@@ -24,10 +24,13 @@ $Executable=(Resolve-Path $Executable).Path;$Project=(Resolve-Path $Project).Pat
 $directory=Split-Path -Parent $Executable
 if($ObjectMotionMode){
  $ObjectPreflight=(Resolve-Path -LiteralPath $ObjectPreflight).Path
- $objectPlan=Get-Content -LiteralPath $ObjectPreflight -Raw|ConvertFrom-Json -Depth 100
+ $objectPlan=Get-Content -LiteralPath $ObjectPreflight -Raw|ConvertFrom-Json
  $projectHash=if($ObjectMotionMode -eq 'placement'){$objectPlan.placement_base_sha256}else{$objectPlan.project_sha256}
  if($objectPlan.schema -ne 1 -or (Get-FileHash $Executable).Hash -ne $objectPlan.exe_sha256 -or (Get-FileHash $Project).Hash -ne $projectHash -or (Get-FileHash $objectPlan.project).Hash -ne $objectPlan.project_sha256 -or (Get-FileHash $objectPlan.placement_base).Hash -ne $objectPlan.placement_base_sha256 -or (Get-FileHash (Join-Path $directory 'layer_windows.dll')).Hash -ne $objectPlan.dll_sha256 -or (Get-FileHash $objectPlan.image).Hash -ne $objectPlan.image_sha256){throw 'Object preflight source or project identity changed'}
- Add-Type -Path (Join-Path $repo 'apps/layer-windows/scripts/PackageFixture.cs')
+    Add-Type -Path (Join-Path $repo 'apps/layer-windows/scripts/PackageFixture.cs') -ReferencedAssemblies @(
+        'System.IO.Compression.dll','System.IO.Compression.FileSystem.dll'
+        if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.IO.Compression.ZipFile.dll'}
+    )
  Add-Type -AssemblyName System.Drawing
  . (Join-Path $repo 'apps/layer-windows/scripts/ObjectFixture.ps1')
  if((Get-FileHash (Join-Path $repo 'crates/layer-ui/src/object_editing.rs')).Hash -ne $objectPlan.object_source_sha256 -or (Get-FileHash (Join-Path $repo 'crates/layer-ui/src/rulers.rs')).Hash -ne $objectPlan.ruler_source_sha256){throw 'Object handle geometry source changed since preflight'}
