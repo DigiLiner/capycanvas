@@ -5,10 +5,10 @@ $id=$Name.ToLowerInvariant().Replace('application-menu-','')
 if($id -notin @('file','edit','image','layer','select','filter','view','window')){throw "Unknown application menu: $Name"}
 $menuRoute=@{id=$null}
 function Visible-Control([string]$Id,$Type,[switch]$ByName){
-    $property=if($ByName){[System.Windows.Automation.AutomationElement]::NameProperty}else{[System.Windows.Automation.AutomationElement]::AutomationIdProperty}
-    $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Id)
-    foreach($entry in $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)){
-        if(!$entry.Current.IsOffscreen -and (!$Type -or $entry.Current.ControlType -eq $Type)){return $entry}
+    foreach($entry in $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)){
+        $current=$entry.Current
+        $value=if($ByName){$current.Name}else{$current.AutomationId}
+        if($value -ceq $Id -and !$current.IsOffscreen -and (!$Type -or $current.ControlType -eq $Type)){return $entry}
     }
 }
 function Menu-Button {

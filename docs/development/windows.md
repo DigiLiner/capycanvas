@@ -814,6 +814,9 @@ desktop so the IME candidate window remains visible in the evidence.
 
 ### UI fixtures
 
+The menu automation helper matches current UIA properties after walking the
+owned window; WinUI can omit visible controls from property-filtered queries.
+
 Each `apps/layer-windows/scripts/exercise-*.ps1` drives the real app through UI
 Automation and guarded OS mouse, pen and touch input. Fixtures that take
 `-Executable` launch their own app with a disposable profile and close it; those
