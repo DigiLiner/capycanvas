@@ -256,9 +256,12 @@ heading spacing, so the final heading retains its full allocation.
 The compact `application-menus` button exposes `application-menu-<id>` entries;
 primary and recovery menus retain their ID and localized-caption lookups.
 Action lookup waits for an enabled visible match, skipping disabled duplicates.
-Selector properties are fetched together in a UIA cache request. Transient
+Selector properties are fetched together in a UIA cache request using the same
+raw tree view as the descendant search. Transient
 ElementNotAvailable errors while a popup appears retry within the existing
 discovery deadline.
+After opening the compact menu, discovery reads the window's immediate children
+and searches only its WinUI popup hosts, avoiding unrelated background controls.
 Inspection still permits disabled visible buttons; an existing submenu completes only the
 normal expansion path. Discovery retains that native entry through invocation
 so another tree read cannot discard it during a menu transition. Visibility,

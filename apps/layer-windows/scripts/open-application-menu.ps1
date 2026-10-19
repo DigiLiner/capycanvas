@@ -7,16 +7,26 @@ $menuRoute=@{id=$null}
 $menuNodes=@()
 $menuCache=[System.Windows.Automation.CacheRequest]::new()
 $menuCache.TreeScope=[System.Windows.Automation.TreeScope]::Element
+$menuCache.TreeFilter=[System.Windows.Automation.Automation]::RawViewCondition
 foreach($property in @(
     [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
     [System.Windows.Automation.AutomationElement]::NameProperty,
     [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.AutomationElement]::ClassNameProperty,
     [System.Windows.Automation.AutomationElement]::IsOffscreenProperty,
     [System.Windows.Automation.AutomationElement]::IsEnabledProperty
 )){$menuCache.Add($property)}
-function Read-MenuNodes {
+function Read-MenuNodes([switch]$Popup) {
     $active=$menuCache.Activate()
-    try { $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) }
+    try {
+        if(!$Popup){return $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)}
+        foreach($popupHost in $Root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)){
+            $current=$popupHost.Cached
+            if($current.Name -ceq 'PopupHost' -and $current.ClassName -ceq 'Microsoft.UI.Content.PopupWindowSiteBridge' -and $current.ControlType -eq [System.Windows.Automation.ControlType]::Pane){
+                $popupHost.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            }
+        }
+    }
     catch {
         if($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]){throw}
     }
@@ -70,7 +80,7 @@ if(!$submenu){
     $overflow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do{
-        $menuNodes=@(Read-MenuNodes)
+        $menuNodes=@(Read-MenuNodes -Popup)
         $submenu=Submenu
         if($submenu){break}
         Start-Sleep -Milliseconds 50
