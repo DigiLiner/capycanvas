@@ -962,6 +962,8 @@ the focused header journeys also check placement cancellation and keyboard input
   `exercise-window.ps1` for sizing and closing.
   Pass `-StateDirectory` for every action when the app's working directory differs
   from its executable directory, so every action records the same owner.
+  Keep the launched process's `Handle` before waiting for exit so its exit code
+  remains available after Windows removes the process.
 - **Wait for layout.** Before injecting input, wait for both the published state
   and the arranged control bounds, then check that the hit belongs to the owned
   app. Use `Control -Arranged` from `CapyUia.ps1` when locating a pointer target.

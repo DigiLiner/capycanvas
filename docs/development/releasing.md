@@ -430,7 +430,9 @@ signing plugin and SDK packaging tools on their host architecture. Each package
 bundles the target's Rust DLL, DXC shader compiler, Windows App SDK and Visual C++
 runtime; packaging rejects mixed-architecture EXE/DLL payloads. CI separately
 executes the ARM64 tests on `windows-11-arm`. A hosted software-adapter pass does
-not qualify canvas behavior or performance on an ARM64 hardware GPU.
+not qualify canvas behavior or performance on an ARM64 hardware GPU. Both test
+and lint commands select the matrix's MSVC target explicitly, including when
+the installed Rust host runs through emulation.
 
 ### Android APK
 

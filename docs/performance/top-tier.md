@@ -3735,6 +3735,50 @@ resumed drawing, or a reference-tier Slow-filter exception. Raw images, exact
 fixed-fixture output and timing rows are retained in
 `artifacts/windows/port-20261010/painterly-1080-control-504f8293287248668e1f602181da537e/`.
 
+### Windows ARM64 brush completion, 2026-10-18
+
+Surface Pro 11, Snapdragon X Plus X1P64100, 16 GB and Adreno X1-85 D3D12
+driver 31.0.137.0 ran the native ARM64 Release example on Windows 11 build
+26200, on AC power. Rust sources are `aaa7a8273`, unchanged through
+`e69325d02`. The `brush_frames.exe` SHA-256 begins `460C39ECCF73` and the
+bundled native DXC 1.9.2609.5 begins `EC234595C270`.
+
+The synthetic 9504 × 6336 Paint/Paper canvas uses a 1600 × 1000 viewport,
+1000 document-pixel brushes, pressure 1, upright tilt and two samples per
+frame. Each preset has 64 warm-up frames followed by three moving contacts
+of 6.48–7.17 seconds. Each frame waits for GPU completion in the offscreen
+runner. Rates include every moving frame after warm-up, including contact
+starts and tails; separate pen-up rows are excluded from moving statistics.
+The completion p99 is the nearest-rank percentile within each contact.
+
+| Brush | Median completed updates/s | Contact rate range, updates/s | Completion p99 range, ms | Pen-up completion range, ms |
+| --- | ---: | ---: | ---: | ---: |
+| G-Pen | 250.22 | 246.30–262.43 | 5.36–5.87 | 3.48–4.46 |
+| Pencil | 304.77 | 302.74–308.86 | 4.78–5.01 | 2.73–2.81 |
+| Eraser | 223.65 | 221.89–225.11 | 6.51–6.89 | 3.58–4.06 |
+| Paintbrush | 156.36 | 154.64–156.53 | 9.77–10.14 | 4.65–5.82 |
+| Airbrush | 240.25 | 235.36–245.21 | 6.02–6.27 | 3.36–4.25 |
+| Marker | 158.11 | 153.46–158.23 | 9.25–9.81 | 4.73–6.02 |
+| Shading Pencil | 385.24 | 385.14–390.90 | 3.90–3.96 | 2.01–2.77 |
+| Bristle Paintbrush | 158.27 | 157.16–159.75 | 8.57–8.94 | 4.84–5.86 |
+
+All eight native processes exit 0. Exact Undo/Redo restoration passes for all
+24 contacts; 38,184 raw rows, including 24 pen-up rows, and eight captures are
+retained. No compiler or other test workload runs during these contacts.
+The calibration observes the companion native DXC module at 2.33 seconds;
+compiler provenance for the sustained processes is inferred from unchanged
+executable, DXC, PATH and Auto compiler configuration. Sustained contacts
+have no module polling. The calibration wrapper loses its exit code; only
+the sustained runs with retained process handles establish native exit 0.
+
+These CPU-observed GPU completion rates do not establish native displayed FPS,
+physical pen latency or reference-tier targets. The hardware, synthetic canvas
+and upright brush pose differ from the reference workload. Raw CSV, process
+closure, captures and summary are in
+`artifacts/windows/arm64-validation/performance/sustained-30a9a7b61cea48e2a7ee70f974f5d54e/`;
+the compiler observation is in `offscreen-2ef84b0ee012415baf1378f954d4725b/`
+beside it.
+
 ## iPadOS 17 compatibility diagnostics
 
 The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;

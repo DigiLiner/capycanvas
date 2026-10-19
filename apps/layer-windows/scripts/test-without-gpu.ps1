@@ -9,6 +9,7 @@ $cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
 & (Join-Path $PSScriptRoot 'test-input.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $repo "artifacts/windows/tests/$($build.architecture)")
 & (Join-Path $PSScriptRoot '../tests/architecture.ps1')
 & (Join-Path $PSScriptRoot '../tests/application-menu-query.ps1')
+& (Join-Path $PSScriptRoot '../tests/pen-capture-title.ps1')
 Push-Location $repo
 $previousSoftwareGpu = $env:LAYER_TEST_SOFTWARE_GPU
 $previousAdapter = $env:WGPU_ADAPTER_NAME

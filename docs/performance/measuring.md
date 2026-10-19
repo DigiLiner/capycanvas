@@ -465,6 +465,8 @@ build, run
 -OutputDirectory <dir>`, then `node tools/performance/windows-pen-report.mjs <dir>`.
 It retains the owned drawing window and waits for the requested document,
 enabled canvas and current brush controls before committing the brush size.
+Title markers use explicit Unicode code points so Windows PowerShell 5.1 and
+PowerShell 7 enforce the same exact title checks.
 After three seconds of settling, it checks the arranged canvas bounds and paces
 a pen circle at up to 240 Hz, recording actual injection timestamps; a delayed
 sample never triggers a catch-up burst. The report matches inputs to DXGI frame

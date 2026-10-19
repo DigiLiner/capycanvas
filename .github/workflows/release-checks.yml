@@ -199,7 +199,7 @@ jobs:
       - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
       - run: ./apps/layer-windows/tests/model-snapshot-reader.ps1
       - run: ./apps/layer-windows/tests/fixture-owner-census.ps1 -Helper apps/layer-windows/scripts/CapyUia.ps1 -Output artifacts/windows/fixture-owner-census-ci
-      - run: cargo clippy --locked -p layer-windows --all-targets --no-deps -- -D warnings
+      - run: cargo clippy --locked --target ${{ matrix.target }} -p layer-windows --all-targets --no-deps -- -D warnings
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:

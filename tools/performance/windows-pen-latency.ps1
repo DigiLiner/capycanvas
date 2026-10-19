@@ -45,6 +45,7 @@ try{
  $env:CAPY_LATENCY_TRACE='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
  if($NavigationMode -or $ObjectMotionMode -or $brushSeries){@{language=@{Explicit='en'};theme=$(if($ObjectMotionMode){$objectPlan.theme}else{'dark'})}|ConvertTo-Json|Set-Content (Settings-File)}
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $OutputDirectory 'stderr.log')
+ $null=$review.Handle
 }finally{Exit-CapyEnvironment}
 $review.Id|Set-Content (Join-Path $OutputDirectory 'process-id.txt')
 Wait-Until {$script:drawing=Owned-DrawingWindow $review;$null -ne $drawing} 'The owned drawing window did not open' 60
@@ -53,7 +54,8 @@ $window=$drawing.Handle;$root=$drawing.Root
 if($NavigationMode -or $ObjectMotionMode){$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)}
 Wait-Until {$script:probe=Trace-File 'presentation-probe';$null -ne $probe} 'Renderer did not become ready' 90
 Open-Project $Project
-$projectTitle=[IO.Path]::GetFileName($Project)+' · Capy Canvas'
+$projectTitle=[IO.Path]::GetFileName($Project)+' '+[char]0x00b7+' Capy Canvas'
+$modifiedProjectTitle=[char]0x2022+' '+$projectTitle
 Wait-Until {
  $canvas=Find 'drawing-canvas' -Visible;$field=Find 'tool-setting-size'
  $root.Current.Name -eq $projectTitle -and $canvas -and $canvas.Current.IsEnabled -and ($ObjectMotionMode -or ($field -and $field.Current.IsEnabled)) -and !(Find 'canvas-status' -Visible)
@@ -86,7 +88,7 @@ if($NavigationMode -or $ObjectMotionMode -or $brushSeries){
   Wait-Until {$item=Find 'undo' -Visible;!$item} 'Edit commands did not close'
   $parentOpen=try{$entry.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem -and !$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$false}
   if($parentOpen){[CapyRowPointer]::Key([uint32]$review.Id,0x1b);Wait-Until {try{$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$true}} 'The compact application menu did not close'}
-  $expectedTitle=if($Modified){'• '+$projectTitle}else{$projectTitle}
+  $expectedTitle=if($Modified){$modifiedProjectTitle}else{$projectTitle}
   if($state.title -ne $expectedTitle -or $state.undo -ne $ExpectedUndo -or $state.redo -ne $ExpectedRedo){throw 'The selected tool, drawing title or Undo/Redo history differs from the expected contact state'}
   Navigation-Focus
   [pscustomobject]$state
@@ -329,7 +331,7 @@ if($NavigationMode){
   Navigation-Focus
   $duration=if($contact -eq 0){1}else{$Seconds};$file="injected-$contact.csv"
   [WindowsPenMotion]::Run([uint32]$review.Id,$cx,$cy,200,120,$duration,240,(Join-Path $OutputDirectory $file))
-  Wait-Until {$root.Current.Name -eq ('• '+$projectTitle) -and !(Find 'canvas-status' -Visible)} 'The brush contact did not change the drawing'
+  Wait-Until {$root.Current.Name -eq $modifiedProjectTitle -and !(Find 'canvas-status' -Visible)} 'The brush contact did not change the drawing'
   $painted=Navigation-State $true $false $true
   Navigation-Command 'Undo'
   Wait-Until {$root.Current.Name -eq $projectTitle -and !(Find 'canvas-status' -Visible)} 'Brush Undo did not restore the clean drawing'
