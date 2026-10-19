@@ -1751,7 +1751,7 @@ impl WgpuRasterizer {
 
     fn paper_shade_pending(&self) -> bool {
         self.paper_lighting.as_ref().map(|lit| &lit.binding).or(self.paper_overlay.as_ref().map(|o| &o.paper))
-            .and_then(|binding| paper::PaperTile::id_for(binding)).is_some_and(|id| self.papers.slope(&id).is_none())
+            .and_then(paper::PaperTile::id_for).is_some_and(|id| self.papers.slope(&id).is_none())
     }
 
     fn texture_view(&self, id: &AssetId) -> Result<&wgpu::TextureView, GpuRasterError> {

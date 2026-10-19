@@ -61,6 +61,7 @@ impl ExportShade {
         });
         Self { layout, pipeline, sampler }
     }
+    #[expect(clippy::too_many_arguments, reason = "Export shading keeps the source, coverage, slope and paper placement explicit")]
     pub fn encode(&self, device: &PipelineDevice, encoder: &mut wgpu::CommandEncoder, source: &wgpu::Texture, coverage: Option<&wgpu::Texture>,
         slope: &wgpu::TextureView, tile: [f32; 4], light: layer_core::paper::PaperLight, origin: [f64; 2]) -> Result<wgpu::Texture, GpuRasterError> {
         let [x, y] = light.direction();
