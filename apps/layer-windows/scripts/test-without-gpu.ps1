@@ -38,6 +38,9 @@ try {
     & cargo test --locked --no-fail-fast --target $build.target @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests -- --test-threads=1 --nocapture
     $failed = $LASTEXITCODE -ne 0
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
+    & cargo test --locked --target $build.target @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests -- color_storage::tests::hidden_profiles_leave_menus_until_shown_or_removed --ignored --exact --test-threads=1 --nocapture
+    if ($LASTEXITCODE -ne 0) { $failed = $true }
+    $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
     & cargo test --locked --target $build.target @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --nocapture --skip hdr --skip native_color
     if ($failed -or $LASTEXITCODE -ne 0) { throw 'Windows Rust or D3D12 document tests failed.' }
 } finally {
