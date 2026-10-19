@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+trap 'CAPY_FAILURE=$?; printf "Apple release failed at line %s (exit %s)\n" "$LINENO" "$CAPY_FAILURE" >&2' ERR
 CAPY_APP="$(cd "$(dirname "$0")/.." && pwd)"
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 case "${1:-}" in
@@ -29,6 +30,7 @@ python3 "$CAPY_APP/scripts/prepare.py"
 python3 "$CAPY_APP/scripts/project.py"
 node "$CAPY_APP/scripts/package-notices.mjs" "$CAPY_APP/Generated/licenses" "$CAPY_RUST_TARGET"
 rm -rf "$CAPY_OUT"
+mkdir -p "$CAPY_OUT"
 if [[ -z "${CAPY_APPLE_TEAM:-}" ]]; then
   CAPY_SIGNING=(CODE_SIGNING_ALLOWED=NO)
 elif [[ $1 == mac ]]; then
@@ -39,7 +41,8 @@ else
 fi
 xcodebuild archive -quiet -project "$CAPY_APP/CapyCanvas.xcodeproj" -scheme "$CAPY_SCHEME" \
   -destination "$CAPY_DEST" -archivePath "$CAPY_ARCHIVE" \
-  -derivedDataPath "${CAPY_DERIVED_DATA:-$CAPY_APP/DerivedData}" "${CAPY_SIGNING[@]}"
+  -resultBundlePath "$CAPY_OUT/$CAPY_SCHEME.xcresult" \
+  -derivedDataPath "${CAPY_DERIVED_DATA:-$CAPY_APP/DerivedData}" "${CAPY_SIGNING[@]}" 2>&1 | tee "$CAPY_OUT/archive.log"
 [[ $1 == ipad ]] && exit 0
 mkdir "$CAPY_OUT/dmg"
 ditto "$CAPY_APP_BUNDLE" "$CAPY_OUT/dmg/Capy Canvas.app"

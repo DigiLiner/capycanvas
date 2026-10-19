@@ -620,6 +620,10 @@ the original database, which remains unchanged.
 The sandbox file fixture checks the resolved file identity and access boundaries;
 bookmark staleness is metadata rather than a failed file grant.
 
+Release archives write an Xcode result bundle and `archive.log` under
+`dist/apple-<platform>`. Failed release jobs retain these build reports separately
+from package artifacts, and the release script reports the failing line and status.
+
 The UIKit fixtures `canvas-modifiers.swift`, `canvas-hover.swift` and
 `pencil-estimates.swift` run as a standalone scene app built from the `Shared/`
 and `iOS/` sources; they have no runner script. Start their supplied-callback

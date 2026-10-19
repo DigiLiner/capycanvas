@@ -34,7 +34,10 @@ class ReleaseTests(unittest.TestCase):
                          "import json, os, sys\nfrom pathlib import Path\n"
                          "Path(os.environ['CAPY_TEST_LOG']).write_text(json.dumps(sys.argv[1:]))\n"
                          "if sys.argv[1] == 'archive':\n"
-                         "    Path(sys.argv[sys.argv.index('-archivePath') + 1]).mkdir(parents=True)\n")
+                         "    Path(sys.argv[sys.argv.index('-archivePath') + 1]).mkdir(parents=True)\n"
+                         "status = int(os.environ.get('CAPY_TEST_XCODE_STATUS', '0'))\n"
+                         "if status: print('fixture archive diagnostic')\n"
+                         "sys.exit(status)\n")
         xcode.chmod(0o755)
         self.environment = {key: value for key, value in os.environ.items() if not key.startswith("CAPY_APPLE_")}
         self.environment.update(PATH=str(tools) + os.pathsep + os.environ["PATH"], CAPY_TEST_LOG=str(self.log))
@@ -59,6 +62,15 @@ class ReleaseTests(unittest.TestCase):
         call = json.loads(self.log.read_text())
         self.assertEqual(call[0], "archive")
         self.assertIn("DEVELOPMENT_TEAM=TEAM", call)
+        self.assertFalse((self.archive.parent / "export.plist").exists())
+
+    def test_failed_archive_preserves_diagnostics_and_exit_status(self):
+        self.environment["CAPY_TEST_XCODE_STATUS"] = "65"
+        result = self.run_release("ipad")
+        self.assertEqual(result.returncode, 65, result.stderr)
+        self.assertIn("fixture archive diagnostic", (self.archive.parent / "archive.log").read_text())
+        self.assertIn("Apple release failed at line", result.stderr)
+        self.assertIn("exit 65", result.stderr)
         self.assertFalse((self.archive.parent / "export.plist").exists())
 
     def test_publish_uses_the_existing_archive_without_rebuilding(self):
