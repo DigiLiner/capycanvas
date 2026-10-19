@@ -512,6 +512,10 @@ from shared document state and requests. Document alerts and export warnings use
 shared localized copy; native I/O errors retain their original details.
 `tests/project-files.swift` checks imported photo names, localized save suggestions
 and language changes while a close prompt remains pending on both Apple policies.
+It also delivers files before initial state publication and before Metal attachment,
+with private recovery storage and in memory-only sessions.
+Workspace readiness starts recovery once the canvas is ready; recovery completion
+retries queued file delivery.
 
 `tests/drawing-tabs.swift` checks independent drawing history, save destinations,
 recovery, close cancellation, and closing a tab before opening several files.

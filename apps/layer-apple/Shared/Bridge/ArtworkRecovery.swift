@@ -33,7 +33,9 @@ import UIKit
         if !started {
             guard store.snapshot["canvas_ready"].bool, store.workspaces?.ready != false else { return }
             started = true
-            guard let sessions = store.native?.sessions else { restoring = false; return }
+            guard let sessions = store.native?.sessions else {
+                restoring = false; store.projectFiles.submitExternalOpen(); return
+            }
             store.native?.restoreSession(sessions: sessions, scene: store.sessionIdentity, adopt: Self.adoptsUnrestoredSessions) {
                 [weak self] failure, adopted in DispatchQueue.main.async {
                 guard let self else { return }
@@ -42,6 +44,7 @@ import UIKit
                 self.restoreError = failure
                 self.restoreFailed = failure != nil && !adopted
                 if !self.restoreFailed { self.schedule() }
+                self.store?.projectFiles.submitExternalOpen()
                 self.store?.wake?()
             } }
             return
@@ -136,6 +139,7 @@ import UIKit
             guard let self else { return }
             self.restoring = false; self.restoreFailed = failure != nil && !adopted && !available; self.restoreError = failure
             if !self.restoreFailed { self.schedule() }
+            self.store?.projectFiles.submitExternalOpen()
         } }
     }
     func later() { dismissedError = error ?? restoreError }

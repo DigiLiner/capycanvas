@@ -129,6 +129,7 @@ import SwiftUI
         focus(next["focus_window"])
         if next["ready"].bool && !wasReady {
             store?.native?.workspaceDidInitialize()
+            store?.recovery.observe()
             store?.projectFiles.submitExternalOpen()
         } else if wasReady && revision != next["switcher_revision"].uint {
             NotificationCenter.default.post(name: Self.preferencesChanged, object: self)

@@ -123,9 +123,9 @@ import ImageIO
             var savedData = try Data(contentsOf: target)
             // A file can launch the app before its first state publication or
             // before the canvas attaches. Retain it through normal startup.
-            for published in [false, true] {
+            for (published, stored) in [(false, true), (true, true), (false, false)] {
                 let cold = EditorStore(platform: platform, persistence: EditorPersistence(root:
-                    root.appendingPathComponent("startup-\(platform)-\(published)")))
+                    stored ? root.appendingPathComponent("startup-\(platform)-\(published)") : nil))
                 cold.projectFiles = ProjectFiles(store: cold, dialogs: .init(
                     open: { _, _ in preconditionFailure("An external URL must not open a picker") },
                     save: { _, _, _ in preconditionFailure("Startup must not save a blank drawing") }))
@@ -168,7 +168,7 @@ import ImageIO
                 precondition(cold.state["document_file"]["location"]["name"].string == target.lastPathComponent)
                 precondition(cold.state["layers"].array.contains { $0["label"].string == "Saved layer" })
                 precondition(!cold.state["document_file"]["modified"].bool)
-                precondition(cold.workspaces?.ready == true)
+                precondition(stored ? cold.workspaces?.ready == true : cold.workspaces == nil)
                 await cold.workspaces?.detached()
                 withExtendedLifetime(surface) {}
             }
