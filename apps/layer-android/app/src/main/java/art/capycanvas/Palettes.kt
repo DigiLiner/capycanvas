@@ -393,8 +393,11 @@ private fun Modifier.paletteKeys(activate: () -> Unit, menu: (() -> Unit)?): Mod
 }
 
 private fun PaletteCells.grid(count: Int) = height(rows(count).coerceIn(2, GridRows))
-private fun PaletteCells.content(count: Int, fixed: Float) = PanelContentSize(
-    (fixed * density + 2 * (8 * density).roundToInt() + (grid(count) * density).roundToInt()).roundToInt() / density)
+private fun PaletteCells.content(count: Int, fixed: Float): PanelContentSize {
+    val viewport = (grid(count) * density).roundToInt() / density
+    val height = (fixed * density + 2 * (8 * density).roundToInt() + viewport * density).roundToInt() / density
+    return PanelContentSize(height, height - viewport, pitch)
+}
 
 @Composable internal fun PaletteMeasurement(host: CanvasHost, onContent: (PanelContentSize) -> Unit) {
     val controller = host.palettes

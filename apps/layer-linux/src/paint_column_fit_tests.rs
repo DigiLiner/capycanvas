@@ -76,14 +76,24 @@ fn native_paint_fitted_columns() {
                 );
             }
             let navigator = group(Panel::Navigator);
+            let measurement = layout.measurements.iter().find(|m| m.panel == Panel::Navigator).unwrap();
+            let scroll = measurement.scroll.unwrap();
+            let preferred = measurement.content_height.min(scroll.fixed_height + 4. * layer_ui::TILE_SIZE)
+                + layer_ui::TAB_BAR_HEIGHT;
+            let minimum = resolved.groups.iter().find(|group| group.panels.contains(&Panel::Navigator)).unwrap().min_body_height
+                + layer_ui::TAB_BAR_HEIGHT;
             assert!(
-                (navigator.height - natural(Panel::Navigator)).abs() <= 0.5,
-                "{name}: {navigator:?}"
+                navigator.height >= minimum - 0.5 && navigator.height <= preferred + 0.5,
+                "{name}: {navigator:?}, minimum {minimum}, preferred {preferred}"
             );
+            if name == "maximized" {
+                assert!((navigator.height - preferred).abs() <= 0.5, "{name}: {navigator:?}, preferred {preferred}");
+            }
             let overview = find_named(w.window.upcast_ref(), "navigator-overview").unwrap();
             let aspect = layer_ui::NavigatorGeometry::overview_aspect(document);
+            let expected = (overview.width() as f32 * aspect).min(navigator.height - layer_ui::TAB_BAR_HEIGHT - scroll.fixed_height);
             assert!(
-                (overview.height() as f32 - overview.width() as f32 * aspect).abs() <= 2.,
+                (overview.height() as f32 - expected).abs() <= 2.,
                 "{name}: overview {}x{}",
                 overview.width(),
                 overview.height()

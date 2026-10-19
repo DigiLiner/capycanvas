@@ -139,7 +139,11 @@ import kotlin.math.roundToInt
         val hasColor = controls.any { it.getString("control") == "color_wheel" }
         val hasScope = controls.any { it.getString("control") in listOf("histogram", "waveform") }
         val displayedHeight = contentHeight
-        val measured = PanelContentSize(naturalHeight, fixedHeight = if (controls.size == 1 && (hasColor || hasNavigator || hasScope)) null else 0f)
+        val measured = PanelContentSize(naturalHeight, fixedHeight = when {
+            controls.size == 1 && hasNavigator -> (panelMetrics().height + panelMetrics().spacing + panelMetrics().inset * 2).value
+            controls.size == 1 && (hasColor || hasScope) -> null
+            else -> 0f
+        })
         SideEffect {
             if (displayedHeight > 0f) { onHeight(displayedHeight); onContent(measured) }
         }

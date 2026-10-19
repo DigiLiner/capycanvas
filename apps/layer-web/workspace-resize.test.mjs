@@ -2,6 +2,201 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
+export async function checkWorkspaceConstraints({call,evaluate,settle,reload}) {
+  const directory=process.env.LAYER_TEST_ARTIFACTS||'artifacts/workspace-constraints';
+  await mkdir(directory,{recursive:true});
+  const axes=process.env.LAYER_CONSTRAINT_AXES==='1';
+  const reports=[],viewports=axes?[[1257,691]]:[[1257,691],[823,1257],[800,600],[1024,600],[1280,720],[1440,1000],[640,360]];
+  const read=expression=>evaluate(`JSON.parse(JSON.stringify((${expression}),(_,v)=>typeof v==='bigint'?String(v):v))`);
+  const poll=condition=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+25000;function check(){if(${condition})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(check,50)}check()})`);
+  const idle=async()=>{await settle();await poll(`(v=>v.ready&&!v.busy&&!v.dirty)(JSON.parse(layerApp.app.workspace_view()))`);await evaluate('new Promise(r=>setTimeout(r,100))');await settle();};
+  const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await idle();};
+  const manager=async action=>{await evaluate(`layerApp.app.workspace_input(${JSON.stringify(JSON.stringify(action))});null`);await idle();};
+  const size=async(width,height)=>{await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:0,mobile:false});await idle();};
+  const snapshot=()=>read('layerApp.app.workspace_persistence()');
+  const group=panel=>read(`layerApp.app.layout(innerWidth,innerHeight).groups.find(g=>g.panels.includes(${JSON.stringify(panel)}))`);
+  const pointer=async(start,end=start)=>{
+    for(const[type,p,buttons]of[['mousePressed',start,1],['mouseMoved',end,1],['mouseReleased',end,0]]){await call('Input.dispatchMouseEvent',{type,...p,button:'left',buttons,clickCount:1});await settle();}
+    await idle();
+  };
+  const target=async(selector,partial=false)=>{
+    await evaluate(`(()=>{const n=[...document.querySelectorAll(${JSON.stringify(selector)})].find(n=>{const r=n.getBoundingClientRect();return r.width>0&&r.height>0&&!n.disabled});if(!n)throw Error('Missing visible enabled '+${JSON.stringify(selector)});window.workspaceConstraintTarget=n;n.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});})()`);await settle();
+    const p=await read(`(()=>{const n=window.workspaceConstraintTarget,r=n.getBoundingClientRect(),g=n.closest('.dock-group,.content-drawer')?.getBoundingClientRect();let top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let a=n.parentElement;a;a=a.parentElement)if(/auto|scroll|hidden|clip/.test(getComputedStyle(a).overflowY)){const b=a.getBoundingClientRect();top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}const x=r.x+r.width/2,y=${partial}?(top+bottom)/2:r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,width:r.width,height:r.height,visibleHeight:Math.max(0,bottom-top),hit:n.contains(hit),contained:r.left>=Math.max(0,g?.left??0)-1&&r.right<=Math.min(innerWidth,g?.right??innerWidth)+1&&(${partial}||bottom-top>=r.height-1),disabled:n.disabled,obscuredBy:n.contains(hit)?null:hit?.outerHTML.slice(0,500),dialogs:[...document.querySelectorAll('dialog[open]')].map(n=>n.textContent.slice(0,500)),viewport:{inner:[innerWidth,innerHeight],visual:[visualViewport.offsetLeft,visualViewport.offsetTop,visualViewport.width,visualViewport.height,visualViewport.scale],screen:[screen.width,screen.height],dpr:devicePixelRatio}}})()`);
+    assert.ok(p.width>0&&p.height>0&&p.hit&&p.contained&&!p.disabled,`${selector} has a reachable complete target: ${JSON.stringify(p)}`);
+    if(partial)assert.ok(p.visibleHeight>=35.5,`${selector} has a useful visible graph viewport: ${JSON.stringify(p)}`);
+    return{x:p.x,y:p.y};
+  };
+  const click=async selector=>pointer(await target(selector));
+  const resize=async(panel,edge,extent)=>{
+    const g=await group(panel),b=g.resize_handles.find(h=>h.edge===edge).bounds,p={x:b.x+b.width/2,y:b.y+b.height/2};
+    await pointer(p,{x:edge==='right'?g.bounds.x+extent:p.x,y:edge==='bottom'?g.bounds.y+extent:p.y});
+  };
+  const capture=async label=>{
+    const geometry=await read(`({viewport:[innerWidth,innerHeight],dpr:devicePixelRatio,scale:visualViewport.scale,groups:layerApp.app.layout(innerWidth,innerHeight).groups.map(g=>({id:g.id,panel:g.active,bounds:g.bounds,min_body_height:g.min_body_height})),previews:[...document.querySelectorAll('.navigator-overview,[data-scope-control="chart"]')].map(n=>({panel:n.closest('.dock-group')?.dataset.panel,bounds:n.getBoundingClientRect().toJSON()}))})`);
+    reports.push({label,...geometry});
+    if(label.endsWith('640x360')||/^illustrator-.+-1257x691$/.test(label)){const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(`${directory}/${label}.png`,Buffer.from(shot.data,'base64'));}
+    return geometry;
+  };
+  const navigator=async label=>{
+    const selector='.dock-group .navigator-overview';
+    if(!await evaluate(`!!document.querySelector(${JSON.stringify(selector)})`))return;
+    await send({type:'invoke',command:'fit_canvas'});
+    const p=await target(selector),r=await read(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
+    assert.ok(r.width>=35.5&&r.height>=35.5,`${label}: usable Navigator preview ${r.width} × ${r.height}`);
+    const camera=await read('layerApp.state().camera.translation');await pointer(p,{x:p.x+Math.min(20,r.width/4),y:p.y+Math.min(10,r.height/4)});
+    assert.notDeepEqual(await read('layerApp.state().camera.translation'),camera,`${label}: Navigator pans the camera`);
+    assert.doesNotMatch(await evaluate("document.querySelector('#status').textContent"),/Invalid Navigator size/);
+    const zoom=await evaluate('layerApp.state().camera.zoom');await click('.dock-group [data-navigator-command="zoom_in"]');
+    assert.ok(await evaluate('layerApp.state().camera.zoom')>zoom,`${label}: Navigator Zoom In action`);
+  };
+  const histogram=async label=>{
+    const selector='[data-scope="histogram"] [data-scope-control="chart"]';
+    if(!await evaluate(`!!document.querySelector(${JSON.stringify(selector)})`))return;
+    const p=await target(selector,true),r=await read(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
+    assert.ok(r.width>=35.5&&r.height>=35.5,`${label}: usable Histogram graph ${JSON.stringify({p,r})}`);
+    for(const selector of ['[data-scope="histogram"] [data-scope-control="source"]','[data-scope="histogram"] [data-scope-control="channel"]'])await target(selector);
+    const before=await evaluate('layerApp.state().histogram.logarithmic');
+    await click('[data-scope="histogram"] [data-scope-control="log"]');
+    assert.equal(await evaluate('layerApp.state().histogram.logarithmic'),!before,`${label}: Histogram Log action`);
+    await click('[data-scope="histogram"] [data-scope-control="log"]');
+  };
+  await poll('layerApp.startupTimes.complete!==null');await idle();
+  const original=await snapshot(),originalId=await evaluate('JSON.parse(layerApp.app.workspace_view()).id'),theme=await evaluate('layerApp.state().theme');
+  const originalSettings=axes?await evaluate('JSON.stringify(layerApp.state().settings)'):null;
+  const artwork=()=>read('({layers:layerApp.state().layers.map(l=>[String(l.id),String(l.paint_revision)]),modified:layerApp.state().document_file.modified})'),documentBefore=await artwork();
+  const native=await read('({viewport:[innerWidth,innerHeight],dpr:devicePixelRatio,scale:visualViewport.scale,agent:navigator.userAgent})');
+  const presets={};let temporary;
+  try {
+    await manager({type:'form',action:{type:'new'}});await manager({type:'submit',name:`Workspace constraints ${Date.now()}`});
+    temporary=await evaluate('JSON.parse(layerApp.app.workspace_view()).id');
+    for(const preset of ['painter','illustrator','photographer']) {
+      const id=`builtin:workspace:${preset}`;await manager({type:'switch',id});
+      const capture=()=>read('JSON.parse(layerApp.app.workspace_capture())'),normalize=value=>JSON.parse(JSON.stringify(value,(k,v)=>k==='timestamp_ms'?'date':v));
+      const saved=normalize(await capture());
+      await manager({type:'form',action:{type:'reset',value:id}});
+      presets[preset]=await read('layerApp.state().workspace');
+      await manager({type:'cancel'});
+      assert.deepEqual(normalize(await capture()),saved,'Reading the starting layout preserves workspace history');
+    }
+    await manager({type:'switch',id:temporary});
+    if(axes) {
+      assert.ok(await evaluate('layerApp.app.bootstrap_view().shipped_tags.includes("de")'),'German is a registered long-label locale');
+      await send({type:'restore_saved_settings',saved:await evaluate('JSON.stringify({...layerApp.state().settings,language:{Explicit:"de"}})')});
+      await poll('!layerApp.app.language_pending()&&document.documentElement.lang==="de"');
+      const key=async key=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key,code:key,windowsVirtualKeyCode:key==='Enter'?13:27,...(key==='Enter'&&type==='keyDown'?{text:'\r',unmodifiedText:'\r'}:{})});await idle();};
+      for(const theme of ['light','dark'])for(const scale of [1,1.25,1.5]) {
+        await send({type:'set_theme',theme});await send({type:'restore_workspace',workspace:presets.illustrator});
+        const durable=await snapshot();
+        await call('Emulation.setDeviceMetricsOverride',{width:1257,height:691,deviceScaleFactor:scale,mobile:false});await idle();
+        await navigator(`de-${theme}-dpr${scale}`);assert.deepEqual(await snapshot(),durable,'Locale and DPR fitting preserve the saved layout');
+        const ng=await group('navigator'),cg=await group('color');
+        await send({type:'select_panel_tab',group:ng.id,panel:'proof'});await target('.proof-panel .proof-modes button');
+        await send({type:'select_panel_tab',group:ng.id,panel:'navigator'});await navigator(`inactive-return-de-${theme}-dpr${scale}`);
+        await send({type:'select_panel_tab',group:cg.id,panel:'palettes'});
+        const root='.dock-group .palettes-panel';await evaluate(`document.querySelector('${root} .palette-scroll').scrollTop=1e6`);await settle();
+        const last=`${root} .palette-swatches > .palette-tile[data-id]:nth-last-child(2)`;await click(last);
+        assert.equal(await evaluate(`document.querySelector(${JSON.stringify(last)}).classList.contains('selected')`),true,'Last swatch remains usable with German labels and fractional DPR');
+        await target(`${root} .palette-add`);await send({type:'select_panel_tab',group:cg.id,panel:'color'});
+        await send({type:'customize',action:{type:'set_column_collapsed',group:ng.id,collapsed:true}});
+        const column=await evaluate(`layerApp.app.layout(innerWidth,innerHeight).collapsed.find(c=>c.groups.some(g=>g.group===${ng.id})).id`);
+        await send({type:'customize',action:{type:'set_column_drawers',column,drawers:true}});
+        const button='.collapsed-column [data-panel="navigator"]';
+        await target(button);await evaluate(`document.querySelector(${JSON.stringify(button)}).focus()`);await key('Enter');
+        await poll('!!document.querySelector(".content-drawer .navigator-overview")');
+        const before=await evaluate('layerApp.state().camera.zoom');await click('.content-drawer [data-navigator-command="zoom_in"]');
+        assert.ok(await evaluate('layerApp.state().camera.zoom')>before,'Keyboard-opened drawer forwards Navigator controls');
+        await evaluate(`document.querySelector(${JSON.stringify(button)}).focus()`);await key('Enter');await poll('!document.querySelector(".content-drawer .navigator-overview")');
+        await send({type:'restore_workspace',workspace:presets.illustrator});assert.deepEqual(await snapshot(),durable,'Closing and restoring the drawer preserves the saved layout');
+        const label=`de-${theme}-dpr${scale}`;await capture(label);
+        const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(`${directory}/${label}.png`,Buffer.from(shot.data,'base64'));
+      }
+      console.log('PASS: German long labels, DPR1/1.25/1.5, both themes, inactive tabs, palette end control and keyboard drawer open/close');
+      return;
+    }
+    for(const theme of ['light','dark'])for(const [preset,workspace]of Object.entries(presets)) {
+      await size(1440,1000);await send({type:'restore_workspace',workspace});await send({type:'set_theme',theme});
+      const durable=await snapshot();
+      for(const[width,height]of viewports) {
+        const label=`${preset}-${theme}-${width}x${height}`;await size(width,height);
+        await navigator(label);await histogram(label);await capture(label);
+        if(preset==='photographer') {
+          await evaluate(`(()=>{const n=[...document.querySelectorAll('.properties-panel .property-controls select:not([disabled])')].at(-1);if(n)n.dataset.layoutLastField='true';})()`);
+          if(await evaluate(`!!document.querySelector('[data-layout-last-field]')`))await target('[data-layout-last-field]');
+        }
+        assert.deepEqual(await snapshot(),durable,`${label}: fitting and camera actions preserve the saved layout`);
+      }
+      if(preset==='illustrator')for(const height of [680,685,690,695,700,710,720,740]) {
+        await size(1257,height);await navigator(`boundary-${theme}-${height}`);await capture(`boundary-${theme}-${height}`);
+        assert.deepEqual(await snapshot(),durable,'Neighboring heights preserve the saved layout');
+      }
+      await size(1440,1000);assert.deepEqual(await snapshot(),durable,'Growing restores the same saved layout');
+      console.log(`Workspace constraints: ${preset}/${theme}, seven CSS viewports and saved layout passed`);
+    }
+    for(const theme of ['light','dark']) {
+      await size(1440,1000);await send({type:'set_theme',theme});
+      for(const panel of ['navigator','color','properties','adjustments','proof','palettes']) {
+        await send({type:'restore_workspace',workspace:presets.illustrator});
+        await send({type:'move_panel',panel,target:{kind:'float',position:[420,100]}});
+        await resize(panel,'bottom',0);
+        const g=await group(panel);assert.ok(g.bounds.height>=72,`${panel}: floating minimum keeps a usable body ${JSON.stringify(g.bounds)}`);
+        if(panel==='navigator')await navigator(`floating-${theme}`);
+        else await target(`.floating-panel[data-panel="${panel}"] .panel :is(button:not([disabled]),select:not([disabled]),input:not([disabled]))`);
+        await capture(`floating-height-${panel}-${theme}`);
+      }
+      for(const panel of ['properties','adjustments','proof']) {
+        await send({type:'restore_workspace',workspace:presets.illustrator});
+        await send({type:'move_panel',panel,target:{kind:'float',position:[420,100]}});await resize(panel,'right',0);
+        const selector=panel==='properties'?'.floating-panel .properties-panel .property-controls select':panel==='adjustments'?'.floating-panel .filter-picker-header input':'.floating-panel .proof-panel select';
+        if(panel==='adjustments')await click('.floating-panel .filter-picker-header button');
+        if(panel==='proof')await click('.floating-panel .proof-modes button[value="print"]');
+        await click(selector);
+        if(panel==='adjustments') {
+          await call('Input.insertText',{text:'glass'});await idle();
+          assert.match(await evaluate("document.querySelector('.floating-panel .filter-picker-list').textContent"),/Glass/i);
+        } else {
+          assert.ok(await evaluate('document.activeElement===window.workspaceConstraintTarget'),`${panel}: narrow dropdown accepts native focus`);
+        }
+        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+        await evaluate('document.activeElement?.blur()');await poll('visualViewport.height>=innerHeight-1');await idle();
+        await capture(`floating-width-${panel}-${theme}`);
+      }
+      for(const extra of [0,17]) {
+        await send({type:'restore_workspace',workspace:presets.illustrator});await send({type:'move_panel',panel:'palettes',target:{kind:'float',position:[420,100]}});
+        const measurement=await read("layerApp.app.panel_measurements().find(m=>m.panel==='palettes')");
+        await resize('palettes','bottom',36+measurement.scroll.fixed_height+measurement.scroll.unit_height*2+extra);
+        const root='.floating-panel .palettes-panel',scroll=`${root} .palette-scroll`,last=`${root} .palette-swatches > .palette-tile[data-id]:nth-last-child(2)`;
+        await evaluate(`document.querySelector(${JSON.stringify(scroll)}).scrollTop=1e6`);await settle();
+        await click(last);assert.equal(await evaluate(`document.querySelector(${JSON.stringify(last)}).classList.contains('selected')`),true,'Last swatch can be selected');
+        await send({type:'set_color',rgba:[.1123,.3456,.7891,1]});
+        const count=await evaluate('layerApp.app.palette_panel().swatches.length');
+        await click(`${root} .palette-add`);assert.equal(await evaluate('layerApp.app.palette_panel().swatches.length'),count+1,'Trailing Add stores a swatch');
+        const id=await evaluate('String(layerApp.app.palette_panel().swatches.at(-1).id)');
+        await send({type:'color',action:{op:'library',action:{op:'remove',id:Number(id)}}});
+        await capture(`palette-two-rows-${extra}-${theme}`);
+      }
+      console.log(`Workspace constraints: floating controls and palette end actions/${theme} passed`);
+    }
+    await size(1257,691);await send({type:'restore_workspace',workspace:presets.illustrator});
+    await send({type:'move_panel',panel:'navigator',target:{kind:'float',position:[420,100]}});
+    assert.deepEqual(await artwork(),documentBefore,'Panel and camera actions preserve the artwork');
+    const durable=await snapshot();await idle();await reload();await poll('window.layerApp?.startupTimes.complete!==null&&!!window.layerApp');await idle();
+    assert.deepEqual(await snapshot(),durable,'An intentional workspace change survives reload');await navigator('reload');
+    console.log('PASS: workspace constraints, all presets and themes, seven CSS viewports, Navigator pan, Histogram controls, floating minima, palette end actions and reload');
+  } catch(error) {
+    reports.push({failure:String(error.stack||error)});
+    const shot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(`${directory}/failure.png`,Buffer.from(shot.data,'base64'));
+    throw error;
+  } finally {
+    await writeFile(`${directory}/constraints.json`,JSON.stringify({native,requestedViewports:viewports,axes:axes?{locale:'de',dpr:[1,1.25,1.5],limitations:'DPR emulation; browser zoom and OS text scaling unverified. No registered RTL locale.'}:null,reports},null,2));
+    await call('Emulation.clearDeviceMetricsOverride');await idle();
+    await manager({type:'cancel'});
+    if(originalSettings){await send({type:'restore_saved_settings',saved:originalSettings});await poll('!layerApp.app.language_pending()');assert.equal(await evaluate('JSON.stringify(layerApp.state().settings)'),originalSettings,'Focused axes restore the original settings and language');}
+    await manager({type:'switch',id:originalId});await send({type:'set_theme',theme});
+    assert.deepEqual(await snapshot(),original,'The original workspace remains intact');
+    if(temporary){await manager({type:'form',action:{type:'delete',value:temporary}});await manager({type:'submit',name:''});}
+  }
+}
+
 // Observe actual panel widths on the browser's display clock. CDP uses native
 // mouse/touch handling; the desktop runner can additionally feed OS input.
 export async function checkWorkspaceResize({call,evaluate,settle,scenarios=["left","right","navigator"]}) {

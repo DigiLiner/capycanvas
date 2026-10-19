@@ -80,12 +80,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         WorkspaceShadow shadow;
         hstring shadowKey;
         Canvas content;
-        Grid layout{nullptr},header{nullptr};
+        Grid layout{nullptr},header{nullptr},bodyViewport{nullptr};
         StackPanel tabLabels{nullptr};
         Grid activeTab{nullptr};
         std::vector<AutomaticTab> automatic;
         Bindings paintIcons;
         ScrollView tabScroll{nullptr};
+        ScrollView bodyScroll{nullptr};
         Microsoft::UI::Xaml::Shapes::Path background,strip;
         std::array<float,4> corners{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius};
         Border footer{nullptr};
@@ -160,12 +161,14 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             group.layout=Grid();
             group.layout.RowDefinitions().Append(RowDefinition());
             RowDefinition bodyRow;bodyRow.Height({1,GridUnitType::Star});group.layout.RowDefinitions().Append(bodyRow);
+            group.layout.RowDefinitions().Append(RowDefinition());
             group.border.Child(group.layout);
             group.tabLabels=StackPanel();group.tabLabels.Orientation(Orientation::Horizontal);
             group.tabLabels.Background(clear());
         }
         auto frame=group.layout;
         frame.RowDefinitions().GetAt(0).Height({flag(geometry,L"tabs_visible")?36.:0.,GridUnitType::Pixel});
+        frame.RowDefinitions().GetAt(2).Height({num(object(geometry,L"footer_grip"),L"height"),GridUnitType::Pixel});
         while(frame.Children().Size()>1)frame.Children().RemoveAtEnd();
         A members;for(auto value:array(geometry,L"panels")){
             auto model=find(array(data->model,L"panels"),L"id",value.GetString());
@@ -243,10 +246,22 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         if(group.tabScroll&&group.tabScroll.ActualWidth()>0)fitAutomaticTabs(data,group.automatic,group.tabScroll.ActualWidth(),tabWidths);
         group.body=std::make_unique<PanelBody>(data,panel,geometry,
             [weak=weak_from_this()]{if(auto self=weak.lock())self->measured();},gestures);
-        auto body=group.body->Root();Grid::SetRow(body,1);frame.Children().Append(body);
+        auto body=group.body->Root();
+        group.bodyScroll=nullptr;group.bodyViewport=nullptr;
+        if(object(geometry,L"tiles").Size()){
+            Grid::SetRow(body,1);frame.Children().Append(body);
+        }else{
+            group.bodyViewport=Grid();group.bodyViewport.Children().Append(body);
+            group.bodyScroll=ScrollView();group.bodyScroll.Content(group.bodyViewport);group.bodyScroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
+            group.bodyScroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
+            group.bodyScroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(group.bodyScroll);
+            group.bodyScroll.ViewChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
+            AutomationProperties::SetAutomationId(group.bodyScroll,L"panel-body-scroll-"+to_hstring(uint32_t(num(geometry,L"id"))));
+            Grid::SetRow(group.bodyScroll,1);frame.Children().Append(group.bodyScroll);
+        }
         auto grip=object(geometry,L"footer_grip");
         if(grip.Size()){
-            Canvas overlay;Grid::SetRow(overlay,1);
+            Canvas overlay;Grid::SetRow(overlay,2);
             Border handle;group.footer=handle;handle.Background(clear());place(handle,grip);
             handle.Child(panelGrip(data->theme(),true));
             auto item=O({{L"kind",S(L"panel")},{L"panel",S(str(panel,L"id"))}});
@@ -372,7 +387,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             if(float fit=groupRadius(geometry)*CornerFit;group.frame.CornerRadius().TopLeft!=fit){group.frame.CornerRadius({fit,fit,fit,fit});group.border.CornerRadius({fit,fit,fit,fit});}
             // Geometry-only changes retain controls, focus, capture and scroll.
             auto structure=J::Parse(geometry.Stringify());
-            for(auto field:{L"bounds",L"resize_handles",L"tiles",L"footer_grip"})if(structure.HasKey(field))structure.Remove(field);
+            for(auto field:{L"bounds",L"resize_handles",L"tiles",L"footer_grip",L"min_body_height"})if(structure.HasKey(field))structure.Remove(field);
             if(auto tiles=object(geometry,L"tiles");tiles.Size())structure.Insert(L"tile_style",S(str(tiles,L"tile_style")));
             structure.Insert(L"footer",B(object(geometry,L"footer_grip").Size()!=0));
             J signature=O({{L"geometry",structure},{L"panel",panelStructure(panel)}});
@@ -668,10 +683,14 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             group.shadow.Layout(box,active?1000:group.order,!group.hidden);
             auto geometry=J::Parse(group.geometry.Stringify());geometry.Insert(L"bounds",preview);
             if(active&&expanded.HasKey(L"tiles"))geometry.Insert(L"tiles",object(expanded,L"tiles"));
+            double bodyHeight=std::max(0.,double(previewBox.Height)-(flag(geometry,L"tabs_visible")?36.:0.)
+                -num(object(geometry,L"footer_grip"),L"height"));
+            double minimum=object(geometry,L"tiles").Size()?0.:num(geometry,L"min_body_height");
+            if(group.bodyViewport)group.bodyViewport.Height(std::max(bodyHeight,minimum));
             group.body->Layout(geometry);
             if(group.footer){
                 auto grip=rectangle(object(group.geometry,L"footer_grip"));
-                grip.Y=std::max(0.f,previewBox.Height-(flag(group.geometry,L"tabs_visible")?36.f:0.f)-grip.Height);
+                grip.X=0;grip.Y=0;grip.Width=previewBox.Width;
                 place(group.footer,rectangle(grip));
             }
             if(active){

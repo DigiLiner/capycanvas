@@ -105,7 +105,7 @@ import { checkStagedStartup } from "./startup.test.mjs";
 import { checkMediumTiles } from "./tiles.test.mjs";
 import { checkCustomization, checkWorkspace, checkTabStyles, checkToolbarManager, checkToolPicker } from "./customization.test.mjs";
 import { checkWorkspaceMotion } from "./workspace-motion.test.mjs";
-import { checkWorkspaceResize } from "./workspace-resize.test.mjs";
+import { checkWorkspaceResize, checkWorkspaceConstraints } from "./workspace-resize.test.mjs";
 import { checkWorkspaceRendering } from "./workspace-rendering.test.mjs";
 
 const packageHost = process.argv.includes("--package") ? await servePackage() : null;
@@ -368,6 +368,7 @@ try {
     [process.argv.includes("--toolbar-manager"), () => checkToolbarManager({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--tab-styles"), () => checkTabStyles({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--settings-audit"), () => checkSettingsParity({ call, evaluate, settle }), checkErrors],
+    [process.argv.includes("--workspace-constraints"), () => checkWorkspaceConstraints({call,evaluate,settle,reload}), checkErrors],
     [process.argv.includes("--workspace-resize"), () => checkWorkspaceResize({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-wheel-resize"), () => checkWorkspaceResize({call,evaluate,settle,scenarios:['color','color-float']}), checkErrors],
     [process.argv.includes("--columns"), () => checkColumnSizing({ call, evaluate, settle }), checkErrors],

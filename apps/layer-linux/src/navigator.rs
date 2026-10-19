@@ -288,6 +288,15 @@ pub struct Navigator {
     controls: NavigationControls,
 }
 impl Navigator {
+    pub fn content_measurement(&self, width: i32) -> (f32, layer_ui::PanelScrollMeasurement) {
+        let inner_width = (width - self.root.margin_start() - self.root.margin_end()).max(0);
+        let fixed_height = self.root.margin_top() + self.root.margin_bottom() + self.root.spacing()
+            + self.controls.root.measure(gtk::Orientation::Vertical, inner_width).1;
+        (
+            self.root.measure(gtk::Orientation::Vertical, width).1 as f32,
+            layer_ui::PanelScrollMeasurement { fixed_height: fixed_height as f32, unit_height: 0. },
+        )
+    }
     pub fn new(images: &Rc<Overviews>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_widget_name("navigator-panel");
@@ -298,6 +307,7 @@ impl Navigator {
         let overview: Overview = glib::Object::new();
         overview.set_widget_name("navigator-overview");
         overview.add_css_class("navigator-overview");
+        overview.add_css_class("drag-immediate");
         overview.set_hexpand(true);
         overview.set_vexpand(true);
         overview.set_cursor_from_name(Some("grab"));

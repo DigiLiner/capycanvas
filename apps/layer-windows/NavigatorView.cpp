@@ -41,7 +41,8 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
         AutomationProperties::SetName(root,data->caption(L"color",L"navigator_panel"));
         surround.Fill(data->brush(L"bg"));surround.IsHitTestVisible(false);
         root.Children().Append(surround);
-        content.Margin({8,8,8,8});content.RowSpacing(4);content.VerticalAlignment(VerticalAlignment::Top);
+        double inset=data->panelMetric(L"inset");
+        content.Margin({inset,inset,inset,inset});content.RowSpacing(data->panelMetric(L"control_spacing"));content.VerticalAlignment(VerticalAlignment::Top);
         RowDefinition imageRow;imageRow.Height({1,GridUnitType::Auto});content.RowDefinitions().Append(imageRow);
         RowDefinition buttonsRow;buttonsRow.Height({data->panelMetric(L"control_height"),GridUnitType::Pixel});content.RowDefinitions().Append(buttonsRow);
         overview.Background(clear());overview.Height(220);
@@ -72,7 +73,7 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
     void refreshGeometry(){
         double width=root.ActualWidth(),height=root.ActualHeight();
         if(!root.IsLoaded()||width<=0||height<=0)return;
-        double imageHeight=std::clamp(height-44.,0.,naturalImage(width));
+        double imageHeight=std::clamp(height-fixedHeight(),0.,naturalImage(width));
         if(overview.Height()!=imageHeight){overview.Height(imageHeight);return;}
         auto tabs=array(data->state,L"tabs");auto document=tabs.Size()?tabs.GetObjectAt(0):J{};
         float bounds[4]{};
@@ -94,7 +95,12 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
     }
     double naturalImage(double width)const{
         auto tabs=array(data->state,L"tabs");auto document=tabs.Size()?tabs.GetObjectAt(0):J{};
-        return std::max(0.,width-16)*capy_navigator_aspect(uint32_t(num(document,L"width")),uint32_t(num(document,L"height")));
+        auto margin=content.Margin();
+        return std::max(0.,width-margin.Left-margin.Right)*capy_navigator_aspect(uint32_t(num(document,L"width")),uint32_t(num(document,L"height")));
+    }
+    double fixedHeight()const{
+        auto margin=content.Margin();
+        return margin.Top+margin.Bottom+content.RowSpacing()+content.RowDefinitions().GetAt(1).Height().Value;
     }
     void apply(bool show){
         visible=show;if(!visible)cancel();
@@ -116,6 +122,7 @@ NavigatorView::NavigatorView(std::shared_ptr<WorkspaceData> data,std::function<v
     impl(std::make_shared<Impl>(std::move(data),std::move(changed))){impl->init();}
 NavigatorView::~NavigatorView(){impl->cancel();}
 FrameworkElement NavigatorView::Root()const{return impl->root;}
-double NavigatorView::NaturalHeight(double width)const{return impl->naturalImage(width)+44;}
+double NavigatorView::NaturalHeight(double width)const{return impl->naturalImage(width)+impl->fixedHeight();}
+double NavigatorView::FixedHeight()const{return impl->fixedHeight();}
 void NavigatorView::Apply(bool visible){impl->apply(visible);}
 J NavigatorView::Placement(UIElement const& reference,Rect clip,int order)const{return impl->placement(reference,clip,order);}

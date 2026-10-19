@@ -214,9 +214,12 @@ picker's availability rules.
 - A stacked group can instead fit its pages' measured content height, leaving
   the rest of the column to its sibling. Vertical splits reserve each group's
   tab bar, fixed controls and one complete scrolling row before applying their
-  saved proportions. Continuous or unmeasured content keeps one tile row.
-  Fitted groups shrink when their siblings need that space. Dragging the adjacent
-  divider releases the fit; moving the whole group keeps it.
+  saved proportions. Palettes keeps two rows; continuous or unmeasured content
+  keeps one tile row. Every tab's minimum fits before neighboring groups gain
+  preferred rows. When these minimums cannot fit, each group keeps one tile of
+  body viewport wherever space permits, and its complete body scrolls at its
+  measured minimum height. Fitted groups shrink when their siblings need that
+  space. Dragging the adjacent divider releases the fit; moving the whole group keeps it.
 - Docking a standalone toolbar resets its cross-axis size to one column on a
   vertical dock or one row on a horizontal dock. Add only the lanes required
   to fit its tiles and trailing grip in the available length; floating widths
@@ -256,6 +259,10 @@ picker's availability rules.
   three Small or Large columns, or two Labeled columns, with enough rows for
   every tool. Manual resizing overrides this and survives tab changes.
   Floating groups accept tab merges anywhere inside, never split drops.
+  Resizing and restored sizes keep fixed controls and one complete scrolling
+  row, two for Palettes, or one tile of continuous content. Compact bodies keep
+  one tile of viewport and scroll when their natural height exceeds it. Later
+  content growth leaves established floating dimensions unchanged.
   When removal leaves a floating group with only a toolbar, clear the group's
   manual size and tab-fit constraint and restore that toolbar's default grid,
   without moving its anchor. This applies to hiding and moving panels alike.

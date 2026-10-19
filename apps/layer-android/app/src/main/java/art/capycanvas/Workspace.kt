@@ -522,6 +522,8 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     val active = group.getString("active")
     val panel = panels[active] ?: return
     val tabsVisible = group.getBoolean("tabs_visible")
+    val minimumBody = group.number("min_body_height")
+    val bodyScroll = rememberScrollState()
     val groupItem = obj("kind" to "group", "group" to group.getInt("id"))
     DisposableEffect(group.getInt("id"), group.array("panels").toString()) {
         val prefix = "${group.getInt("id")}:"
@@ -559,9 +561,12 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                             onLongClick = { dock.holdContext(obj("kind" to "group", "group" to group.getInt("id"))) }), contentAlignment = Alignment.Center) { PanelGrip(host.catalog.getJSONObject("document_delivery_copy").getString("move_group")) }
                 }
             }
-            Box(Modifier.weight(1f).testTag("panel-body-$active").then(if (tabsVisible) Modifier.background(colors.panelFill) else Modifier)) {
-                if (group.objectOrNull("tiles") != null) ToolRibbon(host, panel, group.getJSONObject("tiles"), dock, Modifier.fillMaxSize(), group.optString("axis") == "vertical")
-                else PanelControls(host, state, panel, Modifier.fillMaxSize(), onContent = { dock.measure(active, content = it) })
+            BoxWithConstraints(Modifier.weight(1f).testTag("panel-body-$active").then(if (tabsVisible) Modifier.background(colors.panelFill) else Modifier)) {
+                val constrainedBody = group.objectOrNull("tiles") == null && maxHeight < minimumBody.dp
+                Box(Modifier.fillMaxSize().then(if (constrainedBody) Modifier.panelScroll(bodyScroll) else Modifier)) {
+                    if (group.objectOrNull("tiles") != null) ToolRibbon(host, panel, group.getJSONObject("tiles"), dock, Modifier.fillMaxSize(), group.optString("axis") == "vertical")
+                    else PanelControls(host, state, panel, Modifier.fillMaxWidth().then(if (constrainedBody) Modifier.height(minimumBody.dp) else Modifier.fillMaxHeight()), onContent = { dock.measure(active, content = it) })
+                }
                 if (active != "palettes" && group.array("panels").values().contains("palettes"))
                     PaletteMeasurement(host) { dock.measure("palettes", content = it) }
                 if (active != "color" && group.array("panels").values().contains("color"))

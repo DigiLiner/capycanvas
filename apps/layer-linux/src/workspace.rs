@@ -204,6 +204,9 @@ mod allocation {
             {
                 group.interpolate_from(from, progress);
             }
+            if let Some(owner) = self.owner.borrow().upgrade() {
+                owner.constrain_group_bodies(&resolved);
+            }
             let expansion = self
                 .owner
                 .borrow()
@@ -3053,7 +3056,14 @@ impl Workspace {
                 // minimum. GTK still requires a valid measure request.
                 let width = (width as i32).max(content.measure(gtk::Orientation::Horizontal, -1).0);
                 let (content_height, scroll) = match config.id {
-                    Panel::Palettes => (self.palette_panel.content_height(width), None),
+                    Panel::Navigator => {
+                        let (height, scroll) = self.navigator.content_measurement(width);
+                        (height, Some(scroll))
+                    }
+                    Panel::Palettes => {
+                        let (height, scroll) = self.palette_panel.content_measurement(width);
+                        (height, Some(scroll))
+                    }
                     Panel::Layers => {
                         let (height, scroll) = self.layer_panel.content_measurement(width);
                         (height, Some(scroll))
@@ -3216,7 +3226,18 @@ impl Workspace {
                     }
                     stack.add_named(&widget, Some(&format!("{panel:?}")));
                 }
-                column.append(&stack);
+                if group.panels.iter().any(|panel| panel.kind() == PanelKind::Content) {
+                    let body_scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
+                        .hscrollbar_policy(gtk::PolicyType::Never)
+                        .vscrollbar_policy(gtk::PolicyType::Automatic)
+                        .hexpand(true)
+                        .vexpand(true)
+                        .child(&stack)
+                        .build());
+                    column.append(&body_scroll);
+                } else {
+                    column.append(&stack);
+                }
                 if let Some(bounds) = group.footer_grip {
                     let footer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                     footer.add_css_class("panel-footer");
@@ -3397,6 +3418,19 @@ impl Workspace {
         }
         self.columns.reconcile(self, layout, &resolved);
         self.surface.queue_allocate();
+    }
+    fn constrain_group_bodies(&self, resolved: &ResolvedLayout) {
+        for view in self.groups.borrow().iter() {
+            let Some(group) = resolved.groups.iter().find(|group| group.id == view.id) else { continue; };
+            let minimum = if group.tiles.is_none() {
+                group.min_body_height.ceil() as i32
+            } else {
+                -1
+            };
+            if view.stack.height_request() != minimum {
+                view.stack.set_height_request(minimum);
+            }
+        }
     }
     fn glass_connectors(&self, out: &mut Vec<layer_render_wgpu::BackdropRegion>) {
         for drawer in self.drawers() {

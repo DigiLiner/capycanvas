@@ -747,6 +747,7 @@ impl CustomizationState {
                     active,
                     axis: Axis::Vertical,
                     tabs_visible: true,
+                    min_body_height: layout.group_min_body_height(panels),
                     footer_grip: None,
                     floating: false,
                     resize_handles: Vec::new(),

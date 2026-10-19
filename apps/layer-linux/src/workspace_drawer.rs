@@ -812,7 +812,7 @@ impl Drawer {
         if let (Some(panel), Some(column)) = (
             view.bodies.iter().find_map(|body| if let Body::Palettes(panel) = body { Some(panel) } else { None }),
             state.columns.iter().position(|panels| panels.contains(&Panel::Palettes)),
-        ) { panel.content_height(sizing.columns[column].width as i32); }
+        ) { panel.content_measurement(sizing.columns[column].width as i32); }
 
         let heights: Vec<_> = view
             .columns

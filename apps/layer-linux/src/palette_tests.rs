@@ -360,7 +360,7 @@ fn check_palette_reorder(devices: &[&str]) {
 }
 
 #[test]
-#[ignore = "isolated native-input.js --native-test=native_palette_panel_input"]
+#[ignore = "isolated native-input.js --native-test=native_palette_panel_input --native-storage"]
 fn native_palette_panel_input() {
     use layer_core::color::{RgbColor, RgbSpace};
     use layer_ui::{ColorAction, ColorLibraryAction};
@@ -375,6 +375,19 @@ fn native_palette_panel_input() {
         state(&d.w).customization.drawer.as_ref().unwrap().columns,
         [vec![Panel::Color, Panel::Palettes]]
     );
+    let measurement = state(&d.w).workspace.layout.measurements.into_iter()
+        .find(|measurement| measurement.panel == Panel::Palettes).unwrap();
+    let scroll = measurement.scroll.expect("Palettes reports its swatch rows separately");
+    let palette = state(&d.w).color_library.active_palette().clone();
+    let first = d.named(&format!("palette-swatch-{}", palette.swatches[0].id));
+    let top = first.compute_bounds(&d.w.window).unwrap().y();
+    let pitch = palette.swatches.iter().skip(1).filter_map(|swatch| {
+        let tile = d.named(&format!("palette-swatch-{}", swatch.id));
+        let y = tile.compute_bounds(&d.w.window).unwrap().y();
+        (y > top + 1.).then_some(y - top)
+    }).next().unwrap();
+    assert!((scroll.unit_height - pitch).abs() <= 1., "{scroll:?}, arranged pitch {pitch}");
+    assert!(scroll.fixed_height > 0.);
     capture_palette(&mut d, "palette-starter-sketch.png");
     d.click_name("palette-chooser");
     capture_palette(&mut d, "palette-starter-list.png");

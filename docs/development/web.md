@@ -315,9 +315,23 @@ reloading its corrupted workspace and preference fixtures.
 | New drawing | `--new-drawing` walks the dialog: sizes, presets, paper, Texture visibility, paper color, the Import… tile and Create. Other journeys create drawings with `createDrawing` from `new-drawing-fixture.mjs`, on flat paper unless they pass `relief`. |
 | Photo files, packages and export | `--portable-photo`, `--package-view`, `--image-object-fixture`, `--export-metadata`, `--document-errors` |
 | Title bar | `--title-bar`, `--title-bar-state`, `--title-bar-feedback`, `--title-bar-overflow`, `--menu-labels`, `--compact-workspaces`, `--header-controls` |
-| Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--drawer-drag`, `--drawer-style` |
+| Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--workspace-constraints`, `--drawer-drag`, `--drawer-style` |
 | Workspaces | `--workspace-manager`, `--workspace-switcher`, `--workspace-options`, `--workspace-options-refresh`, `--workspace-focus`, `--workspace-windows`, `--workspace-store` |
 | Settings and retained copy | `--preferences`, `--settings-audit`, `--pressure-calibration`, `--language-switching`, `--live-language-color`, `--live-language-proof`, `--live-language-delivery`, `--live-language-surfaces`, `--live-language-toolbar`, `--live-language-effects` |
+
+`--workspace-constraints` also runs in `device.test.mjs`. It starts each Sketch,
+Paint and Photo theme journey from its starting layout, resizes through seven
+CSS viewports from 640 × 360 to 1440 × 1000, and uses Navigator, Histogram,
+floating controls and the last palette swatch and Add button. It checks that
+automatic fitting leaves the saved layout alone and an intentional change
+survives reload. `constraints.json` records the tablet's initial viewport and
+DPR alongside each effective CSS viewport; emulation does not establish physical
+orientation or browser zoom coverage. The journey uses a temporary workspace and
+leaves the original workspace and built-in histories intact.
+`LAYER_CONSTRAINT_AXES=1` selects a focused 1257 × 691 journey with German labels,
+DPR 1, 1.25 and 1.5, inactive tab returns and keyboard drawer opening and closing,
+in both themes. This does not qualify browser zoom or OS text scaling; the
+registered catalogs contain no RTL locale.
 
 `--header-controls` checks menu focus through compact and overflow layouts.
 Expansion restores the first visible, enabled control in the same zone, skipping

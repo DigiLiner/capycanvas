@@ -61,7 +61,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Smooth Zoom tool, up/down | 120 | **Misses:** 34.56–43.73 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
 | Painting with Filters previews pending (61 MP) | 120 | One frame-gap outlier; repeat passes. Completed-update rate unqualified. Curves thumbnail opening 6.782 → 0.943–1.015 s | [Filters previews](#filters-previews), 2026-10-06 |
 | Footer zoom and rotation sliders | 120 | Unmeasured on the reference tablet | |
-| Navigator drag | 120 | | |
+| Navigator drag | 120 | **Web diagnostic:** 60.50–64.92 Chrome surface presents/s; p99 25.00–33.33 ms on the 61 MP photo. Target unqualified; native unmeasured | [Web Navigator layout](#web-navigator-layout), 2026-10-19 |
 | Pan with Navigator open, checkerboard shader | 120 | Diagnostic: 34.92–39.12 renderer submissions/s; submission interval p99 37.11–39.52 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 61 MP tier photo, thermal 0; release APK `e38cf984`, base `5cee14be0` plus shared white/gray checker colors; `artifacts/checker-android/top/` |
 | Brush-cursor hover | 120 | | |
 | Placed-photo drag (24 MP photo) | 120 | | |
@@ -128,7 +128,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
-| Panel or column resize | 120 | **Unqualified.** Current GTK desktop 1× SDR Color column 59.62–65.40, floating panel 118.29–118.96 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
+| Panel or column resize | 120 | **Web diagnostic:** Navigator column 30.00–30.64 Chrome surface presents/s; p99 50.00–58.34 ms. Tier qualification remains unset | [Web Navigator layout](#web-navigator-layout), 2026-10-19; [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
@@ -3979,3 +3979,35 @@ comparison.
 [build metadata](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected-build.json)
 and the [run log](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected.log)
 identify the frozen executable, source hashes and successful gates.
+
+## Web Navigator layout
+
+The 2026-10-19 Wacom MovinkPad Pro 14 comparison uses Chrome 154.0.8037.126
+and hardware WebGPU, at its unchanged display settings and thermal status 0
+before and after every gesture. Native landscape content is 1646 × 908 CSS
+pixels at DPR 1.75. Both optimized `dev-perf` builds use the 9504 × 6336 tier
+photo, one empty front paint layer, Fit zoom, the starting Paint workspace and
+default panel glass. A one-second priming gesture is reset before three
+six-second gestures for each operation. CDP supplies mouse movement every
+4 ms, with 1460–1473 input events per measured gesture.
+
+| Operation | Frozen baseline presents/s | Layout fix presents/s | Baseline p99 gap, ms | Layout fix p99 gap, ms |
+| --- | ---: | ---: | ---: | ---: |
+| Navigator column resize | 30.34–30.89 | 30.00–30.64 | 50.00–58.34 | 50.00–58.34 |
+| Navigator drag | 61.50–64.68 | 60.50–64.92 | 25.00–41.67 | 25.00–33.33 |
+
+These are SurfaceFlinger actual-present timestamps from Chrome's child surface,
+cleared before each contact and polled during input. The ranges overlap and
+remain below the 114 presents/s floor, with p99 above 16.7 ms. Polling can include
+the stationary contact edge and a final presentation tail; exact matching of
+geometry changes to presentations is unavailable, so tier qualification remains
+unset. Synthetic contacts do not establish physical pen latency. Browser
+geometry callbacks are retained separately and do not count as presentations.
+Earlier sequential-dispatch probes in the same artifact directory are diagnostics
+because CDP acknowledgement paced their input.
+
+The frozen baseline is `a46600c8d`, Wasm SHA-256 prefix `4dfb5f6e7fe9`; the
+layout candidate has prefix `ea29c3c8fc48`. Source differences, exact settings,
+input counts, thermal observations and raw presentation timestamps are retained
+in `artifacts/navigator-layout-fix/movinkpad14/`, with the matched results in
+`baseline-performance-queued/` and `fixed-performance-queued/`.

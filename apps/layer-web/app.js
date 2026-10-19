@@ -602,7 +602,12 @@ function arrange(nextLayout, layoutOnly = false) {
     node.dataset.zIndex = group.floating ? String(100 + layout.groups.indexOf(group) * 2) : "1";
     if (!node.classList.contains("expanded-panel")) node.style.zIndex = node.dataset.zIndex;
     place(node, group.bounds);
-    node.style.setProperty("--panel-body-height", `${group.bounds.height - (group.tabs_visible ? layout.tab_bar_height : 0)}px`);
+    const bodyHeight = Math.max(0, group.bounds.height - (group.tabs_visible ? layout.tab_bar_height : 0) - (group.footer_grip?.height || 0));
+    body.classList.toggle("body-scroll", !group.tiles && group.min_body_height > bodyHeight + .01);
+    node.style.setProperty("--panel-body-height", `${bodyHeight}px`);
+    const minimumBody = `${group.min_body_height || 0}px`;
+    if (node.style.getPropertyValue("--panel-min-body-height") !== minimumBody)
+      node.style.setProperty("--panel-min-body-height", minimumBody);
     if (group.tiles) {
       const strip = node.querySelector(".toolbar-controls");
       const geometry = group.tiles;

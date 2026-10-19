@@ -995,15 +995,15 @@ pub struct PanelMeasurement {
     pub scroll: Option<PanelScrollMeasurement>,
 }
 impl PanelMeasurement {
+    fn minimum_content_height(&self) -> f32 {
+        self.content_height_for_rows(1.)
+    }
     fn content_height_for_rows(&self, rows: f32) -> f32 {
         self.scroll.map_or(self.content_height, |m| {
-            (m.fixed_height
-                + rows * if m.unit_height > 0. {
-                    m.unit_height
-                } else {
-                    TILE_SIZE
-                })
-            .min(self.content_height)
+            let unit = if m.unit_height > 0. { m.unit_height } else { TILE_SIZE };
+            let minimum_rows = if self.panel == Panel::Palettes { 2. } else { 0. };
+            (m.fixed_height + rows.max(minimum_rows) * unit)
+                .min(self.content_height.max(m.fixed_height + minimum_rows * unit))
         })
     }
 }
@@ -1266,6 +1266,8 @@ pub struct GroupPlacement {
     pub active: Panel,
     pub axis: Axis,
     pub tabs_visible: bool,
+    /// Minimum body content height inside an outer scroller, excluding header and footer.
+    pub min_body_height: f32,
     /// Content-local trailing drag strip for a lone built-in panel with no tab.
     pub footer_grip: Option<Bounds>,
     pub floating: bool,
@@ -2434,20 +2436,35 @@ impl DockLayout {
             .filter(|h| *h > 0.0)
             .reduce(f32::max)
     }
+    pub(crate) fn group_min_body_height(&self, panels: &[Panel]) -> f32 {
+        self.measurements.iter()
+            .filter(|m| panels.contains(&m.panel) && m.content_height > 0.)
+            .map(PanelMeasurement::minimum_content_height)
+            .reduce(f32::max).unwrap_or(TILE_SIZE)
+    }
+    fn floating_min_height(&self, node: &DockNode) -> f32 {
+        let DockNode::Tabs { panels, active, .. } = node else { unreachable!() };
+        if panels.len() == 1 && active.kind() == PanelKind::Tiles { return TILE_SIZE; }
+        let chrome = if panels.len() == 1 && self.panel(*active).is_ok_and(|p| p.hide_tab) {
+            PANEL_GRIP_HEIGHT
+        } else { TAB_BAR_HEIGHT };
+        chrome + self.measurements.iter()
+            .filter(|m| panels.contains(&m.panel) && m.content_height > 0.)
+            .map(|m| if m.scroll.is_some() { m.minimum_content_height() } else { m.content_height.min(TILE_SIZE) })
+            .reduce(f32::max).unwrap_or(TILE_SIZE)
+    }
     fn fitted_split(&self, first: &DockNode, second: &DockNode, usable: f32) -> Option<f32> {
         let (height, sibling, leading) = match self.fitted_height(first) {
             Some(height) => (height, second, true),
             None => (self.fitted_height(second)?, first, false),
         };
         let own = if leading { first } else { second };
-        let [hard, minimum, _, _, _, _] = stacked_heights(own, self);
-        let [_, sibling_minimum, _, _, sibling_ideal, sibling_rows] = stacked_heights(sibling, self);
-        let size = if hard + sibling_minimum <= usable {
-            let reserved = if hard + sibling_rows <= usable { sibling_rows } else { sibling_minimum };
-            let minimum = minimum.min(hard.max(usable - reserved));
+        let [floor, minimum, _] = stacked_heights(own, self);
+        let [sibling_floor, sibling_minimum, sibling_ideal] = stacked_heights(sibling, self);
+        let size = if minimum + sibling_minimum <= usable {
             height.min(usable - sibling_ideal).clamp(minimum, usable - sibling_minimum)
         } else {
-            (usable - sibling_minimum).max(height.min(TAB_BAR_HEIGHT)).min(usable)
+            split_size(usable, minimum / (minimum + sibling_minimum), floor, sibling_floor)
         };
         Some(if leading { size } else { usable - size })
     }
@@ -2486,10 +2503,11 @@ impl DockLayout {
                     Panel::Layers => LAYERS_MIN_WIDTH,
                     Panel::BrushSets | Panel::SculptSets | Panel::FilterTypes => BRUSH_SETS_MIN_WIDTH,
                     Panel::Tools | Panel::Brushes => TOOL_PANEL_MIN_WIDTH,
-                    Panel::ToolSettings | Panel::Palettes | Panel::Histogram | Panel::Waveform => PANEL_MIN_WIDTH,
+                    Panel::ToolSettings | Panel::Palettes | Panel::Histogram | Panel::Waveform
+                    | Panel::Properties | Panel::Adjustments | Panel::Proof => PANEL_MIN_WIDTH,
                     Panel::Navigator => 192.0,
                     Panel::Color => 4.0 * TILE_SIZE,
-                    _ => 0.0,
+                    Panel::Toolbar | Panel::Commands | Panel::CustomToolbar(_) | Panel::Sizes | Panel::Stats => 0.0,
                 })
                 .fold(0.0, f32::max)
         })
@@ -3448,7 +3466,7 @@ impl DockLayout {
             let height = floating
                 .height
                 .unwrap_or(natural)
-                .max(TAB_BAR_HEIGHT)
+                .max(self.floating_min_height(&floating.root))
                 .min(max_height);
             let bounds = Bounds {
                 x: floating.position[0]
@@ -3607,9 +3625,13 @@ impl DockLayout {
         {
             return Err("Invalid floating panel size".into());
         }
-        self.fit_tab_groups.retain(|id| *id != group);
         let minimum_width = self.group_min_width(group).max(TILE_SIZE);
         let available_height = self.workspace_height(viewport[1]);
+        let node = &self.floating.iter().find(|f| f.root.id() == group)
+            .ok_or("Unknown floating group")?.root;
+        let minimum_height = self.floating_min_height(node)
+            .min((available_height - crate::HEADER_HEIGHT - WORKSPACE_SPACING).max(1.));
+        self.fit_tab_groups.retain(|id| *id != group);
         let floating = self
             .floating
             .iter_mut()
@@ -3643,7 +3665,7 @@ impl DockLayout {
         ) {
             top = (top + delta[1]).clamp(
                 crate::HEADER_HEIGHT,
-                (bottom - TAB_BAR_HEIGHT).max(crate::HEADER_HEIGHT),
+                (bottom - minimum_height).max(crate::HEADER_HEIGHT),
             );
         }
         if matches!(
@@ -3651,8 +3673,8 @@ impl DockLayout {
             ResizeEdge::Bottom | ResizeEdge::BottomLeft | ResizeEdge::BottomRight
         ) {
             bottom = (bottom + delta[1]).clamp(
-                top + TAB_BAR_HEIGHT,
-                (available_height - WORKSPACE_SPACING).max(top + TAB_BAR_HEIGHT),
+                top + minimum_height,
+                (available_height - WORKSPACE_SPACING).max(top + minimum_height),
             );
         }
         floating.position = [left, top];
@@ -4339,20 +4361,11 @@ fn expanded_ribbon_cross_width(node: &DockNode, ribbon_axis: Axis, length: f32, 
         minimum
     }
 }
-fn stacked_heights(node: &DockNode, layout: &DockLayout) -> [f32; 6] {
+fn stacked_heights(node: &DockNode, layout: &DockLayout) -> [f32; 3] {
     match node {
         DockNode::Tabs { panels, active, .. } => {
-            let heights = layout.measurements.iter()
-                .filter(|m| panels.contains(&m.panel) && m.content_height > 0.)
-                .map(|m| match m.scroll {
-                    Some(scroll) => [scroll.fixed_height, scroll.fixed_height,
-                        if m.panel == *active { m.content_height_for_rows(1.) } else { scroll.fixed_height },
-                        m.content_height_for_rows(1.), m.content_height_for_rows(4.),
-                        if scroll.unit_height > 0. { m.content_height_for_rows(1.) } else { scroll.fixed_height }],
-                    None => [0., m.content_height, m.content_height, m.content_height, m.content_height, m.content_height],
-                })
-                .reduce(|a, b| std::array::from_fn(|i| a[i].max(b[i])))
-                .unwrap_or([0., TILE_SIZE, TILE_SIZE, TILE_SIZE, TILE_SIZE, TILE_SIZE]);
+            let minimum = layout.group_min_body_height(panels);
+            let heights = [minimum.min(TILE_SIZE), minimum, layout.group_content_height(panels).unwrap_or(TILE_SIZE)];
             let chrome = if panels.len() == 1 && layout.panel(*active).is_ok_and(|p| p.hide_tab) {
                 PANEL_GRIP_HEIGHT
             } else { TAB_BAR_HEIGHT };
@@ -4485,6 +4498,7 @@ fn tabs_placement(
         active: *active,
         axis: orientation,
         tabs_visible,
+        min_body_height: if active.kind() == PanelKind::Content { layout.group_min_body_height(panels) } else { 0. },
         footer_grip: (!tabs_visible && active.kind() == PanelKind::Content).then_some(Bounds {
             x: 0.0,
             y: (bounds.height - PANEL_GRIP_HEIGHT).max(0.0),
@@ -4587,12 +4601,12 @@ fn resolve_node(
             } else {
                 let a = stacked_heights(first, layout);
                 let b = stacked_heights(second, layout);
-                if a[4] + b[4] > usable && a[1] + b[1] <= usable {
-                    let tier = (1..4).rev().find(|&tier| a[tier] + b[tier] <= usable).unwrap();
-                    a[tier] + (usable - a[tier] - b[tier]) * (a[tier + 1] - a[tier])
-                        / (a[tier + 1] + b[tier + 1] - a[tier] - b[tier])
+                if a[2] + b[2] > usable && a[1] + b[1] <= usable {
+                    a[1] + (usable - a[1] - b[1]) * (a[2] - a[1])
+                        / (a[2] + b[2] - a[1] - b[1])
                 } else {
-                    split_size(usable, *fraction, a[1], b[1])
+                    let tier = usize::from(a[1] + b[1] <= usable);
+                    split_size(usable, *fraction, a[tier], b[tier])
                 }
             };
             if *axis == Axis::Horizontal {
@@ -4917,7 +4931,8 @@ mod tests {
         assert_eq!(PANEL_MIN_WIDTH - 2. * PANEL_CONTENT_INSET, 6. * TILE_SIZE + 5. * TILE_GAP);
         for (panel, minimum) in [(Panel::Brushes, TOOL_PANEL_MIN_WIDTH),
             (Panel::ToolSettings, PANEL_MIN_WIDTH), (Panel::Palettes, PANEL_MIN_WIDTH),
-            (Panel::Histogram, PANEL_MIN_WIDTH), (Panel::Waveform, PANEL_MIN_WIDTH)] {
+            (Panel::Histogram, PANEL_MIN_WIDTH), (Panel::Waveform, PANEL_MIN_WIDTH),
+            (Panel::Properties, PANEL_MIN_WIDTH), (Panel::Adjustments, PANEL_MIN_WIDTH), (Panel::Proof, PANEL_MIN_WIDTH)] {
             let viewport = [1200., 900.];
             let mut layout = DockLayout::default();
             let bounds = |layout: &DockLayout| layout.resolved(viewport).groups.into_iter()
@@ -4939,7 +4954,7 @@ mod tests {
         layout.bands.iter_mut().find(|b| b.id == 7).unwrap().extent = 45.;
         let r = layout.workspace(1200., 900., crate::HEADER_HEIGHT, crate::STATUS_HEIGHT);
         let row = r.groups.iter().find(|g| g.active == Panel::Layers).unwrap();
-        assert_eq!(row.bounds.width, LAYERS_MIN_WIDTH);
+        assert_eq!(row.bounds.width, PANEL_MIN_WIDTH);
         layout
             .move_panel(
                 [1200., 900.],
@@ -4965,6 +4980,61 @@ mod tests {
         let row = r.groups.iter().find(|g| g.active == Panel::Layers).unwrap();
         assert_eq!(row.bounds.width, LAYERS_MIN_WIDTH);
         assert_eq!(row.bounds.x + row.bounds.width, right);
+    }
+
+    #[test]
+    fn floating_content_floors_apply_to_every_edge_and_restored_size() {
+        let viewport = [1440., 1000.];
+        let scroll = |fixed_height, unit_height| Some(PanelScrollMeasurement { fixed_height, unit_height });
+        for (panel, natural, measurement, minimum) in [
+            (Panel::Navigator, 213.5, scroll(44., 0.), 80.),
+            (Panel::Layers, 10_000., scroll(92., 40.), 132.),
+            (Panel::Properties, 157., scroll(0., 0.), 36.),
+            (Panel::Adjustments, 3760., scroll(40., 64.), 104.),
+            (Panel::Proof, 160., None, 36.),
+            (Panel::Color, 300., None, 36.),
+            (Panel::Palettes, 500., scroll(60., 38.), 136.),
+            (Panel::Palettes, 60., scroll(60., 38.), 136.),
+            (Panel::Histogram, 260., None, 36.),
+        ] {
+            for footer in [false, true] {
+                let mut initial = DockLayout::default();
+                initial.set_panel_visible(panel, true).unwrap();
+                initial.panel_mut(panel).unwrap().hide_tab = footer;
+                initial.measurements = vec![PanelMeasurement { panel, tab_width: 0., content_height: natural, scroll: measurement }];
+                initial.move_panel(viewport, panel, DockTarget::Float { position: [400., 100.] }).unwrap();
+                let id = initial.panel_group(panel).unwrap();
+                let placement = |l: &DockLayout| l.resolved(viewport).groups.into_iter().find(|g| g.id == id).unwrap();
+                let start = placement(&initial);
+                for (edge, delta) in [
+                    (ResizeEdge::Left, [10_000., 0.]), (ResizeEdge::Right, [-10_000., 0.]),
+                    (ResizeEdge::Top, [0., 10_000.]), (ResizeEdge::Bottom, [0., -10_000.]),
+                    (ResizeEdge::TopLeft, [10_000., 10_000.]), (ResizeEdge::TopRight, [-10_000., 10_000.]),
+                    (ResizeEdge::BottomLeft, [10_000., -10_000.]), (ResizeEdge::BottomRight, [-10_000., -10_000.]),
+                ] {
+                    let mut layout = initial.clone();
+                    layout.resize_floating(id, edge, start.bounds, delta, viewport).unwrap();
+                    let g = placement(&layout);
+                    let content = g.body().height - g.footer_grip.map_or(0., |b| b.height);
+                    assert!(content + 0.001 >= minimum, "{panel:?} {edge:?} footer={footer}: {:?}", g.bounds);
+                    if matches!(panel, Panel::Properties | Panel::Adjustments | Panel::Proof) {
+                        assert!(g.bounds.width >= PANEL_MIN_WIDTH);
+                    }
+                    if measurement.is_none() {
+                        layout.measurements[0].content_height += 1000.;
+                        let grown = placement(&layout);
+                        assert_eq!(grown.bounds, g.bounds);
+                        assert!(grown.min_body_height > g.min_body_height);
+                    }
+                }
+                initial.floating[0].width = 1.;
+                initial.floating[0].height = Some(1.);
+                let durable = crate::durable_layout(&initial);
+                let g = placement(&initial);
+                assert!(g.body().height - g.footer_grip.map_or(0., |b| b.height) + 0.001 >= minimum);
+                assert_eq!(crate::durable_layout(&initial), durable);
+            }
+        }
     }
 
     fn column_fixture(two_sections: bool) -> (DockLayout, [Panel; 4]) {

@@ -27,7 +27,7 @@ import {checkWorkspaceStore} from "./workspace-store.test.mjs";
 import {checkLongPressDragging} from "./long-press-drag.test.mjs";
 import {checkLayerHolding,checkLayerSwipes} from "./layer-hold.test.mjs";
 import {checkPaperRows} from "./layers.test.mjs";
-import {checkWorkspaceResize} from "./workspace-resize.test.mjs";
+import {checkWorkspaceResize,checkWorkspaceConstraints} from "./workspace-resize.test.mjs";
 import {checkDeviceImagePlacement} from "./image-placement-device.test.mjs";
 import {checkCanvasBar} from "./canvas-bar-journey.test.mjs";
 import {checkNotices} from "./notice-journey.test.mjs";
@@ -95,10 +95,10 @@ try {
   }
   if (process.argv.includes('--editor'))
     assert.equal(await evaluate("document.querySelectorAll('dialog[open]').length"),0,'Start with a clean fixture without recovery or other dialogs');
-  if (['--workspace-resize','--drawer-switch','--drawer-style','--drawer-drag','--long-press-drag','--layer-hold','--layer-swipes','--medium-tiles','--color-panel'].some(flag=>process.argv.includes(flag))) {
+  if (['--workspace-constraints','--workspace-resize','--drawer-switch','--drawer-style','--drawer-drag','--long-press-drag','--layer-hold','--layer-swipes','--medium-tiles','--color-panel'].some(flag=>process.argv.includes(flag))) {
     const original=(await workspaceIdle()).id;
     const capture=await evaluate('layerApp.app.workspace_capture()');
-    const theme=await evaluate('layerApp.state().settings.theme ?? null');
+    const theme=await evaluate('layerApp.state().theme');
     if(process.argv.includes('--color-panel')){await workspaceInput({type:'switch',id:'builtin:workspace:photographer'});await workspaceIdle();}
     await workspaceInput({type:'form',action:{type:'new'}});
     await workspaceInput({type:'submit',name:`Tablet regression ${Date.now()}`});
@@ -195,6 +195,7 @@ try {
     [process.argv.includes("--color-picker"), () => checkColorPicker({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--brush-drawers"), () => checkBrushDrawers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--editor"), () => checkEditor({call,evaluate,settle,canvasPixels}), checkErrors],
+    [process.argv.includes("--workspace-constraints"), () => checkWorkspaceConstraints({call,evaluate,settle,reload}), checkErrors],
     [process.argv.includes("--workspace-resize"), () => checkWorkspaceResize({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--long-press-drag"), () => checkLongPressDragging({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--layer-swipes"), () => checkLayerSwipes({call,evaluate,settle}), checkErrors],

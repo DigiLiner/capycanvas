@@ -158,6 +158,13 @@ class AndroidPaletteTest {
             assertFitted("Choosing Palettes keeps the fitted group", fitted)
             assertTrue(exists("palette-history") && exists("palette-add-color") && exists("palette-chooser"))
             assertEquals("six swatches across", bounds("palette-swatch-${order()[0]}").top, bounds("palette-swatch-${order()[5]}").top, 1f)
+            val measurement = host.snapshot!!.array("panel_measurements").objects().first { it.getString("panel") == "palettes" }
+            val scroll = measurement.getJSONObject("scroll")
+            val firstRow = bounds("palette-swatch-${order()[0]}").top
+            val nextRow = order().drop(1).map { bounds("palette-swatch-$it").top }.first { it > firstRow + 1f }
+            val pitch = (nextRow - firstRow) / density
+            assertEquals("Palette row measurements follow arranged swatches", pitch, scroll.number("unit_height"), 1f)
+            assertTrue("Palette fixed controls remain outside the swatch viewport", scroll.number("fixed_height") > 0f)
             capture("${id.substringAfterLast(':')}-palettes")
             action(obj("type" to "select_panel_tab", "group" to group("color").getInt("id"), "panel" to "color"))
             assertFitted("Color keeps the fitted group", fitted)

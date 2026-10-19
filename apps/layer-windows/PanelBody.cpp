@@ -225,7 +225,8 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                 root=scroll;
             }
         }
-    if(!scrollMetrics&&(contentHeight||navigator)&&str(panel,L"id")!=L"color"&&str(panel,L"id")!=L"proof"
+    if(navigator)scrollMetrics=[this]{return O({{L"fixed_height",N(navigator->FixedHeight())},{L"unit_height",N(0)}});};
+    if(!scrollMetrics&&contentHeight&&str(panel,L"id")!=L"color"&&str(panel,L"id")!=L"proof"
         &&str(panel,L"id")!=L"histogram"&&str(panel,L"id")!=L"waveform")
         scrollMetrics=[]{return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
     if(!scrollable){

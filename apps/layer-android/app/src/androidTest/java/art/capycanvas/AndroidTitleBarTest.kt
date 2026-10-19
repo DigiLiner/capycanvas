@@ -784,11 +784,16 @@ class AndroidTitleBarTest {
                 val tab = state().getJSONArray("tabs").getJSONObject(0)
                 val aspect = (tab.getInt("height").toFloat() / tab.getInt("width")).coerceIn(.25f, 1f)
                 val overview = node("navigator-overview")!!.second.boundsInRoot
+                val navigationMeasurement = snapshot().array("panel_measurements").objects().first { it.getString("panel") == "navigator" }
+                val scroll = navigationMeasurement.objectOrNull("scroll")
+                val fixed = height("panel-body-navigator") - overview.height / density
+                val continuous = scroll != null && scroll.number("unit_height") == 0f && kotlin.math.abs(scroll.number("fixed_height") - fixed) <= 1f
+                val expectedOverview = minOf(overview.width * aspect, maxOf(0f, navigation - (scroll?.number("fixed_height") ?: 0f)) * density)
                 val sample = listOf(height("group-6"), height("group-7"), height("group-10"), height("group-14"), overview.height / density, colors, navigation).joinToString()
-                val fits = kotlin.math.abs(height("group-6") - height("group-7")) <= 1f &&
+                val fits = continuous && kotlin.math.abs(height("group-6") - height("group-7")) <= 1f &&
                     kotlin.math.abs(height("group-10") - colors - 36f) <= 1f &&
                     kotlin.math.abs(height("group-14") - navigation - 36f) <= 1f &&
-                    kotlin.math.abs(overview.height - overview.width * aspect) <= 2f * density
+                    kotlin.math.abs(overview.height - expectedOverview) <= 2f * density
                 if (!fits || sample != previous) { previous = sample; settled = SystemClock.uptimeMillis() }
                 fits && SystemClock.uptimeMillis() - settled > 1000
             }

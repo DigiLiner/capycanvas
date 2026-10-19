@@ -67,7 +67,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Smooth Zoom tool, left/right | 90 | **Misses:** 50.20–50.33 presented fps, p99 67.00–83.73 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Smooth Zoom tool, up/down | 90 | **Misses:** 50.03–50.28 presented fps, p99 66.99–117.22 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Footer zoom and rotation sliders | 90 | Unmeasured on the reference tablet | |
-| Navigator drag | 90 | | |
+| Navigator drag | 90 | Current Web candidate unmeasured; functional geometry and camera checks do not qualify motion | [Web Navigator resize diagnostic](#web-navigator-resize-diagnostic), 2026-10-19 |
 | Pan with Navigator open, checkerboard shader | 90 | Diagnostic: 60.33–60.43 renderer submissions/s; submission interval p99 19.12–19.25 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 24 MP tier photo, thermal 0; release APK `e38cf984`, base `5cee14be0` plus shared white/gray checker colors; `artifacts/checker-android/mid/` |
 | Brush-cursor hover | 90 | | |
 | Placed-photo drag (24 MP photo) | 90 | screen 59.0/s; renderer 99.4 completed updates/s, Navigator closed | Transform presentation below; 90 Hz not met |
@@ -99,8 +99,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Layer swipe right: alpha lock (24 MP photo) | 90 | **Not met.** Android relationship overlay 58.8–59.4 fps, interval p99 16.8–16.9 ms; Web 53.1–54.6 fps, interval p99 33.5–50.2 ms | Android `00b2d6e73` + native port, 2026-10-04; Web `1d251ece`, 2026-09-27; details below |
 | Navigation with 16 visible paint layers | 90 | | |
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
-| Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms | `cbfad9e5`, 2026-09-26 |
-| Panel or column resize | 90 | Tier workload unmeasured. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
+| Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
+| Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
 | Drawer open and close | 90 | **Not met.** Layers/Properties completed native motion: 59.70–59.71 moving window frames/s, interval p99 up to 16.86 ms, 24 MP photo, thermal 0, active display mode 60 Hz | [Combined layer drawer](#combined-layer-drawer), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 90 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
@@ -111,6 +111,30 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK layer input diagnostic](top-tier.md#gtk-layer-input-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
+
+## Web Navigator resize diagnostic
+
+The 2026-10-19 Chrome 155 diagnostic on Wacom MovinkPad 11 uses the 6000 × 4000
+reference photo beneath one empty paint layer at Fit, default Low panel glass,
+an isolated Navigator column, and thermal status 0 before and after motion.
+The native viewport is 1257 × 691 CSS pixels at DPR 1.75. Three warmed five-second
+mouse gestures produce 18.64–18.72 changing column bounds/s, with RAF interval
+p99 67.1–83.8 ms. These are geometry observations, not presented FPS.
+
+The frozen baseline Wasm SHA-256 is
+`4dfb5f6e7fe90fb70f4f98d2596fddf841943eb398227e4c9025a5e81c942ade`.
+Its compiler profile is not captured in the diagnostic. The dev-perf candidate
+loaded during the functional checks has SHA-256
+`938121939f4575295d040c7d52c2b81b082fa2c74683e7fa8566a7945c0dd4d2`;
+its motion rate remains unmeasured. Raw evidence is in
+`artifacts/navigator-layout-fix/movinkpad11/`.
+
+SurfaceFlinger timestamps are retained, but their gesture alignment is invalid:
+the collector mixed uptime including suspend with monotonic presentation time.
+The panel-drag collector also required zero GPU frames while default glass was
+enabled and stopped that series. Navigator camera throughput, aligned presented
+FPS and the candidate comparison remain unqualified. The observed 60 Hz display
+mode also prevents a 90 fps tier pass.
 
 ## Combined layer drawer
 

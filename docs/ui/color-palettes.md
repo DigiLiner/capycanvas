@@ -24,7 +24,9 @@ right.
 
 - The minimum width is 242 logical pixels, fitting six 34-pixel swatch targets.
   They grow to 40 pixels at 280. Wider panels add columns; after four rows, the grid scrolls;
-  two rows of minimum space keep the in-place chooser usable with empty palettes.
+  shared sizing reserves two rows of minimum space to keep the in-place chooser usable
+  with empty palettes. The saved grid scrolls within its allocated space, leaving
+  the recent colors and footer outside that viewport.
 - The last history cell expands recent colors over the saved grid. The final
   visible cell collapses it. Expansion fits at most four rows within the existing
   body; neither overlay changes the footer position. Covered controls cannot
@@ -85,8 +87,9 @@ presentation as Layers. Swatches grow from 34 to 40 pixels, with gaps of 4. Radi
 selection colors use existing panel theme values in both dock and drawer views.
 
 Fitted dock groups reserve the largest measured minimum body height among their
-tabs. Compact pages stay whole; scrollers use the existing four-row minimum from
-floating drop sizing. Long hidden lists therefore do not inflate the group.
+tabs. Compact pages stay whole; scrollers prefer four rows and retain one row
+when constrained, with two rows reserved for Palettes. Long hidden lists therefore
+do not inflate the group.
 The color wheel therefore fits on workspace load, and switching to a shorter
 palette page does not move the dividers. This shared group rule uses no tab-switch
 size cache or panel-specific exception. Manual divider resizing still opts the

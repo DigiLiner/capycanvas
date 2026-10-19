@@ -665,8 +665,9 @@ mod tests {
                     let resolved=layout.workspace(width,height,crate::HEADER_HEIGHT,0.);
                     let bounds=|panel|resolved.groups.iter().find(|g|g.panels.contains(&panel)).unwrap().bounds;
                     let scopes=bounds(Panel::Histogram);let properties=bounds(Panel::Properties);let layers=bounds(Panel::Layers);
-                    assert!(layers.height-TAB_BAR_HEIGHT>=92.+40.,"{platform:?} {width}x{height}: {layers:?}");
-                    assert!(properties.height-TAB_BAR_HEIGHT>=40.+64.,"{platform:?} {width}x{height}: {properties:?}");
+                    let row_minimum = if height >= 800. { 132. } else { TILE_SIZE };
+                    assert!(layers.height-TAB_BAR_HEIGHT>=row_minimum,"{platform:?} {width}x{height}: {layers:?}");
+                    assert!(properties.height-TAB_BAR_HEIGHT>=if height >= 800. {104.} else {TILE_SIZE},"{platform:?} {width}x{height}: {properties:?}");
                     assert_eq!(scopes,bounds(Panel::Waveform));
                     assert!(scopes.y+scopes.height<properties.y);assert!(properties.y+properties.height<layers.y);assert_eq!(properties.x,layers.x);
                     assert!(layers.y+layers.height<=height);
@@ -680,140 +681,94 @@ mod tests {
         }
     }
 
-    #[test]
-    fn paint_keyboard_clearance_keeps_fixed_controls_and_continuous_and_row_scrollers_reachable() {
-        let mut layout = WorkspacePreset::Illustrator.layout(Platform::Ios);
-        layout.open_default_columns(Platform::Ios);
+    fn measured_panel_layout(preset: WorkspacePreset, platform: Platform) -> DockLayout {
+        let mut layout = preset.layout(platform);
+        layout.open_default_columns(platform);
         layout.header_presentation.height = 48.;
+        let scroll = |fixed_height, unit_height| Some(PanelScrollMeasurement { fixed_height, unit_height });
         layout.measurements = [
-            PanelMeasurement { panel: Panel::Navigator, tab_width: 108.5, content_height: 213.5,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 44., unit_height: 0. }) },
-            PanelMeasurement { panel: Panel::Properties, tab_width: 113.5, content_height: 158.,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 0., unit_height: 0. }) },
-            PanelMeasurement { panel: Panel::Layers, tab_width: 86., content_height: 212.,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 92., unit_height: 40. }) },
-        ].to_vec();
-        let durable = crate::durable_layout(&layout);
-        let bounds = |layout: &DockLayout, height, panel| layout.workspace(1180., height, 48., 0.)
-            .groups.into_iter().find(|g| g.panels.contains(&panel)).unwrap().bounds;
-        for (height, clearance) in [(820., 422.), (900., 502.)] {
-            layout.bottom_inset = clearance;
-            let navigator = bounds(&layout, height, Panel::Navigator);
-            let properties = bounds(&layout, height, Panel::Properties);
-            let layers = bounds(&layout, height, Panel::Layers);
-            assert!(navigator.height >= TAB_BAR_HEIGHT + 44., "{navigator:?}");
-            assert!(properties.height >= TAB_BAR_HEIGHT + TILE_SIZE, "{properties:?}");
-            assert!(layers.height >= TAB_BAR_HEIGHT + 92. + 40., "{layers:?}");
-            assert!(layers.y + layers.height <= height - clearance - WORKSPACE_SPACING + 0.001);
-            assert!(navigator.y + navigator.height <= properties.y);
-            assert!(properties.y + properties.height <= layers.y);
-            assert_eq!(crate::durable_layout(&layout), durable);
-        }
-        layout.bottom_inset = 0.;
-        for height in [820., 1200.] {
-            let properties = bounds(&layout, height, Panel::Properties).height;
-            let layers = bounds(&layout, height, Panel::Layers).height;
-            assert!((properties / (properties + layers) - 0.4).abs() < 0.001);
-        }
-        for height in [80., 128., 240.] {
-            let resolved = layout.workspace(1180., height, 48., 0.);
-            for group in resolved.groups.iter().filter(|g| [Panel::Navigator, Panel::Properties, Panel::Layers].contains(&g.active)) {
-                assert!(group.bounds.height.is_finite() && group.bounds.height >= 0., "{:?}", group.bounds);
-                assert!(group.bounds.y + group.bounds.height <= height - WORKSPACE_SPACING + 0.001, "{:?}", group.bounds);
+            (Panel::Navigator, 213.5, scroll(44., 0.)),
+            (Panel::Proof, 16., None),
+            (Panel::Properties, 157., scroll(0., 0.)),
+            (Panel::Adjustments, 3760., scroll(40., 64.)),
+            (Panel::Layers, 172., scroll(92., 40.)),
+            (Panel::Histogram, 260., None),
+            (Panel::Waveform, 260., None),
+            (Panel::Color, 300., None),
+            (Panel::Palettes, 500., scroll(60., 38.)),
+            (Panel::Brushes, 900., scroll(0., 0.)),
+        ].map(|(panel, content_height, scroll)| PanelMeasurement { panel, content_height, scroll, tab_width: 0. }).to_vec();
+        layout
+    }
+
+    #[test]
+    fn continuous_viewports_keep_their_minimum_before_sibling_preferred_rows() {
+        for platform in Platform::ALL {
+            let mut layout = measured_panel_layout(WorkspacePreset::Illustrator, platform);
+            let navigator_group = layout.panel_group(Panel::Navigator).unwrap();
+            let properties_group = layout.panel_group(Panel::Properties).unwrap();
+            for rows in [0., 0.175, 1., 2., 200.] {
+                layout.measurements.iter_mut().find(|m| m.panel == Panel::Layers).unwrap().content_height = 92. + rows * 40.;
+                for properties_height in [7., 157., 3000.] {
+                    layout.measurements.iter_mut().find(|m| m.panel == Panel::Properties).unwrap().content_height = properties_height;
+                    for height in [600., 686., 691., 695., 720., 722., 1000.] {
+                        let durable = crate::durable_layout(&layout);
+                        let resolved = layout.workspace(1257., height, 48., 0.);
+                        let group = |panel| resolved.groups.iter().find(|g| g.panels.contains(&panel)).unwrap();
+                        for panel in [Panel::Navigator, Panel::Properties, Panel::Layers] {
+                            let g = group(panel);
+                            assert!(g.body().height + 0.001 >= g.min_body_height, "{platform:?} height={height} rows={rows} {panel:?}: {:?}", g.bounds);
+                        }
+                        assert_eq!(group(Panel::Navigator).min_body_height, 44. + TILE_SIZE);
+                        for (id, panel) in [(navigator_group, Panel::Proof), (properties_group, Panel::Adjustments)] {
+                            layout.select_tab(id, panel).unwrap();
+                            let switched = layout.workspace(1257., height, 48., 0.);
+                            for g in &resolved.groups {
+                                assert_eq!(switched.groups.iter().find(|next| next.id == g.id).unwrap().bounds, g.bounds);
+                            }
+                        }
+                        layout.select_tab(navigator_group, Panel::Navigator).unwrap();
+                        layout.select_tab(properties_group, Panel::Properties).unwrap();
+                        assert_eq!(crate::durable_layout(&layout), durable);
+                    }
+                }
             }
         }
     }
 
     #[test]
-    fn active_scroll_viewports_survive_inactive_tab_targets_and_natural_row_caps() {
-        let mut layout = WorkspacePreset::Illustrator.layout(Platform::Web);
-        layout.open_default_columns(Platform::Web);
-        layout.header_presentation.height = 48.;
-        layout.measurements = [
-            PanelMeasurement { panel: Panel::Navigator, tab_width: 108.171875, content_height: 213.5,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 44., unit_height: 0. }) },
-            PanelMeasurement { panel: Panel::Proof, tab_width: 77.203125, content_height: 16., scroll: None },
-            PanelMeasurement { panel: Panel::Properties, tab_width: 113.34375, content_height: 157.,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 0., unit_height: 0. }) },
-            PanelMeasurement { panel: Panel::Adjustments, tab_width: 83.171875, content_height: 3760.,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 40., unit_height: 64. }) },
-            PanelMeasurement { panel: Panel::Layers, tab_width: 85.671875, content_height: 172.,
-                scroll: Some(PanelScrollMeasurement { fixed_height: 92., unit_height: 40. }) },
-        ].to_vec();
-        let bounds = |layout: &DockLayout, height, panel| layout.workspace(1180., height, 48., 0.)
-            .groups.into_iter().find(|g| g.panels.contains(&panel)).unwrap().bounds;
-        let properties_group = layout.panel_group(Panel::Properties).unwrap();
-        let navigator_group = layout.panel_group(Panel::Navigator).unwrap();
-        for natural_layers in [172., 212.] {
-            layout.measurements.iter_mut().find(|m| m.panel == Panel::Layers).unwrap().content_height = natural_layers;
-            for (height, clearance) in [(820., 422.), (900., 502.)] {
-                layout.bottom_inset = clearance;
-                let durable = crate::durable_layout(&layout);
-                let navigator = bounds(&layout, height, Panel::Navigator);
-                let properties = bounds(&layout, height, Panel::Properties);
-                let layers = bounds(&layout, height, Panel::Layers);
-                assert_eq!(navigator.height, TAB_BAR_HEIGHT + 44.);
-                assert!(properties.height >= TAB_BAR_HEIGHT + TILE_SIZE, "{properties:?}");
-                assert!(layers.height >= TAB_BAR_HEIGHT + 92. + 40., "{layers:?}");
-                assert!(navigator.y + navigator.height <= properties.y);
-                assert!(properties.y + properties.height <= layers.y);
-                assert!(layers.y + layers.height <= height - clearance - WORKSPACE_SPACING + 0.001);
-                assert_eq!(crate::durable_layout(&layout), durable);
-                layout.select_tab(navigator_group, Panel::Proof).unwrap();
-                assert_eq!(bounds(&layout, height, Panel::Navigator), navigator);
-                layout.select_tab(navigator_group, Panel::Navigator).unwrap();
-                assert_eq!(crate::durable_layout(&layout), durable);
-            }
-        }
-        layout.bottom_inset = 0.;
-        for height in [820., 1200.] {
-            let properties = bounds(&layout, height, Panel::Properties);
-            let layers = bounds(&layout, height, Panel::Layers);
-            assert!((properties.height / (properties.height + layers.height) - 0.4).abs() < 0.001);
-            layout.select_tab(properties_group, Panel::Adjustments).unwrap();
-            assert_eq!(bounds(&layout, height, Panel::Properties), properties);
-            assert_eq!(bounds(&layout, height, Panel::Layers), layers);
-            layout.select_tab(properties_group, Panel::Properties).unwrap();
-        }
-        layout.select_tab(properties_group, Panel::Adjustments).unwrap();
-        for usable in [204., 220., 252., 308.] {
-            let height = usable + 48. + TAB_BAR_HEIGHT + 44. + 3. * WORKSPACE_SPACING;
-            let durable = crate::durable_layout(&layout);
-            let properties = bounds(&layout, height, Panel::Properties);
-            let layers = bounds(&layout, height, Panel::Layers);
-            assert!(properties.height >= TAB_BAR_HEIGHT + 40. - 0.001, "{properties:?}");
-            assert!(layers.height >= TAB_BAR_HEIGHT + 92. - 0.001, "{layers:?}");
-            if usable > 204. {
-                assert!(properties.height > TAB_BAR_HEIGHT + 40.);
-                assert!(layers.height > TAB_BAR_HEIGHT + 92.);
-            }
-            assert!(layers.y + layers.height <= height - WORKSPACE_SPACING + 0.001);
-            assert_eq!(crate::durable_layout(&layout), durable);
-        }
-        layout.select_tab(properties_group, Panel::Properties).unwrap();
-        for height in [80., 128., 240.] {
-            let resolved = layout.workspace(1180., height, 48., 0.);
-            for group in resolved.groups.iter().filter(|g| g.panels.iter().any(|p|
-                [Panel::Navigator, Panel::Properties, Panel::Layers].contains(p))) {
-                assert!(group.bounds.height.is_finite() && group.bounds.height >= 0., "{:?}", group.bounds);
-                assert!(group.bounds.y + group.bounds.height <= height - WORKSPACE_SPACING + 0.001, "{:?}", group.bounds);
-            }
-        }
-        for measurement in &mut layout.measurements {
-            match measurement.panel {
-                Panel::Properties | Panel::Adjustments => {
-                    measurement.content_height = 7.;
-                    measurement.scroll.as_mut().unwrap().fixed_height = 0.;
+    fn constrained_columns_expose_scrollable_bodies_without_editing_saved_layouts() {
+        for platform in Platform::ALL {
+            for preset in [WorkspacePreset::Illustrator, WorkspacePreset::Photographer] {
+                let mut layout = measured_panel_layout(preset, platform);
+                for fitted in [true, false] {
+                    if !fitted { layout.fit_height_groups.clear(); }
+                    let durable = crate::durable_layout(&layout);
+                    for (height, clearance) in [(360., 0.), (820., 422.), (900., 502.)] {
+                        layout.bottom_inset = clearance;
+                        let resolved = layout.workspace(640., height, 48., 0.);
+                        let panels = [if preset == WorkspacePreset::Illustrator { Panel::Navigator } else { Panel::Histogram }, Panel::Properties, Panel::Layers];
+                        let groups: Vec<_> = panels.iter().map(|p| resolved.groups.iter().find(|g| g.panels.contains(p)).unwrap()).collect();
+                        for g in &groups {
+                            assert!(g.body().height + 0.001 >= g.min_body_height.min(TILE_SIZE), "{platform:?} {preset:?} {height}/{clearance}: {:?}", g.bounds);
+                            assert!(g.bounds.y + g.bounds.height <= height - clearance - WORKSPACE_SPACING + 0.001);
+                        }
+                        for pair in groups.windows(2) { assert!(pair[0].bounds.y + pair[0].bounds.height <= pair[1].bounds.y); }
+                        assert_eq!(groups[0].min_body_height, if preset == WorkspacePreset::Illustrator { 80. } else { 260. });
+                        assert_eq!(groups[1].min_body_height, 104.);
+                        assert_eq!(groups[2].min_body_height, 132.);
+                        assert_eq!(crate::durable_layout(&layout), durable);
+                    }
+                    layout.bottom_inset = 0.;
+                    for height in [80., 128., 240.] {
+                        for g in layout.workspace(640., height, 48., 0.).groups {
+                            assert!(g.bounds.height.is_finite() && g.bounds.height >= 0.);
+                            assert!(g.bounds.y + g.bounds.height <= height - WORKSPACE_SPACING + 0.001);
+                        }
+                    }
                 }
-                Panel::Layers => measurement.content_height = 99.,
-                _ => {}
             }
         }
-        assert_eq!(bounds(&layout, 316., Panel::Properties).height, TAB_BAR_HEIGHT + 3.);
-        assert_eq!(bounds(&layout, 316., Panel::Layers).height, TAB_BAR_HEIGHT + 92. + 3.);
-        layout.fit_height_groups.push(properties_group);
-        assert_eq!(bounds(&layout, 324., Panel::Properties).height, TAB_BAR_HEIGHT + 7.);
-        assert_eq!(bounds(&layout, 324., Panel::Layers).height, TAB_BAR_HEIGHT + 99.);
     }
 
     #[test]
@@ -885,7 +840,7 @@ mod tests {
             let brushes = bounds(&layout, short, Panel::Brushes);
             let tool = bounds(&layout, short, Panel::ToolSettings);
             let color = bounds(&layout, short, Panel::Color);
-            assert_eq!(brushes.height, TAB_BAR_HEIGHT);
+            assert_eq!(brushes.height, TAB_BAR_HEIGHT + TILE_SIZE);
             assert_eq!(tool.height, TAB_BAR_HEIGHT + TILE_SIZE);
             assert_eq!(color.height, short - brushes.height - tool.height - WORKSPACE_SPACING * 2.);
             assert!(brushes.y + brushes.height <= tool.y);

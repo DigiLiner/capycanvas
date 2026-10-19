@@ -54,16 +54,16 @@ to the expanded column.
 Vertical groups retain saved proportions when their measured scroll targets fit.
 A scroll target includes fixed controls and four measured rows, or four tile
 heights for continuous content, capped at the panel's natural content height.
-When these targets exceed the available height, groups first retain their fixed
-controls and one measured row, or one tile height of continuous content, for the
-active page. Extra space first provides that unit for every tab, then grows each
-group toward its four-unit target. If the active-page targets cannot fit, groups
-share the space above their fixed controls instead. Fixed controls keep their
-measured height wherever their combined fixed height fits.
+When these targets exceed the available height, groups first retain fixed
+controls and one measured row, or one tile height of continuous content, for
+every tab. Palettes retains two rows, including empty palettes. Remaining space
+grows groups toward their four-unit target. If the minimums cannot fit, each
+group keeps a tile-height body viewport wherever space permits. The complete
+body then scrolls at its measured minimum height, including fixed controls.
 
 Fitted groups yield body space to neighboring groups while retaining their fixed
-scroll controls. Where space permits, neighboring lists retain at least one
-measured row; continuous scroll areas may shrink to their fixed controls. Content
+scroll controls and useful scroll viewport. Neighboring lists receive preferred
+rows only after every group's minimum fits. Content
 beyond the allocated scroll area remains reachable by scrolling. Hosts retain the
 last measured row height while lazy rows are absent and replace it when a row
 reports a new height.

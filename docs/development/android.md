@@ -235,6 +235,15 @@ exports it as `$CAPY_APPLICATION_ID`. The commands below write
 
 ## Device tests
 
+`AndroidTitleBarTest#paintColorAndNavigatorFitTheirContent` checks Paint's natural
+panel fit and Navigator's continuous-content measurement against the displayed
+overview and controls. Compose reports Navigator's fixed controls, gap and insets
+without choosing its minimum preview height. Shared `min_body_height` controls
+the body extent when a group needs scrolling below its fixed tab strip.
+`AndroidPaletteTest#defaultsPlacePalettesAfterColorAndInSketchDrawer` compares
+the palette's reported row pitch with its arranged swatches. Palettes reports
+its fixed controls separately so shared sizing can reserve two swatch rows.
+
 `AndroidHostTest#penPressureCalibrationUsesNativeCurveAndPersistsAppliedResponse`
 checks the modeless pressure utility in both themes: opening from Preferences,
 touch, mouse and stylus graph input, drag-out removal, the live marker, painting

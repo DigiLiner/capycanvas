@@ -57,7 +57,7 @@ import kotlin.math.roundToInt
             "viewport" to JSONArray(listOf(viewport.width / density, viewport.height / density))))
     }
     val natural = geometry?.let { (viewport.width / density * it.number("overview_aspect")).dp } ?: 220.dp
-    val overviewHeight = (availableHeight - panelMetrics().height - panelMetrics().spacing - panelMetrics().inset*2).coerceIn(minOf(64.dp, natural), natural)
+    val overviewHeight = (availableHeight - panelMetrics().height - panelMetrics().spacing - panelMetrics().inset*2).coerceIn(0.dp, natural)
     SideEffect { onHeight(natural.value, (overviewHeight.value * density).roundToInt() / density) }
     Column(verticalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
         Canvas(Modifier.fillMaxWidth().height(overviewHeight).testTag("navigator-overview").background(colors.surround)

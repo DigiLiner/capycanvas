@@ -13132,11 +13132,7 @@ mod tests {
                     divider.bounds.x + divider.bounds.width * 0.5,
                     divider.bounds.y + 20.,
                 ];
-                let minimum = if group == 5 {
-                    crate::TOOL_PANEL_MIN_WIDTH
-                } else {
-                    crate::LAYERS_MIN_WIDTH
-                };
+                let minimum = original.layout.group_min_width(group).max(TILE_SIZE);
                 let x_for_width = |width| {
                     if divider.reversed {
                         divider.parent.x + divider.parent.width - width - WORKSPACE_SPACING * 0.5
@@ -13246,6 +13242,8 @@ mod tests {
                 .layout
                 .column_width_before_resize(root, viewport)
                 .unwrap();
+            let minimum = session.state.workspace.layout
+                .group_min_width(if root == 4 { 5 } else { root }).max(TILE_SIZE);
             session
                 .state
                 .workspace
@@ -13263,13 +13261,7 @@ mod tests {
                 center: d.bounds.x + d.bounds.width * 0.5,
                 outward: if nested.unwrap_or(right) { -1. } else { 1. },
                 saved_width,
-                minimum: if nested == Some(true) {
-                    TILE_SIZE
-                } else if nested.is_none() && right {
-                    crate::LAYERS_MIN_WIDTH
-                } else {
-                    crate::TOOL_PANEL_MIN_WIDTH
-                },
+                minimum,
             }
         }
         fn drag(&mut self, phase: ContactPhase, distance: f32) {
@@ -13377,11 +13369,7 @@ mod tests {
             assert_eq!(t.session.state.workspace, expanded);
             t.drag(ContactPhase::Move, edge + 45.);
             assert!((t.width() - t.minimum - 45.).abs() < 0.01);
-            let minimum = if right {
-                crate::LAYERS_MIN_WIDTH
-            } else {
-                crate::TOOL_PANEL_MIN_WIDTH
-            };
+            let minimum = t.minimum;
             let threshold = (minimum - 108.).max(TILE_SIZE) - TILE_SIZE;
             for distance in [minimum - TILE_SIZE - 72., threshold + 0.5] {
                 t.drag(ContactPhase::Move, distance);

@@ -290,6 +290,10 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   indexed panel values together before constructing lazy content. Observe
   expansion separately for placement and input admission. Removed containers
   withdraw their native sources; surviving containers keep live metadata.
+  Constrained bodies retain the shared `min_body_height` inside an outer
+  `EditorScrollView`; tabs and footer grips stay outside that viewport. Intersect
+  Navigator placements with the body viewport so scrolling clips its native image
+  before the header and grip.
 - **Visibility queries.** Attach queries such as `canvas_bar_layout` to an always
   present container; `.task` and `.onAppear` do not run on an empty SwiftUI `Group`.
 - **Layer relationships.** Draw shared endpoints over measured row and content

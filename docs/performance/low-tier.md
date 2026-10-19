@@ -148,8 +148,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Attached filter drag inside a clipping run | 60 | **Not met.** 55.64–59.72 native UI fps; moving-frame gap p99 16.75–33.34 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 8 visible paint layers | 60 | | |
 | Drawing with 8 visible paint layers, G-Pen 1024 px | 60 | **Not met.** Navigator open, Fit: 50.12 fresh updates/s (48.65–51.65), completion gap p99 29.30–32.87 ms | Retained-Navigator painting below; seven photo layers and one drawing layer |
-| Panel, tab, column or toolbar drag and docking | 60 | Current lifecycle binary unmeasured. Earlier Web checkpoint: group/tab placements 47.38/60.22 Hz; Navigator assertion failed | Web workspace diagnostic below; no tier qualification |
-| Panel or column resize | 60 | **Unqualified.** TCL default-canvas diagnostic: 25.01–58.23 UI Hz, maximum p99 gap 50.08 ms; base 24.99–58.22 Hz. Retained-model assertion fails on both | 2026-10-09 sidebar-width comparison against `ee4805dfe`; `artifacts/sidebar-widths/android-resize{,-base}-logcat.txt`; no reference-canvas qualification |
+| Panel, tab, column or toolbar drag and docking | 60 | **Unqualified.** Baseline Web floating group/Navigator drags: 18.45–19.41/21.49–22.36 RAF placements/s; current candidate and native host unmeasured | [Web workspace diagnostic](#web-workspace-diagnostic), 2026-10-19; Navigator model assertion fails |
+| Panel or column resize | 60 | **Unqualified.** Baseline Web column/Navigator resizes: 8.43–8.83 changing-geometry updates/s, p99 150.0–183.3 ms; current candidate and native host unmeasured | [Web workspace diagnostic](#web-workspace-diagnostic), 2026-10-19; custom workspace, no aligned presented-frame oracle |
 | Pen pressure utility and curve drag | 60 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
 | Drawer open and close | 60 | Unmeasured on the reference tablet; GTK Sketch has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Grouped tool menus, drawer switching and tile drag | 60 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); functional checks do not qualify this tier |
@@ -761,23 +761,31 @@ qualify the recorded functional journeys only.
 
 ## Web workspace diagnostic
 
-The same measured checkpoint and TCL photo fixture above perform three five-second
-CDP mouse resizes each for the left column, right column and Navigator. Width
-changes sampled through animation callbacks reach 12.04–13.23, 13.03–13.49 and
-11.93–12.36 updates/s respectively; baseline samples were approximately
-12–14/s. All nine gestures retain DOM/content and native-resolution resources
-and pass shared-geometry, undo/redo and cancellation checks.
+Measured 2026-10-19 on the reference TCL in Chrome 154.0.8037.126, thermal 0,
+1129 × 586 CSS pixels at DPR 1.7, default low glass. The frozen baseline is
+`a46600c8d`, Wasm SHA-256 `4dfb5f6e7fe90fb70f4f98d2596fddf841943eb398227e4c9025a5e81c942ade`.
+The 4248 × 2832 tier photo has one empty paint layer above it at Fit zoom.
+These CDP mouse diagnostics use a custom workspace and three warmed five-second
+contacts per row, sampled through animation callbacks.
 
-The first floating-group and tab drags sample 47.38 and 60.22 placements/s.
-The Navigator drag then fails the same assertion as baseline: one full
-`layout()` call occurs where the existing fixture expects zero. Remaining
-repetitions and its trailing glass check do not run. The failed raw probe is
-retained. These UI geometry samples have no presented-frame oracle, so neither
-motion row is qualified. Narrow transient-open collapsed-column motion remains
-unmeasured. [Checkpoint records, partial failure and hashes](../../artifacts/localization-resolution/performance/final-motion-summary.local.json)
-and [baseline scope](../../artifacts/localization-resolution/performance/baseline-motion-summary.local.json)
-record the bounded comparison; they do not establish unchanged performance
-for other workspaces or tiers.
+| Motion | Changing geometry or placement updates/s | Gap p99 across contacts |
+| --- | ---: | ---: |
+| Left column resize | 8.43–8.63 | 150.0–183.3 ms |
+| Right column resize | 8.77–8.83 | 166.5–183.3 ms |
+| Navigator column resize | 8.55–8.83 | 166.7–183.3 ms |
+| Floating group drag | 18.45–19.41 | 116.6 ms |
+| Floating Navigator drag | 21.49–22.36 | 66.8–83.2 ms |
+
+These geometry rates miss the 57 Hz display-paced floor. Raw SurfaceFlinger
+actual-present records exist, but their clock alignment does not establish
+moving-frame cadence. Floating Navigator contacts also fail the retained-model
+probe's zero-`layout()` expectation with one call. The camera-motion probe has
+no accepted samples because its instrumentation throws while serializing a
+BigInt. No presented FPS or tier qualification follows from these diagnostics.
+The current Navigator-minimum candidate, Wasm `938121939f4575295d040c7d52c2b81b082fa2c74683e7fa8566a7945c0dd4d2`,
+has no matched low-tier performance measurement. [Raw baseline records and
+bounded summary](../../artifacts/navigator-layout-fix/tcl/baseline-sf-performance/summary.json)
+retain the scope and failures.
 
 ## Current drag comparison
 

@@ -112,6 +112,7 @@ private struct WorkspacePanelGroupContent: View {
     let group: JSON
     let expansion: JSON
     let panels: [JSON]
+    @Environment(\.workspaceClip) private var clip
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var active: JSON { panels.first { $0["id"].string == group["active"].string } ?? JSON() }
     private var radius: CGFloat {
@@ -165,14 +166,29 @@ private struct WorkspacePanelGroupContent: View {
         VStack(spacing: 0) {
             if group["tabs_visible"].bool { WorkspacePanelHeader(store: store, group: group, panels: panels, glass: expansion.isNull) }
             if !tiles.isNull { WorkspaceToolbar(store: store, panel: active, geometry: tiles, vertical: group["axis"].string == "vertical") }
-            else {
-                PanelControls(store: store, panel: active)
-                    .background(alignment: .top) { companionMeasurement }
-                    .overlay(alignment: .topLeading) {
-                        if !group["footer_grip"].isNull { grip.placed(group["footer_grip"]) }
-                    }
-            }
+            else { panelBody }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("panel-preview-" + active["id"].string)
+    }
+    private var panelBody: some View {
+        GeometryReader { viewport in
+            let footer = CGFloat(group["footer_grip"]["height"].number)
+            let height = max(0, viewport.size.height - footer)
+            let minimum = CGFloat(group["min_body_height"].number)
+            let bounds = viewport.frame(in: .named("editor-workspace"))
+            VStack(spacing: 0) {
+                Group {
+                    if height < minimum {
+                        EditorScrollView {
+                            PanelControls(store: store, panel: active).frame(height: minimum)
+                        }
+                    } else { PanelControls(store: store, panel: active) }
+                }.frame(height: height)
+                    .environment(\.workspaceClip, CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: height).intersection(clip))
+                    .background(alignment: .top) { companionMeasurement }
+                    .clipped()
+                if !group["footer_grip"].isNull { grip.frame(height: footer) }
+            }
+        }
     }
     private var grip: some View {
         WorkspaceGroupGrip(store: store, group: group["id"], vertical: true)

@@ -121,7 +121,7 @@ fn content_aware_drop_height_cases() {
         (900_000., true, Some(700.), 10., false, 268.), // four complete rows
         (900_000., true, Some(700.), 800., true, 700.), // existing manual size
         (900_000., true, Some(700.), 10., true, 268.),
-        (900_000., true, Some(80.), 10., true, 80.), // preserve explicit tiny size
+        (900_000., true, Some(80.), 10., true, 148.),
         (280., false, Some(500.), 10., true, 500.),
     ] {
         let actual = drop_panel(

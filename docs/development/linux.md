@@ -113,6 +113,12 @@ GTK setters and host callbacks can synchronously dispatch an edit and refresh
 widgets. Release `RefCell` guards before those calls by taking owned values or
 cloning handles; keep each collection borrow inside the state operation.
 
+Navigator measures its controls, spacing and insets separately from the continuous
+overview; Palettes reports its fixed controls and arranged swatch-row pitch.
+Group bodies use the shared `min_body_height` when their dock allocation
+is smaller, with scrolling below the fixed tab strip. Ordinary panel scrollers
+retain their finite viewport and continue to own their content scrolling.
+
 Queued frames retain immutable typed scene snapshots and shared source roots.
 Save, recovery, export, clipboard and color/source comparisons enqueue a capture
 barrier beside those roots. File workers wait for the preceding successful GPU

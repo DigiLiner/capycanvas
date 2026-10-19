@@ -69,11 +69,13 @@ fn button(icon: &str, label: &str, id: &str) -> gtk::Button {
     button
 }
 impl PalettePanel {
-    pub fn content_height(&self, width: i32) -> f32 {
+    pub fn content_measurement(&self, width: i32) -> (f32, layer_ui::PanelScrollMeasurement) {
         let (_, pitch) = crate::palette_grid::cells(width - 2 * layer_ui::PANEL_CONTENT_INSET as i32);
         self.scroll.set_min_content_height(2 * pitch - crate::palette_grid::GAP);
         self.scroll.set_max_content_height(4 * pitch - crate::palette_grid::GAP);
-        self.root.measure(gtk::Orientation::Vertical, width).1 as f32
+        let height = self.root.measure(gtk::Orientation::Vertical, width).1 as f32;
+        let viewport = self.scroll.measure(gtk::Orientation::Vertical, width - 2 * layer_ui::PANEL_CONTENT_INSET as i32).1 as f32;
+        (height, layer_ui::PanelScrollMeasurement { fixed_height: (height - viewport).max(0.), unit_height: pitch as f32 })
     }
     pub fn new() -> Rc<Self> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 6);

@@ -1352,7 +1352,8 @@ mod tests {
                     .find(|b| b.root.group_for(panel).is_some())
                     .unwrap();
                 // The editor's paint column also contains Tool settings and Color.
-                let minimum = if band.root.group_for(Panel::ToolSettings).is_some() {
+                let minimum = if band.root.group_for(Panel::ToolSettings).is_some()
+                    || band.root.group_for(Panel::Properties).is_some() {
                     minimum.max(PANEL_MIN_WIDTH)
                 } else if band.root.group_for(Panel::Color).is_some() {
                     minimum.max(4.0 * TILE_SIZE)

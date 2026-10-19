@@ -102,6 +102,11 @@ whatever Rust DLL already exists, so you would test stale code. Close the test
 apps you started before rebuilding. Close every window of the current app before
 switching configurations; a new launch otherwise activates the running build.
 
+Navigator reports its fixed native controls, row gap and insets separately from
+the continuous overview. Group bodies keep a finite viewport for their ordinary
+scrollers; when shared `min_body_height` exceeds the allocation, the outer body
+scrolls between the fixed tab strip and the trailing drag grip.
+
 The build copies `dxcompiler.dll` from the pinned `Microsoft.Direct3D.DXC` package
 for the selected architecture beside the executable. The host compiles D3D12 shaders with it; it uses its
 internal validator, so no `dxil.dll` is needed. Without it the host falls back to

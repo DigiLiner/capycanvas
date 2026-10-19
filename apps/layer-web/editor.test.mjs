@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {mkdir,writeFile} from "node:fs/promises";
 export async function checkEditor({call,evaluate,settle,canvasPixels}) {
-  const wait=(condition,timeout=25000)=>evaluate(`new Promise((resolve,reject)=>{const start=performance.now();function check(){if(${condition})resolve(true);else if(performance.now()-start>${timeout})reject(Error("Timed out: "+${JSON.stringify(condition)}+"; "+document.querySelector("#status").textContent));else setTimeout(check,40);}check();})`);
+  const wait=(condition,timeout=25000)=>evaluate(`new Promise((resolve,reject)=>{const start=performance.now();function check(){const error=window.layerApp?.state().host_error;if(error)reject(Error('Host error: '+error));else if(${condition})resolve(true);else if(performance.now()-start>${timeout})reject(Error("Timed out: "+${JSON.stringify(condition)}+"; "+document.querySelector("#status").textContent));else setTimeout(check,40);}check();})`);
   const click=async selector=>{await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);await settle();};
   const invoke=async id=>{await evaluate(`layerApp.dispatch({type:"invoke",command:${JSON.stringify(id)}})`);await settle();};
   const show=async panel=>{
@@ -84,7 +84,7 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   await click('.collapsed-column [data-panel="navigator"]');
   await wait('!!document.querySelector(".content-drawer .navigator-overview")');
   await settle();
-  await wait('document.querySelector(".content-drawer")?.getBoundingClientRect().width>=editorColumnWidth');
+  await wait('(document.querySelector(".content-drawer")?.getBoundingClientRect().width ?? 0)+1/devicePixelRatio>=editorColumnWidth');
 
   await click('.content-drawer [data-navigator-command="zoom_out"]');
   await pointer("#canvas",.5,.5);
@@ -104,7 +104,7 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   await settle();
   await wait('!!document.querySelector(".content-drawer[data-drawer=tool] .color-wheel")');
   await evaluate('new Promise(r=>setTimeout(r,200))');
-  assert.ok(await evaluate('document.querySelector(".content-drawer[data-drawer=tool]").getBoundingClientRect().width>=editorColumnWidth'),"Nested content drawer uses measured toolbar anchor");
+  assert.ok(await evaluate('(document.querySelector(".content-drawer[data-drawer=tool]")?.getBoundingClientRect().width ?? 0)+1/devicePixelRatio>=editorColumnWidth'),"Nested content drawer uses measured toolbar anchor");
   await pointer("#canvas",.5,.5);
   await wait('!document.querySelector(".content-drawer[data-drawer=tool]")');
   await evaluate('layerApp.dispatch({type:"restore_workspace",workspace:editorWorkspace})');
@@ -127,7 +127,7 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   await invoke("export_document");
   await wait(`!!document.querySelector('dialog[open] select[aria-label="Format"]')`);
   await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(n=>n.textContent==='Choose File…').click()`);
-  await wait('!layerApp.state().document_file.busy');
+  await wait('[...editorFiles.keys()].some(name=>name.endsWith(".png")) && !layerApp.state().document_file.busy && !layerApp.documents.busy()',120000);
   assert.deepEqual(await evaluate('[...editorFiles.entries()].find(([name])=>name.endsWith(".png"))?.[1].slice(0,8)&&Array.from([...editorFiles.entries()].find(([name])=>name.endsWith(".png"))[1].slice(0,8))'),[137,80,78,71,13,10,26,10]);
   await invoke("new_document");
   await wait('!!document.querySelector("#new-drawing-dialog[open] #new-drawing-width input")');

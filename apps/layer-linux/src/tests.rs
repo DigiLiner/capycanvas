@@ -3055,7 +3055,7 @@ fn native_navigator_column_resize() {
         let minimum = if panel == Panel::Brushes {
             192.
         } else {
-            layer_ui::LAYERS_MIN_WIDTH
+            layer_ui::PANEL_MIN_WIDTH
         };
         let outward = if d.reversed { -1. } else { 1. };
         let center = d.bounds.x + d.bounds.width * 0.5;
@@ -3177,6 +3177,14 @@ fn native_navigator() {
         workspace: Box::new(workspace),
     });
     pump(250);
+    let measurement = state(&w).workspace.layout.measurements.into_iter()
+        .find(|measurement| measurement.panel == Panel::Navigator).unwrap();
+    let scroll = measurement.scroll.expect("Navigator reports its fixed controls separately");
+    assert_eq!(scroll.unit_height, 0.);
+    let overview = find_named(w.navigator.root.upcast_ref(), "navigator-overview").unwrap();
+    let fixed = w.navigator.root.height() + w.navigator.root.margin_top()
+        + w.navigator.root.margin_bottom() - overview.height();
+    assert!((scroll.fixed_height - fixed as f32).abs() <= 1., "{scroll:?} != {fixed}");
     w.dispatch(UiAction::SetBrushSize { value: 96.0 });
     let mut sequence = 0;
     for (row, rgba) in [
