@@ -77,6 +77,17 @@ Straight steady runs advance at half the reference diameter, at least 4 px. Pen-
 flushes the endpoint. Segmentation follows input, and prediction clones the same
 state; rendering cadence does not decide where contacts are retained.
 
+Dry media retain their opening contact and swept prefix without depositing an
+imprint. Until real movement exceeds one captured screen pixel from touchdown,
+the live preview shows only a conservative sweep from the opening contact to
+the latest endpoint. Preview clones share the pending history, then exclude it
+from their evaluation. Crossing the tolerance commits the exact retained prefix
+and continues a stroke without an opening imprint. Pen-up inside the tolerance
+discards the prefix and deposits one imprint at the strongest real pressure's
+pose. Prediction cannot commit either choice; real-input preview remains
+available with prediction off. Wet stamps, bristle contact and time-based
+spraying keep their own contact behavior.
+
 For each pixel, the dry evaluator integrates `contact*loading` over the current
 segment and divides by the full geometric contact chord. Subdividing a fixed-pose
 sweep therefore preserves exposure. Ellipse relief gives a quartic engagement
@@ -106,7 +117,7 @@ Each piece computes its closest approach once and reuses it for the geometric,
 empty and fully engaged interval bounds.
 
 Fine elliptical contacts integrate the pixel-square footprint before optical
-transfer. A moving contact uses the square's projection onto its normal; a tap
+transfer. Positive travel uses the square's projection onto its normal; only an explicit tap
 uses a bounded two-dimensional integral. Paper remains anchored to the output
 pixel. Contacts up to four pixels in minor radius use this filtering fully,
 then blend to the point evaluator at eight pixels. The normal projection's three

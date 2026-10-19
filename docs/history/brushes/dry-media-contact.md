@@ -210,7 +210,8 @@ alpha_stroke = opacity * A
 
 The chord is normalized using geometric support, not the fragment length or the
 number of engaged paper contacts. Empty/outside support contributes nothing.
-The stationary-tap limit evaluates `C*L` using the engine's tap exposure rule,
+The stationary-tap limit evaluates `C*L` only for a confirmed tap, using the
+[engine's tap exposure rule](../../internals/contact-brush-engine.md#swept-deposition),
 without dividing by a zero chord.
 
 `E` is renderer exposure. `K` folds in the fixed optical normalization six,

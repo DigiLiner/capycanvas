@@ -465,7 +465,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 .builder
                 .elapsed_micros_at(event.timestamp_ns)
                 .unwrap_or(0);
-            let mut preview = self.dab_generator.clone();
+            let mut preview = self.dab_generator.preview();
             let mut ignored = Vec::new();
             for &sample in &self.builder.real_points()[self.finalized_real_points..] {
                 preview.append(sample, self.brush(), &mut ignored);
@@ -1799,9 +1799,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 }
                 let id = self.editor.allocate_stroke_id();
                 let mut brush = self.settings.brush.clone();
-                if brush.stabilization.strength > 0. {
-                    brush.stabilization.input_scale = self.view.document_to_surface[0].hypot(self.view.document_to_surface[1]).max(f32::EPSILON);
-                }
+                brush.stabilization.input_scale = self.view.document_to_surface[0].hypot(self.view.document_to_surface[1]).max(f32::EPSILON);
                 if !matches!(
                     event.tool,
                     ToolKind::Pen | ToolKind::Brush | ToolKind::Pencil | ToolKind::Airbrush
@@ -2185,7 +2183,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             // Only the current pending contact is provisional; pressure
             // limiting needs no retained input window or endpoint prediction.
             self.dab_generator
-                .clone()
+                .preview()
                 .finish_preview(&active.brush, &mut self.dabs);
             self.push_active_preview(start);
             return;
@@ -2246,7 +2244,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         } else { false };
         let field = has_field.then_some(&active.curve_preview as &dyn crate::brush::PositionField);
         let prediction_start = self.dabs.len();
-        let mut generator = self.dab_generator.clone();
+        let mut generator = self.dab_generator.preview();
         for point in self.builder.real_points()[self.finalized_real_points..]
             .iter().copied()
         {
@@ -2260,7 +2258,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             }
             generator.finish_preview(&active.brush, &mut self.dabs);
             if let Some(endpoint) = generator.modeled_position() {
-                generator.reach_endpoint(endpoint, start, active.preview_taper, &mut self.dabs);
+                generator.reach_endpoint(endpoint, start, active.preview_taper, &active.brush, &mut self.dabs);
             }
             if active.preview_taper {
                 taper_prediction(&mut self.dabs[extra_start..], taper_start,
@@ -2296,7 +2294,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let endpoint = estimate.point.position;
         if active.brush.stabilization.strength == 0. {
             lock_dab_tail(&mut self.dabs[prediction_start..], modeled_endpoint, endpoint);
-            generator.reach_endpoint(endpoint, start, taper, &mut self.dabs);
+            generator.reach_endpoint(endpoint, start, taper, &active.brush, &mut self.dabs);
         }
         if taper {
             taper_prediction(
@@ -2322,6 +2320,9 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn push_active_preview(&mut self, start: usize) {
+        if self.active_stroke.as_ref().is_some_and(|active| active.brush.contact.is_some_and(|c| c.dry.is_some())) {
+            self.dabs.extract_if(start.., |dab| dab.motion == [0.;2]).for_each(drop);
+        }
         if self.dabs.len() == start {
             return;
         }
@@ -2668,6 +2669,7 @@ impl<E> From<DocumentError> for EngineError<E> {
 
 #[cfg(test)]
 mod tests {
+    include!("dry_tap_tests.rs");
     include!("canvas_fullscreen_tests.rs");
     include!("recording/canvas_tests.rs");
     use super::*;

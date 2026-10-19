@@ -84,7 +84,7 @@ fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
     if contact_feature(16384u,radius<8.0) && radius<8.0 && !contact_feature(4096u,style.material_a.x>0.0) {
         let dose=6.0*dab.flow*dab.color.a;
         if dose<=0.0 {return 0.0;}
-        if dot(dab.motion,dab.motion)<0.000001 {filtered=relief_tap_pixel(dab,world,paper,dose);}
+        if all(dab.motion == vec2<f32>(0.0)) {filtered=relief_tap_pixel(dab,world,paper,dose);}
         else {filtered=relief_swept_pixel(dab,world,paper,dose,radius);}
         blend=relief_transfer((radius-4.0)*0.25);
     }

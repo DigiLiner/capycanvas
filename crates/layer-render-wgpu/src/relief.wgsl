@@ -174,7 +174,7 @@ fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, paired: bool) -> vec2
     }
     var sum = vec2<f32>(0.0);
     var full_integral = 0.0;
-    if dot(dab.motion,dab.motion) < 0.000001 {
+    if all(dab.motion == vec2<f32>(0.0)) {
         var q = dot(o,o);
         if rounded {
             let axes = max(dab.radii,vec2<f32>(0.005));

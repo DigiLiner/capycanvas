@@ -10,6 +10,7 @@ use layer_core::{
     MAX_BRUSH_MAPPINGS, MAX_BRUSH_SCATTER_DIAMETERS, Point, Rect, Stroke, StrokeId, StrokePoint,
 };
 use layer_render::Dab;
+use std::sync::{Arc, LazyLock};
 
 mod smoothing;
 pub(crate) use smoothing::{CurveModel, PositionField, CurvePreview, pen_up_settlement_micros};
@@ -18,6 +19,7 @@ const SPEED_FILTER_SECONDS: f32 = 0.015;
 const PRESSURE_FALL_RESPONSE_SECONDS: f32 = 0.004;
 const BARREL_TWIST_RESPONSE_SECONDS: f32 = 0.025;
 const MIN_DAB_DISTANCE: f32 = 0.25;
+const TAP_DISTANCE_PX: f32 = 1.;
 const MAX_DABS_PER_SEGMENT: usize = 65_536;
 /// Power applied to the smooth endpoint-correction envelope.
 const CORRECTION_EASING: f32 = 1.5;
@@ -25,6 +27,7 @@ const MAX_FAN_ARCS: f32 = 64.0;
 const FAN_TURN_RADIANS: f64 = 0.05;
 const FAN_LIFT: f32 = 2.;
 const MAX_FAN_PENDING: usize = 512;
+static EMPTY_CONTACTS: LazyLock<Arc<Vec<Dab>>> = LazyLock::new(Default::default);
 
 #[derive(Clone, Copy, Debug)]
 struct DynamicPoint {
@@ -76,20 +79,21 @@ pub struct DabGenerator {
     bristle_azimuth: Option<f32>,
     barrel_twist: bool,
     fan_slide: f32,
-    fan_touchdown: Point,
+    touchdown: Point,
     fan_roll: f32,
     fan_axis: [f32; 2],
     fan_heading: [f32; 2],
     fan_dragging: bool,
     fan_deepest: f32,
     fan_pressed: f32,
-    fan_pending: Vec<Dab>,
+    pending_contacts: Arc<Vec<Dab>>,
+    tap_peak: Option<DynamicPoint>,
     distance_until_next: f32,
     filtered_speed: f32,
     rng: u32,
     stroke_seed: u32,
     last_evaluated: Option<DynamicPoint>,
-    last_emitted_dab: Option<Dab>,
+    last_contact: Option<Dab>,
     total_distance: Option<f32>,
     continuous_fraction: f32,
 }
@@ -105,20 +109,21 @@ impl Default for DabGenerator {
             bristle_azimuth: None,
             barrel_twist: false,
             fan_slide: 0.,
-            fan_touchdown: Point { x: 0., y: 0. },
+            touchdown: Point { x: 0., y: 0. },
             fan_roll: 0.,
             fan_axis: [0.; 2],
             fan_heading: [0.; 2],
             fan_dragging: false,
             fan_deepest: 0.,
             fan_pressed: 0.,
-            fan_pending: Vec::new(),
+            pending_contacts: EMPTY_CONTACTS.clone(),
+            tap_peak: None,
             distance_until_next: 0.0,
             filtered_speed: 0.0,
             rng: 1,
             stroke_seed: 1,
             last_evaluated: None,
-            last_emitted_dab: None,
+            last_contact: None,
             total_distance: None,
             continuous_fraction: 0.0,
         }
@@ -146,13 +151,13 @@ impl DabGenerator {
     /// spacing, random state or committed input. Hover updates sensors only.
     pub fn cursor_contacts(&mut self, point: StrokePoint, brush: &BrushSnapshot) -> Vec<Dab> {
         let current = self.characterize(point);
-        let mut preview = self.clone();
+        let mut preview = self.preview();
         let evaluated = preview.evaluate(current, brush);
         let mut output = Vec::new();
         let mut damage = Rect::EMPTY;
         preview.emit_contacts(evaluated, brush, &mut output, &mut damage);
         if brush.contact.is_some_and(|c| c.bristles.is_some()) {
-            output = output.last().or(preview.fan_pending.last()).copied().into_iter().collect();
+            output = output.last().or(preview.pending_contacts.last()).copied().into_iter().collect();
             for fan in &mut output {
                 fan.texture_sign = [1.; 2];
             }
@@ -166,28 +171,19 @@ impl DabGenerator {
     }
 
     pub fn reset_for_stroke(&mut self, stroke_id: StrokeId, brush: &BrushSnapshot) {
-        self.last = None;
-        self.stabilized_input = None;
-        self.position_smoother = smoothing::PositionSmoother::default();
-        self.pressure_fall_target = 0.0;
-        self.bristle_azimuth = None;
-        self.barrel_twist = false;
-        self.fan_slide = 0.;
-        self.fan_roll = 0.;
-        self.fan_axis = [0.; 2];
-        self.fan_heading = [0.; 2];
-        self.fan_dragging = false;
-        self.fan_deepest = 0.;
-        self.fan_pressed = 0.;
-        self.fan_pending.clear();
-        self.distance_until_next = 0.0;
-        self.filtered_speed = 0.0;
-        self.rng = mix_seed(brush.seed, stroke_id.0);
-        self.stroke_seed = self.rng;
-        self.last_evaluated = None;
-        self.last_emitted_dab = None;
-        self.total_distance = None;
-        self.continuous_fraction = 0.0;
+        let pending_contacts = std::mem::replace(&mut self.pending_contacts, EMPTY_CONTACTS.clone());
+        *self = Self { pending_contacts, ..Self::new(self.space) };
+        if !self.pending_contacts.is_empty() { Arc::make_mut(&mut self.pending_contacts).clear(); }
+        self.cursor_seed(stroke_id, brush);
+    }
+
+    pub(crate) fn preview(&self) -> Self {
+        let mut preview = self.clone();
+        if preview.tap_peak.take().is_some() {
+            preview.last_contact = self.pending_contacts.first().copied();
+            preview.pending_contacts = EMPTY_CONTACTS.clone();
+        }
+        preview
     }
 
     /// Whether this stroke's twist is a measured barrel angle rather than a
@@ -287,6 +283,10 @@ impl DabGenerator {
 
         let mut damage = Rect::EMPTY;
         let Some(last) = self.last else {
+            if brush.contact.is_some_and(|c| c.dry.is_some()) {
+                self.touchdown = current.position();
+                self.tap_peak = Some(current);
+            }
             let evaluated = self.evaluate(current, brush);
             self.emit_contacts(evaluated, brush, output, &mut damage);
             self.last = Some(current);
@@ -295,6 +295,17 @@ impl DabGenerator {
             }
             return damage;
         };
+
+        if let Some(peak) = &mut self.tap_peak {
+            let travel = (current.position().x-self.touchdown.x).hypot(current.position().y-self.touchdown.y);
+            if current.point.pressure > peak.point.pressure { *peak = current; }
+            if travel * brush.stabilization.input_scale > TAP_DISTANCE_PX {
+                self.tap_peak = None;
+                let start = output.len();
+                output.extend(Arc::make_mut(&mut self.pending_contacts).drain(..).skip(1));
+                damage = damage_for_dabs(&output[start..]);
+            }
+        }
 
         let dx = current.point.position.x - last.point.position.x;
         let dy = current.point.position.y - last.point.position.y;
@@ -357,7 +368,7 @@ impl DabGenerator {
         let start = self.last_evaluated.unwrap_or(last);
         let bristles = brush.contact.is_some_and(|c| c.bristles.is_some());
         let reference = brush.reference_diameter();
-        let radius = self.last_emitted_dab.map_or(reference * 0.5, |dab| {
+        let radius = self.last_contact.map_or(reference * 0.5, |dab| {
             if bristles {
                 dab.radii[0].max(dab.radii[1])
             } else {
@@ -429,6 +440,13 @@ impl DabGenerator {
         if let Some(model) = self.position_smoother.take_completion_model() {
             damage = damage.union(self.append_continuation(model.endpoint(), brush, &model, output));
         }
+        if let Some(peak) = self.tap_peak.take() {
+            Arc::make_mut(&mut self.pending_contacts).clear();
+            self.last_contact = None;
+            let evaluated = self.evaluate(peak, brush);
+            self.emit_contacts(evaluated, brush, output, &mut damage);
+            return damage;
+        }
         damage.union(self.finish_preview(brush, output))
     }
 
@@ -436,7 +454,7 @@ impl DabGenerator {
         let Some(contact) = brush.contact else {
             return Rect::EMPTY;
         };
-        let (Some(last), Some(dab)) = (self.last, self.last_emitted_dab) else {
+        let (Some(last), Some(dab)) = (self.last, self.last_contact) else {
             return Rect::EMPTY;
         };
         let mut damage = Rect::EMPTY;
@@ -457,11 +475,11 @@ impl DabGenerator {
     /// Unless the preview from `start` already reaches the endpoint, add one
     /// preview-only contact centered exactly there without advancing the
     /// committed generator or its random sequence.
-    pub(crate) fn reach_endpoint(&self, endpoint: Point, start: usize, exact: bool, output: &mut Vec<Dab>) {
+    pub(crate) fn reach_endpoint(&self, endpoint: Point, start: usize, exact: bool, brush: &BrushSnapshot, output: &mut Vec<Dab>) {
         if !(exact && output.last().is_none_or(|dab| dab.center != endpoint)) && dabs_cover_point(&output[start..], endpoint) {
             return;
         }
-        let Some(mut dab) = self.last_emitted_dab else {
+        let Some(mut dab) = self.last_contact else {
             return;
         };
         let modeled = if dab.previous[0] > 0.0 {
@@ -473,6 +491,7 @@ impl DabGenerator {
         };
         dab.center = endpoint;
         dab.motion = [endpoint.x - modeled.x, endpoint.y - modeled.y];
+        if dab.motion == [0.;2] && brush.contact.is_some_and(|c| c.dry.is_some()) { return; }
         output.push(dab);
     }
 
@@ -779,10 +798,13 @@ impl DabGenerator {
         }
         if brush.contact.is_some_and(|c| c.dry.is_some()) {
             let mut dab = evaluated.dab;
+            let opening = self.last_contact.is_none();
             self.connect_contact(&mut dab);
-            include_dab(damage, dab);
-            self.last_emitted_dab = Some(dab);
-            output.push(dab);
+            self.last_contact = Some(dab);
+            if opening || dab.motion != [0.;2] {
+                if self.tap_peak.is_some() { Arc::make_mut(&mut self.pending_contacts).push(dab); }
+                else { include_dab(damage,dab); output.push(dab); }
+            }
             return;
         }
         let maximum = brush.shape.count.max(1);
@@ -841,20 +863,20 @@ impl DabGenerator {
                 self.connect_contact(&mut dab);
             }
             include_dab(damage, dab);
-            self.last_emitted_dab = Some(dab);
+            self.last_contact = Some(dab);
             output.push(dab);
         }
     }
 
     fn connect_contact(&self, dab: &mut Dab) {
-        let previous = self.last_emitted_dab.unwrap_or(*dab);
+        let previous = self.last_contact.unwrap_or(*dab);
         dab.previous = [previous.radii[0], previous.radii[1], previous.rotation[0], previous.rotation[1]];
         dab.previous_contact = previous.contact;
         dab.motion = [dab.center.x - previous.center.x, dab.center.y - previous.center.y];
     }
 
     fn emit_fan(&mut self, dab: Dab, output: &mut Vec<Dab>, damage: &mut Rect) {
-        let from = self.last_emitted_dab.unwrap_or(dab);
+        let from = self.last_contact.unwrap_or(dab);
         let start_angle = from.rotation[1].atan2(from.rotation[0]);
         let turn = mix_angle_unwrapped(
             start_angle,
@@ -886,13 +908,13 @@ impl DabGenerator {
             next.motion = [next.center.x - previous.center.x, next.center.y - previous.center.y];
             let turn = (previous.rotation[0] * next.rotation[1] - previous.rotation[1] * next.rotation[0])
                 .atan2(previous.rotation[0] * next.rotation[0] + previous.rotation[1] * next.rotation[1]);
-            let opening = self.last_emitted_dab.is_none() && arc == 1;
+            let opening = self.last_contact.is_none() && arc == 1;
             if opening {
-                self.fan_touchdown = previous.center;
+                self.touchdown = previous.center;
             }
             self.fan_roll += turn;
             self.fan_slide = self.fan_slide.max(
-                (next.center.x - self.fan_touchdown.x).hypot(next.center.y - self.fan_touchdown.y)
+                (next.center.x - self.touchdown.x).hypot(next.center.y - self.touchdown.y)
                     + self.fan_roll.abs() * next.radii[1] * 0.5,
             );
             let start_heading = heading_angle(previous.rotation, self.fan_heading);
@@ -904,19 +926,19 @@ impl DabGenerator {
                 include_dab(damage, next);
                 output.push(next);
             } else {
-                self.fan_pending.push(next);
+                Arc::make_mut(&mut self.pending_contacts).push(next);
                 self.fan_deepest = self.fan_deepest.max(next.radii[0]);
                 self.fan_pressed = self.fan_pressed.max(next.contact[0]);
                 if self.fan_slide.min(coherent) > self.fan_deepest + 4. {
                     self.fan_dragging = true;
                     self.release_pending(true, output, damage);
-                } else if self.fan_pending.len() >= MAX_FAN_PENDING {
+                } else if self.pending_contacts.len() >= MAX_FAN_PENDING {
                     self.release_pending(false, output, damage);
                 }
             }
             previous = next;
         }
-        self.last_emitted_dab = Some(previous);
+        self.last_contact = Some(previous);
     }
 
     /// Until the fan has dragged further than its deepest contact, beyond sensor
@@ -927,7 +949,7 @@ impl DabGenerator {
     /// pressed.
     fn release_pending(&mut self, dragged: bool, output: &mut Vec<Dab>, damage: &mut Rect) {
         let streak = f32::from(u8::from(dragged));
-        for mut span in self.fan_pending.drain(..) {
+        for mut span in Arc::make_mut(&mut self.pending_contacts).drain(..) {
             span.material[1] = streak;
             span.material[3] = streak;
             if !dragged {
@@ -949,7 +971,7 @@ impl DabGenerator {
     /// Spans commit the paint their trailing edge leaves behind. Lifting the fan
     /// commits what is still under it: the last pose, left where it is.
     fn lift_fan(&mut self, output: &mut Vec<Dab>) -> Rect {
-        let Some(pose) = self.last_emitted_dab else {
+        let Some(pose) = self.last_contact else {
             return Rect::EMPTY;
         };
         let mut damage = Rect::EMPTY;
@@ -1643,12 +1665,12 @@ mod tests {
         let mut light = point(0., 0.05, 0);
         light.twist = 0.02;
         generator.append(light, &brush, &mut dabs);
-        let light_width = generator.last_emitted_dab.unwrap().radii[1];
+        let light_width = generator.last_contact.unwrap().radii[1];
         let mut heavy = light;
         heavy.pressure = 0.9;
         heavy.elapsed_micros = 10_000;
         generator.append(heavy, &brush, &mut dabs);
-        let heavy_width = generator.last_emitted_dab.unwrap().radii[1];
+        let heavy_width = generator.last_contact.unwrap().radii[1];
         assert!(heavy_width > light_width * 1.15, "pressure spreads the fan");
         assert!(heavy_width < light_width * 1.6, "without changing its size as much as its paint");
         dabs.clear();
@@ -1683,7 +1705,7 @@ mod tests {
             sample.twist = roll;
             let mut dabs = Vec::new();
             generator.append(sample, &brush, &mut dabs);
-            generator.last_emitted_dab.unwrap()
+            generator.last_contact.unwrap()
         };
         let facing = pose(false, [0., 0.9], 1.3);
         assert!((facing.rotation[1].atan2(facing.rotation[0]) - std::f32::consts::FRAC_PI_2).abs() < 0.001);

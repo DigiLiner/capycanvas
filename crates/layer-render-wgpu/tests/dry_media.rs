@@ -16,7 +16,8 @@ impl Default for Run {
     fn default() -> Self { Self { samples: 64, cadence: 4, feedback: false, scale: 1., mask: false, offset: [0; 2] } }
 }
 
-fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f32, [f32; 2])) -> support::Image {
+fn contact_engine(mut brush: BrushSnapshot, run: Run)
+    -> (support::Engine, layer_engine::InputProducer<layer_engine::PenEvent>) {
     let mut document = Document::new(PortableId::random(), EXTENT[0], EXTENT[1],
         DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
     let paper = support::named_occurrence(&document, "Paper");
@@ -34,7 +35,7 @@ fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f3
             color::source::rgba8_source(EXTENT, |_, _| [255; 4]).into()));
         brush.color_rgba_linear = [1.; 4];
     }
-    let (mut engine, mut input) = support::engine(document);
+    let (mut engine, input) = support::engine(document);
     engine.set_view(ViewState {
         width_px: EXTENT[0], height_px: EXTENT[1],
         document_to_surface: [run.scale, 0., 0., run.scale, 0., 0.],
@@ -42,6 +43,11 @@ fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f3
     engine.set_instant_feedback(InstantFeedbackConfig { enabled: run.feedback, ..Default::default() }).unwrap();
     engine.set_brush(brush).unwrap();
     engine.render_frame_at(0).unwrap();
+    (engine, input)
+}
+
+fn paint(brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f32, [f32; 2])) -> support::Image {
+    let (mut engine, mut input) = contact_engine(brush, run);
     let mut time = 1_000_000_000;
     for i in 0..=run.samples {
         time += 4_000_000;
@@ -525,4 +531,70 @@ fn fine_stationary_contact_matches_independent_two_dimensional_pixel_integration
                 "stationary diameter={diameter} angle={angle} offset={offset} p={pressure} paper={paper} ({x},{y}): GPU {actual}, independent2D {expected}");
         }}
     }
+}
+
+fn contact_stages(brush: BrushSnapshot, feedback: bool,
+    samples: &[([f32; 2], f32)]) -> Vec<support::Image> {
+    let (mut engine, mut input) = contact_engine(brush, Run { feedback, ..Default::default() });
+    samples.iter().enumerate().map(|(i, &(position, pressure))| {
+        let time = 1_000_000_000 + i as u64 * 16_000_000;
+        let mut event = support::pen_sample(i as u64, samples.len() as u64 - 1, time,
+            Point { x: position[0], y: position[1] });
+        event.sequence = time;
+        event.pressure = pressure;
+        event.tilt_radians = [std::f32::consts::FRAC_PI_4, 0.];
+        input.push(event).unwrap();
+        support::drain_input(&mut engine, time, true);
+        support::image(&mut engine, time)
+    }).collect()
+}
+
+#[test]
+fn dry_taps_leave_one_peak_pressure_imprint_only_on_release() {
+    for preset in PRESETS {
+        let mut brush = default_brush(preset);
+        brush.diameter = 80.;
+        brush.mappings = Arc::from([]);
+        brush.stabilization.strength = 0.;
+        brush.color_rgba_linear = [0., 0., 0., 0.1];
+        let center = [128.5; 2];
+        for strength in [0.2, 1.] {
+            brush.flow = strength;
+            let reference = contact_stages(brush.clone(), false,
+                &[(center, 0.6), (center, 0.6), (center, 0.6)]);
+            assert!(reference.last().unwrap().rgba.chunks_exact(4).any(|p| p[3] > 0),
+                "{preset:?} Strength={strength}: release leaves an imprint");
+            for feedback in [false, true] {
+                let jitter = contact_stages(brush.clone(), feedback,
+                    &[(center, 0.6), (center, 0.2), ([128.55, 128.5], 0.2),
+                        ([128.45, 128.5], 0.2), (center, 0.2)]);
+                for image in &jitter[..2] {
+                    assert!(image.rgba.chunks_exact(4).all(|p| p[3] == 0),
+                        "{preset:?} Strength={strength} feedback={feedback}: held pen paints before release");
+                }
+                jitter.last().unwrap().assert_near(reference.last().unwrap(), 1,
+                    &format!("{preset:?} Strength={strength} feedback={feedback}: jitter tap retains one peak-pressure imprint"));
+            }
+        }
+    }
+}
+
+#[test]
+fn dry_drag_caps_have_equal_exposure_without_an_opening_imprint() {
+    let mut brush = analytic(0., 0.);
+    brush.stabilization.strength = 0.;
+    brush.color_rgba_linear[3] = 0.1;
+    for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {
+        pose.relief = [0.; 3];
+    }
+    let image = line(brush.clone(), 0.55, 0., Run::default());
+    let alpha = |x: usize, y: usize| image.rgba[(y*256+x)*4+3];
+    assert!(alpha(128, 128) > alpha(32, 128) + 10,
+        "distance-integrated end caps receive less exposure than the body");
+    for y in 100..157 {
+        assert!(alpha(32, y).abs_diff(alpha(224, y)) <= 2,
+            "start and end caps must match at y={y}: {} vs {}", alpha(32, y), alpha(224, y));
+    }
+    let predicted = line(brush, 0.55, 0., Run { feedback: true, cadence: 1, ..Default::default() });
+    predicted.assert_near(&image, 2, "prediction preserves committed dry drag caps");
 }
