@@ -794,6 +794,17 @@ rows and exact displayed pixels. The commands use native toolbar buttons and
 row menus. `tests/image-import-owner.swift` covers placement, external paste,
 batch import, cancellation and file-worker handoffs under both Apple policies.
 
+`testVectorLayers` and `testVectorLayersDark` press the Layers footer's New
+vector layer button with Pencil chosen and check the selected Vector row, the
+switch to G-Pen, the Eraser's three path modes at the top of the Tools list,
+reselecting the vector row after its paint layer below, and the Merge Down
+notice whose action turns the paths into pixels. Vector rows are found by their
+shared default name, because the content icon is hidden from accessibility.
+On macOS, mouse strokes also check presented pixels: the Pencil
+notice's Use G-Pen and New Paint Layer actions, Fill inside an ellipse outline
+and outside it on a new paint layer below, Erase up to intersection between two
+crossings, and the merged line parts. The iPad journeys skip canvas input.
+
 Layer-row icon buttons share a 24-point width, including the mask link between
 thumbnails. Keep the hit target independent of its smaller glyph. Mask-transform
 journeys use the inline link control and check independent and linked transforms,

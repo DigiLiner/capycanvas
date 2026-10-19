@@ -164,7 +164,7 @@ extension XCTestCase {
         capture.name = name; capture.lifetime = .keepAlways; add(capture)
     }
 
-    @MainActor private func selectPaintPreset(_ tool: String, group: String, preset: String, in app: XCUIApplication) {
+    @MainActor func selectPaintPreset(_ tool: String, group: String, preset: String, in app: XCUIApplication) {
         for (prefix, label) in [("toolbar-tile-toolbar-", tool), ("tool-group-", group), ("brush-", preset)] {
             let button = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", prefix, label)).firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 5))

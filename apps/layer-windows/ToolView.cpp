@@ -122,7 +122,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
             for(uint32_t i=0;i<items.Size();i++){
                 auto item=items.GetObjectAt(i);auto title=str(item,L"label");titles[i].Text(title);AutomationProperties::SetName(buttons[i],title);
                 bool active=flag(item,L"selected");buttons[i].Background(active?selected(data):clear());
-                buttons[i].IsEnabled(flag(item,L"enabled",true));
+                bool enabled=flag(item,L"enabled",true);buttons[i].IsEnabled(enabled);buttons[i].Opacity(enabled?1:.36);
                 if(!group)buttons[i].MinHeight(items.GetObjectAt(i).GetNamedValue(L"preview",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number?34:tonal?36:44);
                 AutomationProperties::SetItemStatus(buttons[i],active?data->caption(L"search",L"selected"):hstring());
             }

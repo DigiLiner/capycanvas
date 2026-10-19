@@ -134,3 +134,181 @@ fn native_vector_tools() {
     d.capture_canvas("vector-erased.png");
     d.finish();
 }
+
+fn presented(d: &Driver, document: [f32; 2]) -> [u8; 4] {
+    let capture = ui_session(&d.w).engine().backend().capture_in(d.w.view_color()).unwrap();
+    let m = state(&d.w).camera.document_to_surface();
+    let x = (m[0] * document[0] + m[2] * document[1] + m[4]).round() as usize;
+    let y = (m[1] * document[0] + m[3] * document[1] + m[5]).round() as usize;
+    capture.bytes[y * capture.stride as usize + x * 4..][..4].try_into().unwrap()
+}
+fn capture(d: &Driver, name: &str) {
+    let _warm = crate::snapshot(&d.w);
+    pump(120);
+    crate::snapshot(&d.w).save_to_png(d.input.dir.join(name)).unwrap();
+}
+fn inked(pixel: [u8; 4]) -> bool { pixel[..3].iter().all(|v| *v < 100) }
+fn marked(pixel: [u8; 4]) -> bool { pixel[..3].iter().map(|v| u16::from(*v)).sum::<u16>() < 600 }
+fn greenish(pixel: [u8; 4]) -> bool { i16::from(pixel[1]) - i16::from(pixel[0]).max(i16::from(pixel[2])) > 40 }
+fn wait_for(what: &str, done: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !done() {
+        pump(20);
+        assert!(Instant::now() < deadline, "{what} timed out");
+    }
+}
+fn active_vector(d: &Driver) -> bool {
+    let session = ui_session(&d.w);
+    let doc = session.engine().document();
+    doc.working.occurrence.is_some_and(|h| doc.scene().vector_layer(h).is_some())
+}
+fn add_vector_layer(d: &mut Driver) {
+    let opener = d.header_tool(ToolbarControl::Panel { panel: Panel::Layers });
+    if state(&d.w).customization.drawer.is_none() { d.click_name(&opener); }
+    pump(150);
+    if state(&d.w).customization.drawer.as_ref().is_some_and(|drawer| drawer.layer_properties == Some(true)) { d.click_name("layer-properties-disclosure"); pump(150); }
+    let page = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap().child_by_name("layers").unwrap();
+    d.click(&find_named(&page, "layer-add-vector-layer-symbolic").expect("the footer offers New vector layer"));
+    wait_for("a vector layer from the footer button", || active_vector(d));
+    d.capture_canvas("footer-new-vector-layer.png");
+    if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
+    pump(150);
+}
+fn press_notice(d: &mut Driver, action: layer_ui::NoticeActionId) {
+    wait_for("the notice", || state(&d.w).notice.as_ref().is_some_and(|n| n.actions.iter().any(|a| a.id == action)));
+    let label = state(&d.w).notice.unwrap().actions.into_iter().find(|a| a.id == action).unwrap().label;
+    d.click_label(&label);
+}
+fn stroke(from: [f32; 2], to: [f32; 2]) -> Vec<[f32; 2]> {
+    (0..=24).map(|i| { let u = i as f32 / 24.; [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u] }).collect()
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_vector_discover_and_wrong_brush --tablet"]
+fn native_vector_discover_and_wrong_brush() {
+    use layer_core::DefaultBrushPreset;
+    let mut d = Driver::new("art.capycanvas.VectorDiscover");
+    d.w.dispatch(UiAction::SetColor { rgba: [0.1, 0.1, 0.12, 1.] });
+    d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Pencil as u32 });
+    pump(200);
+    add_vector_layer(&mut d);
+    assert_eq!(state(&d.w).brush.preset, DefaultBrushPreset::GPen as u32, "a pen that draws paths is chosen");
+    let row = state(&d.w).layers.into_iter().find(|row| row.selected).unwrap();
+    assert_eq!(row.content_icon.as_deref(), Some("layer-path-symbolic"));
+    d.w.dispatch(UiAction::SetBrushSize { value: 14. });
+    pump(100);
+    pen_points(&mut d, &stroke([400., 300.], [900., 340.]));
+    until_paths(&d, "the first inked line", |paths| paths.len() == 1);
+    wait_for("the line on screen", || inked(presented(&d, [650., 320.])));
+    d.capture_canvas("discover-ink.png");
+
+    d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Pencil as u32 });
+    pump(200);
+    pen_points(&mut d, &stroke([400., 500.], [900., 540.]));
+    wait_for("the vector refusal", || state(&d.w).notice.is_some());
+    assert!(paths(&d).len() == 1, "the pencil leaves the paths alone");
+    d.capture_canvas("wrong-brush-notice.png");
+    press_notice(&mut d, layer_ui::NoticeActionId::UseVectorPen);
+    wait_for("Use G-Pen", || state(&d.w).brush.preset == DefaultBrushPreset::GPen as u32);
+    pen_points(&mut d, &stroke([400., 500.], [900., 540.]));
+    until_paths(&d, "a line with the chosen pen", |paths| paths.len() == 2);
+
+    d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Pencil as u32 });
+    pump(200);
+    pen_points(&mut d, &stroke([400., 700.], [900., 740.]));
+    press_notice(&mut d, layer_ui::NoticeActionId::NewPaintLayer);
+    wait_for("a paint layer above", || !active_vector(&d));
+    assert_eq!(state(&d.w).brush.preset, DefaultBrushPreset::Pencil as u32, "the brush stays");
+    d.w.dispatch(UiAction::SetBrushSize { value: 30. });
+    pump(100);
+    pen_points(&mut d, &stroke([400., 700.], [900., 740.]));
+    wait_for("pencil pixels on the new layer", || marked(presented(&d, [650., 720.])));
+    d.capture_canvas("wrong-brush-paint-layer.png");
+    d.finish();
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_vector_color_and_canvas_changes --tablet"]
+fn native_vector_color_and_canvas_changes() {
+    use layer_core::{FigurePaint, FigureShape};
+    let mut d = Driver::new("art.capycanvas.VectorColor");
+    add_vector_layer(&mut d);
+    tool(&d, LayerCanvasTool::Figure { shape: FigureShape::Ellipse, paint: FigurePaint::Outline });
+    pen_points(&mut d, &[[400., 300.], [600., 420.], [800., 540.]]);
+    let ellipse = until_paths(&d, "an ellipse outline", |paths| paths.len() == 1)[0].clone();
+    d.w.dispatch(UiAction::SetColor { rgba: [0.15, 0.7, 0.25, 1.] });
+    tool(&d, LayerCanvasTool::Region { fill: true, source: layer_ui::RegionSource::Visible });
+    pen_points(&mut d, &[[600., 420.], [600., 420.]]);
+    until_paths(&d, "filling inside the outline", |paths| paths.iter().any(|p| p.id == ellipse.id && p.style.entries.len() == 2));
+    wait_for("the fill on screen", || greenish(presented(&d, [600., 460.])));
+    d.capture_canvas("color-inside.png");
+    pen_points(&mut d, &[[1100., 700.], [1100., 700.]]);
+    wait_for("a paint layer below filled from the lines", || !active_vector(&d) && greenish(presented(&d, [1100., 760.])));
+    assert!(greenish(presented(&d, [600., 460.])), "the path keeps its fill");
+    capture(&d, "color-outside.png");
+
+    let extent = ui_session(&d.w).engine().document().composition().size;
+    d.w.dispatch(UiAction::Invoke { command: CommandId::RotateImageRight });
+    wait_for("the canvas turns", || ui_session(&d.w).engine().document().composition().size == [extent[1], extent[0]]);
+    let turned = [extent[1] as f32 - 420., 600.];
+    wait_for("the filled ellipse turns with the canvas", || greenish(presented(&d, turned)));
+    capture(&d, "canvas-rotated.png");
+    d.finish();
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_vector_select_erase_mask_and_merge --tablet"]
+fn native_vector_select_erase_mask_and_merge() {
+    let mut d = Driver::new("art.capycanvas.VectorEdit");
+    d.w.dispatch(UiAction::SetColor { rgba: [0.1, 0.1, 0.12, 1.] });
+    add_vector_layer(&mut d);
+    d.w.dispatch(UiAction::SetBrushSize { value: 14. });
+    pump(100);
+    for (from, to) in [([300., 400.], [1100., 400.]), ([500., 200.], [500., 600.]), ([900., 200.], [900., 600.])] { pen_points(&mut d, &stroke(from, to)); pump(150); }
+    until_paths(&d, "three crossing lines", |paths| paths.len() == 3);
+    d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x61,"down":true},{"key":0x61,"down":false},{"key":0xffe3,"down":false}]));
+    wait_for("Select All selects every path", || ui_session(&d.w).engine().document().working.vector_items.as_ref().is_some_and(|s| s.items.len() == 3));
+    d.capture_canvas("select-all.png");
+    d.w.dispatch(UiAction::Invoke { command: CommandId::TransformFlipVertical });
+    pump(200);
+    d.input.key(0xff1b);
+    wait_for("Escape clears the paths", || ui_session(&d.w).engine().document().working.vector_items.is_none());
+
+    let opener = d.header_tool(ToolbarControl::Command { command: CommandId::Eraser });
+    d.click_name(&opener);
+    if state(&d.w).customization.drawer.is_none() { d.click_name(&opener); }
+    pump(200);
+    d.w.dispatch(UiAction::SetBrushSize { value: 12. });
+    let label = CommandId::EraseToIntersection.localized_label(ui_session(&d.w).localization()).to_string();
+    d.click_label(&label);
+    wait_for("Erase up to intersection", || state(&d.w).settings.vector_eraser == layer_ui::VectorEraser::ToIntersection);
+    capture(&d, "erase-modes.png");
+    if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
+    pump(150);
+    pen_points(&mut d, &stroke([700., 380.], [700., 420.]));
+    until_paths(&d, "erasing up to the crossings", |paths| paths.len() == 4);
+    wait_for("the span between the crossings is gone", || !inked(presented(&d, [800., 400.])) && inked(presented(&d, [400., 400.])) && inked(presented(&d, [1000., 400.])));
+    d.capture_canvas("erase-to-intersection.png");
+
+    let layer = ui_session(&d.w).engine().document().working.occurrence.unwrap();
+    let id = occurrence_token(layer);
+    let before = paths(&d);
+    d.w.dispatch(UiAction::Layer { action: LayerAction::AddMask { id, replace: false } });
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: true } });
+    d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
+    pump(200);
+    let revision = ui_session(&d.w).engine().document().revision;
+    pen_points(&mut d, &stroke([300., 700.], [1100., 700.]));
+    wait_for("the mask stroke", || ui_session(&d.w).engine().document().revision != revision);
+    assert_eq!(paths(&d), before, "mask strokes leave the paths");
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: false } });
+    d.w.dispatch(UiAction::Layer { action: LayerAction::NewBelow });
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: false } });
+    pump(300);
+    d.w.dispatch(UiAction::Invoke { command: CommandId::MergeDown });
+    press_notice(&mut d, layer_ui::NoticeActionId::Merge);
+    wait_for("the lines become pixels", || !active_vector(&d) && ui_session(&d.w).engine().document().scene().vector_layer(layer).is_none());
+    wait_for("the merged pixels on screen", || inked(presented(&d, [400., 400.])));
+    d.capture_canvas("merged.png");
+    d.finish();
+}

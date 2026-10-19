@@ -995,7 +995,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
             && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() && self.vector_erasing_layer(erasing).is_none() }
-                else { self.engine.document().drawing_content().is_none() && !(matches!(self.layer_interaction.tool, LayerCanvasTool::Figure { .. }) && self.vector_figure_layer().is_some()) } };
+                else { self.engine.document().drawing_content().is_none() && !self.vector_tool_accepts() } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
             CursorMode::Tool
@@ -2912,14 +2912,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             &action,
             UiAction::RestoreSettings { .. } | UiAction::RestoreSavedSettings { .. }
         );
-        let mut save_settings = matches!(
-            &action,
-            UiAction::SetTheme { .. }
-                | UiAction::ZoomTool { .. }
-                | UiAction::Invoke {
-                    command: CommandId::ToggleTheme | CommandId::CenterZoomClicks
-                }
-        );
+        let mut save_settings = matches!(&action, UiAction::SetTheme { .. } | UiAction::ZoomTool { .. });
         let (mut changed, wake) = match action {
             UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } => {
                 self.effect_action(action.effect(layer, &key))?; (DOCUMENT, true)
@@ -3368,7 +3361,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::Invoke { command } => {
                 if let Some(reason) = self.command_disabled_reason(command) { return Err(reason); }
-                self.invoke(command)?
+                let settings = self.state.settings.clone();
+                let invoked = self.invoke(command)?;
+                save_settings |= self.state.settings != settings;
+                invoked
             }
             UiAction::SelectBrush { id } => {
                 self.select_brush(id)?;

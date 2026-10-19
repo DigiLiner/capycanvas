@@ -161,8 +161,9 @@ the eraser brushes:
   nearest crossings with other paths, or with itself, on either side; a path
   that crosses nothing goes entirely.
 
-The first piece keeps the path's identity and the others get new ones. The
-eraser's width is the brush size, and one stroke is one undo step.
+The chosen mode is saved with the preferences. The first piece keeps the path's
+identity and the others get new ones. The eraser's width is the brush size, and
+one stroke is one undo step.
 
 ## Coloring line art
 
@@ -203,8 +204,9 @@ With **Move** on a vector layer, whether or not pixels are selected:
   whose frame transforms them.
 - With paths selected, the Move tool options add Flip Horizontal, Flip
   Vertical, Rotate Left and Rotate Right, which turn the selection about its
-  centre in one undo step, and **Scale outline widths**, on by default. Turned
-  off, dragging the frame scales the paths but keeps their outline widths.
+  centre in one undo step, and **Scale outline widths**, on by default and
+  saved with the preferences. Turned off, dragging the frame scales the paths
+  but keeps their outline widths.
 - Enter or a double-click on a path opens **Edit Points** for the selection;
   Escape in Edit Points returns to Move.
 - **Copy** and **Cut** with selected paths and no pixel selection copy those
@@ -305,13 +307,26 @@ the path commands' geometry and width profiles. The GTK journey `native_vector_d
 G-Pen lines with tablet input, drags one, undoes, selects the other with a
 marquee and deletes it. `native_vector_tools` draws a Figure rectangle and a
 Path, drags an anchor with Edit Points, restyles the path, scales the rectangle
-with the Move frame and cuts a G-Pen line with the eraser. Run them with `--tablet` once per theme through
-`CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); both write their
+with the Move frame and cuts a G-Pen line with the eraser.
+`native_vector_discover_and_wrong_brush` makes a vector layer from the Layers
+footer, checks the badge and the switch to G-Pen, inks a line, then answers the
+vector refusal with Use G-Pen and New Paint Layer. `native_vector_color_and_canvas_changes`
+fills inside an ellipse outline and outside it on a new paint layer below, then
+rotates the canvas. `native_vector_select_erase_mask_and_merge` selects all paths
+with Ctrl+A, flips them, clears the selection with Escape, erases up to
+intersection from the eraser's drawer, paints the layer's mask and merges the
+layer into paint through the notice. Each checks presented pixels. Run them with `--tablet` once per theme through
+`CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); each writes its
 captures to the run's `input` directory. On a tablet,
 `AndroidVectorLayerTest#gPenLinesDrawMoveAndUndoOnVectorLayers` draws, drags and
 undoes a G-Pen line with stylus events in both themes and checks the screen, and
 `vectorToolsDrawEditRestyleScaleAndErase` walks the same tools as
-`native_vector_tools` ([Android](../development/android.md#device-tests)). On
+`native_vector_tools`, and `vectorMilestoneDiscoverColorEraseAndMerge` walks the
+footer button, the refusal actions, coloring, Erase up to intersection and the
+merge notice ([Android](../development/android.md#device-tests)). On
 Web, `tools/performance/workspace-motion.sh web --vector-tools` walks them with
-pen events in both themes and checks presented pixels; headless Chrome omits
+pen events in both themes and checks presented pixels, and `--vector-milestone`
+walks the same discovery, coloring, erasing and merge steps as Android, as do
+the Apple `EditorLaunchTests/testVectorLayers` and `testVectorLayersDark`
+([Apple](../development/apple.md)); headless Chrome omits
 WebGPU pixels from screenshots, so run it headed ([Web](../development/web.md)).

@@ -3,6 +3,7 @@ package art.capycanvas
 import android.graphics.Bitmap
 import android.view.WindowManager
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import org.json.JSONObject
 import org.junit.*
@@ -10,7 +11,7 @@ import org.junit.Assert.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/** Vector layer journeys with stylus contacts on the device: G-Pen lines, Figure shapes, Path, Edit Points, Properties, the Move frame and the eraser. */
+/** Vector layer journeys with stylus contacts on the device: discovering vector layers, wrong brushes, coloring line art, selections, eraser modes and merges, plus G-Pen lines, Figure shapes, Path, Edit Points, Properties, the Move frame and the eraser. */
 class AndroidVectorLayerTest {
     @get:Rule(order = 0) val device = CapyDeviceRule()
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
@@ -155,6 +156,102 @@ class AndroidVectorLayerTest {
             awaitPixel("$theme-kept", Offset(.4f, .68f), true)
             screenshot("vector-$theme-erased.png")
             action(obj("type" to "layer", "action" to obj("op" to "delete_selected")))
+            action(obj("type" to "invoke", "command" to "pen"))
+        }
+    }
+    private fun state() = host.snapshot!!.getJSONObject("state")
+    private fun awaitState(name: String, done: (JSONObject) -> Boolean) {
+        try { compose.waitUntil(20_000) { done(state()) || host.failure != null || host.actionError != null } }
+        catch (e: Throwable) { screenshot("vector-$name-failure.png"); throw e }
+        assertNull(host.failure); assertNull(host.actionError)
+    }
+    private fun selectedRow() = state().getJSONArray("layers").objects().first { it.getBoolean("selected") }
+    private fun vectorSelected() = selectedRow().optString("content_icon") == "layer-path-symbolic"
+    private fun brushId(label: String) = host.catalog.getJSONArray("brush_categories").objects().flatMap { it.getJSONArray("brushes").objects() }.first { it.getString("label") == label }.getLong("id")
+    private fun clickNewVectorLayer() {
+        val label = host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_vector_layer")
+        compose.onAllNodesWithContentDescription(label).onFirst().performClick()
+        compose.waitForIdle()
+        awaitState("new-vector-layer") { vectorSelected() }
+    }
+    private fun noticeAction(id: String) {
+        awaitState("notice-$id") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.objects()?.any { it.getString("id") == id } == true }
+        compose.onNodeWithTag("canvas-notice-action-$id").performClick()
+        compose.waitForIdle()
+    }
+    private fun dark(color: Int) = maxOf(color shr 16 and 255, color shr 8 and 255, color and 255) < 100
+    private fun marked(color: Int) = (color shr 16 and 255) + (color shr 8 and 255) + (color and 255) < 600
+    @Test fun vectorMilestoneDiscoverColorEraseAndMerge() {
+        val pencil = brushId("Pencil"); val gPen = brushId("G-Pen")
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "layer", "action" to obj("op" to "new", "group" to false, "clipped" to false)))
+            action(obj("type" to "invoke", "command" to "fit_canvas"))
+            action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.1, .1, .12, 1.0))))
+            action(obj("type" to "set_brush_size", "value" to 16))
+            action(obj("type" to "select_brush", "id" to pencil))
+            clickNewVectorLayer()
+            assertEquals("a pen that draws paths is chosen", gPen, state().getJSONObject("brush").getLong("preset"))
+            drag(Offset(.36f, .38f), Offset(.6f, .4f))
+            awaitPixel("$theme-discover-ink", Offset(.48f, .39f), true, ::dark)
+            screenshot("vector-$theme-discover.png")
+
+            action(obj("type" to "select_brush", "id" to pencil))
+            drag(Offset(.36f, .45f), Offset(.6f, .47f))
+            screenshot("vector-$theme-wrong-brush.png")
+            noticeAction("use_vector_pen")
+            awaitState("$theme-use-g-pen") { it.getJSONObject("brush").getLong("preset") == gPen }
+            drag(Offset(.36f, .45f), Offset(.6f, .47f))
+            awaitPixel("$theme-pen-line", Offset(.48f, .46f), true, ::dark)
+            action(obj("type" to "select_brush", "id" to pencil))
+            drag(Offset(.36f, .52f), Offset(.6f, .54f))
+            noticeAction("new_paint_layer")
+            awaitState("$theme-paint-layer") { !vectorSelected() }
+            action(obj("type" to "set_brush_size", "value" to 30))
+            drag(Offset(.36f, .52f), Offset(.6f, .54f))
+            awaitPixel("$theme-pencil-on-paint", Offset(.48f, .53f), true, ::marked)
+
+            clickNewVectorLayer()
+            figure("ellipse", "outline")
+            drag(Offset(.62f, .36f), Offset(.7f, .5f))
+            action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.15, .7, .25, 1.0))))
+            tool(obj("region" to obj("fill" to true, "source" to "visible")))
+            tap(Offset(.66f, .43f))
+            awaitPixel("$theme-filled-inside", Offset(.66f, .47f), true)
+            tap(Offset(.66f, .7f))
+            awaitPixel("$theme-filled-below", Offset(.66f, .74f), true)
+            screenshot("vector-$theme-color.png")
+
+            action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.1, .1, .12, 1.0))))
+            clickNewVectorLayer()
+            action(obj("type" to "invoke", "command" to "pen"))
+            action(obj("type" to "select_brush", "id" to gPen))
+            action(obj("type" to "set_brush_size", "value" to 16))
+            for ((from, to) in listOf(Offset(.36f, .62f) to Offset(.62f, .62f), Offset(.44f, .56f) to Offset(.44f, .7f), Offset(.54f, .56f) to Offset(.54f, .7f))) drag(from, to)
+            val intersection = state().getJSONArray("commands").objects().first { it.getString("id") == "erase_to_intersection" }.getString("label")
+            action(obj("type" to "invoke", "command" to "eraser"))
+            action(obj("type" to "set_brush_size", "value" to 16))
+            compose.onAllNodesWithTag("subtool-$intersection").onFirst().performClick()
+            awaitState("$theme-erase-mode") { s -> s.getJSONArray("commands").objects().first { it.getString("id") == "erase_to_intersection" }.getBoolean("selected") }
+            drag(Offset(.49f, .6f), Offset(.49f, .64f))
+            awaitPixel("$theme-between-crossings", Offset(.52f, .62f), false, ::dark)
+            awaitPixel("$theme-kept-left", Offset(.39f, .62f), true, ::dark)
+            awaitPixel("$theme-kept-right", Offset(.59f, .62f), true, ::dark)
+            screenshot("vector-$theme-erase-to-intersection.png")
+
+            val vectors = state().getJSONArray("layers").objects().count { it.optString("content_icon") == "layer-path-symbolic" }
+            val id = selectedRow().getLong("id")
+            action(obj("type" to "layer", "action" to obj("op" to "new_below")))
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to id, "mask" to false)))
+            action(obj("type" to "invoke", "command" to "merge_down"))
+            noticeAction("merge")
+            awaitState("$theme-merged") { s -> s.getJSONArray("layers").objects().count { it.optString("content_icon") == "layer-path-symbolic" } == vectors - 1 }
+            awaitPixel("$theme-merged-pixels", Offset(.39f, .62f), true, ::dark)
+            screenshot("vector-$theme-merged.png")
+            for (row in state().getJSONArray("layers").objects().filter { it.isNull("paper") }) {
+                action(obj("type" to "layer", "action" to obj("op" to "select", "id" to row.getLong("id"), "mask" to false)))
+                action(obj("type" to "layer", "action" to obj("op" to "delete_selected")))
+            }
             action(obj("type" to "invoke", "command" to "pen"))
         }
     }

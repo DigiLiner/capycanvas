@@ -1156,6 +1156,13 @@ their original scope.
 `enclose-fill` (dark) and `enclose-fill:light` draw an Enclose and Fill loop with
 the mouse over reference ink: two closed holes fill a new layer, a crossed hole
 and the exterior stay empty, and one Undo, Redo and Escape behave as on GTK.
+`vector-layers` (dark) and `vector-layers:light` walk vector layers with the pen:
+the Layers footer's New vector layer choosing G-Pen, the Pencil refusal's Use
+G-Pen and New Paint Layer, an Ellipse outline filled inside and a paint layer
+filled below it, Erase up to intersection from the Tools list, and Merge Down's
+notice after the Gradient refusal's New Paint Layer Below. Each step checks
+composed canvas pixels; the run fails if a Layers footer or notice button is
+clipped or unlabelled.
 
 Run `exercise-workspace-pickup.ps1 -Executable <exe> -Device <mouse|pen|touch>`
 in both `-Theme dark` and `-Theme light` on the private test display. Run

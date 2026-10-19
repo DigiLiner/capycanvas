@@ -141,6 +141,8 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testPixelClipboardDark() throws { try checkPixelClipboard(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testImageObjects() throws { try checkImageObjects(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testImageObjectsDark() throws { try checkImageObjects(in: editorCaptureApplication(), theme: "dark") }
+    @MainActor func testVectorLayers() { checkVectorLayers(in: editorCaptureApplication(), theme: "light") }
+    @MainActor func testVectorLayersDark() { checkVectorLayers(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testLiveInterfaceLanguage() { checkLiveInterfaceLanguage(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testLiveInterfaceLanguageDark() { checkLiveInterfaceLanguage(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testCanvasActionBar() { checkCanvasActionBar(in: ignoringSavedWindows(editorCaptureApplication())) }

@@ -7,6 +7,9 @@ fn vector_session_on(platform: Platform) -> (UiSession<Recorder>, OccurrenceHand
     assert!(s.engine.document().scene().vector_layer(layer).is_some());
     (s, layer)
 }
+fn saved_settings(s: &UiSession<Recorder>) -> Option<crate::Settings> {
+    s.state.requests.iter().rev().find_map(|r| match &r.kind { HostRequestKind::SaveSettings { settings } => Some((**settings).clone()), _ => None })
+}
 fn draw_line(s: &mut UiSession<Recorder>, first: u64, samples: u64) {
     for i in 0..samples {
         let phase = if i == 0 { PenPhase::Down } else if i + 1 == samples { PenPhase::Up } else { PenPhase::Move };
@@ -903,6 +906,7 @@ fn edit_transform_shows_the_move_frame_and_outline_widths_can_stay() {
     assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "Edit › Transform shows the Move frame");
     invoke(&mut s, CommandId::ScaleOutlineWidths);
     assert!(!s.command(CommandId::ScaleOutlineWidths).selected);
+    assert_eq!(saved_settings(&s).map(|saved| saved.keep_outline_widths), Some(true), "the choice is saved");
     let frame = s.vector_frame().unwrap();
     let corner = frame.unit.map([1., 1.]);
     let from = surface_at(&s, corner);
@@ -1064,6 +1068,7 @@ fn erasing_up_to_intersection_stops_at_crossing_lines() {
     invoke(&mut s, CommandId::Eraser);
     invoke(&mut s, CommandId::EraseToIntersection);
     assert!(s.command(CommandId::EraseToIntersection).selected && !s.command(CommandId::EraseTouchedPart).selected);
+    assert_eq!(saved_settings(&s).map(|saved| saved.vector_eraser), Some(crate::VectorEraser::ToIntersection), "the eraser mode is saved");
     s.dispatch(UiAction::SetBrushSize { value: 6. }).unwrap();
     line(&mut s, 300, [400., 290.], [400., 310.]);
     let object = s.engine.document().scene().vector_layer(handle).unwrap().clone();
@@ -1081,6 +1086,8 @@ fn fill_colors_paths_or_fills_a_new_paint_layer_below_from_the_lines() {
     let ellipse = s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.clone();
     s.dispatch(UiAction::SetColor { rgba: [0.2, 0.6, 0.3, 1.] }).unwrap();
     s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap();
+    let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
+    assert!(!prohibited(&mut s), "Fill works on a vector layer");
     let layers = s.engine.document().scene().children(None).len();
     let inside = surface_at(&s, [300., 260.]);
     press(&mut s, 10, &[inside, inside]);
@@ -1106,6 +1113,8 @@ fn fill_colors_paths_or_fills_a_new_paint_layer_below_from_the_lines() {
 fn lasso_fill_adds_a_filled_path_on_vector_layers() {
     let (mut s, handle) = vector_session();
     s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::LassoFill } }).unwrap();
+    s.cursor_input(Some(event(&s, 1, PenPhase::Hover, 0.)));
+    assert!(!s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)), "Lasso Fill works on a vector layer");
     let corners = [[300., 200.], [500., 200.], [500., 400.], [300., 400.], [300., 200.]];
     let ring: Vec<Point> = corners.windows(2).flat_map(|w| (0..20).map(move |i| { let u = f64::from(i) / 20.; [w[0][0] + (w[1][0] - w[0][0]) * u, w[0][1] + (w[1][1] - w[0][1]) * u] })).map(|p| surface_at(&s, p)).collect();
     press(&mut s, 1, &ring);

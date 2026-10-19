@@ -107,6 +107,13 @@ impl<B: CanvasRenderer> UiSession<B> {
     pub(super) fn vector_figure_layer(&self) -> Option<layer_core::authored::OccurrenceHandle> {
         self.editing_vector_layer().filter(|_| !self.state.colors.transparent())
     }
+    pub(super) fn vector_tool_accepts(&self) -> bool {
+        match self.layer_interaction.tool {
+            LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill => self.vector_figure_layer().is_some(),
+            LayerCanvasTool::Region { fill: true, .. } => self.editing_vector_layer().is_some(),
+            _ => false,
+        }
+    }
     fn figure_colors(&self, paint: FigurePaint) -> Option<[[f32; 4]; 2]> {
         let definitions = [if paint == FigurePaint::Both { self.state.colors.foreground } else { self.state.colors.definition() }, self.state.colors.background];
         let mut colors = [[0.; 4]; 2];
