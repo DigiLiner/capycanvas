@@ -4,8 +4,9 @@ Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $id=$Name.ToLowerInvariant().Replace('application-menu-','')
 if($id -notin @('file','edit','image','layer','select','filter','view','window')){throw "Unknown application menu: $Name"}
 $menuRoute=@{id=$null}
+$menuNodes=@()
 function Visible-Control([string]$Id,$Type,[switch]$ByName){
-    foreach($entry in $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)){
+    foreach($entry in $menuNodes){
         $current=$entry.Current
         $value=if($ByName){$current.Name}else{$current.AutomationId}
         if($value -ceq $Id -and !$current.IsOffscreen -and (!$Type -or $current.ControlType -eq $Type)){return $entry}
@@ -25,6 +26,7 @@ function Submenu {
 }
 $watch=[Diagnostics.Stopwatch]::StartNew()
 do{
+    $menuNodes=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     $button=Visible-Control ("application-menu-"+$id) ([System.Windows.Automation.ControlType]::Button)
     $overflow=if(!$button){Menu-Button}
     $submenu=if(!$button -and !$Inspect){Submenu}
@@ -46,6 +48,7 @@ if(!$submenu){
     $overflow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do{
+        $menuNodes=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
         $submenu=Submenu
         if($submenu){break}
         Start-Sleep -Milliseconds 50
