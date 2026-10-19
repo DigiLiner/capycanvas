@@ -170,6 +170,8 @@ The exact versions are set in
 [`app/build.gradle.kts`](../../apps/layer-android/app/build.gradle.kts). Install
 these through Android Studio's SDK Manager. Set `ANDROID_HOME` if the SDK is not
 at `$HOME/Android/Sdk`; the launcher and the Rust build use that path by default.
+For command-line installation, the API 37 platform package ID is
+`platforms;android-37.0`.
 
 Prepare the Rust targets and JNI build tool:
 
