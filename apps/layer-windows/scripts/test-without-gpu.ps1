@@ -22,11 +22,11 @@ try {
     $env:WGPU_ADAPTER_NAME = 'Microsoft Basic Render Driver'
     $env:LAYER_GPU_INDEX = $null
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
-    & cargo test --locked --target $build.target @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests -- --test-threads=1
-    if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
+    & cargo test --locked --no-fail-fast --target $build.target @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests -- --test-threads=1 --nocapture
+    $failed = $LASTEXITCODE -ne 0
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
-    & cargo test --locked --target $build.target @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --skip hdr --skip native_color
-    if ($LASTEXITCODE -ne 0) { throw 'D3D12 document tests failed.' }
+    & cargo test --locked --target $build.target @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --nocapture --skip hdr --skip native_color
+    if ($failed -or $LASTEXITCODE -ne 0) { throw 'Windows Rust or D3D12 document tests failed.' }
 } finally {
     $env:LAYER_TEST_SOFTWARE_GPU = $previousSoftwareGpu
     $env:WGPU_ADAPTER_NAME = $previousAdapter

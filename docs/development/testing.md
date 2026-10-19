@@ -401,6 +401,8 @@ eventually exhausts static TLS.
 
 The Windows software-adapter runner uses one test thread for both Rust phases
 so independent rendering tests do not submit to software devices concurrently.
+It runs every test binary after a failure and preserves uncaptured diagnostics;
+the release job also records Windows application crash events.
 
 The CPU-only `raster_capture_waits_share_the_selected_gpu_budget` regression in
 `layer-render-wgpu` checks both sides of the raster capture deadline. Run it with

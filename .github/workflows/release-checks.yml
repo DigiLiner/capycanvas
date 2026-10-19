@@ -186,6 +186,8 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: |
@@ -196,10 +198,18 @@ jobs:
           ./apps/layer-windows/tests/architecture.ps1
           ./apps/layer-windows/tests/application-menu.ps1
           ./apps/layer-windows/tests/application-menu-query.ps1
-      - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
+      - name: Native and software-adapter tests
+        run: |
+          New-Item -ItemType Directory -Force artifacts/windows | Out-Null
+          ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }} 2>&1 | Tee-Object artifacts/windows/release-tests.log
       - run: ./apps/layer-windows/tests/model-snapshot-reader.ps1
       - run: ./apps/layer-windows/tests/fixture-owner-census.ps1 -Helper apps/layer-windows/scripts/CapyUia.ps1 -Output artifacts/windows/fixture-owner-census-ci
       - run: cargo clippy --locked --target ${{ matrix.target }} -p layer-windows --all-targets --no-deps -- -D warnings
+      - name: Native crash diagnostics
+        if: failure()
+        run: |
+          Get-WinEvent -FilterHashtable @{ LogName='Application'; Id=1000,1001; StartTime=(Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
+            Format-List TimeCreated,Id,Message | Tee-Object artifacts/windows/crash-events.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
