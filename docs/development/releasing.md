@@ -121,6 +121,10 @@ CI creates a draft with the [package outputs](#release-workflow), `SHA256SUMS`
 and provenance attestations. Expect fourteen assets: the thirteen output files in the
 table, including the Flatpak reference and repository archive, plus `SHA256SUMS`.
 The iPad build is uploaded to App Store Connect, not attached to the release.
+The macOS DMG uses HFS+ with capacity calculated from logical payload sizes and
+filesystem headroom; allocated source blocks and automatic image-size estimates
+can undercount resources. Image creation and verification must both succeed
+before signing, notarization and Gatekeeper assessment.
 Use the authenticated CLI with the explicit tag to find the draft; the latest
 published release is still the previous version. A draft can return 404 from
 the REST release-by-tag endpoint even when the CLI can find it.

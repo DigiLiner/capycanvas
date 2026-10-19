@@ -48,8 +48,18 @@ mkdir "$CAPY_OUT/dmg"
 ditto "$CAPY_APP_BUNDLE" "$CAPY_OUT/dmg/Capy Canvas.app"
 ln -s /Applications "$CAPY_OUT/dmg/Applications"
 CAPY_DMG="$CAPY_APP/../../dist/capycanvas-$CAPY_VERSION-macos-arm64.dmg"
-{ df -h "$CAPY_OUT"; du -sh "$CAPY_OUT/dmg"; hdiutil info; } > "$CAPY_OUT/dmg.log" 2>&1
-hdiutil create -verbose -volname 'Capy Canvas' -srcfolder "$CAPY_OUT/dmg" -format UDZO -ov "$CAPY_DMG" 2>&1 | tee -a "$CAPY_OUT/dmg.log"
+CAPY_DMG_SIZE=$(python3 - "$CAPY_OUT/dmg" <<'PY'
+import os, sys
+def fail(error):
+    raise error
+size = sum(max(os.lstat(os.path.join(parent, name)).st_size, 4096)
+           for parent, directories, files in os.walk(sys.argv[1], followlinks=False, onerror=fail)
+           for name in directories + files)
+print(f'{max(128, (2 * size + 1048575) // 1048576 + 64)}m')
+PY
+)
+{ printf 'DMG capacity: %s (HFS+)\n' "$CAPY_DMG_SIZE"; df -h "$CAPY_OUT"; du -sh "$CAPY_OUT/dmg"; hdiutil info; } > "$CAPY_OUT/dmg.log" 2>&1
+hdiutil create -verbose -fs HFS+ -size "$CAPY_DMG_SIZE" -volname 'Capy Canvas' -srcfolder "$CAPY_OUT/dmg" -format UDZO -ov "$CAPY_DMG" 2>&1 | tee -a "$CAPY_OUT/dmg.log"
 hdiutil verify -verbose "$CAPY_DMG" 2>&1 | tee -a "$CAPY_OUT/dmg.log"
 [[ -n "${CAPY_APPLE_TEAM:-}" ]] || exit 0
 codesign --sign 'Developer ID Application' --timestamp "$CAPY_DMG"
