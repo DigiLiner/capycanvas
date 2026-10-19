@@ -89,7 +89,8 @@ in both themes.
 
 The release validation Arch job installs the package recipe's dependencies into
 a fresh Arch container, tests SDK validation, and builds the default GTK
-development launcher.
+development launcher. Its XMLB introspection dependency enables the localized
+store metadata test.
 It verifies the private GTK/GLib/Pango library paths and text/codec behavior,
 then repeats the launcher build offline. Changes to the runtime recipe or SDK
 setup run these same checks and the source regressions in the

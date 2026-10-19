@@ -160,7 +160,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash tools/build/arch-setup.sh --noconfirm
       - run: python3 -m unittest discover -s apps/layer-linux/bench -p 'test_*.py'
-      - run: node --test apps/layer-linux/package.test.mjs
+      - run: |
+          python3 -c 'import gi; gi.require_version("Xmlb", "2.0")'
+          node --test apps/layer-linux/package.test.mjs
       - run: python3 tools/build/gtk-runtime/test-environment.py
       - run: python3 tools/build/gtk-runtime/test-configure.py
       - run: apps/layer-linux/run.sh --help
