@@ -290,7 +290,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 { if (finish()) apply(obj("type" to "step", "steps" to it)) }) else Modifier)
             .clickable(enabled = enabled) {
             val edit = shown.getString("edit"); text = TextFieldValue(edit, TextRange(0, edit.length)); editing = true
-        }.padding(horizontal = valuePadding).testTag("number-value-$id"), contentAlignment = if (toolbar && !showUnits) Alignment.Center else Alignment.CenterEnd) { Text(shown.getString(if (scrubbing) "scrub_text" else "text"), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
+        }.padding(horizontal = valuePadding).testTag("number-value-$id"), contentAlignment = if (toolbar && !showUnits) Alignment.Center else Alignment.CenterEnd) { Text(shown.getString("text"), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
     }
     if (panel) {
         val reset = {

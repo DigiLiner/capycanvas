@@ -128,12 +128,13 @@ test('outside panels a dial keeps a plain value field',t=>{
 test('Shift scrubs finely and changing it mid-drag continues from the current value without a jump',t=>{
   const h=harness(t),scrubs=[];
   const resolve=request=>{const {operation}=request;if(operation.type==='scrub')scrubs.push(operation);
-    const value=operation.type==='scrub'?operation.origin+operation.pixels/(operation.fine?40:4):request.value;return {value,text:String(value),edit:String(value),scrub_text:String(value),fill:value/10};};
+    const value=operation.type==='scrub'?operation.origin+operation.pixels/(operation.fine?40:4):request.value;return {value,text:String(value),edit:String(value),fill:value/10};};
   const number=createNumberField({...h.options,control:{...h.options.control,max:1000},resolve}),phases=[];number.onEditPhase=phase=>phases.push(phase);
   contactElements(number);number.update(5);
   const move=(clientY,shiftKey=false)=>number.valueButton.dispatch('pointermove',{pointerId:1,clientY,shiftKey});
   number.valueButton.dispatch('pointerdown',{button:0,pointerId:1,clientY:100,shiftKey:false});
   move(97);move(80);move(40,true);move(0,true);move(-40);
+  assert.equal(number.valueButton.textContent,'22','an active drag uses the shared readout without a second formatter');
   number.valueButton.dispatch('pointerup',{pointerId:1,clientY:-40,shiftKey:false});
   assert.deepEqual(scrubs,[
     {type:'scrub',origin:5,pixels:20,fine:false},

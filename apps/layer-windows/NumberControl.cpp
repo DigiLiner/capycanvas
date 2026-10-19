@@ -241,7 +241,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(!local->scrubbing&&std::abs(pixels)<=slop)return;
             if(!std::exchange(local->scrubbing,true)&&phase){local->gesture=true;phase(L"down",local->origin);}
             auto next=local->resolve(spec,local->origin,O({{L"type",S(L"scrub")},{L"origin",N(local->origin)},{L"pixels",N(pixels)}}));
-            local->value=num(next,L"value");setText(str(next,L"scrub_text"));set(local->value);
+            local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);
         };
         valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr))||!commit(false))return;

@@ -3691,7 +3691,7 @@ class AndroidHostTest {
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 47.0 }
                     send(MotionEvent.ACTION_MOVE, 4f)
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 43.0 }
-                    valueNode().assertTextEquals("43.0 px")
+                    valueNode().assertTextEquals("43 px")
                     send(MotionEvent.ACTION_CANCEL, 4f)
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 42.0 }
                     send(MotionEvent.ACTION_DOWN, 0f); send(MotionEvent.ACTION_MOVE, 20f); send(MotionEvent.ACTION_UP, 20f)

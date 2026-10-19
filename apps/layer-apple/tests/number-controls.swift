@@ -196,9 +196,9 @@ import SwiftUI
         let diameter = store.state["brush"]["diameter"].number
         let size = store.catalog["brush_size"]
         let scrub = try store.resolveNumber(size, value: 1200, operation: ["type": "scrub", "origin": 1200, "pixels": 2])
-        precondition(scrub["value"].number == 1201 && scrub["scrub_text"].string == "1201 px")
+        precondition(scrub["value"].number == 1201 && scrub["text"].string == "1201 px")
         let settled = try store.resolveNumber(size, value: scrub["value"].number, operation: ["type": "format"])
-        precondition(settled["scrub_text"].string == "1201 px")
+        precondition(settled["text"].string == "1201 px")
         let operations: [[String: Any]] = [["type": "format"], ["type": "expression", "text": "1200.5 px"]]
         for operation in operations {
             let fractional = try store.resolveNumber(size, value: 1200.5, operation: operation)

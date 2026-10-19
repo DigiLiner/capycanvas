@@ -878,7 +878,7 @@ mod tests {
         assert_eq!(drag(LengthUnit::Mm, 210.4, 3.), 211.);
         assert!((drag(LengthUnit::Cm, 21.03, 3.) - 21.1).abs() < 1e-9);
         assert_eq!(drag(LengthUnit::In, 8.5, 5.), 8.625);
-        let shown = [(LengthUnit::Px, 2480.), (LengthUnit::Mm, 210.4), (LengthUnit::Cm, 21.03), (LengthUnit::In, 8.5)].map(|(unit, origin)| dragged(unit, origin, 3.).scrub_text);
+        let shown = [(LengthUnit::Px, 2480.), (LengthUnit::Mm, 210.4), (LengthUnit::Cm, 21.03), (LengthUnit::In, 8.5)].map(|(unit, origin)| dragged(unit, origin, 3.).text);
         assert_eq!(shown, ["2488", "211", "21.1", "8.625"]);
         assert_eq!(typed(LengthUnit::Mm, 210.4), 210.4);
         assert_eq!(typed(LengthUnit::In, 6.875), 6.875);

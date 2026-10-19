@@ -152,7 +152,7 @@ struct NumberControl: View {
     }
     private var valueReadout: some View {
         Button { showsEntry = true } label: {
-            Text(formatted[valueScrub == nil ? "text" : "scrub_text"].string).monospacedDigit().lineLimit(1)
+            Text(formatted["text"].string).monospacedDigit().lineLimit(1)
                 .frame(maxWidth: inline || valueOnly || toolbar != nil ? .infinity : nil, alignment: valueOnly ? .center : .trailing)
                 .padding(.horizontal, 6).frame(height: 24)
         }.buttonStyle(EditorControlButtonStyle()).opacity(enabled ? 1 : 0.36)

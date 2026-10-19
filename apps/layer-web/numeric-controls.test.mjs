@@ -21,14 +21,15 @@ export async function checkNumericControls({call,evaluate,settle}) {
   fixture.zen_mode=false;
   const size='.dock-group[data-group="43"] [data-tool-setting="size"]';
   const point=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-  const input=async(device,type,p)=>{
+  const input=async(device,type,p,fine=false)=>{
     if(native&&device!=='pen')return performNative([device==='touch'?{touch:type,point:[p.x,p.y]}:type==='up'?{down:false}:{point:[p.x,p.y],...(type==='down'?{down:true}:{})}]);
-    if(device==='touch')return call('Input.dispatchTouchEvent',{type:{down:'touchStart',move:'touchMove',up:'touchEnd'}[type],touchPoints:type==='up'?[]:[{...p,id:1}]});
-    return call('Input.dispatchMouseEvent',{type:{down:'mousePressed',move:'mouseMoved',up:'mouseReleased'}[type],...p,button:'left',buttons:type==='up'?0:1,clickCount:1,pointerType:device});
+    if(device==='touch')return call('Input.dispatchTouchEvent',{type:{down:'touchStart',move:'touchMove',up:'touchEnd'}[type],touchPoints:type==='up'?[]:[{...p,id:1}],modifiers:fine?8:0});
+    return call('Input.dispatchMouseEvent',{type:{down:'mousePressed',move:'mouseMoved',up:'mouseReleased'}[type],...p,button:'left',buttons:type==='up'?0:1,clickCount:1,pointerType:device,modifiers:fine?8:0});
   };
   const key=async name=>{
     for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code:name,windowsVirtualKeyCode:name==='Escape'?27:13});
   };
+  const shift=down=>native?performNative([{key:0xffe1,down}]):call('Input.dispatchKeyEvent',{type:down?'keyDown':'keyUp',key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16,modifiers:down?8:0});
   const text=selector=>evaluate(`document.querySelector(${JSON.stringify(selector+' .number-value')}).textContent`);
   const close=(actual,expected,label)=>assert.ok(Math.abs(actual-expected)<.001,`${label}: ${actual} != ${expected}`);
   const geometry=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),box=n.getBoundingClientRect(),slider=n.querySelector('.number-slider'),track=slider.getBoundingClientRect(),v=n.querySelector('.number-value'),value=v.getBoundingClientRect(),s=getComputedStyle(v),r=document.createRange();r.selectNodeContents(v);const glyph=r.getBoundingClientRect();return{box:box.toJSON(),track:track.toJSON(),value:value.toJSON(),glyph:glyph.toJSON(),font:s.fontFamily,paddingLeft:parseFloat(s.paddingLeft),paddingRight:parseFloat(s.paddingRight),overflow:s.overflow,textOverflow:s.textOverflow,trackHeight:[...document.styleSheets].flatMap(sheet=>[...sheet.cssRules]).find(rule=>rule.selectorText==='.number-slider::-webkit-slider-runnable-track')?.style.height,text:v.textContent}})()`);
@@ -50,6 +51,7 @@ export async function checkNumericControls({call,evaluate,settle}) {
   };
   if(native)await writeFile(`${inputDir}/ready`,'ready');
   try {
+    if(native)await performNative([{key:0xffe1,down:true},{key:0xffe1,down:false},{wait_ms:100}]);
     await send({type:'restore_workspace',workspace:fixture});
     for(const theme of ['light','dark']) {
       await send({type:'set_theme',theme});
@@ -78,7 +80,26 @@ export async function checkNumericControls({call,evaluate,settle}) {
       }
       await send({type:'set_brush_size',value:1200});const p=await point(size+' .number-value');await input('mouse','down',p);await input('mouse','up',p);await call('Input.insertText',{text:'1200.5'});await key('Enter');await wait();close(await evaluate('layerApp.state().brush.diameter'),1200.5,'manual fractional value');assert.equal(await text(size),'1200.5 px');
       const percent=await evaluate(`(()=>{const f=layerApp.state().tool_settings.find(f=>f.id==='opacity');return f?{id:f.id,value:f.value}:null})()`);assert.ok(percent,'brush opacity numeric field');
-      await send({type:'set_tool_setting',id:percent.id,value:.5});const pct='.dock-group[data-group="43"] [data-tool-setting="opacity"]',pp=await point(pct+' .number-value'),pq={x:pp.x,y:pp.y-6};await input('mouse','down',pp);await input('mouse','move',pq);await wait();const fine=await evaluate(`layerApp.state().tool_settings.find(f=>f.id==='opacity').value`);assert.ok(fine>.5&&fine<.52,'percentage scrub preserves fine increments');await input('mouse','up',pq);await wait();
+      const pct='.dock-group[data-group="43"] [data-tool-setting="opacity"]';
+      for(const device of ['mouse','touch','pen']) {
+        for(const [origin,pixels,expected,readout] of [[120,8,122,'122 px'],[12,6,13.5,'13.5 px']]) {
+          await send({type:'set_brush_size',value:origin});const p=await point(size+' .number-value'),q={x:p.x,y:p.y-pixels};
+          await input(device,'down',p);await input(device,'move',{x:p.x,y:p.y-20});await input(device,'move',q);await wait();
+          close(await evaluate('layerApp.state().brush.diameter'),expected,`${device}: pixel scrub value`);
+          assert.equal(await text(size),readout,`${device}: pixel readout while held`);
+          await input(device,'up',q);await wait();assert.equal(await text(size),readout,'release preserves pixel precision');
+        }
+        for(const [origin,pixels,fine,expected,readout] of [[.5,8,false,.52,'52 %'],[.02,6,false,.035,'3.5 %'],[.5,20,true,.505,'50.5 %']]) {
+          await send({type:'set_tool_setting',id:percent.id,value:origin});const p=await point(pct+' .number-value'),q={x:p.x,y:p.y-pixels};
+          if(fine)await shift(true);
+          try {
+            await input(device,'down',p,fine);await input(device,'move',{x:p.x,y:p.y-20},fine);await input(device,'move',q,fine);await wait();
+            close(await evaluate(`layerApp.state().tool_settings.find(f=>f.id==='opacity').value`),expected,`${device}: percentage scrub value`);
+            assert.equal(await text(pct),readout,`${device}: percentage readout while held`);
+            await input(device,'up',q,fine);await wait();assert.equal(await text(pct),readout,'release preserves percentage precision');
+          } finally {if(fine)await shift(false);}
+        }
+      }
       const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${output}/numeric-${theme}.png`,Buffer.from(shot.data,'base64'));
       if(native) {
         const events=(p,count,legs)=>[{point:[p.x,p.y]},{down:true},...Array.from({length:count},(_,i)=>{const phase=(i+1)*legs/count,leg=Math.floor(phase),fraction=phase-leg;return{point:[p.x,p.y+240*(leg%2?1-fraction:fraction)]}}),{down:false}];

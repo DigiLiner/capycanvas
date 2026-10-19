@@ -309,21 +309,21 @@ function Check-PropertyValueScrub {Pointer-Session {
         }
         $before=(Property 'opacity').value.value;$box=(Control 'property-opacity' -Arranged).Current.BoundingRectangle
         $x=[int]($box.Left+$box.Width/2);$y=[int]($box.Top+$box.Height/2)
-        $expected=[Math]::Round($before+30/([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)/4/100,3)
-        $scrubText=($expected*100).ToString('F1',[Globalization.CultureInfo]::InvariantCulture)+' %'
+        $expected=[Math]::Floor($before*100+31/([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)/4+.5)/100
+        $scrubText=($expected*100).ToString('0.#',[Globalization.CultureInfo]::InvariantCulture)+' %'
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
-        for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step);Start-Sleep -Milliseconds 35}
-        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $scrubText} "$device value scrub did not preview exact $expected with fixed readout $scrubText"}catch{throw "$device scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
-        Write-Host "$device fine live=$((Property 'opacity').value.value), expected=$expected"
+        for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}
+        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $scrubText} "$device value scrub did not preview exact $expected with readout $scrubText"}catch{throw "$device scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
+        Write-Host "$device coarse live=$((Property 'opacity').value.value), expected=$expected"
         [CapyRowPointer]::Up()
         Start-Sleep -Milliseconds 250
-        Write-Host "$device fine after Up=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value)"
-        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6} "$device fine release changed the value"}catch{throw "$device fine release actual=$((Property 'opacity').value.value), expected=${expected}: $_"}
+        Write-Host "$device coarse after Up=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value)"
+        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6} "$device coarse release changed the value"}catch{throw "$device coarse release actual=$((Property 'opacity').value.value), expected=${expected}: $_"}
         Wait-Until {((Model).state.commands|Where-Object id -eq 'undo').enabled} "$device value scrub did not finish"
         Invoke 'Undo' -Name;Wait-Until {(Property 'opacity').value.value -eq $before} "$device value scrub needed more than one Undo"
         try{Wait-Until {(Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -in @('50','50 %') -and [Math]::Abs((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value-.5) -lt 1e-6} 'Scrub origin did not reach native controls'}catch{throw "Scrub origin native text=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value), slider=$((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value): $_"}
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
-        for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step);Start-Sleep -Milliseconds 35}
+        for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}
         Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6} "$device canceled value scrub did not preview exact $expected"
         Write-Host "$device scrub Escape before=$before, preview=$((Property 'opacity').value.value)"
         [CapyRowPointer]::Key(0x1B)
@@ -354,7 +354,7 @@ function Check-PixelValueScrub {Pointer-Session {
     Select-Panel 'tool_settings'
     Wait-Until {$null -ne (Find 'tool-setting-size')} 'Brush size field did not appear'
     $value={((Model).state.tool_settings|Where-Object id -eq 'size').value}
-    foreach($case in @(@{origin=1200.5;motion=8},@{origin=1200.5;motion=-8},@{origin=999.5;motion=8},@{origin=999.5;motion=-8})){
+    foreach($case in @(@{origin=1200.5;motion=8},@{origin=1200.5;motion=-8},@{origin=31.5;motion=8},@{origin=31.5;motion=-8},@{origin=30;motion=8})){
         Edit 'tool-setting-size' ($case.origin.ToString([Globalization.CultureInfo]::InvariantCulture))
         (Control 'tool-setting-size-slider').SetFocus()
         Wait-Until {(& $value) -eq $case.origin} 'Typed pixel decimal was not retained'
@@ -364,11 +364,12 @@ function Check-PixelValueScrub {Pointer-Session {
         $bounds=(Control 'tool-setting-size' -Arranged).Current.BoundingRectangle
         $x=[int]($bounds.Right-12);$y=[int]($bounds.Top+$bounds.Height/2)
         $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-        $expected=[Math]::Round($case.origin+$case.motion/4,1)
-        if($expected -gt 1000){$expected=[Math]::Floor($expected+.5)}
-        $text=if($expected -ge 1000 -and $expected -eq [Math]::Floor($expected)){$expected.ToString('F0',[Globalization.CultureInfo]::InvariantCulture)+' px'}else{$expected.ToString('F1',[Globalization.CultureInfo]::InvariantCulture)+' px'}
+        $endY=[int]($y-$case.motion*$scale)
+        $expected=$case.origin+($y-$endY)/$scale/4
+        $expected=if($expected -le 32){[Math]::Floor($expected*10+.5)/10}else{[Math]::Floor($expected+.5)}
+        $text=$expected.ToString('0.#',[Globalization.CultureInfo]::InvariantCulture)+' px'
         [CapyRowPointer]::Down('mouse',$x,$y);Start-Sleep -Milliseconds 60
-        [CapyRowPointer]::Move($x,[int]($y-$case.motion*$scale))
+        [CapyRowPointer]::Move($x,$endY)
         try{Wait-Until {(& $value) -eq $expected -and $native.Current.Value -eq $text} 'Pixel scrub precision or readout differed'}catch{throw "Pixel origin=$($case.origin), expected=$expected/$text, actual=$(& $value)/$($native.Current.Value), bounds=$bounds : $_"}
         $after=(Control 'tool-setting-size').Current.BoundingRectangle
         if([Math]::Abs($after.Right-$bounds.Right) -gt 1){throw 'Pixel suffix right edge moved during scrub'}

@@ -1114,10 +1114,7 @@ impl NumberControl {
         if changed { self.emit_by_name::<()>("value-changed", &[]); }
     }
     fn set_scrubbing(&self, scrubbing: bool) {
-        if self.imp().scrubbing.replace(scrubbing) != scrubbing {
-            let text = self.imp().presented_text.borrow().clone();
-            self.present_value(self.value(), text.as_deref());
-        }
+        self.imp().scrubbing.set(scrubbing);
     }
     pub(crate) fn owns_native_key(focus: &gtk::Widget, key: gtk::gdk::Key) -> bool {
         key == gtk::gdk::Key::Escape && focus.ancestor(Self::static_type()).and_downcast::<Self>()
@@ -1148,8 +1145,7 @@ impl NumberControl {
             editor.present_value(value, text);
         }
         if let Some(label) = imp.value_label.get() {
-            let readout = if imp.scrubbing.get() { result.scrub_text.clone() }
-            else if let Some(text) = text { text.to_string() } else if imp.compact.get() {
+            let readout = if let Some(text) = text { text.to_string() } else if imp.compact.get() {
                 if imp.separate_unit.get() {
                     self.spec().compact_value(value)
                 } else {

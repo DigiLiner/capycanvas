@@ -113,12 +113,13 @@ Percentages keep tenths within five percentage points of either soft-range edge
 and snap to whole percentages elsewhere. Angles snap to whole degrees.
 Other units retain their declared resolution; whole-count fields stay integers.
 Text entry retains fractional values independently of slider snapping. Value
-scrubs snap like the slider; Shift scrubs keep fractions, except pixel
-magnitudes above 1000 px snap to whole pixels. Settled readouts omit trailing fractional zeroes. Panel value drags
-use the shared fixed-decimal `scrub_text` until release or cancellation; whole
-pixel values of 1000 px or more omit the decimal during dragging. Release restores
-the settled readout without changing the value. Compact readouts keep at most
-one fractional digit, including for manually entered large pixel values.
+scrubs snap like the slider unless the field declares a `scrub_snap` increment.
+Shift scrubs keep fractions, except pixel
+magnitudes above 1000 px snap to whole pixels. Sliders and value drags use the
+same shared readout during motion and after release: omit trailing fractional
+zeroes and retain actual fractions from fine ranges, Shift drags and text entry.
+Compact readouts keep at most one fractional digit, including for manually
+entered large pixel values.
 
 `fasteval` (MIT) evaluates bounded mathematical expressions such as `85/2`,
 `sqrt(2)` and `pi`. Unit suffixes are accepted. Nonfinite values, string
@@ -247,11 +248,12 @@ editing with fractions above the pixel threshold, whole-pixel slider snapping
 and label double-click reset in both themes, with workspace captures
 in `artifacts/ui/panel-sliders/`. `native_panel_value_scrub_input` checks mouse
 and touch value scrubs in both themes, whole steps without Shift and tenths
-with it, fixed decimals during motion and trimmed
-zeroes after release, precise Escape cancellation, click editing, Properties
+with it, integer and fractional readouts during motion and after release,
+precise Escape cancellation, click editing, Properties
 label reset and one Undo per
-scrub. Run it separately with `LAYER_PANEL_CONTACT=pen` and `--tablet` for pen
-contacts: the virtual tablet serials cannot authorize native clipboard selection.
+scrub. Select one device with `LAYER_PANEL_CONTACT=mouse`, `touch` or `pen`;
+add `--tablet` for pen contacts. The virtual tablet serials cannot authorize
+native clipboard selection.
 `native_panel_slider_motion` records moving GTK presentation rates and
 p99 gaps for three sustained slider and value scrubs each of size, opacity
 and flow. Run it through the private-display runner with
@@ -265,7 +267,7 @@ Android instrumented tests cover
 native editing, expression evaluation, slider geometry and settings input
 isolation. `panelValuesScrubFineAndCancelAcrossContacts` and
 `propertyValueScrubsHaveOneUndoAcrossContacts` cover mouse, touch and pen value
-drags in both themes, fixed decimals, native cancellation and property history.
+drags in both themes, integer and fractional readouts, native cancellation and property history.
 `native_numeric_preedit_guard` covers both GTK widget branches and
 step buttons using native preedit signals; actual IME journeys remain separate.
 `native_numeric_size_apply_refuses_uncommitted_text` checks Canvas Size and Image
@@ -280,7 +282,7 @@ checks InputConnection composition and unchanged commits. Windows
 `exercise-effects.ps1` covers mouse, pen and touch contacts, double-click
 insertion and removal, held arrows, Delete, exact and unchanged Output text,
 Log HDR readouts in a float drawing and one Undo per property slider scrub.
-Its `-PropertyLayout` check also covers editor clearance, fixed-decimal mouse,
+Its `-PropertyLayout` check also covers editor clearance, mouse,
 pen and touch value drags in both themes, settled release, Escape cancellation,
 label reset after an invalid draft and one Undo per scrub.
 On macOS and iPadOS, `EditorLaunchTests/testFilterArtworkAndHistory` covers

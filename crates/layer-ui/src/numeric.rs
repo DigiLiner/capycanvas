@@ -460,15 +460,10 @@ impl NumericControl {
         } else {
             format!("{edit} {}", self.unit)
         };
-        let scrub_text = if self.scrub_snap.is_some() || self.unit == "px" && shown.abs() >= FRACTIONAL_PIXEL_SCRUB_LIMIT && shown.fract() == 0. {
-            edit.clone()
-        } else { fixed };
-        let scrub_text = if self.unit.is_empty() { scrub_text } else { format!("{scrub_text} {}", self.unit) };
         Ok(NumericValue {
             value: resolved,
             text,
             edit,
-            scrub_text,
             fill: ((self.mapped(resolved.clamp(self.soft_min, self.soft_max))
                 - self.mapped(self.soft_min))
                 / (self.mapped(self.soft_max) - self.mapped(self.soft_min)))
@@ -583,7 +578,6 @@ pub struct NumericValue {
     pub value: f64,
     pub text: String,
     pub edit: String,
-    pub scrub_text: String,
     pub fill: f64,
 }
 #[derive(Deserialize)]
@@ -642,8 +636,8 @@ mod tests {
         ] {
             let result = brush.resolve(origin, NumericOperation::Scrub { origin, pixels, fine: true }).unwrap();
             assert_eq!(result.value, expected, "{origin} with {pixels}px motion");
-            assert_eq!(result.scrub_text, readout);
-            assert_eq!(brush.resolve(result.value, NumericOperation::Format).unwrap().scrub_text, readout);
+            assert_eq!(result.text, readout);
+            assert_eq!(brush.resolve(result.value, NumericOperation::Format).unwrap().text, readout);
         }
         for operation in [NumericOperation::Format, NumericOperation::Expression { text: "1200.5 px".into() }] {
             let result = brush.resolve(1200.5, operation).unwrap();
@@ -656,7 +650,7 @@ mod tests {
         for origin in [-12., 12.] {
             let result = scaled.resolve(origin, NumericOperation::Scrub { origin, pixels: 20. * origin.signum(), fine: true }).unwrap();
             assert!((result.value - origin - 0.01 * origin.signum()).abs() < 1e-12);
-            assert_eq!(result.scrub_text, format!("{:.0} px", result.value * scaled.scale));
+            assert_eq!(result.text, format!("{:.0} px", result.value * scaled.scale));
         }
         let degrees = NumericControl::number(-2000., 2000., 1., 1).unit("°");
         assert_eq!(degrees.resolve(1200., NumericOperation::Scrub { origin: 1200., pixels: 20., fine: true }).unwrap().value, 1200.5);
@@ -957,17 +951,25 @@ mod compact_tests {
     }
 
     #[test]
-    fn settled_numbers_trim_zeroes_and_scrub_readouts_keep_their_fractional_width() {
-        for (spec, value, text, scrub_text) in [
-            (NumericControl::brush_size(), 120., "120 px", "120.0 px"),
-            (NumericControl::percent(), 0.5, "50 %", "50.0 %"),
-            (NumericControl::number(-180., 180., 1., 0).unit("°"), 10., "10 °", "10.0 °"),
-            (NumericControl::number(0.25, 4., 0.05, 2).unit("×"), 1., "1 ×", "1.00 ×"),
+    fn numeric_readouts_omit_padding_and_keep_actual_fractions() {
+        for (spec, origin, pixels, fine, text) in [
+            (NumericControl::brush_size(), 120., 4., false, "121 px"),
+            (NumericControl::brush_size(), 32., 4., false, "33 px"),
+            (NumericControl::brush_size(), 32., -2., false, "31.5 px"),
+            (NumericControl::brush_size(), 120., 20., true, "120.5 px"),
+            (NumericControl::brush_size(), 1200.5, 0., false, "1200.5 px"),
+            (NumericControl::percent(), 0.5, 4., false, "51 %"),
+            (NumericControl::percent(), 0.04, 2., false, "4.5 %"),
+            (NumericControl::percent(), 0.95, 2., false, "95.5 %"),
+            (NumericControl::percent(), 0.5, 20., true, "50.5 %"),
+            (NumericControl::number(-180., 180., 1., 0).unit("°"), 10., 4., false, "11 °"),
+            (NumericControl::number(0.25, 4., 0.05, 2).unit("×"), 1., 0., false, "1 ×"),
+            (NumericControl::number(0.25, 4., 0.05, 2).unit("×"), 1., 4., false, "1.05 ×"),
+            (NumericControl::whole_pixels(0., 64.), 12., 4., false, "13 px"),
         ] {
-            let result = spec.resolve(value, NumericOperation::Format).unwrap();
+            let result = spec.resolve(origin, NumericOperation::Scrub { origin, pixels, fine }).unwrap();
             assert_eq!(result.text, text);
-            assert_eq!(result.scrub_text, scrub_text);
-            assert_eq!(result.value, value);
+            assert_eq!(spec.resolve(result.value, NumericOperation::Format).unwrap().text, text);
         }
         assert_eq!(NumericControl::brush_size().resolve(120.5, NumericOperation::Format).unwrap().text, "120.5 px");
         let count = NumericControl::number(0., 16., 1., 0).unit("px");

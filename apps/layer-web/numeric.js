@@ -68,7 +68,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     if (valueOnly) { root.classList.add('number-value-only'); entry.size = 1; }
   }
   let value = control.min, display, presented, editing = false, disabled = false, errorReason = null;
-  let scrub = null, scrubbing = false, suppressClick = false, disposed = false;
+  let scrub = null, suppressClick = false, disposed = false;
   let gesture = false, cancelled = false, heldKey, releaseTimer, releasePointer;
   const finishGesture = (phase = 'up') => {
     clearTimeout(releaseTimer); releaseTimer = null;
@@ -117,7 +117,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   root.addEventListener('keyup',e=>{if(e.key===heldKey)finishGesture();},true);
   root.addEventListener('focusout',e=>{if(gesture&&!root.contains(e.relatedTarget)){if(scrub)finishScrub(true);else finishGesture();}});
   function show(next) {
-    value = next.value; display = next; valueButton.textContent = scrubbing ? next.scrub_text : next.text;
+    value = next.value; display = next; valueButton.textContent = next.text;
     if (valueOnly) valueBox.querySelector('.number-measure').textContent = next.text;
     if (!editing) entry.value = spin ? next.text : next.edit;
     entry.setAttribute("aria-valuenow", value * control.scale);
@@ -159,7 +159,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   valueButton.addEventListener("click", e => { if(suppressClick){suppressClick=false;e.preventDefault();}else begin(); });
   function finishScrub(cancel = false) {
     const contact = scrub;if(!contact)return;
-    scrub = null;scrubbing = false;suppressClick = contact.moved;
+    scrub = null;suppressClick = contact.moved;
     if(contact.moved){
       if(cancel){
         value = contact.start;
@@ -184,7 +184,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     valueButton.addEventListener('pointermove',e=>{
       if(scrub?.id!==e.pointerId)return;
       if(!scrub.moved && Math.abs(scrub.y-e.clientY)<6)return;
-      if(!scrub.moved){scrub.moved=true;scrubbing=true;beginGesture();}
+      if(!scrub.moved){scrub.moved=true;beginGesture();}
       e.preventDefault();scrubTo(e);
     });
     valueButton.addEventListener('pointerup',e=>{

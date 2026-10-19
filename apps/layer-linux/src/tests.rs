@@ -8578,7 +8578,9 @@ fn native_panel_value_scrub_input() {
     w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
     assert!(!w.layer_panel.opacity.has_css_class("number-panel"));
     let output = artifact_dir("../../artifacts/ui/panel-sliders");
-    let pen = std::env::var("LAYER_PANEL_CONTACT").as_deref() == Ok("pen");
+    let contact_mode = std::env::var("LAYER_PANEL_CONTACT").unwrap_or_default();
+    let pen = contact_mode == "pen";
+    let devices: &[&str] = match contact_mode.as_str() { "mouse" => &["mouse"], "touch" => &["touch"], "pen" => &["pen"], _ => &["mouse", "touch"] };
     for theme in [Theme::Light, Theme::Dark] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
@@ -8587,7 +8589,7 @@ fn native_panel_value_scrub_input() {
         until(|| size.is_mapped() && opacity.is_mapped(), "value scrubs allocated");
         assert!(opacity.has_css_class("number-panel"));
         pump(200);
-        for &device in if pen { &["pen"][..] } else { &["mouse", "touch"][..] } {
+        for &device in devices {
             for (field, initial, expected) in [(&size, 120., 125.), (&opacity, 0.6, 0.65)] {
                 if field == &size { w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: initial as f32 }); }
                 else { w.dispatch(UiAction::SetLayerOpacity { id: None, opacity: initial as f32 }); }
@@ -8617,8 +8619,8 @@ fn native_panel_value_scrub_input() {
                 assert!((field.value() - initial - (expected - initial) / 5.).abs() < 0.00001,
                     "{device} an active drag moves in whole steps inside the initial click threshold");
                 let readout = find_css(field.upcast_ref(), "number-readout").unwrap().downcast::<gtk::Label>().unwrap();
-                assert_eq!(readout.text(), if field == &size { "121.0 px" } else { "61.0 %" },
-                    "integer values keep their decimal during a drag");
+                assert_eq!(readout.text(), if field == &size { "121 px" } else { "61 %" },
+                    "whole values omit fractional zeroes during a drag");
                 input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] - 1.])]));
                 assert!((field.value() - initial).abs() < 0.00001, "{device} a wiggle keeps the whole value");
                 input.perform(serde_json::json!([{ "key": SHIFT, "down": true }, contact(device, "move", [from[0], from[1] - 21.])]));
@@ -8626,13 +8628,29 @@ fn native_panel_value_scrub_input() {
                 assert_eq!(readout.text(), if field == &size { "120.5 px" } else { "60.5 %" });
                 input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] - 1.]), { "key": SHIFT, "down": false }]));
                 assert!((field.value() - initial).abs() < 0.00001, "{device} returning to the Shift point restores the value before release");
-                assert_eq!(readout.text(), if field == &size { "120.0 px" } else { "60.0 %" });
+                assert_eq!(readout.text(), if field == &size { "120 px" } else { "60 %" });
                 let mut events = vec![contact(device, "up", from)];
                 if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
                 input.perform(serde_json::Value::Array(events));
                 assert_eq!(readout.text(), if field == &size { "120 px" } else { "60 %" },
-                    "release trims the decimal zero without changing the value");
+                    "release preserves the trimmed readout and value");
             }
+            for (field, initial, expected, text) in [(&size, 12., 13.5, "13.5 px"), (&opacity, 0.02, 0.035, "3.5 %")] {
+                if field == &size { w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: initial as f32 }); }
+                else { w.dispatch(UiAction::SetLayerOpacity { id: None, opacity: initial as f32 }); }
+                let display = find_css(field.upcast_ref(), "number-value").unwrap();
+                let readout = find_css(field.upcast_ref(), "number-readout").unwrap().downcast::<gtk::Label>().unwrap();
+                let from = screen_point(&display, &w.window, [0.5, 0.5]);
+                input.perform(serde_json::json!([contact(device, "move", from), contact(device, "down", from),
+                    contact(device, "move", [from[0], from[1] - 20.]), contact(device, "move", [from[0], from[1] - 6.])]));
+                assert!((field.value() - expected).abs() < 0.00001, "{device} fine-range scrubs retain fractions");
+                assert_eq!(readout.text(), text, "fine-range fractions stay visible during motion");
+                let mut events = vec![contact(device, "up", [from[0], from[1] - 6.])];
+                if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
+                input.perform(serde_json::Value::Array(events));
+                assert_eq!(readout.text(), text);
+            }
+            w.dispatch(UiAction::SetLayerOpacity { id: None, opacity: 0.6 });
             edit_number(&size, "1200.5");
             assert_eq!(size.value(), 1200.5, "typed large pixel values retain their fraction");
             let display = find_css(size.upcast_ref(), "number-value").unwrap();
