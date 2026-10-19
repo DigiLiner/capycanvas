@@ -13,15 +13,20 @@ function Get-WindowsBuildDirectory([string]$Repo,$Build,[string]$Configuration) 
     else { Join-Path $Repo "artifacts/windows/$Configuration" }
 }
 
-function Assert-WindowsBinaryArchitecture([string]$Directory,[ValidateSet('x64','arm64')][string]$Architecture) {
+function Test-WindowsBinaryArchitecture([string]$Path,[ValidateSet('x64','arm64')][string]$Architecture) {
     $machines = if ($Architecture -eq 'arm64') { @(0xAA64,0xA64E) } else { @(0x8664) }
+    $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
+    try {
+        if ($reader.ReadUInt16() -ne 0x5A4D) { throw "Invalid Windows binary: $Path" }
+        $reader.BaseStream.Position = 0x3C
+        $reader.BaseStream.Position = $reader.ReadUInt32()
+        if ($reader.ReadUInt32() -ne 0x4550) { throw "Invalid Windows binary: $Path" }
+        $reader.ReadUInt16() -in $machines
+    } finally { $reader.Dispose() }
+}
+
+function Assert-WindowsBinaryArchitecture([string]$Directory,[ValidateSet('x64','arm64')][string]$Architecture) {
     foreach ($file in Get-ChildItem -LiteralPath $Directory -File -Recurse | Where-Object Extension -In @('.exe','.dll')) {
-        $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($file.FullName))
-        try {
-            if ($reader.ReadUInt16() -ne 0x5A4D) { throw "Invalid Windows binary: $($file.FullName)" }
-            $reader.BaseStream.Position = 0x3C
-            $reader.BaseStream.Position = $reader.ReadUInt32()
-            if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -notin $machines) { throw "Expected $Architecture binary: $($file.FullName)" }
-        } finally { $reader.Dispose() }
+        if (!(Test-WindowsBinaryArchitecture $file.FullName $Architecture)) { throw "Expected $Architecture binary: $($file.FullName)" }
     }
 }

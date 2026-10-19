@@ -433,6 +433,8 @@ and records every payload file's size and SHA-256 in `package-manifest.json`. Th
 selects the target's runtime and DXC binaries and dependency notices, and rejects
 EXE/DLL files whose PE architecture does not match the manifest. MSIX conversion
 preserves that architecture in `ProcessorArchitecture`.
+CRT collection selects compatible binaries from the redistributable directory,
+which can also contain ARM64EC companions that native ARM64 cannot load.
 It assembles the archive twice and requires identical hashes. Output stays under
 ignored `artifacts/windows/distribution`. `-SkipRestore` reuses restored packages;
 uncommitted changes need `-AllowDirty`, which marks the package as a development

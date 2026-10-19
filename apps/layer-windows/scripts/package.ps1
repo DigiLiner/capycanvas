@@ -39,7 +39,7 @@ try {
     if(!$redistRoot){throw 'The selected build toolchain did not identify its redistributable runtime.'}
     $crt=@(Get-ChildItem -LiteralPath (Join-Path $redistRoot $Architecture) -Directory|Where-Object Name -Match '^Microsoft\.VC\d+\.CRT$')
     if($crt.Count -ne 1){throw "Cannot identify one $Architecture Visual C++ CRT directory."}
-    $crtFiles=@(Get-ChildItem -LiteralPath $crt[0].FullName -Filter '*.dll' -File)
+    $crtFiles=@(Get-ChildItem -LiteralPath $crt[0].FullName -Filter '*.dll' -File | Where-Object { Test-WindowsBinaryArchitecture $_.FullName $Architecture })
     if(!($crtFiles.Name -contains 'vcruntime140.dll') -or !($crtFiles.Name -contains 'msvcp140.dll')){throw 'Required redistributable CRT binaries are missing.'}
     foreach($file in $crtFiles){
         if($file.Length -lt 1024){throw "Invalid redistributable binary: $($file.Name)"}

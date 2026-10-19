@@ -99,10 +99,13 @@ tools/devices/devices.py release
   VM per worktree, named after the worktree. Commands that use a VM lock it; pass
   `--vm` to use another. VMs render with WARP, so they check builds and UI
   fixtures, never performance.
-- **Physical PC.** A Windows 11 Home laptop (Intel Core i7-1255U, Iris Xe, 60 Hz
-  panel) is the only Windows GPU and pen hardware. It cannot measure 120 Hz
-  painting, and Windows Home has no Sandbox for clean package installs. It is not
-  reachable from the Linux machine; work that needs it runs there.
+- **Physical PCs.** The Windows 11 Home laptop has an Intel Core i7-1255U,
+  Iris Xe and a 60 Hz panel. The Surface Pro, 11th Edition has a Snapdragon X
+  Plus X1P64100, Adreno X1-85 and 16 GB RAM for native ARM64/D3D12 checks.
+  Windows Home has no Sandbox for clean package installs. These PCs are not
+  reachable from the Linux machine; work that needs them runs on the assigned
+  PC, using private test desktops and profiles. Desktop diagnostics do not
+  replace reference-tier or physical pen measurements.
 
 ## Apple
 
