@@ -39,8 +39,12 @@ Work lands on `origin/main` directly, and other sessions push to it while you
 work. There are no long-lived port or feature branches.
 
 - Branch from a fresh `origin/main` in your own worktree.
-- Before pushing, fetch and rebase onto `origin/main`, resolve conflicts by
-  keeping both sides' intent, and rerun your checks on the rebased tree.
+- Before pushing, fetch and rebase onto `origin/main` and resolve conflicts by
+  keeping both sides' intent. Rerun the checks for conflicted files or code that
+  upstream also changed; don't restart heavy validation for unrelated upstream
+  changes.
+- Push each milestone as soon as its relevant checks pass. When in doubt, push
+  first, then validate further and fix what you find in a separate commit.
 - Never force-push `main`, reset another session's branch, or drop commits you
   did not write. Never use a bare `git stash`; the stash is shared by every
   worktree.

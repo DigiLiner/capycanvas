@@ -28,11 +28,15 @@ specific tasks.
   Give them the worktree and commands, and ask for concise results with
   relevant, verbatim failure excerpts. A subagent does its task itself instead
   of delegating again.
-- Fetch and rebase onto `origin/main` before pushing, then rerun your checks.
-  Never force-push `main`, `git reset --hard` or bare `git stash` in a shared
-  checkout, or delete another session's worktree, branch, build, install or files.
-- Commit complete milestones that build and pass, not steps. Push when your task
-  says to.
+- Fetch and rebase onto `origin/main` before pushing. Never force-push `main`,
+  `git reset --hard` or bare `git stash` in a shared checkout, or delete another
+  session's worktree, branch, build, install or files.
+- Commit complete milestones that build and pass, not steps. When your task says
+  to push, push each milestone as soon as its relevant checks pass; `origin/main`
+  changes faster than heavy suites run. After a rebase, rerun only the checks for
+  conflicted files or code that upstream also changed, never heavy validation
+  because unrelated changes landed. When in doubt, push first, then validate
+  further and fix what you find in a separate commit.
 - Install the hooks with `sh tools/git/install-hooks.sh` and never bypass them.
   No `Co-Authored-By` trailers for AI assistants or agents; human coauthors are
   fine. Follow the [commit guide](docs/COMMIT_GUIDE.md).
