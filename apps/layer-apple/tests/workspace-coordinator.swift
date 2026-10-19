@@ -102,7 +102,7 @@ import SQLite3
         try database.execute("ROLLBACK")
         try await workspaces.flushed()
         try await editor.apply(["type": "set_brush_size", "value": 95])
-        workspaces.suspend()
+        try await workspaces.perform(["type": "suspend"])
         try await wait("released claim") { !workspaces.busy && !workspaces.view["dirty"].bool }
         let successor = EditorStore(platform: platform, scene: scene,
             persistence: EditorPersistence(root: root), managedWorkspaces: true)
@@ -114,11 +114,12 @@ import SQLite3
         let successorLayout = successor.state["workspace"]["layout"].stableKey
         precondition(successorLayout != editor.state["workspace"]["layout"].stableKey)
         workspaces.resume()
-        try await wait("stale owner") { workspaces.view["owner_lost"].bool }
+        try await wait("stale owner revalidation") { workspaces.view["owner_lost"].bool && workspaces.error != nil }
         precondition(workspaces.readOnly && editor.state["brush"]["diameter"].number == 95)
         try await workspaces.answer(["type": "save_as_new"], name: "Ownership Recovery")
         let recovered = workspaces.view["id"].string
-        precondition(recovered != original && !workspaces.readOnly && editor.state["brush"]["diameter"].number == 95)
+        precondition(recovered != original && !workspaces.readOnly && workspaces.error == nil
+            && editor.state["brush"]["diameter"].number == 95)
         try await successor.workspaces!.closed()
         try await workspaces.perform(["type": "switch", "id": original])
         precondition(editor.state["workspace"]["layout"].stableKey == successorLayout, "The other window's durable workspace must be adopted")

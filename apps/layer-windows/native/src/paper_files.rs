@@ -252,7 +252,7 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let mut host = new_host();let count = Arc::new(AtomicUsize::new(0));let wake = count.clone();
         let mut service = Service::new(Arc::new(move || { wake.fetch_add(1, Ordering::SeqCst); }));service.initialized = true;
-        service.start(&host, None, || panic!("paper worker fixture")).unwrap();
+        service.start(&host, None, || std::panic::resume_unwind(Box::new("paper worker fixture"))).unwrap();
         let deadline = Instant::now()+Duration::from_secs(2);
         while service.pending.is_some() || count.load(Ordering::SeqCst)==0 {
             service.poll(&mut host).unwrap();assert!(Instant::now()<deadline);std::thread::sleep(Duration::from_millis(1));

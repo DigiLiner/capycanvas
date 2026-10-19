@@ -609,6 +609,12 @@ Other runners in `scripts/` and `tests/`:
 | `tests/test_rust_build.py` | Cargo deployment target, output-directory isolation and custom build-root propagation |
 | `scripts/test-workspace-scrolling.py` | Long workspace list on an iPad simulator |
 
+GPU-free workspace fixtures wait for completed controller operations and test
+claim release directly. An unattached canvas keeps artwork recovery pending, so
+successful full-editor close belongs in the attached-canvas fixtures. The sandbox
+file fixture checks the resolved file identity and access boundaries; bookmark
+staleness is metadata rather than a failed file grant.
+
 The UIKit fixtures `canvas-modifiers.swift`, `canvas-hover.swift` and
 `pencil-estimates.swift` run as a standalone scene app built from the `Shared/`
 and `iOS/` sources; they have no runner script. Start their supplied-callback

@@ -112,8 +112,10 @@ import SwiftUI
             let allowed: Bool = await withCheckedContinuation { continuation in editor.projectFiles.confirmClose { continuation.resume(returning: $0) } }
             precondition(allowed)
             let prepared: Bool = await withCheckedContinuation { continuation in editor.prepareClose { continuation.resume(returning: $0) } }
-            precondition(prepared && workspaces.view["closed"].bool, "A prepared close releases the workspace")
-            await withCheckedContinuation { continuation in editor.cancelPreparedClose { continuation.resume() } }
+            precondition(!editor.snapshot["canvas_ready"].bool && editor.recovery.restoring)
+            precondition(!prepared && !workspaces.view["closed"].bool, "Unrestored artwork must keep the workspace open")
+            try await workspaces.closed()
+            precondition(workspaces.view["closed"].bool, "Closing the workspace releases its claim")
             other.systemSceneID = UUID().uuidString
             EditorStore.discardSceneSessions([other.systemSceneID!])
             try await wait("discarded scene release") { other.workspaces!.view["closed"].bool }

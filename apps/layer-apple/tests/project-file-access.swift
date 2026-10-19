@@ -16,8 +16,8 @@ import Darwin
         var stale = false
         let destination = try URL(resolvingBookmarkData: data, options: [.withoutUI, .withoutImplicitStartAccessing],
             relativeTo: nil, bookmarkDataIsStale: &stale)
-        FileHandle.standardError.write(Data("Sandbox fixture: stale=\(stale), file=\(destination.path), temp=\(FileManager.default.temporaryDirectory.path), cwd=\(FileManager.default.currentDirectoryPath)\n".utf8))
-        precondition(!stale, "The file bookmark must remain current after signing")
+        let selected = URL(fileURLWithPath: CommandLine.arguments[1])
+        precondition(destination.standardizedFileURL == selected.standardizedFileURL, "The bookmark must resolve to the exact selected file")
         precondition((try? Data(contentsOf: destination)) == nil, "The sandbox must deny access before the grant")
         func read() throws -> Data { try ProjectFileIO.coordinate(destination, writing: false) { try Data(contentsOf: $0) } }
         func write(_ value: String, fail: Bool = false, cancel: Bool = false) throws {

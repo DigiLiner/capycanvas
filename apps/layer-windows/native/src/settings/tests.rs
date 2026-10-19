@@ -642,7 +642,7 @@ fn stopped_storage_reports_the_latest_close_write_and_allows_discard() {
         move |_| {
             entered.send(()).unwrap();
             gate.recv_timeout(Duration::from_secs(5)).unwrap();
-            panic!("isolated storage worker failure");
+            std::panic::resume_unwind(Box::new("isolated storage worker failure"));
         },
         move || {
             let _ = wake.send(());

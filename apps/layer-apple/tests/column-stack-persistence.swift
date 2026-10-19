@@ -36,13 +36,15 @@ import Foundation
             let preferred = layout()
             precondition(preferred != stacked)
             try await customize(["type":"toggle_column_drawer", "group":16, "panel":"layers"])
-            let bounds = member(12)["open"]["bounds"].rect
+            let opened = member(12)["open"], bounds = opened["bounds"].rect
             precondition(bounds.width > 0)
-            let divider = store.snapshot["layout"]["dividers"].array.first {
+            guard let divider = store.snapshot["layout"]["dividers"].array.first(where: {
                 !$0["fixed"].bool && $0["bounds"].rect.height > $0["bounds"].rect.width
-                    && min(abs($0["bounds"].rect.minX - bounds.maxX - 6),
-                        abs(bounds.minX - $0["bounds"].rect.maxX - 6)) < 0.5
-            }!
+                    && $0["bounds"].rect.minY < bounds.maxY && $0["bounds"].rect.maxY > bounds.minY
+                    && (opened["direction"].string == "right"
+                        ? abs($0["bounds"].rect.minX - bounds.maxX)
+                        : abs(bounds.minX - $0["bounds"].rect.maxX)) < 0.5
+            }) else { throw HostFailure(message: "The open column must expose its resize divider") }
             try await store.apply(["type":"nudge_divider", "id":divider["id"].raw,
                 "forward":true, "viewport":store.snapshot["layout"]["viewport"].raw])
             let resized = layout()

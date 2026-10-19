@@ -41,7 +41,8 @@ extension WorkspaceController {
         await withCheckedContinuation { done in
             store!.native!.workspace(JSON(["type": "tick"])) { _, _ in DispatchQueue.main.async { done.resume() } }
         }
-        try await wait(label, failure: { self.error }) { self.ready && !self.busy && !self.switcherBusy && !self.view["loading"].bool }
+        try await wait(label, failure: { self.busy ? nil : self.error }) { self.ready && !self.busy && !self.switcherBusy && !self.view["loading"].bool }
+        try require(error == nil, "\(label): \(error ?? "")")
         try require(view["switcher_error"].isNull, view["switcher_error"].string)
     }
     func perform(_ input: [String: Any]) async throws { send(input); try await settle() }

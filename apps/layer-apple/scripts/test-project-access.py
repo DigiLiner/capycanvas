@@ -11,7 +11,7 @@ apple = repo / "apps/layer-apple"
 env = os.environ | {"DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer",
                     "MACOSX_DEPLOYMENT_TARGET": "15.0"}
 with tempfile.TemporaryDirectory(prefix="capy-project-access-") as temporary:
-    root = Path(temporary)
+    root = Path(temporary).resolve()
     content = root / "Access.app/Contents"
     (content / "MacOS").mkdir(parents=True)
     (content / "Resources").mkdir()
@@ -35,6 +35,6 @@ with tempfile.TemporaryDirectory(prefix="capy-project-access-") as temporary:
     subprocess.run([str(binary), str(source), str(content / "Resources/input.bookmark")], env=env, check=True)
     subprocess.run(["codesign", "--force", "--sign", "-", "--entitlements", str(entitlements), str(content.parent)],
                    env=env, check=True)
-    subprocess.run([str(binary)], env=env, check=True)
+    subprocess.run([str(binary), str(source)], env=env, check=True)
     assert source.read_bytes() == b"saved revision 3"
     assert list(source.parent.iterdir()) == [source], "No temporary siblings or unrelated writes"

@@ -213,8 +213,8 @@ mod tests {
         for owned in [false, true] {
             let compiler = Compiler::new().unwrap();
             compiler.enqueue(DOCUMENT, move || {
-                if owned { std::panic::panic_any(String::from("dry required owned diagnostic")); }
-                panic!("dry required static diagnostic");
+                if owned { std::panic::resume_unwind(Box::new(String::from("dry required owned diagnostic"))); }
+                std::panic::resume_unwind(Box::new("dry required static diagnostic"));
             });
             compiler.start();
             finish_jobs(&compiler);
