@@ -1034,7 +1034,7 @@ body[data-theme="light"] #header { text-shadow:none; }
 :where(:root:not([data-touch])) .dialog-footer button.suggested-action:hover:not(:disabled) { background:color-mix(in srgb,white 10%,var(--accent)); }
 .dialog-footer button.suggested-action:disabled { opacity:.5; }
 .dialog-gap { flex:1; }
-.texture-dialog { height:min(550px,calc(100dvh - 24px)); }
+.texture-dialog { height:min(556px,calc(100dvh - 24px)); }
 .texture-dialog .dialog-content { position:relative; height:100%; }
 .texture-page { flex:1; min-height:0; display:flex; flex-direction:column; gap:14px; scrollbar-width:none; }
 .texture-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(102px,1fr)); gap:14px 12px; }
