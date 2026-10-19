@@ -198,23 +198,42 @@ jobs:
           ./apps/layer-windows/tests/architecture.ps1
           ./apps/layer-windows/tests/application-menu.ps1
           ./apps/layer-windows/tests/application-menu-query.ps1
-      - name: Native and software-adapter tests
+      - name: Native Windows build and tests
         run: |
           New-Item -ItemType Directory -Force artifacts/windows | Out-Null
-          ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }} 2>&1 | Tee-Object artifacts/windows/release-tests.log
+          $env:RUST_BACKTRACE = 'full'
+          $launch = @{
+            FilePath = (Get-Process -Id $PID).Path
+            WorkingDirectory = $env:GITHUB_WORKSPACE
+            ArgumentList = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','apps/layer-windows/scripts/test-without-gpu.ps1','-Architecture','${{ matrix.architecture }}')
+            PassThru = $true
+            WindowStyle = 'Hidden'
+            RedirectStandardOutput = 'artifacts/windows/test-stdout.log'
+            RedirectStandardError = 'artifacts/windows/test-stderr.log'
+          }
+          $testProcess = Start-Process @launch
+          $null = $testProcess.Handle
+          $testProcess.WaitForExit()
+          Get-Content artifacts/windows/test-stdout.log
+          Get-Content artifacts/windows/test-stderr.log
+          if ($testProcess.ExitCode -ne 0) { throw "Windows tests exited $($testProcess.ExitCode)" }
       - run: ./apps/layer-windows/tests/model-snapshot-reader.ps1
       - run: ./apps/layer-windows/tests/fixture-owner-census.ps1 -Helper apps/layer-windows/scripts/CapyUia.ps1 -Output artifacts/windows/fixture-owner-census-ci
       - run: cargo clippy --locked --target ${{ matrix.target }} -p layer-windows --all-targets --no-deps -- -D warnings
-      - name: Native crash diagnostics
+      - name: Preserve native crash events
         if: failure()
         run: |
-          Get-WinEvent -FilterHashtable @{ LogName='Application'; Id=1000,1001; StartTime=(Get-Date).AddHours(-2) } -ErrorAction SilentlyContinue |
-            Format-List TimeCreated,Id,Message | Tee-Object artifacts/windows/crash-events.log
+          New-Item -ItemType Directory -Force artifacts/windows | Out-Null
+          $events = @(Get-WinEvent -FilterHashtable @{LogName='Application';Id=1000,1001;StartTime=(Get-Date).AddHours(-2)} -ErrorAction SilentlyContinue)
+          ConvertTo-Json -InputObject @($events | Select-Object TimeCreated,Id,ProviderName,Message) -Depth 4 |
+            Set-Content -Encoding utf8 artifacts/windows/crash-events.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: windows-${{ matrix.architecture }}-test-reports
-          path: artifacts/windows/**/*.log
+          path: |
+            artifacts/windows/**/*.log
+            artifacts/windows/crash-events.json
           if-no-files-found: warn
 
   apple:

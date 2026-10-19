@@ -115,6 +115,11 @@ cannot load there. Build and packaging checks reject incompatible PE machines.
 Windows App SDK ARM64X companion DLLs are identified by their dynamic relocation
 metadata and retained beside their matching x64 DLLs for emulation on Arm.
 
+The release checks run tests with uncaptured Rust output and full backtraces.
+Their Windows artifacts retain separate native stdout/stderr logs and, on failure,
+Application Error and Windows Error Reporting events. A native process abort
+still fails the job even when Rust cannot print a test assertion.
+
 Ordinary restarts reopen saved and untitled drawings automatically, retaining tab
 order, the active drawing, camera, selection and bounded Undo/Redo. The first
 window's session worker counts the other saved window sessions, and the app opens
