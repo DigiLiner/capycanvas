@@ -216,11 +216,13 @@ function Read-Snapshot([string]$Path){
         try{
             $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
             $reader=[IO.StreamReader]::new($stream)
-            try{return ($reader.ReadToEnd()|ConvertFrom-Json)}finally{$reader.Dispose()}
+            try{$json=$reader.ReadToEnd()}finally{$reader.Dispose()}
         }catch{
             if($attempt -eq 19 -or $_.Exception.GetBaseException() -isnot [IO.IOException]){throw}
             Start-Sleep -Milliseconds 50
+            continue
         }
+        return ($json|ConvertFrom-Json)
     }
 }
 function Settings-File{

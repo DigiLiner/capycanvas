@@ -548,6 +548,10 @@ been verified.
 Run `pwsh -NoProfile -File ./apps/layer-windows/tests/model-snapshot-reader.ps1`
 to check the UI fixture model reader during concurrent atomic snapshot publication.
 This windowless test needs no GPU and writes its results under `artifacts/windows`.
+It validates 100 reads during concurrent publication without a throughput target.
+Reports retain read durations and exception details; the reader closes each file
+before parsing its JSON. Release checks run script regressions before compiling
+the native client and retain their failure reports.
 
 Fluent catalogs and shared cursor SVGs use LF checkouts through `.gitattributes`.
 Their parser structure and byte hashes must stay identical across hosts.

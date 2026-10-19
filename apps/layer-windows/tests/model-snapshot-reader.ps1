@@ -20,9 +20,9 @@ public sealed class CapyAtomicPublisher : IDisposable {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ReplaceFileW(string replaced,string replacement,string backup,uint flags,IntPtr exclude,IntPtr reserved);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool MoveFileExW(string existing,string target,uint flags);
  readonly string path; readonly byte[] data; readonly Thread thread; volatile bool stop;
- public long Published; public long Errors; public int LastError;
+ public long Published; public long Errors; public int LastError; public string LastException;
  public CapyAtomicPublisher(string path,string payload){this.path=path;data=new UTF8Encoding(false).GetBytes(payload);thread=new Thread(Run);thread.IsBackground=true;thread.Start();}
- void Run(){while(!stop){string pending=path+".pending";try{File.WriteAllBytes(pending,data);bool ok=ReplaceFileW(path,pending,null,0,IntPtr.Zero,IntPtr.Zero);int error=Marshal.GetLastWin32Error();if(!ok&&error==2){ok=MoveFileExW(pending,path,0);error=Marshal.GetLastWin32Error();}if(ok)Interlocked.Increment(ref Published);else{LastError=error;Interlocked.Increment(ref Errors);File.Delete(pending);}}catch(IOException){Interlocked.Increment(ref Errors);}}}
+ void Run(){while(!stop){string pending=path+".pending";try{File.WriteAllBytes(pending,data);bool ok=ReplaceFileW(path,pending,null,0,IntPtr.Zero,IntPtr.Zero);int error=Marshal.GetLastWin32Error();if(!ok&&error==2){ok=MoveFileExW(pending,path,0);error=Marshal.GetLastWin32Error();}if(ok)Interlocked.Increment(ref Published);else{LastError=error;Interlocked.Increment(ref Errors);File.Delete(pending);}}catch(IOException error){LastError=error.HResult;LastException=error.ToString();Interlocked.Increment(ref Errors);}}}
  public void Dispose(){stop=true;thread.Join();}
 }
 '@
@@ -33,15 +33,22 @@ $payload=@{process_id=$ProcessId;model=@{state=@{camera=@{rotation=0;flipped=@($
 [IO.File]::WriteAllText($StateFile,$payload)
 $publisher=[CapyAtomicPublisher]::new($StateFile,$payload)
 $reads=0;$nulls=0;$errors=0;$misclassified=0
+$readFailures=[Collections.Generic.List[object]]::new()
+$readDurations=[Collections.Generic.List[double]]::new()
+$watch=[Diagnostics.Stopwatch]::StartNew()
 try{
- $watch=[Diagnostics.Stopwatch]::StartNew()
- while($watch.Elapsed.TotalSeconds-lt10-and$reads-lt100){
+ while($reads-lt100){
   $reads++
+  $started=$watch.Elapsed.TotalMilliseconds
   try{
    $value=Model
    if($null-eq$value){$nulls++}
    if($value.state.camera.rotation-ne0-or$value.state.camera.flipped[0]-or$value.state.camera.flipped[1]){$misclassified++}
-  }catch{$errors++}
+  }catch{
+   $errors++
+   $exception=$_.Exception.GetBaseException()
+   $readFailures.Add(@{read=$reads;elapsed_ms=$watch.Elapsed.TotalMilliseconds;type=$exception.GetType().FullName;message=$exception.Message;hresult=$exception.HResult})
+  }finally{$readDurations.Add($watch.Elapsed.TotalMilliseconds-$started)}
  }
 }finally{$publisher.Dispose()}
 $invalidOwnerRejected=$false
@@ -54,6 +61,6 @@ $missingRejected=$false
 Remove-Item -LiteralPath $StateFile
 try{$null=Model}catch{$missingRejected=$true}
 $pass=$reads-eq100-and$nulls-eq0-and$errors-eq0-and$misclassified-eq0-and$publisher.Published-gt0-and$invalidOwnerRejected-and$malformedRejected-and$missingRejected
-@{pass=$pass;reads=$reads;nulls=$nulls;read_errors=$errors;false_rotation_preconditions=$misclassified;published=$publisher.Published;replace_errors=$publisher.Errors;last_replace_error=$publisher.LastError;invalid_owner_rejected=$invalidOwnerRejected;malformed_rejected=$malformedRejected;missing_rejected=$missingRejected;writer_joined=$true;pid=$PID}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $out 'result.json')
+@{pass=$pass;reads=$reads;nulls=$nulls;read_errors=$errors;read_failures=$readFailures.ToArray();read_durations_ms=$readDurations.ToArray();elapsed_ms=$watch.Elapsed.TotalMilliseconds;false_rotation_preconditions=$misclassified;published=$publisher.Published;replace_errors=$publisher.Errors;last_replace_error=$publisher.LastError;last_writer_exception=$publisher.LastException;invalid_owner_rejected=$invalidOwnerRejected;malformed_rejected=$malformedRejected;missing_rejected=$missingRejected;writer_joined=$true;pid=$PID}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $out 'result.json')
 Get-Content -LiteralPath (Join-Path $out 'result.json')
 if(!$pass){throw 'Atomic snapshot model reader regression failed'}
