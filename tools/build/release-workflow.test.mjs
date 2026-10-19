@@ -24,8 +24,8 @@ test("only a tag push enables signing and publication", () => {
     }
 });
 
-test("all builds wait for validation and stores wait for every package", () => {
-  for (const name of platforms) assert.match(job(release, name), /^    needs: \[version, checks\]$/m);
+test("packages build alongside checks and stores wait for every result", () => {
+  for (const name of platforms) assert.match(job(release, name), /^    needs: version$/m);
   for (const name of ["android-publish", "ipad-publish"]) {
     const needs = job(release, name).match(/^    needs: \[(.+)\]$/m)[1].split(", ");
     for (const prerequisite of ["checks", ...platforms]) assert.ok(needs.includes(prerequisite), `${name}: ${prerequisite}`);

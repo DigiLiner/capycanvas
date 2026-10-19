@@ -61,7 +61,7 @@ jobs:
       rust-version: ${{ needs.version.outputs.rust }}
 
   web:
-    needs: [version, checks]
+    needs: version
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +80,7 @@ jobs:
           if-no-files-found: error
 
   flatpak:
-    needs: [version, checks]
+    needs: version
     runs-on: ubuntu-24.04
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     steps:
@@ -110,7 +110,7 @@ jobs:
           if-no-files-found: error
 
   android:
-    needs: [version, checks]
+    needs: version
     runs-on: ubuntu-24.04
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     permissions:
@@ -156,7 +156,7 @@ jobs:
           if-no-files-found: warn
 
   windows:
-    needs: [version, checks]
+    needs: version
     runs-on: windows-2025
     strategy:
       fail-fast: false
@@ -216,7 +216,7 @@ jobs:
           if-no-files-found: error
 
   apple:
-    needs: [version, checks]
+    needs: version
     runs-on: macos-26
     environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     strategy:

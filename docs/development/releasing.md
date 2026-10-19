@@ -380,7 +380,9 @@ CI workflow is also called by release validation.
 
 `.github/workflows/release-checks.yml` is reusable only; it has no push, schedule
 or manual trigger. Both a manual release dry run and a tag-push release call it
-before packaging. Tag pushes repeat validation on the exact tagged commit.
+alongside packaging, exposing test and build failures in the same run. Tag pushes
+repeat validation on the exact tagged commit. Store uploads and GitHub Release
+creation require successful validation and every platform package.
 
 | Job | Checks without a hardware GPU |
 | --- | --- |
