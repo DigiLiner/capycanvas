@@ -13,9 +13,10 @@ try {
             $env:PROCESSOR_ARCHITECTURE=$native;$env:PROCESSOR_ARCHITEW6432=$emulated
             $expected=if($emulated -eq 'ARM64' -or $native -eq 'ARM64'){'arm64'}else{'x64'}
             if((Resolve-WindowsArchitecture).architecture -ne $expected){throw 'Native architecture selection ignored Windows emulation.'}
-            foreach($architecture in @('x64','arm64')) {
-                $build=Resolve-WindowsArchitecture $architecture
-                if($build.architecture -ne $architecture){throw 'Explicit architecture did not override the host.'}
+            foreach($argument in @('x64','arm64','X64','ARM64')) {
+                $architecture=$argument.ToLowerInvariant()
+                $build=Resolve-WindowsArchitecture $argument
+                if($build.architecture -cne $architecture){throw 'Explicit architecture did not normalize and override the host.'}
                 $target=if($architecture -eq 'arm64'){'aarch64-pc-windows-msvc'}else{'x86_64-pc-windows-msvc'}
                 if($build.target -ne $target){throw 'Rust target does not match the native architecture.'}
                 if((Get-WindowsBuildDirectory $repo $build Release) -eq (Get-WindowsBuildDirectory $repo (Resolve-WindowsArchitecture $(if($architecture -eq 'x64'){'arm64'}else{'x64'})) Release)){throw 'Architectures share build output.'}

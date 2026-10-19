@@ -56,6 +56,7 @@ The launcher builds optimized Release and opens the app after a successful build
 It selects the PC's native architecture, including from an emulated shell.
 Pass `-Architecture arm64` or `-Architecture x64` to choose explicitly; the same
 option applies to `build.ps1` and `test-without-gpu.ps1`.
+Architecture arguments are case-insensitive and package names use lowercase.
 It sets the script execution policy for its child PowerShell process, leaving
 your settings intact. Use Release for everyday development, drawing and performance
 checks. Reserve `-Configuration Debug` for stepping through code, inspecting

@@ -1,4 +1,5 @@
 function Resolve-WindowsArchitecture([ValidateSet('native','x64','arm64')][string]$Architecture='native') {
+    $Architecture = $Architecture.ToLowerInvariant()
     $native = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $hostArchitecture = if ($native -eq 'ARM64') { 'arm64' } else { 'x64' }
     if ($Architecture -eq 'native') { $Architecture = $hostArchitecture }
