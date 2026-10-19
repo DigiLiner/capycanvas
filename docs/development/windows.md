@@ -296,8 +296,9 @@ and their undo history in both themes, alongside the existing pickup fixture var
 `exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
 activation, scrolling and undo history in both themes; `-PaperLight` runs the
 light-theme scrolling, history and empty-stack cases. Both variants also walk
-Choose Texture from the Paper row and from Properties: its size against Edit
-Color, keyboard choice, Cancel, Use Texture with one Undo, Rename and Delete
+Choose Texture from the Paper row and from Properties: its width against Edit
+Color, three fully visible rows, keyboard choice, Cancel, Use Texture with one
+Undo, Rename and Delete
 in the open dialog, a seeded library paper scrolled into view and a refused
 Use Texture after the drawing changes. They then drag Properties' Scale slider
 and require nonuniform relief to change more than a third of the samples in
@@ -317,7 +318,8 @@ texture grid. Repeated full-window searches can exhaust the original polling
 deadline after the native selection has already changed.
 Compare `edit-color-dialog-frame` and `texture-dialog-frame`, since focusing a
 selected library texture can scroll its title out of view. The outer dialog
-peer includes the popup backdrop. Check the frame size again on that library reopen.
+peer includes the popup backdrop. Check the width and visible rows again on
+that library reopen.
 Run `exercise-layer-pickup.ps1 -Executable <path> -Device mouse -Theme dark`;
 repeat with `-Device pen` and `-Device touch`, each with `-Theme light` too.
 The UIA helper resolves the current `layer-list` for row searches; explicit

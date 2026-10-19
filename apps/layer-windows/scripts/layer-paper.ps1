@@ -78,8 +78,26 @@ function Texture-Span([string]$Prefix,$Expected){
     $bounds=$frame.Current.BoundingRectangle;$window=$root.Current.BoundingRectangle
     $apply=(Control "$Prefix-apply" -Within $frame -Arranged).Current.BoundingRectangle
     if($frame.Current.ClassName -eq 'Popup' -or !$bounds.Contains($apply) -or $bounds.Width -ge $window.Width -or $bounds.Height -ge $window.Height){throw 'Picker geometry requires the dialog frame inside its owned window'}
-    $span=[ordered]@{top=$bounds.Top;bottom=$bounds.Bottom;right=$bounds.Right;height=$bounds.Height;button=$apply.Height;class=$frame.Current.ClassName}
-    if($Expected -and ([Math]::Abs($span.height-$Expected.height) -gt 1 -or [Math]::Abs($span.right-$Expected.right) -gt 1)){throw "Choose Texture is not the size of Edit Color: $($span.height) vs $($Expected.height)"}
+    $span=[ordered]@{top=$bounds.Top;bottom=$bounds.Bottom;right=$bounds.Right;width=$bounds.Width;height=$bounds.Height;button=$apply.Height;class=$frame.Current.ClassName}
+    if($Expected){
+        if([Math]::Abs($span.width-$Expected.width) -gt 1 -or [Math]::Abs($span.right-$Expected.right) -gt 1){throw 'Choose Texture does not retain Edit Color width and right edge'}
+        $scroll=$frame.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty,'ScrollViewer'))
+        if(!$scroll){throw 'Choose Texture has no native scroll viewport'}
+        $viewport=$scroll.Current.BoundingRectangle
+        $tiles=@(for($i=0;$i -lt (Texture-Tiles).Count;$i++){$tile=Find "texture-tile-$i" -Within $frame;if($tile -and $tile.Current.BoundingRectangle.Height -gt 0){[pscustomobject]@{id=$i;bounds=$tile.Current.BoundingRectangle}}})
+        $rows=@($tiles|Group-Object {$_.bounds.Top}|Sort-Object {[double]$_.Name})
+        $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        $rowEvidence=@(for($row=0;$row -lt $rows.Count;$row++){
+            $members=$rows[$row].Group
+            $naturalHeight=if($row+1 -lt $rows.Count){[double]$rows[$row+1].Name-[double]$rows[$row].Name-14*$scale}else{($rows[$row-1].Group|ForEach-Object {$_.bounds.Height}|Measure-Object -Maximum).Maximum}
+            $fullHeight=($members|ForEach-Object {$_.bounds.Height}|Measure-Object -Maximum).Maximum
+            [pscustomobject]@{top=[double]$rows[$row].Name;natural_height=$naturalHeight;observed_height=$fullHeight;tiles=@($members);full=([Math]::Abs($fullHeight-$naturalHeight) -le 1 -and !@($members|Where-Object {!$viewport.Contains($_.bounds)}).Count)}
+        })
+        @{viewport=$viewport;rows=$rowEvidence}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run "texture-row-geometry-$((Model).state.theme).json")
+        $complete=@($rowEvidence|Where-Object full)
+        if($complete.Count -lt 3){throw "Choose Texture does not show three full rows including captions: $($complete.Count)"}
+        $span.full_rows=$complete.Count;$span.viewport=$viewport
+    }
     $span
 }
 function Texture-ScreenCapture([string]$Name,$Rects){
