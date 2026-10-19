@@ -260,6 +260,7 @@ jobs:
           name: apple-${{ matrix.platform }}-build-reports
           path: |
             dist/apple-${{ matrix.platform }}/archive.log
+            dist/apple-${{ matrix.platform }}/dmg.log
             dist/apple-${{ matrix.platform }}/*.xcresult
           if-no-files-found: warn
 

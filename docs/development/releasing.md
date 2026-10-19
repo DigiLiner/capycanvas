@@ -398,6 +398,10 @@ The Android package job also builds its debug app and instrumentation APK and
 runs debug/release lint. The instrumentation APK is retained but not executed:
 those tests require hardware Vulkan.
 
+The macOS job verifies the disk image before signing. Apple failure reports retain
+archive logs and Xcode result bundles; Mac reports also include disk space, image
+size, mounted-image state and disk-image creation and verification output.
+
 The renderer job selects tests that do not create GPU devices. Shader contract
 checks select individual CPU tests from modules that also contain GPU tests.
 Windows runs the existing native host and document suites on WARP. Renderer

@@ -48,7 +48,9 @@ mkdir "$CAPY_OUT/dmg"
 ditto "$CAPY_APP_BUNDLE" "$CAPY_OUT/dmg/Capy Canvas.app"
 ln -s /Applications "$CAPY_OUT/dmg/Applications"
 CAPY_DMG="$CAPY_APP/../../dist/capycanvas-$CAPY_VERSION-macos-arm64.dmg"
-hdiutil create -quiet -volname 'Capy Canvas' -srcfolder "$CAPY_OUT/dmg" -format UDZO -ov "$CAPY_DMG"
+{ df -h "$CAPY_OUT"; du -sh "$CAPY_OUT/dmg"; hdiutil info; } > "$CAPY_OUT/dmg.log" 2>&1
+hdiutil create -verbose -volname 'Capy Canvas' -srcfolder "$CAPY_OUT/dmg" -format UDZO -ov "$CAPY_DMG" 2>&1 | tee -a "$CAPY_OUT/dmg.log"
+hdiutil verify -verbose "$CAPY_DMG" 2>&1 | tee -a "$CAPY_OUT/dmg.log"
 [[ -n "${CAPY_APPLE_TEAM:-}" ]] || exit 0
 codesign --sign 'Developer ID Application' --timestamp "$CAPY_DMG"
 CAPY_NOTARY=(--key "$CAPY_APPLE_KEY" --key-id "$CAPY_APPLE_KEY_ID" --issuer "$CAPY_APPLE_ISSUER")
