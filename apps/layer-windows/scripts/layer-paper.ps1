@@ -273,6 +273,99 @@ function Paper-ScaleRelief{
     Relationship-Undo
     Wait-Until {(Paper-Scale) -eq $relief.original} 'One Undo did not restore the Paper Scale'
 }
+function Lighting-Property([string]$Key){@((Model).state.layer_properties.controls|Where-Object key -eq $Key)[0]}
+function Lighting-Value([string]$Key){(Lighting-Property $Key).value.value}
+function Lighting-Reveal{
+    $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$node=$walker.GetParent((Control 'property-light-dial'));$scroll=$null
+    while($node){if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll) -and $scroll.Current.VerticallyScrollable){break};$scroll=$null;$node=$walker.GetParent($node)}
+    if($scroll){$scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,100)}
+    foreach($id in @('property-relief-slider','property-light-dial','property-through_paint-slider')){$null=Control $id -Arranged}
+}
+function Lighting-Point([double]$Angle,[double]$Radii){
+    $b=(Control 'property-light-dial' -Arranged).Current.BoundingRectangle;$radius=$b.Width/2;$a=$Angle*[Math]::PI/180
+    @([int][Math]::Round($b.X+$radius+[Math]::Cos($a)*$radius*$Radii),[int][Math]::Round($b.Y+$b.Height/2+[Math]::Sin($a)*$radius*$Radii))
+}
+function Lighting-Dot([string]$Name,[double]$Angle){
+    $b=(Control 'property-light-dial' -Arranged).Current.BoundingRectangle
+    $origin=[CapyRowPointer+Point]::new();if(![CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'The Light dial capture origin is unavailable'}
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $run "$Name.png"))
+    try{
+        $r=$b.Width/2;$x=$b.X+$r-$origin.x;$y=$b.Y+$r-$origin.y;$a=$Angle*[Math]::PI/180
+        $dot=$bitmap.GetPixel([int]($x+[Math]::Cos($a)*$r*.55),[int]($y+[Math]::Sin($a)*$r*.55));$face=$bitmap.GetPixel([int]($x-[Math]::Cos($a)*$r*.55),[int]($y-[Math]::Sin($a)*$r*.55))
+        @{angle=$Angle;dot=$dot.ToArgb();face=$face.ToArgb();bounds=$b}|ConvertTo-Json|Set-Content (Join-Path $run "$Name-dot.json")
+        if([Math]::Abs($dot.GetBrightness()-$face.GetBrightness()) -lt .15){throw "The Light dial dot does not point toward $Angle degrees: dot=$dot face=$face"}
+    }finally{$bitmap.Dispose()}
+}
+function Lighting-Relief([string]$Text,[scriptblock]$Published){
+    Edit 'property-relief' $Text;[CapyRowPointer]::Key([uint32]$review.Id,0x0D)
+    Wait-Until $Published "Texture visibility $Text did not publish"
+}
+function Test-PaperLighting{
+    $theme=(Model).state.theme;$paper=(Texture-Paper).id
+    Relationship-Layers;Relationship-Reveal "layer-$paper-name";Invoke "layer-$paper-name"
+    Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper} 'Paper selection did not publish'
+    if(!@((Model).layout.groups|Where-Object {$_.active -eq 'properties'}).Count){Invoke 'Properties' -Name}
+    Wait-Until {(Lighting-Property 'light').kind.numeric.kind -eq 'dial'} 'Paper Properties did not publish the Light dial'
+    Lighting-Reveal
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+    if((Lighting-Value 'relief') -ne 0 -or !(Lighting-Property 'light').disabled -or !(Lighting-Property 'through_paint').disabled){throw 'Light and Shows through paint were not disabled while Texture visibility is 0'}
+    $dial=Control 'property-light-dial' -Arranged
+    if($dial.Current.IsEnabled -or (Control 'property-through_paint-slider').Current.IsEnabled -or (Control 'property-light').Current.IsEnabled){throw 'Disabled lighting controls still accept input'}
+    $revision=(Model).state.document_file.revision;$light=Lighting-Value 'light'
+    $at=Lighting-Point 180 .84;[CapyRowPointer]::Down('mouse',$at[0],$at[1]);Start-Sleep -Milliseconds 35;[CapyRowPointer]::Up();Start-Sleep -Milliseconds 400
+    if((Model).state.document_file.revision -ne $revision -or (Lighting-Value 'light') -ne $light){throw 'A press on the disabled Light dial changed the drawing'}
+    Capture "paper-lighting-disabled-$theme" -Composed -WithModel
+    Lighting-Relief '100' {(Lighting-Value 'relief') -eq 100 -and !(Lighting-Property 'light').disabled -and !(Lighting-Property 'through_paint').disabled -and (Control 'property-light-dial').Current.IsEnabled}
+    (Control 'drawing-canvas').SetFocus();Lighting-Reveal
+    $dial=Control 'property-light-dial' -Arranged;$d=$dial.Current.BoundingRectangle
+    $track=(Control 'property-relief-slider' -Arranged).Current.BoundingRectangle
+    $row=(Control 'number-root-property-light' -Arranged).Current.BoundingRectangle;$slider=(Control 'number-root-property-relief' -Arranged).Current.BoundingRectangle
+    $value=(Control 'property-light' -Arranged).Current.BoundingRectangle
+    [ordered]@{dial=$d;track=$track;row=$row;slider_row=$slider;value=$value;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "paper-lighting-geometry-$theme.json")
+    if([Math]::Abs($d.Width/$scale-28) -gt .5 -or [Math]::Abs($d.Height/$scale-28) -gt .5){throw "The Light dial is not 28 DIP: $d"}
+    if([Math]::Abs($d.Right-$track.Right) -gt 1){throw "The Light dial does not end where the slider tracks end: $($d.Right) vs $($track.Right)"}
+    if([Math]::Abs($row.Height-$slider.Height) -gt 1 -or [Math]::Abs($row.Height/$scale-36) -gt .5){throw "The Light row is not a slider row's height: $($row.Height) vs $($slider.Height)"}
+    if([Math]::Abs($d.Top+$d.Height/2-($row.Top+$row.Height/2)) -gt 1){throw 'The Light dial is not centered in its row'}
+    if([Math]::Abs($value.Right-$row.Right) -gt 1 -or [Math]::Abs($value.Bottom-$row.Bottom) -gt 1 -or $value.Left -lt $d.Right){throw 'The Light value is not at the bottom right beside the dial'}
+    $range=$dial.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+    $text=$dial.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if($range.Minimum -ne 0 -or $range.Maximum -ne 360 -or $range.Value -ne (Lighting-Value 'light') -or $text -ne (Control 'property-light').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value){throw "The Light dial range or value text differs: $($range.Value) $text"}
+    Capture "paper-lighting-$theme" -Composed -WithModel;Lighting-Dot "paper-lighting-$theme" (Lighting-Value 'light')
+    foreach($device in @('mouse','pen','touch')){
+        $before=Lighting-Value 'light'
+        $at=Lighting-Point 180 .84;[CapyRowPointer]::Down($device,$at[0],$at[1])
+        Wait-Until {(Lighting-Value 'light') -eq 180} "A $device press on the dial's left edge did not light from the left"
+        foreach($step in 1..4){$at=Lighting-Point (180+22.5*$step) .84;[CapyRowPointer]::Move($at[0],$at[1]);Start-Sleep -Milliseconds 30}
+        Wait-Until {(Lighting-Value 'light') -eq 270} "A $device drag to the dial's top did not light from above"
+        foreach($step in 1..4){$at=Lighting-Point (270+27.5*$step) (.84+.54*$step);[CapyRowPointer]::Move($at[0],$at[1]);Start-Sleep -Milliseconds 30}
+        Wait-Until {[Math]::Abs((Lighting-Value 'light')-20) -le 1} "A $device drag far outside the dial did not turn freely: $(Lighting-Value 'light')"
+        if($device -eq 'mouse'){Capture "paper-lighting-drag-$theme" -Composed;Lighting-Dot "paper-lighting-drag-$theme" (Lighting-Value 'light')}
+        [CapyRowPointer]::Up()
+        Wait-Until {((Model).state.commands|Where-Object id -eq 'undo').enabled -and [Math]::Abs((Lighting-Value 'light')-20) -le 1} "The $device dial release changed the light"
+        Relationship-Undo
+        Wait-Until {(Lighting-Value 'light') -eq $before} "A $device dial drag needed more than one Undo"
+    }
+    $at=Lighting-Point 180 .84;[CapyRowPointer]::Down('mouse',$at[0],$at[1])
+    Wait-Until {(Lighting-Value 'light') -eq 180} 'The held dial press did not preview'
+    [CapyRowPointer]::Key(0x1B)
+    Wait-Until {(Lighting-Value 'light') -eq $before} 'Escape did not cancel the held dial drag'
+    [CapyRowPointer]::Up();Start-Sleep -Milliseconds 250
+    if((Lighting-Value 'light') -ne $before){throw 'Releasing after Escape changed the light'}
+    $dial=Control 'property-light-dial';$dial.SetFocus();Wait-Until {$dial.Current.HasKeyboardFocus} 'The Light dial did not take focus'
+    [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x09);[CapyRowPointer]::Key([uint32]$review.Id,0x09)
+    Wait-Until {(Control 'property-light-dial').Current.HasKeyboardFocus} 'Tab did not return to the Light dial'
+    Capture "paper-lighting-focus-$theme" -Composed
+    [CapyRowPointer]::Key([uint32]$review.Id,0x27)
+    Wait-Until {(Lighting-Value 'light') -eq $before+1} 'Right did not step the focused dial'
+    Wait-Until {((Model).state.commands|Where-Object id -eq 'undo').enabled} 'The dial key step did not finish'
+    Relationship-Undo
+    Wait-Until {(Lighting-Value 'light') -eq $before} 'A dial key step needed more than one Undo'
+    $at=Lighting-Point 270 .84;[CapyRowPointer]::Down('mouse',$at[0],$at[1]);Start-Sleep -Milliseconds 35;[CapyRowPointer]::Up()
+    Wait-Until {(Lighting-Value 'light') -eq 270} 'A dial tap did not light from above'
+    $at=Lighting-Point 180 .84;$null=[CapyRowPointer]::DoubleClick($at[0],$at[1])
+    Wait-Until {(Lighting-Value 'light') -eq (Lighting-Property 'light').default.value} 'Double-clicking the dial did not restore the default light'
+    Lighting-Relief '0' {(Lighting-Value 'relief') -eq 0 -and (Lighting-Property 'light').disabled -and !(Control 'property-light-dial').Current.IsEnabled}
+}
 function Paper-Geometry {
     $list=Control 'layer-list'
     $viewport=$list.Current.BoundingRectangle
@@ -313,6 +406,7 @@ function Test-LayerPaper([switch]$Light) {
     foreach($theme in $(if($Light){@(2)}else{1..2})){
         Test-PaperTexture
         Paper-ScaleRelief
+        Test-PaperLighting
         Relationship-Layers
         if((Model).state.layer_tools.add_paper -or (Find 'layer-add-paper' -Visible)){throw 'Add paper appears while initial paper exists'}
         $paper=@((Model).state.layers)[-1].id

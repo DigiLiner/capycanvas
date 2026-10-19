@@ -291,7 +291,10 @@ Color, keyboard choice, Cancel, Use Texture with one Undo, Rename and Delete
 in the open dialog, a seeded library paper scrolled into view and a refused
 Use Texture after the drawing changes. They then drag Properties' Scale slider
 and require relief over the page while it is held, a flat page after release
-and one Undo.
+and one Undo. With Texture visibility at 0 they require Light and Shows through
+paint to be disabled, then check the Light dial's size and alignment with the
+slider rows, its dot, mouse, pen and touch drags with one Undo each, Escape,
+arrow steps and double-click reset.
 The Paper fixtures maximize their owned window and wait for two full rows in
 the Layers viewport before comparing row heights; UIA bounds are clipped to
 that viewport. Reacquire the current Layers list with bounded polling after
@@ -719,8 +722,10 @@ Properties sliders use the shared [compact numeric layout](../ui/numeric-control
 with the track beneath the caption and room for the value and its editor.
 Long captions trim and relabel without replacing the control.
 `exercise-effects.ps1 -Executable <path> -PropertyLayout -Theme dark` checks
-opacity and filter sliders, typed edits, fine mouse/pen/touch value drags,
-release, Escape while held, label reset and one Undo per drag in both themes.
+opacity and filter sliders, typed edits, mouse/pen/touch value drags that snap
+like the slider, a mouse drag that continues ten times slower while Shift is
+held, release, Escape while held, label reset and one Undo per drag in both
+themes.
 It also checks narrow Russian captions and a return to wider English controls
 with retained values and identity. The ordinary full effects journey also runs
 the value drags. A secondary mouse drag on the readout must preserve the shared

@@ -137,6 +137,14 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
         bindings.emplace_back([property,text,weak=make_weak(row),arrange]{auto title=str(property->model(),L"label");if(text.Text()!=title)text.Text(title);if(auto row=weak.get();row&&row.ActualWidth()>0)arrange(row.ActualWidth());});
         Grid::SetColumn(field,1);row.Children().Append(field);return row;
     }
+    static FrameworkElement gate(std::shared_ptr<Property> const& property,FrameworkElement const& field,Bindings& bindings){
+        ContentControl gate;gate.Content(field);gate.IsTabStop(false);gate.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+        AutomationProperties::SetAccessibilityView(gate,Automation::Peers::AccessibilityView::Raw);
+        bindings.emplace_back([property,weak=make_weak(gate)]{
+            if(auto gate=weak.get()){bool enabled=!flag(property->model(),L"disabled");gate.IsEnabled(enabled);gate.IsHitTestVisible(enabled);gate.Opacity(enabled?1.:.4);}
+        });
+        return gate;
+    }
     FrameworkElement build(J const& c,Bindings& bindings){
         auto property=std::make_shared<Property>(data,c);
         auto kind=object(c,L"kind");auto type=str(kind,L"kind");auto name=str(c,L"label");
@@ -358,7 +366,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
                 std::wstring key=str(c,L"key").c_str();auto shape=fieldSchema(c);
                 auto found=previous.find(key);
                 Field field=found!=previous.end()&&found->second.schema==shape?std::move(found->second):Field{nullptr,{},shape};
-                if(!field.row){field.row=build(c,field.bindings);}
+                if(!field.row){field.row=gate(std::make_shared<Property>(data,c),build(c,field.bindings),field.bindings);}
                 items.push_back(field.row);fields.insert_or_assign(key,std::move(field));
             }
             arrange(items);

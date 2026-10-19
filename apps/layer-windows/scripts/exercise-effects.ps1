@@ -309,18 +309,30 @@ function Check-PropertyValueScrub {Pointer-Session {
         }
         $before=(Property 'opacity').value.value;$box=(Control 'property-opacity' -Arranged).Current.BoundingRectangle
         $x=[int]($box.Left+$box.Width/2);$y=[int]($box.Top+$box.Height/2)
-        $expected=[Math]::Floor($before*100+31/([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)/4+.5)/100
+        $steps=31/([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)/4
+        $coarse=$expected=[Math]::Floor($before*100+$steps+.5)/100
         $scrubText=($expected*100).ToString('0.#',[Globalization.CultureInfo]::InvariantCulture)+' %'
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
         for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}
         try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $scrubText} "$device value scrub did not preview exact $expected with readout $scrubText"}catch{throw "$device scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
         Write-Host "$device coarse live=$((Property 'opacity').value.value), expected=$expected"
-        [CapyRowPointer]::Up()
+        if($device -eq 'mouse'){
+            $fine=[Math]::Round($expected+$steps/10/100,3);$fineText=($fine*100).ToString('0.#',[Globalization.CultureInfo]::InvariantCulture)+' %'
+            [CapyRowPointer]::Hold(0x10,$true)
+            try{
+                for($step=7;$step -le 12;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}
+                try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$fine) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $fineText} "Shift did not continue the scrub ten times slower from $expected to $fine"}catch{throw "Shift scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
+                Capture "opacity-fine-scrub-$((Model).state.theme)" -Composed
+                [CapyRowPointer]::Up()
+            }finally{[CapyRowPointer]::Hold(0x10,$false)}
+            $expected=$fine
+        }else{[CapyRowPointer]::Up()}
         Start-Sleep -Milliseconds 250
         Write-Host "$device coarse after Up=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value)"
         try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6} "$device coarse release changed the value"}catch{throw "$device coarse release actual=$((Property 'opacity').value.value), expected=${expected}: $_"}
         Wait-Until {((Model).state.commands|Where-Object id -eq 'undo').enabled} "$device value scrub did not finish"
         Invoke 'Undo' -Name;Wait-Until {(Property 'opacity').value.value -eq $before} "$device value scrub needed more than one Undo"
+        $expected=$coarse
         try{Wait-Until {(Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -in @('50','50 %') -and [Math]::Abs((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value-.5) -lt 1e-6} 'Scrub origin did not reach native controls'}catch{throw "Scrub origin native text=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value), slider=$((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value): $_"}
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
         for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}

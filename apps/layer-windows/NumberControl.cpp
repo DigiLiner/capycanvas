@@ -1,18 +1,62 @@
 #include "pch.h"
 #include "UiControls.h"
 #include "PointerGesture.h"
+#include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.Provider.h>
+#include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <limits>
+#include <numbers>
 
 namespace CapyUi {
 namespace {
+namespace Peers=Microsoft::UI::Xaml::Automation::Peers;
+namespace Provider=Microsoft::UI::Xaml::Automation::Provider;
 struct NumericCaption {hstring title,language,errorLanguage;J labels,errorReason;};
 struct NumberState {
     double value=0;bool editing=false,dragging=false,formatting=false,gesture=false;
-    bool scrubbing=false;std::optional<uint32_t> pointer,sliderPointer;double origin=0,originY=0;
+    bool scrubbing=false,turning=false,fine=false;std::optional<uint32_t> pointer,sliderPointer;double origin=0,originY=0;
+    double scrubOrigin=0,scrubBase=0,scrubPixels=0,dialShown=0;
     hstring identity;
     hstring measuredText;double measuredWidth=-1;
     std::function<J(J const&,double,J const&)> resolve;
 };
+struct DialRange {
+    std::function<double()> value;std::function<hstring()> text;std::function<void(J const&)> apply;
+    double scale=1,minimum=0,maximum=0,step=0;
+};
+struct DialText:implements<DialText,Provider::IValueProvider> {
+    weak_ref<Control> owner;std::shared_ptr<DialRange> range;
+    DialText(weak_ref<Control> control,std::shared_ptr<DialRange> source):owner(std::move(control)),range(std::move(source)){}
+    hstring Value(){return range->text();}
+    bool IsReadOnly(){auto control=owner.get();return !control||!control.IsEnabled();}
+    void SetValue(hstring const& text){if(!IsReadOnly())range->apply(O({{L"type",S(L"expression")},{L"text",S(text)}}));}
+};
+struct DialPeer:Peers::FrameworkElementAutomationPeerT<DialPeer,Provider::IRangeValueProvider> {
+    weak_ref<Control> owner;std::shared_ptr<DialRange> range;Provider::IValueProvider text;
+    DialPeer(Control const& control,std::shared_ptr<DialRange> const& source):FrameworkElementAutomationPeerT<DialPeer,Provider::IRangeValueProvider>(control),
+        owner(make_weak(control)),range(source),text(make<DialText>(make_weak(control),source)){}
+    Peers::AutomationControlType GetAutomationControlTypeCore(){return Peers::AutomationControlType::Slider;}
+    hstring GetClassNameCore(){return L"Dial";}
+    Windows::Foundation::IInspectable GetPatternCore(Peers::PatternInterface pattern){
+        if(pattern==Peers::PatternInterface::RangeValue)return *this;
+        if(pattern==Peers::PatternInterface::Value)return text;
+        return FrameworkElementAutomationPeerT<DialPeer,Provider::IRangeValueProvider>::GetPatternCore(pattern);
+    }
+    double Value(){return range->value()*range->scale;}
+    double Minimum(){return range->minimum*range->scale;}
+    double Maximum(){return range->maximum*range->scale;}
+    double SmallChange(){return range->step*range->scale;}
+    double LargeChange(){return SmallChange();}
+    bool IsReadOnly(){auto control=owner.get();return !control||!control.IsEnabled();}
+    void SetValue(double value){if(!IsReadOnly())range->apply(O({{L"type",S(L"value")},{L"value",N(value/range->scale)}}));}
+};
+struct Dial:ContentControlT<Dial> {
+    std::shared_ptr<DialRange> range=std::make_shared<DialRange>();
+    Peers::AutomationPeer OnCreateAutomationPeer(){return make<DialPeer>(*this,range);}
+};
+bool shifted(PointerRoutedEventArgs const& e){
+    using Windows::System::VirtualKeyModifiers;return (e.KeyModifiers()&VirtualKeyModifiers::Shift)==VirtualKeyModifiers::Shift;
+}
 void showNumericError(TextBox const& entry,hstring const& text){
     AutomationProperties::SetHelpText(entry,text);
     if(text.empty()){entry.BorderThickness({0});ToolTipService::SetToolTip(entry,nullptr);}
@@ -41,7 +85,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     auto phase=presentation.phase;auto presented=presentation.text;
     auto finish=[local,phase](hstring const& name){if(local->gesture){local->gesture=false;phase(name,local->value);}};
     auto showText=[local,spec,presented](wchar_t const* field){return presented?presented():str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),field);};
-    bool ranged=str(spec,L"kind")==L"slider",preference=presentation.preference,compact=presentation.compact&&!preference;
+    bool preference=presentation.preference,compact=presentation.compact&&!preference;
+    bool dial=str(spec,L"kind")==L"dial"&&!preference&&!valueOnly&&!inlineTrack,ranged=str(spec,L"kind")==L"slider"||dial;
     bool panel=ranged&&!preference&&!valueOnly&&!inlineTrack;
     double valueHeight=compact?data->controlHeight():preference?34.:(ranged?24.:32.),stepSize=panel?16.:compact?data->panelMetric(L"control_height"):ranged&&!preference?24.:32.;
     StackPanel root;root.Spacing(0);
@@ -61,6 +106,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     tooltip(text,title);
     StackPanel labels;labels.UseLayoutRounding(false);labels.VerticalAlignment(VerticalAlignment::Center);labels.Children().Append(text);
     if(panel){labels.VerticalAlignment(VerticalAlignment::Top);text.MinHeight(20);}
+    double dialSize=data->panelMetric(L"slider_height")-2*data->panelMetric(L"control_spacing");
+    if(dial)labels.Margin({0,0,dialSize+data->panelMetric(L"control_spacing"),0});
     weak_ref<TextBlock> detailView;
     if(!presentation.description.empty()||presentation.descriptionText){
         auto detail=label(data,presentation.description);detailView=make_weak(detail);detail.FontSize(data->textSize()/1.2);
@@ -122,8 +169,35 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         });
     }else header.Children().Append(entry);
     AutomationProperties::SetName(entry,str(numericLabels,L"edit"));if(!identifier.empty())AutomationProperties::SetAutomationId(entry,identifier);
+    auto palette=object(data->state,L"palette");
+    auto panelColor=color(str(palette,L"panel")),textColor=color(str(palette,L"text"));
+    auto track=fill({255,uint8_t((int(panelColor.R)+textColor.R)/2),
+        uint8_t((int(panelColor.G)+textColor.G)/2),uint8_t((int(panelColor.B)+textColor.B)/2)});
+    ContentControl dialView{nullptr};weak_ref<ContentControl> dialWeak;std::shared_ptr<DialRange> dialRange;
+    TranslateTransform dialDot{nullptr};
+    if(dial){
+        auto implementation=make_self<Dial>();dialRange=implementation->range;dialView=implementation.as<ContentControl>();dialWeak=make_weak(dialView);
+        dialRange->scale=num(spec,L"scale",1);dialRange->minimum=num(spec,L"min");dialRange->maximum=num(spec,L"max");dialRange->step=num(spec,L"step");
+        Grid face;face.Background(clear());face.ManipulationMode(ManipulationModes::None);
+        Shapes::Ellipse disc;disc.Fill(data->brush(L"input"));disc.IsHitTestVisible(false);face.Children().Append(disc);
+        Shapes::Ellipse ring;ring.Stroke(data->tint(L"text",153));ring.StrokeThickness(2);ring.IsHitTestVisible(false);ring.Visibility(Visibility::Collapsed);face.Children().Append(ring);
+        Shapes::Ellipse dot;dot.Width(dialSize*.22);dot.Height(dialSize*.22);dot.Fill(track);dot.IsHitTestVisible(false);
+        dot.HorizontalAlignment(HorizontalAlignment::Center);dot.VerticalAlignment(VerticalAlignment::Center);
+        dialDot=TranslateTransform();dot.RenderTransform(dialDot);face.Children().Append(dot);
+        dialView.Content(face);dialView.Width(dialSize);dialView.Height(dialSize);dialView.Padding({0});
+        dialView.HorizontalContentAlignment(HorizontalAlignment::Stretch);dialView.VerticalContentAlignment(VerticalAlignment::Stretch);
+        dialView.HorizontalAlignment(HorizontalAlignment::Right);dialView.VerticalAlignment(VerticalAlignment::Center);dialView.Margin({0,0,76,0});
+        dialView.IsTabStop(true);dialView.UseSystemFocusVisuals(false);dialView.ManipulationMode(ManipulationModes::None);
+        Grid::SetRowSpan(dialView,2);Grid::SetColumnSpan(dialView,2);
+        AutomationProperties::SetName(dialView,title);AutomationProperties::SetAutomationId(dialView,numberId+L"-dial");tooltip(dialView,title);
+        dialView.GotFocus([dialWeak,ring=make_weak(ring)](auto&&,auto&&){
+            if(auto view=dialWeak.get())if(auto focus=ring.get())focus.Visibility(view.FocusState()==FocusState::Keyboard?Visibility::Visible:Visibility::Collapsed);
+        });
+        dialView.LostFocus([ring=make_weak(ring)](auto&&,auto&&){if(auto focus=ring.get())focus.Visibility(Visibility::Collapsed);});
+        header.Children().Append(dialView);
+    }
     Slider slider;
-    auto presentCaption=[source=std::weak_ptr<WorkspaceData>(data),numericCopy,currentTitle,caption,description=presentation.descriptionText,root=make_weak(root),text=make_weak(text),detail=detailView,entry=make_weak(entry),slider=make_weak(slider)]{
+    auto presentCaption=[source=std::weak_ptr<WorkspaceData>(data),numericCopy,currentTitle,caption,description=presentation.descriptionText,root=make_weak(root),text=make_weak(text),detail=detailView,entry=make_weak(entry),slider=make_weak(slider),dialWeak]{
         auto data=source.lock();auto control=entry.get();if(!data||!control)return false;
         auto title=currentTitle();auto labels=numericCopy();
         AutomationProperties::SetName(control,str(labels,L"edit"));
@@ -131,6 +205,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         if(auto view=text.get()){view.Text(title);tooltip(view,title);}
         if(auto view=detail.get();view&&description){auto descriptionText=description();view.Text(descriptionText);view.Visibility(descriptionText.empty()?Visibility::Collapsed:Visibility::Visible);}
         if(auto view=slider.get())AutomationProperties::SetName(view,title);
+        if(auto view=dialWeak.get()){AutomationProperties::SetName(view,title);tooltip(view,title);}
         if(caption->errorReason.Size()&&caption->errorLanguage!=data->language()){showNumericError(control,data->caption(O({{L"type",S(L"numeric_error")},{L"reason",caption->errorReason}})));caption->errorLanguage=data->language();}
         return true;
     };
@@ -143,9 +218,17 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         local->measuredText=value;local->measuredWidth=double(measure.DesiredSize().Width);return local->measuredWidth;
     };
     auto surface=make_weak(valueSurface);
-    auto setText=[data,local,measureText,readout,panelValueBox,surface,hiddenText,ranged,valueOnly,inlineTrack,preference,panel,weak=make_weak(entry)](hstring const& value){
+    auto setText=[data,local,measureText,readout,panelValueBox,surface,hiddenText,ranged,valueOnly,inlineTrack,preference,panel,dialWeak,dialDot,dialSize,scale=num(spec,L"scale",1),weak=make_weak(entry)](hstring const& value){
         bool previous=std::exchange(local->formatting,true);
         struct Reset{bool& value;bool previous;~Reset(){value=previous;}} reset{local->formatting,previous};
+        if(dialDot){
+            double angle=local->value*scale*std::numbers::pi/180;
+            dialDot.X(std::cos(angle)*dialSize*.275);dialDot.Y(std::sin(angle)*dialSize*.275);
+            double shown=std::exchange(local->dialShown,local->value);
+            if(auto view=dialWeak.get();view&&shown!=local->value&&Peers::AutomationPeer::ListenerExists(Peers::AutomationEvents::PropertyChanged))
+                if(auto peer=Peers::FrameworkElementAutomationPeer::FromElement(view))
+                    peer.RaisePropertyChangedEvent(Automation::RangeValuePatternIdentifiers::ValueProperty(),box_value(shown*scale),box_value(local->value*scale));
+        }
         if(auto control=weak.get()){
             if(control.Text()!=value)control.Text(value);
             if(auto display=readout.get()){
@@ -192,10 +275,6 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             slider.Resources().Insert(box_value(key),box_value(0.));
     }
     AutomationProperties::SetName(slider,title);if(!identifier.empty())AutomationProperties::SetAutomationId(slider,identifier+L"-slider");
-    auto palette=object(data->state,L"palette");
-    auto panelColor=color(str(palette,L"panel")),textColor=color(str(palette,L"text"));
-    auto track=fill({255,uint8_t((int(panelColor.R)+textColor.R)/2),
-        uint8_t((int(panelColor.G)+textColor.G)/2),uint8_t((int(panelColor.B)+textColor.B)/2)});
     for(auto key:{L"SliderTrackValueFill",L"SliderTrackValueFillPointerOver",L"SliderTrackValueFillPressed",L"SliderTrackValueFillDisabled"})
         slider.Resources().Insert(box_value(key),preference?accent(data):track);
     for(auto key:{L"SliderThumbBackground",L"SliderThumbBackgroundPointerOver",L"SliderThumbBackgroundPressed"})
@@ -229,36 +308,41 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     if(admissions)admissions->emplace_back(commit);
     if(panel){
         auto surfaceY=[weak=make_weak(valueSurface)](PointerRoutedEventArgs const& e){return e.GetCurrentPoint(weak.get().XamlRoot().Content().as<UIElement>()).Position().Y;};
-        auto restore=[local,spec,set,setText,finish,weak=make_weak(valueSurface)]{
-            bool active=std::exchange(local->scrubbing,false);local->pointer.reset();local->dragging=false;
+        auto restore=[local,spec,set,setText,finish,weak=make_weak(valueSurface),dialWeak]{
+            bool active=std::exchange(local->scrubbing,false);active=std::exchange(local->turning,false)||active;
+            local->pointer.reset();local->dragging=false;
             if(auto target=weak.get())target.ReleasePointerCaptures();
+            if(auto target=dialWeak.get())target.ReleasePointerCaptures();
             if(active){bool transaction=local->gesture;finish(L"cancel");local->value=local->origin;if(!transaction)set(local->value);}
             setText(str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text"));
         };
-        auto move=[local,spec,set,setText,phase](double y){
+        auto move=[local,spec,set,setText,phase](double y,bool fine){
             double pixels=local->originY-y;
+            if(fine!=local->fine){local->fine=fine;local->scrubOrigin=local->value;local->scrubBase=local->scrubPixels;}
+            local->scrubPixels=pixels;
             auto dpi=GetDpiForSystem();double slop=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
             if(!local->scrubbing&&std::abs(pixels)<=slop)return;
             if(!std::exchange(local->scrubbing,true)&&phase){local->gesture=true;phase(L"down",local->origin);}
-            auto next=local->resolve(spec,local->origin,O({{L"type",S(L"scrub")},{L"origin",N(local->origin)},{L"pixels",N(pixels)}}));
+            auto next=local->resolve(spec,local->scrubOrigin,O({{L"type",S(L"scrub")},{L"origin",N(local->scrubOrigin)},{L"pixels",N(pixels-local->scrubBase)},{L"fine",B(fine)}}));
             local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);
         };
         valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr))||!commit(false))return;
             auto target=weak.get();if(!target||!target.IsEnabled())return;
-            local->pointer=e.Pointer().PointerId();local->origin=local->value;local->originY=surfaceY(e);
+            local->pointer=e.Pointer().PointerId();local->origin=local->scrubOrigin=local->value;local->originY=surfaceY(e);
+            local->fine=shifted(e);local->scrubBase=local->scrubPixels=0;
             if(!target.CapturePointer(e.Pointer())){local->pointer.reset();return;}
             local->dragging=true;target.Focus(FocusState::Pointer);e.Handled(true);
         })),true);
         valueSurface.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([local,move,restore,surfaceY,identity=presentation.identity](auto&&,PointerRoutedEventArgs const& e){
             if(local->pointer!=e.Pointer().PointerId())return;
             if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()||(identity&&local->identity!=identity())){restore();return;}
-            move(surfaceY(e));e.Handled(true);
+            move(surfaceY(e),shifted(e));e.Handled(true);
         })),true);
         valueSurface.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([local,move,finish,setText,showText,restore,surfaceY,weak=make_weak(entry),surface=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(local->pointer!=e.Pointer().PointerId())return;
             if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()){restore();return;}
-            bool scrub=local->scrubbing;if(scrub)move(surfaceY(e));
+            bool scrub=local->scrubbing;if(scrub)move(surfaceY(e),shifted(e));
             local->pointer.reset();local->dragging=false;local->scrubbing=false;
             if(auto target=surface.get())target.ReleasePointerCaptures();
             if(scrub){finish(L"up");setText(showText(L"text"));}else if(auto entry=weak.get())entry.Focus(FocusState::Pointer);
@@ -273,12 +357,70 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
                 if(auto entry=weak.get())entry.Focus(FocusState::Keyboard);e.Handled(true);
             }
         });
-        text.DoubleTapped([local,spec,set,commit,reset=presentation.reset](auto&&,DoubleTappedRoutedEventArgs const& e){
+        auto resetValue=[local,spec,set,commit,reset=presentation.reset]{
             commit(true);
             if(reset)reset();else if(spec.HasKey(L"default_value")&&spec.GetNamedValue(L"default_value").ValueType()==Windows::Data::Json::JsonValueType::Number){
                 auto next=local->resolve(spec,local->value,O({{L"type",S(L"expression")},{L"text",S(L"")}}));local->value=num(next,L"value");set(local->value);
-            }e.Handled(true);
-        });
+            }
+        };
+        text.DoubleTapped([resetValue](auto&&,DoubleTappedRoutedEventArgs const& e){resetValue();e.Handled(true);});
+        if(dial){
+            auto turn=[local,spec,set,setText,weak=make_weak(entry)](J const& operation){
+                auto next=local->resolve(spec,local->value,operation);bool changed=num(next,L"value")!=local->value;
+                local->value=num(next,L"value");
+                if(auto entry=weak.get())setText(str(next,entry.FocusState()==FocusState::Unfocused?L"text":L"edit"));
+                if(changed)set(local->value);
+            };
+            auto point=[dialWeak](PointerRoutedEventArgs const& e){
+                auto view=dialWeak.get();auto at=e.GetCurrentPoint(view).Position();double width=view.ActualWidth(),height=view.ActualHeight();
+                return O({{L"type",S(L"dial")},{L"x",N(at.X-width/2)},{L"y",N(at.Y-height/2)},{L"radius",N(std::min(width,height)/2)}});
+            };
+            dialRange->value=[local]{return local->value;};
+            dialRange->text=[local,spec]{return str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text");};
+            dialRange->apply=[local,commit,turn](J const& operation){if(!local->pointer&&commit(false))turn(operation);};
+            dialView.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,phase,turn,point,resetValue,dialWeak,pressed=std::make_shared<uint64_t>()](auto&&,PointerRoutedEventArgs const& e){
+                auto view=dialWeak.get();if(!view||local->pointer||!view.IsEnabled())return;
+                auto contact=e.GetCurrentPoint(view);
+                if(!PointerGesture::PrimaryContact(contact))return;
+                bool repeated=contact.Timestamp()-std::exchange(*pressed,contact.Timestamp())<=uint64_t(GetDoubleClickTime())*1000;
+                if(repeated){*pressed=0;view.Focus(FocusState::Pointer);resetValue();e.Handled(true);return;}
+                if(!commit(false)||!view.CapturePointer(e.Pointer()))return;
+                view.Focus(FocusState::Pointer);
+                local->pointer=contact.PointerId();local->origin=local->value;local->dragging=true;local->turning=true;
+                if(phase){local->gesture=true;phase(L"down",local->value);}
+                turn(point(e));e.Handled(true);
+            })),true);
+            dialView.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([local,restore,turn,point,identity=presentation.identity](auto&&,PointerRoutedEventArgs const& e){
+                if(local->pointer!=e.Pointer().PointerId()||!local->turning)return;
+                if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()||(identity&&local->identity!=identity())){restore();return;}
+                turn(point(e));e.Handled(true);
+            })),true);
+            dialView.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([local,restore,turn,point,finish,dialWeak](auto&&,PointerRoutedEventArgs const& e){
+                if(local->pointer!=e.Pointer().PointerId()||!local->turning)return;
+                if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()){restore();return;}
+                turn(point(e));local->pointer.reset();local->dragging=false;local->turning=false;
+                if(auto view=dialWeak.get())view.ReleasePointerCaptures();
+                finish(L"up");e.Handled(true);
+            })),true);
+            auto release=[local,restore](auto&&,PointerRoutedEventArgs const& e){if(local->turning&&local->pointer==e.Pointer().PointerId())restore();};
+            dialView.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler(release)),true);
+            dialView.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler(release)),true);
+            dialView.KeyDown([local,commit,phase,finish,turn](auto&&,KeyRoutedEventArgs const& e){
+                using Windows::System::VirtualKey;auto key=e.Key();
+                if(local->pointer)return;
+                if(key==VirtualKey::Escape&&local->gesture){finish(L"cancel");e.Handled(true);return;}
+                int steps=key==VirtualKey::Right||key==VirtualKey::Up?1:key==VirtualKey::Left||key==VirtualKey::Down?-1:0;
+                if(!steps)return;
+                e.Handled(true);if(!commit(false))return;
+                if(phase&&!local->gesture){local->gesture=true;phase(L"down",local->value);}
+                turn(O({{L"type",S(L"step")},{L"steps",N(steps)}}));
+            });
+            dialView.KeyUp([local,finish](auto&&,KeyRoutedEventArgs const& e){
+                using Windows::System::VirtualKey;auto key=e.Key();
+                if(!local->pointer&&(key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Left||key==VirtualKey::Down))finish(L"up");
+            });
+            dialView.LostFocus([local,finish](auto&&,auto&&){if(!local->pointer)finish(L"up");});
+        }
     }
     entry.GotFocus([data,local,showText,setText](Windows::Foundation::IInspectable const& sender,RoutedEventArgs const&){
         auto entry=sender.as<TextBox>();entry.Background(data->brush(L"input"));
@@ -339,7 +481,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         if(identity && local->identity!=identity()){
             local->sliderPointer.reset();
             finish(L"cancel");
-            local->identity=identity();local->editing=false;local->dragging=false;local->pointer.reset();local->scrubbing=false;
+            local->identity=identity();local->editing=false;local->dragging=false;local->pointer.reset();local->scrubbing=false;local->turning=false;
             showNumericError(entry,L"");caption->errorReason=J{};
         }
         if(local->editing||local->dragging)return;
@@ -350,7 +492,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         entry.Background(entry.FocusState()==FocusState::Unfocused?clear():data->brush(L"input"));
         slider.Value(num(shown,L"fill"));
     });
-    root.Unloaded([local,finish](auto&&,auto&&){local->sliderPointer.reset();finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->dragging=false;});
+    root.Unloaded([local,finish](auto&&,auto&&){local->sliderPointer.reset();finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->turning=false;local->dragging=false;});
     if(inlineTrack){
         // Compact layer controls retain the same shared value/expression rules
         // and target guards as full numeric controls.
@@ -371,7 +513,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     }
     if(panel){
         slider.Margin({36,0,76,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);Grid::SetRow(slider,1);
-        header.Children().Append(slider);root.Children().Append(header);return root;
+        if(!dial)header.Children().Append(slider);
+        root.Children().Append(header);return root;
     }
     StackPanel spin;spin.Orientation(Orientation::Horizontal);spin.Spacing(0);
     if(!ranged){
