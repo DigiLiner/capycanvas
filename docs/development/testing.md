@@ -6,9 +6,11 @@ Different checks answer different questions. Shared tests exercise document and
 editor rules without a window. Host tests exercise native controls and input.
 GPU tests check pixels and rendering cost. Device tests establish whether real
 pen and display behaviour matches the intended interaction. None substitutes for
-another. CI runs only the window-free shared suites, the Wasm check, the Apple
-project check and the license check ([releasing](releasing.md#continuous-integration)),
-so run the checks for every area your change touches.
+another. Ordinary CI runs the window-free shared suites, the Wasm check, the Apple
+project check and the license check. The manually dispatched release dry run adds
+platform builds, packaging, script suites and software-adapter correctness tests
+([release validation](releasing.md#release-validation)). Run the checks for every
+area your change touches; hosted validation does not replace hardware journeys.
 
 The renderer's `dry_material::tests` module also runs in CI without a GPU.
 `every_kernel_entry_resolves_its_overrides` validates each generated dry-material
@@ -85,8 +87,9 @@ in both themes.
 
 ## Checks by change type
 
-CI's Arch job installs the package recipe's dependencies into a fresh Arch
-container, tests SDK validation, and builds the default GTK development launcher.
+The release validation Arch job installs the package recipe's dependencies into
+a fresh Arch container, tests SDK validation, and builds the default GTK
+development launcher.
 It verifies the private GTK/GLib/Pango library paths and text/codec behavior,
 then repeats the launcher build offline. Changes to the runtime recipe or SDK
 setup run these same checks and the source regressions in the

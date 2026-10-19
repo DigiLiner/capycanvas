@@ -107,6 +107,9 @@ icons and brush previews from `apps/layer-web`, the iPad app icon from
 `scripts/release.sh` also adds the Rust toolchain notices and, through
 `scripts/package-notices.mjs` and the pinned `cargo-about`, the exact notices of
 the Rust dependencies linked for the archived target.
+The iPad archive is retained after building. `scripts/release.sh ipad publish`
+uploads that existing signed archive after the other platform packages pass;
+building an archive never uploads it.
 The Xcode generation phase declares its resource outputs so incremental builds
 compile the newly generated assets and localized names.
 
@@ -574,6 +577,7 @@ The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
 
 | Runner | Checks |
 | --- | --- |
+| `scripts/test-without-gpu.sh` | Direct Swift state/input fixtures, owner and workspace persistence, color input and sandbox file grants without attaching Metal surfaces; logs under `artifacts/release-tests/apple` |
 | `scripts/test-persistence.sh` | Atomic settings files, backup exclusion and the settings owner |
 | `scripts/test-color-input.sh` | AppKit color text entry in all RGB spaces |
 | `scripts/test-project-access.py` | Project writes through a file-only App Sandbox grant |
@@ -838,10 +842,14 @@ Passing the audit establishes catalog coverage, not working native workflows.
 The inventory restores editing memory before each tool path and compares all
 authored filter values, including values hidden by conditional controls. Projected
 control readbacks retain their published types; Undo, Redo and rejected locked
-edits also compare the complete authored effect and spatial mapping. Property
-schema comparisons exclude curve and gradient interaction epochs while retaining
+or disabled edits also compare the complete authored effect and spatial mapping.
+Each property trial restores its starting values after checking Reset, preserving
+the availability of later controls. Property schema comparisons exclude curve
+and gradient interaction epochs while retaining
 their action targets. Run its regression checks with
 `cargo test --locked -p layer-host --example inventory`.
+Release validation also generates a CPU inventory and checks its property
+evidence; the full command audit still needs the hardware tool paths above.
 
 ## Debugging and evidence
 

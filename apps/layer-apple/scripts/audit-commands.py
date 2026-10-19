@@ -29,13 +29,6 @@ def comparable(control):
             "gradient": gradient and {**gradient, "destination": {**gradient["destination"], "epoch": None}}}
 
 
-def settled(control, edits):
-    result = next((edit["result"] for edit in edits if edit["key"] == control["key"] and edit["result"]), None)
-    if result is None:
-        return comparable(control)
-    return comparable({**control, "value": result["reset"], "modified": result["reset"] != control["default"]})
-
-
 def shared_properties(coverage, platform, model):
     scenarios = model["property_scenarios"]
     expected = ["paint", "paper", "group"] + ["filter:" + item["id"]
@@ -54,7 +47,7 @@ def shared_properties(coverage, platform, model):
         if scenario["lock_action"] is None:
             if name != "paper" or locked is not None or scenario["locked_edit"] is not None:
                 raise ValueError(f"{platform} property locking capability drift: {name}")
-        elif locked["enabled"] or [comparable(item) for item in locked["controls"]] != [settled(item, scenario["edits"]) for item in view["controls"]]:
+        elif locked["enabled"] or [comparable(item) for item in locked["controls"]] != [comparable(item) for item in view["controls"]]:
             raise ValueError(f"{platform} property lock changed values/schema or remained editable: {name}")
         elif view["controls"] and (not scenario["locked_edit"]["error"] or not scenario["locked_edit"]["values_unchanged"]):
             raise ValueError(f"{platform} locked property edit was not rejected intact: {name}")
@@ -68,10 +61,15 @@ def shared_properties(coverage, platform, model):
             if edit["error"] or not result:
                 raise ValueError(f"{platform} property edit failed: {name}/{edit['key']}: {edit['error']}")
             action = result["action"]
-            if (action["type"] != "effect" or action["action"]["op"] != "set"
+            disabled = control.get("disabled", False)
+            if (action["type"] != "effect" or action["action"]["op"] != ("reset" if disabled else "set")
                     or action["action"]["key"] != edit["key"] or action["action"]["layer"] != view["layer"]
-                    or action["action"]["value"]["kind"] != control["kind"]["kind"]):
+                    or not disabled and action["action"]["value"]["kind"] != control["kind"]["kind"]):
                 raise ValueError(f"{platform} property action routing mismatch: {name}/{edit['key']}")
+            if disabled:
+                if not result.get("disabled") or not result.get("edit_error") or not result.get("values_unchanged"):
+                    raise ValueError(f"{platform} disabled property edit was not rejected intact: {name}/{edit['key']}")
+                continue
             if (result["before"] != control["value"] or result["before"] == result["edited"] or result["reset"] != control["default"]
                     or not result["undo_restored_all_properties"] or not result["redo_restored_all_properties"]):
                 raise ValueError(f"{platform} property edit/history/reset mismatch: {name}/{edit['key']}")

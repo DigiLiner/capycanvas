@@ -1,13 +1,20 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
+    inputs:
+      rust-version:
+        type: string
+        default: "1.99.0"
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.99.0"
+  RUST_VERSION: ${{ inputs.rust-version || '1.99.0' }}
 jobs:
   checks:
     runs-on: ubuntu-24.04
@@ -20,40 +27,6 @@ jobs:
       - run: cargo check --locked -p layer-web --target wasm32-unknown-unknown
       - run: python3 apps/layer-apple/scripts/project.py && git diff --exit-code
       - run: python3 -m unittest discover -s tools/git -p 'test_*.py'
-  windows:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x64
-            target: x86_64-pc-windows-msvc
-            runner: windows-2025
-          - architecture: arm64
-            target: aarch64-pc-windows-msvc
-            runner: windows-11-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: |
-          rustup toolchain install $env:RUST_VERSION --profile minimal --target ${{ matrix.target }}
-          rustup default $env:RUST_VERSION
-      - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
-  arch:
-    runs-on: ubuntu-24.04
-    container: archlinux:base-devel
-    env:
-      CAPY_BUILD_JOBS: "2"
-      CARGO_BUILD_JOBS: "2"
-    steps:
-      - run: pacman -Syu --noconfirm git
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: bash tools/build/arch-setup.sh --noconfirm
-      - run: python3 tools/build/gtk-runtime/test-environment.py
-      - run: python3 tools/build/gtk-runtime/test-configure.py
-      - run: node --test apps/layer-linux/package.test.mjs tools/build/development-profile.test.mjs
-      - run: apps/layer-linux/run.sh --help
-      - run: python3 tools/build/gtk-runtime/test-runtime.py target/gtk-runtime/prefix target/gtk-runtime/gtk-4.24.1/subprojects
-      - run: CARGO_NET_OFFLINE=true apps/layer-linux/run.sh --help
   licenses:
     runs-on: ubuntu-24.04
     steps:

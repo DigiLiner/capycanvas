@@ -1,0 +1,220 @@
+name: Release checks
+on:
+  workflow_call:
+    inputs:
+      rust-version:
+        required: true
+        type: string
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_TERM_COLOR: never
+  RUST_VERSION: ${{ inputs.rust-version }}
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      rust-version: ${{ inputs.rust-version }}
+
+  scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$RUST_VERSION" --profile minimal && rustup default "$RUST_VERSION"
+      - run: python3 -m pip install -r tools/visual/requirements.txt numpy
+      - name: Validate GitHub workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck= -pyflakes=
+      - name: Python unit tests
+        run: |
+          mkdir -p artifacts/release-tests
+          failed=0
+          for directory in tools/build tools/git tools/devices tools/windows-vm tools/visual tools/prediction tools/performance apps/layer-apple/tests apps/layer-linux/bench; do
+            python3 -m unittest discover -s "$directory" -p 'test_*.py' > "artifacts/release-tests/${directory//\//-}.log" 2>&1 || failed=1
+            cat "artifacts/release-tests/${directory//\//-}.log"
+          done
+          exit "$failed"
+      - name: Web unit tests
+        if: ${{ !cancelled() }}
+        run: node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization,numeric,histogram,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy,color-button-lifecycle,gpu-diagnostics,raster-worker-client,pipeline-wait}.test.mjs 2>&1 | tee artifacts/release-tests/web.log
+      - name: Packaging, capture and report unit tests
+        if: ${{ !cancelled() }}
+        run: node --test apps/layer-linux/package.test.mjs apps/layer-linux/bench/window-capture.test.mjs tools/build/*.test.mjs tools/performance/windows-pen-report.test.mjs tools/cdp.test.mjs 2>&1 | tee artifacts/release-tests/node.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: script-test-reports
+          path: artifacts/release-tests
+          if-no-files-found: error
+
+  renderer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CAPY_STORAGE_DIR: ${{ github.workspace }}/artifacts/release-tests/profile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          mkdir -p "$CAPY_STORAGE_DIR"
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy
+          rustup default "$RUST_VERSION"
+      - name: Renderer CPU models and shader contracts
+        run: |
+          cargo test --locked --release -p layer-render-wgpu --lib -- \
+            dry_material::tests:: pixel_transform::program_tests:: attached:: \
+            bristle_table::tests:: brush_stamp::tests:: brush_tiles::tests:: builtin_masks:: \
+            display_memory::tests:: effects::tests:: moving_projection::tests:: pixel_rect::tests:: \
+            paint_transform::fine_demand:: paint_transform::region_batches:: \
+            paint_transform::sampling::tests:: paint_transform::snapshot::tests:: \
+            paint_transform::mesh::tests:: scene::metadata::tests:: scene::object_spatial::tests:: \
+            scene::resample::program_tests:: scene::scale::graph::object_reuse_tests:: \
+            startup::admission::tests:: startup::platform::tests:: shader_cache::tests:: \
+            object_sampling::reference::tests:: retouch_sources::heal::tests:: \
+            startup::tests::shader_document_ \
+            startup::tests::brush_shader_key_ignores_color_and_size_but_tracks_pipeline_changes \
+            startup::tests::dependencies_precede_speculation_and_promotions_compile_once \
+            display_mips::tests::large_photo_display_plans_bound_pixels_without_changing_document_dimensions \
+            object_sampling::tests::preflight_refuses_finite_mappings_that_cannot_form_gpu_source_coordinates \
+            object_sampling::tests::nearest_coordinate_chunks_preserve_f64_boundaries_and_reject_unbounded_requests \
+            object_sampling::tests::nearest_has_no_footprint_cap_but_checks_finite_linear_precision \
+            object_sampling::tests::reference_stretch_agrees_with_independent_eigenvectors \
+            tests::gpu_records_match_shader_layouts \
+            tests::zoomed_out_previews_evaluate_paint_in_blocks_no_larger_than_a_surface_pixel \
+            tests::clipped_empty_damage_never_visits_a_page \
+            tests::pixel_rect_subtraction_preserves_every_pixel_outside_the_overlap \
+            raster::native_tests::raster_capture_waits_share_the_selected_gpu_budget \
+            --skip cached_gpu_startup_matches_eager_pixels_and_waits_for_catalog \
+            --skip positions_grow_and_keep_their_texture_for_smaller_windows \
+            2>&1 | tee artifacts/release-tests/renderer.log
+      - name: Apple bridge model tests
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked --release -p layer-apple --lib -- \
+            tests::header:: tests::toolbar_component:: tests::palette:: tests::workspace_motion:: tests::source:: \
+            tests::workspace_request_starts_resumes_scene_and_closes \
+            tests::color_raster_ffi_validates_buffer_and_matches_shared_spaces \
+            tests::compact_color_circle_picking_uses_shared_shapes \
+            tests::filter_property_edits_reset_and_undo_through_the_abi \
+            tests::application_menu_hover_switches_only_an_open_neighbor_on_both_apple_platforms \
+            tests::stateless_ tests::apple_ruler_toggles_flip_their_checkable_commands \
+            tests::optional_gpu_timing_has_explicit_uninitialized_state_and_bounded_abi \
+            tests::apple_color_hit_classifies_wheel_parts tests::apple_launch_ \
+            tests::apple_native_boundaries_preserve_panic_diagnostics \
+            tests::apple_language_publication_is_atomic_deferred_and_window_local \
+            tests::ui_actions_change_only_the_addressed_apple_session \
+            tests::storage_names_every_store_within_the_folders_it_is_given \
+            --test-threads=1 2>&1 | tee artifacts/release-tests/apple-bridge.log
+      - name: Android bridge tests
+        if: ${{ !cancelled() }}
+        run: cargo test --locked --release -p layer-android --lib 2>&1 | tee artifacts/release-tests/android-bridge.log
+      - name: Command inventory regression tests
+        if: ${{ !cancelled() }}
+        run: |
+          cargo test --locked --release -p layer-host --example inventory 2>&1 | tee artifacts/release-tests/inventory.log
+          cargo run --locked --release -p layer-host --example inventory > artifacts/release-tests/inventory.json
+          python3 apps/layer-apple/scripts/test-property-audit.py artifacts/release-tests/inventory.json 2>&1 | tee artifacts/release-tests/property-audit.log
+      - name: Windows bridge lint
+        if: ${{ !cancelled() }}
+        run: cargo clippy --locked -p layer-windows --all-targets --no-deps -- -D warnings
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: renderer-test-reports
+          path: |
+            artifacts/release-tests/*.log
+            artifacts/release-tests/inventory.json
+          if-no-files-found: error
+
+  prediction:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          python3 -m pip install numpy
+      - run: cargo test --locked -p layer-engine --features prediction-bench
+      - run: cargo build --locked -p layer-engine --release --features prediction-bench --examples
+      - run: python3 tools/prediction/replay-bank.py --bin-dir target/release/examples --output artifacts/release-tests/prediction --analyze --check
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: prediction-test-reports
+          path: artifacts/release-tests/prediction
+          if-no-files-found: warn
+
+  arch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container: archlinux:base-devel
+    env:
+      CAPY_BUILD_JOBS: "2"
+      CARGO_BUILD_JOBS: "2"
+      CAPY_STORAGE_DIR: ${{ github.workspace }}/artifacts/release-tests/profile
+    steps:
+      - run: pacman -Syu --noconfirm git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash tools/build/arch-setup.sh --noconfirm
+      - run: python3 tools/build/gtk-runtime/test-environment.py
+      - run: python3 tools/build/gtk-runtime/test-configure.py
+      - run: apps/layer-linux/run.sh --help
+      - run: python3 tools/build/gtk-runtime/test-runtime.py target/gtk-runtime/prefix target/gtk-runtime/gtk-4.24.1/subprojects
+      - run: python3 tools/build/gtk-runtime/test-tablet-entry.py target/gtk-runtime/gtk-4.24.1
+      - run: python3 tools/build/gtk-runtime/test-pad-focus.py target/gtk-runtime/gtk-4.24.1
+      - run: LD_LIBRARY_PATH="$PWD/target/gtk-runtime/prefix/lib" cargo test --locked -p layer-linux --lib
+      - run: CARGO_NET_OFFLINE=true apps/layer-linux/run.sh --help
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            target: x86_64-pc-windows-msvc
+            runner: windows-2025
+          - architecture: arm64
+            target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal --component clippy --target ${{ matrix.target }}
+          rustup default $env:RUST_VERSION
+      - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
+      - run: ./apps/layer-windows/tests/model-snapshot-reader.ps1
+      - run: ./apps/layer-windows/tests/fixture-owner-census.ps1 -Helper apps/layer-windows/scripts/CapyUia.ps1 -Output artifacts/windows/fixture-owner-census-ci
+      - run: cargo clippy --locked -p layer-windows --all-targets --no-deps -- -D warnings
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: windows-${{ matrix.architecture }}-test-reports
+          path: artifacts/windows/**/*.log
+          if-no-files-found: warn
+
+  apple:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-apple-darwin --target aarch64-apple-ios-sim
+          rustup default "$RUST_VERSION"
+      - name: Build iPad simulator and its XCTest bundle
+        run: apps/layer-apple/scripts/build.sh simulator build-for-testing
+      - name: Swift tests without Metal surfaces
+        run: bash apps/layer-apple/scripts/test-without-gpu.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: apple-test-reports
+          path: artifacts/release-tests/apple
+          if-no-files-found: warn

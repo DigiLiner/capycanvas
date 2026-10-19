@@ -8,6 +8,14 @@ fn normalize_session_identity(app: &App, snapshot: &mut Value) {
     let encoded = serde_json::to_vec(&app.state()).unwrap();
     let live: Value = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(snapshot["state"], live);
+    let session = &unsafe { &*app.0 }.host.session;
+    for (key, context) in [
+        ("color_edit_context", session.color_edit_context()),
+        ("color_wheel_context", session.color_wheel_context()),
+    ] {
+        assert_eq!(snapshot[key], serde_json::to_value(context).unwrap());
+        snapshot[key]["document"] = json!(0);
+    }
     let state = &mut snapshot["state"];
     for (index, tab) in state["tabs"].as_array_mut().unwrap().iter_mut().enumerate() {
         assert!(!tab["id"].as_str().unwrap().is_empty());

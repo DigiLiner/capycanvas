@@ -19,6 +19,10 @@ def gradient_destination(model):
                 if item["name"] == "filter:gradient_map" for control in item["locked_properties"]["controls"]
                 if control.get("gradient"))
 
+def disabled_edit(model):
+    return next(edit["result"] for item in model["property_scenarios"] for edit in item["edits"]
+                if edit["result"] and edit["result"].get("disabled"))
+
 probes = {
     "missing filter": lambda m, c: m["property_scenarios"].pop(),
     "duplicate filter": lambda m, c: m["property_scenarios"].append(deepcopy(m["property_scenarios"][-1])),
@@ -29,6 +33,8 @@ probes = {
     "enabled locked controls": lambda m, c: scenario(m)["locked_properties"].update(enabled=True),
     "failed history": lambda m, c: scenario(m)["edits"][0]["result"].update(undo_restored_all_properties=False),
     "incorrect reset": lambda m, c: scenario(m)["edits"][0]["result"].update(reset={"kind":"number", "value":999}),
+    "accepted disabled edit": lambda m, c: disabled_edit(m).update(edit_error=None),
+    "disabled edit changed values": lambda m, c: disabled_edit(m).update(values_unchanged=False),
     "missing handler": lambda m, c: c["property_kinds"].update(number="missing-property-handler.swift"),
     "wrong gradient destination": lambda m, c: gradient_destination(m).update(layer=999),
 }

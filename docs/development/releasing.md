@@ -36,7 +36,8 @@ before changing either testing channel.
 
 **Pushing a release tag has store side effects.** It signs packages, uploads to
 Play, rolls out internal testing, and uploads the iPad build to App Store Connect.
-Every platform job must succeed before CI creates the draft GitHub Release.
+Validation and every platform package must succeed before Play or TestFlight
+uploads start. Both uploads must succeed before CI creates the draft GitHub Release.
 Missing Play or Apple upload access blocks that draft; missing Microsoft Store
 setup does not. There is no platform-skip input. Restore missing required access
 before tagging; an unsigned build is not a substitute for signed distribution.
@@ -77,12 +78,30 @@ gh run list --repo capyatelier/capycanvas --workflow ci.yml \
   --commit "$CAPY_RELEASE_COMMIT" --json databaseId,status,conclusion,url
 ```
 
-Wait for CI on that commit to pass. Optional build rehearsal:
-`gh workflow run release.yml --repo capyatelier/capycanvas --ref main`.
-This is unsigned only when dispatched on a branch; dispatching on a release tag
-performs the same signing and store uploads as pushing it. Confirm the rehearsal's
-source SHA, since `main` can advance. It does not publish or verify user journeys,
-and the unsigned iPad archive is not retained as a downloadable artifact.
+Wait for CI on that commit to pass, then run the full release dry run:
+
+```bash
+gh workflow run release.yml --repo capyatelier/capycanvas --ref main
+gh run list --repo capyatelier/capycanvas --workflow release.yml \
+  --event workflow_dispatch --json databaseId,headSha,status,conclusion,url
+```
+
+Select a branch or existing tag containing the candidate. Confirm the run's
+`headSha` equals `CAPY_RELEASE_COMMIT`, since `main` can advance before dispatch.
+Every job checks out that run's immutable source revision. Manual runs always
+produce unsigned packages, including when an existing tag is selected. They do
+not import release signing credentials, upload to stores, deploy or create a
+GitHub Release. No release-environment approval is needed for a dry run.
+Use a revision containing this dry-run workflow: older tags execute their
+historical workflow, whose manual tag dispatch could publish.
+
+Require the **Release dry run** to succeed and inspect its job summary. Download
+`release-report` for the commit, job outcomes and `SHA256SUMS`; package artifacts
+end in `-package`, and `ipad-archive` contains the unsigned device archive. Test
+reports have separate artifact names and remain available after test failures.
+Download packages into one fresh directory to check the checksum manifest.
+Complete the hardware journeys below before treating the candidate as qualified;
+software adapters do not establish hardware rendering or performance.
 
 ### 3. Tag and collect the signed candidate
 
@@ -99,13 +118,13 @@ capyatelier/capycanvas` to inspect results. If a job fails, follow
 [recovery](#recovering-a-failed-release) before retrying uploads.
 
 CI creates a draft with the [package outputs](#release-workflow), `SHA256SUMS`
-and provenance attestations. Expect eleven assets: the ten output files in the
+and provenance attestations. Expect fourteen assets: the thirteen output files in the
 table, including the Flatpak reference and repository archive, plus `SHA256SUMS`.
 The iPad build is uploaded to App Store Connect, not attached to the release.
 Use the authenticated CLI with the explicit tag to find the draft; the latest
 published release is still the previous version. A draft can return 404 from
 the REST release-by-tag endpoint even when the CLI can find it.
-Download to a fresh directory, check the ten checksum subjects, and verify
+Download to a fresh directory, check the thirteen checksum subjects, and verify
 provenance for every asset, including the checksum manifest:
 
 ```bash
@@ -294,7 +313,7 @@ version. A delivery or store-setup failure can be retried with the preserved,
 unchanged build. Download retained artifacts with `gh run download <run-id>
 --repo capyatelier/capycanvas --dir artifacts/release/<tag>/recovered` and follow
 the [Android recovery steps](#android-apk). Inspect completed store uploads before
-rerunning any job: rerunning the successful Apple iPad job repeats the same
+rerunning any job: rerunning the successful `ipad-publish` job repeats the same
 version/build upload, and the workflow has no duplicate-upload recovery for it.
 Rerun only failed jobs when safe, rather than the whole release workflow.
 
@@ -352,10 +371,37 @@ its own numbers from it at build time:
 
 `.github/workflows/ci.yml` runs on every push and pull request: the window-free
 shared Rust suites, including the localization catalogs, the Wasm consumer check,
-a check that the generated Xcode project matches `project.py`, the Git hook tests,
-`cargo deny`, and Windows builds, input and software-adapter tests on x64 and
-native ARM64 runners. Hosted runners have no hardware painting GPU or tablet, so CI never replaces
-the [checks for your change](testing.md).
+a check that the generated Xcode project matches `project.py`, the Git hook tests
+and `cargo deny`. Expensive platform builds and the Arch development/runtime
+check run in the release workflow rather than on every push. The same ordinary
+CI workflow is also called by release validation.
+
+### Release validation
+
+`.github/workflows/release-checks.yml` is reusable only; it has no push, schedule
+or manual trigger. Both a manual release dry run and a tag-push release call it
+before packaging. Tag pushes repeat validation on the exact tagged commit.
+
+| Job | Checks without a hardware GPU |
+| --- | --- |
+| Ordinary CI | Shared model suites, localization, Wasm, generated Apple project, Git hooks and licenses |
+| Scripts | Python tests under build, Git, devices, Windows VM, visual and performance tools, prediction, Apple resources and Linux capture; the explicit Web Node unit suites, packaging tests and isolated headless Chrome CDP tests |
+| Renderer | CPU renderer models and shader contracts, Apple bridge models, Android bridge tests, command inventory regressions and Windows bridge lint |
+| Prediction | Prediction benchmark tests, optimized replay tools and the complete recorded stroke bank's analysis checks |
+| Arch | Fresh package dependencies, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
+| Windows x64 and ARM64 | Native Release build, C++ input and script tests, serial Rust/document tests on WARP, model snapshot reader and native bridge lint |
+| Apple | Simulator app and XCTest bundle build; Swift state, input, persistence and sandbox fixtures that do not attach Metal surfaces |
+
+The Android package job also builds its debug app and instrumentation APK and
+runs debug/release lint. The instrumentation APK is retained but not executed:
+those tests require hardware Vulkan.
+
+The renderer job selects tests that do not create GPU devices. Windows runs the
+existing native host and document suites on WARP. Renderer pixel/reference
+suites, GPU telemetry and timing, pipeline-cache qualification, native canvas
+journeys, physical pen/touch, HDR, device loss and performance still need the
+[checks for your change](testing.md) on appropriate hardware. WARP results do not
+qualify hardware rendering or performance.
 
 ## Release workflow
 
@@ -368,14 +414,16 @@ the same scripts developers run and the Rust version pinned in the workflow:
 | Web | `node apps/layer-web/package.mjs` | `capycanvas-<version>-web.zip` |
 | Android | `./gradlew :app:bundleRelease -PcapyAbi=arm64-v8a` | `capycanvas-<version>-android.aab`; on a tag also a Play-signed `capycanvas-<version>-android.apk` without Play licensing checks |
 | Windows x64 and ARM64 | `package.ps1 -Architecture x64` / `-Architecture arm64`, `package-msix.ps1`, `test-msix.ps1` and `package-installer.ps1` | Separate `capycanvas-<version>-windows-<architecture>.zip`, `-setup.exe` and `.msix` |
-| macOS, iPadOS | `apps/layer-apple/scripts/release.sh mac` and `ipad` | `capycanvas-<version>-macos-arm64.dmg`; the iPad build goes to App Store Connect |
+| macOS, iPadOS | `apps/layer-apple/scripts/release.sh mac` and `ipad` | `capycanvas-<version>-macos-arm64.dmg`; retained iPad archive, uploaded separately on tag pushes |
 
-Dispatching on a branch checks unsigned builds and saves downloadable artifacts
-for every platform except iPad. Dispatching on a tag or pushing it follows the
-signed release path. CI checks that the tag names the workspace version and its
-commit belongs to `main`, and runs `cargo deny`. All platform jobs must pass
-before the draft release job runs; neither store processing nor tester
-availability is checked by that job.
+Manual dispatch always validates and builds unsigned packages for every platform.
+Only a version-tag push enables signing and publishing. CI checks that the tag
+names the workspace version and its commit belongs to `main`. After validation
+and every package succeed, `android-publish` uses the preserved AAB and
+`ipad-publish` exports the preserved archive with `release.sh ipad publish`.
+Their success allows the draft GitHub Release. Release downloads include only
+`-package` artifacts, keeping logs and private iPad archives out of public assets.
+Neither store processing nor tester availability is checked by that job.
 
 The Windows release matrix builds both targets on x64 runners, keeping the
 signing plugin and SDK packaging tools on their host architecture. Each package
@@ -391,9 +439,9 @@ services or Play licensing checks. The
 [Android distribution guide](android.md#distribution-apk-verification) describes
 protection settings, signing verification and local checks.
 
-The Android job saves the `android-bundle` artifact before uploading to Play,
+The Android job saves the `android-bundle-package` artifact before uploading to Play,
 which consumes the version number. It saves the verified APK separately as
-`android-apk` before internal rollout. If a later step fails, recover these
+`android-apk-package` before internal rollout. If a later step fails, recover these
 artifacts from that workflow run instead of rebuilding or uploading the same
 version. `android_publish.py upload` checks Play's version and SHA-256 against
 the saved AAB and reuses an identical existing upload. Both upload and promotion
@@ -411,14 +459,11 @@ to the recovered, hash-checked bundle, then use:
 python3 tools/build/android_publish.py upload "$CAPY_RELEASE_VERSION" "$CAPY_RELEASE_AAB"
 ```
 
-For an Android-only CI retry, commit that original AAB to Play first: the upload
-script then refuses a rebuilt AAB with a different hash. Wait for the original
-workflow run to finish before requesting the rerun.
-Use `gh run rerun <run-id> --repo capyatelier/capycanvas --job <android-job-id>`.
-Preserve and hash-check the failed attempt's `android-bundle` before removing
-that specific Actions artifact to allow the retry to save an artifact with the
-same name. Compare the retry's AAB hash with the retained original before
-accepting the candidate. Keep successful Apple jobs out of the retry.
+For an Android-only CI retry, rerun the failed `android-publish` job after the
+original workflow finishes. It downloads the preserved `android-bundle-package`
+without rebuilding. If `android-apk-package` already exists, preserve and
+hash-check it before removing that specific artifact so the retry can save the
+same artifact name. Keep successful Apple uploads out of the retry.
 
 After testing the final internal build, check closed-track setup and review state.
 When promotion is needed and no changes are in review, run **Promote Android
@@ -529,7 +574,8 @@ an old certificate only after confirming no active developer or build uses it.
 
 Locally, `CAPY_UPLOAD_KEYSTORE` and `CAPY_UPLOAD_KEYSTORE_PASSWORD` sign the
 Android bundle, and `CAPY_APPLE_TEAM`, `CAPY_APPLE_KEY`, `CAPY_APPLE_KEY_ID` and
-`CAPY_APPLE_ISSUER` make `release.sh` sign, upload or notarize. On a tag, the
+`CAPY_APPLE_ISSUER` make `release.sh` sign or notarize; `release.sh ipad publish`
+explicitly uploads an existing signed archive. On a tag push, the
 Windows job passes Azure Artifact Signing's `signtool` plugin to the packagers'
 `-SignArguments` ([Windows](windows.md#portable-zip)), signing the app
 executables and the setup program; the Store signs the MSIX.

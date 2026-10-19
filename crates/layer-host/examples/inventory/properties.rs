@@ -96,9 +96,19 @@ fn changed_value(control: &Value) -> Result<Value, String> {
 fn round_trip(host: &mut NativeHost, control: &Value) -> Result<Value, String> {
     let layer = host.session.state().layer_properties.layer.unwrap();
     let key = control["key"].as_str().unwrap();
+    let before = values(host); let before_application = application(host); let before_controls = control_values(host);
+    let checkpoint = host.session.engine().checkpoint();
+    if control["disabled"] == true {
+        let action = json!({"type":"effect", "action":{"op":"reset", "layer":layer, "key":key}});
+        let error = dispatch(host, action.clone()).err().ok_or("A disabled property accepted a reset")?;
+        if host.session.engine().checkpoint() != checkpoint || values(host) != before
+            || application(host) != before_application || control_values(host) != before_controls {
+            return Err("A disabled edit changed a property".into());
+        }
+        return Ok(json!({"action":action, "disabled":true, "edit_error":error, "values_unchanged":true}));
+    }
     let action = json!({"type":"effect", "action":{"op":"set", "layer":layer, "key":key,
         "value":{"kind":control["kind"]["kind"], "value":changed_value(control)?}}});
-    let before = values(host); let before_application = application(host); let before_controls = control_values(host);
     dispatch(host, action.clone())?;
     let edited = values(host); let edited_application = application(host); let edited_controls = control_values(host);
     if before_controls[key] == edited_controls[key] {
@@ -129,6 +139,14 @@ fn round_trip(host: &mut NativeHost, control: &Value) -> Result<Value, String> {
     let reset = control_values(host);
     if reset[key] != control["default"] {
         return Err("Reset did not restore the shared default".into());
+    }
+    for _ in 0..2 {
+        if host.session.engine().checkpoint() == checkpoint { break; }
+        host.dispatch(UiAction::Invoke { command: CommandId::Undo })?;
+    }
+    if host.session.engine().checkpoint() != checkpoint || values(host) != before
+        || application(host) != before_application || control_values(host) != before_controls {
+        return Err("Undo after reset did not restore the initial properties".into());
     }
     Ok(
         json!({"action":action, "before":before_controls[key], "edited":edited_controls[key], "reset":reset[key],
@@ -207,6 +225,12 @@ fn conditional_controls_keep_hidden_values_through_history_and_reset() {
         assert!(scenario["error"].is_null());
         for edit in scenario["edits"].as_array().unwrap() {
             assert!(edit["error"].is_null(), "{edit}");
+            let control = scenario["properties"]["controls"].as_array().unwrap().iter()
+                .find(|control| control["key"] == edit["key"]).unwrap();
+            if control["disabled"] == true {
+                assert_eq!(edit["result"]["disabled"], true);
+                assert_eq!(edit["result"]["values_unchanged"], true);
+            }
         }
         assert_eq!(scenario["properties"]["controls"], scenario["locked_properties"]["controls"]);
         assert_eq!(scenario["locked_edit"]["values_unchanged"], true);

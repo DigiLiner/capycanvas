@@ -1,4 +1,5 @@
 name: Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && 'Release dry run' || 'Release' }} — ${{ github.ref_name }}
 on:
   push:
     tags: ["v*"]
@@ -6,24 +7,28 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: release
+  group: ${{ github.event_name == 'push' && 'release' || format('release-dry-run-{0}', github.ref) }}
   cancel-in-progress: false
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: "1.99.0"
-  SIGNED: ${{ github.ref_type == 'tag' }}
+  SIGNED: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
 jobs:
   version:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       notes: ${{ steps.version.outputs.notes }}
+      rust: ${{ steps.version.outputs.rust }}
+      publish: ${{ steps.version.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml)
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rust=$RUST_VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish=$SIGNED" >> "$GITHUB_OUTPUT"
           {
             echo 'notes<<NOTES'
             python3 - "$version" <<'PY'
@@ -40,11 +45,7 @@ jobs:
           PY
             echo NOTES
           } >> "$GITHUB_OUTPUT"
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          arguments: --locked
-          command: check licenses sources
-      - if: github.ref_type == 'tag'
+      - if: env.SIGNED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
@@ -53,8 +54,14 @@ jobs:
           status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$GITHUB_SHA" -q .status)
           test "$status" = identical || test "$status" = behind
 
-  web:
+  checks:
     needs: version
+    uses: ./.github/workflows/release-checks.yml
+    with:
+      rust-version: ${{ needs.version.outputs.rust }}
+
+  web:
+    needs: [version, checks]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -68,14 +75,14 @@ jobs:
       - run: cd dist && zip -qr "capycanvas-${{ needs.version.outputs.version }}-web.zip" capycanvas
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: web
+          name: web-package
           path: dist/*.zip
           if-no-files-found: error
 
   flatpak:
-    needs: version
+    needs: [version, checks]
     runs-on: ubuntu-24.04
-    environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: sudo apt-get update && sudo apt-get install -y flatpak librsvg2-common zstd
@@ -92,20 +99,20 @@ jobs:
             tar --zstd -xf "$RUNNER_TEMP/previous-flatpak.tar.zst" -C target/flatpak
           fi
       - env:
-          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
-          FLATPAK_GPG_PASSPHRASE: ${{ secrets.FLATPAK_GPG_PASSPHRASE }}
+          FLATPAK_GPG_PRIVATE_KEY: ${{ needs.version.outputs.publish == 'true' && secrets.FLATPAK_GPG_PRIVATE_KEY || '' }}
+          FLATPAK_GPG_PASSPHRASE: ${{ needs.version.outputs.publish == 'true' && secrets.FLATPAK_GPG_PASSPHRASE || '' }}
           FLATPAK_GPG_FINGERPRINT: ${{ vars.FLATPAK_GPG_FINGERPRINT }}
         run: bash packaging/flatpak/export.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: flatpak
+          name: flatpak-package
           path: dist/flatpak/*
           if-no-files-found: error
 
   android:
-    needs: version
+    needs: [version, checks]
     runs-on: ubuntu-24.04
-    environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     permissions:
       contents: read
       id-token: write
@@ -116,7 +123,10 @@ jobs:
           rustup default "$RUST_VERSION"
           cargo install --locked cargo-ndk --version 4.1.2
           cargo install --locked cargo-about --version 0.9.2 --features cli
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" "platforms;android-37" "build-tools;37.0.0"
+      - name: Android debug and instrumentation builds and lint
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :app:lintRelease -PcapyAbi=arm64-v8a
+        working-directory: apps/layer-android
       - if: env.SIGNED == 'true'
         env:
           KEYSTORE: ${{ secrets.ANDROID_UPLOAD_KEYSTORE }}
@@ -133,47 +143,20 @@ jobs:
       - name: Preserve the bundle before Play consumes its version
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: android-bundle
+          name: android-bundle-package
           path: dist/*.aab
           if-no-files-found: error
-      - if: env.SIGNED == 'true'
-        id: google
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-          token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
-      - name: Upload the preserved bundle as an internal draft
-        if: env.SIGNED == 'true'
-        env:
-          TOKEN: ${{ steps.google.outputs.access_token }}
-          VERSION: ${{ needs.version.outputs.version }}
-          NOTES: ${{ needs.version.outputs.notes }}
-        run: python3 tools/build/android_publish.py upload "$VERSION" "dist/capycanvas-$VERSION-android.aab"
-      - if: env.SIGNED == 'true'
-        env:
-          TOKEN: ${{ steps.google.outputs.access_token }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: |
-          export JAVA_HOME="${JAVA_HOME_25_X64:?}"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          python3 tools/build/android_apk.py download "$VERSION" "dist/capycanvas-$VERSION-android.apk"
-      - if: env.SIGNED == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: android-apk
-          path: dist/*.apk
-          if-no-files-found: error
-      - name: Roll out the verified build to internal testers
-        if: env.SIGNED == 'true'
-        env:
-          TOKEN: ${{ steps.google.outputs.access_token }}
-          VERSION: ${{ needs.version.outputs.version }}
-        run: python3 tools/build/android_publish.py promote "$VERSION" internal
+          name: android-test-reports
+          path: |
+            apps/layer-android/app/build/reports
+            apps/layer-android/app/build/outputs/apk/androidTest
+          if-no-files-found: warn
 
   windows:
-    needs: version
+    needs: [version, checks]
     runs-on: windows-2025
     strategy:
       fail-fast: false
@@ -183,7 +166,7 @@ jobs:
             target: x86_64-pc-windows-msvc
           - architecture: arm64
             target: aarch64-pc-windows-msvc
-    environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     permissions:
       contents: read
       id-token: write
@@ -228,14 +211,14 @@ jobs:
           Copy-Item (Get-Content $setup -Raw | ConvertFrom-Json).installer dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-${{ matrix.architecture }}
+          name: windows-${{ matrix.architecture }}-package
           path: dist/*
           if-no-files-found: error
 
   apple:
-    needs: version
+    needs: [version, checks]
     runs-on: macos-26
-    environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
+    environment: ${{ needs.version.outputs.publish == 'true' && 'release' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -251,39 +234,160 @@ jobs:
           API_KEY: ${{ secrets.APPLE_API_KEY }}
           SIGNING_CERTIFICATE: ${{ matrix.platform == 'ipad' && secrets.APPLE_DEVELOPMENT_P12 || matrix.platform == 'mac' && secrets.APPLE_DEVELOPER_ID_P12 || '' }}
           SIGNING_PASSWORD: ${{ matrix.platform == 'ipad' && secrets.APPLE_DEVELOPMENT_PASSWORD || matrix.platform == 'mac' && secrets.APPLE_DEVELOPER_ID_PASSWORD || '' }}
-        run: |
-          base64 --decode <<< "${API_KEY:?}" > "$RUNNER_TEMP/api-key.p8"
-          {
-            echo "CAPY_APPLE_TEAM=${{ vars.APPLE_TEAM_ID }}"
-            echo "CAPY_APPLE_KEY=$RUNNER_TEMP/api-key.p8"
-            echo "CAPY_APPLE_KEY_ID=${{ vars.APPLE_API_KEY_ID }}"
-            echo "CAPY_APPLE_ISSUER=${{ vars.APPLE_API_ISSUER_ID }}"
-          } >> "$GITHUB_ENV"
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          base64 --decode <<< "${SIGNING_CERTIFICATE:?}" > "$RUNNER_TEMP/signing.p12"
-          security create-keychain -p '' "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p '' "$keychain"
-          security import "$RUNNER_TEMP/signing.p12" -P "${SIGNING_PASSWORD:?}" -A -t cert -f pkcs12 -k "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -k '' "$keychain"
-          security list-keychains -d user -s "$keychain"
-          signing_identity='Apple Development'
-          if [[ ${{ matrix.platform }} == mac ]]; then signing_identity='Developer ID Application'; fi
-          if ! security find-identity -v -p codesigning "$keychain" | grep -Fq "\"$signing_identity:"; then
-            echo "The signing certificate must include a valid $signing_identity private key." >&2
-            exit 1
-          fi
+          SIGNING_IDENTITY: ${{ matrix.platform == 'ipad' && 'Apple Development' || 'Developer ID Application' }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
+        run: bash apps/layer-apple/scripts/import-signing.sh
       - run: apps/layer-apple/scripts/release.sh ${{ matrix.platform }}
+      - if: matrix.platform == 'ipad'
+        run: ditto -c -k --keepParent dist/apple-ipad/CapyCanvas-iPad.xcarchive dist/ipad-archive.zip
+      - if: matrix.platform == 'ipad'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ipad-archive
+          path: dist/ipad-archive.zip
+          if-no-files-found: error
       - if: matrix.platform == 'mac'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mac
+          name: mac-package
           path: dist/*.dmg
           if-no-files-found: error
 
+  android-publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [version, checks, flatpak, web, android, windows, apple]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-bundle-package
+          path: dist
+      - if: env.SIGNED == 'true'
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+      - name: Upload the preserved bundle as an internal draft
+        if: env.SIGNED == 'true'
+        env:
+          TOKEN: ${{ steps.google.outputs.access_token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          NOTES: ${{ needs.version.outputs.notes }}
+        run: python3 tools/build/android_publish.py upload "$VERSION" "dist/capycanvas-$VERSION-android.aab"
+      - if: env.SIGNED == 'true'
+        env:
+          TOKEN: ${{ steps.google.outputs.access_token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          export JAVA_HOME="${JAVA_HOME_25_X64:?}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          python3 tools/build/android_apk.py download "$VERSION" "dist/capycanvas-$VERSION-android.apk"
+      - if: env.SIGNED == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-apk-package
+          path: dist/*.apk
+          if-no-files-found: error
+      - name: Roll out the verified build to internal testers
+        if: env.SIGNED == 'true'
+        env:
+          TOKEN: ${{ steps.google.outputs.access_token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: python3 tools/build/android_publish.py promote "$VERSION" internal
+
+  ipad-publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [version, checks, flatpak, web, android, windows, apple]
+    runs-on: macos-26
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipad-archive
+          path: dist
+      - run: |
+          mkdir -p dist/apple-ipad
+          ditto -x -k dist/ipad-archive.zip dist/apple-ipad
+      - env:
+          API_KEY: ${{ secrets.APPLE_API_KEY }}
+          SIGNING_CERTIFICATE: ${{ secrets.APPLE_DEVELOPMENT_P12 }}
+          SIGNING_PASSWORD: ${{ secrets.APPLE_DEVELOPMENT_PASSWORD }}
+          SIGNING_IDENTITY: Apple Development
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ vars.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ vars.APPLE_API_ISSUER_ID }}
+        run: bash apps/layer-apple/scripts/import-signing.sh
+      - run: bash apps/layer-apple/scripts/release.sh ipad publish
+
+  summary:
+    if: ${{ always() }}
+    needs: [version, checks, flatpak, web, android, windows, apple, android-publish, ipad-publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Record every job and the tested revision
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          mkdir report
+          python3 - <<'PYCODE'
+          import json, os, pathlib
+          results = json.loads(os.environ['RESULTS'])
+          publish = os.environ['SIGNED'] == 'true'
+          excluded = 'Hardware required: renderer pixel/reference suites, GPU timestamp/timing and pipeline-cache qualification, native canvas UI journeys, physical pen/touch, HDR, device loss and performance. CPU models and Windows WARP tests do not qualify hardware rendering. Signing and store acceptance are exercised only by tag pushes.'
+          report = {'commit': os.environ['GITHUB_SHA'], 'ref': os.environ['GITHUB_REF'], 'publish': publish, 'jobs': {name: job['result'] for name, job in results.items()}, 'hardware_checks': excluded}
+          pathlib.Path('report/results.json').write_text(json.dumps(report, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"{'Release' if publish else 'Release dry run'} at `{report['commit']}`\n\n| Job | Result |\n| --- | --- |\n")
+              for name, result in report['jobs'].items():
+                  summary.write(f'| {name} | {result} |\n')
+              summary.write('\n' + excluded + '\n')
+          PYCODE
+      - if: needs.apple.result == 'success' && needs.web.result == 'success' && needs.flatpak.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: '*-package'
+          path: report/packages
+          merge-multiple: true
+      - if: github.event_name == 'workflow_dispatch' && needs.apple.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ipad-archive
+          path: report/packages
+      - run: |
+          if [[ -d report/packages ]]; then (cd report/packages && sha256sum -- * > ../SHA256SUMS); fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: release-report
+          path: |
+            report/results.json
+            report/SHA256SUMS
+          if-no-files-found: error
+      - name: Require successful checks and packages
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          required = set(results) - ({'android-publish', 'ipad-publish'} if os.environ['SIGNED'] != 'true' else set())
+          sys.exit(any(results[name]['result'] != 'success' for name in required))
+          PYCODE
+
   release:
-    if: github.ref_type == 'tag'
-    needs: [version, flatpak, web, android, windows, apple]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [version, summary]
     runs-on: ubuntu-24.04
     permissions:
       attestations: write
@@ -292,6 +396,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: '*-package'
           path: dist
           merge-multiple: true
       - run: cd dist && sha256sum -- * > SHA256SUMS

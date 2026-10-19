@@ -245,22 +245,39 @@ fn assert_saved_document(actual: &layer_core::Document, expected: &layer_core::D
 #[test]
 fn storage_names_every_store_within_the_folders_it_is_given() {
     let temp = std::env::temp_dir();
+    if std::env::var_os("CAPY_APPLE_STORAGE_TEST").is_none() {
+        for directory in [None, Some(std::path::PathBuf::from("capy-private")), Some(temp.join("capy-apple-storage/private"))] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "tests::storage_names_every_store_within_the_folders_it_is_given"])
+                .env("CAPY_APPLE_STORAGE_TEST", "1").env_remove("CAPY_STORAGE_DIR");
+            if let Some(directory) = directory { child.env("CAPY_STORAGE_DIR", directory); }
+            let output = child.output().unwrap();
+            assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        }
+        return;
+    }
     let support = temp.join("capy-apple-storage/support");
+    let directory = std::env::var_os("CAPY_STORAGE_DIR").map(std::path::PathBuf::from);
+    let roots = match &directory {
+        Some(directory) => layer_host::StorageRoots::within(&temp.join(directory)),
+        None => layer_host::StorageRoots { config: support.clone(), data: support.clone(),
+            state: support.join("State"), cache: temp.join("capy-apple-storage/caches"), temp: temp.clone() },
+    };
     let installation = stateless(capy_apple_storage, json!({"platform": {"config": support, "data": support,
         "state": support.join("State"), "cache": temp.join("capy-apple-storage/caches"), "temp": temp}}).to_string());
-    assert_eq!(installation["settings"], json!(support.join("settings.json")));
-    assert_eq!(installation["workspaces"], json!(support.join("workspaces")));
-    assert_eq!(installation["papers"], json!(support.join("papers")));
-    assert_eq!(installation["sessions"], json!(support.join("State/sessions")));
-    assert_eq!(installation["shaders"], json!(temp.join("capy-apple-storage/caches/shaders")));
-    assert_eq!(layer_core::temp_files::directory().unwrap(), temp);
+    assert_eq!(installation["settings"], json!(roots.settings()));
+    assert_eq!(installation["workspaces"], json!(roots.workspaces()));
+    assert_eq!(installation["papers"], json!(roots.papers()));
+    assert_eq!(installation["sessions"], json!(roots.sessions()));
+    assert_eq!(installation["shaders"], json!(roots.shaders()));
+    assert_eq!(layer_core::temp_files::directory().unwrap(), roots.temp);
     let private = stateless(capy_apple_storage, r#"{"directory":"/private/capy"}"#);
     assert_eq!(private["color_profiles"], "/private/capy/data/color-profiles");
     assert_eq!(private["papers"], "/private/capy/data/papers");
     assert_eq!(private["export_presets"], "/private/capy/config/export-presets");
     assert_eq!(private["state"], "/private/capy/state");
     let relative = json!({"platform": {"config": "support", "data": support, "state": support, "cache": support, "temp": temp}});
-    assert!(stateless(capy_apple_storage, relative.to_string())["error"].is_string());
+    assert_eq!(stateless(capy_apple_storage, relative.to_string())["error"].is_string(), directory.is_none());
 }
 
 #[test]
