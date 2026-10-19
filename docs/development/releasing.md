@@ -405,6 +405,10 @@ journeys, physical pen/touch, HDR, device loss and performance still need the
 [checks for your change](testing.md) on appropriate hardware. WARP results do not
 qualify hardware rendering or performance.
 
+Run `node --test tools/build/release-workflow.test.mjs` when changing release
+dependencies or publication gates. It executes the summary gate with Python 3;
+set `PYTHON` to the interpreter's path when it is not available as `python3`.
+
 ## Release workflow
 
 `.github/workflows/release.yml` builds every package from a clean checkout with

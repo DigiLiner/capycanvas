@@ -5,9 +5,10 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const release = readFileSync(root + ".github/workflows/release.yml", "utf8");
-const checks = readFileSync(root + ".github/workflows/release-checks.yml", "utf8");
-const ci = readFileSync(root + ".github/workflows/ci.yml", "utf8");
+const workflow = name => readFileSync(root + `.github/workflows/${name}.yml`, "utf8").replace(/\r\n/g, "\n");
+const release = workflow("release");
+const checks = workflow("release-checks");
+const ci = workflow("ci");
 const job = (source, name) => source.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  [\\w-]+:|$(?![\\s\\S]))`, "m"))?.[1];
 const condition = (expression, event, ref) => Function("github", `return (${expression.replace(/^\$\{\{\s*|\s*\}\}$/g, "")});`)({ event_name: event, ref_type: ref });
 const signed = release.match(/^  SIGNED: (.+)$/m)?.[1];
@@ -59,7 +60,7 @@ test("dry-run success permits only the intentionally skipped store jobs", () => 
   const gate = job(release, "summary").split("      - name: Require successful checks and packages")[1]
     .match(/python3 - <<'PYCODE'\n([\s\S]*?)\n          PYCODE/)[1].replace(/^          /gm, "");
   const results = Object.fromEntries(["version", "checks", ...platforms, "android-publish", "ipad-publish"].map(name => [name, { result: "success" }]));
-  const run = signed => spawnSync("python3", ["-c", gate], { env: { ...process.env, SIGNED: String(signed), RESULTS: JSON.stringify(results) }, encoding: "utf8" });
+  const run = signed => spawnSync(process.env.PYTHON ?? "python3", ["-c", gate], { env: { ...process.env, SIGNED: String(signed), RESULTS: JSON.stringify(results) }, encoding: "utf8" });
   assert.equal(run(true).status, 0);
   results["android-publish"].result = results["ipad-publish"].result = "skipped";
   assert.equal(run(false).status, 0);
