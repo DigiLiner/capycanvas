@@ -108,6 +108,8 @@ function Texture-ScreenCapture([string]$Name,$Rects){
     (Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run "$Name-model.json")
 }
 function Texture-Menu([int]$Index,[string]$Op){
+    $target=Control "texture-tile-$Index";$scroll=$null
+    if($target.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scroll)){$scroll.ScrollIntoView()}else{$target.SetFocus()}
     $tile=(Control "texture-tile-$Index" -Arranged).Current.BoundingRectangle
     [CapyRowPointer]::RightClick([int]($tile.X+$tile.Width/2),[int]($tile.Y+$tile.Width/3))
     Invoke "paper-$Op-$Index"

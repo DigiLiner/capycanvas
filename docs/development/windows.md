@@ -325,6 +325,8 @@ selection changes, since WinUI can replace its automation peer.
 Read the pending choice with one selected-button query scoped to the active
 texture grid. Repeated full-window searches can exhaust the original polling
 deadline after the native selection has already changed.
+Reveal a texture tile through its native scroll pattern or keyboard focus before
+requiring arranged bounds for its context-menu pointer click.
 Compare `edit-color-dialog-frame` and `texture-dialog-frame`, since focusing a
 selected library texture can scroll its title out of view. The outer dialog
 peer includes the popup backdrop. Check the width and visible rows again on
