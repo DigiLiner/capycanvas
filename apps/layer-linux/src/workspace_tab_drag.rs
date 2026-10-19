@@ -175,11 +175,7 @@ impl Workspace {
         }) else {
             return;
         };
-        let mut picked = self.surface.pick(
-            drag.origin[0] as f64,
-            drag.origin[1] as f64,
-            gtk::PickFlags::DEFAULT,
-        );
+        let mut picked = Some(drag.source.clone());
         while let Some(widget) = picked {
             picked = widget.parent();
             if !widget.is::<gtk::Button>() {

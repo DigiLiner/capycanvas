@@ -592,6 +592,8 @@ The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
 `reorder-contact` checks selection at native press before release or drag pickup.
 `tests/workspace-native-input.swift` checks immediate drawer-tab selection and
 retained source identity through native mouse and pen reordering.
+`tests/workspace-tabs.swift` checks that a late selection publication updates the
+retained preview's panel shade while its identity and geometry stay fixed.
 
 Other runners in `scripts/` and `tests/`:
 

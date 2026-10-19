@@ -1121,7 +1121,12 @@ taps on drawing tabs before reordering and Undo/Redo.
 and during a held mouse press in both themes and every transparency level. It
 checks both neighboring directions, visible inactive hover, selection before
 release and retained native tab buttons. `tab-pickup` checks the regular mouse
-cursor on the tab and selection before mouse, pen and touch release.
+cursor, selection before mouse release, and short mouse, pen and touch taps.
+`tab-drag` presses an inactive tab before pickup and compares its selected
+shoulder pixels with the drag preview. Preview geometry is captured at pickup,
+after press selection, and late selection publication updates its active fill.
+Use `tab-drag:preview-dark` and `tab-drag:preview-light` for the focused selection,
+preview pixels and cancellation checks.
 
 `exercise-illustration-filters.ps1 -Executable <path> -Theme dark` checks
 Brightness to Opacity and Threshold through the native Filters and Properties

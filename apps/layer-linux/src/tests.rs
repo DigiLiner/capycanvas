@@ -10628,6 +10628,20 @@ fn native_tab_slide_input() {
     let original = layer_ui::WorkspaceState::default();
     let mut input = RemoteInput::new().settle_ms(150).timeout_secs(4);
     input.ready();
+    let preview_backing = |slide: &NativeTabSlide| {
+        let snapshot = gtk::Snapshot::new();
+        slide.snapshot(&snapshot, w.window.frame_clock().unwrap().frame_time(), 1.);
+        let texture = w.window.renderer().unwrap().render_texture(
+            &snapshot.to_node().unwrap(),
+            Some(&gtk::graphene::Rect::new(slide.bounds.x, slide.bounds.y, slide.bounds.width, slide.bounds.height)),
+        );
+        let stride = texture.width() as usize * 4;
+        let mut pixels = vec![0; stride * texture.height() as usize];
+        texture.download(&mut pixels, stride);
+        let i = (texture.height() as usize - 2) * stride + texture.width() as usize / 2 * 4;
+        [pixels[i + 2], pixels[i + 1], pixels[i]]
+    };
+    let mut selected_backing = None;
     for (panel, end) in [
         (Panel::Layers, "cancel"),
         (Panel::Adjustments, "release"),
@@ -10678,6 +10692,11 @@ fn native_tab_slide_input() {
             let drag = w.workspace_drag.borrow();
             let drag = drag.as_ref().unwrap();
             let slide = drag.tab.as_ref().unwrap();
+            if dx == 24. {
+                let pixel = preview_backing(slide);
+                let selected = *selected_backing.get_or_insert(pixel);
+                assert_eq!(pixel, selected, "{panel:?}: inactive-source preview matches the selected panel backing");
+            }
             assert!(
                 (slide.bounds.x
                     - (bounds.x() + dx).clamp(
@@ -10816,6 +10835,34 @@ fn native_tab_slide_input() {
             serde_json::to_value(&selected).unwrap()
         );
     }
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(original.clone()) });
+    let group = original.layout.panel_group(Panel::Adjustments).unwrap();
+    w.dispatch(UiAction::MovePanel {
+        panel: Panel::Properties,
+        target: DockTarget::Tab { group, index: Some(0) },
+        viewport: [w.surface.width() as f32, w.surface.height() as f32],
+    });
+    w.dispatch(UiAction::SelectPanelTab { group, panel: Panel::Properties });
+    w.dispatch(UiAction::Customize { action: CustomizationAction::SetTabStyle { group, style: TabStyle::ActiveName } });
+    pump(300);
+    let tab = w.groups.borrow().iter().find(|g| g.id == group).unwrap().tabs.iter()
+        .find(|(panel, _)| *panel == Panel::Adjustments).unwrap().1.clone();
+    let before = tab.compute_bounds(&w.surface).unwrap();
+    let start = [before.x() + before.width() - 2., before.y() + before.height() * 0.5];
+    input.perform(serde_json::json!([{"point": start}, {"down": true}]));
+    let selected = tab.compute_bounds(&w.surface).unwrap();
+    assert_ne!(before, selected, "ActiveName selection resizes the inactive source");
+    assert!(start[0] > selected.x() + selected.width(), "the old origin now lies beyond the retained source");
+    input.perform(serde_json::json!([{"point": [start[0] - 24., start[1] + 8.]}]));
+    {
+        let drag = w.workspace_drag.borrow();
+        let slide = drag.as_ref().unwrap().tab.as_ref().expect("retained inactive source starts sliding");
+        let pixel = preview_backing(slide);
+        assert_eq!(pixel, selected_backing.unwrap(),
+            "ActiveName preview captures the retained selected source rather than the old pointer position");
+    }
+    input.perform(serde_json::json!([{"key":65307,"down":true},{"key":65307,"down":false},{"down":false}]));
+    assert!(w.workspace_drag.borrow().is_none());
     input.finish();
     w.window.destroy();
     pump(100);

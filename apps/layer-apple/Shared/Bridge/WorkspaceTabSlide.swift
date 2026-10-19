@@ -9,8 +9,7 @@ import Observation
         let group: UInt64, source: Int
         let frames: [WorkspaceTabFrame]
         let clip: CGRect
-        let panels: [JSON]
-        let active: String
+        let panels: [String]
         var action: [String: Any] {
             ["type": "begin_tab_drag", "clip": JSON(clip).raw,
              "tabs": frames.enumerated().map { index, frame in
@@ -23,7 +22,7 @@ import Observation
     init(motion: WorkspaceMotion) { self.motion = motion }
     private func matches(_ tab: JSON, group: UInt64) -> Bool {
         guard let grab, grab.group == group, grab.panels.indices.contains(grab.source) else { return false }
-        return !tab.isNull && tab["group"].uint == group && tab["panel"].string == grab.panels[grab.source]["id"].string
+        return !tab.isNull && tab["group"].uint == group && tab["panel"].string == grab.panels[grab.source]
     }
     var preview: JSON {
         guard let grab, matches(motion.tab, group: grab.group) else { return JSON() }

@@ -222,6 +222,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         if(!claim())return;
         ignoreClick=true;hideMenu();stopRecognition();
         dragging=true;++generation;position=origin;
+        tabSlide->Grab(object(sourceTag,L"workspace_tab"),tabs);
         tabCapture=tabSlide->Begin();
         cursor();
         chrome(O({{L"kind",S(L"refresh")}}));send(L"down");evidence();
@@ -268,7 +269,6 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         }
         contactToken=(++contactVersion<<32)|uint64_t(p.PointerId());
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
-        tabSlide->Grab(tab,tabs);
         // Handles and tabs keep immediate drag arbitration. Tile bodies defer
         // both capture and scroll interception until the native hold starts.
         if(!needsHold){

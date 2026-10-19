@@ -7,7 +7,11 @@ struct WorkspaceTabSlideOverlay: View {
     let slide: WorkspaceTabSlide
     var body: some View {
         if let grab = slide.grab, !slide.preview.isNull {
-            WorkspaceTabSlideContent(slide: slide, grab: grab, palette: EditorPalette(source: store.state["palette"]))
+            let groups = store.snapshot["layout"]["groups"].array
+                + store.state["customization"]["column_drawers"].array.map { $0["tabs"].replacing("id", with: $0["tabs"]["group"]) }
+            let active = groups.first { $0["id"].uint == grab.group }?["active"].string ?? ""
+            let panels = store.workspace.presentedTabs(group: grab.group, panels: grab.panels.map { store.panel($0) })
+            WorkspaceTabSlideContent(slide: slide, grab: grab, panels: panels, active: active, palette: EditorPalette(source: store.state["palette"]))
                 .id(grab.id)
         }
     }
@@ -16,14 +20,16 @@ struct WorkspaceTabSlideOverlay: View {
 private struct WorkspaceTabSlideContent: View {
     let slide: WorkspaceTabSlide
     let grab: WorkspaceTabSlide.Grab
+    let panels: [JSON]
+    let active: String
     let palette: EditorPalette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
     var body: some View {
         ZStack(alignment: .topLeading) {
             ForEach(grab.frames.indices, id: \.self) { index in
-                let tab = grab.panels[index], frame = grab.frames[index].bounds
-                let selected = tab["id"].string == grab.active
+                let tab = panels[index], frame = grab.frames[index].bounds
+                let selected = tab["id"].string == active
                 let source = index == grab.source
                 // Establish the neighbors' original positions even when
                 // down and the first preview arrive in one SwiftUI update.

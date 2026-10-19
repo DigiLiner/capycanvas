@@ -163,9 +163,39 @@ import SwiftUI
         store.workspace.cancel(item)
         try await wait("Cancellation retires the preview") { store.workspace.tabSlide.grab == nil }
         precondition(store.state["workspace"].stableKey == before)
+        store.workspace.start(item, point: restartPress)
+        store.workspace.move(item, point: restartBeyond)
+        try await wait("Preview before late selection") { !store.workspace.tabSlide.preview.isNull }
+        let liveGroups = store.snapshot["layout"]["groups"].array
+            + store.state["customization"]["column_drawers"].array.map { $0["tabs"].replacing("id", with: $0["tabs"]["group"]) }
+        let previousActive = liveGroups.first { $0["id"].uint == group }!["active"].string
+        let nextActive = previousActive == "toolbar" ? "brushes" : "toolbar"
+        func previewShade() async throws -> [CGFloat] {
+            for _ in 0..<35 {
+                window.contentView?.layoutSubtreeIfNeeded()
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let grab = store.workspace.tabSlide.grab!, frame = grab.frames[grab.source].bounds
+            let x = store.workspace.tabSlide.preview["bounds"]["x"].number + frame.width / 2
+            let area = CGRect(x: x, y: frame.maxY - 2, width: 1, height: 1)
+            let host = window.contentView!, bitmap = host.bitmapImageRepForCachingDisplay(in: area)!
+            host.cacheDisplay(in: area, to: bitmap)
+            let color = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)!.usingColorSpace(.deviceRGB)!
+            return [color.redComponent, color.greenComponent, color.blueComponent]
+        }
+        let previousShade = try await previewShade(), previewID = store.workspace.tabSlide.grab!.id
+        try await store.apply(["type": "select_panel_tab", "group": group, "panel": nextActive])
+        let selectedShade = try await previewShade()
+        precondition(zip(previousShade, selectedShade).contains { abs($0 - $1) > 1 / 255 },
+            "A late selection publication must update the retained preview's selected surface")
+        precondition(store.workspace.tabSlide.grab!.id == previewID && store.workspace.tabSlide.grab!.frames == restarted)
+        try await store.apply(["type": "select_panel_tab", "group": group, "panel": previousActive])
+        store.workspace.cancel(item)
+        try await wait("Late-selection preview retires") { store.workspace.tabSlide.grab == nil }
+        precondition(store.state["workspace"].stableKey == before)
         try await store.apply(["type": "customize", "action": ["type": "set_tab_style", "group": group, "style": "icon"]])
         try await wait("Shared icon-only tab widths") { frames().count == 3 && frames().allSatisfy { $0.bounds.width == 36 } }
-        print("PASS: platform \(platform), \(theme) \(collapsed ? "drawer" : "docked") tabs: clipped natural widths, frozen hits, reversal, release, undo/redo, cancellation/restart, 36-point icon tabs")
+        print("PASS: platform \(platform), \(theme) \(collapsed ? "drawer" : "docked") tabs: clipped natural widths, frozen hits, reversal, release, undo/redo, cancellation/restart, live preview selection, 36-point icon tabs")
         let arrangement = store.state["workspace"]
         for panel in store.snapshot["panels"].array {
             try await store.apply(["type": "customize", "action": ["type": "set_panel_visible", "panel": panel["id"].raw, "visible": false]])

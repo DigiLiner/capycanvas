@@ -153,7 +153,14 @@ struct WorkspaceTabDrag::Impl {
             if(!tab.Size()||num(tab,L"group")!=group)continue;
             auto index=uint32_t(num(tab,L"index"));if(index>=entries.size())continue;
             auto& entry=entries[index];if(str(tab,L"panel")!=entry.panel)continue;
-            auto shell=shellOf(element);if(shell==entry.source.get())continue;
+            auto shell=shellOf(element);
+            bool active=unbox_value_or<hstring>(shell.Tag(),L"")==L"active-panel-tab-shell";
+            if(active!=entry.active){
+                entry.active=active;auto copy=entry.copy.as<Grid>();
+                selectPanelTabShell(copy,active,active?Brush(data->brush(L"panel")):Brush(nullptr));
+                Canvas::SetZIndex(copy,index==source?2:active?1:0);
+            }
+            if(shell==entry.source.get())continue;
             if(auto previous=entry.source.get())previous.Opacity(entry.opacity);
             entry.source=make_weak(shell);entry.opacity=shell.Opacity();shell.Opacity(0);
         }

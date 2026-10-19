@@ -53,14 +53,17 @@ function Drifting-TabTaps([string]$Prefix,[string[]]$Panels,[switch]$Drawer) {
         }
         $retained=(Control $id).GetRuntimeId() -join ':'
         [CapyRowPointer]::Down($Device,$at.x,$at.y)
-        Wait-Until {& $selected} "$case did not select before release"
-        if(((Control $id).GetRuntimeId() -join ':') -ne $retained){throw "$case replaced the pressed tab"}
+        if($Device -eq 'mouse'){Wait-Until {& $selected} "$case did not select before release"}else{Start-Sleep -Milliseconds 35}
         [CapyRowPointer]::Move($x,$y)
         Start-Sleep -Milliseconds 35
         [CapyRowPointer]::Up($Device -eq 'pen')
-        Wait-Until {(& $selected) -and (Gesture).phase -eq 'idle' -and !(Gesture).ignore_click} "$case did not select on its first tap"
+        @{case=$case;contact_ms=[CapyRowPointer]::ContactDurationMilliseconds;injection_gap_ms=[CapyRowPointer]::MaxGapMilliseconds}|ConvertTo-Json -Compress|Add-Content (Join-Path $run 'tab-taps.jsonl')
+        if(((Control $id).GetRuntimeId() -join ':') -ne $retained){throw "$case replaced the pressed tab"}
+        Wait-Until {$gesture=Gesture;(& $selected) -and $gesture.phase -eq 'idle' -and !$gesture.ignore_click -and !$gesture.menu_open} "$case did not select on its first tap"
+        if((Gesture).last_release.held){throw "$case invoked native hold instead of a tab tap"}
         Start-Sleep -Milliseconds 150
         if(!(& $selected) -or (Tab-Placement) -ne $before -or ((Model).state.customization.expanded|ConvertTo-Json -Depth 30 -Compress) -ne $expanded){throw "$case changed the settled selection, order, layout or configuration"}
+        Write-Output "$case passed"
     }
 }
 function Cancel-Contact {

@@ -3758,7 +3758,7 @@ impl Workspace {
             if self.workspace_drag.borrow().is_none()
                 && let Some((source, target)) = self.drag_source_at(point)
             {
-                let mut drag = NativeWorkspaceDrag {
+                let drag = NativeWorkspaceDrag {
                     target,
                     origin: point,
                     point,
@@ -3778,7 +3778,6 @@ impl Workspace {
                     tab: None,
                     tab_grab: None,
                 };
-                self.grab_tab_slide(&mut drag);
                 *self.workspace_drag.borrow_mut() = Some(drag);
             }
             return false;
@@ -3881,6 +3880,7 @@ impl Workspace {
                 self.restore_drag_cursor(&drag);
                 return false;
             }
+            self.grab_tab_slide(&mut drag);
             self.start_tab_slide(&mut drag);
             if matches!(drag.target, DragTarget::Dock(_) | DragTarget::Header(_)) {
                 self.set_drag_cursor(&mut drag, "grabbing");

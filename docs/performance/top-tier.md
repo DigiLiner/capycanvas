@@ -127,7 +127,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
-| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. Current GTK desktop probe fails its native-input gate; reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic), 2026-10-19 UTC |
+| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. Current GTK desktop group probe fails its 114 Hz rate floor; reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic), 2026-10-19 UTC |
 | Panel or column resize | 120 | **Unqualified.** Current GTK desktop 1× SDR Color column 59.62–65.40, floating panel 118.29–118.96 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
@@ -3923,17 +3923,24 @@ in `artifacts/ipados17/comparison/codegen-control/`.
 
 ## GTK panel-tab input diagnostic
 
-The 2026-10-19 UTC release build of the panel-tab press change, based on
-`098d05435`, uses the default untitled canvas on the Ryzen Threadripper PRO
-9995WX and RTX PRO 6000 Blackwell Max-Q workstation, NVIDIA 615.71.09 Vulkan,
-with private Mutter 50.5 at 1600 × 1000, 120 Hz and scale 1. The executable
-SHA-256 is `0181e116c933d89f1af77ec8b8dffe916acfb062296fd411e88d96a0c172d7f8`.
+The 2026-10-19 UTC release build captures the tab preview at pickup from its
+retained source. It uses base `05fc2e765` plus the GTK capture and regression
+changes, including the motion fixture's post-press Undo baseline. The default
+untitled canvas runs on Ryzen Threadripper PRO 9995WX and RTX PRO 6000 Blackwell
+Max-Q, NVIDIA 615.71.09 Vulkan, with private Mutter 50.5 at 1600 × 1000, 120 Hz and
+scale 1. The executable SHA-256 is
+`3afe682024fd09a83bdfdc56f2fc77f1cd6a2bda68e2845678d39c1a9829f853`.
 
-The first group/mouse drag probe observes 177 native input samples against the
-required more than 200, so the run fails before the remaining scenarios. During
-its 2.2 s motion it observes 78.73 presentations/s and a 116.795 ms presentation
-gap p99; GPU time is 0.220 ms median and 1.120 ms p95. The failed input gate,
-short duration and non-reference hardware prevent tier qualification. No tab,
-column or toolbar timing is established by this run. Raw metrics and build
-metadata are in `artifacts/panel-tab-press/workspace-motion-quiet-report.json`
-and `artifacts/panel-tab-press/workspace-motion-build.json`.
+The single corrected-fixture invocation observes 237 native input samples in the
+first 2.2 s group/mouse motion, passing the required more than 200. It presents at
+103.530/s, below the 114 Hz desktop floor, with a 9.410 ms presentation-gap p99.
+GPU time is 0.127 ms median and 0.364 ms p95. The run stops at this first rate failure;
+no retry runs. Tab, touch, column and toolbar motion remain unmeasured. The
+failed rate gate, short duration and non-reference hardware prevent tier
+qualification.
+
+[Raw metrics](../../artifacts/panel-tab-press/gtk-preview/workspace-motion-corrected.json)
+and [build metadata](../../artifacts/panel-tab-press/gtk-preview/workspace-motion-corrected-build.json)
+identify the measured source. The [run log](../../artifacts/panel-tab-press/gtk-preview/workspace-motion-corrected.log)
+records the unchanged input and rate gates. The earlier lifecycle-assertion run
+is preserved separately in the same artifact directory.

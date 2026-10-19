@@ -1,4 +1,5 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','preview-dark','preview-light')][string]$Journey='full')
+if($Journey -ne 'full'){$Theme=$Journey -replace '^preview-',''}
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true;$CapyEach={if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)};[CapyCanvasTouch]::Verify()}
@@ -107,23 +108,50 @@ function Check-OverviewOverlap([string]$Before,[string]$After) {
 }
 function Walk([double]$FromX,[double]$FromY,[double]$ToX,[double]$ToY){
  for($i=1;$i -le 8;$i++){
-  [CapyCanvasTouch]::Move(1,[int]($FromX+($ToX-$FromX)*$i/8),[int]($FromY+($ToY-$FromY)*$i/8))
+  $x=[int]($FromX+($ToX-$FromX)*$i/8);$y=[int]($FromY+($ToY-$FromY)*$i/8)
+  if($Journey -eq 'full'){[CapyCanvasTouch]::Move(1,$x,$y)}else{[CapyRowPointer]::Move($x,$y)}
   Start-Sleep -Milliseconds 18
  }
 }
 function Start-Slide([double]$Grab=8){
  (Control 'drawing-canvas').SetFocus()
+ Invoke 'panel-tab-tool_settings'
+ Wait-Until {@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'})[0].active -eq 'tool_settings'} 'Selected preview setup did not select Tool'
+ $selectedSource=(Control 'panel-tab-tool_settings' -Arranged).Current.BoundingRectangle
+ $selectedNeighbor=(Control 'panel-tab-sizes' -Arranged).Current.BoundingRectangle
+ if(!$script:previewSelectionChecked){Capture 'selected-before-slide' -Composed}
+ Invoke 'panel-tab-sizes'
+ Wait-Until {(Current-Group).active -eq 'sizes'} 'Inactive-source setup did not select Brush size'
  $source=(Control 'panel-tab-tool_settings').Current.BoundingRectangle
- $neighbor=(Control 'panel-tab-sizes').Current.BoundingRectangle
  $startX=$source.Left+$Grab*$scale;$startY=$source.Top+$source.Height/2
- $finishX=$startX+$neighbor.Width/2+10*$scale
- [CapyCanvasTouch]::Down(1,[int]$startX,[int]$startY)
- Start-Sleep -Milliseconds 20
+ if($Journey -eq 'full'){
+  [CapyCanvasTouch]::Down(1,[int]$startX,[int]$startY)
+  Start-Sleep -Milliseconds 20
+ }else{
+  [CapyRowPointer]::Down('mouse',[int]$startX,[int]$startY)
+  Wait-Until {@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'})[0].active -eq 'tool_settings'} 'Mouse down did not select Tool before dragging'
+ }
+ $source=$selectedSource
+ $finishX=$startX+$selectedNeighbor.Width/2+10*$scale
  Walk $startX $startY $finishX $startY
  Wait-Until {$null -ne (Preview) -and (Preview).insertion -eq 2} 'Attached native tab preview did not cross the shared insertion threshold'
  $actual=(Control 'panel-tab-tool_settings').Current.BoundingRectangle
  if([Math]::Abs($actual.Left-$source.Left) -gt 1 -or [Math]::Abs($actual.Width-$source.Width) -gt 1){throw 'Tab preview moved the original hit rectangle'}
  if(((Current-Group).panels -join ',') -ne 'tool_settings,sizes'){throw 'Preview prematurely committed tab order'}
+ if(!$script:previewSelectionChecked){
+  Capture 'inactive-source-preview' -Composed
+  $origin=[CapyRowPointer+Point]::new();if(![CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Cannot locate preview capture'}
+  $before=[Drawing.Bitmap]::new((Join-Path $run 'selected-before-slide.png'))
+  $after=[Drawing.Bitmap]::new((Join-Path $run 'inactive-source-preview.png'))
+  try{
+   $offset=(Preview).bounds.x*$scale+$origin.x-$source.Left
+   foreach($dx in @(3,5)){
+    $x=[int]($source.Left+$dx*$scale-$origin.x);$y=[int]($source.Bottom-2*$scale-$origin.y)
+    if($before.GetPixel($x,$y).ToArgb() -ne $after.GetPixel([int]($x+$offset),$y).ToArgb()){throw 'Inactive-source preview lost the selected tab surface'}
+   }
+  }finally{$before.Dispose();$after.Dispose()}
+  $script:previewSelectionChecked=$true
+ }
  [pscustomobject]@{x=$finishX;y=$startY}
 }
 function Undo-Workspace {
@@ -150,6 +178,7 @@ try{
  [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
  [CapyCanvasTouch]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyCanvasTouch]::Initialize([uint32]$review.Id)
+ if($Journey -ne 'full'){[CapyRowPointer]::Initialize([uint32]$review.Id)}
  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Invalid run: owned window DPI is unavailable'}
  Start-Sleep -Milliseconds 350
@@ -158,6 +187,15 @@ try{
  $baseline|ConvertTo-Json -Depth 90|Set-Content (Join-Path $run 'before-model.json')
  $position=Start-Slide
  Capture 'attached' -Composed
+ if($Journey -ne 'full'){
+  [CapyRowPointer]::Key([uint32]$review.Id,0x1b);[CapyRowPointer]::Up()
+  Wait-Until {$null -eq (Find-Preview)} 'Focused preview cancellation retained the overlay'
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
+  if(!$review.WaitForExit(15000) -or $review.ExitCode -ne 0){throw 'Focused preview window did not close cleanly'}
+  if((Get-Item -LiteralPath $stderr).Length){throw 'Focused preview wrote native stderr'}
+  [pscustomobject]@{theme=$Theme;mouse_contact='passed';inactive_source_down='passed';selected_preview_pixels='passed';fixed_hit_rectangles='passed';cancel='passed';zero_exit='passed'}|ConvertTo-Json
+  return
+ }
  [CapyCanvasTouch]::Up(1)
  Wait-Until {((Current-Group).panels -join ',') -eq 'sizes,tool_settings'} 'Release did not commit the preview insertion'
  Undo-Workspace
@@ -251,6 +289,7 @@ try{
  try{Capture 'failure' -WithModel -Composed}catch{}
  [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{
+ try{[CapyRowPointer]::Dispose()}catch{}
  try{[CapyCanvasTouch]::Dispose()}catch{}
  if($review -and !$review.HasExited){if($drawingWindow){$null=[CapyWindowApi]::PostMessage($drawingWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)};if(!$review.WaitForExit(10000)){$review.Kill();$review.WaitForExit()}}
  Exit-CapyEnvironment

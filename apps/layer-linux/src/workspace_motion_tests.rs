@@ -73,7 +73,6 @@ fn native_workspace_motion_input() {
                 assert!(w.color_panel.root.is_mapped(), "measure a visible Color panel");
             }
             assert!(!w.status.is_visible(), "{}", w.status.text());
-            let before = saved();
             let view = w
                 .groups
                 .borrow()
@@ -111,6 +110,7 @@ fn native_workspace_motion_input() {
             let event = |phase: &str, p: [f32; 2]| contact(device, phase, p);
             input.perform(serde_json::json!([event("down", start)]));
             pump(35);
+            let before = saved();
             if scenario == "tab" {
                 input.perform(serde_json::json!([event(
                     "move",

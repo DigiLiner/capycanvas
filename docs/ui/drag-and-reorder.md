@@ -96,7 +96,9 @@ focus loss, or source invalidation restores the cursor. This feedback does not
 change the immediate pickup rule for handles and title/tab bars. Panel tabs and
 unused tab-header space use the regular pointer before dragging. Primary contact
 selects a tab immediately; retain its native button and ancestors through that
-selection so the same contact can become a drag.
+selection so the same contact can become a drag. Capture preview geometry at
+pickup from that retained source. Keep its selected appearance current when
+selection publication arrives after pickup.
 
 ## Scrolling, menus, and cancellation
 

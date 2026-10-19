@@ -1152,7 +1152,6 @@ workspace.addEventListener("pointerdown", e => {
     workspaceGestureSourceObserver.observe(workspace, { childList: true, subtree: true });
   if (node.matches('.dock-tab[data-group]'))
     dispatch({type:"select_panel_tab",group:Number(node.dataset.group),panel:node.dataset.panel});
-  grabTabSlide(workspaceGesture);
   // External resize strips are outside the unselectable panel. Prevent a
   // native text-selection drag from stealing their pointer sequence.
   if (workspaceGesture.action.type !== "drag_workspace") e.preventDefault();
@@ -1177,6 +1176,7 @@ workspace.addEventListener("pointermove", e => {
     if (drag.tile) {
       dragItem = drag.action.item; drag.node.classList.add("drag-source"); updateZen();
     } else {
+      grabTabSlide(drag);
       startTabSlide(drag);
       workspaceGestureEvent("down", drag.start);
       if (drag.tabSlide) app.begin_tab_drag(drag.tabSlide.tabs.map(t => t.hit), drag.tabSlide.clip);

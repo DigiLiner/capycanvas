@@ -204,7 +204,7 @@ import SwiftUI
             frames[source].bounds.intersection(frames[source].clip).contains(point),
             !frames[source].clip.isEmpty, !frames[source].clip.isInfinite else { return nil }
         return WorkspaceTabSlide.Grab(group: id, source: source, frames: frames, clip: frames[source].clip,
-            panels: presentedTabs(group: id, panels: group["panels"].array.map { store.panel($0.string) }), active: group["active"].string)
+            panels: group["panels"].array.map(\.string))
     }
     func move(_ item: JSON, point: CGPoint, released: Bool = false) {
         guard drag?.item.stableKey == item.stableKey else { return }

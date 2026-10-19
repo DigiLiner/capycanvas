@@ -757,6 +757,26 @@ async function checkTabPress({call,evaluate,settle}) {
       await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});await settle();
       assert.deepEqual(await selected(),{selected:'true',retained:true,parent:true,configuration:null},'release preserves selection and native tab identity');
       console.log(JSON.stringify({theme,drawer,primaryPressSelection:true,retainedTab:true,releaseSelection:true,arrowCursor:true,inactiveHover:true}));
+      for(const style of ['icon','active_name']) {
+        await send({type:'customize',action:{type:'set_tab_style',group:41,style}});
+        await send({type:'select_panel_tab',group:41,panel:'brushes'});
+        const measure=()=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect(),neighbor=n.parentElement.querySelector('[data-panel="brushes"]'),b=neighbor.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,selected:n.getAttribute('aria-selected'),neighborWidth:b.width}})()`);
+        const inactive=await measure(),start={x:inactive.x+inactive.width/2,y:inactive.y+inactive.height/2};
+        await call('Input.dispatchMouseEvent',{type:'mouseMoved',...start});
+        await call('Input.dispatchMouseEvent',{type:'mousePressed',...start,button:'left',buttons:1,clickCount:1});await settle();
+        const active=await measure();assert.equal(active.selected,'true');
+        if(style==='active_name'){assert.ok(active.width>inactive.width,'press expands the new active name');assert.ok(active.neighborWidth<inactive.neighborWidth,'press hides the previous active name');}
+        await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:start.x+12,y:start.y,button:'left',buttons:1});await settle();
+        const preview=await evaluate(`(()=>{const n=document.querySelector('.dragged-tab-preview'),r=n.getBoundingClientRect(),neighbor=document.querySelector('.neighbor-tab-preview'),b=neighbor.getBoundingClientRect();return{selected:n.getAttribute('aria-selected'),width:r.width,height:r.height,y:r.y,neighborWidth:b.width,neighborSelected:neighbor.getAttribute('aria-selected'),name:[...n.querySelectorAll('span')].some(s=>!s.hidden&&s.textContent.trim())}})()`);
+        assert.equal(preview.selected,'true','inactive source pickup presents the newly selected tab');assert.equal(preview.neighborSelected,'false');
+        for(const key of ['width','height','y','neighborWidth'])assert.ok(Math.abs(preview[key]-active[key])<.02,`${style} pickup uses selected native ${key}: ${JSON.stringify({inactive,active,preview})}`);
+        assert.equal(preview.name,style==='active_name');
+        const capture=await call('Page.captureScreenshot',{format:'png'});await mkdir('artifacts/panel-tab-press/web-preview',{recursive:true});await writeFile(`artifacts/panel-tab-press/web-preview/${theme}-${drawer?'drawer':'docked'}-${style}.png`,Buffer.from(capture.data,'base64'));
+        await evaluate('window.dispatchEvent(new Event("blur"))');await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:start.x+12,y:start.y,button:'left',buttons:0,clickCount:1});await settle();
+        assert.equal((await measure()).selected,'true');
+        console.log(JSON.stringify({theme,drawer,style,inactiveSourcePreview:true,selectedGeometry:true,sourceWidth:active.width,neighborWidth:active.neighborWidth}));
+      }
+
     }
   }finally{await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:800,y:500});await send({type:'restore_workspace',workspace:saved});await evaluate('delete window.__pressedTab;delete window.__pressedParent;delete window.__pressedHeader');}
 }

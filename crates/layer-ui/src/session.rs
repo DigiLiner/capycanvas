@@ -1732,8 +1732,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         })
     }
 
-    /// Hosts supply the complete tab geometry captured on pointer down, once
-    /// their drag recognizer starts the workspace gesture.
+    /// Hosts supply complete tab geometry after press selection, when their
+    /// drag recognizer starts the workspace gesture.
     pub fn begin_tab_drag(&mut self, tabs: &[TabHit], clip: Bounds) {
         self.workspace_tab_drag = (|| {
             let drag = self
