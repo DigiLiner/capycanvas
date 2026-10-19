@@ -12266,11 +12266,8 @@ mod tests {
         .unwrap();
         for panel in [Panel::Brushes, Panel::Sizes, Panel::Layers] {
             assert_eq!(
-                app.panel_view(panel).unwrap().tab,
-                TabPresentation {
-                    show_icon: false,
-                    show_name: true
-                }
+                (app.panel_view(panel).unwrap().tab.show_icon, app.panel_view(panel).unwrap().tab.show_name),
+                (false, true)
             );
         }
         // Splitting a tab creates a fresh group's default, not a per-panel preference.

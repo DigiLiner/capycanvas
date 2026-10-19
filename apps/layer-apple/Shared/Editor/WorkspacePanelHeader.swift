@@ -71,7 +71,7 @@ private struct WorkspacePanelTabs: View {
                 if !store.workspace.input.contact.consumeClick() { store.dispatch(["type": "select_panel_tab", "group": group["id"].raw, "panel": tab["id"].raw]) }
             } label: {
                 WorkspaceTabLabel(tab: tab, selected: selected, palette: palette, fill: fill).contentShape(Rectangle())
-            }.buttonStyle(WorkspaceTabButtonStyle(selected: selected, ink: palette["text"])).accessibilityLabel(tab["title"].string)
+            }.buttonStyle(WorkspaceTabButtonStyle(selected: selected, ink: palette["text"], bottom: tab["tab"]["hover_bottom"])).accessibilityLabel(tab["title"].string)
                 .accessibilityIdentifier((drawer ? "drawer-tab-" : "panel-tab-") + tab["id"].string)
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: JSON(["kind": "panel", "panel": tab["id"].raw]),
@@ -86,18 +86,20 @@ private struct WorkspacePanelTabs: View {
 private struct WorkspaceTabButtonStyle: ButtonStyle {
     let selected: Bool
     let ink: Color
+    let bottom: JSON
     func makeBody(configuration: Configuration) -> some View {
-        Feedback(label: configuration.label, selected: selected, ink: ink)
+        Feedback(label: configuration.label, selected: selected, ink: ink, bottom: bottom)
     }
     private struct Feedback: View {
         let label: ButtonStyleConfiguration.Label
         let selected: Bool
         let ink: Color
+        let bottom: JSON
         @State private var hovered = false
         var body: some View {
             label.background {
                 if hovered && !selected {
-                    SquircleShape(topLeading: 18, topTrailing: 18, bottomTrailing: 6, bottomLeading: 6).fill(ink.opacity(0.08))
+                    WorkspaceTabShape(bottomLeading: CGFloat(bottom[0].number), bottomTrailing: CGFloat(bottom[1].number)).fill(ink.opacity(0.08))
                 }
             }.onHover { hovered = $0 }
         }
@@ -123,15 +125,17 @@ struct WorkspaceTabLabel: View {
 /// The shared tab silhouette: squircle upper corners and concave lower feet.
 /// The feet extend into adjacent slots; the strip clips its outer edges.
 private struct WorkspaceTabShape: Shape {
+    var bottomLeading: CGFloat = -6
+    var bottomTrailing: CGFloat = -6
     func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height, r = min(SquircleShape.surfaceRadius, w / 2, h), f: CGFloat = 6
+        let w = rect.width, h = rect.height, r = min(SquircleShape.surfaceRadius, w / 2, h), left = bottomLeading, right = bottomTrailing
         var path = Path()
         path.move(to: CGPoint(x: r, y: 0)); path.addLine(to: CGPoint(x: w - r, y: 0))
         path.squircle(center: CGPoint(x: w - r, y: r), start: CGVector(dx: 0, dy: -r), end: CGVector(dx: r, dy: 0))
-        path.addLine(to: CGPoint(x: w, y: h - f))
-        path.squircle(center: CGPoint(x: w + f, y: h - f), start: CGVector(dx: -f, dy: 0), end: CGVector(dx: 0, dy: f))
-        path.addLine(to: CGPoint(x: -f, y: h))
-        path.squircle(center: CGPoint(x: -f, y: h - f), start: CGVector(dx: 0, dy: f), end: CGVector(dx: f, dy: 0))
+        path.addLine(to: CGPoint(x: w, y: h - abs(right)))
+        path.squircle(center: CGPoint(x: w - right, y: h - abs(right)), start: CGVector(dx: right, dy: 0), end: CGVector(dx: 0, dy: abs(right)))
+        path.addLine(to: CGPoint(x: left, y: h))
+        path.squircle(center: CGPoint(x: left, y: h - abs(left)), start: CGVector(dx: 0, dy: abs(left)), end: CGVector(dx: -left, dy: 0))
         path.addLine(to: CGPoint(x: 0, y: r))
         path.squircle(center: CGPoint(x: r, y: r), start: CGVector(dx: -r, dy: 0), end: CGVector(dx: 0, dy: -r))
         path.closeSubpath()

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('full','hover-dark','hover-light')][string]$Journey='full')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='visible'
@@ -117,6 +117,81 @@ function Tab-Feedback([string]$Name){
     if(@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -ne $restore){Invoke ('panel-tab-'+$restore)}
     Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $restore} 'Tab feedback did not restore selection'
 }
+function Four-TabGroup {
+    $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'brushes'})[0]
+    foreach($panel in 'navigator','proof'){
+        [CapyRowPointer]::RightClick((Center (Control ('group-grip-'+$group.id))).x,(Center (Control ('group-grip-'+$group.id))).y)
+        (Control 'Add built-in panel' -Name).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        $title=@((Model).panels|Where-Object id -eq $panel)[0].configuration_title -replace '^Configure ',''
+        (Control $title -Name -Type $ControlType::MenuItem).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].panels -contains $panel} "Four-tab setup did not add $panel"
+    }
+    @((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0]
+}
+function Tab-Style($Group,[string]$Name){
+    $at=Center (Control ('group-grip-'+$Group));[CapyRowPointer]::RightClick($at.x,$at.y)
+    (Control $Name -Name -Type $ControlType::MenuItem).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    Wait-Until {!(Find $Name -Name -Type $ControlType::MenuItem)} 'Tab style menu did not close'
+}
+function Hover-Contours {
+    $group=Four-TabGroup;$panels=@($group.panels)
+    if($panels.Count -ne 4){throw 'Hover contours need exactly four tabs'}
+    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$origin)
+    $park=Center (Control 'drawing-canvas');$observations=[Collections.Generic.List[object]]::new();$selectedArgb=$null
+    Tab-Style $group.id 'Icons only'
+    foreach($active in 0..3){
+        Invoke ('panel-tab-'+$panels[$active])
+        Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $panels[$active]} 'Hover setup did not select its tab'
+        $selected=(Control ('panel-tab-'+$panels[$active]) -Arranged).Current.BoundingRectangle
+        [CapyRowPointer]::Hover($park.x,$park.y);Start-Sleep -Milliseconds 200
+        Wait-Until {
+            Capture ("contour-$active-rest") -Composed
+            $sample=[Drawing.Bitmap]::new((Join-Path $run ("contour-$active-rest.png")))
+            try{$color=$sample.GetPixel([int](($selected.Left+$selected.Right)/2-$origin[0]),[int]($selected.Bottom-3*$scale-$origin[1])).ToArgb()}finally{$sample.Dispose()}
+            if($null -eq $selectedArgb){$script:CapySelectedTabArgb=$color;return $true}
+            $color -eq $selectedArgb
+        } 'Selected tab surface was not presented'
+        if($null -eq $selectedArgb){$selectedArgb=$script:CapySelectedTabArgb}
+        $rest=[Drawing.Bitmap]::new((Join-Path $run ("contour-$active-rest.png")))
+        try{
+            $selected=(Control ('panel-tab-'+$panels[$active]) -Arranged).Current.BoundingRectangle
+            foreach($hovered in 0..3){
+                $tab=Control ('panel-tab-'+$panels[$hovered]) -Arranged;$bounds=$tab.Current.BoundingRectangle;$at=Center $tab
+                [CapyRowPointer]::Hover($at.x,$at.y);Start-Sleep -Milliseconds 200;$name="contour-$active-hover-$hovered";Capture $name -Composed
+                @{bounds=@($bounds.Left,$bounds.Top,$bounds.Right,$bounds.Bottom);injected=@($at.x,$at.y);cursor=[CapyRowPointer]::Cursor();origin=$origin;selected=@($selected.Left,$selected.Top,$selected.Right,$selected.Bottom)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($name+'-pointer.json'))
+                $image=[Drawing.Bitmap]::new((Join-Path $run ($name+'.png')))
+                try{
+                    foreach($x in @(($selected.Left+3*$scale),($selected.Right-3*$scale))){
+                        $px=[int]($x-$origin[0]);$py=[int]($selected.Bottom-2*$scale-$origin[1])
+                        if($image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()){throw "$name changed the selected foot"}
+                    }
+                    foreach($x in @(([Math]::Floor($selected.Left)-1),([Math]::Ceiling($selected.Right)))){
+                        $px=[int]($x-$origin[0]);$py=[int]([Math]::Floor($selected.Bottom)-1-$origin[1])
+                        if($image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()){throw "$name changed the selected outer foot"}
+                    }
+                    if($hovered -eq $active){continue}
+                    $visible=$false
+                    foreach($fraction in .2,.5,.8){
+                        $px=[int]($bounds.Left+$bounds.Width*$fraction-$origin[0]);$py=[int]($bounds.Top+4*$scale-$origin[1])
+                        $visible=$visible -or $image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()
+                    }
+                    if(!$visible){throw "$name has no visible hover interior"}
+                    foreach($side in 0,1){
+                        $neighbor=if($side -eq 0){$hovered-1}else{$hovered+1}
+                        $kind=if($neighbor -lt 0 -or $neighbor -gt 3){'square'}elseif($neighbor -eq $active){'inset'}else{'reverse'}
+                        $x=if($kind -eq 'reverse'){if($side -eq 0){[Math]::Floor($bounds.Left)-1}else{[Math]::Ceiling($bounds.Right)}}else{if($side -eq 0){[Math]::Ceiling($bounds.Left)}else{[Math]::Floor($bounds.Right)-1}}
+                        $px=[int]($x-$origin[0]);$py=[int]([Math]::Floor($bounds.Bottom)-1-$origin[1])
+                        $changed=$image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()
+                        $observations.Add(@{active=$active;hovered=$hovered;side=$side;kind=$kind;changed=$changed;x=$px;y=$py})
+                        $observations|ConvertTo-Json|Set-Content (Join-Path $run 'hover-contours.json')
+                        if($changed -ne ($kind -ne 'inset')){throw "$name $side $kind lower contour has incorrect pixels"}
+                    }
+                }finally{$image.Dispose()}
+            }
+        }finally{$rest.Dispose()}
+    }
+    Write-Output 'Four-tab lower contours, selected feet and square ends passed'
+}
 function Zoom([double]$Minimum){
     (Control 'drawing-canvas').SetFocus()
     Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus} 'Transparency canvas did not own keyboard focus'
@@ -151,6 +226,14 @@ try {
     $point=@{x=[int]($client[0]+($bounds.x+$bounds.width-24)*$scale);y=[int]($client[1]+($bounds.y+$bounds.height-72)*$scale)}
     $panel=[Convert]::ToInt32((Model).state.palette.panel.Substring(3,2),16)
     $tabShades=[Collections.Generic.List[string]]::new();$tabMismatches=[Collections.Generic.List[string]]::new()
+    if($Journey -ne 'full'){
+        Preference 0 ($Journey -replace '^hover-','')
+        Hover-Contours
+        [CapyRowPointer]::Verify();[CapyRowPointer]::Dispose()
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        if(!$review.WaitForExit(8000) -or $review.ExitCode -ne 0){throw 'Hover contour review did not close cleanly'}
+        return
+    }
     Fit-Canvas
     $surround=@{};$overPaper=@{}
     foreach($level in 0,3,2,1){

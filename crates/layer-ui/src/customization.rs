@@ -66,6 +66,7 @@ impl TabStyle {
             show_name: matches!(self, Self::Name | Self::IconName)
                 || (self == Self::Automatic && (tab_count <= 2 || active))
                 || (self == Self::ActiveName && active),
+            hover_bottom: [0; 2],
         }
     }
 }
@@ -89,6 +90,7 @@ fn automatic_tab_names_follow_measured_space_and_left_priority() {
 pub struct TabPresentation {
     pub show_icon: bool,
     pub show_name: bool,
+    pub hover_bottom: [i8; 2],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1008,7 +1010,17 @@ impl DockLayout {
         else {
             unreachable!()
         };
-        tab_style.presentation(*active == panel, panels.len())
+        let mut tab = tab_style.presentation(*active == panel, panels.len());
+        if *active != panel {
+            let index = panels.iter().position(|p| *p == panel).unwrap();
+            tab.hover_bottom = [index.checked_sub(1), (index + 1 < panels.len()).then_some(index + 1)]
+                .map(|neighbor| match neighbor.map(|i| panels[i]) {
+                    Some(p) if p == *active => 6,
+                    Some(_) => -6,
+                    None => 0,
+                });
+        }
+        tab
     }
     fn hide_tab_items(&self, target: ContextTarget, localization: &Localizer) -> Result<Vec<ContextMenuItem>, String> {
         let group = match target {
@@ -2926,6 +2938,41 @@ mod tests {
     }
 
     #[test]
+    fn tab_hover_bottom_corners_follow_selection_and_membership() {
+        let mut layout = DockLayout::default();
+        layout.move_panel([1200., 900.], Panel::Brushes, DockTarget::Tab { group: 8, index: None }).unwrap();
+        let mut customization = CustomizationState::default();
+        let expected = [
+            [[0, 0], [6, -6], [-6, -6], [-6, 0]],
+            [[0, 6], [0, 0], [6, -6], [-6, 0]],
+            [[0, -6], [-6, 6], [0, 0], [6, 0]],
+            [[0, -6], [-6, -6], [-6, 6], [0, 0]],
+        ];
+        for reordered in [false, true] {
+            if reordered {
+                layout.move_panel([1200., 900.], Panel::Brushes, DockTarget::Tab { group: 8, index: Some(0) }).unwrap();
+            }
+            let panels = layout.group_panels(8).unwrap().to_vec();
+            assert_eq!(panels.len(), 4);
+            for style in TabStyle::ALL {
+                customization.edit(&mut layout, CustomizationAction::SetTabStyle { group: 8, style }, Platform::Gtk, [1200., 900.]).unwrap();
+                for (i, active) in panels.iter().enumerate() {
+                    layout.select_tab(8, *active).unwrap();
+                    for (j, panel) in panels.iter().enumerate() {
+                        assert_eq!(layout.tab_presentation(*panel).hover_bottom, expected[i][j], "{style:?}/{i}/{j}");
+                        assert_eq!(serde_json::to_value(layout.tab_presentation(*panel)).unwrap()["hover_bottom"], serde_json::json!(expected[i][j]));
+                    }
+                }
+            }
+        }
+        layout.move_panel([1200., 900.], Panel::Brushes, DockTarget::Float { position: [600., 400.] }).unwrap();
+        assert_eq!(layout.tab_presentation(Panel::Brushes).hover_bottom, [0, 0]);
+        layout.select_tab(8, Panel::Layers).unwrap();
+        assert_eq!(layout.tab_presentation(Panel::Adjustments).hover_bottom, [6, -6]);
+        assert_eq!(layout.tab_presentation(Panel::Properties).hover_bottom, [-6, 0]);
+    }
+
+    #[test]
     fn automatic_tabs_follow_group_membership_without_changing_the_saved_style() {
         let mut layout = DockLayout::default();
         let check = |layout: &mut DockLayout| {
@@ -2935,11 +2982,8 @@ mod tests {
                 layout.select_tab(8, active).unwrap();
                 for &panel in &panels {
                     assert_eq!(
-                        layout.tab_presentation(panel),
-                        TabPresentation {
-                            show_icon: true,
-                            show_name: panels.len() <= 2 || panel == active,
-                        }
+                        (layout.tab_presentation(panel).show_icon, layout.tab_presentation(panel).show_name),
+                        (true, panels.len() <= 2 || panel == active)
                     );
                 }
             }
@@ -3042,11 +3086,8 @@ mod tests {
         assert_eq!(layout.group_tab_style(8).unwrap(), TabStyle::Icon);
         for panel in [Panel::Layers, custom] {
             assert_eq!(
-                layout.tab_presentation(panel),
-                TabPresentation {
-                    show_icon: true,
-                    show_name: false
-                }
+                (layout.tab_presentation(panel).show_icon, layout.tab_presentation(panel).show_name),
+                (true, false)
             );
         }
         state

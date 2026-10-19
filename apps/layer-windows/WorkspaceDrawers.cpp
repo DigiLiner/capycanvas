@@ -334,7 +334,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
             auto panel=panels.find(id);if(panel==panels.end())continue;auto presentation=object(panel->second,L"tab");
             auto labels=tab.Content().as<StackPanel>();labels.Children().GetAt(0).Visibility(fitted||flag(presentation,L"show_icon")?Visibility::Visible:Visibility::Collapsed);
             if(!fitted)labels.Children().GetAt(1).Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);
-            selectPanelTabShell(shell,hstring(id)==str(tabs,L"active"));
+            selectPanelTabShell(shell,hstring(id)==str(tabs,L"active"),nullptr,presentation);
         }
         auto placements=array(object(geometry,L"placement"),L"columns");
         for(uint32_t i=0;i<std::min(uint32_t(columns.size()),placements.Size());++i){

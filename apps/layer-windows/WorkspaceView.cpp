@@ -237,7 +237,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             label.Children().GetAt(0).Visibility(fitted||flag(presentation,L"show_icon")?Visibility::Visible:Visibility::Collapsed);
             if(!fitted)label.Children().GetAt(1).Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);
             bool selected=hstring(id)==str(geometry,L"active");
-            selectPanelTabShell(shell,selected,selected?Brush(data->glass(L"panel")):Brush(nullptr));
+            selectPanelTabShell(shell,selected,selected?Brush(data->glass(L"panel")):Brush(nullptr),presentation);
             if(selected)group.activeTab=shell;
         }
         if(group.tabScroll&&group.tabScroll.ActualWidth()>0)fitAutomaticTabs(data,group.automatic,group.tabScroll.ActualWidth(),tabWidths);

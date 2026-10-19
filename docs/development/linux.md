@@ -387,6 +387,11 @@ Drop rules and tile/grip bounds belong to `native_layout_drop_input`,
 contacts, and selection in both directions, themes and every transparency level.
 It requires visible inactive hover without painting over the active shoulders,
 selection before release, retained tab controls and the regular tab cursor.
+`native_panel_tab_lower_contours` checks every active/hovered pair in a four-tab
+strip, docked and drawer presentations, both themes and all transparency levels.
+It compares the full lower contour, active feet, strip ends and scrolled clips;
+run at 1x and 2x with `LAYER_NATIVE_TEST_TIMEOUT_MS=300000` to allow the complete
+matrix. Other native tests retain the default 180-second watchdog.
 `native_tab_slide_input` checks the selected preview shade after pressing an
 inactive tab, including Active name layouts where selection moves the tab beyond
 the original pointer position. Capture uses the retained source at pickup.

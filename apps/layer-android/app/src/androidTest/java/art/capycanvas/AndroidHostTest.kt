@@ -827,6 +827,83 @@ class AndroidHostTest {
         }
     }
 
+    @Test fun panelHoverCornersFollowEveryActiveTab() = panelHoverCornersFollowEveryActiveTab("light")
+    @Test fun panelHoverCornersFollowEveryActiveTabInDarkTheme() = panelHoverCornersFollowEveryActiveTab("dark")
+
+    private fun panelHoverCornersFollowEveryActiveTab(theme: String) {
+        val panels = listOf("brushes", "sizes", "tool_settings", "navigator")
+        val fixture = JSONObject(defaultWorkspace)
+        fixture.getJSONObject("layout").apply {
+            put("bands", JSONArray(listOf(
+                obj("id" to 40, "edge" to "left", "extent" to 252, "root" to tabs(41, *panels.toTypedArray())),
+                obj("id" to 42, "edge" to "right", "extent" to 252, "root" to tabs(43, "layers", "properties", "adjustments")))))
+            put("floating", JSONArray()); put("collapsed", JSONArray()); put("column_scroll", JSONArray()); put("fit_tab_groups", JSONArray()); put("fit_height_groups", JSONArray()); put("column_stacks", JSONArray())
+            put("next_id", maxOf(44, getInt("next_id")))
+        }
+        fixture.put("zen_mode", false)
+        action(obj("type" to "set_theme", "theme" to theme))
+        val root = compose.onNodeWithTag("workspace")
+        fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        fun hover(point: androidx.compose.ui.geometry.Offset, entering: Boolean = false, exiting: Boolean = false) {
+            val position = point - root.fetchSemanticsNode().boundsInRoot.topLeft + root.fetchSemanticsNode().positionInWindow
+            instrumentation.runOnMainSync {
+                val props = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE }
+                val coords = MotionEvent.PointerCoords().apply { x = position.x; y = position.y }
+                val time = SystemClock.uptimeMillis()
+                val event = MotionEvent.obtain(time, time, if (exiting) MotionEvent.ACTION_HOVER_EXIT else if (entering) MotionEvent.ACTION_HOVER_ENTER else MotionEvent.ACTION_HOVER_MOVE,
+                    1, arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f, 1, 0, InputDevice.SOURCE_MOUSE, 0)
+                try { compose.activity.window.decorView.dispatchGenericMotionEvent(event) } finally { event.recycle() }
+            }
+            settle()
+        }
+        for (drawer in listOf(false, true)) {
+            action(obj("type" to "restore_workspace", "workspace" to fixture))
+            if (drawer) {
+                customize(obj("type" to "set_column_collapsed", "group" to 41, "collapsed" to true))
+                customize(obj("type" to "set_column_drawers", "column" to 41, "drawers" to true))
+                compose.onNodeWithTag("column-icon-brushes").performTouchInput { click() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("column-drawer-header-41").fetchSemanticsNodes().isNotEmpty() }
+            }
+            val header = if (drawer) "column-drawer-header-41" else "group-header-41"
+            val prefix = if (drawer) "drawer-tab-" else "tab-"
+            val away = bounds(if (drawer) "column-drawer-grip-41" else "group-grip-41").center
+            hover(away, entering = true)
+            for (active in panels.indices) for (hovered in panels.indices) {
+                hover(away)
+                action(obj("type" to "select_panel_tab", "group" to 41, "panel" to panels[active]))
+                val headerBounds = bounds(header)
+                val activeBounds = bounds("$prefix${panels[active]}")
+                val target = bounds("$prefix${panels[hovered]}")
+                val baseline = compose.onNodeWithTag(header).captureToImage().toPixelMap()
+                hover(target.center)
+                val actual = compose.onNodeWithTag(header).captureToImage().toPixelMap()
+                fun pixel(point: androidx.compose.ui.geometry.Offset, changed: Boolean, label: String) {
+                    val x = (point.x - headerBounds.left).toInt()
+                    val y = (point.y - headerBounds.top).toInt()
+                    if (x !in 0 until baseline.width || y !in 0 until baseline.height) return
+                    assertEquals("$theme drawer=$drawer active=$active hovered=$hovered $label at $point", changed, baseline[x, y] != actual[x, y])
+                }
+                pixel(androidx.compose.ui.geometry.Offset(target.center.x, target.top + 5f * compose.activity.resources.displayMetrics.density), active != hovered, "face")
+                val bottom = target.bottom - 1f
+                for (left in listOf(true, false)) {
+                    val neighbor = hovered + if (left) -1 else 1
+                    val inside = if (left) target.left + 1f else target.right - 2f
+                    val outside = if (left) target.left - 1f else target.right + 1f
+                    if (hovered != active) {
+                        pixel(androidx.compose.ui.geometry.Offset(inside, target.top + 1f), false, "rounded top corner")
+                        if (neighbor !in panels.indices) pixel(androidx.compose.ui.geometry.Offset(inside, bottom), true, "square end")
+                        else if (neighbor == active) pixel(androidx.compose.ui.geometry.Offset(inside, bottom), false, "active-neighbor convex corner")
+                        else pixel(androidx.compose.ui.geometry.Offset(outside, bottom), true, "inactive-neighbor concave foot")
+                    }
+                    val activeOutside = if (left) activeBounds.left - 1f else activeBounds.right + 1f
+                    pixel(androidx.compose.ui.geometry.Offset(activeOutside, activeBounds.bottom - 1f), false, "active shoulder")
+                }
+                if (active == 1 && hovered == 2) capture("panel-hover-corners-$theme-drawer-$drawer")
+            }
+            hover(away, exiting = true)
+        }
+    }
+
     @Test fun panelHeadersRetainVisibleKeyboardFocus() {
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_TAB)
         val tab = compose.onNodeWithTag("tab-brushes")

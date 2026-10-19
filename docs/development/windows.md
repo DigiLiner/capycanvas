@@ -1154,6 +1154,9 @@ and during a held mouse press in both themes and every transparency level. It
 checks both neighboring directions, visible inactive hover, selection before
 release and retained native tab buttons. Baseline shade samples move keyboard
 focus to Settings so native focus borders are not mistaken for the tab fill.
+`-Journey hover-dark` and
+`-Journey hover-light` run the four-tab lower-hover contour matrix, covering
+all active/inactive pairs, straight ends, reverse feet and active-foot protection.
 `tab-pickup` checks the regular mouse
 cursor, selection before mouse release, and short mouse, pen and touch taps.
 `tab-drag` presses an inactive tab before pickup and compares its selected

@@ -4,6 +4,16 @@ use super::*;
 #[test]
 #[ignore = "isolated 120 Hz Mutter and native-input.js --workspace-motion"]
 fn native_workspace_motion_input() {
+    workspace_motion_input(&["group", "tab", "tear-off", "navigator", "color-overlap"]);
+}
+
+#[test]
+#[ignore = "isolated 120 Hz Mutter and native-input.js --native-test=native_workspace_tab_motion_input"]
+fn native_workspace_tab_motion_input() {
+    workspace_motion_input(&["tab"]);
+}
+
+fn workspace_motion_input(scenarios: &[&str]) {
     let app = native_test_app("art.capycanvas.WorkspaceMotion");
     let w = fixture_workspace(&app);
     w.window.maximize();
@@ -19,7 +29,7 @@ fn native_workspace_motion_input() {
     let saved = || serde_json::to_value(state(&w).workspace).unwrap();
     let mut reports = Vec::new();
     for touch in [false, true] {
-        for scenario in ["group", "tab", "tear-off", "navigator", "color-overlap"] {
+        for &scenario in scenarios {
             let mut fixture = original.clone();
             let viewport = [w.surface.width() as f32, w.surface.height() as f32];
             if scenario == "color-overlap" {
@@ -111,6 +121,12 @@ fn native_workspace_motion_input() {
             input.perform(serde_json::json!([event("down", start)]));
             pump(35);
             let before = saved();
+            let pickup_started = glib::monotonic_time();
+            let pickup_timings = Rc::new(RefCell::new(Vec::new()));
+            let pickup_clock = w.surface.frame_clock().unwrap();
+            let pickup_after = pickup_clock.connect_after_paint(glib::clone!(#[strong] pickup_timings, move |clock| {
+                if let Some(timing) = clock.current_timings() { pickup_timings.borrow_mut().push(timing); }
+            }));
             if scenario == "tab" {
                 input.perform(serde_json::json!([event(
                     "move",
@@ -119,6 +135,11 @@ fn native_workspace_motion_input() {
             }
             input.perform(serde_json::json!([event("move", origin)]));
             pump(350);
+            pickup_clock.disconnect(pickup_after);
+            let pickup_command_to_present_ms = pickup_timings.borrow().iter()
+                .filter(|timing| timing.is_complete() && timing.frame_time() >= pickup_started && timing.presentation_time() > 0)
+                .map(|timing| (timing.presentation_time() - pickup_started) as f64 / 1000.)
+                .min_by(f64::total_cmp);
             assert!(
                 w.workspace_drag
                     .borrow()
@@ -269,7 +290,7 @@ fn native_workspace_motion_input() {
             };
             let mut placement_cpu: Vec<_> = frames.iter().map(|f| f.1).collect();
             placement_cpu.sort_by(f64::total_cmp);
-            let report = serde_json::json!({"touch":touch,"scenario":scenario,"native_input_samples":cpu.len(),"native_input_gate_passed":cpu.len()>200,"native_input_minimum_exclusive":200,"model_refreshes":0,"dispatch_ms":{"p50":cpu.get(cpu.len()/2),"p95":cpu.get(cpu.len()*95/100)},"placement_ms":{"p50":placement_cpu.get(placement_cpu.len()/2),"p95":placement_cpu.get(placement_cpu.len()*95/100)},"placement_hz":hz(&frames.iter().map(|f|f.0).collect::<Vec<_>>()),"presentation_hz":hz(&presented),"presented_frames":presented.len(),"presentation_gap_p99_ms":presentation_gap_p99_ms,"refresh_intervals_us":timings.borrow().iter().map(|t|t.refresh_interval()).collect::<std::collections::BTreeSet<_>>(),"canvas":canvas});
+            let report = serde_json::json!({"touch":touch,"scenario":scenario,"pickup_command_to_present_ms":pickup_command_to_present_ms,"native_input_samples":cpu.len(),"native_input_gate_passed":cpu.len()>200,"native_input_minimum_exclusive":200,"model_refreshes":0,"dispatch_ms":{"p50":cpu.get(cpu.len()/2),"p95":cpu.get(cpu.len()*95/100)},"placement_ms":{"p50":placement_cpu.get(placement_cpu.len()/2),"p95":placement_cpu.get(placement_cpu.len()*95/100)},"placement_hz":hz(&frames.iter().map(|f|f.0).collect::<Vec<_>>()),"presentation_hz":hz(&presented),"presented_frames":presented.len(),"presentation_gap_p99_ms":presentation_gap_p99_ms,"refresh_intervals_us":timings.borrow().iter().map(|t|t.refresh_interval()).collect::<std::collections::BTreeSet<_>>(),"canvas":canvas});
             eprintln!("{report}");
             reports.push(report);
             assert!(!placement_cpu.is_empty(), "publish native placement");

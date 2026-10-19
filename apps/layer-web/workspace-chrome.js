@@ -1,4 +1,23 @@
 // Shared dock projections. The browser supplies widgets and measured body sizes.
+function squircleCorner([cx,cy],[sx,sy],[ex,ey]) {
+  return Array.from({length:24},(_,i)=>{
+    const angle=(i+1)*Math.PI/48,along=Math.sqrt(Math.cos(angle)),across=Math.sqrt(Math.sin(angle));
+    return `L ${cx+sx*along+ex*across} ${cy+sy*along+ey*across}`;
+  }).join(" ");
+}
+const hoverFeet = [
+  `path("M 6 0 L 6 6 L 0 6 ${squircleCorner([0,0],[0,6],[6,0])} Z")`,
+  `path("M 0 0 L 0 6 L 6 6 ${squircleCorner([6,0],[0,6],[-6,0])} Z")`,
+];
+export function tabHover(tab, presentation) {
+  const [left,right]=presentation.hover_bottom;
+  if(tab.dataset.hoverLeft===String(left)&&tab.dataset.hoverRight===String(right))return;
+  tab.dataset.hoverLeft=left;tab.dataset.hoverRight=right;
+  tab.style.setProperty('--hover-left-radius',`${Math.max(0,left)}px`);
+  tab.style.setProperty('--hover-right-radius',`${Math.max(0,right)}px`);
+  tab.style.setProperty('--hover-left-foot',hoverFeet[0]);
+  tab.style.setProperty('--hover-right-foot',hoverFeet[1]);
+}
 export function createWorkspaceChrome({app,state,workspace,element,button,icon,place,dispatch,customization,editor,panelFrame,draggable,grip,contentPanel,tabLabel,automaticTabs,releaseTabs}) {
   const columns=new Map(),drawers=new Map(),connections=new Map();
   let resolved,animating=false;
@@ -104,12 +123,6 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
       const square=facing.filter(i=>{const[x,y]=corners[i],[rx,ry]=vertical?[radii[i],.5]:[.5,radii[i]];return x>=a.left-rx&&x<=a.right+rx&&y>=a.top-ry&&y<=a.bottom+ry;});
       if(square.length)node.dataset.drawerSourceCorners=[...new Set([...(node.dataset.drawerSourceCorners?.split(' ')||[]),...square])].join(' ');
     }
-  }
-  function squircleCorner([cx,cy],[sx,sy],[ex,ey]) {
-    return Array.from({length:24},(_,i)=>{
-      const angle=(i+1)*Math.PI/48,along=Math.sqrt(Math.cos(angle)),across=Math.sqrt(Math.sin(angle));
-      return `L ${cx+sx*along+ex*across} ${cy+sy*along+ey*across}`;
-    }).join(" ");
   }
   function bridge(node,c) {
     if(!node){node=document.createElementNS("http://www.w3.org/2000/svg","svg");node.classList.add("drawer-bridge");node.setAttribute('aria-hidden','true');workspace.append(node);}
@@ -290,8 +303,9 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
         if(tabs) {
         const automatic=tabs.dataset.tabStyle==="automatic";
         if(!r.closing)for(const b of tabs.querySelectorAll('.dock-tab')) {
-          const v=customization.view(b.dataset.panel),key=JSON.stringify([v.title,v.icon,automatic?null:v.tab]);
+          const v=customization.view(b.dataset.panel),key=JSON.stringify([v.title,v.icon,automatic?null:[v.tab.show_icon,v.tab.show_name]]);
           b.setAttribute('aria-selected',String(b.dataset.panel===r.drawer.tabs.active));
+          tabHover(b,v.tab);
           if(b.dataset.labelKey!==key){b.dataset.labelKey=key;b.replaceChildren();tabLabel(b,v,automatic);b.title=v.title;b.setAttribute('aria-label',v.title);if(automatic)automaticTabs(b.parentElement);}
         }
         // Shared placement includes tabs in the first column body.

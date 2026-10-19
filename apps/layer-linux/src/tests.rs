@@ -84,6 +84,8 @@ mod column_stack_tests;
 mod paint_column_fit;
 #[path = "ui_motion_tests.rs"]
 mod ui_motion;
+#[path = "panel_tab_contour_tests.rs"]
+mod panel_tab_contour;
 #[path = "contact_brush_tests.rs"]
 mod contact_brush;
 #[path = "squircle_tests.rs"]

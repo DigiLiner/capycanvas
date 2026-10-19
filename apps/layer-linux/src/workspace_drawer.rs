@@ -339,6 +339,7 @@ struct View {
     bodies: Vec<Body>,
     tabs: Vec<gtk::Button>,
     tab_clip: Option<gtk::ScrolledWindow>,
+    tab_strip: Option<crate::panel_tabs::PanelTabs>,
 }
 impl View {
     fn new(w: &Rc<Workspace>, drawer: &ContentDrawer, previous: Option<&Self>) -> Self {
@@ -388,6 +389,7 @@ impl View {
         let mut effects = None;
         let mut tab_buttons = previous.map(|view| view.tabs.clone()).unwrap_or_default();
         let mut tab_clip = previous.and_then(|view| view.tab_clip.clone());
+        let mut tab_strip = previous.and_then(|view| view.tab_strip.clone());
         for panels in &drawer.columns {
             let column = gtk::Box::new(gtk::Orientation::Vertical, WORKSPACE_SPACING as i32);
             for panel in panels {
@@ -515,6 +517,7 @@ impl View {
                     labels.append(&button);
                     tab_buttons.push(button);
                 }
+                labels.set_hover_bottom(tabs.panels.iter().map(|panel| layout.tab_presentation(*panel).hover_bottom));
                 let header_clip = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
                     .hscrollbar_policy(gtk::PolicyType::External)
                     .vscrollbar_policy(gtk::PolicyType::Never)
@@ -523,6 +526,7 @@ impl View {
                     .build());
                 header.append(&header_clip);
                 tab_clip = Some(header_clip);
+                tab_strip = Some(labels);
                 let grip = tiles::grip(&w.localization().text(layer_ui::MessageId::DOCUMENTS_DELIVERY_DRAG_PANEL));
                 grip.set_widget_name("column-drawer-grip");
                 grip.set_size_request(20, 24);
@@ -553,6 +557,7 @@ impl View {
             bodies,
             tabs: tab_buttons,
             tab_clip,
+            tab_strip,
         }
     }
 }
@@ -1077,7 +1082,8 @@ impl Drawer {
                         }
                     }
                 }
-                if let Some(labels) = view.tab_clip.as_ref().and_then(|clip| clip.child()).and_downcast::<crate::panel_tabs::PanelTabs>() {
+                if let Some(labels) = view.tab_strip.as_ref() {
+                    labels.set_hover_bottom(tabs.panels.iter().map(|panel| layout.tab_presentation(*panel).hover_bottom));
                     labels.set_style(style);
                     if changed { labels.queue_resize(); labels.queue_draw(); }
                 }

@@ -107,6 +107,8 @@ const colorPanel = ARGV.includes('--color-panel') || ARGV.includes('--web-color-
 const workspaceDropSizes = ARGV.includes('--workspace-drop-sizes');
 const workspaceEdges = ARGV.includes('--workspace-edges');
 const workspaceMotion = workspaceDropSizes || workspaceEdges || colorPanel || columnStacks || ARGV.includes('--workspace-motion') || workspaceWeb || workspaceResize;
+const nativeTestTimeout = Number(GLib.getenv('LAYER_NATIVE_TEST_TIMEOUT_MS') ?? 180000);
+if (!Number.isFinite(nativeTestTimeout) || nativeTestTimeout <= 0) throw new Error('LAYER_NATIVE_TEST_TIMEOUT_MS must be positive and finite');
 // A captured executable lets correctness runs identify their exact build and
 // avoids an unrelated release rebuild. The ordinary cargo route remains usable.
 const capturedExecutable = GLib.getenv('LAYER_NATIVE_TEST_EXECUTABLE');
@@ -362,7 +364,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
     });
     return GLib.SOURCE_REMOVE;
 });
-GLib.timeout_add(GLib.PRIORITY_DEFAULT, nativeTest ? 180000 : workspaceHold || workspaceMotion || drawerStyle || workspaceSwitcher || iconAudit ? 120000 : 60000, () => {
+GLib.timeout_add(GLib.PRIORITY_DEFAULT, nativeTest ? nativeTestTimeout : workspaceHold || workspaceMotion || drawerStyle || workspaceSwitcher || iconAudit ? 120000 : 60000, () => {
     process.force_exit();
     loop.quit();
     return GLib.SOURCE_REMOVE;

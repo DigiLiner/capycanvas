@@ -64,10 +64,10 @@ private fun JSONObject.tabStyle(group: Int): String? {
 
 private val TabFoot = 6.dp
 
-private fun Path.tabFace(w: Float, h: Float, r: Float, f: Float) {
+private fun Path.tabFace(w: Float, h: Float, r: Float, left: Float, right: Float) {
     moveTo(r, 0f); lineTo(w-r, 0f); squircleTo(Offset(w-r, r), Offset(0f, -r), Offset(r, 0f))
-    lineTo(w, h-f); squircleTo(Offset(w+f, h-f), Offset(-f, 0f), Offset(0f, f))
-    lineTo(-f, h); squircleTo(Offset(-f, h-f), Offset(0f, f), Offset(f, 0f))
+    lineTo(w, h-kotlin.math.abs(right)); squircleTo(Offset(w-right, h-kotlin.math.abs(right)), Offset(right, 0f), Offset(0f, kotlin.math.abs(right)))
+    lineTo(left, h); squircleTo(Offset(left, h-kotlin.math.abs(left)), Offset(0f, kotlin.math.abs(left)), Offset(-left, 0f))
     lineTo(0f, r); squircleTo(Offset(r, r), Offset(-r, 0f), Offset(0f, -r)); close()
 }
 
@@ -101,7 +101,7 @@ internal class StripNode(private var strip: TabStrip, private var color: Color) 
             val placed = tab.requireLayoutCoordinates()
             if (placed.size != faceSize) {
                 faceSize = placed.size
-                face.reset(); face.tabFace(faceSize.width.toFloat(), faceSize.height.toFloat(), SurfaceRadius.toPx(), TabFoot.toPx())
+                face.reset(); face.tabFace(faceSize.width.toFloat(), faceSize.height.toFloat(), SurfaceRadius.toPx(), -TabFoot.toPx(), -TabFoot.toPx())
             }
             if (size != bandSize) { bandSize = size; band.reset(); band.addRect(Rect(Offset.Zero, size)) }
             hole.reset(); hole.addPath(face, requireLayoutCoordinates().localPositionOf(placed, Offset.Zero) + Offset(tab.slide(), 0f))
@@ -153,9 +153,10 @@ internal class HoleNode(private var strip: TabStrip, var slide: () -> Float) : M
         .then(if (selected) Modifier.tabHole(strip, slide) else Modifier)
         .graphicsLayer { translationX = slide() }
         .drawWithCache {
-            val face = if (selected) Path().apply { tabFace(size.width, size.height, SurfaceRadius.toPx(), TabFoot.toPx()) } else null
+            val face = if (selected) Path().apply { tabFace(size.width, size.height, SurfaceRadius.toPx(), -TabFoot.toPx(), -TabFoot.toPx()) } else null
             val hover = if (!selected && hovered) Path().apply {
-                addSquircle(Rect(Offset.Zero, size), SurfaceRadius.toPx(), SurfaceRadius.toPx(), TabFoot.toPx(), TabFoot.toPx())
+                val bottom = presentation.getJSONArray("hover_bottom")
+                tabFace(size.width, size.height, SurfaceRadius.toPx(), bottom.getInt(0).dp.toPx(), bottom.getInt(1).dp.toPx())
             } else null
             onDrawBehind {
                 if (dragged && !selected) drawRect(colors.tabs)

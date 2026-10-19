@@ -161,23 +161,29 @@ inline std::vector<Point> clipColumns(std::vector<Point> points,float left,float
 }
 // The 6-DIP shoulders join the active tab to its panel. Coordinates include
 // both overhangs so a Path never has to arrange a negative geometry origin.
-inline std::vector<Point> panelTabOutline(float width,float height){
-    constexpr float foot=6;float r=std::min({SurfaceRadius,width*.5f,height-foot});
+inline std::vector<Point> panelTabOutline(float width,float height,std::array<float,2> bottom={-6,-6}){
+    auto [left,right]=bottom;float pad=std::max(0.f,-left),r=std::min({SurfaceRadius,width*.5f,height-6});
     PointCollection points;
-    squircleCorner(points,{0,height-foot},{0,foot},{foot,0});
-    squircleCorner(points,{foot+r,r},{-r,0},{0,-r});
-    squircleCorner(points,{foot+width-r,r},{0,-r},{r,0});
-    squircleCorner(points,{2*foot+width,height-foot},{-foot,0},{0,foot});
+    squircleCorner(points,{pad+left,height-std::abs(left)},{0,std::abs(left)},{-left,0});
+    squircleCorner(points,{pad+r,r},{-r,0},{0,-r});
+    squircleCorner(points,{pad+width-r,r},{0,-r},{r,0});
+    squircleCorner(points,{pad+width-right,height-std::abs(right)},{right,0},{0,std::abs(right)});
     std::vector<Point> outline(points.Size());points.GetMany(0,outline);return outline;
 }
 inline PathGeometry panelTabShape(float width,float height){return polygon(panelTabOutline(width,height));}
-inline void selectPanelTabShell(Grid const& shell,bool selected,Brush const& fill=nullptr){
+inline void selectPanelTabShell(Grid const& shell,bool selected,Brush const& fill=nullptr,J const& presentation=J{}){
     shell.Tag(box_value(selected?L"active-panel-tab-shell":L"panel-tab-shell"));Canvas::SetZIndex(shell,selected?1:0);
     auto background=shell.Children().GetAt(0).as<Canvas>();auto shape=background.Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>();
     shape.Fill(selected?fill:unbox_value_or<bool>(background.Tag(),false)?shape.Tag().try_as<Brush>():Brush(nullptr));
-    Canvas::SetLeft(shape,selected?-6:0);
+    if(presentation.Size()){
+        auto bottom=array(presentation,L"hover_bottom");
+        shape.Resources().Insert(box_value(L"TabHoverBottom"),box_value(Thickness{bottom.GetNumberAt(0),0,bottom.GetNumberAt(1),0}));
+    }
+    auto key=box_value(L"TabHoverBottom");auto corners=shape.Resources().HasKey(key)?unbox_value<Thickness>(shape.Resources().Lookup(key)):Thickness{};
+    std::array<float,2> bottom=selected?std::array<float,2>{-6,-6}:std::array<float,2>{float(corners.Left),float(corners.Right)};
+    Canvas::SetLeft(shape,std::min(0.f,bottom[0]));
     auto content=shell.Children().GetAt(1).as<FrameworkElement>();float width=float(content.ActualWidth()),height=float(content.ActualHeight());
-    if(width>0&&height>0){shape.Width(width+(selected?12:0));shape.Height(height);shape.Data(selected?panelTabShape(width,height):squircleRectangle(width,height,{SurfaceRadius,SurfaceRadius,6,6}));}
+    if(width>0&&height>0){shape.Width(width-std::min(0.f,bottom[0])-std::min(0.f,bottom[1]));shape.Height(height);shape.Data(polygon(panelTabOutline(width,height,bottom)));}
 }
 inline Grid panelTabShell(FrameworkElement const& content,Brush const& fill,Brush const& hover=nullptr){
     if(auto tab=content.try_as<Button>())for(auto state:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed"})

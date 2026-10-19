@@ -54,6 +54,24 @@ flattens facing corners within `SURFACE_RADIUS` of the tile
 never clips the square join. A closing drawer keeps these joins while its body
 and connector shrink; they round again only once the drawer is removed.
 
+Panel-tab hover keeps the existing 18-unit upper corners. Shared
+`TabPresentation.hover_bottom` publishes the left and right lower radii:
+
+| Neighbour on that side | Lower hover corner |
+| --- | --- |
+| Active tab | Convex 6-unit corner, following the active tab's concave foot. |
+| Inactive tab | Concave 6-unit foot extending into the neighbouring slot. |
+| End of the tab strip | Straight edge. |
+
+Negative radii denote concave feet, positive radii denote convex corners, and
+zero denotes a straight edge. Selected tabs publish zero hover radii and keep
+their active silhouette. Strip viewports clip hover feet at scrolled edges.
+These rules apply to docked, floating and drawer tabs and update with selection,
+reordering and membership. Hover remains below the active silhouette and uses
+one 8% text-color fill, including its feet.
+Browsers without `corner-shape` keep the 6-unit lower inset radius to match
+the active tab's circular foot; the fitted upper radius stays unchanged.
+
 ## Scope
 
 Squircles cover the workspace: the title bar, toolbars, panels, tabs, drawers,
@@ -137,6 +155,10 @@ appear in native drag snapshots.
 
 ## Checks
 
+- Panel tabs: GTK `native_panel_tab_lower_contours` at 1x/2x, Web `--tab-styles`,
+  and Android `panelHoverCornersFollowEveryActiveTab` in both themes cover
+  inactive neighbours, active neighbours and strip ends. GTK and Web also
+  compare clipped viewports; Web checks the circular browser fallback.
 - GTK layer thumbnails: `tools/performance/workspace-motion.sh gtk --native-test=native_layer_thumbnail_squircles`
   checks preview clipping, outer borders, corner clicks and drag previews in both themes.
 - Web `--layer-hold` also checks intermediate selection outlines, rapid retargeting

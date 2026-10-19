@@ -596,6 +596,9 @@ The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
 retained source identity through native mouse and pen reordering.
 `tests/workspace-tabs.swift` checks that a late selection publication updates the
 retained preview's panel shade while its identity and geometry stay fixed.
+Panel hover uses the shared left/right `TabPresentation.hover_bottom` values.
+`WorkspaceTabShape` renders their signed radii with the same squircle segments
+as the active silhouette; see the [lower corner rules](../ui/squircle-corners.md#radii).
 
 Other runners in `scripts/` and `tests/`:
 

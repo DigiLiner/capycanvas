@@ -3167,7 +3167,7 @@ impl Workspace {
                 header.add_css_class("dock-tabs");
                 header.set_height_request(layer_ui::TAB_BAR_HEIGHT as i32);
                 let labels =
-                    crate::panel_tabs::PanelTabs::new(layout.group_tab_style(group.id).unwrap()).with_feet();
+                    crate::panel_tabs::PanelTabs::new(layout.group_tab_style(group.id).unwrap());
                 let mut tabs = Vec::new();
                 if group.tabs_visible {
                     for &panel in &group.panels {
@@ -3390,6 +3390,7 @@ impl Workspace {
                 button.update_property(&[gtk::accessible::Property::Label(&title)]);
                 selected(button, *panel == group.active);
             }
+            view.tab_strip.set_hover_bottom(group.panels.iter().map(|panel| layout.tab_presentation(*panel).hover_bottom));
             view.tab_strip.set_style(tab_style);
             view.tab_strip.queue_resize();
             view.tab_strip.queue_draw();

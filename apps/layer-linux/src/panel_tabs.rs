@@ -10,8 +10,8 @@ mod imp {
     pub struct Strip {
         pub buttons: RefCell<Vec<gtk::Button>>,
         pub style: Cell<TabStyle>,
+        pub hover_bottom: RefCell<Vec<[i8; 2]>>,
         pub tints: RefCell<Option<[gtk::Box; 2]>>,
-        pub feet: Cell<bool>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for Strip {
@@ -96,9 +96,8 @@ mod imp {
             let Some([strip, foot]) = self.tints.borrow().clone() else { return };
             let selected = buttons.iter().find(|b| b.has_css_class("selected-tool") && b.opacity() > 0.);
             let active = selected.and_then(|tab| tab.compute_bounds(&*obj));
-            let feet = active.filter(|_| self.feet.get());
             let draw_feet = |color: &gtk::gdk::RGBA| {
-                if let Some(tab) = feet {
+                if let Some(tab) = active {
                     let cr = snapshot.append_cairo(&bounds);
                     cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), color.alpha().into());
                     super::feet(&cr, &tab, bounds.height());
@@ -116,7 +115,18 @@ mod imp {
             draw_feet(&gtk::gdk::RGBA::BLACK);
             snapshot.pop();
             snapshot.append_color(&strip.color(), &bounds);
-            for button in buttons.iter().filter(|button| Some(*button) != selected) {
+            let corners = self.hover_bottom.borrow();
+            for (i, button) in buttons.iter().enumerate().filter(|(_, button)| Some(*button) != selected) {
+                if button.is_sensitive() && button.opacity() > 0. && !button.has_css_class("selected-tool")
+                    && button.state_flags().contains(gtk::StateFlags::PRELIGHT) {
+                    if let Some(tab) = button.compute_bounds(&*obj) {
+                        let cr = snapshot.append_cairo(&bounds);
+                        let color = button.color();
+                        cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), f64::from(color.alpha()) * 0.08 * button.opacity());
+                        super::hover(&cr, &tab, corners.get(i).copied().unwrap_or_default());
+                        let _ = cr.fill();
+                    }
+                }
                 obj.snapshot_child(button, snapshot);
             }
             snapshot.pop();
@@ -146,18 +156,23 @@ impl PanelTabs {
         *tabs.imp().tints.borrow_mut() = Some(tints);
         tabs
     }
-    pub fn with_feet(self) -> Self {
-        self.imp().feet.set(true);
-        self
-    }
     pub fn set_style(&self, style: TabStyle) {
         if self.imp().style.replace(style) != style {
             self.queue_resize();
         }
     }
+    pub fn set_hover_bottom(&self, corners: impl Iterator<Item = [i8; 2]>) {
+        let corners: Vec<_> = corners.collect();
+        if *self.imp().hover_bottom.borrow() != corners {
+            *self.imp().hover_bottom.borrow_mut() = corners;
+            self.queue_draw();
+        }
+    }
     pub fn append(&self, button: &gtk::Button) {
         button.set_cursor_from_name(Some("default"));
         button.set_parent(self);
+        button.connect_state_flags_changed(glib::clone!(#[weak(rename_to = tabs)] self, move |_, _| tabs.queue_draw()));
+        button.connect_opacity_notify(glib::clone!(#[weak(rename_to = tabs)] self, move |_| tabs.queue_draw()));
         self.imp().buttons.borrow_mut().push(button.clone());
         self.queue_resize();
     }
@@ -190,6 +205,16 @@ impl PanelTabs {
                 ]
             })
             .collect()
+    }
+}
+
+pub(crate) fn hover(cr: &gtk::cairo::Context, tab: &gtk::graphene::Rect, corners: [i8; 2]) {
+    let [left, right] = corners.map(f32::from);
+    let radius = gtk::graphene::Size::new(layer_ui::SURFACE_RADIUS, layer_ui::SURFACE_RADIUS);
+    let lower = |r: f32| gtk::graphene::Size::new(r.max(0.), r.max(0.));
+    crate::squircle::rounded_rect(cr, &gtk::gsk::RoundedRect::new(*tab, radius, radius, lower(right), lower(left)));
+    for (r, x, direction) in [(left, tab.x(), -1.), (right, tab.x() + tab.width(), 1.)] {
+        if r < 0. { crate::squircle::concave_foot(cr, x.into(), (tab.y() + tab.height()).into(), f64::from(-r), direction); }
     }
 }
 

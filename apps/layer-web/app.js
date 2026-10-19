@@ -19,7 +19,7 @@ import { createNotice } from "./notice.js";
 import { createZoomReadout } from "./zoom-readout.js";
 import { createScreenStatus } from "./screen-status.js";
 import { createEditorPanels } from "./editor-panels.js";
-import { createWorkspaceChrome } from "./workspace-chrome.js";
+import { createWorkspaceChrome, tabHover } from "./workspace-chrome.js";
 import { createGlass } from "./glass.js";
 import { createDocuments } from "./documents.js";
 import { createSystemStatus } from "./system-status.js";
@@ -486,6 +486,7 @@ function place(node, rect) {
   glass?.queue();
 }
 function tabLabel(tab, view, automatic = false) {
+  tabHover(tab,view.tab);
   tab.classList.toggle("icon-only-tab", !view.tab.show_name);
   if (view.tab.show_icon || automatic) tab.append(icon(view.icon, true));
   if (view.tab.show_name || automatic) { const label = element("span", "", view.title); label.hidden = !view.tab.show_name; tab.append(label); }
@@ -586,7 +587,8 @@ function arrange(nextLayout, layoutOnly = false) {
     for(const tab of node.querySelectorAll('.dock-tab')) {
       const view=customization.view(tab.dataset.panel),title=view.title;
       tab.setAttribute('aria-selected',String(tab.dataset.panel===group.active));
-      const labelKey=JSON.stringify([view.title,view.icon,tabStyle==='automatic'?null:view.tab]);
+      tabHover(tab,view.tab);
+      const labelKey=JSON.stringify([view.title,view.icon,tabStyle==='automatic'?null:[view.tab.show_icon,view.tab.show_name]]);
       if(tab.dataset.labelKey===labelKey)continue;
       tab.dataset.labelKey=labelKey;tab.replaceChildren();tabLabel(tab,view,tabStyle==='automatic');
       tab.title=title;tab.setAttribute('aria-label',title);
@@ -715,7 +717,7 @@ function measurePanels() {
     // Model publication also advances for numeric values and canvas poses.
     // Intrinsic copies change only with panel structure/copy, appearance or
     // available width; each content widget invalidates its own schema below.
-    const key = JSON.stringify([state.theme, view.title, view.tab, view.icon, view.controls, view.tile_style]);
+    const key = JSON.stringify([state.theme, view.title, view.tab.show_icon, view.tab.show_name, view.icon, view.controls, view.tile_style]);
     let cached = panelMeasurements.get(config.id);
     if (cached?.key !== key) {
       invalidatePanelMeasurement(config.id);

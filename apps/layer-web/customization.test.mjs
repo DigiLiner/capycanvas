@@ -1,3 +1,4 @@
+import {checkTabHoverContours} from './tab-hover.test.mjs';
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 
@@ -134,6 +135,7 @@ export async function checkToolbarManager({ call, evaluate, settle }) {
 }
 
 export async function checkTabStyles({ call, evaluate, settle }) {
+  await checkTabHoverContours({call,evaluate,settle});
   await checkTabPress({call,evaluate,settle});
   const dir = 'artifacts/ui/group-tab-styles'; await mkdir(dir, { recursive: true });
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false });
@@ -749,7 +751,7 @@ async function checkTabPress({call,evaluate,settle}) {
       const point=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect();window.__pressedTab=n;window.__pressedParent=n.parentElement;window.__pressedHeader=n.closest('nav');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
       await call('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await settle();
       const hover=await evaluate(`(()=>{const n=window.__pressedTab,s=getComputedStyle(n);return{cursor:s.cursor,background:s.backgroundColor,header:getComputedStyle(n.parentElement).cursor,hover:n.matches(':hover'),lowerCorners:[s.borderBottomLeftRadius,s.borderBottomRightRadius]}})()`);
-      assert.equal(hover.cursor,'default');assert.ok(['auto','default'].includes(hover.header));assert.equal(hover.hover,true);assert.notEqual(hover.background,'rgba(0, 0, 0, 0)');assert.ok(hover.lowerCorners.every(r=>parseFloat(r)>=6),'hover clears the active tab curved foot');
+      assert.equal(hover.cursor,'default');assert.ok(['auto','default'].includes(hover.header));assert.equal(hover.hover,true);assert.notEqual(hover.background,'rgba(0, 0, 0, 0)');assert.deepEqual(hover.lowerCorners.map(parseFloat),[6,0],'only the corner next to the active tab is rounded');
       const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${dir}/${theme}-${drawer?'drawer':'docked'}-hover.png`,Buffer.from(shot.data,'base64'));
       await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});await settle();
       const selected=()=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return{selected:n.getAttribute('aria-selected'),retained:n===window.__pressedTab,parent:n.parentElement===window.__pressedParent,configuration:layerApp.state().customization.expanded??null}})()`);

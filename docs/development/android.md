@@ -294,6 +294,10 @@ manual save checkpoints and undo/redo after an actual process death.
   `InDarkTheme` variant check docked, floating and drawer tabs: visible inactive
   hover, preserved
   active shoulders, selection before release and unchanged configuration.
+- `AndroidHostTest#panelHoverCornersFollowEveryActiveTab` and its `InDarkTheme`
+  variant check all active/hovered pairings in four-tab docked and drawer strips,
+  including reverse feet outside inactive slots, convex corners beside the active
+  tab, straight ends and unchanged active shoulders.
 - `AndroidHostTest#compactPanelSpacingAndAlignmentAcrossContexts` captures Tools
   and Properties at 242/320 dp in both themes. It checks 24 dp controls, 36 dp
   slider rows, 8 dp content edges, common caption columns and 4 dp gaps on both
