@@ -27,8 +27,8 @@ function At([string]$Id,[switch]$Name){
 }
 function Screen($Bounds){
     $point=[CapyRowPointer+Point]::new()
-    if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$point)){throw 'Native client origin is unavailable'}
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if(![CapyRowPointer]::ClientToScreen($window,[ref]$point)){throw 'Native client origin is unavailable'}
+    $scale=[CapyRowPointer]::GetDpiForWindow($window)/96.
     @{x=[int]($point.x+($Bounds.x+$Bounds.width*.5)*$scale);y=[int]($point.y+($Bounds.y+$Bounds.height*.5)*$scale)}
 }
 function Tap([string]$Id){$at=At $Id;[CapyRowPointer]::Down($Device,$at.x,$at.y);[CapyRowPointer]::Up()}
@@ -62,7 +62,7 @@ function Check-ColumnInteractions {
             [CapyRowPointer]::Down($Device,$at.x,$at.y);[CapyRowPointer]::Up()
         }else{
             $at=At 'divider-11'
-            $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+            $scale=[CapyRowPointer]::GetDpiForWindow($window)/96.
             Drag 'divider-11' @{x=[int]($at.x-160*$scale);y=$at.y}
         }
         Wait-Until {$null -eq (Column 12)} "$operation did not expand the column"
@@ -164,9 +164,10 @@ function Start-Review([string]$Phase){
     $null=$review.Handle
     @{process_id=$review.Id;run=$run;device=$Device}|ConvertTo-Json|Set-Content (Join-Path $repo 'artifacts/windows/column-stack-review.json')
     Write-Output "Owned column-stack review $($review.Id) ($Device)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Native stack review did not start' 45
-    $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
-    $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));$null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Native stack review did not start' 45
+    $script:root=$native.window.Root;$script:window=$native.window.Handle
+    $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));$null=[CapyRowPointer]::SetForegroundWindow($window)
     (Control 'drawing-canvas').SetFocus()
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 }
