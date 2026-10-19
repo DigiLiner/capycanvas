@@ -224,6 +224,23 @@ extension XCTestCase {
             waitForExpectations(timeout: 15)
         }
         let paper = editorPixels(in: app)
+        try clipboard.replace([item(original), item(original)])
+        paste()
+        let pasted = app.buttons["drawing-tab-2"].firstMatch, startup = app.buttons["drawing-tab-1"].firstMatch
+        if !pasted.waitForExistence(timeout: 5) { workspaceActivate(app.buttons["document-title"]) }
+        XCTAssertTrue(pasted.waitForExistence(timeout: 20), "Paste on the untouched startup canvas opens a new drawing")
+        XCTAssertTrue(pasted.isSelected); XCTAssertTrue((pasted.value as? String ?? "").contains(extent))
+        expectation(for: NSPredicate { _, _ in
+            let pixel = self.editorPixels(in: app); return rows.count == 3 && Int(pixel[2]) > Int(pixel[0]) + 100
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(apply.exists)
+        attachEditor(in: app, name: "native-clipboard-startup-new-drawing")
+        if !startup.exists { workspaceActivate(app.buttons["document-title"]) }
+        workspaceActivate(startup)
+        expect(2, paper)
+        editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
+        editorMenu(in: app, menu: "Select", id: "deselect", label: "Deselect pixels")
         for cancel in [true, false] {
             try clipboard.replace([item(original), item(original)])
             paste(); XCTAssertTrue(apply.waitForExistence(timeout: 20)); XCTAssertEqual(rows.count, 4)
