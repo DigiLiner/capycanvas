@@ -227,7 +227,7 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
 internal val TextureFrame = 102.dp
 private val TexturePageEnd = 20.dp
 private val TextureRowGap = 14.dp
-private val TextureCaptionGap = 6.dp
+internal val TextureCaptionGap = 6.dp
 
 @Composable private fun threeTextureRows(): Dp {
     val style = LocalTextStyle.current
@@ -250,9 +250,18 @@ internal val TextureGap = 12.dp
     } }
 }
 
+@Composable internal fun TextureFace(host: CanvasHost, id: String?, label: String, empty: String, hovered: Boolean, chosen: Boolean) {
+    val colors = LocalPalette.current
+    Box(Modifier.size(TextureFrame).clip(TileShape).background(if (hovered) colors.text.copy(alpha = .10f) else Color.Transparent)
+        .then(if (chosen) Modifier.border(2.dp, colors.accent, TileShape) else Modifier).padding(3.dp)) {
+        PaperPreview(host, id, 96.dp, colors.text.copy(alpha = .06f), empty)
+    }
+    Text(label, Modifier.fillMaxWidth(), fontSize = LocalTextStyle.current.fontSize * .83333f, lineHeight = LocalTextStyle.current.lineHeight * .83333f,
+        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+}
+
 @Composable internal fun TextureTile(host: CanvasHost, tile: JSONObject, index: Int, chosen: Boolean, modifier: Modifier, act: (JSONObject) -> Unit,
     empty: String = "paper", tag: String = "texture-tile", use: (() -> Unit)? = null, choose: () -> Unit) {
-    val colors = LocalPalette.current
     val label = tile.getString("label")
     val actions = tile.array("actions").objects()
     val interactions = remember { MutableInteractionSource() }
@@ -273,12 +282,7 @@ internal val TextureGap = 12.dp
                 .hoverable(interactions)
                 .combinedClickable(interactions, null, role = Role.RadioButton, onLongClick = if (actions.isEmpty()) null else ({ menu = true }), onClick = rememberActivation(choose, use)),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(TextureCaptionGap)) {
-                Box(Modifier.size(TextureFrame).clip(TileShape).background(if (hovered) colors.text.copy(alpha = .10f) else Color.Transparent)
-                    .then(if (chosen) Modifier.border(2.dp, colors.accent, TileShape) else Modifier).padding(3.dp)) {
-                    PaperPreview(host, tile.paperId(), 96.dp, colors.text.copy(alpha = .06f), empty)
-                }
-                Text(label, Modifier.fillMaxWidth(), fontSize = LocalTextStyle.current.fontSize * .83333f, lineHeight = LocalTextStyle.current.lineHeight * .83333f,
-                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                TextureFace(host, tile.paperId(), label, empty, hovered, chosen)
             }
         }
         DropdownMenu(menu, { menu = false }) {

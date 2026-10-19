@@ -78,7 +78,7 @@ mod image_size;
 pub use image_size::{ImageResample, ImageResampleChoice, ImageSizeAction, ImageSizeView};
 #[path = "new_drawing_dialog.rs"]
 mod new_drawing_dialog;
-pub use new_drawing_dialog::{NewDrawingAction, NewDrawingChoice, NewDrawingCopy, NewDrawingDialogView, NewDrawingDrawerView, NewDrawingOrder, PaperChoice, PaperColorChoice, PaperColorDrawerView, PresetBrowserView, PresetSaveView, PresetTabView, PresetTileView, ResolutionChoice, SheetView};
+pub use new_drawing_dialog::{NewDrawingAction, NewDrawingChoice, NewDrawingCopy, NewDrawingDialogView, NewDrawingDrawerView, NewDrawingOrder, PaperChoice, PaperColorChoice, PaperColorDrawerView, PaperReliefView, PresetBrowserView, PresetSaveView, PresetTabView, PresetTileView, ResolutionChoice, SheetView};
 #[path = "image_geometry.rs"]
 mod image_geometry;
 #[path = "selection_properties.rs"]

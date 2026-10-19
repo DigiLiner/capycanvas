@@ -119,12 +119,42 @@ fn native_new_drawing_dialog_review() {
         press(&w, "new-drawing-save-cancel");
         press(&w, "new-drawing-select");
         assert!(label(&w, "new-drawing-caption").is_empty() || part::<gtk::Label>(&w, "new-drawing-caption").label().contains("Chalkboard"));
+        assert_eq!(label(&w, "new-drawing-texture-relief"), "50 %");
+        assert_eq!(label(&w, "new-drawing-summary-details"), "sRGB 8-bit SDR · Sanded 50 %, Chalkboard");
         shot("5-chalkboard");
 
         press(&w, "new-drawing-texture");
+        let papers = part::<gtk::FlowBox>(&w, "new-drawing-papers");
+        let import = part::<gtk::FlowBoxChild>(&w, "new-drawing-paper-import");
+        assert_eq!(import.index(), layer_core::paper::built_in_papers().len() as i32 + 1, "Import follows the last paper");
+        let field = part::<gtk::Widget>(&w, "new-drawing-paper-relief-field");
+        assert_eq!(field.compute_bounds(&field).map(|bounds| bounds.height().round()), Some(34.), "the visibility field matches the footer buttons");
+        assert_eq!(part::<crate::number_control::NumberControl>(&w, "new-drawing-paper-relief").value(), 50., "Chalkboard's texture visibility");
         shot("6-paper");
-        pick(&part::<gtk::FlowBox>(&w, "new-drawing-papers"), 9);
+        papers.select_child(&import);
+        pump(150);
+        let marked = match state(&w).new_drawing.and_then(|view| view.drawer) { Some(NewDrawingDrawerView::Paper { tiles, .. }) => tiles.iter().position(|tile| tile.selected), _ => None };
+        assert_eq!(papers.selected_children().first().map(|tile| tile.index() as usize), marked, "Import is an action, so the paper stays marked");
+        new_drawing_action(&w, NewDrawingAction::PaperRelief { value: 150. });
+        pick(&papers, 0);
+        assert!(!part::<gtk::Widget>(&w, "new-drawing-paper-relief-field").is_sensitive(), "No paper has no texture to show");
+        shot("6b-no-paper");
+        let scroller = papers.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>().unwrap();
+        scroller.vadjustment().set_value(scroller.vadjustment().upper());
+        pump(200);
+        shot("6c-import");
+        let chooser = || gtk::Window::list_toplevels().into_iter().find(|window| window.type_().name() == "GtkFileChooserDialog" && window.is_visible())
+            .and_downcast::<gtk::Window>();
+        let marked = papers.selected_children().first().map(|tile| tile.index());
+        input.click(screen_point(import.upcast_ref(), &w.window, [0.5, 0.3]));
+        until(|| chooser().is_some(), "a click on Import opens the image chooser");
+        assert_eq!(papers.selected_children().first().map(|tile| tile.index()), marked, "Import never becomes the marked paper");
+        chooser().unwrap().close();
+        until(|| chooser().is_none(), "the image chooser closes");
+        pump(200);
+        pick(&papers, 9);
         press(&w, "new-drawing-paper-use");
+        assert_eq!(state(&w).new_drawing.as_ref().map(|view| view.setup.paper.relief), Some(150));
         press(&w, "new-drawing-paper-color");
         shot("7-paper-color");
         let layout = |w: &Workspace| ["edit-color-wheel", "edit-color-hex", "edit-color-value-0-0", "edit-color-value-1-2", "edit-color-value-2-0", "edit-color-value-2-2", "new-drawing-color-mode"]
@@ -177,6 +207,9 @@ fn native_new_drawing_dialog_review() {
     until(|| w.window.visible_dialog().is_some(), "New drawing");
     pump(500);
     capture_ui(&w, &output, "narrow.png");
+    press(&w, "new-drawing-texture");
+    capture_ui(&w, &output, "narrow-paper.png");
+    press(&w, "new-drawing-paper-cancel");
     click(&part::<gtk::Button>(&w, "new-drawing-cancel"));
     let fresh = Workspace::new(&app);
     fresh.window.present();

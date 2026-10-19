@@ -43,8 +43,8 @@ impl PaperThumbnail {
         }
         *self.settled.borrow_mut() = (preview.is_some() || id.is_none()).then(|| id.cloned());
     }
-    pub fn show_none(&self) {
-        crate::icons::set(&self.image, Some("layer-none-symbolic"));
+    pub fn show_icon(&self, icon: &str) {
+        crate::icons::set(&self.image, Some(icon));
         self.image.set_pixel_size(self.size / 2);
         *self.settled.borrow_mut() = None;
     }

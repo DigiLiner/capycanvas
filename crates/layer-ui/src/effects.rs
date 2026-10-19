@@ -586,7 +586,7 @@ pub enum PropertyKind {
     Gradient,
 }
 /// The number field for a numeric filter parameter.
-pub(super) fn number_control(p: &layer_core::EffectParameter) -> Option<NumericControl> {
+pub(crate) fn number_control(p: &layer_core::EffectParameter) -> Option<NumericControl> {
     let EffectParameterKind::Number { min, max, step, decimals, unit } = &p.kind else {
         return None;
     };

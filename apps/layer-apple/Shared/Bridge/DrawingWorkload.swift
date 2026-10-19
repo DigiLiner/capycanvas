@@ -90,7 +90,7 @@ import Combine
                 ["op": "width", "value": extent[0]], ["op": "height", "value": extent[1]],
                 ["op": "space", "space": plan.color["space"] ?? "Srgb"],
                 ["op": "depth", "depth": plan.color["depth"] ?? "U8"],
-                ["op": "paper"], ["op": "pick_paper", "id": "drawing_paper"], ["op": "use_paper"],
+                ["op": "paper"], ["op": "pick_paper", "id": "drawing_paper"], ["op": "paper_relief", "value": 0], ["op": "use_paper"],
                 ["op": "paper_color"], ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]],
                 ["op": "transparent", "transparent": false], ["op": "use_paper_color"], ["op": "create"]]
             for step in steps {

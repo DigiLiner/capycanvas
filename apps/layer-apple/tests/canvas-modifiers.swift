@@ -224,7 +224,8 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         let native = store.native!, png = root.appendingPathComponent("artwork.png")
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(
             open: { _, done in done([]) }, save: { _, _, done in done(nil) },
-            create: { _, done in done([["op": "unit", "unit": "px"], ["op": "width", "value": 128], ["op": "height", "value": 128], ["op": "paper_color"],
+            create: { _, done in done([["op": "unit", "unit": "px"], ["op": "width", "value": 128], ["op": "height", "value": 128],
+                ["op": "paper"], ["op": "paper_relief", "value": 0], ["op": "use_paper"], ["op": "paper_color"],
                 ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]], ["op": "use_paper_color"]]) },
             export: { staging, done in
                 do { try FileManager.default.copyItem(at: staging, to: png); done(png) }

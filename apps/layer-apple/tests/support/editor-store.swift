@@ -84,7 +84,8 @@ extension WorkspaceController {
 
 func newSheet(_ extent: [Int], space: String = "Srgb", depth: String = "U8", transparent: Bool = false) -> [[String: Any]] {
     [["op": "unit", "unit": "px"], ["op": "width", "value": extent[0]], ["op": "height", "value": extent[1]],
-     ["op": "space", "space": space], ["op": "depth", "depth": depth], ["op": "paper_color"],
+     ["op": "space", "space": space], ["op": "depth", "depth": depth],
+     ["op": "paper"], ["op": "paper_relief", "value": 0], ["op": "use_paper"], ["op": "paper_color"],
      ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]],
      ["op": "transparent", "transparent": transparent], ["op": "use_paper_color"]]
 }

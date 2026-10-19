@@ -312,7 +312,7 @@ reloading its corrupted workspace and preference fixtures.
 | Color | `--color-panel`, `--color-wheel-resize`, `--color-picker`, `--palettes`, `--scopes-smoke`, `--scopes`, `--tonal-controls` |
 | Layers and filters | `--paper-texture-readiness`, `--tip-resize-readiness`, `--paper-rows`, `--paper-library`, `--layers`, `--layer-relationships`, `--blend-menu`, `--pass-through`, `--blending`, `--adjustments`, `--curves`, `--gradients`, `--pointwise-effects`, `--filter-drawer`, `--filter-previews`, `--spatial-filter-windows`, `--photo-edit`, `--merges`, `--retouch-layers` |
 | Canvas size, crop and image commands | `--canvas-size`, `--crop`, `--image-commands` |
-| New drawing | `--new-drawing` walks the dialog: sizes, presets, paper, paper color, Import… and Create. Other journeys create drawings with `createDrawing` from `new-drawing-fixture.mjs`. |
+| New drawing | `--new-drawing` walks the dialog: sizes, presets, paper, Texture visibility, paper color, the Import… tile and Create. Other journeys create drawings with `createDrawing` from `new-drawing-fixture.mjs`, on flat paper unless they pass `relief`. |
 | Photo files, packages and export | `--portable-photo`, `--package-view`, `--image-object-fixture`, `--export-metadata`, `--document-errors` |
 | Title bar | `--title-bar`, `--title-bar-state`, `--title-bar-feedback`, `--title-bar-overflow`, `--menu-labels`, `--compact-workspaces`, `--header-controls` |
 | Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--drawer-drag`, `--drawer-style` |

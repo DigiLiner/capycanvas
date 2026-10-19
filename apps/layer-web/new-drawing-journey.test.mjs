@@ -157,17 +157,76 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     await click('#new-drawing-select');await shut('new-drawing-browser');
     assert.equal((await view()).page.preset,'Kraft paper','The preview opens Presets and Select keeps the pick');
 
+    await click('#new-drawing-presets-button');await slid('new-drawing-browser');
+    await click(`#new-drawing-tabs [data-new-drawing-tab="${(await drawer()).tabs.findIndex(t=>t.label==='Pastel')}"]`);
+    await doubleClick(node(`#new-drawing-presets [data-new-drawing-preset="${(await drawer()).tiles.findIndex(t=>t.name==='Chalkboard')}"]`));
+    await shut('new-drawing-browser');
+    const board=await view();
+    assert.deepEqual([board.page.preset,board.setup.paper.relief,board.page.relief],['Chalkboard',50,'50 %'],'Chalkboard starts at 50% texture visibility');
+    const textureTile=()=>evaluate(`(()=>{const box=s=>document.querySelector(s).getBoundingClientRect(),line=document.querySelector('#new-drawing-texture-relief'),name=box('#new-drawing-texture .new-drawing-tile-label'),r=box('#new-drawing-texture-relief'),t=box('#new-drawing-texture');
+      return{text:line.hidden?null:line.textContent,below:line.hidden||r.top>=name.bottom-.5&&r.bottom<=t.bottom,height:Math.round(t.height)}})()`);
+    const tile=await textureTile();
+    assert.deepEqual(tile,{text:'50 %',below:true,height:44},`The texture tile shows its visibility below the name and keeps its height ${JSON.stringify(tile)}`);
+    await press(node('#new-drawing-title'));
+    await capture(`${theme}-5-chalkboard`);
+
     await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
     let paper=await drawer();
     assert.equal(paper.tiles[0].id??null,null,'No paper comes first');
     assert.equal(await evaluate(`!!document.querySelector('#new-drawing-papers [data-new-drawing-paper="0"] svg')`),true,'No paper shows its icon');
+    const reliefField='#new-drawing-paper-relief-field input';
+    const paperDrawer=await evaluate(`(()=>{const grid=document.querySelector('#new-drawing-papers'),tile=grid.lastElementChild,field=document.querySelector('#new-drawing-paper-relief-field'),box=n=>Math.round(n.getBoundingClientRect().height);
+      return{last:tile.id,caption:tile.querySelector('.texture-caption').textContent,icon:!!tile.querySelector('.paper-preview svg'),checked:tile.getAttribute('aria-checked'),footerImport:!!document.querySelector('#new-drawing-paper-drawer footer #new-drawing-paper-import'),
+        label:document.querySelector('#new-drawing-paper-relief .new-drawing-relief-label').textContent,value:field.querySelector('input').value,unit:field.querySelector('.new-drawing-affix').textContent,heights:[box(field),box(document.querySelector('#new-drawing-paper-use'))],disabled:field.querySelector('input').disabled}})()`);
+    assert.deepEqual(paperDrawer,{last:'new-drawing-paper-import',caption:board.copy.import,icon:true,checked:null,footerImport:false,label:board.copy.relief,value:'50',unit:board.copy.relief_unit,heights:[34,34],disabled:false},
+      `Import… is the last tile and Texture visibility shows the sheet's value ${JSON.stringify(paperDrawer)}`);
+    assert.deepEqual([paper.relief.value,paper.relief.enabled],[50,true]);
     await capture(`${theme}-6-paper`);
+    const stubPicker=()=>evaluate(`(()=>{window.paperPickers??=0;const click=HTMLInputElement.prototype.click;HTMLInputElement.prototype.click=function(){
+      if(this.type!=='file'||this.accept!=='image/*')return click.call(this);
+      HTMLInputElement.prototype.click=click;window.paperPickers++;this.dispatchEvent(new Event('cancel'));};return window.paperPickers;})()`);
+    const marked=paper.tiles.findIndex(t=>t.selected);
+    const markedTiles=()=>evaluate(`[...document.querySelectorAll('#new-drawing-papers [aria-checked=true]')].map(n=>n.dataset.newDrawingPaper??n.id)`);
+    let pickers=await stubPicker();
+    await click('#new-drawing-paper-import');
+    await wait(`window.paperPickers===${pickers+1}`);await settle();
+    assert.deepEqual([(await drawer()).tiles.findIndex(t=>t.selected),await markedTiles()],[marked,[String(marked)]],'A click on Import… opens the image picker and keeps the marked paper');
+    await evaluate(`${node(`#new-drawing-papers [data-new-drawing-paper="${marked}"]`)}.focus()`);
+    await key('End','End',35);
+    assert.equal(await evaluate('document.activeElement.id'),'new-drawing-paper-import','End reaches Import…');
+    pickers=await stubPicker();
+    await key('Enter','Enter',13);
+    await wait(`window.paperPickers===${pickers+1}`);await settle();
+    assert.deepEqual([(await drawer()).tiles.findIndex(t=>t.selected),await markedTiles()],[marked,[String(marked)]],'Enter on Import… opens the image picker and keeps the marked paper');
+
+    await click('#new-drawing-papers [data-new-drawing-paper="0"]');
+    assert.equal((await drawer()).relief.enabled,false);
+    assert.deepEqual(await evaluate(`(()=>{const row=document.querySelector('#new-drawing-paper-relief');return[row.classList.contains('disabled'),row.querySelector('input').disabled,getComputedStyle(row).opacity]})()`),[true,true,'0.5'],'No paper disables Texture visibility');
+    await capture(`${theme}-6b-no-paper`);
+    await evaluate(`(()=>{const body=document.querySelector('#new-drawing-paper-drawer .new-drawing-drawer-body');body.scrollTop=body.scrollHeight;})()`);
+    await capture(`${theme}-6c-import`);
     const cold=paper.tiles.findIndex(t=>t.id==='cold_press');
     await click(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`);
     assert.equal(await evaluate(`${node(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`)}.getAttribute('aria-checked')`),'true','Clicking a paper picks it');
+    assert.equal(await evaluate(`${node(reliefField)}.disabled`),false,'A paper enables Texture visibility');
+    await type(reliefField,'150');
     await click('#new-drawing-paper-use');await shut('new-drawing-paper-drawer');
-    assert.equal((await view()).setup.paper.texture,'cold_press','Use Texture chooses the paper');
-    assert.equal(await text('#new-drawing-texture .new-drawing-tile-label'),(await view()).page.texture);
+    let sheet=await view();
+    assert.deepEqual([sheet.setup.paper.texture,sheet.setup.paper.relief,sheet.page.relief],['cold_press',150,'150 %'],'Use Texture applies the paper and its typed visibility');
+    assert.equal(await text('#new-drawing-texture .new-drawing-tile-label'),sheet.page.texture);
+    assert.equal((await textureTile()).text,'150 %');
+
+    await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+    assert.equal(await evaluate(`${node(reliefField)}.value`),'150','The drawer opens at the sheet visibility');
+    await type(reliefField,'250');
+    await click('#new-drawing-paper-cancel');await shut('new-drawing-paper-drawer');
+    assert.equal((await view()).setup.paper.relief,150,'Cancel discards the visibility');
+    await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+    assert.equal(await evaluate(`${node(reliefField)}.value`),'150','Reopening shows the kept visibility');
+    await evaluate(`(()=>{const entry=${node(reliefField)};entry.focus();entry.value='120';document.querySelector('#new-drawing-paper-use').click();})()`);
+    await shut('new-drawing-paper-drawer');
+    sheet=await view();
+    assert.deepEqual([sheet.setup.paper.relief,sheet.page.relief],[120,'120 %'],'Use Texture commits text still being typed');
     if(theme==='light') {
       await evaluate(`(async()=>{
         const canvas=new OffscreenCanvas(64,48),context=canvas.getContext('2d');
@@ -268,9 +327,18 @@ export async function checkNewDrawing({call,evaluate,settle}) {
     const narrow=await evaluate(`(()=>{const p=document.querySelector('#new-drawing-preview').getBoundingClientRect(),f=document.querySelector('.new-drawing-form').getBoundingClientRect();return{stacked:p.bottom<=f.top,width:Math.round(p.width)}})()`);
     assert.deepEqual(narrow,{stacked:true,width:348},'Narrow windows stack the preview above the form');
     await capture('narrow');
+    await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+    const footer=()=>evaluate(`(()=>{const f=document.querySelector('#new-drawing-paper-drawer footer'),label=f.querySelector('.new-drawing-relief-label'),row=document.querySelector('#new-drawing-paper-relief').getBoundingClientRect(),cancel=document.querySelector('#new-drawing-paper-cancel').getBoundingClientRect();
+      return{fits:f.scrollWidth<=f.clientWidth,clear:row.right<=cancel.left,ellipsized:label.scrollWidth>label.clientWidth,buttons:[...f.querySelectorAll(':scope > button')].map(n=>Math.round(n.getBoundingClientRect().height))}})()`);
+    assert.deepEqual(await footer(),{fits:true,clear:true,ellipsized:false,buttons:[34,34]},'The narrow paper footer keeps Texture visibility clear of the buttons');
+    await capture('narrow-paper');
+    await call('Emulation.setDeviceMetricsOverride',{width:420,height:860,deviceScaleFactor:1,mobile:false});await settle();
+    assert.deepEqual(await footer(),{fits:true,clear:true,ellipsized:true,buttons:[34,34]},'Texture visibility ellipsizes before the footer buttons shrink');
+    await capture('narrower-paper');
+    await click('#new-drawing-paper-cancel');await shut('new-drawing-paper-drawer');
     await click('#new-drawing-cancel');await wait(`!document.querySelector('${dialog}')`);
   } finally {
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await settle();
   }
-  console.log('PASS: New drawing opens with the next untitled name, edits size, unit, link, orientation and resolution, browses, searches, saves, renames and deletes presets, picks and imports paper, creates on a stored library paper, edits, adds, deletes and clears paper colors, cancels and creates a named drawing in both themes');
+  console.log('PASS: New drawing opens with the next untitled name, edits size, unit, link, orientation and resolution, browses, searches, saves, renames and deletes presets, picks and imports paper from the last tile, sets, cancels and commits texture visibility, creates on a stored library paper, edits, adds, deletes and clears paper colors, cancels and creates a named drawing in both themes');
 }

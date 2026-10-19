@@ -1,8 +1,9 @@
 // An in-page script that fills the open New drawing dialog through its
 // controls and, unless `create` is false, presses Create. Sizes are in
 // pixels; `paper` is 'white', 'transparent' or null to keep the dialog's
-// paper color.
-export function createDrawing({width = 2048, height = 1536, resolution = null, space = null, depth = null, paper = 'white', name = null, create = true} = {}) {
+// paper color; `relief` is the Texture visibility in percent or null to keep
+// the dialog's.
+export function createDrawing({width = 2048, height = 1536, resolution = null, space = null, depth = null, paper = 'white', relief = 0, name = null, create = true} = {}) {
   return `(async()=>{
     const end=performance.now()+30000,dialog=()=>document.querySelector('#new-drawing-dialog[open]'),view=()=>layerApp.state().new_drawing;
     while(!dialog()||!view()){if(performance.now()>end)throw Error('New drawing did not open');await new Promise(r=>setTimeout(r,20));}
@@ -15,6 +16,7 @@ export function createDrawing({width = 2048, height = 1536, resolution = null, s
     ${space == null ? '' : `choose('new-drawing-space','spaces',${JSON.stringify(space)});`}
     ${depth == null ? '' : `choose('new-drawing-depth','depths',${JSON.stringify(depth)});`}
     ${paper == null ? '' : `press('#new-drawing-paper-color');press(${JSON.stringify(paper === 'white' ? '#new-drawing-paper-color-tiles [data-new-drawing-paper-color="0"]' : '#new-drawing-color-mode-transparent')});press('#new-drawing-color-use');`}
+    ${relief == null ? '' : `press('#new-drawing-texture');type('#new-drawing-paper-relief-field input',${relief});press('#new-drawing-paper-use');if(view().setup.paper.relief!==${relief})throw Error('New drawing kept relief '+view().setup.paper.relief);`}
     ${name == null ? '' : `const field=dialog().querySelector('#new-drawing-name');field.value=${JSON.stringify(name)};field.dispatchEvent(new Event('input',{bubbles:true}));`}
     const setup=view().setup;
     if(setup.unit!=='px'||view().values[0]!==${width}||view().values[1]!==${height})throw Error('New drawing kept '+JSON.stringify(view().values));

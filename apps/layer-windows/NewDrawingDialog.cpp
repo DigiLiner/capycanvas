@@ -18,7 +18,7 @@ namespace Pickers=winrt::Microsoft::Windows::Storage::Pickers;
 namespace {
 namespace Animation=winrt::Microsoft::UI::Xaml::Media::Animation;
 using Size2=std::array<double,2>;
-constexpr double InputHeight=34,ControlGap=6,RowGap=10,SectionGap=14,FieldWidth=92,NarrowWidth=700,ThumbnailSide=36,SwatchSide=40;
+constexpr double InputHeight=34,ControlGap=6,RowGap=10,SectionGap=14,FieldWidth=92,ValueWidth=64,NarrowWidth=700,ThumbnailSide=36,SwatchSide=40;
 constexpr uint32_t PaperColorLimit=64;
 constexpr double PresetTile=128,PresetFrameWidth=116,PresetFrameHeight=86,PresetFit=74,SummaryArt=36,TileGap=10;
 constexpr Size2 Preview{232,250},PreviewFit{196,214},NarrowPreview{348,140},NarrowFit{312,104};
@@ -85,13 +85,13 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
     double request=0,epoch=0,revision=0;
     bool waiting=false,seen=false,showing=false,programmatic=false,stopping=false,creating=false,built=false,narrow=false;
     J shown;
-    hstring copyKey,unitsKey,spacesKey,depthsKey,blendingsKey,numericKey,resolutionsKey,tabsKey,tilesKey,paperKey,paletteKey,groupsKey,drawerKind;
+    hstring copyKey,unitsKey,spacesKey,depthsKey,blendingsKey,numericKey,reliefKey,resolutionsKey,tabsKey,tilesKey,paperKey,paletteKey,groupsKey,drawerKind;
     ContentDialog dialog{nullptr};
     Grid root,footer,body,drawerHost;
     ContentControl gate;
     ScrollViewer scroll;
     StackPanel page,left,right,captions;
-    TextBlock title,captionText,capacity,nameLabel,sizeHeading,resolutionLabel,resolutionUnit,sizeLine,colorHeading,spaceLabel,depthLabel,blendingLabel,paperHeading,textureName,paperColorName,presetsLabel;
+    TextBlock title,captionText,capacity,nameLabel,sizeHeading,resolutionLabel,resolutionUnit,sizeLine,colorHeading,spaceLabel,depthLabel,blendingLabel,paperHeading,textureName,textureRelief,paperColorName,presetsLabel;
     Button preview{nullptr},presets{nullptr},cancel{nullptr},create{nullptr},resolutionChoices{nullptr},texture{nullptr},paperColor{nullptr};
     TextBox name;
     std::array<Border,2> fields;
@@ -126,7 +126,13 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
     Button browserCancel{nullptr},saveAs{nullptr},select{nullptr},saveCancel{nullptr},saveConfirm{nullptr};
     ComboBox saveGroup;
     std::shared_ptr<TextureGrid> papers;
-    Button paperImport{nullptr},paperCancel{nullptr},paperUse{nullptr};
+    Grid reliefRow,reliefSlot;
+    Border reliefField;
+    TextBlock reliefLabel,reliefUnit;
+    TextBox reliefEntry{nullptr};
+    Bindings reliefBinds;
+    NumericAdmissions reliefAdmissions;
+    Button paperCancel{nullptr},paperUse{nullptr};
     std::optional<ColorForm> form;
     Border well;
     Button colorMode{nullptr},transparentMode{nullptr};
@@ -355,7 +361,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         }});
         resolutionChoices.Width(28);resolutionChoices.Height(InputHeight);resolutionChoices.Content(icon(L"chevron-down",data->theme(),14));
         AutomationProperties::SetAutomationId(resolutionChoices,L"new-drawing-resolution-choices");
-        columns(resolutionSlot,{{64,GridUnitType::Pixel},autoWidth(),autoWidth()});resolutionSlot.ColumnSpacing(2);
+        columns(resolutionSlot,{{ValueWidth,GridUnitType::Pixel},autoWidth(),autoWidth()});resolutionSlot.ColumnSpacing(2);
         resolutionUnit.Margin({2,0,0,0});column(resolutionSlot,resolutionUnit,1);column(resolutionSlot,resolutionChoices,2);
         resolutionField.Height(InputHeight);resolutionField.Background(data->brush(L"input"));resolutionField.CornerRadius(data->controlCorner());resolutionField.Child(resolutionSlot);
         AutomationProperties::SetAutomationId(resolutionField,L"new-drawing-resolution-field");
@@ -388,7 +394,9 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         paperPatch.Data(squircleRectangle(float(ThumbnailSide),float(ThumbnailSide),{18,18,18,18}));
         paperPatch.Stroke(data->tint(L"text",31));paperPatch.StrokeThickness(1);
         textureName=caption(true);paperColorName=caption(true);
-        for(auto [tile,picture,label]:{std::tuple<Button,FrameworkElement,TextBlock>{texture,textureThumbnail->root,textureName},{paperColor,paperPatch,paperColorName}}){
+        textureRelief=caption(false,.82,.6);textureRelief.LineHeight(0);textureRelief.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());AutomationProperties::SetAutomationId(textureRelief,L"new-drawing-texture-relief");
+        StackPanel textureText;textureText.VerticalAlignment(VerticalAlignment::Center);textureText.Children().Append(textureName);textureText.Children().Append(textureRelief);
+        for(auto [tile,picture,label]:{std::tuple<Button,FrameworkElement,FrameworkElement>{texture,textureThumbnail->root,textureText},{paperColor,paperPatch,paperColorName}}){
             Grid content;content.ColumnSpacing(RowGap);columns(content,{autoWidth(),star()});column(content,picture,0);column(content,label,1);tile.Content(content);
         }
         Grid paperTiles;paperTiles.ColumnSpacing(ControlGap);columns(paperTiles,{star(),star()});column(paperTiles,texture,0);column(paperTiles,paperColor,1);
@@ -475,13 +483,19 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         paperTitle=drawerTitle(paperDrawer,L"new-drawing-paper-title");
         papers=TextureGrid::Create(data,L"new-drawing-paper");
         papers->picked=[weak](uint32_t index){if(auto self=weak.lock())self->pickPaper(index);};
-        papers->activated=[weak](uint32_t index){if(auto self=weak.lock()){self->pickPaper(index);self->send(op(L"use_paper"));}};
+        papers->activated=[weak](uint32_t index){if(auto self=weak.lock()){self->pickPaper(index);self->usePaper();}};
+        papers->trail(L"import",L"plus",[weak]{if(auto self=weak.lock())self->importPaper();});
         paperDrawer.body.Children().Append(papers->grid);
-        pickerFooter(data,paperDrawer.footer,{GridUnitType::Auto,GridUnitType::Star,GridUnitType::Auto,GridUnitType::Auto});
-        paperImport=pickerButton(data,L"new-drawing-paper-import",0,false,[weak]{if(auto self=weak.lock())self->importPaper();});
-        paperCancel=pickerButton(data,L"new-drawing-paper-cancel",2,false,sends(op(L"close_drawer")));
-        paperUse=primary(L"new-drawing-paper-use",3,sends(op(L"use_paper")));
-        for(auto const& node:{paperImport,paperCancel,paperUse})paperDrawer.footer.Children().Append(node);
+        pickerFooter(data,paperDrawer.footer,{GridUnitType::Star,GridUnitType::Auto,GridUnitType::Auto});
+        reliefLabel=caption();reliefUnit=caption(false,1,.6);reliefUnit.Margin({2,0,10,0});
+        columns(reliefSlot,{{ValueWidth,GridUnitType::Pixel},autoWidth()});reliefSlot.ColumnSpacing(2);column(reliefSlot,reliefUnit,1);
+        reliefField.Height(InputHeight);reliefField.Background(data->tint(L"text",15));reliefField.CornerRadius(data->controlCorner());reliefField.Child(reliefSlot);
+        AutomationProperties::SetAutomationId(reliefField,L"new-drawing-paper-relief-field");
+        reliefRow.ColumnSpacing(RowGap);reliefRow.HorizontalAlignment(HorizontalAlignment::Left);columns(reliefRow,{star(),autoWidth()});
+        column(reliefRow,reliefLabel,0);column(reliefRow,reliefField,1);AutomationProperties::SetAutomationId(reliefLabel,L"new-drawing-paper-relief-label");
+        paperCancel=pickerButton(data,L"new-drawing-paper-cancel",1,false,sends(op(L"close_drawer")));
+        paperUse=primary(L"new-drawing-paper-use",2,[weak]{if(auto self=weak.lock())self->usePaper();});
+        for(FrameworkElement node:{FrameworkElement(reliefRow),FrameworkElement(paperCancel),FrameworkElement(paperUse)})paperDrawer.footer.Children().Append(node);
     }
     void buildColors(){
         auto weak=weak_from_this();
@@ -575,8 +589,15 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         for(auto const& list:admissions)for(auto const& admit:list)admitted=admit(false)&&admitted;
         if(admitted)send(op(L"create"));
     }
+    void usePaper(){
+        if(!dialog||data->updating)return;
+        bool admitted=true;
+        for(auto const& admit:reliefAdmissions)admitted=admit(false)&&admitted;
+        if(admitted)send(op(L"use_paper"));
+    }
     fire_and_forget importPaper(){
         auto lifetime=shared_from_this();
+        if(picker)co_return;
         try{
             auto copied=object(object(data->catalog,L"native_copy"),L"paper");
             Pickers::FileOpenPicker chooser(window.AppWindow().Id());chooser.CommitButtonText(str(copied,L"import_accept"));
@@ -610,7 +631,8 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         pickerLabel(browserCancel,t(L"cancel"));pickerLabel(select,t(L"select"));
         saveName.PlaceholderText(t(L"preset_name"));named(saveName,t(L"preset_name"));named(saveGroup,t(L"preset_category"),true);
         pickerLabel(saveCancel,t(L"cancel"));
-        paperTitle.Text(t(L"paper"));pickerLabel(paperImport,t(L"import"));pickerLabel(paperCancel,t(L"cancel"));pickerLabel(paperUse,t(L"use_texture"));
+        paperTitle.Text(t(L"paper"));papers->rename(*papers->trailing,t(L"import"));pickerLabel(paperCancel,t(L"cancel"));pickerLabel(paperUse,t(L"use_texture"));
+        reliefLabel.Text(t(L"relief"));tooltip(reliefLabel,t(L"relief"));reliefUnit.Text(t(L"relief_unit"));named(reliefField,t(L"relief"));
         colorTitle.Text(t(L"paper_color"));colorModeLabel.Text(t(L"color"));transparentModeLabel.Text(t(L"transparent"));named(well,t(L"sheet_mode"));
         named(colorMode,t(L"color"));named(transparentMode,t(L"transparent"));
         paletteTitle.Text(t(L"paper_colors"));pickerLabel(colorCancel,t(L"cancel"));pickerLabel(colorUse,t(L"use_color"));
@@ -627,34 +649,46 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
     static std::function<bool(J const&)> valued(V const& value){auto expected=value.Stringify();return [expected](J const& choice){return choice.GetNamedValue(L"value").Stringify()==expected;};}
     static hstring labelOf(J const& choice){return str(choice,L"label");}
 
+    TextBox numberField(J const& spec,wchar_t const* titleKey,wchar_t const* operation,hstring const& id,std::function<double(J const&)> value,Bindings& binds,NumericAdmissions& admit){
+        auto weak=weak_from_this();
+        NumberPresentation presentation;presentation.title=[weak,titleKey]{if(auto self=weak.lock())return self->text(titleKey);return hstring();};
+        auto number=CapyUi::number(data,text(titleKey),spec,
+            [weak,value]{if(auto self=weak.lock();self&&self->shown.Size())return value(self->shown);return 0.;},
+            [weak,operation](double next){if(auto self=weak.lock())self->send(O({{L"op",S(operation)},{L"value",N(next)}}));},
+            binds,nullptr,true,id,false,presentation,&admit);
+        auto entry=numberEntry(number);detach(entry);
+        entry.Height(InputHeight);entry.TextAlignment(TextAlignment::Right);entry.HorizontalAlignment(HorizontalAlignment::Stretch);
+        entry.Padding({4,7,10,0});entry.VerticalAlignment(VerticalAlignment::Center);
+        return entry;
+    }
+    void reliefNumber(J const& relief){
+        auto key=object(relief,L"numeric").Stringify()+L"|"+data->theme();
+        if(key==reliefKey)return;
+        reliefKey=key;reliefBinds.clear();reliefAdmissions.clear();
+        if(reliefEntry)detach(reliefEntry);
+        reliefEntry=numberField(object(relief,L"numeric"),L"relief",L"paper_relief",L"new-drawing-paper-relief",
+            [](J const& current){return num(object(object(current,L"drawer"),L"relief"),L"value");},reliefBinds,reliefAdmissions);
+        reliefEntry.Padding({10,7,0,0});column(reliefSlot,reliefEntry,0);
+    }
     void numbers(J const& view){
         auto key=object(view,L"numeric").Stringify()+L"|"+object(view,L"resolution_numeric").Stringify()+L"|"+data->theme();
         if(key==numericKey)return;
         numericKey=key;numberBinds.clear();for(auto& list:admissions)list.clear();
-        auto weak=weak_from_this();
         auto make=[&](size_t index)->TextBox{
             auto value=[index](J const& current){return index<2?array(current,L"values").GetNumberAt(uint32_t(index)):num(object(current,L"setup"),L"resolution");};
             auto spec=index<2?object(view,L"numeric"):object(view,L"resolution_numeric");
             wchar_t const* titleKey=index==0?L"width_name":index==1?L"height_name":L"resolution";
             wchar_t const* operation=index==0?L"width":index==1?L"height":L"resolution";
             hstring id=index==0?L"document-width":index==1?L"document-height":L"document-resolution";
-            NumberPresentation presentation;presentation.title=[weak,titleKey]{if(auto self=weak.lock())return self->text(titleKey);return hstring();};
-            auto number=CapyUi::number(data,str(object(view,L"copy"),titleKey),spec,
-                [weak,value]{if(auto self=weak.lock();self&&self->shown.Size())return value(self->shown);return 0.;},
-                [weak,operation](double next){if(auto self=weak.lock())self->send(O({{L"op",S(operation)},{L"value",N(next)}}));},
-                numberBinds,nullptr,true,id,false,presentation,&admissions[index]);
-            auto entry=numberEntry(number);
-            entry.Height(InputHeight);entry.TextAlignment(TextAlignment::Right);entry.HorizontalAlignment(HorizontalAlignment::Stretch);
-            entry.Padding({4,7,10,0});entry.VerticalAlignment(VerticalAlignment::Center);
-            return entry;
+            return numberField(spec,titleKey,operation,id,value,numberBinds,admissions[index]);
         };
         for(size_t i=0;i<2;++i){
             auto slot=fields[i].Child().as<Grid>();
             while(slot.Children().Size()>1)slot.Children().RemoveAtEnd();
-            auto entry=make(i);detach(entry);column(slot,entry,1);
+            column(slot,make(i),1);
         }
         if(resolutionEntry)detach(resolutionEntry);
-        resolutionEntry=make(2);detach(resolutionEntry);resolutionEntry.Padding({10,7,0,0});column(resolutionSlot,resolutionEntry,0);
+        resolutionEntry=make(2);resolutionEntry.Padding({10,7,0,0});column(resolutionSlot,resolutionEntry,0);
     }
     static void detach(FrameworkElement const& element){
         if(auto parent=VisualTreeHelper::GetParent(element).try_as<Panel>()){uint32_t at=0;if(parent.Children().IndexOf(element,at))parent.Children().RemoveAt(at);}
@@ -707,6 +741,8 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         explain(blendingHost,blending,note.ValueType()!=JsonValueType::String,text(L"blending"),note.ValueType()==JsonValueType::String?note.GetString():hstring());
         textureThumbnail->show(sheet.GetNamedValue(L"texture",JsonValue::CreateNullValue()),str(pageView,L"texture"));
         textureName.Text(str(pageView,L"texture"));
+        auto relief=pageView.GetNamedValue(L"relief",JsonValue::CreateNullValue());bool textured=relief.ValueType()==JsonValueType::String;
+        textureRelief.Text(textured?relief.GetString():hstring());textureRelief.Visibility(textured?Visibility::Visible:Visibility::Collapsed);
         auto paint=displayed({object(sheet,L"color")})[0];
         if(flag(sheet,L"shown"))paperPatch.Fill(fill(paint));else paperPatch.Fill(checks());
         paperColorName.Text(str(pageView,L"paper_color"));paperColor.IsEnabled(flag(view,L"paper_color_enabled"));
@@ -867,6 +903,10 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         A stripped;for(auto value:tiles){auto tile=value.GetObject();stripped.Append(O({{L"id",tile.GetNamedValue(L"id",JsonValue::CreateNullValue())},{L"label",tile.GetNamedValue(L"label",JsonValue::CreateNullValue())}}));}
         if(auto key=stripped.Stringify();key!=paperKey||opening){paperKey=key;papers->rebuild(stripped);}
         papers->mark(selectedPaper(view));
+        auto relief=object(view,L"relief");reliefNumber(relief);
+        if(opening)for(auto const& admit:reliefAdmissions)admit(true);
+        for(auto const& bind:reliefBinds)bind();
+        bool enabled=flag(relief,L"enabled");reliefEntry.IsEnabled(enabled);reliefRow.Opacity(enabled?1:.5);
     }
     void renderColors(J const& view,bool opening){
         auto weak=weak_from_this();

@@ -263,6 +263,12 @@ impl crate::Document {
             if let EffectValue::Color(current) = value { *current = crate::color::RgbColor { rgba: [color.rgba[0], color.rgba[1], color.rgba[2], 1.], ..color }; }
         }
     }
+    pub fn set_paper_relief(&mut self, percent: f32) {
+        let Some(handle) = paper_occurrence(self.scene(), None).and_then(|h| self.scene().effect_handle(h)) else { return };
+        let application = self.artwork.effects.get_mut(handle).expect("listed paper");
+        let Some(index) = application.program.parameters.iter().position(|p| p.key.as_ref() == RELIEF) else { return };
+        application.values[index] = EffectValue::Number(percent);
+    }
     pub fn fit_papers_to_resolution(&mut self) {
         let ppi = paper_ppi(self.composition().resolution);
         let papers: Vec<_> = self.artwork.effects.iter().filter(|(_, _, a)| is_paper(&a.program)).map(|(h, _, _)| h).collect();

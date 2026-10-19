@@ -677,7 +677,7 @@ fn a_library_import_from_new_drawing_becomes_its_paper_without_changing_the_draw
     let id = paper_identity(&image).unwrap();
     let entry = PaperEntry { id: id.clone(), name: "Cotton".into(), bytes: 64, preview: vec![70; 96 * 96].into() };
     s.paper_imported(None, vec![entry], &id, image).unwrap();
-    let Some(NewDrawingDrawerView::Paper { tiles }) = s.state.new_drawing.clone().unwrap().drawer else { panic!("the paper drawer") };
+    let Some(NewDrawingDrawerView::Paper { tiles, .. }) = s.state.new_drawing.clone().unwrap().drawer else { panic!("the paper drawer") };
     assert!(tiles.iter().any(|tile| tile.selected && tile.id.as_deref() == Some(id.as_str()) && tile.label.as_ref() == "Cotton"));
     assert_eq!(s.engine.checkpoint(), checkpoint);
     new_drawing(&mut s, NewDrawingAction::UsePaper);

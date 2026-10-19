@@ -58,6 +58,8 @@ pub struct PaperSetup {
     pub color: RgbColor,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub transparent: bool,
+    #[serde(default)]
+    pub relief: u32,
 }
 impl PaperSetup {
     pub fn shown(&self) -> bool { self.texture.is_some() && !self.transparent }
@@ -109,6 +111,7 @@ impl DrawingSetup {
         self.validate(limits).map_err(|problem| problem.message(l))?;
         let mut document = self.options().document_on(id, paper, l);
         document.set_paper_color(self.paper.color);
+        document.set_paper_relief(self.paper.relief as f32);
         if self.paper.texture.is_some() { return Ok(document); }
         document.without_paper().map_err(|error| error.to_string())
     }
@@ -281,7 +284,7 @@ pub const DEFAULT_PRESET: &str = "sketchbook-a4";
 pub const MAX_RECENT: usize = 8;
 
 #[allow(clippy::too_many_arguments)]
-fn sheet(unit: LengthUnit, width: f64, height: f64, resolution: u32, space: RgbSpace, depth: SampleDepth, texture: &str, color: RgbColor, transparent: bool) -> DrawingSetup {
+fn sheet(unit: LengthUnit, width: f64, height: f64, resolution: u32, space: RgbSpace, depth: SampleDepth, texture: &str, relief: u32, color: RgbColor, transparent: bool) -> DrawingSetup {
     DrawingSetup {
         unit,
         width: Measure::new(width),
@@ -289,7 +292,7 @@ fn sheet(unit: LengthUnit, width: f64, height: f64, resolution: u32, space: RgbS
         resolution,
         color: DocumentColor { space, depth },
         blend_space: BlendSpace::Perceptual.for_depth(depth),
-        paper: PaperSetup { texture: Some(texture.into()), color, transparent },
+        paper: PaperSetup { texture: Some(texture.into()), color, transparent, relief },
     }
 }
 
@@ -303,76 +306,76 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
         use SampleDepth::{F16, U8, U16};
         let p = |id, name, group, setup| BuiltInPreset { id, name, group, setup };
         vec![
-            p("pocket-book", M::DOCUMENTS_PRESET_POCKET_BOOK, Sketch, sheet(In, 3.5, 5.5, 300, Srgb, U8, "drawing_paper", NATURAL, false)),
-            p("sketchbook-a5", M::DOCUMENTS_PRESET_SKETCHBOOK_A5, Sketch, sheet(Mm, 148., 210., 300, Srgb, U8, "drawing_paper", NATURAL, false)),
-            p("sketchbook-a4", M::DOCUMENTS_PRESET_SKETCHBOOK_A4, Sketch, sheet(Mm, 210., 297., 300, Srgb, U8, "drawing_paper", NATURAL, false)),
-            p("sketch-pad", M::DOCUMENTS_PRESET_SKETCH_PAD, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("square-book", M::DOCUMENTS_PRESET_SQUARE_BOOK, Sketch, sheet(In, 8., 8., 300, Srgb, U8, "drawing_paper", CREAM, false)),
-            p("toned-tan", M::DOCUMENTS_PRESET_TONED_TAN, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", TONED_TAN, false)),
-            p("toned-gray", M::DOCUMENTS_PRESET_TONED_GRAY, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", TONED_GRAY, false)),
-            p("toned-blue", M::DOCUMENTS_PRESET_TONED_BLUE, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", TONED_BLUE, false)),
-            p("kraft-paper", M::DOCUMENTS_PRESET_KRAFT_PAPER, Sketch, sheet(In, 8.5, 11., 300, Srgb, U8, "drawing_paper", KRAFT, false)),
-            p("black-book", M::DOCUMENTS_PRESET_BLACK_BOOK, Sketch, sheet(Mm, 148., 210., 300, Srgb, U8, "drawing_paper", BLACK, false)),
-            p("bristol-pad", M::DOCUMENTS_PRESET_BRISTOL_PAD, Sketch, sheet(In, 11., 14., 300, Srgb, U8, "bristol", WHITE, false)),
-            p("newsprint-pad", M::DOCUMENTS_PRESET_NEWSPRINT_PAD, Sketch, sheet(In, 18., 24., 300, Srgb, U8, "drawing_paper", NEWSPRINT, false)),
-            p("trading-card", M::DOCUMENTS_PRESET_TRADING_CARD, Sketch, sheet(In, 2.5, 3.5, 300, Srgb, U8, "bristol", CREAM, false)),
-            p("postcard", M::DOCUMENTS_PRESET_POSTCARD, Watercolor, sheet(In, 6., 4., 300, Srgb, U16, "cold_press", NATURAL, false)),
-            p("bookmark", M::DOCUMENTS_PRESET_BOOKMARK, Watercolor, sheet(In, 2., 6., 300, Srgb, U16, "cold_press", WHITE, false)),
-            p("greeting-card", M::DOCUMENTS_PRESET_GREETING_CARD, Watercolor, sheet(In, 5., 7., 300, Srgb, U16, "cold_press", CREAM, false)),
-            p("paper-block", M::DOCUMENTS_PRESET_PAPER_BLOCK, Watercolor, sheet(In, 9., 12., 300, Srgb, U16, "cold_press", NATURAL, false)),
-            p("quarter-sheet", M::DOCUMENTS_PRESET_QUARTER_SHEET, Watercolor, sheet(In, 11., 15., 300, Srgb, U16, "cold_press", NATURAL, false)),
-            p("half-sheet", M::DOCUMENTS_PRESET_HALF_SHEET, Watercolor, sheet(In, 15., 22., 300, Srgb, U16, "cold_press", NATURAL, false)),
-            p("full-sheet", M::DOCUMENTS_PRESET_FULL_SHEET, Watercolor, sheet(In, 22., 30., 300, Srgb, U16, "rough", NATURAL, false)),
-            p("botanical", M::DOCUMENTS_PRESET_BOTANICAL, Watercolor, sheet(In, 11., 14., 300, Srgb, U16, "hot_press", WHITE, false)),
-            p("journal", M::DOCUMENTS_PRESET_JOURNAL, Watercolor, sheet(In, 6., 8., 300, Srgb, U16, "handmade_paper", CREAM, false)),
-            p("washi-sheet", M::DOCUMENTS_PRESET_WASHI_SHEET, Watercolor, sheet(In, 12., 18., 300, Srgb, U16, "washi", NATURAL, false)),
-            p("ink-scroll", M::DOCUMENTS_PRESET_INK_SCROLL, Watercolor, sheet(Cm, 30., 90., 300, Srgb, U16, "unryu", CREAM, false)),
-            p("pastel-pad", M::DOCUMENTS_PRESET_PASTEL_PAD, Pastel, sheet(In, 9., 12., 300, Srgb, U8, "pastel_paper", TONED_GRAY, false)),
-            p("pearl-gray", M::DOCUMENTS_PRESET_PEARL_GRAY, Pastel, sheet(In, 12., 16., 300, Srgb, U8, "pastel_paper", PEARL, false)),
-            p("pastel-sheet", M::DOCUMENTS_PRESET_PASTEL_SHEET, Pastel, sheet(In, 19.5, 25.5, 300, Srgb, U8, "pastel_paper", TONED_TAN, false)),
-            p("dark-gray", M::DOCUMENTS_PRESET_DARK_GRAY, Pastel, sheet(In, 12., 16., 300, Srgb, U8, "pastel_paper", STEEL, false)),
-            p("black-paper", M::DOCUMENTS_PRESET_BLACK_PAPER, Pastel, sheet(In, 9., 12., 300, Srgb, U8, "pastel_paper", BLACK, false)),
-            p("sanded-pastel", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 12., 18., 300, Srgb, U8, "sanded_pastel", OYSTER, false)),
-            p("sanded-pastel-large", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "sanded_pastel", TONED_GRAY, false)),
-            p("charcoal-pad", M::DOCUMENTS_PRESET_CHARCOAL_PAD, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "ingres", NATURAL, false)),
-            p("chalkboard", M::DOCUMENTS_PRESET_CHALKBOARD, Pastel, sheet(In, 36., 24., 150, Srgb, U8, "sanded_pastel", CHALKBOARD, false)),
-            p("blueprint", M::DOCUMENTS_PRESET_BLUEPRINT, Pastel, sheet(In, 24., 18., 150, Srgb, U8, "hot_press", BLUEPRINT, false)),
-            p("canvas-panel", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 8., 10., 300, Srgb, U16, "canvas", WHITE, false)),
-            p("canvas-panel-large", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 11., 14., 300, Srgb, U16, "canvas", WHITE, false)),
-            p("plein-air", M::DOCUMENTS_PRESET_PLEIN_AIR, Canvas, sheet(In, 9., 12., 300, Srgb, U16, "linen", OYSTER, false)),
-            p("toned-canvas", M::DOCUMENTS_PRESET_TONED_CANVAS, Canvas, sheet(In, 16., 20., 300, Srgb, U16, "canvas", TONED_TAN, false)),
-            p("canvas", M::DOCUMENTS_PRESET_CANVAS, Canvas, sheet(In, 18., 24., 300, Srgb, U16, "canvas", WHITE, false)),
-            p("gray-linen", M::DOCUMENTS_PRESET_GRAY_LINEN, Canvas, sheet(Cm, 30., 40., 300, Srgb, U16, "linen", PEARL, false)),
-            p("linen", M::DOCUMENTS_PRESET_LINEN, Canvas, sheet(In, 24., 36., 300, Srgb, U16, "linen", WHITE, false)),
-            p("manga-b5", M::DOCUMENTS_PRESET_MANGA_B5, Comics, sheet(Mm, 182., 257., 600, Srgb, U8, "bristol", WHITE, false)),
-            p("manga-b4", M::DOCUMENTS_PRESET_MANGA_B4, Comics, sheet(Mm, 257., 364., 350, Srgb, U8, "bristol", WHITE, false)),
-            p("us-comic", M::DOCUMENTS_PRESET_US_COMIC, Comics, sheet(In, 6.875, 10.5, 600, Srgb, U8, "bristol", WHITE, false)),
-            p("comic-board", M::DOCUMENTS_PRESET_COMIC_BOARD, Comics, sheet(In, 11., 17., 600, Srgb, U8, "bristol", WHITE, false)),
-            p("four-panel-strip", M::DOCUMENTS_PRESET_FOUR_PANEL_STRIP, Comics, sheet(In, 4., 13., 600, Srgb, U8, "bristol", WHITE, false)),
-            p("daily-strip", M::DOCUMENTS_PRESET_DAILY_STRIP, Comics, sheet(In, 13., 4., 600, Srgb, U8, "bristol", WHITE, false)),
-            p("zine-page", M::DOCUMENTS_PRESET_ZINE_PAGE, Comics, sheet(In, 5.5, 8.5, 300, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("picture-book", M::DOCUMENTS_PRESET_PICTURE_BOOK, Comics, sheet(In, 16., 10., 300, Srgb, U16, "hot_press", NATURAL, false)),
-            p("scroll-comic", M::DOCUMENTS_PRESET_SCROLL_COMIC, Comics, sheet(Px, 1600., 2560., SCREEN_PPI, Srgb, U8, "bristol", WHITE, false)),
-            p("art-print-5x7", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 5., 7., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("art-print-8x10", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 8., 10., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("art-print-11x14", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 11., 14., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("art-print-16x20", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 16., 20., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("poster", M::DOCUMENTS_PRESET_POSTER, Prints, sheet(In, 18., 24., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("a4", M::DOCUMENTS_PRESET_A4, Prints, sheet(Mm, 210., 297., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("a3", M::DOCUMENTS_PRESET_A3, Prints, sheet(Mm, 297., 420., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("letter", M::DOCUMENTS_PRESET_LETTER, Prints, sheet(In, 8.5, 11., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("tabloid", M::DOCUMENTS_PRESET_TABLOID, Prints, sheet(In, 11., 17., 300, Adobe, U16, "hot_press", WHITE, false)),
-            p("sticker", M::DOCUMENTS_PRESET_STICKER, Prints, sheet(In, 3., 3., 300, Srgb, U8, "drawing_paper", WHITE, true)),
-            p(THIS_SCREEN, M::DOCUMENTS_PRESET_THIS_SCREEN, Digital, sheet(Px, 2560., 1600., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("full-hd", M::DOCUMENTS_PRESET_FULL_HD, Digital, sheet(Px, 1920., 1080., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("uhd", M::DOCUMENTS_PRESET_UHD, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("uhd-hdr", M::DOCUMENTS_PRESET_UHD_HDR, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, F16, "drawing_paper", WHITE, false)),
-            p("cinematic", M::DOCUMENTS_PRESET_CINEMATIC, Digital, sheet(Px, 3840., 1608., SCREEN_PPI, P3, U16, "drawing_paper", PEARL, false)),
-            p("phone", M::DOCUMENTS_PRESET_PHONE, Digital, sheet(Px, 1290., 2796., SCREEN_PPI, P3, U8, "drawing_paper", WHITE, false)),
-            p("tablet", M::DOCUMENTS_PRESET_TABLET, Digital, sheet(Px, 2048., 2732., SCREEN_PPI, P3, U8, "drawing_paper", WHITE, false)),
-            p("square-post", M::DOCUMENTS_PRESET_SQUARE_POST, Digital, sheet(Px, 2160., 2160., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("portrait-post", M::DOCUMENTS_PRESET_PORTRAIT_POST, Digital, sheet(Px, 2160., 2700., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
-            p("story", M::DOCUMENTS_PRESET_STORY, Digital, sheet(Px, 2160., 3840., SCREEN_PPI, Srgb, U8, "drawing_paper", WHITE, false)),
+            p("pocket-book", M::DOCUMENTS_PRESET_POCKET_BOOK, Sketch, sheet(In, 3.5, 5.5, 300, Srgb, U8, "drawing_paper", 100, NATURAL, false)),
+            p("sketchbook-a5", M::DOCUMENTS_PRESET_SKETCHBOOK_A5, Sketch, sheet(Mm, 148., 210., 300, Srgb, U8, "drawing_paper", 100, NATURAL, false)),
+            p("sketchbook-a4", M::DOCUMENTS_PRESET_SKETCHBOOK_A4, Sketch, sheet(Mm, 210., 297., 300, Srgb, U8, "drawing_paper", 100, NATURAL, false)),
+            p("sketch-pad", M::DOCUMENTS_PRESET_SKETCH_PAD, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", 100, WHITE, false)),
+            p("square-book", M::DOCUMENTS_PRESET_SQUARE_BOOK, Sketch, sheet(In, 8., 8., 300, Srgb, U8, "drawing_paper", 100, CREAM, false)),
+            p("toned-tan", M::DOCUMENTS_PRESET_TONED_TAN, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", 100, TONED_TAN, false)),
+            p("toned-gray", M::DOCUMENTS_PRESET_TONED_GRAY, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", 100, TONED_GRAY, false)),
+            p("toned-blue", M::DOCUMENTS_PRESET_TONED_BLUE, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drawing_paper", 100, TONED_BLUE, false)),
+            p("kraft-paper", M::DOCUMENTS_PRESET_KRAFT_PAPER, Sketch, sheet(In, 8.5, 11., 300, Srgb, U8, "drawing_paper", 100, KRAFT, false)),
+            p("black-book", M::DOCUMENTS_PRESET_BLACK_BOOK, Sketch, sheet(Mm, 148., 210., 300, Srgb, U8, "drawing_paper", 100, BLACK, false)),
+            p("bristol-pad", M::DOCUMENTS_PRESET_BRISTOL_PAD, Sketch, sheet(In, 11., 14., 300, Srgb, U8, "bristol", 100, WHITE, false)),
+            p("newsprint-pad", M::DOCUMENTS_PRESET_NEWSPRINT_PAD, Sketch, sheet(In, 18., 24., 300, Srgb, U8, "drawing_paper", 50, NEWSPRINT, false)),
+            p("trading-card", M::DOCUMENTS_PRESET_TRADING_CARD, Sketch, sheet(In, 2.5, 3.5, 300, Srgb, U8, "bristol", 100, CREAM, false)),
+            p("postcard", M::DOCUMENTS_PRESET_POSTCARD, Watercolor, sheet(In, 6., 4., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
+            p("bookmark", M::DOCUMENTS_PRESET_BOOKMARK, Watercolor, sheet(In, 2., 6., 300, Srgb, U16, "cold_press", 100, WHITE, false)),
+            p("greeting-card", M::DOCUMENTS_PRESET_GREETING_CARD, Watercolor, sheet(In, 5., 7., 300, Srgb, U16, "cold_press", 100, CREAM, false)),
+            p("paper-block", M::DOCUMENTS_PRESET_PAPER_BLOCK, Watercolor, sheet(In, 9., 12., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
+            p("quarter-sheet", M::DOCUMENTS_PRESET_QUARTER_SHEET, Watercolor, sheet(In, 11., 15., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
+            p("half-sheet", M::DOCUMENTS_PRESET_HALF_SHEET, Watercolor, sheet(In, 15., 22., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
+            p("full-sheet", M::DOCUMENTS_PRESET_FULL_SHEET, Watercolor, sheet(In, 22., 30., 300, Srgb, U16, "rough", 150, NATURAL, false)),
+            p("botanical", M::DOCUMENTS_PRESET_BOTANICAL, Watercolor, sheet(In, 11., 14., 300, Srgb, U16, "hot_press", 100, WHITE, false)),
+            p("journal", M::DOCUMENTS_PRESET_JOURNAL, Watercolor, sheet(In, 6., 8., 300, Srgb, U16, "handmade_paper", 150, CREAM, false)),
+            p("washi-sheet", M::DOCUMENTS_PRESET_WASHI_SHEET, Watercolor, sheet(In, 12., 18., 300, Srgb, U16, "washi", 100, NATURAL, false)),
+            p("ink-scroll", M::DOCUMENTS_PRESET_INK_SCROLL, Watercolor, sheet(Cm, 30., 90., 300, Srgb, U16, "unryu", 100, CREAM, false)),
+            p("pastel-pad", M::DOCUMENTS_PRESET_PASTEL_PAD, Pastel, sheet(In, 9., 12., 300, Srgb, U8, "pastel_paper", 100, TONED_GRAY, false)),
+            p("pearl-gray", M::DOCUMENTS_PRESET_PEARL_GRAY, Pastel, sheet(In, 12., 16., 300, Srgb, U8, "pastel_paper", 100, PEARL, false)),
+            p("pastel-sheet", M::DOCUMENTS_PRESET_PASTEL_SHEET, Pastel, sheet(In, 19.5, 25.5, 300, Srgb, U8, "pastel_paper", 100, TONED_TAN, false)),
+            p("dark-gray", M::DOCUMENTS_PRESET_DARK_GRAY, Pastel, sheet(In, 12., 16., 300, Srgb, U8, "pastel_paper", 100, STEEL, false)),
+            p("black-paper", M::DOCUMENTS_PRESET_BLACK_PAPER, Pastel, sheet(In, 9., 12., 300, Srgb, U8, "pastel_paper", 100, BLACK, false)),
+            p("sanded-pastel", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 12., 18., 300, Srgb, U8, "sanded_pastel", 100, OYSTER, false)),
+            p("sanded-pastel-large", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "sanded_pastel", 100, TONED_GRAY, false)),
+            p("charcoal-pad", M::DOCUMENTS_PRESET_CHARCOAL_PAD, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "ingres", 100, NATURAL, false)),
+            p("chalkboard", M::DOCUMENTS_PRESET_CHALKBOARD, Pastel, sheet(In, 36., 24., 150, Srgb, U8, "sanded_pastel", 50, CHALKBOARD, false)),
+            p("blueprint", M::DOCUMENTS_PRESET_BLUEPRINT, Pastel, sheet(In, 24., 18., 150, Srgb, U8, "hot_press", 0, BLUEPRINT, false)),
+            p("canvas-panel", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 8., 10., 300, Srgb, U16, "canvas", 100, WHITE, false)),
+            p("canvas-panel-large", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 11., 14., 300, Srgb, U16, "canvas", 100, WHITE, false)),
+            p("plein-air", M::DOCUMENTS_PRESET_PLEIN_AIR, Canvas, sheet(In, 9., 12., 300, Srgb, U16, "linen", 100, OYSTER, false)),
+            p("toned-canvas", M::DOCUMENTS_PRESET_TONED_CANVAS, Canvas, sheet(In, 16., 20., 300, Srgb, U16, "canvas", 100, TONED_TAN, false)),
+            p("canvas", M::DOCUMENTS_PRESET_CANVAS, Canvas, sheet(In, 18., 24., 300, Srgb, U16, "canvas", 100, WHITE, false)),
+            p("gray-linen", M::DOCUMENTS_PRESET_GRAY_LINEN, Canvas, sheet(Cm, 30., 40., 300, Srgb, U16, "linen", 100, PEARL, false)),
+            p("linen", M::DOCUMENTS_PRESET_LINEN, Canvas, sheet(In, 24., 36., 300, Srgb, U16, "linen", 100, WHITE, false)),
+            p("manga-b5", M::DOCUMENTS_PRESET_MANGA_B5, Comics, sheet(Mm, 182., 257., 600, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("manga-b4", M::DOCUMENTS_PRESET_MANGA_B4, Comics, sheet(Mm, 257., 364., 350, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("us-comic", M::DOCUMENTS_PRESET_US_COMIC, Comics, sheet(In, 6.875, 10.5, 600, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("comic-board", M::DOCUMENTS_PRESET_COMIC_BOARD, Comics, sheet(In, 11., 17., 600, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("four-panel-strip", M::DOCUMENTS_PRESET_FOUR_PANEL_STRIP, Comics, sheet(In, 4., 13., 600, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("daily-strip", M::DOCUMENTS_PRESET_DAILY_STRIP, Comics, sheet(In, 13., 4., 600, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("zine-page", M::DOCUMENTS_PRESET_ZINE_PAGE, Comics, sheet(In, 5.5, 8.5, 300, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("picture-book", M::DOCUMENTS_PRESET_PICTURE_BOOK, Comics, sheet(In, 16., 10., 300, Srgb, U16, "hot_press", 100, NATURAL, false)),
+            p("scroll-comic", M::DOCUMENTS_PRESET_SCROLL_COMIC, Comics, sheet(Px, 1600., 2560., SCREEN_PPI, Srgb, U8, "bristol", 0, WHITE, false)),
+            p("art-print-5x7", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 5., 7., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("art-print-8x10", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 8., 10., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("art-print-11x14", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 11., 14., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("art-print-16x20", M::DOCUMENTS_PRESET_ART_PRINT, Prints, sheet(In, 16., 20., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("poster", M::DOCUMENTS_PRESET_POSTER, Prints, sheet(In, 18., 24., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("a4", M::DOCUMENTS_PRESET_A4, Prints, sheet(Mm, 210., 297., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("a3", M::DOCUMENTS_PRESET_A3, Prints, sheet(Mm, 297., 420., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("letter", M::DOCUMENTS_PRESET_LETTER, Prints, sheet(In, 8.5, 11., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("tabloid", M::DOCUMENTS_PRESET_TABLOID, Prints, sheet(In, 11., 17., 300, Adobe, U16, "hot_press", 0, WHITE, false)),
+            p("sticker", M::DOCUMENTS_PRESET_STICKER, Prints, sheet(In, 3., 3., 300, Srgb, U8, "drawing_paper", 0, WHITE, true)),
+            p(THIS_SCREEN, M::DOCUMENTS_PRESET_THIS_SCREEN, Digital, sheet(Px, 2560., 1600., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("full-hd", M::DOCUMENTS_PRESET_FULL_HD, Digital, sheet(Px, 1920., 1080., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("uhd", M::DOCUMENTS_PRESET_UHD, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("uhd-hdr", M::DOCUMENTS_PRESET_UHD_HDR, Digital, sheet(Px, 3840., 2160., SCREEN_PPI, Srgb, F16, "drawing_paper", 0, WHITE, false)),
+            p("cinematic", M::DOCUMENTS_PRESET_CINEMATIC, Digital, sheet(Px, 3840., 1608., SCREEN_PPI, P3, U16, "drawing_paper", 0, PEARL, false)),
+            p("phone", M::DOCUMENTS_PRESET_PHONE, Digital, sheet(Px, 1290., 2796., SCREEN_PPI, P3, U8, "drawing_paper", 0, WHITE, false)),
+            p("tablet", M::DOCUMENTS_PRESET_TABLET, Digital, sheet(Px, 2048., 2732., SCREEN_PPI, P3, U8, "drawing_paper", 0, WHITE, false)),
+            p("square-post", M::DOCUMENTS_PRESET_SQUARE_POST, Digital, sheet(Px, 2160., 2160., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("portrait-post", M::DOCUMENTS_PRESET_PORTRAIT_POST, Digital, sheet(Px, 2160., 2700., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
+            p("story", M::DOCUMENTS_PRESET_STORY, Digital, sheet(Px, 2160., 3840., SCREEN_PPI, Srgb, U8, "drawing_paper", 0, WHITE, false)),
         ]
     })
 }
@@ -400,7 +403,7 @@ pub fn default_setup() -> DrawingSetup { built_in(DEFAULT_PRESET, None).expect("
 
 /// The sheet a new window opens with.
 pub fn startup_setup() -> DrawingSetup {
-    sheet(LengthUnit::Mm, 297., 210., 300, RgbSpace::Srgb, SampleDepth::U8, layer_core::paper::DEFAULT_PAPER, WHITE, false)
+    sheet(LengthUnit::Mm, 297., 210., 300, RgbSpace::Srgb, SampleDepth::U8, layer_core::paper::DEFAULT_PAPER, 0, WHITE, false)
 }
 
 pub fn startup_drawing(l: &Localizer) -> Result<Document, String> {
@@ -419,7 +422,7 @@ pub enum NewDrawingEdit {
     Depth(SampleDepth),
     Blending(BlendSpace),
     Setup(DrawingSetup),
-    Texture(Option<Arc<str>>),
+    Texture { texture: Option<Arc<str>>, relief: u32 },
     PaperColor { color: RgbColor, transparent: bool },
 }
 
@@ -474,7 +477,7 @@ impl NewDrawingDraft {
                 if !next.color.depth.is_float() { self.blend_choice = next.blend_space; }
                 *setup = DrawingSetup { blend_space: next.blend_space.for_depth(next.color.depth), ..next };
             }
-            NewDrawingEdit::Texture(texture) => setup.paper.texture = texture,
+            NewDrawingEdit::Texture { texture, relief } => (setup.paper.texture, setup.paper.relief) = (texture, relief),
             NewDrawingEdit::PaperColor { color, transparent } => {
                 setup.paper.color = RgbColor { rgba: [color.rgba[0], color.rgba[1], color.rgba[2], 1.], ..color };
                 setup.paper.transparent = transparent;
@@ -531,6 +534,12 @@ pub fn resolution_control() -> crate::NumericControl {
     crate::NumericControl { kind: crate::NumericKind::Number, ..crate::NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_RESOLUTION), 1., 0) }
 }
 
+pub fn relief_control() -> crate::NumericControl {
+    let program = layer_core::bundled_effect_catalog().get(layer_core::paper::PAPER_PROGRAM).expect("paper program").program();
+    let relief = program.parameters.iter().find(|p| p.key.as_ref() == layer_core::paper::RELIEF).expect("paper relief");
+    crate::NumericControl { kind: crate::NumericKind::Number, unit: String::new(), ..crate::session::effects::number_control(relief).expect("numeric relief") }
+}
+
 pub const RESOLUTION_CHOICES: [(u32, MessageId); 5] = [
     (72, MessageId::DOCUMENTS_RESOLUTION_SCREEN),
     (150, MessageId::DOCUMENTS_RESOLUTION_DRAFT),
@@ -580,6 +589,8 @@ pub fn texture_name(texture: Option<&str>, imported: &[NamedPaper], l: &Localize
         .unwrap_or_else(|| l.text(MessageId::RESOURCES_PAPER_OWN))
 }
 
+fn relief_text(relief: u32) -> String { format!("{relief} %") }
+
 pub fn dimensions_text(setup: &DrawingSetup, l: &Localizer) -> String {
     let unit = setup.unit;
     format!("{} × {} {}", format_length(setup.width.get(), unit), format_length(setup.height.get(), unit), unit.label(l))
@@ -596,6 +607,7 @@ pub struct NewDrawingView {
     pub capacity: String,
     pub memory: String,
     pub texture: Arc<str>,
+    pub relief: Option<String>,
     pub paper_color: String,
     pub resolution: String,
 }
@@ -656,6 +668,7 @@ impl NewDrawingView {
             capacity,
             memory,
             texture: texture_name(setup.paper.texture.as_deref(), catalog.imported, l),
+            relief: setup.paper.texture.is_some().then(|| relief_text(setup.paper.relief)),
             paper_color: if setup.paper.texture.is_none() { l.text(MessageId::DOCUMENTS_PAPER_NONE).to_string() }
                 else if setup.paper.transparent { l.text(MessageId::DOCUMENTS_TRANSPARENT).to_string() }
                 else { paper_color_name(setup.paper.color, l) },
@@ -774,7 +787,7 @@ impl PresetCatalog<'_> {
         let paper = match &setup.paper.texture {
             None => l.text(MessageId::DOCUMENTS_NO_PAPER).to_string(),
             Some(texture) => {
-                args.set("texture", texture_name(Some(texture), self.imported, l).to_string());
+                args.set("texture", format!("{} {}", texture_name(Some(texture), self.imported, l), relief_text(setup.paper.relief)));
                 let color = if setup.paper.transparent { l.text(MessageId::DOCUMENTS_TRANSPARENT).to_string() } else { paper_color_name(setup.paper.color, l) };
                 args.set("color", color);
                 l.format(MessageId::DOCUMENTS_PRESET_PAPER, &args)
@@ -847,6 +860,10 @@ mod tests {
         for (_, color) in PAPER_COLORS {
             assert!(presets.iter().any(|preset| preset.setup.paper.color == color), "{color:?}");
         }
+        for preset in presets.iter().filter(|preset| preset.group == PresetGroup::Digital || preset.setup.unit == LengthUnit::Px) {
+            assert_eq!(preset.setup.paper.relief, 0, "{} is a screen, not a sheet", preset.id);
+        }
+        assert!(presets.iter().all(|preset| preset.setup.paper.relief <= 300));
         assert_eq!(built_in("sketchbook-a4", None).unwrap().extent(), [2480, 3508]);
     }
 
@@ -956,6 +973,7 @@ mod tests {
         let project = setup.project(PortableId::random(), bristol.clone(), CanvasLimits::default(), &l).unwrap();
         let paper = project.bottom_paper().unwrap();
         assert_eq!(project.scene().effect(paper).unwrap().constant_color(), Some(KRAFT));
+        assert_eq!(layer_core::paper::light(project.scene().effect(paper).unwrap()).map(|light| light.relief), Some(1.));
         assert_eq!(project.paper(None).texture, bristol);
         assert!(project.scene().occurrence(paper).unwrap().visible);
         assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
@@ -1051,7 +1069,7 @@ mod tests {
         let screen = catalog.get(&PresetKey::BuiltIn(THIS_SCREEN.into())).unwrap();
         assert_eq!((screen.setup.extent(), screen.setup.resolution), ([2880, 1800], 220));
         let summary = catalog.summary("Kraft paper", &built_in("kraft-paper", None).unwrap());
-        assert_eq!((summary.size.as_str(), summary.details.as_str()), ("8.5 × 11 in · 300 ppi", "sRGB 8-bit SDR · Drawing, Kraft"));
+        assert_eq!((summary.size.as_str(), summary.details.as_str()), ("8.5 × 11 in · 300 ppi", "sRGB 8-bit SDR · Drawing 100 %, Kraft"));
         assert_eq!(catalog.get(&PresetKey::BuiltIn("uhd-hdr".into())).unwrap().details, "144 ppi · Drawing · HDR");
         assert_eq!(catalog.tiles(BrowserTab::Group(PresetGroup::Digital), "").len(), 10);
     }

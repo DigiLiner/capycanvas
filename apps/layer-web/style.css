@@ -1186,6 +1186,11 @@ button.new-drawing-preview { display:block; min-height:0; padding:0; overflow:hi
 .new-drawing-combo .number-control { flex:none; width:44px; }
 .new-drawing-combo .number-control .number-entry { padding:0 2px 0 10px; }
 .new-drawing-combo .new-drawing-affix { padding:0 2px 0 3px; }
+.new-drawing-combo > .new-drawing-affix:last-child { padding-right:10px; }
+.new-drawing-relief { display:flex; align-items:center; gap:10px; min-width:0; }
+.new-drawing-relief-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.new-drawing-relief.disabled { opacity:.5; }
+.dialog-footer > .new-drawing-relief ~ button { flex:none; }
 button.new-drawing-chevron { display:grid; place-items:center; width:26px; height:26px; min-height:26px; padding:0; border-radius:calc(var(--control-radius) - 2px); }
 button.new-drawing-chevron svg { width:16px; height:16px; }
 button.new-drawing-link { display:grid; place-items:center; width:26px; height:34px; min-height:34px; padding:0; border-radius:var(--control-radius); color:color-mix(in srgb,currentColor 62%,transparent); }
@@ -1212,6 +1217,8 @@ button.new-drawing-paper-tile:disabled { opacity:.5; }
 .new-drawing-paper-tile .paper-preview svg { width:18px; height:18px; }
 .new-drawing-patch { box-shadow:inset 0 0 0 1px var(--card-shade); }
 .new-drawing-tile-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:700; }
+.new-drawing-tile-text { display:flex; flex-direction:column; gap:1px; min-width:0; line-height:1.2; }
+.new-drawing-tile-text > .new-drawing-caption { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dialog-footer > .new-drawing-open-presets { display:flex; align-items:center; gap:6px; }
 .new-drawing-up { width:16px; height:16px; transform:rotate(180deg); }
 .new-drawing-drawer-head { flex:none; padding:18px 20px 0; }

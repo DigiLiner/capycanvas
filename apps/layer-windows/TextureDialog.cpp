@@ -127,7 +127,7 @@ void PaperThumbnail::refresh(){
     if(pixels.ImageSource()!=image.source)pixels.ImageSource(image.source);
     picture.Visibility(image.source?Visibility::Visible:Visibility::Collapsed);
     glyph.Visibility(image.source?Visibility::Collapsed:Visibility::Visible);
-    if(!image.source&&theme!=data->theme()){theme=data->theme();setIcon(glyph,L"layer-paper-symbolic",theme,glyphSize);}
+    if(!image.source&&theme!=data->theme()){theme=data->theme();setIcon(glyph,placeholder,theme,glyphSize);}
     AutomationProperties::SetItemStatus(root,image.source?data->caption(L"header",L"ready"):image.pending?data->caption(L"layers",L"pending"):hstring());
 }
 
@@ -156,33 +156,47 @@ std::shared_ptr<TextureGrid> TextureGrid::Create(std::shared_ptr<WorkspaceData> 
     grid.SizeChanged([weak=result->weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->arrange();});
     return result;
 }
+TextureGrid::Tile TextureGrid::make(V const& id,hstring const& text,hstring const& suffix,hstring const& glyph,std::function<void()> click){
+    Tile result;
+    result.node=button(data,text,std::move(click));
+    result.node.HorizontalAlignment(HorizontalAlignment::Stretch);result.node.VerticalAlignment(VerticalAlignment::Top);
+    result.node.HorizontalContentAlignment(HorizontalAlignment::Stretch);result.node.Padding({0,0,0,0});
+    for(auto state:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed"})result.node.Resources().Insert(box_value(hstring(state)),clear());
+    Grid frame;frame.Width(TileFrame);frame.Height(TileFrame);frame.HorizontalAlignment(HorizontalAlignment::Center);
+    result.hover=squircle(TileFrame);result.hover.Fill(clear());
+    result.picture=PaperThumbnail::Create(data,TilePreview,48,true);result.picture->placeholder=glyph;result.picture->show(id,text);
+    result.ring=squircle(TileFrame);
+    GeometryGroup edge;edge.FillRule(FillRule::EvenOdd);edge.Children().Append(squircleShape(TileFrame));edge.Children().Append(squircleShape(TileFrame-4,2));
+    result.ring.Data(edge);result.ring.Fill(accent(data));result.ring.Opacity(0);
+    for(UIElement part:{UIElement(result.hover),UIElement(result.picture->root),UIElement(result.ring)})frame.Children().Append(part);
+    AutomationProperties::SetAutomationId(result.picture->root,prefix+L"-preview-"+suffix);
+    result.caption=label(data,text,false,false);result.caption.FontSize(data->textSize()*.82);result.caption.LineHeight(0);result.caption.LineStackingStrategy(LineStackingStrategy::MaxHeight);
+    result.caption.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());result.caption.TextAlignment(TextAlignment::Center);result.caption.HorizontalAlignment(HorizontalAlignment::Stretch);
+    result.caption.TextWrapping(TextWrapping::Wrap);result.caption.TextTrimming(TextTrimming::CharacterEllipsis);result.caption.MaxLines(2);
+    StackPanel content;content.Spacing(6);content.Children().Append(frame);content.Children().Append(result.caption);result.node.Content(content);
+    AutomationProperties::SetAutomationId(result.node,prefix+L"-tile-"+suffix);tooltip(result.node,text);
+    auto hover=result.hover;
+    result.node.PointerEntered([hover,data=data](auto&&,auto&&){hover.Fill(data->tint(L"text",26));});
+    auto leave=[hover](auto&&,auto&&){hover.Fill(clear());};
+    result.node.PointerExited(leave);result.node.PointerCanceled(leave);result.node.PointerCaptureLost(leave);
+    return result;
+}
+void TextureGrid::trail(hstring const& suffix,hstring const& glyph,std::function<void()> click){
+    trailing=make(JsonValue::CreateNullValue(),L"",suffix,glyph,std::move(click));
+    AutomationProperties::SetAutomationId(trailing->node,prefix+L"-"+suffix);
+    grid.Children().Append(trailing->node);columns=0;arrange();
+}
+void TextureGrid::rename(Tile const& target,hstring const& text){
+    target.caption.Text(text);tooltip(target.node,text);AutomationProperties::SetName(target.node,text);AutomationProperties::SetName(target.picture->root,text);
+}
 void TextureGrid::rebuild(A const& list){
     auto weak=weak_from_this();
     grid.Children().Clear();tiles.clear();
     for(uint32_t index=0;index<list.Size();++index){
-        auto item=list.GetObjectAt(index);auto text=str(item,L"label");
-        Tile tile;tile.id=textureTileId(item);
-        tile.node=button(data,text,[weak,index]{if(auto self=weak.lock();self&&self->picked)self->picked(index);});
-        tile.node.HorizontalAlignment(HorizontalAlignment::Stretch);tile.node.VerticalAlignment(VerticalAlignment::Top);
-        tile.node.HorizontalContentAlignment(HorizontalAlignment::Stretch);tile.node.Padding({0,0,0,0});
-        for(auto state:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed"})tile.node.Resources().Insert(box_value(hstring(state)),clear());
-        Grid frame;frame.Width(TileFrame);frame.Height(TileFrame);frame.HorizontalAlignment(HorizontalAlignment::Center);
-        tile.hover=squircle(TileFrame);tile.hover.Fill(clear());
-        tile.picture=PaperThumbnail::Create(data,TilePreview,48,true);tile.picture->show(item.GetNamedValue(L"id",JsonValue::CreateNullValue()),text);
-        tile.ring=squircle(TileFrame);
-        GeometryGroup edge;edge.FillRule(FillRule::EvenOdd);edge.Children().Append(squircleShape(TileFrame));edge.Children().Append(squircleShape(TileFrame-4,2));
-        tile.ring.Data(edge);tile.ring.Fill(accent(data));tile.ring.Opacity(0);
-        for(UIElement part:{UIElement(tile.hover),UIElement(tile.picture->root),UIElement(tile.ring)})frame.Children().Append(part);
-        AutomationProperties::SetAutomationId(tile.picture->root,prefix+L"-preview-"+to_hstring(index));
-        auto caption=label(data,text,false,false);caption.FontSize(data->textSize()*.82);caption.LineHeight(0);caption.LineStackingStrategy(LineStackingStrategy::MaxHeight);
-        caption.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());caption.TextAlignment(TextAlignment::Center);caption.HorizontalAlignment(HorizontalAlignment::Stretch);
-        caption.TextWrapping(TextWrapping::Wrap);caption.TextTrimming(TextTrimming::CharacterEllipsis);caption.MaxLines(2);
-        StackPanel content;content.Spacing(6);content.Children().Append(frame);content.Children().Append(caption);tile.node.Content(content);
-        AutomationProperties::SetAutomationId(tile.node,prefix+L"-tile-"+to_hstring(index));tooltip(tile.node,text);
-        auto hover=tile.hover;
-        tile.node.PointerEntered([hover,data=data](auto&&,auto&&){hover.Fill(data->tint(L"text",26));});
-        auto leave=[hover](auto&&,auto&&){hover.Fill(clear());};
-        tile.node.PointerExited(leave);tile.node.PointerCanceled(leave);tile.node.PointerCaptureLost(leave);
+        auto item=list.GetObjectAt(index);
+        auto tile=make(item.GetNamedValue(L"id",JsonValue::CreateNullValue()),str(item,L"label"),to_hstring(index),L"layer-paper-symbolic",
+            [weak,index]{if(auto self=weak.lock();self&&self->picked)self->picked(index);});
+        tile.id=textureTileId(item);
         tile.node.DoubleTapped([weak,index](auto&&,DoubleTappedRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->activated){e.Handled(true);self->activated(index);}});
         if(auto actions=array(item,L"actions");actions.Size()){
             MenuFlyout menu;TrackPopup(menu,data);AutomationProperties::SetAutomationId(menu,L"paper-tile-menu");
@@ -195,19 +209,22 @@ void TextureGrid::rebuild(A const& list){
         }
         grid.Children().Append(tile.node);tiles.push_back(std::move(tile));
     }
+    if(trailing)grid.Children().Append(trailing->node);
     columns=0;arrange();
 }
 void TextureGrid::arrange(){
-    double width=grid.ActualWidth();if(width<=0||tiles.empty())return;
+    std::vector<Button> nodes;for(auto const& tile:tiles)nodes.push_back(tile.node);
+    if(trailing)nodes.push_back(trailing->node);
+    double width=grid.ActualWidth();if(width<=0||nodes.empty())return;
     int next=std::clamp(int((width+TileColumnGap)/(TileFrame+TileColumnGap)),1,6);
     if(next!=columns){
         columns=next;grid.ColumnDefinitions().Clear();
         for(int i=0;i<columns;++i){ColumnDefinition column;column.Width({1,GridUnitType::Star});grid.ColumnDefinitions().Append(column);}
     }
-    auto rows=int((tiles.size()+columns-1)/columns);
+    auto rows=int((nodes.size()+columns-1)/columns);
     while(int(grid.RowDefinitions().Size())<rows){RowDefinition row;row.Height({1,GridUnitType::Auto});grid.RowDefinitions().Append(row);}
     while(int(grid.RowDefinitions().Size())>rows)grid.RowDefinitions().RemoveAtEnd();
-    for(size_t i=0;i<tiles.size();++i){Grid::SetColumn(tiles[i].node,int(i)%columns);Grid::SetRow(tiles[i].node,int(i)/columns);}
+    for(size_t i=0;i<nodes.size();++i){Grid::SetColumn(nodes[i],int(i)%columns);Grid::SetRow(nodes[i],int(i)/columns);}
 }
 void TextureGrid::mark(hstring const& id){
     for(auto const& tile:tiles){

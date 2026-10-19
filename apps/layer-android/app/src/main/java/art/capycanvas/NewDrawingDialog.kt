@@ -80,6 +80,7 @@ import org.json.JSONObject
 import kotlin.math.roundToInt
 
 private val FieldHeight = 36.dp
+private val FooterHeight = 34.dp
 private val ControlGap = 6.dp
 private val RowGap = 10.dp
 private val SectionGap = 14.dp
@@ -90,6 +91,7 @@ private val WideDialog = 600.dp
 private val NumberWidth = 96.dp
 private val LinkWidth = 26.dp
 private val UnitWidth = 76.dp
+private val ReliefWidth = 76.dp
 private val OrientationWidth = 70.dp
 private val PresetTile = 120.dp
 private val PresetFrame = DpSize(116.dp, 86.dp)
@@ -112,12 +114,14 @@ private class NumberDraft(val typing: () -> Boolean, val commit: () -> Boolean)
 
 private class NewDrawingActions(private val host: CanvasHost) {
     private val drafts = linkedMapOf<Any, NumberDraft>()
+    var importFocused = false
     fun register(owner: Any, draft: NumberDraft?) { if (draft == null) drafts.remove(owner) else drafts[owner] = draft }
     fun typing() = drafts.values.any { it.typing() }
     fun commit() = drafts.values.toList().map { it.commit() }.all { it }
     fun send(op: String, vararg fields: Pair<String, Any?>) { host.documents.newDrawing(obj("op" to op, *fields)) }
     fun page(op: String, vararg fields: Pair<String, Any?>) { commit(); send(op, *fields) }
     fun create() { if (commit()) host.documents.createNewDrawing() }
+    fun usePaper() { if (commit()) send("use_paper") }
 }
 
 private class DrawerMemory { var shown: JSONObject? = null; var open = false; var opening = 0 }
@@ -157,7 +161,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
             null -> if (view.getBoolean("can_create")) actions.create()
             "presets" -> drawer.objectOrNull("save")?.let { if (it.getBoolean("can_save")) actions.send("save_preset") }
                 ?: run { if (drawer.getBoolean("can_select")) actions.send("use_preset") }
-            "paper" -> actions.send("use_paper")
+            "paper" -> actions.usePaper()
         }
     }
     val keys = { event: AndroidKeyEvent ->
@@ -165,8 +169,9 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
         val kind = drawer?.getString("kind")
         if (host.textComposition.owns(event)) false
         else when (event.keyCode) {
-            AndroidKeyEvent.KEYCODE_ESCAPE -> if ((kind == null && actions.typing()) || (kind == "paper_color" && host.editingText)) false else { if (pressed) back(); true }
-            AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER -> if (host.editingText || kind == "paper_color") false else { if (pressed) accept(); true }
+            AndroidKeyEvent.KEYCODE_ESCAPE -> if (actions.typing() || (kind == "paper_color" && host.editingText)) false else { if (pressed) back(); true }
+            AndroidKeyEvent.KEYCODE_ENTER, AndroidKeyEvent.KEYCODE_NUMPAD_ENTER ->
+                if (host.editingText || kind == "paper_color" || (kind == "paper" && actions.importFocused)) false else { if (pressed) accept(); true }
             else -> false
         }
     }
@@ -325,11 +330,12 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
         Section(copy.getString("paper")) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
                 val texture = if (sheet.isNull("texture")) null else sheet.getString("texture")
-                PaperTile(page.getString("texture"), copy.getString("paper"), "new-drawing-texture", Modifier.weight(1f), true, { actions.page("paper") }) {
+                val relief = if (page.isNull("relief")) null else page.getString("relief")
+                PaperTile(page.getString("texture"), relief, copy.getString("paper"), "new-drawing-texture", Modifier.weight(1f), true, { actions.page("paper") }) {
                     PaperPreview(host, texture, Thumbnail, colors.text.copy(alpha = .06f), "none")
                 }
                 val paper = rememberDisplayColors(host, listOf(sheet.getJSONObject("color"))).first()
-                PaperTile(page.getString("paper_color"), copy.getString("paper_color"), "new-drawing-paper-color", Modifier.weight(1f), view.getBoolean("paper_color_enabled"), { actions.page("paper_color") }) {
+                PaperTile(page.getString("paper_color"), null, copy.getString("paper_color"), "new-drawing-paper-color", Modifier.weight(1f), view.getBoolean("paper_color_enabled"), { actions.page("paper_color") }) {
                     PaletteFace(if (sheet.getBoolean("shown")) paper else Color.Transparent, Modifier.size(Thumbnail), TileShape)
                 }
             }
@@ -409,7 +415,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
 
 /** A number typed in place. Rust reads the text; Done, Enter or leaving the field commits it, Escape restores the value. */
 @Composable private fun DialogNumber(actions: NewDrawingActions, value: Double, control: JSONObject, name: String, prefix: String?, suffix: String?, tag: String,
-    modifier: Modifier, trailing: @Composable RowScope.() -> Unit = {}, onValue: (Double) -> Unit) {
+    modifier: Modifier, height: Dp = FieldHeight, enabled: Boolean = true, trailing: @Composable RowScope.() -> Unit = {}, onValue: (Double) -> Unit) {
     val host = LocalCanvasHost.current
     val colors = LocalPalette.current
     val focus = LocalFocusManager.current
@@ -449,7 +455,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
             host.textComposition.clear(requester)
         }
     }
-    Row(modifier.height(FieldHeight).clip(ControlShape).background(fieldColor())
+    Row(modifier.height(height).clip(ControlShape).background(fieldColor())
         .then(if (invalid) Modifier.border(1.5.dp, MaterialTheme.colorScheme.error, ControlShape) else Modifier).testTag(tag),
         verticalAlignment = Alignment.CenterVertically) {
         prefix?.let { Text(it, Modifier.padding(start = 10.dp), color = colors.text.copy(alpha = .62f), fontSize = smallSize(), maxLines = 1) }
@@ -473,7 +479,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
                     else -> false
                 }
             }.semantics { contentDescription = name },
-            singleLine = true, textStyle = LocalTextStyle.current.copy(color = colors.text, textAlign = TextAlign.End, fontFeatureSettings = "tnum"),
+            enabled = enabled, singleLine = true, textStyle = LocalTextStyle.current.copy(color = colors.text, textAlign = TextAlign.End, fontFeatureSettings = "tnum"),
             cursorBrush = SolidColor(colors.accent), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { if (text.composition == null && commit()) focus.clearFocus() }))
         suffix?.let { Text(it, Modifier.padding(horizontal = 3.dp), color = colors.text.copy(alpha = .62f), fontSize = smallSize(), maxLines = 1) }
@@ -510,12 +516,16 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
     }
 }
 
-@Composable private fun PaperTile(name: String, description: String, tag: String, modifier: Modifier, enabled: Boolean, open: () -> Unit, thumbnail: @Composable () -> Unit) {
+@Composable private fun PaperTile(name: String, detail: String?, description: String, tag: String, modifier: Modifier, enabled: Boolean, open: () -> Unit,
+    thumbnail: @Composable () -> Unit) {
     Row(modifier.height(Thumbnail + 8.dp).clip(ControlShape).background(fieldColor()).alpha(if (enabled) 1f else .5f)
-        .clickable(enabled, role = Role.Button, onClick = open).semantics { contentDescription = description; stateDescription = name }.testTag(tag)
-        .padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(RowGap)) {
+        .clickable(enabled, role = Role.Button, onClick = open).semantics { contentDescription = description; stateDescription = listOfNotNull(name, detail).joinToString(", ") }
+        .testTag(tag).padding(start = 4.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(RowGap)) {
         thumbnail()
-        Text(name, Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            detail?.let { Text(it, Modifier.testTag("$tag-relief"), color = LocalPalette.current.secondary, fontSize = captionSize(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
     }
 }
 
@@ -663,27 +673,47 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
         if (uri != null) host.viewModelScope.launch { importLibraryPaper(host, uri) }
     }
     val tiles = drawer.getJSONArray("tiles").objects()
+    val relief = drawer.getJSONObject("relief")
     DrawerSheet("new-drawing-paper-drawer", head = { DialogTitle(copy.getString("paper"), "new-drawing-paper-title") }, footer = {
-        DialogButton(copy.getString("import"), "new-drawing-paper-import") {
-            try { chooser.launch(arrayOf("image/*")) } catch (e: Exception) { host.reportActionError(e.message ?: failed) }
+        val enabled = relief.getBoolean("enabled")
+        Row(Modifier.weight(1f).alpha(if (enabled) 1f else .5f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(RowGap)) {
+            Text(copy.getString("relief"), Modifier.weight(1f, fill = false).testTag("new-drawing-paper-relief-label"), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            DialogNumber(actions, relief.getDouble("value"), relief.getJSONObject("numeric"), copy.getString("relief"), null, copy.getString("relief_unit"),
+                "new-drawing-paper-relief", Modifier.width(ReliefWidth), FooterHeight, enabled, trailing = { Spacer(Modifier.width(7.dp)) }) {
+                actions.send("paper_relief", "value" to it)
+            }
         }
-        Spacer(Modifier.weight(1f))
         DialogButton(copy.getString("cancel"), "new-drawing-paper-cancel") { actions.send("close_drawer") }
-        DialogButton(copy.getString("use_texture"), "new-drawing-paper-use", accent = true) { actions.send("use_paper") }
+        DialogButton(copy.getString("use_texture"), "new-drawing-paper-use", accent = true) { actions.usePaper() }
     }) {
         BoxWithConstraints(Modifier.fillMaxWidth().testTag("new-drawing-papers")) {
             val columns = ((maxWidth + TextureGap) / (TextureFrame + TextureGap)).toInt().coerceIn(1, 6)
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                tiles.withIndex().chunked(columns).forEach { row ->
+                (tiles.withIndex() + null).chunked(columns).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TextureGap)) {
-                        row.forEach { (index, tile) ->
-                            TextureTile(host, tile, index, tile.getBoolean("selected"), Modifier.weight(1f), {}, "none", "new-drawing-paper-tile",
-                                use = { actions.send("use_paper") }) { actions.send("pick_paper", "id" to tile.paperId()) }
+                        row.forEach { item ->
+                            if (item == null) ImportTile(host, copy.getString("import"), Modifier.weight(1f), actions) {
+                                try { chooser.launch(arrayOf("image/*")) } catch (e: Exception) { host.reportActionError(e.message ?: failed) }
+                            } else TextureTile(host, item.value, item.index, item.value.getBoolean("selected"), Modifier.weight(1f), {}, "none", "new-drawing-paper-tile",
+                                use = { actions.usePaper() }) { actions.send("pick_paper", "id" to item.value.paperId()) }
                         }
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable private fun ImportTile(host: CanvasHost, label: String, modifier: Modifier, actions: NewDrawingActions, import: () -> Unit) {
+    val interactions = remember { MutableInteractionSource() }
+    val hovered by interactions.collectIsHoveredAsState()
+    DisposableEffect(actions) { onDispose { actions.importFocused = false } }
+    HoverTip(label, modifier) {
+        Column(Modifier.fillMaxWidth().onFocusChanged { actions.importFocused = it.isFocused }.hoverable(interactions)
+            .clickable(interactions, null, role = Role.Button, onClick = import).testTag("new-drawing-paper-import"),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(TextureCaptionGap)) {
+            TextureFace(host, null, label, "plus", hovered, false)
         }
     }
 }

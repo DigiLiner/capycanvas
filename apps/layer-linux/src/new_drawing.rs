@@ -207,6 +207,7 @@ struct Page {
     texture: gtk::Button,
     texture_thumbnail: PaperThumbnail,
     texture_name: gtk::Label,
+    texture_relief: gtk::Label,
     paper_color: gtk::Button,
     paper_patch: ColorPatch,
     paper_color_name: gtk::Label,
@@ -241,7 +242,12 @@ struct PaperDrawer {
     slide: Rc<SlideSheet>,
     title: gtk::Label,
     grid: gtk::FlowBox,
-    import: gtk::Button,
+    import: gtk::FlowBoxChild,
+    import_label: gtk::Label,
+    relief_row: gtk::Box,
+    relief_label: gtk::Label,
+    relief: NumberControl,
+    relief_unit: gtk::Label,
     cancel: gtk::Button,
     apply: gtk::Button,
 }
@@ -446,23 +452,30 @@ impl NewDrawing {
 
         let paper_heading = heading();
         let paper_tile = |name: &str, thumbnail: &gtk::Widget| {
-            let label = gtk::Label::builder().xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).build();
+            let label = gtk::Label::builder().xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).build();
             label.add_css_class("heading");
+            let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
+            text.set_hexpand(true);
+            text.set_valign(gtk::Align::Center);
+            text.append(&label);
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
             content.append(thumbnail);
-            content.append(&label);
+            content.append(&text);
             let button = gtk::Button::builder().child(&content).hexpand(true).build();
             button.add_css_class("new-drawing-paper-tile");
             button.set_widget_name(name);
-            (button, label)
+            (button, label, text)
         };
         let texture_thumbnail = PaperThumbnail::new(THUMBNAIL);
-        let (texture, texture_name) = paper_tile("new-drawing-texture", texture_thumbnail.image.upcast_ref());
+        let (texture, texture_name, texture_text) = paper_tile("new-drawing-texture", texture_thumbnail.image.upcast_ref());
+        let texture_relief = dim("new-drawing-caption");
+        texture_relief.set_widget_name("new-drawing-texture-relief");
+        texture_text.append(&texture_relief);
         let paper_patch = ColorPatch::new(false);
         paper_patch.set_size_request(THUMBNAIL, THUMBNAIL);
         paper_patch.set_overflow(gtk::Overflow::Hidden);
         paper_patch.add_css_class("paper-preview");
-        let (paper_color, paper_color_name) = paper_tile("new-drawing-paper-color", paper_patch.upcast_ref());
+        let (paper_color, paper_color_name, _) = paper_tile("new-drawing-paper-color", paper_patch.upcast_ref());
         let paper_tiles = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         paper_tiles.set_homogeneous(true);
         paper_tiles.append(&texture);
@@ -600,13 +613,32 @@ impl NewDrawing {
             let title = title();
             let grid = texture_grid();
             grid.set_widget_name("new-drawing-papers");
-            let import = footer_button("new-drawing-paper-import", false);
+            let thumbnail = PaperThumbnail::new(96);
+            let import = texture_tile(&thumbnail, w, None, "");
+            thumbnail.show_icon("layer-plus-symbolic");
+            import.set_widget_name("new-drawing-paper-import");
+            let import_label = import.child().and_then(|content| content.last_child()).and_downcast::<gtk::Label>().expect("texture tile caption");
+            let relief_label = gtk::Label::builder().xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).build();
+            let relief = NumberControl::field(relief_control(), "", 4, localization.clone());
+            relief.set_widget_name("new-drawing-paper-relief");
+            relief.set_hexpand(false);
+            let relief_unit = gtk::Label::new(None);
+            relief_unit.add_css_class("new-drawing-affix");
+            let relief_field = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            relief_field.add_css_class("new-drawing-field");
+            relief_field.add_css_class("new-drawing-combo");
+            relief_field.set_widget_name("new-drawing-paper-relief-field");
+            relief_field.append(&relief);
+            relief_field.append(&relief_unit);
+            let relief_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+            relief_row.append(&relief_label);
+            relief_row.append(&relief_field);
             let cancel = footer_button("new-drawing-paper-cancel", false);
             let apply = footer_button("new-drawing-paper-use", true);
             let bottom = footer();
-            for widget in [import.upcast_ref::<gtk::Widget>(), gap().upcast_ref(), cancel.upcast_ref(), apply.upcast_ref()] { bottom.append(widget); }
+            for widget in [relief_row.upcast_ref::<gtk::Widget>(), gap().upcast_ref(), cancel.upcast_ref(), apply.upcast_ref()] { bottom.append(widget); }
             let sheet = drawer("new-drawing-paper-drawer", &title, &grid, &bottom);
-            PaperDrawer { slide: SlideSheet::new(&overlay, &sheet), title, grid, import, cancel, apply }
+            PaperDrawer { slide: SlideSheet::new(&overlay, &sheet), title, grid, import, import_label, relief_row, relief_label, relief, relief_unit, cancel, apply }
         };
 
         let colors = {
@@ -655,7 +687,7 @@ impl NewDrawing {
             title: page_title, body, left, art, preview, preset, capacity, name_label, name, size_heading, width_prefix, height_prefix,
             width_slot, height_slot, numbers: RefCell::default(), link, unit, portrait, landscape, resolution_label, resolution, resolution_unit,
             resolutions, resolution_menu, resolution_choices, size, color_heading, space_label, depth_label, blending_label, space, depth, blending,
-            paper_heading, texture, texture_thumbnail, texture_name, paper_color, paper_patch, paper_color_name, presets,
+            paper_heading, texture, texture_thumbnail, texture_name, texture_relief, paper_color, paper_patch, paper_color_name, presets,
             presets_label, cancel, create,
         };
         let this = Rc::new_cyclic(|this| Self {
@@ -767,7 +799,13 @@ impl NewDrawing {
         browser.save_cancel.set_label(&copy.cancel);
         let papers = &self.papers;
         papers.title.set_text(&copy.paper);
-        papers.import.set_label(&copy.import);
+        papers.import_label.set_text(&copy.import);
+        papers.import.set_tooltip_text(Some(&copy.import));
+        label(papers.import.upcast_ref(), &copy.import);
+        papers.relief_label.set_text(&copy.relief);
+        papers.relief_label.set_tooltip_text(Some(&copy.relief));
+        papers.relief.set_caption(&copy.relief, "", self.localization.borrow().clone());
+        papers.relief_unit.set_text(&copy.relief_unit);
         papers.cancel.set_label(&copy.cancel);
         papers.apply.set_label(&copy.use_texture);
         let colors = &self.colors;
@@ -826,9 +864,11 @@ impl NewDrawing {
         page.blending.set_tooltip_text(view.blending_note.as_deref());
         match &view.sheet.texture {
             Some(id) => page.texture_thumbnail.show(w, Some(id)),
-            None => page.texture_thumbnail.show_none(),
+            None => page.texture_thumbnail.show_icon("layer-none-symbolic"),
         }
         page.texture_name.set_text(&view.page.texture);
+        page.texture_relief.set_text(view.page.relief.as_deref().unwrap_or_default());
+        page.texture_relief.set_visible(view.page.relief.is_some());
         page.paper_patch.set_display_color(if view.sheet.shown { view.sheet.color } else { CLEAR }, w.paint_view_color(), 1.);
         page.paper_color_name.set_text(&view.page.paper_color);
         page.paper_color.set_sensitive(view.paper_color_enabled);
@@ -874,8 +914,8 @@ impl NewDrawing {
                 self.render_browser(w, browser, previous.and_then(|previous| match previous { NewDrawingDrawerView::Presets(browser) => Some(&**browser), _ => None }).filter(|_| !opening));
                 Some(0)
             }
-            Some(NewDrawingDrawerView::Paper { tiles }) => {
-                self.render_papers(w, tiles, previous.and_then(|previous| match previous { NewDrawingDrawerView::Paper { tiles } => Some(tiles), _ => None }).filter(|_| !opening));
+            Some(NewDrawingDrawerView::Paper { tiles, relief }) => {
+                self.render_papers(w, tiles, relief, previous.and_then(|previous| match previous { NewDrawingDrawerView::Paper { tiles, .. } => Some(tiles), _ => None }).filter(|_| !opening));
                 Some(1)
             }
             Some(NewDrawingDrawerView::PaperColor(colors)) => {
@@ -1029,26 +1069,34 @@ impl NewDrawing {
         browser.menu.popup();
     }
 
-    fn render_papers(&self, w: &Workspace, tiles: &[PaperChoice], previous: Option<&Vec<PaperChoice>>) {
-        let grid = &self.papers.grid;
+    fn render_papers(&self, w: &Workspace, tiles: &[PaperChoice], relief: &PaperReliefView, previous: Option<&Vec<PaperChoice>>) {
+        let papers = &self.papers;
+        let grid = &papers.grid;
         let content = |tiles: &[PaperChoice]| tiles.iter().map(|tile| (tile.id.clone(), tile.label.clone())).collect::<Vec<_>>();
         if previous.is_none_or(|previous| content(previous) != content(tiles)) {
             grid.remove_all();
             for (index, tile) in tiles.iter().enumerate() {
                 let thumbnail = PaperThumbnail::new(96);
                 let child = texture_tile(&thumbnail, w, tile.id.as_ref(), &tile.label);
-                if tile.id.is_none() { thumbnail.show_none(); }
+                if tile.id.is_none() { thumbnail.show_icon("layer-none-symbolic"); }
                 child.set_widget_name(&format!("new-drawing-paper-tile-{index}"));
                 grid.append(&child);
             }
+            grid.append(&papers.import);
         }
         if let Some(child) = tiles.iter().position(|tile| tile.selected).and_then(|index| grid.child_at_index(index as i32)) { grid.select_child(&child); }
+        if !papers.relief.composing() { papers.relief.set_value(relief.value); }
+        papers.relief_row.set_sensitive(relief.enabled);
+    }
+
+    fn use_paper(&self) {
+        if self.papers.relief.commit_text() { self.send(NewDrawingAction::UsePaper); }
     }
 
     fn picked_paper(&self) -> Option<Option<String>> {
         let index = self.papers.grid.selected_children().first().and_then(|child| usize::try_from(child.index()).ok())?;
         match self.shown.borrow().as_ref()?.drawer.as_ref()? {
-            NewDrawingDrawerView::Paper { tiles } => tiles.get(index).map(|tile| tile.id.as_deref().map(str::to_string)),
+            NewDrawingDrawerView::Paper { tiles, .. } => tiles.get(index).map(|tile| tile.id.as_deref().map(str::to_string)),
             _ => None,
         }
     }
@@ -1253,16 +1301,31 @@ impl NewDrawing {
 
         let papers = &self.papers;
         let weak = self.this.clone();
-        papers.grid.connect_selected_children_changed(move |_| if let Some(dialog) = weak.upgrade() && let Some(id) = dialog.picked_paper() { dialog.send(NewDrawingAction::PickPaper { id }); });
+        papers.grid.connect_selected_children_changed(move |_| if let Some(dialog) = weak.upgrade() {
+            match dialog.picked_paper() {
+                Some(id) => dialog.send(NewDrawingAction::PickPaper { id }),
+                None if !dialog.updating.get() => dialog.render(),
+                None => {}
+            }
+        });
         papers.grid.set_activate_on_single_click(false);
-        let send = sends(NewDrawingAction::UsePaper);
-        papers.grid.connect_child_activated(move |_, _| send());
         let weak = self.this.clone();
-        papers.import.connect_clicked(move |_| if let Some(dialog) = weak.upgrade() { dialog.import_paper(); });
-        for (button, action) in [(&papers.cancel, NewDrawingAction::CloseDrawer), (&papers.apply, NewDrawingAction::UsePaper)] {
-            let send = sends(action);
-            button.connect_clicked(move |_| send());
-        }
+        papers.grid.connect_child_activated(move |_, child| if let Some(dialog) = weak.upgrade() {
+            if *child == dialog.papers.import { dialog.import_paper(); } else { dialog.use_paper(); }
+        });
+        let click = gtk::GestureClick::new();
+        let weak = self.this.clone();
+        click.connect_pressed(|gesture, _, _, _| { gesture.set_state(gtk::EventSequenceState::Claimed); });
+        click.connect_released(move |gesture, presses, x, y| if presses == 1 && gesture.widget().is_some_and(|tile| tile.contains(x, y)) && let Some(dialog) = weak.upgrade() {
+            dialog.import_paper();
+        });
+        papers.import.add_controller(click);
+        let weak = self.this.clone();
+        papers.relief.connect_value_changed(move |number| if let Some(dialog) = weak.upgrade() { dialog.send(NewDrawingAction::PaperRelief { value: number.value() }); });
+        let send = sends(NewDrawingAction::CloseDrawer);
+        papers.cancel.connect_clicked(move |_| send());
+        let weak = self.this.clone();
+        papers.apply.connect_clicked(move |_| if let Some(dialog) = weak.upgrade() { dialog.use_paper(); });
 
         let colors = &self.colors;
         for (toggle, transparent) in [(&colors.color_mode, false), (&colors.transparent_mode, true)] {

@@ -74,6 +74,7 @@ extension XCTestCase {
         #endif
         workspaceActivate(chalkboard)
         expectNewDrawingText("new-drawing-summary-name", in: app) { $0 == "Chalkboard" }
+        expectNewDrawingText("new-drawing-summary-details", in: app) { $0.hasSuffix("Sanded 50 %, Chalkboard") }
         workspaceActivate(app.buttons["new-drawing-save-as"])
         let saveName = app.textFields["new-drawing-save-name"]
         XCTAssertTrue(saveName.waitForExistence(timeout: 10))
@@ -98,19 +99,7 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: create)
         waitForExpectations(timeout: 15)
 
-        workspaceActivate(app.buttons["new-drawing-texture"])
-        let useTexture = app.buttons["new-drawing-paper-use"]
-        XCTAssertTrue(useTexture.waitForExistence(timeout: 10))
-        let coldPress = app.buttons["new-drawing-paper-tile-2"]
-        XCTAssertTrue(coldPress.waitForExistence(timeout: 10))
-        let texture = coldPress.label
-        workspaceActivate(coldPress)
-        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: coldPress)
-        waitForExpectations(timeout: 10)
-        attachEditor(in: app, name: "new-drawing-paper-" + theme)
-        workspaceActivate(useTexture)
-        XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
-        expectNewDrawingValue("new-drawing-texture", texture, in: app)
+        checkNewDrawingPaper(in: app, theme: theme)
 
         let paperColor = app.buttons["new-drawing-paper-color"]
         workspaceActivate(paperColor)
@@ -162,5 +151,81 @@ extension XCTestCase {
         XCTAssertTrue(create.waitForNonExistence(timeout: 15))
         XCTAssertEqual(editorText(title), created, "Cancel keeps the current drawing")
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+
+    @MainActor func checkNewDrawingPaper(in app: XCUIApplication, theme: String) {
+        let textureTile = app.buttons["new-drawing-texture"], useTexture = app.buttons["new-drawing-paper-use"]
+        let relief = newDrawingNumber("paper-relief", in: app)
+        expectNewDrawingValue("new-drawing-texture", "Sanded, 50 %", in: app)
+        workspaceActivate(textureTile)
+        XCTAssertTrue(useTexture.waitForExistence(timeout: 10))
+        XCTAssertEqual(relief.value as? String, "50", "Texture visibility opens with the sheet's value")
+        XCTAssertTrue(relief.isEnabled)
+        let noPaper = app.buttons["new-drawing-paper-tile-0"]
+        XCTAssertTrue(noPaper.waitForExistence(timeout: 10))
+        let none = noPaper.label
+        workspaceActivate(noPaper)
+        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: noPaper)
+        expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: relief)
+        waitForExpectations(timeout: 10)
+        attachEditor(in: app, name: "new-drawing-no-paper-" + theme)
+        workspaceActivate(useTexture)
+        XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
+        expectNewDrawingValue("new-drawing-texture", none, in: app)
+
+        let coldPress = app.buttons["new-drawing-paper-tile-2"]
+        func pickColdPress() {
+            workspaceActivate(textureTile)
+            XCTAssertTrue(useTexture.waitForExistence(timeout: 10))
+            XCTAssertFalse(relief.isEnabled, "No paper has no texture to show")
+            workspaceActivate(coldPress)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: coldPress)
+            expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: relief)
+            waitForExpectations(timeout: 10)
+            XCTAssertEqual(relief.value as? String, "50")
+        }
+        pickColdPress()
+        let texture = coldPress.label
+        let importTile = app.buttons["new-drawing-paper-import"]
+        XCTAssertTrue(importTile.waitForExistence(timeout: 10))
+        XCTAssertEqual(importTile.label, "Import…")
+        XCTAssertEqual(importTile.frame.size, noPaper.frame.size, "Import… is a tile like No paper")
+        revealEditorControl(importTile, in: app.scrollViews.containing(.button, identifier: importTile.identifier).firstMatch)
+        XCTAssertEqual(newDrawingElement("new-drawing-papers", in: app).buttons.allElementsBoundByIndex.last?.identifier,
+            importTile.identifier, "Import… follows the imported papers")
+        attachEditor(in: app, name: "new-drawing-paper-import-" + theme)
+        workspaceActivate(importTile)
+        #if os(macOS)
+        let chooser = app.windows.buttons["OKButton"].firstMatch
+        XCTAssertTrue(chooser.waitForExistence(timeout: 20), "Import… opens the file chooser")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        #else
+        let chooser = app.buttons.matching(NSPredicate(format: "label == %@ AND NOT (identifier BEGINSWITH %@)", "Cancel", "new-drawing-")).firstMatch
+        XCTAssertTrue(chooser.waitForExistence(timeout: 20), "Import… opens the file chooser")
+        workspaceActivate(chooser)
+        #endif
+        XCTAssertTrue(chooser.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(useTexture.exists, "Cancelling the import keeps the paper drawer")
+        XCTAssertTrue(coldPress.isSelected, "Import… keeps the marked paper")
+        XCTAssertFalse(importTile.isSelected)
+
+        replaceEditorText(relief, with: "250", in: app)
+        #if os(iOS)
+        dismissEditorKeyboard(in: app)
+        #endif
+        workspaceActivate(app.buttons["new-drawing-paper-cancel"])
+        XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
+        expectNewDrawingValue("new-drawing-texture", none, in: app)
+
+        pickColdPress()
+        replaceEditorText(relief, with: "150", in: app)
+        #if os(iOS)
+        dismissEditorKeyboard(in: app)
+        #endif
+        attachEditor(in: app, name: "new-drawing-paper-" + theme)
+        workspaceActivate(useTexture)
+        XCTAssertTrue(useTexture.waitForNonExistence(timeout: 10))
+        expectNewDrawingValue("new-drawing-texture", texture + ", 150 %", in: app)
+        attachEditor(in: app, name: "new-drawing-paper-relief-" + theme)
     }
 }

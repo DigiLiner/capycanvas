@@ -5,7 +5,7 @@
 New drawing asks for a sheet the way an art store sells one: a size in the
 unit the artist thinks in, a resolution, a color mode and a paper. A new window
 always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
-8-bit, Drawing paper).
+8-bit, Drawing paper at 0% Texture visibility).
 
 ## What artists see
 
@@ -13,9 +13,10 @@ always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
   captioned with the matching preset and the orientation, and how many layers
   this device can hold at that size. Beside it: Name, Size (W and H, a link
   that keeps their ratio, the unit, portrait or landscape, and Resolution with
-  common choices), Color (space, depth, blending) and Paper (texture and paper
-  color). Presets ⌃, Cancel and Create sit in the footer; clicking the preview
-  opens Presets too.
+  common choices), Color (space, depth, blending) and Paper (the texture, with
+  its Texture visibility in fainter text below its name, and the paper color).
+  Presets ⌃, Cancel and Create sit in the footer; clicking the preview opens
+  Presets too.
 - **Units.** Millimetres, centimetres and inches keep the sheet's physical size
   when the resolution changes; pixels keep the pixel size. Dragging W or H
   lands on whole pixels and millimetres, tenths of a centimetre and eighths of
@@ -24,12 +25,21 @@ always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
   for a layer, shows why instead of the size line and cannot be created. Common
   resolutions that would cross a limit are disabled.
 - **Presets.** Search, category pills, tiles with a sheet thumbnail, name, size
-  and details, and a summary of the picked preset in the footer. Recent comes
-  first once a preset was used; Your presets appears once one is saved. Save
-  As… names the current sheet into a category; your own presets have Rename and
-  Delete. Select applies the picked preset.
+  and details, and a summary of the picked preset in the footer, whose texture
+  name is followed by its visibility, as in "Sanded 50 %, Chalkboard". Recent
+  comes first once a preset was used; Your presets appears once one is saved.
+  Save As… names the current sheet into a category; your own presets have
+  Rename and Delete. Select applies the picked preset.
 - **Paper.** The Choose Texture grid with No paper first, the built-in papers,
-  then imported papers, and Import….
+  then imported papers, and an Import… tile last. Texture visibility, a 0–300%
+  field like W and H, sits at the left of the footer and is disabled for No
+  paper. Use Texture applies the paper and its visibility; Cancel keeps both.
+  Light and Shows through paint start at their defaults.
+- **Texture visibility in presets.** Screens, comics pages, print sizes and
+  Blueprint start at 0%: their drawings are reproduced, so a lit sheet would
+  print over the real one. Physical papers start at 100%, the relief their
+  brushes feel. Newsprint and Chalkboard start at 50%; the rough Full sheet and
+  the handmade Journal start at 150% so their surface reads.
 - **Paper color.** The Edit Color form without its copy buttons and eyedropper,
   a Color / Transparent choice, and the Paper Colors palette with + and Delete.
   Transparent keeps the Paper layer but hides it.

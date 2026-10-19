@@ -43,6 +43,7 @@ pub enum NewDrawingAction {
     SavePreset,
     CancelSave,
     PickPaper { id: Option<String> },
+    PaperRelief { value: f64 },
     UsePaper,
     PaperColorValue { color: RgbColor },
     Transparent { transparent: bool },
@@ -129,6 +130,8 @@ pub struct NewDrawingCopy {
     pub rename: Arc<str>,
     pub delete: Arc<str>,
     pub import: Arc<str>,
+    pub relief: Arc<str>,
+    pub relief_unit: Arc<str>,
     pub use_texture: Arc<str>,
     pub transparent: Arc<str>,
     pub sheet_mode: Arc<str>,
@@ -155,7 +158,8 @@ impl NewDrawingCopy {
             search: t(M::DOCUMENTS_SEARCH_PRESETS), select: t(M::DOCUMENTS_SELECT_PRESET),
             preset_name: t(M::DOCUMENTS_PRESET_NAME), preset_category: t(M::DOCUMENTS_PRESET_CATEGORY),
             rename: t(M::DOCUMENTS_RENAME_PRESET), delete: common.delete.clone(),
-            import: t(M::RESOURCES_PAPER_IMPORT), use_texture: native.paper.use_texture.clone(),
+            import: t(M::RESOURCES_PAPER_IMPORT), relief: t(M::RESOURCES_PARAMETER_PAPER_TEXTURE_VISIBILITY), relief_unit: "%".into(),
+            use_texture: native.paper.use_texture.clone(),
             transparent: t(M::DOCUMENTS_TRANSPARENT), sheet_mode: t(M::DOCUMENTS_SHEET_MODE),
             paper_colors: t(M::DOCUMENTS_PAPER_COLORS), add_paper_color: t(M::DOCUMENTS_ADD_PAPER_COLOR),
             use_color: t(M::NATIVE_COLOR_USE_COLOR),
@@ -211,6 +215,13 @@ pub struct PaperChoice {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PaperReliefView {
+    pub value: f64,
+    pub numeric: NumericControl,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PaperColorChoice {
     pub color: RgbColor,
     pub name: String,
@@ -231,7 +242,7 @@ pub struct PaperColorDrawerView {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NewDrawingDrawerView {
     Presets(Box<PresetBrowserView>),
-    Paper { tiles: Vec<PaperChoice> },
+    Paper { tiles: Vec<PaperChoice>, relief: PaperReliefView },
     PaperColor(PaperColorDrawerView),
 }
 
@@ -277,9 +288,14 @@ struct PaperColorDraft {
     from: Option<RgbColor>,
 }
 
+struct PaperDraft {
+    picked: Option<Arc<str>>,
+    relief: u32,
+}
+
 enum Drawer {
     Presets(Browser),
-    Paper(Option<Arc<str>>),
+    Paper(PaperDraft),
     PaperColor(PaperColorDraft),
 }
 
@@ -322,6 +338,10 @@ impl NewDrawingDialog {
 
     fn browser(&mut self) -> Result<&mut Browser, String> {
         match &mut self.drawer { Some(Drawer::Presets(browser)) => Ok(browser), _ => Err("The presets are not open".into()) }
+    }
+
+    fn paper(&mut self) -> Result<&mut PaperDraft, String> {
+        match &mut self.drawer { Some(Drawer::Paper(draft)) => Ok(draft), _ => Err("Paper is not open".into()) }
     }
 
     fn paper_color(&mut self) -> Result<&mut PaperColorDraft, String> {
@@ -418,8 +438,9 @@ impl NewDrawingDialog {
                     save,
                 }))
             }
-            Drawer::Paper(picked) => NewDrawingDrawerView::Paper {
-                tiles: paper_tiles(catalog.imported, l).into_iter().map(|(id, label)| PaperChoice { selected: id == *picked, id, label }).collect(),
+            Drawer::Paper(draft) => NewDrawingDrawerView::Paper {
+                tiles: paper_tiles(catalog.imported, l).into_iter().map(|(id, label)| PaperChoice { selected: id == draft.picked, id, label }).collect(),
+                relief: PaperReliefView { value: f64::from(draft.relief), numeric: relief_control(), enabled: draft.picked.is_some() },
             },
             Drawer::PaperColor(draft) => {
                 let palette = catalog.settings.paper_palette();
@@ -448,7 +469,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub(super) fn new_drawing_imported(&mut self, id: &str) {
-        if let Some(NewDrawingDialog { drawer: Some(Drawer::Paper(picked)), .. }) = &mut self.new_drawing { *picked = Some(id.into()); }
+        if let Some(NewDrawingDialog { drawer: Some(Drawer::Paper(draft)), .. }) = &mut self.new_drawing { draft.picked = Some(id.into()); }
     }
 
     pub(super) fn close_new_drawing(&mut self) {
@@ -535,7 +556,10 @@ impl NewDrawingDialog {
                     .map_or(opening, |view| if opening == BrowserTab::Recent { opening } else { BrowserTab::Group(view.group) });
                 self.drawer = Some(Drawer::Presets(Browser { tab, query: String::new(), picked: current.map(|view| view.key), save: None }));
             }
-            NewDrawingAction::Paper => self.drawer = Some(Drawer::Paper(self.draft.setup.paper.texture.clone())),
+            NewDrawingAction::Paper => {
+                let paper = &self.draft.setup.paper;
+                self.drawer = Some(Drawer::Paper(PaperDraft { picked: paper.texture.clone(), relief: paper.relief }));
+            }
             NewDrawingAction::PaperColor => {
                 let paper = &self.draft.setup.paper;
                 if paper.texture.is_none() { return Err(l.text(MessageId::DOCUMENTS_NO_PAPER).to_string()); }
@@ -605,12 +629,15 @@ impl NewDrawingDialog {
             NewDrawingAction::PickPaper { id } => {
                 let id = id.map(Arc::<str>::from);
                 if !paper_tiles(imported, l).iter().any(|(tile, _)| *tile == id) { return Err(l.text(MessageId::RESOURCES_PAPER_OWN).to_string()); }
-                let Some(Drawer::Paper(picked)) = &mut self.drawer else { return Err("Paper is not open".into()) };
-                *picked = id;
+                self.paper()?.picked = id;
+            }
+            NewDrawingAction::PaperRelief { value } => {
+                let control = relief_control();
+                self.paper()?.relief = finite(value)?.round().clamp(control.min, control.max) as u32;
             }
             NewDrawingAction::UsePaper => {
-                let Some(Drawer::Paper(picked)) = self.drawer.take() else { return Err("Paper is not open".into()) };
-                self.draft.apply(NewDrawingEdit::Texture(picked));
+                let Some(Drawer::Paper(PaperDraft { picked, relief })) = self.drawer.take() else { return Err("Paper is not open".into()) };
+                self.draft.apply(NewDrawingEdit::Texture { texture: picked, relief });
             }
             NewDrawingAction::PaperColorValue { color } => {
                 color.validate()?;
@@ -753,14 +780,26 @@ mod tests {
     fn paper_and_paper_color_drawers_choose_texture_color_and_transparency() {
         let mut s = session(Platform::Gtk);
         open(&mut s);
+        let paper = |s: &UiSession<_>| match view(s).drawer { Some(NewDrawingDrawerView::Paper { tiles, relief }) => (tiles, relief), other => panic!("{other:?}") };
         act(&mut s, NewDrawingAction::Paper);
-        let Some(NewDrawingDrawerView::Paper { tiles }) = view(&s).drawer else { panic!() };
+        let (tiles, relief) = paper(&s);
         assert_eq!((tiles[0].id.clone(), tiles.len()), (None, layer_core::paper::built_in_papers().len() + 1));
         assert!(tiles.iter().any(|tile| tile.selected && tile.id.as_deref() == Some("drawing_paper")));
+        assert_eq!((relief.value, relief.enabled, relief.numeric.min, relief.numeric.max), (100., true, 0., 300.));
         assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::PickPaper { id: Some("missing".into()) } }).is_err());
+        act(&mut s, NewDrawingAction::PaperRelief { value: 250. });
+        act(&mut s, NewDrawingAction::CloseDrawer);
+        assert_eq!(view(&s).setup.paper.relief, 100, "Cancel keeps the sheet's texture visibility");
+        assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::PaperRelief { value: 40. } }).is_err());
+        act(&mut s, NewDrawingAction::Paper);
         act(&mut s, NewDrawingAction::PickPaper { id: Some("cold_press".into()) });
+        act(&mut s, NewDrawingAction::PaperRelief { value: 1000. });
+        assert_eq!(paper(&s).1.value, 300.);
+        assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::PaperRelief { value: f64::NAN } }).is_err());
+        act(&mut s, NewDrawingAction::PaperRelief { value: 39.6 });
         act(&mut s, NewDrawingAction::UsePaper);
-        assert_eq!(view(&s).setup.paper.texture.as_deref(), Some("cold_press"));
+        assert_eq!((view(&s).setup.paper.texture.as_deref(), view(&s).setup.paper.relief), (Some("cold_press"), 40));
+        assert_eq!(view(&s).page.relief.as_deref(), Some("40 %"));
         act(&mut s, NewDrawingAction::PaperColor);
         act(&mut s, NewDrawingAction::Transparent { transparent: true });
         let Some(NewDrawingDrawerView::PaperColor(drawer)) = view(&s).drawer else { panic!() };
@@ -783,8 +822,10 @@ mod tests {
         assert_eq!(opened.page.paper_color, "Transparent");
         act(&mut s, NewDrawingAction::Paper);
         act(&mut s, NewDrawingAction::PickPaper { id: None });
+        assert!(!paper(&s).1.enabled, "No paper has no texture to show");
         act(&mut s, NewDrawingAction::UsePaper);
         assert!(!view(&s).paper_color_enabled);
+        assert_eq!(view(&s).page.relief, None);
         assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::PaperColor }).is_err());
     }
 

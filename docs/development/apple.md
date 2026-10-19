@@ -222,8 +222,10 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   Edit Color's form and the Choose Texture tiles, and continues New through
   `capy_project_new` only after Create. On iPad, use the native numeric text
   adapter so every edit reaches the session before keyboard dismissal or Create.
-  `testNewDrawingDialog` and its Dark variant walk the dialog;
-  `testNewDrawingAndExportCancellation` checks cancellation.
+  `testNewDrawingDialog` and its Dark variant walk the dialog, including
+  Texture visibility and the Import… tile;
+  `testNewDrawingAndExportCancellation` checks cancellation. `DrawingWorkload`
+  creates its drawing on flat paper so performance rows stay comparable.
 - **Paper library.** Both Apple hosts present shared Paper texture tiles,
   selection and Scale. Use the shared installation papers directory and storage,
   import and identity APIs. Startup and Import/Add/Load/Rename/Delete use immutable

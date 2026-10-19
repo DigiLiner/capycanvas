@@ -28,6 +28,7 @@ private struct NewDrawingDialog: View {
     @State private var resolutions = false
     @State private var importing = false
     @State private var paperColor: ColorEditorSession?
+    private static let reliefField = "new-drawing-paper-relief"
     private var view: JSON { store.state["new_drawing"] }
     private var copy: JSON { view["copy"] }
     private var page: JSON { view["page"] }
@@ -70,13 +71,19 @@ private struct NewDrawingDialog: View {
         session.close(apply: false)
     }
     private func create() {
+        admit {
+            if name != view["name"].string { send(["op": "name", "text": name]) }
+            send(["op": "create"])
+        }
+    }
+    private func usePaper() { admit(only: Self.reliefField) { send(["op": "use_paper"]) } }
+    private func admit(only key: String? = nil, then action: @escaping () -> Void) {
         #if os(iOS)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         #endif
         DispatchQueue.main.async {
-            guard admissions.values.map({ $0(false) }).allSatisfy({ $0 }) else { return }
-            if name != view["name"].string { send(["op": "name", "text": name]) }
-            send(["op": "create"])
+            guard admissions.filter({ key == nil || $0.key == key }).values.map({ $0(false) }).allSatisfy({ $0 }) else { return }
+            action()
         }
     }
 
@@ -173,7 +180,8 @@ private struct NewDrawingDialog: View {
             }
             section(copy["paper"].string) {
                 HStack(spacing: 6) {
-                    paperTile("new-drawing-texture", label: page["texture"].string, help: copy["paper"].string, enabled: true, op: "paper") {
+                    paperTile("new-drawing-texture", label: page["texture"].string, detail: page["relief"].raw as? String,
+                        help: copy["paper"].string, enabled: true, op: "paper") {
                         PaperPreview(previews: store.papers.previews, id: view["setup"]["paper"]["texture"].raw as? String, side: 36, placeholder: "none")
                     }
                     paperTile("new-drawing-paper-color", label: page["paper_color"].string, help: copy["paper_color"].string,
@@ -266,17 +274,21 @@ private struct NewDrawingDialog: View {
         }
     }
 
-    private func paperTile<Thumbnail: View>(_ identifier: String, label: String, help: String, enabled: Bool, op: String,
+    private func paperTile<Thumbnail: View>(_ identifier: String, label: String, detail: String? = nil, help: String, enabled: Bool, op: String,
         @ViewBuilder thumbnail: () -> Thumbnail) -> some View {
         Button { send(["op": op]) } label: {
             HStack(spacing: 10) {
                 thumbnail()
-                Text(label).fontWeight(.semibold).lineLimit(1)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label).fontWeight(.semibold).lineLimit(1)
+                    if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                }
                 Spacer(minLength: 0)
             }.padding(4).padding(.trailing, 6).frame(maxWidth: .infinity, minHeight: 44)
                 .background(palette["input"], in: SquircleShape.control).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
-            .help(help).accessibilityLabel(help).accessibilityValue(label).accessibilityIdentifier(identifier)
+            .help(help).accessibilityLabel(help).accessibilityValue([label, detail].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityIdentifier(identifier)
     }
 
     @ViewBuilder private var opened: some View {
@@ -418,16 +430,30 @@ private struct NewDrawingDialog: View {
                     EditorDialogTitle(text: copy["paper"].string)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 102, maximum: 102), spacing: 12, alignment: .top)], spacing: 14) {
                         ForEach(tiles.indices, id: \.self) { index in paperChoice(tiles[index], index: index) }
+                        TextureTile(previews: store.papers.previews, id: nil, label: copy["import"].string, pending: false,
+                            placeholder: "plus", select: importPaper)
+                            .disabled(importing).accessibilityIdentifier("new-drawing-paper-import")
                     }.frame(maxWidth: 672).accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-papers")
                 }.padding(20).frame(maxWidth: .infinity)
             }
             EditorDialogFooter(label: copy["use_texture"].string, identifiers: (cancel: "new-drawing-paper-cancel", apply: "new-drawing-paper-use"),
-                cancel: { send(["op": "close_drawer"]) }, apply: { send(["op": "use_paper"]) }) {
-                Button(copy["import"].string, action: importPaper).buttonStyle(.bordered).disabled(importing)
-                    .accessibilityIdentifier("new-drawing-paper-import")
-                Spacer(minLength: 8)
+                cancel: { _ = admissions[Self.reliefField]?(true); send(["op": "close_drawer"]) }, apply: usePaper) {
+                reliefRow(drawer["relief"])
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-paper-drawer")
+    }
+
+    private func reliefRow(_ relief: JSON) -> some View {
+        let enabled = relief["enabled"].bool
+        return HStack(spacing: 10) {
+            Text(copy["relief"].string).lineLimit(1).truncationMode(.tail).help(copy["relief"].string)
+            NumberControl(store: store, label: copy["relief"].string, value: relief["value"].number, control: relief["numeric"],
+                identifier: Self.reliefField, affixes: ("", copy["relief_unit"].string),
+                registerAdmission: { key, admission in admissions[key] = admission }) { value, completion in
+                store.projectFiles.newDrawing(["op": "paper_relief", "value": value]) { failure in error = failure; completion(failure) }
+            }.frame(width: 62).padding(.trailing, 10).frame(height: 34).background(palette["input"], in: SquircleShape.control)
+        }.disabled(!enabled).opacity(enabled ? 1 : 0.4).padding(.trailing, 8)
+            .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(-1)
     }
 
     private func paperChoice(_ tile: JSON, index: Int) -> some View {
@@ -435,7 +461,7 @@ private struct NewDrawingDialog: View {
         let pick: [String: Any] = ["op": "pick_paper", "id": id ?? NSNull()]
         return TextureTile(previews: store.papers.previews, id: id, label: tile["label"].string, pending: selected,
             placeholder: id == nil ? "none" : "layer-paper-symbolic") { if !selected { send(pick) } }
-            .simultaneousGesture(TapGesture(count: 2).onEnded { send(pick); send(["op": "use_paper"]) })
+            .simultaneousGesture(TapGesture(count: 2).onEnded { send(pick); usePaper() })
             .accessibilityIdentifier("new-drawing-paper-tile-\(index)")
     }
 

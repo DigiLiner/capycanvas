@@ -300,6 +300,48 @@ fn apple_new_drawing_imports_paper_into_the_library_without_changing_the_drawing
 }
 
 #[test]
+fn apple_new_drawing_texture_visibility_reaches_the_drawing_built_on_the_project_worker() {
+    for platform in [0,1] {
+        let app=App::new(platform);
+        unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
+        let dialog=|app:&App| app.state()["new_drawing"].clone();
+        app.invoke("new_document");
+        app.new_drawing(json!({"op":"open","screen":null,"untitled":"Untitled 2"}));
+        assert_eq!((dialog(&app)["copy"]["relief"].as_str(),dialog(&app)["copy"]["relief_unit"].as_str()),(Some("Texture visibility"),Some("%")));
+        let opened=dialog(&app)["setup"]["paper"]["relief"].as_f64().unwrap();
+        assert_eq!(dialog(&app)["page"]["relief"],format!("{opened} %"));
+        app.new_drawing(json!({"op":"paper"}));
+        let relief=dialog(&app)["drawer"]["relief"].clone();
+        assert_eq!((relief["value"].as_f64(),relief["enabled"].as_bool()),(Some(opened),Some(true)));
+        let numeric=&relief["numeric"];
+        assert_eq!((numeric["kind"].as_str(),numeric["min"].as_f64(),numeric["max"].as_f64(),numeric["step"].as_f64()),(Some("number"),Some(0.),Some(300.),Some(1.)));
+        app.new_drawing(json!({"op":"paper_relief","value":250}));
+        assert_eq!(dialog(&app)["drawer"]["relief"]["value"].as_f64(),Some(250.));
+        app.new_drawing(json!({"op":"close_drawer"}));
+        assert_eq!(dialog(&app)["setup"]["paper"]["relief"].as_f64(),Some(opened),"Cancel keeps the sheet's texture visibility");
+        app.new_drawing(json!({"op":"paper"}));
+        app.new_drawing(json!({"op":"pick_paper","id":null}));
+        assert_eq!(dialog(&app)["drawer"]["relief"]["enabled"],false);
+        app.new_drawing(json!({"op":"use_paper"}));
+        assert!(dialog(&app)["page"]["relief"].is_null());
+        app.new_drawing(json!({"op":"paper"}));
+        app.new_drawing(json!({"op":"pick_paper","id":"cold_press"}));
+        app.new_drawing(json!({"op":"paper_relief","value":149.6}));
+        app.new_drawing(json!({"op":"use_paper"}));
+        assert_eq!(dialog(&app)["page"]["relief"],"150 %");
+        for action in [json!({"op":"unit","unit":"px"}),json!({"op":"width","value":64}),json!({"op":"height","value":48}),json!({"op":"create"})] { app.new_drawing(action); }
+        app.save_settings();
+        let job=ProjectJob::new(&app,true);
+        assert_eq!(unsafe {capy_project_new(job.0)},0,"{:?}",job.error());
+        assert_eq!(unsafe {capy_apple_project_adopt(app.0,job.0,c"Untitled".as_ptr(),c"".as_ptr())},0,"{:?} / {:?}",job.error(),unsafe { &*app.0 }.error);
+        let created=document(&app);
+        let paper=created.bottom_paper().unwrap();
+        assert_eq!(created.composition().size,[64,48]);
+        assert_eq!(layer_core::paper::light(created.scene().effect(paper).unwrap()).map(|light|light.relief),Some(1.5));
+    }
+}
+
+#[test]
 fn apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_failed_default_request() {
     let directory=std::env::temp_dir().join(format!("capy-apple-paper-initial-failure-{}",layer_workspace::new_id()));
     let mut input=gray_png();let mut encoded=Vec::new();std::io::Read::read_to_end(&mut input,&mut encoded).unwrap();

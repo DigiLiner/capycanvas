@@ -481,6 +481,7 @@ button.new-drawing-preview:hover { background: mix(var(--view-bg-color), var(--w
 .new-drawing-field.new-drawing-combo { padding-left: 0; padding-right: 3px; }
 .new-drawing-dialog .new-drawing-combo button.number-value, .new-drawing-dialog .new-drawing-combo entry.number-entry { padding: 0 2px 0 10px; }
 .new-drawing-combo .new-drawing-affix { padding: 0 2px 0 3px; }
+.new-drawing-combo > .new-drawing-affix:last-child { padding-right: 10px; }
 .new-drawing-combo menubutton > button { min-width: 26px; min-height: 26px; padding: 0; border-radius: calc(var(--control-radius) - 2px); }
 button.new-drawing-link { min-width: 26px; min-height: 34px; padding: 0; border-radius: var(--control-radius); background: none; box-shadow: none; color: alpha(currentColor, .62); }
 button.new-drawing-link:hover { background: alpha(currentColor, .08); }

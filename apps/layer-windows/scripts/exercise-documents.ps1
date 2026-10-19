@@ -17,6 +17,7 @@ public static class CapyDocumentControls {
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h,out Rect rect);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect rect);
     [StructLayout(LayoutKind.Sequential)] public struct Point {public int x,y;}
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h,ref Point point);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
@@ -164,6 +165,28 @@ function Pick-Choice([string]$Id,[int]$Index) {
 }
 function Item-Index($List,[scriptblock]$Match) {$items=@($List);for($i=0;$i -lt $items.Count;$i++){if(& $Match $items[$i]){return $i}};throw 'The New drawing view has no matching item'}
 function Value-Index($List,$Value) {Item-Index $List {param($item)$item.value -eq $Value}}
+function Field-Value([string]$Id) {[double](((Owned $Id).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value) -replace '[^0-9.]','')}
+function Import-Last {
+    $last=@((Drawer).tiles).Count-1
+    Scroll-Position (Owned 'new-drawing-paper-import') 100
+    Wait-Until {
+        $tile=(Owned "new-drawing-paper-tile-$last").Current.BoundingRectangle;$import=(Owned 'new-drawing-paper-import').Current
+        $after=if([Math]::Abs($import.BoundingRectangle.Top-$tile.Top) -le 1){$import.BoundingRectangle.Left -ge $tile.Right}else{$import.BoundingRectangle.Top -ge $tile.Bottom}
+        $after -and $import.Name -eq (Drawing).copy.import -and [Math]::Abs($import.BoundingRectangle.Width-$tile.Width) -le 1 -and [Math]::Abs($import.BoundingRectangle.Height-$tile.Height) -le 1
+    } 'The Import tile is not a paper-sized tile named Import after the last paper'
+}
+function Click-Center([string]$Id) {
+    $bounds=(Owned $Id).Current.BoundingRectangle
+    $context=[CapyDocumentControls]::SetThreadDpiAwarenessContext([IntPtr](-4))
+    try{
+        [CapyRowPointer]::SetForegroundWindow($drawing.Handle)|Out-Null
+        [CapyRowPointer]::Initialize([uint32]$review.Id)
+        try{[CapyRowPointer]::Down('mouse',[int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2));[CapyRowPointer]::Up()}finally{[CapyRowPointer]::Dispose()}
+    }finally{[CapyDocumentControls]::SetThreadDpiAwarenessContext($context)|Out-Null}
+}
+function Resize-Review([int]$Width,[int]$Height) {
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Resize -Width $Width -Height $Height
+}
 function Context-Item([string]$Target,[string]$Item) {
     (Owned $Target).SetFocus();Wait-Until {(Find $Target -Within $root).Current.HasKeyboardFocus} "Context target did not take focus: $Target"
     Foreground;[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
@@ -235,13 +258,65 @@ function New-Journey([string]$Theme,[switch]$Full) {
         Press 'new-drawing-save-cancel';Wait-Until {!(Drawer).save} 'Cancel did not leave the naming row'
         Press 'new-drawing-browser-cancel';Wait-Until {!(Drawer)} 'Cancel did not close the presets'
     }
+    Open-Drawer 'new-drawing-presets-button' 'presets'
+    Type-Text 'new-drawing-search' 'chalk'
+    Wait-Until {$browser=Drawer;$browser.query -eq 'chalk' -and @($browser.tiles).Count -ge 1 -and $browser.tiles[0].name -eq 'Chalkboard'} 'Preset search did not find Chalkboard'
+    Press 'new-drawing-preset-0';Wait-Until {(Drawer).tiles[0].selected} 'Chalkboard did not select'
+    Press 'new-drawing-select'
+    Wait-Until {$view=Drawing;!$view.drawer -and $view.page.preset -eq 'Chalkboard' -and $view.setup.paper.relief -eq 50 -and $view.page.relief -eq '50 %'} 'Chalkboard did not set its texture visibility'
+    Wait-Until {(Owned 'new-drawing-texture-relief').Current.Name -eq '50 %'} 'The texture tile did not show the texture visibility'
+    $tile=(Owned 'new-drawing-texture').Current.BoundingRectangle;$color=(Owned 'new-drawing-paper-color').Current.BoundingRectangle
+    if([Math]::Abs($tile.Height-$color.Height) -gt 1){throw "The texture visibility line changed the tile height: $($tile.Height) and $($color.Height)"}
+    New-Capture 'main-chalkboard'
     Open-Drawer 'new-drawing-texture' 'paper'
+    Wait-Until {$drawer=Drawer;$drawer.relief.value -eq 50 -and $drawer.relief.enabled -and (Owned 'new-drawing-paper-relief').Current.IsEnabled -and (Field-Value 'new-drawing-paper-relief') -eq 50} 'Texture visibility did not show the preset value'
     New-Capture 'paper'
+    $marked=@((Drawer).tiles|Where-Object selected)[0].id
+    Import-Last
+    New-Capture 'paper-import'
+    foreach($activate in @({Click-Center 'new-drawing-paper-import'},{(Owned 'new-drawing-paper-import').SetFocus();Foreground;[CapyRowPointer]::Key([uint32]$review.Id,0x20)})){
+        & $activate;Picker 'Open';Picker-Button '2';$script:scope=$root
+        Wait-Until {!(Find-Name 'Open' ([System.Windows.Automation.ControlType]::Window))} 'The paper picker did not close'
+        Wait-Until {$drawer=Drawer;$drawer.kind -eq 'paper' -and @($drawer.tiles|Where-Object selected).id -eq $marked -and !(Owned 'new-drawing-paper-import').Current.ItemStatus} 'Import changed the marked paper'
+    }
+    Press 'new-drawing-paper-tile-0'
+    Wait-Until {$drawer=Drawer;$drawer.tiles[0].selected -and !$drawer.relief.enabled -and !(Owned 'new-drawing-paper-relief').Current.IsEnabled} 'No paper did not disable Texture visibility'
+    New-Capture 'paper-none'
+    Press 'new-drawing-paper-use'
+    Wait-Until {$view=Drawing;!$view.drawer -and !$view.setup.paper.texture -and $null -eq $view.page.relief -and !(Find 'new-drawing-texture-relief' -Within $root)} 'No paper kept the texture visibility line'
+    Open-Drawer 'new-drawing-texture' 'paper'
     $paper=Item-Index (Drawer).tiles {param($item)$item.id -eq 'cold_press'}
     Press "new-drawing-paper-tile-$paper"
-    Wait-Until {(Drawer).tiles[$paper].selected} 'The paper tile did not select'
+    Wait-Until {$drawer=Drawer;$drawer.tiles[$paper].selected -and $drawer.relief.enabled -and (Owned 'new-drawing-paper-relief').Current.IsEnabled} 'The paper tile did not select'
+    Type-Text 'new-drawing-paper-relief' '150'
     Press 'new-drawing-paper-use'
-    Wait-Until {!(Drawer) -and (Drawing).setup.paper.texture -eq 'cold_press'} 'Use Texture did not choose the paper'
+    Wait-Until {$view=Drawing;!$view.drawer -and $view.setup.paper.texture -eq 'cold_press' -and $view.setup.paper.relief -eq 150 -and $view.page.relief -eq '150 %'} 'Use Texture did not apply the typed texture visibility'
+    Wait-Until {(Owned 'new-drawing-texture-relief').Current.Name -eq '150 %'} 'The texture tile did not show the new texture visibility'
+    Open-Drawer 'new-drawing-texture' 'paper'
+    Wait-Until {(Field-Value 'new-drawing-paper-relief') -eq 150} 'Texture visibility did not reopen with the sheet value'
+    Type-Text 'new-drawing-paper-relief' '20'
+    Press 'new-drawing-paper-cancel'
+    Wait-Until {$view=Drawing;!$view.drawer -and $view.setup.paper.relief -eq 150} 'Cancel kept the typed texture visibility'
+    Open-Drawer 'new-drawing-texture' 'paper'
+    Wait-Until {(Field-Value 'new-drawing-paper-relief') -eq 150} 'The cancelled draft stayed in the Texture visibility field'
+    if($Full){
+        $footer={$parts=@{};foreach($part in @('relief-label','relief','cancel','use')){$parts[$part]=(Owned "new-drawing-paper-$part").Current.BoundingRectangle};$parts}
+        $wide=& $footer
+        $frame=[CapyDocumentControls+Rect]::new();$context=[CapyDocumentControls]::SetThreadDpiAwarenessContext([IntPtr](-4))
+        try{if(![CapyDocumentControls]::GetWindowRect($drawing.Handle,[ref]$frame)){throw 'Cannot read the review window bounds'}}finally{[CapyDocumentControls]::SetThreadDpiAwarenessContext($context)|Out-Null}
+        Resize-Review ([int](420*[CapyRowPointer]::GetDpiForWindow($drawing.Handle)/96.)) ($frame.bottom-$frame.top)
+        $narrow=@{parts=$null}
+        Wait-Until {$narrow.parts=& $footer;$narrow.parts['cancel'].Left -lt $wide['cancel'].Left-100} 'The paper footer did not narrow'
+        Wait-Until {
+            $parts=$narrow.parts=& $footer
+            $parts['relief-label'].Width -gt 0 -and $parts['relief'].Left -gt $parts['relief-label'].Left -and $parts['relief'].Right -le $parts['cancel'].Left -and $parts['cancel'].Right -le $parts['use'].Left
+        } 'Texture visibility overflowed the narrow paper footer'
+        foreach($size in @(@{name='wide';parts=$wide},@{name='narrow';parts=$narrow.parts})){"Paper footer $($size.name): $(($size.parts.GetEnumerator()|Sort-Object Key|ForEach-Object {"$($_.Key)=$($_.Value)"}) -join '; ')"}
+        New-Capture 'paper-narrow'
+        Resize-Review ($frame.right-$frame.left) ($frame.bottom-$frame.top)
+        Wait-Until {[Math]::Abs((& $footer)['cancel'].Left-$wide['cancel'].Left) -le 2} 'The review did not return to its width'
+    }
+    Press 'new-drawing-paper-cancel';Wait-Until {!(Drawer)} 'Cancel did not close the paper drawer'
     if($Full){
         $paperFile=Join-Path $run 'Fixture paper.png'
         $grain=[Drawing.Bitmap]::new(128,128);$random=[Random]::new(7)
@@ -249,6 +324,7 @@ function New-Journey([string]$Theme,[switch]$Full) {
         Open-Drawer 'new-drawing-texture' 'paper'
         Press 'new-drawing-paper-import';Picker 'Open';Choose-Path $paperFile;$script:scope=$root
         Wait-Until {@((Drawer).tiles|Where-Object {$_.selected -and $_.label -eq 'Fixture paper'}).Count -eq 1} 'Import did not pick the imported paper' 45
+        Import-Last
         $imported=@((Drawer).tiles|Where-Object selected)[0].id
         Press 'new-drawing-paper-use'
         Wait-Until {!(Drawer) -and (Drawing).setup.paper.texture -eq $imported -and (Drawing).page.texture -eq 'Fixture paper'} 'The imported paper was not used'
@@ -281,7 +357,7 @@ function New-Journey([string]$Theme,[switch]$Full) {
     Type-Text 'document-resolution' '150' -Commit
     Wait-Until {(Drawing).setup.resolution -eq 150} 'Typed resolution did not apply'
     Pick-Choice 'new-drawing-unit' (Value-Index (Drawing).units 'px')
-    Wait-Until {$view=Drawing;$view.setup.unit -eq 'px' -and [double](((Owned 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value) -replace '[^0-9.]','') -eq $view.values[0]} 'Pixels did not apply'
+    Wait-Until {$view=Drawing;$view.setup.unit -eq 'px' -and (Field-Value 'document-width') -eq $view.values[0]} 'Pixels did not apply'
     Type-Text 'document-width' '64*2' -Commit;Wait-Until {(Drawing).values[0] -eq 128} 'The width expression did not apply'
     Type-Text 'document-height' '96' -Commit;Wait-Until {(Drawing).values[1] -eq 96} 'The height did not apply'
     Press 'new-drawing-link';Wait-Until {(Drawing).linked} 'Link did not apply'

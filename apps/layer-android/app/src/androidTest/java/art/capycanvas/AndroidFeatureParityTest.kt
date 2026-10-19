@@ -789,6 +789,23 @@ class AndroidFeatureParityTest {
         fun JSONObject.sheet() = getJSONObject("sheet").getJSONArray("extent").let { it.getInt(0) to it.getInt(1) }
         fun JSONObject.panel() = objectOrNull("drawer")
         fun JSONObject.tiles() = panel()!!.getJSONArray("tiles").objects()
+        fun JSONObject.paper() = getJSONObject("setup").getJSONObject("paper")
+        fun JSONObject.relief() = panel()!!.getJSONObject("relief")
+        fun JSONObject.marked() = tiles().indexOfFirst { it.getBoolean("selected") }
+        fun reliefField() = compose.onNode(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.EditableText) and
+            hasAnyAncestor(hasTestTag("new-drawing-paper-relief")), useUnmergedTree = true)
+        val documentsUi = { node: android.view.accessibility.AccessibilityNodeInfo -> node.packageName?.toString()?.contains("documentsui") == true }
+        fun importOpensPicker(open: () -> Unit) {
+            val marked = drawing()!!.marked()
+            open()
+            val pickerDeadline = android.os.SystemClock.uptimeMillis() + 10_000
+            while (systemNode(documentsUi) == null && android.os.SystemClock.uptimeMillis() < pickerDeadline) android.os.SystemClock.sleep(100)
+            assertNotNull("Import… opens the system picker", systemNode(documentsUi))
+            assertEquals("Import never becomes the marked paper", marked, drawing()!!.marked())
+            instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            compose.waitUntil(10_000) { systemNode(documentsUi) == null }
+            awaitDrawing("paper stays open with its marked paper") { it.panel()?.getString("kind") == "paper" && it.marked() == marked }
+        }
         val paperImage = compose.activity.getExternalFilesDir(null)!!.resolve("new-drawing-paper.png")
         Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888).let { bitmap ->
             val random = java.util.Random(7)
@@ -860,31 +877,60 @@ class AndroidFeatureParityTest {
                 awaitDrawing("Chalkboard picked again") { it.panel()!!.getBoolean("can_select") }
                 tap("new-drawing-select")
                 awaitDrawing("Chalkboard") { it.isNull("drawer") && it.getJSONObject("page").getString("preset") == "Chalkboard" }
+                assertEquals("50 %", drawing()!!.getJSONObject("page").getString("relief"))
+                compose.onNodeWithTag("new-drawing-texture-relief", useUnmergedTree = true).assertIsDisplayed().assert(hasText("50 %"))
                 shot(theme, "5-chalkboard")
 
                 tap("new-drawing-texture", true)
                 awaitDrawing("paper") { it.panel()?.getString("kind") == "paper" }
+                assertEquals("Chalkboard's texture visibility", 50.0, drawing()!!.relief().getDouble("value"), 0.0)
+                reliefField().assertIsEnabled().assert(hasText("50"))
+                assertEquals("the visibility field matches the footer buttons", compose.onNodeWithTag("new-drawing-paper-use").fetchSemanticsNode().size.height,
+                    compose.onNodeWithTag("new-drawing-paper-relief").fetchSemanticsNode().size.height)
                 shot(theme, "6-paper")
                 val cold = drawing()!!.tiles().indexOfFirst { it.optString("id") == "cold_press" }
                 tap("new-drawing-paper-tile-$cold", true)
                 awaitDrawing("cold press picked") { it.tiles()[cold].getBoolean("selected") }
+                compose.onNodeWithTag("new-drawing-paper-import").performScrollTo()
+                compose.waitForIdle()
+                val lastPaper = compose.onNodeWithTag("new-drawing-paper-tile-${drawing()!!.tiles().size - 1}").fetchSemanticsNode().boundsInRoot
+                val importTile = compose.onNodeWithTag("new-drawing-paper-import").assertIsDisplayed().assert(hasText(drawing()!!.getJSONObject("copy").getString("import")))
+                    .fetchSemanticsNode().boundsInRoot
+                assertTrue("Import follows the last paper", importTile.top > lastPaper.bottom || (importTile.top == lastPaper.top && importTile.left > lastPaper.right))
+                shot(theme, "6c-import")
                 if (theme == "light") {
-                    tap("new-drawing-paper-import")
-                    val pickerDeadline = android.os.SystemClock.uptimeMillis() + 10_000
-                    while (systemNode { it.packageName?.toString()?.contains("documentsui") == true } == null && android.os.SystemClock.uptimeMillis() < pickerDeadline) android.os.SystemClock.sleep(100)
-                    assertNotNull("Import… opens the system picker", systemNode { it.packageName?.toString()?.contains("documentsui") == true })
-                    instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-                    compose.waitUntil(10_000) { systemNode { it.packageName?.toString()?.contains("documentsui") == true } == null }
-                    awaitDrawing("paper stays open") { it.panel()?.getString("kind") == "paper" }
+                    importOpensPicker { compose.onNodeWithTag("new-drawing-paper-import").performClick() }
                     val builtIn = drawing()!!.tiles().size
                     kotlinx.coroutines.runBlocking { importLibraryPaper(host, android.net.Uri.fromFile(paperImage)) }
                     awaitDrawing("imported paper picked") { d -> d.tiles().size == builtIn + 1 && d.tiles().last().getBoolean("selected") }
-                    shot(theme, "6b-imported-paper")
-                    tap("new-drawing-paper-tile-$cold", true)
-                    awaitDrawing("cold press picked again") { it.tiles()[cold].getBoolean("selected") }
+                    compose.onNodeWithTag("new-drawing-paper-tile-$builtIn").performScrollTo()
+                    shot(theme, "6d-imported-paper")
+                } else {
+                    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_TAB)
+                    compose.onNodeWithTag("new-drawing-paper-import").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+                    compose.onNodeWithTag("new-drawing-paper-import").assertIsFocused()
+                    host.drain()
+                    compose.waitForIdle()
+                    importOpensPicker { instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_ENTER) }
                 }
+                tap("new-drawing-paper-tile-$cold", true)
+                awaitDrawing("cold press picked again") { it.tiles()[cold].getBoolean("selected") }
+                reliefField().performTextReplacement("120")
+                compose.waitForIdle()
                 tap("new-drawing-paper-use")
-                awaitDrawing("cold press") { it.isNull("drawer") && it.getJSONObject("setup").getJSONObject("paper").optString("texture") == "cold_press" }
+                awaitDrawing("Use Texture applies the typed visibility") { it.isNull("drawer") && it.paper().optString("texture") == "cold_press" && it.paper().getInt("relief") == 120 }
+                assertEquals("120 %", drawing()!!.getJSONObject("page").getString("relief"))
+
+                tap("new-drawing-texture", true)
+                awaitDrawing("paper again") { it.panel()?.getString("kind") == "paper" && it.relief().getDouble("value") == 120.0 }
+                reliefField().assert(hasText("120")).performTextReplacement("200")
+                tap("new-drawing-paper-tile-0", true)
+                awaitDrawing("No paper") { it.tiles()[0].getBoolean("selected") && !it.relief().getBoolean("enabled") }
+                reliefField().assertIsNotEnabled()
+                shot(theme, "6b-no-paper")
+                tap("new-drawing-paper-cancel")
+                awaitDrawing("Cancel keeps the paper and its visibility") { it.isNull("drawer") && it.paper().optString("texture") == "cold_press" && it.paper().getInt("relief") == 120 }
+                assertNull(host.actionError)
 
                 tap("new-drawing-paper-color", true)
                 awaitDrawing("paper color") { it.panel()?.getString("kind") == "paper_color" }

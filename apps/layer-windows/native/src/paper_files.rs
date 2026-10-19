@@ -231,7 +231,7 @@ mod tests {
         let id = layer_ui::paper_library::paper_identity(&image).unwrap();
         let entry = PaperEntry { id:id.clone(), name:"Library scan".into(), bytes:64, preview:vec![127; 96*96].into() };
         send.send(Ok(Outcome::Imported(None, id.clone(), image, vec![entry]))).unwrap();service.poll(&mut host).unwrap();
-        let Some(layer_ui::NewDrawingDrawerView::Paper { tiles }) = host.session.new_drawing_view().unwrap().drawer.clone() else { panic!("Paper drawer closed") };
+        let Some(layer_ui::NewDrawingDrawerView::Paper { tiles, .. }) = host.session.new_drawing_view().unwrap().drawer.clone() else { panic!("Paper drawer closed") };
         let picked = tiles.iter().find(|tile| tile.selected).unwrap();
         assert_eq!((picked.id.as_deref(), picked.label.as_ref()), (Some(id.as_str()), "Library scan"));
         assert!(host.session.paper_preview(&id).is_some());

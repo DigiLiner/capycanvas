@@ -189,7 +189,9 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
 
     const thumbnail = paperThumbnail({app, element, icon, size:36});
     const textureName = element('span', 'new-drawing-tile-label'), paperColorName = element('span', 'new-drawing-tile-label'), patch = element('span', 'new-drawing-patch');
-    const texture = button('', () => send({op:'paper'}), 'new-drawing-paper-tile'); texture.id = 'new-drawing-texture'; texture.append(thumbnail.node, textureName);
+    const textureRelief = element('span', 'new-drawing-caption new-drawing-dim'); textureRelief.id = 'new-drawing-texture-relief';
+    const textureText = element('span', 'new-drawing-tile-text'); textureText.append(textureName, textureRelief);
+    const texture = button('', () => send({op:'paper'}), 'new-drawing-paper-tile'); texture.id = 'new-drawing-texture'; texture.append(thumbnail.node, textureText);
     const paperColor = button('', () => send({op:'paper_color'}), 'new-drawing-paper-tile'); paperColor.id = 'new-drawing-paper-color'; paperColor.append(patch, paperColorName);
     const papers = element('div', 'new-drawing-papers'); papers.append(texture, paperColor);
 
@@ -248,20 +250,28 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
     const paperHead = element('div', 'new-drawing-drawer-head'); paperHead.append(paperTitle);
     const paperGrid = element('div', 'texture-grid'); paperGrid.id = 'new-drawing-papers'; paperGrid.setAttribute('role', 'radiogroup');
     let importing = false;
-    const importButton = button('', async () => {
+    async function importTexture() {
       if (importing) return;
-      importing = importButton.disabled = true;
+      importing = true;
       try { await importPaper(); }
       catch (error) { ui?.report(String(error)); }
-      finally { importing = importButton.disabled = false; }
-    }, 'dialog-button');
-    importButton.id = 'new-drawing-paper-import';
+      finally { importing = false; }
+    }
+    const importPreview = element('span', 'paper-preview'), importCaption = element('span', 'texture-caption'), importFrame = element('span', 'texture-frame');
+    importPreview.setAttribute('aria-hidden', 'true'); importPreview.append(icon('plus')); importFrame.append(importPreview);
+    const importTile = button('', importTexture, 'texture-tile'); importTile.id = 'new-drawing-paper-import'; importTile.tabIndex = -1; importTile.append(importFrame, importCaption);
+    const relief = sizeFields({element, numberField, resolve:request => app.number_input(request), key:'newDrawing', names:['paper_relief'], send, inline:true});
+    const reliefLabel = element('span', 'new-drawing-relief-label'), reliefUnit = element('span', 'new-drawing-affix');
+    const reliefField = field('new-drawing-paper-relief-field', relief.nodes[0], reliefUnit); reliefField.classList.add('new-drawing-combo');
+    const reliefRow = element('div', 'new-drawing-relief'); reliefRow.id = 'new-drawing-paper-relief'; reliefRow.append(reliefLabel, reliefField);
+    const usePaperTexture = () => { if (relief.commit()) send({op:'use_paper'}); };
     const paperCancel = button('', () => send({op:'close_drawer'}), 'dialog-button'); paperCancel.id = 'new-drawing-paper-cancel';
-    const usePaper = button('', () => send({op:'use_paper'}), 'suggested-action'); usePaper.id = 'new-drawing-paper-use';
-    const paperFooter = element('footer', 'dialog-footer'); paperFooter.append(importButton, element('span', 'dialog-gap'), paperCancel, usePaper);
+    const usePaper = button('', usePaperTexture, 'suggested-action'); usePaper.id = 'new-drawing-paper-use';
+    const paperFooter = element('footer', 'dialog-footer'); paperFooter.append(reliefRow, element('span', 'dialog-gap'), paperCancel, usePaper);
     const paperDrawer = drawer('new-drawing-paper-drawer', paperHead, [paperGrid], paperFooter);
     let paperTiles = [], paperKey = '';
-    keyGrid(paperGrid, () => paperTiles, index => send({op:'pick_paper', id:shown.drawer.tiles[index].id}), () => send({op:'use_paper'}));
+    keyGrid(paperGrid, () => [...paperTiles, importTile], index => { if (paperTiles[index]) send({op:'pick_paper', id:shown.drawer.tiles[index].id}); },
+      () => { if (document.activeElement === importTile) importTexture(); else usePaperTexture(); });
 
     const colorPage = element('div', 'new-drawing-color-page');
     const mode = (transparent, glyph) => {
@@ -321,7 +331,8 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
       blending.select.disabled = v.blending_note != null; blending.cell.title = v.blending_note ?? '';
       text(paperHeading, c.paper); texture.title = c.paper; paperColor.title = c.paper_color;
       if (v.sheet.texture == null) thumbnail.none(); else thumbnail.show(v.sheet.texture);
-      text(textureName, v.page.texture); text(paperColorName, v.page.paper_color);
+      text(textureName, v.page.texture); text(textureRelief, v.page.relief ?? ''); textureRelief.hidden = v.page.relief == null;
+      text(paperColorName, v.page.paper_color);
       patch.style.background = v.sheet.shown ? paint(app, v.sheet.color) : ''; patch.classList.toggle('new-drawing-clear', !v.sheet.shown);
       paperColor.disabled = !v.paper_color_enabled;
       art.show(v.sheet); text(preset, v.page.preset); text(orientationName, ` · ${v.page.orientation_label}`);
@@ -372,8 +383,12 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
       if (starting) { saveName.focus(); saveName.select(); }
     }
     function renderPapers(v, opening) {
-      const c = v.copy, tiles = v.drawer.tiles;
-      text(paperTitle, c.paper); text(importButton, c.import); text(paperCancel, c.cancel); text(usePaper, c.use_texture);
+      const c = v.copy, {tiles, relief: shownRelief} = v.drawer;
+      text(paperTitle, c.paper); text(importCaption, c.import); importTile.title = c.import; text(paperCancel, c.cancel); text(usePaper, c.use_texture);
+      text(reliefLabel, c.relief); reliefLabel.title = c.relief; text(reliefUnit, c.relief_unit);
+      relief.show(0, shownRelief.numeric, c.relief, shownRelief.value, () => view()?.drawer?.relief?.value);
+      if (opening) relief.nodes[0].cancelEditing();
+      relief.nodes[0].setDisabled(!shownRelief.enabled); reliefRow.classList.toggle('disabled', !shownRelief.enabled);
       const key = json(tiles.map(tile => [tile.id, tile.label]));
       if (opening || key !== paperKey) {
         paperKey = key;
@@ -382,10 +397,10 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
           node.dataset.newDrawingPaper = index; node.setAttribute('role', 'radio'); node.title = tile.label;
           if (tile.id == null) preview.none(); else preview.show(tile.id);
           frame.append(preview.node); node.append(frame, element('span', 'texture-caption', tile.label));
-          node.addEventListener('dblclick', () => send({op:'use_paper'}));
+          node.addEventListener('dblclick', usePaperTexture);
           return node;
         });
-        paperGrid.replaceChildren(...paperTiles);
+        paperGrid.replaceChildren(...paperTiles, importTile);
       }
       roving(paperTiles, index => tiles[index].selected);
     }
