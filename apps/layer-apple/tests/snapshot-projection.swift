@@ -217,7 +217,7 @@ private final class Changes: @unchecked Sendable {
             return JSON(["workspace_update": update(revision, model: model, content: content).raw,
                 "layout": ["viewport": [1200, 900], "tab_bar_height": 36,
                     "work_area": bounds, "status": bounds, "groups": [["id": 7, "bounds": bounds]], "collapsed": [], "dividers": []],
-                "workspace_layout": ["bands": [["id": 1, "extent": width]], "floating": [], "collapsed": [], "fit_tab_groups": [7],
+                "workspace_layout": ["bands": [["id": 1, "extent": width]], "floating": [], "collapsed": [], "fit_tab_groups": [7], "fit_height_groups": [],
                     "column_stacks": [["column": 7, "members": [7], "drawers": false, "auto_hide": false]]],
                 "camera": ["zoom": 2, "revision": 1], "panel_measurements": [["panel": "brushes", "tab_width": 90, "content_height": 300]]])
         }

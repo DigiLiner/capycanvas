@@ -22,7 +22,10 @@ import Foundation
             func layout() -> String { store.state["workspace"]["layout"].stableKey }
             func member(_ id: UInt64) -> JSON { store.snapshot["layout"]["collapsed"].array.first { $0["id"].uint == id } ?? JSON() }
             func customize(_ value: [String: Any]) async throws { try await store.apply(["type":"customize", "action":value]) }
-            try await customize(["type":"set_column_collapsed", "group":16, "collapsed":true])
+            try await customize(["type":"set_column_collapsed", "group":4, "collapsed":true])
+            precondition([4, 12].allSatisfy { id in
+                store.state["workspace"]["layout"]["collapsed"].array.contains { $0["root"].uint == UInt64(id) }
+            })
             try await customize(["type":"set_column_drawers", "column":4, "drawers":false])
             let beforeStack = layout()
             try await store.apply(["type":"move_column", "column":12,

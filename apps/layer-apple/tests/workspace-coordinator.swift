@@ -31,7 +31,7 @@ import SQLite3
             precondition(clean != original && first.state["brush"]["diameter"].number == 87)
             try await first.apply(["type": "set_brush_size", "value": 44])
             try await workspaces.perform(["type": "switch", "id": original])
-            precondition(first.state["brush"]["diameter"].number == 87)
+            precondition(first.state["brush"]["diameter"].number == 44)
             try await workspaces.perform(["type": "form", "action": ["type": "new"]])
             workspaces.formName = "Clean"; workspaces.submit()
             try await wait("conflicting name") { workspaces.error != nil }
@@ -110,6 +110,9 @@ import SQLite3
         precondition(successor.workspaces!.view["id"].string == original)
         precondition(successor.state["brush"]["diameter"].number == 95, "Suspension must save before releasing the claim")
         try await successor.apply(["type": "set_brush_size", "value": 96])
+        try await successor.workspaces!.answer(["type": "new_toolbar", "value": NSNull()], name: "Successor tools")
+        let successorLayout = successor.state["workspace"]["layout"].stableKey
+        precondition(successorLayout != editor.state["workspace"]["layout"].stableKey)
         workspaces.resume()
         try await wait("stale owner") { workspaces.view["owner_lost"].bool }
         precondition(workspaces.readOnly && editor.state["brush"]["diameter"].number == 95)
@@ -118,7 +121,8 @@ import SQLite3
         precondition(recovered != original && !workspaces.readOnly && editor.state["brush"]["diameter"].number == 95)
         try await successor.workspaces!.closed()
         try await workspaces.perform(["type": "switch", "id": original])
-        precondition(editor.state["brush"]["diameter"].number == 96, "The other window's durable workspace must be adopted")
+        precondition(editor.state["workspace"]["layout"].stableKey == successorLayout, "The other window's durable workspace must be adopted")
+        precondition(editor.state["brush"]["diameter"].number == 95, "Switching workspaces preserves the current brush")
         try await workspaces.answer(["type": "delete", "value": recovered])
         try await editor.apply(["type": "set_brush_size", "value": 91])
         let flushed: Bool = await withCheckedContinuation { continuation in
