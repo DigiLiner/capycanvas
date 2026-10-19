@@ -66,11 +66,14 @@ import SQLite3
             try FileManager.default.createDirectory(at: badFile.deletingLastPathComponent(), withIntermediateDirectories: true)
             let badData = Data("invalid SQLite data".utf8)
             try badData.write(to: badFile)
-            let blocked = EditorStore(platform: platform, persistence: badStorage)
-            try await wait("corrupt database error") { blocked.failure != nil || blocked.workspaces?.error != nil }
-            precondition(blocked.workspaces?.ready != true)
-            try require(Data(contentsOf: badFile) == badData, "A corrupt library must not be replaced")
-            print("PASS: platform \(platform), SQLite startup, scene restoration, latest-edit switching, failure unlock, suspension, ownership recovery and restart")
+            let recovered = EditorStore(platform: platform, persistence: badStorage)
+            let recoveredWorkspaces = recovered.workspaces!
+            try await recoveredWorkspaces.started("corrupt database recovery")
+            precondition(recovered.failure == nil && !recovered.state["notice"].isNull)
+            try require(await recoveredWorkspaces.workspaceRows().count == 3, "In-memory recovery must initialize the shared defaults")
+            try await recoveredWorkspaces.closed()
+            try require(Data(contentsOf: badFile) == badData, "In-memory recovery must preserve the corrupt library")
+            print("PASS: platform \(platform), SQLite startup, scene restoration, latest-edit switching, failure unlock, suspension, ownership recovery, restart and unreadable-store preservation")
         }
     }
     @MainActor static func editable(_ editor: EditorStore, _ size: Double) async throws {
@@ -129,7 +132,10 @@ import SQLite3
         let flushed: Bool = await withCheckedContinuation { continuation in
             editor.flushPersistence { continuation.resume(returning: $0) }
         }
-        precondition(flushed && !workspaces.view["dirty"].bool, "The editor lifecycle barrier must include workspace storage")
+        precondition(!editor.snapshot["canvas_ready"].bool && editor.recovery.restoring)
+        precondition(!flushed, "Unrestored artwork must fail the full editor lifecycle barrier")
+        precondition(!workspaces.view["dirty"].bool && !workspaces.view["saving"].bool && workspaces.error == nil,
+            "The editor lifecycle barrier must finish workspace storage before reporting artwork failure")
     }
     @MainActor static func libraryActions(_ workspaces: WorkspaceController, editor: EditorStore) async throws {
         let original = workspaces.view["id"].string

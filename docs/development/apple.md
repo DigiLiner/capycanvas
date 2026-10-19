@@ -611,9 +611,12 @@ Other runners in `scripts/` and `tests/`:
 
 GPU-free workspace fixtures wait for completed controller operations and test
 claim release directly. An unattached canvas keeps artwork recovery pending, so
-successful full-editor close belongs in the attached-canvas fixtures. The sandbox
-file fixture checks the resolved file identity and access boundaries; bookmark
-staleness is metadata rather than a failed file grant.
+full-editor lifecycle barriers report failure after workspace storage finishes.
+Successful full-editor save and close belong in the attached-canvas fixtures.
+The coordinator fixture also checks in-memory startup when SQLite cannot open
+the original database, which remains unchanged.
+The sandbox file fixture checks the resolved file identity and access boundaries;
+bookmark staleness is metadata rather than a failed file grant.
 
 The UIKit fixtures `canvas-modifiers.swift`, `canvas-hover.swift` and
 `pencil-estimates.swift` run as a standalone scene app built from the `Shared/`
