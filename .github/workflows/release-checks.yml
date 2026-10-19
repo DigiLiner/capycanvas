@@ -190,6 +190,19 @@ jobs:
           LAYER_TEST_JPEG_FIXTURES: ${{ github.workspace }}/artifacts/release-tests/color/jpeg
           LAYER_PROOF_REFERENCE: ${{ github.workspace }}/artifacts/release-tests/color/proof
         run: |
+          CAPY_COLOR="$PWD/artifacts/release-tests/color"
+          CAPY_LCMS_REVISION=6a5a89058cc0ef7e700c849d71a447e17fd07086
+          mkdir -p "$CAPY_COLOR/lcms-source"
+          git -C "$CAPY_COLOR/lcms-source" init --quiet
+          git -C "$CAPY_COLOR/lcms-source" fetch --quiet --depth 1 https://github.com/mm2/Little-CMS.git "$CAPY_LCMS_REVISION"
+          git -C "$CAPY_COLOR/lcms-source" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$CAPY_COLOR/lcms-source" rev-parse HEAD)" = "$CAPY_LCMS_REVISION"
+          git -C "$CAPY_COLOR/lcms-source" log -1 --format='%H%n%cs%n%s' | tee "$CAPY_COLOR/lcms-source.log"
+          meson setup "$CAPY_COLOR/lcms-build" "$CAPY_COLOR/lcms-source" --prefix "$CAPY_COLOR/lcms" --libdir lib \
+            --buildtype release --default-library shared -Dtests=disabled -Dutils=false -Djpeg=disabled -Dtiff=disabled -Dfastfloat=false -Dthreaded=false
+          meson compile -C "$CAPY_COLOR/lcms-build" -j 2
+          meson install -C "$CAPY_COLOR/lcms-build"
+          export LD_LIBRARY_PATH="$CAPY_COLOR/lcms/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           python3 tools/validation/icc_reference.py "$LAYER_TEST_CMYK_PROFILE" "$LAYER_TEST_CMYK_REFERENCE"
           python3 tools/validation/jpeg_interchange.py prepare "$LAYER_TEST_JPEG_FIXTURES" --cmyk-profile "$LAYER_TEST_CMYK_PROFILE" --rgb-profile "$LAYER_TEST_WORKING_PROFILES/sRGB.icc"
           cargo run --locked --release -p layer-color --example proof_profiles -- artifacts/release-tests/color/working

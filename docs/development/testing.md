@@ -103,6 +103,10 @@ compare WebP decoding against checksum-pinned public-domain samples decoded by
 the system libwebp. Arch checks independent LittleCMS CMYK and print-proof
 references, plus CMYK, YCCK, progressive and oriented JPEG interchange against
 Pillow and ImageMagick. Reference reports record tool versions and source hashes.
+The independent LittleCMS oracle is built from pinned
+[upstream commit 6a5a8905](https://github.com/mm2/Little-CMS/commit/6a5a89058cc0ef7e700c849d71a447e17fd07086), which restores neutral black-point
+detection missing in 2.19. Its source revision is retained in `lcms-source.log`;
+`LD_LIBRARY_PATH` selects this library for the reference generators.
 The remaining ignored color tests require the pinned libavif 1.3.0 qualification
 SDK or external HEIF references, or only emit fixtures for hardware journeys.
 
