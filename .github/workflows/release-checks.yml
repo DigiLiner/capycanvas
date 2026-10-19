@@ -120,6 +120,11 @@ jobs:
             tests::apple_language_publication_is_atomic_deferred_and_window_local \
             tests::ui_actions_change_only_the_addressed_apple_session \
             tests::storage_names_every_store_within_the_folders_it_is_given \
+            tests::papers::apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_history \
+            tests::papers::apple_paper_preview_leases_outlive_the_editor_and_match_shared_pixels \
+            tests::papers::apple_paper_worker_failure_retires_its_request_without_authored_changes \
+            tests::papers::apple_initial_paper_is_prepared_before_publication_and_later_library_reload_does_not_enqueue_another_load \
+            tests::papers::apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_failed_default_request \
             --test-threads=1 2>&1 | tee artifacts/release-tests/apple-bridge.log
       - name: Android bridge tests
         if: ${{ !cancelled() }}

@@ -355,7 +355,7 @@ mod tests {
             assert!(!host.session.state().document_file.modified);assert!(!host.session.engine().can_undo());
             let layer=layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(),None).unwrap());
             host.dispatch(layer_ui::UiAction::SelectLayer {id:layer}).unwrap();
-            host.dispatch(layer_ui::UiAction::Effect {action:layer_ui::EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}}).unwrap();
+            host.dispatch(layer_ui::UiAction::Effect {action:layer_ui::EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(layer_core::paper::built_in_papers().len() as u32)}}).unwrap();
             assert_eq!(host.session.state().requests.iter().filter(|request|matches!(&request.kind,
                 layer_ui::HostRequestKind::Paper {request:layer_ui::paper_library::PaperRequest::Load {id:requested}} if requested==&id)).count(),1,
                 "an explicit user retry must remain available");
