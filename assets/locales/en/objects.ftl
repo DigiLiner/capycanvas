@@ -17,3 +17,4 @@ objects-vector-refusal-layer = A vector layer holds paths, not paint.
 objects-action-use-brush = Use { $brush }
 objects-action-reset-setting = Reset { $setting }
 objects-action-new-paint-layer-below = New Paint Layer Below
+objects-merge-turns-paths-into-pixels = Merging turns the paths in “{ $layers }” into pixels.

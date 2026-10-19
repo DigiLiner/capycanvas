@@ -670,3 +670,5 @@ command-reverse-path = Inverter direção
 command-make-compound-path = Criar caminho composto
 command-release-compound-path = Liberar caminho composto
 menu-path = Caminho
+command-erase-touched-part = Apagar a parte tocada
+command-erase-to-intersection = Apagar até a interseção

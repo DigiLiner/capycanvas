@@ -17,7 +17,7 @@ pub struct Notice {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NoticeActionId { CloneSource, UseReference, Flatten, AddMask, EditMask, NewPaintLayer, NewPaintLayerBelow, RasterizeLayer, UseVectorPen, ResetSetting }
+pub enum NoticeActionId { CloneSource, UseReference, Flatten, AddMask, EditMask, NewPaintLayer, NewPaintLayerBelow, RasterizeLayer, UseVectorPen, ResetSetting, Merge }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NoticeAction {
@@ -32,6 +32,7 @@ enum NoticeCopy {
     Drawing(DrawingRefusal), Stroke(StrokeRefusal), Message(MessageId), Reference { message: MessageId, name: std::sync::Arc<str> },
     Object { layer: OccurrenceHandle, name: std::sync::Arc<str> }, Flatten { hidden: usize },
     Vector { layer: OccurrenceHandle, name: std::sync::Arc<str>, reason: VectorRefusal },
+    Rasterizing { command: CommandId, names: Vec<std::sync::Arc<str>> },
 }
 
 #[derive(Clone)]
@@ -64,6 +65,12 @@ impl NoticeCopy {
                 let mut args = FluentArgs::new(); args.set("count", *hidden);
                 return localization.format(MessageId::COMMANDS_FLATTEN_DISCARDS_HIDDEN_LAYERS, &args);
             }
+            Self::Rasterizing { names, .. } => {
+                let mut args = FluentArgs::new();
+                args.set("layers", names.iter().map(|name| name.as_ref()).collect::<Vec<_>>().join(", "));
+                args.set("count", names.len());
+                return localization.format(MessageId::OBJECTS_MERGE_TURNS_PATHS_INTO_PIXELS, &args);
+            }
         }.to_string()
     }
     fn action_label(&self, id: NoticeActionId, localization: &Localizer) -> String {
@@ -75,6 +82,8 @@ impl NoticeCopy {
             (_, NoticeActionId::CloneSource) => CommandId::CloneSourceArm.localized_label(localization).to_string(),
             (_, NoticeActionId::UseReference) => CommandId::UseReferenceBelow.localized_label(localization).to_string(),
             (_, NoticeActionId::Flatten) => CommandId::FlattenImage.localized_label(localization).to_string(),
+            (Self::Rasterizing { command, .. }, NoticeActionId::Merge) => command.localized_label(localization).to_string(),
+            (_, NoticeActionId::Merge) => String::new(),
             (_, NoticeActionId::AddMask) => localization.text(MessageId::OBJECTS_ACTION_ADD_MASK).to_string(),
             (_, NoticeActionId::EditMask) => localization.text(MessageId::OBJECTS_ACTION_EDIT_MASK).to_string(),
             (_, NoticeActionId::NewPaintLayer) => localization.text(MessageId::OBJECTS_ACTION_NEW_PAINT_LAYER).to_string(),
@@ -94,7 +103,7 @@ impl NoticeCopy {
 }
 
 #[derive(Clone)]
-pub(super) enum NoticeRun { Dispatch(Box<UiAction>), RevealMask(OccurrenceHandle) }
+pub(super) enum NoticeRun { Dispatch(Box<UiAction>), RevealMask(OccurrenceHandle), Bake(layer_core::MergeKind) }
 
 #[derive(Default)]
 pub(super) struct Notices {
@@ -327,6 +336,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.refresh_document();
                 Ok(self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true))
             }
+            NoticeRun::Bake(kind) => {
+                self.bake(kind)?;
+                Ok(self.changed(regions::DOCUMENT | regions::COMMANDS, true))
+            }
         }
     }
 
@@ -429,6 +442,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
 
+    pub(super) fn offer_rasterizing_merge(&mut self, kind: layer_core::MergeKind, names: Vec<std::sync::Arc<str>>) {
+        let command = match kind {
+            layer_core::MergeKind::Down => CommandId::MergeDown,
+            layer_core::MergeKind::Group => CommandId::MergeGroup,
+            layer_core::MergeKind::Visible => CommandId::MergeVisible,
+            layer_core::MergeKind::Flatten => CommandId::FlattenImage,
+            layer_core::MergeKind::Stamp => CommandId::StampVisible,
+        };
+        let copy = NoticeCopy::Rasterizing { command, names };
+        let action = self.notice_choice(&copy, NoticeActionId::Merge, NoticeRun::Bake(kind), None);
+        self.raise_notice(copy.text(self.localization()), vec![action]);
+        self.notices.copy = Some(copy);
+    }
     pub(super) fn offer_flatten(&mut self, hidden: usize) {
         let copy = NoticeCopy::Flatten { hidden };
         let action = self.notice_choice(&copy, NoticeActionId::Flatten, NoticeRun::Dispatch(Box::new(UiAction::Layer { action: LayerAction::Flatten })), None);

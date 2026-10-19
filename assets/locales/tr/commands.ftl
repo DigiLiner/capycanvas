@@ -666,3 +666,5 @@ command-reverse-path = Yönü ters çevir
 command-make-compound-path = Bileşik yol oluştur
 command-release-compound-path = Bileşik yolu çöz
 menu-path = Yol
+command-erase-touched-part = Dokunulan kısmı sil
+command-erase-to-intersection = Kesişime kadar sil

@@ -621,3 +621,6 @@ workspace-tool-description-split-path = Разрезать контуры в в�
 workspace-tool-description-reverse-path = Обратить направление выбранных контуров, поменяв начало и конец
 workspace-tool-description-make-compound-path = Объединить выбранные контуры в один с отверстиями там, где они перекрываются
 workspace-tool-description-release-compound-path = Сделать каждую часть составного контура отдельным контуром
+workspace-tool-description-erase-touched-part = Разрезать контуры там, где ластик закрывает их среднюю линию
+workspace-tool-description-erase-whole-paths = Удалять каждый контур, которого касается ластик
+workspace-tool-description-erase-to-intersection = Удалять часть контура между пересечениями по обе стороны от места касания ластика

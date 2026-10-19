@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Lớp vector chứa đường, không phải nét
 objects-action-use-brush = Dùng { $brush }
 objects-action-reset-setting = Đặt lại { $setting }
 objects-action-new-paint-layer-below = Lớp vẽ mới bên dưới
+objects-merge-turns-paths-into-pixels = Khi gộp, các đường trong “{ $layers }” sẽ thành điểm ảnh.

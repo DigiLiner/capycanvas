@@ -603,3 +603,6 @@ workspace-tool-description-split-path = ตัดพาธที่จุดย�
 workspace-tool-description-reverse-path = กลับทิศทางพาธที่เลือก สลับจุดเริ่มต้นและจุดสิ้นสุด
 workspace-tool-description-make-compound-path = รวมพาธที่เลือกเป็นหนึ่งเดียว โดยส่วนที่ซ้อนกันกลายเป็นรู
 workspace-tool-description-release-compound-path = แยกแต่ละส่วนของพาธผสมกลับเป็นพาธของตัวเอง
+workspace-tool-description-erase-touched-part = ตัดพาธตรงที่ยางลบทับเส้นกลาง
+workspace-tool-description-erase-whole-paths = ลบทุกพาธที่ยางลบแตะ
+workspace-tool-description-erase-to-intersection = ลบส่วนของพาธระหว่างจุดตัดทั้งสองข้างของตำแหน่งที่ยางลบแตะ

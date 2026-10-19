@@ -618,3 +618,6 @@ workspace-tool-description-split-path = Cortar los trazados en los anclajes sele
 workspace-tool-description-reverse-path = Invertir el sentido de los trazados seleccionados, intercambiando inicio y final
 workspace-tool-description-make-compound-path = Combinar los trazados seleccionados en uno, con huecos donde se solapan
 workspace-tool-description-release-compound-path = Convertir cada parte de un trazado compuesto en su propio trazado
+workspace-tool-description-erase-touched-part = Cortar los trazados donde la goma cubre su línea central
+workspace-tool-description-erase-whole-paths = Eliminar cada trazado que toca la goma
+workspace-tool-description-erase-to-intersection = Eliminar la parte del trazado entre los cruces a cada lado de donde toca la goma

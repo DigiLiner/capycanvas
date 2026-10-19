@@ -615,3 +615,6 @@ workspace-tool-description-split-path = Yolları seçili bağlantı noktalarınd
 workspace-tool-description-reverse-path = Seçili yolların yönünü ters çevirip başı ve sonu değiştirin
 workspace-tool-description-make-compound-path = Seçili yolları tek yolda birleştirin; çakıştıkları yerler delik olur
 workspace-tool-description-release-compound-path = Bileşik yolun her parçasını yeniden ayrı bir yol yapın
+workspace-tool-description-erase-touched-part = Silginin orta çizgiyi kapattığı yerde yolları kesin
+workspace-tool-description-erase-whole-paths = Silginin dokunduğu her yolu kaldırın
+workspace-tool-description-erase-to-intersection = Silginin dokunduğu yerin iki yanındaki kesişimler arasındaki parçayı kaldırın

@@ -669,3 +669,5 @@ command-reverse-path = Invertir dirección
 command-make-compound-path = Crear trazado compuesto
 command-release-compound-path = Liberar trazado compuesto
 menu-path = Trazado
+command-erase-touched-part = Borrar la parte tocada
+command-erase-to-intersection = Borrar hasta la intersección

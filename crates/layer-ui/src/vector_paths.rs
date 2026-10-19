@@ -14,6 +14,25 @@ impl VectorPaths {
     pub fn drafting(&self) -> bool { self.draft.is_some() }
 }
 
+fn simplified(points: &[[f64; 2]], tolerance: f64) -> Vec<[f64; 2]> {
+    fn reduce(points: &[[f64; 2]], tolerance: f64, out: &mut Vec<[f64; 2]>) {
+        let (first, last) = (points[0], points[points.len() - 1]);
+        let d = [last[0] - first[0], last[1] - first[1]];
+        let length = d[0].hypot(d[1]);
+        let distance = |p: &[f64; 2]| if length > 0. { ((p[0] - first[0]) * d[1] - (p[1] - first[1]) * d[0]).abs() / length } else { (p[0] - first[0]).hypot(p[1] - first[1]) };
+        let farthest = points[1..points.len() - 1].iter().enumerate().map(|(i, p)| (i + 1, distance(p))).max_by(|a, b| a.1.total_cmp(&b.1));
+        match farthest {
+            Some((at, far)) if far > tolerance => { reduce(&points[..=at], tolerance, out); reduce(&points[at..], tolerance, out); }
+            _ => out.push(last),
+        }
+    }
+    if points.len() < 3 { return points.to_vec(); }
+    let mut out = vec![points[0]];
+    reduce(points, tolerance, &mut out);
+    if out.len() > 1 && out.last() == out.first() { out.pop(); }
+    out
+}
+
 impl<R: CanvasRenderer> UiSession<R> {
     fn vector_path_paint(&self) -> Option<FigurePaint> {
         if let LayerCanvasTool::Figure { shape: FigureShape::Path, paint } = self.layer_interaction.tool { Some(paint) } else { None }
@@ -122,6 +141,26 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (path.id, document.vector_object_edit(layer, object.insert_front(vec![Record::Path(path)])).map_err(|e| e.to_string())?)
             }
         };
+        self.layer_edit(edit)?;
+        self.select_vector_items(layer, [id].into()).map(|_| ())
+    }
+    pub(super) fn lasso_fill_path(&mut self, layer: OccurrenceHandle, outline: &layer_core::Selection) -> Result<(), String> {
+        if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
+        let [ox, oy] = self.engine.document().scene().occurrence_offset64(layer);
+        let tolerance = 0.5 * self.document_per_surface_pixel();
+        let subpaths: Vec<Subpath> = outline.contours().iter().filter_map(|contour| {
+            let points: Vec<[f64; 2]> = contour.iter().map(|p| [f64::from(p.x) - ox, f64::from(p.y) - oy]).collect();
+            let kept = simplified(&points, tolerance);
+            (kept.len() >= 3).then(|| Subpath::new(&kept.into_iter().map(Anchor::corner).collect::<Vec<_>>(), true))
+        }).collect();
+        if subpaths.is_empty() { return Ok(()); }
+        let style = self.vector_figure_style(FigurePaint::Fill, Cap::Butt, Join::Miter)?;
+        let document = self.engine.document();
+        let object = document.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
+        let id = object.allocate_id();
+        let mut path = PathItem::new(id, Arc::new(PathGeometry::new(subpaths).map_err(str::to_string)?), Arc::new(style));
+        path.fill_rule = layer_core::authored::vector::FillRule::EvenOdd;
+        let edit = document.vector_object_edit(layer, object.insert_front(vec![Record::Path(path)])).map_err(|e| e.to_string())?;
         self.layer_edit(edit)?;
         self.select_vector_items(layer, [id].into()).map(|_| ())
     }

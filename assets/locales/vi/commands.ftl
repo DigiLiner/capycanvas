@@ -667,3 +667,5 @@ command-reverse-path = Đảo chiều
 command-make-compound-path = Tạo đường phức hợp
 command-release-compound-path = Bỏ đường phức hợp
 menu-path = Đường
+command-erase-touched-part = Xóa phần chạm vào
+command-erase-to-intersection = Xóa đến giao điểm

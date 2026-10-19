@@ -1099,7 +1099,10 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::Zoom | CommandId::CenterZoomClicks | CommandId::RotateView | CommandId::FitWidth | CommandId::FillView
                 | CommandId::ZoomSelection | CommandId::ResetRotation | CommandId::ResetView | CommandId::PreviousView
                 | CommandId::SaveView | CommandId::RestoreView | CommandId::NextDrawing | CommandId::PreviousDrawing
-                | CommandId::SmoothingAdjustSpeed | CommandId::EraseWholePaths | CommandId::ScaleOutlineWidths => label.to_string(),
+                | CommandId::SmoothingAdjustSpeed | CommandId::ScaleOutlineWidths => label.to_string(),
+                CommandId::EraseTouchedPart => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_ERASE_TOUCHED_PART).to_string(),
+                CommandId::EraseWholePaths => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_ERASE_WHOLE_PATHS).to_string(),
+                CommandId::EraseToIntersection => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_ERASE_TO_INTERSECTION).to_string(),
                 CommandId::SearchCommands => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SEARCH_COMMANDS).to_string(),
                 CommandId::DrawingBrush => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_DRAWING_BRUSH).to_string(),
                 CommandId::Sculpt => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SCULPT).to_string(),

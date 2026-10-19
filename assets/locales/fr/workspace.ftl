@@ -618,3 +618,6 @@ workspace-tool-description-split-path = Couper les tracés aux points d’ancrag
 workspace-tool-description-reverse-path = Inverser le sens des tracés sélectionnés en échangeant début et fin
 workspace-tool-description-make-compound-path = Combiner les tracés sélectionnés en un seul, avec des trous là où ils se chevauchent
 workspace-tool-description-release-compound-path = Rendre à chaque partie d’un tracé transparent son propre tracé
+workspace-tool-description-erase-touched-part = Couper les tracés là où la gomme couvre leur ligne médiane
+workspace-tool-description-erase-whole-paths = Supprimer chaque tracé que touche la gomme
+workspace-tool-description-erase-to-intersection = Supprimer la partie du tracé entre les croisements de part et d’autre du point touché

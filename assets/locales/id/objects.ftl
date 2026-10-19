@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Lapisan vektor berisi jalur, bukan cat.
 objects-action-use-brush = Gunakan { $brush }
 objects-action-reset-setting = Atur Ulang { $setting }
 objects-action-new-paint-layer-below = Lapisan Cat Baru di Bawah
+objects-merge-turns-paths-into-pixels = Menggabungkan mengubah jalur di “{ $layers }” menjadi piksel.

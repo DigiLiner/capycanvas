@@ -8,7 +8,7 @@ mod ops;
 #[cfg(test)]
 mod ops_tests;
 mod points;
-pub use erase::Eraser;
+pub use erase::{EraseMode, Eraser};
 pub use points::{AnchorRef, SegmentHit};
 pub use index::VectorIndex;
 
@@ -406,6 +406,14 @@ impl PathItem {
             PaintEntry::Stroke(stroke) => stroke.width > 0. && self.touches(point, stroke, slop, tolerance),
             PaintEntry::Opaque(_) => false,
         })
+    }
+    /// Whether a click at `point` lands inside this path's fill, or inside it
+    /// when every subpath is closed.
+    pub fn encloses(&self, point: [f64; 2], tolerance: f64) -> bool {
+        let [x0, y0, x1, y1] = self.geometry.hull();
+        let filled = self.style.entries.iter().any(|entry| matches!(entry, PaintEntry::Fill(_)));
+        !self.hidden && (filled || self.geometry.subpaths().iter().all(|s| s.closed && s.segment_count() > 1))
+            && point[0] >= x0 && point[0] <= x1 && point[1] >= y0 && point[1] <= y1 && self.winds(point, tolerance)
     }
     fn winds(&self, point: [f64; 2], tolerance: f64) -> bool {
         let mut winding = 0i32;

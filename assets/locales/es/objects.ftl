@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Una capa vectorial contiene trazados, no pintura.
 objects-action-use-brush = Usar { $brush }
 objects-action-reset-setting = Restablecer { $setting }
 objects-action-new-paint-layer-below = Nueva capa de pintura debajo
+objects-merge-turns-paths-into-pixels = Al combinar, los trazados de «{ $layers }» se convierten en píxeles.

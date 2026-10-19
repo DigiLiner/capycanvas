@@ -1192,3 +1192,6 @@ workspace-tool-description-split-path = Potong jalur di jangkar yang dipilih
 workspace-tool-description-reverse-path = Balik arah jalur yang dipilih, menukar awal dan akhirnya
 workspace-tool-description-make-compound-path = Gabungkan jalur yang dipilih menjadi satu, dengan lubang di bagian yang bertumpuk
 workspace-tool-description-release-compound-path = Kembalikan setiap bagian jalur gabungan menjadi jalur sendiri
+workspace-tool-description-erase-touched-part = Potong jalur di tempat penghapus menutupi garis tengahnya
+workspace-tool-description-erase-whole-paths = Hapus setiap jalur yang tersentuh penghapus
+workspace-tool-description-erase-to-intersection = Hapus bagian jalur di antara perpotongan di kedua sisi tempat penghapus menyentuh

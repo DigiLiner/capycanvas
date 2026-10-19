@@ -157,7 +157,8 @@ fn the_eraser_cuts_or_removes_vector_paths_in_one_undo_step() {
     invoke(&mut s, CommandId::Eraser);
     s.dispatch(UiAction::SetBrushSize { value: 8. }).unwrap();
     assert!(!prohibited(&mut s), "the eraser works on vector layers");
-    assert!(s.state.tool_actions.iter().any(|action| action.command == CommandId::EraseWholePaths));
+    let modes: Vec<_> = s.state.tool_panels.tools.subtools.iter().take(3).map(|item| (item.action.clone(), item.selected)).collect();
+    assert_eq!(modes, [CommandId::EraseTouchedPart, CommandId::EraseWholePaths, CommandId::EraseToIntersection].map(|command| (UiAction::Invoke { command }, command == CommandId::EraseTouchedPart)), "the eraser modes lead the tool panel");
     let across = |s: &UiSession<Recorder>| [-40., 0., 40.].map(|dy| surface_at(s, [middle[0], middle[1] + dy]));
     let points = across(&s);
     press(&mut s, 100, &points);
@@ -168,7 +169,7 @@ fn the_eraser_cuts_or_removes_vector_paths_in_one_undo_step() {
     s.frame(5_000_000_000, 5_000_000_000).unwrap();
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &drawn, "one undo step restores the line");
     invoke(&mut s, CommandId::EraseWholePaths);
-    assert!(s.state.settings.erase_whole_paths);
+    assert_eq!(s.state.settings.vector_eraser, crate::settings::VectorEraser::WholePaths);
     let points = across(&s);
     press(&mut s, 200, &points);
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 0, "Whole Path removes the touched line");
@@ -1047,4 +1048,93 @@ fn figure_options_shape_rectangles_polygons_and_stars_on_both_layer_kinds() {
     s.dispatch(UiAction::SetToolSetting { id: "figure_corner_radius".into(), value: 0. }).unwrap();
     drag(&mut s, 80);
     assert!(matches!(last(&s), Some(layer_core::RasterOperationKind::Figure(_))), "square rectangles keep the raster figure");
+}
+
+#[test]
+fn erasing_up_to_intersection_stops_at_crossing_lines() {
+    let (mut s, handle) = vector_session();
+    let line = |s: &mut UiSession<Recorder>, first: u64, from: [f64; 2], to: [f64; 2]| {
+        let points: Vec<Point> = (0..=12).map(|i| { let u = f64::from(i) / 12.; surface_at(s, [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u]) }).collect();
+        press(s, first, &points);
+    };
+    line(&mut s, 1, [100., 300.], [700., 300.]);
+    line(&mut s, 100, [300., 100.], [300., 500.]);
+    line(&mut s, 200, [500., 100.], [500., 500.]);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 3);
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseToIntersection);
+    assert!(s.command(CommandId::EraseToIntersection).selected && !s.command(CommandId::EraseTouchedPart).selected);
+    s.dispatch(UiAction::SetBrushSize { value: 6. }).unwrap();
+    line(&mut s, 300, [400., 290.], [400., 310.]);
+    let object = s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    let spans: Vec<[f64; 4]> = object.paths().map(|(_, p)| p.geometry.hull()).filter(|h| (h[1] - h[3]).abs() < 5.).collect();
+    assert_eq!(spans.len(), 2, "{spans:?}");
+    assert!(spans.iter().any(|h| (h[2] - 300.).abs() < 2.) && spans.iter().any(|h| (h[0] - 500.).abs() < 2.), "the line loses only the span between the crossings: {spans:?}");
+}
+
+#[test]
+fn fill_colors_paths_or_fills_a_new_paint_layer_below_from_the_lines() {
+    let (mut s, handle) = vector_session();
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Ellipse, paint: FigurePaint::Outline } } }).unwrap();
+    let drag = [surface_at(&s, [200., 200.]), surface_at(&s, [300., 260.]), surface_at(&s, [400., 320.])];
+    press(&mut s, 1, &drag);
+    let ellipse = s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.clone();
+    s.dispatch(UiAction::SetColor { rgba: [0.2, 0.6, 0.3, 1.] }).unwrap();
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap();
+    let layers = s.engine.document().scene().children(None).len();
+    let inside = surface_at(&s, [300., 260.]);
+    press(&mut s, 10, &[inside, inside]);
+    let filled = s.engine.document().scene().vector_layer(handle).unwrap().find(ellipse.id).map(|p| s.engine.document().scene().vector_layer(handle).unwrap().record(p).unwrap().path().unwrap().clone()).unwrap();
+    assert!(matches!(filled.style.entries[..], [layer_core::authored::vector::PaintEntry::Fill(_), layer_core::authored::vector::PaintEntry::Stroke(_)]), "a click inside a closed path fills it under its outline");
+    assert_eq!(s.engine.document().scene().children(None).len(), layers, "no layer is added");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(5_000_000_000, 5_000_000_000).unwrap();
+    assert!(s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.style.entries.len() == 1, "one undo step");
+    let requests = s.renderer_mut().region_requests.len();
+    let outside = surface_at(&s, [700., 600.]);
+    press(&mut s, 20, &[outside, outside]);
+    let paint = s.engine.document().working.occurrence.unwrap();
+    let order = s.engine.document().scene().children(None).to_vec();
+    assert!(s.engine.document().scene().paint_source(paint).is_some());
+    assert_eq!(order.iter().position(|h| *h == paint), order.iter().position(|h| *h == handle).map(|i| i + 1), "elsewhere fills a new paint layer below the lines");
+    assert_eq!(s.renderer_mut().region_requests.len(), requests + 1);
+    let request = s.renderer_mut().region_requests.last().unwrap().clone();
+    assert!(matches!(request.source, layer_render::RegionSource::Scene { scope: SceneScope::RawObjects(layer), .. } if layer == handle), "the fill reads the lines");
+}
+
+#[test]
+fn lasso_fill_adds_a_filled_path_on_vector_layers() {
+    let (mut s, handle) = vector_session();
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::LassoFill } }).unwrap();
+    let corners = [[300., 200.], [500., 200.], [500., 400.], [300., 400.], [300., 200.]];
+    let ring: Vec<Point> = corners.windows(2).flat_map(|w| (0..20).map(move |i| { let u = f64::from(i) / 20.; [w[0][0] + (w[1][0] - w[0][0]) * u, w[0][1] + (w[1][1] - w[0][1]) * u] })).map(|p| surface_at(&s, p)).collect();
+    press(&mut s, 1, &ring);
+    let object = s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    assert_eq!(object.path_count(), 1);
+    let path = object.paths().next().unwrap().1;
+    assert!(path.geometry.subpaths()[0].closed && matches!(path.style.entries[..], [layer_core::authored::vector::PaintEntry::Fill(_)]));
+    assert!(path.geometry.anchor_count() <= 6, "straight sides keep only their corners: {}", path.geometry.anchor_count());
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone()), Some([path.id].into()));
+}
+
+#[test]
+fn merging_vector_layers_keeps_paths_and_baking_them_asks_first() {
+    let (mut s, lower) = vector_session();
+    draw_line(&mut s, 1, 20);
+    layer(&mut s, LayerAction::NewVector);
+    draw_line(&mut s, 100, 20);
+    invoke(&mut s, CommandId::MergeDown);
+    assert_eq!(s.state.notice, None);
+    let merged = s.engine.document().scene().vector_layer(lower).expect("vector onto vector stays vector");
+    assert_eq!(merged.path_count(), 2);
+    s.layer_action(LayerAction::NewBelow).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(lower), mask: false });
+    invoke(&mut s, CommandId::MergeDown);
+    let notice = s.state.notice.clone().expect("merging into paint asks first");
+    let name = s.engine.document().scene().occurrence(lower).unwrap().name.to_string();
+    assert!(notice.text.contains(&name), "{}", notice.text);
+    assert_eq!(notice.actions.iter().map(|a| (a.id, a.label.as_str())).collect::<Vec<_>>(), [(NoticeActionId::Merge, CommandId::MergeDown.localized_label(s.localization()).as_ref())]);
+    assert!(s.engine.document().scene().vector_layer(lower).is_some(), "nothing changes before the answer");
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::Merge) }).unwrap();
+    assert!(s.engine.document().scene().vector_layer(lower).is_none(), "accepting bakes the paths into the paint layer");
 }

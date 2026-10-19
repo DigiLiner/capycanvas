@@ -7,7 +7,7 @@ const LINE_TOLERANCE: f64 = 0.5;
 
 struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample>, continues: Option<PathItem> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
-struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, whole: bool }
+struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, mode: layer_core::authored::vector::EraseMode }
 
 #[derive(Default)]
 pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasing: Option<Erasing>, revision: u64, pen: Option<u32>, restore: Option<(u32, u32)>, on_vector: bool }
@@ -52,6 +52,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         for item in view.groups.iter_mut().chain(&mut view.subtools) { item.enabled &= self.brush_usable(&item.action); }
         view
     }
+    pub(super) fn vector_eraser_modes(&self) -> Vec<ToolSetItem> {
+        if self.vector_erasing_layer(false).is_none() { return Vec::new(); }
+        [CommandId::EraseTouchedPart, CommandId::EraseWholePaths, CommandId::EraseToIntersection].into_iter().map(|command| ToolSetItem {
+            enabled: true, label: command.localized_label(self.localization()), icon: command.icon().unwrap_or("eraser"),
+            action: UiAction::Invoke { command }, selected: super::vector_eraser(command) == Some(self.state.settings.vector_eraser), preview: None,
+        }).collect()
+    }
     pub(super) fn remember_vector_pen(&mut self, id: u32) {
         if tools::group(id).tool() != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
     }
@@ -93,7 +100,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let offset = document.scene().occurrence_offset64(layer);
                 let local = [point[0] - offset[0], point[1] - offset[1]];
                 let radius = f64::from(self.engine.configured_brush().diameter).max(1.) * 0.5;
-                self.vector_lines.erasing = Some(Erasing { layer, original: object.clone(), current: object, last: local, radius, whole: self.state.settings.erase_whole_paths });
+                self.vector_lines.erasing = Some(Erasing { layer, original: object.clone(), current: object, last: local, radius, mode: self.state.settings.vector_eraser.mode() });
                 self.erase_vector_sample(point)
             }
             PenPhase::Move => self.erase_vector_sample(point),
@@ -112,7 +119,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let eraser = Eraser { from: erasing.last, to: local, radius: erasing.radius };
         erasing.last = local;
         let candidates = self.vector_moves.index.near(&erasing.current, eraser.bounds());
-        let Some(erased) = erasing.current.erase(&candidates, &eraser, erasing.whole) else { return Ok(()) };
+        let Some(erased) = erasing.current.erase(&candidates, &eraser, erasing.mode) else { return Ok(()) };
         erasing.current = erased.clone();
         let layer = erasing.layer;
         let edit = self.engine.document().vector_object_edit(layer, erased).map_err(|e| e.to_string())?;

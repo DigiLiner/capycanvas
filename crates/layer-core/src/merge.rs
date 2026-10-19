@@ -197,6 +197,50 @@ impl Document {
     pub fn merge_refusal(&self, kind: MergeKind) -> Option<MergeRefusal> {
         self.merge(kind).err()
     }
+    /// Merge Down of a plain vector layer onto another keeps paths: the upper
+    /// layer's paths go in front of the lower layer's, in one edit.
+    pub fn vector_merge_down(&self) -> Option<Vec<Edit>> {
+        let m = self.merge(MergeKind::Down).ok()?;
+        let lower = m.anchor?;
+        let upper = self.working.occurrence?;
+        let scene = self.scene();
+        if m.members != BTreeSet::from([upper, lower]) { return None; }
+        let plain = |h: OccurrenceHandle| scene.occurrence(h).filter(|o| o.opacity == 1. && o.mask.is_none() && !o.attachment.is_clip() && scene.attached_effects(h).is_empty());
+        let (top, bottom) = (plain(upper)?, plain(lower)?);
+        let (OccurrenceContent::Vector(top_object), OccurrenceContent::Vector(bottom_object)) = (&top.content, &bottom.content) else { return None };
+        let (paths, base) = (self.artwork.vectors.get(*top_object)?, self.artwork.vectors.get(*bottom_object)?);
+        let [ux, uy] = scene.occurrence_offset64(upper);
+        let [lx, ly] = scene.occurrence_offset64(lower);
+        let moved = paths.transformed(Affine64([1., 0., 0., 1., ux - lx, uy - ly])).ok()?;
+        let mut taken = BTreeSet::new();
+        let records = moved.paths().map(|(_, path)| {
+            let id = if base.contains(path.id) || !taken.insert(path.id) { loop { let id = base.allocate_id(); if !moved.contains(id) && taken.insert(id) { break id; } } } else { path.id };
+            vector::Record::Path(vector::PathItem { id, ..path.clone() })
+        }).collect();
+        let mut edits = vec![Edit::Vector(RecordChange::replace(&self.artwork.vectors, *bottom_object, Some(base.insert_front(records))).ok()?)];
+        for (h, _, before) in self.artwork.stacks.iter().filter(|(_, _, stack)| stack.entries.contains(&upper)) {
+            let mut stack = before.clone();
+            stack.entries.retain(|entry| *entry != upper);
+            edits.push(Edit::Stack(RecordChange::replace(&self.artwork.stacks, h, Some(stack)).ok()?));
+        }
+        edits.extend(self.removal_edits(&BTreeSet::from([upper])).ok()?);
+        let mut working = self.working.clone();
+        working.occurrence = Some(lower);
+        working.layer_selection = [lower].into();
+        working.layer_anchor = Some(lower);
+        working.target = None;
+        working.vector_items = None;
+        working.inspect_mask = None;
+        edits.push(Edit::Working(working));
+        Some(edits)
+    }
+    /// The vector layers a merge would turn into pixels.
+    pub fn merge_rasterizes(&self, kind: MergeKind) -> Vec<OccurrenceHandle> {
+        if kind == MergeKind::Down && self.vector_merge_down().is_some() { return Vec::new(); }
+        let Ok(m) = self.merge(kind) else { return Vec::new() };
+        let scene = self.scene();
+        scene.order().iter().copied().filter(|h| m.members.contains(h) && scene.vector_layer(*h).is_some()).collect()
+    }
     pub fn flatten_discards(&self) -> usize {
         self.merge(MergeKind::Flatten).map_or(0, |m| {
             let scene = self.scene();

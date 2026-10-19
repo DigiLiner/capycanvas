@@ -1681,7 +1681,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let id = doc.working.occurrence.ok_or("Unknown layer")?;
                 let layer = doc.scene().occurrence(id).ok_or("Unknown layer")?;
                 match self.layer_interaction.tool {
-                    LayerCanvasTool::Figure { .. } if self.vector_figure_layer().is_some() => (),
+                    LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill if self.vector_figure_layer().is_some() => (),
+                    LayerCanvasTool::LassoFill if self.editing_vector_layer().is_some() => {
+                        self.notify(self.localization().text(MessageId::COMMANDS_PATHS_NEED_A_COLOR).to_string());
+                        return Ok(());
+                    }
                     LayerCanvasTool::LassoFill | LayerCanvasTool::EncloseFill { .. } | LayerCanvasTool::Gradient { .. } | LayerCanvasTool::Figure { .. }
                         if doc.drawing_content().is_none() && self.selection_masks.target().is_none() =>
                     {
@@ -1771,6 +1775,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                                 self.commit_tool_selection(selection)?;
                             } else if matches!(self.layer_interaction.tool, LayerCanvasTool::EncloseFill { .. }) {
                                 self.enclose_fill(selection);
+                            } else if let Some(layer) = self.vector_figure_layer() {
+                                self.lasso_fill_path(layer, &selection)?;
                             } else {
                                 self.fill_selection(selection)?;
                             }

@@ -150,12 +150,31 @@ layer the draft shows as an outline and Finish paints it into the layer.
 ## Erasing
 
 The Eraser, transparent paint and the pen's eraser end erase paths on a vector
-layer. By default the eraser cuts paths where it covers their centerline: the
-part under the eraser goes, the rest keeps its exact curve and widths, and a cut
-closed path becomes open. The first piece keeps the path's identity and the
-others get new ones. With **Erase whole paths** checked in the tool options, the
-eraser removes every path it touches instead. The eraser's width is the brush
-size, and one stroke is one undo step.
+layer. On a vector layer the Tools list starts with the eraser's modes, above
+the eraser brushes:
+
+- **Erase touched part**, the default, cuts paths where the eraser covers their
+  centerline: the part under the eraser goes, the rest keeps its exact curve
+  and widths, and a cut closed path becomes open.
+- **Erase whole paths** removes every path the eraser touches.
+- **Erase up to intersection** removes the touched part of a path out to the
+  nearest crossings with other paths, or with itself, on either side; a path
+  that crosses nothing goes entirely.
+
+The first piece keeps the path's identity and the others get new ones. The
+eraser's width is the brush size, and one stroke is one undo step.
+
+## Coloring line art
+
+With **Fill** on a vector layer, a click inside a filled path, or inside a path
+whose parts are all closed, fills it with the foreground color below its
+outline, in one undo step; transparent paint removes the fill. A click
+anywhere else adds a paint layer directly below the vector layer and fills it
+there from the vector layer's lines, with Fill's tolerance, gap closing,
+expansion and smoothing; the new layer and the fill are two undo steps.
+**Lasso Fill** on a vector layer adds a filled closed path, with holes where
+the outline crosses itself, and selects it. Gradient and Enclose Fill offer
+New Paint Layer Below.
 
 ## Moving paths
 
@@ -208,7 +227,14 @@ restored with a session.
 ## Rasterize Layer
 
 **Rasterize Layer** turns a vector layer into a paint layer holding what its
-paths show, at the document grid, in one undo step. The layer keeps its opacity,
+paths show, at the document grid, in one undo step.
+
+Merge Down of a vector layer onto another vector layer keeps paths when both
+have full opacity, no mask, no clipping and no attached filters: the upper
+layer's paths move in front of the lower layer's at their place on the canvas,
+in one undo step. Other merges that would turn vector layers into pixels,
+including Merge Visible, Merge Group and Stamp Visible, first show a notice
+naming those layers with the merge as its action. The layer keeps its opacity,
 blend, mask, clipping and attached effects, which still apply once, as for image
 layers ([Object layers](image-objects.md)).
 
@@ -258,6 +284,10 @@ same path as fitting at pen-up.
 `path_commands_join_split_close_reverse_and_compound_selected_paths`,
 `pens_and_the_path_tool_continue_a_selected_paths_open_end`,
 `figure_options_shape_rectangles_polygons_and_stars_on_both_layer_kinds`,
+`erasing_up_to_intersection_stops_at_crossing_lines`,
+`fill_colors_paths_or_fills_a_new_paint_layer_below_from_the_lines`,
+`lasso_fill_adds_a_filled_path_on_vector_layers`,
+`merging_vector_layers_keeps_paths_and_baking_them_asks_first`,
 `edit_transform_shows_the_move_frame_and_outline_widths_can_stay` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover

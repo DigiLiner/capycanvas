@@ -106,14 +106,32 @@ pub struct Settings {
     pub hold_keys: Option<Vec<crate::shortcuts::HoldKey>>,
     #[serde(skip_serializing_if = "EraserEnd::is_default")]
     pub eraser_end: EraserEnd,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub erase_whole_paths: bool,
+    #[serde(skip_serializing_if = "VectorEraser::is_default")]
+    pub vector_eraser: VectorEraser,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub keep_outline_widths: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keymap: Option<crate::keymaps::KeymapRef>,
     /// Per-preset slider values, shared by every placement of that slider.
     pub slider_bookmarks: BTreeMap<String, SliderBookmarks>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorEraser {
+    #[default]
+    TouchedPart,
+    WholePaths,
+    ToIntersection,
+}
+impl VectorEraser {
+    pub fn is_default(&self) -> bool { *self == Self::default() }
+    pub fn mode(self) -> layer_core::authored::vector::EraseMode {
+        match self {
+            Self::TouchedPart => layer_core::authored::vector::EraseMode::Touched,
+            Self::WholePaths => layer_core::authored::vector::EraseMode::Whole,
+            Self::ToIntersection => layer_core::authored::vector::EraseMode::ToIntersection,
+        }
+    }
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -147,7 +165,7 @@ impl Default for Settings {
             hold_keys: None,
             pen_buttons: BTreeMap::new(),
             eraser_end: EraserEnd::default(),
-            erase_whole_paths: false,
+            vector_eraser: VectorEraser::default(),
             keep_outline_widths: false,
             keymap: None,
             slider_bookmarks: BTreeMap::new(),

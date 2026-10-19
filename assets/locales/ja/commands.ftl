@@ -665,3 +665,5 @@ command-reverse-path = 方向を反転
 command-make-compound-path = 複合パスを作成
 command-release-compound-path = 複合パスを解除
 menu-path = パス
+command-erase-touched-part = 触れた部分を消去
+command-erase-to-intersection = 交点まで消去

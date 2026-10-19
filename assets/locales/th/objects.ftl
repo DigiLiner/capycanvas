@@ -17,3 +17,4 @@ objects-vector-refusal-layer = เลเยอร์เวกเตอร์ม�
 objects-action-use-brush = ใช้ { $brush }
 objects-action-reset-setting = รีเซ็ต { $setting }
 objects-action-new-paint-layer-below = เลเยอร์ระบายสีใหม่ด้านล่าง
+objects-merge-turns-paths-into-pixels = การผสานจะเปลี่ยนพาธใน “{ $layers }” เป็นพิกเซล

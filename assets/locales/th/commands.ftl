@@ -665,3 +665,5 @@ command-reverse-path = กลับทิศทาง
 command-make-compound-path = สร้างพาธผสม
 command-release-compound-path = แยกพาธผสม
 menu-path = พาธ
+command-erase-touched-part = ลบส่วนที่แตะ
+command-erase-to-intersection = ลบถึงจุดตัด

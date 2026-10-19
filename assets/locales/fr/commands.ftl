@@ -669,3 +669,5 @@ command-reverse-path = Inverser le sens
 command-make-compound-path = Créer un tracé transparent
 command-release-compound-path = Annuler le tracé transparent
 menu-path = Tracé
+command-erase-touched-part = Effacer la partie touchée
+command-erase-to-intersection = Effacer jusqu’à l’intersection

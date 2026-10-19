@@ -615,3 +615,6 @@ workspace-tool-description-split-path = Taglia i tracciati negli ancoraggi selez
 workspace-tool-description-reverse-path = Inverti il senso dei tracciati selezionati, scambiando inizio e fine
 workspace-tool-description-make-compound-path = Unisci i tracciati selezionati in uno, con fori dove si sovrappongono
 workspace-tool-description-release-compound-path = Rendi ogni parte di un tracciato composto un tracciato a sé
+workspace-tool-description-erase-touched-part = Taglia i tracciati dove la gomma ne copre la linea centrale
+workspace-tool-description-erase-whole-paths = Rimuovi ogni tracciato toccato dalla gomma
+workspace-tool-description-erase-to-intersection = Rimuovi la parte del tracciato tra gli incroci ai lati del punto toccato dalla gomma

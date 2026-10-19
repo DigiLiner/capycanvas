@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Un calque vectoriel contient des tracés, pas de 
 objects-action-use-brush = Utiliser { $brush }
 objects-action-reset-setting = Réinitialiser { $setting }
 objects-action-new-paint-layer-below = Nouveau calque de peinture dessous
+objects-merge-turns-paths-into-pixels = La fusion transforme les tracés de « { $layers } » en pixels.

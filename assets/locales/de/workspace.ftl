@@ -618,3 +618,6 @@ workspace-tool-description-split-path = Pfade an den ausgewählten Ankerpunkten 
 workspace-tool-description-reverse-path = Ausgewählte Pfade umkehren, sodass Anfang und Ende tauschen
 workspace-tool-description-make-compound-path = Ausgewählte Pfade zu einem verbinden, mit Löchern, wo sie sich überlappen
 workspace-tool-description-release-compound-path = Jeden Teil eines zusammengesetzten Pfads wieder zu einem eigenen Pfad machen
+workspace-tool-description-erase-touched-part = Pfade dort trennen, wo der Radierer ihre Mittellinie überdeckt
+workspace-tool-description-erase-whole-paths = Jeden Pfad entfernen, den der Radierer berührt
+workspace-tool-description-erase-to-intersection = Den Teil eines Pfads zwischen den Kreuzungen beidseits der Radierstelle entfernen

@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Векторный слой содержит ко
 objects-action-use-brush = Взять { $brush }
 objects-action-reset-setting = Сбросить «{ $setting }»
 objects-action-new-paint-layer-below = Новый слой рисования ниже
+objects-merge-turns-paths-into-pixels = При объединении контуры в «{ $layers }» станут пикселями.

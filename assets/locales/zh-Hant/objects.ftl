@@ -17,3 +17,4 @@ objects-vector-refusal-layer = 向量圖層包含路徑，而不是繪畫。
 objects-action-use-brush = 使用{ $brush }
 objects-action-reset-setting = 重設{ $setting }
 objects-action-new-paint-layer-below = 在下方新增繪畫圖層
+objects-merge-turns-paths-into-pixels = 合併會將「{ $layers }」中的路徑變為像素。

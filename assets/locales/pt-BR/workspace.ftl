@@ -621,3 +621,6 @@ workspace-tool-description-split-path = Cortar os caminhos nas âncoras selecion
 workspace-tool-description-reverse-path = Inverter o sentido dos caminhos selecionados, trocando início e fim
 workspace-tool-description-make-compound-path = Combinar os caminhos selecionados em um, com furos onde se sobrepõem
 workspace-tool-description-release-compound-path = Transformar cada parte de um caminho composto em um caminho próprio
+workspace-tool-description-erase-touched-part = Cortar os caminhos onde a borracha cobre a linha central
+workspace-tool-description-erase-whole-paths = Remover cada caminho que a borracha toca
+workspace-tool-description-erase-to-intersection = Remover a parte do caminho entre os cruzamentos de cada lado de onde a borracha toca

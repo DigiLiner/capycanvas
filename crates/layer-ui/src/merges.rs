@@ -65,11 +65,19 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Flatten Image asks, through the notice, before it discards hidden layers.
     pub(super) fn merge(&mut self, kind: MergeKind) -> Result<(), String> {
         refused(self.merge_refusal(kind))?;
-        let hidden = if kind == MergeKind::Flatten { self.engine.document().flatten_discards() } else { 0 };
-        if hidden == 0 {
-            return self.bake(kind);
+        let document = self.engine.document();
+        if kind == MergeKind::Down && let Some(edits) = document.vector_merge_down() {
+            return self.layer_edit(layer_core::Edit::Batch(edits));
         }
-        self.offer_flatten(hidden);
+        let hidden = if kind == MergeKind::Flatten { document.flatten_discards() } else { 0 };
+        if hidden > 0 {
+            self.offer_flatten(hidden);
+            return Ok(());
+        }
+        let rasterized: Vec<std::sync::Arc<str>> = document.merge_rasterizes(kind).into_iter()
+            .filter_map(|h| document.scene().occurrence(h).map(|o| o.name.clone())).collect();
+        if rasterized.is_empty() { return self.bake(kind); }
+        self.offer_rasterizing_merge(kind, rasterized);
         Ok(())
     }
 

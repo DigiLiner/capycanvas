@@ -17,3 +17,4 @@ objects-vector-refusal-layer = ベクターレイヤーにはパスがあり、�
 objects-action-use-brush = { $brush }を使う
 objects-action-reset-setting = { $setting }をリセット
 objects-action-new-paint-layer-below = 下に新規ペイントレイヤー
+objects-merge-turns-paths-into-pixels = 結合すると「{ $layers }」のパスはピクセルになります。

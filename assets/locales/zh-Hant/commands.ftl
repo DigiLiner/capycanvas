@@ -665,3 +665,5 @@ command-reverse-path = 反轉方向
 command-make-compound-path = 建立複合路徑
 command-release-compound-path = 釋放複合路徑
 menu-path = 路徑
+command-erase-touched-part = 擦除觸及部分
+command-erase-to-intersection = 擦除到交叉點

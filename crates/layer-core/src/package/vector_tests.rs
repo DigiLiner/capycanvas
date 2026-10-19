@@ -665,7 +665,7 @@ fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
     let path = ink(1, curve, false, Some(profile));
     let original = samples(&path);
     let eraser = Eraser { from: [100., -40.], to: [100., 40.], radius: 6. };
-    let pieces = path.erased(&eraser).expect("the eraser crosses the path");
+    let pieces = path.erased(&eraser, None).expect("the eraser crosses the path");
     assert_eq!(pieces.len(), 2, "one crossing leaves two pieces");
     for piece in &pieces {
         piece.validate().unwrap();
@@ -676,11 +676,11 @@ fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
             assert!(eraser.from[0] - point[0] >= 6. - 1e-3 || point[0] - eraser.from[0] >= 6. - 1e-3, "nothing inside the eraser remains");
         }
     }
-    assert!(path.erased(&Eraser { from: [400., 0.], to: [400., 10.], radius: 6. }).is_none(), "a miss leaves the path alone");
-    assert_eq!(path.erased(&Eraser { from: [-10., 0.], to: [210., 20.], radius: 80. }), Some(Vec::new()), "covering everything removes the path");
+    assert!(path.erased(&Eraser { from: [400., 0.], to: [400., 10.], radius: 6. }, None).is_none(), "a miss leaves the path alone");
+    assert_eq!(path.erased(&Eraser { from: [-10., 0.], to: [210., 20.], radius: 80. }, None), Some(Vec::new()), "covering everything removes the path");
 
     let square = ink(2, [[0., 0.], [50., 0.], [50., 50.], [0., 50.]].map(Anchor::corner).to_vec(), true, None);
-    let opened = square.erased(&Eraser { from: [25., -5.], to: [25., 5.], radius: 3. }).unwrap();
+    let opened = square.erased(&Eraser { from: [25., -5.], to: [25., 5.], radius: 3. }, None).unwrap();
     assert_eq!(opened.len(), 1, "cutting a closed path once opens it");
     let subpath = &opened[0].geometry.subpaths()[0];
     assert!(!subpath.closed);
@@ -691,7 +691,7 @@ fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
         Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([100., 0.])], false),
         Subpath::new(&[Anchor::corner([0., 50.]), Anchor::corner([100., 50.])], false),
     ]).unwrap()), square.style.clone());
-    let cut = compound.erased(&Eraser { from: [50., -5.], to: [50., 5.], radius: 3. }).unwrap();
+    let cut = compound.erased(&Eraser { from: [50., -5.], to: [50., 5.], radius: 3. }, None).unwrap();
     assert_eq!(cut.len(), 1, "a compound path stays one path");
     assert_eq!(cut[0].geometry.subpaths().len(), 3);
 }
@@ -702,15 +702,15 @@ fn erasing_a_layer_splits_or_removes_only_touched_paths_with_fresh_ids() {
     let mut index = VectorIndex::default();
     let eraser = Eraser { from: [100., 5.], to: [100., 52.], radius: 4. };
     let near = index.near(&object, eraser.bounds());
-    let split = object.erase(&near, &eraser, false).unwrap();
+    let split = object.erase(&near, &eraser, EraseMode::Touched).unwrap();
     split.validate().unwrap();
     assert_eq!(split.path_count(), 105, "five crossed lines split in two");
     let order: Vec<u64> = split.paths().map(|(_, p)| p.id.0).take(11).collect();
     assert_eq!(order[..2], [1, order[1]], "a split keeps the first piece's identity in place");
     assert!(order[1] > 100, "the second piece gets a new identity");
-    let whole = object.erase(&index.near(&object, eraser.bounds()), &eraser, true).unwrap();
+    let whole = object.erase(&index.near(&object, eraser.bounds()), &eraser, EraseMode::Whole).unwrap();
     assert_eq!(whole.path_count(), 95, "Whole Path removes every touched path");
-    assert!(object.erase(&index.near(&object, [500., 500., 510., 510.]), &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, false).is_none());
+    assert!(object.erase(&index.near(&object, [500., 500., 510., 510.]), &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, EraseMode::Touched).is_none());
 }
 
 #[test]
@@ -753,4 +753,64 @@ fn newer_vector_layers_open_from_their_fallback_locked_and_save_back_unchanged()
 
     let current = open(save(&layer(&readable, 1)));
     assert!(current.objects.is_empty() && vector(&current).path_count() == 1, "a reader that knows every record opens the paths and drops the fallback");
+}
+
+#[test]
+fn erasing_up_to_intersections_removes_the_touched_span_between_crossings() {
+    let horizontal = plain_line(1, [0., 50.], [300., 50.], 2.);
+    let left = plain_line(2, [100., 0.], [100., 100.], 2.);
+    let right = plain_line(3, [200., 0.], [200., 100.], 2.);
+    let object = VectorObject::from_records(vec![Record::Path(horizontal.clone()), Record::Path(left), Record::Path(right)]);
+    let mut index = VectorIndex::default();
+    let eraser = Eraser { from: [150., 45.], to: [150., 55.], radius: 3. };
+    let near = index.near(&object, eraser.bounds());
+    let erased = object.erase(&near, &eraser, EraseMode::ToIntersection).unwrap();
+    erased.validate().unwrap();
+    let pieces: Vec<[f64; 4]> = erased.paths().filter(|(_, p)| p.id == ItemId(1) || p.id.0 > 3).map(|(_, p)| p.geometry.hull()).collect();
+    assert_eq!(pieces.len(), 2, "the line keeps both outer parts: {pieces:?}");
+    assert!(pieces.iter().any(|h| (h[0] - 0.).abs() < 1e-3 && (h[2] - 100.).abs() < 1e-3), "{pieces:?}");
+    assert!(pieces.iter().any(|h| (h[0] - 200.).abs() < 1e-3 && (h[2] - 300.).abs() < 1e-3), "{pieces:?}");
+    assert_eq!(erased.paths().filter(|(_, p)| p.id == ItemId(2) || p.id == ItemId(3)).count(), 2, "the crossing lines stay");
+    let cut = object.erase(&near, &eraser, EraseMode::Touched).unwrap();
+    assert!(cut.paths().filter(|(_, p)| p.id == ItemId(1) || p.id.0 > 3).any(|(_, p)| p.geometry.hull()[2] > 140. && p.geometry.hull()[2] < 150.), "Touched Part cuts only under the eraser");
+    let alone = VectorObject::from_records(vec![Record::Path(horizontal)]);
+    let gone = alone.erase(&index.near(&alone, eraser.bounds()), &eraser, EraseMode::ToIntersection).unwrap();
+    assert_eq!(gone.path_count(), 0, "a line that crosses nothing goes entirely");
+    let square = PathItem::new(ItemId(9), Arc::new(PathGeometry::new(vec![Subpath::new(&[[0., 0.], [40., 0.], [40., 40.], [0., 40.]].map(Anchor::corner), true)]).unwrap()), Arc::new(Style::default()));
+    assert!(square.encloses([20., 20.], 0.1) && !square.encloses([60., 20.], 0.1), "a closed path encloses its inside");
+    assert!(!plain_line(10, [0., 0.], [40., 40.], 2.).encloses([20., 10.], 0.1), "an open unfilled line encloses nothing");
+}
+
+#[test]
+fn merging_a_plain_vector_layer_down_onto_another_keeps_paths() {
+    let artwork = crate::Artwork::new([640, 480]).unwrap();
+    let mut editor = crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
+    let (lower, edit) = editor.document().create_vector_layer_edit("Lines", VectorObject::from_records(vec![Record::Path(plain_line(1, [10., 10.], [100., 10.], 2.))]), None, 0).unwrap();
+    editor.perform(edit).unwrap();
+    let (upper, edit) = editor.document().create_vector_layer_edit("More", VectorObject::from_records(vec![Record::Path(plain_line(1, [10., 50.], [100., 50.], 2.)), Record::Path(plain_line(2, [10., 90.], [100., 90.], 2.))]), None, 0).unwrap();
+    editor.perform(edit).unwrap();
+    let mut moved = editor.document().scene().occurrence(upper).unwrap().clone();
+    moved.offset = [5, 7];
+    editor.perform(crate::Edit::Occurrence(crate::RecordChange::replace(&editor.document().artwork.occurrences, upper, Some(moved)).unwrap())).unwrap();
+    let mut working = editor.document().working.clone();
+    working.occurrence = Some(upper);
+    editor.perform(crate::Edit::Working(working)).unwrap();
+    assert!(editor.document().merge_rasterizes(crate::MergeKind::Down).is_empty());
+    assert_eq!(editor.document().merge_rasterizes(crate::MergeKind::Visible).len(), 2, "Merge Visible turns both into pixels");
+    let edits = editor.document().vector_merge_down().expect("two plain vector layers merge as paths");
+    editor.perform(crate::Edit::Batch(edits)).unwrap();
+    let document = editor.document();
+    assert!(document.scene().occurrence(upper).is_none() && document.working.occurrence == Some(lower));
+    let merged = document.scene().vector_layer(lower).unwrap();
+    merged.validate().unwrap();
+    assert_eq!(merged.path_count(), 3);
+    let fronts: Vec<[f64; 2]> = merged.paths().map(|(_, p)| p.geometry.subpaths()[0].anchor(0).point()).collect();
+    assert_eq!(fronts, [[15., 57.], [15., 97.], [10., 10.]], "the upper paths sit in front, at their place on the canvas");
+    editor.undo().unwrap();
+    assert!(editor.document().scene().vector_layer(upper).is_some(), "one undo step restores both layers");
+    let mut faded = editor.document().scene().occurrence(upper).unwrap().clone();
+    faded.opacity = 0.5;
+    editor.perform(crate::Edit::Occurrence(crate::RecordChange::replace(&editor.document().artwork.occurrences, upper, Some(faded)).unwrap())).unwrap();
+    assert!(editor.document().vector_merge_down().is_none(), "a faded layer bakes into pixels");
+    assert_eq!(editor.document().merge_rasterizes(crate::MergeKind::Down), [upper, lower]);
 }

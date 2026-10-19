@@ -165,20 +165,48 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let Some(point) = self.region_tools.contact.take() else {
                     return;
                 };
-                self.request_region_at(point, None);
+                self.request_region_at(point, None, None);
             }
             PenPhase::Cancel => self.region_tools.cancel(),
             _ => (),
         }
     }
     pub(super) fn enclose_fill(&mut self, enclosure: Selection) {
-        self.request_region_at(Point { x: 0., y: 0. }, Some(enclosure));
+        self.request_region_at(Point { x: 0., y: 0. }, Some(enclosure), None);
     }
-    fn request_region_at(&mut self, point: Point, enclosure: Option<Selection>) {
+    fn fill_vector_layer(&mut self, layer: OccurrenceHandle, point: Point) -> Result<(), String> {
+        use layer_core::authored::vector::{PaintEntry, Record, Style};
+        let doc = self.engine.document();
+        if doc.is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
+        let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
+        let [ox, oy] = doc.scene().occurrence_offset64(layer);
+        let local = [f64::from(point.x) - ox, f64::from(point.y) - oy];
+        let tolerance = 0.25 * self.document_per_surface_pixel();
+        let fill = if self.state.colors.transparent() { None } else {
+            self.vector_figure_style(FigurePaint::Fill, layer_core::authored::vector::Cap::Butt, layer_core::authored::vector::Join::Miter)?.entries.first().cloned()
+        };
+        let edit = object.paths().find(|(_, path)| !path.locked && path.encloses(local, tolerance)).map(|(position, path)| {
+            let mut entries: Vec<PaintEntry> = path.style.entries.iter().filter(|entry| !matches!(entry, PaintEntry::Fill(_))).cloned().collect();
+            if let Some(fill) = fill.clone() { entries.insert(0, fill); }
+            let restyled = Record::Path(path.with_style(std::sync::Arc::new(Style::new(entries))));
+            doc.vector_object_edit(layer, object.replace([(position, Some(restyled))])).map_err(|e| e.to_string())
+        }).transpose()?;
+        if let Some(edit) = edit { return self.layer_edit(edit); }
+        if self.state.colors.transparent() { return Ok(()); }
+        self.layer_action(LayerAction::NewBelow)?;
+        let source = layer_render::RegionSource::Scene { snapshot: self.engine.document().snapshot(), scope: SceneScope::RawObjects(layer) };
+        self.request_region_at(point, None, Some(source));
+        Ok(())
+    }
+    fn request_region_at(&mut self, point: Point, enclosure: Option<Selection>, from: Option<layer_render::RegionSource>) {
         let enclosed = enclosure.is_some();
         let Some((fill, source, contiguous)) = self.layer_interaction.tool.region() else {
             return;
         };
+        if fill && from.is_none() && !enclosed && self.selection_masks.target().is_none() && let Some(layer) = self.editing_vector_layer() {
+            if let Err(error) = self.fill_vector_layer(layer, point) { self.notify(error); }
+            return;
+        }
         let doc = self.engine.document();
         let mask_target = self.selection_masks.target().filter(|_| fill);
         let source_target=if mask_target.is_some() {
@@ -209,9 +237,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     source_to_document: basis, keep_canvas_edges: false,
                 })
             } else if fill { None } else { self.selection_refinement(basis) },
-            source: match source {
-                RegionSource::Visible => layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::All},
-                RegionSource::Editing => {
+            source: match (from, source) {
+                (Some(from), _) => from,
+                (None, RegionSource::Visible) => layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::All},
+                (None, RegionSource::Editing) => {
                     if let Some(target) = source_target {
                         layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::Raw(target)}
                     } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().holds_objects(*handle)) {
@@ -228,7 +257,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         layer_render::RegionSource::Scene {snapshot,scope:SceneScope::Members(vec![handle].into())}
                     }
                 }
-                RegionSource::Reference => {
+                (None, RegionSource::Reference) => {
                     if doc.scene().references().is_empty() {
                         self.notify_missing_reference();
                         return;

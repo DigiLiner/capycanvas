@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Vektör katmanı yollar içerir, boya değil.
 objects-action-use-brush = { $brush } Kullan
 objects-action-reset-setting = { $setting } Sıfırla
 objects-action-new-paint-layer-below = Alta Yeni Boya Katmanı
+objects-merge-turns-paths-into-pixels = Birleştirme, “{ $layers }” içindeki yolları piksele dönüştürür.

@@ -669,3 +669,5 @@ command-reverse-path = Richtung umkehren
 command-make-compound-path = Zusammengesetzten Pfad erstellen
 command-release-compound-path = Zusammengesetzten Pfad lösen
 menu-path = Pfad
+command-erase-touched-part = Berührten Teil radieren
+command-erase-to-intersection = Bis zum Schnittpunkt radieren

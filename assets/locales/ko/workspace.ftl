@@ -641,3 +641,6 @@ workspace-tool-description-split-path = 선택한 고정점에서 패스를 끊�
 workspace-tool-description-reverse-path = 선택한 패스의 방향을 바꿔 시작과 끝을 맞바꿉니다.
 workspace-tool-description-make-compound-path = 선택한 패스를 하나로 합치고 겹치는 곳은 구멍으로 만듭니다.
 workspace-tool-description-release-compound-path = 컴파운드 패스의 각 부분을 개별 패스로 되돌립니다.
+workspace-tool-description-erase-touched-part = 지우개가 중심선을 덮은 곳에서 패스를 자릅니다.
+workspace-tool-description-erase-whole-paths = 지우개가 닿은 패스를 통째로 지웁니다.
+workspace-tool-description-erase-to-intersection = 지우개가 닿은 곳 양쪽의 교차점 사이 부분을 지웁니다.

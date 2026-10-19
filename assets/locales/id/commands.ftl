@@ -1249,3 +1249,5 @@ command-reverse-path = Balik arah
 command-make-compound-path = Buat jalur gabungan
 command-release-compound-path = Lepas jalur gabungan
 menu-path = Jalur
+command-erase-touched-part = Hapus bagian yang tersentuh
+command-erase-to-intersection = Hapus sampai perpotongan

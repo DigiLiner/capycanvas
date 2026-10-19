@@ -517,13 +517,16 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub(super) fn current_tool_set(&self) -> ToolSetView {
         let Some((group, anchor)) = self.active_tool_group() else {
-            return self.mark_path_brushes(tools::view(&self.state.brush, self.layer_interaction.tool, self.localization()));
+            let mut view = self.mark_path_brushes(tools::view(&self.state.brush, self.layer_interaction.tool, self.localization()));
+            view.subtools.splice(0..0, self.vector_eraser_modes());
+            return view;
         };
         let mut view = self.group_tool_set(group, anchor);
         if matches!(group, ToolControlGroup::Slot(ToolSlotId::Gradient))
             || self.layer_interaction.tool.selection_tool().is_some() && matches!(group, ToolControlGroup::Slot(_)) {
             view.subtools = std::mem::take(&mut view.groups);
         }
+        view.subtools.splice(0..0, self.vector_eraser_modes());
         view
     }
 

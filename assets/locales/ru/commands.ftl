@@ -672,3 +672,5 @@ command-reverse-path = Обратить направление
 command-make-compound-path = Создать составной контур
 command-release-compound-path = Разобрать составной контур
 menu-path = Контур
+command-erase-touched-part = Стирать задетую часть
+command-erase-to-intersection = Стирать до пересечения

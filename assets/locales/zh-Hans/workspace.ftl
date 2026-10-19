@@ -641,3 +641,6 @@ workspace-tool-description-split-path = 在所选锚点处断开路径
 workspace-tool-description-reverse-path = 反转所选路径的方向，交换起点和终点
 workspace-tool-description-make-compound-path = 将所选路径合并为一个，重叠处形成镂空
 workspace-tool-description-release-compound-path = 将复合路径的每个部分恢复为独立路径
+workspace-tool-description-erase-touched-part = 在橡皮擦覆盖路径中线的地方切断路径
+workspace-tool-description-erase-whole-paths = 移除橡皮擦触及的每条路径
+workspace-tool-description-erase-to-intersection = 移除橡皮擦触及处两侧交叉点之间的路径部分

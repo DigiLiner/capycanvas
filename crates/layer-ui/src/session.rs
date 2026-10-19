@@ -349,6 +349,16 @@ fn transform_choice(command: CommandId) -> Option<TransformChoice> {
     })
 }
 
+pub(super) fn vector_eraser(command: CommandId) -> Option<crate::settings::VectorEraser> {
+    use crate::settings::VectorEraser;
+    Some(match command {
+        CommandId::EraseTouchedPart => VectorEraser::TouchedPart,
+        CommandId::EraseWholePaths => VectorEraser::WholePaths,
+        CommandId::EraseToIntersection => VectorEraser::ToIntersection,
+        _ => return None,
+    })
+}
+
 impl<R: CanvasRenderer> UiSession<R> {
     pub fn blank(renderer: R, viewport: [u32; 2], platform: Platform) -> Result<Self, String> {
         Self::blank_localized(renderer, viewport, platform, Localizer::shared(UiLanguage::English))
@@ -2640,7 +2650,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::SmoothingAdjustSpeed => {
                 self.smoothing_available()
             }
-            CommandId::EraseWholePaths => self.vector_erasing_layer(false).is_some(),
+            CommandId::EraseTouchedPart | CommandId::EraseWholePaths | CommandId::EraseToIntersection => self.vector_erasing_layer(false).is_some(),
             CommandId::ScaleOutlineWidths => self.selected_vector_items().is_some(),
             _ => true,
         };
@@ -2648,7 +2658,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let selection_mode = self.effective_selection_mode();
         let selected = (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
             || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
-            || (id == CommandId::EraseWholePaths && self.state.settings.erase_whole_paths)
+            || vector_eraser(id) == Some(self.state.settings.vector_eraser)
             || (id == CommandId::ScaleOutlineWidths && !self.state.settings.keep_outline_widths)
             || (id == CommandId::QuickMask && self.selection_masks.quick())
             || (id == CommandId::SelectionOutline && self.selection_tools.options.display.outline)
@@ -4897,8 +4907,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.state.settings.keep_outline_widths ^= true;
                 Ok((SETTINGS | BRUSH | COMMANDS, false))
             }
-            CommandId::EraseWholePaths => {
-                self.state.settings.erase_whole_paths ^= true;
+            CommandId::EraseTouchedPart | CommandId::EraseWholePaths | CommandId::EraseToIntersection => {
+                self.state.settings.vector_eraser = vector_eraser(command).unwrap_or_default();
                 Ok((SETTINGS | BRUSH | COMMANDS, false))
             }
             CommandId::SmoothingAdjustSpeed => {
@@ -5591,7 +5601,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             let moving = tool == LayerCanvasTool::Move;
             let guides = matches!(tool, LayerCanvasTool::Ruler { .. }) || (moving && self.selected_ruler().is_some());
             let mixing = tool == LayerCanvasTool::Paint && tool_settings::mixes_color(self.engine.configured_brush());
-            let erasing_paths = tool == LayerCanvasTool::Paint && self.vector_erasing_layer(false).is_some();
             let editing_points = tool == LayerCanvasTool::EditPoints && self.selected_vector_items().is_some();
             let arranging = moving && self.selected_vector_items().is_some();
             let turning = arranging.then_some([CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight]);
@@ -5601,7 +5610,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .chain(moving.then_some(CommandId::TransformSnapping))
                 .chain(guides.then_some([CommandId::ShowRulers, CommandId::SnapRulers, CommandId::DeleteRuler]).into_iter().flatten())
                 .chain(mixing.then_some(tool_settings::COLOR_MIXING_COMMANDS).into_iter().flatten())
-                .chain(erasing_paths.then_some(CommandId::EraseWholePaths))
                 .chain(arranging.then_some([CommandId::BringToFront, CommandId::BringForward, CommandId::SendBackward, CommandId::SendToBack]).into_iter().flatten())
                 .chain(turning.into_iter().flatten())
                 .chain(arranging.then_some(CommandId::ScaleOutlineWidths))

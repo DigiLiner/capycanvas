@@ -665,3 +665,5 @@ command-reverse-path = 방향 반전
 command-make-compound-path = 컴파운드 패스 만들기
 command-release-compound-path = 컴파운드 패스 해제
 menu-path = 패스
+command-erase-touched-part = 닿은 부분 지우기
+command-erase-to-intersection = 교차점까지 지우기

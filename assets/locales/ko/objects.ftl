@@ -17,3 +17,4 @@ objects-vector-refusal-layer = 벡터 레이어에는 패스가 있으며 페인
 objects-action-use-brush = { $brush } 사용
 objects-action-reset-setting = { $setting } 재설정
 objects-action-new-paint-layer-below = 아래에 새 페인트 레이어
+objects-merge-turns-paths-into-pixels = 병합하면 “{ $layers }”의 패스가 픽셀이 됩니다.

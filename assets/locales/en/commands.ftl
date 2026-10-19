@@ -669,3 +669,5 @@ command-reverse-path = Reverse direction
 command-make-compound-path = Make compound path
 command-release-compound-path = Release compound path
 menu-path = Path
+command-erase-touched-part = Erase touched part
+command-erase-to-intersection = Erase up to intersection

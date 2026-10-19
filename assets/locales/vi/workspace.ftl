@@ -612,3 +612,6 @@ workspace-tool-description-split-path = Cắt đường tại các điểm neo �
 workspace-tool-description-reverse-path = Đảo chiều các đường đã chọn, hoán đổi điểm đầu và điểm cuối
 workspace-tool-description-make-compound-path = Gộp các đường đã chọn thành một, chỗ chồng lên nhau thành lỗ
 workspace-tool-description-release-compound-path = Biến mỗi phần của đường phức hợp thành đường riêng
+workspace-tool-description-erase-touched-part = Cắt đường tại chỗ tẩy phủ lên đường giữa
+workspace-tool-description-erase-whole-paths = Xóa mọi đường mà tẩy chạm vào
+workspace-tool-description-erase-to-intersection = Xóa phần đường giữa các giao điểm hai bên chỗ tẩy chạm vào

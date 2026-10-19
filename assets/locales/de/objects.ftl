@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Eine Vektorebene enthält Pfade, keine Farbe.
 objects-action-use-brush = { $brush } verwenden
 objects-action-reset-setting = { $setting } zurücksetzen
 objects-action-new-paint-layer-below = Neue Malebene darunter
+objects-merge-turns-paths-into-pixels = Beim Zusammenfügen werden die Pfade in „{ $layers }“ zu Pixeln.

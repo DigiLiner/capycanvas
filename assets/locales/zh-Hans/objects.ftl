@@ -17,3 +17,4 @@ objects-vector-refusal-layer = 矢量图层包含路径，而不是绘画。
 objects-action-use-brush = 使用{ $brush }
 objects-action-reset-setting = 重置{ $setting }
 objects-action-new-paint-layer-below = 在下方新建绘画图层
+objects-merge-turns-paths-into-pixels = 合并会将“{ $layers }”中的路径变为像素。

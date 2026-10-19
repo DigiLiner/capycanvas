@@ -190,7 +190,7 @@ pub use settings::{
     PreferenceGroup, PreferenceId, PreferenceKind, PreferencePage, PreferenceReset, PreferenceRow,
     PreferenceSearchResult, PreferenceValue, PreferencesState, PreferencesView, Settings,
     SettingsPage, ShortcutEditor, Swatch, ZenIcon, MissingProfilePolicy, PhotoOpenPolicy,
-    EraserEnd, ModifierKeyAction, ModifierKeyEditor,
+    EraserEnd, ModifierKeyAction, ModifierKeyEditor, VectorEraser,
 };
 pub use shortcut_page::{
     ActionPickerView, MODIFIER_SECTION, ModifierKeyRow, PenButtonEditor, PickerAction, PickerSection, ShortcutCategoryView,
@@ -695,7 +695,9 @@ command_ids! {
     ColorMixLinear,
     ColorMixClassic,
     SmoothingAdjustSpeed,
+    EraseTouchedPart,
     EraseWholePaths,
+    EraseToIntersection,
     ScaleOutlineWidths,
     Heal,
     SpotHeal,
@@ -730,7 +732,7 @@ impl CommandId {
                 | Self::TransformSnapping | Self::TransformFree | Self::TransformUniform | Self::TransformDistort | Self::TransformPerspective
                 | Self::TransformNearest | Self::TransformBilinear | Self::TransformBicubic | Self::TransformLanczos
                 | Self::ColorMixOklab | Self::ColorMixLinear | Self::ColorMixClassic
-                | Self::SmoothingAdjustSpeed | Self::EraseWholePaths | Self::ScaleOutlineWidths
+                | Self::SmoothingAdjustSpeed | Self::EraseTouchedPart | Self::EraseWholePaths | Self::EraseToIntersection | Self::ScaleOutlineWidths
                 | Self::TransformWarp | Self::WarpGridThree | Self::WarpGridFour | Self::WarpGridFive
                 | Self::WarpSplitVertical | Self::WarpSplitHorizontal | Self::WarpSplitCross | Self::WarpSelectPoints
                 | Self::ZenMode
@@ -849,7 +851,10 @@ impl CommandId {
             Self::FitWidth => "fit",
             Self::RotateView => "rotate-right",
             Self::Zoom => "search",
-            Self::CenterZoomClicks | Self::SmoothingAdjustSpeed | Self::EraseWholePaths | Self::ScaleOutlineWidths => return None,
+            Self::CenterZoomClicks | Self::SmoothingAdjustSpeed | Self::ScaleOutlineWidths => return None,
+            Self::EraseTouchedPart => "erase-touched-part",
+            Self::EraseWholePaths => "erase-whole-path",
+            Self::EraseToIntersection => "erase-to-intersection",
             Self::Eyedropper => "eyedropper",
             Self::Gradient => "gradient",
             Self::Figure => "figure",
@@ -1278,7 +1283,9 @@ impl CommandId {
             Self::ColorMixLinear => MessageId::COMMAND_COLOR_MIX_LINEAR,
             Self::ColorMixClassic => MessageId::COMMAND_COLOR_MIX_CLASSIC,
             Self::SmoothingAdjustSpeed => MessageId::COMMAND_SMOOTHING_ADJUST_SPEED,
+            Self::EraseTouchedPart => MessageId::COMMAND_ERASE_TOUCHED_PART,
             Self::EraseWholePaths => MessageId::COMMAND_ERASE_WHOLE_PATHS,
+            Self::EraseToIntersection => MessageId::COMMAND_ERASE_TO_INTERSECTION,
             Self::ScaleOutlineWidths => MessageId::COMMAND_SCALE_OUTLINE_WIDTHS,
             Self::BlendPerceptual => MessageId::COMMAND_BLEND_PERCEPTUAL,
             Self::BlendLinear => MessageId::COMMAND_BLEND_LINEAR,
@@ -1861,7 +1868,7 @@ mod icon_tests {
     #[test]
     fn command_icons_ship_and_editing_semantics_are_distinct() {
         assert_eq!(CommandId::ALL.into_iter().filter(|command| command.icon().is_none()).collect::<Vec<_>>(),
-            [CommandId::CenterZoomClicks, CommandId::SmoothingAdjustSpeed, CommandId::EraseWholePaths, CommandId::ScaleOutlineWidths]);
+            [CommandId::CenterZoomClicks, CommandId::SmoothingAdjustSpeed, CommandId::ScaleOutlineWidths]);
         for command in CommandId::ALL {
             if let Some(icon) = command.icon() { assert!(icon_ships(icon), "{command:?}: missing SVG"); }
         }

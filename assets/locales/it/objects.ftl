@@ -17,3 +17,4 @@ objects-vector-refusal-layer = Un livello vettoriale contiene tracciati, non pit
 objects-action-use-brush = Usa { $brush }
 objects-action-reset-setting = Ripristina { $setting }
 objects-action-new-paint-layer-below = Nuovo livello di pittura sotto
+objects-merge-turns-paths-into-pixels = L’unione trasforma i tracciati di «{ $layers }» in pixel.

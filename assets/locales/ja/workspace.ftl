@@ -641,3 +641,6 @@ workspace-tool-description-split-path = 選択したアンカーでパスを切�
 workspace-tool-description-reverse-path = 選択したパスの向きを反対にして、始点と終点を入れ替えます。
 workspace-tool-description-make-compound-path = 選択したパスを1つにまとめ、重なる部分を穴にします。
 workspace-tool-description-release-compound-path = 複合パスの各部分を個別のパスに戻します。
+workspace-tool-description-erase-touched-part = 消しゴムが中心線に触れた部分でパスを切ります。
+workspace-tool-description-erase-whole-paths = 消しゴムが触れたパスを丸ごと消去します。
+workspace-tool-description-erase-to-intersection = 消しゴムが触れた位置の両側にある交点の間を消去します。

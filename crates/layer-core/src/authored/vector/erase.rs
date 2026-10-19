@@ -3,6 +3,9 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Eraser { pub from: [f64; 2], pub to: [f64; 2], pub radius: f64 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EraseMode { #[default] Touched, Whole, ToIntersection }
+
 impl Eraser {
     pub fn bounds(&self) -> [f64; 4] {
         let r = self.radius;
@@ -55,30 +58,113 @@ fn portion(segment: Segment, from: f64, to: f64) -> Segment {
     if to < 1. { right.split((to - from) / (1. - from)).0 } else { right }
 }
 
-fn kept(subpath: &Subpath, eraser: &Eraser) -> Option<Pieces> {
-    if subpath.segment_count() == 0 { return eraser.covers(subpath.anchor(0).point(), 0.).then(Vec::new); }
-    let mut pieces: Pieces = Vec::new();
-    let mut open = false;
-    let mut touched = false;
-    for index in 0..subpath.segment_count() {
-        let cuts = eraser.cuts(&subpath.segment(index));
-        touched |= !cuts.is_empty();
-        let mut at = 0.;
-        for (from, to) in cuts.into_iter().chain([(1., 1.)]) {
-            if from > at + 1e-9 {
-                if open { pieces.last_mut().unwrap().push((index, at, from)); } else { pieces.push(vec![(index, at, from)]); }
-                open = from >= 1.;
-            } else { open = false; }
-            at = to;
-        }
+fn removed(subpath: &Subpath, eraser: &Eraser) -> Vec<(f64, f64)> {
+    (0..subpath.segment_count()).flat_map(|index| eraser.cuts(&subpath.segment(index)).into_iter().map(move |(from, to)| (index as f64 + from, index as f64 + to))).collect()
+}
+
+fn reach_stops(removed: Vec<(f64, f64)>, stops: &[f64], length: f64, closed: bool) -> Vec<(f64, f64)> {
+    if closed && stops.is_empty() && !removed.is_empty() { return vec![(0., length)]; }
+    let mut out = Vec::new();
+    for (a, b) in removed {
+        let before = stops.iter().copied().filter(|s| *s <= a).fold(None, |m: Option<f64>, s| Some(m.map_or(s, |m| m.max(s))));
+        let after = stops.iter().copied().filter(|s| *s >= b).fold(None, |m: Option<f64>, s| Some(m.map_or(s, |m| m.min(s))));
+        let from = before.unwrap_or_else(|| if closed { stops.iter().copied().fold(f64::MIN, f64::max) - length } else { 0. });
+        let to = after.unwrap_or_else(|| if closed { stops.iter().copied().fold(f64::MAX, f64::min) + length } else { length });
+        if from < 0. { out.extend([(from + length, length), (0., to.min(length))]); }
+        else if to > length { out.extend([(from, length), (0., to - length)]); }
+        else { out.push((from, to)); }
     }
-    if !touched { return None; }
-    let first_open = pieces.first().is_some_and(|piece| piece[0].0 == 0 && piece[0].1 == 0.);
-    if subpath.closed && open && first_open && pieces.len() > 1 {
+    out
+}
+
+fn kept(subpath: &Subpath, eraser: &Eraser, stops: Option<&[f64]>) -> Option<Pieces> {
+    if subpath.segment_count() == 0 { return eraser.covers(subpath.anchor(0).point(), 0.).then(Vec::new); }
+    let length = subpath.segment_count() as f64;
+    let mut removed = removed(subpath, eraser);
+    if removed.is_empty() { return None; }
+    if let Some(stops) = stops { removed = reach_stops(removed, stops, length, subpath.closed); }
+    removed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    let mut at = 0.;
+    for (a, b) in removed {
+        if a > at + 1e-9 { spans.push((at, a)); }
+        at = f64::max(at, b);
+    }
+    if at < length - 1e-9 { spans.push((at, length)); }
+    let entries = |(u, v): (f64, f64)| -> Vec<(usize, f64, f64)> {
+        let first = u.floor() as usize;
+        let last = ((v.ceil() as usize).max(first + 1)).min(subpath.segment_count());
+        (first..last).map(|i| (i, (u - i as f64).clamp(0., 1.), (v - i as f64).clamp(0., 1.))).filter(|(_, from, to)| to > from).collect()
+    };
+    let mut pieces: Pieces = spans.into_iter().map(entries).filter(|piece| !piece.is_empty()).collect();
+    let wraps = pieces.first().is_some_and(|piece| piece[0].0 == 0 && piece[0].1 == 0.)
+        && pieces.last().is_some_and(|piece| piece.last().is_some_and(|last| last.0 + 1 == subpath.segment_count() && last.2 == 1.));
+    if subpath.closed && wraps && pieces.len() > 1 {
         let first = pieces.remove(0);
         pieces.last_mut().unwrap().extend(first);
     }
     Some(pieces)
+}
+
+fn polyline(subpath: &Subpath, tolerance: f64) -> Vec<([f64; 2], f64)> {
+    let mut points = vec![(subpath.anchor(0).point(), 0.)];
+    for (index, segment) in subpath.segments().enumerate() { segment.flatten(tolerance, |p, t| points.push((p, index as f64 + t))); }
+    points
+}
+
+fn nearest_place(subpath: &Subpath, at: [f64; 2], from: f64, to: f64) -> f64 {
+    let index = (from.floor() as usize).min(subpath.segment_count().saturating_sub(1));
+    let segment = subpath.segment(index);
+    let base = index as f64;
+    let distance = |t: f64| { let p = segment.point(t - base); (p[0] - at[0]).hypot(p[1] - at[1]) };
+    let (mut lo, mut hi) = (from.max(base), to.min(base + 1.));
+    for _ in 0..60 {
+        let (m1, m2) = (lo + (hi - lo) / 3., hi - (hi - lo) / 3.);
+        if distance(m1) < distance(m2) { hi = m2 } else { lo = m1 }
+    }
+    (lo + hi) * 0.5
+}
+
+fn crossing(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> Option<f64> {
+    let r = [b[0] - a[0], b[1] - a[1]];
+    let s = [d[0] - c[0], d[1] - c[1]];
+    let denominator = r[0] * s[1] - r[1] * s[0];
+    if denominator.abs() < 1e-12 { return None; }
+    let q = [c[0] - a[0], c[1] - a[1]];
+    let t = (q[0] * s[1] - q[1] * s[0]) / denominator;
+    let u = (q[0] * r[1] - q[1] * r[0]) / denominator;
+    ((0. ..=1.).contains(&t) && (0. ..=1.).contains(&u)).then_some(t)
+}
+
+impl PathItem {
+    /// Where each subpath crosses `others` or another part of itself, in segment-plus-`t` places.
+    fn crossings(&self, others: &[&PathItem], tolerance: f64) -> Vec<Vec<f64>> {
+        let lines: Vec<Vec<([f64; 2], f64)>> = self.geometry.subpaths().iter().map(|s| polyline(s, tolerance)).collect();
+        let foreign: Vec<Vec<[f64; 2]>> = others.iter().flat_map(|other| other.geometry.subpaths().iter().map(|s| polyline(s, tolerance).into_iter().map(|(p, _)| p).collect())).collect();
+        lines.iter().enumerate().map(|(i, line)| {
+            let mut stops = Vec::new();
+            let closed = self.geometry.subpaths()[i].closed;
+            let last = line.len().saturating_sub(2);
+            for (k, edge) in line.windows(2).enumerate() {
+                let ((a, ta), (b, tb)) = (edge[0], edge[1]);
+                let subpath = &self.geometry.subpaths()[i];
+                let mut found = |c: [f64; 2], d: [f64; 2]| if let Some(t) = crossing(a, b, c, d) {
+                    let at = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    stops.push(nearest_place(subpath, at, ta, tb));
+                };
+                for other in &foreign { for pair in other.windows(2) { found(pair[0], pair[1]); } }
+                for (j, other) in lines.iter().enumerate() {
+                    for (m, pair) in other.windows(2).enumerate() {
+                        let adjacent = m + 1 >= k && m <= k + 1 || closed && (k == 0 && m == last || m == 0 && k == last);
+                        if i == j && adjacent { continue; }
+                        found(pair[0].0, pair[1].0);
+                    }
+                }
+            }
+            stops.sort_by(f64::total_cmp);
+            stops
+        }).collect()
+    }
 }
 
 fn build(subpath: &Subpath, piece: &[(usize, f64, f64)]) -> Subpath {
@@ -133,13 +219,14 @@ impl PathItem {
             false
         }) || filled && self.hit(eraser.to, eraser.radius)
     }
-    pub fn erased(&self, eraser: &Eraser) -> Option<Vec<PathItem>> {
+    pub fn erased(&self, eraser: &Eraser, crossed: Option<&[&PathItem]>) -> Option<Vec<PathItem>> {
         let [x0, y0, x1, y1] = self.geometry.hull();
         let area = eraser.bounds();
         if area[2] < x0 || area[0] > x1 || area[3] < y0 || area[1] > y1 { return None; }
         let mut base = 0u32;
-        let mut results: Vec<Option<Pieces>> = Vec::new();
-        for subpath in self.geometry.subpaths() { results.push(kept(subpath, eraser)); }
+        let stops = crossed.map(|others| self.crossings(others, (eraser.radius * 0.25).max(0.05)));
+        let results: Vec<Option<Pieces>> = self.geometry.subpaths().iter().enumerate()
+            .map(|(i, subpath)| kept(subpath, eraser, stops.as_ref().map(|stops| stops[i].as_slice()))).collect();
         if results.iter().all(Option::is_none) { return None; }
         let compound = self.geometry.subpaths().len() > 1;
         let mut outputs: Vec<(Vec<Subpath>, Vec<Origin>, Vec<bool>)> = vec![Default::default()];
@@ -172,12 +259,21 @@ impl PathItem {
 }
 
 impl VectorObject {
-    pub fn erase(&self, candidates: &[Position], eraser: &Eraser, whole: bool) -> Option<Self> {
+    pub fn erase(&self, candidates: &[Position], eraser: &Eraser, mode: EraseMode) -> Option<Self> {
         let mut changes = BTreeMap::new();
         let mut fresh = BTreeSet::new();
         for &position in candidates {
             let Some(path) = self.record(position).and_then(Record::path).filter(|path| !path.locked && !path.hidden) else { continue };
-            let replacement = if whole { path.touched_by(eraser).then(Vec::new) } else { path.erased(eraser) };
+            let replacement = match mode {
+                EraseMode::Whole => path.touched_by(eraser).then(Vec::new),
+                EraseMode::Touched => path.erased(eraser, None),
+                EraseMode::ToIntersection => {
+                    let [x0, y0, x1, y1] = path.bounds();
+                    let others: Vec<&PathItem> = self.paths().map(|(_, other)| other)
+                        .filter(|other| other.id != path.id && !other.hidden && { let [a0, b0, a1, b1] = other.bounds(); a0 <= x1 && x0 <= a1 && b0 <= y1 && y0 <= b1 }).collect();
+                    path.erased(eraser, Some(&others))
+                }
+            };
             let Some(pieces) = replacement else { continue };
             let records = pieces.into_iter().enumerate().map(|(i, piece)| {
                 let id = if i == 0 { path.id } else { loop { let id = self.allocate_id(); if fresh.insert(id) { break id; } } };

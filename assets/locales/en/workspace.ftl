@@ -618,3 +618,6 @@ workspace-tool-description-split-path = Cut paths apart at the selected anchors
 workspace-tool-description-reverse-path = Run the selected paths the other way, swapping their start and end
 workspace-tool-description-make-compound-path = Combine the selected paths into one, with holes where they overlap
 workspace-tool-description-release-compound-path = Turn each part of a compound path back into its own path
+workspace-tool-description-erase-touched-part = Cut paths where the eraser covers their centerline
+workspace-tool-description-erase-whole-paths = Remove every path the eraser touches
+workspace-tool-description-erase-to-intersection = Remove a path’s part between the crossings on either side of where the eraser touches
