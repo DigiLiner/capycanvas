@@ -101,7 +101,7 @@ fn apple_paper_library_import_reload_rename_delete_and_add_preserve_authored_his
         assert_eq!(layer_host::papers::list(&directory).unwrap().len(),1);
         effect(&app,json!({"op":"reset","layer":layer(&app),"key":"texture"}));
         let reset=checkpoint(&app);
-        effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":13}}));
+        effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":layer_core::paper::built_in_papers().len()}}));
         let pending=unsafe { &*app.0 }.host.session.state().requests.iter().find_map(|item|
             matches!(item.kind,layer_ui::HostRequestKind::Paper { .. }).then_some(item.id));
         if let Some(id)=pending {let job=PaperJob::new(&app,id,&directory);job.work(None);job.apply(&app);}
@@ -169,7 +169,7 @@ fn apple_paper_preview_leases_outlive_the_editor_and_match_shared_pixels() {
         .tiles.iter().filter_map(|tile|tile.id.as_deref().map(str::to_string)).collect();
     ids.push("missing".into());
     let expected:Vec<_>=ids.iter().map(|id|unsafe { &*app.0 }.host.session.paper_preview(id)).collect();
-    assert_eq!(expected.iter().filter(|image|image.is_some()).count(),13);
+    assert_eq!(expected.iter().filter(|image|image.is_some()).count(),layer_core::paper::built_in_papers().len());
     let json=std::ffi::CString::new(serde_json::to_string(&ids).unwrap()).unwrap();
     assert!(unsafe { capy_apple_paper_previews(app.0,std::ptr::null()) }.is_null());
     let previews=unsafe { capy_apple_paper_previews(app.0,json.as_ptr()) };assert!(!previews.is_null());drop(app);
@@ -359,7 +359,7 @@ fn apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_fa
     assert!(!unsafe { &*app.0 }.host.session.state().requests.iter().any(|request|matches!(request.kind,
         layer_ui::HostRequestKind::Paper {..}|layer_ui::HostRequestKind::SaveSettings {..})));
     app.action(json!({"type":"select_layer","id":layer(&app)}));
-    effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":13}}));
+    effect(&app,json!({"op":"set","layer":layer(&app),"key":"texture","value":{"kind":"choice","value":layer_core::paper::built_in_papers().len()}}));
     let request=paper_request(&app);let job=PaperJob::new(&app,request,&directory);
     unsafe {capy_paper_work(job.0,-1,c"Cotton".as_ptr())};
     let error=unsafe {capy_paper_error(job.0)};assert!(!error.is_null());unsafe {capy_apple_string_free(error)};job.apply(&app);

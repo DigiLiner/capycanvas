@@ -609,6 +609,7 @@ Other runners in `scripts/` and `tests/`:
 | `scripts/test-color-input.sh` | AppKit color text entry in all RGB spaces |
 | `scripts/test-project-access.py` | Project writes through a file-only App Sandbox grant |
 | `cargo test -p layer-apple tests::session` | Session restart, history, durable removal, preserved unreadable copies, retry beside new work, and new windows adopting unrestored sessions on both policies |
+| `cargo test -p layer-apple tests::papers` | Paper import/history, failed loads, preview leases and New drawing visibility; choice positions and preview counts follow the shared paper catalog |
 | `tests/background-expiration.py` | iPad background-task lease ordering |
 | `scripts/test-native-rows.py` | UIKit row scrolling and contacts on one booted iPad simulator (`--fixture scenes` for per-scene cancellation, `--fixture scroll` for native offset restoration and nested-scroll observation) |
 | `tests/test_rust_build.py` | Cargo deployment target, output-directory isolation and custom build-root propagation |
