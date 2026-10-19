@@ -251,7 +251,7 @@ private struct WorkspaceManagerForm: View {
                     .disabled(workspaces.busy || !spec["name"].isNull && workspaces.formName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("workspace-form-confirm")
             }
-        }.accessibilityIdentifier("workspace-library-form")
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-form")
     }
 }
 

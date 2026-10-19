@@ -76,14 +76,12 @@ extension XCTestCase {
         attachWorkspaceScreen(app, name: "columns-drawers-zen")
     }
     @MainActor func checkToolbarCustomization(in app: XCUIApplication) {
-        XCTAssertTrue(app.textFields["toolbar-name"].waitForExistence(timeout: 20))
-        for query in ["Undo", "Divider", "Manage Toolbars"] {
-            workspaceText(app.textFields["tool-picker-search"], query)
-            workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tool-choice-" + query)).firstMatch)
-        }
-        attachWorkspaceScreen(app, name: "toolbar-tool-picker")
-        workspaceActivate(app.buttons["tool-picker-confirm"])
-        let created = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Options for Toolbar 1")).firstMatch
+        let name = app.textFields["workspace-form-name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 20), "New Toolbar opens the workspace library form")
+        XCTAssertEqual(name.value as? String, "New Toolbar")
+        attachWorkspaceScreen(app, name: "toolbar-new-form")
+        workspaceActivate(app.buttons["workspace-form-confirm"])
+        let created = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Options for New Toolbar")).firstMatch
         XCTAssertTrue(created.waitForExistence(timeout: 10))
         let identifier = created.identifier
         let panel = String(identifier.dropFirst("toolbar-options-".count))
@@ -92,6 +90,18 @@ extension XCTestCase {
             workspaceActivate(options)
             workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "menu-action-" + prefix)).firstMatch)
         }
+        func tile(_ label: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "toolbar-tile-" + panel + "-", label)).firstMatch
+        }
+        menu("Add Tools")
+        for query in ["Undo", "Divider", "Manage Toolbars"] {
+            workspaceText(app.textFields["tool-picker-search"], query)
+            workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tool-choice-" + query)).firstMatch)
+        }
+        attachWorkspaceScreen(app, name: "toolbar-tool-picker")
+        workspaceActivate(app.buttons["tool-picker-confirm"])
+        XCTAssertTrue(tile("Undo").waitForExistence(timeout: 10))
+        XCTAssertTrue(tile("Manage Toolbars").exists)
         menu("Rename ")
         workspaceText(app.textFields["toolbar-name"], "Quick tools")
         attachWorkspaceScreen(app, name: "toolbar-rename-prompt")
@@ -101,19 +111,24 @@ extension XCTestCase {
         workspaceActivate(app.buttons["toolbar-prompt-confirm"])
         let copied = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Options for Copy tools")).firstMatch
         XCTAssertTrue(copied.waitForExistence(timeout: 10))
-        let copyIdentifier = copied.identifier
-        let copyPanel = String(copyIdentifier.dropFirst("toolbar-options-".count))
-        // Exercise the actual command installed by the picker, without OS menus.
-        workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label BEGINSWITH %@", "toolbar-tile-" + panel + "-", "Manage Toolbars")).firstMatch)
-        workspaceActivate(app.buttons["managed-toolbar-" + copyPanel])
-        attachWorkspaceScreen(app, name: "toolbar-manager-selection")
-        workspaceActivate(app.buttons["delete-managed-toolbar"])
+        let copy = app.descendants(matching: .any)[copied.identifier].firstMatch
+        let manager = app.descendants(matching: .any)["workspace-library-manager"].firstMatch
+        func deleteCopy() {
+            workspaceActivate(tile("Manage Toolbars"))
+            XCTAssertTrue(manager.waitForExistence(timeout: 10), "Manage Toolbars opens this workspace's toolbars")
+            workspaceActivate(manager.buttons["Options for Copy tools"].firstMatch)
+            workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "menu-action-Delete Toolbar")).firstMatch)
+            XCTAssertTrue(manager.waitForNonExistence(timeout: 10))
+            XCTAssertTrue(app.buttons["toolbar-prompt-confirm"].waitForExistence(timeout: 10))
+        }
+        deleteCopy()
         attachWorkspaceScreen(app, name: "toolbar-delete-prompt")
         workspaceActivate(app.buttons["toolbar-prompt-cancel"])
-        workspaceActivate(app.buttons["delete-managed-toolbar"])
+        XCTAssertTrue(app.buttons["toolbar-prompt-cancel"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(copy.exists, "Cancel keeps the toolbar")
+        deleteCopy()
         workspaceActivate(app.buttons["toolbar-prompt-confirm"])
-        workspaceActivate(app.buttons["Close"])
-        XCTAssertFalse(app.descendants(matching: .any)[copyIdentifier].firstMatch.exists)
+        XCTAssertTrue(copy.waitForNonExistence(timeout: 10))
         XCTAssertTrue(options.exists)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         #if os(iOS)
