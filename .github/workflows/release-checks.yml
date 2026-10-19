@@ -32,7 +32,7 @@ jobs:
         run: |
           mkdir -p artifacts/release-tests
           failed=0
-          for directory in tools/build tools/git tools/devices tools/windows-vm tools/visual tools/prediction tools/performance apps/layer-apple/tests apps/layer-linux/bench; do
+          for directory in tools/build tools/git tools/devices tools/windows-vm tools/visual tools/prediction tools/performance apps/layer-apple/tests; do
             python3 -m unittest discover -s "$directory" -p 'test_*.py' > "artifacts/release-tests/${directory//\//-}.log" 2>&1 || failed=1
             cat "artifacts/release-tests/${directory//\//-}.log"
           done
@@ -42,7 +42,7 @@ jobs:
         run: node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization,numeric,histogram,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy,color-button-lifecycle,gpu-diagnostics,raster-worker-client,pipeline-wait}.test.mjs 2>&1 | tee artifacts/release-tests/web.log
       - name: Packaging, capture and report unit tests
         if: ${{ !cancelled() }}
-        run: node --test apps/layer-linux/package.test.mjs apps/layer-linux/bench/window-capture.test.mjs tools/build/*.test.mjs tools/performance/windows-pen-report.test.mjs tools/cdp.test.mjs 2>&1 | tee artifacts/release-tests/node.log
+        run: node --test apps/layer-linux/bench/window-capture.test.mjs tools/build/*.test.mjs tools/performance/windows-pen-report.test.mjs tools/cdp.test.mjs 2>&1 | tee artifacts/release-tests/node.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
@@ -159,6 +159,8 @@ jobs:
       - run: pacman -Syu --noconfirm git
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash tools/build/arch-setup.sh --noconfirm
+      - run: python3 -m unittest discover -s apps/layer-linux/bench -p 'test_*.py'
+      - run: node --test apps/layer-linux/package.test.mjs
       - run: python3 tools/build/gtk-runtime/test-environment.py
       - run: python3 tools/build/gtk-runtime/test-configure.py
       - run: apps/layer-linux/run.sh --help
@@ -209,7 +211,7 @@ jobs:
           rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-apple-darwin --target aarch64-apple-ios-sim
           rustup default "$RUST_VERSION"
       - name: Build iPad simulator and its XCTest bundle
-        run: apps/layer-apple/scripts/build.sh simulator build-for-testing
+        run: bash apps/layer-apple/scripts/build.sh simulator build-for-testing
       - name: Swift tests without Metal surfaces
         run: bash apps/layer-apple/scripts/test-without-gpu.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

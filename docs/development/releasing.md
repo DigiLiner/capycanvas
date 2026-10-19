@@ -385,10 +385,10 @@ before packaging. Tag pushes repeat validation on the exact tagged commit.
 | Job | Checks without a hardware GPU |
 | --- | --- |
 | Ordinary CI | Shared model suites, localization, Wasm, generated Apple project, Git hooks and licenses |
-| Scripts | Python tests under build, Git, devices, Windows VM, visual and performance tools, prediction, Apple resources and Linux capture; the explicit Web Node unit suites, packaging tests and isolated headless Chrome CDP tests |
+| Scripts | Python tests under build, Git, devices, Windows VM, visual and performance tools, prediction and Apple resources; the explicit Web Node unit suites, packaging/capture/report tests and isolated headless Chrome CDP tests |
 | Renderer | CPU renderer models and shader contracts, Apple bridge models, Android bridge tests, command inventory regressions and Windows bridge lint |
 | Prediction | Prediction benchmark tests, optimized replay tools and the complete recorded stroke bank's analysis checks |
-| Arch | Fresh package dependencies, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
+| Arch | Fresh package dependencies, native packaging and Wayland protocol tests, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
 | Windows x64 and ARM64 | Native Release build, C++ input and script tests, serial Rust/document tests on WARP, model snapshot reader and native bridge lint |
 | Apple | Simulator app and XCTest bundle build; Swift state, input, persistence and sandbox fixtures that do not attach Metal surfaces |
 
