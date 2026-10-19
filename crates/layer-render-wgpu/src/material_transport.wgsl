@@ -156,20 +156,6 @@ fn reservoir_load(dab: Dab, world: vec2<f32>) -> vec4<f32> {
     return textureLoad(reservoir_texture, coordinate, 0);
 }
 
-fn reservoir_exchange_amount(dab: Dab, coverage: f32) -> f32 {
-    let pull = clamp(dab.material.y, 0.0, 1.0);
-    return clamp(
-        ((1.0 - style.material_a.x) * style.material_b.x + pull * 0.25)
-            * coverage * dab.flow,
-        0.0,
-        1.0,
-    );
-}
-
-fn replenished_reservoir_alpha(carried: f32, pickup: f32, exchange: f32) -> f32 {
-    return max(carried, mix(carried, pickup, exchange));
-}
-
 fn trace_smudge(initial: vec2<f32>, first: u32, count: u32) -> SmudgeTrace {
     var coordinate = initial;
     var optical_depth = 0.0;
@@ -477,37 +463,4 @@ fn material_result(fragment_position:vec4<f32>)->MaterialOutput {
     result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
     result.color=working_clamp(result.color);
     return result;
-}
-
-@fragment
-fn reservoir_fragment(@builtin(position) fragment_position: vec4<f32>) -> @location(0) vec4<f32> {
-    let first = style.operation.x;
-    let count = style.operation.y;
-    if count == 0u {
-        return vec4<f32>(0.0);
-    }
-    let reservoir_size = vec2<f32>(textureDimensions(reservoir_texture));
-    let local = fragment_position.xy / reservoir_size * 2.0 - vec2<f32>(1.0);
-    var carried = textureLoad(
-        reservoir_texture,
-        clamp(vec2<i32>(floor(fragment_position.xy)), vec2<i32>(0), vec2<i32>(reservoir_size) - 1),
-        0,
-    );
-    for (var offset = 0u; offset < count; offset += 1u) {
-        let dab = dabs[first + offset];
-        let scaled = local * dab.radii;
-        let world = dab.center + rotate(scaled, dab.rotation.x, dab.rotation.y);
-        let coverage = contact_coverage(dab, world);
-        if coverage <= 0.0 { continue; }
-        let pull = clamp(dab.material.y, 0.0, 1.0);
-        let pickup = blurred_canvas_load(world - dab.motion * pull, style.material_b.z);
-        if !working_has_color(pickup.a) { continue; }
-        let exchange = reservoir_exchange_amount(dab, coverage);
-        let alpha_exchange = exchange * (1.0 - style.material_a.w * 0.5);
-        carried = vec4<f32>(
-            mix_color(carried.rgb, pickup.rgb / pickup.a, exchange),
-            replenished_reservoir_alpha(carried.a, pickup.a, alpha_exchange),
-        );
-    }
-    return carried;
 }

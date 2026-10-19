@@ -177,7 +177,7 @@ The full brush retains three kinds of state.
 
 ### Brush state
 
-- a double-buffered 64×64 RGBA8 reservoir for brush-local spatial paint;
+- a double-buffered 64×64 RGBA32Float reservoir for brush-local spatial paint;
 - loaded color/material and water;
 - contact orientation and the previous pose;
 - optional bristle/contact data added behind a separate feature stage.
@@ -271,12 +271,14 @@ swaps them. The same rule applies to the brush reservoir. This is deterministic,
 removes data races between neighboring pixels, and stays within portable WebGPU
 resource rules. It also makes damaged-region checkpoints possible for undo.
 
-Smudge and Liquify write their destination pages from compute kernels through
-write-only storage. A page job stores the material result inside its dirty
-rectangle and the unchanged source texel elsewhere, including stroke coverage,
-so no page copy or coverage clear precedes it. One compute pass dispatches every
-job of a batch, together with the gather dispatches of jobs whose samples reach
-beyond their 3×3 neighborhood. Each dispatch is its own WebGPU usage scope, so a
+Smudge, Liquify and wet brushes write their destination pages from compute
+kernels through write-only storage. A page job stores the material result inside
+its dirty rectangle and the unchanged source texel elsewhere, including stroke
+coverage, so no page copy or coverage clear precedes it. One compute pass
+dispatches every job of a batch, together with the gather dispatches of jobs
+whose samples reach beyond their 3×3 neighborhood and, after a committed wet
+batch's jobs, its reservoir exchange. At stroke start the exchange begins from
+the selected pigment instead of the stored reservoir. Each dispatch is its own WebGPU usage scope, so a
 later dispatch reads earlier writes in recorded order. Only a job that binds
 decoded source tiles ends the pass first, because preparing it may reuse a cache
 slot that an earlier job still reads.

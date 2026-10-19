@@ -99,9 +99,10 @@ fn destination(start: Start) -> Cow<'static, str> {
 pub(super) enum Entries {
     /// Dry compute kernels.
     Kernel(Start),
-    /// The material fragment and the wet reservoir exchange for one blend code.
+    /// The material fragment for one blend code.
     Fragment(u32),
-    /// Page kernels of a transported material for one blend code.
+    /// Page kernels of a transported material for one blend code, and Wet's
+    /// reservoir exchange.
     Transport(u32),
     /// Distant samples gathered for Liquify and Smudge.
     Gather,
@@ -145,6 +146,7 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
             if gathered {source+=&format!("fn gathered_sample(w:vec2<f32>)->vec4<f32> {{return {name}_gathered(w);}}\n");}
+            if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()
         }
     };
@@ -721,25 +723,23 @@ mod tests {
                     "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
+        use crate::destination_material::{self as destination, Entry};
         for slot in 0..MATERIAL_SLOTS {for filterable in [true, false] {
             let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
             let (flags, blend) = material_entries(slot);
-            let transported = crate::destination_material::OPERATIONS;
-            let fragments = MaterialPipelineKind::OPERATIONS.map(|operation| (Entries::Fragment(blend), operation,
-                &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]));
-            let transports = transported.map(|operation| (Entries::Transport(blend), operation, &["transport_color", "transport_coverage"][..]));
-            let gathers = transported.map(|operation| (Entries::Gather, operation, &["gather_samples"][..usize::from(slot % MATERIAL_BLENDS.len() == 0)]));
-            for (entries, operation, used_entries) in fragments.into_iter().chain(transports).chain(gathers) {
-                if used_entries.is_empty() {continue;}
-                let module = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
-                validate(&module);
-                for entry in used_entries {
-                    let mut used = module.clone();
-                    used.entry_points.retain(|e| e.name == *entry);
-                    naga::compact::compact(&mut used, naga::compact::KeepUnused::No);
-                    assert!(used.overrides.iter().all(|(_, value)| value.init.is_some()),
-                        "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
-                }
+            let fragments = MaterialPipelineKind::OPERATIONS.map(|operation| (Entries::Fragment(blend), operation, "fragment_main"));
+            let kernels = destination::OPERATIONS.into_iter()
+                .filter(|&operation| destination::blended(operation) || slot % MATERIAL_BLENDS.len() == 0)
+                .flat_map(|operation| destination::entries(operation).iter().map(move |&entry|
+                    (if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(blend) }, operation, entry.name())));
+            for (entries, operation, entry) in fragments.into_iter().chain(kernels) {
+                let mut used = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
+                validate(&used);
+                used.entry_points.retain(|e| e.name == entry);
+                assert_eq!(used.entry_points.len(), 1, "{entry}/{operation:?}");
+                naga::compact::compact(&mut used, naga::compact::KeepUnused::No);
+                assert!(used.overrides.iter().all(|(_, value)| value.init.is_some()),
+                    "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}
     }
@@ -785,23 +785,18 @@ mod tests {
                 absent(&present, &blend, &what);
             }
         }
-        let transported = crate::destination_material::OPERATIONS;
+        use crate::destination_material::{self as destination, Entry};
         for flags in [0, 128] {for operation in [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet, MaterialOperation::Watercolor] {
-            let entries: &[_] = if transported.contains(&operation) {
-                &[(Entries::Transport(0), "transport_color"), (Entries::Transport(0), "transport_coverage")]
-            } else { &[(Entries::Fragment(0), "fragment_main")] };
-            for &(entries, entry) in entries {
+            let kernels: Vec<_> = if destination::OPERATIONS.contains(&operation) {
+                destination::entries(operation).iter().map(|&entry| (if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) },
+                    entry.name(), !matches!(entry, Entry::Gather | Entry::Reservoir))).collect()
+            } else { vec![(Entries::Fragment(0), "fragment_main", true)] };
+            for (entries, entry, evaluates) in kernels {
                 let what = format!("{operation:?} {entry} {flags:#x}");
                 let present = compiled(entries, flags, operation, entry);
                 for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
                 let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
-                assert_eq!(operations.len(), 1, "{what} reaches {operations:?}");
-            }
-            if transported.contains(&operation) {
-                let present = compiled(Entries::Gather, flags, operation, "gather_samples");
-                for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &format!("{operation:?} gather {flags:#x}")); }
-                let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
-                assert!(operations.is_empty(), "{operation:?} gather reaches {operations:?}");
+                assert_eq!(operations.len(), usize::from(evaluates), "{what} reaches {operations:?}");
             }
         }}
         let multiply = Entries::Fragment(layer_core::LayerBlend::from(BrushBlendMode::Multiply).code());

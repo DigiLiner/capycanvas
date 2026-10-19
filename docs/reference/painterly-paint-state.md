@@ -21,7 +21,7 @@ The renderer implements these bounded kinds of state:
 | Stroke coverage | two sparse R32Float 256×256 pages per touched color page | keyed to layer + stroke ID | uniform accumulation |
 | Starting paint | one immutable sparse RGBA page per touched color page | keyed to layer + stroke ID | partial-opacity pointwise paint, erase and retouch |
 | Watercolor wetness | one logical sparse R32Float channel, ping-ponged during updates; saved as U8/U16 tiles | persistent until merge | localized transport, material identity, and live edges |
-| Wet brush reservoir | two 64×64 RGBA8 textures | active wet stroke; reused | spatial carried RGB + paint amount for oils/gouache |
+| Wet brush reservoir | two 64×64 RGBA32Float textures | active wet stroke; reused | spatial carried RGB + paint amount for oils/gouache |
 
 Other wet brushes keep their state in the reservoir; only watercolor leaves
 wetness on the canvas. Watercolor does not use the reservoir. A wetness value at
@@ -52,8 +52,8 @@ strokes.
 
 ## Material transfer
 
-Each material invocation, a fragment for wet and watercolor paint or a compute
-thread for Smudge and Liquify, owns one destination pixel. It reads an
+Each material invocation, a fragment for watercolor paint or a compute thread for
+Smudge, Liquify and wet paint, owns one destination pixel. It reads an
 immutable 3×3 neighborhood of source color pages and evaluates overlapping
 contacts in submission order:
 
@@ -87,8 +87,8 @@ The CPU precomputes remaining charge as a deterministic exponential of traveled
 stroke distance measured in brush diameters. This scalar is carried in the
 existing fixed-size `Dab.material` field, so charge adds no texture lookup or
 new upload. A spatial reservoir preserves brush-local variation for loaded oil
-and palette-knife marks. It uses the bounded 64×64 ping-pong pass after a wet
-microbatch of at most three contacts. Smudge uses short deterministic
+and palette-knife marks. Its bounded 64×64 ping-pong exchange runs in the same
+compute pass as a wet microbatch of at most three contacts, after its page jobs. Smudge uses short deterministic
 three-contact backtrace chunks with distance-normalized strength; liquify keeps
 immediate one-contact destination ordering.
 

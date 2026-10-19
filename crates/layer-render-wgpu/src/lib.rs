@@ -520,8 +520,8 @@ enum MaterialPipelineKind {
 
 impl MaterialPipelineKind {
     const COUNT: usize = 3;
-    const OPERATIONS: [MaterialOperation; 5] = [MaterialOperation::Deposit, MaterialOperation::Coverage,
-        MaterialOperation::Wet, MaterialOperation::Watercolor, MaterialOperation::Clone];
+    const OPERATIONS: [MaterialOperation; 4] = [MaterialOperation::Deposit, MaterialOperation::Coverage,
+        MaterialOperation::Watercolor, MaterialOperation::Clone];
 
     fn index(self, operation: MaterialOperation) -> usize {
         Self::OPERATIONS.iter().position(|o| *o == operation).expect("a fragment material") * Self::COUNT + self as usize
@@ -571,7 +571,6 @@ struct BrushPassPlan {
     direct: Option<DirectPipelineKind>,
     material: MaterialOperation,
     state: BrushStateTargets,
-    reservoir: bool,
     stroke_edge: bool,
 }
 
@@ -613,7 +612,6 @@ impl BrushPassPlan {
             direct,
             material,
             state,
-            reservoir: style.execution == BrushExecution::Wet,
             stroke_edge: style.rendering.edge_after_stroke,
         }
     }
@@ -864,7 +862,6 @@ struct Pipelines {
     material: [[Deferred<wgpu::RenderPipeline>;
         MaterialPipelineKind::OPERATIONS.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_SLOTS],
     watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
-    reservoir: [Deferred<wgpu::RenderPipeline>; dry_material::MATERIAL_SLOTS],
     stroke_edge: Deferred<wgpu::RenderPipeline>,
     watercolor_composite: Deferred<wgpu::RenderPipeline>,
     watercolor_compute: (wgpu::BindGroupLayout, Deferred<wgpu::ComputePipeline>),
@@ -883,10 +880,6 @@ impl Pipelines {
         kind: MaterialPipelineKind,
     ) -> &Deferred<wgpu::RenderPipeline> {
         &self.material[dry_material::material_slot(style)][kind.index(operation)]
-    }
-
-    fn reservoir(&self, style: &layer_render::DabStyle) -> &Deferred<wgpu::RenderPipeline> {
-        &self.reservoir[dry_material::material_slot(style)]
     }
 }
 
@@ -3127,46 +3120,6 @@ impl WgpuRasterizer {
         self.transport_jobs = pending;
         self.transport_regions = regions;
         result
-    }
-
-    fn encode_reservoir_update(
-        &mut self,
-        encoder: &mut crate::submission::CommandEncoder,
-        batch_index: usize,
-        batch: &DabBatch,
-        coordinate: [u32; 2],
-        source_bind_group: &wgpu::BindGroup,
-    ) -> Result<(), GpuRasterError> {
-        let texture_key = Self::texture_set_key(&batch.style);
-        let texture_set = self
-            .texture_sets
-            .iter()
-            .find(|set| set.key == texture_key)
-            .expect("reservoir brush textures are prepared before encoding");
-        let target = &self.reservoir.inactive().view;
-        {
-            let mut pass = encoder.color_pass(
-                "layer brush reservoir exchange",
-                target,
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-            );
-            pass.set_pipeline(self.pipelines.reservoir(&batch.style));
-            pass.set_bind_group(
-                0,
-                &self.style_bind_group,
-                &[batch_index as u32 * self.style_stride as u32],
-            );
-            pass.set_bind_group(
-                1,
-                self.paint_target_binding(&batch.style),
-                &[self.layer_target_offset(batch.target, coordinate)],
-            );
-            pass.set_bind_group(2, source_bind_group, &[0]);
-            pass.set_bind_group(3, &texture_set.bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-        self.reservoir.active_secondary = !self.reservoir.active_secondary;
-        Ok(())
     }
 
     fn encode_stroke_edge(
@@ -5849,25 +5802,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             })
         })
     });
-    let reservoir = std::array::from_fn(|slot| {
-        let (device, layout, shader) = (
-            device.clone(),
-            material_pipeline_layout.clone(),
-            paint_shaders[slot][MaterialPipelineKind::OPERATIONS.iter().position(|o| *o == MaterialOperation::Wet).unwrap()].clone(),
-        );
-        Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_recipe(
-                mode,
-                &device,
-                &layout,
-                &shader,
-                "reservoir_fragment",
-                None,
-                device.working_format(),
-                "layer brush reservoir exchange",
-            )
-        })
-    });
     let stroke_edge = {
         let (device, layout, shader) = (
             device.clone(),
@@ -5939,7 +5873,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         direct,
         material,
         watercolor_transport,
-        reservoir,
         stroke_edge,
         watercolor_composite,
         watercolor_compute,

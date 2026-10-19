@@ -36,7 +36,8 @@ struct MaterialSources {
     header: vec4<u32>,
     // For page kernels, pages[0] is the local dirty rectangle (min xy, max xy).
     // A clone's pages[1..5] map it to its source, whose 2x2 blocks of target
-    // and reference pages it binds around source_11.
+    // and reference pages it binds around source_11. The reservoir exchange's
+    // pages[0] holds the bits of a new stroke's starting reservoir.
     pages: array<vec4<u32>, 9>,
 }
 @group(2) @binding(12) var<uniform> material_sources: MaterialSources;

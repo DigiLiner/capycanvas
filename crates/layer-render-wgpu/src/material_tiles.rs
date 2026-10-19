@@ -33,19 +33,6 @@ impl WgpuRasterizer {
                 for page in &mut layer.pages { page.clear_stroke_start(); }
             }
         }
-        if !preview
-            && batch.stroke_start
-            && plan.reservoir
-            && let Some(first) = batch_dabs.first()
-        {
-            let amount = batch.style.wet_mix.amount_of_paint * first.material[2];
-            let color = first.color_rgba_linear;
-            let _pass = encoder.color_pass(
-                "layer initialize brush reservoir",
-                &self.reservoir.active().view,
-                wgpu::LoadOp::Clear(wgpu::Color { r: color[0] as f64, g: color[1] as f64, b: color[2] as f64, a: amount as f64, }),
-            );
-        }
 
         // Evaluation that writes whole pages writes the new coverage page too.
         // An old owner binds the shared zero scalar as its source, so no clear
@@ -335,28 +322,6 @@ impl WgpuRasterizer {
         self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
         compute_jobs.clear();
         self.dry_jobs = compute_jobs;
-        // Reservoir exchange samples the immutable pre-batch canvas. Keep a
-        // bind group to that generation before the page ping-pong state flips.
-        let reservoir_exchange = if !preview && plan.reservoir {
-            batch_dabs
-                .last()
-                .map(|last| {
-                    let center = last.center;
-                    let coordinate = [
-                        (center.x.max(0.0) as u32 / PAGE_SIZE).min(
-                            self.target_extent(batch.target)[0].saturating_sub(1) / PAGE_SIZE,
-                        ),
-                        (center.y.max(0.0) as u32 / PAGE_SIZE).min(
-                            self.target_extent(batch.target)[1].saturating_sub(1) / PAGE_SIZE,
-                        ),
-                    ];
-                    self.material_bind_group(batch, coordinate, false, MaterialInputs::Neighborhood, None, encoder)
-                        .map(|(bind_group, _)| (coordinate, bind_group))
-                })
-                .transpose()?
-        } else {
-            None
-        };
 
         let contribution=self.compact_preview_contribution(batch);
         let (pages, coverage_pages) = if preview {
@@ -378,15 +343,6 @@ impl WgpuRasterizer {
         }
         jobs.clear();
         self.material_jobs = jobs;
-        if let Some((coordinate, source_bind_group)) = reservoir_exchange {
-            self.encode_reservoir_update(
-                encoder,
-                batch_index,
-                batch,
-                coordinate,
-                &source_bind_group,
-            )?;
-        }
         Ok(())
     }
 }
