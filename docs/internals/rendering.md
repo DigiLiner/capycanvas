@@ -694,8 +694,9 @@ preview and when applied. A drag rasterizes the mesh at the display level's
 texels instead, tessellated within half a texel, and resamples the reduced copy
 at those positions. A pixel selection moved by a warp is resampled on the GPU
 the same way, a window at a time. What draws meshes compiles in the background
-when a warp is first shown, and until then the preview keeps the frame before
-it.
+when a warp is first shown. Frames wait for it like the transform's other
+pipelines, so the canvas keeps the frame before it and then draws the current
+warp, including a drag released before the compile finished.
 
 ### Resampling
 

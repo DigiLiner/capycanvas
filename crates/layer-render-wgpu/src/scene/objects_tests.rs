@@ -761,8 +761,8 @@ fn settle_live_frames(r: &mut WgpuRasterizer, frame: FramePacket<'_>, limit: usi
         if !r.has_pending_work() { return submitted; }
         r.submit(FramePacket { composite_all: false, ..frame }).unwrap();
     }
-    panic!("object scene must settle within {limit} submissions: deferred={}, image_waiting={}, moving={}, analysis={}, awaiting_meshes={}, results_pending={}, results_bytes={}, completed_images={}, passes={}",
-        r.object_deferred,r.image_decode_waiting(),r.moving_images_pending(),r.analysis_dirty,r.awaiting_meshes,
+    panic!("object scene must settle within {limit} submissions: deferred={}, image_waiting={}, moving={}, analysis={}, results_pending={}, results_bytes={}, completed_images={}, passes={}",
+        r.object_deferred,r.image_decode_waiting(),r.moving_images_pending(),r.analysis_dirty,
         r.scene.as_ref().is_some_and(|scene|scene.object_results.pending()),r.scene.as_ref().map_or(0,|scene|scene.object_results.bytes()),
         r.moving_images.completed_images,r.metrics.command_passes);
 }

@@ -973,9 +973,6 @@ pub struct WgpuRasterizer {
     transform_damage: Vec<(SourceTarget, PixelRect)>,
     /// Document regions to recompose whose layers' own pixels are unchanged.
     document_damage: Vec<PixelRect>,
-    /// A warp preview waits, showing the frame before it, until what draws
-    /// meshes has compiled in the background.
-    awaiting_meshes: bool,
     background_ready: Arc<std::sync::atomic::AtomicBool>,
     background_refinement: bool,
     moving_pixels: Option<(SourceTarget, layer_core::Selection)>,
@@ -1363,7 +1360,6 @@ impl WgpuRasterizer {
             transform_preview: None,
             transform_damage: Vec::with_capacity(2),
             document_damage: Vec::new(),
-            awaiting_meshes: false,
             background_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             background_refinement: false,
             moving_pixels: None,
@@ -1818,18 +1814,6 @@ impl WgpuRasterizer {
             }
         }
         ready
-    }
-
-    /// Whether warp meshes draw without compiling on this thread, asking the
-    /// background compiler for what they draw with. Without one, a frame
-    /// compiles it.
-    fn mesh_pipelines_ready(&self) -> bool {
-        let (Some(startup), Some(transforms)) = (&self.startup, &self.transforms) else {
-            return true;
-        };
-        startup.compiler.require(&transforms.mesh_pipelines(), startup::BRUSH)
-            & startup.compiler.require(self.scene_pipelines.resample.mesh.iter(), startup::BRUSH)
-            & startup.compiler.require(self.scene_pipelines.fine_resample.mesh.iter(), startup::BRUSH)
     }
 
     pub(crate) fn background_pipeline_ready(&self, pipeline: &deferred::Deferred<wgpu::ComputePipeline>) -> bool {
@@ -3724,7 +3708,7 @@ impl CanvasRenderer for WgpuRasterizer {
         self.moving_pixels = pixels;
     }
     fn has_pending_work(&self) -> bool {
-        self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() || self.settling.is_some() || self.awaiting_meshes || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
+        self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
             || self.navigator.pending()
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
@@ -4822,10 +4806,7 @@ impl WgpuRasterizer {
         self.preview_layer_id = new_preview_layer;
         self.preview_requires_base = new_preview_requires_base;
 
-        self.awaiting_meshes = self.transform_preview.as_ref()
-            .is_some_and(|p| p.transform.placement.mesh.is_some())
-            && !self.mesh_pipelines_ready();
-        if let Some(preview) = self.transform_preview.clone().filter(|_| !self.awaiting_meshes) {
+        if let Some(preview) = self.transform_preview.clone() {
             let level = self.scale_display.as_ref().filter(|cache| cache.evaluation != scene::scale::Evaluation::Native).map(|cache| cache.plan.level).filter(|level| *level > 0);
             let mut transforms = self.transforms.take().expect("retained transform renderer");
             let result = transforms.update_preview(self, &mut encoder, &preview, packet.scene, level);

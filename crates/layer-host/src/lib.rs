@@ -1526,6 +1526,76 @@ mod tests {
         contact(&mut host, 8, &[([500., 400.], 1.), ([500., 400.], 3.)]);
         assert!(!host.session.holding_input() && saving(&host), "a contact while painting is ready is never held");
     }
+    fn presented(host: &NativeHost, points: &[Point]) -> Vec<[u8; 4]> {
+        let view = host.session.state().camera.view();
+        let gpu = host.session.engine().backend().0.as_ref().unwrap();
+        let device = gpu.device();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("presented warp"), size: wgpu::Extent3d { width: view.width_px, height: view.height_px, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+        });
+        layer_render_wgpu::ViewportPresenter::for_surface(gpu, wgpu::TextureFormat::Rgba8UnormSrgb, layer_render_wgpu::SdrSurfaceColor::Srgb)
+            .unwrap().present(gpu, &texture.create_view(&Default::default()), view, host.session.state().palette.surround_linear).unwrap();
+        let row = (view.width_px * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("presented warp readback"),
+            size: u64::from(row * view.height_px), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(texture.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(view.height_px) } },
+            texture.size());
+        gpu.queue().submit([encoder.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |result| result.unwrap());
+        device.poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(std::time::Duration::from_secs(30)) }).unwrap();
+        let bytes = buffer.slice(..).get_mapped_range().unwrap().to_vec();
+        let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+        points.iter().map(|point| {
+            let at = surface.map(*point);
+            let offset = at.y as usize * row as usize + at.x as usize * 4;
+            bytes[offset..offset + 4].try_into().unwrap()
+        }).collect()
+    }
+    #[test]
+    fn a_warp_drag_released_before_its_meshes_compile_shows_the_warp() {
+        use layer_ui::CommandId;
+        let (_reference, mut host) = gpu_host(layer_ui::Platform::Mac, [2048, 1536]);
+        let clock = std::cell::Cell::new(0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while !host.startup.complete { frame_step(&mut host, &clock, deadline); }
+        let settle = |host: &mut NativeHost| {
+            frame_step(host, &clock, deadline);
+            while host.dirty || host.session.engine().raster_backing_pending() { frame_step(host, &clock, deadline); }
+        };
+        host.dispatch(serde_json::from_value(json!({"type":"set_color","rgba":[0.2,0.45,0.8,1]})).unwrap()).unwrap();
+        for command in [CommandId::SelectAll, CommandId::FillSelection, CommandId::ZoomOut, CommandId::ZoomOut] {
+            host.dispatch(UiAction::Invoke { command }).unwrap();
+            settle(&mut host);
+        }
+        for command in [CommandId::ScaleRotate, CommandId::TransformNearest, CommandId::TransformWarp, CommandId::WarpGridThree] {
+            host.dispatch(UiAction::Invoke { command }).unwrap();
+            settle(&mut host);
+        }
+        let [width, height] = host.session.engine().document().composition().size.map(|v| v as f32);
+        let node = Point { x: width / 3., y: 0. };
+        let probes = [Point { x: node.x + width * 0.08, y: height * 0.06 }, Point { x: width * 0.9, y: height * 0.06 }];
+        assert!(presented(&host, &probes).iter().all(|p| p[2] > p[0] + 50), "the filled selection starts blue");
+        let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+        let drag = |host: &mut NativeHost, steps: std::ops::RangeInclusive<u32>| {
+            let records: Vec<f64> = steps.flat_map(|step| {
+                let at = surface.map(Point { x: node.x, y: height * 0.3 * step.min(12) as f32 / 12. });
+                let phase = match step { 0 => 1., 13 => 3., _ => 2. };
+                [f64::from(at.x), f64::from(at.y), 1., 0., 0., 0., 0., (clock.get() + u64::from(step) * 1_000_000) as f64, phase]
+            }).collect();
+            pointer(host, 9, 1, 0, &records, false).unwrap();
+        };
+        drag(&mut host, 0..=2);
+        frame_step(&mut host, &clock, deadline);
+        drag(&mut host, 3..=13);
+        settle(&mut host);
+        let [uncovered, kept] = presented(&host, &probes).try_into().unwrap();
+        assert!(uncovered.iter().take(3).all(|&c| c > 240), "the bent edge uncovers the paper: {uncovered:?}");
+        assert!(kept[2] > kept[0] + 50, "the far edge stays blue: {kept:?}");
+    }
     #[test]
     fn thumbnails_in_flight_during_a_renderer_replacement_still_arrive() {
         let mut document = layer_ui::new_drawing(256, 256, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();

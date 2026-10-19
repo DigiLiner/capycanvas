@@ -1005,10 +1005,22 @@ mod gpu_tests {
         let meshes: Vec<_> = transforms.mesh_pipelines().into_iter()
             .chain(renderer.scene_pipelines.resample.mesh.iter().cloned())
             .chain(renderer.scene_pipelines.fine_resample.mesh.iter().cloned()).collect();
-        assert!(!renderer.mesh_pipelines_ready(), "first warp use must request its cold dependencies");
+        let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
+        let mesh = layer_core::MeshMap::identity(layer_core::Rect::from_extent([128; 2]), [3, 3]).unwrap()
+            .move_node(1, layer_core::Point { x: 0., y: 40. }).unwrap();
+        let warp = layer_render::TransformPreview { transaction: 1, moving: false, target, selection: None,
+            transform: layer_core::ImageTransform { placement: layer_core::LayerPlacement { mesh: Some(Arc::new(mesh)),
+                ..Default::default() }, ..Default::default() } };
+        let packet = || crate::test_support::packet(document.scene(), [128; 2]);
+        assert!(!renderer.raster_dependencies_ready(packet(), Some(&warp)), "first warp use must wait for its cold dependencies");
         crate::test_support::wait_startup(&mut renderer, deadline, |_| meshes.iter().all(|p| p.ready()),
             format_args!("Warp mesh demand compilation timed out"));
-        assert!(renderer.mesh_pipelines_ready(), "prepared warp dependencies must be reused");
+        while !renderer.raster_dependencies_ready(packet(), Some(&warp)) {
+            renderer.poll_startup().unwrap();
+            assert!(std::time::Instant::now() < deadline, "Warp preview preparation timed out");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(meshes.iter().all(|p| p.ready()), "prepared warp dependencies must be reused");
         renderer.prepare_startup(&document, &brush, false).unwrap();
         assert!(renderer.poll_startup().unwrap().brush_ready, "cached dependencies resume immediately");
         renderer.prepare_startup(&document, &brush, true).unwrap();

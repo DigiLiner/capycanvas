@@ -82,6 +82,11 @@ impl PaintTransforms {
             for preview in std::iter::once(preview).chain(companion.as_ref()) {
                 require(preview.target, &preview.drawn(), preview_taps(preview));
             }
+            if preview.transform.placement.mesh.is_some() {
+                required.render.extend(self.mesh_pipelines());
+                required.render.extend(r.scene_pipelines.resample.mesh.iter().cloned());
+                required.render.extend(r.scene_pipelines.fine_resample.mesh.iter().cloned());
+            }
         }
     }
     pub fn begin_frame(&mut self) {
