@@ -106,6 +106,8 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
 
 & (Join-Path $PSScriptRoot '../tests/application-menu-query.ps1')
 
+& (Join-Path $PSScriptRoot '../tests/paper-relief.ps1')
+
 & {
  $tokens=$null;$errors=$null
  $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'exercise-workspace-pickup.ps1'),[Text.Encoding]::UTF8)

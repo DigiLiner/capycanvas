@@ -249,7 +249,8 @@ heading spacing, so the final heading retains its full allocation.
 `open-application-menu.ps1` uses the submenu IDs of the visible menu entry point.
 The compact `application-menus` button exposes `application-menu-<id>` entries;
 primary and recovery menus retain their ID and localized-caption lookups.
-Inspection waits for a visible button; an existing submenu completes only the
+Action lookup waits for an enabled visible match, skipping disabled duplicates.
+Inspection still permits disabled visible buttons; an existing submenu completes only the
 normal expansion path. Discovery retains that native entry through invocation
 so another tree read cannot discard it during a menu transition. Visibility,
 enabled state and expansion checks remain.
@@ -296,7 +297,8 @@ Choose Texture from the Paper row and from Properties: its size against Edit
 Color, keyboard choice, Cancel, Use Texture with one Undo, Rename and Delete
 in the open dialog, a seeded library paper scrolled into view and a refused
 Use Texture after the drawing changes. They then drag Properties' Scale slider
-and require relief over the page while it is held, a flat page after release
+and require nonuniform relief to change more than a third of the samples in
+the same page crop while it is held, exact baseline pixels after the fade
 and one Undo. With Texture visibility at 0 they require Light and Shows through
 paint to be disabled, then check the Light dial's size and alignment with the
 slider rows, its dot, mouse, pen and touch drags with one Undo each, Escape,
@@ -840,6 +842,7 @@ Each polling attempt shares one tree snapshot across the visible and compact
 menu routes, so an expensive traversal cannot consume the wait on fallback IDs.
 The input suite checks delayed publication, disappearing submenu routes and
 current-property discovery through this complete helper.
+Workspace setup uses Undo Layout Change (Ctrl+Alt+Z in the default keymap).
 
 Each `apps/layer-windows/scripts/exercise-*.ps1` drives the real app through UI
 Automation and guarded OS mouse, pen and touch input. Fixtures that take

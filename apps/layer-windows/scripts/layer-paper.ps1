@@ -239,7 +239,18 @@ function Test-PaperTexture{
     if((Relationship-Layer $paper).paper.id -ne $original){throw 'The texture journey left the texture changed'}
 }
 function Paper-Scale{[double]@((Model).state.layer_properties.controls|Where-Object key -eq 'scale')[0].value.value}
-function Relief-Spread([string]$Name){
+function Relief-Comparison([int[]]$Before,[int[]]$After){
+    if(!$Before.Count -or $Before.Count -ne $After.Count){throw 'Paper relief sample geometry changed'}
+    $changed=0;$minimum=[int]::MaxValue;$maximum=[int]::MinValue
+    for($i=0;$i -lt $Before.Count;$i++){
+        if($Before[$i] -ne $After[$i]){$changed++}
+        $a=[Drawing.Color]::FromArgb($Before[$i]);$b=[Drawing.Color]::FromArgb($After[$i])
+        $delta=[int]$b.R+$b.G+$b.B-$a.R-$a.G-$a.B
+        $minimum=[Math]::Min($minimum,$delta);$maximum=[Math]::Max($maximum,$delta)
+    }
+    @{changed=$changed;samples=$Before.Count;textured=($changed*3 -gt $Before.Count -and $minimum -lt $maximum)}
+}
+function Relief-Samples([string]$Name){
     $model=Model;$camera=$model.state.camera;$tab=@($model.state.tabs|Where-Object active)[0]
     $c=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$k=$c.Width/$camera.viewport[0];$w=[int]($tab.width*$camera.zoom*$k*.3);$h=[int]($tab.height*$camera.zoom*$k*.3)
     $bitmap=[Drawing.Bitmap]::new($w,$h);$graphics=[Drawing.Graphics]::FromImage($bitmap)
@@ -248,9 +259,9 @@ function Relief-Spread([string]$Name){
         $lock=$bitmap.LockBits([Drawing.Rectangle]::new(0,0,$w,$h),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
         try{$stride=$lock.Stride;$bytes=[byte[]]::new($stride*$h);[Runtime.InteropServices.Marshal]::Copy($lock.Scan0,$bytes,0,$bytes.Length)}finally{$bitmap.UnlockBits($lock)}
     }finally{$graphics.Dispose();$bitmap.Dispose()}
-    $sum=0.;$squares=0.;$n=0
-    for($y=0;$y -lt $h;$y+=3){for($i=$y*$stride;$i -lt $y*$stride+$w*4;$i+=12){$l=.0722*$bytes[$i]+.7152*$bytes[$i+1]+.2126*$bytes[$i+2];$sum+=$l;$squares+=$l*$l;$n++}}
-    [Math]::Sqrt([Math]::Max(0,$squares/$n-[Math]::Pow($sum/$n,2)))
+    $samples=[Collections.Generic.List[int]]::new()
+    for($y=0;$y -lt $h;$y+=3){for($i=$y*$stride;$i -lt $y*$stride+$w*4;$i+=12){$samples.Add([BitConverter]::ToInt32($bytes,$i))}}
+    ,$samples.ToArray()
 }
 function Paper-ScaleRelief{
     $theme=(Model).state.theme;$paper=(Texture-Paper).id
@@ -258,16 +269,16 @@ function Paper-ScaleRelief{
     Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper} 'Paper selection did not publish before Scale'
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'properties'}).Count){Invoke 'Properties' -Name}
     $track=(Control 'property-scale-slider' -Arranged).Current.BoundingRectangle;$y=[int]($track.Y+$track.Height/2)
-    $relief=[ordered]@{original=(Paper-Scale);held=0.;scale=0.;flat=-1.;dragging=0.;released=0.}
+    $relief=[ordered]@{original=(Paper-Scale);held=0.;scale=0.;flat=$null;dragging=$null;released=$null};$baseline=@{pixels=@()}
     try{
         [CapyLayersCapture]::SetForegroundWindow($drawingWindow)|Out-Null;[CapyRowPointer]::Hover([int]($track.X+$track.Width*.5),$y)
-        Wait-Until {$s=Relief-Spread "scale-relief-flat-$theme";$settled=[Math]::Abs($s-$relief.flat) -lt .5;$relief.flat=$s;$settled} 'The canvas did not settle before the Scale drag'
+        Wait-Until {$pixels=Relief-Samples "scale-relief-flat-$theme";$settled=$baseline.pixels.Count -eq $pixels.Count -and (Relief-Comparison $baseline.pixels $pixels).changed -eq 0;$baseline.pixels=$pixels;$relief.flat=@{samples=$pixels.Count};$settled} 'The canvas did not settle before the Scale drag'
         [CapyRowPointer]::Down('mouse',[int]($track.X+$track.Width*.5),$y)
         for($i=1;$i -le 12;$i++){[CapyRowPointer]::Move([int]($track.X+$track.Width*(.5+.03*$i)),$y);Start-Sleep -Milliseconds 30}
-        Wait-Until {$relief.held=Paper-Scale;$relief.dragging=Relief-Spread "scale-relief-dragging-$theme";$relief.dragging -gt $relief.flat+4} 'Holding the Scale slider did not shade the paper relief'
+        Wait-Until {$relief.held=Paper-Scale;$relief.dragging=Relief-Comparison $baseline.pixels (Relief-Samples "scale-relief-dragging-$theme");$relief.dragging.textured} 'Holding the Scale slider did not shade the paper relief'
         [CapyRowPointer]::Up();$clock=[Diagnostics.Stopwatch]::StartNew()
         Wait-Until {$relief.scale=Paper-Scale;$relief.scale -gt 1.5*$relief.original} 'Releasing the Scale slider did not grow the paper'
-        Wait-Until {$relief.released=Relief-Spread "scale-relief-released-$theme";$relief.released -le $relief.flat+1} 'The paper relief did not fade after the Scale drag' (3*$script:CapyWaitSeconds)
+        Wait-Until {$relief.released=Relief-Comparison $baseline.pixels (Relief-Samples "scale-relief-released-$theme");$relief.released.changed -eq 0} 'The paper relief did not fade after the Scale drag' (3*$script:CapyWaitSeconds)
         $relief.fade=$clock.Elapsed.TotalSeconds
     }finally{$relief|ConvertTo-Json|Set-Content (Join-Path $run "scale-relief-$theme.json")}
     Relationship-Undo
