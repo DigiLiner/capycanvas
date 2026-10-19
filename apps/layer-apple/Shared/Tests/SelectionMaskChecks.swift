@@ -75,6 +75,9 @@ extension XCTestCase {
         let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
         let count = rows.count
         workspaceActivate(app.buttons["layer-New Selection Layer"])
+        #if os(iOS)
+        dismissEditorKeyboard(in: app)
+        #endif
         expectation(for: NSPredicate(format: "count == %d", count + 1), evaluatedWith: rows)
         waitForExpectations(timeout: 10)
         let load = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "selection-load-")).firstMatch

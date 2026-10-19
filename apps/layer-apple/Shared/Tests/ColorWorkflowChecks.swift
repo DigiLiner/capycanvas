@@ -42,11 +42,13 @@ extension XCTestCase {
             image.lifetime = .keepAlways; tree.lifetime = .keepAlways; add(image); add(tree)
             XCTFail(message)
         }
+        let window = workspaceViewport(in: app)
         let keyboard = app.keyboards.firstMatch
         let hide = keyboard.buttons["Hide keyboard"]
         let numberPad = app.popovers.containing(.key, identifier: "0").firstMatch
+        func keyboardShown() -> Bool { keyboard.exists && keyboard.frame.intersects(window.frame) }
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            keyboard.exists || numberPad.exists
+            keyboardShown() || numberPad.exists
         }, object: app)
         let ready = XCTWaiter.wait(for: [visible], timeout: 5)
         guard ready == .completed else { return }
@@ -55,7 +57,7 @@ extension XCTestCase {
         catch { XCTFail("Cannot inspect the editor keyboard: \(error)"); return }
         guard pads.count <= 1 else { fail("The editor exposes multiple number pads: \(pads)"); return }
         if let pad = pads.first {
-            let window = workspaceViewport(in: app), bounds = window.frame
+            let bounds = window.frame
             guard let backdrop = pad.backdrop, usable(backdrop), usable(pad.frame), usable(bounds), pad.frame.intersects(bounds) else {
                 fail("The number pad needs its own dismissal region: \(pad), window \(bounds)")
                 return
@@ -87,10 +89,11 @@ extension XCTestCase {
             let result = XCTWaiter.wait(for: [absent], timeout: 5)
             guard result == .completed else { fail("The number pad must close while its editor fields remain visible"); return }
         }
-        if keyboard.waitForExistence(timeout: 5) {
+        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in keyboardShown() }, object: app)], timeout: 5) == .completed {
             guard hide.waitForExistence(timeout: 15), hide.isHittable else { fail("The keyboard needs a hittable Hide button"); return }
             hide.clickOrTap()
-            XCTAssertTrue(keyboard.waitForNonExistence(timeout: 5))
+            let hidden = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !keyboardShown() }, object: app)
+            XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 5), .completed, "Hide keyboard uncovers the editor")
         }
     }
     #endif

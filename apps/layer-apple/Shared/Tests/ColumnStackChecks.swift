@@ -127,10 +127,10 @@ extension XCTestCase {
         XCTAssertTrue(leftGrip.waitForExistence(timeout: 25))
         XCTAssertTrue(rightGrip.exists)
         XCTAssertGreaterThan(right.frame.minX - left.frame.minX, 500)
-        rightGrip.press(forDuration: 0.05, thenDragTo: leftGrip)
+        leftGrip.press(forDuration: 0.05, thenDragTo: rightGrip)
         expectation(for: NSPredicate { _, _ in
             left.exists && right.exists && abs(left.frame.minX - right.frame.minX) < 1
-                && right.frame.minY > left.frame.minY
+                && left.frame.minY > right.frame.minY
         }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
 
@@ -150,10 +150,13 @@ extension XCTestCase {
         let originalWidth = layerGroup.frame.width
         let handles = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "workspace-divider-"))
         guard let handle = handles.allElementsBoundByIndex.first(where: {
-            $0.frame.height > $0.frame.width && abs($0.frame.minX - layerGroup.frame.maxX - 6) < 2
-        }) else { XCTFail("The open member must expose its canvas-facing resize edge"); return }
+            $0.frame.height > $0.frame.width && abs(layerGroup.frame.minX - $0.frame.maxX) < 2
+        }) else {
+            XCTFail("The open member must expose its canvas-facing resize edge: group \(layerGroup.frame), dividers \(handles.allElementsBoundByIndex.map(\.frame))")
+            return
+        }
         let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 50, dy: 0)))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -50, dy: 0)))
         expectation(for: NSPredicate { _, _ in layerGroup.frame.width > originalWidth + 25 }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
         let resizedWidth = layerGroup.frame.width
@@ -184,12 +187,12 @@ extension XCTestCase {
         capture.name = "stacked-columns-open-member-\(theme)"; capture.lifetime = .keepAlways; add(capture)
 
         // Stack preferences are the shared context menu on each member's grip.
-        workspaceActivate(leftGrip)
+        workspaceActivate(rightGrip)
         workspaceActivate(app.buttons["Auto-hide"].firstMatch)
-        let outside = workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.65))
+        let outside = workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.65))
         outside.clickOrTap()
         XCTAssertTrue(layerGroup.waitForNonExistence(timeout: 10))
-        workspaceActivate(leftGrip)
+        workspaceActivate(rightGrip)
         workspaceActivate(app.buttons["Open individual panels"].firstMatch)
         workspaceActivate(brushes)
         let drawer = element("column-drawer-4")

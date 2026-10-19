@@ -609,7 +609,10 @@ Documents directory, enable that runner's file sharing, name its provider
 
 Shared journeys are `check…` functions in `Shared/Tests`, called by `test…`
 methods in `Shared/Tests/EditorLaunchTests.swift`, compiled by both UI targets.
-Dismiss the iPad keyboard before activating controls it covers.
+Dismiss the iPad keyboard before activating controls it covers or counting rows
+in panels that the shared keyboard clearance shrinks, such as a new Selection
+Layer's name editor. A keyboard counts only while its frame overlaps the editor
+window; the number pad leaves the system keyboard offscreen in the hierarchy.
 Poll keyboard and number-pad existence with targeted accessibility queries. Read
 a floating number pad's complete hierarchy outside the short waiter before
 checking its dismissal region.
@@ -759,6 +762,13 @@ cancellation and exact Undo/Redo pixels in both themes.
 - **Accessible geometry.** iOS container frames are the union of their children;
   do not reuse macOS width expectations. Open editor menus hide their buttons
   from queries: close using the recorded button frame and reveal scrolled rows.
+  The Color wheel's square accessibility frame makes XCTest report the swatches,
+  shape buttons and readout around its ring as not hittable, although touches
+  reach them; tap their visible points with `colorControlPoint`.
+- **Window corners.** In iPadOS 26 windowed scenes, including a window that
+  fills the screen, the system resize handle owns touches in the window's
+  bottom-trailing corner. Start touch drags elsewhere; `testColumnStacks` drags
+  the leading column's grip onto the trailing column.
 - **Two-finger input.** Whole-canvas XCTest pinches and multi-finger taps can
   place a finger on the header or panels. Run each one in `withHiddenChrome`,
   which enters Zen through the visible Capy control, then return to read the

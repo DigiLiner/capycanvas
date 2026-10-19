@@ -3,17 +3,7 @@ import XCTest
 extension XCTestCase {
     @MainActor func checkColorControls(in app: XCUIApplication, capture: (String, CGRect, [String: Any]) -> Void) {
         func reveal(_ element: XCUIElement) { revealColorControl(element, in: app) }
-        func activate(_ element: XCUIElement) {
-            reveal(element)
-            // The readout's rectangular AX frame includes the excluded wheel.
-            // Activate its visible label, which lies inside the curved button.
-            if element.identifier == "color-readout" {
-                let label = element.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.06))
-                label.clickOrTap()
-                return
-            }
-            element.clickOrTap()
-        }
+        func activate(_ element: XCUIElement) { colorControlPoint(element, in: app).clickOrTap() }
         func point(_ x: Double, _ y: Double) -> XCUICoordinate {
             app.descendants(matching: .any)["color-wheel"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: x, dy: y))
         }
@@ -100,6 +90,19 @@ extension XCTestCase {
         XCTFail("Color control did not become fully visible: \(element.identifier)")
     }
 
+    @MainActor func colorControlPoint(_ control: XCUIElement, in app: XCUIApplication) -> XCUICoordinate {
+        revealColorControl(control, in: app)
+        let offset = switch control.identifier {
+        // The readout's rectangular AX frame includes the excluded wheel.
+        // Activate its visible label, which lies inside the curved button.
+        case "color-readout": CGVector(dx: 0.2, dy: 0.06)
+        case "color-background": CGVector(dx: 0.85, dy: 0.5)
+        case "color-foreground": CGVector(dx: 0.3, dy: 0.3)
+        default: CGVector(dx: 0.5, dy: 0.5)
+        }
+        return control.coordinate(withNormalizedOffset: offset)
+    }
+
     @MainActor func checkPaintColorMenu(in app: XCUIApplication, theme: String) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"customize","action":{"type":"set_panel_visible","panel":"color","visible":true}},{"type":"color","action":{"op":"select","slot":"background"}},{"type":"set_color","rgba":[0,0,1,1]},{"type":"color","action":{"op":"select","slot":"foreground"}},{"type":"set_color","rgba":[1,0,0,1]}]"#
         app.launchEnvironment["CAPY_COLOR_PROBE"] = "1"
@@ -116,17 +119,12 @@ extension XCTestCase {
             let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: wheel)], timeout: 10)
             XCTAssertEqual(result, .completed, "\(message); accepted state: \(String(describing: wheel.value))")
         }
-        func center(_ swatch: XCUIElement) -> XCUICoordinate {
-            revealColorControl(swatch, in: app)
-            let background = swatch.identifier == "color-background"
-            return swatch.coordinate(withNormalizedOffset: CGVector(dx: background ? 0.85 : 0.3, dy: background ? 0.5 : 0.3))
-        }
         func choose(_ swatch: XCUIElement, _ identifier: String, _ label: String, capture: String? = nil) {
             #if os(macOS)
-            center(swatch).rightClick()
+            colorControlPoint(swatch, in: app).rightClick()
             let item = app.menuItems[label]
             #else
-            center(swatch).press(forDuration: 0.8)
+            colorControlPoint(swatch, in: app).press(forDuration: 0.8)
             let item = app.buttons[identifier]
             #endif
             XCTAssertTrue(item.waitForExistence(timeout: 5), "The paint color menu offers \(label)")
@@ -146,9 +144,9 @@ extension XCTestCase {
         cancelEditor("Edit Color… opens the color editor")
         expect([1, 0, 0, 1], selected: background, "Edit Color… selects the color it edits")
         #if os(macOS)
-        center(foreground).doubleClick()
+        colorControlPoint(foreground, in: app).doubleClick()
         #else
-        center(foreground).doubleTap()
+        colorControlPoint(foreground, in: app).doubleTap()
         #endif
         cancelEditor("Double-clicking a paint color opens the color editor")
         expect([0, 0, 1, 1], selected: foreground, "Double-clicking selects the color it edits")
