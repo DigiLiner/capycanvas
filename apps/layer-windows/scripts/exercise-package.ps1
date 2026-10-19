@@ -61,7 +61,7 @@ try {
         $modulePaths[$name]='app-local'
     }
     foreach($action in @('Test stroke','Undo','Redo','Test pan','Resize')){
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action $action
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action $action -StateDirectory $run
         if($action -in @('Test stroke','Redo')){Wait-Until {(Model).state.document_file.modified} 'Package stroke did not change the document'}
         if($action -eq 'Undo'){Wait-Until {!(Model).state.document_file.modified} 'Package Undo did not restore the clean document'}
     }
