@@ -252,7 +252,7 @@ workspace-tool-description-placement-original-size = Riporta le immagini alle di
 workspace-tool-description-hand = Trascina per spostare la vista della tela
 workspace-tool-description-eyedropper = Preleva un colore dalla tela
 workspace-tool-description-gradient = Trascina per riempire con una sfumatura
-workspace-tool-description-figure = Disegna linee, rettangoli ed ellissi
+workspace-tool-description-figure = Disegna linee, rettangoli, ellissi e tracciati
 workspace-tool-description-ruler = Crea e modifica guide di disegno
 workspace-tool-description-show-rulers = Mostra o nascondi guide di disegno
 workspace-tool-description-snap-rulers = Vincola i tratti alle guide di disegno
@@ -608,3 +608,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } selezionato
    *[other] { $count } selezionati
     }
+workspace-tool-description-new-vector-layer = Crea un livello vettoriale per l’inchiostrazione, con linee da rimodellare senza perdere nitidezza
+workspace-tool-description-join-paths = Collega le estremità più vicine di due tracciati aperti o chiudi un tracciato aperto
+workspace-tool-description-close-path = Collega le estremità di ogni tracciato aperto selezionato
+workspace-tool-description-split-path = Taglia i tracciati negli ancoraggi selezionati
+workspace-tool-description-reverse-path = Inverti il senso dei tracciati selezionati, scambiando inizio e fine
+workspace-tool-description-make-compound-path = Unisci i tracciati selezionati in uno, con fori dove si sovrappongono
+workspace-tool-description-release-compound-path = Rendi ogni parte di un tracciato composto un tracciato a sé

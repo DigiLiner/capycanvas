@@ -284,3 +284,32 @@ fn rasterize_bakes_a_vector_layer_into_paint_and_removes_its_paths_undoably() {
     restored(&before, &doc);
     assert_eq!(doc.artwork.vectors.len(), 1);
 }
+
+#[test]
+fn paths_paint_over_a_paint_layer_through_a_bake_of_the_layer_and_a_reserved_path_layer() {
+    use crate::authored::vector::*;
+    let mut doc = fixture::document([600, 400], &["Ink"]);
+    let owner = doc.working.occurrence.unwrap();
+    let target = doc.scene().source_target(owner).unwrap();
+    edited(&mut doc, owner, |o| { o.opacity = 0.5; o.alpha_locked = true; });
+    let stroke = Stroke::new(Paint::color(crate::color::RgbColor::BLACK), 6.);
+    let path = PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([40., 50.]), Anchor::corner([320., 90.]), Anchor::corner([100., 200.])], true)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
+    let order = doc.scene().order().to_vec();
+    let (reserved, operation) = doc.paint_path_plan(target, path.clone()).unwrap();
+    let RasterOperationKind::Bake { scene, scope: SceneScope::Members(members), offset } = &operation.kind else { panic!("bake") };
+    assert_eq!(*offset, Point::default());
+    let added = *members.iter().find(|h| **h != owner).expect("the path's layer");
+    assert!(members.contains(&owner) && members.len() == 2);
+    let view = scene.view();
+    let raw = view.occurrence(owner).unwrap();
+    assert_eq!((raw.opacity, raw.mask.is_none()), (1., true), "the bake reads the layer's own pixels");
+    assert_eq!(view.occurrence(added).unwrap().attachment, Attachment::Clip, "alpha lock keeps the layer's transparency");
+    assert_eq!(view.vector_layer(added).unwrap().paths().next().unwrap().1, &path);
+    let damage = operation.bounds(doc.target_extent(target));
+    assert!(damage.min.x <= 37. && damage.max.x >= 323. && damage.max.y >= 203., "{damage:?}");
+    let next = doc.artwork.occurrences.next_handle();
+    doc.apply(Edit::Batch(reserved)).unwrap();
+    assert!(doc.artwork.vectors.is_empty() && doc.scene().order() == order, "the path's layer exists only in the bake");
+    assert!(doc.artwork.occurrences.next_handle().index() > next.index(), "its identity is never reused");
+    assert_eq!(doc.paint_path_plan(SourceTarget::Coverage(crate::authored::CoverageHandle::from_index(0)), path).err(), Some(ConversionRefusal::NotPaint));
+}

@@ -513,6 +513,7 @@ pub(crate) fn action_command(action: &UiAction) -> Option<CommandId> {
         UiAction::Layer { action: LayerAction::Deselect } => Some(CommandId::Deselect),
         UiAction::Layer { action: LayerAction::InvertSelection } => Some(CommandId::InvertSelection),
         UiAction::Layer { action: LayerAction::New { group: false, clipped: false } } => Some(CommandId::AddLayer),
+        UiAction::Layer { action: LayerAction::NewVector } => Some(CommandId::NewVectorLayer),
         _ => None,
     }
 }
@@ -624,6 +625,7 @@ pub(crate) fn defaults(id: &str) -> Vec<KeyChord> {
         "command.KeyboardShortcuts" => key("?", true, true),
         "command.NewDocument" => key("n", true, false),
         "command.AddLayer" => key("n", true, true),
+        "command.NewVectorLayer" => KeyChord { key: "n".into(), command: true, shift: true, alt: true },
         "command.OpenDocument" => key("o", true, false),
         "command.ImportImage" => key("o", true, true),
         "command.Copy" => return vec![key("c", true, false), key("insert", true, false)],
@@ -679,7 +681,7 @@ fn command_section(command: CommandId) -> ShortcutSection {
         | C::TransformFree | C::TransformUniform | C::TransformDistort | C::TransformPerspective | C::TransformNearest
         | C::TransformBilinear | C::TransformBicubic | C::TransformLanczos | C::CropFitContent | C::MoveLeaveCopy => ShortcutSection::Transform,
         C::ColorMixOklab | C::ColorMixLinear | C::ColorMixClassic
-        | C::SmoothingAdjustSpeed | C::EraseWholePaths => ShortcutSection::Painting,
+        | C::SmoothingAdjustSpeed | C::EraseWholePaths | C::ScaleOutlineWidths => ShortcutSection::Painting,
         command if CommandId::TOOLS.contains(&command) => ShortcutSection::Tools,
         C::CloneSourceArm | C::CloneAligned | C::CloneFlipHorizontal | C::CloneFlipVertical | C::CloneResetOffset => {
             ShortcutSection::Painting
@@ -693,7 +695,8 @@ fn command_section(command: CommandId) -> ShortcutSection {
         | C::Deselect | C::InvertSelection | C::RemoveSelectionPoint | C::MaskSelection | C::LoadSelectionLayer
         | C::InvertSelectionLayer | C::GrowSelection | C::ShrinkSelection | C::FeatherSelection | C::BorderSelection
         | C::SmoothSelection | C::TransformSelectionOutline => ShortcutSection::Select,
-        C::AddLayer | C::DeleteLayer | C::RaiseLayer | C::LowerLayer | C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack | C::RasterizeSource | C::RasterizeLayer | C::ConvertToObject | C::RepairSourceProfile
+        C::JoinPaths | C::ClosePath | C::SplitPath | C::ReversePath | C::MakeCompoundPath | C::ReleaseCompoundPath
+        | C::AddLayer | C::NewVectorLayer | C::DeleteLayer | C::RaiseLayer | C::LowerLayer | C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack | C::RasterizeSource | C::RasterizeLayer | C::ConvertToObject | C::RepairSourceProfile
         | C::UseReferenceBelow | C::CopySelectionToLayer | C::CutSelectionToLayer | C::DiscardPaintEdits | C::InvertLayerMask
         | C::LayerMaskEnabled | C::ApplyLayerMask | C::EditLayerMask | C::EditLayerContent | C::MergeDown | C::MergeGroup
         | C::MergeVisible | C::FlattenImage | C::StampVisible | C::NewDodgeBurnLayer | C::FrequencySeparation => ShortcutSection::Layer,

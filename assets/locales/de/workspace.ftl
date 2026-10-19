@@ -252,7 +252,7 @@ workspace-tool-description-placement-original-size = Bilder auf ihre ursprüngli
 workspace-tool-description-hand = Ziehen, um die Leinwandansicht zu verschieben
 workspace-tool-description-eyedropper = Eine Farbe von der Leinwand aufnehmen
 workspace-tool-description-gradient = Ziehen, um mit einem Farbverlauf zu füllen
-workspace-tool-description-figure = Linien, Rechtecke und Ellipsen zeichnen
+workspace-tool-description-figure = Linien, Rechtecke, Ellipsen und Pfade zeichnen
 workspace-tool-description-ruler = Zeichenhilfslinien erstellen und bearbeiten
 workspace-tool-description-show-rulers = Zeichenhilfslinien ein- oder ausblenden
 workspace-tool-description-snap-rulers = Pinselstriche auf Zeichenhilfslinien beschränken
@@ -611,3 +611,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } ausgewählt
    *[other] { $count } ausgewählt
     }
+workspace-tool-description-new-vector-layer = Eine Vektorebene für Lineart erstellen, deren Linien sich ohne Schärfeverlust umformen lassen
+workspace-tool-description-join-paths = Die nächsten Enden zweier offener Pfade verbinden oder einen offenen Pfad schließen
+workspace-tool-description-close-path = Die Enden jedes ausgewählten offenen Pfads verbinden
+workspace-tool-description-split-path = Pfade an den ausgewählten Ankerpunkten trennen
+workspace-tool-description-reverse-path = Ausgewählte Pfade umkehren, sodass Anfang und Ende tauschen
+workspace-tool-description-make-compound-path = Ausgewählte Pfade zu einem verbinden, mit Löchern, wo sie sich überlappen
+workspace-tool-description-release-compound-path = Jeden Teil eines zusammengesetzten Pfads wieder zu einem eigenen Pfad machen

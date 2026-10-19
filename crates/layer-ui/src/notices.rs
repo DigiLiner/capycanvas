@@ -17,7 +17,7 @@ pub struct Notice {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum NoticeActionId { CloneSource, UseReference, Flatten, AddMask, EditMask, NewPaintLayer, RasterizeLayer }
+pub enum NoticeActionId { CloneSource, UseReference, Flatten, AddMask, EditMask, NewPaintLayer, NewPaintLayerBelow, RasterizeLayer, UseVectorPen, ResetSetting }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NoticeAction {
@@ -31,7 +31,11 @@ pub struct NoticeAction {
 enum NoticeCopy {
     Drawing(DrawingRefusal), Stroke(StrokeRefusal), Message(MessageId), Reference { message: MessageId, name: std::sync::Arc<str> },
     Object { layer: OccurrenceHandle, name: std::sync::Arc<str> }, Flatten { hidden: usize },
+    Vector { layer: OccurrenceHandle, name: std::sync::Arc<str>, reason: VectorRefusal },
 }
+
+#[derive(Clone)]
+enum VectorRefusal { Brush { pen: Option<u32> }, Setting { id: &'static str, label: MessageId, pen: u32 }, Tool { below: bool } }
 
 impl NoticeCopy {
     fn text(&self, localization: &Localizer) -> String {
@@ -42,6 +46,19 @@ impl NoticeCopy {
             Self::Object { name, .. } => {
                 let mut args = FluentArgs::new(); args.set("layer", name.as_ref());
                 return localization.format(MessageId::OBJECTS_REFUSAL_PAINT, &args);
+            }
+            Self::Vector { name, reason, .. } => {
+                let mut args = FluentArgs::new(); args.set("layer", name.as_ref());
+                let message = match reason {
+                    VectorRefusal::Brush { .. } => MessageId::OBJECTS_VECTOR_REFUSAL_BRUSH,
+                    VectorRefusal::Setting { label, pen, .. } => {
+                        args.set("setting", localization.text(*label).to_string());
+                        args.set("brush", tools::brush_label_localized(*pen, localization).unwrap_or_default().to_string());
+                        MessageId::OBJECTS_VECTOR_REFUSAL_SETTING
+                    }
+                    VectorRefusal::Tool { .. } => MessageId::OBJECTS_VECTOR_REFUSAL_TOOL,
+                };
+                return localization.format(message, &args);
             }
             Self::Flatten { hidden } => {
                 let mut args = FluentArgs::new(); args.set("count", *hidden);
@@ -61,7 +78,17 @@ impl NoticeCopy {
             (_, NoticeActionId::AddMask) => localization.text(MessageId::OBJECTS_ACTION_ADD_MASK).to_string(),
             (_, NoticeActionId::EditMask) => localization.text(MessageId::OBJECTS_ACTION_EDIT_MASK).to_string(),
             (_, NoticeActionId::NewPaintLayer) => localization.text(MessageId::OBJECTS_ACTION_NEW_PAINT_LAYER).to_string(),
+            (_, NoticeActionId::NewPaintLayerBelow) => localization.text(MessageId::OBJECTS_ACTION_NEW_PAINT_LAYER_BELOW).to_string(),
             (_, NoticeActionId::RasterizeLayer) => CommandId::RasterizeLayer.localized_label(localization).to_string(),
+            (Self::Vector { reason: VectorRefusal::Setting { label, .. }, .. }, NoticeActionId::ResetSetting) => {
+                let mut args = FluentArgs::new(); args.set("setting", localization.text(*label).to_string());
+                localization.format(MessageId::OBJECTS_ACTION_RESET_SETTING, &args)
+            }
+            (Self::Vector { reason: VectorRefusal::Brush { pen: Some(pen) }, .. }, NoticeActionId::UseVectorPen) => {
+                let mut args = FluentArgs::new(); args.set("brush", tools::brush_label_localized(*pen, localization).unwrap_or_default().to_string());
+                localization.format(MessageId::OBJECTS_ACTION_USE_BRUSH, &args)
+            }
+            (_, NoticeActionId::UseVectorPen | NoticeActionId::ResetSetting) => String::new(),
         }
     }
 }
@@ -99,6 +126,7 @@ pub(super) fn drawing_refusal_text(refusal: DrawingRefusal, l: &Localizer) -> st
         DrawingRefusal::Mask => l.text(MessageId::COMMANDS_RETURN_TO_THE_LAYER_S_ARTWORK_FIRST),
         DrawingRefusal::EffectMask => l.text(MessageId::COMMANDS_REFUSAL_NOTICES_THIS_TOOL_DRAWS_ON_ARTWORK_NOT_ON_AN_EFFECT_LAYER_S_MASK),
         DrawingRefusal::Object => l.text(MessageId::OBJECTS_REFUSAL_LAYER),
+        DrawingRefusal::Vector => l.text(MessageId::OBJECTS_VECTOR_REFUSAL_LAYER),
     }
 }
 
@@ -124,8 +152,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             for action in &mut notice.actions { action.label = copy.action_label(action.id, &self.state.localization); }
             self.notices.changed = true;
         }
-        if let Some(NoticeCopy::Object { layer, .. }) = self.notices.copy.clone() {
-            let actions = self.object_refusal_actions(layer);
+        if let Some(copy @ (NoticeCopy::Object { .. } | NoticeCopy::Vector { .. })) = self.notices.copy.clone() {
+            let actions = self.object_refusal_actions(&copy);
             if let Some(notice) = &mut self.state.notice { notice.actions = actions.into_iter().map(|(action, _)| action).collect(); }
         }
     }
@@ -163,32 +191,54 @@ impl<R: CanvasRenderer> UiSession<R> {
         (NoticeAction { id, label: copy.action_label(id, self.localization()), enabled: reason.is_none(), reason: reason.map(|r| r.to_string()) }, run)
     }
 
-    fn object_refusal_actions(&self, layer: OccurrenceHandle) -> Vec<(NoticeAction, NoticeRun)> {
+    fn object_refusal_actions(&self, copy: &NoticeCopy) -> Vec<(NoticeAction, NoticeRun)> {
+        let (NoticeCopy::Object { layer, .. } | NoticeCopy::Vector { layer, .. }) = *copy else { return Vec::new(); };
         let doc = self.engine.document();
         let Some(occurrence) = doc.scene().occurrence(layer) else { return Vec::new(); };
-        let copy = NoticeCopy::Object { layer, name: occurrence.name.clone() };
         let l = self.localization();
         let locked = doc.is_locked(layer).then(|| l.text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED));
         let parent_locked = doc.scene().parent(layer).filter(|parent| doc.is_locked(*parent)).map(|_| l.text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED));
         let id = occurrence_token(layer);
         let rasterize = self.command(CommandId::RasterizeLayer);
-        vec![
-            match &occurrence.mask {
-                Some(_) => self.notice_choice(&copy, NoticeActionId::EditMask, NoticeRun::Dispatch(Box::new(UiAction::Layer { action: LayerAction::Select { id, mask: true } })), locked.clone()),
-                None => self.notice_choice(&copy, NoticeActionId::AddMask, NoticeRun::RevealMask(layer), locked.clone()),
-            },
-            self.notice_choice(&copy, NoticeActionId::NewPaintLayer, NoticeRun::Dispatch(Box::new(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } })), parent_locked),
-            self.notice_choice(&copy, NoticeActionId::RasterizeLayer, NoticeRun::Dispatch(Box::new(UiAction::Invoke { command: CommandId::RasterizeLayer })),
-                (!rasterize.enabled).then(|| rasterize.disabled_reason.clone().unwrap_or_default())),
-        ]
+        let dispatch = |action: UiAction| NoticeRun::Dispatch(Box::new(action));
+        let new_layer = |action: LayerAction, id| self.notice_choice(copy, id, dispatch(UiAction::Layer { action }), parent_locked.clone());
+        let first = match copy {
+            NoticeCopy::Vector { reason: VectorRefusal::Brush { pen: Some(pen) }, .. } => Some(self.notice_choice(copy, NoticeActionId::UseVectorPen, dispatch(UiAction::SelectBrush { id: *pen }), None)),
+            NoticeCopy::Vector { reason: VectorRefusal::Setting { id, .. }, .. } => Some(self.notice_choice(copy, NoticeActionId::ResetSetting, dispatch(UiAction::ResetToolSetting { id: (*id).into() }), None)),
+            NoticeCopy::Vector { .. } => None,
+            _ => Some(match &occurrence.mask {
+                Some(_) => self.notice_choice(copy, NoticeActionId::EditMask, dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: true } }), locked),
+                None => self.notice_choice(copy, NoticeActionId::AddMask, NoticeRun::RevealMask(layer), locked),
+            }),
+        };
+        let paint = match copy {
+            NoticeCopy::Vector { reason: VectorRefusal::Tool { below: true }, .. } => new_layer(LayerAction::NewBelow, NoticeActionId::NewPaintLayerBelow),
+            _ => new_layer(LayerAction::New { group: false, clipped: false }, NoticeActionId::NewPaintLayer),
+        };
+        first.into_iter().chain([paint, self.notice_choice(copy, NoticeActionId::RasterizeLayer, dispatch(UiAction::Invoke { command: CommandId::RasterizeLayer }),
+            (!rasterize.enabled).then(|| rasterize.disabled_reason.clone().unwrap_or_default()))]).collect()
     }
 
-    pub(super) fn notify_object_refusal(&mut self, layer: OccurrenceHandle) {
-        let Some(name) = self.engine.document().scene().occurrence(layer).map(|o| o.name.clone()) else { return; };
-        let copy = NoticeCopy::Object { layer, name };
-        let actions = self.object_refusal_actions(layer);
+    pub(super) fn notify_object_refusal(&mut self, layer: OccurrenceHandle, brush: bool) {
+        let doc = self.engine.document();
+        let Some(name) = doc.scene().occurrence(layer).map(|o| o.name.clone()) else { return; };
+        let copy = if doc.scene().vector_layer(layer).is_none() { NoticeCopy::Object { layer, name } } else {
+            let below = matches!(self.layer_interaction.tool, LayerCanvasTool::Gradient { .. } | LayerCanvasTool::EncloseFill { .. } | LayerCanvasTool::LassoFill | LayerCanvasTool::Region { fill: true, .. });
+            NoticeCopy::Vector { layer, name, reason: if brush { self.vector_brush_refusal() } else { VectorRefusal::Tool { below } } }
+        };
+        let actions = self.object_refusal_actions(&copy);
         self.raise_notice(copy.text(self.localization()), actions);
         self.notices.copy = Some(copy);
+    }
+
+    fn vector_brush_refusal(&self) -> VectorRefusal {
+        let preset = self.state.brush.preset;
+        let blocker = tools::preset(preset).ok().and_then(|p| self.tools.path_blocker(p))
+            .and_then(|id| self.state.tool_settings.iter().find(|setting| setting.id == id));
+        match blocker {
+            Some(setting) => VectorRefusal::Setting { id: setting.id, label: setting.label_id, pen: preset },
+            None => VectorRefusal::Brush { pen: self.vector_pen() },
+        }
     }
 
     fn reveal_layer_mask(&mut self, layer: OccurrenceHandle) -> Result<(), String> {
@@ -263,9 +313,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let current = self.notices.owner == self.engine.document().owner && self.notices.epoch == self.state.document_file.epoch;
         self.dismiss_notice();
         let Some(run) = chosen else { return Ok(self.changed(0, false)); };
-        if let Some(NoticeCopy::Object { layer, .. }) = copy {
+        if let Some(NoticeCopy::Object { layer, .. } | NoticeCopy::Vector { layer, .. }) = &copy {
             let doc = self.engine.document();
-            if !current || doc.working.occurrence != Some(layer) || doc.scene().object_layer(layer).is_none() {
+            let kept = match copy { Some(NoticeCopy::Vector { .. }) => doc.scene().vector_layer(*layer).is_some(), _ => doc.scene().object_layer(*layer).is_some() };
+            if !current || doc.working.occurrence != Some(*layer) || !kept {
                 return Err(self.localization().text(MessageId::OBJECTS_NOTICE_STALE).to_string());
             }
         }
@@ -293,8 +344,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         match refusal {
             Some(StrokeRefusal::EmptySource(RetouchSource::References)) if self.reference_below().is_some() => self
                 .offer_reference_below(MessageId::RESOURCES_REFERENCE_EMPTY_UNMARKED),
-            Some(StrokeRefusal::Target(DrawingRefusal::Object)) => {
-                if let Some(layer) = self.engine.document().working.occurrence { self.notify_object_refusal(layer); }
+            Some(StrokeRefusal::Target(DrawingRefusal::Object | DrawingRefusal::Vector)) => {
+                if let Some(layer) = self.engine.document().working.occurrence { self.notify_object_refusal(layer, true); }
             }
             Some(refusal) => {
                 let copy = NoticeCopy::Stroke(refusal);
@@ -314,24 +365,23 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
 
-    /// Whether a pixel write on the active layer would land on its images.
-    pub(super) fn image_content(&self) -> bool {
-        self.engine.document().drawing_refusal() == Some(DrawingRefusal::Object)
+    /// Whether a pixel write on the active layer would land on its images or paths.
+    pub(super) fn object_content(&self) -> bool {
+        matches!(self.engine.document().drawing_refusal(), Some(DrawingRefusal::Object | DrawingRefusal::Vector))
     }
 
-    /// Refuse a pixel write on image content with the image actions.
-    pub(super) fn refuse_image_content(&mut self) -> bool {
-        let image = self.image_content();
-        if image { self.notify_drawing_refusal(); }
-        image
+    /// Refuse a pixel write on image or path content with the layer's actions.
+    pub(super) fn refuse_object_content(&mut self) -> bool {
+        let objects = self.object_content();
+        if objects { self.notify_drawing_refusal(); }
+        objects
     }
 
     /// Explain why a content tool (Move, Lasso Fill, Gradient, Figure, Fill)
     /// has nothing to act on.
     pub(super) fn notify_drawing_refusal(&mut self) {
-        if self.engine.document().drawing_refusal() == Some(DrawingRefusal::Object)
-            && let Some(layer) = self.engine.document().working.occurrence {
-            return self.notify_object_refusal(layer);
+        if self.object_content() && let Some(layer) = self.engine.document().working.occurrence {
+            return self.notify_object_refusal(layer, false);
         }
         if let Some(refusal) = self.engine.document().drawing_refusal() {
             self.notify(drawing_refusal_text(refusal, self.localization()).to_string());

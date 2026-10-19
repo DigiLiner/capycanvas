@@ -483,19 +483,31 @@ pub(super) fn fingerprint(path: &PathItem) -> [u8; 16] {
     sha2::Sha256::digest(&bytes)[..16].try_into().unwrap()
 }
 pub(super) fn encode_shape(shape: &LiveShape, print: [u8; 16]) -> Vec<u8> {
-    let (kind, radii) = match shape.kind { ShapeKind::Rectangle { radii } => (1, Some(radii)), ShapeKind::Ellipse => (2, None) };
+    let (kind, extra) = match shape.kind {
+        ShapeKind::Rectangle { radii } => (1, radii.to_vec()),
+        ShapeKind::Ellipse => (2, Vec::new()),
+        ShapeKind::Polygon { corners } => (3, vec![f64::from(corners)]),
+        ShapeKind::Star { points, inner } => (4, vec![f64::from(points), inner]),
+    };
     let mut out = vec![kind];
-    for v in [shape.center[0], shape.center[1], shape.size[0], shape.size[1], shape.rotation].into_iter().chain(radii.into_iter().flatten()) { out.extend_from_slice(&v.to_le_bytes()); }
+    for v in [shape.center[0], shape.center[1], shape.size[0], shape.size[1], shape.rotation].into_iter().chain(extra) { out.extend_from_slice(&v.to_le_bytes()); }
     out.extend_from_slice(&print);
     out
 }
 fn decode_shape(value: &[u8]) -> Option<(LiveShape, [u8; 16])> {
     let (&kind, rest) = value.split_first()?;
-    let numbers = match kind { 1 => 9, 2 => 5, _ => return None };
+    let numbers = match kind { 1 => 9, 2 => 5, 3 => 6, 4 => 7, _ => return None };
     if rest.len() != numbers * 8 + 16 { return None; }
     let v: Vec<f64> = rest[..numbers * 8].as_chunks::<8>().0.iter().map(|b| f64::from_le_bytes(*b)).collect();
-    if !v.iter().all(|n| n.is_finite()) || v[2] < 0. || v[3] < 0. || v[5..].iter().any(|r| *r < 0.) { return None; }
-    let kind = if kind == 1 { ShapeKind::Rectangle { radii: [v[5], v[6], v[7], v[8]] } } else { ShapeKind::Ellipse };
+    if !v.iter().all(|n| n.is_finite()) || v[2] < 0. || v[3] < 0. { return None; }
+    let count = |n: f64| (n.fract() == 0. && n >= 0. && n <= f64::from(u32::MAX)).then_some(n as u32);
+    let kind = match kind {
+        1 => ShapeKind::Rectangle { radii: [v[5], v[6], v[7], v[8]] },
+        2 => ShapeKind::Ellipse,
+        3 => ShapeKind::Polygon { corners: count(v[5])? },
+        _ => ShapeKind::Star { points: count(v[5])?, inner: v[6] },
+    };
+    if !kind.valid() { return None; }
     Some((LiveShape { kind, center: [v[0], v[1]], size: [v[2], v[3]], rotation: v[4] }, rest[numbers * 8..].try_into().unwrap()))
 }
 fn encode_path(out: &mut Vec<u8>, path: &PathItem) {

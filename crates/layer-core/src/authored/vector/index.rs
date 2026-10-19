@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(index.hit(&object, [4500., 3500.], 1.), Some(ItemId(3)), "a path spanning many cells");
         assert_eq!(index.hit(&object, [20., 70.], 2.), None, "hidden paths are not picked");
         assert_eq!(index.within(&object, [-10., -30., 110., 30.]), [ItemId(1), ItemId(2)].into());
-        let moved = object.transform_items(&[ItemId(2)].into(), crate::authored::Affine64([1., 0., 0., 1., 500., 0.])).unwrap();
+        let moved = object.transform_items(&[ItemId(2)].into(), crate::authored::Affine64([1., 0., 0., 1., 500., 0.]), true).unwrap();
         assert_eq!(index.hit(&moved, [50., 10.], 0.), None, "the index follows edits");
         assert_eq!(index.hit(&moved, [550., 10.], 0.), Some(ItemId(2)));
         let front = moved.insert_front(vec![line(9, [40., 0.], [60., 0.])]);
@@ -156,7 +156,7 @@ mod tests {
                 let mut index = VectorIndex::default();
                 let candidates = probes(&object).iter().map(|p| { index.update(&object); index.candidates([p[0] - 6., p[1] - 6., p[0] + 6., p[1] + 6.]).len() }).max().unwrap();
                 let one = BTreeSet::from([ItemId(count / 2)]);
-                let moved = object.transform_items(&one, crate::authored::Affine64([1., 0., 0., 1., 3., 3.])).unwrap();
+                let moved = object.transform_items(&one, crate::authored::Affine64([1., 0., 0., 1., 3., 3.]), true).unwrap();
                 let keys: HashSet<usize> = object.chunks().iter().map(key).collect();
                 let rewritten = moved.chunks().iter().filter(|chunk| !keys.contains(&key(chunk))).map(|chunk| chunk.records().len()).sum();
                 index.update(&moved);

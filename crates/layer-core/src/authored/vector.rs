@@ -4,6 +4,9 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
 
 mod erase;
 mod index;
+mod ops;
+#[cfg(test)]
+mod ops_tests;
 mod points;
 pub use erase::Eraser;
 pub use points::{AnchorRef, SegmentHit};
@@ -295,7 +298,18 @@ impl Style {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ShapeKind { Rectangle { radii: [f64; 4] }, Ellipse }
+pub enum ShapeKind { Rectangle { radii: [f64; 4] }, Ellipse, Polygon { corners: u32 }, Star { points: u32, inner: f64 } }
+impl ShapeKind {
+    pub const MAX_CORNERS: u32 = 100;
+    pub fn valid(&self) -> bool {
+        match *self {
+            Self::Rectangle { radii } => radii.iter().all(|r| r.is_finite() && *r >= 0.),
+            Self::Ellipse => true,
+            Self::Polygon { corners } => (3..=Self::MAX_CORNERS).contains(&corners),
+            Self::Star { points, inner } => (3..=Self::MAX_CORNERS).contains(&points) && inner > 0. && inner <= 1.,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LiveShape { pub kind: ShapeKind, pub center: [f64; 2], pub size: [f64; 2], pub rotation: f64 }
@@ -306,7 +320,15 @@ impl LiveShape {
         let (sin, cos) = self.rotation.sin_cos();
         let place = |p: [f64; 2]| [self.center[0] + p[0] * cos - p[1] * sin, self.center[1] + p[0] * sin + p[1] * cos];
         let turn = |v: [f64; 2]| [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos];
+        if !self.kind.valid() { return Err("Invalid live shape"); }
+        let around = |count: u32, radius: &dyn Fn(u32) -> f64| (0..count).map(|i| {
+            let angle = -std::f64::consts::FRAC_PI_2 + std::f64::consts::TAU * f64::from(i) / f64::from(count);
+            let r = radius(i);
+            Anchor::corner(place([w * r * angle.cos(), h * r * angle.sin()]))
+        }).collect::<Vec<_>>();
         let anchors: Vec<Anchor> = match self.kind {
+            ShapeKind::Polygon { corners } => around(corners, &|_| 1.),
+            ShapeKind::Star { points, inner } => around(points * 2, &|i| if i % 2 == 0 { 1. } else { inner }),
             ShapeKind::Ellipse => [([0., -h], [w, 0.]), ([w, 0.], [0., h]), ([0., h], [-w, 0.]), ([-w, 0.], [0., -h])].into_iter()
                 .map(|(p, t)| Anchor::new(place(p), turn([-t[0] * ARC, -t[1] * ARC]), turn([t[0] * ARC, t[1] * ARC]), AnchorKind::SYMMETRIC)).collect(),
             ShapeKind::Rectangle { radii } => {
@@ -339,9 +361,10 @@ impl LiveShape {
         let kind = match self.kind {
             ShapeKind::Rectangle { radii } if radii.iter().any(|r| *r > 0.) && (su - sv).abs() > 1e-9 * su.max(sv) => return None,
             ShapeKind::Rectangle { radii: [r0, r1, r2, r3] } => ShapeKind::Rectangle { radii: if flipped { [r3, r2, r1, r0] } else { [r0, r1, r2, r3] }.map(|r| r * su) },
-            ShapeKind::Ellipse => ShapeKind::Ellipse,
+            kind => kind,
         };
-        Some(Self { kind, center: affine.map(self.center), size: [self.size[0] * su, self.size[1] * sv], rotation: u[1].atan2(u[0]) })
+        let turned = if flipped && matches!(kind, ShapeKind::Polygon { .. } | ShapeKind::Star { .. }) { std::f64::consts::PI } else { 0. };
+        Some(Self { kind, center: affine.map(self.center), size: [self.size[0] * su, self.size[1] * sv], rotation: u[1].atan2(u[0]) + turned })
     }
 }
 
@@ -427,12 +450,12 @@ impl PathItem {
         }
         false
     }
-    pub fn transformed(&self, affine: Affine64) -> Result<Self, &'static str> {
+    pub fn transformed(&self, affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
         let geometry = Arc::new(self.geometry.transformed(|p| affine.map(p))?);
         let [a, b, c, d, _, _] = affine.0;
         let scale = (a * d - b * c).abs().sqrt();
         let moved = Self { shape: self.shape.as_ref().and_then(|shape| shape.transformed(affine)).map(Arc::new), ..self.with_geometry(geometry) };
-        if scale == 1. || self.style.strokes().next().is_none() { return Ok(moved); }
+        if !scale_widths || scale == 1. || self.style.strokes().next().is_none() { return Ok(moved); }
         let entries = self.style.entries.iter().map(|entry| match entry {
             PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: stroke.width * scale, ..stroke.clone() }),
             other => other.clone(),
@@ -637,19 +660,19 @@ impl VectorObject {
         let mut edits = BTreeMap::new();
         for (chunk, records) in self.chunks().iter().enumerate().filter(|(_, chunk)| chunk.summary().paths > 0) {
             let records = records.records().iter().map(|record| match record {
-                Record::Path(path) => path.transformed(affine).map(Record::Path),
+                Record::Path(path) => path.transformed(affine, true).map(Record::Path),
                 other => Ok(other.clone()),
             }).collect::<Result<Vec<_>, _>>()?;
             edits.insert(chunk, records);
         }
         Ok(self.edit_chunks(edits))
     }
-    pub fn transform_items(&self, ids: &BTreeSet<ItemId>, affine: Affine64) -> Result<Self, &'static str> {
+    pub fn transform_items(&self, ids: &BTreeSet<ItemId>, affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
         let mut edits = BTreeMap::new();
         for (chunk, indices) in self.positions(ids) {
             let mut records = self.chunks()[chunk].records().to_vec();
             for index in indices {
-                if let Record::Path(path) = &records[index] { records[index] = Record::Path(path.transformed(affine)?); }
+                if let Record::Path(path) = &records[index] { records[index] = Record::Path(path.transformed(affine, scale_widths)?); }
             }
             edits.insert(chunk, records);
         }

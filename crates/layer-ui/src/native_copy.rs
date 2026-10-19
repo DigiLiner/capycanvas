@@ -40,6 +40,7 @@ copy_struct! { LayerCopy {
     row: NATIVE_LAYERS_ROW,
     title: WORKSPACE_PANEL_LAYERS,
     new_layer: COMMAND_ADD_LAYER,
+    new_vector_layer: COMMAND_NEW_VECTOR_LAYER,
     new_selection_layer: COMMAND_NEW_SELECTION_LAYER,
     import_image: COMMAND_IMPORT_IMAGE,
     alpha_lock: RESOURCES_LAYER_MENU_ALPHA_LOCK,

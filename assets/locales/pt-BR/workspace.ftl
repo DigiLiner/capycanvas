@@ -253,7 +253,7 @@ workspace-tool-description-placement-original-size = Restaurar as imagens ao tam
 workspace-tool-description-hand = Arraste para mover a visualização da tela
 workspace-tool-description-eyedropper = Selecionar uma cor da tela
 workspace-tool-description-gradient = Arraste para preencher com um degradê
-workspace-tool-description-figure = Desenhar linhas, retângulos e elipses
+workspace-tool-description-figure = Desenhar linhas, retângulos, elipses e caminhos
 workspace-tool-description-ruler = Criar e editar guias de desenho
 workspace-tool-description-show-rulers = Mostrar ou ocultar guias de desenho
 workspace-tool-description-snap-rulers = Restringir traços às guias de desenho
@@ -614,3 +614,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } selecionado
    *[other] { $count } selecionados
     }
+workspace-tool-description-new-vector-layer = Criar uma camada vetorial para o traço, com linhas que você pode remodelar sem perder nitidez
+workspace-tool-description-join-paths = Unir as pontas mais próximas de dois caminhos abertos ou fechar um caminho aberto
+workspace-tool-description-close-path = Unir as pontas de cada caminho aberto selecionado
+workspace-tool-description-split-path = Cortar os caminhos nas âncoras selecionadas
+workspace-tool-description-reverse-path = Inverter o sentido dos caminhos selecionados, trocando início e fim
+workspace-tool-description-make-compound-path = Combinar os caminhos selecionados em um, com furos onde se sobrepõem
+workspace-tool-description-release-compound-path = Transformar cada parte de um caminho composto em um caminho próprio

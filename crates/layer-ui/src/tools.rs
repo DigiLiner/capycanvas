@@ -325,6 +325,9 @@ pub fn preset(id: u32) -> Result<DefaultBrushPreset, String> {
         .map(|p| p.0)
         .ok_or_else(|| "Unknown brush".into())
 }
+pub(crate) fn group_presets(group: ToolGroup) -> impl Iterator<Item = u32> {
+    PRESETS.iter().filter(move |preset| preset.2 == group).map(|preset| preset.0 as u32)
+}
 pub(crate) fn group(id: u32) -> ToolGroup {
     PRESETS
         .iter()
@@ -576,6 +579,13 @@ impl ToolMemory {
             color[..3].copy_from_slice(&rgb.map(|v| v as f32));
         }
         brush
+    }
+    pub(crate) fn path_blocker(&self, preset: DefaultBrushPreset) -> Option<&str> {
+        let defaults = layer_core::default_brush(preset);
+        if !defaults.draws_vector_lines() { return None; }
+        self.overrides.get(&(preset as u32))?.iter()
+            .find(|(setting, value)| crate::tool_settings::edit_value(&defaults, setting, **value).is_ok_and(|brush| !brush.draws_vector_lines()))
+            .map(|(setting, _)| setting.as_str())
     }
     pub fn brush(&self, preset: DefaultBrushPreset) -> BrushSnapshot {
         let mut brush = layer_core::default_brush(preset);

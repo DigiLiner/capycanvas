@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 const LINE_TOLERANCE: f64 = 0.5;
 
-struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample> }
+struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample>, continues: Option<PathItem> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
 struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, whole: bool }
 
 #[derive(Default)]
-pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasing: Option<Erasing>, revision: u64 }
+pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasing: Option<Erasing>, revision: u64, pen: Option<u32>, restore: Option<(u32, u32)>, on_vector: bool }
 impl VectorLines {
     pub fn active(&self) -> bool { self.line.is_some() }
     pub fn erasing(&self) -> bool { self.erasing.is_some() }
@@ -32,6 +32,39 @@ impl<R: CanvasRenderer> UiSession<R> {
         let layer = document.working.occurrence?;
         (document.scene().vector_layer(layer).is_some() && !matches!(document.working.target, Some(SourceTarget::Coverage(_)))
             && self.selection_masks.target().is_none()).then_some(layer)
+    }
+    fn draws_paths(&self, id: u32) -> bool {
+        tools::group(id).tool() == Tool::Eraser || tools::preset(id).is_ok_and(|preset| self.tools.brush(preset).draws_vector_lines())
+    }
+    pub(super) fn vector_pen(&self) -> Option<u32> {
+        self.vector_lines.pen.into_iter().chain(tools::group_presets(ToolGroup::Pen)).chain(tools::brush_ids())
+            .find(|id| tools::group(*id).tool() != Tool::Eraser && self.draws_paths(*id))
+    }
+    pub(super) fn brush_usable(&self, action: &UiAction) -> bool {
+        if self.editing_vector_layer().is_none() { return true; }
+        match *action {
+            UiAction::SelectBrush { id } => self.draws_paths(id),
+            UiAction::SelectToolGroup { group } | UiAction::SelectBrushSet { group } => tools::group_presets(group).any(|id| self.draws_paths(id)),
+            _ => true,
+        }
+    }
+    pub(super) fn mark_path_brushes(&self, mut view: ToolSetView) -> ToolSetView {
+        for item in view.groups.iter_mut().chain(&mut view.subtools) { item.enabled &= self.brush_usable(&item.action); }
+        view
+    }
+    pub(super) fn remember_vector_pen(&mut self, id: u32) {
+        if tools::group(id).tool() != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
+    }
+    pub(super) fn follow_layer_brush(&mut self) {
+        let vector = self.editing_vector_layer().is_some();
+        if std::mem::replace(&mut self.vector_lines.on_vector, vector) == vector || self.layer_interaction.tool != LayerCanvasTool::Paint { return; }
+        let current = self.state.brush.preset;
+        if !vector {
+            if let Some((brush, pen)) = self.vector_lines.restore.take() && pen == current { let _ = self.select_brush(brush); }
+        } else if self.state.brush.tool != Tool::Eraser && !self.engine.configured_brush().draws_vector_lines()
+            && let Some(pen) = self.vector_pen() && self.select_brush(pen).is_ok() {
+            self.vector_lines.restore = Some((current, pen));
+        }
     }
     pub(super) fn vector_drawing_layer(&self) -> Option<OccurrenceHandle> {
         let layer = self.editing_vector_layer()?;
@@ -118,8 +151,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let [r, g, b, a] = brush.color_rgba_linear;
                 let color = layer_core::color::RgbColor::from_linear(space, [r, g, b, (a * brush.opacity).clamp(0., 1.)]).map_err(|e| e.to_string())?;
                 let offset = self.engine.document().scene().occurrence_offset64(layer);
+                let p = self.state.camera.input_transform().map(event.surface_position);
+                let local = [f64::from(p.x) - offset[0], f64::from(p.y) - offset[1]];
+                let continues = self.selected_open_end(layer, local, 6. * self.document_per_surface_pixel()).map(|(path, _)| path);
                 let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset, LINE_TOLERANCE * self.document_per_surface_pixel());
-                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), shown: Vec::new() });
+                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), shown: Vec::new(), continues });
             }
             PenPhase::Move => self.push_vector_sample(event),
             PenPhase::Up => {
@@ -154,9 +190,13 @@ impl<R: CanvasRenderer> UiSession<R> {
             let Some(fitted) = line.stroke.fitted() else { return Ok(()) };
             let document = self.engine.document();
             let object = document.scene().vector_layer(line.layer).ok_or("The vector layer was removed")?;
-            let id = object.allocate_id();
-            let drawn = object.insert_front(vec![Record::Path(path(id, &line.paint, fitted))]);
-            let edit = document.vector_object_edit(line.layer, drawn).map_err(|e| e.to_string())?;
+            let (id, edit) = match &line.continues {
+                Some(original) => (original.id, self.continue_path(line.layer, original, &path(original.id, &line.paint, fitted), false)?),
+                None => {
+                    let id = object.allocate_id();
+                    (id, document.vector_object_edit(line.layer, object.insert_front(vec![Record::Path(path(id, &line.paint, fitted))])).map_err(|e| e.to_string())?)
+                }
+            };
             self.layer_edit(edit)?;
             self.layer_interaction.changed = true;
             if line.stroke.awaits_corrections() { self.vector_lines.drawn = Some(Drawn { line, id, checkpoint: self.engine.checkpoint() }); }
@@ -179,8 +219,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let document = self.engine.document();
         let object = document.scene().vector_layer(drawn.line.layer).ok_or("The vector layer was removed")?;
         let Some(position) = object.find(drawn.id) else { return Ok(()) };
-        let corrected = object.replace([(position, Some(Record::Path(path(drawn.id, &drawn.line.paint, fitted))))]);
-        let edit = document.vector_object_edit(drawn.line.layer, corrected).map_err(|e| e.to_string())?;
+        let edit = match &drawn.line.continues {
+            Some(original) => self.continue_path(drawn.line.layer, original, &path(drawn.id, &drawn.line.paint, fitted), false)?,
+            None => document.vector_object_edit(drawn.line.layer, object.replace([(position, Some(Record::Path(path(drawn.id, &drawn.line.paint, fitted))))])).map_err(|e| e.to_string())?,
+        };
         self.engine.amend_edit(edit).map_err(|e| e.to_string())?;
         self.layer_interaction.changed = true;
         drawn.checkpoint = self.engine.checkpoint();

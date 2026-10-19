@@ -10,6 +10,8 @@ pub enum FigureShape {
     Line,
     Rectangle,
     Ellipse,
+    Polygon,
+    Star,
     Path,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,7 +74,7 @@ impl Figure {
                 .colors
                 .iter()
                 .all(|c| c.iter().all(|v| v.is_finite()) && (0.0..=1.0).contains(&c[3]))
-            && self.shape != FigureShape::Path
+            && !matches!(self.shape, FigureShape::Path | FigureShape::Polygon | FigureShape::Star)
             && if self.shape == FigureShape::Line {
                 self.paint == FigurePaint::Outline && dx.hypot(dy) >= 0.001
             } else {
@@ -104,7 +106,7 @@ impl FigureShape {
     pub fn guide(self, start: Point, end: Point, zoom: f32) -> Vec<Point> {
         match self {
             Self::Line | Self::Path => vec![start, end],
-            Self::Rectangle => vec![
+            Self::Rectangle | Self::Polygon | Self::Star => vec![
                 start,
                 Point {
                     x: end.x,

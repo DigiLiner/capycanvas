@@ -425,7 +425,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn request_copy(&mut self, command: CommandId) -> Result<(), String> {
         self.require_document_idle()?;
         refused(self.copy_refusal(command))?;
-        if command == CommandId::Cut && !self.copies_layers(command) && !matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) && self.refuse_image_content() {
+        if command == CommandId::Cut && !self.copies_layers(command) && !matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) && self.refuse_object_content() {
             return Ok(());
         }
         self.clipboard_crop()?;
@@ -790,7 +790,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let (ids, records) = source.copies(&all, object);
         let shift = layer_core::authored::Affine64([1., 0., 0., 1., delta[0], delta[1]]);
         let records = records.into_iter().map(|record| match record {
-            Record::Path(path) => path.transformed(shift).map(Record::Path),
+            Record::Path(path) => path.transformed(shift, true).map(Record::Path),
             other => Ok(other),
         }).collect::<Result<Vec<_>, _>>().map_err(str::to_string)?;
         let edit = document.vector_object_edit(target, object.insert_front(records)).map_err(error)?;

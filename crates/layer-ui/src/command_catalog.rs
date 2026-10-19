@@ -298,6 +298,9 @@ fn entry(
             command: CommandId::NewDodgeBurnLayer,
         } => Some(MessageId::COMMANDS_ALIAS_NEW_DODGE_BURN_LAYER),
         UiAction::Invoke {
+            command: CommandId::NewVectorLayer,
+        } => Some(MessageId::COMMANDS_ALIAS_NEW_VECTOR_LAYER),
+        UiAction::Invoke {
             command: CommandId::FrequencySeparation,
         } => Some(MessageId::COMMANDS_ALIAS_FREQUENCY_SEPARATION),
         _ => None,
@@ -978,7 +981,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.state.document_file.close_ready {
             return l.text(MessageId::COMMANDS_THIS_DRAWING_IS_CLOSING);
         }
-        if let Some(reason) = self.object_disabled_reason(command) {
+        if let Some(reason) = self.object_disabled_reason(command).or_else(|| self.vector_disabled_reason(command)) {
             return reason;
         }
         if self.workspace_read_only && !matches!(command, C::ApplyTransform | C::CancelTransform) {
@@ -1274,7 +1277,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             C::ScaleRotate => l.text(MessageId::COMMANDS_SELECT_UNLOCKED_PAINT_CONTENT_OR_A_LAYER_MASK),
             C::ClearLayer | C::FillSelection if !paint => l.text(MessageId::COMMANDS_SELECT_A_PAINT_LAYER),
             C::ClearLayer | C::FillSelection if document.working.target.is_some_and(layer_core::SourceTarget::is_coverage) => l.text(MessageId::COMMANDS_RETURN_TO_THE_LAYER_S_ARTWORK_FIRST),
-            C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack => l.text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER),
+            C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack | C::JoinPaths | C::ClosePath | C::SplitPath | C::ReversePath
+            | C::MakeCompoundPath | C::ReleaseCompoundPath => l.text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER),
             C::FinishPath | C::CancelPath => l.text(MessageId::COMMANDS_DRAW_PATHS_ON_A_VECTOR_LAYER),
             C::RaiseLayer | C::LowerLayer => match self.layer_step_edit(command == C::RaiseLayer).err() {
                 Some(layer_core::DocumentError::InvalidLayerOperation("Invalid layer position")) => l.text(if command == C::RaiseLayer {

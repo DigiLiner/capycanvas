@@ -142,6 +142,9 @@ struct LayerPanel: View {
     private var footer: some View {
         ConfigurationFlow(spacing: store.panelMetrics.spacing, trailingLast: true) {
             LayerButton(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) { store.layer(["op": "new", "group": false, "clipped": false]) }
+            LayerButton(icon: "add-vector-layer", label: store.catalog["native_copy"]["layers"]["new_vector_layer"].string, enabled: store.command("new_vector_layer")["enabled"].bool) {
+                store.invoke("new_vector_layer")
+            }.accessibilityIdentifier("layer-new-vector")
             LayerButton(icon: "folder", label: store.catalog["native_copy"]["layers"]["new_group"].string) { store.layer(["op": "new", "group": true, "clipped": false]) }
             LayerButton(icon: "selection-brush", label: store.catalog["native_copy"]["layers"]["new_selection_layer"].string, enabled: store.command("new_selection_layer")["enabled"].bool) {
                 store.invoke("new_selection_layer")

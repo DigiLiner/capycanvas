@@ -498,7 +498,7 @@ workspace-tool-description-eyedropper = Pilih warna dari kanvas
 
 workspace-tool-description-gradient = Seret untuk mengisi dengan gradasi
 
-workspace-tool-description-figure = Gambar garis, persegi panjang, dan elips
+workspace-tool-description-figure = Gambar garis, persegi panjang, elips, dan jalur
 
 workspace-tool-description-ruler = Buat dan edit garis bantu gambar
 
@@ -1185,3 +1185,10 @@ workspace-tool-strength-slider = Penggeser kekuatan
 workspace-tool-strength-slider-description = Atur kekuatan alat langsung di bilah alat
 workspace-owner-lost = Perubahan pada ruang kerja ini tidak dapat disimpan saat ini.
 workspace-picker-selected = { $count } dipilih
+workspace-tool-description-new-vector-layer = Buat lapisan vektor untuk line art yang bisa dibentuk ulang tanpa kehilangan ketajaman
+workspace-tool-description-join-paths = Hubungkan ujung terdekat dua jalur terbuka, atau tutup satu jalur terbuka
+workspace-tool-description-close-path = Hubungkan kedua ujung setiap jalur terbuka yang dipilih
+workspace-tool-description-split-path = Potong jalur di jangkar yang dipilih
+workspace-tool-description-reverse-path = Balik arah jalur yang dipilih, menukar awal dan akhirnya
+workspace-tool-description-make-compound-path = Gabungkan jalur yang dipilih menjadi satu, dengan lubang di bagian yang bertumpuk
+workspace-tool-description-release-compound-path = Kembalikan setiap bagian jalur gabungan menjadi jalur sendiri

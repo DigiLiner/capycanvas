@@ -279,6 +279,7 @@ pub struct UiSession<R: CanvasRenderer> {
     vector_moves: vector_moves::VectorMoves,
     vector_paths: vector_paths::VectorPaths,
     vector_points: vector_points::VectorPoints,
+    figure_options: figures::FigureOptions,
     deferred_edits: std::collections::VecDeque<deferred_edits::DeferredEdit>,
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
@@ -489,6 +490,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             vector_moves: Default::default(),
             vector_paths: Default::default(),
             vector_points: Default::default(),
+            figure_options: Default::default(),
             deferred_edits: Default::default(),
             selection_masks: Default::default(),
             canvas_size: None,
@@ -2326,7 +2328,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
         } else if id == CommandId::SoftProof {
             self.state.localization.text(MessageId::COMMAND_SOFT_PROOF_TOGGLE)
-        } else if let Some(label) = self.object_command_label(id) {
+        } else if let Some(label) = self.object_command_label(id).or_else(|| self.vector_command_label(id)) {
             label
         } else if id == CommandId::MergeDown {
             self.merge_down_label()
@@ -2378,6 +2380,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let idle = self.canvas_idle();
         if let Some(enabled) = self.object_command_enabled(id) {
             return (enabled, self.object_command_selected(id).unwrap_or(false));
+        }
+        if let Some(enabled) = self.vector_command_enabled(id) {
+            return (enabled, false);
         }
 
         let enabled = match id {
@@ -2593,7 +2598,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::ClearLayer | CommandId::FillSelection => {
                 let vector = active.is_some_and(|handle| scene.vector_layer(handle).is_some());
                 self.require_document_idle().is_ok()
-                    && (editable || vector || self.image_content())
+                    && (editable || self.object_content())
                     && !matches!(document.working.target, Some(SourceTarget::Coverage(_)))
                     && !document.is_locked(active.unwrap_or_default())
                     && (id == CommandId::ClearLayer || (document.working.selection.is_some() && !vector))
@@ -2604,7 +2609,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::RedoWorkspace => {
                 !self.state.customization.header_editing && self.workspace_history.can_redo()
             }
-            CommandId::AddLayer => idle,
+            CommandId::AddLayer | CommandId::NewVectorLayer => idle,
             CommandId::UseReferenceBelow => {
                 self.require_document_idle().is_ok() && self.use_reference_below_reason().is_none()
             }
@@ -2636,6 +2641,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.smoothing_available()
             }
             CommandId::EraseWholePaths => self.vector_erasing_layer(false).is_some(),
+            CommandId::ScaleOutlineWidths => self.selected_vector_items().is_some(),
             _ => true,
         };
         let selection = self.layer_interaction.tool.selection_tool();
@@ -2643,6 +2649,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let selected = (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
             || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
             || (id == CommandId::EraseWholePaths && self.state.settings.erase_whole_paths)
+            || (id == CommandId::ScaleOutlineWidths && !self.state.settings.keep_outline_widths)
             || (id == CommandId::QuickMask && self.selection_masks.quick())
             || (id == CommandId::SelectionOutline && self.selection_tools.options.display.outline)
             || (id == CommandId::MaskOverlay && self.selection_tools.options.display.overlay)
@@ -3540,6 +3547,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 } else if id.starts_with("tonal_") {
                     let value=self.selection_tools.options.tonal.reset_value(&id)?;
                     return self.dispatch(UiAction::SetToolSetting {id,value});
+                } else if let Some(value) = figures::FigureOptions::default_value(&id) {
+                    return self.dispatch(UiAction::SetToolSetting { id, value });
                 } else if id.starts_with("selection_") {
                     let options = SelectionOptions {
                         constraint: self.selection_tools.options.constraint,
@@ -3603,6 +3612,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if id.starts_with("transform_") {
                     self.set_transform_control(&id, value)?;
                     return Ok(self.changed(BRUSH, true));
+                }
+                if id.starts_with("figure_") {
+                    self.figure_options.edit(&id, value, &self.state.localization)?;
+                    self.refresh_tools();
+                    return Ok(self.changed(BRUSH, false));
                 }
                 if id.starts_with("crop_") {
                     self.set_crop_control(&id, value)?;
@@ -4647,6 +4661,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             result?;
             return Ok((DOCUMENT | BRUSH | COMMANDS, true));
         }
+        if let Some(result) = self.vector_command(command) {
+            result?;
+            self.refresh_tools();
+            return Ok((DOCUMENT | BRUSH | COMMANDS, true));
+        }
         if self.objects.placing() && matches!(command, CommandId::ApplyTransform | CommandId::CancelTransform | CommandId::ResetTransform | CommandId::Undo) {
             if command == CommandId::ResetTransform { self.reset_object_session()?; }
             else { self.finish_object_placement(command == CommandId::ApplyTransform)?; }
@@ -4873,6 +4892,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let space = tool_settings::color_mixing(command).expect("a color mixing choice");
                 self.edit_brush(tool_settings::COLOR_MIXING, f32::from(space as u8))?;
                 Ok((BRUSH, false))
+            }
+            CommandId::ScaleOutlineWidths => {
+                self.state.settings.keep_outline_widths ^= true;
+                Ok((SETTINGS | BRUSH | COMMANDS, false))
             }
             CommandId::EraseWholePaths => {
                 self.state.settings.erase_whole_paths ^= true;
@@ -5228,6 +5251,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 })?;
                 Ok((0, true))
             }
+            CommandId::NewVectorLayer => {
+                self.layer_action(LayerAction::NewVector)?;
+                Ok((0, true))
+            }
             CommandId::DeleteLayer => {
                 self.layer_action(LayerAction::DeleteSelected)?;
                 Ok((0, true))
@@ -5235,6 +5262,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::RaiseLayer | CommandId::LowerLayer => {
                 self.layer_edit(self.layer_step_edit(command == CommandId::RaiseLayer).map_err(error)?)?;
                 Ok((0, true))
+            }
+            CommandId::JoinPaths | CommandId::ClosePath | CommandId::SplitPath | CommandId::ReversePath | CommandId::MakeCompoundPath | CommandId::ReleaseCompoundPath => {
+                Err(self.localization().text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER).to_string())
             }
             CommandId::BringToFront | CommandId::BringForward | CommandId::SendBackward | CommandId::SendToBack => {
                 use layer_core::authored::vector::Arrange;
@@ -5440,7 +5470,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.brush.tool = tools::group(id).tool();
         self.state.brush.diameter = brush.diameter;
         self.state.brush.opacity = brush.opacity;
-        self.apply_brush()
+        self.apply_brush()?;
+        self.remember_vector_pen(id);
+        Ok(())
     }
 
     fn edit_brush(&mut self, id: &str, value: f32) -> Result<(), String> {
@@ -5448,8 +5480,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.brush.diameter = brush.diameter;
         self.state.brush.opacity = brush.opacity;
         self.engine.set_brush(brush).map_err(error)?;
-        self.apply_brush()?;
-        self.tools.set_override(self.state.brush.preset, id, value, &self.state.localization)
+        self.tools.set_override(self.state.brush.preset, id, value, &self.state.localization)?;
+        self.apply_brush()
     }
 
     fn apply_brush(&mut self) -> Result<(), String> {
@@ -5560,7 +5592,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             let guides = matches!(tool, LayerCanvasTool::Ruler { .. }) || (moving && self.selected_ruler().is_some());
             let mixing = tool == LayerCanvasTool::Paint && tool_settings::mixes_color(self.engine.configured_brush());
             let erasing_paths = tool == LayerCanvasTool::Paint && self.vector_erasing_layer(false).is_some();
+            let editing_points = tool == LayerCanvasTool::EditPoints && self.selected_vector_items().is_some();
             let arranging = moving && self.selected_vector_items().is_some();
+            let turning = arranging.then_some([CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight]);
             moving
                 .then_some(CommandId::MoveLeaveCopy)
                 .into_iter()
@@ -5569,6 +5603,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .chain(mixing.then_some(tool_settings::COLOR_MIXING_COMMANDS).into_iter().flatten())
                 .chain(erasing_paths.then_some(CommandId::EraseWholePaths))
                 .chain(arranging.then_some([CommandId::BringToFront, CommandId::BringForward, CommandId::SendBackward, CommandId::SendToBack]).into_iter().flatten())
+                .chain(turning.into_iter().flatten())
+                .chain(arranging.then_some(CommandId::ScaleOutlineWidths))
+                .chain(editing_points.then_some([CommandId::SplitPath, CommandId::JoinPaths, CommandId::ClosePath, CommandId::ReversePath]).into_iter().flatten())
                 .map(|command| ToolSettingAction {
                     command,
                     checkable: command.is_toggle(),
@@ -5619,7 +5656,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else if self.layer_interaction.tool == LayerCanvasTool::Paint {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                 .into_iter().filter(|control| control.id != "smoothing_strength" || self.smoothing_available()).collect()
-        } else if let LayerCanvasTool::Figure { paint, .. } = self.layer_interaction.tool {
+        } else if let LayerCanvasTool::Figure { shape, paint } = self.layer_interaction.tool {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                 .into_iter()
                 .filter(|c| c.id == "opacity" || (c.id == "size" && paint != FigurePaint::Fill))
@@ -5630,6 +5667,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                     c.ungrouped()
                 })
+                .chain(self.figure_options.controls(shape, &self.state.localization))
                 .collect()
         } else if let LayerCanvasTool::Selection { kind } = self.layer_interaction.tool {
             if kind == SelectionTool::Tonal {self.selection_tools.options.tonal.controls(&self.state.localization)}
@@ -5932,6 +5970,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.filter_picker.selected = doc.working.occurrence.and_then(|handle| doc.scene().effect(handle)).map(|effect| effect.program.id.clone());
         let drawing_target = doc.drawing_target();
         self.end_dry_mask_session(drawing_target);
+        self.follow_layer_brush();
         self.refresh_layer_presentation();
     }
 
@@ -5966,7 +6005,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                         .get(&fx.program.id)
                         .map_or("adjustments", |e| e.icon.as_ref())
                 )
-            }).or_else(|| match l.kind() { LayerKind::Selection => Some("layer-selection-brush-symbolic".into()), _ => None }),
+            }).or_else(|| match l.content {
+                OccurrenceContent::Selection(_) => Some("layer-selection-brush-symbolic".into()),
+                OccurrenceContent::Vector(_) => Some("layer-path-symbolic".into()),
+                _ => None,
+            }),
             label: l.name.to_string(),
             description: {
                 let mut parts = Vec::new();
@@ -8596,7 +8639,7 @@ mod tests {
         let mut s = session(Platform::Gtk);
         assert!(key(&mut s, "u", true, false, false).handled);
         key(&mut s, "u", false, false, false);
-        assert_eq!(s.state.tool_set.groups.len(), 4);
+        assert_eq!(s.state.tool_set.groups.len(), 6);
         assert_eq!(s.state.tool_set.subtools.len(), 1);
         assert_eq!(
             s.state
@@ -8645,7 +8688,7 @@ mod tests {
                 invoke(&mut s, CommandId::Hand);
                 invoke(&mut s, CommandId::Figure);
                 assert_eq!(s.layer_interaction.tool, remembered);
-                assert_eq!(s.state.tool_settings.len(), if mode == 1 { 1 } else { 2 });
+                assert_eq!(s.state.tool_settings.len(), if mode == 1 { 1 } else { 2 } + usize::from(index == 1), "Rectangle adds its corner radius");
                 send(&mut s, PenPhase::Down, [30., 40.]);
                 for i in 0..100 {
                     send(&mut s, PenPhase::Move, [50. + i as f32, 90.]);
@@ -12231,10 +12274,10 @@ mod tests {
         .unwrap();
         assert!(!app.command(CommandId::ClearLayer).enabled);
         let doc = app.engine.document();
-        assert_eq!(
-            serialize(app.application_menu(ApplicationMenu::Layer)),
-            serialize(app.layer_menu(occurrence_token(doc.working.occurrence.unwrap()), true).unwrap())
-        );
+        let menu = serialize(app.application_menu(ApplicationMenu::Layer));
+        let row = serialize(app.layer_menu(occurrence_token(doc.working.occurrence.unwrap()), true).unwrap());
+        assert_eq!(menu[0][0]["label"], app.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW).as_ref(), "New stays while a mask is edited");
+        assert_eq!(menu.as_array().unwrap()[1..], row.as_array().unwrap()[..]);
         app.input_pending = true;
         assert!(!app.command(CommandId::SelectAll).enabled);
         assert!(

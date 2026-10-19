@@ -20,13 +20,13 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Why the active content can't take a pixel write, other than holding images.
     fn pixel_write_refusal(&self)->Option<Arc<str>> {
         match self.engine.document().try_drawing_content() {
-            Ok(_)|Err(layer_core::DrawingRefusal::Object)=>None,
+            Ok(_)|Err(layer_core::DrawingRefusal::Object|layer_core::DrawingRefusal::Vector)=>None,
             Err(reason)=>Some(notices::drawing_refusal_text(reason,self.localization())),
         }
     }
     pub(super) fn clear_selection(&mut self, outside: bool) -> Result<(),String> {
         refused(self.clear_refusal())?;
-        if self.refuse_image_content() {return Ok(());}
+        if self.refuse_object_content() {return Ok(());}
         let doc=self.engine.document();let target=doc.drawing_content().ok_or("Select a drawing layer")?;
         let alpha_locked=doc.scene().source_owner(target).and_then(|h|doc.scene().occurrence(h)).is_some_and(|o|o.alpha_locked);
         let mut selection=doc.working.selection.clone().ok_or_else(||self.localization().text(NO_SELECTION).to_string())?;
@@ -69,7 +69,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn selection_to_layer(&mut self,cut:bool)->Result<(),String> {
         refused(self.selection_to_layer_refusal(cut))?;
-        if cut && self.refuse_image_content() {return Ok(());}
+        if cut && self.refuse_object_content() {return Ok(());}
         let Some(selection)=self.engine.document().working.selection.clone() else {return self.layer_action(LayerAction::DuplicateSelected);};
         let doc=self.engine.document();let scene=doc.scene();let source_id=doc.working.occurrence.ok_or("Select a layer first")?;
         let source=scene.occurrence(source_id).ok_or("Select a layer first")?.clone();

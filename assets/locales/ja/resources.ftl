@@ -440,7 +440,6 @@ resources-layer-menu-new = 新規
 resources-layer-menu-new-clipping-layer = 新規クリッピングレイヤー
 
 resources-layer-menu-new-group = 新規グループ
-resources-layer-menu-new-vector-layer = 新規ベクターレイヤー
 resources-path-fill = 塗り
 resources-path-fill-color = 塗りの色
 resources-path-outline = 線
@@ -740,3 +739,8 @@ resources-paper-washi = 和紙
 resources-paper-weathered-wood = 古材
 resources-layer-add-paper = 用紙を追加
 resources-size-unit = 単位
+resources-layer-type-vector = ベクターレイヤー
+resources-path-overlaps = 重なり
+resources-path-overlaps-filled = 塗りつぶす
+resources-path-overlaps-holes = 穴にする
+resources-path-miter-limit = 鋭角の限度

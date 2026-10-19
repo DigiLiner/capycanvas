@@ -14,6 +14,7 @@ pub enum DrawingRefusal {
     Mask,
     EffectMask,
     Object,
+    Vector,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -602,6 +603,7 @@ impl Document {
                 Ok(target)
             }
             LayerKind::Group => Err(DrawingRefusal::Group),
+            LayerKind::Object if matches!(occurrence.content, OccurrenceContent::Vector(_)) => Err(DrawingRefusal::Vector),
             LayerKind::Object => Err(DrawingRefusal::Object),
             LayerKind::Selection => Err(DrawingRefusal::SelectionLayer),
             LayerKind::Effect => Err(DrawingRefusal::EffectWithoutBase),

@@ -269,6 +269,7 @@ internal class LayerSwipe {
             }
             Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height / density.density }.padding(horizontal=panelMetrics().inset,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
                 LayerButton(host,"add-layer",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"),action=obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false)))
+                LayerButton(host,"add-vector-layer",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_vector_layer"),action=obj("type" to "invoke","command" to "new_vector_layer"))
                 LayerButton(host,"folder",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_group"),action=obj("type" to "layer","action" to obj("op" to "new","group" to true,"clipped" to false)))
                 LayerButton(host,"selection-brush",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_selection_layer"),action=obj("type" to "invoke","command" to "new_selection_layer"))
                 LayerButton(host,"mask",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("add_mask"),enabled=controls.getBoolean("mask"),action=active?.let { obj("type" to "layer","action" to obj("op" to "add_mask","id" to it.getLong("id"),"replace" to false)) })

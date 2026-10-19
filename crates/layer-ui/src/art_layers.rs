@@ -206,6 +206,8 @@ pub(super) fn swipe_actions(doc: &Document, id: OccurrenceHandle, layer: &Occurr
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NewContent { Paint, Group, Vector }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NewPlacement { Above, Clipped, Below }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -215,6 +217,7 @@ pub enum LayerAction {
         clipped: bool,
     },
     NewVector,
+    NewBelow,
     Select {
         id: u64,
         mask: bool,
@@ -762,21 +765,26 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.engine.document().is_locked(id) { return Err("This layer is locked".into()); }
         Ok(layer.clone())
     }
-    fn new_layer(&mut self, kind: NewContent, clipped: bool) -> Result<(), String> {
+    fn new_layer(&mut self, kind: NewContent, placement: NewPlacement) -> Result<(), String> {
         self.return_to_artwork()?;
         let doc = self.engine.document();
         let scene = doc.scene();
         let active = doc.working.occurrence;
+        let clipped = placement == NewPlacement::Clipped;
         if clipped && !active.is_some_and(|h| scene.eligible_target(h)) {
             return Err("Choose a paint layer, object layer or isolated group to clip to".into());
         }
-        let parent = active.and_then(|h| if !clipped && scene.occurrence(h).is_some_and(|l| l.kind() == LayerKind::Group) { Some(h) } else { scene.parent(h) });
+        let parent = active.and_then(|h| if placement == NewPlacement::Above && scene.occurrence(h).is_some_and(|l| l.kind() == LayerKind::Group) { Some(h) } else { scene.parent(h) });
         if parent.is_some_and(|p| doc.is_locked(p)) { return Err("The destination group is locked".into()); }
         let stack_handle = match parent { Some(h) => match scene.occurrence(h).unwrap().content { OccurrenceContent::Stack(h) => h, _ => unreachable!() }, None => doc.composition().result };
         let mut stack = doc.artwork.stacks.get(stack_handle).ok_or("Unknown stack")?.clone();
-        let index = active.and_then(|h| {
-            let top = if clipped { scene.attached_effects(h).last().copied().unwrap_or(h) } else { doc.clipping_stack_top(h).unwrap_or(h) };
-            stack.entries.iter().position(|id| *id == top)
+        let index = active.and_then(|h| match placement {
+            NewPlacement::Below => {
+                let base = if scene.occurrence(h).is_some_and(|o| o.attachment == Attachment::Clip) { doc.clipping_base(h).unwrap_or(h) } else { h };
+                stack.entries.iter().position(|id| *id == base).map(|index| index + 1)
+            }
+            NewPlacement::Clipped => stack.entries.iter().position(|id| *id == scene.attached_effects(h).last().copied().unwrap_or(h)),
+            NewPlacement::Above => stack.entries.iter().position(|id| *id == doc.clipping_stack_top(h).unwrap_or(h)),
         }).unwrap_or(0);
         let mut edits = Vec::new();
         let (content, name) = match kind {
@@ -921,7 +929,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             LayerAction::FillSelection => {
                 let selection = self.engine.document().working.selection.clone().ok_or("Make a selection first")?;
-                if self.refuse_image_content() { return Ok(()); }
+                if self.refuse_object_content() { return Ok(()); }
                 self.fill_selection(selection)?;
             }
             LayerAction::Drop { id, target, fraction, surface } => {
@@ -934,9 +942,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if group && !clipped && self.selected_layers().len() > 1 {
                     return self.layer_action(LayerAction::GroupSelected);
                 }
-                self.new_layer(if group { NewContent::Group } else { NewContent::Paint }, clipped)?;
+                self.new_layer(if group { NewContent::Group } else { NewContent::Paint }, if clipped { NewPlacement::Clipped } else { NewPlacement::Above })?;
             }
-            LayerAction::NewVector => self.new_layer(NewContent::Vector, false)?,
+            LayerAction::NewVector => self.new_layer(NewContent::Vector, NewPlacement::Above)?,
+            LayerAction::NewBelow => self.new_layer(NewContent::Paint, NewPlacement::Below)?,
             LayerAction::Select { id, mask } => {
                 let handle = occurrence_handle(id)?;
                 if self.engine.document().scene().occurrence(handle).is_some_and(|l| l.kind() == LayerKind::Selection) {
@@ -1180,7 +1189,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                     LayerAction::Clear { .. } => {
                         let OccurrenceContent::Paint(handle) = layer.content else {
-                            if self.engine.document().working.occurrence == Some(id) && self.refuse_image_content() { return Ok(()); }
+                            if self.engine.document().working.occurrence == Some(id) && self.refuse_object_content() { return Ok(()); }
                             return Err("Choose a paint layer".into());
                         };
                         let mut source = self.engine.document().artwork.paint.get(handle).ok_or("Unknown source")?.clone();
@@ -1306,6 +1315,40 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(ContextMenu { title, sections: self.layer_menu_sections(id, mask, filters)? }
             .with_shortcuts_localized(&self.state.settings, self.state.platform, self.localization()))
     }
+    pub(super) fn application_layer_sections(&self) -> Vec<Vec<ContextMenuItem>> {
+        let doc = self.engine.document();
+        let active = doc.working.occurrence;
+        let mask = doc.working.target.is_some_and(SourceTarget::is_coverage);
+        let mut sections = active.and_then(|h| self.layer_menu_sections(occurrence_token(h), mask, false).ok()).unwrap_or_default();
+        if mask || active.and_then(|h| doc.scene().occurrence(h)).is_none_or(|l| l.kind() == LayerKind::Selection) {
+            sections.insert(0, vec![self.new_layer_submenu(active)]);
+        }
+        sections
+    }
+    fn new_layer_submenu(&self, handle: Option<OccurrenceHandle>) -> ContextMenuItem {
+        use LayerAction as A;
+        let doc = self.engine.document();
+        let scene = doc.scene();
+        let l = self.localization();
+        let parent = handle.and_then(|h| if scene.occurrence(h).is_some_and(|o| o.kind() == LayerKind::Group) { Some(h) } else { scene.parent(h) });
+        let open = !parent.is_some_and(|p| doc.is_locked(p));
+        let group = if self.selected_layers().len() > 1 { doc.group_layers_edit(&doc.layer_roots(self.selected_layers()), self.new_group_blend(), "").is_ok() } else { open };
+        let item = |label: std::sync::Arc<str>, action: A, enabled: bool| ContextMenuItem { enabled, ..ContextMenuItem::command(label.as_ref(), UiAction::Layer { action }) };
+        let mut sections = vec![vec![
+            item(l.text(MessageId::COMMAND_ADD_LAYER), A::New { group: false, clipped: false }, open),
+            item(l.text(MessageId::RESOURCES_LAYER_MENU_NEW_CLIPPING_LAYER), A::New { group: false, clipped: true }, open && handle.is_some_and(|h| scene.eligible_target(h))),
+            item(l.text(MessageId::RESOURCES_LAYER_MENU_NEW_GROUP), A::New { group: true, clipped: false }, group),
+            item(CommandId::NewVectorLayer.localized_label(l), A::NewVector, open),
+        ]];
+        if handle.is_some() && handle == doc.working.occurrence {
+            sections.push(self.fill_layer_items());
+            sections.push([CommandId::CopySelectionToLayer, CommandId::CutSelectionToLayer].map(|command| {
+                let state = self.command(command);
+                ContextMenuItem { enabled: state.enabled, ..ContextMenuItem::command(state.label.as_ref(), UiAction::Invoke { command }) }
+            }).into());
+        }
+        ContextMenuItem::submenu(l.text(MessageId::RESOURCES_LAYER_MENU_NEW).as_ref(), sections)
+    }
     pub(super) fn layer_menu_sections(&self, id: u64, mask: bool, filters: bool) -> Result<Vec<Vec<ContextMenuItem>>, String> {
         use LayerAction as A;
         if id == 0 && self.selection_masks.quick() { return Ok(self.quick_mask_menu().sections); }
@@ -1319,11 +1362,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         let accepts_mask = !layer_core::paper::is_paper_layer(doc.scene(), handle);
         let roots = doc.layer_roots(self.selected_layers());
         let multiple = roots.len() > 1;
-        let parent = if l.kind() == LayerKind::Group {
-            Some(handle)
-        } else {
-            doc.scene().parent(handle)
-        };
         let item = |label: &str, action: A| {
             let enabled = match &action {
                 A::RepairSourceProfile { .. } | A::RasterizeSource { .. } => self.can_edit_original(handle) && !self.state.document_file.busy,
@@ -1339,12 +1377,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                     accepts_mask && !locked && self.copied_mask_use(handle).is_ok()
                 }
                 A::AddMask { .. } => accepts_mask && !locked,
-                A::New { group: true, clipped: false } if self.selected_layers().len() > 1 => doc.group_layers_edit(&roots, self.new_group_blend(), "").is_ok(),
-                A::New { clipped, .. } => {
-                    !parent.is_some_and(|p| doc.is_locked(p))
-                        && (!clipped || doc.scene().eligible_target(handle))
-                }
-                A::NewVector => !parent.is_some_and(|p| doc.is_locked(p)),
                 A::Reference { .. } => matches!(l.kind(), LayerKind::Paint | LayerKind::Object | LayerKind::Group),
                 A::ReferenceSelection => !self.reference_selection().is_empty(),
                 A::Lock { .. } => controls.edit_lock,
@@ -1557,47 +1589,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     A::Delete { id }
                 },
             ));
-            let mut new = vec![vec![
-                item(
-                    self.localization().text(MessageId::COMMAND_ADD_LAYER).as_ref(),
-                    A::New {
-                        group: false,
-                        clipped: false,
-                    },
-                ),
-                item(
-                    self.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW_CLIPPING_LAYER).as_ref(),
-                    A::New {
-                        group: false,
-                        clipped: true,
-                    },
-                ),
-                item(
-                    self.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW_GROUP).as_ref(),
-                    A::New {
-                        group: true,
-                        clipped: false,
-                    },
-                ),
-                item(self.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW_VECTOR_LAYER).as_ref(), A::NewVector),
-            ]];
-            let current = Some(handle) == doc.working.occurrence;
-            if current {
-                new.push(self.fill_layer_items());
-                new.push(
-                    [CommandId::CopySelectionToLayer, CommandId::CutSelectionToLayer]
-                        .map(|command| {
-                            let state = self.command(command);
-                            let mut item = ContextMenuItem::command(state.label.as_ref(), UiAction::Invoke { command });
-                            item.enabled = state.enabled;
-                            item
-                        })
-                        .into(),
-                );
-            }
             vec![
                 [
-                    Some(ContextMenuItem::submenu(self.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW).as_ref(), new)),
+                    Some(self.new_layer_submenu(Some(handle))),
                     (filters && !mask).then(|| self.layer_filter_menu(handle)).flatten()
                         .map(|menu| ContextMenuItem { icon: Some("add-filter".into()), ..ContextMenuItem::submenu(&menu.title, menu.sections) }),
                 ]
@@ -1978,9 +1972,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             path(&outline, true, layer_core::Affine::IDENTITY);
         }
         if let Some(figure) = self.current_figure() {
-            let guide = figure
-                .shape
-                .guide(figure.start, figure.end, self.state.camera.zoom);
+            let guide = self.figure_guide(&figure);
             let offset = self
                 .engine
                 .document()

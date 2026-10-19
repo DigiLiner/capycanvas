@@ -160,6 +160,8 @@ impl ToolSlotId {
                         V::Figure {
                             shape: FigureShape::Ellipse,
                         },
+                        V::Figure { shape: FigureShape::Polygon },
+                        V::Figure { shape: FigureShape::Star },
                         V::Figure {
                             shape: FigureShape::Path,
                         },
@@ -247,6 +249,8 @@ impl ToolVariant {
                 FigureShape::Line => "line",
                 FigureShape::Rectangle => "rectangle",
                 FigureShape::Ellipse => "ellipse",
+                FigureShape::Polygon => "polygon",
+                FigureShape::Star => "star",
                 FigureShape::Path => "path",
             },
             Self::Ruler { kind } => match kind {
@@ -279,6 +283,8 @@ impl ToolVariant {
             Self::Figure {
                 shape: FigureShape::Path,
             } => MessageId::TOOL_FIGURES_PATH,
+            Self::Figure { shape: FigureShape::Polygon } => MessageId::TOOL_FIGURES_POLYGON,
+            Self::Figure { shape: FigureShape::Star } => MessageId::TOOL_FIGURES_STAR,
             Self::Ruler {
                 kind: RulerKind::Straight,
             } => MessageId::TOOL_RULERS_STRAIGHT,
@@ -435,7 +441,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn group_choices(&self, group: ToolControlGroup, anchor: Option<DrawerAnchor>) -> Vec<(ToolVariant, ToolSetItem)> {
         group.variants().into_iter().filter(|v| v.command().available_on(self.state.platform))
             .map(|variant| (variant, ToolSetItem {
-                enabled: self.command(variant.command()).enabled,
+                enabled: self.command(variant.command()).enabled && self.brush_usable(&self.variant_action(variant)),
                 label: variant.label(self.localization()).into(),
                 icon: variant.icon_in(&self.state),
                 action: anchor.map_or_else(|| self.variant_action(variant), |anchor| UiAction::ChooseToolVariant { anchor, variant }),
@@ -474,7 +480,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn group_tool_set(&self, group: ToolControlGroup, anchor: Option<DrawerAnchor>) -> ToolSetView {
-        let mut view = tools::view(&self.state.brush, self.layer_interaction.tool, self.localization());
+        let mut view = self.mark_path_brushes(tools::view(&self.state.brush, self.layer_interaction.tool, self.localization()));
         if matches!(group, ToolControlGroup::Drawing | ToolControlGroup::Sculpt) { return view; }
         let lasso = ToolControlGroup::Slot(ToolSlotId::LassoFill);
         let remembered_lasso = self.group_variant(lasso);
@@ -511,7 +517,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub(super) fn current_tool_set(&self) -> ToolSetView {
         let Some((group, anchor)) = self.active_tool_group() else {
-            return tools::view(&self.state.brush, self.layer_interaction.tool, self.localization());
+            return self.mark_path_brushes(tools::view(&self.state.brush, self.layer_interaction.tool, self.localization()));
         };
         let mut view = self.group_tool_set(group, anchor);
         if matches!(group, ToolControlGroup::Slot(ToolSlotId::Gradient))

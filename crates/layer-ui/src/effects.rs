@@ -462,7 +462,7 @@ pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l:
     } else { match layer.map(|layer| layer.kind()) {
         Some(LayerKind::Group) => l.text(MessageId::RESOURCES_LAYER_GROUP_PROPERTIES).to_string(),
         Some(LayerKind::Effect | LayerKind::Selection) => if view.layer_type.is_empty() { view.name.clone() } else { view.layer_type.clone() },
-        Some(LayerKind::Object) => l.text(MessageId::RESOURCES_LAYER_TYPE_IMAGE).to_string(),
+        Some(LayerKind::Object) if layer.is_none_or(|layer| !matches!(layer.content, OccurrenceContent::Vector(_))) => l.text(MessageId::RESOURCES_LAYER_TYPE_IMAGE).to_string(),
         _ => l.text(MessageId::RESOURCES_LAYER_PROPERTIES).to_string(),
     }};
     let effect = view.layer.and_then(|id| occurrence_handle(id).ok()).and_then(|id| property_effect(doc, id));
@@ -680,14 +680,16 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
     let Some((handle, layer)) = doc.working.occurrence.and_then(|handle| scene.occurrence(handle).map(|layer| (handle, layer))) else {
         return LayerPropertiesView::default();
     };
+    let vector = matches!(layer.content, OccurrenceContent::Vector(_));
     let layer_type = match layer.kind() {
         LayerKind::Paint => l.text(MessageId::RESOURCES_LAYER_TYPE_PAINT),
+        LayerKind::Object if vector => l.text(MessageId::RESOURCES_LAYER_TYPE_VECTOR),
         LayerKind::Object => Arc::from(""),
         LayerKind::Group => l.text(MessageId::RESOURCES_LAYER_TYPE_GROUP),
         LayerKind::Selection => l.text(MessageId::RESOURCES_LAYER_TYPE_SELECTION),
         LayerKind::Effect => scene.effect(handle).map_or_else(|| Arc::from(""), |effect| resource_label(&effect.program.label, l)),
     };
-    let title = if layer.kind() != LayerKind::Paint && !layer_type.is_empty() && layer_type.as_ref() != layer.name.as_ref() {
+    let title = if layer.kind() != LayerKind::Paint && !vector && !layer_type.is_empty() && layer_type.as_ref() != layer.name.as_ref() {
         let mut args = FluentArgs::new();
         args.set("name", layer.name.as_ref());
         args.set("type", layer_type.as_ref());

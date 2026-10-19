@@ -240,7 +240,7 @@ fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render()
         };
         let object = editor.document().scene().vector_layer(layer).unwrap().clone();
         let moving: BTreeSet<ItemId> = object.paths().step_by(97).map(|(_, p)| p.id).collect();
-        let moved = object.transform_items(&moving, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();
+        let moved = object.transform_items(&moving, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.]), true).unwrap();
         editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
         submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
         matches(&r, &editor, "moving items");
@@ -383,7 +383,7 @@ fn vector_layer_thumbnails_show_their_paths() {
     submit_ready(&mut r, FramePacket { composite_all: false, ..packet(editor.document().scene(), [2048, 1536]) });
     assert_eq!(inked(&mut r), shown, "a drag in progress keeps its paths in the thumbnail");
     let mut editor = editor;
-    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&[ItemId(1)].into(), layer_core::authored::Affine64([1., 0., 0., 1., 40., 30.])).unwrap();
+    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&[ItemId(1)].into(), layer_core::authored::Affine64([1., 0., 0., 1., 40., 30.]), true).unwrap();
     editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
     r.set_vector_motion(None);
     r.submit(FramePacket { composite_all: true, ..packet(editor.document().scene(), [2048, 1536]) }).unwrap();
@@ -422,7 +422,7 @@ fn moving_paths_show_at_their_offset_under_other_layers_and_hand_off_to_the_comm
         let close = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0., f32::max);
         let original = shown(&r);
         let items: Arc<BTreeSet<ItemId>> = Arc::new((9000..9006).map(ItemId).collect());
-        let moved_object = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 38., -22.])).unwrap();
+        let moved_object = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 38., -22.]), true).unwrap();
         let mut moved = layer_core::Editor::new(editor.document().clone());
         moved.perform(moved.document().vector_object_edit(layer, moved_object.clone()).unwrap()).unwrap();
         let mut fresh = WgpuRasterizer::new_native_headless(moved.document().composition().color).unwrap();
@@ -515,7 +515,7 @@ fn crowded_vector_layer_edit_frames() {
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         let object = editor.document().scene().vector_layer(layer).unwrap().clone();
         let start = std::time::Instant::now();
-        let moved = object.transform_items(&selected, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();
+        let moved = object.transform_items(&selected, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.]), true).unwrap();
         let transform = start.elapsed().as_secs_f64() * 1e3;
         let start = std::time::Instant::now();
         editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
@@ -559,7 +559,7 @@ fn split_drags_redraw_neither_the_overview_nor_the_navigator() {
         }
     }
     assert_eq!(r.navigator.revision, navigator, "the Navigator keeps the layer as it was until the move commits");
-    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 36., -24.])).unwrap();
+    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 36., -24.]), true).unwrap();
     editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
     r.set_vector_motion(None);
     r.submit(FramePacket { composite_all: true, ..frame(&editor, view, extent, 1.) }).unwrap();
@@ -616,4 +616,53 @@ fn rasterizing_a_vector_layer_bakes_what_it_shows() {
     let rasterized = native(engine.backend_mut(), &document);
     assert!(rasterized.iter().filter(|p| p[3] > 0.5).count() > 5000, "the paint layer holds the paths' pixels");
     assert!(max_error(&rasterized, &shown) < 2. / 255., "Rasterize Layer keeps the picture: {}", max_error(&rasterized, &shown));
+}
+
+#[test]
+fn paths_painted_onto_paint_layers_match_the_path_drawn_above_them() {
+    let settle = |engine: &mut layer_engine::CanvasEngine<WgpuRasterizer>| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            engine.render_frame().unwrap();
+            if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
+            assert!(std::time::Instant::now() < deadline, "the bake must finish");
+            std::thread::yield_now();
+        }
+    };
+    let (editor, base) = document([300, 200], vec![shape(1, [30., 40., 200., 150.], [0.2, 0.6, 0.3, 0.7])]);
+    let r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let (_input, consumer) = layer_engine::input_queue(16);
+    let mut engine = layer_engine::CanvasEngine::new(r, editor.document().clone(), consumer, crate::test_support::view([300, 200]), layer_engine::ViewTransform::IDENTITY).unwrap();
+    let plan = engine.document().rasterize_plan(base, false).unwrap();
+    engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+    settle(&mut engine);
+    let target = plan.target;
+    assert_eq!(engine.document().target_offset(target), [0, 0]);
+    let Record::Path(ink) = stroke(9, &[[20., 30.], [150., 180.], [280., 20.]], 12., [0.8, 0.1, 0.1, 0.9]) else { unreachable!() };
+    for alpha_locked in [false, true] {
+        let mut doc = engine.document().clone();
+        if alpha_locked {
+            let mut occurrence = doc.scene().occurrence(base).unwrap().clone();
+            occurrence.alpha_locked = true;
+            engine.apply_edit(layer_core::Edit::Occurrence(layer_core::RecordChange::replace(&doc.artwork.occurrences, base, Some(occurrence)).unwrap())).unwrap();
+            settle(&mut engine);
+            doc = engine.document().clone();
+        }
+        let (above, edit) = doc.create_vector_layer_edit("Ink", VectorObject::from_records(vec![Record::Path(ink.clone())]), None, 0).unwrap();
+        let mut expected = doc.clone();
+        expected.apply(edit).unwrap();
+        if alpha_locked {
+            let mut occurrence = expected.scene().occurrence(above).unwrap().clone();
+            occurrence.attachment = layer_core::Attachment::Clip;
+            expected.apply(layer_core::Edit::Occurrence(layer_core::RecordChange::replace(&expected.artwork.occurrences, above, Some(occurrence)).unwrap())).unwrap();
+        }
+        let shown = native(engine.backend_mut(), &expected);
+        let (edits, operation) = engine.document().paint_path_plan(target, ink.clone()).unwrap();
+        engine.insert_with_operations(edits, vec![(target, operation)], None).unwrap();
+        settle(&mut engine);
+        let document = engine.document().clone();
+        let painted = native(engine.backend_mut(), &document);
+        assert!(max_error(&painted, &shown) < 2. / 255., "alpha lock {alpha_locked}: {}", max_error(&painted, &shown));
+        assert_eq!(document.scene().order().len(), doc.scene().order().len(), "no layer is added");
+    }
 }

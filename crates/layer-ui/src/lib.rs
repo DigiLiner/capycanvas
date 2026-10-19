@@ -568,9 +568,16 @@ command_ids! {
     ToggleTheme,
     Settings,
     AddLayer,
+    NewVectorLayer,
     DeleteLayer,
     RaiseLayer,
     EditPoints,
+    JoinPaths,
+    ClosePath,
+    SplitPath,
+    ReversePath,
+    MakeCompoundPath,
+    ReleaseCompoundPath,
     FinishPath,
     CancelPath,
     BringToFront,
@@ -689,6 +696,7 @@ command_ids! {
     ColorMixClassic,
     SmoothingAdjustSpeed,
     EraseWholePaths,
+    ScaleOutlineWidths,
     Heal,
     SpotHeal,
     BlendPerceptual,
@@ -722,7 +730,7 @@ impl CommandId {
                 | Self::TransformSnapping | Self::TransformFree | Self::TransformUniform | Self::TransformDistort | Self::TransformPerspective
                 | Self::TransformNearest | Self::TransformBilinear | Self::TransformBicubic | Self::TransformLanczos
                 | Self::ColorMixOklab | Self::ColorMixLinear | Self::ColorMixClassic
-                | Self::SmoothingAdjustSpeed | Self::EraseWholePaths
+                | Self::SmoothingAdjustSpeed | Self::EraseWholePaths | Self::ScaleOutlineWidths
                 | Self::TransformWarp | Self::WarpGridThree | Self::WarpGridFour | Self::WarpGridFive
                 | Self::WarpSplitVertical | Self::WarpSplitHorizontal | Self::WarpSplitCross | Self::WarpSelectPoints
                 | Self::ZenMode
@@ -817,6 +825,12 @@ impl CommandId {
 
             Self::Move => "move",
             Self::EditPoints => "edit-points",
+            Self::JoinPaths => "join-paths",
+            Self::ClosePath => "close-path",
+            Self::SplitPath => "split-path",
+            Self::ReversePath => "reverse-path",
+            Self::MakeCompoundPath => "make-compound-path",
+            Self::ReleaseCompoundPath => "release-compound-path",
             Self::ScaleRotate | Self::TransformAgain => "transform",
             Self::TransformSnapping => "ruler-snap",
             Self::ApplyTransform => "check",
@@ -835,7 +849,7 @@ impl CommandId {
             Self::FitWidth => "fit",
             Self::RotateView => "rotate-right",
             Self::Zoom => "search",
-            Self::CenterZoomClicks | Self::SmoothingAdjustSpeed | Self::EraseWholePaths => return None,
+            Self::CenterZoomClicks | Self::SmoothingAdjustSpeed | Self::EraseWholePaths | Self::ScaleOutlineWidths => return None,
             Self::Eyedropper => "eyedropper",
             Self::Gradient => "gradient",
             Self::Figure => "figure",
@@ -865,6 +879,7 @@ impl CommandId {
             Self::Settings => "settings",
             Self::ToggleTheme => "appearance",
             Self::AddLayer => "add-layer",
+            Self::NewVectorLayer => "add-vector-layer",
             Self::DeleteLayer => "delete",
             Self::RaiseLayer | Self::BringForward => "up",
             Self::BringToFront => "bring-to-front",
@@ -1002,8 +1017,9 @@ impl CommandId {
         Self::AutoSelect,
         Self::Fill,
     ];
-    pub const LAYERS: [Self; 4] = [
+    pub const LAYERS: [Self; 5] = [
         Self::AddLayer,
+        Self::NewVectorLayer,
         Self::DeleteLayer,
         Self::RaiseLayer,
         Self::LowerLayer,
@@ -1091,6 +1107,12 @@ impl CommandId {
             Self::SelectionReference => MessageId::COMMAND_SELECTION_REFERENCE,
             Self::Move => MessageId::COMMAND_MOVE,
             Self::EditPoints => MessageId::COMMAND_EDIT_POINTS,
+            Self::JoinPaths => MessageId::COMMAND_JOIN_PATHS,
+            Self::ClosePath => MessageId::COMMAND_CLOSE_PATH,
+            Self::SplitPath => MessageId::COMMAND_SPLIT_PATH,
+            Self::ReversePath => MessageId::COMMAND_REVERSE_PATH,
+            Self::MakeCompoundPath => MessageId::COMMAND_MAKE_COMPOUND_PATH,
+            Self::ReleaseCompoundPath => MessageId::COMMAND_RELEASE_COMPOUND_PATH,
             Self::ScaleRotate => MessageId::COMMAND_SCALE_ROTATE,
             Self::TransformAgain => MessageId::COMMAND_TRANSFORM_AGAIN,
             Self::TransformSnapping => MessageId::COMMAND_TRANSFORM_SNAPPING,
@@ -1142,6 +1164,7 @@ impl CommandId {
             Self::Settings => MessageId::COMMAND_SETTINGS,
             Self::ToggleTheme => MessageId::COMMAND_TOGGLE_THEME,
             Self::AddLayer => MessageId::COMMAND_ADD_LAYER,
+            Self::NewVectorLayer => MessageId::COMMAND_NEW_VECTOR_LAYER,
             Self::DeleteLayer => MessageId::COMMAND_DELETE_LAYER,
             Self::RaiseLayer => MessageId::COMMAND_RAISE_LAYER,
             Self::BringToFront => MessageId::COMMAND_BRING_TO_FRONT,
@@ -1256,6 +1279,7 @@ impl CommandId {
             Self::ColorMixClassic => MessageId::COMMAND_COLOR_MIX_CLASSIC,
             Self::SmoothingAdjustSpeed => MessageId::COMMAND_SMOOTHING_ADJUST_SPEED,
             Self::EraseWholePaths => MessageId::COMMAND_ERASE_WHOLE_PATHS,
+            Self::ScaleOutlineWidths => MessageId::COMMAND_SCALE_OUTLINE_WIDTHS,
             Self::BlendPerceptual => MessageId::COMMAND_BLEND_PERCEPTUAL,
             Self::BlendLinear => MessageId::COMMAND_BLEND_LINEAR,
             Self::NewDodgeBurnLayer => MessageId::COMMAND_NEW_DODGE_BURN_LAYER,
@@ -1837,7 +1861,7 @@ mod icon_tests {
     #[test]
     fn command_icons_ship_and_editing_semantics_are_distinct() {
         assert_eq!(CommandId::ALL.into_iter().filter(|command| command.icon().is_none()).collect::<Vec<_>>(),
-            [CommandId::CenterZoomClicks, CommandId::SmoothingAdjustSpeed, CommandId::EraseWholePaths]);
+            [CommandId::CenterZoomClicks, CommandId::SmoothingAdjustSpeed, CommandId::EraseWholePaths, CommandId::ScaleOutlineWidths]);
         for command in CommandId::ALL {
             if let Some(icon) = command.icon() { assert!(icon_ships(icon), "{command:?}: missing SVG"); }
         }

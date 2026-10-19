@@ -32,11 +32,75 @@ pub(crate) fn modes(shape: FigureShape, paint: FigurePaint, localizer: &crate::l
                 (FigureShape::Ellipse, FigurePaint::Both) => "ellipse-both",
                 (FigureShape::Path, FigurePaint::Fill) => "path-fill",
                 (FigureShape::Path, FigurePaint::Both) => "path-both",
+                (FigureShape::Polygon, FigurePaint::Fill) => "polygon-fill",
+                (FigureShape::Polygon, FigurePaint::Both) => "polygon-both",
+                (FigureShape::Star, FigurePaint::Fill) => "star-fill",
+                (FigureShape::Star, FigurePaint::Both) => "star-both",
                 _ => icon,
             };
             item(label, icon, shape, p, p == paint)
         })
         .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FigureOptions { corner_radius: f32, corners: f32, points: f32, inner: f32 }
+impl Default for FigureOptions {
+    fn default() -> Self { Self { corner_radius: 0., corners: 5., points: 5., inner: 0.5 } }
+}
+const FIGURE_SETTINGS: [(&str, crate::localization::MessageId); 4] = [
+    ("figure_corner_radius", crate::localization::MessageId::TOOL_CONTROL_CORNER_RADIUS),
+    ("figure_corners", crate::localization::MessageId::TOOL_CONTROL_CORNERS),
+    ("figure_points", crate::localization::MessageId::TOOL_CONTROL_POINTS),
+    ("figure_inner_radius", crate::localization::MessageId::TOOL_CONTROL_INNER_RADIUS),
+];
+impl FigureOptions {
+    fn numeric(id: &str) -> NumericControl {
+        match id {
+            "figure_corner_radius" => NumericControl::number(0., 4096., 1., 0).unit("px"),
+            "figure_inner_radius" => NumericControl { min: 0.05, soft_min: 0.05, ..NumericControl::percent() },
+            _ => NumericControl::number(3., 100., 1., 0),
+        }
+    }
+    fn value(&self, id: &str) -> f32 {
+        match id { "figure_corner_radius" => self.corner_radius, "figure_corners" => self.corners, "figure_points" => self.points, _ => self.inner }
+    }
+    pub(crate) fn controls(&self, shape: FigureShape, localizer: &crate::localization::Localizer) -> Vec<ToolSetting> {
+        let ids: &[&str] = match shape {
+            FigureShape::Rectangle => &["figure_corner_radius"],
+            FigureShape::Polygon => &["figure_corners"],
+            FigureShape::Star => &["figure_points", "figure_inner_radius"],
+            _ => &[],
+        };
+        FIGURE_SETTINGS.iter().filter(|(id, _)| ids.contains(id)).map(|&(id, label)| ToolSetting {
+            id, label: localizer.text(label), label_id: label, group_id: "", group: Arc::from(""),
+            numeric: Self::numeric(id), value: self.value(id),
+        }).collect()
+    }
+    pub(crate) fn edit(&mut self, id: &str, value: f32, localizer: &crate::localization::Localizer) -> Result<(), String> {
+        let (_, label) = FIGURE_SETTINGS.iter().find(|(key, _)| *key == id).ok_or("Unknown figure setting")?;
+        Self::numeric(id).validate(value, *label).map_err(|reason| crate::WorkspaceValidationError::from(reason).message(localizer))?;
+        let whole = value.round();
+        match id { "figure_corner_radius" => self.corner_radius = value, "figure_corners" => self.corners = whole, "figure_points" => self.points = whole, _ => self.inner = value }
+        Ok(())
+    }
+    pub(crate) fn default_value(id: &str) -> Option<f32> {
+        FIGURE_SETTINGS.iter().any(|(key, _)| *key == id).then(|| Self::default().value(id))
+    }
+    pub(crate) fn shape(&self, shape: FigureShape, start: [f64; 2], end: [f64; 2]) -> Option<layer_core::authored::vector::LiveShape> {
+        use layer_core::authored::vector::{LiveShape, ShapeKind};
+        let kind = match shape {
+            FigureShape::Rectangle => ShapeKind::Rectangle { radii: [f64::from(self.corner_radius); 4] },
+            FigureShape::Ellipse => ShapeKind::Ellipse,
+            FigureShape::Polygon => ShapeKind::Polygon { corners: self.corners as u32 },
+            FigureShape::Star => ShapeKind::Star { points: self.points as u32, inner: f64::from(self.inner) },
+            FigureShape::Line | FigureShape::Path => return None,
+        };
+        Some(LiveShape { kind, center: [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5], size: [(end[0] - start[0]).abs(), (end[1] - start[1]).abs()], rotation: 0. })
+    }
+    pub(crate) fn needs_path(&self, shape: FigureShape) -> bool {
+        matches!(shape, FigureShape::Polygon | FigureShape::Star | FigureShape::Path) || (shape == FigureShape::Rectangle && self.corner_radius > 0.)
+    }
 }
 
 impl<B: CanvasRenderer> UiSession<B> {
@@ -69,24 +133,40 @@ impl<B: CanvasRenderer> UiSession<B> {
             FigurePaint::Both => vec![fill(colors[1])?, outline(colors[0], Cap::Butt)?],
         }))
     }
-    fn commit_vector_figure(&mut self, layer: layer_core::authored::OccurrenceHandle, figure: &Figure) -> Result<(), String> {
+    fn figure_path(&self, figure: &Figure, id: layer_core::authored::vector::ItemId) -> Result<layer_core::authored::vector::PathItem, String> {
         use layer_core::authored::vector::*;
-        if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
         let (start, end) = ([f64::from(figure.start.x), f64::from(figure.start.y)], [f64::from(figure.end.x), f64::from(figure.end.y)]);
-        let join = if figure.shape == FigureShape::Rectangle { Join::Miter } else { Join::Round };
+        let join = if figure.shape == FigureShape::Ellipse { Join::Round } else { Join::Miter };
         let style = self.vector_figure_style(figure.paint, if figure.shape == FigureShape::Line { Cap::Round } else { Cap::Butt }, join)?;
+        let line = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(start), Anchor::corner(end)], false)]).map_err(str::to_string)?;
+        let path = PathItem::new(id, Arc::new(line), Arc::new(style));
+        match self.figure_options.shape(figure.shape, start, end) {
+            Some(shape) => path.with_shape(shape).map_err(str::to_string),
+            None => Ok(path),
+        }
+    }
+    pub(super) fn figure_guide(&self, figure: &Figure) -> Vec<Point> {
+        let (start, end) = ([f64::from(figure.start.x), f64::from(figure.start.y)], [f64::from(figure.end.x), f64::from(figure.end.y)]);
+        let shaped = self.figure_options.shape(figure.shape, start, end).filter(|_| self.figure_options.needs_path(figure.shape)).and_then(|shape| shape.geometry().ok());
+        let Some(geometry) = shaped else { return figure.shape.guide(figure.start, figure.end, self.state.camera.zoom) };
+        let mut points = Vec::new();
+        let tolerance = 0.25 / f64::from(self.state.camera.zoom.max(1e-3));
+        for segment in geometry.segments() { segment.flatten(tolerance, |p, _| points.push(Point { x: p[0] as f32, y: p[1] as f32 })); }
+        points
+    }
+    pub(super) fn paint_path(&mut self, path: layer_core::authored::vector::PathItem) -> Result<(), String> {
+        let document = self.engine.document();
+        let target = document.drawing_content().ok_or("Select a drawing layer")?;
+        let (edits, operation) = document.paint_path_plan(target, path).map_err(|refusal| format!("{refusal:?}"))?;
+        self.engine.insert_with_operations(edits, vec![(target, operation)], None).map_err(|e| e.to_string())
+    }
+    fn commit_vector_figure(&mut self, layer: layer_core::authored::OccurrenceHandle, figure: &Figure) -> Result<(), String> {
+        if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
         let doc = self.engine.document();
         let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
         let id = object.allocate_id();
-        let line = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(start), Anchor::corner(end)], false)]).map_err(str::to_string)?;
-        let path = PathItem::new(id, Arc::new(line), Arc::new(style));
-        let shape = |kind| LiveShape { kind, center: [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5], size: [(end[0] - start[0]).abs(), (end[1] - start[1]).abs()], rotation: 0. };
-        let path = match figure.shape {
-            FigureShape::Line | FigureShape::Path => path,
-            FigureShape::Rectangle => path.with_shape(shape(ShapeKind::Rectangle { radii: [0.; 4] })).map_err(str::to_string)?,
-            FigureShape::Ellipse => path.with_shape(shape(ShapeKind::Ellipse)).map_err(str::to_string)?,
-        };
-        let edit = doc.vector_object_edit(layer, object.insert_front(vec![Record::Path(path)])).map_err(|e| e.to_string())?;
+        let path = self.figure_path(figure, id)?;
+        let edit = doc.vector_object_edit(layer, object.insert_front(vec![layer_core::authored::vector::Record::Path(path)])).map_err(|e| e.to_string())?;
         self.layer_edit(edit)?;
         self.select_vector_items(layer, [id].into()).map(|_| ())
     }
@@ -141,6 +221,11 @@ impl<B: CanvasRenderer> UiSession<B> {
             return Ok(());
         }
         if let Some(layer) = self.vector_figure_layer() { return self.commit_vector_figure(layer, &figure); }
+        if self.figure_options.needs_path(figure.shape) {
+            if self.state.colors.transparent() { return Err(self.localization().text(MessageId::COMMANDS_PATHS_NEED_A_COLOR).to_string()); }
+            let path = self.figure_path(&figure, layer_core::authored::vector::ItemId(1))?;
+            return self.paint_path(path);
+        }
         let both = figure.paint == FigurePaint::Both;
         let colors = if both {
             [self.state.colors.foreground, self.state.colors.background]

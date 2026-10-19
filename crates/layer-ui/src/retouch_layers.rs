@@ -91,7 +91,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let l = self.localization();
         let doc = self.engine.document();
         self.retouch_layer_refusal().or_else(|| doc.working.occurrence.and_then(|h| doc.separation_refusal(h)).or_else(|| doc.working.occurrence.is_none().then_some(RetouchLayerRefusal::NoLayer))
-            .filter(|refusal| *refusal != RetouchLayerRefusal::Objects || !self.image_content()).map(|refusal| refusal_text(refusal, l)))
+            .filter(|refusal| *refusal != RetouchLayerRefusal::Objects || !self.object_content()).map(|refusal| refusal_text(refusal, l)))
     }
 
     pub fn frequency_separation_view(&self) -> Option<FrequencySeparationView> {
@@ -124,7 +124,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn open_frequency_separation(&mut self) -> Result<(), String> {
         self.require_document_idle()?;
         refused(self.separation_refusal())?;
-        if self.refuse_image_content() { return Ok(()); }
+        if self.refuse_object_content() { return Ok(()); }
         let parameter = SeparationFilters::radius_parameter(&self.effect_catalog).ok_or("Gaussian Blur is missing")?;
         let numeric = effects::number_control(parameter).ok_or("Gaussian Blur has no radius")?;
         let radius = DEFAULT_RADIUS.clamp(numeric.min as f32, numeric.max as f32);

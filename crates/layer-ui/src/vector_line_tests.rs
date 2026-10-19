@@ -246,14 +246,15 @@ fn figure_shapes_on_vector_layers_become_selected_editable_paths() {
     let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
     let drag = |s: &mut UiSession<Recorder>, first: u64, from: [f64; 2], to: [f64; 2]| { let points = [surface_at(s, from), surface_at(s, [(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5]), surface_at(s, to)]; press(s, first, &points); };
     let front = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().paths().next().map(|(_, p)| p.clone());
-    for (shape, paint, first) in [(FigureShape::Rectangle, FigurePaint::Both, 100), (FigureShape::Ellipse, FigurePaint::Fill, 200), (FigureShape::Line, FigurePaint::Outline, 300)] {
+    for (shape, paint, first) in [(FigureShape::Rectangle, FigurePaint::Both, 100), (FigureShape::Ellipse, FigurePaint::Fill, 200), (FigureShape::Line, FigurePaint::Outline, 300), (FigureShape::Polygon, FigurePaint::Outline, 400), (FigureShape::Star, FigurePaint::Fill, 500)] {
         s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint } } }).unwrap();
         assert!(!prohibited(&mut s), "{shape:?} works on a vector layer");
         drag(&mut s, first, [100., 120.], [260., 200.]);
         let path = front(&s).expect("the figure becomes a path");
         assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selection| (*selection.items).clone()), Some([path.id].into()), "the new path is selected");
         let [x0, y0, x1, y1] = path.geometry.hull();
-        assert!((x0 - 100.).abs() < 1e-3 && (y0 - 120.).abs() < 1e-3 && (x1 - 260.).abs() < 1e-3 && (y1 - 200.).abs() < 1e-3, "{shape:?} spans the drag: {:?}", path.geometry.hull());
+        let spans = (x0 - 100.).abs() < 1e-3 && (x1 - 260.).abs() < 1e-3 && (y1 - 200.).abs() < 1e-3 || matches!(shape, FigureShape::Polygon | FigureShape::Star) && x0 >= 100. && x1 <= 260. && y1 <= 200.;
+        assert!((y0 - 120.).abs() < 1e-3 && spans, "{shape:?} spans the drag: {:?}", path.geometry.hull());
         match shape {
             FigureShape::Rectangle => {
                 assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Rectangle { .. }, .. })));
@@ -263,13 +264,15 @@ fn figure_shapes_on_vector_layers_become_selected_editable_paths() {
                 assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Ellipse, .. })));
                 assert!(matches!(path.style.entries[..], [PaintEntry::Fill(_)]));
             }
+            FigureShape::Polygon => assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Polygon { corners: 5 }, .. })) && path.geometry.anchor_count() == 5),
+            FigureShape::Star => assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Star { points: 5, .. }, .. })) && path.geometry.anchor_count() == 10),
             FigureShape::Line | FigureShape::Path => assert!(path.shape.is_none() && matches!(path.style.entries[..], [PaintEntry::Stroke(ref s)] if s.cap == Cap::Round)),
         }
     }
-    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 3);
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 5);
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
     s.frame(9_000_000_000, 9_000_000_000).unwrap();
-    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 2, "each figure is one undo step");
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 4, "each figure is one undo step");
 }
 
 #[test]
@@ -349,6 +352,7 @@ fn properties_restyle_every_selected_path_in_one_undo_step() {
     let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
     assert!(s.state.layer_properties.controls.iter().all(|c| !c.key.starts_with("path_")), "path properties need selected paths");
     let label = |s: &UiSession<Recorder>, key: &str| s.state.layer_properties.controls.iter().find(|c| c.key == key).map(|c| c.label.clone()).unwrap();
+    let keys_of = |s: &UiSession<Recorder>| s.state.layer_properties.controls.iter().map(|c| c.key.clone()).collect::<Vec<_>>();
     let ids: std::collections::BTreeSet<_> = object(&s).paths().map(|(_, p)| p.id).collect();
     invoke(&mut s, CommandId::Move);
     let corners = { let [x0, y0, x1, y1] = object(&s).bounds().unwrap(); [surface_at(&s, [x0 - 5., y0 - 5.]), surface_at(&s, [x1 + 5., y1 + 5.])] };
@@ -375,6 +379,13 @@ fn properties_restyle_every_selected_path_in_one_undo_step() {
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
     s.frame(8_000_000_000, 8_000_000_000).unwrap();
     assert_eq!(object(&s), styled, "a drag is one undo step");
+    set(&mut s, "path_overlaps", EffectValue::Choice(1));
+    assert!(object(&s).paths().all(|(_, p)| p.fill_rule == layer_core::authored::vector::FillRule::EvenOdd), "Overlaps: Holes cuts overlaps out of every selected fill");
+    assert!(!keys_of(&s).contains(&"path_miter_limit".to_string()), "round corners have no limit");
+    set(&mut s, "path_corners", EffectValue::Choice(0));
+    assert!(keys_of(&s).contains(&"path_miter_limit".to_string()), "sharp corners show their limit");
+    set(&mut s, "path_miter_limit", EffectValue::Number(8.));
+    assert!(object(&s).paths().all(|(_, p)| p.style.strokes().last().unwrap().miter_limit == 8.));
     set(&mut s, "path_outline", EffectValue::Toggle(false));
     assert!(object(&s).paths().all(|(_, p)| matches!(p.style.entries[..], [PaintEntry::Fill(_)])), "turning the outline off keeps the fill");
 }
@@ -483,8 +494,22 @@ fn path_tool_builds_open_and_closed_paths_anchor_by_anchor() {
     assert_eq!(object(&s).path_count(), 1, "each path is one undo step");
     s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
     s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+    let paint = s.engine.document().drawing_content().unwrap();
+    let operations = |s: &UiSession<Recorder>| s.engine.document().target_operations(paint).map_or(0, <[_]>::len);
+    let before = operations(&s);
     click(&mut s, 300, [100., 100.]);
-    assert!(s.state.notice.is_some(), "paint layers refuse the Path tool");
+    click(&mut s, 310, [300., 120.]);
+    click(&mut s, 320, [200., 300.]);
+    let mut overlay = Vec::new();
+    s.append_layer_overlay(&mut overlay);
+    assert!(overlay.iter().any(|segment| segment.marker == 0.), "the drafted outline shows on a paint layer");
+    key(&mut s, "enter", true, false, false);
+    assert_eq!(s.state.notice, None);
+    assert_eq!(operations(&s), before + 1, "Finish paints the path into the paint layer");
+    assert!(matches!(s.engine.document().target_operations(paint).unwrap().last().unwrap().kind, layer_core::RasterOperationKind::Bake { .. }));
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(12_000_000_000, 12_000_000_000).unwrap();
+    assert_eq!(operations(&s), before, "one undo step");
 }
 
 #[test]
@@ -674,4 +699,352 @@ fn copy_and_the_wand_read_what_a_vector_layer_shows() {
     press(&mut s, 100, &[point, point]);
     let request = s.renderer_mut().region_requests.last().cloned().expect("the wand reads the layer");
     assert!(matches!(request.source, layer_render::RegionSource::Scene { scope: SceneScope::RawObjects(layer), .. } if layer == handle));
+}
+
+#[test]
+fn new_vector_layers_switch_to_a_pen_and_paint_layers_switch_back() {
+    let mut s = session(Platform::Gtk);
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let paint = s.engine.document().working.occurrence.unwrap();
+    let command = s.command(CommandId::NewVectorLayer);
+    assert!(command.enabled);
+    assert_eq!((command.icon, command.shortcut.as_str()), (Some("add-vector-layer"), "Ctrl+Alt+Shift+N"));
+    invoke(&mut s, CommandId::NewVectorLayer);
+    let vector = s.engine.document().working.occurrence.unwrap();
+    assert!(s.engine.document().scene().vector_layer(vector).is_some());
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "a new vector layer picks a pen that draws paths");
+    let row = s.state.layers.iter().find(|row| row.id == occurrence_token(vector)).unwrap();
+    assert_eq!(row.content_icon.as_deref(), Some("layer-path-symbolic"));
+    assert_eq!(s.state.layer_properties.layer_type, s.localization().text(MessageId::RESOURCES_LAYER_TYPE_VECTOR).as_ref());
+    assert_eq!(s.state.layer_properties.title, row.label);
+    let usable = |s: &UiSession<Recorder>, preset: DefaultBrushPreset| s.state.tool_set.subtools.iter()
+        .find(|item| item.action == UiAction::SelectBrush { id: preset as u32 }).map(|item| item.enabled);
+    assert_eq!((usable(&s, DefaultBrushPreset::GPen), usable(&s, DefaultBrushPreset::Monoline), usable(&s, DefaultBrushPreset::RoughGPen)), (Some(true), Some(true), Some(false)));
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "a paint layer brings the painting brush back");
+    s.select_brush(DefaultBrushPreset::GPen as u32).unwrap();
+    assert_eq!(usable(&s, DefaultBrushPreset::RoughGPen), Some(true), "paint layers take every brush");
+    layer(&mut s, LayerAction::Select { id: occurrence_token(vector), mask: false });
+    s.select_brush(DefaultBrushPreset::Monoline as u32).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Monoline as u32, "a pen the painter chose stays");
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    layer(&mut s, LayerAction::Select { id: occurrence_token(vector), mask: false });
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Monoline as u32, "the last pen used on paths comes back");
+}
+
+#[test]
+fn the_layer_menu_offers_new_vector_layer_in_every_state() {
+    let mut s = session(Platform::Gtk);
+    let finds = |s: &UiSession<Recorder>| s.application_menu(ApplicationMenu::Layer).sections.iter().flatten()
+        .flat_map(|item| item.sections.iter().flatten())
+        .find(|item| item.action == Some(UiAction::Layer { action: LayerAction::NewVector }))
+        .map(|item| (item.label.clone(), item.enabled));
+    let label = CommandId::NewVectorLayer.localized_label(s.localization()).to_string();
+    assert_eq!(finds(&s), Some((label.clone(), true)));
+    let id = occurrence_token(s.engine.document().working.occurrence.unwrap());
+    layer(&mut s, LayerAction::AddMask { id, replace: false });
+    layer(&mut s, LayerAction::Select { id, mask: true });
+    assert_eq!(finds(&s), Some((label.clone(), true)), "while a mask is edited");
+    layer(&mut s, LayerAction::Select { id, mask: false });
+    select(&mut s, rectangle([10., 10., 60., 60.]));
+    invoke(&mut s, CommandId::NewSelectionLayer);
+    assert!(s.engine.document().working.occurrence.and_then(|h| s.engine.document().scene().occurrence(h)).is_some_and(|l| l.kind() == LayerKind::Selection));
+    assert_eq!(finds(&s), Some((label.clone(), true)), "while a selection layer is active");
+    let mut working = s.engine.document().working.clone();
+    working.occurrence = None;
+    working.target = None;
+    s.layer_edit(layer_core::Edit::Working(working)).unwrap();
+    assert_eq!(finds(&s), Some((label, true)), "with no active layer");
+    invoke(&mut s, CommandId::NewVectorLayer);
+    assert!(s.engine.document().working.occurrence.is_some_and(|h| s.engine.document().scene().vector_layer(h).is_some()));
+}
+
+#[test]
+fn painting_brushes_on_vector_layers_offer_a_pen_a_paint_layer_or_rasterizing() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 20);
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let refused = |s: &mut UiSession<Recorder>, first: u64| {
+        let revision = s.engine.document().revision;
+        draw_line(s, first, 10);
+        assert_eq!(s.engine.document().revision, revision, "nothing reaches the paths");
+        s.state.notice.clone().expect("a vector refusal")
+    };
+    let notice = refused(&mut s, 100);
+    let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string());
+    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_BRUSH, &args));
+    assert_eq!(notice.actions.iter().map(|a| (a.id, a.label.as_str(), a.enabled)).collect::<Vec<_>>(),
+        [(NoticeActionId::UseVectorPen, "Use G-Pen", true), (NoticeActionId::NewPaintLayer, "New Paint Layer", true), (NoticeActionId::RasterizeLayer, "Rasterize Layer", true)]);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::UseVectorPen) }).unwrap();
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32);
+    draw_line(&mut s, 200, 20);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 2, "the pen draws a path");
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let notice = refused(&mut s, 300);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayer) }).unwrap();
+    let paint = s.engine.document().working.occurrence.unwrap();
+    assert!(s.engine.document().scene().paint_source(paint).is_some());
+    assert_eq!(s.engine.document().scene().children(None).iter().position(|h| *h == paint).unwrap() + 1,
+        s.engine.document().scene().children(None).iter().position(|h| *h == handle).unwrap(), "the paint layer sits above the lines");
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "the brush stays");
+    layer(&mut s, LayerAction::Select { id: occurrence_token(handle), mask: false });
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let notice = refused(&mut s, 400);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::RasterizeLayer) }).unwrap();
+    for t in 0..20 { s.frame(9_000_000_000 + t * 16_000_000, 9_000_000_000 + t * 16_000_000).unwrap(); }
+    assert!(s.engine.document().scene().paint_source(handle).is_some(), "the lines become paint");
+}
+
+#[test]
+fn a_pen_setting_that_stops_paths_is_named_and_reset_from_the_refusal() {
+    let (mut s, handle) = vector_session();
+    s.dispatch(UiAction::SetToolSetting { id: "size_jitter".into(), value: 0.5 }).unwrap();
+    assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.enabled), Some(false));
+    let revision = s.engine.document().revision;
+    draw_line(&mut s, 1, 10);
+    assert_eq!(s.engine.document().revision, revision);
+    let notice = s.state.notice.clone().expect("a vector refusal");
+    let label = s.state.tool_settings.iter().find(|setting| setting.id == "size_jitter").unwrap().label.clone();
+    let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string()); args.set("setting", label.as_ref()); args.set("brush", "G-Pen");
+    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_SETTING, &args));
+    assert_eq!(notice.actions[0].id, NoticeActionId::ResetSetting);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::ResetSetting) }).unwrap();
+    draw_line(&mut s, 100, 20);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 1);
+}
+
+#[test]
+fn fill_tools_on_vector_layers_offer_a_paint_layer_below() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 20);
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Gradient { shape: layer_core::GradientShape::Linear } }).unwrap();
+    let start = surface_at(&s, [100., 100.]);
+    press(&mut s, 100, &[start, Point { x: start.x + 80., y: start.y }]);
+    let notice = s.state.notice.clone().expect("a vector refusal");
+    let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string());
+    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_TOOL, &args));
+    assert_eq!(notice.actions.iter().map(|a| a.id).collect::<Vec<_>>(), [NoticeActionId::NewPaintLayerBelow, NoticeActionId::RasterizeLayer]);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayerBelow) }).unwrap();
+    let paint = s.engine.document().working.occurrence.unwrap();
+    let order = s.engine.document().scene().children(None).to_vec();
+    assert!(s.engine.document().scene().paint_source(paint).is_some());
+    assert_eq!(order.iter().position(|h| *h == paint), order.iter().position(|h| *h == handle).map(|i| i + 1), "the paint layer sits under the lines");
+    assert!(matches!(s.layer_interaction.tool, LayerCanvasTool::Gradient { .. }), "the tool stays");
+}
+
+#[test]
+fn select_all_transform_flip_escape_and_delete_act_on_paths() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    draw_line(&mut s, 100, 30);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    let drawn = object(&s);
+    let all: std::collections::BTreeSet<_> = drawn.paths().map(|(_, path)| path.id).collect();
+    assert!(!s.command(CommandId::Deselect).enabled);
+    invoke(&mut s, CommandId::SelectAll);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone()), Some(all.clone()));
+    assert!(s.engine.document().working.selection.is_none(), "Select All selects paths, not pixels");
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move);
+    assert_eq!(s.command(CommandId::ClearSelected).label.as_ref(), "Delete");
+    for command in [CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight, CommandId::ScaleOutlineWidths] {
+        assert!(s.state.tool_actions.iter().any(|action| action.command == command), "{command:?} is a Move option for paths");
+    }
+    assert!(s.command(CommandId::ScaleOutlineWidths).selected, "outline widths scale by default");
+    let [x0, _, x1, _] = drawn.items_bounds(&all).unwrap();
+    invoke(&mut s, CommandId::TransformFlipHorizontal);
+    let flipped = object(&s);
+    for ((_, before), (_, after)) in drawn.paths().zip(flipped.paths()) {
+        let [a, b] = [before.geometry.subpaths()[0].anchor(0).point(), after.geometry.subpaths()[0].anchor(0).point()];
+        assert!((b[0] - (x0 + x1 - a[0])).abs() < 1e-6 && (b[1] - a[1]).abs() < 1e-6, "{a:?} mirrors to {b:?}");
+    }
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(5_000_000_000, 5_000_000_000).unwrap();
+    assert_eq!(object(&s), drawn, "one undo step restores the flip");
+    invoke(&mut s, CommandId::SelectAll);
+    key(&mut s, "escape", true, false, false);
+    key(&mut s, "escape", false, false, false);
+    assert!(s.engine.document().working.vector_items.is_none(), "Escape clears the path selection");
+    invoke(&mut s, CommandId::SelectAll);
+    assert!(s.command(CommandId::Deselect).enabled);
+    invoke(&mut s, CommandId::Deselect);
+    assert!(s.engine.document().working.vector_items.is_none());
+    let start = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 300, &[start, start]);
+    key(&mut s, "enter", true, false, false);
+    key(&mut s, "enter", false, false, false);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::EditPoints, "Enter edits the selected path's points");
+    key(&mut s, "escape", true, false, false);
+    key(&mut s, "escape", false, false, false);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "Escape leaves Edit Points");
+    assert!(s.engine.document().working.vector_items.is_some());
+    press(&mut s, 400, &[start, start]);
+    press(&mut s, 402, &[start, start]);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::EditPoints, "a double-click edits the path's points");
+    invoke(&mut s, CommandId::Move);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::ClearSelected);
+    assert_eq!(object(&s).path_count(), 0, "Delete removes the selected paths");
+}
+
+#[test]
+fn edit_transform_shows_the_move_frame_and_outline_widths_can_stay() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    let width = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.style.strokes().next().unwrap().width;
+    let before = width(&s);
+    assert!(!s.command(CommandId::ScaleRotate).enabled);
+    assert_eq!(s.command(CommandId::ScaleRotate).disabled_reason.as_deref(), Some(s.localization().text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER).as_ref()));
+    invoke(&mut s, CommandId::SelectAll);
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Paint }).unwrap();
+    assert!(s.command(CommandId::ScaleRotate).enabled);
+    invoke(&mut s, CommandId::ScaleRotate);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "Edit › Transform shows the Move frame");
+    invoke(&mut s, CommandId::ScaleOutlineWidths);
+    assert!(!s.command(CommandId::ScaleOutlineWidths).selected);
+    let frame = s.vector_frame().unwrap();
+    let corner = frame.unit.map([1., 1.]);
+    let from = surface_at(&s, corner);
+    let to = surface_at(&s, [corner[0] + (corner[0] - frame.unit.map([0., 0.])[0]), corner[1] + (corner[1] - frame.unit.map([0., 0.])[1])]);
+    press(&mut s, 100, &[from, Point { x: (from.x + to.x) * 0.5, y: (from.y + to.y) * 0.5 }, to]);
+    assert_eq!(width(&s), before, "outline widths stay while the path doubles");
+    invoke(&mut s, CommandId::ScaleOutlineWidths);
+    let frame = s.vector_frame().unwrap();
+    let corner = frame.unit.map([1., 1.]);
+    let from = surface_at(&s, corner);
+    let to = surface_at(&s, [corner[0] + (corner[0] - frame.unit.map([0., 0.])[0]), corner[1] + (corner[1] - frame.unit.map([0., 0.])[1])]);
+    press(&mut s, 200, &[from, Point { x: (from.x + to.x) * 0.5, y: (from.y + to.y) * 0.5 }, to]);
+    assert!((width(&s) - before * 2.).abs() < before * 0.05, "{} scales with the path", width(&s));
+}
+
+#[test]
+fn path_commands_join_split_close_reverse_and_compound_selected_paths() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    draw_line(&mut s, 100, 30);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    let edit = s.application_menu(ApplicationMenu::Edit);
+    let path_menu = edit.sections.iter().flatten().find(|item| item.label == s.localization().text(MessageId::MENU_PATH).as_ref()).expect("Edit › Path");
+    let commands: Vec<_> = path_menu.sections.iter().flatten().filter_map(|item| match item.action { Some(UiAction::Invoke { command }) => Some(command), _ => None }).collect();
+    assert_eq!(commands, [CommandId::JoinPaths, CommandId::ClosePath, CommandId::SplitPath, CommandId::ReversePath, CommandId::MakeCompoundPath, CommandId::ReleaseCompoundPath]);
+    assert!(!s.command(CommandId::JoinPaths).enabled);
+    invoke(&mut s, CommandId::SelectAll);
+    for (command, enabled) in [(CommandId::JoinPaths, true), (CommandId::ClosePath, true), (CommandId::SplitPath, false), (CommandId::ReversePath, true), (CommandId::MakeCompoundPath, true), (CommandId::ReleaseCompoundPath, false)] {
+        assert_eq!(s.command(command).enabled, enabled, "{command:?}");
+    }
+    let before = object(&s);
+    invoke(&mut s, CommandId::JoinPaths);
+    let joined = object(&s);
+    assert_eq!(joined.path_count(), 1, "two open lines join into one");
+    let path = joined.paths().next().unwrap().1.clone();
+    let anchors = path.geometry.subpaths()[0].len();
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone()), Some([path.id].into()));
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(5_000_000_000, 5_000_000_000).unwrap();
+    assert_eq!(object(&s), before, "one undo step restores both lines");
+    s.dispatch(UiAction::Invoke { command: CommandId::Redo }).unwrap();
+    s.frame(5_100_000_000, 5_100_000_000).unwrap();
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::ReversePath);
+    let reversed = object(&s).paths().next().unwrap().1.clone();
+    assert_eq!(reversed.geometry.subpaths()[0].anchor(0).point(), path.geometry.subpaths()[0].anchor(anchors - 1).point());
+    invoke(&mut s, CommandId::EditPoints);
+    let middle = reversed.geometry.subpaths()[0].anchor(anchors / 2).point();
+    let at = surface_at(&s, middle);
+    press(&mut s, 300, &[at, at]);
+    assert!(s.command(CommandId::SplitPath).enabled, "a selected anchor can be split");
+    invoke(&mut s, CommandId::SplitPath);
+    assert_eq!(object(&s).path_count(), 2);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| v.items.len()), Some(2), "both pieces stay selected");
+    invoke(&mut s, CommandId::Move);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::MakeCompoundPath);
+    assert_eq!(object(&s).path_count(), 1);
+    assert!(s.command(CommandId::ReleaseCompoundPath).enabled);
+    invoke(&mut s, CommandId::ReleaseCompoundPath);
+    assert_eq!(object(&s).path_count(), 2);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::ClosePath);
+    assert!(object(&s).paths().all(|(_, path)| path.geometry.subpaths()[0].closed));
+}
+
+#[test]
+fn pens_and_the_path_tool_continue_a_selected_paths_open_end() {
+    let (mut s, handle) = vector_session();
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    let stroke = |s: &mut UiSession<Recorder>, first: u64, from: [f64; 2], to: [f64; 2]| {
+        let points: Vec<Point> = (0..=20).map(|i| { let u = f64::from(i) / 20.; surface_at(s, [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u + (u * 3.1).sin() * 20.]) }).collect();
+        press(s, first, &points);
+    };
+    stroke(&mut s, 1, [200., 200.], [600., 200.]);
+    let first = object(&s).paths().next().unwrap().1.clone();
+    let [_, end] = first.open_ends().unwrap();
+    stroke(&mut s, 100, end, [900., 400.]);
+    assert_eq!(object(&s).path_count(), 2, "without a selection a new line starts");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    invoke(&mut s, CommandId::Move);
+    let on = surface_at(&s, first.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 200, &[on, on]);
+    s.select_brush(DefaultBrushPreset::GPen as u32).unwrap();
+    stroke(&mut s, 300, end, [900., 400.]);
+    let continued = object(&s);
+    assert_eq!(continued.path_count(), 1, "a line from the selected path's end continues it");
+    let path = continued.paths().next().unwrap().1;
+    assert_eq!(path.id, first.id);
+    assert!(path.geometry.subpaths()[0].len() > first.geometry.subpaths()[0].len());
+    let [start, far] = path.open_ends().unwrap();
+    assert_eq!(start, first.open_ends().unwrap()[0]);
+    assert!((far[0] - 900.).abs() < 2. && (far[1] - 400.).abs() < 2., "{far:?}");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(3_000_000_000, 3_000_000_000).unwrap();
+    assert_eq!(object(&s).paths().next().unwrap().1, &first, "one undo step restores the line");
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    click(&mut s, 400, end);
+    click(&mut s, 410, [700., 500.]);
+    click(&mut s, 420, first.open_ends().unwrap()[0]);
+    let closed = object(&s);
+    assert_eq!(closed.path_count(), 1, "the Path tool continues the selected path");
+    let path = closed.paths().next().unwrap().1;
+    assert!(path.geometry.subpaths()[0].closed, "clicking the path's other end closes it");
+    assert_eq!(path.geometry.subpaths()[0].len(), first.geometry.subpaths()[0].len() + 1);
+}
+
+#[test]
+fn figure_options_shape_rectangles_polygons_and_stars_on_both_layer_kinds() {
+    use layer_core::authored::vector::{LiveShape, ShapeKind};
+    let (mut s, layer) = vector_session();
+    let ids = |s: &UiSession<Recorder>| s.state.tool_settings.iter().map(|c| c.id).filter(|id| id.starts_with("figure_")).collect::<Vec<_>>();
+    let tool = |s: &mut UiSession<Recorder>, shape| s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint: FigurePaint::Outline } } }).unwrap();
+    let drag = |s: &mut UiSession<Recorder>, first: u64| { let points = [surface_at(s, [100., 100.]), surface_at(s, [200., 160.]), surface_at(s, [300., 260.])]; press(s, first, &points); };
+    let front = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().paths().next().unwrap().1.shape.as_deref().copied();
+    tool(&mut s, FigureShape::Rectangle);
+    assert_eq!(ids(&s), ["figure_corner_radius"]);
+    s.dispatch(UiAction::SetToolSetting { id: "figure_corner_radius".into(), value: 24. }).unwrap();
+    drag(&mut s, 10);
+    assert!(matches!(front(&s), Some(LiveShape { kind: ShapeKind::Rectangle { radii: [24., 24., 24., 24.] }, .. })));
+    tool(&mut s, FigureShape::Polygon);
+    assert_eq!(ids(&s), ["figure_corners"]);
+    s.dispatch(UiAction::SetToolSetting { id: "figure_corners".into(), value: 7. }).unwrap();
+    assert!(s.dispatch(UiAction::SetToolSetting { id: "figure_corners".into(), value: 2. }).is_err());
+    drag(&mut s, 30);
+    assert!(matches!(front(&s), Some(LiveShape { kind: ShapeKind::Polygon { corners: 7 }, .. })));
+    tool(&mut s, FigureShape::Star);
+    assert_eq!(ids(&s), ["figure_points", "figure_inner_radius"]);
+    s.dispatch(UiAction::SetToolSetting { id: "figure_inner_radius".into(), value: 0.3 }).unwrap();
+    s.dispatch(UiAction::ResetToolSetting { id: "figure_points".into() }).unwrap();
+    drag(&mut s, 40);
+    assert!(matches!(front(&s), Some(LiveShape { kind: ShapeKind::Star { points: 5, inner }, .. }) if (inner - 0.3).abs() < 1e-6));
+    s.layer_action(LayerAction::New { group: false, clipped: false }).unwrap();
+    let paint = s.engine.document().drawing_content().unwrap();
+    let last = |s: &UiSession<Recorder>| s.engine.backend().pending_operations.last().filter(|(target, _)| *target == paint).map(|(_, op)| op.kind.clone());
+    for (shape, first) in [(FigureShape::Polygon, 50), (FigureShape::Star, 60), (FigureShape::Rectangle, 70)] {
+        tool(&mut s, shape);
+        drag(&mut s, first);
+        assert!(matches!(last(&s), Some(layer_core::RasterOperationKind::Bake { .. })), "{shape:?} paints through a bake");
+    }
+    s.dispatch(UiAction::SetToolSetting { id: "figure_corner_radius".into(), value: 0. }).unwrap();
+    drag(&mut s, 80);
+    assert!(matches!(last(&s), Some(layer_core::RasterOperationKind::Figure(_))), "square rectangles keep the raster figure");
 }

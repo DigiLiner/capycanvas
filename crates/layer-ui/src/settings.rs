@@ -108,6 +108,8 @@ pub struct Settings {
     pub eraser_end: EraserEnd,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub erase_whole_paths: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub keep_outline_widths: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keymap: Option<crate::keymaps::KeymapRef>,
     /// Per-preset slider values, shared by every placement of that slider.
@@ -146,6 +148,7 @@ impl Default for Settings {
             pen_buttons: BTreeMap::new(),
             eraser_end: EraserEnd::default(),
             erase_whole_paths: false,
+            keep_outline_widths: false,
             keymap: None,
             slider_bookmarks: BTreeMap::new(),
         }

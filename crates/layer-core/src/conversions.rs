@@ -135,6 +135,51 @@ impl Document {
         Ok(edit)
     }
 
+    /// Paints `path`, in the paint target's own coordinates, over that target's pixels in one bake;
+    /// an alpha-locked layer keeps its transparency.
+    pub fn paint_path_plan(&self, target: SourceTarget, path: vector::PathItem) -> Result<(Vec<Edit>, RasterOperation), ConversionRefusal> {
+        let SourceTarget::Paint(_) = target else { return Err(ConversionRefusal::NotPaint) };
+        let scene = self.scene();
+        let owner = scene.source_owner(target).ok_or(ConversionRefusal::NoLayer)?;
+        let layer = scene.occurrence(owner).ok_or(ConversionRefusal::NoLayer)?;
+        if self.is_locked(owner) { return Err(ConversionRefusal::Locked); }
+        let stack_handle = match scene.parent(owner).and_then(|p| scene.occurrence(p)).map(|p| &p.content) {
+            Some(OccurrenceContent::Stack(h)) => *h,
+            _ => self.composition().result,
+        };
+        let vector = RecordChange::insert(&self.artwork.vectors, vector::VectorObject::from_records(vec![vector::Record::Path(path)]));
+        let mut occurrence = Occurrence::new(OccurrenceContent::Vector(vector.handle), layer.name.clone());
+        occurrence.offset = layer.offset;
+        if layer.alpha_locked { occurrence.attachment = Attachment::Clip; }
+        let inserted = RecordChange::insert(&self.artwork.occurrences, occurrence);
+        let mut stack = self.artwork.stacks.get(stack_handle).ok_or(ConversionRefusal::NoLayer)?.clone();
+        let top = self.clipping_stack_top(owner).unwrap_or(owner);
+        let index = stack.entries.iter().position(|h| *h == top).ok_or(ConversionRefusal::NoLayer)?;
+        stack.entries.insert(index, inserted.handle);
+        let mut candidate = self.clone();
+        candidate.apply(Edit::Batch(vec![Edit::Vector(vector.clone()), Edit::Occurrence(inserted.clone()),
+            Edit::Stack(RecordChange::replace(&self.artwork.stacks, stack_handle, Some(stack)).map_err(|_| ConversionRefusal::NoLayer)?)]))
+            .map_err(|_| ConversionRefusal::NoLayer)?;
+        let mut snapshot = candidate.snapshot();
+        let raw = Arc::make_mut(&mut snapshot).artwork.occurrences.get_mut(owner).ok_or(ConversionRefusal::NoLayer)?;
+        raw.visible = true; raw.opacity = 1.; raw.blend = LayerBlend::Normal; raw.mask = None; raw.attachment = Attachment::None;
+        let scope = SceneScope::Members(candidate.scene().order().iter().copied().filter(|h| *h == owner || *h == inserted.handle).collect::<Vec<_>>().into());
+        let origin = offsets::point(self.target_offset(target));
+        let extent = self.target_extent(target);
+        let operation = RasterOperation {
+            placement: Affine::IDENTITY,
+            coverage: CoverageSnapshot::reveal_all(self.artwork.coverage.next_handle(), extent, [0; 2]),
+            kind: RasterOperationKind::Bake { scene: snapshot, scope, offset: Point { x: -origin.x, y: -origin.y } },
+        };
+        if self.exceeds_publication(&operation, extent) { return Err(ConversionRefusal::TooLarge); }
+        let reserved = vec![
+            Edit::Vector(vector),
+            Edit::Occurrence(inserted.clone()),
+            Edit::Occurrence(RecordChange::remove(&candidate.artwork.occurrences, inserted.handle).map_err(|_| ConversionRefusal::NoLayer)?),
+            Edit::Vector(RecordChange::remove(&candidate.artwork.vectors, match candidate.artwork.occurrences.get(inserted.handle).map(|o| &o.content) { Some(OccurrenceContent::Vector(h)) => *h, _ => return Err(ConversionRefusal::NoLayer) }).map_err(|_| ConversionRefusal::NoLayer)?),
+        ];
+        Ok((reserved, operation))
+    }
     pub fn rasterize_refusal(&self, h: OccurrenceHandle, apply_mask: bool) -> Option<ConversionRefusal> {
         let occurrence = self.scene().occurrence(h)?;
         if occurrence.kind() != LayerKind::Object { return Some(ConversionRefusal::NotObjects); }

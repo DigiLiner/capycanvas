@@ -252,7 +252,7 @@ workspace-tool-description-placement-original-size = Devolver las imágenes a su
 workspace-tool-description-hand = Arrastrar para desplazar la vista del lienzo
 workspace-tool-description-eyedropper = Tomar un color del lienzo
 workspace-tool-description-gradient = Arrastrar para rellenar con un degradado
-workspace-tool-description-figure = Dibujar líneas, rectángulos y elipses
+workspace-tool-description-figure = Dibujar líneas, rectángulos, elipses y trazados
 workspace-tool-description-ruler = Crear y editar guías de dibujo
 workspace-tool-description-show-rulers = Mostrar u ocultar guías de dibujo
 workspace-tool-description-snap-rulers = Restringir trazos a las guías de dibujo
@@ -611,3 +611,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } seleccionado
    *[other] { $count } seleccionados
     }
+workspace-tool-description-new-vector-layer = Crear una capa vectorial para el entintado, con líneas que puedes reformar sin perder nitidez
+workspace-tool-description-join-paths = Unir los extremos más cercanos de dos trazados abiertos o cerrar un trazado abierto
+workspace-tool-description-close-path = Unir los extremos de cada trazado abierto seleccionado
+workspace-tool-description-split-path = Cortar los trazados en los anclajes seleccionados
+workspace-tool-description-reverse-path = Invertir el sentido de los trazados seleccionados, intercambiando inicio y final
+workspace-tool-description-make-compound-path = Combinar los trazados seleccionados en uno, con huecos donde se solapan
+workspace-tool-description-release-compound-path = Convertir cada parte de un trazado compuesto en su propio trazado

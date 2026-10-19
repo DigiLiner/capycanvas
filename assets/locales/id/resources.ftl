@@ -752,7 +752,6 @@ resources-layer-menu-new = Baru
 resources-layer-menu-new-clipping-layer = Lapisan kliping baru
 
 resources-layer-menu-new-group = Grup baru
-resources-layer-menu-new-vector-layer = Lapisan vektor baru
 resources-path-fill = Isian
 resources-path-fill-color = Warna isian
 resources-path-outline = Garis tepi
@@ -1052,3 +1051,8 @@ resources-paper-washi = Washi
 resources-paper-weathered-wood = Kayu tua
 resources-layer-add-paper = Tambah kertas
 resources-size-unit = Satuan
+resources-layer-type-vector = Lapisan vektor
+resources-path-overlaps = Tumpang tindih
+resources-path-overlaps-filled = Terisi
+resources-path-overlaps-holes = Lubang
+resources-path-miter-limit = Batas sudut tajam

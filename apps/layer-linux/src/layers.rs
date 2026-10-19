@@ -1165,30 +1165,17 @@ impl LayerPanel {
             );
         }
         for (icon, label, a) in [
-            (
-                "layer-add-layer-symbolic",
-                copy.layer.new_layer.as_ref(),
-                A::New {
-                    group: false,
-                    clipped: false,
-                },
-            ),
-            (
-                "layer-folder-symbolic",
-                copy.layer.new_group.as_ref(),
-                A::New {
-                    group: true,
-                    clipped: false,
-                },
-            ),
+            ("layer-add-layer-symbolic", copy.layer.new_layer.as_ref(), UiAction::Layer { action: A::New { group: false, clipped: false } }),
+            ("layer-add-vector-layer-symbolic", copy.layer.new_vector_layer.as_ref(), UiAction::Invoke { command: layer_ui::CommandId::NewVectorLayer }),
+            ("layer-folder-symbolic", copy.layer.new_group.as_ref(), UiAction::Layer { action: A::New { group: true, clipped: false } }),
         ] {
             let b = button(icon, label);
             b.set_widget_name(icon);
-            w.bind_action_tooltip(&b, UiAction::Layer { action: a.clone() });
+            w.bind_action_tooltip(&b, a.clone());
             b.connect_clicked(glib::clone!(
                 #[weak]
                 w,
-                move |_| action(&w, a.clone())
+                move |_| w.dispatch(a.clone())
             ));
             self.footer.append(&b);
         }
@@ -1388,6 +1375,7 @@ impl LayerPanel {
             let label = match child.widget_name().as_str() {
                 "new-selection-layer" => Some(&copy.layer.new_selection_layer),
                 "layer-add-layer-symbolic" => Some(&copy.layer.new_layer),
+                "layer-add-vector-layer-symbolic" => Some(&copy.layer.new_vector_layer),
                 "layer-folder-symbolic" => Some(&copy.layer.new_group),
                 "import-image-layer" => Some(&copy.layer.import_image),
                 "layer-actions" => Some(&copy.layer.actions),

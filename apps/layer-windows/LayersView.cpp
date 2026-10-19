@@ -131,6 +131,13 @@ void LayersView::init(){
         auto pick=footerButton(group?L"folder":L"add-layer",group?data->copyCaption(L"layers",L"new_group"):data->copyCaption(L"layers",L"new_layer"),group?L"layer-new-group":L"layer-new",
             [weak,create]{if(auto self=weak.lock())self->action(create);});
         actionTooltip(data,pick,[create]{return O({{L"type",S(L"layer")},{L"action",create}});});
+        if(group)continue;
+        auto vectorLayer=footerButton(L"add-vector-layer",data->copyCaption(L"layers",L"new_vector_layer"),L"layer-new-vector",[weak]{if(auto self=weak.lock();self&&!self->data->updating)
+            self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_vector_layer")}}));});
+        actionTooltip(data,vectorLayer,[]{return O({{L"type",S(L"invoke")},{L"command",S(L"new_vector_layer")}});});
+        controls.emplace_back([data=data,vectorLayer](J,J){
+            vectorLayer.IsEnabled(flag(find(array(data->state,L"commands"),L"id",L"new_vector_layer"),L"enabled"));vectorLayer.Opacity(vectorLayer.IsEnabled()?1.:.36);
+        });
     }
     auto selectionLayer=footerButton(L"selection-brush",data->copyCaption(L"layers",L"new_selection_layer"),L"layer-new-selection",[weak]{if(auto self=weak.lock();self&&!self->data->updating)
         self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_selection_layer")}}));});

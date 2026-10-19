@@ -440,7 +440,6 @@ resources-layer-menu-new = 新建
 resources-layer-menu-new-clipping-layer = 新建剪贴图层
 
 resources-layer-menu-new-group = 新建图层组
-resources-layer-menu-new-vector-layer = 新建矢量图层
 resources-path-fill = 填充
 resources-path-fill-color = 填充颜色
 resources-path-outline = 描边
@@ -740,3 +739,8 @@ resources-paper-washi = 和纸
 resources-paper-weathered-wood = 旧木
 resources-layer-add-paper = 添加纸张
 resources-size-unit = 单位
+resources-layer-type-vector = 矢量图层
+resources-path-overlaps = 重叠部分
+resources-path-overlaps-filled = 填充
+resources-path-overlaps-holes = 镂空
+resources-path-miter-limit = 尖角限制

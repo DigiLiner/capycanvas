@@ -408,7 +408,7 @@ fn transforming_items_rewrites_only_their_chunks_and_scales_stroke_widths() {
         let found: BTreeSet<_> = object.positions(ids).into_iter().flat_map(|(c, v)| v.into_iter().map(move |i| Position { chunk: c as u32, index: i as u32 })).collect();
         assert_eq!(found, expected);
     }
-    let moved = object.transform_items(&few, Affine64([2., 0., 0., 2., 1000., 0.])).unwrap();
+    let moved = object.transform_items(&few, Affine64([2., 0., 0., 2., 1000., 0.]), true).unwrap();
     moved.validate().unwrap();
     let touched: BTreeSet<_> = few.iter().map(|id| object.find(*id).unwrap().chunk as usize).collect();
     for (index, (a, b)) in object.chunks().iter().zip(moved.chunks()).enumerate() { assert_eq!(a.same_owner(b), !touched.contains(&index)); }
@@ -468,18 +468,48 @@ fn live_shapes_round_trip_and_detach_when_a_foreign_writer_changed_their_geometr
 }
 
 #[test]
+fn polygons_and_stars_keep_their_recipe_through_turns_flips_and_stretches() {
+    let corners = |geometry: &PathGeometry| { let mut p: Vec<[i64; 2]> = geometry.subpaths()[0].anchors().map(|a| a.point().map(|v| (v * 1000.).round() as i64)).collect(); p.sort(); p };
+    let polygon = LiveShape { kind: ShapeKind::Polygon { corners: 5 }, center: [50., 50.], size: [40., 40.], rotation: 0. };
+    let star = LiveShape { kind: ShapeKind::Star { points: 5, inner: 0.5 }, ..polygon };
+    for (shape, count) in [(polygon, 5), (star, 10)] {
+        let geometry = shape.geometry().unwrap();
+        assert_eq!(geometry.anchor_count(), count);
+        assert!(geometry.subpaths()[0].closed);
+        let top = geometry.subpaths()[0].anchor(0).point();
+        assert!((top[0] - 50.).abs() < 1e-9 && (top[1] - 30.).abs() < 1e-9, "the first corner is at the top: {top:?}");
+        for affine in [Affine64([1., 0., 0., -1., 0., 100.]), Affine64([-1., 0., 0., 1., 100., 0.]), Affine64([0., 1., -1., 0., 100., 0.]), Affine64([2., 0., 0., 1., 0., 0.])] {
+            let moved = shape.transformed(affine).expect("a frame-aligned map keeps the recipe");
+            assert_eq!(corners(&moved.geometry().unwrap()), corners(&geometry.transformed(|p| affine.map(p)).unwrap()), "{affine:?}");
+        }
+    }
+    let inner = |shape: &LiveShape| { let p = shape.geometry().unwrap().subpaths()[0].anchor(1).point(); (p[0] - 50.).hypot(p[1] - 50.) };
+    assert!((inner(&star) - 10.).abs() < 1e-4, "inner points sit at half the radius");
+    for kind in [ShapeKind::Polygon { corners: 2 }, ShapeKind::Star { points: 101, inner: 0.5 }, ShapeKind::Star { points: 5, inner: 0. }] {
+        assert!(!kind.valid() && LiveShape { kind, ..polygon }.geometry().is_err(), "{kind:?}");
+    }
+    let records: Vec<Record> = [polygon, star].into_iter().enumerate().map(|(i, shape)| {
+        let Record::Path(path) = line(i as u64 + 1, &[[0., 0.], [1., 1.]], 2.) else { unreachable!() };
+        Record::Path(path.with_shape(shape).unwrap())
+    }).collect();
+    let (bytes, decoded) = round_trip(records.clone());
+    assert_eq!(decoded.records(), &records[..], "polygon and star recipes reopen");
+    assert_eq!(encode_chunk(&decoded), bytes);
+}
+
+#[test]
 fn transforms_keep_live_shapes_they_can_express_and_drop_the_rest() {
     let rounded = live(1, ShapeKind::Rectangle { radii: [4., 0., 8., 2.] });
     for affine in [Affine64([1., 0., 0., 1., 30., -12.]), Affine64([0.8, 0.6, -0.6, 0.8, 5., 9.]), Affine64([-1.5, 0., 0., 1.5, 400., 0.])] {
-        let moved = rounded.transformed(affine).unwrap();
+        let moved = rounded.transformed(affine, true).unwrap();
         let shape = moved.shape.as_ref().expect("similarities keep the recipe");
         assert!(near(&normalized(&moved.geometry), &normalized(&shape.geometry().unwrap())), "{affine:?}");
     }
-    let stretched = rounded.transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap();
+    let stretched = rounded.transformed(Affine64([2., 0., 0., 1., 0., 0.]), true).unwrap();
     assert_eq!(stretched.shape, None, "uneven scale cannot keep rounded corners");
-    let plain = rotated(2, ShapeKind::Rectangle { radii: [0.; 4] }, 0.).transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap();
+    let plain = rotated(2, ShapeKind::Rectangle { radii: [0.; 4] }, 0.).transformed(Affine64([2., 0., 0., 1., 0., 0.]), true).unwrap();
     assert!(plain.shape.is_some(), "a square-cornered rectangle stretches along its own axes");
-    assert!(live(3, ShapeKind::Ellipse).transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap().shape.is_none(), "stretching across a rotated frame shears it");
+    assert!(live(3, ShapeKind::Ellipse).transformed(Affine64([2., 0., 0., 1., 0., 0.]), true).unwrap().shape.is_none(), "stretching across a rotated frame shears it");
     assert!(rounded.with_style(Arc::new(Style::default())).shape.is_some(), "restyling keeps the recipe");
     assert!(rounded.with_geometry(rounded.geometry.clone()).shape.is_none(), "editing geometry detaches it");
 }
@@ -540,7 +570,7 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
         object = match step {
             0 => {
                 let ids: BTreeSet<ItemId> = (0..1 + next() % 5).filter_map(|_| pick(&object, next())).collect();
-                let moved = object.transform_items(&ids, Affine64([1., 0., 0., 1., (next() % 40) as f64, 3.])).unwrap();
+                let moved = object.transform_items(&ids, Affine64([1., 0., 0., 1., (next() % 40) as f64, 3.]), true).unwrap();
                 for id in &ids {
                     let path = moved.record(moved.find(*id).unwrap()).unwrap().path().unwrap();
                     assert!(path.unknown.iter().flat_map(|u| u.iter()).all(|p| p.tag & COPY_SAFE != 0), "moving drops data that is not copy-safe");

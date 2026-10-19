@@ -203,6 +203,14 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.changed = true;
         true
     }
+    pub(super) fn vector_points_selected(&self) -> bool {
+        self.points_layer().is_some() && !self.vector_points.selected.is_empty()
+    }
+    pub(super) fn take_selected_vector_points(&mut self) -> BTreeMap<ItemId, BTreeSet<AnchorRef>> {
+        let mut cuts: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
+        for point in std::mem::take(&mut self.vector_points.selected) { cuts.entry(point.path).or_default().insert(point.at); }
+        cuts
+    }
     pub(super) fn delete_selected_vector_points(&mut self) -> Result<bool, String> {
         let Some(layer) = self.points_layer().filter(|_| !self.vector_points.selected.is_empty()) else { return Ok(false) };
         let document = self.engine.document();

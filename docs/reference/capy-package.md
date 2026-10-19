@@ -568,13 +568,14 @@ default butt), `join` (`u8` miter, round, bevel; default miter), `miter_limit`
 | --- | --- |
 | Geometry | Varuint subpath count, at least one. Per subpath: varuint anchor count (at least one), `u8` flags (bit 0 closed), then per anchor a `u8` kind (0 corner, 1 smooth, 2 symmetric) and six F32 values: point, incoming handle offset, outgoing handle offset. F32 resolves 1/256 pixel across the largest canvas. Segment *i* is the cubic from anchor *i* through its outgoing handle and the next anchor's incoming handle; a closed subpath adds the closing segment. A single-anchor subpath is a dot. |
 | Width profile | Varuint knot count, at least one. Per knot: `u32` segment index counted across subpaths, F32 `t` in `[0,1]`, F32 left and right factors. Knots strictly ascend by (segment, `t`). Each side's offset is half the stroke width times its factor, interpolated linearly in segment plus `t` and held beyond the ends. |
-| Live shape | `u8` kind (1 rectangle, 2 ellipse), then F64 center x and y, width, height and rotation in radians; a rectangle adds four F64 corner radii from the top-left corner clockwise in its own frame. Then 16 bytes: the first half of the SHA-256 of the path's kind word followed by its encoded required properties (`geometry`, `fill_rule`, `style`, `hidden`). |
+| Live shape | `u8` kind (1 rectangle, 2 ellipse, 3 polygon, 4 star), then F64 center x and y, width, height and rotation in radians; a rectangle adds four F64 corner radii from the top-left corner clockwise in its own frame, a polygon an F64 corner count and a star an F64 point count and an F64 inner radius as a fraction of the outer one, in (0, 1]. Counts are whole numbers from 3 to 100; the first corner or point sits at the top of the frame. Then 16 bytes: the first half of the SHA-256 of the path's kind word followed by its encoded required properties (`geometry`, `fill_rule`, `style`, `hidden`). |
 
 A reader treats an anchor kind it does not know as a corner when editing and
 keeps it otherwise.
 
-**Live shapes.** A rectangle or ellipse keeps its frame and corner radii as a
-recipe beside the geometry it generated. A reader that knows the recipe checks
+**Live shapes.** A rectangle, ellipse, polygon or star keeps its frame and its
+corner radii, corner count or points and inner radius as a recipe beside the
+geometry it generated. A reader that knows the recipe checks
 the fingerprint on open and detaches a mismatched recipe, keeping the geometry;
 nothing is regenerated on open. Moving, rotating, uniform scaling and flipping
 update the recipe, and so does scaling a square-cornered shape along its own

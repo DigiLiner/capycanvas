@@ -1099,7 +1099,7 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::Zoom | CommandId::CenterZoomClicks | CommandId::RotateView | CommandId::FitWidth | CommandId::FillView
                 | CommandId::ZoomSelection | CommandId::ResetRotation | CommandId::ResetView | CommandId::PreviousView
                 | CommandId::SaveView | CommandId::RestoreView | CommandId::NextDrawing | CommandId::PreviousDrawing
-                | CommandId::SmoothingAdjustSpeed | CommandId::EraseWholePaths => label.to_string(),
+                | CommandId::SmoothingAdjustSpeed | CommandId::EraseWholePaths | CommandId::ScaleOutlineWidths => label.to_string(),
                 CommandId::SearchCommands => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SEARCH_COMMANDS).to_string(),
                 CommandId::DrawingBrush => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_DRAWING_BRUSH).to_string(),
                 CommandId::Sculpt => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SCULPT).to_string(),
@@ -1174,6 +1174,12 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
 
                 CommandId::Move => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_MOVE).to_string(),
                 CommandId::EditPoints => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_EDIT_POINTS).to_string(),
+                CommandId::JoinPaths => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_JOIN_PATHS).to_string(),
+                CommandId::ClosePath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_CLOSE_PATH).to_string(),
+                CommandId::SplitPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SPLIT_PATH).to_string(),
+                CommandId::ReversePath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_REVERSE_PATH).to_string(),
+                CommandId::MakeCompoundPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_MAKE_COMPOUND_PATH).to_string(),
+                CommandId::ReleaseCompoundPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_RELEASE_COMPOUND_PATH).to_string(),
                 CommandId::MoveLeaveCopy => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_MOVE_LEAVE_COPY).to_string(),
                 CommandId::TransformAgain => localization.text(MessageId::COMMANDS_TRANSFORM_AGAIN_HELP).to_string(),
                 CommandId::TransformSnapping => localization.text(MessageId::COMMANDS_TRANSFORM_SNAPPING_HELP).to_string(),
@@ -1255,6 +1261,7 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::Settings => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SETTINGS).to_string(),
                 CommandId::ToggleTheme => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_TOGGLE_THEME).to_string(),
                 CommandId::AddLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_ADD_LAYER).to_string(),
+                CommandId::NewVectorLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_NEW_VECTOR_LAYER).to_string(),
                 CommandId::DeleteLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_DELETE_LAYER).to_string(),
                 CommandId::RaiseLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_RAISE_LAYER).to_string(),
                 CommandId::FinishPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_FINISH_PATH).to_string(),

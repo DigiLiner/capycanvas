@@ -163,7 +163,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         .into_iter()
                         .map(|id| {
                             ContextMenuItem::submenu(&id.localized_label(self.localization()), if id == M::Layer && self.selection_masks.quick() { self.quick_mask_menu().sections } else if id == M::Layer {
-                                self.layer_menu_sections(self.engine.document().working.occurrence.map(super::occurrence_token).unwrap_or(0), self.engine.document().working.target.is_some_and(layer_core::SourceTarget::is_coverage), false).unwrap_or_default()
+                                self.application_layer_sections()
                             } else { self.application_menu(id).sections })
                         })
                         .collect(),
@@ -178,7 +178,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                         [CommandId::PasteInto, CommandId::PasteAsNewImage].map(command).into(),
                     ])]).collect(),
                 [CommandId::FillSelection, CommandId::ClearSelected, CommandId::ClearOutside].map(command).into(),
-                vec![command(CommandId::ScaleRotate), command(CommandId::TransformAgain), ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_ARRANGE), vec![
+                vec![command(CommandId::ScaleRotate), command(CommandId::TransformAgain), ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_PATH), vec![
+                    [CommandId::JoinPaths, CommandId::ClosePath, CommandId::SplitPath, CommandId::ReversePath].map(command).into(),
+                    [CommandId::MakeCompoundPath, CommandId::ReleaseCompoundPath].map(command).into(),
+                ]), ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_ARRANGE), vec![
                     [CommandId::BringToFront, CommandId::BringForward, CommandId::SendBackward, CommandId::SendToBack].map(command).into(),
                 ])],
                 vec![command(CommandId::SearchCommands), command(CommandId::Settings)],
@@ -214,16 +217,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 vec![ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_LOAD_SELECTION), vec![self.saved_selection_menu_items()]), ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_REPLACE_SELECTION_LAYER_FROM_CURRENT_SELECTION),vec![self.replace_selection_menu_items()])],
                 vec![command(CommandId::SelectionOutline)],
             ] },
-            M::Layer => self
-                .layer_menu_with(
-                    self.engine.document().working.occurrence.map(super::occurrence_token).unwrap_or(0),
-                    self.engine.document().working.target.is_some_and(layer_core::SourceTarget::is_coverage),
-                    false,
-                )
-                .unwrap_or(ContextMenu {
-                    title: menu.localized_label(self.localization()).to_string(),
-                    sections: Vec::new(),
-                }),
+            M::Layer => ContextMenu { title: String::new(), sections: self.application_layer_sections() },
             M::Window => self.workspace_menu(),
             M::Filter => ContextMenu {
                 title: menu.localized_label(self.localization()).to_string(),
@@ -328,7 +322,7 @@ mod tests {
         for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Ios, Platform::Mac, Platform::Windows] {
             let session = session(platform);
             let edit = session.application_menu(ApplicationMenu::Edit);
-            assert_eq!(edit.sections.iter().map(Vec::len).sum::<usize>(), 16);
+            assert_eq!(edit.sections.iter().map(Vec::len).sum::<usize>(), 17);
             assert_eq!(edit.sections[0].iter().map(|item| item.action.clone()).collect::<Vec<_>>(),
                 [CommandId::Undo, CommandId::Redo].map(|command| Some(UiAction::Invoke { command })));
             let mut commands = Vec::new();
@@ -337,7 +331,7 @@ mod tests {
                 assert!(!commands.contains(&command), "{platform:?}: {command:?} belongs outside Edit");
             }
             check(&session, &session.application_menu(ApplicationMenu::Image).sections, &mut commands);
-            assert_eq!(commands.len(), 39, "{platform:?}: all remaining Edit/Image commands survive exactly once");
+            assert_eq!(commands.len(), 45, "{platform:?}: all remaining Edit/Image commands survive exactly once");
         }
     }
 

@@ -252,7 +252,7 @@ workspace-tool-description-placement-original-size = Restore images to their ori
 workspace-tool-description-hand = Drag to move the canvas view
 workspace-tool-description-eyedropper = Pick a color from the canvas
 workspace-tool-description-gradient = Drag to fill with a gradient
-workspace-tool-description-figure = Draw lines, rectangles and ellipses
+workspace-tool-description-figure = Draw lines, rectangles, ellipses and paths
 workspace-tool-description-ruler = Create and edit drawing guides
 workspace-tool-description-show-rulers = Show or hide drawing guides
 workspace-tool-description-snap-rulers = Constrain strokes to drawing guides
@@ -611,3 +611,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } selected
    *[other] { $count } selected
     }
+workspace-tool-description-new-vector-layer = Create a vector layer for line art you can reshape without losing sharpness
+workspace-tool-description-join-paths = Connect the nearest ends of two open paths, or close one open path
+workspace-tool-description-close-path = Connect each selected open path’s ends
+workspace-tool-description-split-path = Cut paths apart at the selected anchors
+workspace-tool-description-reverse-path = Run the selected paths the other way, swapping their start and end
+workspace-tool-description-make-compound-path = Combine the selected paths into one, with holes where they overlap
+workspace-tool-description-release-compound-path = Turn each part of a compound path back into its own path

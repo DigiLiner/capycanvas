@@ -252,7 +252,7 @@ workspace-tool-description-placement-original-size = Rétablir les images à leu
 workspace-tool-description-hand = Faire glisser pour déplacer la vue de la toile
 workspace-tool-description-eyedropper = Prélever une couleur sur la toile
 workspace-tool-description-gradient = Faire glisser pour remplir avec un dégradé
-workspace-tool-description-figure = Dessiner lignes, rectangles et ellipses
+workspace-tool-description-figure = Dessiner lignes, rectangles, ellipses et tracés
 workspace-tool-description-ruler = Créer et modifier les repères de dessin
 workspace-tool-description-show-rulers = Afficher ou masquer les repères de dessin
 workspace-tool-description-snap-rulers = Contraindre les traits aux repères de dessin
@@ -611,3 +611,10 @@ workspace-picker-selected = { $count ->
     [one] { $count } sélectionné
    *[other] { $count } sélectionnés
     }
+workspace-tool-description-new-vector-layer = Créer un calque vectoriel pour l’encrage, aux traits remodelables sans perte de netteté
+workspace-tool-description-join-paths = Relier les extrémités les plus proches de deux tracés ouverts, ou fermer un tracé ouvert
+workspace-tool-description-close-path = Relier les extrémités de chaque tracé ouvert sélectionné
+workspace-tool-description-split-path = Couper les tracés aux points d’ancrage sélectionnés
+workspace-tool-description-reverse-path = Inverser le sens des tracés sélectionnés en échangeant début et fin
+workspace-tool-description-make-compound-path = Combiner les tracés sélectionnés en un seul, avec des trous là où ils se chevauchent
+workspace-tool-description-release-compound-path = Rendre à chaque partie d’un tracé transparent son propre tracé

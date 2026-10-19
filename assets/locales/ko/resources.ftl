@@ -440,7 +440,6 @@ resources-layer-menu-new = 새로 만들기
 resources-layer-menu-new-clipping-layer = 새 클리핑 레이어
 
 resources-layer-menu-new-group = 새 그룹
-resources-layer-menu-new-vector-layer = 새 벡터 레이어
 resources-path-fill = 칠
 resources-path-fill-color = 칠 색상
 resources-path-outline = 외곽선
@@ -740,3 +739,8 @@ resources-paper-washi = 와시
 resources-paper-weathered-wood = 헛간 나무
 resources-layer-add-paper = 종이 추가
 resources-size-unit = 단위
+resources-layer-type-vector = 벡터 레이어
+resources-path-overlaps = 겹친 부분
+resources-path-overlaps-filled = 채움
+resources-path-overlaps-holes = 구멍
+resources-path-miter-limit = 뾰족한 모서리 한도

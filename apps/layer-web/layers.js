@@ -78,6 +78,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   for (const group of [false, true]) {
     const getAction = () => ({ op: "new", group, clipped: false });
     footer.append(glyphButton(group ? "folder" : "add-layer", ()=>group ? copy.new_group : copy.new_layer, () => send(getAction()), "", getAction));
+    if (!group) footer.append(glyphButton("add-vector-layer", ()=>copy.new_vector_layer, () => dispatch({type:"invoke",command:"new_vector_layer"})));
   }
   footer.append(glyphButton("selection-brush", ()=>copy.new_selection_layer, () => dispatch({type:"invoke",command:"new_selection_layer"})));
   const addMask = () => ({ op: "add_mask", id: active().id, replace: false });
