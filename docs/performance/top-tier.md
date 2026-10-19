@@ -3669,54 +3669,45 @@ independent process/desktop closure precedes the unchanged reporter on the same
 capture. Raw data and summary are in
 `artifacts/windows/port-20261010/pencil-final-prepared-a3f7d2e9/`.
 
-### Windows Pencil input, 2026-10-18
+### Windows Pencil input after native activation, 2026-10-18
 
 The Surface Laptop 5, i7-1255U and Intel Iris Xe D3D12 driver
-32.0.101.7085 ran the normal production Release at `ba0f45ea2`.
-Executable/DLL SHA-256 prefixes are `40AA47DCACA3`/`E57288CF9ED3`;
-DXC is `9A5100511E12`. The official Rust and C++ build passes, with all
-43 native objects rebuilt in the private intermediate directory.
+32.0.101.7085 ran the normal production Release at `2ece7f68c`, including
+native pen/touch activation `d025bd38f`. Executable/DLL SHA-256 prefixes are
+`5D145DBDB319`/`896DA9DFFD20`; DXC is `9A5100511E12`. The official Rust and
+C++ build passes, with 48 native objects rebuilt in a private intermediate
+directory.
 
 The plain 8192 × 6336 drawing, 4 px Pencil, Immediate presentation and maximum
-frame latency 1 match the previous comparison. One priming contact is undone
-before three nominal six-second contacts requested at 240 Hz. Actual input is
-209.54–209.63 Hz. All 4,564 inputs are consumed, with zero unmatched records or
-statistics errors. Artwork, camera, controls and all four Undo restorations
-pass. No compiler, debugger or UI tracing runs during capture.
+frame latency 1 match the previous normal Release at `ba0f45ea2`
+(`40AA47DCACA3`/`E57288CF9ED3`). One priming contact is undone before three
+nominal six-second contacts requested at 240 Hz. Actual input is
+213.21–217.43 Hz, compared with 209.54–209.63 Hz previously. All 4,564 inputs
+are consumed, with zero unmatched records or statistics errors. Artwork,
+camera, controls and all four Undo restorations pass. No compiler, debugger,
+PresentMon or UI tracing runs during capture. The motion injector and reporter
+are unchanged.
 
-The earlier baseline includes shader specialization `10d515055`, with sources
-committed at `509e4a1a9`; its executable/DLL prefixes are
-`4E0AC4825C23`/`6DF248B8DB3B`. Every initial moving sample is retained.
-
-| Contact | Baseline input-to-frame-return p99, ms | Current p99, ms | Baseline pen-down to frame return, ms | Current pen-down, ms | Current submitted frames/s |
+| Contact | Previous input-to-frame-return p99, ms | Current p99, ms | Previous pen-down to frame return, ms | Current pen-down, ms | Current submitted frames/s |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | 52.48 | 25.54 | 83.28 | 34.05 | 192.76 |
-| 2 | 57.96 | 36.61 | 83.66 | 72.87 | 193.60 |
-| 3 | 49.02 | 24.70 | 82.07 | 34.20 | 196.27 |
+| 1 | 25.54 | 5.90 | 34.05 | 29.88 | 217.25 |
+| 2 | 36.61 | 6.31 | 72.87 | 38.76 | 217.51 |
+| 3 | 24.70 | 6.18 | 34.20 | 23.01 | 213.31 |
 
-Pooled input-to-frame return changes from 3.70 to 5.77 ms median,
-9.85 to 10.62 ms p95, 57.09 to 30.32 ms p99 and 113.24 to 75.03 ms maximum.
-The median and p95 are higher; tail latency and contact-start pauses remain.
-Current submitted-frame intervals have p99 7.87 ms and maximum 48.23 ms.
-Native frame work has p99 4.75 ms and maximum 45.54 ms; acquisition waits reach
-43.14 ms. These results do not establish that native input stutter is fixed.
-
-A separate instrumented baseline stack sampled `capy_frame` during display
-reduction inside D3D12 sampler-index-buffer allocation for a page bind group.
-Debugger pauses invalidate that capture's timing. The repair retains the
-unchanged sampler with uniform records, removing it from changing page bindings.
-Upstream page-clear batching, Watercolor, Paper and other shared changes are
-also present; this comparison does not isolate the sampler repair. The earlier
-post-sampler binary used shared C++ intermediates. This capture qualifies the
-named integrated runtime and replaces that binary's measurements.
+Pooled input-to-frame return changes from 5.77 to 2.34 ms median,
+10.62 to 3.07 ms p95, 30.32 to 6.22 ms p99 and 75.03 to 38.76 ms maximum.
+Current submitted-frame intervals have p99 5.84 ms and maximum 7.79 ms.
+Native frame work has p99 2.30 ms and maximum 20.93 ms; acquisition waits reach
+3.64 ms. This comparison measures the integrated builds and does not isolate
+one change. Contact starts still reach 38.76 ms after priming; first-use shader
+compilation and physical pen latency are not qualified by this capture.
 
 The original reporter, process and private-display closure pass, and runtime
 hashes remain unchanged. These are software timestamps and renderer submissions;
 they do not establish physical Wacom latency, displayed fps, long-running
 stability or reference-tier targets. Current raw traces and summary are in
-`artifacts/windows/port-20261010/pencil-finite-final-prepared-1ed6ee73/`;
-the baseline is in `pencil-final-prepared-a3f7d2e9/`, and the attribution stack
-is in `pencil-cdb-final-680bad93/` beside it.
+`artifacts/windows/port-20261010/pencil-2ece-final-7f14/`; the previous normal
+capture is in `pencil-finite-final-prepared-1ed6ee73/` beside it.
 
 ### Windows Painterly control diagnostic, 2026-10-18
 

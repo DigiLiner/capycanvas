@@ -30,7 +30,8 @@ if(!('CapyPrivateDesktop' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot '
 $powershell=Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
 Write-Output "Private desktop artifacts: $run"
 $code=1
-try{$code=[CapyPrivateDesktop]::Run($powershell,(Join-Path $run 'invoke.ps1'),$run,$desktop,$TimeoutSeconds)}
+$modulePath=$env:PSModulePath
+try{$env:PSModulePath=$null;$code=[CapyPrivateDesktop]::Run($powershell,(Join-Path $run 'invoke.ps1'),$run,$desktop,$TimeoutSeconds)}
 catch{$_|Out-String|Set-Content -LiteralPath (Join-Path $run 'desktop-failure.txt');throw}
-finally{@{exit_code=$code;desktop=$desktop;run=$run}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $run 'result.json')}
+finally{$env:PSModulePath=$modulePath;@{exit_code=$code;desktop=$desktop;run=$run}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $run 'result.json')}
 if($code){throw "Private desktop test exited $code; see $run"}

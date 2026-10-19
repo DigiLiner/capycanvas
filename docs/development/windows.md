@@ -815,7 +815,8 @@ menu selection and held-release behavior remain in the native device matrix.
 
 Run native input fixtures on a private desktop with `test-desktop.ps1`; it
 restores the original desktop and closes its own process tree on completion or
-timeout. For example, from the
+timeout. Its Windows PowerShell child uses the default module search path, so
+the fixture can also be launched from PowerShell 7. For example, from the
 repository root with local scripts allowed:
 
 ```powershell
