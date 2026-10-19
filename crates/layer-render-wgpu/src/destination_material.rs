@@ -9,7 +9,11 @@ use material_sources::{elapsed, record, rect_words};
 
 pub(super) const OPERATIONS: [MaterialOperation; 4] = [MaterialOperation::Liquify, MaterialOperation::Smudge,
     MaterialOperation::Wet, MaterialOperation::Watercolor];
-const WORKGROUP: u32 = 8;
+
+/// The workgroup of an operation's page, gather and reservoir kernels.
+pub(super) fn workgroup(operation: MaterialOperation) -> [u32; 2] {
+    if matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge) { [16, 8] } else { [8, 8] }
+}
 
 pub(super) fn transported(style: &layer_render::DabStyle) -> bool {
     OPERATIONS.contains(&BrushPassPlan::for_style(style).material)
@@ -272,6 +276,7 @@ impl WgpuRasterizer {
         let texture_key = Self::texture_set_key(&batch.style);
         let textures = &self.texture_sets.iter().find(|set| set.key == texture_key).unwrap().bind_group;
         let style_offset = batch_index as u32 * self.style_stride as u32;
+        let [width, height] = workgroup(BrushPassPlan::for_style(&batch.style).material);
         let pass = encoder.compute_pass();
         pass.set_bind_group(3, textures, &[]);
         for dispatch in dispatches {
@@ -279,8 +284,8 @@ impl WgpuRasterizer {
             pass.set_bind_group(0, &dispatch.output, &[style_offset]);
             pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, dispatch.coordinate)]);
             pass.set_bind_group(2, &dispatch.sources, &[dispatch.record_offset]);
-            let size = if dispatch.entry == Entry::Reservoir { RESERVOIR_SIZE } else { PAGE_SIZE } / WORKGROUP;
-            pass.dispatch_workgroups(size, size, 1);
+            let size = if dispatch.entry == Entry::Reservoir { RESERVOIR_SIZE } else { PAGE_SIZE };
+            pass.dispatch_workgroups(size / width, size / height, 1);
         }
         self.metrics.material_cpu_ms[3] += elapsed(started);
     }
@@ -315,6 +320,21 @@ mod tests {
             for &entry in entries(operation) {
                 assert_eq!(std::ptr::eq(transport.kernel(&normal, entry), transport.kernel(&multiply, entry)), !blended(operation),
                     "{preset:?} {entry:?} has a module per blend only when it deposits through the blend");
+            }
+        }
+    }
+
+    #[test]
+    fn transport_kernels_declare_the_workgroup_they_are_dispatched_with() {
+        for operation in OPERATIONS {
+            for &entry in entries(operation) {
+                let entries = if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) };
+                let source = dry_material::material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true), entries, 0, operation);
+                let module = naga::front::wgsl::parse_str(&source).unwrap();
+                let kernel = module.entry_points.iter().find(|e| e.name == entry.name()).unwrap();
+                let [width, height] = workgroup(operation);
+                assert_eq!(kernel.workgroup_size, [width, height, 1], "{operation:?} {entry:?}");
+                assert_eq!([PAGE_SIZE % width, PAGE_SIZE % height, RESERVOIR_SIZE % width, RESERVOIR_SIZE % height], [0; 4]);
             }
         }
     }

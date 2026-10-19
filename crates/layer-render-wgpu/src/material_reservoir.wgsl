@@ -12,7 +12,7 @@ fn replenished_reservoir_alpha(carried: f32, pickup: f32, exchange: f32) -> f32 
     return max(carried, mix(carried, pickup, exchange));
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(TRANSPORT_WORKGROUP_X, TRANSPORT_WORKGROUP_Y)
 fn reservoir_exchange(@builtin(global_invocation_id) id: vec3<u32>) {
     let local = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(textureDimensions(reservoir_texture)) * 2.0 - vec2<f32>(1.0);
     var carried = textureLoad(reservoir_texture, vec2<i32>(id.xy), 0);

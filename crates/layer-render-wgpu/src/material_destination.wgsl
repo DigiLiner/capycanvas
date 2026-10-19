@@ -9,7 +9,7 @@ fn transport_result(id: vec2<u32>) -> MaterialOutput {
     return material_result(vec4<f32>(vec2<f32>(id) + 0.5, 0.0, 1.0));
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(TRANSPORT_WORKGROUP_X, TRANSPORT_WORKGROUP_Y)
 fn transport_color(@builtin(global_invocation_id) id: vec3<u32>) {
     if transport_dirty(id.xy) {
         store_dry_color(id.xy, transport_result(id.xy).color);
@@ -31,12 +31,12 @@ fn store_transport_coverage(id: vec2<u32>, dirty: bool) -> MaterialOutput {
     return MaterialOutput(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(TRANSPORT_WORKGROUP_X, TRANSPORT_WORKGROUP_Y)
 fn transport_coverage(@builtin(global_invocation_id) id: vec3<u32>) {
     store_transport_coverage(id.xy, transport_dirty(id.xy));
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(TRANSPORT_WORKGROUP_X, TRANSPORT_WORKGROUP_Y)
 fn transport_watercolor(@builtin(global_invocation_id) id: vec3<u32>) {
     let dirty = transport_dirty(id.xy);
     let wetness = store_transport_coverage(id.xy, dirty).wetness;

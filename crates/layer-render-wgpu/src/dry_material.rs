@@ -140,7 +140,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         _ => {
             let name=match operation {M::Liquify=>"liquify",M::Smudge=>"smudge",M::Wet=>"wet",_=>"watercolor"};
             let gathered=entries==Entries::Gather;
+            let [width,height]=crate::destination_material::workgroup(operation);
             let mut source=format!("{}\nconst MATERIAL_GATHERED: bool = {gathered};\n\
+                const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
             if gathered {source+=&format!("fn gathered_sample(w:vec2<f32>)->vec4<f32> {{return {name}_gathered(w);}}\n");}
