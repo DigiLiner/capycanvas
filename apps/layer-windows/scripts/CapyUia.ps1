@@ -76,10 +76,11 @@ function Record-CapyFixtureClose([int]$ProcessId,[long]$WindowHandle,[bool]$Wind
     Update-CapyFixtureContext {param($context);$context.closes=@($context.closes)+@($entry)}
 }
 function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle,[string]$TraceDirectory=$script:CapyTraceDirectory){
-    if(!$TraceDirectory){$executable=$Process.Path;if(!$executable){return $null};$TraceDirectory=Split-Path -Parent $executable}
+    $directory=$TraceDirectory
+    if(!$directory){$executable=$Process.Path;if(!$executable){return $null};$directory=Split-Path -Parent $executable}
     $registered=$false
     if($WindowHandle){
-        $path=Join-Path $TraceDirectory "windows-$($Process.Id).json"
+        $path=Join-Path $directory "windows-$($Process.Id).json"
         if(Test-Path $path){
             $trace=Read-Snapshot $path
             $registered=$trace.process_id -eq $Process.Id -and $WindowHandle -in $trace.windows.hwnd
@@ -296,22 +297,29 @@ function Invoke-Id([string]$Id){
     Wait-Until {$hit.item=Find $Id;$hit.item -and $hit.item.Current.IsEnabled} "Missing enabled control: $Id"
     Invoke $Id
 }
+function New-DrawingControl([string]$Id,$Within=$root){
+    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$Id)
+    $hit=$Within.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+    if($hit -or $Within -ne $root){return $hit}
+    $owned=[System.Windows.Automation.AndCondition]::new($condition,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id))
+    [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$owned)
+}
 function New-DrawingPixels([int]$Width,[int]$Height){
-    Wait-Until {(Model).state.new_drawing -and (Find 'document-width' -Within $root)} 'New drawing did not open' 30
+    Wait-Until {(Model).state.new_drawing -and (New-DrawingControl 'document-width') -and (New-DrawingControl 'new-drawing-unit')} 'New drawing did not open' 30
     if((Model).state.new_drawing.setup.unit -ne 'px'){
         $index=[array]::IndexOf(@((Model).state.new_drawing.units.value),'px')
-        $unit=Find 'new-drawing-unit' -Within $root
+        $unit=New-DrawingControl 'new-drawing-unit'
         $unit.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-        $choice=@{item=$null};Wait-Until {$choice.item=Find "new-drawing-unit-$index" -Within $unit;$null -ne $choice.item} 'New drawing has no pixel unit'
+        $choice=@{item=$null};Wait-Until {$choice.item=New-DrawingControl "new-drawing-unit-$index" $unit;$null -ne $choice.item} 'New drawing has no pixel unit'
         $choice.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         Wait-Until {(Model).state.new_drawing.setup.unit -eq 'px'} 'New drawing did not switch to pixels'
     }
     Wait-Until {
-        $view=(Model).state.new_drawing;$entry=Find 'document-width' -Within $root
+        $view=(Model).state.new_drawing;$entry=New-DrawingControl 'document-width'
         $entry -and [double](($entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value) -replace '[^0-9.]','') -eq $view.values[0]
     } 'New drawing did not show pixel sizes'
     foreach($field in @(@('document-width',$Width),@('document-height',$Height))){
-        $entry=Find $field[0] -Within $root;$entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue([string]$field[1])
+        $entry=New-DrawingControl $field[0];$entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue([string]$field[1])
     }
 }
 function Tool-Tile([string]$Command){

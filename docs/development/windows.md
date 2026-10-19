@@ -207,11 +207,10 @@ captions update retained controls, accessibility names and tooltips. Numeric
 refusals retain their shared reason, and color forms relabel their rows and
 re-read a refused value in the new language without changing the draft. Profile,
 proof and export captions preserve raw names, selections and prepared candidates.
-New Drawing presents the shared `creation.resolution` unit beside its label and
-uses that same numeric control for resolution expressions. Width and height use
-the catalog dimension control. Invalid drafts retain the shared refusal; selecting
-a preset restores its authored dimensions and resolution. New Drawing scrolls
-validation errors into view when rejecting a draft.
+`NewDrawingDialog.cpp` presents the shared [New drawing](../ui/new-drawing.md)
+view: it relabels from the view's copy, keeps a numeric draft that is still being
+typed, and embeds Edit Color's form and the Choose Texture grid in its drawers.
+Fixtures create drawings with `New-DrawingPixels` from `CapyUia.ps1`.
 Preferences reserves the measured titlebar height when fitting its centered
 dialog; its narrow-window check dismisses it with an actual pointer click.
 
