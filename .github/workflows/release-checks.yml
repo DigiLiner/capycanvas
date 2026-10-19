@@ -191,6 +191,11 @@ jobs:
       - run: |
           rustup toolchain install $env:RUST_VERSION --profile minimal --component clippy --target ${{ matrix.target }}
           rustup default $env:RUST_VERSION
+      - name: Windows script regressions
+        run: |
+          ./apps/layer-windows/tests/architecture.ps1
+          ./apps/layer-windows/tests/application-menu.ps1
+          ./apps/layer-windows/tests/application-menu-query.ps1
       - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
       - run: ./apps/layer-windows/tests/model-snapshot-reader.ps1
       - run: ./apps/layer-windows/tests/fixture-owner-census.ps1 -Helper apps/layer-windows/scripts/CapyUia.ps1 -Output artifacts/windows/fixture-owner-census-ci

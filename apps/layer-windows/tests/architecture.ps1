@@ -7,7 +7,7 @@ $payload=Join-Path $run 'payload'
 [IO.Directory]::CreateDirectory($payload)|Out-Null
 $previousNative=$env:PROCESSOR_ARCHITECTURE
 $previousEmulated=$env:PROCESSOR_ARCHITEW6432
-function Write-Arm64XFixture([string]$Path,[uint64]$Symbol=6,[uint16]$RelocationSection=1,[uint32]$PayloadSize=16,[switch]$Truncated) {
+function Write-Arm64XFixture([string]$Path,[uint64]$Symbol=6,[uint16]$RelocationSection=1,[uint32]$PayloadSize=16,[uint64]$Chpe=0x180001000,[switch]$Truncated) {
     $writer=[IO.BinaryWriter]::new([IO.File]::Create($Path))
     try {
         $writer.BaseStream.SetLength(0x600)
@@ -22,6 +22,7 @@ function Write-Arm64XFixture([string]$Path,[uint64]$Symbol=6,[uint16]$Relocation
         $writer.BaseStream.Position=0x188;$writer.Write([Text.Encoding]::ASCII.GetBytes(".rdata`0`0"))
         $writer.Write([uint32]0x400);$writer.Write([uint32]0x1000);$writer.Write([uint32]0x400);$writer.Write([uint32]0x200)
         $writer.BaseStream.Position=0x200;$writer.Write([uint32]0x100)
+        $writer.BaseStream.Position=0x2C8;$writer.Write($Chpe)
         $writer.BaseStream.Position=0x2E0;$writer.Write([uint32]0x180);$writer.Write($RelocationSection)
         $writer.BaseStream.Position=0x380;$writer.Write([uint32]1);$writer.Write($PayloadSize)
         $writer.Write($Symbol);$writer.Write([uint32]4);$writer.Write([uint32]0)
@@ -66,22 +67,30 @@ try {
         try {Read-PortablePackage $resultPath|Out-Null} catch {$rejected=$true}
         if(!$rejected){throw 'Mixed-architecture runtime payload was accepted.'}
     }
-    $path=Join-Path $payload 'fixture.dll'
+    $writer=[IO.BinaryWriter]::new([IO.File]::OpenWrite($path))
+    try {$writer.BaseStream.Position=0x84;$writer.Write([uint16]0x8664)} finally {$writer.Dispose()}
+    $path=Join-Path $payload 'fixture_ec.dll'
     Write-Arm64XFixture $path
-    foreach($architecture in @('x64','arm64')) {
-        if(!(Test-WindowsBinaryArchitecture $path $architecture)){throw "ARM64X executable code was rejected for $architecture."}
-    }
+    if(Test-WindowsBinaryArchitecture $path x64){throw 'ARM64X companion changed native CRT selection.'}
+    if(!(Test-WindowsBinaryArchitecture $path arm64)){throw 'ARM64X native code was rejected for ARM64.'}
+    Assert-WindowsBinaryArchitecture $payload x64
     Write-Arm64XFixture $path -Symbol 5
-    if(Test-WindowsBinaryArchitecture $path x64){throw 'An ARM64 relocation symbol was accepted as ARM64X.'}
+    if(Test-WindowsBinaryArchitecture $path x64 -AllowCompanion){throw 'An ARM64 relocation symbol was accepted as ARM64X.'}
     if(!(Test-WindowsBinaryArchitecture $path arm64)){throw 'Pure ARM64 was rejected for ARM64.'}
-    foreach($malformed in @(@{RelocationSection=2},@{PayloadSize=[uint32]::MaxValue},@{Truncated=$true})) {
+    foreach($malformed in @(@{RelocationSection=2},@{PayloadSize=[uint32]::MaxValue},@{Truncated=$true},@{Chpe=0})) {
         Write-Arm64XFixture $path @malformed
-        if(Test-WindowsBinaryArchitecture $path x64){throw 'Malformed ARM64X metadata was accepted for x64.'}
+        if(Test-WindowsBinaryArchitecture $path x64 -AllowCompanion){throw 'Malformed ARM64X metadata was accepted for x64.'}
     }
+    Write-Arm64XFixture $path
+    $unpaired=Join-Path $payload 'missing_ec.dll'
+    Move-Item -LiteralPath $path -Destination $unpaired
+    try {
+        if(Test-WindowsBinaryArchitecture $unpaired x64 -AllowCompanion){throw 'An unpaired ARM64X binary was accepted.'}
+    } finally {Move-Item -LiteralPath $unpaired -Destination $path}
     Write-Output 'Windows architecture selection and mixed-payload regression checks passed.'
 } finally {
     $env:PROCESSOR_ARCHITECTURE=$previousNative;$env:PROCESSOR_ARCHITEW6432=$previousEmulated
-    foreach($path in @((Join-Path $payload 'fixture.dll'),(Join-Path $payload 'package-manifest.json'),(Join-Path $run 'result.json'))){Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue}
+    foreach($path in @((Join-Path $payload 'fixture.dll'),(Join-Path $payload 'fixture_ec.dll'),(Join-Path $payload 'package-manifest.json'),(Join-Path $run 'result.json'))){Remove-Item -LiteralPath $path -ErrorAction SilentlyContinue}
     [IO.Directory]::Delete($payload)
     [IO.Directory]::Delete($run)
 }

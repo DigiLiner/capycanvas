@@ -112,9 +112,8 @@ copied beside the executable, so development builds run unpackaged.
 DXC is pinned to 1.9.2609.5, whose ARM64 DLL loads in a native ARM64 process.
 The earlier 1.9.2607.13 package's `arm64` DLL contains ARM64EC/x64 code and
 cannot load there. Build and packaging checks reject incompatible PE machines.
-ARM64X runtime DLLs are identified by their dynamic relocation metadata and
-remain valid in both package architectures, including the Windows App SDK
-companion DLLs.
+Windows App SDK ARM64X companion DLLs are identified by their dynamic relocation
+metadata and retained beside their matching x64 DLLs for emulation on Arm.
 
 Ordinary restarts reopen saved and untitled drawings automatically, retaining tab
 order, the active drawing, camera, selection and bounded Undo/Redo. The first
@@ -440,6 +439,9 @@ and records every payload file's size and SHA-256 in `package-manifest.json`. Th
 selects the target's runtime and DXC binaries and dependency notices, and rejects
 EXE/DLL files whose PE architecture does not match the manifest. MSIX conversion
 preserves that architecture in `ProcessorArchitecture`.
+An x64 SDK payload can also contain an ARM64X `_ec.dll` companion for x64
+emulation on Arm. Validation requires its matching x64 DLL and ARM64X relocation
+metadata; plain ARM64 binaries and unpaired companions remain errors.
 CRT collection selects compatible binaries from the redistributable directory,
 which can also contain ARM64EC companions that native ARM64 cannot load.
 It assembles the archive twice and requires identical hashes. Output stays under

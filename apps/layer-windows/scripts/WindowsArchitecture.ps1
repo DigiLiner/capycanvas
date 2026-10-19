@@ -43,6 +43,8 @@ function Test-WindowsArm64XBinary([IO.BinaryReader]$Reader,[long]$PeOffset) {
     if ($loadOffset+232 -gt $stream.Length) { return $false }
     $stream.Position = $loadOffset
     if ($Reader.ReadUInt32() -lt 232) { return $false }
+    $stream.Position = $loadOffset+200
+    if (!$Reader.ReadUInt64()) { return $false }
     $stream.Position = $loadOffset+224
     $relocationOffset = $Reader.ReadUInt32()
     $relocationSection = $Reader.ReadUInt16()
@@ -59,14 +61,14 @@ function Test-WindowsArm64XBinary([IO.BinaryReader]$Reader,[long]$PeOffset) {
     while ($stream.Position+12 -le $end) {
         $symbol = $Reader.ReadUInt64()
         $relocationSize = $Reader.ReadUInt32()
-        if ($stream.Position+$relocationSize -gt $end) { return $false }
+        if (!$relocationSize -or $stream.Position+$relocationSize -gt $end) { return $false }
         if ($symbol -eq 6) { return $true }
         $stream.Position += $relocationSize
     }
     return $false
 }
 
-function Test-WindowsBinaryArchitecture([string]$Path,[ValidateSet('x64','arm64')][string]$Architecture) {
+function Test-WindowsBinaryArchitecture([string]$Path,[ValidateSet('x64','arm64')][string]$Architecture,[switch]$AllowCompanion) {
     $machines = if ($Architecture -eq 'arm64') { @(0xAA64,0xA64E) } else { @(0x8664) }
     $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($Path))
     try {
@@ -77,13 +79,15 @@ function Test-WindowsBinaryArchitecture([string]$Path,[ValidateSet('x64','arm64'
         if ($reader.ReadUInt32() -ne 0x4550) { throw "Invalid Windows binary: $Path" }
         $machine = $reader.ReadUInt16()
         if ($machine -in $machines) { return $true }
-        if ($Architecture -ne 'x64' -or $machine -ne 0xAA64) { return $false }
+        if (!$AllowCompanion -or $Architecture -ne 'x64' -or $machine -ne 0xAA64 -or $Path -notmatch '_ec\.dll$') { return $false }
+        $paired = $Path -replace '_ec\.dll$', '.dll'
+        if (!(Test-Path -LiteralPath $paired -PathType Leaf) -or !(Test-WindowsBinaryArchitecture $paired x64)) { return $false }
         Test-WindowsArm64XBinary $reader $peOffset
     } finally { $reader.Dispose() }
 }
 
 function Assert-WindowsBinaryArchitecture([string]$Directory,[ValidateSet('x64','arm64')][string]$Architecture) {
     foreach ($file in Get-ChildItem -LiteralPath $Directory -File -Recurse | Where-Object Extension -In @('.exe','.dll')) {
-        if (!(Test-WindowsBinaryArchitecture $file.FullName $Architecture)) { throw "Expected $Architecture binary: $($file.FullName)" }
+        if (!(Test-WindowsBinaryArchitecture $file.FullName $Architecture -AllowCompanion)) { throw "Expected $Architecture binary: $($file.FullName)" }
     }
 }
