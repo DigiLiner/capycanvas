@@ -18,6 +18,7 @@ $Root|Add-Member ScriptMethod FindAll {
     if($Condition -eq [System.Windows.Automation.Condition]::TrueCondition){return $this.Elements}
     @()
 }
+foreach($entry in $Root.Elements){$entry|Add-Member NoteProperty Cached $entry.Current}
 $menuNodes=$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $expected=$Root.Elements[2]
 if(![object]::ReferenceEquals((Visible-Control 'application-menu-file' $button),$expected)){throw 'Visible menu was lost when the provider omitted filtered property matches.'}
@@ -25,6 +26,7 @@ if(![object]::ReferenceEquals((Visible-Control 'File' $button -ByName),$expected
 if(Visible-Control 'file' $button -ByName){throw 'Caption matching changed case sensitivity.'}
 if(Visible-Control 'application-menu-edit' $button){throw 'A different menu was returned.'}
 $disabled=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menu-file';Name='File';ControlType=$button;IsEnabled=$false;IsOffscreen=$false}}
+$disabled|Add-Member NoteProperty Cached $disabled.Current
 $menuNodes=@($disabled,$expected)
 if(![object]::ReferenceEquals((Visible-Control 'application-menu-file' $button),$expected)){throw 'A disabled duplicate hid the actionable menu.'}
 if(![object]::ReferenceEquals((Visible-Control 'application-menu-file' $button -Enabled:$false),$disabled)){throw 'Disabled menu inspection was lost.'}
@@ -34,6 +36,7 @@ if(Visible-Control 'application-menu-file' $button){throw 'An offscreen menu was
 $invoke=[pscustomobject]@{Calls=0}
 $invoke|Add-Member ScriptMethod Invoke {$this.Calls++}
 $target=[pscustomobject]@{Current=$expected.Current;Invoker=$invoke}
+$target|Add-Member NoteProperty Cached $target.Current
 $target|Add-Member ScriptMethod GetCurrentPattern {param($Pattern);$this.Invoker}
 $delayed=[pscustomobject]@{Queries=0;Target=$target;Disabled=$disabled}
 $delayed|Add-Member ScriptMethod FindAll {
@@ -57,6 +60,7 @@ public sealed class CapyMenuQueryRoot {
 }
 public sealed class CapyMenuQueryExpired {
     public object Current {get{throw new System.Windows.Automation.ElementNotAvailableException();}}
+    public object Cached {get{throw new System.Windows.Automation.ElementNotAvailableException();}}
 }
 '@
 }

@@ -250,6 +250,9 @@ heading spacing, so the final heading retains its full allocation.
 The compact `application-menus` button exposes `application-menu-<id>` entries;
 primary and recovery menus retain their ID and localized-caption lookups.
 Action lookup waits for an enabled visible match, skipping disabled duplicates.
+Selector properties are fetched together in a UIA cache request. Transient
+ElementNotAvailable errors while a popup appears retry within the existing
+discovery deadline.
 Inspection still permits disabled visible buttons; an existing submenu completes only the
 normal expansion path. Discovery retains that native entry through invocation
 so another tree read cannot discard it during a menu transition. Visibility,

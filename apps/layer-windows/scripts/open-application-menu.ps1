@@ -5,17 +5,33 @@ $id=$Name.ToLowerInvariant().Replace('application-menu-','')
 if($id -notin @('file','edit','image','layer','select','filter','view','window')){throw "Unknown application menu: $Name"}
 $menuRoute=@{id=$null}
 $menuNodes=@()
-function Menu-Snapshot {
-    try {$Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)}
-    catch [System.Windows.Automation.ElementNotAvailableException] {}
+$menuCache=[System.Windows.Automation.CacheRequest]::new()
+$menuCache.TreeScope=[System.Windows.Automation.TreeScope]::Element
+foreach($property in @(
+    [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+    [System.Windows.Automation.AutomationElement]::NameProperty,
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.AutomationElement]::IsOffscreenProperty,
+    [System.Windows.Automation.AutomationElement]::IsEnabledProperty
+)){$menuCache.Add($property)}
+function Read-MenuNodes {
+    $active=$menuCache.Activate()
+    try { $Root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) }
+    catch {
+        if($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]){throw}
+    }
+    finally {$active.Dispose()}
 }
+
 function Visible-Control([string]$Id,$Type,[switch]$ByName,[switch]$Enabled=(!$Inspect)){
     foreach($entry in $menuNodes){
         try {
-            $current=$entry.Current
+            $current=$entry.Cached
             $value=if($ByName){$current.Name}else{$current.AutomationId}
             if($value -ceq $Id -and !$current.IsOffscreen -and (!$Enabled -or $current.IsEnabled) -and (!$Type -or $current.ControlType -eq $Type)){return $entry}
-        } catch [System.Windows.Automation.ElementNotAvailableException] {}
+        } catch {
+            if($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]){throw}
+        }
     }
 }
 function Menu-Button {
@@ -32,7 +48,7 @@ function Submenu {
 }
 $watch=[Diagnostics.Stopwatch]::StartNew()
 do{
-    $menuNodes=Menu-Snapshot
+    $menuNodes=@(Read-MenuNodes)
     $button=Visible-Control ("application-menu-"+$id) ([System.Windows.Automation.ControlType]::Button)
     $overflow=if(!$button){Menu-Button}
     $submenu=if(!$button -and !$Inspect){Submenu}
@@ -54,7 +70,7 @@ if(!$submenu){
     $overflow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do{
-        $menuNodes=Menu-Snapshot
+        $menuNodes=@(Read-MenuNodes)
         $submenu=Submenu
         if($submenu){break}
         Start-Sleep -Milliseconds 50

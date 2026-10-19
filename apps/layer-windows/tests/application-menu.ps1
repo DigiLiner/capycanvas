@@ -10,6 +10,7 @@ function Menu-Root([string]$Mode){
         if($this.mode -eq 'changing-route' -and $this.reads -gt 2){return}
         $type=if($this.mode -eq 'inspect' -and $this.reads -ge 3){[System.Windows.Automation.ControlType]::Button}else{[System.Windows.Automation.ControlType]::MenuItem}
         $item=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menu-file';Name='File';IsOffscreen=$false;IsEnabled=$true;ControlType=$type}}
+        $item|Add-Member NoteProperty Cached $item.Current
         $item|Add-Member ScriptMethod GetCurrentPattern {
             param($pattern)
             $result=[pscustomobject]@{Current=[pscustomobject]@{ExpandCollapseState=[System.Windows.Automation.ExpandCollapseState]::Expanded}}
@@ -40,3 +41,33 @@ foreach($mode in @('inspect','expanded','changing-route')){
     }
 }
 if($failures.Count){throw ($failures -join [Environment]::NewLine)}
+
+$popup=[pscustomobject]@{reads=0;opened=$false;expanded=$false}
+$overflow=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menus';Name='Menus';IsOffscreen=$false;IsEnabled=$true;ControlType=[System.Windows.Automation.ControlType]::Button};Root=$popup}
+$overflow|Add-Member NoteProperty Cached $overflow.Current
+$overflow|Add-Member ScriptMethod GetCurrentPattern {
+    param($pattern)
+    $invoke=[pscustomobject]@{Root=$this.Root}
+    $invoke|Add-Member ScriptMethod Invoke {$this.Root.opened=$true}
+    $invoke
+}
+$submenu=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menu-file';Name='File';IsOffscreen=$false;IsEnabled=$true;ControlType=[System.Windows.Automation.ControlType]::MenuItem};Root=$popup}
+$submenu|Add-Member NoteProperty Cached $submenu.Current
+$submenu|Add-Member ScriptMethod GetCurrentPattern {
+    param($pattern)
+    $expand=[pscustomobject]@{Root=$this.Root;Current=[pscustomobject]@{ExpandCollapseState=[System.Windows.Automation.ExpandCollapseState]::Expanded}}
+    $expand|Add-Member ScriptMethod Expand {$this.Root.expanded=$true}
+    $expand
+}
+$popup|Add-Member NoteProperty Overflow $overflow
+$popup|Add-Member NoteProperty Submenu $submenu
+$popup|Add-Member ScriptMethod FindAll {
+    param($scope,$condition)
+    $this.reads++
+    if(!$this.opened){return $this.Overflow}
+    if($this.reads -eq 2){throw [System.Windows.Automation.ElementNotAvailableException]::new('Popup is materializing')}
+    $this.Submenu
+}
+& $Helper -Root $popup -Name File
+if($popup.reads -ne 3 -or !$popup.expanded){throw 'Transient popup query did not retry and expand the owned File submenu'}
+Write-Output 'Application menu popup materialization: passed'
