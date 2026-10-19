@@ -237,6 +237,7 @@ class AndroidVectorLayerTest {
             awaitPixel("$theme-between-crossings", Offset(.52f, .62f), false, ::dark)
             awaitPixel("$theme-kept-left", Offset(.39f, .62f), true, ::dark)
             awaitPixel("$theme-kept-right", Offset(.59f, .62f), true, ::dark)
+            awaitState("$theme-erase-mode-kept") { s -> s.getJSONObject("tool_set").getJSONArray("subtools").objects().first { it.getString("label") == intersection }.getBoolean("selected") }
             screenshot("vector-$theme-erase-to-intersection.png")
 
             val vectors = state().getJSONArray("layers").objects().count { it.optString("content_icon") == "layer-path-symbolic" }

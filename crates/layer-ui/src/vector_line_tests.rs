@@ -1069,6 +1069,8 @@ fn erasing_up_to_intersection_stops_at_crossing_lines() {
     invoke(&mut s, CommandId::EraseToIntersection);
     assert!(s.command(CommandId::EraseToIntersection).selected && !s.command(CommandId::EraseTouchedPart).selected);
     assert_eq!(saved_settings(&s).map(|saved| saved.vector_eraser), Some(crate::VectorEraser::ToIntersection), "the eraser mode is saved");
+    let highlighted: Vec<_> = s.state.tool_panels.tools.subtools.iter().take(3).map(|item| item.selected).collect();
+    assert_eq!(highlighted, [false, false, true], "the Tools list highlights the chosen mode");
     s.dispatch(UiAction::SetBrushSize { value: 6. }).unwrap();
     line(&mut s, 300, [400., 290.], [400., 310.]);
     let object = s.engine.document().scene().vector_layer(handle).unwrap().clone();

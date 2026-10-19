@@ -28,7 +28,7 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
   const color=async at=>{
     const {x,y}=await screen(at);
     const shot=await call('Page.captureScreenshot',{format:'png',clip:{x:x-2,y:y-2,width:5,height:5,scale:1}});
-    return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${shot.data}';await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);const d=context.getImageData(0,0,canvas.width,canvas.height).data;const sum=[0,0,0];for(let i=0;i<d.length;i+=4)for(let c=0;c<3;c++)sum[c]+=d[i+c];return sum.map(v=>v/(d.length/4))})()`);
+    return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${shot.data}';await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);const d=context.getImageData(0,0,canvas.width,canvas.height).data;let darkest=[255,255,255];for(let i=0;i<d.length;i+=4)if(d[i]+d[i+1]+d[i+2]<darkest[0]+darkest[1]+darkest[2])darkest=[d[i],d[i+1],d[i+2]];return darkest})()`);
   };
   const dark=([r,g,b])=>Math.max(r,g,b)<100;
   const marked=([r,g,b])=>r+g+b<600;
