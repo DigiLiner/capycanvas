@@ -2,6 +2,7 @@
 // Test-only virtual pointer through Mutter -> Wayland -> GTK/Chromium. Run ONLY inside
 // an isolated dbus-run-session + headless Mutter, never on a user's desktop.
 const {Gio, GLib} = imports.gi;
+const sessionBus = Gio.DBus.session;
 // The private monitor is configured by workspace-motion.sh. RemoteDesktop's
 // touch positions are stream pixels; Mutter divides them by monitor scale.
 // Relative pointer motion and the test fixtures use logical desktop units.
@@ -163,7 +164,7 @@ process.wait_async(null, (p, result) => {
 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
     if (!ready.query_exists(null)) return GLib.SOURCE_CONTINUE;
     const dest = 'org.gnome.Mutter.RemoteDesktop', iface = `${dest}.Session`;
-    const call = (path, name, method, signature, values) => Gio.DBus.session.call_sync(
+    const call = (path, name, method, signature, values) => sessionBus.call_sync(
         dest, path, name, method, new GLib.Variant(signature, values), null,
         Gio.DBusCallFlags.NONE, 3000, null,
     ).deep_unpack();
@@ -173,7 +174,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
     if (nativeTest || workspaceHold || workspaceMotion || workspaceSwitcher || workspaceTransitions) {
         const id = call(session, 'org.freedesktop.DBus.Properties', 'Get', '(ss)', [iface, 'SessionId'])[0].deep_unpack();
         const cast = 'org.gnome.Mutter.ScreenCast';
-        const castCall = (path, name, method, signature, values) => Gio.DBus.session.call_sync(
+        const castCall = (path, name, method, signature, values) => sessionBus.call_sync(
             cast, path, name, method, new GLib.Variant(signature, values), null,
             Gio.DBusCallFlags.NONE, 3000, null,
         ).deep_unpack();
@@ -182,7 +183,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
         touchStream = castCall(path, `${cast}.Session`, 'RecordMonitor', '(sa{sv})',
             ['', captureDir ? {'cursor-mode': new GLib.Variant('u', 0)} : {}])[0];
         if (captureDir) {
-            Gio.DBus.session.signal_subscribe(cast, `${cast}.Stream`, 'PipeWireStreamAdded', touchStream,
+            sessionBus.signal_subscribe(cast, `${cast}.Stream`, 'PipeWireStreamAdded', touchStream,
                 null, Gio.DBusSignalFlags.NONE, (_connection, _sender, _path, _iface, _signal, params) => {
                     print(`Compositor capture stream: ${params.deep_unpack()[0]}`);
                     const {Gst, GstApp, GstVideo, GdkPixbuf} = imports.gi;

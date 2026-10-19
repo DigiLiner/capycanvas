@@ -383,6 +383,9 @@ warm textures and theme loops remain in their callers.
 Docking and ink checks retain pressure editing, native wrapping and GPU pixels.
 Drop rules and tile/grip bounds belong to `native_layout_drop_input`,
 `native_toolbar_sizing` and `native_ribbon_allocation`.
+`native_panel_tab_feedback_preserves_join` checks tab hover, held mouse and touch
+contacts, and selection in both directions, themes and every transparency level.
+It compares the lower tab-strip pixels while the neighboring tab is pressed.
 `native_spatial_filter_windows` checks a 24 MP photo with chained Gaussian blurs
 at 50% zoom, panning and radius changes in both themes.
 `native_hue_ranges_colorize_retains_values` and

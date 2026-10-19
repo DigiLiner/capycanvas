@@ -1091,6 +1091,10 @@ clipping; they cover drifting panel/drawer tab taps, direct tear-off, retained
 contact, cancellation and history. `exercise-hdr.ps1` also checks drifting pen
 taps on drawing tabs before reordering and Undo/Redo.
 
+`exercise-transparency.ps1` compares panel-tab lower corners at rest, on hover
+and during a held mouse press in both themes and every transparency level. It
+checks both neighboring directions and native click selection on release.
+
 `exercise-illustration-filters.ps1 -Executable <path> -Theme dark` checks
 Brightness to Opacity and Threshold through the native Filters and Properties
 panels. It compares composed pixels, changes color and transparency choices,

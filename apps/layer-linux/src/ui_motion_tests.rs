@@ -71,6 +71,60 @@ fn stripes(w: &Rc<Workspace>) {
 }
 
 #[test]
+#[ignore = "isolated Mutter native-input.js --native-test=native_panel_tab_feedback_preserves_join"]
+fn native_panel_tab_feedback_preserves_join() {
+    let mut input = RemoteInput::new().settle_ms(30).timeout_secs(10);
+    let app = native_test_app("art.capycanvas.PanelTabFeedback");
+    let w = fixture_workspace(&app);
+    w.window.maximize();
+    w.window.present();
+    pump(1600);
+    let group = state(&w).workspace.layout.panel_group(Panel::Layers).unwrap();
+    let tabs = w.groups.borrow().iter().find(|g| g.id == group).unwrap().tabs.clone();
+    assert!(tabs.len() >= 2);
+    let strip = tabs[0].1.parent().unwrap();
+    let bottom = || {
+        let texture = icons::capture_widget(&w.window, &strip);
+        let stride = texture.width() as usize * 4;
+        let mut pixels = vec![0; stride * texture.height() as usize];
+        texture.download(&mut pixels, stride);
+        pixels.split_off((texture.height() as usize - 6 * strip.scale_factor() as usize) * stride)
+    };
+    input.ready();
+    for theme in [Theme::Dark, Theme::Light] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        for level in [layer_ui::Transparency::Off, layer_ui::Transparency::Low, layer_ui::Transparency::Medium, layer_ui::Transparency::High] {
+            use_transparency(&w, level);
+            for active in 0..2 {
+                for device in ["mouse", "touch"] {
+                    input.perform(serde_json::json!([{"point": [800., 500.]}]));
+                    w.dispatch(UiAction::SelectPanelTab { group, panel: tabs[active].0 });
+                    pump(200);
+                    let _ = bottom();
+                    until(|| w.chrome_released.get() == w.chrome.revision(), "panel chrome published");
+                    let expected = bottom();
+                    let next = &tabs[1 - active];
+                    let point = screen_point(next.1.upcast_ref(), &w.window, [0.5, 0.5]);
+                    if device == "mouse" {
+                        input.perform(serde_json::json!([{"point": point}]));
+                        assert!(next.1.state_flags().contains(gtk::StateFlags::PRELIGHT));
+                        assert!(bottom() == expected, "{theme:?}/{level:?}/{active}: hover preserves the join");
+                    }
+                    input.perform(serde_json::json!([contact(device, "down", point)]));
+                    assert!(tabs[active].1.has_css_class("selected-tool"), "selection waits for release");
+                    let pressed = bottom();
+                    input.perform(serde_json::json!([contact(device, "up", point)]));
+                    pump(200);
+                    assert!(next.1.has_css_class("selected-tool"), "{device} click selects the inactive tab");
+                    assert!(pressed == expected, "{theme:?}/{level:?}/{active}/{device}: press preserves the join");
+                }
+            }
+        }
+    }
+    input.finish();
+}
+
+#[test]
 #[ignore = "isolated Mutter compositor captures; LAYER_NATIVE_CAPTURE_DIR=<dir> workspace-motion.sh gtk --native-test=native_active_tab_matches_panel"]
 fn native_active_tab_matches_panel() {
     let captures = std::path::PathBuf::from(std::env::var("LAYER_NATIVE_CAPTURE_DIR").expect("compositor captures"));

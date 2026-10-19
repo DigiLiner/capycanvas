@@ -69,9 +69,47 @@ function Tab-Shades([string]$Name){
         }
     }finally{$image.Dispose()}
 }
-function Zoom([int]$Steps){
+function Tab-Feedback([string]$Name){
+    $group=@((Model).layout.groups|Where-Object {$_.tabs_visible -and $_.panels.Count -ge 2})[0]
+    if(!$group){throw 'No adjacent panel tabs to check'}
+    $restore=$group.active
+    foreach($index in 0,1){
+        $active=$group.panels[$index];$next=$group.panels[1-$index]
+        if(@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -ne $active){Invoke ('panel-tab-'+$active)}
+        Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $active} 'Tab feedback setup did not select its tab'
+        $park=Center (Control 'drawing-canvas');[CapyRowPointer]::Hover($park.x,$park.y)
+        $tab=Control ('panel-tab-'+$next) -Arranged;$bounds=$tab.Current.BoundingRectangle
+        $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
+        $points=@(foreach($x in @(($bounds.Left+1*$scale),($bounds.Left+3*$scale),($bounds.Left+5*$scale),($bounds.Right-5*$scale),($bounds.Right-3*$scale),($bounds.Right-1*$scale))){
+            foreach($y in @(($bounds.Bottom-1*$scale),($bounds.Bottom-3*$scale),($bounds.Bottom-5*$scale))){
+                @{x=[int]($x-$origin[0]);y=[int]($y-$origin[1])}
+            }
+        })
+        $expected=$null
+        foreach($state in 'rest','hover','press'){
+            if($state -eq 'hover'){$at=Center $tab;[CapyRowPointer]::Hover($at.x,$at.y)}
+            if($state -eq 'press'){[CapyRowPointer]::Down('mouse',$at.x,$at.y)}
+            Start-Sleep -Milliseconds 200
+            $capture="$Name-feedback-$index-$state";Capture $capture -Composed
+            $image=[System.Drawing.Bitmap]::new((Join-Path $run ($capture+'.png')))
+            try{$pixels=(@($points|ForEach-Object {$image.GetPixel($_.x,$_.y).ToArgb()}) -join ',')}finally{$image.Dispose()}
+            if($state -eq 'rest'){$expected=$pixels}
+            elseif($pixels -ne $expected){throw "$capture changed the inactive tab's lower corners or the active tab's shoulders"}
+        }
+        [CapyRowPointer]::Up()
+        Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $next} 'Native click did not select the inactive tab'
+    }
+    if(@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -ne $restore){Invoke ('panel-tab-'+$restore)}
+    Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $restore} 'Tab feedback did not restore selection'
+}
+function Zoom([double]$Minimum){
     (Control 'drawing-canvas').SetFocus()
-    for($i=0;$i -lt $Steps;$i++){[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0xBB);Start-Sleep -Milliseconds 120}
+    Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus} 'Transparency canvas did not own keyboard focus'
+    for($i=0;$i -lt 32 -and (Model).state.camera.zoom -le $Minimum;$i++){
+        $before=(Model).state.camera.zoom
+        [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0xBB)
+        Wait-Until {(Model).state.camera.zoom -gt $before} 'Transparency zoom input did not change the camera'
+    }
 }
 try {
     Enter-CapyEnvironment
@@ -101,10 +139,10 @@ try {
     $surround=@{};$overPaper=@{}
     foreach($level in 0,3,2,1){
         Preference $level
-        $surround[$level]=(Sample ('fit-'+$level) @($point))[0];Tab-Shades ('fit-'+$level)
+        $surround[$level]=(Sample ('fit-'+$level) @($point))[0];Tab-Shades ('fit-'+$level);Tab-Feedback ('fit-'+$level)
         if([Math]::Abs($surround[$level]-$panel) -gt 1){throw "Level $level panel over the surround is $($surround[$level]), expected $panel"}
     }
-    Zoom 12
+    Zoom 2
     Wait-Until {$z=(Model).state.camera.zoom;$z -gt 2} 'The canvas did not zoom under the panels'
     foreach($level in 0,1,2,3){
         Preference $level
@@ -117,9 +155,9 @@ try {
     Fit-Canvas
     foreach($level in 0,1,2,3){
         if($level){Preference $level}
-        $null=Sample ('light-fit-'+$level) @();Tab-Shades ('light-fit-'+$level)
+        $null=Sample ('light-fit-'+$level) @();Tab-Shades ('light-fit-'+$level);Tab-Feedback ('light-fit-'+$level)
     }
-    Zoom 12
+    Zoom 2
     Wait-Until {$z=(Model).state.camera.zoom;$z -gt 2} 'The light canvas did not zoom under the panels'
     foreach($level in 0,1,2,3){
         Preference $level
@@ -141,7 +179,7 @@ try {
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
     if(!$review.WaitForExit(8000)){throw 'Transparency review did not close'}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Transparency review wrote to stderr'}
-    [pscustomobject]@{default_low='passed';circles='passed';invisible_over_surround='passed';paper_by_level='passed';active_tab_matches_panel='passed';drawer_connector='passed';
+    [pscustomobject]@{default_low='passed';circles='passed';invisible_over_surround='passed';paper_by_level='passed';active_tab_matches_panel='passed';tab_feedback_preserves_join='passed';drawer_connector='passed';
         scope='Synthetic UIA and captured pixels; physical display and performance acceptance are separate'}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
 }catch{
     try{Capture 'failure'}catch{}

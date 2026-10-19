@@ -172,6 +172,8 @@ inline std::vector<Point> panelTabOutline(float width,float height){
 }
 inline PathGeometry panelTabShape(float width,float height){return polygon(panelTabOutline(width,height));}
 inline Grid panelTabShell(FrameworkElement const& content,Brush const& fill){
+    if(auto tab=content.try_as<Button>())for(auto state:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed"})
+        tab.Resources().Insert(box_value(hstring(state)),clear());
     Grid shell;shell.Tag(box_value(fill?L"active-panel-tab-shell":L"panel-tab-shell"));
     Canvas background;shell.Children().Append(background);
     if(fill){

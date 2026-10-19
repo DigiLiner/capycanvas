@@ -227,8 +227,10 @@ Colors come from the [theme palette](theme-colors.md). The active tab matches
 its content, with rounded top corners and concave lower shoulders joining the
 two surfaces. The tab strip leaves a hole under the active tab and its
 shoulders, which take the panel's fill, so the tab is the same surface as its
-panel at every [transparency](panel-transparency.md) level. Native tab
-controls and their hit targets are unchanged. Panels have soft shadows rather than persistent outlines.
+panel at every [transparency](panel-transparency.md) level. Hovering or pressing
+a panel tab keeps its fill unchanged, so inactive tabs stay behind the active
+tab's shoulders. Keyboard focus retains its native indication. Panels have soft
+shadows rather than persistent outlines.
 The header and HUD containers are transparent. Their controls sit on chips
 filled with the canvas surround color, translucent or opaque according to
 [panel transparency](panel-transparency.md), so they disappear over the
