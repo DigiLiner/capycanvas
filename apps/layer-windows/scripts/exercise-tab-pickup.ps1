@@ -1,26 +1,20 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='prefer-visible';$CapyPopups=$true;$CapyEach={[CapyRowPointer]::Verify()}
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
-$directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/tab-pickup/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+$directory=$run
+$CapyTraceDirectory=$run
 function Point([string]$Id,[switch]$Name) {
-    $stable=@{bounds=$null;count=0}
-    Wait-Until {
-        $item=Find $Id -Name:$Name
-        if(!$item -or $item.Current.IsOffscreen){return $false}
-        $bounds=$item.Current.BoundingRectangle
-        if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){return $false}
-        if($bounds -eq $stable.bounds){$stable.count++}else{$stable.bounds=$bounds;$stable.count=0}
-        $stable.count -ge 2
-    } "Source $Id did not arrange visibly"
+    $bounds=(Control $Id -Name:$Name -Arranged).Current.BoundingRectangle
     # A row-root source uses its transparent left padding, outside child buttons.
-    $x=if($Id -like 'layer-row-*'){$stable.bounds.X+2}else{$stable.bounds.X+$stable.bounds.Width*.5}
-    @{x=[int]$x;y=[int]($stable.bounds.Y+$stable.bounds.Height*.5)}
+    $x=if($Id -like 'layer-row-*'){$bounds.X+2}else{$bounds.X+$bounds.Width*.5}
+    @{x=[int]$x;y=[int]($bounds.Y+$bounds.Height*.5)}
 }
 
 function Gesture {try{(Workspace-Root).Current.HelpText|ConvertFrom-Json}catch{}}
@@ -43,7 +37,7 @@ function Drifting-TabTaps([string]$Prefix,[string[]]$Panels,[switch]$Drawer) {
     $expanded=(Model).state.customization.expanded|ConvertTo-Json -Depth 30 -Compress
     $drifts=@(@(6,0),@(0,6),@(4,4),@(-6,0),@(0,-6),@(-4,-4))
     if($Device -eq 'mouse'){$drifts=@(@(1,0),@(0,1),@(1,1),@(-1,0),@(0,-1),@(-1,-1))}
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Cannot read the owned tab window DPI'}
     for($i=0;$i -lt $drifts.Count;$i++){
         $panel=$Panels[$i%$Panels.Count];$id=$Prefix+$panel;$script:case="$id-drift-$i"
@@ -103,16 +97,29 @@ function Tear-Off([string]$Panel,[switch]$Gradual,[switch]$Cancel) {
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError $stderr
     $null=$review.Handle
     @{process_id=$review.Id;run=$run;device=$Device}|ConvertTo-Json|Set-Content (Join-Path $repo 'artifacts/windows/tab-pickup-review.json')
     Write-Output "Owned tab pickup review $($review.Id) ($Device)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Tab review did not start' 45
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Tab review did not start' 75
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyWindowApi]::ShowWindow($drawingWindow,3)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
+    $root.SetFocus()
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    foreach($panel in @('properties','layers')){
+        if(@((Model).layout.collapsed|Where-Object {$_.groups.icons.panel -contains $panel}).Count){
+            (Control ('column-icon-'+$panel)).SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+            Wait-Until {$null -ne (Find 'Expand column' -Name)} 'Initial column setup did not expose Expand column'
+            Invoke 'Expand column' -Name
+            Wait-Until {@((Model).layout.collapsed|Where-Object {$_.groups.icons.panel -contains $panel}).Count -eq 0} 'Initial column setup did not expand'
+            Start-Sleep -Milliseconds 250
+        }
+    }
     $script:case='short-tab-selection'
     Tap 'panel-tab-sizes'
     Wait-Until {(Panel-Group 'sizes').active -eq 'sizes'} 'Short tab click did not select Sizes'
@@ -120,38 +127,46 @@ try {
     Wait-Until {(Panel-Group 'tool_settings').active -eq 'tool_settings'} 'Short tab click did not restore Properties'
     Drifting-TabTaps 'panel-tab-' @('sizes','tool_settings')
     $before=Tab-Placement
-    $at=Point 'panel-tab-properties';[CapyRowPointer]::RightClick($at.x,$at.y);Invoke 'Collapse column' -Name
-    $restoreSteps=1
+    $script:case='drawer-setup-collapse'
+    (Control 'panel-tab-properties').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+    Wait-Until {$null -ne (Find 'Collapse column' -Name)} 'Column setup menu did not expose Collapse column'
+    Invoke 'Collapse column' -Name
     Wait-Until {$null -ne (Find 'column-icon-properties')} 'Properties column did not collapse'
-    $at=Point 'column-icon-properties';[CapyRowPointer]::RightClick($at.x,$at.y)
+    (Control 'column-icon-properties').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+    Wait-Until {$null -ne (Find 'Open individual panels' -Name)} 'Column setup menu did not expose individual panels'
     $toggle=(Control 'Open individual panels' -Name).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-    if($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off){$toggle.Toggle();$restoreSteps++}
+    if($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off){$toggle.Toggle()}
     [CapyRowPointer]::Key(0x1b)
     Tap 'column-icon-properties'
     Wait-Until {$null -ne (Find 'drawer-tab-adjustments')} 'Properties drawer did not expose its tabs'
     Invoke 'drawer-tab-properties'
     Wait-Until {@((Model).state.customization.column_drawers|Where-Object {$_.tabs.active -eq 'properties'}).Count -eq 1} 'Drawer did not select its initial Properties tab'
     Drifting-TabTaps 'drawer-tab-' @('adjustments','properties') -Drawer
-    for($i=0;$i -lt $restoreSteps;$i++){
-        $previous=Tab-Placement;Workspace-History 'undo_workspace'
-        Wait-Until {(Tab-Placement) -ne $previous} 'Drawer setup Undo did not finish'
+    $script:case='drawer-setup-restore'
+    for($undo=0;(Tab-Placement) -ne $before -and $undo -lt 16;$undo++){
+        $previous=(Model).state.workspace|ConvertTo-Json -Depth 80 -Compress;Workspace-History 'undo_workspace'
+        Wait-Until {((Model).state.workspace|ConvertTo-Json -Depth 80 -Compress) -ne $previous} 'Drawer setup Undo did not finish'
     }
     Wait-Until {(Tab-Placement) -eq $before -and $null -ne (Find 'panel-tab-properties')} 'Drawer tap fixture did not restore the docked column'
     Tear-Off 'layers'
     Tear-Off 'layers' -Cancel
     Tear-Off 'tool_settings' -Gradual
     Tear-Off 'tool_settings' -Gradual -Cancel
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    $null=[CapyWindowApi]::PostMessage($drawingWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)
+    if(!$review.WaitForExit(15000)){throw 'Owned tab review did not close'}
+    if($review.ExitCode -ne 0){throw "Owned tab review exited $($review.ExitCode)"}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [pscustomobject]@{device=$Device;short_click='passed';drifting_panel_tabs='passed';drifting_drawer_tabs='passed';direct_tearoff='passed';gradual_tearoff='passed';retained_contact='passed';capture_cancel='passed';workspace_undo_redo='passed';zero_exit='passed';scope='OS-injected input; physical digitizers and latency remain separate'}|ConvertTo-Json
 }catch{
     $failure=$_
     @{case=$script:case;injection_gap_ms=[CapyRowPointer]::MaxGapMilliseconds;error=$failure.ToString();gesture=(Gesture);presentation=(Presentation)}|ConvertTo-Json -Depth 60|Set-Content (Join-Path $run 'failure.json')
+    try{[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.AndCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id),[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem)))|ForEach-Object {@{id=$_.Current.AutomationId;name=$_.Current.Name;enabled=$_.Current.IsEnabled}}|ConvertTo-Json|Set-Content (Join-Path $run 'failure-menu.json')}catch{}
     if($review -and !$review.HasExited){
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-capture.json')
+        try{& (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-capture.json')}catch{}
     }
     throw $failure
 }finally{
     [CapyRowPointer]::Dispose()
+    if($review -and !$review.HasExited){if($drawingWindow){$null=[CapyWindowApi]::PostMessage($drawingWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)};if(!$review.WaitForExit(10000)){$review.Kill();$review.WaitForExit()}}
     Exit-CapyEnvironment
 }

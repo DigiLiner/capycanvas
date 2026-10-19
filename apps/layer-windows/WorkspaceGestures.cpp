@@ -14,16 +14,13 @@ namespace NativeInput=Microsoft::UI::Input;
 namespace {
 A point(Point p){A result;result.Append(N(p.X));result.Append(N(p.Y));return result;}
 J rect(Rect r){return O({{L"x",N(r.X)},{L"y",N(r.Y)},{L"width",N(r.Width)},{L"height",N(r.Height)}});}
-void ownHolding(DependencyObject const& node){
-    if(auto element=node.try_as<UIElement>())element.IsHoldingEnabled(false);
-    for(int i=0;i<VisualTreeHelper::GetChildrenCount(node);++i)ownHolding(VisualTreeHelper::GetChild(node,i));
-}
 }
 struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
     std::shared_ptr<WorkspaceData> data;
     Canvas root{nullptr};
     Border hint;
     MenuFlyout menu{nullptr};
+    OwnedPopup menuOwner;
     std::vector<weak_ref<FrameworkElement>> tabs;
     std::vector<weak_ref<UIElement>> pressedPath;
     std::unique_ptr<WorkspaceTabDrag> tabSlide;
@@ -40,24 +37,22 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
     HWND owner=nullptr;
     Point origin{},position{};
     bool dragging=false,finishing=false,busy=false,dirty=false,releasing=false;
-    bool needsHold=false,contextOnly=false,held=false,recognizing=false,ignoreClick=false,menuOpen=false,menuPending=false;
+    bool needsHold=false,contextOnly=false,held=false,recognizing=false,ignoreClick=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
-    uint64_t generation=0,motion=0,menuGeneration=0;
+    uint64_t generation=0,motion=0;
     J lastRelease,lastCancel,lastCaptureLoss,lastDown;
     uint64_t contactVersion=0,contactToken=0;
     bool ownsFocus()const{return owner&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==owner&&!IsIconic(owner);}
     bool crossed()const{return recognizer.Moved();}
     bool owns(UIElement const& element)const{
-        if(auto captures=element.PointerCaptures())for(auto captured:captures)
-            if(pointer&&captured.PointerId()==*pointer)return true;
-        return false;
+        return pointer&&PointerGesture::Captured(element,*pointer);
     }
     void evidence(){
         if(!trace)return;
         auto value=O({{L"phase",S(finishing?L"finishing":dragging?L"dragging":held?L"held":pointer?L"pressed":L"idle")},
             {L"generation",N(double(generation))},{L"source",object(action,L"item")},{L"requires_hold",B(needsHold)},{L"context_only",B(contextOnly)},
             {L"device",S(device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch")},
-            {L"captured",B(owns(root))},{L"menu_open",B(menuOpen)},{L"ignore_click",B(ignoreClick)},{L"scroll_claimed",B(!scrollModes.empty())},
+            {L"captured",B(owns(root))},{L"menu_open",B(menuOwner.Open())},{L"ignore_click",B(ignoreClick)},{L"scroll_claimed",B(!scrollModes.empty())},
             {L"can_drop",B(dragging&&hint.Visibility()==Visibility::Visible)},
             {L"pointer_id",pointer?N(*pointer):JsonValue::CreateNullValue()},
             {L"routed_pointer_id",contact?N(contact.PointerId()):JsonValue::CreateNullValue()},
@@ -85,8 +80,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         return true;
     }
     void hideMenu(){
-        ++menuGeneration;menuPending=false;
-        if(menu)menu.Hide();
+        menuOwner.Cancel();
     }
     void stopRecognition(){
         if(recognizing){recognizing=false;recognizer.CompleteGesture();}
@@ -179,7 +173,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         chrome(O({{L"kind",S(L"refresh")}}));deferClick();evidence();
     }
     bool cancel(hstring reason=L"cancel",bool suppressClick=true){
-        if(!pointer&&!dragging&&!menuOpen&&!menuPending)return false;
+        if(!pointer&&!dragging&&!menuOwner.Active())return false;
         if(trace)lastCancel=O({{L"generation",N(double(generation))},{L"reason",S(reason)},{L"source",object(action,L"item")}});
         // Dismissing a menu alone has no pointer click to suppress. In
         // particular, a menu action may be followed immediately by UIA Invoke.
@@ -246,9 +240,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         if(pointer){if(*pointer!=e.Pointer().PointerId())cancel(L"additional_contact");return;}
         if(dragging||data->externalPopup||data->popupCount)return;
         ignoreClick=false;rejectedPointer.reset();
-        auto p=e.GetCurrentPoint(root);if(!p.IsInContact())return;
-        if(p.Properties().IsRightButtonPressed()||p.Properties().IsBarrelButtonPressed())return;
-        if(p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
+        auto p=e.GetCurrentPoint(root);if(!PointerGesture::PrimaryContact(p))return;
         auto tag=target(e.OriginalSource());
         auto tab=object(tag,L"workspace_tab");
         if(tab.Size())data->chrome.Insert(L"contact_tab",S(str(tab,L"panel")));
@@ -279,9 +271,13 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         tabSlide->Grab(tab,tabs);
         // Handles and tabs keep immediate drag arbitration. Tile bodies defer
         // both capture and scroll interception until the native hold starts.
-        if(!needsHold)claimScrolling();
+        if(!needsHold){
+            claimScrolling();bool nativeButton=false;
+            for(auto const& weak:pressedPath)if(auto element=weak.get())nativeButton|=bool(element.try_as<Primitives::ButtonBase>());
+            if(!nativeButton&&!claim())return;
+        }
         recognizing=true;
-        recognizer.Begin(p,NativeInput::GestureSettings::Hold|
+        recognizer.Begin(source.get(),p,NativeInput::GestureSettings::Hold|
             (needsHold?NativeInput::GestureSettings::HoldWithMouse:NativeInput::GestureSettings::None));
         timer.Start();evidence();
         if(needsHold)for(auto const& weak:pressedPath)if(auto element=weak.get())if(auto scroll=element.try_as<ScrollViewer>()){
@@ -300,7 +296,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         if(!pointer||*pointer!=e.Pointer().PointerId()||finishing)return;
         if(!current()){cancel(L"source_invalid");return;}
         auto next=e.GetCurrentPoint(root).Position();
-        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
+        if(recognizing)recognizer.Move(root,e);
         if(!dragging&&crossed()){
             // Motion disarms pickup; the native Button still owns a short tap.
             // Tablet jitter inside its bounds must not swallow its Click.
@@ -331,27 +327,25 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         }else{send(L"up");clear();}
         e.Handled(true);evidence();
     }
-    void context(J const& value,Point at,bool holding=false){
+    void context(J const& value,Point at,bool holding=false,FrameworkElement anchor=nullptr){
         if(dragging||data->externalPopup||data->popupCount||!value.Size())return;
-        auto serial=++menuGeneration;menuPending=true;
-        if(!holding)owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
+        if(!anchor)anchor=source.get();if(!anchor)anchor=root;
+        hideMenu();menu=MenuFlyout();auto ticket=menuOwner.Begin(data,anchor,menu);
+        auto weak=weak_from_this();
+        menu.Opened([weak](auto&&,auto&&){if(auto self=weak.lock())self->evidence();});
+        menu.Closed([weak](auto&&,auto&&){if(auto self=weak.lock())self->evidence();});
         if(!QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",value}}),
-            [weak=weak_from_this(),serial,at,holding](J reply){
+            [weak,ticket,at,holding](J reply){
                 if(auto self=weak.lock()){
-                    if(serial!=self->menuGeneration)return;
-                    self->menuPending=false;
-                    if(self->dragging||self->data->externalPopup||!self->ownsFocus())return;
-                    auto model=object(reply,L"result");if(!array(model,L"sections").Size())return;
-                    self->menu=MenuFlyout();TrackPopup(self->menu,self->data);
-                    self->menu.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){self->menuOpen=true;self->evidence();}});
-                    self->menu.Closed([weak](auto&&,auto&&){if(auto self=weak.lock()){self->menuOpen=false;self->evidence();}});
+                    if(!ticket.Current())return;
+                    auto model=object(reply,L"result");if(self->dragging||!array(model,L"sections").Size()){ticket.Cancel();return;}
                     NativeMenuItems(self->menu.Items(),array(model,L"sections"),self->data,
                         [weak](J action){if(auto self=weak.lock()){self->cancel(L"menu_action");self->data->dispatch(action);}});
                     Primitives::FlyoutShowOptions options;options.Position(at);
                     options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);
-                    self->menu.ShowAt(self->root,options);
+                    ticket.Show(self->root,options);
                 }
-            }))menuPending=false;
+            }))ticket.Cancel();
     }
     void doubleClick(DoubleTappedRoutedEventArgs const& e){
         auto tag=target(e.OriginalSource());if(!flag(tag,L"workspace_double"))return;
@@ -415,12 +409,11 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->move(e);})),true);
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
         root.AddHandler(UIElement::PointerExitedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
-            if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()&&self->needsHold&&!self->held&&!self->dragging){
-                if(self->recognizing)self->recognizer.ProcessMoveEvents(e.GetIntermediatePoints(self->root));
-                if(!self->crossed())return;
-                // Disabled commands can lack Button capture. Leaving their
-                // hit target must retire pickup even over the canvas sibling.
-                self->rejectedPointer=self->pointer;self->cancel(L"motion_before_hold",false);
+            if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()&&!self->owns(self->root)){
+                if(!self->current()){self->cancel(L"source_invalid");return;}
+                for(auto const& entry:self->pressedPath)if(auto element=entry.get();element&&self->owns(element))return;
+                auto source=self->source.get();if(source&&!PointerGesture::Outside(source,e))return;
+                self->clear(false);
             }
         })),true);
         root.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
@@ -459,14 +452,17 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
                     auto focused=FocusManager::GetFocusedElement(self->root.XamlRoot()).try_as<FrameworkElement>();
                     if(focused){auto bounds=visibleBounds(focused,self->root);at={bounds.X,bounds.Y+bounds.Height};}
                 }
-                self->context(object(self->target(e.OriginalSource()),L"workspace_context"),at);e.Handled(true);
+                FrameworkElement anchor{nullptr};
+                for(auto node=e.OriginalSource().try_as<DependencyObject>();node&&node!=self->root;node=VisualTreeHelper::GetParent(node))
+                    if(auto element=node.try_as<FrameworkElement>();element&&element.Tag().try_as<J>()){anchor=element;break;}
+                self->context(object(self->target(e.OriginalSource()),L"workspace_context"),at,false,anchor);e.Handled(true);
             }
         });
         root.AddHandler(UIElement::DoubleTappedEvent(),box_value(DoubleTappedEventHandler([weak](auto&&,auto&& e){
             if(auto self=weak.lock())self->doubleClick(e);
         })),true);
         root.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->chrome(O({{L"kind",S(L"refresh")}}));});
-        root.PreviewKeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
+        ShortcutKeys(root,[weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
             if(e.Key()==Windows::System::VirtualKey::Escape&&self->cancel(L"escape"))e.Handled(true);
             else if(!self->pointer){self->ignoreClick=false;self->rejectedPointer.reset();}
         }});
@@ -480,13 +476,8 @@ WorkspaceGestures::~WorkspaceGestures()=default;
 void WorkspaceGestures::Source(FrameworkElement const& element,J const& action,J const& context,bool doubleClick,J const& tab,Pickup pickup){
     auto previous=element.Tag().try_as<J>();
     if(!previous||!previous.HasKey(L"workspace_action")){
-        // IsHoldingEnabled is not inherited by template/content children.
-        // A second WinUI hold can schedule a context timer against an icon
-        // removed by tear-off. This source's native recognizer owns that hold.
-        element.Loaded([weak=make_weak(element)](auto&&,auto&&){if(auto element=weak.get())ownHolding(element);});
-        if(element.IsLoaded())ownHolding(element);
+        PointerGesture::OwnHolding(element);
     }
-    element.IsHoldingEnabled(false);element.CanDrag(false);
     element.Tag(O({{L"workspace_action",action},{L"workspace_context",context},{L"workspace_double",B(doubleClick)},
         {L"workspace_tab",tab},{L"workspace_hold",B(pickup==Pickup::Hold)}}));
     if(tab.Size())impl->tabs.emplace_back(make_weak(element));

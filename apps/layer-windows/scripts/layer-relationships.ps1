@@ -44,7 +44,7 @@ function Relationship-Attach([double]$Id,[string]$Kind,[double]$Target){
 }
 function Relationship-Reveal([string]$Id){
     if($Id -notmatch '^layer-(?:row-)?([0-9]+)(?:-|$)'){return}
-    $ids=@((Model).state.layers.id);$index=[Array]::IndexOf($ids,[int64]$Matches[1])
+    $ids=[int64[]]@((Model).state.layers.id);$index=[Array]::IndexOf($ids,[int64]$Matches[1])
     $list=Control 'layer-list';$scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
     if($index -lt 0 -or !$scroll.Current.VerticallyScrollable){return}
     for($attempt=0;$attempt -lt 12;$attempt++){
@@ -55,7 +55,7 @@ function Relationship-Reveal([string]$Id){
             $extent=$viewport.Height*(100-$scroll.Current.VerticalViewSize)/$scroll.Current.VerticalViewSize
             $percent=$scroll.Current.VerticalScrollPercent+100*($rect.Y+$rect.Height*.5-$viewport.Y-$viewport.Height*.5)/$extent
         }else{$percent=100.*$index/[Math]::Max(1,$ids.Count-1)}
-        $percent=[Math]::Clamp($percent,0.,100.)
+        $percent=[Math]::Max(0.,[Math]::Min(100.,$percent))
         $scroll.SetScrollPercent(-1,$percent);Start-Sleep -Milliseconds 150
         if($percent -eq 0 -or $percent -eq 100){if(Find $Id -Visible){return}}
     }

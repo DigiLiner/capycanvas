@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=45
@@ -46,13 +46,15 @@ function Drag([string]$Device,[int[]]$From,[int[]]$To){
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1'
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned canvas bar review $($review.Id): $run"
  $native=@{window=$null}
  Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window} 'Review did not start' 45
  $root=$native.window.Root;$drawingWindow=$native.window.Handle
- Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Canvas bar review did not start'
+ Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy -and (Model).state.theme -eq $Theme} 'Canvas bar review did not start in the requested theme'
+ $checks.initial_theme=$Theme
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
@@ -77,7 +79,7 @@ try {
  if($bar.Top -lt $selection[1][1]){throw "The selection bar is not below the selection: $($bar.Top) < $($selection[1][1])"}
  if([Math]::Abs(($bar.X+$bar.Width/2)-$cx) -gt 40){throw 'The selection bar is not centred under the selection'}
  Wait-Until {(Glass) -ge $glassBefore+1} 'The bar did not register its glass region' 5
- Capture 'selection-dark'
+ Capture ('selection-'+$Theme)
  $checks.selection_below_object_with_glass='passed'
 
  $paint=Paint
@@ -138,7 +140,7 @@ try {
  if((Kind) -ne 'transform'){throw 'The finger drag ended the transform'}
  $checks.finger_moves_transform='passed'
  if((Paint) -ne $paint){throw 'Transform bar taps painted on the canvas'}
- Capture 'transform-dark'
+ Capture ('transform-'+$Theme)
  $checks.transform_bar_and_flip='passed'
 
  [CapyRowPointer]::Down('pen',$cx,($cy-25))
@@ -205,10 +207,10 @@ try {
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Edit'
  Invoke-Id 'settings'
  Wait-Until {$null -ne (Find 'Color theme' -Name)} 'Preferences did not open' 10
- $theme=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.AndCondition]::new(
+ $themeControl=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.AndCondition]::new(
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Color theme'),
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ComboBox)))
- $theme.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+ $themeControl.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
  Wait-Until {$null -ne (Owned 'Light' -Name)} 'Light theme choice missing' 5
  (Owned 'Light' -Name).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
  Wait-Until {(Model).state.theme -eq 'light'} 'The theme did not switch to light' 5

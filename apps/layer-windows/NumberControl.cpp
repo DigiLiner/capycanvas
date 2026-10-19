@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "UiControls.h"
+#include "PointerGesture.h"
 #include <limits>
 
 namespace CapyUi {
@@ -7,7 +8,7 @@ namespace {
 struct NumericCaption {hstring title,language,errorLanguage;J labels,errorReason;};
 struct NumberState {
     double value=0;bool editing=false,dragging=false,formatting=false,gesture=false;
-    bool scrubbing=false;std::optional<uint32_t> pointer;double origin=0,originY=0;
+    bool scrubbing=false;std::optional<uint32_t> pointer,sliderPointer;double origin=0,originY=0;
     hstring identity;
     hstring measuredText;double measuredWidth=-1;
     std::function<J(J const&,double,J const&)> resolve;
@@ -243,8 +244,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             local->value=num(next,L"value");setText(str(next,L"scrub_text"));set(local->value);
         };
         valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
-            if(local->pointer||!commit(false))return;auto target=weak.get();if(!target||!target.IsEnabled())return;
-            if(e.GetCurrentPoint(target).Properties().IsCanceled())return;
+            if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr))||!commit(false))return;
+            auto target=weak.get();if(!target||!target.IsEnabled())return;
             local->pointer=e.Pointer().PointerId();local->origin=local->value;local->originY=surfaceY(e);
             if(!target.CapturePointer(e.Pointer())){local->pointer.reset();return;}
             local->dragging=true;target.Focus(FocusState::Pointer);e.Handled(true);
@@ -263,9 +264,10 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(scrub){finish(L"up");setText(showText(L"text"));}else if(auto entry=weak.get())entry.Focus(FocusState::Pointer);
             e.Handled(true);
         })),true);
-        valueSurface.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([restore](auto&&,auto&&){restore();})),true);
-        valueSurface.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([local,restore](auto&&,auto&&){if(local->pointer)restore();})),true);
-        root.PreviewKeyDown([local,restore](auto&&,KeyRoutedEventArgs const& e){if(e.Key()==Windows::System::VirtualKey::Escape&&local->pointer){restore();e.Handled(true);}});
+        auto cancel=[local,restore](auto&&,PointerRoutedEventArgs const& e){if(local->pointer==e.Pointer().PointerId())restore();};
+        valueSurface.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler(cancel)),true);
+        valueSurface.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler(cancel)),true);
+        root.KeyDown([local,restore](auto&&,KeyRoutedEventArgs const& e){if(e.Key()==Windows::System::VirtualKey::Escape&&local->pointer){restore();e.Handled(true);}});
         valueSurface.PreviewKeyDown([local,weak=make_weak(entry)](auto&&,KeyRoutedEventArgs const& e){
             if(!local->pointer&&(e.Key()==Windows::System::VirtualKey::Enter||e.Key()==Windows::System::VirtualKey::Space)){
                 if(auto entry=weak.get())entry.Focus(FocusState::Keyboard);e.Handled(true);
@@ -308,13 +310,14 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     if(!ranged&&phase)entry.AddHandler(UIElement::KeyUpEvent(),box_value(KeyEventHandler([finish](auto&&,KeyRoutedEventArgs const& e){
         if(e.Key()==Windows::System::VirtualKey::Up||e.Key()==Windows::System::VirtualKey::Down)finish(L"up");
     })),true);
-    slider.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,phase](auto&&,auto&&){
+    slider.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,phase](auto&&,PointerRoutedEventArgs const& e){
+        if(local->sliderPointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr)))return;local->sliderPointer=e.Pointer().PointerId();
         local->dragging=true;if(phase&&!local->gesture){local->gesture=true;phase(L"down",local->value);}
     })),true);
-    slider.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler(
-        [local,finish](auto&&,auto&&){local->dragging=false;finish(L"up");})),true);
-    slider.PointerCaptureLost([local,finish](auto&&,auto&&){local->dragging=false;finish(L"up");});
-    slider.PointerCanceled([local,finish](auto&&,auto&&){local->dragging=false;finish(L"cancel");});
+    PointerGesture::OnCompleted(slider,[local,finish](PointerRoutedEventArgs const& e,bool cancel){
+        if(local->sliderPointer!=e.Pointer().PointerId())return;local->sliderPointer.reset();
+        local->dragging=false;finish(cancel?L"cancel":L"up");
+    },PointerCaptureLoss::CompleteLift);
     slider.ValueChanged([data,local,caption,spec,set,setText,phase,weak=make_weak(entry)](auto&&,Primitives::RangeBaseValueChangedEventArgs const& e){
         if(data->updating||local->formatting)return;
         auto next=local->resolve(spec,local->value,O({{L"type",S(L"position")},{L"position",N(e.NewValue())}}));
@@ -334,6 +337,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     });
     bindings.emplace_back([data,local,caption,spec,get,entry,slider,setText,presented,finish,identity=presentation.identity]{
         if(identity && local->identity!=identity()){
+            local->sliderPointer.reset();
             finish(L"cancel");
             local->identity=identity();local->editing=false;local->dragging=false;local->pointer.reset();local->scrubbing=false;
             showNumericError(entry,L"");caption->errorReason=J{};
@@ -346,7 +350,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         entry.Background(entry.FocusState()==FocusState::Unfocused?clear():data->brush(L"input"));
         slider.Value(num(shown,L"fill"));
     });
-    root.Unloaded([local,finish](auto&&,auto&&){finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->dragging=false;});
+    root.Unloaded([local,finish](auto&&,auto&&){local->sliderPointer.reset();finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->dragging=false;});
     if(inlineTrack){
         // Compact layer controls retain the same shared value/expression rules
         // and target guards as full numeric controls.

@@ -3,7 +3,7 @@ param(
     [string]$PackagesDirectory,
     [string]$OutputDirectory,
     [switch]$SkipRust,
-    [ValidateSet('None','Number','Color','Bitmap')][string]$ControlFixture = 'None',
+    [ValidateSet('None','Number','Color','Bitmap','Popup')][string]$ControlFixture = 'None',
     [switch]$SkipRestore,
     [switch]$SoftwareAdapterTests,
     [switch]$ReleaseIdentity,
@@ -39,7 +39,7 @@ try {
         & cargo @cargoArgs
         if ($LASTEXITCODE -ne 0) { throw 'Rust build failed.' }
     }
-    $fixture = switch ($ControlFixture) { Number {'true'} Color {'Color'} Bitmap {'Bitmap'} default {'false'} }
+    $fixture = switch ($ControlFixture) { Number {'true'} Color {'Color'} Bitmap {'Bitmap'} Popup {'Popup'} default {'false'} }
     & msbuild apps/layer-windows/CapyCanvas.vcxproj /m "/p:Configuration=$Configuration" /p:Platform=x64 "/p:CapyControlFixture=$fixture" "/p:PlatformToolset=$toolset" "/p:CapyPackages=$PackagesDirectory" "/p:OutDir=$OutputDirectory/" "/p:IntDir=$intermediateDirectory/" /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { throw 'WinUI build failed.' }
     $executable = Join-Path $OutputDirectory 'CapyCanvas.exe'

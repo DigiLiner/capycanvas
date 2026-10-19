@@ -144,7 +144,6 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             [weak=weak_from_this()]{auto self=weak.lock();return self&&self->canReorder();},
             [weak=weak_from_this()](hstring id,std::optional<hstring> before){if(auto self=weak.lock())
                 self->editSwitcher(O({{L"type",S(L"move")},{L"id",S(id)},{L"before",before?S(*before):JsonValue::CreateNullValue()}}));},
-            [weak=weak_from_this()](hstring id){if(auto self=weak.lock())self->select(id);},
             [weak=weak_from_this()]{if(auto self=weak.lock()){++self->selectionSerial;self->restoreSelection();}});
         listing.Children().Append(search);listing.Children().Append(listSurface);
         promptBody.Children().Append(promptMessage);promptBody.Children().Append(name);promptBody.Children().Append(choices);
@@ -176,8 +175,9 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         // Enter and double-click on a row only select/preview, never apply.
         list.ItemClick([weak=weak_from_this()](auto&&,ItemClickEventArgs const& e){
             if(auto self=weak.lock();self&&!self->updating&&!self->rowDrag->SuppressClick()){
-                auto item=e.ClickedItem().try_as<ListViewItem>();
-                if(item)self->select(unbox_value<hstring>(item.Tag()));
+                for(auto const& [id,row]:self->rows)if(e.ClickedItem()==row.item||e.ClickedItem()==row.item.Content()){
+                    self->select(hstring(id));return;
+                }
             }
         });
         list.KeyDown([weak=weak_from_this()](auto&&,Input::KeyRoutedEventArgs const& e){
@@ -364,7 +364,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             dialog=ContentDialog();dialog.XamlRoot(root);dialog.Title(heading);dialog.Content(body);
             auto tag=str(object(catalog,L"bootstrap"),L"active_tag");if(!tag.empty())dialog.Language(tag);
             AutomationProperties::SetAutomationId(dialog,L"workspace-manager");
-            dialog.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
+            dialog.KeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
                 if(e.Key()==Windows::System::VirtualKey::Escape)if(auto self=weak.lock();self&&self->rowDrag->Escape())e.Handled(true);
             });
             dialog.PrimaryButtonClick([weak=weak_from_this()](auto&&,ContentDialogButtonClickEventArgs const& e){

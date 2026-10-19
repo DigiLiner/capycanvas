@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ColorEditor.h"
+#include "PointerGesture.h"
 #include "ColorStrip.h"
 #include "ColorWheel.h"
 #include "Checker.h"
@@ -35,7 +36,7 @@ struct Field {
     TextBlock text;
     TextBox entry;
     hstring edit,name;
-    bool suppress=false;
+    std::shared_ptr<PointerClick> clicks;
     bool editing()const{return entry.Visibility()==Visibility::Visible;}
     bool numeric()const{return str(target,L"kind")!=L"hex";}
 };
@@ -212,7 +213,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         wheelBox.PointerReleased(end);wheelBox.PointerCanceled(end);wheelBox.PointerCaptureLost(end);
         arcTrack.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto p=e.GetCurrentPoint(self->arc);
-            if(self->arcPointer||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+            if(self->arcPointer||!PointerGesture::PrimaryContact(p))return;
             if(!self->arcTrack.CapturePointer(e.Pointer()))return;
             self->arcPointer=p.PointerId();self->arcPick(p.Position());e.Handled(true);
         }});
@@ -222,7 +223,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
     }
     void wheelDown(PointerRoutedEventArgs const& e){
         auto p=e.GetCurrentPoint(wheelBox);
-        if(wheelPointer||side<1||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+        if(wheelPointer||side<1||!PointerGesture::PrimaryContact(p))return;
         auto shape=str(panelView(),L"shape");auto at=p.Position();
         auto part=capy_color_hit(at.X,at.Y,float(side),shape==L"circle"?2:shape==L"triangle"?1:0);
         if(!part||!wheelBox.CapturePointer(e.Pointer()))return;
@@ -288,7 +289,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         f->entry.IsSpellCheckEnabled(false);f->entry.IsTextPredictionEnabled(false);AutomationProperties::SetAutomationId(f->entry,id+L"-entry");
         f->cell.Children().Append(f->show);f->cell.Children().Append(f->entry);
         std::weak_ptr<Field> owner=f;
-        f->show.Click([weak,owner](auto&&,auto&&){auto self=weak.lock();auto f=owner.lock();if(!self||!f)return;if(std::exchange(f->suppress,false))return;self->begin(f);});
+        f->show.Click([weak,owner](auto&&,auto&&){auto self=weak.lock();auto f=owner.lock();if(!self||!f)return;if(f->clicks&&f->clicks->SuppressClick())return;self->begin(f);});
         f->entry.KeyDown([weak,owner](auto&&,KeyRoutedEventArgs const& e){
             auto self=weak.lock();auto f=owner.lock();if(!self||!f||composingKey(e))return;
             if(e.Key()==VirtualKey::Enter){e.Handled(true);self->commit(f);}
@@ -303,29 +304,24 @@ struct Editor:std::enable_shared_from_this<Editor>{
             if(self->act(O({{L"op",S(L"scrub")},{L"target",f->target},{L"pixels",N(e.Key()==VirtualKey::Up?2:-2)},{L"speed",S(speed())}}),f->target))
                 self->act(O({{L"op",S(L"end_scrub")},{L"cancel",B(false)}}),f->target);
         });
+        f->clicks=PointerGesture::Clicks(f->show,[weak](uint32_t id,bool cancel){
+            auto self=weak.lock();if(!self||!self->scrub||self->scrub->pointer!=id)return;
+            auto ended=*self->scrub;self->scrub.reset();
+            if(ended.active)self->act(O({{L"op",S(L"end_scrub")},{L"cancel",B(cancel)}}),ended.field->target);
+        });
         f->show.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak,owner](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();auto f=owner.lock();if(!self||!f||self->scrub)return;
             auto p=e.GetCurrentPoint(self->root);
-            if(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
-            f->suppress=false;self->scrub=Scrub{f,p.PointerId(),p.Position().Y,false};f->show.CapturePointer(e.Pointer());
+            if(!f->clicks->Owns(p.PointerId()))return;
+            self->scrub=Scrub{f,p.PointerId(),p.Position().Y,false};
         })),true);
         f->show.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();if(!self||!self->scrub||self->scrub->pointer!=e.Pointer().PointerId())return;
             double pixels=self->scrub->y-e.GetCurrentPoint(self->root).Position().Y;
             if(!self->scrub->active&&std::abs(pixels)<ScrubSlop)return;
-            self->scrub->active=true;self->scrub->field->suppress=true;e.Handled(true);
+            self->scrub->active=true;self->scrub->field->clicks->Suppress(e.Pointer().PointerId());e.Handled(true);
             self->act(O({{L"op",S(L"scrub")},{L"target",self->scrub->field->target},{L"pixels",N(pixels)},{L"speed",S(speed())}}),self->scrub->field->target);
         })),true);
-        auto finishScrub=[weak](PointerRoutedEventArgs const& e,bool cancel){
-            auto self=weak.lock();if(!self||!self->scrub||self->scrub->pointer!=e.Pointer().PointerId())return;
-            auto ended=*self->scrub;self->scrub.reset();
-            if(!ended.active)return;
-            if(cancel)ended.field->suppress=false;
-            self->act(O({{L"op",S(L"end_scrub")},{L"cancel",B(cancel)}}),ended.field->target);
-        };
-        f->show.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([finishScrub](auto&&,PointerRoutedEventArgs const& e){finishScrub(e,false);})),true);
-        f->show.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([finishScrub](auto&&,PointerRoutedEventArgs const& e){finishScrub(e,true);})),true);
-        f->show.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([finishScrub](auto&&,PointerRoutedEventArgs const& e){finishScrub(e,e.GetCurrentPoint(nullptr).IsInContact());})),true);
         return f;
     }
     Button copyButton(hstring const& id,std::function<hstring()> text){

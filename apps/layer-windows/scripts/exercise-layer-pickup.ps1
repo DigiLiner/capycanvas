@@ -24,9 +24,16 @@ function Layer-Scrollbars {
 function Rows($Snapshot=(Model)) {
     @($Snapshot.state.layers|ForEach-Object {[ordered]@{id=$_.id;depth=$_.depth;visible=$_.visible;locked=$_.locked;mask_linked=$_.mask_linked;alpha_locked=$_.alpha_locked;pass_through=$_.pass_through;relationship=$_.relationship}})|ConvertTo-Json -Depth 8 -Compress
 }
+function Contact-State {
+    $snapshot=Model;$raw=(Control 'layer-list').Current.ItemStatus
+    @{gesture_raw=$raw;gesture=($raw|ConvertFrom-Json);rows=(Rows $snapshot);selected=(@($snapshot.state.layers|Where-Object selected).id -join ',');editing_layer=$snapshot.state.layer_tools.editing_layer;revision=$snapshot.state.document_file.revision}
+}
 function Dismiss {
     [CapyRowPointer]::Key(0x1b)
     Wait-Until {!(Gesture).menu_open} 'Layer context menu did not close'
+}
+function Menu-State($Item) {
+    try{$c=$Item.Current;@{id=$c.AutomationId;runtime_id=@($Item.GetRuntimeId());bounds=$c.BoundingRectangle.ToString();offscreen=$c.IsOffscreen;focused=$c.HasKeyboardFocus;enabled=$c.IsEnabled;process=$c.ProcessId}}catch{@{error=$_.Exception.Message}}
 }
 function Layer-History([string]$Name) {Invoke $Name -Name}
 function Undo-Redo([string]$Before,[string]$After) {
@@ -69,10 +76,12 @@ function Tap([string]$Id) {
     [CapyRowPointer]::Up()
 }
 
-function Focus-Key([string]$Id,[ushort]$Key) {
-    (Control $Id).SetFocus()
+function Focus-Key([string]$Id,[uint16]$Key) {
     Wait-Until {
         $at=Point $Id
+        $target=Control $Id
+        $target.SetFocus()
+        if(!$target.Current.HasKeyboardFocus){return $false}
         try{
             [CapyRowPointer]::KeyAt($Key,$at.x,$at.y)
             $true
@@ -131,7 +140,7 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
         Pick-Up $Id $Layer
         Move-To $to
     }
-    $layers=@((Model).state.layers);$index=[Array]::IndexOf(@($layers.id),[int64]$Target)
+    $layers=@((Model).state.layers);$index=[Array]::IndexOf([int64[]]$layers.id,[int64]$Target)
     $next=if($index -ge 0 -and $index+1 -lt $layers.Count -and $layers[$index+1].depth -eq $layers[$index].depth){$layers[$index+1].id}
     Wait-Until {
         $g=Gesture
@@ -221,9 +230,9 @@ try {
         $at=Point "layer-$created-name";$to=Destination $paint
         # Keep UIA calls out of the timing-critical sequence.
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
-        Move-To $to;[CapyRowPointer]::Up()
+        Move-To @{x=$at.x;y=$to.y};[CapyRowPointer]::Up()
         Wait-Until {(Gesture).phase -eq 'idle'} 'Early motion retained a contact'
-        if((Rows) -ne $before -or (Gesture).menu_open){throw 'Early row motion reordered layers or opened a menu'}
+        if((Rows) -ne $before -or (Gesture).menu_open -or (Find "layer-$created-swipe-delete" -Visible)){throw 'Early vertical row motion reordered layers or opened a menu or swipe action'}
     }
     if($Device -ne 'mouse'){
         $script:case='swipe-delete-close'
@@ -245,6 +254,22 @@ try {
         Tap "layer-$created-swipe-delete"
         Wait-Until {!@((Model).state.layers|Where-Object id -eq $created).Count} 'Revealed Delete did not remove its row'
         Layer-History 'Undo';Wait-Until {(Rows) -eq $before} 'Revealed Delete requires more than one Undo'
+    }
+    if($Device -eq 'mouse'){
+        foreach($source in @("layer-$created-name","layer-$created-drag")){
+            $script:case="middle-source-denied-$source"
+            $at=Point $source;$to=Destination $paint;$before=Contact-State
+            $tracePath=Join-Path $run ($source+'-middle-denied.json')
+            $script:contact=$evidence=@{device=$Device;button='middle';source=$source;from=$at;to=$to;before=$before}
+            $evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath
+            [CapyRowPointer]::MiddleDrag($at.x,$at.y,$to.x,$to.y)
+            $evidence.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds;$evidence.max_gap_ms=[CapyRowPointer]::MaxGapMilliseconds
+            try{Wait-Until {$g=Gesture;$g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Middle body or grip drag retained a custom contact, capture or menu'}
+            finally{$evidence.after=Contact-State;$evidence.driver_active=[CapyRowPointer]::Active;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
+            $after=$evidence.after
+            if($evidence.driver_active -or $after.rows -ne $before.rows -or $after.selected -ne $before.selected -or $after.revision -ne $before.revision -or ($after.editing_layer|ConvertTo-Json -Depth 12 -Compress) -ne ($before.editing_layer|ConvertTo-Json -Depth 12 -Compress)){throw 'Middle body or grip drag changed layer state or history'}
+            if(($after.gesture.last_release|ConvertTo-Json -Depth 12 -Compress) -ne ($before.gesture.last_release|ConvertTo-Json -Depth 12 -Compress) -or ($after.gesture.last_cancel|ConvertTo-Json -Depth 12 -Compress) -ne ($before.gesture.last_cancel|ConvertTo-Json -Depth 12 -Compress)){throw 'Middle body or grip drag completed a custom gesture'}
+        }
     }
     $script:case='locked-source-denied'
     Tap "layer-$created-name"
@@ -270,6 +295,42 @@ try {
         if((Rows $snapshot) -ne $lockedOrder -or !@($snapshot.state.layers|Where-Object id -eq $created)[0].locked){throw 'Rejected locked-source motion changed layers or cleared the lock'}
     }
     $attempts|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'locked-source-denied.json')
+    foreach($source in @("layer-$created-name","layer-$created-drag")){
+        $script:case="locked-source-fast-exit-$source"
+        $at=Point $source;$to=Point 'drawing-canvas'
+        $target=Control $source;$canvas=Control 'drawing-canvas'
+        $bounds=$target.Current.BoundingRectangle;$canvasBounds=$canvas.Current.BoundingRectangle;$viewport=(Control 'layer-list').Current.BoundingRectangle
+        $before=Contact-State
+        if($paint -eq $created -or $before.rows -ne $lockedOrder -or $before.selected -ne [string]$created -or $before.editing_layer.id -ne $created -or !$before.editing_layer.locked -or ($source -like '*-drag' -and $target.Current.IsEnabled)){throw 'Fast locked-source exit lacks its selected locked baseline'}
+        if(!$bounds.Contains($at.x,$at.y) -or !$canvasBounds.Contains($to.x,$to.y) -or $viewport.Contains($to.x,$to.y) -or !$root.Current.BoundingRectangle.Contains($to.x,$to.y)){throw 'Fast locked-source exit does not leave Layers for the drawing canvas'}
+        $hits=@(foreach($point in @($at,$to)){
+            $native=[CapyRowPointer+Point]::new();$native.x=$point.x;$native.y=$point.y
+            $handle=[CapyRowPointer]::WindowFromPoint($native);$owner=[uint32]0
+            [CapyRowPointer]::GetWindowThreadProcessId($handle,[ref]$owner)|Out-Null
+            @{hwnd=$handle.ToInt64();process=$owner;input=(Input-Trace $point.x $point.y)}
+        })
+        if($hits[0].process -ne $review.Id -or $hits[1].process -ne $review.Id -or !$target.Current.BoundingRectangle.Equals($bounds) -or !$canvas.Current.BoundingRectangle.Equals($canvasBounds)){throw 'Fast locked-source exit lost its owned source or canvas geometry'}
+        $tracePath=Join-Path $run ($source+'-fast-canvas-exit.json')
+        $script:contact=$evidence=@{device=$Device;source=$source;from=$at;to=$to;source_bounds=$bounds;canvas_bounds=$canvasBounds;viewport_bounds=$viewport;hits=$hits;before=$before}
+        $evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath
+        [CapyRowPointer]::Down($Device,$at.x,$at.y)
+        [CapyRowPointer]::Move($to.x,$to.y)
+        [CapyRowPointer]::Up()
+        $evidence.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds;$evidence.max_gap_ms=[CapyRowPointer]::MaxGapMilliseconds
+        try{Wait-Until {$g=Gesture;$g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Fast locked-source exit retained a contact, capture or menu'}
+        finally{$evidence.after=Contact-State;$evidence.driver_active=[CapyRowPointer]::Active;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
+        $after=$evidence.after
+        if($evidence.driver_active -or $after.rows -ne $before.rows -or $after.selected -ne $before.selected -or $after.revision -ne $before.revision -or ($after.editing_layer|ConvertTo-Json -Depth 12 -Compress) -ne ($before.editing_layer|ConvertTo-Json -Depth 12 -Compress)){throw 'Fast locked-source exit changed layer state or history'}
+        Tap "layer-$paint-name"
+        try{Wait-Until {$snapshot=Model;$g=Gesture;$snapshot.state.layer_tools.editing_layer.id -eq $paint -and @($snapshot.state.layers|Where-Object id -eq $paint)[0].selected -and $g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Fresh native tap did not select the inactive layer after fast exit'}
+        finally{$evidence.followup=Contact-State;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
+        if($evidence.followup.rows -ne $before.rows -or $evidence.followup.selected -ne [string]$paint -or $evidence.followup.revision -ne $before.revision -or $evidence.followup.gesture.phase -ne 'idle' -or $evidence.followup.gesture.captured -or $evidence.followup.gesture.menu_open){throw 'Fresh native selection after fast exit changed authored state or retained a contact'}
+        Tap "layer-$created-name"
+        try{Wait-Until {$snapshot=Model;$g=Gesture;$snapshot.state.layer_tools.editing_layer.id -eq $created -and @($snapshot.state.layers|Where-Object id -eq $created)[0].selected -and $g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Native tap did not restore the locked fixture selection'}
+        finally{$evidence.restored=Contact-State;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
+        $restored=$evidence.restored
+        if($restored.rows -ne $before.rows -or $restored.selected -ne $before.selected -or $restored.revision -ne $before.revision -or ($restored.editing_layer|ConvertTo-Json -Depth 12 -Compress) -ne ($before.editing_layer|ConvertTo-Json -Depth 12 -Compress) -or $restored.gesture.phase -ne 'idle' -or $restored.gesture.captured -or $restored.gesture.menu_open){throw 'Native selection restore changed the locked fixture or retained a contact'}
+    }
     Layer-History 'Undo'
     Wait-Until {$snapshot=Model;(Rows $snapshot) -eq $unlocked -and !@($snapshot.state.layers|Where-Object id -eq $created)[0].locked} 'Rejected locked-source motion added history after the Lock action'
     Layer-History 'Redo'
@@ -284,7 +345,25 @@ try {
     $script:case='keyboard-context'
     Focus-Key "layer-$created-name" 0x5d
     Wait-Until {(Gesture).menu_open} 'Keyboard context action did not open the layer menu'
-    Dismiss
+    $beforeMenuRows=Rows;$beforeMenuRevision=(Model).state.document_file.revision
+    $source=Control "layer-$created-name";$organize=Control 'menu-organize' -Arranged
+    Tap 'menu-organize'
+    $duplicate=Control 'layer-menu-duplicate' -Arranged
+    $submenu=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($duplicate)
+    $menuItems=$submenu.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
+    $nested=@{device=$Device;before=@{source=(Menu-State $source);parent=(Menu-State $organize);child=(Menu-State $duplicate);items=@($menuItems|ForEach-Object {Menu-State $_})};rows=$beforeMenuRows;revision=$beforeMenuRevision}
+    try{
+        Wait-Until {@($menuItems|Where-Object {$_.Current.HasKeyboardFocus -and !$_.Current.IsOffscreen}).Count -gt 0} 'Native Organize submenu did not acquire keyboard focus'
+        [CapyRowPointer]::Key(0x1b)
+        Wait-Until {$child=Find 'layer-menu-duplicate';(!$child -or $child.Current.IsOffscreen) -and !$organize.Current.IsOffscreen -and $organize.Current.HasKeyboardFocus -and (Gesture).menu_open} 'First Escape did not close only the native Organize submenu'
+        $nested.after_first=@{parent=(Menu-State $organize);child=(Menu-State $duplicate);source=(Menu-State $source);gesture=(Gesture)}
+        Dismiss
+        Wait-Until {$parent=Find 'menu-organize';!$parent -or $parent.Current.IsOffscreen} 'Second Escape did not dismiss the native parent menu'
+        if((Rows) -ne $beforeMenuRows -or (Model).state.document_file.revision -ne $beforeMenuRevision){throw 'Nested menu cancellation changed layer state or history'}
+    }finally{
+        $nested.after_second=@{parent=(Menu-State $organize);child=(Menu-State $duplicate);source=(Menu-State $source);gesture=(Gesture);rows=(Rows);revision=(Model).state.document_file.revision}
+        $nested|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'nested-menu-escape.json')
+    }
     if($Device -eq 'mouse'){
         $script:case='secondary-context'
         $at=Point "layer-$created-name"

@@ -1,6 +1,7 @@
 #pragma once
 #include "UiControls.h"
 #include "NativeMenus.h"
+#include "PointerGesture.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <robuffer.h>
@@ -75,7 +76,7 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
         reset.Padding({0});reset.MinWidth(0);reset.MinHeight(0);reset.Background(clear());reset.BorderThickness({0});AutomationProperties::SetAutomationId(reset,L"proof-dial-reset");
         reset.Click([weak](auto&&,auto&&){if(auto self=weak.lock())self->control(3,O({{L"type",S(L"reset")}}));});canvas.Children().Append(reset);
         root.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
-            auto p=e.GetCurrentPoint(self->canvas);if(self->pointer||!p.IsInContact()||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+            auto p=e.GetCurrentPoint(self->canvas);if(self->pointer||!PointerGesture::PrimaryContact(p))return;
             auto g=self->geometry(p.Position());auto hit=g.GetNamedValue(L"hit",JsonValue::CreateNullValue());if(hit.ValueType()!=JsonValueType::Number||hit.GetNumber()==3)return;
             self->root.Focus(FocusState::Pointer);self->claimScroll();if(!self->root.CapturePointer(e.Pointer())){self->releaseScroll();return;}
             self->pointer=p.PointerId();self->part=uint8_t(hit.GetNumber());self->origin=self->last=p.Position();self->epoch=to_hstring(uint64_t(num(object(self->data->state,L"document_file"),L"epoch")));

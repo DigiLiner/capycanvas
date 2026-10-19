@@ -1,6 +1,9 @@
 #pragma once
 #include "UiControls.h"
 #include "WorkspaceQuery.h"
+#include "WorkspaceGeometry.h"
+#include <winrt/Microsoft.UI.Content.h>
+#include <winrt/Microsoft.UI.Interop.h>
 #include <cwctype>
 
 namespace CapyUi {
@@ -68,11 +71,108 @@ inline void NativeMenuItems(Windows::Foundation::Collections::IVector<MenuFlyout
     }
     while(target.Size()>at)target.RemoveAtEnd();
 }
+struct PopupLifetime:std::enable_shared_from_this<PopupLifetime>{
+    std::weak_ptr<WorkspaceData> data;
+    weak_ref<Primitives::FlyoutBase> popup;
+    uint64_t registration=0,generation=0;
+    bool open=false,closing=false;
+    event_token opening{},opened{},closingEvent{},closed{};
+    virtual ~PopupLifetime()=default;
+    void attach(Primitives::FlyoutBase const& flyout,std::shared_ptr<WorkspaceData> const& context){
+        popup=make_weak(flyout);data=context;auto self=shared_from_this();
+        opening=flyout.Opening([self](auto&&,auto&&){++self->generation;self->closing=false;self->enroll();});
+        opened=flyout.Opened([self](auto&&,auto&&){self->didOpen();});
+        closingEvent=flyout.Closing([self](auto const& sender,auto const& args){
+            sender.DispatcherQueue().TryEnqueue([self,args,serial=self->generation]{
+                if(serial!=self->generation||args.Cancel()||!self->registration)return;
+                self->closing=true;self->uncount();
+            });
+        });
+        closed=flyout.Closed([self](auto&&,auto&&){self->retire();});
+    }
+    void enroll(){if(!registration)if(auto context=data.lock())registration=context->transient([self=shared_from_this()]{return self->cancel();});}
+    virtual void didOpen(){if(!registration||closing){if(auto flyout=popup.get())flyout.Hide();return;}if(!std::exchange(open,true))if(auto context=data.lock())context->popup(true);}
+    void uncount(){if(std::exchange(open,false))if(auto context=data.lock())context->popup(false);}
+    virtual void retire(){
+        ++generation;closing=false;auto id=std::exchange(registration,0);
+        if(auto context=data.lock())context->transients.erase(id);uncount();
+    }
+    bool cancel(){if(!registration)return false;retire();if(auto flyout=popup.get())flyout.Hide();return true;}
+};
 inline void TrackPopup(Primitives::FlyoutBase const& popup,std::shared_ptr<WorkspaceData> const& data){
-    auto open=std::make_shared<bool>(false);
-    popup.Opened([data,open](auto&&,auto&&){if(!std::exchange(*open,true))data->popup(true);});
-    popup.Closed([data,open](auto&&,auto&&){if(std::exchange(*open,false))data->popup(false);});
+    std::make_shared<PopupLifetime>()->attach(popup,data);
 }
+class OwnedPopup {
+    struct State:PopupLifetime{
+        weak_ref<FrameworkElement> anchor,root;
+        HWND window=nullptr;
+        Windows::Foundation::IInspectable press{nullptr};
+        event_token unloaded{};
+        bool current(){
+            if(!registration||closing)return false;
+            auto source=anchor.get(),surface=root.get();auto context=data.lock();
+            bool valid=source&&surface&&context&&!context->externalPopup&&source.XamlRoot()&&source.XamlRoot().Content()==surface&&
+                window&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==window&&!IsIconic(window);
+            if(valid){auto bounds=visibleBounds(source,surface);valid=bounds.Width>0&&bounds.Height>0;}
+            if(valid)for(DependencyObject node=source;node;node=VisualTreeHelper::GetParent(node)){
+                if(auto element=node.try_as<UIElement>();element&&(!element.IsHitTestVisible()||element.Opacity()<=0))valid=false;
+                if(auto control=node.try_as<Control>();control&&!control.IsEnabled())valid=false;
+                if(node==surface)break;
+            }
+            if(!valid)cancel();return valid;
+        }
+        void stopPress(){if(auto surface=root.get();surface&&press)surface.RemoveHandler(UIElement::PointerPressedEvent(),press);press=nullptr;}
+        void didOpen()override{if(current())stopPress();PopupLifetime::didOpen();}
+        void retire()override{
+            stopPress();if(auto source=anchor.get();source&&unloaded.value)source.Unloaded(std::exchange(unloaded,{}));
+            if(auto flyout=popup.get()){
+                if(opening.value)flyout.Opening(std::exchange(opening,{}));
+                if(opened.value)flyout.Opened(std::exchange(opened,{}));
+                if(closingEvent.value)flyout.Closing(std::exchange(closingEvent,{}));
+                if(closed.value)flyout.Closed(std::exchange(closed,{}));
+            }
+            PopupLifetime::retire();
+        }
+    };
+    std::shared_ptr<State> state;
+public:
+    struct Ticket{
+        std::shared_ptr<State> state;
+        bool Current()const{return state&&state->current();}
+        bool Cancel()const{return state&&state->cancel();}
+        bool Show(FrameworkElement const& anchor,Primitives::FlyoutShowOptions const& options)const{
+            if(!Current())return false;
+            auto popup=state->popup.get();
+            if(!popup||!anchor||!anchor.XamlRoot()||anchor.XamlRoot().Content()!=state->root.get()){Cancel();return false;}
+            popup.ShowAt(anchor,options);return true;
+        }
+    };
+    OwnedPopup()=default;
+    OwnedPopup(OwnedPopup const&)=delete;
+    OwnedPopup& operator=(OwnedPopup const&)=delete;
+    ~OwnedPopup(){Cancel();}
+    bool Cancel(){return state&&state->cancel();}
+    bool Active()const{return state&&state->registration;}
+    bool Pending()const{return Active()&&!state->open&&!state->closing;}
+    bool Open()const{return Active()&&state->open;}
+    Ticket Begin(std::shared_ptr<WorkspaceData> const& data,FrameworkElement const& anchor,Primitives::FlyoutBase const& popup){
+        Cancel();state=std::make_shared<State>();auto next=state;
+        next->anchor=make_weak(anchor);
+        if(auto xaml=anchor.XamlRoot()){
+            next->root=make_weak(xaml.Content().as<FrameworkElement>());
+            next->window=GetAncestor(Microsoft::UI::GetWindowFromWindowId(xaml.ContentIslandEnvironment().AppWindowId()),GA_ROOTOWNER);
+        }
+        next->attach(popup,data);next->enroll();auto weak=std::weak_ptr<State>(next);
+        next->unloaded=anchor.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
+        anchor.DispatcherQueue().TryEnqueue([weak]{if(auto self=weak.lock();self&&self->registration&&!self->open){
+            if(auto surface=self->root.get()){
+                self->press=box_value(PointerEventHandler([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();}));
+                surface.AddHandler(UIElement::PointerPressedEvent(),self->press,true);
+            }
+        }});
+        return {next};
+    }
+};
 inline Image ToolGroupMarker(std::shared_ptr<WorkspaceData> const& data){
     auto marker=icon(L"tool-group",data->theme(),16);
     marker.HorizontalAlignment(HorizontalAlignment::Right);marker.VerticalAlignment(VerticalAlignment::Bottom);

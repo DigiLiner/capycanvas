@@ -37,7 +37,7 @@ $p=Get-Process -Id $ProcessId
 # Retain a queryable process handle before the HWND and process disappear.
 $null=$p.Handle
 if($WindowHandle -and $Action -notin @('Resize','Close')){throw 'An explicit window is supported only for resize or close.'}
-$drawing=Owned-DrawingWindow $p $WindowHandle
+$drawing=Owned-DrawingWindow $p $WindowHandle $StateDirectory
 if(!$drawing){throw 'The app has no owned drawing window.'}
 $handle=$drawing.Handle
 $windowOwner=[uint32]0

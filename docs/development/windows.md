@@ -296,6 +296,8 @@ Row activation after dragging uses a fresh pointer tap. Keep the original visibl
 bounds, stability, history and deadline checks.
 The pickup fixture rejects locked body and handle motion without changing layer
 order or adding history: one Undo unlocks the source, and Redo locks it again.
+It also checks that successive native Escape presses close a submenu and its
+parent without changing layer state or history.
 The default layers fixture closes with a focused opacity draft, reopens the same
 private profile, and verifies the saved draft and its clean Undo checkpoint.
 `exercise-layer-drawer.ps1 -Theme dark|light` checks the combined header drawer,
@@ -532,8 +534,8 @@ Native glass geometry uses `NativeHost::set_glass`: a changed layout requests a
 redraw and republishes host metadata without editing the document. Identical or
 invalid layouts preserve the publication cache. The window-free
 `glass_updates_publish_host_metadata_without_document_edits` regression checks
-this contract; `exercise-canvas-bar.ps1` checks the selection bar's native glass
-registration and menu actions in both themes.
+this contract; run `exercise-canvas-bar.ps1` with `-Theme dark` and `-Theme light`
+to check the selection bar's native glass registration and menu actions.
 
 | Where | Checks |
 | --- | --- |
@@ -574,7 +576,8 @@ The renderer's ignored
 `dry_material::tests::fine_aggregate_pencil_color_pipeline_prepares_on_hardware`
 checks the fine-tip, aggregate Pencil compute pipeline through the native DXC
 compiler. Place the app's pinned `dxcompiler.dll` beside the renderer test
-executable before running it. The test requires hardware and rejects software
+executable before running it. Set `$env:WGPU_ADAPTER_NAME` to a distinctive part
+of your hardware adapter's name. The test requires hardware and rejects software
 adapters; a successful WGSL validation alone does not cover pipeline creation.
 
 The zoom menu grows to fit its shared captions and shortcut hints. Its readout
@@ -627,6 +630,8 @@ shortcut hints. Repeat with `-Theme light`.
 `exercise-color-editor.ps1 -Executable <path> -Theme dark` checks color editing,
 native clipboard ownership and the Paper fill. It records the immediate fill,
 then waits for the same layer thumbnail to be ready before capturing it again.
+Numeric input cases check canceled touch scrubs and outside mouse, pen and touch
+releases followed by native activation, plus modifier keys during a held scrub.
 Review the thumbnail color in both themes; readiness alone does not prove its
 visible content. Check the split footer preview against its actual shared frame
 and the footer buttons; fractional display scaling rounds border pixels.
@@ -678,7 +683,9 @@ Long captions trim and relabel without replacing the control.
 opacity and filter sliders, typed edits, fine mouse/pen/touch value drags,
 release, Escape while held, label reset and one Undo per drag in both themes.
 It also checks narrow Russian captions and a return to wider English controls
-with retained values and identity. Review the composed captures.
+with retained values and identity. The ordinary full effects journey also runs
+the value drags. A secondary mouse drag on the readout must preserve the shared
+value, editor and focus. Review the composed captures.
 
 Properties, Tool Settings and Tool Options share one gradient editor
 (`GradientView.cpp`); a worker thread rasterizes its dithered preview through the
@@ -775,9 +782,110 @@ Routine fixture captures use `inspect-window.ps1 -CaptureOnly` for the image,
 window title and responsiveness. They retain separate model and layout evidence. Failure captures keep the full
 control-name inventory. Run the inspector without that switch to request it directly.
 
-`exercise-navigator.ps1 -Executable <path>` checks Navigator commands, live
-preview pixels, exact Undo, retained controls, resizing and both themes in one
-run. It retains the owned drawing window for capture, input, resize and close.
+`exercise-navigator.ps1 -Executable <path> -Theme dark` checks Navigator commands,
+ten native mouse/pen/touch overview contacts, secondary-mouse rejection, live
+preview pixels, exact Undo, retained controls, resizing and an internal theme
+change. Contacts preserve document revision and modified state. Repeat with
+`-Theme light` to exercise the contacts in both starting themes. It retains the
+owned drawing window and trace directory for capture, input, resize and close.
+
+The delayed-popup regression uses real native cancellation events and fixture-owned
+reply gates. Build it into a separate output, then run in both themes:
+
+```powershell
+./apps/layer-windows/scripts/build.ps1 -ControlFixture Popup `
+  -OutputDirectory artifacts/windows/popup-review
+./apps/layer-windows/scripts/test-desktop.ps1 `
+  -Script ./apps/layer-windows/scripts/exercise-popup.ps1 `
+  -Parameters @{
+    Executable = (Resolve-Path ./artifacts/windows/popup-review/CapyCanvas.exe).Path
+    Theme = 'dark'
+  }
+```
+
+Repeat with `Theme = 'light'`. The fixture checks delayed replies after native
+Escape, a handled press on an untagged control, window deactivation, source
+unload, request replacement and window close. It also checks cancellation
+registration before showing, cancellation between ShowAt and Opened, and the
+visible flyout's lifetime. A background window cannot admit a source owned by
+another window. A request begun inside a native routed press survives that press
+and cancels on the next untagged native press. Normal
+menu selection and held-release behavior remain in the native device matrix.
+
+Run native input fixtures on a private desktop with `test-desktop.ps1`; it
+restores the original desktop and closes its own process tree on completion or
+timeout. For example, from the
+repository root with local scripts allowed:
+
+```powershell
+./apps/layer-windows/scripts/test-desktop.ps1 `
+  -Script ./apps/layer-windows/scripts/exercise-activation.ps1 `
+  -Parameters @{
+    Executable = (Resolve-Path ./artifacts/windows/Release/CapyCanvas.exe).Path
+    Device = 'pen'
+    Theme = 'dark'
+  }
+```
+
+Run `exercise-activation.ps1` and `exercise-tab-pickup.ps1` with each device
+(`mouse`, `pen`, `touch`) in both themes (`dark`, `light`). Activation checks use
+native contacts, including small movement, retained pen hover, cancellation and
+release outside a button. UI Automation sets up and observes state; invoking an
+automation pattern does not prove that a pen or finger can activate a control.
+Palette cases also check held-menu dragging, canceled reorders and Escape
+dismissal after the native menu is visible, preserving color and swatch order.
+They release at a new slot after acknowledging an earlier preview, then require
+the final order and one-step Undo.
+Run `exercise-toolbar-components.ps1` in both themes for compact numeric faces:
+release pen and touch scrubs, then activate with mouse, keyboard and accessibility.
+The full `exercise-hdr.ps1` journey also switches paint slots during an acknowledged
+arc contact and checks that its remaining input cannot edit the new slot.
+Run `exercise-tab-drag.ps1` in both themes after changing
+tab capture or preview behavior.
+Run `exercise-switcher-drag.ps1` with each device in both themes for workspace
+rows, including ordinary scrolling with `-Overflow`.
+Run `exercise-hdr.ps1 -DrawingTabsOnly` in both themes for drawing tabs and their
+compact list; this mode uses ordinary documents and does not test HDR. These
+fixtures check native row activation and outside releases as well as held and
+grip dragging. Small outside releases cross the middle tab's edge within the
+native client area and must preserve the active drawing and tab order.
+Secondary-button motion must leave palette colors and row order unchanged; locked rows and
+disabled grips must release ownership and allow fresh native selection.
+Keep the fast Down/Move-inside/Move-outside/Up burst separate from an admitted
+drag. The burst does not assume drag admission: release must restore Ready,
+preserve selection and order, clear menus and contact ownership, and permit a
+fresh native tap. The admitted-outside case first acknowledges Dragging inside
+the strip, then checks detachment and unchanged order after release.
+Run `exercise-shortcut-page.ps1` and `exercise-command-search.ps1` with
+`-Theme dark` and `-Theme light` for native Escape routing, including canceling
+shortcut recording while keeping its editor open.
+
+Use `TrackPopup` in `NativeMenus.h` for immediate native flyouts. For asynchronous
+menu queries, keep an `OwnedPopup` per view, begin its ticket before submitting
+the query, and check the ticket before populating and showing the flyout. It
+owns cancellation from the pending reply through native closure, including a
+later press outside registered drag sources. Both helpers track popup counts in
+their `WorkspaceData` registry; window cancellation must dismiss both header and
+workspace registries. Tickets gate replies; menu command callbacks retain their
+semantic document/target checks and do not require an active ticket.
+Cancellation must cover opening menus: a flyout can become visible before
+`Opened` arrives. Release admission after accepted `Closing`; waiting for the
+later `Closed` notification can reject the next button's menu. Retain lifecycle
+guards until `Closed`, and preserve admission when closing is canceled.
+Use `ShortcutKeys` in `UiControls.h` for ancestor
+shortcuts: non-Escape keys preview, while native editors and submenus handle
+Escape before gesture and window cancellation. Shortcut capture retains raw keys.
+Ordinary custom editors use `PointerGesture::PrimaryContact` before committing
+drafts or capturing input. Native buttons keep their own Click handling. An
+unclaimed reorder candidate must not take their capture before a hold or drag
+is admitted. Use `PointerGesture::OnLeaving` to retire an uncaptured candidate
+when it leaves its observed surface, preserving native child capture and Click.
+Immediate custom drag surfaces capture on press; native Buttons keep their capture until
+the drag is admitted.
+Feed recognizers only from non-generated motion events; exits and scene changes
+can replay older samples.
+The canvas has an independent input source; an ancestor XAML observer alone
+cannot guarantee delivery of an outside release.
 
 For switcher visibility and its context menu during title-bar customization, run
 `tools/windows-vm/windows-vm.py fixtures switcher header:options header:options-light header:options-pen header:options-touch`.
@@ -790,7 +898,9 @@ the focused header journeys also check placement cancellation and keyboard input
   startup and after reopening. Keep its root and HWND for input, sizing,
   captures and window close; `Process.MainWindowHandle` can select an input-indicator
   overlay in the same process. Startup-close checks resolve this window without
-  waiting for brush readiness.
+  waiting for brush readiness. Set `CapyTraceDirectory` when traces live outside the
+  executable directory, and pass that directory as `-StateDirectory` to
+  `exercise-window.ps1` for sizing and closing.
 - **Wait for layout.** Before injecting input, wait for both the published state
   and the arranged control bounds, then check that the hit belongs to the owned
   app. Use `Control -Arranged` from `CapyUia.ps1` when locating a pointer target.
@@ -798,20 +908,60 @@ the focused header journeys also check placement cancellation and keyboard input
   collapsed column before addressing its group grip, and wait for a menu to
   acquire keyboard focus before sending Escape. Cancellation comparisons use
   the saved workspace layout; measured bounds can change as controls settle.
+  Arrange keyboard targets before setting focus, then confirm their native focus
+  before sending keys. `Focus-Keyboard` uses native Tab traversal when testing
+  keyboard activation: UI Automation's SetFocus requests programmatic focus, and
+  HasKeyboardFocus alone does not establish keyboard modality for Space.
+  Revealing an offscreen row can move focus to another child.
+  UI Automation hit queries can expose only the owned native host pane. Retain
+  stable target bounds and native window ownership, then require acknowledged
+  native activation on that same control.
+  Convert DIP sizes with the owned window's DPI before resizing. A compact model
+  projection does not prove that its native selector is visible.
 - **Keep logs observational.** Log acknowledged state and owned control properties
   already used by assertions. A global focused-element lookup can lose its UI
   Automation peer during input; avoid querying it only for a log message.
+  Record `CapyRowPointer.ContactDurationMilliseconds` for short contacts; a
+  requested sleep does not measure the elapsed injection span.
 - **Measure timed input.** Use the native test drivers for double presses and
   prediction strokes. PowerShell sleeps and method calls can exceed a gesture's
   interval under load; retain the actual injection timing with the result.
-  `RowPointerDriver.PenHover` and `Up(true)` keep a stationary pen in range;
-  call `PenLeave` to end hover. The driver refreshes hover through its input timer.
+  `[CapyRowPointer]::PenHover($x,$y)` and `[CapyRowPointer]::Up($true)` keep a
+  stationary pen in range; call `[CapyRowPointer]::PenLeave()` to end hover.
+  The driver refreshes hover through its input timer.
 - **Preserve OS cancellation.** A released sample with `IsCanceled` is a cancel,
-  including for the hold recognizer. Keep the canvas-touch fixture's rapid
-  canceled pairs: they must preserve the drawing instead of triggering Undo.
+  including for the hold recognizer. Use `PointerGesture::OnCompleted` for custom
+  controls with rollback: it observes handled release, cancel and capture-loss
+  events. Its default cancels capture loss; native Button and Slider gestures use
+  `PointerCaptureLoss::CompleteLift` to complete a normal lift while canceling
+  loss during contact. Match the owning `PointerId` before handling a completion,
+  ignore unrelated or repeated completions, and clear ownership before releasing
+  capture.
+  Scrub buttons use `PointerGesture::Clicks` to scope suppression to their native
+  contact, including cancellation and releases that produce no Click. Retain its
+  returned state, mark an admitted scrub with `Suppress(pointerId)`, and gate the
+  native Click with `SuppressClick()`. The helper retires leftover suppression
+  at native release completion, including deferred right taps; cancellation
+  permits the next keyboard or accessibility activation. It observes capture owned
+  by the native Button and starts no scrub when that capture failed. The Button alone captures
+  its pointer and raises Click. Unloading cancels the owning contact.
+  The window-free input test checks the terminal-event mapping and suppression
+  state. Use canceled touch input for rollback and subsequent pointer/accessibility
+  checks; use normal releases to qualify keyboard activation. Injected canceled-UP
+  can leave an ordinary WinUI Button unable to activate with Enter. Destroying a
+  synthetic pen device also does not establish a delivered cancellation event.
+  Physical pen cancellation needs a device check.
+  Wheel and HDR contacts forward their shared `color_wheel_context` or
+  `color_edit_context` through `ColorEdit`. Rust validates it when queued input
+  runs, so a delayed slot or mask change cannot redirect an old contact or its
+  rollback. Wheel context preserves dragging from Transparent into remembered paint.
+  Keep the canvas-touch fixture's rapid canceled pairs: they must preserve the
+  drawing instead of triggering Undo.
 - **Wait for the operation you started.** Compare the document revision or the
   requested state before and after input. An already enabled Undo command does
   not prove that a new stroke has committed.
+  Use the relevant control's terminal state to acknowledge a released contact;
+  `WaitForInputIdle` does not acknowledge that operation.
   Shared worker notifications can arrive before the document operation finishes;
   wait for its completion state.
 - **Prepare the selected tool.** Invoking an already selected grouped tool opens
@@ -854,9 +1004,9 @@ the focused header journeys also check placement cancellation and keyboard input
   scope. Expected values must not share names with the helper's parameters.
 - **One snapshot per assertion.** Read related fields from one state file; check
   its `process_id`, `window_id` and freshness.
-- **Failures keep the app.** A failed fixture leaves its app running for
-  inspection. Close it before rebuilding. The VM runner preserves its evidence
-  and closes the processes it owns before continuing.
+- **Own the test processes.** A fixture run directly can leave its app running
+  for inspection after failure; close it before rebuilding. The private-desktop
+  and VM runners preserve evidence and close the processes they own.
 - **Injection is not hardware.** UI Automation and injected input do not establish
   physical pen and touch behavior, painting cadence or latency. Compare an
   injected-input failure with physical input before changing native capture.

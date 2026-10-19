@@ -1,4 +1,4 @@
-Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+﻿Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 if(!('CapyWindowApi' -as [type])){Add-Type -TypeDefinition @"
 using System;using System.Runtime.InteropServices;using System.Text;
 public static class CapyWindowApi {
@@ -36,12 +36,13 @@ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=$scri
 }
 function Update-CapyFixtureContext([scriptblock]$Update){
     if(!$env:CAPY_FIXTURE_CONTEXT){return}
-    $context=if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json -AsHashtable}else{@{}}
+    $context=@{}
+    if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){foreach($property in (Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json).PSObject.Properties){$context[$property.Name]=$property.Value}}
     & $Update $context
     $temporary=$env:CAPY_FIXTURE_CONTEXT+'.tmp-'+[guid]::NewGuid().ToString('N')
     $stream=[IO.FileStream]::new($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
     try{$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($context|ConvertTo-Json -Depth 12));$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
-    [IO.File]::Move($temporary,$env:CAPY_FIXTURE_CONTEXT,$true)
+    if([IO.File]::Exists($env:CAPY_FIXTURE_CONTEXT)){[IO.File]::Replace($temporary,$env:CAPY_FIXTURE_CONTEXT,[NullString]::Value)}else{[IO.File]::Move($temporary,$env:CAPY_FIXTURE_CONTEXT)}
 }
 function Register-CapyFixtureWindow([Diagnostics.Process]$Process,[long]$WindowHandle,[string]$TraceDirectory){
     if(!$env:CAPY_FIXTURE_CONTEXT){return}
@@ -74,10 +75,11 @@ function Record-CapyFixtureClose([int]$ProcessId,[long]$WindowHandle,[bool]$Wind
     $entry=[ordered]@{process_id=$ProcessId;hwnd=$WindowHandle;contract=$Contract;result='pass';window_only=$WindowOnly;completed_utc=[DateTime]::UtcNow.ToString('o')}
     Update-CapyFixtureContext {param($context);$context.closes=@($context.closes)+@($entry)}
 }
-function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
+function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle,[string]$TraceDirectory=$script:CapyTraceDirectory){
+    if(!$TraceDirectory){$executable=$Process.Path;if(!$executable){return $null};$TraceDirectory=Split-Path -Parent $executable}
     $registered=$false
     if($WindowHandle){
-        $path=Join-Path (Split-Path -Parent $Process.Path) "windows-$($Process.Id).json"
+        $path=Join-Path $TraceDirectory "windows-$($Process.Id).json"
         if(Test-Path $path){
             $trace=Read-Snapshot $path
             $registered=$trace.process_id -eq $Process.Id -and $WindowHandle -in $trace.windows.hwnd
@@ -96,7 +98,7 @@ function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
     })
     if($found.Count -gt 1){throw 'The owned process has multiple drawing windows; specify a window handle'}
     if($WindowHandle -and $found.Count -ne 1){throw 'The specified window is not an owned drawing window'}
-    if($found.Count){Register-CapyFixtureWindow $Process $found[0].Handle.ToInt64();$found[0]}
+    if($found.Count){Register-CapyFixtureWindow $Process $found[0].Handle.ToInt64() $TraceDirectory;$found[0]}
 }
 function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
     $bitmap=[Drawing.Bitmap]::new(96,96)
@@ -113,7 +115,8 @@ function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
         $lock=$bitmap.LockBits([Drawing.Rectangle]::new(0,0,96,96),[Drawing.Imaging.ImageLockMode]::ReadOnly,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
         try {$bytes=[byte[]]::new($lock.Stride*96);[Runtime.InteropServices.Marshal]::Copy($lock.Scan0,$bytes,0,$bytes.Length)}finally{$bitmap.UnlockBits($lock)}
         if($Path){$bitmap.Save($Path)}
-        [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+        $hash=[Security.Cryptography.SHA256]::Create()
+        try{[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')}finally{$hash.Dispose()}
     }finally{$graphics.Dispose();$bitmap.Dispose()}
 }
 function Wait-StablePixels([scriptblock]$Sample){
@@ -140,14 +143,19 @@ function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible)
     $found=$null
     if(!$Visible -and 'first' -eq $script:CapyFind){$found=$searchScope.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)}
     else{
-        $items=$searchScope.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
+        $first=$searchScope.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+        if($first -and !$first.Current.IsOffscreen){return $first}
+        $items=@();if($first){$items=$searchScope.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)}
         foreach($item in $items){if(!$item.Current.IsOffscreen){return $item}}
         if(!$Visible -and 'prefer-visible' -eq $script:CapyFind -and $items.Count){$found=$items[0]}
     }
     if(!$found -and $script:CapyPopups -and $Within -eq $root){
-        $owned=[System.Windows.Automation.AndCondition]::new($condition,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id))
-        foreach($item in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,$owned)){
-            if(!$item.Current.IsOffscreen){return $item}
+        $owned=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id)
+        foreach($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,$owned)){
+            if($window -eq $root){continue}
+            foreach($item in $window.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)){
+                if(!$item.Current.IsOffscreen){return $item}
+            }
         }
     }
     $found
@@ -155,15 +163,23 @@ function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible)
 function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=$script:CapyWaitSeconds,[switch]$Arranged){
     $hit=@{item=$null;bounds=$null;stable=0}
     Wait-Until {
-        $hit.item=Find $Value -Name:$Name -Within $Within -Type $Type -Visible:$Arranged
+        if(!$Arranged -or !$hit.item){$hit.item=Find $Value -Name:$Name -Within $Within -Type $Type -Visible:$Arranged}
         if(!$hit.item){return $false}
         if(!$Arranged){return $true}
-        $bounds=$hit.item.Current.BoundingRectangle
-        if($hit.item.Current.IsOffscreen -or $bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){return $false}
+        try{$bounds=$hit.item.Current.BoundingRectangle;$offscreen=$hit.item.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$hit.item=$null;$hit.bounds=$null;$hit.stable=0;return $false}
+        if($offscreen -or $bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){$hit.item=$null;$hit.bounds=$null;$hit.stable=0;return $false}
         if($bounds -eq $hit.bounds){$hit.stable++}else{$hit.bounds=$bounds;$hit.stable=0}
         $hit.stable -ge 2
     } "Missing control: $Value" $Seconds
     $hit.item
+}
+function Focus-Keyboard($Element){
+    $Element.SetFocus()
+    Wait-Until {$Element.Current.HasKeyboardFocus} 'Native control did not receive focus'
+    [CapyRowPointer]::Key([uint32]$review.Id,0x09)
+    Wait-Until {!$Element.Current.HasKeyboardFocus} 'Tab did not leave the native control'
+    [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x09)
+    Wait-Until {$Element.Current.HasKeyboardFocus} 'Shift+Tab did not return keyboard focus to the native control'
 }
 function Control-Trace($Element){
     $walker=[System.Windows.Automation.TreeWalker]::RawViewWalker

@@ -91,7 +91,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
             if(composingKey(e))return;
             if(auto self=weak.lock()){
                 if(e.Key()==winrt::Windows::System::VirtualKey::Escape&&!e.KeyStatus().WasKeyDown)++self->escapes;
-                bool capturing=self->capturing();self->key(e,true);if(capturing)e.Handled(true);
+                bool capturing=self->capturing();if(capturing||e.Key()!=winrt::Windows::System::VirtualKey::Escape)self->key(e,true);if(capturing)e.Handled(true);
             }
         });
         dialog.PreviewKeyUp([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){

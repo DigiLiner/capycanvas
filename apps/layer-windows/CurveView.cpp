@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "NativeKeyRepeats.h"
 #include "EffectControls.h"
+#include "PointerGesture.h"
 #include "ScopesView.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <cmath>
@@ -162,7 +163,7 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         graph.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto raw=e.GetCurrentPoint(self->graph);
             if(self->pointer||self->graph.ActualWidth()<1||self->graph.ActualHeight()<1
-                ||!raw.IsInContact()||(raw.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!raw.Properties().IsLeftButtonPressed()))return;
+                ||!PointerGesture::PrimaryContact(raw))return;
             auto at=raw.Position();if(!self->secondTap(raw.Timestamp(),at))self->firstCount=self->points().Size();
             self->press={raw.Timestamp(),at};
             if(!self->graph.CapturePointer(e.Pointer()))return;
@@ -173,15 +174,15 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         graph.PointerMoved([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){
             self->contact(L"move",e.GetCurrentPoint(self->graph).Position());e.Handled(true);
         }});
-        graph.PointerReleased([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){
+        CapyUi::PointerGesture::OnCompleted(graph,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){
+            if(cancel){self->cancel();e.Handled(true);return;}
             auto at=e.GetCurrentPoint(self->graph).Position();self->pointer.reset();self->contact(L"up",at);
             self->graph.ReleasePointerCaptures();e.Handled(true);
             bool tap=std::hypot(at.X-self->press.second.X,at.Y-self->press.second.Y)<=4;
             if(tap&&self->secondTap(self->press.first,self->press.second)){self->lastTap.reset();self->removeAt(at,self->firstCount);}
             else self->lastTap=tap?std::optional(self->press):std::nullopt;
         }});
-        graph.PointerCanceled([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pointer)self->cancel();});
-        graph.PointerCaptureLost([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pointer)self->cancel();});
+
         graph.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
         graph.RightTapped([weak](auto&&,RightTappedRoutedEventArgs const& e){if(auto self=weak.lock();self&&e.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse){
             self->cancel();self->removeAt(e.GetPosition(self->graph),std::nullopt);e.Handled(true);

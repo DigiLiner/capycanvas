@@ -2,6 +2,7 @@
 #include "../TextCompositionKeys.h"
 #include "../NativeKeyRepeats.h"
 #include "../CanvasPointerSample.h"
+#include "../PointerCompletion.h"
 #include <limits>
 #include "../CanvasQueryQueue.h"
 #include "../CanvasLatencyTrace.h"
@@ -112,6 +113,61 @@ int main() {
     ForwardKeyRepeats(false,false,0,collect);
     assert((repeats==std::vector<bool>{false,false}));
     std::cout<<"Combined native key presses retain every repeat and one release\n";
+
+    using namespace CapyUi;
+    struct CompletionCase {PointerCompletion event;bool canceled,inContact,customCancel,nativeCancel;};
+    for(auto test:{
+        CompletionCase{PointerCompletion::Released,false,false,false,false},
+        CompletionCase{PointerCompletion::Released,false,true,false,false},
+        CompletionCase{PointerCompletion::Released,true,false,true,true},
+        CompletionCase{PointerCompletion::Released,true,true,true,true},
+        CompletionCase{PointerCompletion::Canceled,false,false,true,true},
+        CompletionCase{PointerCompletion::Canceled,false,true,true,true},
+        CompletionCase{PointerCompletion::CaptureLost,false,false,true,false},
+        CompletionCase{PointerCompletion::CaptureLost,false,true,true,true},
+        CompletionCase{PointerCompletion::CaptureLost,true,false,true,true},
+        CompletionCase{PointerCompletion::CaptureLost,true,true,true,true}}){
+        assert(CanceledCompletion(test.event,test.canceled,test.inContact)==test.customCancel);
+        assert(CanceledCompletion(test.event,test.canceled,test.inContact,PointerCaptureLoss::CompleteLift)==test.nativeCancel);
+    }
+    std::cout<<"Canceled completion rolls back; native controls preserve normal lift capture loss\n";
+
+    {
+        PointerClick clicks;unsigned activations=0;
+        auto activate=[&]{if(!clicks.SuppressClick())++activations;};
+        auto complete=[&](uint32_t id,PointerCompletion phase,bool cancel=false,bool captured=false){return clicks.Complete(id,phase,cancel,captured);};
+        assert(clicks.Begin(1));activate();assert(complete(1,PointerCompletion::CaptureLost));
+        assert(!complete(1,PointerCompletion::Released));activate();assert(activations==2);
+        assert(clicks.Begin(2));clicks.Suppress(2);activate();assert(complete(2,PointerCompletion::CaptureLost));
+        assert(!complete(2,PointerCompletion::Released));activate();assert(activations==3);
+
+        assert(clicks.Begin(3));clicks.Suppress(3);assert(complete(3,PointerCompletion::CaptureLost,false,true));
+        assert(!complete(3,PointerCompletion::Released));activate();assert(activations==4);
+        assert(clicks.Begin(4));clicks.Suppress(4);assert(complete(4,PointerCompletion::Released,false,true));
+        activate();assert(activations==4);assert(!complete(4,PointerCompletion::CaptureLost,false,true));
+        activate();assert(activations==5);
+        assert(clicks.Begin(5));clicks.Suppress(5);assert(complete(5,PointerCompletion::CaptureLost,false,true));
+        activate();assert(activations==5);assert(!complete(5,PointerCompletion::Released));
+        activate();assert(activations==6);
+
+        assert(clicks.Begin(6));clicks.Suppress(6);assert(complete(6,PointerCompletion::Canceled,true,true));
+        activate();assert(activations==7&&!complete(6,PointerCompletion::Released));
+        assert(clicks.Begin(7));activate();assert(complete(7,PointerCompletion::Released));assert(activations==8);
+        assert(clicks.Begin(8));clicks.Suppress(8);assert(!clicks.Begin(9)&&!complete(9,PointerCompletion::Canceled,true));
+        clicks.Reset();activate();assert(activations==8&&clicks.Owns(8));
+        assert(complete(8,PointerCompletion::Released));activate();assert(activations==9);
+
+        assert(clicks.Begin(10));clicks.Suppress(10);assert(complete(10,PointerCompletion::Released,false,true));
+        assert(clicks.Begin(11)&&!clicks.SuppressClick());clicks.Suppress(11);
+        assert(!complete(10,PointerCompletion::CaptureLost)&&clicks.Owns(11));
+        assert(complete(11,PointerCompletion::Released,false,true));assert(!complete(10,PointerCompletion::CaptureLost));
+        activate();assert(activations==9);assert(!complete(11,PointerCompletion::CaptureLost,false,true));
+        activate();assert(activations==10);
+        assert(clicks.Begin(12));clicks.Suppress(12);assert(clicks.Cancel()==12u);
+        assert(!clicks.Owns(12)&&!complete(12,PointerCompletion::Released)&&!clicks.SuppressClick());
+        activate();assert(activations==11&&!clicks.Cancel());
+    }
+    std::cout<<"Scrub suppression preserves native Click ordering and permits immediate accessibility activation after release\n";
 
     for(uint32_t phase=0;phase<=4;++phase) {
         assert(CanvasPointerPhase(phase,false)==phase);

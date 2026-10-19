@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=45
@@ -8,7 +8,7 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/command-search/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
-$checks=[ordered]@{}
+$checks=[ordered]@{theme=$Theme}
 function Visible([string]$Id){$item=Find $Id;if($item -and !$item.Current.IsOffscreen){$item}}
 function Size {((Model).state.tool_settings|Where-Object id -eq 'size').value}
 function Canvas-Point([double]$FractionX,[double]$FractionY){
@@ -16,7 +16,7 @@ function Canvas-Point([double]$FractionX,[double]$FractionY){
  @([int]($canvas.X+$canvas.Width*$FractionX),[int]($canvas.Y+$canvas.Height*$FractionY))
 }
 function Open-Search {
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0x4B)
  Wait-Until {Visible 'command-search'} 'Primary+K did not open command search' 10
  Wait-Until {[System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId -eq 'command-search'} 'Command search did not take keyboard focus' 5
@@ -30,23 +30,26 @@ function Closed {Wait-Until {!(Visible 'command-bar') -and !(Visible 'command-se
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
- $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
+ $review=Start-Process -FilePath $Executable -WorkingDirectory $run -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned command search review $($review.Id): $run"
- $watch=[Diagnostics.Stopwatch]::StartNew()
- do{$review.Refresh();if($review.HasExited){throw 'Review exited at startup'};Start-Sleep -Milliseconds 100}while($review.MainWindowHandle -eq [IntPtr]::Zero -and $watch.Elapsed.TotalSeconds -lt 45)
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
- Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Command search review did not start'
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Command search review did not start'
+ $root=$native.window.Root;$drawingWindow=$native.window.Handle
+ $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+ if($scale -le 0){throw 'Owned command-search window DPI is unavailable'}
  [CapyRowPointer]::Initialize([uint32]$review.Id)
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyWindowApi]::ShowWindow($drawingWindow,5)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  Wait-Until {Find 'drawing-canvas'} 'Drawing canvas did not appear' 10
  if((Find 'drawing-canvas').Current.Name -ne 'Drawing canvas' -or (Find 'drawing-canvas').Current.HelpText -ne 'Drawing canvas. Draw with a mouse or pen; use two fingers to pan, rotate and zoom.'){throw 'Canvas accessibility label or help differs from the English launch fixture'}
  (Find 'drawing-canvas').SetFocus()
 
  Open-Search
  $frame=(Find 'command-bar').Current.BoundingRectangle;$canvas=(Find 'drawing-canvas').Current.BoundingRectangle
- $window=$root.Current.BoundingRectangle;$scale=$canvas.Width/(Model).layout.viewport[0]
+ $window=$root.Current.BoundingRectangle
  $expectedWidth=[Math]::Min(560,[Math]::Max(240,$window.Width/$scale-48))
  if([Math]::Abs($frame.Width/$scale-$expectedWidth) -gt 8){throw "Command bar width $($frame.Width/$scale) differs from $expectedWidth"}
  if([Math]::Abs(($frame.X+$frame.Width/2)-($window.X+$window.Width/2)) -gt 4*$scale){throw 'Command bar is not centered'}
@@ -139,7 +142,7 @@ try {
  Closed
  $checks.palette_focus_scope='passed'
 
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width ([int](560*$scale)) -Height ([int](360*$scale))
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Resize -Width ([int](560*$scale)) -Height ([int](360*$scale))
  Wait-Until {[Math]::Abs($root.Current.BoundingRectangle.Width/$scale-560) -lt 24} 'The window did not become compact' 10
  (Find 'drawing-canvas').SetFocus()
  Open-Search
@@ -155,7 +158,7 @@ try {
  $checks.compact_placement='passed'
 
  [CapyRowPointer]::Dispose()
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'Native stderr requires review'}
  $checks.evidence=$run
  [pscustomobject]$checks|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')

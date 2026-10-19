@@ -1,0 +1,36 @@
+param(
+    [Parameter(Mandatory)][string]$Script,
+    [hashtable]$Parameters=@{},
+    [ValidateRange(1,3600)][int]$TimeoutSeconds=600
+)
+$ErrorActionPreference='Stop'
+$Script=(Resolve-Path -LiteralPath $Script).Path
+$repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+$run=Join-Path $repo ('artifacts/windows/test-desktop/'+[Guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($run)|Out-Null
+$desktop='Capy-Test-'+[Guid]::NewGuid().ToString('N')
+@{script=$Script;parameters=$Parameters;desktop=$desktop}|Export-Clixml -LiteralPath (Join-Path $run 'invocation.clixml')
+@'
+$ErrorActionPreference='Stop'
+$invocation=Import-Clixml -LiteralPath (Join-Path $PSScriptRoot 'invocation.clixml')
+$env:CAPY_PRIVATE_DESKTOP=$invocation.desktop
+$env:CAPY_FIXTURE_CONTEXT=Join-Path $PSScriptRoot 'fixture.json'
+Start-Transcript -LiteralPath (Join-Path $PSScriptRoot 'transcript.log')|Out-Null
+try {
+    $arguments=$invocation.parameters
+    & $invocation.script @arguments
+    if(!$?){exit 1}
+} catch {
+    $_|Out-String|Set-Content -LiteralPath (Join-Path $PSScriptRoot 'failure.txt')
+    Write-Error $_ -ErrorAction Continue
+    exit 1
+} finally {Stop-Transcript|Out-Null}
+'@|Set-Content -LiteralPath (Join-Path $run 'invoke.ps1') -Encoding UTF8
+if(!('CapyPrivateDesktop' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'TestDesktop.cs')}
+$powershell=Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+Write-Output "Private desktop artifacts: $run"
+$code=1
+try{$code=[CapyPrivateDesktop]::Run($powershell,(Join-Path $run 'invoke.ps1'),$run,$desktop,$TimeoutSeconds)}
+catch{$_|Out-String|Set-Content -LiteralPath (Join-Path $run 'desktop-failure.txt');throw}
+finally{@{exit_code=$code;desktop=$desktop;run=$run}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $run 'result.json')}
+if($code){throw "Private desktop test exited $code; see $run"}

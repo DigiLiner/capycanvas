@@ -3,11 +3,14 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyPopups=$true
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
+$CapyEach={if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)};[CapyRowPointer]::Verify()}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/toolbar-components/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+$directory=$run;$CapyTraceDirectory=$run
 function Control([string]$Value,[switch]$Name,$Within=$root,$Type){
     $hit=@{item=$null};Wait-Until {$hit.item=Find $Value -Name:$Name -Within $Within -Type $Type;$null -ne $hit.item -and !$hit.item.Current.IsOffscreen} "Missing native control: $Value";$hit.item
 }
@@ -29,7 +32,7 @@ function Drag($from,$to){
     for($i=1;$i -le 10;$i++){[CapyRowPointer]::Move([int]($from.x+($to.x-$from.x)*$i/10),[int]($from.y+($to.y-$from.y)*$i/10));Start-Sleep -Milliseconds 25}
 }
 function Release{[CapyRowPointer]::Up();Start-Sleep -Milliseconds 250}
-function Focus-Review{$null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle);Start-Sleep -Milliseconds 120}
+function Focus-Review{$null=[CapyRowPointer]::SetForegroundWindow($drawingWindow);Start-Sleep -Milliseconds 120}
 function Switch-Workspace([string]$Name,[string]$Id){
     $switch=Find ('workspace-switch-'+$Id)
     if(!$switch -or $switch.Current.IsOffscreen){Invoke 'header-workspace-menu';$switch=Control $Name -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
@@ -44,8 +47,7 @@ try {
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     Write-Output "Owned toolbar review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Toolbar review did not start' 90
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    Wait-Until {$review.Refresh();$native=Owned-DrawingWindow $review;if(!$native){return $false};$script:drawingWindow=$native.Handle;$script:root=$native.Root;(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Toolbar review did not start' 90
     $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
     $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));Focus-Review
     [CapyRowPointer]::Initialize([uint32]$review.Id)
@@ -118,6 +120,39 @@ try {
     [CapyRowPointer]::Key(0x0D)
     Wait-Until {[Math]::Abs((Brush).diameter-37) -lt 0.001} 'Tool Options size entry did not apply'
     Capture 'photo-brush-options' -WithModel
+    $beforeFaceLayout=(Model).state.workspace.layout|ConvertTo-Json -Depth 40 -Compress
+    $grip=Box 'ribbon-grip-commands';$hostBox=$root.Current.BoundingRectangle;$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+    if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Invalid owned toolbar DPI'}
+    $from=@{x=[int]($grip.X+$grip.Width/2);y=[int]($grip.Y+$grip.Height/2)};$to=@{x=[int]($hostBox.Left+8*$scale);y=[int]($hostBox.Top+$hostBox.Height/2)}
+    $workspace=Workspace-Root
+    if(!$workspace){throw 'Compact face setup has no native workspace trace'}
+    Press 'mouse' $from;Drag $from $to
+    Wait-Until {$contact=$workspace.Current.HelpText|ConvertFrom-Json;$contact.phase -eq 'dragging' -and $contact.captured -and $contact.source.panel -eq 'commands'} 'Compact face setup did not admit the native grip drag'
+    @{from=$from;to=$to;contact=($workspace.Current.HelpText|ConvertFrom-Json)}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-setup.json')
+    Release
+    $null=Box 'toolbar-face-size'
+    $faceCases=@()
+    foreach($device in @('pen','touch')){foreach($activation in @('mouse','enter','space','invoke')){
+        $face=Control 'toolbar-face-size';$bounds=Box 'toolbar-face-size';$x=[int]($bounds.X+$bounds.Width/2);$y=[int]($bounds.Y+$bounds.Height/2)
+        $before=(Brush).diameter;$nextY=[int]($y+$(if($before -gt 100){20}else{-20})*$scale)
+        $case=@{device=$device;activation=$activation;bounds=$bounds.ToString();runtime_id=@($face.GetRuntimeId());before=$before;down=@($x,$y);move=@($x,$nextY)}
+        try{
+            [CapyRowPointer]::Down($device,$x,$y);[CapyRowPointer]::Move($x,$nextY)
+            Wait-Until {[Math]::Abs((Brush).diameter-$before) -gt .001} 'Compact face scrub did not acknowledge an incremental setting change'
+            [CapyRowPointer]::Up();$case.current=(Brush).diameter
+            if($activation -eq 'mouse'){[CapyRowPointer]::Down('mouse',$x,$y);[CapyRowPointer]::Up()}
+            elseif($activation -eq 'invoke'){$face.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+            else{Focus-Keyboard $face;$case.activation_focus=$face.Current.HasKeyboardFocus;[CapyRowPointer]::Key([uint32]$review.Id,$(if($activation -eq 'enter'){0x0D}else{0x20}))}
+            $popupId='number-root-'+$face.Current.Name
+            Wait-Until {$null -ne (Find $popupId)} 'Compact numeric face swallowed the activation after a scrub'
+            if((Brush).diameter -ne $case.current){throw 'Future face activation changed the incremental scrub value'}
+            [CapyRowPointer]::Key([uint32]$review.Id,0x1B);Wait-Until {!(Find $popupId)} 'Compact numeric popup did not dismiss'
+            if((Brush).diameter -ne $case.current){throw 'Dismissing the numeric popup changed the incremental scrub value'}
+            $case.passed=$true
+        }catch{$case.error=$_.Exception.Message;throw}finally{$faceCases+=@($case);$faceCases|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-cases.json')}
+    }}
+    (Control 'toolbar-face-size').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x5A)
+    Wait-Until {((Model).state.workspace.layout|ConvertTo-Json -Depth 40 -Compress) -eq $beforeFaceLayout} 'Compact face setup did not restore the original toolbar layout'
     Invoke "toolbar-more-$($options.id)"
     Wait-Until {$null -ne (Model).state.customization.drawer} 'More did not open the Tool Options drawer'
     Capture 'photo-more-drawer' -WithModel
@@ -127,7 +162,7 @@ try {
     Invoke (Tool-Tile 'gradient')
     $gradient={(@((Model).state.tool_extra|Where-Object {$_.Gradient})[0]).Gradient.value.value|ConvertTo-Json -Depth 8 -Compress}
     Wait-Until {(& $gradient) -and (Find 'toolbar-gradient')} 'Gradient Tool Options did not show the gradient button'
-    $original=& $gradient;$scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $original=& $gradient;$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $box=(Control 'toolbar-gradient').Current.BoundingRectangle
     if([Math]::Abs($box.Height-24*$scale) -gt 1.5){throw 'The Tool Options gradient button is not 24 DIP tall'}
     $face=@{x=[int]($box.X+$box.Width/2);y=[int]($box.Y+$box.Height/2)}
@@ -151,7 +186,7 @@ try {
     [CapyRowPointer]::Dispose()
     Invoke (Tool-Tile 'zoom')
     Wait-Until {(Model).state.layer_tools.tool -eq 'zoom'} 'Zoom did not activate for Tool Options'
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     foreach($id in 'zoom-click','zoom-drag'){
         $spec=@((Model).state.tool_extra|ForEach-Object {$_.Choice}|Where-Object id -eq $id)[0]
         $previous=$null
@@ -170,7 +205,7 @@ try {
     $center.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {(Model).state.settings.zoom_tool.center_clicked_point} 'Tool Options checkbox did not reach shared settings'
     Capture "photo-zoom-options-$Theme" -WithModel -Composed
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 744 -Height 760
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Resize -Width 744 -Height 760
     Invoke "toolbar-more-$($options.id)"
     Wait-Until {$null -ne (Model).state.customization.drawer} 'Narrow Tool Options overflow did not open its drawer'
     $drawer=Control 'tool-drawer'
@@ -187,15 +222,7 @@ try {
     [CapyRowPointer]::Hover([int]($target.X+$target.Width/2),[int]($target.Y+$target.Height/2))
     [CapyRowPointer]::Key(0x1B)
     Wait-Until {!((Model).state.customization.drawer)} 'Zoom overflow drawer did not close'
-    $null=$review.CloseMainWindow();$lastDecision=$null
-    Wait-Until {
-        $review.Refresh();if($review.HasExited){return $true}
-        $m=Model;$discard=Find 'Discard Changes' -Name -Type ([System.Windows.Automation.ControlType]::Button)
-        if($m.windows_isolated_settings -and $discard -and $discard.Current.IsEnabled -and $lastDecision -ne $m.state.document_file.epoch){
-            $discard.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();$lastDecision=$m.state.document_file.epoch
-        }
-        return $false
-    } 'Owned review did not close' 20 -Closing
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
     if($review.ExitCode -ne 0){throw "Native review exit code $($review.ExitCode)"}
     if((Get-Item $stderr).Length){throw 'Review stderr is not empty'}
     @{status='passed';captures=$run;scope='Guarded OS-delivered synthetic mouse, touch and pen input. Physical digitizers are not tested.'}|ConvertTo-Json

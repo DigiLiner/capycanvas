@@ -580,6 +580,24 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn state(&self) -> &UiState {
         &self.state
     }
+    pub fn color_edit_context(&self) -> ColorEditContext {
+        let mask = self.selection_masks.target();
+        let colors = if mask.is_some() { &self.selection_masks.colors } else { &self.state.colors };
+        ColorEditContext {
+            document: self.engine.document().owner,
+            epoch: self.state.document_file.epoch,
+            color: self.engine.document().composition().color,
+            mask,
+            slot: colors.slot,
+            paint_slot: colors.paint_slot(),
+            shape: colors.shape,
+        }
+    }
+    pub fn color_wheel_context(&self) -> ColorEditContext {
+        let mut context = self.color_edit_context();
+        context.slot = context.paint_slot;
+        context
+    }
     /// Only committed workspace topology is durable. A process interruption
     /// during a drag must restore its starting layout, not an intermediate tear-off.
     pub fn durable_workspace(&self) -> WorkspaceState {
@@ -2701,6 +2719,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let UiAction::CanvasBarEdit { context, action } = action {
             return self.canvas_bar_edit(context, *action);
         }
+        if let UiAction::ColorEdit { context, action } = action {
+            let current = if matches!(&action, ColorAction::PickWheel { .. }) { self.color_wheel_context() } else { self.color_edit_context() };
+            if context != current { return Ok(UiChange::default()); }
+            return self.dispatch(UiAction::Color { action });
+        }
         if let UiAction::Notice { id, accept, action } = action {
             return self.notice_action(id, accept, action);
         }
@@ -2862,7 +2885,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::Histogram { action } => { self.histogram_action(action)?; (HISTOGRAM, true) }
             UiAction::CommandSearch { .. } => unreachable!("handled above"),
-            UiAction::ToolbarEdit { .. } | UiAction::CanvasBarEdit { .. } | UiAction::Notice { .. } => {
+            UiAction::ToolbarEdit { .. } | UiAction::CanvasBarEdit { .. } | UiAction::ColorEdit { .. } | UiAction::Notice { .. } => {
                 unreachable!("validated before dispatch")
             }
             UiAction::ToggleSliderBookmark { control } => {

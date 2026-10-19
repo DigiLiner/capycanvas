@@ -3,6 +3,7 @@
 #include "WorkspaceGeometry.h"
 #include "NativeMenus.h"
 #include "RangeControl.h"
+#include "PointerGesture.h"
 #include "EffectControls.h"
 #include <robuffer.h>
 #include <winrt/Windows.Storage.Streams.h>
@@ -320,8 +321,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
     }
     void pressed(PointerRoutedEventArgs const& e){
         auto p=e.GetCurrentPoint(track);
-        if(!enabled||contact)return;
-        if(p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
+        if(!enabled||contact||!PointerGesture::PrimaryContact(p))return;
         if(!track.CapturePointer(e.Pointer()))return;
         contact=Contact{p.PointerId(),p.Position()};e.Handled(true);
         pick(e,true);show();
@@ -551,7 +551,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto weak=weak_from_this();
         auto id=str(option,L"id");auto settingSpec=object(option,L"numeric");
         auto info=toolbarUi(data->localization.get(),O({{L"type",S(L"numeric_info")},{L"id",S(id)},{L"control",settingSpec},{L"compact",B(true)},{L"units",B(true)}})).GetObject();
-        struct State {double value=0;bool units=true,scrubbed=false;std::optional<Contact> contact;double startFill=0;};
+        struct State {double value=0;bool units=true;std::optional<Contact> contact;double startFill=0;};
         auto state=std::make_shared<State>();state->value=num(option,L"value");
         auto set=[weak,id](double value){if(auto self=weak.lock())self->send(O({{L"type",S(L"set_tool_setting")},{L"id",S(id)},{L"value",N(value)}}));};
         auto reset=[weak,id]{if(auto self=weak.lock())self->send(O({{L"type",S(L"reset_tool_setting")},{L"id",S(id)}}));};
@@ -603,9 +603,12 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             faceValue.Text(text);
             faceValue.FontSize(self->data->textSize()*(self->tileStyle==L"small"&&text.size()>=4?.9:1.));
         };
-        face.Click([weak,state,settingSpec,currentTitle=presentation.title,set,reset](winrt::Windows::Foundation::IInspectable const& sender,auto&&){
+        auto clicks=PointerGesture::Clicks(face,[state](uint32_t id,bool){
+            if(state->contact&&state->contact->id==id)state->contact.reset();
+        });
+        face.Click([weak,state,clicks,settingSpec,currentTitle=presentation.title,set,reset](winrt::Windows::Foundation::IInspectable const& sender,auto&&){
             auto self=weak.lock();if(!self)return;
-            if(std::exchange(state->scrubbed,false))return;
+            if(clicks->SuppressClick())return;
             self->closePopup();
             Bindings bindings;StackPanel content;content.MinWidth(220);content.MaxWidth(320);
             NumberPresentation presentation;presentation.title=currentTitle;presentation.reset=reset;
@@ -614,26 +617,20 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             self->editor=Flyout();self->editor.Content(content);TrackPopup(self->editor,self->data);
             self->editor.ShowAt(sender.as<FrameworkElement>());
         });
-        face.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([state,settingSpec,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
+        face.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([state,clicks,settingSpec,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
             auto p=e.GetCurrentPoint(sender.as<UIElement>());
-            if(p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse)return;
-            state->scrubbed=false;state->contact=Contact{p.PointerId(),p.Position()};
+            if(state->contact||!clicks->Owns(p.PointerId())||p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse)return;
+            state->contact=Contact{p.PointerId(),p.Position()};
             state->startFill=num(numeric(data->localization.get(),settingSpec,state->value,O({{L"type",S(L"format")}})),L"fill");
         })),true);
-        face.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([state,settingSpec,set,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
+        face.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([state,clicks,settingSpec,set,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
             if(!state->contact||state->contact->id!=e.Pointer().PointerId())return;
             auto p=e.GetCurrentPoint(sender.as<UIElement>()).Position();
             if(!state->contact->moved&&std::abs(p.Y-state->contact->start.Y)<8)return;
-            state->contact->moved=true;
+            state->contact->moved=true;clicks->Suppress(e.Pointer().PointerId());
             auto next=numeric(data->localization.get(),settingSpec,state->value,O({{L"type",S(L"position")},{L"position",N(state->startFill+(state->contact->start.Y-p.Y)/200)}}));
             if(num(next,L"value")!=state->value)set(num(next,L"value"));
         })),true);
-        auto finish=[state](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
-            if(state->contact&&state->contact->id==e.Pointer().PointerId()){state->scrubbed=state->contact->moved;state->contact.reset();}
-        };
-        face.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler(finish)),true);
-        face.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler(finish)),true);
-        face.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler(finish)),true);
         face.PointerWheelChanged([state,settingSpec,set,data=data](auto&&,PointerRoutedEventArgs const& e){
             auto delta=e.GetCurrentPoint(nullptr).Properties().MouseWheelDelta();if(!delta)return;
             e.Handled(true);

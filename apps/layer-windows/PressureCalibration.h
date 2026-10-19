@@ -1,5 +1,6 @@
 #pragma once
 #include "EffectControls.h"
+#include "PointerGesture.h"
 #include "WorkspaceShadow.h"
 #include "WorkspaceGeometry.h"
 
@@ -62,15 +63,18 @@ struct PressureCalibration:std::enable_shared_from_this<PressureCalibration>{
         header.ManipulationMode(ManipulationModes::None);
         header.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             for(auto node=e.OriginalSource().try_as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node))if(node==self->close)return;
-            auto raw=e.GetCurrentPoint(self->host);if(!raw.IsInContact()||self->pointer)return;
-            if(raw.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!raw.Properties().IsLeftButtonPressed())return;
+            auto raw=e.GetCurrentPoint(self->host);if(self->pointer||!PointerGesture::PrimaryContact(raw))return;
             if(!self->header.CapturePointer(e.Pointer()))return;
             self->pointer=raw.PointerId();self->drag(L"down",raw.Position());e.Handled(true);
         }});
         header.PointerMoved([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){self->drag(L"move",e.GetCurrentPoint(self->host).Position());e.Handled(true);}});
-        header.PointerReleased([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){self->pointer.reset();self->drag(L"up",e.GetCurrentPoint(self->host).Position());self->header.ReleasePointerCaptures();e.Handled(true);}});
-        auto cancelDrag=[weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pointer){self->pointer.reset();self->drag(L"cancel");}};
-        header.PointerCanceled(cancelDrag);header.PointerCaptureLost(cancelDrag);
+        PointerGesture::OnCompleted(header,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){
+            self->pointer.reset();
+            if(cancel)self->drag(L"cancel");else{
+                self->drag(L"up",e.GetCurrentPoint(self->host).Position());self->header.ReleasePointerCaptures();
+            }
+            e.Handled(true);
+        }});
         frame.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&!composingKey(e)&&e.Key()==Windows::System::VirtualKey::Escape){
             self->data->dispatch(O({{L"type",S(L"curve_editor")},{L"target",O({{L"kind",S(L"pressure")}})},{L"action",O({{L"kind",S(L"key")},{L"epoch",object(object(self->view(),L"editor"),L"controls").GetNamedValue(L"epoch")},
                 {L"key_event",S(L"Escape")},{L"pressed",B(true)},{L"repeat",B(e.KeyStatus().WasKeyDown)},{L"modifiers",O({{L"command",B(false)},{L"shift",B(false)},{L"alt",B(false)}})}})}}));e.Handled(true);

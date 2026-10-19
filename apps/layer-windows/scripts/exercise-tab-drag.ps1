@@ -1,15 +1,16 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
-$CapyCacheModel=$true;$CapyEach={[CapyCanvasTouch]::Verify()}
+$CapyCacheModel=$true;$CapyEach={if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)};[CapyCanvasTouch]::Verify()}
 Add-Type -AssemblyName System.Drawing
 Add-Type -Path (Join-Path $PSScriptRoot 'CanvasTouchDriver.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
-$directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/tab-drag/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+$directory=$run;$CapyTraceDirectory=$run
 function Find-Preview {
  # Preview copies are excluded from the accessible control/content views.
  # Inspect only the workspace's direct raw children for this visual fixture.
@@ -69,7 +70,7 @@ function Check-Motion($Before,$After,[uint32]$Group) {
 function Check-OverviewOverlap([string]$Before,[string]$After) {
  $overview=(Control 'navigator-overview').Current.BoundingRectangle
  $origin=[CapyRowPointer+Point]::new()
- if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'Cannot locate client capture'}
+ if(![CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Cannot locate client capture'}
  $model=Model;$document=$model.state.tabs[0]
  $fit=[Math]::Min(($overview.Width-8*$scale)/$document.width,($overview.Height-8*$scale)/$document.height)
  $width=$document.width*$fit;$height=$document.height*$fit
@@ -135,18 +136,22 @@ function Undo-Workspace {
 try{
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
  $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
  $stderr=Join-Path $run 'stderr.log'
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
  $null=$review.Handle
  [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/tab-drag-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
  Write-Output "Owned tab review $($review.Id)"
- Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready} 'Review did not start' 75
+ $drawingWindow=$native.window.Handle;$root=$native.window.Root
  [CapyCanvasTouch]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
- [CapyCanvasTouch]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
+ [CapyCanvasTouch]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyCanvasTouch]::Initialize([uint32]$review.Id)
- $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+ $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+ if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Invalid run: owned window DPI is unavailable'}
  Start-Sleep -Milliseconds 350
  $baseline=Model
  $normal=$baseline.state.workspace.layout|ConvertTo-Json -Depth 80 -Compress
@@ -237,13 +242,16 @@ try{
   };$true}finally{$restored.Dispose()}
  } 'Navigator cancellation did not restore the lower native panel pixels'
  if((Model).state.document_file.modified){throw 'Navigator workspace/camera motion modified the drawing'}
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
+ if(!$review.WaitForExit(15000)){throw 'Owned tab-drag window did not close'}
+ if($review.ExitCode -ne 0){throw "Owned tab-drag process exited $($review.ExitCode)"}
  if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
  [pscustomobject]@{os_touch_routing='passed';attached_preview='passed';fixed_hit_rectangles='passed';release_insertion='passed';different_grab_position='passed';pointer_cancel='passed';tear_off='passed';held_floating_drag='passed';incremental_publication='passed';retained_native_controls='passed';resize_grip_placement='passed';navigator_gpu_motion='passed';fast_tearoff_capture='passed';mixed_camera='passed';overview_occlusion_and_restore='passed';detached_cancel='passed';workspace_undo='passed';zero_exit='passed';scope='OS-injected touch; physical input and latency acceptance remain separate'}|ConvertTo-Json
 }catch{
  try{Capture 'failure' -WithModel -Composed}catch{}
  [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{
- [CapyCanvasTouch]::Dispose()
+ try{[CapyCanvasTouch]::Dispose()}catch{}
+ if($review -and !$review.HasExited){if($drawingWindow){$null=[CapyWindowApi]::PostMessage($drawingWindow,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)};if(!$review.WaitForExit(10000)){$review.Kill();$review.WaitForExit()}}
  Exit-CapyEnvironment
 }

@@ -244,9 +244,10 @@ impl CanvasRenderer for Recorder {
                 if revision.try_data().is_none() {
                     use layer_core::raster::*;
                     let plane = if target.is_coverage() { RasterPlane::Mask } else { RasterPlane::Color };
-                    let bytes = vec![128; plane.descriptor_for(self.document_color(), packet.scene.color_mode(target)).byte_len([TILE_SIZE; 2]).unwrap()];
+                    let descriptor = plane.descriptor_for(self.document_color(), packet.scene.color_mode(target));
+                    let bytes = vec![if descriptor.sample == layer_core::color::SampleType::Float { 0 } else { 128 }; descriptor.byte_len([TILE_SIZE; 2]).unwrap()];
                     let mut data = RasterData::default();
-                    data.tiles.insert(TileKey { plane, coordinate: [0, 0] }, RasterTile::backed(TileBlob::encode(plane.descriptor_for(self.document_color(), packet.scene.color_mode(target)), &bytes).unwrap()));
+                    data.tiles.insert(TileKey { plane, coordinate: [0, 0] }, RasterTile::backed(TileBlob::encode(descriptor, &bytes).unwrap()));
                     revision.publish(Ok(data)).unwrap();
                 }
             }

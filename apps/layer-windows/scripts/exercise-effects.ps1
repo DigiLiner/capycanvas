@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','curve-dark','curve-light')][string]$Theme='dark',[switch]$PropertyLayout)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','curve-dark','curve-light')][string]$Theme='dark',[switch]$PropertyLayout)
 $ErrorActionPreference='Stop'
 $curveOnly=$Theme.StartsWith('curve-');if($curveOnly){$Theme=$Theme.Substring(6)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
@@ -98,6 +98,7 @@ function Preview-Hash([string]$Id){
 }
 
 function Field([string]$Axis){Control "property-rgb-$Axis"}
+function Finite([double]$Value){![double]::IsNaN($Value) -and ![double]::IsInfinity($Value)}
 function Graph-Height{200*[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.}
 function Show-Graph([double]$Percent=0){
     $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$node=$walker.GetParent((Control 'property-rgb-curve'))
@@ -106,7 +107,7 @@ function Show-Graph([double]$Percent=0){
     $settled=@{bounds=$null;scroll=-1;visible=$false;enabled=$false}
     try{Wait-Until {
         $graph=Control 'property-rgb-curve';$bounds=$graph.Current.BoundingRectangle
-        $visible=!$bounds.IsEmpty -and [double]::IsFinite($bounds.X) -and [double]::IsFinite($bounds.Y) -and [double]::IsFinite($bounds.Width) -and [double]::IsFinite($bounds.Height) -and $bounds.Width -gt 0 -and $bounds.Height -gt (6*[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.) -and !$graph.Current.IsOffscreen
+        $visible=!$bounds.IsEmpty -and (Finite $bounds.X) -and (Finite $bounds.Y) -and (Finite $bounds.Width) -and (Finite $bounds.Height) -and $bounds.Width -gt 0 -and $bounds.Height -gt (6*[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.) -and !$graph.Current.IsOffscreen
         $same=$visible -and $graph.Current.IsEnabled -and $bounds -eq $settled.bounds
         if(!$visible -and $node -and $scroll.Current.VerticallyScrollable){
             $currentPercent=$scroll.Current.VerticalScrollPercent
@@ -287,6 +288,25 @@ function Check-PropertyValueScrub {Pointer-Session {
         Wait-Until {[Math]::Abs((Property 'opacity').value.value-.5) -lt 1e-6} 'Value scrub seed did not commit'
         try{Wait-Until {(Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -in @('50','50 %') -and [Math]::Abs((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value-.5) -lt 1e-6} 'Scrub origin did not reach native controls'}catch{throw "Scrub origin native text=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value), slider=$((Control 'property-opacity-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value): $_"}
         Write-Host "$device native seed acknowledged"
+        if($device -eq 'mouse'){
+            $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+            $readout=Native-Bounds 'property-opacity' $scale
+            $track=Native-Bounds 'property-opacity-slider' $scale
+            $x=[int][Math]::Round($readout.Right-3*$scale);$y=[int][Math]::Round($readout.Top+$readout.Height/2)
+            $point=[Windows.Point]::new($x,$y)
+            if(!$readout.Contains($point) -or $track.Contains($point) -or $x-$track.Right -lt 2*$scale){throw 'Secondary input does not target the panel value readout'}
+            $entry=Control 'property-opacity';$value=(Property 'opacity').value.value
+            $text=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+            $focus=([System.Windows.Automation.AutomationElement]::FocusedElement).GetRuntimeId() -join ':'
+            if($entry.Current.HasKeyboardFocus){throw 'Secondary readout test started inside the numeric editor'}
+            $evidence=@{before=@{value=$value;text=$text;focus=$focus};hit=(Input-Trace $x $y);readout=$readout;slider=$track;device='mouse';button='right'}
+            [CapyRowPointer]::RightDrag($x,$y,$x,[int][Math]::Round($y-32*$scale))
+            Start-Sleep -Milliseconds 350
+            $evidence.after=@{text=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;editor_focused=$entry.Current.HasKeyboardFocus;focus=(([System.Windows.Automation.AutomationElement]::FocusedElement).GetRuntimeId() -join ':');value=(Property 'opacity').value.value}
+            $evidence.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds
+            $evidence|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'property-secondary-input.json')
+            if($evidence.after.value -ne $value -or $evidence.after.text -cne $text -or $evidence.after.editor_focused -or $evidence.after.focus -cne $focus){throw 'Secondary mouse drag changed the panel value, editor or focus'}
+        }
         $before=(Property 'opacity').value.value;$box=(Control 'property-opacity' -Arranged).Current.BoundingRectangle
         $x=[int]($box.Left+$box.Width/2);$y=[int]($box.Top+$box.Height/2)
         $expected=[Math]::Round($before+30/([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)/4/100,3)
@@ -615,6 +635,7 @@ try {
     Wait-Until {[Math]::Abs((Property 'opacity').value.value-.6) -lt .000001} 'Opacity not updated'
     Choose 'property-blend' 'Multiply';Wait-Until {(Property 'blend').value.value -eq 1} 'Blend not updated'
     Check-PropertyScrub
+    Check-PropertyValueScrub
     Select-Filter 'curves' 'Curves'
     $curveGestures=Check-CurveGestures
     $graph=(Control 'property-rgb-curve').GetRuntimeId() -join ':'

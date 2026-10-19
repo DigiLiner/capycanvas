@@ -19,6 +19,7 @@ public:
     void SetFullscreen(bool active);
     void SetBlocked(bool blocked);
     bool Key(winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& event,bool pressed);
+    bool CancelGesture();
     std::vector<winrt::Windows::Graphics::RectInt32> DragRegions(float scale,uint32_t width)const;
     void AppendGlass(winrt::Windows::Data::Json::JsonArray& regions,winrt::Microsoft::UI::Xaml::UIElement const& reference)const;
     void SetDrawerSources(winrt::Windows::Data::Json::JsonArray const& sources);

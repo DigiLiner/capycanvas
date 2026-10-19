@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "RangeControl.h"
+#include "PointerGesture.h"
 
 using namespace CapyUi;
 namespace {
@@ -54,7 +55,7 @@ void RangeControl::init(bool showTrack){
     track.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->paint();});
     track.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
         auto point=e.GetCurrentPoint(self->track);
-        if(self->contact||self->retired||(point.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!point.Properties().IsLeftButtonPressed()))return;
+        if(self->contact||self->retired||!PointerGesture::PrimaryContact(point))return;
         double width=self->track.ActualWidth(),x=point.Position().X;
         std::array<double,2> positions{self->position(self->values[0],width),self->position(self->values[1],width)};
         int index=std::abs(positions[1]-positions[0])<1?int(x>=positions[0]):int(std::abs(x-positions[1])<std::abs(x-positions[0]));
@@ -65,13 +66,9 @@ void RangeControl::init(bool showTrack){
     track.PointerMoved([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->contact&&self->contact->id==e.Pointer().PointerId()){
         self->pick(e.GetCurrentPoint(self->track).Position().X);e.Handled(true);
     }});
-    track.PointerReleased([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->contact&&self->contact->id==e.Pointer().PointerId()){
-        self->end(false);e.Handled(true);
+    PointerGesture::OnCompleted(track,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto self=weak.lock();self&&self->contact&&self->contact->id==e.Pointer().PointerId()){
+        self->end(cancel);e.Handled(true);
     }});
-    for(auto kind:{0,1}){
-        auto cancel=[weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->contact&&self->contact->id==e.Pointer().PointerId())self->end(true);};
-        if(kind)track.PointerCanceled(cancel);else track.PointerCaptureLost(cancel);
-    }
     root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->contact&&e.Key()==winrt::Windows::System::VirtualKey::Escape){
         self->end(true);e.Handled(true);
     }});

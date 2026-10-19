@@ -86,7 +86,7 @@ struct CommandSearchPopup : std::enable_shared_from_this<CommandSearchPopup> {
         }});
         entry.TextChanged([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->updating&&self->view.Size()&&!self->parameter().Size())
             self->send(O({{L"type",S(L"query")},{L"text",S(self->entry.Text())}}));});
-        frame.PreviewKeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->view.Size()){
+        ShortcutKeys(frame,[weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->view.Size()){
             if(composingKey(e))return;
             using Windows::System::VirtualKey;
             switch(e.Key()){

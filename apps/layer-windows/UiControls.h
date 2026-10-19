@@ -40,6 +40,16 @@ void captureTextComposition(TextBox const& entry,std::function<void(bool)> local
 bool textComposing(DependencyObject element);
 bool focusedTextComposing(XamlRoot const& root);
 bool composingKey(KeyRoutedEventArgs const& event);
+template<class Handler>
+inline std::pair<event_token,event_token> ShortcutKeys(UIElement const& element,Handler handler){
+    auto preview=element.PreviewKeyDown([handler](auto&& sender,KeyRoutedEventArgs const& e){
+        if(e.Key()!=Windows::System::VirtualKey::Escape)handler(sender,e);
+    });
+    auto bubble=element.KeyDown([handler](auto&& sender,KeyRoutedEventArgs const& e){
+        if(e.Key()==Windows::System::VirtualKey::Escape)handler(sender,e);
+    });
+    return {preview,bubble};
+}
 inline V S(hstring const& value){return JsonValue::CreateStringValue(value);}
 inline V N(double value){return JsonValue::CreateNumberValue(value);}
 inline V B(bool value){return JsonValue::CreateBooleanValue(value);}

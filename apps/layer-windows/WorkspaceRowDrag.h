@@ -13,7 +13,7 @@ public:
     using Move=std::function<void(Id,std::optional<Id>)>;
     WorkspaceRowDrag(winrt::Microsoft::UI::Xaml::Controls::ListView list,
         winrt::Microsoft::UI::Xaml::Controls::Grid surface,
-        std::function<bool()> available,Move move,std::function<void(Id)> select,std::function<void()> ended);
+        std::function<bool()> available,Move move,std::function<void()> ended);
     ~WorkspaceRowDrag();
     void Attach(winrt::Microsoft::UI::Xaml::Controls::ListViewItem row,
         winrt::Microsoft::UI::Xaml::Controls::Button grip,

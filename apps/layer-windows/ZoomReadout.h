@@ -1,6 +1,6 @@
 #pragma once
 #include "UiControls.h"
-#include "WorkspaceQuery.h"
+#include "NativeMenus.h"
 #include "NavigationControls.h"
 #include <winrt/Microsoft.UI.Xaml.Controls.Primitives.h>
 
@@ -18,7 +18,8 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
     double zoom=1,rotation=0;
     hstring flipped;bool zoomLocked=false,rotationLocked=false;
     hstring menuKey;
-    uint64_t transient=0,request=0;
+    OwnedPopup menuOwner;
+    uint64_t request=0;
     bool open=false;
     weak_ref<Control> previous;
 
@@ -58,17 +59,15 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
         scroller.Content(body);scroller.HorizontalScrollMode(ScrollMode::Disabled);scroller.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
         scroller.VerticalScrollMode(ScrollMode::Auto);scroller.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
         popup.Content(scroller);popup.ShowMode(Primitives::FlyoutShowMode::Transient);popup.Placement(Primitives::FlyoutPlacementMode::TopEdgeAlignedRight);
-        popup.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){self->open=true;self->data->popup(true);AutomationProperties::SetItemStatus(self->root,self->data->caption(L"header",L"open"));}});
+        popup.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){self->open=true;AutomationProperties::SetItemStatus(self->root,self->data->caption(L"header",L"open"));}});
         popup.Closed([weak](auto&&,auto&&){if(auto self=weak.lock()){
-            self->open=false;self->data->popup(false);self->menuKey=L"";
+            self->open=false;self->menuKey=L"";
             auto focus=FocusManager::GetFocusedElement(self->root.XamlRoot()).try_as<UIElement>();
             if(!focus||self->within(focus))self->restoreFocus();
             self->previous=nullptr;
             AutomationProperties::SetItemStatus(self->root,self->data->caption(L"header",L"closed"));
         }});
-        transient=data->transient([weak]{auto self=weak.lock();if(!self||!self->open)return false;self->popup.Hide();return true;});
     }
-    ~ZoomReadout(){if(data)data->transients.erase(transient);}
     void Update(J const& camera){
         if(!camera.Size())return;
         auto next=to_hstring(int(std::round(num(camera,L"zoom",1)*100)))+L"% · "+to_hstring(int(std::round(num(camera,L"rotation")*180/3.141592653589793)))+L"°";
@@ -97,16 +96,17 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
     }
     void query(bool show){
         auto serial=++request;auto weak=weak_from_this();
-        QueryWorkspace(data->query,O({{L"type",S(L"zoom_menu")}}),[weak,serial,show](J reply){
-            auto self=weak.lock();if(!self||serial!=self->request||(!show&&!self->open))return;
+        auto ticket=show?menuOwner.Begin(data,root,popup):OwnedPopup::Ticket{};
+        if(!QueryWorkspace(data->query,O({{L"type",S(L"zoom_menu")}}),[weak,serial,show,ticket](J reply){
+            auto self=weak.lock();if(!self||serial!=self->request||(show?!ticket.Current():!self->open))return;
             self->render(object(reply,L"result"));
             if(!self->open){
                 if(auto xaml=self->root.XamlRoot())self->scroller.MaxHeight(std::max(0.,double(xaml.Size().Height)-12));
                 Primitives::FlyoutShowOptions options;options.Placement(Primitives::FlyoutPlacementMode::TopEdgeAlignedRight);
                 options.ShowMode(Primitives::FlyoutShowMode::Transient);
-                self->popup.ShowAt(self->root,options);
+                ticket.Show(self->root,options);
             }
-        });
+        }))ticket.Cancel();
     }
     static hstring itemId(J const& action){
         auto type=str(action,L"type");

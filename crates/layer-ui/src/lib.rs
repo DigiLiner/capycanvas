@@ -91,7 +91,7 @@ pub use color::{
     ColorLibrary, ColorLibraryAction, ColorPalette, ColorReorderPreview, SavedColor,
     PaletteChoiceView, PaletteCommand, PaletteExport, PaletteFileRequest, PaletteFormat, palette_file, PaletteMenuItem, PaletteMenuTarget, PalettePanelView,
     PaletteTileView, SwatchSectionView, SwatchSheetView, selected_swatch,
-    HdrIntensityArc, ColorAction, ColorComponentView, ColorHueStop, ColorPanelLayout, ColorPanelView, ColorReadout, ColorShape, ColorSlot, ColorSpace, ColorState,
+    HdrIntensityArc, ColorAction, ColorEditContext, ColorComponentView, ColorHueStop, ColorPanelLayout, ColorPanelView, ColorReadout, ColorShape, ColorSlot, ColorSpace, ColorState,
     ColorSwatchView, PaintPairView, PaintSwatchView, ColorWheelGeometry, ColorWheelPart, render_color_field, render_hue_guide_in, render_hue_ring_f16_in,
 };
 pub use tool_settings::{ToolActionGroup, ToolActionGroupView, ToolActionRow, ToolActionRowView, ToolSetting, ToolSettingAction};
@@ -1566,6 +1566,10 @@ pub enum UiAction {
         rgba: [f32; 4],
     },
     Color {
+        action: ColorAction,
+    },
+    ColorEdit {
+        context: ColorEditContext,
         action: ColorAction,
     },
     SetToolSetting {

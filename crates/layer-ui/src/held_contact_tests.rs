@@ -67,6 +67,70 @@ fn a_held_contact_and_the_tool_chosen_after_it_keep_their_order() {
 }
 
 #[test]
+fn queued_color_selection_rejects_an_older_hdr_contact_and_its_rollback() {
+    use layer_core::color::SampleDepth;
+    let mut document = Document::new(layer_core::PortableId::random(), 1000, 1000, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color.depth = SampleDepth::F32;
+    let mut s = UiSession::new(Recorder { color: document.composition().color, ..Default::default() }, document, [1000, 1000], Platform::Gtk).unwrap();
+    for (slot, rgba, stops) in [(ColorSlot::Background, [0.6, 0.3, 0.1, 1.], -1.), (ColorSlot::Foreground, [0.2, 0.4, 0.6, 1.], 1.)] {
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot } }).unwrap();
+        s.dispatch(UiAction::SetColor { rgba }).unwrap();
+        s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops } }).unwrap();
+    }
+    let paint = |colors: &ColorState, slot| {
+        let mut colors = colors.clone();
+        colors.apply(ColorAction::Select { slot }).unwrap();
+        (colors.definition(), colors.hdr_intensity())
+    };
+    let before = [paint(&s.state.colors, ColorSlot::Foreground), paint(&s.state.colors, ColorSlot::Background)];
+    let context = s.color_edit_context();
+    s.frame(1, 1).unwrap();
+    s.renderer_mut().painting_unready = true;
+    for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
+        s.pen(event(&s, sequence, phase, 0.5));
+    }
+    s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Background } }).unwrap();
+    for stops in [3., before[0].1] {
+        s.dispatch(UiAction::ColorEdit { context, action: ColorAction::HdrIntensity { stops } }).unwrap();
+    }
+    assert!(s.holding_input());
+    assert_eq!(s.state.colors.slot, ColorSlot::Foreground);
+    s.renderer_mut().painting_unready = false;
+    settle(&mut s);
+    assert!(!s.holding_input() && s.deferred_edits.is_empty());
+    assert_eq!(s.state.colors.slot, ColorSlot::Background);
+    assert_eq!([paint(&s.state.colors, ColorSlot::Foreground), paint(&s.state.colors, ColorSlot::Background)], before);
+}
+
+#[test]
+fn queued_transparent_selection_rejects_an_older_hdr_contact_and_its_rollback() {
+    use layer_core::color::SampleDepth;
+    let mut document = Document::new(layer_core::PortableId::random(), 1000, 1000, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color.depth = SampleDepth::F32;
+    let mut s = UiSession::new(Recorder { color: document.composition().color, ..Default::default() }, document, [1000, 1000], Platform::Gtk).unwrap();
+    s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: 1. } }).unwrap();
+    let context = s.color_edit_context();
+    let mut expected = s.state.colors.clone();
+    expected.apply(ColorAction::Select { slot: ColorSlot::Transparent }).unwrap();
+    s.frame(1, 1).unwrap();
+    s.renderer_mut().painting_unready = true;
+    for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
+        s.pen(event(&s, sequence, phase, 0.5));
+    }
+    s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+    for stops in [3., 1.] {
+        s.dispatch(UiAction::ColorEdit { context, action: ColorAction::HdrIntensity { stops } }).unwrap();
+    }
+    assert!(s.holding_input());
+    assert_eq!(s.state.colors.slot, ColorSlot::Foreground);
+    s.renderer_mut().painting_unready = false;
+    settle(&mut s);
+    assert!(!s.holding_input() && s.deferred_edits.is_empty());
+    assert_eq!(s.state.colors.slot, ColorSlot::Transparent);
+    assert_eq!(s.state.colors, expected);
+}
+
+#[test]
 fn cancelled_expired_and_oversized_held_contacts_are_discarded() {
     let mut s = held_session();
     let committed = s.engine.metrics().committed_strokes;

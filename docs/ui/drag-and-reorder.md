@@ -35,7 +35,10 @@ a stationary touch/pen hold opens its context menu. Scroll long palettes from
 the gaps, scrollbar, wheel or trackpad; dragging near an edge scrolls during
 reordering. The lifted color follows the grab point, and neighboring colors slide
 around its proposed slot. Hovering previews order without editing the palette;
-a valid release commits one move. Other interactive tiles keep the hold rule.
+a valid release commits one move. Resolve the final slot from release coordinates,
+independently of earlier asynchronous preview replies. A preview reply belongs to
+one request in one contact, including across scrolling. Other interactive tiles
+keep the hold rule.
 
 An explicit handle takes precedence over its enclosing row or tile. Other child
 controls retain ordinary click/edit behavior until a recognized reorder gesture
@@ -43,6 +46,29 @@ claims the contact. Title/tab bars use the immediate rule even when a tab looks
 like an icon button. A collapsed-column icon outside a tab bar uses the tile rule
 if it supports dragging. Classify by the visible hit surface, not only by the
 Rust drag payload: `DockItem::Panel` can originate at a tab, grip, or icon tile.
+
+Keep native controls and their ancestors in place while a contact can still
+become a click. Raising, reparenting or replacing a pressed container can cancel
+pen and touch capture. Transfer capture after a hold or drag wins, then change
+the presentation; a press alone must not change stacking order.
+Pointer cleanup must also preserve a menu opened by the native click. Dismiss
+menus explicitly when cancellation, a new contact or a drag takes ownership.
+Native flyout tracking must retain window cancellation after the contact ends.
+Abandoning an unclaimed drag candidate must leave native child clicks available;
+native scrolling or an admitted gesture can cancel them. Held menus must keep
+the original contact available for dragging. Pending menu replies belong to the
+same source and must retire with dismissal, cancellation or a later native press,
+including presses on controls outside registered drag sources. Register that
+ownership before requesting the menu and retain it through native opening.
+Custom hold recognition owns the loaded visual tree, including template and
+content children, and refreshes ownership when a contact begins. Native text
+editing keeps its own gestures.
+Native list-item clicks own row activation; drag completion must not synthesize
+a click from distance or elapsed time. Retire an unclaimed candidate when it
+leaves the observed surface; captured gestures retain their terminal events.
+Native editors and submenus handle Escape before ancestor gesture cancellation.
+Windows shortcut owners use `ShortcutKeys`: other keys preview, while unhandled
+Escape bubbles through `KeyDown`.
 
 In **Customize Title Bar**, the whole item is a placement surface, not an active
 tool button. Its body and decorative grip both drag immediately after slop.

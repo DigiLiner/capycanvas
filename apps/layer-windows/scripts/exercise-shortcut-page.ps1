@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=20
@@ -8,7 +8,7 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/shortcut-page/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
-$checks=[ordered]@{}
+$checks=[ordered]@{theme=$Theme}
 function Owned([string]$Value){
  $condition=[System.Windows.Automation.AndCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Value),
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id))
@@ -27,15 +27,16 @@ function Type-Into([string]$Id,[string]$Text){(Control $Id).GetCurrentPattern([S
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
- $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
+ $review=Start-Process -FilePath $Executable -WorkingDirectory $run -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned shortcut page review $($review.Id): $run"
- $watch=[Diagnostics.Stopwatch]::StartNew()
- do{$review.Refresh();if($review.HasExited){throw 'Review exited at startup'};Start-Sleep -Milliseconds 100}while($review.MainWindowHandle -eq [IntPtr]::Zero -and $watch.Elapsed.TotalSeconds -lt 45)
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
- Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Shortcut page review did not start' 45
+ [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Shortcut page review did not start' 45
+ $root=$native.window.Root;$drawingWindow=$native.window.Handle
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  (Control 'drawing-canvas').SetFocus()
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0xBC)
  Wait-Until {(Prefs) -and (Shown 'CloseButton')} 'Ctrl+, did not open Preferences'
@@ -43,7 +44,7 @@ try {
  Wait-Until {(Prefs).page -eq 'shortcuts' -and (Shown 'shortcut-category-Modifier keys') -and (Shown 'keymap-preset')} 'Keyboard Shortcuts did not list its categories before any search'
  if((Page).filtering){throw 'The shortcut page opened filtered'}
  foreach($category in (Page).categories){if(!(Find ('shortcut-category-'+$category.id))){throw "Category $($category.id) is not listed"}}
- Capture 'shortcuts-root-dark'
+ Capture "shortcuts-root-$Theme"
  $checks.categories_on_open='passed'
 
  $category=@((Page).categories)[1].id
@@ -51,7 +52,7 @@ try {
  Wait-Until {(Page).category -eq $category -and (Find 'settings-title').Current.Name -eq $category -and (Shown 'shortcut-category-back')} "Category $category did not open with its title and Back"
  $first=@((Prefs).shortcuts|Where-Object visible)[0]
  Wait-Until {Shown ('shortcut-'+$first.id)} "Category row $($first.id) is missing"
- Capture 'shortcuts-category-dark'
+ Capture "shortcuts-category-$Theme"
  Press 0x1B
  Wait-Until {!(Page).category -and (Prefs)} 'Escape did not return from the category'
  $checks.category_navigation_and_escape='passed'
@@ -67,7 +68,16 @@ try {
  Wait-Until {(Prefs).capture -and (Shown 'shortcut-recording')} 'Add Shortcut did not start recording'
  Press 0x78
  Wait-Until {(Prefs).capture.shortcut -eq 'F9' -and (Control 'confirm-shortcut').Current.IsEnabled} 'Recording did not capture F9'
- Capture 'shortcut-recording-dark'
+ Capture "shortcut-recording-$Theme"
+ $bindingsBefore=ConvertTo-Json -InputObject ([string[]]@((Prefs).shortcut_editor.bindings)) -Compress
+ Press 0x1B
+ Wait-Until {!(Prefs).capture -and (Prefs).page -eq 'shortcuts' -and (Prefs).shortcut_editor.id -eq 'command.Undo' -and (Shown 'shortcut-editor-close') -and (Shown 'add-shortcut')} 'Escape did not cancel recording while keeping the shortcut editor and Preferences open'
+ if((ConvertTo-Json -InputObject ([string[]]@((Prefs).shortcut_editor.bindings)) -Compress) -ne $bindingsBefore){throw 'Escape during capture changed the shortcut bindings'}
+ $checks.capture_escape_cancels_recording_only='passed'
+ Invoke-Id 'add-shortcut'
+ Wait-Until {(Prefs).capture -and (Shown 'shortcut-recording')} 'Add Shortcut did not restart recording'
+ Press 0x78
+ Wait-Until {(Prefs).capture.shortcut -eq 'F9' -and (Control 'confirm-shortcut').Current.IsEnabled} 'Recording did not capture F9 after Escape'
  Invoke-Id 'confirm-shortcut'
  Wait-Until {!(Prefs).capture -and @((Prefs).shortcut_editor.bindings) -contains 'F9' -and (Prefs).shortcut_editor.modified} 'Add did not bind F9'
  $index=[array]::IndexOf(@((Prefs).shortcut_editor.bindings),'F9')
@@ -86,7 +96,7 @@ try {
  Wait-Until {$null -ne (Owned 'Differences…')} 'The keymap menu did not open'
  (Owned 'Differences…').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {(Prefs).keymap.details -and (Shown 'keymap-details-close')} 'Differences did not open'
- Capture 'keymap-details-dark'
+ Capture "keymap-details-$Theme"
  Press 0x1B
  Wait-Until {!(Prefs).keymap.details -and (Prefs)} 'Escape did not close Differences'
  Choose 'keymap-preset' (@((Prefs).keymap.presets|Where-Object id -eq $original)[0].title)
@@ -106,7 +116,7 @@ try {
  Wait-Until {(Page).picker -and (Shown 'action-picker-search')} 'The action picker did not open'
  Type-Into 'action-picker-search' 'nothing'
  Wait-Until {(Page).picker.query -eq 'nothing' -and (Shown 'action-nothing')} 'Searching the picker did not offer Nothing'
- Capture 'action-picker-dark'
+ Capture "action-picker-$Theme"
  Invoke-Id 'action-nothing'
  Wait-Until {!(Page).picker -and (Prefs).modifier_editor.modified} 'Choosing Nothing did not change the modifier key'
  Invoke-Id 'modifier-reset'
@@ -131,7 +141,7 @@ try {
  Wait-Until {!(Page).picker -and (Prefs)} 'Reset did not close the picker'
  Invoke-Id 'trigger-pen.button.primary'
  Wait-Until {(Prefs).pen_button_editor -and (Shown 'pen-button-same')} 'The pen button page did not open'
- Capture 'pen-button-dark'
+ Capture "pen-button-$Theme"
  Press 0x1B;Wait-Until {!(Prefs).pen_button_editor -and (Prefs)} 'Escape did not return from the pen button page'
  $checks.pen_and_input_triggers='passed'
 
@@ -155,7 +165,7 @@ try {
  $checks.escape_closes_preferences='passed'
 
  [CapyRowPointer]::Dispose()
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'Native stderr requires review'}
  $checks.evidence=$run
  [pscustomobject]$checks|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')

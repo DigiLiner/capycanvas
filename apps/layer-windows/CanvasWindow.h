@@ -152,6 +152,7 @@ private:
     void Send(std::string json, CanvasCommandKind kind=CanvasCommandKind::Action);
     bool SendIndependent(CanvasWork item);
     void Key(winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&, bool pressed);
+    bool CancelGesture();
     bool SyncContactModifiers(winrt::Windows::System::VirtualKeyModifiers held);
     bool ClaimsDeviceKey(std::wstring const& name)const;
     bool PenButtons(winrt::Microsoft::UI::Input::PointerPoint const& point,uint32_t phase);

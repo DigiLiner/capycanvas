@@ -110,8 +110,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::unique_ptr<LayerRowDrag> pickup;
     MenuFlyout menu{nullptr};
-    uint64_t menuGeneration=0;
-    bool menuOpen=false,menuPending=false;
+    OwnedPopup menuOwner;
     std::optional<double> menuTarget;
     ~LayersView();
     J view()const{return object(data->state,L"layer_tools");}

@@ -76,23 +76,24 @@ public static class CapyRowPointer {
  }
  static string InjectionFailure(Point point,uint flags,int retry) {
   long failedAt=System.Diagnostics.Stopwatch.GetTimestamp();uint thread=GetCurrentThreadId();IntPtr input=OpenInputDesktop(0,false,1);
-  try{return $"kind={kind}, id=0, flags=0x{flags:X}, point=({point.x},{point.y}), last=({last.x},{last.y}), device=0x{pen.ToInt64():X}, active={active}, hover={hovering}, retry={retry}, ms_since_accepted_at_error={(failedAt-lastInjection)*1000.0/System.Diagnostics.Stopwatch.Frequency:R}, thread={thread}, thread_desktop={DesktopName(GetThreadDesktop(thread))??"unavailable"}, input_desktop={DesktopName(input)??"unavailable"}";}
+  try{return string.Format("kind={0}, id=0, flags=0x{1:X}, point=({2},{3}), last=({4},{5}), device=0x{6:X}, active={7}, hover={8}, retry={9}, ms_since_accepted_at_error={10:R}, thread={11}, thread_desktop={12}, input_desktop={13}",kind,flags,point.x,point.y,last.x,last.y,pen.ToInt64(),active,hovering,retry,(failedAt-lastInjection)*1000.0/System.Diagnostics.Stopwatch.Frequency,thread,DesktopName(GetThreadDesktop(thread))??"unavailable",DesktopName(input)??"unavailable");}
   finally{if(input!=IntPtr.Zero)CloseDesktop(input);}
  }
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window,out uint process);
- [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+ [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point point);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
  [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window,ref Point point);
  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
- static long lastInjection;public static double MaxGapMilliseconds {get;private set;}
+ static long lastInjection,contactDown;public static double MaxGapMilliseconds {get;private set;}
+ public static double ContactDurationMilliseconds {get;private set;}
  static uint owner,kind,penButtons,mouseRelease;static bool active,hovering,eraserEnd;static Point last;static IntPtr pen;
  static readonly object gate=new object();static Timer pulse;static Exception failure;
  public static bool Active {get{lock(gate)return active;}}
  public static void Initialize(uint process) {
   if(active||pulse!=null||pen!=IntPtr.Zero)throw new InvalidOperationException("Dispose the previous pointer review first.");
-  failure=null;kind=0;penButtons=0;mouseRelease=0;hovering=false;eraserEnd=false;owner=process;
+  failure=null;kind=0;penButtons=0;mouseRelease=0;hovering=false;eraserEnd=false;owner=process;contactDown=0;ContactDurationMilliseconds=double.NaN;
   if(Marshal.SizeOf(typeof(TouchInfo))!=144||Marshal.SizeOf(typeof(PenInfo))!=120||Marshal.SizeOf(typeof(TypeInfo))!=152)
    throw new Exception("Pointer structures require the x64 ABI.");
   if(!InitializeTouchInjection(1,3))throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -179,13 +180,15 @@ public static class CapyRowPointer {
  public static void Down(string device,int x,int y,string button) {
   lock(gate){
    Check();if(active)throw new Exception("A review contact is already active.");
-   EndHover();kind=device=="touch"?2u:device=="pen"?3u:device=="mouse"?4u:0;
-   if(kind==0)throw new ArgumentException("Unknown pointer device.");
+   uint next=device=="touch"?2u:device=="pen"?3u:device=="mouse"?4u:0;
+   if(next==0)throw new ArgumentException("Unknown pointer device.");
    uint press=button=="left"?2u:button=="right"?8u:button=="middle"?32u:0;
-   if(press==0||(kind!=4&&press!=2))throw new ArgumentException("Choose left, right or middle for mouse contacts only.");
+   if(press==0||(next!=4&&press!=2))throw new ArgumentException("Choose left, right or middle for mouse contacts only.");
+   if(next!=kind)EndHover();kind=next;
    var point=new Point{x=x,y=y};Guard(point);MaxGapMilliseconds=0;
+   contactDown=System.Diagnostics.Stopwatch.GetTimestamp();ContactDurationMilliseconds=double.NaN;
    if(kind==4){MouseMove(point);MouseButton(press);mouseRelease=press<<1;}else Send(point,0x10006);
-   last=point;active=true;if(kind!=4)pulse.Change(25,25);
+   last=point;active=true;hovering=false;if(kind!=4)pulse.Change(25,25);
   }
  }
  public static void Move(int x,int y) {
@@ -199,6 +202,7 @@ public static class CapyRowPointer {
   lock(gate){
    Check();if(!active)return;Guard(last);Thread.Sleep(2);
    if(kind==4)MouseButton(mouseRelease);else Send(last,kind==3&&stayInRange?0x40002u:0x40000u);
+   ContactDurationMilliseconds=(System.Diagnostics.Stopwatch.GetTimestamp()-contactDown)*1000.0/System.Diagnostics.Stopwatch.Frequency;
    active=false;hovering=kind==3&&stayInRange;
    pulse.Change(hovering?25:Timeout.Infinite,hovering?25:Timeout.Infinite);
   }
@@ -229,8 +233,6 @@ public static class CapyRowPointer {
    Thread.Sleep(2);
    if(kind==4)MouseButton(mouseRelease);
    else if(kind==3){
-    // Device removal exercises native capture loss. A canceled synthetic pen UP
-    // can be projected as a regular release by WinUI.
     DestroySyntheticPointerDevice(pen);pen=CreateSyntheticPointerDevice(3,1,3);
     if(pen==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());
    }else Send(last,0x48000);

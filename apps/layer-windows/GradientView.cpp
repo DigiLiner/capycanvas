@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "EffectControls.h"
 #include "BitmapUpload.h"
+#include "PointerGesture.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <cstdlib>
 #include <cstring>
@@ -152,8 +153,7 @@ struct EditorView:std::enable_shared_from_this<EditorView> {
     }
     void down(PointerRoutedEventArgs const& e){
         auto p=e.GetCurrentPoint(focus);
-        if(contact||!p.IsInContact()||!source.enabled())return;
-        if(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
+        if(contact||!source.enabled()||!PointerGesture::PrimaryContact(p))return;
         double width=focus.ActualWidth()-12;if(width<=0)return;
         cancel();
         double at=std::clamp((p.Position().X-6)/width,0.,1.);auto all=stops();int existing=-1,below=0;

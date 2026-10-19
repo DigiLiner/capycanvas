@@ -88,6 +88,16 @@ pub enum ColorWheelPart {
     Hue,
     Field,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColorEditContext {
+    pub(crate) document: u64,
+    pub(crate) epoch: u64,
+    pub(crate) color: layer_core::color::DocumentColor,
+    pub(crate) mask: Option<layer_core::SelectionTarget>,
+    pub(crate) slot: ColorSlot,
+    pub(crate) paint_slot: ColorSlot,
+    pub(crate) shape: ColorShape,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ColorAction {
@@ -213,6 +223,7 @@ impl Default for ColorState {
     fn default() -> Self { Self::new() }
 }
 impl ColorState {
+    pub(crate) fn paint_slot(&self) -> ColorSlot { self.paint_slot }
     #[cfg(test)]
     fn apply_canonical(&mut self, action: ColorAction) -> Result<(), String> {
         self.apply(action).map_err(|reason| reason.message(&crate::Localizer::shared(crate::UiLanguage::English)))

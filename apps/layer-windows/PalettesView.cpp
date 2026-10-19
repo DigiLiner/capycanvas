@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "PalettesView.h"
 #include "WorkspaceQuery.h"
+#include "WorkspaceGeometry.h"
 #include "NativeMenus.h"
 #include "Checker.h"
 #include <winrt/Microsoft.UI.Composition.h>
@@ -19,7 +20,7 @@ constexpr double Cell=40,Gap=4,Pitch=Cell+Gap;
 struct Tile{uint64_t id=0;Button node{nullptr};Border patch{nullptr};J swatch;double x=0,y=0;Microsoft::UI::Composition::Vector3KeyFrameAnimation animation{nullptr};};
 struct Drag{
     uint32_t pointer=0;uint64_t id=0,palette=0;winrt::Windows::Foundation::Point point{},grab{};
-    bool started=false,held=false;std::optional<int> slot;J action;uint64_t generation=0;
+    bool started=false,held=false;std::optional<int> slot;uint64_t generation=0;
     Primitives::Popup ghost{nullptr};PointerGesture hold;
 };
 struct PalettesView:std::enable_shared_from_this<PalettesView>{
@@ -28,9 +29,11 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
     TextBox search,editor;Button more{nullptr},selector{nullptr},name{nullptr},add{nullptr};TextBlock selectorLabel,nameLabel,detail,note,empty;
     std::map<uint64_t,Tile> tiles;std::vector<uint64_t> order;std::vector<FrameworkElement> historyCells,expandedCells;
     hstring viewKey,historyKey,choicesKey,currentKey,checkerKey;Imaging::WriteableBitmap checker{nullptr};
-    std::optional<uint64_t> selected;bool editing=false,animate=true;int columns=6;uint64_t reportGeneration=0;
+    std::optional<uint64_t> selected;bool editing=false,animate=true;int columns=6;uint64_t reportGeneration=0,previewGeneration=0;
     std::optional<Drag> drag;Microsoft::UI::Dispatching::DispatcherQueueTimer scrollTimer{nullptr};double scrollCarry=0;
     bool ignoreClick=false;uint64_t gestureGeneration=0;
+    MenuFlyout openMenu{nullptr};OwnedPopup menuOwner;uint64_t transient=0;
+    ~PalettesView(){data->transients.erase(transient);dismissMenu();}
     J view()const{return object(data->model,L"palette_panel");}
     J files()const{return object(data->model,L"windows_palettes");}
     J current()const{return object(object(data->model,L"color_panel"),L"definition");}
@@ -158,15 +161,19 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         if(editing){commitName();if(editing)return;}
         library(O({{L"op",S(L"store")},{L"palette",N(num(view(),L"palette"))},{L"name",S(L"")},{L"color",current()}}));
     }
-    MenuFlyout openMenu{nullptr};
+    void dismissMenu(){
+        menuOwner.Cancel();openMenu=nullptr;
+    }
     void menu(J target,FrameworkElement const& anchor,hstring const& title){
-        auto weak=weak_from_this();auto held=make_weak(anchor);
-        QueryWorkspace(data->query,O({{L"type",S(L"palette_menu")},{L"target",target}}),[weak,held,title](J reply){
-            auto self=weak.lock();auto anchor=held.get();if(!self||!anchor||(self->drag&&self->drag->started))return;
-            auto sections=array(reply,L"result");if(!sections.Size())return;
-            MenuFlyout flyout;TrackPopup(flyout,self->data);self->fillMenu(flyout.Items(),sections);
-            AutomationProperties::SetName(flyout,title);self->openMenu=flyout;flyout.ShowAt(anchor);
-        });
+        dismissMenu();auto weak=weak_from_this();auto source=make_weak(anchor);auto palette=num(view(),L"palette");bool holding=drag&&drag->held;
+        MenuFlyout flyout;openMenu=flyout;auto ticket=menuOwner.Begin(data,anchor,flyout);
+        if(!QueryWorkspace(data->query,O({{L"type",S(L"palette_menu")},{L"target",target}}),[weak,source,title,palette,holding,flyout,ticket](J reply){
+            auto self=weak.lock();if(!self||!ticket.Current())return;
+            auto sections=array(reply,L"result");
+            if(palette!=num(self->view(),L"palette")||!sections.Size()){ticket.Cancel();return;}
+            self->fillMenu(flyout.Items(),sections);AutomationProperties::SetName(flyout,title);
+            Primitives::FlyoutShowOptions options;options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);ticket.Show(source.get(),options);
+        }))ticket.Cancel();
     }
     void fillMenu(winrt::Windows::Foundation::Collections::IVector<MenuFlyoutItemBase> const& target,A const& sections){
         auto weak=weak_from_this();bool first=true;
@@ -276,7 +283,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         t.node.ContextRequested([weak,id](auto&&,ContextRequestedEventArgs const& e){e.Handled(true);if(auto self=weak.lock();self&&!(self->drag&&self->drag->started)){
             auto s=self->swatch(id);self->menu(O({{L"kind",S(L"color")},{L"id",N(double(id))}}),self->tiles.at(id).node,s?str(*s,L"name"):L"");
         }});
-        t.node.IsHoldingEnabled(false);t.node.ManipulationMode(ManipulationModes::None);
+        PointerGesture::OwnHolding(t.node);t.node.ManipulationMode(ManipulationModes::None);
         t.node.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak,id](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
             if(auto self=weak.lock())self->press(e,id);})),true);
         return t;
@@ -284,7 +291,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
     void press(PointerRoutedEventArgs const& e,uint64_t id){
         if(drag||!tiles.contains(id))return;auto point=e.GetCurrentPoint(root);
         auto type=point.PointerDeviceType();bool mouse=type==Microsoft::UI::Input::PointerDeviceType::Mouse;
-        if(mouse&&!point.Properties().IsLeftButtonPressed())return;
+        if(!PointerGesture::PrimaryContact(point))return;
         ignoreClick=false;++gestureGeneration;
         auto node=tiles.at(id).node;auto local=e.GetCurrentPoint(node).Position();
         Drag d;d.pointer=point.PointerId();d.id=id;d.palette=uint64_t(num(view(),L"palette"));d.point=point.Position();d.grab=local;
@@ -295,13 +302,13 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
                 self->drag->held=true;auto s=self->swatch(id);self->menu(O({{L"kind",S(L"color")},{L"id",N(double(id))}}),self->tiles.at(id).node,s?str(*s,L"name"):L"");
             }});
         }
-        d.hold.Begin(e.GetCurrentPoint(node),mouse?Microsoft::UI::Input::GestureSettings::None:Microsoft::UI::Input::GestureSettings::Hold);
+        d.hold.Begin(node,e.GetCurrentPoint(node),mouse?Microsoft::UI::Input::GestureSettings::None:Microsoft::UI::Input::GestureSettings::Hold);
         drag=std::move(d);
     }
     void moved(PointerRoutedEventArgs const& e){
         if(!drag||e.Pointer().PointerId()!=drag->pointer)return;
         drag->point=e.GetCurrentPoint(root).Position();
-        if(drag->hold&&!drag->started&&tiles.contains(drag->id))drag->hold.ProcessMoveEvents(e.GetIntermediatePoints(tiles.at(drag->id).node));
+        if(drag->hold&&!drag->started&&tiles.contains(drag->id))drag->hold.Move(tiles.at(drag->id).node,e);
         if(!drag->started){
             if(!drag->hold.Moved())return;
             start();
@@ -309,7 +316,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         update();e.Handled(true);
     }
     void start(){
-        auto& d=*drag;d.started=true;auto& source=tiles.at(d.id);if(openMenu){openMenu.Hide();openMenu=nullptr;}
+        auto& d=*drag;d.started=true;auto& source=tiles.at(d.id);dismissMenu();
         animate=winrt::Windows::UI::ViewManagement::UISettings().AnimationsEnabled();
         Border ghost;ghost.Width(source.node.ActualWidth());ghost.Height(source.node.ActualHeight());ghost.Padding({3,3,3,3});ghost.CornerRadius({6,6,6,6});
         ghost.Background(data->brush(L"panel"));if(selected==d.id){ghost.BorderBrush(accent(data));ghost.BorderThickness({2,2,2,2});}
@@ -330,17 +337,20 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         int index=int(y/pitch())*columns+int(x*columns/(grid.ActualWidth()+Gap));
         return index<int(order.size())+1?std::optional<int>(index):std::nullopt;
     }
-    void update(){
+    J reorderPreview(Drag const& d,int slot)const{
+        return O({{L"type",S(L"palette_reorder_preview")},{L"palette",N(double(d.palette))},{L"id",N(double(d.id))},{L"slot",N(double(slot))}});
+    }
+    void update(bool force=false){
         auto& d=*drag;
         if(d.ghost){auto origin=root.TransformToVisual(nullptr).TransformPoint({0,0});d.ghost.HorizontalOffset(origin.X+d.point.X-d.grab.X);d.ghost.VerticalOffset(origin.Y+d.point.Y-d.grab.Y);}
-        auto slot=hit(d.point);if(d.generation&&slot==d.slot)return;d.slot=slot;
+        auto slot=hit(d.point);if(!force&&d.generation&&slot==d.slot)return;d.slot=slot;
         int original=int(std::find(order.begin(),order.end(),d.id)-order.begin());
-        auto generation=++d.generation;auto weak=weak_from_this();
-        QueryWorkspace(data->query,O({{L"type",S(L"palette_reorder_preview")},{L"palette",N(double(d.palette))},{L"id",N(double(d.id))},{L"slot",N(double(slot.value_or(original)))}}),
-            [weak,generation,outside=!slot.has_value()](J reply){
+        auto generation=d.generation=++previewGeneration;auto weak=weak_from_this();
+        QueryWorkspace(data->query,reorderPreview(d,slot.value_or(original)),
+            [weak,generation](J reply){
                 auto self=weak.lock();if(!self||!self->drag||self->drag->generation!=generation)return;
                 auto preview=object(reply,L"result");if(!preview.Size())return;
-                self->drag->action=outside?J{}:object(preview,L"action");self->shift(array(preview,L"order"));
+                self->shift(array(preview,L"order"));
             });
     }
     void shift(A const& target){
@@ -365,10 +375,12 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         }
         scrollCarry+=delta;auto step=std::trunc(scrollCarry);if(!step)return;scrollCarry-=step;
         auto before=scroll.VerticalOffset();scroll.ChangeView(nullptr,before+step,nullptr,true);
-        drag->generation=0;update();
+        update(true);
     }
     void finish(bool cancel){
+        if(cancel)dismissMenu();
         if(!drag)return;auto d=std::move(*drag);ignoreClick=d.started||d.held;drag.reset();
+        auto slot=!cancel&&d.started?hit(d.point):std::nullopt;
         if(ignoreClick){auto generation=gestureGeneration;
             root.DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low,[weak=weak_from_this(),generation]{
                 if(auto self=weak.lock();self&&self->gestureGeneration==generation&&!self->drag)self->ignoreClick=false;
@@ -382,13 +394,19 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
             for(auto& [id,t]:tiles){if(t.animation){t.node.StopAnimation(t.animation);t.animation=nullptr;}t.node.Translation({0,0,0});t.node.Opacity(1);}
             AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));AutomationProperties::SetItemStatus(grid,L"");
         }
-        if(!cancel&&d.started&&d.action.Size()){library(d.action);if(tiles.contains(d.id))tiles.at(d.id).node.Focus(FocusState::Programmatic);}
+        if(slot)QueryWorkspace(data->query,reorderPreview(d,*slot),[weak=weak_from_this(),id=d.id,palette=d.palette](J reply){
+            if(auto self=weak.lock()){
+                auto action=object(object(reply,L"result"),L"action");if(!action.Size())return;
+                self->library(action);
+                if(uint64_t(num(self->view(),L"palette"))==palette&&self->tiles.contains(id))self->tiles.at(id).node.Focus(FocusState::Programmatic);
+            }
+        });
     }
     void released(PointerRoutedEventArgs const& e){
         if(!drag||e.Pointer().PointerId()!=drag->pointer)return;
-        if(drag->hold)drag->hold.ProcessUpEvent(e.GetCurrentPoint(tiles.contains(drag->id)?UIElement(tiles.at(drag->id).node):UIElement(root)));
+        auto point=e.GetCurrentPoint(tiles.contains(drag->id)?UIElement(tiles.at(drag->id).node):UIElement(root));if(point.Properties().IsCanceled()){finish(true);e.Handled(true);return;}
+        if(drag->hold)drag->hold.ProcessUpEvent(point);
         drag->point=e.GetCurrentPoint(root).Position();bool started=drag->started;
-        if(started){drag->generation=0;if(!hit(drag->point))drag->action=J{};}
         finish(false);if(started)e.Handled(true);
     }
     void sync(){
@@ -477,6 +495,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
     }
     void init(){
         auto weak=weak_from_this();
+        transient=data->transient([weak]{if(auto self=weak.lock()){bool active=self->drag.has_value()||self->menuOwner.Active();self->finish(true);return active;}return false;});
         root.Padding({8,8,8,8});root.RowSpacing(6);root.MinWidth(0);root.Tag(O({{L"native_keys",B(true)}}));AutomationProperties::SetAutomationId(root,L"palettes-panel");AutomationProperties::SetName(root,data->caption(L"palettes",L"title"));
         for(auto star:{true,false,false,false}){RowDefinition row;row.Height(star?GridLength{1,GridUnitType::Star}:GridLength{1,GridUnitType::Auto});root.RowDefinitions().Append(row);}
         auto divider=[&]{Border line;line.Height(1);line.Background(data->tint(L"text",38));return line;};
@@ -544,7 +563,8 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         root.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();if(!self||!self->drag||self->drag->pointer!=e.Pointer().PointerId())return;
             if(e.GetCurrentPoint(self->root).IsInContact())self->finish(true);else self->released(e);})),true);
-        root.AddHandler(UIElement::KeyDownEvent(),box_value(KeyEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,KeyRoutedEventArgs const& e){if(auto self=weak.lock())self->keys(e);})),true);
+        root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock())self->keys(e);});
+        root.ContextCanceled([weak](auto&&,auto&&){if(auto self=weak.lock())self->dismissMenu();});
         root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->finish(true);});
         refresh();
     }

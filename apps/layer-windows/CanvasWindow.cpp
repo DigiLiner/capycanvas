@@ -142,14 +142,8 @@ void CanvasWindow::Open() {
             });
         }
     });
-    root.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
-        if(auto self=weak.lock())if(!CapyUi::composingKey(e)&&!self->dialogOpen.load()&&(!self->header||!self->header->Key(e,true))
-            &&e.Key()!=Windows::System::VirtualKey::Escape)self->Key(e,true);
-    });
-    // Native editors and captured controls cancel first; only an unhandled
-    // Escape reaches the shared drawer and application shortcuts.
-    root.KeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
-        if(auto self=weak.lock();self&&!CapyUi::composingKey(e)&&!self->dialogOpen.load()&&e.Key()==Windows::System::VirtualKey::Escape)self->Key(e,true);
+    CapyUi::ShortcutKeys(root,[weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
+        if(auto self=weak.lock();self&&!CapyUi::composingKey(e)&&!self->dialogOpen.load()&&(!self->header||!self->header->Key(e,true)))self->Key(e,true);
     });
     root.PreviewKeyUp([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
         if(auto self=weak.lock())if(!self->dialogOpen.load()&&(!self->header||!self->header->Key(e,false)))self->Key(e,false);
@@ -205,14 +199,14 @@ void CanvasWindow::Open() {
                 // A WinUI submenu can deactivate the main HWND while focus
                 // stays inside its owned popup tree. Check after activation
                 // settles before retiring the workspace contact or menu.
-                self->dispatcher.TryEnqueue([weak]{if(auto self=weak.lock();self&&!self->closed&&self->workspace){
+                self->dispatcher.TryEnqueue([weak]{if(auto self=weak.lock();self&&!self->closed){
                     auto owner=self->Handle();
                     auto foreground=GetForegroundWindow();
                     // Tablet/IME helper HWNDs can briefly own activation without
                     // presenting another application. Preserve the idle placement
                     // across those transitions; visible app switches still blur.
                     if(IsIconic(owner)||(IsWindowVisible(foreground)&&GetAncestor(foreground,GA_ROOTOWNER)!=owner)){
-                        self->workspace->CancelGesture();self->heldKeys.clear();self->sentModifiers.store(0);
+                        self->CancelGesture();self->heldKeys.clear();self->sentModifiers.store(0);
                         self->Send(R"({"type":"blur"})",CanvasCommandKind::Input);
                     }
                 }});
@@ -707,11 +701,14 @@ void CanvasWindow::Wheel(Microsoft::UI::Input::PointerEventArgs const& e) {
         !horizontal&&(modifiers&Mod::Shift)!=Mod::None};
     if(SendIndependent(scroll))e.Handled(true);
 }
+bool CanvasWindow::CancelGesture(){
+    bool closed=header&&header->CancelGesture();return (workspace&&workspace->CancelGesture())||closed;
+}
 void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
     if(closing||closed||(pressed&&CapyUi::composingKey(e)))return;
     using VirtualKey=Windows::System::VirtualKey;
     auto key=e.Key();
-    if(pressed&&key==VirtualKey::Escape&&workspace&&workspace->CancelGesture()){e.Handled(true);return;}
+    if(pressed&&key==VirtualKey::Escape&&CancelGesture()){e.Handled(true);return;}
     auto focused=FocusManager::GetFocusedElement(root.XamlRoot());
 
     std::wstring name=CapyUi::KeyName(key,e.KeyStatus().ScanCode);
@@ -1133,7 +1130,7 @@ void CanvasWindow::RequestClose() {
     {std::lock_guard lock(mutex);if(closing||closed)return;}
     if(!host||!renderer.joinable()||rendererDone.load()){Stop();return;}
     if((documents&&documents->IsOpen())||(workspaceStorage&&workspaceStorage->IsOpen()))return;
-    if(workspace)workspace->CancelGesture();
+    CancelGesture();
     // Commit the focused workspace draft before shared close policy checks dirty state.
     canvasFocus.Focus(FocusState::Programmatic);
     if(settings)settings->CommitEdits();

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "NavigatorView.h"
 #include "NavigationControls.h"
+#include "PointerGesture.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <optional>
 
@@ -53,21 +54,18 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
         Grid::SetRow(actions,1);content.Children().Append(actions);root.Children().Append(content);
         overview.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto p=e.GetCurrentPoint(self->overview);
-            if(self->pointer||!p.IsInContact()||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+            if(self->pointer||!PointerGesture::PrimaryContact(p))return;
             if(self->overview.ActualWidth()<=8||self->overview.ActualHeight()<=8)return;
             if(self->overview.CapturePointer(e.Pointer())){self->pointer=p.PointerId();self->send(L"down",p.Position());e.Handled(true);}
         }});
         overview.PointerMoved([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             if(self->pointer==e.Pointer().PointerId()){self->send(L"move",e.GetCurrentPoint(self->overview).Position());e.Handled(true);}
         }});
-        overview.PointerReleased([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
-            if(self->pointer==e.Pointer().PointerId()){
-                self->pointer.reset();self->send(L"up",e.GetCurrentPoint(self->overview).Position());
-                self->overview.ReleasePointerCapture(e.Pointer());e.Handled(true);
-            }
+        PointerGesture::OnCompleted(overview,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()){
+            if(cancel)self->cancel();else{
+                self->pointer.reset();self->send(L"up",e.GetCurrentPoint(self->overview).Position());self->overview.ReleasePointerCapture(e.Pointer());
+            }e.Handled(true);
         }});
-        overview.PointerCanceled([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
-        overview.PointerCaptureLost([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
         root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->cancel();self->layoutChanged();}});
         root.LayoutUpdated([weak](auto&&,auto&&){if(auto self=weak.lock()){self->refreshGeometry();self->layoutChanged();}});
     }

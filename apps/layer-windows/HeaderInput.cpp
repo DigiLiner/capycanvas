@@ -11,10 +11,6 @@ namespace NativeInput=Microsoft::UI::Input;
 namespace {
 A point(Point p){A result;result.Append(N(p.X));result.Append(N(p.Y));return result;}
 J edit(J const& action){return O({{L"type",S(L"customize")},{L"action",O({{L"type",S(L"header")},{L"action",action}})}});}
-void ownHolding(DependencyObject const& node){
-    if(auto element=node.try_as<UIElement>())element.IsHoldingEnabled(false);
-    for(int i=0;i<VisualTreeHelper::GetChildrenCount(node);++i)ownHolding(VisualTreeHelper::GetChild(node,i));
-}
 }
 struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     std::shared_ptr<WorkspaceData> data;
@@ -31,18 +27,18 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     MenuFlyout menu{nullptr};
+    OwnedPopup menuOwner;
     Point origin{},position{};
     HWND owner=nullptr;
     uint32_t selected=0;
-    uint64_t generation=0,menuGeneration=0;
+    uint64_t generation=0;
     bool editing=false,dragging=false,starting=false,started=false,busy=false,ending=false,cancelled=false;
-    bool dirty=false,held=false,recognizing=false,releasing=false,menuOpen=false,workspaceMenu=false,normalContact=false,released=false;
+    bool dirty=false,held=false,recognizing=false,releasing=false,workspaceMenu=false,normalContact=false,released=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     ~Impl(){if(timer)timer.Stop();if(menu)menu.Hide();}
     bool focused()const{return owner&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==owner&&!IsIconic(owner);}
     bool captured(UIElement const& element)const{
-        if(pointer)if(auto captures=element.PointerCaptures())for(auto p:captures)if(p.PointerId()==*pointer)return true;
-        return false;
+        return pointer&&PointerGesture::Captured(element,*pointer);
     }
     bool active()const{return pointer||starting||started||busy||ending;}
     bool editable()const{return editing&&flag(object(data->model,L"header"),L"editing");}
@@ -52,10 +48,10 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             {L"phase",S(ending?L"finishing":dragging?L"dragging":held?L"held":pointer?L"pressed":L"idle")},
             {L"generation",N(double(generation))},{L"source",source},{L"requires_hold",B(false)},
             {L"device",S(device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch")},
-            {L"captured",B(captured(root))},{L"menu_open",B(menuOpen)},{L"preview",preview},{L"last_cancel",lastCancel}}).Stringify());
+            {L"captured",B(captured(root))},{L"menu_open",B(menuOwner.Open())},{L"menu_pending",B(menuOwner.Pending())},{L"preview",preview},{L"last_cancel",lastCancel}}).Stringify());
     }
     void notify(){evidence();if(changed)changed();}
-    void hideMenu(){++menuGeneration;if(menu)menu.Hide();}
+    void hideMenu(){menuOwner.Cancel();}
     void stopRecognition(){if(recognizing){recognizing=false;recognizer.CompleteGesture();}}
     void release(){
         releasing=true;if(root.IsLoaded()&&captured(root))root.ReleasePointerCaptures();
@@ -63,14 +59,13 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         scrollModes.clear();releasing=false;
         pointer.reset();contact=nullptr;pressedPath.clear();stopRecognition();
     }
-    void clear(bool keepMenu=false){
-        if(!keepMenu)hideMenu();
+    void clear(){
         release();++generation;starting=started=busy=ending=cancelled=dragging=dirty=held=normalContact=released=false;
         dragCursor(root,false,false);
         source=J{};beginRequest=J{};preview=J{};timer.Stop();chrome(position,false);notify();
     }
     bool cancel(hstring reason=L"cancel"){
-        if(!active()&&!menuOpen)return false;
+        if(!active()&&!menuOwner.Active())return false;
         if(trace)lastCancel=O({{L"reason",S(reason)},{L"source",source},{L"captured",B(captured(root))},{L"dragging",B(dragging)}});
         cancelled=true;hideMenu();release();preview=J{};
         if(busy||started){ending=true;cancelled=true;pump();notify();}
@@ -78,7 +73,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         return true;
     }
     void deferCancel(){
-        if(!active()&&!menuOpen)return;
+        if(!active()&&!menuOwner.Active())return;
         // Capture changes are forbidden while XAML is arranging/unloading.
         // Reject a release immediately, then retire capture on the dispatcher.
         cancelled=true;auto serial=generation;
@@ -181,49 +176,51 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             if(auto self=weak.lock()){self->cancel();self->data->dispatch(action);}
         });
     }
-    void showMenu(J const& presentation,Point at,bool holding,FrameworkElement const& invoking,bool workspaceOptions=false){
-        if(!array(presentation,L"sections").Size()||!available(invoking))return;
-        if(menu)menu.Hide();
-        menu=MenuFlyout();workspaceMenu=workspaceOptions;TrackPopup(menu,data);
+    OwnedPopup::Ticket beginMenu(FrameworkElement const& invoking,bool workspaceOptions=false){
+        hideMenu();menu=MenuFlyout();workspaceMenu=workspaceOptions;auto ticket=menuOwner.Begin(data,invoking,menu);
         auto weak=weak_from_this();auto control=invoking.try_as<Control>();
         if(!control)control=FocusManager::GetFocusedElement(root.XamlRoot()).try_as<Control>();
         auto focus=make_weak(control);
-        menu.Opened([weak](auto const& sender,auto&&){if(auto self=weak.lock();self&&self->menu==sender.template as<MenuFlyout>()){self->menuOpen=true;self->notify();}});
+        menu.Opened([weak](auto const& sender,auto&&){if(auto self=weak.lock();self&&self->menu==sender.template as<MenuFlyout>())self->notify();});
         menu.Closed([weak,focus](auto const& sender,auto&&){if(auto self=weak.lock();self&&self->menu==sender.template as<MenuFlyout>()){
-            self->menuOpen=false;self->workspaceMenu=false;self->notify();
+            self->workspaceMenu=false;self->notify();
             if(auto element=focus.get();element&&element.IsLoaded())element.Focus(FocusState::Keyboard);
         }});
-        NativeMenuItems(menu.Items(),array(presentation,L"sections"),data,[weak](J action){
+        return ticket;
+    }
+    void showMenu(J const& presentation,Point at,bool holding,OwnedPopup::Ticket const& ticket){
+        if(!ticket.Current())return;
+        if(!array(presentation,L"sections").Size()){ticket.Cancel();return;}
+        NativeMenuItems(menu.Items(),array(presentation,L"sections"),data,[weak=weak_from_this()](J action){
             if(auto self=weak.lock()){self->cancel();self->data->dispatch(action);}
         });
         Primitives::FlyoutShowOptions options;options.Position(at);
         options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);
-        menu.ShowAt(root,options);
+        ticket.Show(root,options);
     }
     void context(uint32_t id,Point at,bool holding=false,FrameworkElement invoking=nullptr){
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
         if(!invoking)invoking=originElement.get();if(!invoking)invoking=root;
-        auto serial=++menuGeneration;
+        auto ticket=beginMenu(invoking,workspace(id));
         auto tag=invoking.Tag().try_as<J>();bool capy=tag&&str(object(tag,L"header_source"),L"kind")==L"capy";
         if(workspace(id)){
-            showMenu(object(object(data->model,L"windows_workspace"),L"switcher_options"),at,holding,invoking,true);return;
+            showMenu(object(object(data->model,L"windows_workspace"),L"switcher_options"),at,holding,ticket);return;
         }
-        QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",capy?O({{L"kind",S(L"zen_mode")}}):O({{L"kind",S(L"header")},
+        evidence();
+        if(!QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",capy?O({{L"kind",S(L"zen_mode")}}):O({{L"kind",S(L"header")},
             {L"id",id?N(id):JsonValue::CreateNullValue()}})}}),
-            [weak=weak_from_this(),serial,at,holding,focus=make_weak(invoking)](J reply){
-                auto self=weak.lock();if(!self||serial!=self->menuGeneration||self->dragging||!self->focused()||self->data->externalPopup)return;
-                auto invoking=focus.get();if(!invoking)return;
-                self->showMenu(object(reply,L"result"),at,holding,invoking);
-            });
+            [weak=weak_from_this(),ticket,at,holding](J reply){
+                auto self=weak.lock();if(!self||!ticket.Current())return;
+                if(self->dragging){ticket.Cancel();return;}
+                self->showMenu(object(reply,L"result"),at,holding,ticket);self->evidence();
+            })){ticket.Cancel();evidence();}
     }
     void down(PointerRoutedEventArgs const& e){
         if(active()){if(released)clear();else {if(pointer==e.Pointer().PointerId())return;cancel(L"additional_contact");if(active())return;}}
         if(data->externalPopup)return;
-        auto p=e.GetCurrentPoint(root);if(!p.IsInContact())return;
+        auto p=e.GetCurrentPoint(root);if(!PointerGesture::PrimaryContact(p))return;
         auto element=target(e.OriginalSource());if(!element)return;
         auto tag=element.Tag().as<J>();auto item=object(tag,L"header_source");
-        if(p.Properties().IsRightButtonPressed()||p.Properties().IsBarrelButtonPressed())return;
-        if(p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
         auto kind=str(item,L"kind");
         bool isItem=kind==L"item";
         if(editable())selected=isItem?uint32_t(num(item,L"value")):0;
@@ -239,7 +236,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         beginRequest=J::Parse(configuration.Stringify());beginRequest.Insert(L"op",S(L"begin"));
         beginRequest.Insert(L"source",source);beginRequest.Insert(L"press",point(origin));
         beginRequest.Insert(L"grab",rectangle(visibleBounds(element,root)));
-        recognizing=true;recognizer.Begin(p,(isItem||kind==L"capy")&&device!=NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::Hold:NativeInput::GestureSettings::None);
+        recognizing=true;recognizer.Begin(element,p,(isItem||kind==L"capy")&&device!=NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::Hold:NativeInput::GestureSettings::None);
         if(editable()&&kind!=L"background"){claim();e.Handled(true);}
         timer.Start();notify();
     }
@@ -248,7 +245,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!focused()||!current()){cancel(L"source_or_focus_lost");return;}
         if(!editable()&&device==NativeInput::PointerDeviceType::Mouse)return;
         auto next=e.GetCurrentPoint(root).Position();
-        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
+        if(recognizing)recognizer.Move(root,e);
         bool moved=recognizer.Moved();
         if(!dragging&&moved){
             if(!editable()){stopRecognition();return;}
@@ -259,14 +256,14 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     }
     void up(PointerRoutedEventArgs const& e){
         if(!pointer||*pointer!=e.Pointer().PointerId()||released)return;
-        if(device==NativeInput::PointerDeviceType::Mouse&&e.GetCurrentPoint(root).Properties().IsLeftButtonPressed())return;
-        if(!focused()||!current()){cancel(L"source_or_focus_lost");e.Handled(true);return;}
         auto p=e.GetCurrentPoint(root);
+        if(!focused()||!current()||p.Properties().IsCanceled()){cancel(L"release_canceled");e.Handled(true);return;}
+        if(device==NativeInput::PointerDeviceType::Mouse&&p.Properties().IsLeftButtonPressed())return;
         if(recognizing){recognizing=false;recognizer.ProcessUpEvent(p);}
         if(dragging){
             position=p.Position();ending=true;release();pump();e.Handled(true);notify();
         }else{
-            if(editable()||held){clear(held);e.Handled(true);}
+            if(editable()||held){clear();e.Handled(true);}
             else {released=true;auto serial=generation;root.DispatcherQueue().TryEnqueue([weak=weak_from_this(),serial]{if(auto self=weak.lock();self&&self->generation==serial)self->clear();});}
         }
     }
@@ -284,6 +281,10 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         }});
         root.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->down(e);})),true);
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->move(e);})),true);
+        PointerGesture::OnLeaving(root,[weak](PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()&&!self->captured(self->root)){
+            for(auto const& entry:self->pressedPath)if(auto element=entry.get();element&&self->captured(element))return;
+            self->clear();
+        }});
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
         root.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
             if(auto self=weak.lock();self&&!self->releasing&&!self->released&&self->pointer==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
@@ -313,16 +314,15 @@ HeaderInput::~HeaderInput()=default;
 void HeaderInput::Source(FrameworkElement const& element,J const& source,hstring const& label){
     auto prior=element.Tag().try_as<J>();
     if(!prior||!prior.HasKey(L"header_source")){
-        element.Loaded([weak=make_weak(element)](auto&&,auto&&){if(auto element=weak.get())ownHolding(element);});
-        if(element.IsLoaded())ownHolding(element);
+        PointerGesture::OwnHolding(element);
     }
-    element.Tag(O({{L"header_source",source}}));element.IsHoldingEnabled(false);element.CanDrag(false);
+    element.Tag(O({{L"header_source",source}}));
     AutomationProperties::SetName(element,label);
 }
 void HeaderInput::WorkspaceOptions(FrameworkElement const& invoking){
     impl->owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);impl->hideMenu();
     auto box=visibleBounds(invoking,impl->root);
-    impl->showMenu(object(object(impl->data->model,L"windows_workspace"),L"switcher_options"),{box.X,box.Y+box.Height},false,invoking,true);
+    impl->showMenu(object(object(impl->data->model,L"windows_workspace"),L"switcher_options"),{box.X,box.Y+box.Height},false,impl->beginMenu(invoking,true));
 }
 void HeaderInput::Context(uint32_t id,FrameworkElement const& invoking){
     if(impl->active())return;
@@ -352,7 +352,7 @@ bool HeaderInput::Key(KeyRoutedEventArgs const& e,bool pressed){
             }return true;
         }
     }
-    if(key==K::Escape&&impl->menuOpen){e.Handled(true);if(pressed)impl->cancel();return true;}
+    if(key==K::Escape&&impl->menuOwner.Active()){e.Handled(true);if(pressed)impl->cancel();return true;}
     if(!impl->editable())return false;
     if(key!=K::Escape&&key!=K::Left&&key!=K::Right&&key!=K::Delete&&key!=K::Back&&!context)return false;
     if(key!=K::Escape&&!impl->selected)return false;

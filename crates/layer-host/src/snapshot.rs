@@ -304,6 +304,8 @@ impl NativeHost {
         map.serialize_entry("color_preview", &self.color_preview())?;
         let colors = state.display_colors();
         map.serialize_entry("color_panel", &self.color_view(colors))?;
+        map.serialize_entry("color_edit_context", &self.session.color_edit_context())?;
+        map.serialize_entry("color_wheel_context", &self.session.color_wheel_context())?;
         let (display, rendition) = match self.ui_color {
             crate::UiColor::Mapped => (layer_core::color::RgbSpace::Srgb, Some(self.session.effective_sdr_rendition())),
             crate::UiColor::Tagged(space) => (space, None),

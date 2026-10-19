@@ -1,8 +1,10 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -AssemblyName System.Drawing
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)
+$CapyEach={[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP);[CapyRowPointer]::Verify()}
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -15,9 +17,16 @@ public static class CapyNavigatorCapture {
 '@
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
-$directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/navigator/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+$CapyTraceDirectory=$run
+function Navigator-Pose($Camera){
+    @($Camera.zoom,$Camera.rotation,$Camera.flipped,$Camera.translation)|ConvertTo-Json -Depth 4 -Compress
+}
+function Navigator-Document{
+    $file=(Model).state.document_file
+    @($file.epoch,$file.revision,$file.modified)|ConvertTo-Json -Compress
+}
 function Navigator {
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Window'
     $menuCondition=[System.Windows.Automation.AndCondition]::new(
@@ -72,9 +81,10 @@ function Different($Before,$After,$Rect) {
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Compress))
     $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
     $stderr=Join-Path $run 'stderr.log'
-    $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
+    $review=Start-Process -FilePath $Executable -WorkingDirectory $run -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/navigator-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
     Write-Output "Owned Navigator review $($review.Id)"
@@ -114,6 +124,86 @@ try {
     $canvas.SetFocus()
     [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    $navDocument=Navigator-Document
+    $navBaseline=(Model).state.camera
+    $navigatorChecks=[Collections.Generic.List[object]]::new()
+    for($i=0;$i -lt 3;$i++){
+        $beforeZoom=(Model).state.camera.zoom
+        Invoke 'navigator-zoom_in'
+        Wait-Until {(Model).state.camera.zoom -gt $beforeZoom} 'Navigator gesture zoom did not advance'
+    }
+    foreach($device in @('mouse','pen','touch')){
+        foreach($ending in $(if($device -eq 'mouse'){@('up')}else{@('up','cancel')})){
+            foreach($fresh in @($false,$true)){
+                $box=(Control 'navigator-overview' -Arranged).Current.BoundingRectangle
+                $document=@((Model).state.tabs|Where-Object active)[0]
+                $fit=[Math]::Min(($box.Width-8*$scale)/$document.width,($box.Height-8*$scale)/$document.height)
+                $width=$document.width*$fit;$height=$document.height*$fit
+                if($width -le 16*$scale -or $height -le 16*$scale){throw 'Navigator image is too small for the native contact checks'}
+                $left=$box.Left+($box.Width-$width)/2
+                $x0=[int]($left+$width*.35);$x1=[int]($left+$width*.65)
+                if($fresh){$swap=$x0;$x0=$x1;$x1=$swap}
+                $y=[int]($box.Top+$box.Height/2)
+                $finish=if($fresh){'up'}else{$ending}
+                $stimulus=if($finish -eq 'up'){'normal native Up'}elseif($device -eq 'pen'){'synthetic pen device removal'}else{'synthetic touch canceled Up'}
+                $row=@{device=$device;ending_stimulus=$stimulus;fresh=$fresh;start_px=@($x0,$y);end_px=@($x1,$y);bounds=$box;hit=(Input-Trace $x0 $y);before=(Model).state.camera;document_before=(Navigator-Document);move_samples=6;move_sleep_ms=25;uia_during_contact=$false}
+                $timer=[Diagnostics.Stopwatch]::StartNew()
+                try{
+                    try{
+                        [CapyRowPointer]::Down($device,$x0,$y)
+                        Wait-Until {(Model).state.camera.revision -gt $row.before.revision} "$device Navigator Down was not acknowledged"
+                        $row.down=(Model).state.camera
+                        for($step=1;$step -le 6;$step++){
+                            [CapyRowPointer]::Move([int]($x0+($x1-$x0)*$step/6),$y)
+                            Start-Sleep -Milliseconds 25
+                        }
+                        $settled=@{pose=$null;count=0;camera=$null}
+                        Wait-Until {
+                            $c=(Model).state.camera;$pose=Navigator-Pose $c
+                            if($pose -ceq $settled.pose){$settled.count++}else{$settled.count=0}
+                            $settled.pose=$pose;$settled.camera=$c
+                            $settled.count -ge 2 -and
+                                ([Math]::Abs($c.translation[0]-$row.down.translation[0]) -gt .1 -or
+                                 [Math]::Abs($c.translation[1]-$row.down.translation[1]) -gt .1)
+                        } "$device Navigator motion did not pan"
+                        $row.live=$settled.camera
+                        $row.document_live=Navigator-Document
+                    }finally{
+                        if([CapyRowPointer]::Active){
+                            if($finish -eq 'cancel'){[CapyRowPointer]::Cancel()}else{[CapyRowPointer]::Up()}
+                        }
+                        $timer.Stop();$row.active_elapsed_ms=$timer.Elapsed.TotalMilliseconds
+                        $duration=[CapyRowPointer]::ContactDurationMilliseconds
+                        $row.contact_ms=if([double]::IsNaN($duration)){$null}else{$duration}
+                    }
+                    [CapyRowPointer]::Verify()
+                    Start-Sleep -Milliseconds 200
+                    $row.after=(Model).state.camera
+                    $row.document_after=Navigator-Document
+                    $row.passed=(Navigator-Pose $row.after) -ceq (Navigator-Pose $row.live) -and $row.document_live -ceq $navDocument -and $row.document_after -ceq $navDocument
+                }catch{$row.error=$_.ToString();throw}finally{
+                    $navigatorChecks.Add($row)
+                    ConvertTo-Json -InputObject @($navigatorChecks.ToArray()) -Depth 15|Set-Content (Join-Path $run 'navigator-contacts.json')
+                }
+                if(!$row.passed){throw "$device Navigator $finish/fresh=$fresh changed the settled pose or document"}
+            }
+        }
+    }
+    if($navigatorChecks.Count -ne 10){throw 'Navigator did not complete all ten native contacts'}
+    $secondary=@{device='mouse';button='right';ending_stimulus='normal native right-button Up';start_px=@($x0,$y);end_px=@($x1,$y);hit=(Input-Trace $x0 $y);before=(Model).state.camera;document_before=(Navigator-Document);uia_during_contact=$false}
+    $secondary|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'navigator-secondary.json')
+    $timer=[Diagnostics.Stopwatch]::StartNew()
+    [CapyRowPointer]::RightDrag($x0,$y,$x1,$y)
+    $timer.Stop();$secondary.active_elapsed_ms=$timer.Elapsed.TotalMilliseconds;$secondary.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds
+    Start-Sleep -Milliseconds 350
+    $secondary.after=(Model).state.camera;$secondary.document_after=Navigator-Document
+    $secondary.passed=(Navigator-Pose $secondary.after) -ceq (Navigator-Pose $secondary.before) -and $secondary.document_after -ceq $navDocument
+    $secondary|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'navigator-secondary.json')
+    if(!$secondary.passed){throw 'Secondary mouse input moved the Navigator camera or changed the document'}
+    for($i=0;$i -lt 3;$i++){Invoke 'navigator-zoom_out'}
+    Wait-Until {[Math]::Abs((Model).state.camera.zoom-$navBaseline.zoom) -lt .001} 'Navigator gesture zoom did not restore'
+    if((Navigator-Document) -cne $navDocument){throw 'Navigator contacts modified the document'}
+    @{baseline=$navBaseline;after_inverse_zoom=(Model).state.camera;document_before=$navDocument;document_after=(Navigator-Document)}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'navigator-pose.json')
     $bounds=$canvas.Current.BoundingRectangle
     [CapyRowPointer]::Hover([int]($bounds.Left+$bounds.Width/2),[int]($bounds.Top+$bounds.Height/2))
     $tooltip=[System.Windows.Automation.AndCondition]::new(
@@ -150,7 +240,7 @@ try {
             Surround-Matches $replacement
         }finally{$replacement.Dispose()}
     } 'New document did not fill the expected overview image'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1550 -Height 1040
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Resize -Width 1550 -Height 1040
     Wait-Until {(Model).state.camera.viewport[0] -gt 1450} 'Native resize did not reach the renderer'
     if(((Control 'navigator-overview').GetRuntimeId() -join ':') -ne $identity){throw 'Resize replaced the native Navigator'}
     Navigator
@@ -173,9 +263,10 @@ try {
         $alternate=Capture 'alternate-theme'
         try{Surround-Matches $alternate}finally{$alternate.Dispose()}
     } 'Navigator surround did not present the alternate theme after Preferences closed'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native runtime stderr requires inspection'}
     [PSCustomObject]@{
+        theme=$Theme;native_overview_contacts=$navigatorChecks.Count;secondary_mouse_admission='passed'
         shared_commands_and_camera='passed';retained_controls_and_resize='passed'
         live_stroke_and_exact_undo='passed';changed_preview_pixels=$changed
         document_aspect_replacement='passed';hide_reopen_and_theme='passed';zero_exit='passed'

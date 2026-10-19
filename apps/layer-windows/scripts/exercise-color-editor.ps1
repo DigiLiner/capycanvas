@@ -1,16 +1,18 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='visible'
 $CapyCaptureDelay=250
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
+$CapyEach={if($env:CAPY_PRIVATE_DESKTOP){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)};[CapyRowPointer]::Verify()}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/color-editor/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 function Center([string]$Id){$b=(Control $Id -Within $editorFrame -Arranged).Current.BoundingRectangle;@{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
-function Shown([string]$Id){$name=(Control $Id).Current.Name;$name.Substring($name.LastIndexOf(' ')+1)}
+function Shown([string]$Id){$name=(Control $Id -Within $editorFrame).Current.Name;$name.Substring($name.LastIndexOf(' ')+1)}
 function Row([int]$Row){@(0..2|ForEach-Object {Shown "edit-color-$Row-$_"})}
 function Foreground{(Model).state.colors.foreground.rgba}
 function Artwork-Identity{
@@ -49,6 +51,69 @@ function Sheet-Open{$sheet=Find 'edit-color-search';$sheet -and !$sheet.Current.
 function Paper-Point{
     $area=(Model).state.camera.work_area;$bounds=(Control 'drawing-canvas').Current.BoundingRectangle
     @{x=[int]($bounds.X+$area[0]+$area[2]/2);y=[int]($bounds.Y+$area[1]+$area[3]/2)}
+}
+$numericInputChecks=[Collections.Generic.List[object]]::new()
+$numericFieldIds=@('edit-color-hex')+@(foreach($row in 0..2){foreach($column in 0..2){"edit-color-$row-$column"}})
+function Draft-Identity{@($numericFieldIds|ForEach-Object {(Control $_ -Within $editorFrame).Current.Name})|ConvertTo-Json -Compress}
+function No-FieldEntry{foreach($id in $numericFieldIds){if(Find ($id+'-entry') -Within $editorFrame){throw "A scrub opened $id for typing"}}}
+function Numeric-Input([string]$Device,[ValidateSet('cancel','outside','modifier')][string]$Ending,[ValidateSet('mouse','touch','key','uia')][string]$Activation,[uint16]$Modifier=0){
+    $id='edit-color-0-0';$case="$Device-$Ending-$Activation-$Modifier"
+    $check=[ordered]@{case=$case;device=$Device;ending=$Ending;activation=$Activation;modifier=$Modifier;status='started'}
+    $numericInputChecks.Add($check)
+    try{
+        Invoke 'edit-color-current';Wait-Until {(Shown 'edit-color-hex') -eq '#FFFFFF'} "$case did not restore its white baseline"
+        $baseline=Draft-Identity;$paint=(Model).state.colors.foreground|ConvertTo-Json -Depth 12 -Compress;$artwork=Artwork-Identity
+        $field=Control $id -Within $editorFrame -Arranged;$field.SetFocus();$bounds=$field.Current.BoundingRectangle
+        $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        $x=[int]($bounds.X+$bounds.Width/2);$y=[int]($bounds.Y+$bounds.Height/2)
+        $distance=if($Ending -eq 'modifier'){8*$scale}else{[Math]::Max(24*$scale,$bounds.Height/2+8*$scale)}
+        $endY=[int]($y+$distance)
+        if($Ending -eq 'modifier' -and !$bounds.Contains([System.Windows.Point]::new($x,$endY))){throw "$case modifier release must stay inside the native Button"}
+        if($Ending -eq 'outside' -and $bounds.Contains([System.Windows.Point]::new($x,$endY))){throw "$case release did not leave the native Button"}
+        $check.before=$baseline;$check.bounds=$bounds.ToString();$check.from=@($x,$y);$check.to=@($x,$endY);$check.runtime_id=$field.GetRuntimeId() -join ':'
+        [CapyRowPointer]::Down($Device,$x,$y);[CapyRowPointer]::Move($x,$endY)
+        Wait-Until {[int](Shown $id) -lt 255} "$case did not change the shared color draft while scrubbing"
+        $moved=Draft-Identity;$check.moved=$moved
+        if($Ending -eq 'modifier'){
+            [CapyRowPointer]::Hold($Modifier,$true);[CapyRowPointer]::Up()
+            $check.moves_after_modifier=0
+        }elseif($Ending -eq 'cancel'){[CapyRowPointer]::Cancel()}else{[CapyRowPointer]::Up($Device -eq 'pen')}
+        $check.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds;$check.max_gap_ms=[CapyRowPointer]::MaxGapMilliseconds
+        if($Ending -eq 'cancel'){
+            Wait-Until {(Draft-Identity) -ceq $baseline} "$case did not restore every shared draft readout exactly"
+        }else{
+            if(!$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).WaitForInputIdle(5000)){throw "$case native input queue did not become idle after release"}
+            if((Draft-Identity) -cne $moved){throw "$case release changed the acknowledged scrub draft"}
+        }
+        if($Modifier){[CapyRowPointer]::Hold($Modifier,$false)}
+        No-FieldEntry
+        $expected=Draft-Identity;$check.after=$expected
+        switch($Activation){
+            {$_ -in 'mouse','touch'}{$at=$field.Current.BoundingRectangle;[CapyRowPointer]::Down($Activation,[int]($at.X+$at.Width/2),[int]($at.Y+$at.Height/2));[CapyRowPointer]::Up()}
+            'key'{Focus-Keyboard $field;$check.activation_focus=$field.Current.HasKeyboardFocus;Key 0x0D}
+            'uia'{$field.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+        }
+        Wait-Until {$entry=Find ($id+'-entry') -Within $editorFrame;$entry -and $entry.Current.HasKeyboardFocus} "$case swallowed the next $Activation activation"
+        Key 0x1B;Wait-Until {!(Find ($id+'-entry') -Within $editorFrame)} "$case could not leave its activated native editor"
+        if((Draft-Identity) -cne $expected){throw "$case activation changed the draft"}
+        if(((Model).state.colors.foreground|ConvertTo-Json -Depth 12 -Compress) -cne $paint -or (Artwork-Identity) -cne $artwork){throw "$case changed paint or artwork before Use Color"}
+        if($Ending -eq 'cancel'){
+            Invoke 'edit-color-apply';Closed-Editor "$case could not accept the canceled draft"
+            Wait-Until {((Model).state.colors.foreground|ConvertTo-Json -Depth 12 -Compress) -ceq $paint} "$case did not accept the exact original shared paint definition"
+            if((Artwork-Identity) -cne $artwork){throw "$case accepting the restored paint changed artwork"}
+            Open-Editor
+            $check.shared_paint_rollback='exact'
+        }
+        $check.status='passed'
+    }catch{
+        $check.error=$_|Out-String
+        try{Capture ("numeric-$case-failure") -WithModel}catch{}
+        throw
+    }finally{
+        if($Modifier){[CapyRowPointer]::Hold($Modifier,$false)}
+        if([CapyRowPointer]::Active){[CapyRowPointer]::Cancel()}
+        @($numericInputChecks.ToArray())|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'numeric-input.json')
+    }
 }
 try {
     Enter-CapyEnvironment
@@ -135,6 +200,10 @@ try {
     $after=[int](Shown 'edit-color-0-2')
     (Control 'edit-color-0-2').SetFocus();Key 0x28
     Wait-Until {[int](Shown 'edit-color-0-2') -eq $after-1} 'Arrow Down did not step the number'
+
+    foreach($activation in 'mouse','touch','uia'){Numeric-Input 'touch' 'cancel' $activation}
+    foreach($device in 'mouse','pen','touch'){foreach($activation in 'key','uia'){Numeric-Input $device 'outside' $activation}}
+    foreach($modifier in 0x10,0x11){Numeric-Input 'mouse' 'modifier' 'uia' $modifier}
 
     Invoke 'edit-color-current'
     Wait-Until {(Shown 'edit-color-hex') -eq '#FFFFFF'} 'Current did not revert the draft'
@@ -245,7 +314,7 @@ try {
 
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
-    [pscustomobject]@{theme=$Theme;rows='passed';paste_and_copy='passed';native_clipboard_ownership='passed';formats='passed';typing_and_refusal='passed';scrub_and_step='passed';revert='passed';sheet='passed';memory='passed';canvas_pick='passed';use_color='passed';fill_thumbnail='passed';evidence=$run}|ConvertTo-Json
+    [pscustomobject]@{theme=$Theme;rows='passed';paste_and_copy='passed';native_clipboard_ownership='passed';formats='passed';typing_and_refusal='passed';scrub_and_step='passed';numeric_input_cases=$numericInputChecks.Count;revert='passed';sheet='passed';memory='passed';canvas_pick='passed';use_color='passed';fill_thumbnail='passed';evidence=$run}|ConvertTo-Json
 }catch{
     if($review -and !$review.HasExited){try{Capture 'failure' -WithModel}catch{}}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw

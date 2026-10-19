@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ColorEditor.h"
 #include "ColorView.h"
+#include "PointerGesture.h"
 #include "NativeMenus.h"
 #include "WorkspaceQuery.h"
 #include "Checker.h"
@@ -141,7 +142,7 @@ struct View:std::enable_shared_from_this<View>{
     Button edit;Shapes::Ellipse editFill;bool editHovered=false;
     Canvas arc;Shapes::Path arcTrack;std::vector<Shapes::Line> ramp;Shapes::Ellipse markerShadow,marker;TextBlock caption;
     Slider intensity;bool syncingIntensity=false;
-    std::optional<uint32_t> arcPointer;double arcOriginal=0;hstring arcKey;
+    std::optional<uint32_t> arcPointer;double arcOriginal=0;hstring arcKey,arcContext;
     bool layoutHdr=false;double frameWidth=0,frameHeight=0;
     uint64_t listener=0;
     std::array<Button,2> shapes;
@@ -187,24 +188,27 @@ struct View:std::enable_shared_from_this<View>{
     static J geometry(std::shared_ptr<WorkspaceData> const& data,double size,bool hdr){return colorUi(data->localization.get(),O({{L"type",S(L"layout")},{L"size",N(size)},{L"hdr",B(hdr)}})).GetObject();}
     J arcAt(double fraction)const{return colorUi(data->localization.get(),O({{L"type",S(L"arc")},{L"size",N(panelSize)},{L"fraction",N(fraction)}})).GetObject();}
     void pickIntensity(Point position){
+        if(!arcPointer||arcContext!=intensityContext()){endArc(false);return;}
         A point;point.Append(N(position.X));point.Append(N(position.Y));
         auto hit=colorUi(data->localization.get(),O({{L"type",S(L"arc")},{L"size",N(panelSize)},{L"point",point}})).GetObject();
         auto fraction=hit.GetNamedValue(L"fraction",JsonValue::CreateNullValue());
         if(fraction.ValueType()==JsonValueType::Number)setIntensity(-2+8*fraction.GetNumber());
     }
-    void setIntensity(double stops){send(O({{L"op",S(L"hdr_intensity")},{L"stops",N(std::clamp(stops,-2.,6.))}}));}
+    void setIntensity(double stops){sendEdit(O({{L"op",S(L"hdr_intensity")},{L"stops",N(std::clamp(stops,-2.,6.))}}),arcPointer?arcContext:intensityContext());}
     bool transparentSlot()const{return str(displayColors(data->state),L"slot")==L"transparent";}
     void endArc(bool restore){
         if(!arcPointer)return;arcPointer.reset();arcTrack.ReleasePointerCaptures();
-        if(restore)setIntensity(arcOriginal);
+        if(restore&&arcContext==intensityContext())setIntensity(arcOriginal);
     }
-    hstring editingContext()const{return str(model(),L"shape")+L"/"+str(displayColors(data->state),L"paint_slot");}
+    hstring editingContext()const{return object(data->model,L"color_wheel_context").Stringify();}
+    hstring intensityContext()const{return object(data->model,L"color_edit_context").Stringify();}
+    void sendEdit(J const& action,hstring const& expected){data->dispatch(O({{L"type",S(L"color_edit")},{L"context",J::Parse(expected)},{L"action",action}}));}
     void send(J const& action){data->dispatch(O({{L"type",S(L"color")},{L"action",action}}));}
     void cancel(){pointer.reset();part=0;root.ReleasePointerCaptures();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));}
     void pick(Point position){
         if(!pointer||context!=editingContext()||side<1)return;
         A location;location.Append(N(position.X));location.Append(N(position.Y));
-        send(O({{L"op",S(L"pick_wheel")},{L"part",S(part==1?L"hue":L"field")},{L"point",location},{L"size",N(side)}}));
+        sendEdit(O({{L"op",S(L"pick_wheel")},{L"part",S(part==1?L"hue":L"field")},{L"point",location},{L"size",N(side)}}),context);
     }
     static void placeBox(FrameworkElement const& element,A const& box){
         Canvas::SetLeft(element,box.GetNumberAt(0));Canvas::SetTop(element,box.GetNumberAt(1));
@@ -232,7 +236,7 @@ struct View:std::enable_shared_from_this<View>{
         // Native buttons consume their own presses before this bubbles here.
         root.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto p=e.GetCurrentPoint(self->wheel);
-            if(self->pointer||!p.IsInContact()||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+            if(self->pointer||!PointerGesture::PrimaryContact(p))return;
             auto at=p.Position();auto shape=str(self->model(),L"shape");
             auto part=capy_color_hit(at.X,at.Y,float(self->side),shape==L"circle"?2:shape==L"triangle"?1:0);
             if(part&&self->root.CapturePointer(e.Pointer())){self->pointer=p.PointerId();self->part=part;AutomationProperties::SetItemStatus(self->root,self->data->caption(L"color",L"picking"));self->pick(at);e.Handled(true);}
@@ -315,18 +319,17 @@ struct View:std::enable_shared_from_this<View>{
         caption.IsHitTestVisible(false);caption.FontFamily(FontFamily(L"Segoe UI"));
         arcTrack.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto p=e.GetCurrentPoint(self->stage);
-            if(self->arcPointer||self->transparentSlot()||(p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed()))return;
+            if(self->arcPointer||self->transparentSlot()||!PointerGesture::PrimaryContact(p))return;
             if(!self->arcTrack.CapturePointer(e.Pointer()))return;
-            self->arcPointer=p.PointerId();self->arcOriginal=num(self->model(),L"intensity");self->pickIntensity(p.Position());e.Handled(true);
+            self->arcPointer=p.PointerId();self->arcContext=self->intensityContext();self->arcOriginal=num(self->model(),L"intensity");self->pickIntensity(p.Position());e.Handled(true);
         }});
         arcTrack.PointerMoved([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->arcPointer==e.Pointer().PointerId()){
             self->pickIntensity(e.GetCurrentPoint(self->stage).Position());e.Handled(true);
         }});
-        arcTrack.PointerReleased([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->arcPointer==e.Pointer().PointerId()){
-            self->pickIntensity(e.GetCurrentPoint(self->stage).Position());self->endArc(false);e.Handled(true);
+        PointerGesture::OnCompleted(arcTrack,[weak](PointerRoutedEventArgs const& e,bool cancel){if(auto self=weak.lock();self&&self->arcPointer==e.Pointer().PointerId()){
+            if(!cancel)self->pickIntensity(e.GetCurrentPoint(self->stage).Position());
+            self->endArc(cancel);e.Handled(true);
         }});
-        arcTrack.PointerCanceled([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->arcPointer==e.Pointer().PointerId())self->endArc(true);});
-        arcTrack.PointerCaptureLost([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->arcPointer==e.Pointer().PointerId())self->endArc(true);});
         arcTrack.DoubleTapped([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->transparentSlot())self->setIntensity(0);});
         intensity.Minimum(-2);intensity.Maximum(6);intensity.StepFrequency(.01);intensity.SmallChange(.1);intensity.LargeChange(1);
         intensity.Width(1);intensity.Height(1);intensity.Opacity(0);intensity.IsHitTestVisible(false);intensity.Visibility(Visibility::Collapsed);
@@ -454,6 +457,7 @@ struct View:std::enable_shared_from_this<View>{
     void refresh(){
         auto view=model();if(!view.Size()||!root.XamlRoot())return;
         auto nextContext=editingContext();if(context!=nextContext){cancel();context=nextContext;}
+        if(arcPointer&&arcContext!=intensityContext())endArc(false);
         double scale=root.XamlRoot().RasterizationScale();
         bool hdr=flag(view,L"hdr");
         double available=std::floor(root.ActualWidth()*scale)/scale,height=fitHeight?root.ActualHeight():0;

@@ -170,7 +170,7 @@ void LayersView::init(){
     timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->preview();});
     root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->data->thumbnails){self->timer.Start();self->preview();}});
     root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){
-        self->timer.Stop();++self->menuGeneration;if(self->menu)self->menu.Hide();if(self->pickup)self->pickup->Cancel();
+        self->timer.Stop();self->menuOwner.Cancel();if(self->pickup)self->pickup->Cancel();
     }});
 }
 void LayersView::refresh(){
@@ -183,7 +183,7 @@ void LayersView::refresh(){
     list.Visibility(rowsShown?Visibility::Visible:Visibility::Collapsed);listFrame.Visibility(list.Visibility());opacityGate.Visibility(opacityShown?Visibility::Visible:Visibility::Collapsed);
     footerFrame.Visibility(shown(L"layer_actions")?Visibility::Visible:Visibility::Collapsed);
     auto nextEpoch=epochOf(data);if(epoch!=nextEpoch){
-        epoch=nextEpoch;++menuGeneration;if(menu)menu.Hide();if(pickup)pickup->Cancel();source.Clear();
+        epoch=nextEpoch;menuOwner.Cancel();if(pickup)pickup->Cancel();source.Clear();
     }
     auto active=editing(),capabilities=object(view(),L"controls");
     blend.IsEnabled(flag(capabilities,L"blend"));
@@ -230,8 +230,8 @@ void LayersView::refresh(){
         else if(!source.GetAt(uint32_t(ids.size())).try_as<J>())source.SetAt(uint32_t(ids.size()),paper);
     }
     for(auto const& [element,row]:rows)row->refresh();
-    if(menuTarget&&(menuOpen||menuPending)&&!panelRow(data->state,*menuTarget).Size()){
-        ++menuGeneration;menuPending=false;menuOpen=false;if(menu)menu.Hide();
+    if(menuTarget&&menuOwner.Active()&&!panelRow(data->state,*menuTarget).Size()){
+        menuOwner.Cancel();
     }
     if(pickup)pickup->Refresh();
     connections();
@@ -307,53 +307,51 @@ void LayersView::preview(){
 }
 void LayersView::showMenu(J spec, FrameworkElement const& anchor){
     if(data->updating||!spec.Size()||!anchor.XamlRoot())return;
-    if(pickup)pickup->Cancel();if(menu)menu.Hide();
-    auto generation=++menuGeneration;auto document=epochOf(data);auto weak=weak_from_this();
-    menuPending=false;menuTarget.reset();menu=MenuFlyout();TrackPopup(menu,data);
-    menu.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){self->menuOpen=true;if(self->pickup)self->pickup->MenuChanged();}});
-    menu.Closed([weak](auto&& sender,auto&&){if(auto self=weak.lock();self&&self->menu==sender){self->menuOpen=false;if(self->pickup)self->pickup->MenuChanged();}});
-    NativeMenuItems(menu.Items(),array(spec,L"sections"),data,[weak,generation,document](J action){
-        if(auto self=weak.lock();self&&self->menuGeneration==generation&&epochOf(self->data)==document)self->data->dispatchDocument(action,document);
+    if(pickup)pickup->Cancel();menuOwner.Cancel();
+    auto document=epochOf(data);auto weak=weak_from_this();
+    menuTarget.reset();menu=MenuFlyout();auto ticket=menuOwner.Begin(data,anchor,menu);
+    menu.Opened([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pickup)self->pickup->MenuChanged();});
+    menu.Closed([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pickup)self->pickup->MenuChanged();});
+    NativeMenuItems(menu.Items(),array(spec,L"sections"),data,[weak,flyout=make_weak(menu),document](J action){
+        if(auto self=weak.lock();self&&self->menu==flyout.get()&&epochOf(self->data)==document)self->data->dispatchDocument(action,document);
     });
-    menu.ShowAt(anchor);
+    ticket.Show(anchor,Primitives::FlyoutShowOptions{});
 }
 
 void LayersView::context(double id,bool mask,UIElement const& anchor,std::optional<Windows::Foundation::Point> at,bool holding,bool blendMenu){
     if(data->updating||!anchor.XamlRoot())return;
     if(!holding&&pickup)pickup->Cancel();
     if(id>=0&&!blendMenu)action(O({{L"op",S(L"context")},{L"id",N(id)},{L"mask",B(mask)}}));
-    auto generation=++menuGeneration;auto document=epoch;
-    if(menu)menu.Hide();menuOpen=false;menuPending=true;menuTarget=id>=0?std::optional<double>(id):std::nullopt;
+    auto document=epoch;
+    menuOwner.Cancel();menu=MenuFlyout();auto ticket=menuOwner.Begin(data,anchor.as<FrameworkElement>(),menu);
+    menuTarget=id>=0?std::optional<double>(id):std::nullopt;
     auto weak=weak_from_this();auto target=make_weak(anchor);auto queue=root.DispatcherQueue();
+    menu.Opened([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pickup)self->pickup->MenuChanged();});
+    menu.Closed([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pickup)self->pickup->MenuChanged();});
     auto query=O({{L"epoch",S(document)},{L"id",id>=0?S(to_hstring(uint64_t(id))):JsonValue::CreateNullValue()},
         {L"mask",id>=0?B(mask):JsonValue::CreateNullValue()},{L"blend",B(blendMenu)}});
-    bool queued=data->query(CanvasQueryKind::LayerMenu,to_string(query.Stringify()),[weak,target,queue,generation,document,id,at,holding](PreviewPacket packet){
-        queue.TryEnqueue([weak,target,generation,document,id,at,holding,packet=std::move(packet)]{
+    bool queued=data->query(CanvasQueryKind::LayerMenu,to_string(query.Stringify()),[weak,target,queue,ticket,document,id,at,holding](PreviewPacket packet){
+        queue.TryEnqueue([weak,target,ticket,document,id,at,holding,packet=std::move(packet)]{
             auto self=weak.lock();auto anchor=target.get();
-            if(!self||self->menuGeneration!=generation)return;
-            self->menuPending=false;if(self->pickup)self->pickup->MenuChanged();
-            if(!anchor||!anchor.XamlRoot()||!self->root.IsLoaded()||epochOf(self->data)!=document||!packet)return;
-            if(id>=0&&!panelRow(self->data->state,id).Size())return;
+            if(!self||!ticket.Current())return;
+            if(epochOf(self->data)!=document||!packet||(id>=0&&!panelRow(self->data->state,id).Size())){ticket.Cancel();return;}
             try{
                 auto reply=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
-                if(str(reply,L"epoch")!=document)return;
-                auto spec=object(reply,L"menu");if(!spec.Size())return;
+                if(str(reply,L"epoch")!=document){ticket.Cancel();return;}
+                auto spec=object(reply,L"menu");if(!spec.Size()){ticket.Cancel();return;}
                 auto menuId=double(std::stoull(to_string(str(reply,L"id"))));
-                self->menu=MenuFlyout();TrackPopup(self->menu,self->data);
-                self->menu.Opened([weak](auto&&,auto&&){if(auto owner=weak.lock()){owner->menuOpen=true;if(owner->pickup)owner->pickup->MenuChanged();}});
-                self->menu.Closed([weak](auto&& sender,auto&&){if(auto owner=weak.lock();owner&&owner->menu==sender){owner->menuOpen=false;if(owner->pickup)owner->pickup->MenuChanged();}});
-                NativeMenuItems(self->menu.Items(),array(spec,L"sections"),self->data,[weak,generation,document,menuId](J action){
-                    if(auto self=weak.lock();self&&self->menuGeneration==generation&&epochOf(self->data)==document
+                NativeMenuItems(self->menu.Items(),array(spec,L"sections"),self->data,[weak,flyout=make_weak(self->menu),document,menuId](J action){
+                    if(auto self=weak.lock();self&&self->menu==flyout.get()&&epochOf(self->data)==document
                         &&(panelRow(self->data->state,menuId).Size()||num(self->editing(),L"id",-1)==menuId))self->data->dispatchDocument(action,document);
                 });
                 Primitives::FlyoutShowOptions options;
                 if(at)options.Position(*at);
                 options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);
-                self->menu.ShowAt(anchor,options);
-            }catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
+                ticket.Show(anchor.as<FrameworkElement>(),options);
+            }catch(hresult_error const& error){ticket.Cancel();OutputDebugStringW(error.message().c_str());}
         });
     });
-    if(!queued)menuPending=false;
+    if(!queued)ticket.Cancel();
     if(pickup)pickup->MenuChanged();
 }
 

@@ -3,6 +3,7 @@
 #include "PickerDialog.h"
 #include "BitmapUpload.h"
 #include "WorkspaceGeometry.h"
+#include "NativeMenus.h"
 #include <deque>
 #include <set>
 
@@ -237,7 +238,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
             auto leave=[hover](auto&&,auto&&){hover.Fill(clear());};
             tile.node.PointerExited(leave);tile.node.PointerCanceled(leave);tile.node.PointerCaptureLost(leave);
             if(auto actions=array(item,L"actions");actions.Size()){
-                MenuFlyout menu;AutomationProperties::SetAutomationId(menu,L"paper-tile-menu");
+                MenuFlyout menu;TrackPopup(menu,data);AutomationProperties::SetAutomationId(menu,L"paper-tile-menu");
                 for(auto value:actions){
                     auto spec=value.GetObject();auto action=object(spec,L"action");MenuFlyoutItem command;command.Text(str(spec,L"label"));
                     AutomationProperties::SetAutomationId(command,L"paper-"+str(action,L"op")+L"-"+to_hstring(index));

@@ -644,7 +644,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     void present(){
         if(!built)return;
         auto preview=input->Preview();auto resolved=object(preview,L"geometry");if(!resolved.Size())resolved=geometry;
-        auto source=input->Source();uint32_t held=str(source,L"kind")==L"item"?uint32_t(num(source,L"value")):0;
+        auto source=input->Source();uint32_t dragged=preview.Size()&&str(source,L"kind")==L"item"?uint32_t(num(source,L"value")):0;
         auto size=find(array(view,L"sizes"),L"id",str(geometry,L"size"));
         auto command=object(view,L"capy"),capyBounds=object(geometry,L"zen_button");
         bool capyVisible=flag(data->model,L"keep_zen_button")||(!hidden&&!editing&&geometry.GetNamedValue(L"capy_item",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number);
@@ -666,14 +666,14 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             if(shown){place(bars[i],object(barList.GetObjectAt(uint32_t(i)),L"bounds"));bars[i].CornerRadius({corner(),corner(),corner(),corner()});}
         }
         for(auto& [id,native]:items){
-            auto bounds=id==held&&preview.Size()?object(preview,L"held"):object(findId(placed,id),L"bounds");
+            auto bounds=id==dragged?object(preview,L"held"):object(findId(placed,id),L"bounds");
             bool visible=bounds.Size()&&!hidden&&(editing||str(object(native.entry,L"item"),L"kind")!=L"capy");native.frame.Visibility(visible?Visibility::Visible:Visibility::Collapsed);
             if(!visible)continue;
             // Only drag neighbors animate. Normal controls and native caption
             // hit regions must adopt a completed layout together.
-            if(!preview.Size()||id==held)native.frame.Transitions().Clear();
+            if(!preview.Size()||id==dragged)native.frame.Transitions().Clear();
             else if(!native.frame.Transitions().Size())native.frame.Transitions().Append(Media::Animation::RepositionThemeTransition());
-            place(native.frame,bounds);Canvas::SetZIndex(native.frame,id==held?30:5);
+            place(native.frame,bounds);Canvas::SetZIndex(native.frame,id==dragged?30:5);
             bool compact=num(bounds,L"width")<num(findId(metrics,id),L"width")-.5;
             auto kind=str(object(native.entry,L"item"),L"kind");
             if(kind==L"menu_labels"){
@@ -694,7 +694,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
                 }}
             }
             native.outline.BorderThickness(editing?Thickness{1,1,1,1}:Thickness{});
-            native.outline.BorderBrush(held==id&&flag(preview,L"detached")?fill(color(L"#dc3545")):input->Selected()==id?accent(data):data->brush(L"tabbar"));
+            native.outline.BorderBrush(dragged==id&&flag(preview,L"detached")?fill(color(L"#dc3545")):input->Selected()==id?accent(data):data->brush(L"tabbar"));
             AutomationProperties::SetItemStatus(native.frame,editing&&input->Selected()==id?data->caption(L"search",L"selected"):L"");
         }
         auto zoneBounds=array(resolved,L"zones"),more=array(resolved,L"overflow");
@@ -705,8 +705,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             overflow[i].Visibility(show?Visibility::Visible:Visibility::Collapsed);if(show)place(overflow[i],more.GetObjectAt(i));
             overflow[i].Background(overflowJoined[i]?clear():headerSurface(data));overflow[i].CornerRadius({corner(),corner(),corner(),corner()});
         }
-        ghost.Visibility(preview.Size()&&!held?Visibility::Visible:Visibility::Collapsed);
-        if(preview.Size()&&!held){
+        ghost.Visibility(preview.Size()&&!dragged?Visibility::Visible:Visibility::Collapsed);
+        if(preview.Size()&&!dragged){
             place(ghost,object(preview,L"held"));ghost.BorderBrush(flag(preview,L"detached")?fill(color(L"#dc3545")):accent(data));
             hstring text=data->caption(L"header",L"add_tools");
             if(str(source,L"kind")==L"component")for(auto v:array(view,L"components"))if(object(v.GetObject(),L"item").Stringify()==object(source,L"value").Stringify())text=str(v.GetObject(),L"label");
@@ -808,6 +808,11 @@ void HeaderView::SetFullscreen(bool active){
 void HeaderView::SetBlocked(bool blocked){impl->data->externalPopup=blocked;if(blocked)impl->input->Cancel();}
 bool HeaderView::Key(Input::KeyRoutedEventArgs const& e,bool pressed){
     return impl->input->Key(e,pressed);
+}
+bool HeaderView::CancelGesture(){
+    bool closed=impl->data->dismissTransients();
+    if(impl->drawings)closed=impl->drawings->cancelAll()||closed;
+    return impl->input->Cancel()||closed;
 }
 void HeaderView::SetDrawerSources(A const& sources){
     if(sources.Stringify()==impl->data->drawerSources.Stringify())return;

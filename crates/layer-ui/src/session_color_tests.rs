@@ -26,6 +26,88 @@ fn fresh_sessions_use_green_paint_and_restore_remembered_colors() {
 }
 
 #[test]
+fn current_color_context_keeps_hdr_motion_and_restore_on_the_same_base() {
+    use layer_core::color::SampleDepth;
+    let mut document = Document::new(layer_core::PortableId::random(), 32, 32, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color.depth = SampleDepth::F32;
+    let mut s = UiSession::new(Recorder { color: document.composition().color, ..Default::default() }, document, [32, 32], Platform::Gtk).unwrap();
+    s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: 1. } }).unwrap();
+    let context = s.color_edit_context();
+    let original = s.state.colors.definition();
+    let base = s.state.colors.picker_base();
+    let background = s.state.colors.background;
+    let checkpoint = s.engine.checkpoint();
+    s.dispatch(UiAction::ColorEdit { context, action: ColorAction::HdrIntensity { stops: 3. } }).unwrap();
+    assert_ne!(s.state.colors.definition(), original);
+    assert_eq!(s.state.colors.hdr_intensity(), 3.);
+    assert_eq!(s.state.colors.picker_base(), base);
+    assert!(s.color_edit_context() == context);
+    s.dispatch(UiAction::ColorEdit { context, action: ColorAction::HdrIntensity { stops: 1. } }).unwrap();
+    assert_eq!(s.state.colors.definition(), original);
+    assert_eq!(s.state.colors.hdr_intensity(), 1.);
+    assert_eq!(s.state.colors.picker_base(), base);
+    assert_eq!(s.state.colors.background, background);
+    assert_eq!(s.engine.checkpoint(), checkpoint);
+}
+
+#[test]
+fn a_wheel_contact_from_transparent_keeps_editing_the_remembered_paint_slot() {
+    for slot in [ColorSlot::Foreground, ColorSlot::Background] {
+        let mut s = session(Platform::Gtk);
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot } }).unwrap();
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+        let context = s.color_wheel_context();
+        let other = if slot == ColorSlot::Foreground { s.state.colors.background } else { s.state.colors.foreground };
+        let checkpoint = s.engine.checkpoint();
+        for point in [[92., 62.], [58., 88.]] {
+            let before = s.state.colors.definition();
+            s.dispatch(UiAction::ColorEdit { context, action: ColorAction::PickWheel { part: ColorWheelPart::Field, point, size: 160. } }).unwrap();
+            assert_eq!(s.state.colors.slot, slot);
+            assert_ne!(s.state.colors.definition(), before, "{slot:?} {point:?}");
+            assert!(s.color_wheel_context() == context);
+            assert_eq!(if slot == ColorSlot::Foreground { s.state.colors.background } else { s.state.colors.foreground }, other);
+        }
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+    }
+}
+
+#[test]
+fn old_color_contacts_cannot_retarget_a_wheel_edit() {
+    let action = ColorAction::PickWheel { part: ColorWheelPart::Field, point: [92., 62.], size: 160. };
+    for target in ["shape", "slot", "document", "activation", "quick_mask", "saved_mask"] {
+        let mut s = session(Platform::Gtk);
+        if target == "saved_mask" { invoke(&mut s, CommandId::QuickMask); }
+        let context = s.color_edit_context();
+        match target {
+            "shape" => { s.dispatch(UiAction::Color { action: ColorAction::Shape { shape: ColorShape::Square } }).unwrap(); }
+            "slot" => { s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Background } }).unwrap(); }
+            "document" => { s = session(Platform::Gtk); }
+            "activation" => {
+                let mut next = session(Platform::Gtk);
+                next.inherit_window_state(&s).unwrap();
+                s = next;
+            }
+            "quick_mask" => { invoke(&mut s, CommandId::QuickMask); }
+            "saved_mask" => { invoke(&mut s, CommandId::SaveSelectionLayer); }
+            _ => unreachable!(),
+        }
+        assert!(s.color_edit_context() != context, "{target}");
+        let mut changed = s.state.display_colors().clone();
+        changed.apply(action.clone()).unwrap();
+        assert_ne!(&changed, s.state.display_colors(), "{target} must exercise a changing wheel action");
+        let artwork_colors = s.state.colors.clone();
+        let mask_colors = s.selection_masks.colors.clone();
+        let checkpoint = s.engine.checkpoint();
+        let change = s.dispatch(UiAction::ColorEdit { context, action: action.clone() }).unwrap();
+        assert_eq!(change.regions, 0, "{target}");
+        assert!(!change.canvas_wake, "{target}");
+        assert_eq!(s.state.colors, artwork_colors, "{target}");
+        assert_eq!(s.selection_masks.colors, mask_colors, "{target}");
+        assert_eq!(s.engine.checkpoint(), checkpoint, "{target}");
+    }
+}
+
+#[test]
 fn tone_preview_survives_edits_but_not_document_replacement() {
     use crate::proof_workflow::ToneKey;
     use layer_core::color::{SampleDepth,hdr::SdrRendition};

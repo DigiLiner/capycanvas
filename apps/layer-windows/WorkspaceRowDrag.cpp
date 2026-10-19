@@ -26,7 +26,6 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
     MenuFlyout visibleMenu{nullptr};
     std::function<bool()> available;
     Move move;
-    std::function<void(Id)> select;
     std::function<void()> ended;
     struct Row{
         weak_ref<ListViewItem> item;
@@ -97,9 +96,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             &&std::find(order.begin(),order.end(),source->id)!=order.end();
     }
     bool owns(UIElement const& node)const{
-        if(auto captures=node.PointerCaptures())for(auto contact:captures)
-            if(pointer&&contact.PointerId()==pointer.PointerId())return true;
-        return false;
+        return pointer&&PointerGesture::Captured(node,pointer.PointerId());
     }
     bool claim(){
         if(!current()||!pointer)return false;
@@ -142,10 +139,10 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         auto original=e.OriginalSource().try_as<DependencyObject>();if(!original)return;
         for(auto const& row:rows)if(auto item=row.item.get();item&&inside(original,item)){
             auto point=e.GetCurrentPoint(surface);
-            if(!point.IsInContact())return;
+            if(!PointerGesture::PrimaryContact(point))return;
             source=row;pointer=e.Pointer();device=point.PointerDeviceType();
             position=point.Position();grip=inside(original,row.grip.get());
-            child=inside(original,row.more.get())||point.Properties().IsRightButtonPressed()||point.Properties().IsBarrelButtonPressed();
+            child=inside(original,row.more.get());
             ignoreClick=grip||child;
             owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
             auto node=original;
@@ -157,7 +154,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
                 // Grips bypass hold and claim panning immediately, but movement
                 // still has to cross the system drag slop.
                 if(grip&&!claim())return;
-                recognizing=true;recognizer.Begin(point,device==NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::None:NativeInput::GestureSettings::Hold);
+                recognizing=true;recognizer.Begin(item,point,device==NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::None:NativeInput::GestureSettings::Hold);
             }
             tickAt=std::chrono::steady_clock::now();timer.Start();evidence();return;
         }
@@ -195,11 +192,11 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(!current()){cancel();return;}
         position=e.GetCurrentPoint(surface).Position();
         if(child)return;
-        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(surface));
+        if(recognizing)recognizer.Move(surface,e);
         if(!dragging&&crossed()){
             if(!grip&&device!=NativeInput::PointerDeviceType::Mouse&&!held){
                 // Ordinary scroll motion retires this hold without claiming it.
-                cancel();return;
+                clear(true);return;
             }
             if(!claim())return;
             dragging=true;ignoreClick=true;suppressContext=true;
@@ -220,14 +217,12 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             {L"canceled",B(e.GetCurrentPoint(surface).Properties().IsCanceled())},
             {L"before",before?S(*before):JsonValue::CreateNullValue()},
             {L"position",O({{L"x",N(position.X)},{L"y",N(position.Y)}})}});
-        bool tapped=!ignoreClick&&!held&&!dragging&&!grip&&!child&&!crossed()&&current();
-        bool handled=held||dragging||grip||tapped;
+        bool handled=held||dragging||grip;
         ignoreClick=ignoreClick||handled;
         // A held release keeps its menu; dragging/cancellation closes it.
         clear(dragging);
         if(handled)e.Handled(true);
         if(commit)move(id,destination);
-        else if(tapped)select(id);
     }
     void tick(){
         if(!pointer)return;
@@ -247,10 +242,9 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
     }
     void attach(ListViewItem const& item,Button const& gripButton,Button const& more,MenuFlyout const& menu,hstring id){
         Row row{make_weak(item),make_weak(gripButton),make_weak(more),make_weak(menu),id};rows.push_back(row);
-        menu.Opened([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock())self->visibleMenu=sender.template as<MenuFlyout>();});
+        menu.Opening([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock())self->visibleMenu=sender.template as<MenuFlyout>();});
         menu.Closed([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock();self&&self->visibleMenu==sender)self->visibleMenu=nullptr;});
-        // WinUI's automatic CanDrag pickup would bypass pen/touch hold policy.
-        item.CanDrag(false);item.IsHoldingEnabled(false);gripButton.IsHoldingEnabled(false);
+        PointerGesture::OwnHolding(item);
         item.RightTapped([weak=weak_from_this(),row](auto&&,RightTappedRoutedEventArgs const& e){
             if(auto self=weak.lock();self&&self->available()){
                 e.Handled(true);
@@ -296,6 +290,11 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         timer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->tick();});
         surface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->down(e);})),true);
         surface.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->motion(e);})),true);
+        PointerGesture::OnLeaving(surface,[weak=weak_from_this()](PointerRoutedEventArgs const& e){
+            if(auto self=weak.lock();self&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId()&&!self->owns(self->surface)){
+                self->clear(false);
+            }
+        });
         surface.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
         auto canceled=PointerEventHandler([weak=weak_from_this()](auto&&,PointerRoutedEventArgs const& e){
             if(auto self=weak.lock();self&&!self->releasing&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
@@ -310,7 +309,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
                 else self->cancel(L"capture_lost");
             }
         })),true);
-        surface.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
+        ShortcutKeys(surface,[weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){
             if(auto self=weak.lock()){
                 if(e.Key()==Windows::System::VirtualKey::Escape&&self->cancel(L"escape"))e.Handled(true);
                 else if(!self->pointer)self->ignoreClick=false;
@@ -318,8 +317,8 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         });
     }
 };
-WorkspaceRowDrag::WorkspaceRowDrag(ListView list,Grid surface,std::function<bool()> available,Move move,std::function<void(Id)> select,std::function<void()> ended):impl(std::make_shared<Impl>()){
-    impl->list=list;impl->surface=surface;impl->available=std::move(available);impl->move=std::move(move);impl->select=std::move(select);impl->ended=std::move(ended);impl->init();
+WorkspaceRowDrag::WorkspaceRowDrag(ListView list,Grid surface,std::function<bool()> available,Move move,std::function<void()> ended):impl(std::make_shared<Impl>()){
+    impl->list=list;impl->surface=surface;impl->available=std::move(available);impl->move=std::move(move);impl->ended=std::move(ended);impl->init();
 }
 WorkspaceRowDrag::~WorkspaceRowDrag(){impl->cancel();impl->timer.Stop();}
 void WorkspaceRowDrag::Attach(ListViewItem row,Button grip,Button more,MenuFlyout menu,Id id){impl->attach(row,grip,more,menu,id);}

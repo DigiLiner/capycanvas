@@ -18,6 +18,7 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     TextBlock caption{nullptr};
     Button more{nullptr};
     MenuFlyout menu{nullptr};
+    OwnedPopup menuOwner;
     WorkspaceShadow shadow;
     std::vector<FrameworkElement> fields;
     Microsoft::UI::Dispatching::DispatcherQueueTimer reappear{nullptr};
@@ -157,7 +158,7 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         return hstring(key);
     }
     void rebuild(){
-        if(menu)menu.Hide();
+        menuOwner.Cancel();
         items.Children().Clear();completion.Children().Clear();fields.clear();sizes=J{};placement=L"";
         caption.Text(str(view,L"label"));caption.Visibility(str(view,L"label").empty()?Visibility::Collapsed:Visibility::Visible);
         for(auto [list,panel]:{std::pair{L"items",items},std::pair{L"completion",completion}})
@@ -168,7 +169,7 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     void Apply(J const& state){
         auto value=state.GetNamedValue(L"canvas_bar",JsonValue::CreateNullValue());
         if(value.ValueType()!=JsonValueType::Object){
-            if(view.Size()){view=J{};schema=L"";placement=L"";++request;bounds=J{};if(menu)menu.Hide();present(false);}
+            if(view.Size()){view=J{};schema=L"";placement=L"";++request;bounds=J{};menuOwner.Cancel();present(false);}
             return;
         }
         auto next=value.GetObject();auto key=signature(next);
@@ -226,7 +227,7 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     }
     void suppress(bool hidden){
         reappear.Stop();
-        if(hidden){suppressed=true;if(menu)menu.Hide();present(false);return;}
+        if(hidden){suppressed=true;menuOwner.Cancel();present(false);return;}
         if(suppressed&&!contact&&!dragging)reappear.Start();
     }
     void Contact(bool active){
@@ -248,33 +249,22 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         }
         return nullptr;
     }
-    void openChoice(hstring const& id){
-        if(!view.Size())return;
+    void openPopup(J const& request,FrameworkElement const& anchor,Primitives::FlyoutPlacementMode placement){
+        if(!view.Size()||!anchor)return;
+        menuOwner.Cancel();menu=MenuFlyout();auto ticket=menuOwner.Begin(data,anchor,menu);
         auto weak=weak_from_this();
-        QueryWorkspace(data->query,O({{L"type",S(L"canvas_bar_choice_menu")},{L"context",context()},{L"id",S(id)}}),[weak,id](J reply){
-            auto self=weak.lock();if(!self||!self->view.Size())return;
-            auto model=object(reply,L"result");if(!array(model,L"sections").Size())return;
-            auto anchor=self->anchorFor(id);
-            if(!anchor)return;
-            if(self->menu)self->menu.Hide();
-            self->menu=MenuFlyout();TrackPopup(self->menu,self->data);
-            NativeMenuItems(self->menu.Items(),array(model,L"sections"),self->data,[data=self->data](J action){data->dispatch(action);});
-            Primitives::FlyoutShowOptions options;options.Placement(Primitives::FlyoutPlacementMode::TopEdgeAlignedLeft);
-            self->menu.ShowAt(anchor,options);
-        });
+        if(!QueryWorkspace(data->query,request,[weak,ticket,placement,source=make_weak(anchor)](J reply){
+            auto self=weak.lock();if(!self||!ticket.Current())return;
+            auto sections=array(object(reply,L"result"),L"sections");if(!sections.Size()){ticket.Cancel();return;}
+            NativeMenuItems(self->menu.Items(),sections,self->data,[data=self->data](J action){data->dispatch(action);});
+            Primitives::FlyoutShowOptions options;options.Placement(placement);ticket.Show(source.get(),options);
+        }))ticket.Cancel();
+    }
+    void openChoice(hstring const& id){
+        openPopup(O({{L"type",S(L"canvas_bar_choice_menu")},{L"context",context()},{L"id",S(id)}}),anchorFor(id),Primitives::FlyoutPlacementMode::TopEdgeAlignedLeft);
     }
     void openMenu(){
-        if(!view.Size())return;
-        auto weak=weak_from_this();
-        QueryWorkspace(data->query,O({{L"type",S(L"canvas_bar_menu")},{L"context",context()},{L"shown",N(double(shown))}}),[weak](J reply){
-            auto self=weak.lock();if(!self||!self->view.Size())return;
-            auto model=object(reply,L"result");if(!array(model,L"sections").Size())return;
-            if(self->menu)self->menu.Hide();
-            self->menu=MenuFlyout();TrackPopup(self->menu,self->data);
-            NativeMenuItems(self->menu.Items(),array(model,L"sections"),self->data,[data=self->data](J action){data->dispatch(action);});
-            Primitives::FlyoutShowOptions options;options.Placement(Primitives::FlyoutPlacementMode::TopEdgeAlignedRight);
-            self->menu.ShowAt(self->more,options);
-        });
+        openPopup(O({{L"type",S(L"canvas_bar_menu")},{L"context",context()},{L"shown",N(double(shown))}}),more,Primitives::FlyoutPlacementMode::TopEdgeAlignedRight);
     }
 };
 }

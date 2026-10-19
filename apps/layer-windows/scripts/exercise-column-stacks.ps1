@@ -124,11 +124,12 @@ function Check-Open([int]$Id){
     $bottom=($members|ForEach-Object {$_.bounds.y+$_.bounds.height}|Measure-Object -Maximum).Maximum
     if([Math]::Abs($column.open.bounds.y-$top) -gt .6 -or [Math]::Abs($column.open.bounds.height-($bottom-$top)) -gt .6){throw 'Open column did not span the complete stack height'}
 }
-function Drag([string]$Id,$To,[switch]$Cancel,[switch]$Hold,[switch]$Stack,$Expected){
+function Drag([string]$Id,$To,[switch]$Cancel,[switch]$Hold,[switch]$Stack,[switch]$Captured,$Expected){
     $from=At $Id;$generation=(Gesture).generation
     [CapyRowPointer]::Down($Device,$from.x,$from.y)
     Wait-Until {(Gesture).generation -gt $generation} 'Native handle did not receive pointer down'
     if((Gesture).requires_hold -ne [bool]$Hold -or (Gesture).device -ne $Device){throw 'Source used the wrong device or pickup policy'}
+    if($Captured -and !(Gesture).captured){throw 'Immediate custom handle did not capture its contact on press'}
     if($Hold){
         Wait-Until {(Gesture).phase -eq 'held'} 'Tile did not reach a native stationary hold'
         if($Device -eq 'mouse'){if((Gesture).menu_open){throw 'Mouse hold opened a context menu'}}
@@ -192,15 +193,15 @@ try {
     # Native tab bodies and handles are immediate; icon bodies retain their hold.
     foreach($source in @(
         @{id='panel-tab-brushes';hold=$false},
-        @{id='group-grip-7';hold=$false},
+        @{id='group-grip-7';hold=$false;captured=$true},
         @{id='ribbon-grip-toolbar';hold=$false},
         @{id='column-icon-color';hold=$true}
     )){
         if(!(Column 4).open){Tap 'column-icon-brushes';Check-Open 4}
         $before=Layout;$to=At 'column-grip-12'
-        Drag $source.id $to -Hold:$source.hold -Stack -Cancel
+        Drag $source.id $to -Hold:$source.hold -Captured:$source.captured -Stack -Cancel
         if((Layout) -ne $before){throw 'Canceled member insertion changed the layout'}
-        Drag $source.id $to -Hold:$source.hold -Stack
+        Drag $source.id $to -Hold:$source.hold -Captured:$source.captured -Stack
         Wait-Until {@((Model).state.workspace.layout.column_stacks|Where-Object {$_.members.Count -eq 3}).Count -eq 1} 'Content drop did not create an independent member'
         $after=Layout;Check-History $before $after
         WindowCommand 'undo_workspace';Wait-Until {(Layout) -eq $before} 'Fixture member insertion did not undo'
