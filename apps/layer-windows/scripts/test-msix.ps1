@@ -41,7 +41,7 @@ foreach($file in $manifest.files){
 }
 [xml]$appx=Get-Content -LiteralPath (Join-Path $unpacked 'AppxManifest.xml') -Raw
 $identity=$appx.Package.Identity
-if($identity.Name -cne $result.identity -or $identity.Publisher -cne $result.publisher -or $identity.Version -ne $result.version -or $identity.ProcessorArchitecture -ne 'x64'){throw 'Unexpected MSIX identity.'}
+if($identity.Name -cne $result.identity -or $identity.Publisher -cne $result.publisher -or $identity.Version -ne $result.version -or $manifest.architecture -notin @('x64','arm64') -or $identity.ProcessorArchitecture -ne $manifest.architecture){throw 'Unexpected MSIX identity.'}
 $application=$appx.Package.Applications.Application
 $uap10='http://schemas.microsoft.com/appx/manifest/uap/windows10/10'
 if($application.Executable -ne 'CapyCanvas.exe' -or $application.GetAttribute('RuntimeBehavior',$uap10) -ne 'packagedClassicApp' -or $application.GetAttribute('TrustLevel',$uap10) -ne 'mediumIL'){throw 'Unexpected MSIX activation contract.'}
@@ -142,7 +142,7 @@ $inputPayload=Join-Path $inputRoot 'payload'
 [IO.Directory]::CreateDirectory($inputPayload)|Out-Null
 [IO.File]::WriteAllText((Join-Path $inputPayload 'file.txt'),'package input fixture')
 $inputFile=[ordered]@{path='file.txt';bytes=(Get-Item -LiteralPath (Join-Path $inputPayload 'file.txt')).Length;sha256=(Get-FileHash -LiteralPath (Join-Path $inputPayload 'file.txt')).Hash}
-$inputManifest=[ordered]@{schema=1;architecture='x64';release_identity=$true;version='1.0.0';source_commit=$result.source_commit;files=@($inputFile)}
+$inputManifest=[ordered]@{schema=1;architecture=$manifest.architecture;release_identity=$true;version='1.0.0';source_commit=$result.source_commit;files=@($inputFile)}
 $inputResult=Join-Path $inputRoot 'result.json'
 [ordered]@{payload=$inputPayload;source_commit=$result.source_commit}|ConvertTo-Json|Set-Content -LiteralPath $inputResult
 function Reject-Input([string]$Expected,[hashtable]$Arguments=@{}){

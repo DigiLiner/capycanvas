@@ -52,7 +52,7 @@ function Pixels {
   try{
    foreach($point in $sampleCenters){
     $patch=$bitmap.Clone([Drawing.Rectangle]::new(($point[0]-$origin.x-8),($point[1]-$origin.y-8),16,16),[Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    try{$stream.SetLength(0);$stream.Position=0;$patch.Save($stream,[Drawing.Imaging.ImageFormat]::Png);$patches.Add([Convert]::ToHexString($hash.ComputeHash($stream.ToArray())))}finally{$patch.Dispose()}
+    try{$stream.SetLength(0);$stream.Position=0;$patch.Save($stream,[Drawing.Imaging.ImageFormat]::Png);$patches.Add([BitConverter]::ToString($hash.ComputeHash($stream.ToArray())).Replace('-',''))}finally{$patch.Dispose()}
    }
    $patches -join ':'
   }finally{$hash.Dispose();$stream.Dispose()}

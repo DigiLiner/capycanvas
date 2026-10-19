@@ -3,6 +3,8 @@
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64"><Configuration>Debug</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64"><Configuration>Release</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{D178893B-6F2A-43AB-A287-7248D89120DF}</ProjectGuid>
@@ -19,6 +21,9 @@
     <CapyPackages Condition="'$(CapyPackages)' == ''">$(CapyRoot)\artifacts\windows\packages</CapyPackages>
     <CapyRustProfile Condition="'$(Configuration)' == 'Release'">release</CapyRustProfile>
     <CapyRustProfile Condition="'$(CapyRustProfile)' == ''">debug</CapyRustProfile>
+    <CapyRustTarget Condition="'$(Platform)' == 'ARM64'">aarch64-pc-windows-msvc</CapyRustTarget>
+    <CapyRustTarget Condition="'$(CapyRustTarget)' == ''">x86_64-pc-windows-msvc</CapyRustTarget>
+    <CapyRustDirectory Condition="'$(CapyRustDirectory)' == ''">$(CapyRoot)\target\$(CapyRustTarget)\$(CapyRustProfile)</CapyRustDirectory>
   </PropertyGroup>
   <ImportGroup Label="ExtensionSettings">
     <Import Project="$(CapyPackages)\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('$(CapyPackages)\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.props')" />
@@ -46,8 +51,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
 
   <PropertyGroup>
-    <OutDir>$(CapyRoot)\artifacts\windows\$(Configuration)\</OutDir>
-    <IntDir>$(CapyRoot)\artifacts\windows\obj\$(Configuration)\</IntDir>
+    <OutDir>$(CapyRoot)\artifacts\windows\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(CapyRoot)\artifacts\windows\obj\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>CapyCanvas</TargetName><GenerateManifest>true</GenerateManifest>
   </PropertyGroup>
   <ItemDefinitionGroup>
@@ -60,7 +65,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link><SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>$(CapyRoot)\target\$(CapyRustProfile)\layer_windows.dll.lib;windowsapp.lib;user32.lib;shell32.lib;dwmapi.lib;shcore.lib;comctl32.lib;d3d11.lib;d2d1.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(CapyRustDirectory)\layer_windows.dll.lib;windowsapp.lib;user32.lib;shell32.lib;dwmapi.lib;shcore.lib;comctl32.lib;d3d11.lib;d2d1.lib;dwrite.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest><AdditionalManifestFiles>app.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles></Manifest>
   </ItemDefinitionGroup>
@@ -96,9 +101,9 @@
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)scripts\stage-assets.ps1&quot; -Destination &quot;$(OutDir)Assets&quot;" />
   </Target>
   <Target Name="CopyRustRuntime" AfterTargets="Build">
-    <Copy SourceFiles="$(CapyRoot)\target\$(CapyRustProfile)\layer_windows.dll" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="$(CapyRustDirectory)\layer_windows.dll" DestinationFolder="$(OutDir)" />
   </Target>
   <Target Name="CopyShaderCompiler" AfterTargets="Build">
-    <Copy SourceFiles="$(CapyPackages)\Microsoft.Direct3D.DXC.1.9.2607.13\build\native\bin\x64\dxcompiler.dll" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="$(CapyPackages)\Microsoft.Direct3D.DXC.1.9.2609.5\build\native\bin\$(Platform)\dxcompiler.dll" DestinationFolder="$(OutDir)" />
   </Target>
 </Project>

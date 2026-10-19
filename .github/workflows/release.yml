@@ -175,6 +175,14 @@ jobs:
   windows:
     needs: version
     runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            target: x86_64-pc-windows-msvc
+          - architecture: arm64
+            target: aarch64-pc-windows-msvc
     environment: ${{ github.ref_type == 'tag' && 'release' || '' }}
     permissions:
       contents: read
@@ -182,7 +190,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: |
-          rustup toolchain install $env:RUST_VERSION --profile minimal --component rust-docs
+          rustup toolchain install $env:RUST_VERSION --profile minimal --component rust-docs --target ${{ matrix.target }}
           rustup default $env:RUST_VERSION
       - if: env.SIGNED == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -208,7 +216,7 @@ jobs:
             $sign.SignArguments = '/fd', 'SHA256', '/tr', 'http://timestamp.acs.microsoft.com', '/td', 'SHA256',
               '/dlib', "$env:RUNNER_TEMP/Microsoft.ArtifactSigning.Client/bin/x64/Azure.CodeSigning.Dlib.dll", '/dmdf', $metadata
           }
-          ./apps/layer-windows/scripts/package.ps1 @sign
+          ./apps/layer-windows/scripts/package.ps1 -Architecture ${{ matrix.architecture }} @sign
           $portable = (Get-ChildItem artifacts/windows/distribution -Recurse -Filter result.json).FullName
           ./apps/layer-windows/scripts/package-msix.ps1 -PortableResultFile $portable
           $msix = (Get-ChildItem artifacts/windows/msix -Recurse -Filter result.json).FullName
@@ -220,7 +228,7 @@ jobs:
           Copy-Item (Get-Content $setup -Raw | ConvertFrom-Json).installer dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows
+          name: windows-${{ matrix.architecture }}
           path: dist/*
           if-no-files-found: error
 

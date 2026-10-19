@@ -20,6 +20,24 @@ jobs:
       - run: cargo check --locked -p layer-web --target wasm32-unknown-unknown
       - run: python3 apps/layer-apple/scripts/project.py && git diff --exit-code
       - run: python3 -m unittest discover -s tools/git -p 'test_*.py'
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            target: x86_64-pc-windows-msvc
+            runner: windows-2025
+          - architecture: arm64
+            target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal --target ${{ matrix.target }}
+          rustup default $env:RUST_VERSION
+      - run: ./apps/layer-windows/scripts/test-without-gpu.ps1 -Architecture ${{ matrix.architecture }}
   arch:
     runs-on: ubuntu-24.04
     container: archlinux:base-devel

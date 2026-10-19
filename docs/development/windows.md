@@ -15,12 +15,14 @@ On Windows 11, install:
 
 - [Visual Studio Build Tools](https://aka.ms/vs/18/stable/vs_buildtools.exe): select
   **Desktop development with C++**, the MSVC x64/x86 build tools (v143 or v145)
-  and **Windows 11 SDK (10.0.26100.0)**. The full Visual Studio IDE and a separate
+  and **Windows 11 SDK (10.0.26100.0)**. For ARM64 builds also select
+  **MSVC C++ ARM64 build tools** (`Microsoft.VisualStudio.Component.VC.Tools.ARM64`).
+  The full Visual Studio IDE and a separate
   Windows App SDK installation are unnecessary.
-- [Rust stable](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
-  with the **`x86_64-pc-windows-msvc` host toolchain**, including on ARM64 PCs.
-  Run the installer with `--default-host x86_64-pc-windows-msvc`. The client builds
-  x64; adding the x64 target to an ARM64 host is insufficient.
+- [Rust stable](https://www.rust-lang.org/tools/install) with an MSVC host
+  toolchain. An existing x64 Rust host can cross-compile the native ARM64 app;
+  add its target with `rustup target add aarch64-pc-windows-msvc`. Add
+  `x86_64-pc-windows-msvc` when building x64 from an ARM64 Rust host.
 
 Unless `nuget.exe` is already on `PATH`, download the official CLI to the location
 the build script searches:
@@ -51,6 +53,9 @@ root, build and run:
 ```
 
 The launcher builds optimized Release and opens the app after a successful build.
+It selects the PC's native architecture, including from an emulated shell.
+Pass `-Architecture arm64` or `-Architecture x64` to choose explicitly; the same
+option applies to `build.ps1` and `test-without-gpu.ps1`.
 It sets the script execution policy for its child PowerShell process, leaving
 your settings intact. Use Release for everyday development, drawing and performance
 checks. Reserve `-Configuration Debug` for stepping through code, inspecting
@@ -67,7 +72,10 @@ Set-ExecutionPolicy -Scope Process RemoteSigned -Force
 The build script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
-`artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.
+`artifacts/windows/Release` for x64 or `artifacts/windows/arm64/Release` for ARM64,
+and prints the path of `CapyCanvas.exe`. Rust builds use an explicit MSVC target;
+MSBuild links and copies that target's DLL from Cargo's resolved target directory,
+including a configured `CARGO_TARGET_DIR`.
 
 The self-contained runtime uses Windows App SDK 2.5.1. Keep its component packages
 and the project imports at the versions required by the SDK package. This includes
@@ -78,7 +86,8 @@ To compare with an older runtime, build it into a new `-OutputDirectory`; an
 existing output keeps the newer runtime DLLs.
 See the [WinUI release notes](https://github.com/microsoft/microsoft-ui-xaml/releases).
 
-For a Debug build, pass `-Configuration Debug`; the output is `artifacts/windows/Debug`.
+For a Debug build, pass `-Configuration Debug`; `Debug` replaces `Release` in
+the architecture's output path.
 `-OutputDirectory` builds elsewhere and keeps native objects and precompiled headers
 in `<OutputDirectory>.obj`, so separate outputs never share native intermediates.
 `-PackagesDirectory` reuses another restore
@@ -93,11 +102,15 @@ apps you started before rebuilding. Close every window of the current app before
 switching configurations; a new launch otherwise activates the running build.
 
 The build copies `dxcompiler.dll` from the pinned `Microsoft.Direct3D.DXC` package
-beside the executable. The host compiles D3D12 shaders with it; it uses its
+for the selected architecture beside the executable. The host compiles D3D12 shaders with it; it uses its
 internal validator, so no `dxil.dll` is needed. Without it the host falls back to
 the system FXC compiler, which is several times slower. Set
 `WGPU_DX12_COMPILER=fxc` to compare the two. The Windows App SDK runtime is also
 copied beside the executable, so development builds run unpackaged.
+
+DXC is pinned to 1.9.2609.5, whose ARM64 DLL loads in a native ARM64 process.
+The earlier 1.9.2607.13 package's `arm64` DLL contains ARM64EC/x64 code and
+cannot load there. Build and packaging checks reject incompatible PE machines.
 
 Ordinary restarts reopen saved and untitled drawings automatically, retaining tab
 order, the active drawing, camera, selection and bounded Undo/Redo. The first
@@ -400,19 +413,27 @@ describes the loader and the `capy_load_filter_directory` reload API.
 
 ### Portable ZIP
 
-Build a Windows 11 x64 ZIP from a committed checkout, then check it on an
-unlocked desktop:
+Build a Windows 11 ZIP for the PC's native architecture from a committed
+checkout, then check it on an unlocked desktop:
 
 ```powershell
 ./apps/layer-windows/scripts/package.ps1
 ./apps/layer-windows/scripts/exercise-package.ps1 -Archive <path-to-zip>
 ```
 
+Pass `-Architecture arm64` or `-Architecture x64` to `package.ps1` to choose
+explicitly. ZIP, installer and MSIX names include `windows-arm64` or
+`windows-x64`. The converters take their architecture from the portable manifest;
+an ARM64 installer refuses to install on a different PC architecture.
+
 The packager runs a Release build with the release identity into a fresh
 directory, collects the
 self-contained Windows App SDK, the app-local Visual C++ runtime and all notices,
-and records every payload file's size and SHA-256 in `package-manifest.json`. It
-assembles the archive twice and requires identical hashes. Output stays under
+and records every payload file's size and SHA-256 in `package-manifest.json`. The packager
+selects the target's runtime and DXC binaries and dependency notices, and rejects
+EXE/DLL files whose PE architecture does not match the manifest. MSIX conversion
+preserves that architecture in `ProcessorArchitecture`.
+It assembles the archive twice and requires identical hashes. Output stays under
 ignored `artifacts/windows/distribution`. `-SkipRestore` reuses restored packages;
 uncommitted changes need `-AllowDirty`, which marks the package as a development
 build. `-SignArguments` passes its values to `signtool sign` for `CapyCanvas.exe`
@@ -540,7 +561,7 @@ to check the selection bar's native glass registration and menu actions.
 | Where | Checks |
 | --- | --- |
 | Linux or Windows | `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings` |
-| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: Release build, native input queue tests, serial Rust unit and `d3d12_` document tests on the Microsoft software adapter. Pass `-Configuration Debug` for unoptimized builds and tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
+| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: native-architecture Release build, native input queue tests, architecture and mixed-payload regressions, serial Rust unit and `d3d12_` document tests on the Microsoft software adapter. Pass `-Architecture x64` or `-Architecture arm64` to choose explicitly, and `-Configuration Debug` for unoptimized builds and tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
 | Windows desktop | The `exercise-*.ps1` fixtures for the changed area. On Linux: `tools/windows-vm/windows-vm.py fixtures <name>`. |
 | Hardware D3D12 | `cargo test --locked -p layer-windows --lib d3d12_ -- --ignored --test-threads=1`, which adds the HDR and color round-trip tests; [GPU reconstruction](#gpu-reconstruction); renderer tests with `LAYER_GPU_INDEX`; performance. |
 
@@ -571,6 +592,20 @@ The test script adds its build folder to the child process DLL search path so
 D3D12 uses the same pinned DXC as the app. Before direct Cargo GPU tests, prepend
 that folder to `$env:PATH`, for example
 `$env:PATH=(Resolve-Path artifacts/windows/Release).Path+';'+$env:PATH`.
+
+For native ARM64 checks, use the ARM64 build folder and explicit Cargo target,
+even when the installed Rust host is x64:
+
+```powershell
+$env:PATH=(Resolve-Path artifacts/windows/arm64/Release).Path+';'+$env:PATH
+$env:CAPY_STORAGE_DIR=Join-Path (Get-Location) ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
+cargo test --locked --release --target aarch64-pc-windows-msvc -p layer-windows --lib d3d12_ -- --ignored --test-threads=1
+```
+
+Use a fresh storage folder for each run. Hardware tests and performance runs keep
+the software-adapter feature and overrides disabled. The same `--target` applies
+to shared tests, Clippy and renderer examples. Run native UI fixtures through
+`scripts/test-desktop.ps1` with the ARM64 executable and private test profiles.
 
 The renderer's ignored
 `dry_material::tests::fine_aggregate_pencil_color_pipeline_prepares_on_hardware`

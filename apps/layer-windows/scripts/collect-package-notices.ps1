@@ -1,10 +1,13 @@
 param(
+    [ValidateSet('native','x64','arm64')][string]$Architecture='native',
     [Parameter(Mandatory)][string]$Destination,
     [Parameter(Mandatory)][string]$PackagesDirectory,
     [Parameter(Mandatory)][string]$VisualStudio
 )
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+. (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
+$buildArchitecture=Resolve-WindowsArchitecture $Architecture
 $Destination=[IO.Path]::GetFullPath($Destination)
 [IO.Directory]::CreateDirectory($Destination)|Out-Null
 $utf8=[Text.UTF8Encoding]::new($false)
@@ -23,7 +26,7 @@ Push-Location $repo
 try {
     # metadata on the whole workspace also fetches unrelated GTK dependencies.
     # tree selects exactly this target, including build/proc-macro dependencies.
-    $tree=& cargo tree --locked --offline -p layer-windows-link --target x86_64-pc-windows-msvc -e normal,build --prefix none --format '{p}|{l}'
+    $tree=& cargo tree --locked --offline -p layer-windows-link --target $buildArchitecture.target -e normal,build --prefix none --format '{p}|{l}'
     if($LASTEXITCODE -ne 0){throw 'Resolve/build the locked Windows dependencies before collecting notices.'}
     $local=& cargo metadata --locked --offline --no-deps --format-version 1|ConvertFrom-Json
     if($LASTEXITCODE -ne 0){throw 'Cannot read workspace package identities.'}

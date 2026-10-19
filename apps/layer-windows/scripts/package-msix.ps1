@@ -40,7 +40,7 @@ $xml=@"
  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
  IgnorableNamespaces="uap uap10 rescap">
- <Identity Name="$identity" Publisher="$publisherXml" Version="$Version" ProcessorArchitecture="x64" />
+ <Identity Name="$identity" Publisher="$publisherXml" Version="$Version" ProcessorArchitecture="$($manifest.architecture)" />
  <Properties><DisplayName>$displayXml</DisplayName><PublisherDisplayName>Capy Atelier</PublisherDisplayName><Logo>PackageAssets\Logo50.png</Logo></Properties>
  <Resources>$resources</Resources>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
@@ -82,7 +82,7 @@ Write-PackagedPayload $portable.source $payload $manifest $packaging {
     & $makepri new /pr $namesRoot /cf $config /mn (Join-Path $payload 'AppxManifest.xml') /of (Join-Path $payload 'resources.pri') /o *> (Join-Path $run 'pri-build.log')
     if($LASTEXITCODE -ne 0){throw "MakePRI indexing failed; inspect $run"}
 }
-$label='capycanvas-'+$manifest.version+'-windows-x64'+$(if($UnsignedTestIdentity){'-test'}else{''})
+$label='capycanvas-'+$manifest.version+'-windows-'+$manifest.architecture+$(if($UnsignedTestIdentity){'-test'}else{''})
 if($manifest.development){$label+='-development'}
 $archive=Join-Path $run ($label+'.msix');$repeat=Join-Path $run 'repeat.msix'
 foreach($path in @($archive,$repeat)){

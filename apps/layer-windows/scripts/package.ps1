@@ -1,7 +1,10 @@
-param([string]$OutputRoot,[switch]$SkipRestore,[switch]$AllowDirty,[string[]]$SignArguments)
+param([ValidateSet('native','x64','arm64')][string]$Architecture='native',[string]$OutputRoot,[switch]$SkipRestore,[switch]$AllowDirty,[string[]]$SignArguments)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+. (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
+$buildArchitecture=Resolve-WindowsArchitecture $Architecture
+$Architecture=$buildArchitecture.architecture
 if(!$OutputRoot){$OutputRoot=Join-Path $repo 'artifacts/windows/distribution'}
 $OutputRoot=[IO.Path]::GetFullPath($OutputRoot)
 $artifactRoot=[IO.Path]::GetFullPath((Join-Path $repo 'artifacts/windows'))+[IO.Path]::DirectorySeparatorChar
@@ -28,14 +31,14 @@ try {
     [IO.Directory]::CreateDirectory($build)|Out-Null
     [IO.Directory]::CreateDirectory($payload)|Out-Null
     # Fresh directories cannot contain old diagnostics, profiles or staged assets.
-    & (Join-Path $PSScriptRoot 'build.ps1') -Configuration Release -ReleaseIdentity -OutputDirectory $build -SkipRestore:$SkipRestore *> (Join-Path $run 'build.log')
+    & (Join-Path $PSScriptRoot 'build.ps1') -Architecture $Architecture -Configuration Release -ReleaseIdentity -OutputDirectory $build -SkipRestore:$SkipRestore *> (Join-Path $run 'build.log')
     if($LASTEXITCODE -ne 0){throw "Package build failed; inspect $run/build.log"}
     $vswhere=Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft Visual Studio/Installer/vswhere.exe'
-    $installation=(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+    $installation=(& $vswhere -latest -products '*' -requires $buildArchitecture.component -property installationPath).Trim()
     $redistRoot=$env:VCToolsRedistDir
     if(!$redistRoot){throw 'The selected build toolchain did not identify its redistributable runtime.'}
-    $crt=@(Get-ChildItem -LiteralPath (Join-Path $redistRoot 'x64') -Directory|Where-Object Name -Match '^Microsoft\.VC\d+\.CRT$')
-    if($crt.Count -ne 1){throw 'Cannot identify one x64 Visual C++ CRT directory.'}
+    $crt=@(Get-ChildItem -LiteralPath (Join-Path $redistRoot $Architecture) -Directory|Where-Object Name -Match '^Microsoft\.VC\d+\.CRT$')
+    if($crt.Count -ne 1){throw "Cannot identify one $Architecture Visual C++ CRT directory."}
     $crtFiles=@(Get-ChildItem -LiteralPath $crt[0].FullName -Filter '*.dll' -File)
     if(!($crtFiles.Name -contains 'vcruntime140.dll') -or !($crtFiles.Name -contains 'msvcp140.dll')){throw 'Required redistributable CRT binaries are missing.'}
     foreach($file in $crtFiles){
@@ -51,21 +54,22 @@ try {
         [IO.Directory]::CreateDirectory((Split-Path -Parent $target))|Out-Null
         Copy-Item -LiteralPath $file.FullName -Destination $target
     }
-    foreach($name in @('CapyCanvas.exe','layer_windows.dll','CapyCanvas.pri','Microsoft.UI.Xaml.dll','Microsoft.WindowsAppRuntime.dll')){
+    foreach($name in @('CapyCanvas.exe','layer_windows.dll','dxcompiler.dll','CapyCanvas.pri','Microsoft.UI.Xaml.dll','Microsoft.WindowsAppRuntime.dll')){
         if(!(Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){throw "Incomplete runtime payload: $name"}
     }
     $signed=[bool]$SignArguments
+    Assert-WindowsBinaryArchitecture $payload $Architecture
     if($signed){
         & signtool sign @SignArguments (Join-Path $payload 'CapyCanvas.exe') (Join-Path $payload 'layer_windows.dll')
         if($LASTEXITCODE -ne 0){throw 'Signing the application executables failed.'}
     }
-    & (Join-Path $PSScriptRoot 'collect-package-notices.ps1') -Destination (Join-Path $payload 'Notices') -PackagesDirectory (Join-Path $repo 'artifacts/windows/packages') -VisualStudio $installation
+    & (Join-Path $PSScriptRoot 'collect-package-notices.ps1') -Architecture $Architecture -Destination (Join-Path $payload 'Notices') -PackagesDirectory (Join-Path $repo 'artifacts/windows/packages') -VisualStudio $installation
     $utf8=[Text.UTF8Encoding]::new($false);$lf=[string][char]10
     $readme=@'
 Capy Canvas for Windows
 
 Extract the entire ZIP to a folder, then run CapyCanvas.exe.
-Keep the files and subfolders together. Windows 11 x64 is required.
+Keep the files and subfolders together. Windows 11 ARCHITECTURE is required.
 The Windows App SDK and Visual C++ runtimes are included beside the app.
 Preferences and app data are kept in AppData\Roaming\CapyAtelier\CapyCanvas
 and AppData\Local\CapyAtelier\CapyCanvas; deleting the app folder keeps them.
@@ -75,7 +79,7 @@ changes were included and whether the executables are signed. See Notices for
 project, branding, dependency and runtime terms. See package-manifest.json for
 all file sizes and SHA-256 hashes.
 '@
-    [IO.File]::WriteAllText((Join-Path $payload 'README.txt'),$readme.Replace(([string][char]13+[char]10),$lf)+$lf,$utf8)
+    [IO.File]::WriteAllText((Join-Path $payload 'README.txt'),$readme.Replace('ARCHITECTURE',$Architecture).Replace(([string][char]13+[char]10),$lf)+$lf,$utf8)
     [string[]]$paths=@(Get-ChildItem -LiteralPath $payload -File -Recurse|ForEach-Object {$_.FullName.Substring($payload.Length+1).Replace('\','/')})
     [Array]::Sort($paths,[StringComparer]::Ordinal)
     $files=@(foreach($path in $paths){
@@ -86,7 +90,7 @@ all file sizes and SHA-256 hashes.
     $nuget=@($config.packages.package|ForEach-Object {[ordered]@{name=$_.id;version=$_.version}})
     if((& git rev-parse HEAD).Trim() -ne $commit -or (!$dirty -and (Source-IsDirty))){throw 'Package sources changed during the build; retry from a stable checkout.'}
     $manifest=[ordered]@{
-        schema=1;application='Capy Canvas';version=$version;source_commit=$commit;development=$dirty;signed=$signed;release_identity=$true;architecture='x64';minimum_windows='11';
+        schema=1;application='Capy Canvas';version=$version;source_commit=$commit;development=$dirty;signed=$signed;release_identity=$true;architecture=$Architecture;minimum_windows='11';
         rust=(& rustc --version).Trim();visual_cpp_tools=$env:VCToolsVersion;windows_sdk=$env:WindowsSDKVersion.TrimEnd('\');
         cargo_lock_sha256=(Get-FileHash -LiteralPath (Join-Path $repo 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant();
         nuget=$nuget;files=$files
@@ -110,14 +114,14 @@ all file sizes and SHA-256 hashes.
             }
         }finally{$zip.Dispose();$stream.Dispose()}
     }
-    $label='capycanvas-'+$version+'-windows-x64'+$(if($dirty){'-development'}else{''})
+    $label='capycanvas-'+$version+'-windows-'+$Architecture+$(if($dirty){'-development'}else{''})
     $archive=Join-Path $run ($label+'.zip')
     Write-Archive $archive
     $repeat=Join-Path $run 'reproducibility-check.zip';Write-Archive $repeat
     $hash=(Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
     if((Get-FileHash -LiteralPath $repeat -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash){throw 'Repeated archive assembly produced different bytes.'}
     [IO.File]::WriteAllText(($archive+'.sha256'),$hash+'  '+[IO.Path]::GetFileName($archive)+$lf,$utf8)
-    $result=[ordered]@{archive=$archive;sha256=$hash;payload=$payload;development=$dirty;source_commit=$commit;file_count=$files.Count+1;repeat_archive='passed'}
+    $result=[ordered]@{archive=$archive;sha256=$hash;payload=$payload;architecture=$Architecture;development=$dirty;source_commit=$commit;file_count=$files.Count+1;repeat_archive='passed'}
     [IO.File]::WriteAllText((Join-Path $run 'result.json'),($result|ConvertTo-Json)+$lf,$utf8)
     $result|ConvertTo-Json
 }finally{Pop-Location}

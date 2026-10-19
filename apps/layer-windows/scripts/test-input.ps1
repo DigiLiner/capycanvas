@@ -36,15 +36,19 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
  $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'build.ps1'),[ref]$tokens,[ref]$errors)
  if($errors.Count){throw 'Build script parse failed'}
  $directory=$ast.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$intermediateDirectory'},$true)
- $build=$ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'msbuild'},$true)
- if($directory.Count -ne 1 -or $build.Count -ne 1){throw 'Expected one native build and intermediate directory'}
+ $nativeBuild=$ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'msbuild'},$true)
+ if($directory.Count -ne 1 -or $nativeBuild.Count -ne 1){throw 'Expected one native build and intermediate directory'}
+ . (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
  function msbuild {$script:nativeBuildArguments=@($args)}
  $Configuration='Release';$fixture='false';$toolset='v145';$PackagesDirectory='C:\fixture\packages'
  $seen=@()
- foreach($case in @(@{output='C:\fixture\first';expected='C:\fixture\first.obj'},@{output='C:\fixture\second\';expected='C:\fixture\second.obj'})){
+ foreach($case in @(@{architecture='x64';output='C:\fixture\first';expected='C:\fixture\first.obj'},@{architecture='arm64';output='C:\fixture\second\';expected='C:\fixture\second.obj'})){
+  $build=Resolve-WindowsArchitecture $case.architecture
+  $rustDirectory='C:\fixture\cargo-target\'+$build.target+'\release'
   $OutputDirectory=$case.output
   Invoke-Expression $directory[0].Extent.Text
-  Invoke-Expression $build[0].Extent.Text
+  Invoke-Expression $nativeBuild[0].Extent.Text
+  if($script:nativeBuildArguments -notcontains "/p:Platform=$($build.platform)" -or $script:nativeBuildArguments -notcontains "/p:CapyRustDirectory=$rustDirectory"){throw 'The native build did not link the selected Rust target'}
   if($script:nativeBuildArguments -notcontains "/p:IntDir=$($case.expected)/" -or $script:nativeBuildArguments -notcontains "/p:OutDir=$OutputDirectory/"){throw 'The native build did not isolate intermediates beside its output'}
   $seen+=$intermediateDirectory
  }

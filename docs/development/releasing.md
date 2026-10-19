@@ -13,7 +13,7 @@ provide test and build details; the release sequence lives here.
 | Linux x86_64 | Signed Flatpak download and project-hosted update repository | Publish the GitHub Release, deploy Flatpak updates, verify installation and updating. Flathub app publication is not configured by these workflows. |
 | Web | Downloadable static/PWA ZIP and `editor.capycanvas.art` | Publish the ZIP and deploy the editor from the same tag; verify the live revision and offline/update journeys. |
 | Android ARM64 | Direct Play-signed APK, Play internal and closed (`alpha`) testing | Verify both installation paths and check the closed track's current review state before promotion. Production Play rollout is outside this procedure. |
-| Windows x64 | Signed installer and portable ZIP | Verify both downloads. Microsoft Store is not set up; retain the generated MSIX and report Store submission as deferred. |
+| Windows x64 and ARM64 | Signed installer and portable ZIP for each architecture | Verify both downloads on each architecture. Microsoft Store is not set up; retain the generated MSIX packages and report Store submission as deferred. |
 | macOS Apple silicon | Signed, notarized DMG | Verify download, Gatekeeper, installation and updating. The workflow does not submit a Mac App Store build. |
 | iPadOS | Working TestFlight beta | Verify the exact build and its availability to the intended tester group. Beta review and production App Store submission are separate actions. |
 
@@ -352,8 +352,9 @@ its own numbers from it at build time:
 
 `.github/workflows/ci.yml` runs on every push and pull request: the window-free
 shared Rust suites, including the localization catalogs, the Wasm consumer check,
-a check that the generated Xcode project matches `project.py`, the Git hook tests
-and `cargo deny`. Hosted runners have no GPU and no tablet, so CI never replaces
+a check that the generated Xcode project matches `project.py`, the Git hook tests,
+`cargo deny`, and Windows builds, input and software-adapter tests on x64 and
+native ARM64 runners. Hosted runners have no hardware painting GPU or tablet, so CI never replaces
 the [checks for your change](testing.md).
 
 ## Release workflow
@@ -366,7 +367,7 @@ the same scripts developers run and the Rust version pinned in the workflow:
 | Linux | `packaging/flatpak/build.sh` and `packaging/flatpak/export.sh` with GNOME Platform and SDK 51 | `capycanvas-<version>-linux-x86_64.flatpak`; on a tag also `capycanvas.flatpakref` and `capycanvas-<version>-flatpak-repository.tar.zst` |
 | Web | `node apps/layer-web/package.mjs` | `capycanvas-<version>-web.zip` |
 | Android | `./gradlew :app:bundleRelease -PcapyAbi=arm64-v8a` | `capycanvas-<version>-android.aab`; on a tag also a Play-signed `capycanvas-<version>-android.apk` without Play licensing checks |
-| Windows | `package.ps1`, `package-msix.ps1`, `test-msix.ps1` and `package-installer.ps1` | Portable ZIP, setup program and Store MSIX |
+| Windows x64 and ARM64 | `package.ps1 -Architecture x64` / `-Architecture arm64`, `package-msix.ps1`, `test-msix.ps1` and `package-installer.ps1` | Separate `capycanvas-<version>-windows-<architecture>.zip`, `-setup.exe` and `.msix` |
 | macOS, iPadOS | `apps/layer-apple/scripts/release.sh mac` and `ipad` | `capycanvas-<version>-macos-arm64.dmg`; the iPad build goes to App Store Connect |
 
 Dispatching on a branch checks unsigned builds and saves downloadable artifacts
@@ -375,6 +376,13 @@ signed release path. CI checks that the tag names the workspace version and its
 commit belongs to `main`, and runs `cargo deny`. All platform jobs must pass
 before the draft release job runs; neither store processing nor tester
 availability is checked by that job.
+
+The Windows release matrix builds both targets on x64 runners, keeping the
+signing plugin and SDK packaging tools on their host architecture. Each package
+bundles the target's Rust DLL, DXC shader compiler, Windows App SDK and Visual C++
+runtime; packaging rejects mixed-architecture EXE/DLL payloads. CI separately
+executes the ARM64 tests on `windows-11-arm`. A hosted software-adapter pass does
+not qualify canvas behavior or performance on an ARM64 hardware GPU.
 
 ### Android APK
 

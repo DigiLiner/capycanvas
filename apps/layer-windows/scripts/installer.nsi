@@ -17,6 +17,7 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 VIAddVersionKey "LegalCopyright" "Capy Atelier"
 
 !include "MUI2.nsh"
+!include "x64.nsh"
 !define MUI_ICON "${PAYLOAD}\CapyCanvas.ico"
 !define MUI_UNICON "${PAYLOAD}\CapyCanvas.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\CapyCanvas.exe"
@@ -40,6 +41,12 @@ VIAddVersionKey "LegalCopyright" "Capy Atelier"
 !macroend
 
 Function .onInit
+!if "${ARCHITECTURE}" == "arm64"
+    ${IfNot} ${IsNativeARM64}
+        MessageBox MB_OK|MB_ICONSTOP "This version of Capy Canvas requires an ARM64 PC." /SD IDOK
+        Abort
+    ${EndIf}
+!endif
     StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${NAME}"
 FunctionEnd
 

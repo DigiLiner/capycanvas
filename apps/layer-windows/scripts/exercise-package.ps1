@@ -24,7 +24,9 @@ try {
 }finally{$zip.Dispose()}
 $payload=Join-Path $unpacked 'CapyCanvas'
 $manifest=Get-Content (Join-Path $payload 'package-manifest.json') -Raw|ConvertFrom-Json
-if($manifest.schema -ne 1 -or $manifest.architecture -ne 'x64'){throw 'Unsupported package manifest'}
+if($manifest.schema -ne 1 -or $manifest.architecture -notin @('x64','arm64')){throw 'Unsupported package manifest'}
+. (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
+Assert-WindowsBinaryArchitecture $payload $manifest.architecture
 $declared=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach($file in $manifest.files){
     if(!$declared.Add($file.path) -or !$names.Contains('CapyCanvas/'+$file.path)){throw 'Manifest contains duplicate or missing files'}

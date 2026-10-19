@@ -46,11 +46,11 @@ Write-PackagedPayload $portable.source $payload $manifest $packaging {
     & (Join-Path $PSScriptRoot 'package-logos.ps1') -Destination (Join-Path $run 'logos') -Icon (Join-Path $payload 'CapyCanvas.ico')
     [IO.File]::WriteAllText((Join-Path $payload 'README.txt'),$readme.Replace(([string][char]13+[char]10),$lf)+$lf,$utf8)
 }
-$label='capycanvas-'+$manifest.version+'-windows-x64'+$(if($TestIdentity){'-installer-test'}else{'-setup'})
+$label='capycanvas-'+$manifest.version+'-windows-'+$manifest.architecture+$(if($TestIdentity){'-installer-test'}else{'-setup'})
 if($manifest.development){$label+='-development'}
 $installer=Join-Path $run ($label+'.exe');$repeat=Join-Path $run 'repeat.exe'
 function Build-Installer([string]$Path,[string[]]$Defines){
-    & $makensis -V2 -NOCD "-DPAYLOAD=$payload" "-DOUTFILE=$Path" "-DVERSION=$Version" "-DNAME=$($identity.name)" "-DKEY=$($identity.key)" "-DPROGID=$($identity.progid)" @Defines (Join-Path $PSScriptRoot 'installer.nsi') *> (Join-Path $run ([IO.Path]::GetFileName($Path)+'.log'))
+    & $makensis -V2 -NOCD "-DARCHITECTURE=$($manifest.architecture)" "-DPAYLOAD=$payload" "-DOUTFILE=$Path" "-DVERSION=$Version" "-DNAME=$($identity.name)" "-DKEY=$($identity.key)" "-DPROGID=$($identity.progid)" @Defines (Join-Path $PSScriptRoot 'installer.nsi') *> (Join-Path $run ([IO.Path]::GetFileName($Path)+'.log'))
     if($LASTEXITCODE -ne 0){throw "NSIS failed; inspect $run"}
 }
 foreach($path in @($installer,$repeat)){Build-Installer $path @()}

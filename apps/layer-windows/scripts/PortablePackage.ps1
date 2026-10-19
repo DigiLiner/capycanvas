@@ -35,10 +35,11 @@ function Get-ShippedLanguages([string]$Repo) {
 }
 # The payload of a portable release build, after checking every file against its manifest.
 function Read-PortablePackage([string]$ResultFile) {
+    . (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
     $result=Get-Content -LiteralPath (Resolve-Path -LiteralPath $ResultFile).Path -Raw|ConvertFrom-Json
     $source=(Resolve-Path -LiteralPath $result.payload).Path
     $manifest=Get-Content -LiteralPath (Join-Path $source 'package-manifest.json') -Raw|ConvertFrom-Json
-    if($manifest.schema -ne 1 -or $manifest.architecture -ne 'x64' -or !$manifest.release_identity -or $manifest.source_commit -ne $result.source_commit -or $manifest.packaging){throw 'Expected a portable x64 release package result and matching manifest.'}
+    if($manifest.schema -ne 1 -or $manifest.architecture -notin @('x64','arm64') -or !$manifest.release_identity -or $manifest.source_commit -ne $result.source_commit -or $manifest.packaging){throw 'Expected a portable Windows release package result and matching manifest.'}
     $declared=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $prefix=$source+[IO.Path]::DirectorySeparatorChar
     $entries=@(Get-ChildItem -LiteralPath $source -Recurse -Force)
@@ -50,6 +51,7 @@ function Read-PortablePackage([string]$ResultFile) {
         if((Get-Item -LiteralPath $path).Length -ne $file.bytes -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256){throw "Portable payload hash mismatch: $($file.path)"}
     }
     if(@($entries|Where-Object {!$_.PSIsContainer}).Count -ne $declared.Count+1){throw 'Portable payload contains files absent from its manifest.'}
+    Assert-WindowsBinaryArchitecture $source $manifest.architecture
     [pscustomobject]@{source=$source;manifest=$manifest}
 }
 
