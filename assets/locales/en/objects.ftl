@@ -18,3 +18,7 @@ objects-action-use-brush = Use { $brush }
 objects-action-reset-setting = Reset { $setting }
 objects-action-new-paint-layer-below = New Paint Layer Below
 objects-merge-turns-paths-into-pixels = Merging turns the paths in “{ $layers }” into pixels.
+objects-flatten-discards-hidden-layers-and-paths = { $count ->
+    [one] Flattening discards { $count } hidden layer and turns the paths in “{ $layers }” into pixels.
+   *[other] Flattening discards { $count } hidden layers and turns the paths in “{ $layers }” into pixels.
+    }

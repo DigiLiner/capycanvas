@@ -1,9 +1,10 @@
 use super::{ImmutableBacking, RangeState, MAX_RANGE_BYTES, manifest::{Manifest, decimal_u64}, values::{self, DecodeError, DecodeResult}};
 use super::RASTER_TILE_SIZE as TILE_SIZE;
-use crate::{authored::{PortableId, Resource, ResourceEncoding, EncodedBytes, EncodedIntegrity, vector::{VectorChunk, VectorObject}}, color::{PixelDescriptor, SampleType, TransferEncoding, AlphaAssociation, ColorProfile}, raster::{TileBlob}, Lut3d};
+use crate::{authored::{OpaqueResource, PortableId, Resource, ResourceEncoding, EncodedBytes, EncodedIntegrity, vector::{Slot, VectorChunk, VectorObject}}, color::{PixelDescriptor, SampleType, TransferEncoding, AlphaAssociation, ColorProfile}, raster::{TileBlob}, Lut3d};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 
+pub(crate) const WRAPPERS: [&str; 2] = ["capy.lz4-bytes/1", "capy.deflate-bytes/1"];
 pub fn reference(id: PortableId) -> Value { json!({"ref":id}) }
 pub fn reference_id(value: &Value) -> DecodeResult<PortableId> {
     values::string(values::required(values::object(value, &["ref"])?, "ref")?)?.parse().map_err(DecodeError::from)
@@ -71,12 +72,13 @@ pub struct ResourceInventory {
     pub(crate) private: bool,
     pub(crate) images: BTreeMap<PortableId, Value>,
     pub(crate) transfer_selections: BTreeMap<SelectionKey, Arc<crate::SelectionPixels>>,
+    pub(crate) opaque: BTreeMap<PortableId, Arc<OpaqueResource>>,
 }
 impl ResourceInventory {
     pub(crate) fn for_transfer() -> Self { Self { transfer: true, private: true, ..Default::default() } }
     pub fn insert(&mut self, entry: ResourceEntry) -> Result<Value, String> {
         let id = entry.payload.id();
-        if self.images.contains_key(&id) {return Err("Object and resource identities overlap".into());}
+        if self.images.contains_key(&id) || self.opaque.contains_key(&id) {return Err("Object and resource identities overlap".into());}
         if let Some(previous) = self.entries.get(&id) {
             let conflict=|reason:&str|format!("Conflicting immutable resource identity {id} ({}): {reason}",entry.kind);
             if previous.kind != entry.kind || previous.data != entry.data || previous.raw_encoding != entry.raw_encoding {
@@ -95,11 +97,29 @@ impl ResourceInventory {
         Ok(reference(id))
     }
     pub(crate) fn image(&mut self,id:PortableId,record:Value)->Result<Value,String> {
-        if self.entries.contains_key(&id) {return Err("Object and resource identities overlap".into());}
+        if self.entries.contains_key(&id) || self.opaque.contains_key(&id) {return Err("Object and resource identities overlap".into());}
         if let Some(previous)=self.images.get(&id) {
             if previous!=&record {return Err("Conflicting immutable image identity".into());}
         } else {self.images.insert(id,record);}
         Ok(reference(id))
+    }
+    pub(crate) fn slot(&mut self, slot: &Slot) -> Result<Value, String> {
+        match slot {
+            Slot::Image(image) => super::artwork_records::encode_image(image, self),
+            Slot::Resource(resource) => {
+                if self.entries.contains_key(&resource.id) || self.images.contains_key(&resource.id) {return Err("Object and resource identities overlap".into());}
+                if self.opaque.insert(resource.id, resource.clone()).is_some_and(|previous| previous != *resource) {return Err("Conflicting slot resource identity".into());}
+                Ok(reference(resource.id))
+            }
+        }
+    }
+    pub(crate) fn with_opaque(&self, retained: impl IntoIterator<Item = Arc<OpaqueResource>>) -> Result<Vec<Arc<OpaqueResource>>, String> {
+        let mut all = self.opaque.clone();
+        for resource in retained {
+            if all.get(&resource.id).is_some_and(|previous| *previous != resource) { return Err("Conflicting opaque resource identity".into()); }
+            all.insert(resource.id, resource);
+        }
+        Ok(all.into_values().collect())
     }
     pub fn bytes(&mut self, kind: &'static str, bytes: &Resource<[u8]>, data: Value) -> Result<Value, String> {
         self.insert(ResourceEntry { kind, data, raw_encoding:"raw", payload:Payload::Bytes(bytes.clone()) })
@@ -121,9 +141,10 @@ impl ResourceInventory {
     pub(crate) fn validate_opaque_alias(&self,resource:&crate::authored::OpaqueResource)->Result<bool,String> {
         let Some(entry)=self.entries.get(&resource.id) else {return Ok(false)};
         let mut data=resource.data.clone();
-        if resource.encoding.as_ref()=="capy.lz4-bytes/1" {data.as_object_mut().ok_or("Invalid wrapped resource descriptor")?.remove("decoded_bytes");}
+        let wrapped=WRAPPERS.contains(&resource.encoding.as_ref());
+        if wrapped {data.as_object_mut().ok_or("Invalid wrapped resource descriptor")?.remove("decoded_bytes");}
         if resource.kind.as_ref()!=entry.kind || data!=entry.data || !resource.extra_fields.is_empty()
-            || (resource.encoding.as_ref()!=entry.raw_encoding && resource.encoding.as_ref()!="capy.lz4-bytes/1") {return Err("Opaque resource conflicts with authored resource".into());}
+            || (resource.encoding.as_ref()!=entry.raw_encoding && !wrapped) {return Err("Opaque resource conflicts with authored resource".into());}
         Ok(true)
     }
     pub fn prepare(&self, cancelled: &AtomicBool) -> Result<PreparedResources, String> {
@@ -256,7 +277,8 @@ pub struct ResourceReader<'a> {
     pub(crate) selections: BTreeMap<SelectionKey, Arc<crate::SelectionPixels>>,
     pub(crate) images: BTreeMap<PortableId, (Value, crate::authored::Image)>,
     pub(crate) programs: BTreeMap<Vec<u8>, Arc<crate::EffectProgram>>,
-    pub(crate) vectors: BTreeMap<PortableId, (u32, u32, Resource<VectorChunk>)>,
+    pub(crate) vectors: BTreeMap<PortableId, (u32, u32, usize, Resource<VectorChunk>)>,
+    pub(crate) opaque: BTreeMap<PortableId, Arc<OpaqueResource>>,
 }
 #[derive(Default)]
 pub(crate) struct ResourceCache {
@@ -265,19 +287,20 @@ pub(crate) struct ResourceCache {
     aliases: BTreeMap<(usize,u64,u64), (PortableId,Value)>, rasters: BTreeMap<PortableId, crate::raster::RasterTile>,
     selections: BTreeMap<SelectionKey, Arc<crate::SelectionPixels>>, images: BTreeMap<PortableId, (Value, crate::authored::Image)>,
     programs: BTreeMap<Vec<u8>, Arc<crate::EffectProgram>>,
-    vectors: BTreeMap<PortableId, (u32, u32, Resource<VectorChunk>)>,
+    vectors: BTreeMap<PortableId, (u32, u32, usize, Resource<VectorChunk>)>,
+    opaque: BTreeMap<PortableId, Arc<OpaqueResource>>,
 }
 impl<'a> ResourceReader<'a> {
     pub fn new(manifest: &'a Manifest, backing: &'a ImmutableBacking, cancelled: &'a AtomicBool, limits: crate::ProjectLimits) -> Self {
-        Self {manifest,backing,cancelled,limits,private:false,bytes:BTreeMap::new(),texts:BTreeMap::new(),tiles:BTreeMap::new(),luts:BTreeMap::new(),decoded:0,verified:false,aliases:BTreeMap::new(),rasters:BTreeMap::new(),selections:BTreeMap::new(),images:BTreeMap::new(),programs:BTreeMap::new(),vectors:BTreeMap::new()}
+        Self {manifest,backing,cancelled,limits,private:false,bytes:BTreeMap::new(),texts:BTreeMap::new(),tiles:BTreeMap::new(),luts:BTreeMap::new(),decoded:0,verified:false,aliases:BTreeMap::new(),rasters:BTreeMap::new(),selections:BTreeMap::new(),images:BTreeMap::new(),programs:BTreeMap::new(),vectors:BTreeMap::new(),opaque:BTreeMap::new()}
     }
     pub(crate) fn install_cache(&mut self, cache: ResourceCache) {
         self.bytes=cache.bytes;self.texts=cache.texts;self.tiles=cache.tiles;self.luts=cache.luts;self.decoded=cache.decoded;
-        self.aliases=cache.aliases;self.rasters=cache.rasters;self.selections=cache.selections;self.images=cache.images;self.programs=cache.programs;self.vectors=cache.vectors;
+        self.aliases=cache.aliases;self.rasters=cache.rasters;self.selections=cache.selections;self.images=cache.images;self.programs=cache.programs;self.vectors=cache.vectors;self.opaque=cache.opaque;
     }
     pub(crate) fn into_cache(self)->ResourceCache {
         ResourceCache {bytes:self.bytes,texts:self.texts,tiles:self.tiles,luts:self.luts,decoded:self.decoded,
-            aliases:self.aliases,rasters:self.rasters,selections:self.selections,images:self.images,programs:self.programs,vectors:self.vectors}
+            aliases:self.aliases,rasters:self.rasters,selections:self.selections,images:self.images,programs:self.programs,vectors:self.vectors,opaque:self.opaque}
     }
     pub(crate) fn require_verified(&mut self) { self.verified = true; }
     fn alias(&self, id:PortableId) -> DecodeResult<Option<PortableId>> {
@@ -341,10 +364,10 @@ impl<'a> ResourceReader<'a> {
         let (id,record) = self.record(reference,kind)?;
         if let Some(bytes) = self.bytes.get(&id) { return Ok(bytes.clone()); }
         let encoding = record["encoding"].as_str().ok_or("Missing resource encoding")?;
-        let compressed = encoding == "capy.lz4-bytes/1";
-        let expected_raw = match kind {"capy.wgsl/1"=>"utf8","capy.lut3d/1"=>"capy.rgb-f32/1",_=>"raw"};
-        if !compressed && encoding != expected_raw { return Err(DecodeError::Unsupported("Unknown resource encoding".into())); }
-        let expected = if compressed { decimal_u64(&record["data"]["decoded_bytes"])? } else { self.manifest.resources[&id].bytes };
+        let wrapper = WRAPPERS.iter().position(|name| *name == encoding);
+        let expected_raw = match kind {"capy.wgsl/1"=>"utf8","capy.lut3d/1"=>"capy.rgb-f32/1","capy.vector-items/1"=>"capy.vector-records/1",_=>"raw"};
+        if wrapper.is_none() && encoding != expected_raw { return Err(DecodeError::Unsupported("Unknown resource encoding".into())); }
+        let expected = if wrapper.is_some() { decimal_u64(&record["data"]["decoded_bytes"])? } else { self.manifest.resources[&id].bytes };
         if expected > limit as u64 { return Err(DecodeError::Unsupported("Resource exceeds decoded size admission".into())); }
         if let Some(previous)=self.alias(id)?.and_then(|alias|self.bytes.get(&alias)) {
             let result=previous.alias(id);
@@ -352,18 +375,47 @@ impl<'a> ResourceReader<'a> {
         }
         self.charge(expected)?;
         let (stored,integrity) = self.stored(id, lz4_flex::block::get_maximum_output_size(limit))?;
-        let decoded: Arc<[u8]> = if compressed {
-            let mut bytes = vec![0;expected as usize];
-            let written = lz4_flex::block::decompress_into(&stored,&mut bytes).map_err(|_| self.backing.fail("Invalid compressed resource".into()))?;
-            if written != bytes.len() { return Err(self.backing.fail("Incomplete compressed resource".into()).into()); }
-            bytes.into()
-        } else { stored.clone() };
-        let result = Resource::with_id_and_encoded(id,decoded,EncodedBytes { encoding:if compressed {ResourceEncoding::Lz4}else{ResourceEncoding::Raw},bytes:stored });
-        result.set_encoded_integrity(integrity)?;
+        let result = match wrapper {
+            Some(0) => {
+                let mut bytes = vec![0;expected as usize];
+                let written = lz4_flex::block::decompress_into(&stored,&mut bytes).map_err(|_| self.backing.fail("Invalid compressed resource".into()))?;
+                if written != bytes.len() { return Err(self.backing.fail("Incomplete compressed resource".into()).into()); }
+                Resource::with_id_and_encoded(id,bytes.into(),EncodedBytes { encoding:ResourceEncoding::Lz4,bytes:stored })
+            }
+            Some(_) => Resource::with_id(id,super::archive::inflate(&stored,expected as usize,true).map_err(|e|self.backing.fail(e))?.into()),
+            None => Resource::with_id_and_encoded(id,stored.clone(),EncodedBytes { encoding:ResourceEncoding::Raw,bytes:stored }),
+        };
+        if result.encoded_if_ready().is_some() { result.set_encoded_integrity(integrity)?; }
         self.decoded+=expected; self.remember_alias(id);
         self.bytes.insert(id,result.clone()); Ok(result)
     }
-    pub fn vector_object(&mut self, items: &[Value]) -> DecodeResult<VectorObject> {
+    pub(crate) fn slots(&mut self, value: Option<&Value>) -> DecodeResult<Arc<[Slot]>> {
+        let Some(value) = value else { return Ok(Arc::default()) };
+        let list = value.as_array().ok_or("Expected vector slots")?;
+        list.iter().map(|reference| {
+            let id = reference_id(reference)?;
+            if self.manifest.resources.contains_key(&id) { return self.opaque_resource(id).map(Slot::Resource); }
+            match self.manifest.objects.get(&id).map(|record| &record["type"]) {
+                Some(kind) if kind == "capy.image/1" => super::artwork_records::image_reference(reference, self).map(Slot::Image),
+                _ => Err(DecodeError::Unsupported("Unsupported vector slot target".into())),
+            }
+        }).collect()
+    }
+    fn opaque_resource(&mut self, id: PortableId) -> DecodeResult<Arc<OpaqueResource>> {
+        if let Some(resource) = self.opaque.get(&id) { return Ok(resource.clone()); }
+        let record = &self.manifest.resources[&id];
+        if !super::references(&record.value, super::manifest::ManifestLimits::default().traversal_nodes)?.is_empty() {
+            return Err(DecodeError::Unsupported("A slot resource references other records".into()));
+        }
+        let range = record.range.ok_or("Missing slot resource range")?;
+        let resource = Arc::new(OpaqueResource::from_record(id, &record.value, self.backing.clone(), range.offset, record.bytes, record.crc32).map_err(DecodeError::from)?);
+        self.charge(record.bytes)?;
+        resource.verify(self.cancelled)?;
+        self.decoded += record.bytes;
+        self.opaque.insert(id, resource.clone());
+        Ok(resource)
+    }
+    pub fn vector_object(&mut self, items: &[Value], slots: Arc<[Slot]>) -> DecodeResult<VectorObject> {
         let mut open = 0u32;
         let mut records = 0usize;
         let mut chunks = Vec::with_capacity(items.len());
@@ -373,21 +425,26 @@ impl<'a> ResourceReader<'a> {
             records = records.saturating_add(count);
             if records > super::vector_records::MAX_RECORDS { return Err(DecodeError::Unsupported("Vector object exceeds the admitted record count".into())); }
             let chunk = match self.vectors.get(&id) {
-                Some((start, end, chunk)) if *start == open => { open = *end; chunk.clone() }
+                Some((start, end, count, chunk)) if *start == open && *count == slots.len() => { open = *end; chunk.clone() }
                 _ => {
                     let start = open;
                     let bytes = self.bytes(item, "capy.vector-items/1", super::vector_records::MAX_CHUNK_BYTES)?;
-                    let chunk = super::vector_records::decode_chunk(&bytes, count, &mut open)?;
-                    let encoded = bytes.encoded_if_ready().cloned().ok_or("Missing stored vector bytes")?;
-                    let resource = Resource::with_id_and_encoded(id, Arc::new(chunk), encoded);
+                    let chunk = super::vector_records::decode_chunk(&bytes, count, &mut open, slots.len())?;
+                    let resource = match bytes.encoded_if_ready().cloned() {
+                        Some(encoded) => Resource::with_id_and_encoded(id, Arc::new(chunk), encoded),
+                        None => Resource::with_id(id, Arc::new(chunk)),
+                    };
+                    let resident = crate::history_budget::Accounting::default().charge_vector(&VectorObject::from_chunks(vec![resource.clone()])) as u64;
+                    self.charge(resident)?;
+                    self.decoded += resident;
                     if let Some(integrity) = bytes.encoded_integrity_if_ready() { resource.set_encoded_integrity(integrity)?; }
-                    self.vectors.insert(id, (start, open, resource.clone()));
+                    self.vectors.insert(id, (start, open, slots.len(), resource.clone()));
                     resource
                 }
             };
             chunks.push(chunk);
         }
-        let object = VectorObject::from_chunks(chunks);
+        let object = VectorObject::with_slots(chunks, slots);
         object.validate().map_err(|e| format!("Invalid vector data: {e}"))?;
         Ok(object)
     }
@@ -402,7 +459,7 @@ impl<'a> ResourceReader<'a> {
     pub fn tile(&mut self, reference: &Value) -> DecodeResult<Arc<TileBlob>> {
         let (id,record)=self.record(reference,"capy.raster-tile/1")?;
         if let Some(tile)=self.tiles.get(&id) {return Ok(tile.clone());}
-        if record["encoding"]!="capy.lz4-tile/1" {return Err(DecodeError::Unsupported("Unknown tile encoding".into()));}
+        let filtered=match record["encoding"].as_str() {Some("capy.lz4-tile/1")=>false,Some("capy.deflate-tile/1")=>true,_=>return Err(DecodeError::Unsupported("Unknown tile encoding".into()))};
         if let Some(previous)=self.alias(id)?.and_then(|alias|self.tiles.get(&alias)) {
             let tile=Arc::new(previous.alias(id));
             self.tiles.insert(id,tile.clone()); return Ok(tile);
@@ -412,8 +469,17 @@ impl<'a> ResourceReader<'a> {
         let retained=self.manifest.resources[&id].bytes;
         self.charge(retained)?;
         let (bytes,integrity)=self.stored(id,lz4_flex::block::get_maximum_output_size(size))?;
-        let tile=Arc::new(TileBlob::from_package(id,descriptor,bytes).map_err(|e|self.backing.fail(e))?);
-        tile.compressed.set_integrity(integrity)?;
+        let tile=if filtered {
+            let tile=Arc::new(TileBlob::from_filtered_deflate(id,descriptor,&bytes).map_err(|e|self.backing.fail(e))?);
+            let resident=tile.compressed_len() as u64;
+            self.charge(resident.max(retained))?;
+            self.decoded+=resident.saturating_sub(retained);
+            tile
+        } else {
+            let tile=Arc::new(TileBlob::from_package(id,descriptor,bytes).map_err(|e|self.backing.fail(e))?);
+            tile.compressed.set_integrity(integrity)?;
+            tile
+        };
         self.decoded+=retained; self.remember_alias(id);
         self.tiles.insert(id,tile.clone()); Ok(tile)
     }
@@ -442,7 +508,8 @@ impl super::effect_records::ResourceReader for ResourceReader<'_> {
             self.texts.insert(id,code.clone()); return Ok(code);
         }
         let bytes=self.bytes(value,"capy.wgsl/1",4*1024*1024)?;
-        let code: Resource<str>=Resource::with_id_and_encoded(id,std::str::from_utf8(&bytes).map_err(|_|"Invalid UTF-8 shader resource")?.into(),bytes.encoded_if_ready().unwrap().clone());
+        let text:Arc<str>=std::str::from_utf8(&bytes).map_err(|_|"Invalid UTF-8 shader resource")?.into();
+        let code: Resource<str>=match bytes.encoded_if_ready() {Some(encoded)=>Resource::with_id_and_encoded(id,text,encoded.clone()),None=>Resource::with_id(id,text)};
         if let Some(integrity)=bytes.encoded_integrity_if_ready() {code.set_encoded_integrity(integrity)?;}
         self.texts.insert(id,code.clone()); self.bytes.remove(&id); Ok(code)
     }

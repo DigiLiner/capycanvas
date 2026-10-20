@@ -110,6 +110,16 @@ impl PartialEq for SelectionPixels {
     }
 }
 impl Eq for SelectionPixels {}
+pub(crate) struct PackageWindow { pub stride: usize, pub rows: std::ops::Range<usize>, pub columns: std::ops::Range<usize> }
+impl PackageWindow {
+    pub(crate) fn new(extent: [u32; 2], [x0, y0, x1, y1]: [u32; 4], byte_coverage: bool) -> Self {
+        let per_word = if byte_coverage { 4 } else { 8 };
+        let columns = if x0 < x1 && y0 < y1 { (x0 / per_word) as usize..x1.div_ceil(per_word) as usize } else { 0..0 };
+        Self { stride: extent[0].div_ceil(per_word) as usize, rows: if columns.is_empty() { 0..0 } else { y0 as usize..y1 as usize }, columns }
+    }
+    pub(crate) fn words(&self) -> usize { self.rows.len() * self.columns.len() }
+    pub(crate) fn chunks(&self) -> usize { (self.words() * 4).div_ceil(SELECTION_CHUNK_BYTES) }
+}
 impl SelectionPixels {
     pub fn new(
         extent: [u32; 2],
@@ -189,7 +199,9 @@ impl SelectionPixels {
         self.validate_package()?;
         Ok(self.package_chunks.get_or_init(|| {
             let ids = self.transfer_chunk_ids();
-            self.words.chunks(SELECTION_CHUNK_BYTES / 4).enumerate().map(|(index, words)| {
+            let window = PackageWindow::new(self.extent, self.bounds, self.byte_coverage);
+            let words: Vec<u32> = window.rows.clone().flat_map(|y| &self.words[y * window.stride + window.columns.start..y * window.stride + window.columns.end]).copied().collect();
+            words.chunks(SELECTION_CHUNK_BYTES / 4).enumerate().map(|(index, words)| {
                 let mut bytes = vec![0; SELECTION_CHUNK_BYTES];
                 for (word, dest) in words.iter().zip(bytes.as_chunks_mut::<4>().0) {
                     dest.copy_from_slice(&word.to_le_bytes());
@@ -201,18 +213,19 @@ impl SelectionPixels {
     pub(crate) fn from_package_chunks(
         extent: [u32; 2], bounds: [u32; 4], byte_coverage: bool, chunks: Vec<Resource<[u8]>>,
     ) -> Result<Self, String> {
-        let count = u64::from(extent[0].div_ceil(if byte_coverage { 4 } else { 8 }))
-            .checked_mul(u64::from(extent[1])).ok_or("Oversized selection coverage")?;
-        let bytes = count.checked_mul(4).ok_or("Oversized selection coverage")?;
         let [x0, y0, x1, y1] = bounds;
         if extent.contains(&0) || extent.iter().any(|v| *v > crate::MAX_EXTENT)
-            || x0 > x1 || y0 > y1 || x1 > extent[0] || y1 > extent[1]
-            || bytes.div_ceil(SELECTION_CHUNK_BYTES as u64) != chunks.len() as u64 {
+            || x0 > x1 || y0 > y1 || x1 > extent[0] || y1 > extent[1] {
             return Err("Invalid selection chunk index".into());
         }
-        let count = usize::try_from(count).map_err(|_| "Oversized selection coverage")?;
+        let window = PackageWindow::new(extent, bounds, byte_coverage);
+        if window.chunks() != chunks.len() { return Err("Invalid selection chunk index".into()); }
+        let count = usize::try_from(window.stride as u64 * u64::from(extent[1])).map_err(|_| "Oversized selection coverage")?;
         let mut words = Vec::new();
         words.try_reserve_exact(count).map_err(|_| "Selection allocation failed")?;
+        words.resize(count, 0);
+        let mut stored = window.rows.clone().flat_map(|y| (window.columns.start..window.columns.end).map(move |x| y * window.stride + x));
+        let mut remaining = window.words();
         let mut decoded = vec![0; SELECTION_CHUNK_BYTES];
         for chunk in &chunks {
             if chunk.len() > lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES) {
@@ -220,9 +233,10 @@ impl SelectionPixels {
             }
             let length = lz4_flex::block::decompress_into(chunk, &mut decoded).map_err(|e| e.to_string())?;
             if length != SELECTION_CHUNK_BYTES { return Err("Invalid selection chunk length".into()); }
-            let used = (count - words.len()).min(SELECTION_CHUNK_BYTES / 4) * 4;
+            let used = remaining.min(SELECTION_CHUNK_BYTES / 4) * 4;
             if decoded[used..].iter().any(|v| *v != 0) { return Err("Nonzero selection chunk padding".into()); }
-            words.extend(decoded[..used].as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)));
+            for (bytes, index) in decoded[..used].as_chunks::<4>().0.iter().zip(stored.by_ref()) { words[index] = u32::from_le_bytes(*bytes); }
+            remaining -= used / 4;
         }
         let value = Self::with_coverage(extent, bounds, words.into(), byte_coverage).map_err(|e| e.to_string())?;
         value.validate_package()?;
@@ -234,7 +248,7 @@ impl SelectionPixels {
     pub(crate) fn transfer_chunk_ids(&self) -> &[crate::authored::PortableId] {
         self.package_chunk_ids.get_or_init(|| {
             if let Some(chunks) = self.package_chunks.get() { return chunks.iter().map(Resource::id).collect::<Vec<_>>().into(); }
-            (0..(self.words.len() * 4).div_ceil(SELECTION_CHUNK_BYTES)).map(|_| crate::authored::PortableId::random()).collect::<Vec<_>>().into()
+            (0..PackageWindow::new(self.extent, self.bounds, self.byte_coverage).chunks()).map(|_| crate::authored::PortableId::random()).collect::<Vec<_>>().into()
         })
     }
     pub(crate) fn from_verified_words(
@@ -245,7 +259,7 @@ impl SelectionPixels {
         let [x0, y0, x1, y1] = bounds;
         if extent.contains(&0) || extent.iter().any(|v| *v > crate::MAX_EXTENT)
             || x0 > x1 || y0 > y1 || x1 > extent[0] || y1 > extent[1] || count != words.len() as u64
-            || (count * 4).div_ceil(SELECTION_CHUNK_BYTES as u64) != ids.len() as u64
+            || PackageWindow::new(extent, bounds, byte_coverage).chunks() != ids.len()
             || ids.iter().copied().collect::<std::collections::BTreeSet<_>>().len() != ids.len()
             || chunks.as_ref().is_some_and(|chunks| chunks.len() != ids.len() || chunks.iter().zip(&ids).any(|(chunk, id)| chunk.id() != *id)) {
             return Err("Invalid verified selection descriptor".into());

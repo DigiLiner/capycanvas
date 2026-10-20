@@ -25,13 +25,17 @@ pub(super) struct VectorMoves {
     click: Option<(ItemId, u64)>,
 }
 
+impl VectorMoves {
+    pub(super) fn gesturing(&self) -> bool { self.gesture.is_some() }
+}
+
 impl<R: CanvasRenderer> UiSession<R> {
     fn vector_move_layer(&self) -> Option<OccurrenceHandle> {
         self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::Move)
     }
     pub(super) fn selected_vector_items(&self) -> Option<&VectorItemSelection> {
-        let doc = self.engine.document();
-        doc.working.vector_items.as_ref().filter(|selection| Some(selection.layer) == doc.working.occurrence)
+        let layer = self.editing_vector_layer()?;
+        self.engine.document().working.vector_items.as_ref().filter(|selection| selection.layer == layer)
     }
     pub(super) fn select_vector_items(&mut self, layer: OccurrenceHandle, items: BTreeSet<ItemId>) -> Result<Arc<BTreeSet<ItemId>>, String> {
         let current = self.engine.document().working.vector_items.clone();
@@ -103,7 +107,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let double = self.vector_moves.click.replace((id, event.timestamp_ns)).is_some_and(|(last, at)| last == id && event.timestamp_ns.saturating_sub(at) <= DOUBLE_CLICK_NS);
                 if double && !adding {
                     self.vector_moves.click = None;
-                    self.select_vector_items(layer, [id].into())?;
+                    self.select_vector_items(layer, if selected.contains(&id) { selected } else { [id].into() })?;
                     return self.object_tool(LayerCanvasTool::EditPoints).map(|()| true);
                 }
                 let items = match (selected.contains(&id), adding) {
@@ -260,8 +264,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let idle = self.require_document_idle().is_ok();
         let selected = self.selected_vector_items().is_some();
         Some(match id {
-            CommandId::SelectAll if self.engine.document().scene().vector_layer(layer).is_some_and(|object| object.path_count() > 0) => idle,
+            CommandId::SelectAll if self.engine.document().scene().vector_layer(layer).is_some_and(|object| object.paths().any(|(_, path)| path.pickable())) => idle,
             CommandId::Deselect if selected => idle,
+            CommandId::ClearSelected if selected => idle && self.vector_paths_editable(),
             CommandId::ScaleRotate | CommandId::TransformFlipHorizontal | CommandId::TransformFlipVertical
             | CommandId::TransformRotateLeft | CommandId::TransformRotateRight | CommandId::ReversePath => idle && self.vector_paths_editable(),
             CommandId::JoinPaths | CommandId::ClosePath | CommandId::MakeCompoundPath | CommandId::ReleaseCompoundPath => idle && self.vector_paths_editable() && {
@@ -273,21 +278,29 @@ impl<R: CanvasRenderer> UiSession<R> {
                     _ => paths.iter().any(|path| path.geometry.subpaths().len() > 1),
                 }
             },
-            CommandId::SplitPath => idle && self.vector_paths_editable() && self.vector_points_selected(),
+            CommandId::SplitPath => idle && self.vector_paths_editable() && self.vector_points_split(),
             _ => return None,
         })
     }
     pub(super) fn vector_disabled_reason(&self, id: CommandId) -> Option<Arc<str>> {
         let layer = self.editing_vector_layer()?;
-        if self.vector_command_enabled(id)? { return None; }
+        if self.vector_command_enabled(id)? || self.require_document_idle().is_err() { return None; }
         let l = self.localization();
-        Some(if self.engine.document().is_locked(layer) { l.text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED) }
-            else if self.selected_vector_items().is_none() { l.text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER) }
-            else { return None })
+        Some(l.text(if self.engine.document().is_locked(layer) { MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED }
+            else if self.selected_vector_items().is_none() { MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER }
+            else {
+                match id {
+                    CommandId::JoinPaths => MessageId::COMMANDS_SELECT_OPEN_PATHS_TO_JOIN,
+                    CommandId::ClosePath => MessageId::COMMANDS_SELECT_AN_OPEN_PATH_TO_CLOSE,
+                    CommandId::SplitPath => MessageId::COMMANDS_SELECT_AN_ANCHOR_INSIDE_A_PATH_TO_SPLIT,
+                    CommandId::MakeCompoundPath => MessageId::COMMANDS_SELECT_PATHS_TO_MAKE_A_COMPOUND_PATH,
+                    CommandId::ReleaseCompoundPath => MessageId::COMMANDS_SELECT_A_COMPOUND_PATH_TO_RELEASE,
+                    _ => return None,
+                }
+            }))
     }
     pub(super) fn vector_command_label(&self, id: CommandId) -> Option<Arc<str>> {
-        (id == CommandId::ClearSelected && self.engine.document().working.selection.is_none()
-            && (self.selected_vector_items().is_some() || self.vector_points_selected()))
+        (id == CommandId::ClearSelected && self.selected_vector_items().is_some())
             .then(|| self.localization().text(MessageId::COMMANDS_DELETE_SELECTED_PATHS))
     }
     pub(super) fn vector_command(&mut self, id: CommandId) -> Option<Result<(), String>> {
@@ -312,11 +325,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let local = translation([-ox, -oy]).compose(turn(frame.pivot)).compose(translation([ox, oy]));
                 let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
                 let turned = object.transform_items(&items, local, true).map_err(str::to_string)?;
+                if turned == *object { return Ok(()); }
                 let edit = doc.vector_object_edit(layer, turned).map_err(|e| e.to_string())?;
                 self.layer_edit(edit)
             })(),
             (CommandId::SelectAll, _) => {
-                let all = self.engine.document().scene().vector_layer(layer).map(|object| object.paths().map(|(_, path)| path.id).collect()).unwrap_or_default();
+                let all = self.engine.document().scene().vector_layer(layer).map(|object| object.paths().filter(|(_, path)| path.pickable()).map(|(_, path)| path.id).collect()).unwrap_or_default();
                 self.select_vector_items(layer, all).and_then(|_| self.object_tool(LayerCanvasTool::Move))
             }
             (CommandId::Deselect, _) => self.deselect_vector_items(),
@@ -327,17 +341,17 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn vector_path_operation(&mut self, layer: OccurrenceHandle, id: CommandId) -> Result<(), String> {
         let items = self.selected_vector_items().ok_or("Select paths first")?.items.clone();
-        let tolerance = CLICK * self.document_per_surface_pixel();
+        let tolerance = HIT_SLOP * self.document_per_surface_pixel();
         let cuts = if id == CommandId::SplitPath { self.take_selected_vector_points() } else { Default::default() };
         let object = self.engine.document().scene().vector_layer(layer).ok_or("The vector layer was removed")?;
-        let (changed, selection) = match id {
+        let Some((changed, selection)) = (match id {
             CommandId::JoinPaths => object.join_paths(&items, tolerance)?.map(|(o, id)| (o, BTreeSet::from([id]))),
             CommandId::MakeCompoundPath => object.compound_paths(&items)?.map(|(o, id)| (o, BTreeSet::from([id]))),
             CommandId::ReleaseCompoundPath => object.release_paths(&items)?,
             CommandId::SplitPath => object.split_paths(&cuts)?,
             CommandId::ClosePath => object.map_paths(&items, |path| path.can_close().then(|| path.closed()).transpose())?.map(|o| (o, (*items).clone())),
-            _ => object.map_paths(&items, |path| path.reversed().map(Some))?.map(|o| (o, (*items).clone())),
-        }.ok_or("Nothing to change")?;
+            _ => object.map_paths(&items, |path| path.reversed().map(|reversed| (reversed != *path).then_some(reversed)))?.map(|o| (o, (*items).clone())),
+        }) else { return Ok(()) };
         let edit = self.engine.document().vector_object_edit(layer, changed).map_err(|e| e.to_string())?;
         self.layer_edit(edit)?;
         self.select_vector_items(layer, selection).map(|_| ())

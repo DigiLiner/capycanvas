@@ -255,7 +255,7 @@ mod tests {
         let prepared=transfer(&original);let mut descriptor=prepared.descriptor().clone();
         let change=descriptor.undo[0].changes.iter_mut().find(|change|change.kind=="capy.occurrence/3").unwrap();
         let object=original.document.scene().object_handle(second).unwrap();let object_id=original.document.artwork.objects.id(object).unwrap();
-        change.value.as_mut().unwrap().record["data"]["content"]=serde_json::json!({"objects":super::super::resources::reference(object_id)});
+        change.value.as_mut().unwrap().record["data"]["content"]=serde_json::json!({"object":super::super::resources::reference(object_id)});
         let invalid=PreparedSessionTransfer {descriptor,artwork:prepared.artwork};
         assert!(invalid.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).is_err());
     }

@@ -210,13 +210,17 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
             if object.interpolation==ImageInterpolation::Nearest {data.insert("interpolation".into(),"nearest".into());}
             if let Some(vector)=&object.vector {
                 let items=vector.0.iter().map(|(descriptor,bytes)|resources.vector_bytes(bytes,descriptor.clone())).collect::<Result<Vec<_>,_>>()?;
-                return Ok(record(change.id,"capy.vector-object/1",json!({"items":items,"fallback":Value::Object(data)})));
+                let mut fields=json!({"items":items,"fallback":Value::Object(data)});
+                slots(&mut fields,&vector.1,resources)?;
+                return Ok(record(change.id,"capy.vector-object/1",fields));
             }
             Ok(record(change.id,"capy.image-object/1",Value::Object(data)))
         },
         crate::Edit::Vector(change)=>{let object=change.value.as_ref().ok_or("Cannot encode removed record")?;
             let items=object.chunks().iter().map(|chunk|resources.vector_chunk(chunk)).collect::<Result<Vec<_>,_>>()?;
-            Ok(record(change.id,"capy.vector-object/1",if items.is_empty(){json!({})}else{json!({"items":items})}))
+            let mut fields=if items.is_empty(){json!({})}else{json!({"items":items})};
+            slots(&mut fields,object.slots(),resources)?;
+            Ok(record(change.id,"capy.vector-object/1",fields))
         },
         crate::Edit::Effect(change)=>{let effect=change.value.as_ref().ok_or("Cannot encode removed record")?;
             effect.validate().map_err(str::to_string)?;
@@ -240,7 +244,7 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
         crate::Edit::Occurrence(change)=>{let identity=change.id;let occurrence=change.value.as_ref().ok_or("Cannot encode removed record")?;
             if !(0. ..=1.).contains(&occurrence.opacity) {return Err("Invalid occurrence opacity".into());}
         if occurrence.blend==LayerBlend::PassThrough && !matches!(occurrence.content,OccurrenceContent::Stack(_)) {return Err("Pass through requires a stack".into());}
-        let content=match &occurrence.content {OccurrenceContent::Paint(h)=>json!({"paint":reference(id(&art.paint,*h)?)}),OccurrenceContent::Stack(h)=>json!({"stack":reference(id(&art.stacks,*h)?)}),OccurrenceContent::Effect(h)=>json!({"effect":reference(id(&art.effects,*h)?)}),OccurrenceContent::Selection(h)=>json!({"selection":reference(id(&art.selections,*h)?)}),OccurrenceContent::Objects(h)=>json!({"objects":reference(id(&art.objects,*h)?)}),OccurrenceContent::Vector(h)=>json!({"objects":reference(id(&art.vectors,*h)?)})};
+        let content=match &occurrence.content {OccurrenceContent::Paint(h)=>json!({"paint":reference(id(&art.paint,*h)?)}),OccurrenceContent::Stack(h)=>json!({"stack":reference(id(&art.stacks,*h)?)}),OccurrenceContent::Effect(h)=>json!({"effect":reference(id(&art.effects,*h)?)}),OccurrenceContent::Selection(h)=>json!({"selection":reference(id(&art.selections,*h)?)}),OccurrenceContent::Objects(h)=>json!({"object":reference(id(&art.objects,*h)?)}),OccurrenceContent::Vector(h)=>json!({"object":reference(id(&art.vectors,*h)?)})};
         let mut data=json!({"content":content}).as_object().unwrap().clone(); set_name(&mut data,&occurrence.name);
         for (key,value,default) in [("visible",occurrence.visible,true),("locked",occurrence.locked,false),("alpha_locked",occurrence.alpha_locked,false),("reference",occurrence.reference,false)] {set_bool(&mut data,key,value,default);}
         match occurrence.attachment {Attachment::None=>{},Attachment::Clip=>{data.insert("attachment".into(),json!("clip"));},Attachment::Effect=>{data.insert("attachment".into(),json!("effect"));}}
@@ -276,6 +280,14 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
     }
 }
 
+fn slots(fields:&mut Value,slots:&[vector::Slot],resources:&mut ResourceInventory)->Result<(),String> {
+    if !slots.is_empty() {fields["slots"]=slots.iter().map(|slot|resources.slot(slot)).collect::<Result<Vec<_>,_>>()?.into();}
+    Ok(())
+}
+pub(crate) fn slot_resources(art:&Artwork)->BTreeSet<PortableId> {
+    art.vectors.iter().flat_map(|(_,_,object)|object.slots().iter()).chain(art.objects.iter().filter_map(|(_,_,object)|object.vector.as_ref()).flat_map(|vector|vector.1.iter()))
+        .filter_map(|slot|if let vector::Slot::Resource(resource)=slot {Some(resource.id)} else {None}).collect()
+}
 pub fn encode(art:&Artwork,cancel:&AtomicBool)->Result<(Vec<Value>,ResourceInventory),String> {
     encode_with_inventory(art,cancel,ResourceInventory::default())
 }
@@ -309,7 +321,7 @@ fn preserved_vector(record:&Value,reader:&mut ResourceReader<'_>)->DecodeResult<
     let data=&record["data"];
     if data.get("fallback").is_none() {return Ok(false);}
     let items=data.get("items").map(list).transpose()?.unwrap_or_default();
-    match reader.vector_object(items) {Ok(_)=>Ok(false),Err(DecodeError::Unsupported(_))=>Ok(true),Err(error)=>Err(error)}
+    match reader.slots(data.get("slots")).and_then(|slots|reader.vector_object(items,slots)) {Ok(_)=>Ok(false),Err(DecodeError::Unsupported(_))=>Ok(true),Err(error)=>Err(error)}
 }
 fn decode_image_object(data:&serde_json::Map<String,Value>,reader:&mut ResourceReader<'_>)->DecodeResult<ImageObject> {
     let affine=data.get("affine").map(decode_affine).transpose()?.unwrap_or_default();
@@ -398,10 +410,11 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
                     if let Some(fields)=descriptor.as_object_mut() {fields.remove("decoded_bytes");}
                     Ok((descriptor,reader.bytes(item,"capy.vector-items/1",super::vector_records::MAX_CHUNK_BYTES)?))
                 }).collect::<DecodeResult<Vec<_>>>()?;
-                let object=ImageObject {vector:Some(crate::authored::PreservedVector(preserved.into())),..decode_image_object(fallback,reader)?};
+                let object=ImageObject {vector:Some(crate::authored::PreservedVector(preserved.into(),reader.slots(data.get("slots"))?)),..decode_image_object(fallback,reader)?};
                 art.objects.install(handle,object)?;
             } else {
-                let object=reader.vector_object(items)?;
+                let slots=reader.slots(data.get("slots"))?;
+                let object=reader.vector_object(items,slots)?;
                 art.vectors.install(art.vectors.allocated(*identity).unwrap(),object)?;
             }},
         "capy.coverage-source/2"=> {let data=record_fields(kind,value)?;let domain=dimension(v::required(data,"domain")?,reader)?;
@@ -434,9 +447,9 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
         "capy.stack/1"=> {let data=record_fields(kind,value)?;let entries=data.get("entries").map(|v|list(v)?.iter().map(|value|handle(&art.occurrences,value)).collect::<DecodeResult<Vec<_>>>()).transpose()?.unwrap_or_default();art.stacks.install(art.stacks.allocated(*identity).unwrap(),Stack {entries})?;},
         "capy.occurrence/3"=> {
             let data=record_fields(kind,value)?;
-            let content=fields(v::required(data,"content")?,&["paint","objects","stack","effect","selection"])?;
+            let content=fields(v::required(data,"content")?,&["paint","object","stack","effect","selection"])?;
             if content.len()!=1 {return Err("Occurrence requires one content alternative".into());}
-            let (kind,value)=content.iter().next().unwrap();let content=match kind.as_str() {"paint"=>OccurrenceContent::Paint(handle(&art.paint,value)?),"objects"=>match art.vectors.allocated(reference_id(value)?) {Some(vector)=>OccurrenceContent::Vector(vector),None=>OccurrenceContent::Objects(handle(&art.objects,value)?)},"stack"=>OccurrenceContent::Stack(handle(&art.stacks,value)?),"effect"=>OccurrenceContent::Effect(handle(&art.effects,value)?),"selection"=>OccurrenceContent::Selection(handle(&art.selections,value)?),_=>unreachable!()};
+            let (kind,value)=content.iter().next().unwrap();let content=match kind.as_str() {"paint"=>OccurrenceContent::Paint(handle(&art.paint,value)?),"object"=>match art.vectors.allocated(reference_id(value)?) {Some(vector)=>OccurrenceContent::Vector(vector),None=>OccurrenceContent::Objects(handle(&art.objects,value)?)},"stack"=>OccurrenceContent::Stack(handle(&art.stacks,value)?),"effect"=>OccurrenceContent::Effect(handle(&art.effects,value)?),"selection"=>OccurrenceContent::Selection(handle(&art.selections,value)?),_=>unreachable!()};
             let offset=data.get("offset").map(decode_offset).transpose()?.unwrap_or_default();
             let blend=data.get("blend").map(v::parse_layer_blend).transpose()?.unwrap_or(LayerBlend::Normal);
             if blend==LayerBlend::PassThrough && !matches!(content,OccurrenceContent::Stack(_)) {return Err(DecodeError::Unsupported("Pass through requires a stack".into()));}

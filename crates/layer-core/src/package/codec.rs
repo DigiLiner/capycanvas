@@ -1,5 +1,5 @@
 use super::{archive::{self, Directory, InputMember}, manifest::{Manifest, ManifestLimits, ManifestRead},
-    resources::{self, ResourceInventory, PreparedResources}, preview::{Preview, MAX_PREVIEW_BYTES}, transport::BackingReader, ImmutableBacking};
+    resources::{self, ResourceInventory, PreparedResources}, preview::{Preview, MAX_PREVIEW_BYTES, MAX_PREVIEW_DIMENSION}, transport::BackingReader, ImmutableBacking};
 use crate::authored::{Artwork, ArtworkCapture, CaptureCheckpoint, EvaluationContext, PortableId, Support};
 use serde_json::{Value, json};
 use std::{io::{Cursor, Write}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
@@ -64,6 +64,7 @@ pub(crate) fn admit_metadata(artwork:&Artwork,limits:crate::ProjectLimits)->Resu
     let live=objects.iter().filter_map(|r|r["id"].as_str()?.parse().ok()).collect();
     let (extensions,opaque)=artwork.extensions.edited_retained(&live)?;
     objects.extend(extensions);
+    let opaque=inventory.with_opaque(opaque)?;
     let resources:Vec<_>=inventory.entries.iter().map(|(id,entry)| {
         let mut data=entry.data.clone();
         if matches!(entry.payload,resources::Payload::Bytes(_)|resources::Payload::Code(_)) {data["decoded_bytes"]=u64::MAX.to_string().into();}
@@ -72,7 +73,7 @@ pub(crate) fn admit_metadata(artwork:&Artwork,limits:crate::ProjectLimits)->Resu
     }).chain(opaque.iter().map(|resource|resource.record(json!({"pack":"data/tiles-1.bin","offset":u64::MAX.to_string()})))).collect();
     let default=artwork.outputs.id(artwork.default_output).ok_or("Missing default output")?;
     if let Some(output)=objects.iter_mut().find(|record|record["id"]==json!(default)) {
-        output["data"]["representation"]=json!({"member":"preview.png","size":[1024,1024],"color":"srgb"});
+        output["data"]["representation"]=json!({"member":"preview.png","size":[MAX_PREVIEW_DIMENSION,MAX_PREVIEW_DIMENSION],"color":"srgb"});
     }
     let mut value=json!({"default_output":resources::reference(default),"document":artwork.id,"format":"capy.canvas",
         "objects":objects,"outputs":artwork.outputs.iter().map(|(_,id,_)|resources::reference(id)).collect::<Vec<_>>(),
@@ -115,6 +116,7 @@ impl PreparedPackage {
         objects.extend(extensions);
         objects.sort_by(|a,b|a["id"].as_str().cmp(&b["id"].as_str()));
         if inventory.entries.keys().any(|id|*id==artwork.id || shape.objects.contains_key(id)) {return Err("Object and resource identities overlap".into());}
+        let opaque=inventory.with_opaque(opaque)?;
         let mut resources=inventory.prepare(cancelled)?;
         resources.append_opaque(opaque,cancelled)?;
         let manifest=serde_json::to_vec(&ManifestWire {

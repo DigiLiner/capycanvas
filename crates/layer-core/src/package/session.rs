@@ -230,7 +230,8 @@ impl PreparedSession {
         for (kind,bytes) in ["exif","xmp","iptc"].into_iter().zip(current.artwork.metadata.blocks()) {
             if let Some(bytes)=bytes {artwork_metadata.insert(kind.into(),inventory.bytes("capy.photo-metadata/1",bytes,json!({"kind":kind}))?);}
         }
-        let mut resources=inventory.prepare(cancel)?;resources.append_opaque(opaque.into_values().collect(),cancel)?;
+        let opaque=inventory.with_opaque(opaque.into_values())?;
+        let mut resources=inventory.prepare(cancel)?;resources.append_opaque(opaque,cancel)?;
         let art=&current.artwork;
         let record=SessionRecord {format:"capy.session".into(),version:1,checkpoint:capture.artwork.checkpoint,next_checkpoint:capture.next_checkpoint,next_stroke_id:current.next_stroke_id,
             layout:TransferLayout::capture(art),root:resources::reference(art.compositions.id(art.root).ok_or("Missing session root")?),
@@ -381,11 +382,7 @@ pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLi
         active(cancel)?;
         let resource=resource_records.get(id).ok_or("Missing preserved session resource")?;
         let range=resource.range.ok_or("Missing preserved session resource range")?;
-        let fields=resource.value.as_object().ok_or("Invalid preserved session resource")?;
-        let opaque=Arc::new(crate::authored::OpaqueResource {id:*id,kind:fields["type"].as_str().ok_or("Missing preserved resource type")?.into(),
-            data:fields["data"].clone(),encoding:fields["encoding"].as_str().ok_or("Missing preserved resource encoding")?.into(),
-            extra_fields:fields.iter().filter(|(key,_)|!["id","type","data","encoding","location","bytes","crc32"].contains(&key.as_str())).map(|(key,value)|(key.clone(),value.clone())).collect(),
-            backing:resource_pack.clone(),offset:range.offset,length:range.length,crc32:resource.crc32});
+        let opaque=Arc::new(crate::authored::OpaqueResource::from_record(*id,&resource.value,resource_pack.clone(),range.offset,range.length,resource.crc32)?);
         opaque.verify(cancel)?;
         if extensions.resources.insert(*id,opaque).is_some() {return Err("Duplicate preserved session resource".into());}
     }

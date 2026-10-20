@@ -18,3 +18,4 @@ objects-action-use-brush = Dùng { $brush }
 objects-action-reset-setting = Đặt lại { $setting }
 objects-action-new-paint-layer-below = Lớp vẽ mới bên dưới
 objects-merge-turns-paths-into-pixels = Khi gộp, các đường trong “{ $layers }” sẽ thành điểm ảnh.
+objects-flatten-discards-hidden-layers-and-paths = Gộp phẳng sẽ bỏ { $count } lớp ẩn và biến các đường trong “{ $layers }” thành điểm ảnh.

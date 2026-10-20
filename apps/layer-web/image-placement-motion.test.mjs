@@ -73,7 +73,7 @@ export async function measurePlacedPhotos({call,evaluate,settle,invoke,save,base
     await invoke('fit_canvas');
     const rows=(await state()).layers.filter(l=>l.object);
     for(let index=0;index<objects.length;index++)for(const size of ['fit','original']) {
-      const name=packageOccurrences(baseline).find(o=>o.data.content.objects?.ref===objects[index].id)?.data.name;
+      const name=packageOccurrences(baseline).find(o=>o.data.content.object?.ref===objects[index].id)?.data.name;
       const row=rows.find(r=>r.label===name)??rows[index];
       for(const candidate of rows)await send({type:'layer',action:{op:'visibility',id:candidate.id,value:candidate.id===row.id}});
       await invoke('move');await send({type:'select_layer',id:row.id});

@@ -45,7 +45,7 @@ fn roundtrip(document:&Document)->Document {
 
 #[test]
 fn package_previews_preserve_capture_color_alpha_sdr_and_source_only_fallback() {
-    use layer_core::package::{codec::{PreparedPackage, PreviewStatus, OpenOutcome, open}, ImmutableBacking};
+    use layer_core::package::{codec::{PreparedPackage, PreviewStatus, OpenOutcome, open}, ImmutableBacking, preview::MAX_PREVIEW_DIMENSION};
     let cancelled = AtomicBool::new(false);
     for depth in [SampleDepth::U8, SampleDepth::F32] {
         let extent = [2048, 8];
@@ -60,10 +60,10 @@ fn package_previews_preserve_capture_color_alpha_sdr_and_source_only_fallback() 
         refresh(&mut document);
         let checkpoint = CaptureCheckpoint {document:document.artwork.id,owner:document.owner,session_generation:1,artwork_generation:2,working_generation:3,edit_checkpoint:4};
         let saved = document.artwork.capture(checkpoint).unwrap();
-        let expected = capture(document).unwrap().preview_document([1024;2],RgbSpace::Srgb).unwrap().srgb_bytes().unwrap();
+        let expected = capture(document).unwrap().preview_document([MAX_PREVIEW_DIMENSION;2],RgbSpace::Srgb).unwrap().srgb_bytes().unwrap();
         let preview = gpu().package_preview(&saved, &cancelled).unwrap();
         assert_eq!(preview.checkpoint, checkpoint);
-        assert_eq!(preview.preview.size(), [1024,4]);
+        assert_eq!(preview.preview.size(), [512,2]);
         assert!(preview.preview.pixels().iter().zip(&expected).all(|(a,b)| a.abs_diff(*b)<=1));
         assert!(preview.preview.pixels().chunks_exact(4).all(|p| p[3].abs_diff(128)<=1));
         let package = PreparedPackage::prepare(&saved, Some(preview), &cancelled).unwrap();
@@ -71,7 +71,7 @@ fn package_previews_preserve_capture_color_alpha_sdr_and_source_only_fallback() 
         let mut bytes = Vec::new(); package.write(&mut bytes, &cancelled).unwrap();
         let source = ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap();
         let OpenOutcome::Candidate {artwork, preview:Some(reopened),..} = open(source,Default::default(),&cancelled).unwrap() else {panic!("Expected editable artwork with preview")};
-        assert_eq!(reopened.size(),[1024,4]);
+        assert_eq!(reopened.size(),[512,2]);
         assert_eq!(artwork.outputs.get(artwork.default_output).unwrap().sdr.exposure,-1.);
         assert!(gpu().package_preview(&saved,&AtomicBool::new(true)).is_none());
         assert_eq!(PreparedPackage::prepare(&saved,None,&cancelled).unwrap().preview_status,PreviewStatus::Unavailable);

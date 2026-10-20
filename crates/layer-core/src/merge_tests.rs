@@ -409,3 +409,33 @@ fn merging_a_vector_layer_down_bakes_its_paths() {
     let damage = doc.merge_plan(MergeKind::Down).unwrap().operation.bounds(doc.composition().size);
     assert!(damage.min.x <= 18. && damage.min.y <= 28. && damage.max.x >= 302. && damage.max.y >= 92., "the merge bakes the stroked path: {damage:?}");
 }
+#[test]
+fn merge_down_keeps_paths_only_when_the_upper_vector_layer_holds_nothing_unknown() {
+    use crate::authored::vector::*;
+    let line = |id: u64| PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([20., 30.]), Anchor::corner([300., 90.])], false)]).unwrap()),
+        Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(Paint::color(crate::color::RgbColor::BLACK), 4.))])));
+    let unknown: Unknown = Some(Arc::from([UnknownProperty { tag: (40 << 4) | IGNORABLE | COPY_SAFE, value: Arc::from([1u8, 2]) }]));
+    let opaque = Record::Opaque(OpaqueRecord { kind: (900 << 4) | IGNORABLE, id: 77, properties: Arc::from([]) });
+    let marked = PathItem { unknown: unknown.clone(), ..line(2) };
+    let mut painted = line(3);
+    if let PaintEntry::Stroke(stroke) = &mut Arc::make_mut(&mut painted.style).entries[0] { stroke.paint = Paint::Color { color: crate::color::RgbColor::BLACK, unknown: unknown.clone() }; }
+    let image: crate::Image = crate::color::source::rgba8_source([1, 1], |_, _| [0, 0, 0, 255]).into();
+    let slotted = VectorObject::with_slots(VectorObject::from_records(vec![Record::Path(line(4))]).chunks().to_vec(), Arc::from([Slot::Image(image)]));
+    for (upper, merges) in [
+        (VectorObject::from_records(vec![Record::Path(line(1))]), true),
+        (VectorObject::from_records(vec![Record::Path(line(1)), opaque]), false),
+        (VectorObject::from_records(vec![Record::Path(marked)]), false),
+        (VectorObject::from_records(vec![Record::Path(painted)]), false),
+        (slotted, false),
+    ] {
+        let mut doc = document(&[]);
+        let (lower, edit) = doc.create_vector_layer_edit("Lower", VectorObject::from_records(vec![Record::Path(line(1))]), None, 0).unwrap();
+        doc.apply(edit).unwrap();
+        let (layer, edit) = doc.create_vector_layer_edit("Upper", upper.clone(), None, 0).unwrap();
+        doc.apply(edit).unwrap();
+        doc.working.occurrence = Some(layer);
+        doc.working.target = None;
+        assert_eq!(doc.vector_merge_down().is_some(), merges, "{upper:?}");
+        assert_eq!(doc.merge_rasterizes(MergeKind::Down), if merges { Vec::new() } else { vec![layer, lower] }, "content the merge can't keep turns into pixels after the notice");
+    }
+}

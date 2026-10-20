@@ -185,15 +185,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         let fill = if self.state.colors.transparent() { None } else {
             self.vector_figure_style(FigurePaint::Fill, layer_core::authored::vector::Cap::Butt, layer_core::authored::vector::Join::Miter)?.entries.first().cloned()
         };
-        let edit = object.paths().find(|(_, path)| !path.locked && path.encloses(local, tolerance)).map(|(position, path)| {
+        let innermost = object.paths().filter(|(_, path)| path.pickable() && path.encloses(local, tolerance))
+            .map(|(position, path)| (path.area_around(local, tolerance), position, path)).min_by(|a, b| a.0.total_cmp(&b.0));
+        let found = innermost.map(|(_, position, path)| {
             let mut entries: Vec<PaintEntry> = path.style.entries.iter().filter(|entry| !matches!(entry, PaintEntry::Fill(_))).cloned().collect();
-            if let Some(fill) = fill.clone() { entries.insert(0, fill); }
-            let restyled = Record::Path(path.with_style(std::sync::Arc::new(Style::new(entries))));
-            doc.vector_object_edit(layer, object.replace([(position, Some(restyled))])).map_err(|e| e.to_string())
+            if let Some(fill) = fill { entries.insert(0, fill); }
+            (*path.style.entries != entries[..]).then(|| {
+                let restyled = Record::Path(path.with_style(std::sync::Arc::new(Style::new(entries))));
+                doc.vector_object_edit(layer, object.replace([(position, Some(restyled))])).map_err(|e| e.to_string())
+            }).transpose()
         }).transpose()?;
-        if let Some(edit) = edit { return self.layer_edit(edit); }
+        if let Some(edit) = found { return edit.map_or(Ok(()), |edit| self.layer_edit(edit)); }
         if self.state.colors.transparent() { return Ok(()); }
-        self.layer_action(LayerAction::NewBelow)?;
+        self.new_paint_layer_under()?;
         let source = layer_render::RegionSource::Scene { snapshot: self.engine.document().snapshot(), scope: SceneScope::RawObjects(layer) };
         self.request_region_at(point, None, Some(source));
         Ok(())
@@ -203,6 +207,16 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some((fill, source, contiguous)) = self.layer_interaction.tool.region() else {
             return;
         };
+        let extent = self.engine.document().composition().size;
+        if !point.x.is_finite()
+            || !point.y.is_finite()
+            || point.x < 0.
+            || point.y < 0.
+            || point.x >= extent[0] as f32
+            || point.y >= extent[1] as f32
+        {
+            return;
+        }
         if fill && from.is_none() && !enclosed && self.selection_masks.target().is_none() && let Some(layer) = self.editing_vector_layer() {
             if let Err(error) = self.fill_vector_layer(layer, point) { self.notify(error); }
             return;
@@ -213,16 +227,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.selection_masks.artwork().and_then(|h|doc.scene().source_target(h))
         } else {doc.drawing_target().or(doc.active_target())};
         let basis = layer_core::Affine::IDENTITY;
-        let extent = doc.composition().size;
-        if !point.x.is_finite()
-            || !point.y.is_finite()
-            || point.x < 0.
-            || point.y < 0.
-            || point.x >= extent[0] as f32
-            || point.y >= extent[1] as f32
-        {
-            return;
-        }
         if fill && mask_target.is_none() && doc.drawing_content().is_none() {
             self.notify_drawing_refusal();
             return;

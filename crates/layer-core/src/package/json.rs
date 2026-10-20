@@ -1,43 +1,54 @@
 use crate::authored::PortableId;
-use serde::{Deserialize, Deserializer, de::{Error, MapAccess, SeqAccess, Visitor}};
+use serde::{Deserializer, de::{DeserializeSeed, Error, MapAccess, SeqAccess, Visitor}};
 use serde_json::{Map, Number, Value};
-use std::{collections::BTreeMap, fmt};
+use std::{cell::Cell, collections::BTreeMap, fmt};
 use super::values::{DecodeError, DecodeResult};
 
 pub const MAX_JSON_DEPTH: usize = 128;
+pub const MAX_JSON_NODES: usize = 4_194_304;
+const NODE_LIMIT: &str = "Package JSON exceeds the node limit";
 
-struct Unique(Value);
-impl<'de> Deserialize<'de> for Unique {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct Json;
-        impl<'de> Visitor<'de> for Json {
-            type Value = Unique;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("JSON without duplicate keys") }
-            fn visit_bool<E: Error>(self, v: bool) -> Result<Unique, E> { Ok(Unique(Value::Bool(v))) }
-            fn visit_i64<E: Error>(self, v: i64) -> Result<Unique, E> { Ok(Unique(Value::Number(v.into()))) }
-            fn visit_u64<E: Error>(self, v: u64) -> Result<Unique, E> { Ok(Unique(Value::Number(v.into()))) }
-            fn visit_f64<E: Error>(self, v: f64) -> Result<Unique, E> {
-                Number::from_f64(v).map(|v| Unique(Value::Number(v))).ok_or_else(|| E::custom("Non-finite JSON number"))
-            }
-            fn visit_str<E: Error>(self, v: &str) -> Result<Unique, E> { Ok(Unique(Value::String(v.into()))) }
-            fn visit_string<E: Error>(self, v: String) -> Result<Unique, E> { Ok(Unique(Value::String(v))) }
-            fn visit_unit<E: Error>(self) -> Result<Unique, E> { Ok(Unique(Value::Null)) }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Unique, A::Error> {
-                let mut values = Vec::new();
-                while let Some(Unique(value)) = seq.next_element()? { values.push(value); }
-                Ok(Unique(Value::Array(values)))
-            }
-            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Unique, A::Error> {
-                let mut values = Map::new();
-                while let Some(key) = map.next_key::<String>()? {
-                    if values.contains_key(&key) { return Err(A::Error::custom("Duplicate JSON key")); }
-                    let Unique(value) = map.next_value()?;
-                    values.insert(key, value);
-                }
-                Ok(Unique(Value::Object(values)))
-            }
+struct Unique<'a>(&'a Cell<usize>);
+impl Unique<'_> {
+    fn node<E: Error>(&self) -> Result<(), E> {
+        let count = self.0.get() + 1;
+        if count > MAX_JSON_NODES { return Err(E::custom(NODE_LIMIT)); }
+        self.0.set(count);
+        Ok(())
+    }
+}
+impl<'de> DeserializeSeed<'de> for Unique<'_> {
+    type Value = Value;
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> { deserializer.deserialize_any(self) }
+}
+impl<'de> Visitor<'de> for Unique<'_> {
+    type Value = Value;
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("JSON without duplicate keys") }
+    fn visit_bool<E: Error>(self, v: bool) -> Result<Value, E> { self.node()?; Ok(Value::Bool(v)) }
+    fn visit_i64<E: Error>(self, v: i64) -> Result<Value, E> { self.node()?; Ok(Value::Number(v.into())) }
+    fn visit_u64<E: Error>(self, v: u64) -> Result<Value, E> { self.node()?; Ok(Value::Number(v.into())) }
+    fn visit_f64<E: Error>(self, v: f64) -> Result<Value, E> {
+        self.node()?;
+        Number::from_f64(v).map(Value::Number).ok_or_else(|| E::custom("Non-finite JSON number"))
+    }
+    fn visit_str<E: Error>(self, v: &str) -> Result<Value, E> { self.node()?; Ok(Value::String(v.into())) }
+    fn visit_string<E: Error>(self, v: String) -> Result<Value, E> { self.node()?; Ok(Value::String(v)) }
+    fn visit_unit<E: Error>(self) -> Result<Value, E> { self.node()?; Ok(Value::Null) }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        self.node()?;
+        let mut values = Vec::new();
+        while let Some(value) = seq.next_element_seed(Unique(self.0))? { values.push(value); }
+        Ok(Value::Array(values))
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        self.node()?;
+        let mut values = Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if values.contains_key(&key) { return Err(A::Error::custom("Duplicate JSON key")); }
+            let value = map.next_value_seed(Unique(self.0))?;
+            values.insert(key, value);
         }
-        deserializer.deserialize_any(Json)
+        Ok(Value::Object(values))
     }
 }
 
@@ -56,7 +67,12 @@ pub fn parse_json(bytes: &[u8], limit: usize) -> DecodeResult<Value> {
             }
         }
     }
-    serde_json::from_slice::<Unique>(bytes).map(|value| value.0).map_err(|e| DecodeError::Invalid(e.to_string()))
+    let nodes = Cell::new(0);
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+    let parsed = Unique(&nodes).deserialize(&mut deserializer).and_then(|value| deserializer.end().map(|()| value));
+    parsed.map_err(|error| if nodes.get() >= MAX_JSON_NODES && error.to_string().starts_with(NODE_LIMIT) {
+        DecodeError::Unsupported(NODE_LIMIT.into())
+    } else { DecodeError::Invalid(error.to_string()) })
 }
 
 pub fn references(value: &Value, limit: usize) -> DecodeResult<Vec<PortableId>> {

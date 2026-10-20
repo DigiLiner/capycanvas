@@ -511,3 +511,18 @@ fn web_reserves_drawings_default_without_reserving_select_all() {
     assert_eq!(s.state.requests.len(), 1);
     assert!(matches!(s.state.requests[0].kind, HostRequestKind::Drawings));
 }
+
+#[test]
+fn vector_layer_shortcuts_hold_in_every_keymap_preset() {
+    for preset in crate::keymaps::KEYMAP_PRESETS {
+        let mut settings = Settings::default();
+        crate::keymaps::select(&mut settings, preset.id).unwrap();
+        assert_eq!(bound(&settings, &chord("n", true, true, true)), Some(CommandId::NewVectorLayer.shortcut_id()), "{}", preset.id);
+        assert_eq!(bound(&settings, &chord("insert", false, true, false)), Some(CommandId::PasteImage.shortcut_id()), "{} keeps Shift+Insert for Paste", preset.id);
+        for command in [CommandId::EditPoints, CommandId::Move, CommandId::ClearSelected, CommandId::SelectAll, CommandId::Deselect, CommandId::ScaleRotate] {
+            for key in settings.command_keys(command) {
+                assert_eq!(bound(&settings, &key), Some(command.shortcut_id()), "{} {command:?} {key:?}", preset.id);
+            }
+        }
+    }
+}

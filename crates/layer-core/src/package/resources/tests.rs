@@ -226,7 +226,7 @@ fn alias_corruption_conflicting_descriptors_and_cancelled_reads_are_rejected() {
     let cancelled=AtomicBool::new(false);let (inventory,references)=tile_inventory();let prepared=inventory.prepare(&cancelled).unwrap();
     let mut packed=Vec::new();prepared.reader(&cancelled).read_to_end(&mut packed).unwrap();
     let (mut manifest,backing)=loaded(&prepared,packed.clone().into());
-    manifest.resources.get_mut(&reference_id(&references[1]).unwrap()).unwrap().value["data"]["alpha"]=json!("premultiplied_linear");
+    manifest.resources.get_mut(&reference_id(&references[1]).unwrap()).unwrap().value["data"]["alpha"]=json!("none");
     let mut reader=ResourceReader::new(&manifest,&backing,&cancelled,Default::default());reader.tile(&references[0]).unwrap();
     assert!(reader.tile(&references[1]).unwrap_err().to_string().contains("Conflicting aliased"));
     let (manifest,backing)=loaded(&prepared,packed.clone().into());let mut reader=ResourceReader::new(&manifest,&backing,&cancelled,Default::default());

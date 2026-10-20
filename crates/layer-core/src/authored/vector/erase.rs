@@ -263,13 +263,13 @@ impl VectorObject {
         let mut changes = BTreeMap::new();
         let mut fresh = BTreeSet::new();
         for position in index.near(self, eraser.bounds()) {
-            let Some(path) = self.record(position).and_then(Record::path).filter(|path| !path.locked && !path.hidden) else { continue };
+            let Some(path) = self.record(position).and_then(Record::path).filter(|path| path.pickable()) else { continue };
             let replacement = match mode {
                 EraseMode::Whole => path.touched_by(eraser).then(Vec::new),
                 EraseMode::Touched => path.erased(eraser, None),
                 EraseMode::ToIntersection => {
                     let others: Vec<&PathItem> = index.near(self, path.bounds()).into_iter()
-                        .filter_map(|p| self.record(p).and_then(Record::path)).filter(|other| other.id != path.id && !other.hidden).collect();
+                        .filter_map(|p| self.record(p).and_then(Record::path)).filter(|other| other.id != path.id).collect();
                     path.erased(eraser, Some(&others))
                 }
             };

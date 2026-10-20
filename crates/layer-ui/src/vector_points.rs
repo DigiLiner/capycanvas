@@ -19,6 +19,9 @@ enum Gesture {
 
 #[derive(Default)]
 pub(super) struct VectorPoints { gesture: Option<Gesture>, selected: BTreeSet<PointRef>, click: Option<(PointRef, u64)> }
+impl VectorPoints {
+    pub(super) fn gesturing(&self) -> bool { self.gesture.is_some() }
+}
 
 fn path_of(object: &VectorObject, id: ItemId) -> Option<&PathItem> { object.record(object.find(id)?)?.path() }
 fn anchor_of(object: &VectorObject, r: PointRef) -> Option<Anchor> {
@@ -190,10 +193,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
     fn switch_anchor_kind(&mut self, layer: OccurrenceHandle, object: &VectorObject, r: PointRef) -> Result<(), String> {
-        let path = path_of(object, r.path).ok_or("The path was removed")?.with_anchor_kind_switched(r.at).map_err(str::to_string)?;
+        let original = path_of(object, r.path).ok_or("The path was removed")?;
+        let path = original.with_anchor_kind_switched(r.at).map_err(str::to_string)?;
+        self.vector_points.click = None;
+        if path.geometry == original.geometry { return Ok(()); }
         let position = object.find(r.path).ok_or("The path was removed")?;
         let edit = self.engine.document().vector_object_edit(layer, object.replace([(position, Some(Record::Path(path)))])).map_err(|e| e.to_string())?;
-        self.vector_points.click = None;
         self.layer_edit(edit)
     }
     pub(super) fn cancel_vector_points(&mut self) -> bool {
@@ -203,20 +208,27 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.changed = true;
         true
     }
-    pub(super) fn vector_points_selected(&self) -> bool {
-        self.points_layer().is_some() && !self.vector_points.selected.is_empty()
+    fn selected_points(&self) -> BTreeMap<ItemId, BTreeSet<AnchorRef>> {
+        let mut grouped: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
+        if self.points_layer().is_none() { return grouped; }
+        let edited = self.edited_paths();
+        for r in self.vector_points.selected.iter().filter(|r| edited.contains(&r.path)) { grouped.entry(r.path).or_default().insert(r.at); }
+        grouped
+    }
+    pub(super) fn vector_points_split(&self) -> bool {
+        let Some(object) = self.points_layer().and_then(|layer| self.engine.document().scene().vector_layer(layer)) else { return false };
+        self.selected_points().iter().any(|(id, anchors)| path_of(object, *id).is_some_and(|path| anchors.iter().any(|at| path.cuts_at(*at))))
     }
     pub(super) fn take_selected_vector_points(&mut self) -> BTreeMap<ItemId, BTreeSet<AnchorRef>> {
-        let mut cuts: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
-        for point in std::mem::take(&mut self.vector_points.selected) { cuts.entry(point.path).or_default().insert(point.at); }
-        cuts
+        let points = self.selected_points();
+        self.vector_points.selected.clear();
+        points
     }
     pub(super) fn delete_selected_vector_points(&mut self) -> Result<bool, String> {
-        let Some(layer) = self.points_layer().filter(|_| !self.vector_points.selected.is_empty()) else { return Ok(false) };
+        let grouped = self.selected_points();
+        let Some(layer) = self.points_layer().filter(|_| !grouped.is_empty()) else { return Ok(false) };
         let document = self.engine.document();
         let object = document.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
-        let mut grouped: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
-        for r in &self.vector_points.selected { grouped.entry(r.path).or_default().insert(r.at); }
         let mut changes = Vec::new();
         for (id, anchors) in grouped {
             let (Some(position), Some(path)) = (object.find(id), path_of(object, id)) else { continue };

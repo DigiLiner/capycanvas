@@ -108,11 +108,12 @@ impl<B: CanvasRenderer> UiSession<B> {
         self.editing_vector_layer().filter(|_| !self.state.colors.transparent())
     }
     pub(super) fn vector_tool_accepts(&self) -> bool {
-        match self.layer_interaction.tool {
-            LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill => self.vector_figure_layer().is_some(),
-            LayerCanvasTool::Region { fill: true, .. } => self.editing_vector_layer().is_some(),
-            _ => false,
-        }
+        let layer = match self.layer_interaction.tool {
+            LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill => self.vector_figure_layer(),
+            LayerCanvasTool::Region { fill: true, .. } => self.editing_vector_layer(),
+            _ => None,
+        };
+        layer.is_some_and(|layer| !self.engine.document().is_locked(layer))
     }
     fn figure_colors(&self, paint: FigurePaint) -> Option<[[f32; 4]; 2]> {
         let definitions = [if paint == FigurePaint::Both { self.state.colors.foreground } else { self.state.colors.definition() }, self.state.colors.background];
@@ -164,7 +165,7 @@ impl<B: CanvasRenderer> UiSession<B> {
     pub(super) fn paint_path(&mut self, path: layer_core::authored::vector::PathItem) -> Result<(), String> {
         let document = self.engine.document();
         let target = document.drawing_content().ok_or("Select a drawing layer")?;
-        let (edits, operation) = document.paint_path_plan(target, path).map_err(|refusal| format!("{refusal:?}"))?;
+        let (edits, operation) = document.paint_path_plan(target, path).map_err(|refusal| super::layer_conversions::conversion_refusal_text(refusal, self.localization()).to_string())?;
         self.engine.insert_with_operations(edits, vec![(target, operation)], None).map_err(|e| e.to_string())
     }
     fn commit_vector_figure(&mut self, layer: layer_core::authored::OccurrenceHandle, figure: &Figure) -> Result<(), String> {

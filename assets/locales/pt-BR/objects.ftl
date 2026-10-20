@@ -18,3 +18,7 @@ objects-action-use-brush = Usar { $brush }
 objects-action-reset-setting = Redefinir { $setting }
 objects-action-new-paint-layer-below = Nova camada de pintura abaixo
 objects-merge-turns-paths-into-pixels = Ao mesclar, os caminhos em “{ $layers }” viram pixels.
+objects-flatten-discards-hidden-layers-and-paths = { $count ->
+    [one] Achatar descarta { $count } camada oculta e transforma os caminhos em “{ $layers }” em pixels.
+   *[other] Achatar descarta { $count } camadas ocultas e transforma os caminhos em “{ $layers }” em pixels.
+    }

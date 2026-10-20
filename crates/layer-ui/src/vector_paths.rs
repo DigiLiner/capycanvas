@@ -12,6 +12,7 @@ struct Draft { layer: OccurrenceHandle, paint: Option<SourceTarget>, origin: [f6
 pub(super) struct VectorPaths { draft: Option<Draft>, revision: u64 }
 impl VectorPaths {
     pub fn drafting(&self) -> bool { self.draft.is_some() }
+    pub fn placing(&self) -> bool { self.draft.as_ref().is_some_and(|draft| draft.dragging) }
 }
 
 fn simplified(points: &[[f64; 2]], tolerance: f64) -> Vec<[f64; 2]> {
@@ -124,15 +125,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(())
     }
     pub(super) fn finish_vector_path(&mut self, closed: bool) -> Result<(), String> {
+        let Some(draft) = &self.vector_paths.draft else { return Ok(()) };
+        let current = match draft.paint { Some(target) => self.engine.document().drawing_content() == Some(target), None => self.editing_vector_layer() == Some(draft.layer) };
+        let refusal = if self.engine.document().is_locked(draft.layer) { Some(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED) } else { (!current).then_some(MessageId::OBJECTS_NOTICE_STALE) };
+        if let Some(refusal) = refusal {
+            self.cancel_vector_path();
+            return Err(self.localization().text(refusal).to_string());
+        }
         let continues = self.vector_paths.draft.as_ref().and_then(|draft| draft.continues.as_ref().map(|(original, _)| original.clone()));
         let paint = self.vector_paths.draft.as_ref().and_then(|draft| draft.paint);
         let drafted = self.drafted_path(closed && continues.is_none());
         self.cancel_vector_path();
         let Some((layer, path)) = drafted? else { return Ok(()) };
-        if let Some(target) = paint {
-            if self.engine.document().drawing_content() != Some(target) { return Err("The layer changed".into()); }
-            return self.paint_path(path);
-        }
+        if paint.is_some() { return self.paint_path(path); }
         let (id, edit) = match continues {
             Some(original) => (original.id, self.continue_path(layer, &original, &path, closed)?),
             None => {

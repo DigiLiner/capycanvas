@@ -1,7 +1,7 @@
 use std::{io::Cursor, sync::Arc};
 
 pub const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_PREVIEW_DIMENSION: u32 = 1024;
+pub const MAX_PREVIEW_DIMENSION: u32 = 512;
 #[derive(Clone, Debug)]
 pub struct Preview { size: [u32; 2], encoded: Arc<[u8]>, pixels: Arc<[u8]> }
 impl Preview {
@@ -30,24 +30,28 @@ impl Preview {
         let mut reader=decoder.read_info().map_err(|e|e.to_string())?;
         let info=reader.info();
         let size=[info.width,info.height];
-        if size.contains(&0) || size.iter().any(|n|*n>MAX_PREVIEW_DIMENSION) || info.bit_depth!=png::BitDepth::Eight || info.color_type!=png::ColorType::Rgba || info.interlaced || info.srgb.is_none() {
+        let channels=match info.color_type {png::ColorType::Rgb=>3,png::ColorType::Rgba=>4,_=>return Err("Unsupported preview representation".into())};
+        if size.contains(&0) || size.iter().any(|n|*n>MAX_PREVIEW_DIMENSION) || info.bit_depth!=png::BitDepth::Eight || info.interlaced || info.srgb.is_none() {
             return Err("Unsupported preview representation".into());
         }
-        let mut pixels=vec![0;size[0] as usize*size[1] as usize*4];
-        let output=reader.next_frame(&mut pixels).map_err(|e|e.to_string())?;
-        if output.buffer_size()!=pixels.len() {return Err("Invalid decoded preview length".into());}
+        let mut samples=vec![0;size[0] as usize*size[1] as usize*channels];
+        let output=reader.next_frame(&mut samples).map_err(|e|e.to_string())?;
+        if output.buffer_size()!=samples.len() {return Err("Invalid decoded preview length".into());}
         reader.finish().map_err(|e|e.to_string())?;
+        let pixels=if channels==3 {samples.as_chunks::<3>().0.iter().flat_map(|[r,g,b]|[*r,*g,*b,255]).collect()} else {samples};
         Ok(Self {size,encoded,pixels:pixels.into()})
     }
     pub fn from_rgba(size:[u32;2],pixels:Arc<[u8]>) -> Result<Self,String> {
         if size.contains(&0) || size.iter().any(|n|*n>MAX_PREVIEW_DIMENSION) || pixels.len()!=size[0] as usize*size[1] as usize*4 {return Err("Invalid preview pixels".into());}
+        let opaque=pixels.as_chunks::<4>().0.iter().all(|p|p[3]==255);
+        let rgb:Vec<u8>=if opaque {pixels.as_chunks::<4>().0.iter().flat_map(|[r,g,b,_]|[*r,*g,*b]).collect()} else {Vec::new()};
         let mut bytes=Vec::new();
         {
             let mut encoder=png::Encoder::new(&mut bytes,size[0],size[1]);
-            encoder.set_color(png::ColorType::Rgba); encoder.set_depth(png::BitDepth::Eight);
+            encoder.set_color(if opaque {png::ColorType::Rgb} else {png::ColorType::Rgba}); encoder.set_depth(png::BitDepth::Eight);
             encoder.set_source_srgb(png::SrgbRenderingIntent::RelativeColorimetric);
             let mut writer=encoder.write_header().map_err(|e|e.to_string())?;
-            writer.write_image_data(&pixels).map_err(|e|e.to_string())?;
+            writer.write_image_data(if opaque {&rgb} else {&pixels}).map_err(|e|e.to_string())?;
             writer.finish().map_err(|e|e.to_string())?;
         }
         if bytes.len()>MAX_PREVIEW_BYTES {return Err("Preview exceeds encoded bound".into());}
@@ -67,6 +71,18 @@ mod tests {
         let mut broken=preview.encoded().to_vec();broken[25]^=1;assert!(Preview::decode(broken.into()).is_err());
         let mut extra=preview.encoded().to_vec();extra.push(0);assert!(Preview::decode(extra.into()).is_err());
         assert!(Preview::decode(preview.encoded()[..preview.encoded().len()-1].into()).is_err());
-        assert!(Preview::from_rgba([1025,1],vec![0;4100].into()).is_err());
+        assert!(Preview::from_rgba([MAX_PREVIEW_DIMENSION+1,1],vec![0;(MAX_PREVIEW_DIMENSION as usize+1)*4].into()).is_err());
+    }
+    #[test]
+    fn opaque_previews_are_rgb_and_decode_to_the_same_rgba_pixels() {
+        let pixels:Arc<[u8]>=[255,12,3,255,0,19,255,255].into();
+        let preview=Preview::from_rgba([2,1],pixels.clone()).unwrap();
+        let info=png::Decoder::new(Cursor::new(preview.encoded().to_vec())).read_info().unwrap().info().color_type;
+        assert_eq!(info,png::ColorType::Rgb);
+        assert_eq!(Preview::decode(preview.encoded().clone()).unwrap().pixels(),&pixels);
+        let translucent:Arc<[u8]>=[255,12,3,254,0,19,255,255].into();
+        let preview=Preview::from_rgba([2,1],translucent.clone()).unwrap();
+        assert_eq!(png::Decoder::new(Cursor::new(preview.encoded().to_vec())).read_info().unwrap().info().color_type,png::ColorType::Rgba);
+        assert_eq!(Preview::decode(preview.encoded().clone()).unwrap().pixels(),&translucent);
     }
 }

@@ -40,6 +40,15 @@ fn check(cancelled: &AtomicBool) -> Result<(), String> {
     if cancelled.load(Ordering::Relaxed) { Err("Package operation cancelled".into()) } else { Ok(()) }
 }
 impl OpaqueResource {
+    pub(crate) fn from_record(id: PortableId, record: &Value, backing: ImmutableBacking, offset: u64, length: u64, crc32: u32) -> Result<Self, String> {
+        let fields = record.as_object().ok_or("Invalid opaque resource record")?;
+        let kind = fields.get("type").and_then(Value::as_str).ok_or("Missing opaque resource type")?;
+        let encoding = fields.get("encoding").and_then(Value::as_str).ok_or("Missing opaque resource encoding")?;
+        let data = fields.get("data").ok_or("Missing opaque resource descriptor")?.clone();
+        let extra_fields = fields.iter().filter(|(key, _)| !["id", "type", "data", "encoding", "location", "bytes", "crc32"].contains(&key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone())).collect();
+        Ok(Self { id, kind: kind.into(), data, encoding: encoding.into(), extra_fields, backing, offset, length, crc32 })
+    }
     pub fn record(&self, location: Value) -> Value {
         let mut fields = self.extra_fields.clone();
         for (key, value) in [("id", json!(self.id)), ("type", json!(self.kind)), ("data", self.data.clone()),
@@ -102,14 +111,7 @@ impl Extensions {
             check(cancelled)?;
             let record = &manifest.resources[&id];
             let range = record.range.ok_or("Unknown ancillary resource location")?;
-            let fields = record.value.as_object().ok_or("Invalid ancillary resource")?;
-            let kind = fields.get("type").and_then(Value::as_str).ok_or("Missing ancillary resource type")?;
-            let encoding = fields.get("encoding").and_then(Value::as_str).ok_or("Missing ancillary resource encoding")?;
-            let data = fields.get("data").ok_or("Missing ancillary resource descriptor")?.clone();
-            let extra_fields = fields.iter().filter(|(key, _)| !["id", "type", "data", "encoding", "location", "bytes", "crc32"].contains(&key.as_str()))
-                .map(|(key, value)| (key.clone(), value.clone())).collect();
-            let resource = Arc::new(OpaqueResource { id, kind:kind.into(), data, encoding:encoding.into(), extra_fields,
-                backing:backing.clone(), offset:range.offset, length:record.bytes, crc32:record.crc32 });
+            let resource = Arc::new(OpaqueResource::from_record(id, &record.value, backing.clone(), range.offset, record.bytes, record.crc32)?);
             resource.verify(cancelled)?;
             resources.insert(id, resource);
         }

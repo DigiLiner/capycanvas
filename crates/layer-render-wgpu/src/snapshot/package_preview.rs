@@ -1,6 +1,6 @@
 use super::*;
 use layer_core::color::RgbSpace;
-use layer_core::package::{codec::CapturedPreview, preview::Preview};
+use layer_core::package::{codec::CapturedPreview, preview::{MAX_PREVIEW_DIMENSION, Preview}};
 
 impl SnapshotGpu {
     #[cfg(not(target_arch = "wasm32"))]
@@ -25,7 +25,7 @@ impl SnapshotGpu {
         let extent = renderer.extent;
         let working = renderer.color().space;
         let guide = if renderer.sdr_rendition.is_some() { Some(renderer.local_tone_guide_async().await?) } else { None };
-        let mut reduction = layer_color::AreaPreview::new(extent, [1024; 2])?;
+        let mut reduction = layer_color::AreaPreview::new(extent, [MAX_PREVIEW_DIMENSION; 2])?;
         let mut y = 0;
         while y < extent[1] {
             check()?;

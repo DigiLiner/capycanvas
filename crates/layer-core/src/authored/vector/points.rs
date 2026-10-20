@@ -74,31 +74,44 @@ impl PathItem {
     }
     pub fn without_anchors(&self, removed: &BTreeSet<AnchorRef>) -> Result<Option<Self>, &'static str> {
         let bases = self.bases();
-        let mut subpaths = Vec::new();
-        let mut places: Vec<(u32, f64)> = Vec::new();
-        for (s, subpath) in self.geometry.subpaths().iter().enumerate() {
-            let kept: Vec<(usize, Anchor)> = subpath.anchors().copied().enumerate().filter(|(i, _)| !removed.contains(&AnchorRef { subpath: s as u32, anchor: *i as u32 })).collect();
-            if kept.len() >= 2 || kept.len() == subpath.len() {
-                let place = |i: usize| if subpath.closed || i + 1 < subpath.len() || i == 0 { (bases[s] + i as u32, 0.) } else { (bases[s] + i as u32 - 1, 1.) };
-                places.extend(kept.iter().map(|(i, _)| place(*i)));
-                subpaths.push(Subpath::new(&kept.iter().map(|(_, anchor)| *anchor).collect::<Vec<_>>(), subpath.closed && kept.len() > 2));
-            }
-        }
-        if subpaths.is_empty() { return Ok(None); }
-        let geometry = PathGeometry::new(subpaths)?;
+        let pieces: Vec<(&Subpath, u32, Vec<usize>, bool)> = self.geometry.subpaths().iter().enumerate().filter_map(|(s, subpath)| {
+            let kept: Vec<usize> = (0..subpath.len()).filter(|i| !removed.contains(&AnchorRef { subpath: s as u32, anchor: *i as u32 })).collect();
+            let whole = kept.len() == subpath.len();
+            let closed = subpath.closed && (kept.len() > 2 || whole);
+            (kept.len() >= 2 || whole).then(|| (subpath, bases[s], kept, closed))
+        }).collect();
+        if pieces.is_empty() { return Ok(None); }
+        let geometry = PathGeometry::new(pieces.iter().map(|(subpath, _, kept, closed)| Subpath::new(&kept.iter().map(|&i| *subpath.anchor(i)).collect::<Vec<_>>(), *closed)).collect())?;
         let style = self.restyled_profiles(|profile| {
-            let mut knots = Vec::new();
-            let mut at = 0usize;
+            let mut knots: Vec<WidthKnot> = Vec::new();
+            let mut push = |knot: WidthKnot| if knots.last().is_none_or(|last| (last.segment(), last.t()) < (knot.segment(), knot.t())) { knots.push(knot); };
             let mut base = 0u32;
-            for subpath in geometry.subpaths() {
-                for i in 0..subpath.len() {
-                    let (segment, t) = places[at];
-                    at += 1;
-                    let [l, r] = profile.at(segment, t);
-                    let new = if subpath.closed || i + 1 < subpath.len() || i == 0 { (base + i as u32, 0.) } else { (base + i as u32 - 1, 1.) };
-                    knots.push(WidthKnot::new(new.0, new.1, l, r));
+            for (subpath, origin, kept, closed) in &pieces {
+                let n = subpath.len();
+                let width = |k: usize| {
+                    let k = k % n;
+                    let (segment, t) = if subpath.closed || k + 1 < n || k == 0 { (origin + k as u32, 0.) } else { (origin + k as u32 - 1, 1.) };
+                    profile.at(segment, t)
+                };
+                let count = if *closed { kept.len() } else { kept.len() - 1 };
+                for i in 0..count {
+                    let (from, to) = (kept[i], kept.get(i + 1).copied().unwrap_or(kept[0] + n));
+                    let segment = base + i as u32;
+                    let [l, r] = width(from);
+                    push(WidthKnot::new(segment, 0., l, r));
+                    for q in from..to {
+                        for knot in profile.knots().iter().filter(|k| k.segment() == origin + (q % n) as u32 && (q > from || k.t() > 0.) && (q + 1 < to || k.t() < 1.)) {
+                            push(WidthKnot::new(segment, ((q - from) as f64 + knot.t()) / (to - from) as f64, knot.left(), knot.right()));
+                        }
+                    }
+                    let [l, r] = width(to);
+                    push(WidthKnot::new(segment, 1., l, r));
                 }
-                base += subpath.segment_count() as u32;
+                base += count as u32;
+            }
+            if let (true, Some((_, origin, kept, _))) = (knots.is_empty(), pieces.first()) {
+                let [l, r] = profile.at(origin + kept[0] as u32, 0.);
+                knots.push(WidthKnot::new(0, 0., l, r));
             }
             WidthProfile::new(knots).ok()
         });
@@ -162,6 +175,24 @@ mod tests {
         assert!((profile.at(0, 0.)[0] - 0.2).abs() < 1e-6 && (profile.at(0, 1.)[0] - 0.4).abs() < 1e-6);
         shorter.validate().unwrap();
         assert!(path.without_anchors(&[0, 1].map(|anchor| AnchorRef { subpath: 0, anchor }).into()).unwrap().is_none(), "one anchor left is no path");
+    }
+
+    #[test]
+    fn deleting_anchors_keeps_the_widths_and_closing_of_untouched_parts() {
+        let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        let line: Vec<Anchor> = [[0., 0.], [100., 0.], [200., 40.], [300., 0.]].into_iter().map(Anchor::corner).collect();
+        let lens = Subpath::new(&[Anchor::new([0., 100.], [0., 30.], [0., -30.], AnchorKind::SMOOTH), Anchor::new([60., 100.], [0., -30.], [0., 30.], AnchorKind::SMOOTH)], true);
+        let mut stroke = Stroke::new(Paint::color(crate::color::RgbColor::BLACK), 8.);
+        stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.2, 0.2), WidthKnot::new(0, 0.5, 1., 0.8), WidthKnot::new(1, 0.5, 0.3, 0.3), WidthKnot::new(2, 0.5, 0.9, 0.9), WidthKnot::new(3, 0.5, 0.6, 0.6)]).unwrap()));
+        let path = PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&line, false), lens]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
+        let before = path.style.strokes().next().unwrap().profile.clone().unwrap();
+        let shorter = path.without_anchors(&[AnchorRef { subpath: 0, anchor: 2 }].into()).unwrap().unwrap();
+        shorter.validate().unwrap();
+        assert!(shorter.geometry.subpaths()[1].closed, "an untouched closed part stays closed");
+        let after = shorter.style.strokes().next().unwrap().profile.clone().unwrap();
+        for t in [0.25, 0.5, 0.75] { assert!(near(after.at(0, t), before.at(0, t)), "an untouched segment keeps its widths at {t}"); }
+        assert!(near(after.at(1, 0.25), before.at(1, 0.5)) && near(after.at(1, 0.75), before.at(2, 0.5)) && near(after.at(1, 1.), before.at(2, 1.)), "a joined segment keeps the widths along both parts");
+        for t in [0., 0.5, 1.] { assert!(near(after.at(2, t), before.at(3, t)), "the closed part keeps its widths at {t}"); }
     }
 
     #[test]

@@ -142,19 +142,20 @@ impl Directory {
             || member.offset.checked_add(encoded_length).is_none_or(|end| end > self.length) { return Err("ZIP member exceeds read bound".into()); }
         input.seek(SeekFrom::Start(member.offset)).map_err(io)?;
         let mut bytes = vec![0; encoded_length as usize]; input.read_exact(&mut bytes).map_err(io)?;
-        if member.compressed_length.is_some() {
-            let mut decoded = vec![0; (member.length as usize).checked_add(1).ok_or("Manifest length overflow")?];
-            let mut decoder = flate2::Decompress::new(false);
-            let status = decoder.decompress(&bytes, &mut decoded, flate2::FlushDecompress::Finish).map_err(|e| e.to_string())?;
-            if status != flate2::Status::StreamEnd || decoder.total_in() != encoded_length || decoder.total_out() != member.length {
-                return Err("Invalid compressed manifest length or stream".into());
-            }
-            decoded.truncate(member.length as usize);
-            bytes = decoded;
-        }
+        if member.compressed_length.is_some() { bytes = inflate(&bytes, member.length as usize, false)?; }
         verify(member, crc32fast::hash(&bytes))?;
         Ok(bytes)
     }
+}
+pub(crate) fn inflate(bytes: &[u8], length: usize, zlib: bool) -> Result<Vec<u8>, String> {
+    let mut decoded = vec![0; length.checked_add(1).ok_or("Decoded length overflow")?];
+    let mut decoder = flate2::Decompress::new(zlib);
+    let status = decoder.decompress(bytes, &mut decoded, flate2::FlushDecompress::Finish).map_err(|e| e.to_string())?;
+    if status != flate2::Status::StreamEnd || decoder.total_in() != bytes.len() as u64 || decoder.total_out() != length as u64 {
+        return Err("Invalid compressed length or stream".into());
+    }
+    decoded.truncate(length);
+    Ok(decoded)
 }
 fn verify(member: &Member, crc: u32) -> Result<(), String> {
     if member.name == CREDENTIAL && member.crc32 == 0 || member.crc32 == crc { Ok(()) }

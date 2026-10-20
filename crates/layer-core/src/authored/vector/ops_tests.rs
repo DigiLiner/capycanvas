@@ -112,3 +112,74 @@ fn object_operations_replace_paths_in_place_with_fresh_identities() {
     released.validate().unwrap();
     assert!(object.release_paths(&[ItemId(1)].into()).unwrap().is_none());
 }
+
+#[test]
+fn path_commands_keep_single_anchor_dots() {
+    let dot = path(1, &[[5., 5.]], false, 6., None);
+    assert_eq!(points(&dot.reversed().unwrap()), [[5., 5.]], "a dot reverses to itself");
+    assert!(!dot.can_close());
+    assert_eq!(dot.split_at(&[AnchorRef { subpath: 0, anchor: 0 }].into()).unwrap(), vec![dot.clone()], "a dot has nothing to split");
+    let line = path(2, &[[20., 5.], [40., 5.]], false, 6., None);
+    let joined = dot.joined(&line, 0.5).unwrap();
+    joined.validate().unwrap();
+    assert_eq!(points(&joined), [[5., 5.], [20., 5.], [40., 5.]], "a dot joins a line across a gap");
+    let compound = PathItem::compound(&[dot.clone(), line.clone()]).unwrap();
+    compound.reversed().unwrap().validate().unwrap();
+    assert_eq!(compound.released().unwrap().iter().map(points).collect::<Vec<_>>(), [points(&dot), points(&line)]);
+}
+
+#[test]
+fn erasing_up_to_intersection_stops_at_locked_lines_and_passes_hidden_ones() {
+    let corner = |id: u64, points: &[[f64; 2]]| PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&points.iter().map(|p| Anchor::corner(*p)).collect::<Vec<_>>(), false)]).unwrap()),
+        Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(paint(), 4.))])));
+    let mut locked = corner(2, &[[300., 100.], [300., 500.]]);
+    locked.locked = true;
+    let mut hidden = corner(3, &[[400., 100.], [400., 500.]]);
+    hidden.hidden = true;
+    let object = VectorObject::from_records(vec![Record::Path(corner(1, &[[100., 300.], [700., 300.]])), Record::Path(locked.clone()), Record::Path(hidden.clone()), Record::Path(corner(4, &[[500., 100.], [500., 500.]]))]);
+    let erased = object.erase(&mut VectorIndex::default(), &Eraser { from: [450., 290.], to: [450., 310.], radius: 3. }, EraseMode::ToIntersection).unwrap();
+    let mut spans: Vec<[f64; 2]> = erased.paths().map(|(_, p)| p.geometry.hull()).filter(|h| h[1] == h[3]).map(|h| [h[0], h[2]]).collect();
+    spans.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert!(spans.len() == 2 && (spans[0][1] - 300.).abs() < 0.5 && (spans[1][0] - 500.).abs() < 0.5, "a locked line still stops the eraser and a hidden one does not: {spans:?}");
+    for kept in [&locked, &hidden] { assert_eq!(erased.record(erased.find(kept.id).unwrap()).unwrap().path(), Some(kept)); }
+}
+
+#[test]
+fn mirroring_a_path_keeps_each_side_width_on_its_mirrored_side() {
+    let sided = path(1, &[[0., 0.], [40., 10.], [80., 0.]], false, 6., Some(vec![WidthKnot::new(0, 0., 0.2, 1.), WidthKnot::new(1, 1., 0.9, 0.4)]));
+    let edge = |item: &PathItem, t: f64, left: bool| {
+        let segment = item.geometry.subpaths()[0].segment(0);
+        let (p, q) = (segment.point(t), segment.point(t + 1e-6));
+        let stroke = item.style.strokes().next().unwrap();
+        let [l, r] = stroke.profile.as_ref().unwrap().at(0, t);
+        let offset = if left { l } else { -r } * stroke.width * 0.5 / (q[0] - p[0]).hypot(q[1] - p[1]);
+        [p[0] + (q[1] - p[1]) * offset, p[1] - (q[0] - p[0]) * offset]
+    };
+    for affine in [Affine64([-1., 0., 0., 1., 100., 0.]), Affine64([2., 0., 0., -2., 0., 50.]), Affine64([0., 1., 1., 0., 0., 0.])] {
+        let mirrored = sided.transformed(affine, true).unwrap();
+        for t in [0.1, 0.5, 0.9] {
+            for left in [true, false] {
+                let ([x, y], [ex, ey]) = (affine.map(edge(&sided, t, left)), edge(&mirrored, t, !left));
+                assert!((x - ex).abs() < 1e-3 && (y - ey).abs() < 1e-3, "{affine:?} at {t}: {:?} vs {:?}", [x, y], [ex, ey]);
+            }
+        }
+    }
+    let flip = Affine64([-1., 0., 0., 1., 0., 0.]);
+    assert_eq!(sided.transformed(flip, true).unwrap().transformed(flip, true).unwrap().style, sided.style, "flipping twice restores the widths");
+    let even = path(2, &[[0., 0.], [10., 0.]], false, 2., Some(vec![WidthKnot::new(0, 0., 0.5, 0.5), WidthKnot::new(0, 1., 1., 1.)]));
+    assert!(Arc::ptr_eq(&even.transformed(flip, true).unwrap().style, &even.style), "even widths keep their shared style");
+}
+
+#[test]
+fn joining_or_combining_onto_a_zero_width_outline_keeps_the_other_widths() {
+    let hairless = path(1, &[[0., 0.], [10., 0.]], false, 0., None);
+    let inked = path(2, &[[10., 0.], [30., 0.]], false, 4., None);
+    let width = |path: &PathItem, segment: u32, t: f64| { let stroke = path.style.strokes().next().unwrap(); stroke.profile.as_ref().map_or([1.; 2], |p| p.at(segment, t)).map(|f| f * stroke.width) };
+    let joined = hairless.joined(&inked, 0.5).unwrap();
+    joined.validate().unwrap();
+    assert!(near(width(&joined, 0, 0.5), [0., 0.]) && near(width(&joined, 1, 0.5), [4., 4.]), "the front stays bare and the joined path keeps its width: {:?}", joined.style);
+    let compound = PathItem::compound(&[hairless.clone(), inked.clone()]).unwrap();
+    compound.validate().unwrap();
+    assert!(near(width(&compound, 0, 0.5), [0., 0.]) && near(width(&compound, 1, 0.5), [4., 4.]), "{:?}", compound.style);
+    assert_eq!(inked.joined(&hairless, 0.5).unwrap().style.strokes().next().unwrap().width, 4., "a wider front path keeps its own width");
+}

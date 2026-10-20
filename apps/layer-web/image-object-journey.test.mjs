@@ -59,7 +59,7 @@ export async function checkImageObjectFixture({call,evaluate,settle,canvasPixels
       const prior=await evaluate('objectJourney.jobs');
       const coordinates=await evaluate('objectJourney.coordinates');
       await evaluate(`(async()=>{const response=await fetch(${JSON.stringify(url)});if(!response.ok)throw Error('Missing object fixture');objectJourney.input=new Uint8Array(await response.arrayBuffer())})()`);
-      if(onlyObjects){const input=await readPackage(evaluate,'objectJourney.input');assert.equal(packageObjects(input,'capy.paint-source/2').length,0);assert.equal(packageOccurrences(input).length,3);assert.ok(packageOccurrences(input)[0].data.content.objects);}
+      if(onlyObjects){const input=await readPackage(evaluate,'objectJourney.input');assert.equal(packageObjects(input,'capy.paint-source/2').length,0);assert.equal(packageOccurrences(input).length,3);assert.ok(packageOccurrences(input)[0].data.content.object);}
       await invoke('open_document');
       await evaluate('layerApp.app.wait_for_canvas()');
       await wait(`objectJourney.jobs>${prior}`);
@@ -77,7 +77,7 @@ export async function checkImageObjectFixture({call,evaluate,settle,canvasPixels
       assert.equal(objects.length,3);assert.equal(packageObjects(before,'capy.image/1').length,1);
       assert.ok(objects.every(object=>object.data.image.ref===objects[0].data.image.ref));
       assert.equal(objects[0].data.affine[4],16777217.125,'Package preserves the F64 coefficient beyond F32 precision');
-      const imageId=objects[0].data.image.ref,owner=packageOccurrences(before).find(o=>o.data.content.objects);
+      const imageId=objects[0].data.image.ref,owner=packageOccurrences(before).find(o=>o.data.content.object);
       assert.deepEqual(owner.data.offset,['-16777216','0']);
       const runtime=await evaluate(`Number(layerApp.state().layers[${packageOccurrences(before).findIndex(o=>o.id===owner.id)}].id)`);
       for(const theme of ['light','dark']) {

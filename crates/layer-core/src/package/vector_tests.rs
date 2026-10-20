@@ -36,7 +36,7 @@ fn chunk(records: Vec<Record>) -> VectorChunk { VectorChunk::new(records) }
 fn round_trip(records: Vec<Record>) -> (Vec<u8>, VectorChunk) {
     let original = chunk(records);
     let bytes = encode_chunk(&original);
-    let decoded = decode_chunk(&bytes, original.records().len(), &mut 0).unwrap();
+    let decoded = decode_chunk(&bytes, original.records().len(), &mut 0, 0).unwrap();
     assert_eq!(decoded, original);
     assert_eq!(encode_chunk(&decoded), bytes);
     (bytes, decoded)
@@ -90,7 +90,7 @@ fn unknown_ignorable_data_survives_and_required_data_is_unsupported() {
     let volatile = tag_word(901, IGNORABLE, ValueClass::Nested);
     let nested = record_bytes(kind_word(77) | IGNORABLE, 0, &[(tag_word(3, IGNORABLE, ValueClass::Items), 42u64.to_le_bytes().to_vec())]);
     let bytes = record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (keep, vec![1, 2, 3]), (volatile, nested.clone())]);
-    let chunk = decode_chunk(&bytes, 1, &mut 0).unwrap();
+    let chunk = decode_chunk(&bytes, 1, &mut 0, 0).unwrap();
     assert_eq!(encode_chunk(&chunk), bytes);
     let Record::Path(path) = &chunk.records()[0] else { panic!() };
     let moved = path.with_geometry(path.geometry.clone());
@@ -98,14 +98,14 @@ fn unknown_ignorable_data_survives_and_required_data_is_unsupported() {
     let renamed = PathItem { name: Some("Renamed".into()), ..path.clone() };
     assert_eq!(renamed.unknown, path.unknown);
 
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, 0, ValueClass::Data), vec![])]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, IGNORABLE | 16, ValueClass::Data), vec![])]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (WIDTH, 1f64.to_le_bytes().to_vec())]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50), 3, &[]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | IGNORABLE | KIND_PARENT | 8, 3, &[]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | COPY_SAFE, 3, &[]), 1, &mut 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (FILL_RULE, vec![7])]), 1, &mut 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry), (FILL_RULE, vec![0, 0])]), 1, &mut 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, 0, ValueClass::Data), vec![])]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, IGNORABLE | 16, ValueClass::Data), vec![])]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (WIDTH, 1f64.to_le_bytes().to_vec())]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50), 3, &[]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | IGNORABLE | KIND_PARENT | 8, 3, &[]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | COPY_SAFE, 3, &[]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (FILL_RULE, vec![7])]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry), (FILL_RULE, vec![0, 0])]), 1, &mut 0, 0)));
 }
 
 #[test]
@@ -115,40 +115,40 @@ fn unknown_parents_are_atomic_and_may_span_chunks() {
     first.extend(encode_chunk(&chunk(vec![line(12, &[[0., 0.], [1., 1.]], 1.)])));
     let mut second = record_bytes(0, 0, &[]);
     second.extend(encode_chunk(&chunk(vec![line(13, &[[2., 2.], [3., 3.]], 1.)])));
-    let chunks = decode_object(&[(&first, 2), (&second, 2)]).unwrap();
+    let chunks = decode_object(&[(&first, 2), (&second, 2)], 0).unwrap();
     assert!(matches!(chunks[0].records()[0], Record::Opaque(_)));
     assert!(matches!(chunks[0].records()[1], Record::Opaque(_)), "children of an unknown parent stay uninterpreted");
     assert!(matches!(chunks[1].records()[0], Record::End));
     assert!(matches!(chunks[1].records()[1], Record::Path(_)));
     assert_eq!(encode_chunk(&chunks[0]), first);
     assert_eq!(encode_chunk(&chunks[1]), second);
-    assert!(matches!(decode_object(&[(&first, 2)]), Err(DecodeError::Invalid(_))));
-    assert!(matches!(decode_object(&[(&second, 2)]), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&first, 2)], 0), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&second, 2)], 0), Err(DecodeError::Invalid(_))));
 }
 
 #[test]
 fn malformed_framing_is_invalid() {
     let good = encode_chunk(&chunk(vec![line(1, &[[0., 0.], [3., 1.]], 2.)]));
-    for cut in 1..good.len() { assert!(decode_chunk(&good[..cut], 1, &mut 0).is_err(), "truncated at {cut}"); }
-    assert!(is_invalid(decode_chunk(&good, 2, &mut 0)));
+    for cut in 1..good.len() { assert!(decode_chunk(&good[..cut], 1, &mut 0, 0).is_err(), "truncated at {cut}"); }
+    assert!(is_invalid(decode_chunk(&good, 2, &mut 0, 0)));
     let mut padded = good.clone();
     padded.push(0);
-    assert!(is_invalid(decode_chunk(&padded, 1, &mut 0)));
+    assert!(is_invalid(decode_chunk(&padded, 1, &mut 0, 0)));
     let mut overlong = vec![PATH as u8 | 0x80, 0];
     overlong.extend_from_slice(&good[1..]);
-    assert!(is_invalid(decode_chunk(&overlong, 1, &mut 0)));
+    assert!(is_invalid(decode_chunk(&overlong, 1, &mut 0, 0)));
     let geometry = geometry_bytes();
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(FILL_RULE, vec![1]), (GEOMETRY, geometry.clone())]), 1, &mut 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (GEOMETRY, geometry.clone())]), 1, &mut 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 0, &[(GEOMETRY, geometry.clone())]), 1, &mut 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[]), 1, &mut 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH | IGNORABLE, 8, &[(GEOMETRY, geometry.clone())]), 1, &mut 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(FILL_RULE, vec![1]), (GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 0, &[(GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH | IGNORABLE, 8, &[(GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
     let mut nan = geometry.clone();
     let at = nan.len() - 4;
     nan[at..].copy_from_slice(&f32::NAN.to_le_bytes());
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, nan)]), 1, &mut 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, nan)]), 1, &mut 0, 0)));
     let two = [encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)])), encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)]))];
-    assert!(matches!(decode_object(&[(&two[0], 1), (&two[1], 1)]), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&two[0], 1), (&two[1], 1)], 0), Err(DecodeError::Invalid(_))));
 }
 
 #[test]
@@ -171,11 +171,11 @@ fn seeded_byte_mutations_never_panic_and_decode_to_stable_records() {
             }
             if bytes.is_empty() { break; }
         }
-        let Ok(chunk) = decode_chunk(&bytes, records.len(), &mut 0) else { continue };
+        let Ok(chunk) = decode_chunk(&bytes, records.len(), &mut 0, 0) else { continue };
         decoded += 1;
         let again = encode_chunk(&chunk);
-        assert_eq!(decode_chunk(&again, chunk.records().len(), &mut 0).as_ref(), Ok(&chunk));
-        assert_eq!(encode_chunk(&decode_chunk(&again, chunk.records().len(), &mut 0).unwrap()), again);
+        assert_eq!(decode_chunk(&again, chunk.records().len(), &mut 0, 0).as_ref(), Ok(&chunk));
+        assert_eq!(encode_chunk(&decode_chunk(&again, chunk.records().len(), &mut 0, 0).unwrap()), again);
     }
     assert!(decoded > 0, "some mutations land in values that stay valid");
 }
@@ -208,7 +208,7 @@ fn seeded_unknown_properties_survive_every_position() {
         };
         let tag = tag_word(number, flags, class);
         let bytes = record_bytes(PATH, 1 + next() % 1000, &[(GEOMETRY, geometry_bytes()), (tag, value)]);
-        let decoded = decode_chunk(&bytes, 1, &mut 0);
+        let decoded = decode_chunk(&bytes, 1, &mut 0, 0);
         if flags & IGNORABLE == 0 { assert!(is_unsupported(decoded)); continue; }
         let chunk = decoded.unwrap();
         assert_eq!(encode_chunk(&chunk), bytes);
@@ -461,7 +461,7 @@ fn live_shapes_round_trip_and_detach_when_a_foreign_writer_changed_their_geometr
     let recipe = encode_shape(edited.shape.as_ref().unwrap(), fingerprint(edited));
     let moved = PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([5., 5.])], false)]).unwrap();
     let stale = record_bytes(PATH, 1, &[(GEOMETRY, encode_geometry(&moved)), (STYLE, encode_style(&edited.style)), (LIVE_SHAPE, recipe)]);
-    let reopened = decode_chunk(&stale, 1, &mut 0).unwrap();
+    let reopened = decode_chunk(&stale, 1, &mut 0, 0).unwrap();
     let path = reopened.records()[0].path().unwrap();
     assert_eq!(path.shape, None, "a recipe whose fingerprint no longer matches detaches");
     assert_eq!(*path.geometry, moved, "and leaves the geometry unchanged");
@@ -600,7 +600,7 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
         if step != 5 { history.push(before); history.push(object.clone()); history.swap_remove(history.len() - 2); }
         object.validate().unwrap();
         let encoded: Vec<(Vec<u8>, usize)> = object.chunks().iter().map(|c| (encode_chunk(c), c.records().len())).collect();
-        let decoded = decode_object(&encoded.iter().map(|(b, n)| (&b[..], *n)).collect::<Vec<_>>()).unwrap();
+        let decoded = decode_object(&encoded.iter().map(|(b, n)| (&b[..], *n)).collect::<Vec<_>>(), 0).unwrap();
         assert!(decoded.iter().zip(object.chunks()).all(|(a, b)| a.records() == b.records()) && decoded.len() == object.chunks().len(), "every state round-trips exactly");
     }
 }
@@ -720,7 +720,7 @@ fn newer_vector_layers_open_from_their_fallback_locked_and_save_back_unchanged()
     let layer = |bytes: &[u8], records: u64| {
         let mut object = crate::ImageObject::new(image.clone());
         object.affine = crate::authored::Affine64([1., 0., 0., 1., 40., 30.]);
-        object.vector = Some(crate::authored::PreservedVector(Arc::from([(serde_json::json!({"records": records}), crate::authored::Resource::new(Arc::<[u8]>::from(bytes)))])));
+        object.vector = Some(crate::authored::PreservedVector(Arc::from([(serde_json::json!({"records": records}), crate::authored::Resource::new(Arc::<[u8]>::from(bytes)))]), Arc::default()));
         let mut editor = crate::Editor::new(crate::Document::from_artwork(crate::Artwork::new([200, 150]).unwrap()).unwrap());
         let (_, edit) = editor.document().create_object_layer_edit("Newer", object, None, 0).unwrap();
         editor.perform(edit).unwrap();
@@ -811,4 +811,158 @@ fn merging_a_plain_vector_layer_down_onto_another_keeps_paths() {
     editor.perform(crate::Edit::Occurrence(crate::RecordChange::replace(&editor.document().artwork.occurrences, upper, Some(faded)).unwrap())).unwrap();
     assert!(editor.document().vector_merge_down().is_none(), "a faded layer bakes into pixels");
     assert_eq!(editor.document().merge_rasterizes(crate::MergeKind::Down), [upper, lower]);
+}
+
+#[test]
+fn colors_caps_and_joins_use_fixed_wire_codes() {
+    let mut entries = Vec::new();
+    for (code, space) in [(0u8, crate::color::RgbSpace::Srgb), (1, crate::color::RgbSpace::DisplayP3), (2, crate::color::RgbSpace::AdobeRgb), (3, crate::color::RgbSpace::ProPhoto)] {
+        for (form, color) in [(0u8, RgbColor::new(space, [0.5, 0.25, 0.125, 1.]).unwrap()), (1, RgbColor::from_linear(space, [1.5, 0.25, 0.125, 1.]).unwrap())] {
+            entries.push((code, form, PaintEntry::Fill(Fill { paint: Paint::color(color), unknown: None })));
+        }
+    }
+    for (code, (cap, join)) in [(1u8, (Cap::Round, Join::Round)), (2, (Cap::Square, Join::Bevel))] {
+        let mut stroke = Stroke::new(color(0.5), 2.);
+        (stroke.cap, stroke.join) = (cap, join);
+        let bytes = encode_chunk(&chunk(vec![Record::Path(PathItem::new(ItemId(9), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0.; 2])], false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))]));
+        for tag in [CAP, JOIN] {
+            let mut property = Vec::new();
+            put_varuint(&mut property, tag);
+            property.extend([1, code]);
+            assert!(bytes.windows(property.len()).any(|w| w == property));
+        }
+    }
+    for (code, form, entry) in entries {
+        let bytes = encode_chunk(&chunk(vec![Record::Path(PathItem::new(ItemId(9), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0.; 2])], false)]).unwrap()), Arc::new(Style::new(vec![entry.clone()]))))]));
+        let PaintEntry::Fill(Fill { paint: Paint::Color { color, .. }, .. }) = &entry else { unreachable!() };
+        let form = if color.linear_rgb.is_some() { form } else { 0 };
+        let mut property = Vec::new();
+        put_varuint(&mut property, COLOR_VALUE);
+        property.extend([18, code, form]);
+        assert!(bytes.windows(property.len()).any(|w| w == property), "space {code} form {form}");
+        let decoded = decode_chunk(&bytes, 1, &mut 0, 0).unwrap();
+        assert_eq!(decoded.records()[0].path().unwrap().style.entries[0], entry);
+    }
+}
+
+#[test]
+fn slot_values_name_existing_slots_and_stay_behind_when_paths_leave_their_object() {
+    let slots = |value: Vec<u8>| record_bytes(PATH, 4, &[(GEOMETRY, geometry_bytes()), (tag_word(1000, IGNORABLE | COPY_SAFE, ValueClass::Slots), value)]);
+    assert!(decode_chunk(&slots(vec![0, 1]), 1, &mut 0, 2).is_ok());
+    assert!(is_invalid(decode_chunk(&slots(vec![0, 2]), 1, &mut 0, 2)));
+    assert!(is_invalid(decode_chunk(&slots(vec![0]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&slots(vec![0x80]), 1, &mut 0, 2)));
+    assert!(decode_chunk(&slots(Vec::new()), 1, &mut 0, 0).is_ok());
+    let nested = record_bytes(PATH, 4, &[(GEOMETRY, geometry_bytes()), (tag_word(1001, IGNORABLE, ValueClass::Nested), record_bytes(kind_word(60) | IGNORABLE, 0, &[(tag_word(3, IGNORABLE, ValueClass::Slots), vec![1])]))]);
+    assert!(decode_chunk(&nested, 1, &mut 0, 2).is_ok() && is_invalid(decode_chunk(&nested, 1, &mut 0, 1)));
+
+    let artwork = open(include_bytes!("codec/fixtures/vector-future.capy").to_vec());
+    let object = vector(&artwork).clone();
+    let Record::Path(path) = &object.records().next().unwrap().1 else { panic!() };
+    assert!(path.unknown.as_ref().is_some_and(|u| u[0].tag >> 2 & 3 == ValueClass::Slots as u64));
+    let mut kept = BTreeSet::new();
+    kept.insert(path.id);
+    let (_, same) = object.copies(&kept, &object);
+    let (_, other) = object.copies(&kept, &VectorObject::default());
+    assert_eq!(same[0].path().unwrap().unknown, path.unknown);
+    assert_eq!(other[0].path().unwrap().unknown, None, "slot references never point into another object's slots");
+    let moved = object.transform_items(&kept, Affine64([1., 0., 0., 1., 5., 5.]), true).unwrap();
+    assert!(Arc::ptr_eq(moved.slots(), object.slots()), "edits keep the object's slots");
+}
+
+#[test]
+fn future_slots_open_editable_or_from_their_fallback_and_save_back_byte_for_byte() {
+    let fixed = include_bytes!("codec/fixtures/vector-future.capy").to_vec();
+    let artwork = open(fixed.clone());
+    let object = vector(&artwork);
+    assert_eq!(object.path_count(), 1);
+    let [Slot::Image(texture), Slot::Resource(font)] = &object.slots()[..] else { panic!("an image and a resource slot") };
+    assert_eq!(texture.extent, [16, 12]);
+    assert_eq!((font.kind.as_ref(), font.length), ("example.font/1", 24));
+    assert_eq!(&*font.read_chunk(0, 24, &std::sync::atomic::AtomicBool::new(false)).unwrap(), b"capy future font program");
+    let (_, _, newer) = artwork.objects.iter().next().expect("the newer layer opens from its fallback");
+    let preserved = newer.vector.as_ref().unwrap();
+    assert!(matches!(&preserved.1[..], [Slot::Resource(a), Slot::Image(b)] if a.id == font.id && b.id() == texture.id()));
+    assert!(super::artwork_records::slot_resources(&artwork).contains(&font.id));
+    let document = crate::Document::from_artwork(artwork.clone()).unwrap();
+    let newer_layer = *document.scene().order().iter().find(|h| document.scene().object_layer(**h).is_some()).unwrap();
+    assert!(document.is_locked(newer_layer));
+    let editor = crate::Editor::new(document);
+    assert!(save(&editor) == fixed, "a save without edits reproduces the fixture byte for byte");
+
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let capture = editor.capture_session(editor.capture(1, Default::default()).unwrap()).unwrap();
+    let session = super::session::PreparedSession::prepare(&capture, serde_json::json!({}), &cancel).unwrap();
+    let mut pack = Vec::new();
+    std::io::Read::read_to_end(&mut session.resources().reader(&cancel), &mut pack).unwrap();
+    let loaded = super::session::open_parts(session.metadata(), super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(pack))).unwrap(), crate::ProjectLimits::default(), &cancel).unwrap();
+    let restored = &loaded.editor.document().artwork;
+    assert!(matches!(&vector(restored).slots()[..], [Slot::Image(_), Slot::Resource(r)] if r.kind.as_ref() == "example.font/1"));
+    assert!(restored.extensions.resources.is_empty());
+
+    let transfer = super::transfer::PreparedTransfer::capture(&editor.capture(1, Default::default()).unwrap(), &cancel).unwrap();
+    let descriptor = serde_json::from_slice(&serde_json::to_vec(transfer.descriptor()).unwrap()).unwrap();
+    let mut receiver = super::transfer::TransferReceiver::new(descriptor, crate::ProjectLimits::default()).unwrap();
+    for index in receiver.missing_payloads() {
+        let length = transfer.payload_len(index).unwrap();
+        let mut offset = 0;
+        while offset < length {
+            let count = (length - offset).min(super::MAX_RANGE_BYTES as u64) as usize;
+            receiver.push_chunk(index, &transfer.read_chunk(index, offset, count).unwrap()).unwrap();
+            offset += count as u64;
+        }
+    }
+    let adopted = receiver.finish().unwrap().adopt_verified(crate::ProjectLimits::default(), &cancel).unwrap();
+    assert!(matches!(&vector(&adopted.artwork).slots()[..], [Slot::Image(_), Slot::Resource(r)] if r.id == font.id));
+    assert!(adopted.artwork.extensions.resources.is_empty(), "slot resources are not ancillary extensions");
+    let mut edited = crate::Editor::new(crate::Document::from_artwork((*adopted.artwork).clone()).unwrap());
+    let layer = *edited.document().scene().order().iter().find(|h| edited.document().scene().vector_layer(**h).is_some()).unwrap();
+    let moved = vector(&edited.document().artwork).transformed(Affine64([1., 0., 0., 1., 3., 0.])).unwrap();
+    edited.perform(edited.document().vector_object_edit(layer, moved).unwrap()).unwrap();
+    let reopened = open(save(&edited));
+    assert_eq!(vector(&reopened).slots().len(), 2);
+    assert!(reopened.objects.iter().next().unwrap().2.vector.as_ref().is_some_and(|v| v.1.len() == 2));
+}
+
+#[test]
+fn chunks_that_do_not_compress_are_stored_raw_and_reopen() {
+    let mut state = 0x1234_5678_9abc_def1u64;
+    let mut next = move || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; (state >> 11) as f64 / (1u64 << 53) as f64 };
+    let anchors: Vec<Anchor> = (0..2000).map(|_| Anchor::new([next() * 640., next() * 480.], [next() * 9. - 4.5, next() * 9. - 4.5], [next() * 9. - 4.5, next() * 9. - 4.5], AnchorKind::CORNER)).collect();
+    let path = PathItem::new(ItemId(0x9f3a_5c21_77e4_0b6d), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()),
+        Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(Paint::color(RgbColor::BLACK), 3.))])));
+    let (mut editor, layer) = document_with_paths(1);
+    editor.perform(editor.document().vector_object_edit(layer, VectorObject::from_records(vec![Record::Path(path.clone())])).unwrap()).unwrap();
+    let saved = save(&editor);
+    let directory = super::archive::Directory::read(&mut std::io::Cursor::new(&saved), 16, 1 << 20).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&directory.read_member(&mut std::io::Cursor::new(&saved), directory.member("manifest.json").unwrap(), 1 << 20).unwrap()).unwrap();
+    assert!(manifest["resources"].as_array().unwrap().iter().any(|r| r["type"] == "capy.vector-items/1" && r["encoding"] == "capy.vector-records/1"));
+    let reopened = open(saved);
+    assert_eq!(vector(&reopened).paths().next().unwrap().1, &path);
+    let again = crate::Editor::new(crate::Document::from_artwork(reopened).unwrap());
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let capture = again.capture_session(again.capture(1, Default::default()).unwrap()).unwrap();
+    let session = super::session::PreparedSession::prepare(&capture, serde_json::json!({}), &cancel).unwrap();
+    let mut pack = Vec::new();
+    std::io::Read::read_to_end(&mut session.resources().reader(&cancel), &mut pack).unwrap();
+    let loaded = super::session::open_parts(session.metadata(), super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(pack))).unwrap(), crate::ProjectLimits::default(), &cancel).unwrap();
+    assert_eq!(vector(&loaded.editor.document().artwork).paths().next().unwrap().1, &path);
+}
+
+#[test]
+fn opening_charges_the_records_that_decoded_vector_bytes_become() {
+    let (editor, _) = document_with_paths(3000);
+    let saved = save(&editor);
+    let directory = super::archive::Directory::read(&mut std::io::Cursor::new(&saved), 16, 1 << 24).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&directory.read_member(&mut std::io::Cursor::new(&saved), directory.member("manifest.json").unwrap(), 1 << 24).unwrap()).unwrap();
+    let decoded: u64 = manifest["resources"].as_array().unwrap().iter().filter(|r| r["type"] == "capy.vector-items/1")
+        .map(|r| r["data"]["decoded_bytes"].as_str().map_or_else(|| r["bytes"].as_str().unwrap(), |v| v).parse::<u64>().unwrap()).sum();
+    let resident = crate::history_budget::Accounting::default().charge_vector(vector(&open(saved.clone()))) as u64;
+    assert!(resident > decoded, "records hold more than their wire bytes: {resident} vs {decoded}");
+    let outcome = |budget: u64| {
+        let backing = super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(saved.clone()))).unwrap();
+        super::codec::open(backing, crate::ProjectLimits { raster_bytes: budget, asset_bytes: 0, ..Default::default() }, &std::sync::atomic::AtomicBool::new(false)).unwrap()
+    };
+    assert!(matches!(outcome(decoded + resident / 2), super::codec::OpenOutcome::Preserved { .. }));
+    assert!(matches!(outcome(decoded + resident), super::codec::OpenOutcome::Candidate { .. }));
 }

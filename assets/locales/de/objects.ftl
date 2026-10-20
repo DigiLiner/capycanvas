@@ -18,3 +18,7 @@ objects-action-use-brush = { $brush } verwenden
 objects-action-reset-setting = { $setting } zurücksetzen
 objects-action-new-paint-layer-below = Neue Malebene darunter
 objects-merge-turns-paths-into-pixels = Beim Zusammenfügen werden die Pfade in „{ $layers }“ zu Pixeln.
+objects-flatten-discards-hidden-layers-and-paths = { $count ->
+    [one] Beim Reduzieren wird { $count } ausgeblendete Ebene verworfen und die Pfade in „{ $layers }“ werden zu Pixeln.
+   *[other] Beim Reduzieren werden { $count } ausgeblendete Ebenen verworfen und die Pfade in „{ $layers }“ werden zu Pixeln.
+    }

@@ -207,7 +207,7 @@ pub(super) fn swipe_actions(doc: &Document, id: OccurrenceHandle, layer: &Occurr
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NewContent { Paint, Group, Vector }
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum NewPlacement { Above, Clipped, Below }
+enum NewPlacement { Above, Clipped, Below, Under }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -765,12 +765,14 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.engine.document().is_locked(id) { return Err("This layer is locked".into()); }
         Ok(layer.clone())
     }
+    pub(super) fn new_paint_layer_under(&mut self) -> Result<(), String> { self.new_layer(NewContent::Paint, NewPlacement::Under) }
     fn new_layer(&mut self, kind: NewContent, placement: NewPlacement) -> Result<(), String> {
         self.return_to_artwork()?;
         let doc = self.engine.document();
         let scene = doc.scene();
         let active = doc.working.occurrence;
         let clipped = placement == NewPlacement::Clipped;
+        let under_clip = placement == NewPlacement::Under && active.and_then(|h| scene.occurrence(h)).is_some_and(|o| o.attachment == Attachment::Clip);
         if clipped && !active.is_some_and(|h| scene.eligible_target(h)) {
             return Err("Choose a paint layer, object layer or isolated group to clip to".into());
         }
@@ -783,6 +785,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let base = if scene.occurrence(h).is_some_and(|o| o.attachment == Attachment::Clip) { doc.clipping_base(h).unwrap_or(h) } else { h };
                 stack.entries.iter().position(|id| *id == base).map(|index| index + 1)
             }
+            NewPlacement::Under => stack.entries.iter().position(|id| *id == h).map(|index| index + 1),
             NewPlacement::Clipped => stack.entries.iter().position(|id| *id == scene.attached_effects(h).last().copied().unwrap_or(h)),
             NewPlacement::Above => stack.entries.iter().position(|id| *id == doc.clipping_stack_top(h).unwrap_or(h)),
         }).unwrap_or(0);
@@ -804,7 +807,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let id = doc.artwork.occurrences.next_handle();
         let mut layer = Occurrence::new(content, self.numbered_document_name(name, occurrence_token(id)));
         if kind == NewContent::Group { layer.blend = self.new_group_blend(); }
-        layer.attachment = if clipped { Attachment::Clip } else { Attachment::None };
+        layer.attachment = if clipped || under_clip { Attachment::Clip } else { Attachment::None };
         let mut working = doc.working.clone();
         working.occurrence = Some(id); working.target = match layer.content { OccurrenceContent::Paint(h) => Some(SourceTarget::Paint(h)), _ => None }; working.inspect_mask = None;
         working.layer_selection = BTreeSet::from([id]); working.layer_anchor = Some(id);
@@ -1682,7 +1685,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let layer = doc.scene().occurrence(id).ok_or("Unknown layer")?;
                 match self.layer_interaction.tool {
                     LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill if self.vector_figure_layer().is_some() => (),
-                    LayerCanvasTool::LassoFill if self.editing_vector_layer().is_some() => {
+                    LayerCanvasTool::Figure { .. } | LayerCanvasTool::LassoFill if self.editing_vector_layer().is_some() => {
                         self.notify(self.localization().text(MessageId::COMMANDS_PATHS_NEED_A_COLOR).to_string());
                         return Ok(());
                     }

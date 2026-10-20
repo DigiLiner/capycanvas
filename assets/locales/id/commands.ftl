@@ -237,6 +237,11 @@ command-bring-forward = Majukan
 command-send-backward = Mundurkan
 command-send-to-back = Kirim ke belakang
 commands-select-paths-on-a-vector-layer = Pilih jalur pada lapisan vektor
+commands-select-open-paths-to-join = Pilih satu atau dua jalur terbuka untuk digabungkan
+commands-select-an-open-path-to-close = Pilih jalur terbuka untuk ditutup
+commands-select-an-anchor-inside-a-path-to-split = Pilih titik di dalam jalur untuk dipisah
+commands-select-paths-to-make-a-compound-path = Pilih dua jalur atau lebih untuk membuat jalur gabungan
+commands-select-a-compound-path-to-release = Pilih jalur gabungan untuk dilepas
 menu-arrange = Atur
 
 command-lower-layer = Turunkan lapisan

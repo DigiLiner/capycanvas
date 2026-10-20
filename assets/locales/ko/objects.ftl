@@ -18,3 +18,4 @@ objects-action-use-brush = { $brush } 사용
 objects-action-reset-setting = { $setting } 재설정
 objects-action-new-paint-layer-below = 아래에 새 페인트 레이어
 objects-merge-turns-paths-into-pixels = 병합하면 “{ $layers }”의 패스가 픽셀이 됩니다.
+objects-flatten-discards-hidden-layers-and-paths = 병합하면 숨긴 레이어 { $count }개가 삭제되고 “{ $layers }”의 패스가 픽셀이 됩니다.

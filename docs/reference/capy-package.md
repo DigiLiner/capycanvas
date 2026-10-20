@@ -101,7 +101,7 @@ as unsupported and is preserved; there is no conversion reader.
 | `capy.paint-source/2` | Required pixel `domain`; authored `color_mode` (`full_color`, `grayscale`, `two_tone`, default `full_color`), optional `base` image binding, sparse `tiles`, `material`. The binding owns its base offset and color policy. |
 | `capy.image/1` | Immutable sample `extent`, `interpretation`, complete `tiles`; optional physical `resolution`. |
 | `capy.image-object/1` | Required immutable `image` reference; optional F64 `affine`, `interpolation`. |
-| `capy.vector-object/1` | Optional `items`, an ordered array of `capy.vector-items/1` resource references whose record streams concatenate front to back. Absent means no items. See [vector records](#vector-records). |
+| `capy.vector-object/1` | Optional `items`, an ordered array of `capy.vector-items/1` resource references whose record streams concatenate front to back, and optional `slots`, an ordered array of resource or `capy.image/1` references that item records name by index. Absent means none. See [vector records](#vector-records). |
 | `capy.coverage-source/2` | Required pixel `domain`; `default_coverage` and sparse `tiles`. A mask made from a selection stores that selection's coverage in tiles. |
 | `capy.effect/2` | Required inline `builtin`, parameter-data `version` and every keyed `values` entry. Effects consuming authored coordinates require F64 `spatial`. |
 | `capy.selection/1` | Required `shape`; optional `affine` and `inverted`. Pixels use coverage resources; contours keep their geometry. |
@@ -109,7 +109,7 @@ as unsupported and is preserved; there is no conversion reader.
 | `capy.output/2` | Required `source` composition endpoint; `name`, `context`, SDR rendition, proof intent and disposable optional `representation`; unfamiliar caches are ignored. Export requests own delivery size. |
 
 `content` is one of `{"paint":{"ref":"…"}}`,
-`{"objects":{"ref":"…"}}` (a direct image-object reference), `{"stack":{"ref":"…"}}`, `{"effect":{"ref":"…"}}`,
+`{"object":{"ref":"…"}}` (one image or vector object), `{"stack":{"ref":"…"}}`, `{"effect":{"ref":"…"}}`,
 or `{"selection":{"ref":"…"}}`.
 Exactly one alternative appears. Paper is an ordinary Solid Color effect
 occurrence, with its color in the effect values. Files using the former inline
@@ -173,14 +173,16 @@ target. Later versions extend the format with new names, never by giving an
 existing field a second meaning.
 Reader, editor admission and finalized capture publication share metadata and
 record admission. Metadata is bounded to 64 MiB, fewer than 128 nested JSON
-containers and 4,194,304 traversal nodes; evaluation graphs admit 65,536 objects,
+containers and 4,194,304 JSON values, counted while parsing so a larger document
+stops before its tree is built; evaluation graphs admit 65,536 objects,
 262,144 evaluation edges and depth 128.
 Layer names are at most 4,096 bytes. Resource bindings, including repeated
 tile references, do not consume evaluation edges. There are at most 262,144
 resource records. Project admission also bounds layers, dimensions, retained
 source bytes and raster bytes using the same units on reopen. Shared source
 owners and compressed tile allocations count once; editable raster capacity is
-charged per source. Pending edits must resolve before final publication.
+charged per source. Opening charges vector items for both their decoded bytes
+and the path records they become. Pending edits must resolve before final publication.
 
 Current evaluator bounds include 1,024 rulers, 32 mesh cells per axis, 32 curve
 points or gradient stops and LUT cubes of side 65. Precision bounds on invertible
@@ -436,7 +438,7 @@ Pack partition and range changes never change source or resource identity.
 
 | Resource type | Encoding and descriptor |
 | --- | --- |
-| `capy.raster-tile/1` | `capy.lz4-tile/1`; exactly 256 × 256 samples, with `channels`, `depth`, `transfer` and `alpha`. A `profile` transfer uses the profile of the owning original or composition. |
+| `capy.raster-tile/1` | `capy.lz4-tile/1` or `capy.deflate-tile/1`; exactly 256 × 256 samples, with `channels`, `depth`, `transfer` and `alpha`. A `profile` transfer uses the profile of the owning original or composition. |
 | `capy.selection-coverage/1` | `capy.lz4-coverage/1`; coverage depth `u4` or `u8`, required extent/bounds and chunk index. |
 | `capy.icc/1` | `raw`; exact profile bytes, profile interpretation validated by the color subsystem. |
 | `capy.photo-metadata/1` | `raw`; `kind` is `exif`, `xmp` or `iptc`; retain exact supplied bytes. |
@@ -444,14 +446,18 @@ Pack partition and range changes never change source or resource identity.
 | `capy.lut3d/1` | `capy.rgb-f32/1`; current immutable little-endian F32 cube block, red coordinate fastest, declared size/domain. Titles belong to individual parameter bindings. |
 | `capy.vector-items/1` | `capy.vector-records/1`; a record stream of at most 64 records with the integer `records` count in `data` ([vector records](#vector-records)). |
 
-ICC, photo metadata, WGSL, LUT and vector-item resources may use `capy.lz4-bytes/1` instead
-of their raw encoding. In that case `data.decoded_bytes` is required and gives
-the exact decoded length as a canonical decimal U64 string. It is absent for
-raw encodings. One raw LZ4 block preserves every decoded byte; the resource's
-type fixes the interpretation after decompression. Writers select this encoding
-only when it reduces size, cache the encoded result on the immutable resource,
-and preserve the original encoding and compressed bytes when opening and saving
-unchanged resources. Bounds on both encoded and decoded size apply before allocation.
+ICC, photo metadata, WGSL, LUT and vector-item resources may use `capy.lz4-bytes/1`
+or `capy.deflate-bytes/1` instead of their raw encoding. In that case
+`data.decoded_bytes` is required and gives the exact decoded length as a
+canonical decimal U64 string. It is absent for raw encodings. `capy.lz4-bytes/1`
+is one raw LZ4 block; `capy.deflate-bytes/1` is one complete zlib stream
+(RFC 1950, Adler-32 included) with no trailing input. Either preserves every
+decoded byte; the resource's type fixes the interpretation after decompression.
+Writers select LZ4 only when it reduces size, cache the encoded result on the
+immutable resource, and preserve the original LZ4 encoding and bytes when opening
+and saving unchanged resources. Current writers do not produce DEFLATE; readers
+decode it and save the resource again with LZ4. Bounds on both encoded and
+decoded size apply before allocation.
 No quantization, palette reduction or lossy image encoding is used for authored data.
 
 Raster channels are `coverage`, `gray`, `gray_alpha`, `rgb`, `rgba` or `cmyk`;
@@ -465,9 +471,13 @@ within `[0,1]`. Preserve hidden straight RGB, including alpha-zero pixels, and
 all finite float bit patterns. Imported originals retain their independent
 interpretation; paint admission can require matching composition format.
 
-Tiles store one raw LZ4 block with no frame or prefixed decoded length. With `P`
+`capy.lz4-tile/1` stores one raw LZ4 block with no frame or prefixed decoded length. With `P`
 pixels and `B` bytes/pixel, bytes of a multibyte-depth pixel are shuffled by
 `stored_uncompressed[b*P+p] = interleaved[p*B+b]`. U8-depth tiles are unshuffled.
+`capy.deflate-tile/1` stores one zlib stream of the same planes for every depth,
+U8 included, after a Sub filter on each 256-byte plane row: every byte but the
+first of a row holds its difference from the byte to its left, modulo 256.
+Current writers do not produce it; readers decode it and keep the tile as LZ4.
 The decoded length is exactly `256*256*B`; decoding is bounded to that size and
 rejects trailing input. Tile plane membership (`color`, `mask`,
 `watercolor_wetness`) belongs to the source's tile index, not the byte identity.
@@ -480,9 +490,12 @@ which the brush engine may use as it chooses. Smaller values are not watercolor.
 Selection coverage preserves the current defined packing: rows start at whole
 little-endian U32 words, low bits hold the first pixel, with eight U4 or four U8
 pixels/word. U4 codes are exactly `0..4` and mean coverage divided by four;
-values `5..15` are invalid. U8 codes mean coverage divided by 255. Row padding is zero. Linear word bytes are split into 65,536-byte
-chunks, with zero padding in the final chunk, compressed as raw LZ4 without byte
-shuffle. Bounds cannot omit nonzero coverage; unused padding is validated.
+values `5..15` are invalid. U8 codes mean coverage divided by 255. Row padding is zero. Chunks store only the words of
+`bounds`: rows `y0..y1`, and in each row the words from the one holding pixel
+`x0` to the one holding pixel `x1 - 1`. Every other word is zero. Those words,
+row by row, are split into 65,536-byte chunks, with zero padding in the final
+chunk, compressed as raw LZ4 without byte shuffle; empty bounds have no chunks.
+Bounds cannot omit nonzero coverage; unused padding is validated.
 Contours are not converted to pixel coverage for convenience.
 
 A LUT resource stores `size`, input `domain`, and exactly `size^3` tightly
@@ -531,7 +544,7 @@ resources keep their IDs and bytes. Items are front to back, as stack entries ar
 | Property | Tag word (varuint), varuint value length, value bytes. Tag numbers strictly ascend within a record. Every value is length-prefixed, so any reader can step over any property. |
 | Kind word | `number << 4` with flags ignorable (1), copy-safe (2), parent (4) and reserved (8). A parent's children and its End marker follow it. |
 | Tag word | `number << 5` with flags ignorable (1), copy-safe (2), a value class in bits 2–3 and reserved (16). |
-| Value class | Data (0) opaque bytes; Items (1) item IDs as `u64` values; Slots (2) slot references; Nested (3) a record stream with the same framing. |
+| Value class | Data (0) opaque bytes; Items (1) item IDs as `u64` values; Slots (2) varuint indices into the object's `slots`; Nested (3) a record stream with the same framing. |
 
 Flags belong to a number's identity: a known number with other flags is invalid.
 Numbers are listed, with their flags, owners and the vocabulary revision that
@@ -541,14 +554,26 @@ which only grows; retired numbers stay reserved. Revision 1 is the vocabulary
 of the first reader; a layer that uses a later number needs a fallback image
 for older readers.
 
+**Slots.** Item records never contain Capy IDs. A record that needs another
+record names it through the object's `slots` array, by index, in a Slots-class
+value. A slot is a resource of any type or a `capy.image/1` object; any other
+object type makes the object unsupported. A slot index at or past the end of
+`slots` is invalid. A reader keeps every slot of an object while the object
+exists, including slots that no property it understands uses, and never
+interprets a slot resource, so a resource that only slots reference may have a
+type or encoding the reader does not know. A slot resource must not reference
+other records. When paths are copied or merged into another object, unknown
+properties of the Slots or Nested class and unknown paint records are dropped,
+because their slot indices would name the other object's slots.
+
 **Fallback.** A `capy.vector-object/1` record may carry `fallback`: the
 `image`, `affine` and `interpolation` of an image object that shows the layer.
 A reader that can read every item ignores it and drops it on save. A reader
 whose item decoding is unsupported, and only then, opens the object as a
 locked image object showing the fallback, keeps each item resource's
-descriptor and decoded bytes, and saves the record back with the same items
-and fallback, in packages and sessions alike. Without a fallback, unsupported
-items make the artwork unsupported.
+descriptor and decoded bytes and every slot, and saves the record back with the
+same items, slots and fallback, in packages, sessions and worker transfers alike.
+Without a fallback, unsupported items make the artwork unsupported.
 
 **Vocabulary.** Item records: Path (kind 1) with a nonzero layer-local ID that is
 never reused. Path tags: `geometry` (required), `fill_rule` (`u8`: 0 nonzero,
@@ -558,10 +583,10 @@ copy-safe `name` (UTF-8) and `locked` (`u8` flag), and the ignorable
 `live_shape` recipe. Fill (kind 2) and Stroke
 (kind 3) records have ID 0 and a required nested `paint` holding one paint
 record; the only paint kind is Color (kind 4), whose `color` value is a `u8`
-space (`srgb`, `display_p3`, `adobe_rgb`, `pro_photo`), a `u8` form (0 encoded
+space (0 `srgb`, 1 `display_p3`, 2 `adobe_rgb`, 3 `pro_photo`), a `u8` form (0 encoded
 RGBA, 1 linear RGB) and four F32 values, as portable colors define them. Stroke
-tags are `width` (F64 layer pixels, default 1), `cap` (`u8` butt, round, square;
-default butt), `join` (`u8` miter, round, bevel; default miter), `miter_limit`
+tags are `width` (F64 layer pixels, default 1), `cap` (`u8` 0 butt, 1 round, 2 square;
+default butt), `join` (`u8` 0 miter, 1 round, 2 bevel; default miter), `miter_limit`
 (F64, at least 1, default 4) and `width_profile`.
 
 | Value | Encoding |
@@ -586,7 +611,13 @@ data under the same rule.
 
 The fixed [`vector-objects.capy`](../../crates/layer-core/src/package/codec/fixtures/vector-objects.capy),
 generated by `cargo run -p layer-core --example vector_fixture -- OUTPUT.capy`,
-covers every V0 feature and must reopen and save byte for byte.
+covers every V0 feature and must reopen and save byte for byte. The fixed
+[`vector-future.capy`](../../crates/layer-core/src/package/codec/fixtures/vector-future.capy),
+generated by `cargo run -p layer-core --example vector_future_fixture -- OUTPUT.capy`,
+holds a readable layer whose path keeps an ignorable Slots value naming an image
+and an unknown `example.font/1` resource, and a layer from a newer version whose
+required Slots value opens it from its fallback. It must open editable and save
+byte for byte.
 
 **Unknown data.** An unknown kind or tag that is not ignorable, or has a reserved
 bit set, makes the object unsupported: it opens from its fallback, or makes the
@@ -668,8 +699,9 @@ writer never patches headers or emits descriptors.
 
 ## Preview and file outcomes
 
-The fixed `preview.png` is at most 1,024 pixels on each axis and 8 MiB encoded.
-It is non-interlaced 8-bit RGBA PNG with an explicit sRGB chunk and standard sRGB interpretation and straight
+The fixed `preview.png` is at most 512 pixels on each axis and 8 MiB encoded.
+It is a non-interlaced 8-bit PNG with an explicit sRGB chunk and standard sRGB
+interpretation, RGB when every pixel is opaque and otherwise RGBA with straight
 alpha, containing the complete default output framing at a uniform scale. PNG
 chunk CRCs, dimensions and decoded allocation bounds are checked before display.
 HDR uses the output's authored SDR rendition. No checkerboard, current selection,
@@ -905,7 +937,16 @@ The separate `codec/fixtures/shared-image-objects.capy` fixes shared immutable
 image IDs, both paint-base policies, offsets crossing tile boundaries and both
 object interpolation choices. Its tests compare hardcoded F64 coefficient bits
 and source U16/F32 sample bits through portable open/save, private checkpoints
-and serialized worker transfer.
+and serialized worker transfer. It, `vector-objects.capy` and the Web
+`shared-image-f64-*.capy` packages were last converted to the `object` content
+key by re-saving them through the current writer, and must reopen and save byte
+for byte; `unsupported-pass-through.capy` was converted in place and stays
+preserved.
+`codec/fixtures/deflate-resources.capy`, generated by
+`cargo run -p layer-core --example deflate_fixture -- OUTPUT.capy`, stores a
+U16 RGBA paint tile, U8 RGB image tiles, vector items, a LUT and XMP metadata
+with the DEFLATE encodings. Its test compares exact decoded samples and values,
+saves them back with LZ4 and rejects trailing input and wrong decoded lengths.
 
 Keep these inputs fixed while their data versions remain supported. Adding a
 built-in, widening an accepted numeric range or adding a stable choice does not

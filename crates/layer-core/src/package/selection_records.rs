@@ -1,6 +1,6 @@
 use super::values::{self, DecodeError, DecodeResult};
 use crate::{Affine, ProjectLimits, Selection, SelectionPixels, SelectionShape,
-    authored::{PortableId, Resource}, package::SELECTION_CHUNK_BYTES};
+    authored::{PortableId, Resource}};
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
@@ -108,7 +108,7 @@ pub fn decode_selection(value: &Value, resources: &mut impl SelectionResourceRea
             let decoded_bytes = count.checked_mul(4).ok_or("Oversized selection coverage")?;
             let chunks = values::required(fields, "chunks")?.as_array().ok_or("Expected selection chunks")?;
             if extent.contains(&0) || x0 > x1 || y0 > y1 || x1 > extent[0] || y1 > extent[1]
-                || decoded_bytes.div_ceil(SELECTION_CHUNK_BYTES as u64) != chunks.len() as u64 {
+                || crate::selection::PackageWindow::new(extent, bounds, byte_coverage).chunks() != chunks.len() {
                 return Err("Invalid selection coverage".into());
             }
             if extent.iter().any(|v| *v > limits.dimension || *v > crate::MAX_EXTENT)
@@ -133,6 +133,7 @@ pub fn decode_selection(value: &Value, resources: &mut impl SelectionResourceRea
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::package::SELECTION_CHUNK_BYTES;
     use std::collections::BTreeMap;
 
     #[derive(Default)]
@@ -201,6 +202,7 @@ mod tests {
             assert_eq!(encode_selection(&selection.clone(), &mut resources).unwrap(), wire);
             assert!(pixels.package_chunks().unwrap()[0].same_owner(&capture_before_encoding.package_chunks().unwrap()[0]));
             assert_eq!(resources.chunks.len(), (pixels.words().len() * 4).div_ceil(SELECTION_CHUNK_BYTES));
+            assert_eq!(resources.chunks.len(), crate::selection::PackageWindow::new(pixels.extent(), pixels.bounds(), byte_coverage).chunks());
             let restored = decode_selection(&wire, &mut resources).unwrap();
             assert_eq!(restored, selection);
             assert_eq!(encode_selection(&restored, &mut resources).unwrap(), wire);
@@ -215,6 +217,30 @@ mod tests {
             assert_eq!(&uncached, pixels.as_ref());
             assert_ne!(uncached.package_chunks().unwrap()[0].id(), pixels.package_chunks().unwrap()[0].id());
         }
+    }
+
+    #[test]
+    fn chunks_hold_only_the_word_columns_and_rows_of_the_bounds() {
+        let (extent, bounds): ([u32; 2], [u32; 4]) = ([9504, 6336], [4001, 3000, 4019, 3007]);
+        let stride = extent[0].div_ceil(8) as usize;
+        let mut words = vec![0u32; stride * extent[1] as usize];
+        for y in bounds[1]..bounds[3] { for x in bounds[0]..bounds[2] { words[y as usize * stride + x as usize / 8] |= (1 + (x + y) % 4) << (x % 8 * 4); } }
+        let expected: Vec<u32> = (3000..3007).flat_map(|y| (500..503).map(move |x| y * stride + x)).map(|i| words[i]).collect();
+        let selection = Selection::pixels(Arc::new(SelectionPixels::new(extent, bounds, words).unwrap()));
+        let mut resources = Resources::default();
+        let wire = encode_selection(&selection, &mut resources).unwrap();
+        assert_eq!(wire["shape"]["pixels"]["chunks"].as_array().unwrap().len(), 1);
+        let (chunk, _) = resources.chunks.values().next().unwrap();
+        let mut decoded = vec![0; SELECTION_CHUNK_BYTES];
+        lz4_flex::block::decompress_into(chunk, &mut decoded).unwrap();
+        let window: Vec<u32> = decoded.as_chunks::<4>().0.iter().map(|b| u32::from_le_bytes(*b)).take(expected.len()).collect();
+        assert_eq!((window, expected.len()), (expected, 21));
+        assert!(decoded[21 * 4..].iter().all(|b| *b == 0));
+        assert_eq!(decode_selection(&wire, &mut resources).unwrap(), selection);
+        let empty = Selection::pixels(Arc::new(SelectionPixels::new([16, 2], [3, 1, 3, 1], vec![0; 4]).unwrap()));
+        let wire = encode_selection(&empty, &mut resources).unwrap();
+        assert_eq!(wire["shape"]["pixels"]["chunks"], json!([]));
+        assert_eq!(decode_selection(&wire, &mut resources).unwrap(), empty);
     }
 
     #[test]

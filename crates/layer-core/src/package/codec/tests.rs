@@ -112,6 +112,88 @@ fn rewrite_with(bytes: &[u8], added: Vec<(String,Vec<u8>)>, change: impl FnOnce(
 }
 
 #[test]
+fn object_layer_fixtures_reopen_and_save_byte_for_byte() {
+    for fixed in [include_bytes!("fixtures/shared-image-objects.capy").as_slice(), include_bytes!("fixtures/vector-objects.capy"),
+        include_bytes!("../../../../../apps/layer-web/fixtures/shared-image-f64-builtin.capy"),
+        include_bytes!("../../../../../apps/layer-web/fixtures/shared-image-f64-icc.capy"),
+        include_bytes!("../../../../../apps/layer-web/fixtures/shared-image-f64-nearest.capy")] {
+        let artwork=editable(fixed.to_vec());
+        assert!(artwork.occurrences.iter().any(|(_,_,occurrence)|matches!(occurrence.content,OccurrenceContent::Objects(_)|OccurrenceContent::Vector(_))));
+        let editor=crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
+        let capture=editor.capture(0,Default::default()).unwrap();
+        let mut saved=Vec::new();
+        PreparedPackage::prepare(&capture,None,&AtomicBool::new(false)).unwrap().write(&mut saved,&AtomicBool::new(false)).unwrap();
+        assert!(saved==fixed);
+    }
+    let fixed=include_bytes!("fixtures/unsupported-pass-through.capy");
+    let OpenOutcome::Preserved {source,reason,..}=open(backing(fixed.to_vec()),Default::default(),&AtomicBool::new(false)).unwrap() else {panic!("pass-through stays preserved")};
+    assert!(!reason.contains("Unknown occurrence content"),"{reason}");
+    let mut copied=Vec::new();copy_original(&source,&mut copied,&AtomicBool::new(false)).unwrap();assert!(copied==fixed);
+}
+
+#[test]
+fn vector_slots_admit_resources_and_images_only() {
+    let fixed=include_bytes!("fixtures/vector-future.capy");
+    let editable_object=|manifest:&mut Value|->usize {manifest["objects"].as_array().unwrap().iter().position(|r|r["type"]=="capy.vector-object/1" && r["data"].get("fallback").is_none()).unwrap()};
+    let occurrence=rewrite(fixed,|manifest| {
+        let target=manifest["objects"].as_array().unwrap().iter().find(|r|r["type"]=="capy.occurrence/3").unwrap()["id"].clone();
+        let index=editable_object(manifest);manifest["objects"][index]["data"]["slots"][0]=json!({"ref":target});
+    });
+    let OpenOutcome::Preserved {reason,..}=open(backing(occurrence),Default::default(),&AtomicBool::new(false)).unwrap() else {panic!("an occurrence is not a slot target")};
+    assert!(reason.contains("slot target"),"{reason}");
+    let unknown=rewrite(fixed,|manifest| {
+        let font=manifest["resources"].as_array().unwrap().iter().find(|r|r["type"]=="example.font/1").unwrap()["id"].clone();
+        let index=editable_object(manifest);manifest["objects"][index]["data"]["items"].as_array_mut().unwrap().push(json!({"ref":font}));
+    });
+    assert!(matches!(open(backing(unknown),Default::default(),&AtomicBool::new(false)).unwrap(),OpenOutcome::Preserved {..}),"an unknown resource outside slots is required");
+}
+
+#[test]
+fn deflate_resources_decode_exact_samples_and_save_back_as_lz4() {
+    let fixed=include_bytes!("fixtures/deflate-resources.capy");
+    let check=|artwork:&Artwork| {
+        let paint=artwork.paint.iter().next().unwrap().2.raster.wait_data().unwrap();
+        let samples:Vec<u8>=(0..256u32*256).flat_map(|i| {let (x,y)=(i%256,i/256);[x*257+y,y*131+x*7,(x^y)*251,40000+x*99].into_iter().flat_map(|v|(v as u16).to_le_bytes())}).collect();
+        assert!(paint.tiles.values().next().unwrap().wait_backing().unwrap().decode().unwrap()==samples);
+        let image=&artwork.objects.iter().next().unwrap().2.image;
+        let mut row=vec![0;image.row_bytes()];
+        for y in [0,137,199] {image.rows().read(y,&mut row).unwrap();assert!(row.chunks_exact(3).enumerate().all(|(x,p)|p==[x as u8,y as u8,(x as u32^y) as u8]));}
+        let path=artwork.vectors.iter().next().unwrap().2.paths().next().unwrap().1;
+        assert_eq!(path.geometry.subpaths()[0].anchors().map(|a|a.point()).collect::<Vec<_>>(),[[10.,20.],[150.,90.],[290.,180.]]);
+        let EffectValue::Lut3d(Some(lut))=artwork.effects.iter().next().unwrap().2.values.iter().find(|v|matches!(v,EffectValue::Lut3d(_))).unwrap() else {panic!("lookup")};
+        assert_eq!(lut.samples().unwrap().collect::<Vec<_>>(),(0..8).map(|i|[i as f32/8.,0.5,1.-i as f32/8.]).collect::<Vec<_>>());
+        assert_eq!(artwork.metadata.xmp.as_deref(),Some(b"<xmp>deflated metadata</xmp>".as_slice()));
+    };
+    let artwork=editable(fixed.to_vec());check(&artwork);
+    let saved=serialize(&PreparedPackage::prepare(&capture(&artwork),None,&AtomicBool::new(false)).unwrap());
+    let directory=Directory::read(&mut Cursor::new(&saved),16,1<<24).unwrap();
+    let manifest:Value=serde_json::from_slice(&directory.read_member(&mut Cursor::new(&saved),directory.member("manifest.json").unwrap(),1<<24).unwrap()).unwrap();
+    assert!(manifest["resources"].as_array().unwrap().iter().all(|r|r["encoding"]!="capy.deflate-tile/1"&&r["encoding"]!="capy.deflate-bytes/1"));
+    check(&editable(saved));
+    let directory=Directory::read(&mut Cursor::new(fixed),16,1<<24).unwrap();
+    let manifest:Value=serde_json::from_slice(&directory.read_member(&mut Cursor::new(fixed),directory.member("manifest.json").unwrap(),1<<24).unwrap()).unwrap();
+    let pack=directory.read_member(&mut Cursor::new(fixed),directory.member("data/tiles-1.bin").unwrap(),1<<24).unwrap();
+    let items=manifest["resources"].as_array().unwrap().iter().find(|r|r["type"]=="capy.vector-items/1").unwrap();
+    let offset:usize=items["location"]["offset"].as_str().unwrap().parse().unwrap();let length:usize=items["bytes"].as_str().unwrap().parse().unwrap();
+    let mut records=Vec::new();std::io::Read::read_to_end(&mut flate2::read::ZlibDecoder::new(&pack[offset..offset+length]),&mut records).unwrap();
+    let variant=|trailing:&[u8],decoded:usize|->Vec<u8> {
+        let mut encoder=flate2::write::ZlibEncoder::new(Vec::new(),flate2::Compression::new(6));
+        encoder.write_all(&records).unwrap();
+        let mut payload=encoder.finish().unwrap();payload.extend_from_slice(trailing);
+        let moved=rewrite_with(fixed,Vec::new(),|value| {
+            let resource=value["resources"].as_array_mut().unwrap().iter_mut().find(|r|r["type"]=="capy.vector-items/1").unwrap();
+            resource["location"]=json!({"pack":"data/tiles-2.bin","offset":"0"});resource["data"]["decoded_bytes"]=decoded.to_string().into();
+            resource["bytes"]=payload.len().to_string().into();resource["crc32"]=format!("{:08x}",crc32fast::hash(&payload)).into();
+        });
+        rewrite_with(&moved,vec![("data/tiles-2.bin".into(),payload)],|_|{})
+    };
+    check(&editable(variant(&[],records.len())));
+    for broken in [variant(&[0],records.len()),variant(&[],records.len()-1),variant(&[],records.len()+1)] {
+        assert!(matches!(open(backing(broken),Default::default(),&AtomicBool::new(false)).unwrap(),OpenOutcome::Failure {..}|OpenOutcome::RecoveredView {..}));
+    }
+}
+
+#[test]
 fn full_archives_preserve_authored_graph_exact_samples_material_and_resource_bytes() {
     for depth in [SampleDepth::U8,SampleDepth::U16,SampleDepth::F16,SampleDepth::F32] {
         let artwork=fixture(depth); let prepared=prepare(&artwork,true); let bytes=serialize(&prepared);

@@ -221,8 +221,8 @@ pub struct ImageObject {
     pub vector:Option<PreservedVector>,
 }
 #[derive(Clone, Debug)]
-pub struct PreservedVector(pub Arc<[(serde_json::Value, super::Resource<[u8]>)]>);
-impl PartialEq for PreservedVector { fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) } }
+pub struct PreservedVector(pub Arc<[(serde_json::Value, super::Resource<[u8]>)]>, pub Arc<[super::vector::Slot]>);
+impl PartialEq for PreservedVector { fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) && self.1 == other.1 } }
 impl ImageObject {
     pub fn new(image:Image)->Self {Self {image,affine:Default::default(),interpolation:Default::default(),vector:None}}
     pub fn admit_affine(&self)->Result<(),Affine64Error> {

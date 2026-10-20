@@ -18,3 +18,4 @@ objects-action-use-brush = 使用{ $brush }
 objects-action-reset-setting = 重置{ $setting }
 objects-action-new-paint-layer-below = 在下方新建绘画图层
 objects-merge-turns-paths-into-pixels = 合并会将“{ $layers }”中的路径变为像素。
+objects-flatten-discards-hidden-layers-and-paths = 拼合会丢弃 { $count } 个隐藏图层，并将“{ $layers }”中的路径变为像素。

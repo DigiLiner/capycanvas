@@ -215,6 +215,9 @@ impl WidthProfile {
         Ok(Self { knots: knots.into() })
     }
     pub fn knots(&self) -> &[WidthKnot] { &self.knots }
+    pub fn mirrored(&self) -> Option<Self> {
+        self.knots.iter().any(|k| k.left != k.right).then(|| Self { knots: self.knots.iter().map(|k| WidthKnot { left: k.right, right: k.left, ..*k }).collect() })
+    }
     pub fn max_factor(&self) -> f64 { self.knots.iter().map(|k| k.left().max(k.right())).fold(0., f64::max) }
     pub fn at(&self, segment: u32, t: f64) -> [f64; 2] {
         let position = f64::from(segment) + t;
@@ -389,6 +392,7 @@ impl PathItem {
         let reach = self.style.reach();
         [x0 - reach, y0 - reach, x1 + reach, y1 + reach]
     }
+    pub fn pickable(&self) -> bool { !self.hidden && !self.locked }
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.id.0 == 0 { return Err("A path requires a nonzero identity"); }
         for stroke in self.style.strokes() {
@@ -461,11 +465,13 @@ impl PathItem {
     pub fn transformed(&self, affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
         let geometry = Arc::new(self.geometry.transformed(|p| affine.map(p))?);
         let [a, b, c, d, _, _] = affine.0;
-        let scale = (a * d - b * c).abs().sqrt();
+        let determinant = a * d - b * c;
+        let scale = if scale_widths { determinant.abs().sqrt() } else { 1. };
+        let mirror = |stroke: &Stroke| stroke.profile.as_ref().filter(|_| determinant < 0.).and_then(|profile| profile.mirrored()).map(Arc::new);
         let moved = Self { shape: self.shape.as_ref().and_then(|shape| shape.transformed(affine)).map(Arc::new), ..self.with_geometry(geometry) };
-        if !scale_widths || scale == 1. || self.style.strokes().next().is_none() { return Ok(moved); }
+        if scale == 1. && self.style.strokes().all(|stroke| mirror(stroke).is_none()) { return Ok(moved); }
         let entries = self.style.entries.iter().map(|entry| match entry {
-            PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: stroke.width * scale, ..stroke.clone() }),
+            PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: stroke.width * scale, profile: mirror(stroke).or_else(|| stroke.profile.clone()), ..stroke.clone() }),
             other => other.clone(),
         }).collect();
         Ok(moved.with_style(Arc::new(Style::new(entries))))
@@ -475,6 +481,19 @@ impl PathItem {
     }
     pub fn with_shape(&self, shape: LiveShape) -> Result<Self, &'static str> {
         Ok(Self { shape: Some(Arc::new(shape)), ..self.with_geometry(Arc::new(shape.geometry()?)) })
+    }
+    pub fn without_slots(&self) -> Self {
+        let keep = |unknown: &Unknown| -> Unknown {
+            let kept: Vec<_> = unknown.iter().flat_map(|u| u.iter()).filter(|p| !matches!(p.tag >> 2 & 3, 2 | 3)).cloned().collect();
+            (!kept.is_empty()).then(|| kept.into())
+        };
+        let paint = |paint: &Paint| match paint { Paint::Color { color, unknown } => Some(Paint::Color { color: *color, unknown: keep(unknown) }), Paint::Opaque(_) => None };
+        let entries = self.style.entries.iter().filter_map(|entry| match entry {
+            PaintEntry::Fill(fill) => Some(PaintEntry::Fill(Fill { paint: paint(&fill.paint)?, unknown: keep(&fill.unknown) })),
+            PaintEntry::Stroke(stroke) => Some(PaintEntry::Stroke(Stroke { paint: paint(&stroke.paint)?, unknown: keep(&stroke.unknown), ..stroke.clone() })),
+            PaintEntry::Opaque(_) => None,
+        }).collect();
+        Self { unknown: keep(&self.unknown), style: Arc::new(Style::new(entries)), ..self.clone() }
     }
     pub fn with_style(&self, style: Arc<Style>) -> Self {
         Self { style, unknown: retained(&self.unknown, true), ..self.clone() }
@@ -562,19 +581,26 @@ impl VectorChunk {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position { pub chunk: u32, pub index: u32 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Slot { Image(super::Image), Resource(Arc<super::OpaqueResource>) }
+
 #[derive(Debug, Default)]
-struct Root { chunks: Box<[Resource<VectorChunk>]>, valid: OnceLock<Result<(), &'static str>> }
+struct Root { chunks: Box<[Resource<VectorChunk>]>, slots: Arc<[Slot]>, valid: OnceLock<Result<(), &'static str>> }
 
 #[derive(Clone, Debug, Default)]
 pub struct VectorObject { root: Arc<Root> }
 impl PartialEq for VectorObject {
     fn eq(&self, other: &Self) -> bool {
-        self.same_root(other) || (self.chunks().len() == other.chunks().len()
+        self.same_root(other) || (self.chunks().len() == other.chunks().len() && self.slots() == other.slots()
             && self.chunks().iter().zip(other.chunks()).all(|(a, b)| a.same_owner(b) || **a == **b))
     }
 }
 impl VectorObject {
-    pub fn from_chunks(chunks: Vec<Resource<VectorChunk>>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), valid: OnceLock::new() }) } }
+    pub fn from_chunks(chunks: Vec<Resource<VectorChunk>>) -> Self { Self::with_slots(chunks, Arc::default()) }
+    pub fn with_slots(chunks: Vec<Resource<VectorChunk>>, slots: Arc<[Slot]>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), slots, valid: OnceLock::new() }) } }
+    fn rechunked(&self, chunks: Vec<Resource<VectorChunk>>) -> Self { Self::with_slots(chunks, self.root.slots.clone()) }
+    pub fn slots(&self) -> &Arc<[Slot]> { &self.root.slots }
+    pub fn shares_slots(&self, other: &Self) -> bool { self.slots().is_empty() || Arc::ptr_eq(self.slots(), other.slots()) }
     pub fn from_records(records: Vec<Record>) -> Self { Self::from_chunks(pack(records)) }
     pub fn chunks(&self) -> &[Resource<VectorChunk>] { &self.root.chunks }
     pub fn same_root(&self, other: &Self) -> bool { Arc::ptr_eq(&self.root, &other.root) }
@@ -696,6 +722,7 @@ impl VectorObject {
         let mut fresh = BTreeSet::new();
         let records = self.selected(ids).into_iter().map(|path| {
             let id = loop { let id = target.allocate_id(); if fresh.insert(id) { break id; } };
+            let path = if self.shares_slots(target) { path } else { path.without_slots() };
             Record::Path(PathItem { id, unknown: retained(&path.unknown, true), ..path })
         }).collect();
         (fresh, records)
@@ -714,7 +741,7 @@ impl VectorObject {
     pub fn insert_back(&self, records: Vec<Record>) -> Self { self.insert(records, false) }
     fn insert(&self, records: Vec<Record>, front: bool) -> Self {
         if records.is_empty() { return self.clone(); }
-        if self.chunks().is_empty() { return Self::from_records(records); }
+        if self.chunks().is_empty() { return self.rechunked(pack(records)); }
         let at = if front { 0 } else { self.chunks().len() - 1 };
         let edge = self.chunks()[at].records();
         if edge.len() + records.len() <= CHUNK_RECORDS {
@@ -723,7 +750,7 @@ impl VectorObject {
         }
         let mut chunks = self.chunks().to_vec();
         if front { chunks.splice(0..0, pack(records)); } else { chunks.extend(pack(records)); }
-        Self::from_chunks(chunks)
+        self.rechunked(chunks)
     }
     fn step(&self, position: Position, forward: bool) -> Option<Position> {
         let (chunk, index) = (position.chunk as usize, position.index as usize);
@@ -793,7 +820,7 @@ impl VectorObject {
                 }
             }
         }
-        Self::from_chunks(chunks)
+        self.rechunked(chunks)
     }
 }
 fn pack(records: Vec<Record>) -> Vec<Resource<VectorChunk>> {

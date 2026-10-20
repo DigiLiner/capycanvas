@@ -54,6 +54,10 @@ fn scenes() -> Vec<(&'static str, PathItem)> {
         ("one-sided round caps on miter joins", path(vec![corners(&[[30., 50.], [120., 210.], [150., 60.], [230., 120.]], false), smooth(&[[20., 230.], [200., 236.]], false)],
             vec![stroke(16., Cap::Round, Join::Miter, Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 1.), WidthKnot::new(2, 1., 1., 0.2), WidthKnot::new(3, 1., 0.5, 0.5)]).unwrap()))], FillRule::NonZero)),
         ("round joins with butt caps", path(vec![corners(&[[30., 200.], [90., 40.], [170., 220.], [230., 60.]], false)], vec![stroke(18., Cap::Butt, Join::Round, None)], FillRule::NonZero)),
+        ("round dots in one path", path(vec![corners(&[[60., 60.]], false), corners(&[[180., 90.]], false), corners(&[[120., 200.], [120., 200.]], false)], vec![round_stroke(30., None)], FillRule::NonZero)),
+        ("square dot and a closed two-anchor lens", path(vec![corners(&[[50., 50.]], false), smooth(&[[80., 190.], [200., 140.]], true)], vec![stroke(12., Cap::Square, Join::Miter, None)], FillRule::NonZero)),
+        ("a corner past its miter limit", path(vec![corners(&[[30., 60.], [230., 90.], [30., 120.]], false)], vec![PaintEntry::Stroke(Stroke { miter_limit: 1.5, ..Stroke::new(paint([0.4, 0.1, 0.6, 1.]), 14.) })], FillRule::NonZero)),
+        ("fill under a zero-width outline", path(vec![smooth(&[[60., 60.], [200., 80.], [150., 220.]], true)], vec![fill([0.2, 0.7, 0.7, 1.]), round_stroke(0., None)], FillRule::NonZero)),
     ]
 }
 
@@ -225,7 +229,7 @@ fn stroke_pieces(line: &[([f64; 2], [f64; 2])], closed: bool, stroke: &Stroke) -
     pieces
 }
 fn inside_stroke(lines: &[(Vec<([f64; 2], [f64; 2])>, bool)], p: [f64; 2]) -> bool {
-    lines.iter().any(|(line, _)| line.windows(2).any(|w| {
+    lines.iter().any(|(line, _)| line.len() == 1 && (p[0] - line[0].0[0]).hypot(p[1] - line[0].0[1]) <= line[0].1[0] || line.windows(2).any(|w| {
         let (a, b) = (w[0].0, w[1].0);
         let d = [b[0] - a[0], b[1] - a[1]];
         let l2 = d[0] * d[0] + d[1] * d[1];

@@ -102,14 +102,17 @@ pub(crate) fn bristle_paintbrush() -> BrushSnapshot {
     }
 }
 
+pub(crate) const PEN_HARDNESS: f32 = 0.96;
+pub(crate) const PEN_FLOW: f32 = 1.0;
+
 pub(crate) fn contact_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     use DefaultBrushPreset::*;
     let mut model = BrushContact::default();
     let mut brush = BrushSnapshot {
         diameter: 18.0,
         color_rgba_linear: [0.006, 0.006, 0.006, 1.0],
-        flow: 1.0,
-        hardness: 0.96,
+        flow: PEN_FLOW,
+        hardness: PEN_HARDNESS,
         spacing: 0.18,
         seed: 0x434f_4e54,
         rendering: BrushRendering {

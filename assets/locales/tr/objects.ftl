@@ -18,3 +18,4 @@ objects-action-use-brush = { $brush } Kullan
 objects-action-reset-setting = { $setting } Sıfırla
 objects-action-new-paint-layer-below = Alta Yeni Boya Katmanı
 objects-merge-turns-paths-into-pixels = Birleştirme, “{ $layers }” içindeki yolları piksele dönüştürür.
+objects-flatten-discards-hidden-layers-and-paths = Düzleştirme { $count } gizli katmanı atar ve “{ $layers }” içindeki yolları piksele dönüştürür.

@@ -1149,3 +1149,645 @@ fn merging_vector_layers_keeps_paths_and_baking_them_asks_first() {
     s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::Merge) }).unwrap();
     assert!(s.engine.document().scene().vector_layer(lower).is_none(), "accepting bakes the paths into the paint layer");
 }
+
+fn straight(id: u64, points: &[[f64; 2]], closed: bool) -> layer_core::authored::vector::PathItem {
+    use layer_core::authored::vector::*;
+    let anchors: Vec<Anchor> = points.iter().map(|p| Anchor::corner(*p)).collect();
+    let stroke = Stroke::new(Paint::color(layer_core::color::RgbColor::BLACK), 4.);
+    PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, closed)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])))
+}
+fn put_paths(s: &mut UiSession<Recorder>, layer: OccurrenceHandle, paths: Vec<layer_core::authored::vector::PathItem>) {
+    let object = layer_core::authored::vector::VectorObject::from_records(paths.into_iter().map(layer_core::authored::vector::Record::Path).collect());
+    let edit = s.engine.document().vector_object_edit(layer, object).unwrap();
+    s.layer_edit(edit).unwrap();
+    s.frame(1, 1).unwrap();
+}
+fn path_ids(s: &UiSession<Recorder>, layer: OccurrenceHandle) -> Vec<layer_core::authored::vector::ItemId> {
+    s.engine.document().scene().vector_layer(layer).unwrap().paths().map(|(_, path)| path.id).collect()
+}
+
+#[test]
+fn fill_ignores_clicks_off_the_canvas_and_fills_that_change_nothing() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 100.], [400., 100.], [400., 400.], [100., 400.]], true)]);
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap();
+    let steps = |s: &UiSession<Recorder>| (s.engine.document().scene().children(None).len(), s.engine.checkpoint());
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    let before = steps(&s);
+    click(&mut s, 10, [-50., 250.]);
+    assert_eq!(steps(&s), before, "a click off the canvas adds no layer");
+    s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+    click(&mut s, 20, [250., 250.]);
+    assert_eq!(steps(&s), before, "transparent paint inside an unfilled outline has nothing to remove");
+    s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Foreground } }).unwrap();
+    click(&mut s, 30, [250., 250.]);
+    let filled = steps(&s);
+    assert!(filled.0 == before.0 && filled.1 != before.1, "a click inside fills the outline");
+    click(&mut s, 40, [250., 250.]);
+    assert_eq!(steps(&s), filled, "the same fill again adds no undo step");
+}
+
+#[test]
+fn select_all_takes_only_the_paths_the_move_tool_can_pick() {
+    use layer_core::authored::vector::ItemId;
+    let (mut s, handle) = vector_session();
+    let mut hidden = straight(2, &[[100., 400.], [600., 400.]], false);
+    hidden.hidden = true;
+    let mut locked = straight(3, &[[100., 500.], [600., 500.]], false);
+    locked.locked = true;
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [600., 300.]], false), hidden, locked]);
+    invoke(&mut s, CommandId::SelectAll);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone()), Some([ItemId(1)].into()));
+    invoke(&mut s, CommandId::ClearSelected);
+    assert_eq!(path_ids(&s, handle), [ItemId(2), ItemId(3)], "Delete leaves hidden and locked paths");
+    invoke(&mut s, CommandId::SelectAll);
+    assert!(s.engine.document().working.vector_items.is_none() && s.engine.document().working.selection.is_some(), "with nothing to pick Select All selects pixels");
+}
+
+#[test]
+fn delete_removes_paths_only_while_their_unlocked_layer_is_edited() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [300., 300.], [500., 300.], [700., 300.]], false), straight(2, &[[100., 500.], [700., 500.]], false)]);
+    let id = occurrence_token(handle);
+    let anchors = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().anchor_count();
+    invoke(&mut s, CommandId::SelectAll);
+    select(&mut s, rectangle([0., 0., 50., 50.]));
+    assert_eq!(s.command(CommandId::ClearSelected).label.as_ref(), "Delete", "with pixels selected too, Delete names what it removes");
+    layer(&mut s, LayerAction::Lock { id, value: true });
+    let command = s.command(CommandId::ClearSelected);
+    assert_eq!((command.enabled, command.disabled_reason.as_deref()), (false, Some(s.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).as_ref())));
+    layer(&mut s, LayerAction::Lock { id, value: false });
+    layer(&mut s, LayerAction::AddMask { id, replace: false });
+    layer(&mut s, LayerAction::Select { id, mask: true });
+    let _ = s.dispatch(UiAction::Invoke { command: CommandId::ClearSelected });
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(anchors(&s), 6, "editing the mask leaves the paths alone");
+    layer(&mut s, LayerAction::Select { id, mask: false });
+    invoke(&mut s, CommandId::EditPoints);
+    let at = surface_at(&s, [300., 300.]);
+    press(&mut s, 10, &[at, at]);
+    invoke(&mut s, CommandId::Deselect);
+    select(&mut s, rectangle([0., 0., 50., 50.]));
+    let _ = s.dispatch(UiAction::Invoke { command: CommandId::ClearSelected });
+    s.frame(3_000_000_000, 3_000_000_000).unwrap();
+    assert_eq!(anchors(&s), 6, "an anchor of a path that is no longer selected stays");
+}
+
+#[test]
+fn undo_waits_for_vector_lines_erasing_and_drags_to_finish() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [700., 300.]], false), straight(2, &[[100., 500.], [700., 500.]], false)]);
+    let hold = |s: &mut UiSession<Recorder>, first: u64, points: &[[f64; 2]]| for (i, point) in points.iter().enumerate() {
+        let mut e = event(s, first + i as u64, if i == 0 { PenPhase::Down } else { PenPhase::Move }, 0.5);
+        e.surface_position = surface_at(s, *point);
+        s.pen(e);
+        s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+    };
+    let release = |s: &mut UiSession<Recorder>, sequence: u64, point: [f64; 2]| {
+        let mut e = event(s, sequence, PenPhase::Up, 0.5);
+        e.surface_position = surface_at(s, point);
+        s.pen(e);
+        s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+    };
+    let held = |s: &UiSession<Recorder>| !s.command(CommandId::Undo).enabled && !s.command(CommandId::SelectAll).enabled;
+    hold(&mut s, 10, &[[200., 700.], [300., 720.], [400., 740.]]);
+    assert!(held(&s), "drawing a path holds Undo");
+    release(&mut s, 13, [500., 750.]);
+    assert_eq!(path_ids(&s, handle).len(), 3);
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseWholePaths);
+    hold(&mut s, 20, &[[400., 250.], [400., 350.]]);
+    assert!(held(&s), "erasing holds Undo");
+    release(&mut s, 22, [400., 360.]);
+    invoke(&mut s, CommandId::Move);
+    hold(&mut s, 30, &[[100., 500.], [150., 520.]]);
+    assert!(held(&s), "dragging paths holds Undo");
+    release(&mut s, 32, [200., 540.]);
+    let ids = path_ids(&s, handle);
+    assert_eq!(ids.len(), 2, "the erased line is gone");
+    for count in [2, 3, 2] {
+        s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+        s.frame(9_000_000_000, 9_000_000_000).unwrap();
+        assert_eq!(path_ids(&s, handle).len(), count, "each gesture is one undo step in order");
+    }
+}
+
+#[test]
+fn split_needs_an_anchor_inside_a_path_and_reverse_takes_a_dot() {
+    let (mut s, handle) = vector_session();
+    let at = surface_at(&s, [800., 800.]);
+    press(&mut s, 1, &[at, at]);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().anchor_count(), 1, "a tap draws a dot");
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::ReversePath);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().anchor_count(), 1, "a dot reverses to itself");
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [300., 300.], [500., 300.]], false)]);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::EditPoints);
+    let click = |s: &mut UiSession<Recorder>, first: u64, point: [f64; 2]| { let p = surface_at(s, point); press(s, first, &[p, p]); };
+    click(&mut s, 10, [100., 300.]);
+    assert!(!s.command(CommandId::SplitPath).enabled, "an open end is not a place to split");
+    click(&mut s, 20, [300., 300.]);
+    assert!(s.command(CommandId::SplitPath).enabled);
+    invoke(&mut s, CommandId::SplitPath);
+    assert_eq!(path_ids(&s, handle).len(), 2);
+    put_paths(&mut s, handle, vec![straight(1, &[[500., 500.]], false)]);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::EditPoints);
+    let checkpoint = s.engine.checkpoint();
+    click(&mut s, 30, [500., 500.]);
+    click(&mut s, 32, [500., 500.]);
+    assert_eq!(s.engine.checkpoint(), checkpoint, "a dot's anchor has no smooth form, so a double-click adds no undo step");
+}
+
+#[test]
+fn a_setting_refusal_closes_when_another_brush_is_chosen() {
+    let (mut s, _) = vector_session();
+    s.select_brush(DefaultBrushPreset::Monoline as u32).unwrap();
+    s.dispatch(UiAction::SetToolSetting { id: "size_jitter".into(), value: 0.4 }).unwrap();
+    s.select_brush(DefaultBrushPreset::GPen as u32).unwrap();
+    s.dispatch(UiAction::SetToolSetting { id: "size_jitter".into(), value: 0.5 }).unwrap();
+    draw_line(&mut s, 1, 10);
+    let notice = s.state.notice.clone().expect("a vector refusal");
+    assert_eq!(notice.actions[0].id, NoticeActionId::ResetSetting);
+    s.select_brush(DefaultBrushPreset::Monoline as u32).unwrap();
+    assert_eq!(s.state.notice, None, "the refusal names G-Pen's setting");
+    assert!(s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::ResetSetting) }).is_err());
+    assert_eq!(s.tools.brush(DefaultBrushPreset::Monoline).shape.size_jitter, 0.4, "Monoline keeps its own setting");
+}
+
+#[test]
+fn every_vector_tool_result_reopens_from_a_package_unchanged() {
+    use layer_core::{EffectValue, authored::vector::PathItem};
+    let (mut s, handle) = vector_session();
+    let token = occurrence_token(handle);
+    let drag = |s: &mut UiSession<Recorder>, first: u64, from: [f64; 2], to: [f64; 2]| { let points = [surface_at(s, from), surface_at(s, [(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5]), surface_at(s, to)]; press(s, first, &points); };
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    let pen_line = |s: &UiSession<Recorder>| -> PathItem { s.engine.document().scene().vector_layer(handle).unwrap().paths().map(|(_, p)| p.clone()).find(|p| p.style.strokes().next().is_some_and(|s| s.profile.is_some())).expect("the pen line") };
+    draw_line(&mut s, 1, 60);
+    click(&mut s, 70, [900., 900.]);
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Both } } }).unwrap();
+    for (i, at) in [[600., 100.], [700., 160.], [650., 240.]].into_iter().enumerate() { click(&mut s, 80 + i as u64 * 5, at); }
+    click(&mut s, 99, [601., 101.]);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::MakeCompoundPath);
+    invoke(&mut s, CommandId::ReleaseCompoundPath);
+    for (shape, paint, first) in [(FigureShape::Rectangle, FigurePaint::Both, 100), (FigureShape::Ellipse, FigurePaint::Outline, 110), (FigureShape::Polygon, FigurePaint::Fill, 120), (FigureShape::Star, FigurePaint::Both, 130), (FigureShape::Line, FigurePaint::Outline, 140)] {
+        s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint } } }).unwrap();
+        if shape == FigureShape::Rectangle { s.dispatch(UiAction::SetToolSetting { id: "figure_corner_radius".into(), value: 12. }).unwrap(); }
+        drag(&mut s, first, [20. + (first - 100) as f64 * 9., 600.], [100. + (first - 100) as f64 * 9., 680.]);
+    }
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::TransformFlipVertical);
+    invoke(&mut s, CommandId::TransformRotateRight);
+    for (key, value) in [("path_corners", EffectValue::Choice(0)), ("path_miter_limit", EffectValue::Number(9.)), ("path_overlaps", EffectValue::Choice(1))] {
+        s.dispatch(UiAction::Effect { action: EffectAction::Set { layer: token, key: key.into(), value } }).unwrap();
+    }
+    invoke(&mut s, CommandId::EditPoints);
+    let line = pen_line(&s);
+    click(&mut s, 300, line.geometry.subpaths()[0].anchor(line.geometry.subpaths()[0].len() / 2).point());
+    invoke(&mut s, CommandId::SplitPath);
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseTouchedPart);
+    s.dispatch(UiAction::SetBrushSize { value: 4. }).unwrap();
+    let [x, y] = { let line = pen_line(&s); line.geometry.subpaths()[0].segment(0).point(0.5) };
+    let across = [surface_at(&s, [x - 10., y - 10.]), surface_at(&s, [x + 10., y + 10.])];
+    press(&mut s, 400, &across);
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::LassoFill }).unwrap();
+    let ring: Vec<Point> = [[700., 700.], [820., 700.], [700., 820.], [820., 820.], [700., 700.]].windows(2).flat_map(|w| (0..10).map(move |i| { let u = f64::from(i) / 10.; [w[0][0] + (w[1][0] - w[0][0]) * u, w[0][1] + (w[1][1] - w[0][1]) * u] })).map(|p| surface_at(&s, p)).collect();
+    press(&mut s, 500, &ring);
+    for t in 0..20 { s.frame(9_000_000_000 + t * 16_000_000, 9_000_000_000 + t * 16_000_000).unwrap(); }
+    let document = s.engine.document();
+    let object = document.scene().vector_layer(handle).unwrap();
+    object.validate().unwrap();
+    let count = |test: fn(&PathItem) -> bool| object.paths().filter(|(_, p)| test(p)).count();
+    assert!(count(|p| p.shape.is_some()) == 4 && count(|p| p.geometry.anchor_count() == 1) == 1 && count(|p| p.style.strokes().next().is_some_and(|s| s.profile.is_some())) >= 3 && count(|p| p.fill_rule == layer_core::authored::vector::FillRule::EvenOdd) >= 1,
+        "shapes, a dot, cut pen lines and holes are all in the layer: {} paths", object.path_count());
+    let reopened = package_roundtrip(document);
+    assert_eq!(reopened.scene().order().iter().find_map(|h| reopened.scene().vector_layer(*h)), Some(object), "the paths reopen unchanged");
+}
+
+#[test]
+fn every_tool_shows_the_refusal_cursor_on_a_locked_vector_layer() {
+    let (mut s, handle) = vector_session();
+    let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
+    let tools: [fn(&mut UiSession<Recorder>); 5] = [
+        |s| s.select_brush(DefaultBrushPreset::GPen as u32).unwrap(),
+        |s| { invoke(s, CommandId::Eraser); },
+        |s| s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Rectangle, paint: FigurePaint::Outline } }).unwrap(),
+        |s| s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::LassoFill }).unwrap(),
+        |s| s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap(),
+    ];
+    for (i, tool) in tools.iter().enumerate() {
+        tool(&mut s);
+        assert!(!prohibited(&mut s), "tool {i} works on the unlocked layer");
+        layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
+        assert!(prohibited(&mut s), "tool {i} shows the refusal before contact on the locked layer");
+        layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: false });
+    }
+}
+
+#[test]
+fn cancelled_vector_gestures_leave_the_paths_and_history_alone() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [400., 300.], [700., 300.]], false), straight(2, &[[100., 500.], [700., 500.]], false)]);
+    let before = (s.engine.document().scene().vector_layer(handle).unwrap().clone(), s.engine.checkpoint());
+    let state = |s: &UiSession<Recorder>| (s.engine.document().scene().vector_layer(handle).unwrap().clone(), s.engine.checkpoint());
+    let cancel_after = |s: &mut UiSession<Recorder>, first: u64, points: &[[f64; 2]]| {
+        for (i, point) in points.iter().enumerate() {
+            let mut e = event(s, first + i as u64, if i == 0 { PenPhase::Down } else { PenPhase::Move }, 0.5);
+            e.surface_position = surface_at(s, *point);
+            s.pen(e);
+            s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+        }
+        let mut e = event(s, first + points.len() as u64, PenPhase::Cancel, 0.5);
+        e.surface_position = surface_at(s, points[points.len() - 1]);
+        s.pen(e);
+        s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+    };
+    cancel_after(&mut s, 10, &[[100., 700.], [300., 720.], [500., 760.]]);
+    assert_eq!(state(&s), before, "a cancelled line adds no path");
+    assert!(s.engine.backend().vector_preview.is_none());
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseWholePaths);
+    cancel_after(&mut s, 20, &[[400., 250.], [400., 550.]]);
+    assert_eq!(state(&s), before, "a cancelled erase puts the paths back");
+    invoke(&mut s, CommandId::Move);
+    s.interaction.modifiers = Modifiers { alt: true, ..Modifiers::default() };
+    cancel_after(&mut s, 30, &[[100., 500.], [200., 560.]]);
+    s.interaction.modifiers = Modifiers::default();
+    assert_eq!(state(&s), before, "a cancelled Alt-drag leaves no copies");
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::EditPoints);
+    cancel_after(&mut s, 40, &[[400., 300.], [450., 350.], [500., 400.]]);
+    assert_eq!(state(&s), before, "a cancelled anchor drag puts the anchor back");
+    assert!(s.command(CommandId::Undo).enabled, "the canvas is idle again");
+}
+
+#[test]
+fn join_paths_merges_ends_within_six_screen_pixels() {
+    for (gap, anchors) in [(4.5, 3), (8., 4)] {
+        let (mut s, handle) = vector_session();
+        let px = s.document_per_surface_pixel();
+        put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [400., 300.]], false), straight(2, &[[400. + gap * px, 300.], [700., 300.]], false)]);
+        invoke(&mut s, CommandId::SelectAll);
+        invoke(&mut s, CommandId::JoinPaths);
+        assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().anchor_count(), anchors, "ends {gap} screen pixels apart");
+    }
+}
+
+#[test]
+fn polygon_and_star_options_hold_three_to_a_hundred_corners_and_inner_radii_up_to_one() {
+    use layer_core::authored::vector::{LiveShape, ShapeKind};
+    let (mut s, handle) = vector_session();
+    let set = |s: &mut UiSession<Recorder>, id: &str, value: f32| s.dispatch(UiAction::SetToolSetting { id: id.into(), value }).is_ok();
+    let drag = |s: &mut UiSession<Recorder>, first: u64| { let points = [surface_at(s, [100., 100.]), surface_at(s, [200., 160.]), surface_at(s, [300., 260.])]; press(s, first, &points); };
+    let front = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.clone();
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Polygon, paint: FigurePaint::Outline } } }).unwrap();
+    assert_eq!([2.4, 3., 100., 100.6, 0.].map(|v| set(&mut s, "figure_corners", v)), [false, true, true, false, false]);
+    drag(&mut s, 10);
+    assert!(matches!(front(&s).shape.as_deref(), Some(LiveShape { kind: ShapeKind::Polygon { corners: 100 }, .. })) && front(&s).geometry.anchor_count() == 100);
+    assert!(set(&mut s, "figure_corners", 6.6));
+    drag(&mut s, 20);
+    assert!(matches!(front(&s).shape.as_deref(), Some(LiveShape { kind: ShapeKind::Polygon { corners: 7 }, .. })), "corners round to whole numbers");
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Star, paint: FigurePaint::Outline } } }).unwrap();
+    assert_eq!([0., 0.04, 1., 1.01].map(|v| set(&mut s, "figure_inner_radius", v)), [false, false, true, false]);
+    assert!(set(&mut s, "figure_points", 100.));
+    drag(&mut s, 30);
+    let star = front(&s);
+    assert!(matches!(star.shape.as_deref(), Some(LiveShape { kind: ShapeKind::Star { points: 100, inner }, .. }) if *inner == 1.) && star.geometry.anchor_count() == 200);
+    star.validate().unwrap();
+}
+
+#[test]
+fn the_eraser_mode_and_outline_width_choice_come_back_with_the_preferences() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [700., 300.]], false), straight(2, &[[400., 100.], [400., 500.]], false)]);
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseToIntersection);
+    invoke(&mut s, CommandId::SelectAll);
+    invoke(&mut s, CommandId::ScaleOutlineWidths);
+    let saved = serde_json::to_string(&saved_settings(&s).expect("the choices are saved")).unwrap();
+    let (mut restored, layer) = vector_session();
+    restored.dispatch(UiAction::RestoreSettings { settings: Box::new(serde_json::from_str(&saved).unwrap()) }).unwrap();
+    put_paths(&mut restored, layer, vec![straight(1, &[[100., 300.], [700., 300.]], false), straight(2, &[[400., 100.], [400., 500.]], false)]);
+    invoke(&mut restored, CommandId::Eraser);
+    assert!(restored.command(CommandId::EraseToIntersection).selected);
+    restored.dispatch(UiAction::SetBrushSize { value: 6. }).unwrap();
+    let across = [surface_at(&restored, [200., 290.]), surface_at(&restored, [200., 310.])];
+    press(&mut restored, 10, &across);
+    let spans: Vec<[f64; 4]> = restored.engine.document().scene().vector_layer(layer).unwrap().paths().map(|(_, p)| p.geometry.hull()).filter(|h| h[1] == h[3]).collect();
+    assert!(spans.len() == 1 && (spans[0][0] - 400.).abs() < 0.5, "the restored eraser stops at the crossing: {spans:?}");
+    invoke(&mut restored, CommandId::SelectAll);
+    assert!(!restored.command(CommandId::ScaleOutlineWidths).selected, "outline widths stay as chosen");
+}
+
+#[test]
+fn finishing_a_path_whose_layer_changed_explains_why_and_adds_nothing() {
+    let (mut s, handle) = vector_session();
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    let draft = |s: &mut UiSession<Recorder>, first: u64| {
+        s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+        for (i, at) in [[100., 100.], [300., 120.], [200., 300.]].into_iter().enumerate() { click(s, first + i as u64 * 5, at); }
+        assert!(s.command(CommandId::FinishPath).enabled);
+    };
+    let text = |s: &UiSession<Recorder>, id| s.localization().text(id).to_string();
+    let checkpoint = s.engine.checkpoint();
+    draft(&mut s, 10);
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
+    assert_eq!(s.dispatch(UiAction::Invoke { command: CommandId::FinishPath }).err(), Some(text(&s, MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED)));
+    assert!(!s.command(CommandId::FinishPath).enabled, "the draft is gone");
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: false });
+    draft(&mut s, 40);
+    layer(&mut s, LayerAction::New { group: false, clipped: false });
+    let paint = s.engine.document().working.occurrence.unwrap();
+    assert_eq!(s.dispatch(UiAction::Invoke { command: CommandId::FinishPath }).err(), Some(text(&s, MessageId::OBJECTS_NOTICE_STALE)));
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 0);
+    draft(&mut s, 70);
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(paint), value: true });
+    assert_eq!(s.dispatch(UiAction::Invoke { command: CommandId::FinishPath }).err(), Some(text(&s, MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED)));
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(paint), value: false });
+    draft(&mut s, 100);
+    layer(&mut s, LayerAction::Select { id: occurrence_token(handle), mask: false });
+    assert_eq!(s.dispatch(UiAction::Invoke { command: CommandId::FinishPath }).err(), Some(text(&s, MessageId::OBJECTS_NOTICE_STALE)));
+    assert!(s.engine.document().target_operations(s.engine.document().scene().source_target(paint).unwrap()).is_none_or(<[_]>::is_empty), "nothing is painted");
+    let _ = checkpoint;
+}
+
+#[test]
+fn vector_refusal_actions_check_the_layer_when_pressed() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 20);
+    let refusal = |s: &mut UiSession<Recorder>, first: u64| {
+        s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+        draw_line(s, first, 10);
+        s.state.notice.clone().expect("a vector refusal")
+    };
+    let notice = refusal(&mut s, 100);
+    let count = s.engine.document().scene().children(None).len();
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
+    assert_eq!(s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::RasterizeLayer) }).err().as_deref(), Some(s.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).as_ref()));
+    assert!(s.engine.document().scene().vector_layer(handle).is_some(), "a locked layer keeps its paths");
+    layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: false });
+    let notice = refusal(&mut s, 200);
+    let revision = s.engine.document().revision;
+    layer(&mut s, LayerAction::Delete { id: occurrence_token(handle) });
+    let deleted = s.engine.document().clone();
+    for action in [NoticeActionId::UseVectorPen, NoticeActionId::NewPaintLayer, NoticeActionId::RasterizeLayer] {
+        let stale = s.state.notice.clone().unwrap_or(notice.clone());
+        let _ = s.dispatch(UiAction::Notice { id: stale.id, accept: true, action: Some(action) });
+    }
+    assert_ne!(deleted.revision, revision);
+    assert_eq!(s.engine.document().scene().children(None).len(), count - 1, "no action reaches a deleted layer");
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32);
+}
+
+#[test]
+fn path_tools_with_transparent_paint_ask_for_a_color() {
+    let (mut s, handle) = vector_session();
+    s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+    let ask = s.localization().text(MessageId::COMMANDS_PATHS_NEED_A_COLOR).to_string();
+    for (first, tool) in [(10, LayerCanvasTool::Figure { shape: FigureShape::Rectangle, paint: FigurePaint::Outline }), (20, LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline }), (30, LayerCanvasTool::LassoFill)] {
+        s.layer_action(LayerAction::Tool { tool }).unwrap();
+        let points = [surface_at(&s, [100., 100.]), surface_at(&s, [200., 160.]), surface_at(&s, [300., 260.])];
+        press(&mut s, first, &points);
+        assert_eq!(s.state.notice.as_ref().map(|n| (n.text.as_str(), n.actions.len())), Some((ask.as_str(), 0)), "{tool:?}");
+        s.dismiss_notice();
+    }
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 0);
+}
+
+#[test]
+fn the_pens_eraser_end_erases_paths_and_hands_back_the_pen() {
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [700., 300.]], false)]);
+    for (i, y) in [250., 300., 350.].into_iter().enumerate() {
+        let phase = [PenPhase::Down, PenPhase::Move, PenPhase::Up][i];
+        let mut e = PenEvent { tool: ToolKind::Eraser, ..event(&s, 10 + i as u64, phase, 0.8) };
+        e.surface_position = surface_at(&s, [400., y]);
+        s.pen(e);
+        s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+    }
+    s.pen(PenEvent { tool: ToolKind::Eraser, ..event(&s, 20, PenPhase::Hover, 0.) });
+    s.pen(event(&s, 21, PenPhase::Hover, 0.));
+    s.frame(300_000_000, 300_000_000).unwrap();
+    assert_eq!(path_ids(&s, handle).len(), 2, "the eraser end cuts the path");
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "the pen tip draws paths again");
+    draw_line(&mut s, 100, 20);
+    assert_eq!(path_ids(&s, handle).len(), 3);
+}
+
+#[test]
+fn soft_or_light_pens_name_hardness_or_flow_in_the_refusal_and_other_settings_still_draw() {
+    for (setting, value) in [("hardness", 0.5), ("flow", 0.6)] {
+        let (mut s, handle) = vector_session();
+        s.dispatch(UiAction::SetToolSetting { id: setting.into(), value }).unwrap();
+        assert_eq!(s.state.tool_set.subtools.iter().find(|item| item.action == UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).map(|item| item.enabled), Some(false), "{setting} dims G-Pen");
+        draw_line(&mut s, 1, 10);
+        let notice = s.state.notice.clone().expect("a vector refusal");
+        let label = s.state.tool_settings.iter().find(|control| control.id == setting).unwrap().label.clone();
+        let mut args = FluentArgs::new(); args.set("layer", s.engine.document().scene().occurrence(handle).unwrap().name.to_string()); args.set("setting", label.as_ref()); args.set("brush", "G-Pen");
+        assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_VECTOR_REFUSAL_SETTING, &args));
+        assert_eq!(notice.actions[0].id, NoticeActionId::ResetSetting);
+        s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::ResetSetting) }).unwrap();
+        draw_line(&mut s, 100, 20);
+        assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 1, "after Reset G-Pen draws a path");
+    }
+    let (mut s, handle) = vector_session();
+    s.dispatch(UiAction::SetToolSetting { id: "spacing".into(), value: 0.5 }).unwrap();
+    s.dispatch(UiAction::SetToolSetting { id: "hardness".into(), value: 1. }).unwrap();
+    draw_line(&mut s, 1, 20);
+    assert_eq!((s.engine.document().scene().vector_layer(handle).unwrap().path_count(), s.state.notice.as_ref()), (1, None), "wider spacing and harder edges still draw paths");
+}
+
+#[test]
+fn fill_takes_the_innermost_path_around_the_click() {
+    use layer_core::authored::vector::{ItemId, PaintEntry};
+    let (mut s, handle) = vector_session();
+    let square = |id: u64, [x0, y0, x1, y1]: [f64; 4]| straight(id, &[[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true);
+    put_paths(&mut s, handle, vec![square(1, [100., 100., 600., 600.]), square(2, [200., 200., 300., 300.]), square(3, [400., 400., 700., 700.])]);
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap();
+    let filled = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(handle).unwrap().paths()
+        .filter(|(_, p)| p.style.entries.iter().any(|e| matches!(e, PaintEntry::Fill(_)))).map(|(_, p)| p.id).collect::<Vec<_>>();
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    click(&mut s, 10, [250., 250.]);
+    assert_eq!(filled(&s), [ItemId(2)], "a click inside a nested path fills it, though the outer path is in front");
+    click(&mut s, 20, [150., 150.]);
+    assert_eq!(filled(&s), [ItemId(1), ItemId(2)]);
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(5_000_000_000, 5_000_000_000).unwrap();
+    click(&mut s, 30, [500., 500.]);
+    assert_eq!(filled(&s), [ItemId(2), ItemId(3)], "where paths overlap, the smaller one around the click fills");
+}
+
+#[test]
+fn paint_layers_under_a_clipped_vector_layer_stay_in_its_clip() {
+    let mut s = session(Platform::Gtk);
+    let base = s.engine.document().working.occurrence.unwrap();
+    layer(&mut s, LayerAction::NewVector);
+    let vector = s.engine.document().working.occurrence.unwrap();
+    let document = s.engine.document();
+    let mut clipped = document.scene().occurrence(vector).unwrap().clone();
+    clipped.attachment = layer_core::Attachment::Clip;
+    s.engine.apply_edit(layer_core::Edit::Occurrence(layer_core::authored::RecordChange::replace(&document.artwork.occurrences, vector, Some(clipped)).unwrap())).unwrap();
+    s.refresh_document();
+    put_paths(&mut s, vector, vec![straight(1, &[[100., 100.], [400., 100.], [400., 400.], [100., 400.]], true)]);
+    let placed = |s: &UiSession<Recorder>| {
+        let doc = s.engine.document();
+        let new = doc.working.occurrence.unwrap();
+        let order = doc.scene().children(None).to_vec();
+        let at = |h| order.iter().position(|o| *o == h).unwrap();
+        assert!(doc.scene().paint_source(new).is_some());
+        assert_eq!(at(new), at(vector) + 1, "the paint layer sits directly under the lines");
+        assert_eq!(doc.clipping_base(new), Some(base), "and clips to the same base");
+    };
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Visible } }).unwrap();
+    let outside = surface_at(&s, [600., 600.]);
+    press(&mut s, 10, &[outside, outside]);
+    placed(&s);
+    layer(&mut s, LayerAction::Select { id: occurrence_token(vector), mask: false });
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Gradient { shape: layer_core::GradientShape::Linear } }).unwrap();
+    let start = surface_at(&s, [100., 100.]);
+    press(&mut s, 20, &[start, Point { x: start.x + 80., y: start.y }]);
+    let notice = s.state.notice.clone().expect("a vector refusal");
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayerBelow) }).unwrap();
+    placed(&s);
+}
+
+#[test]
+fn one_flatten_notice_names_hidden_layers_and_vector_layers() {
+    let (mut s, vector) = vector_session();
+    draw_line(&mut s, 1, 20);
+    layer(&mut s, LayerAction::New { group: false, clipped: false });
+    let hidden = s.engine.document().working.occurrence.unwrap();
+    layer(&mut s, LayerAction::Visibility { id: occurrence_token(hidden), value: false });
+    invoke(&mut s, CommandId::FlattenImage);
+    let notice = s.state.notice.clone().expect("Flatten asks first");
+    let mut args = FluentArgs::new();
+    args.set("count", 1);
+    args.set("layers", s.engine.document().scene().occurrence(vector).unwrap().name.to_string());
+    assert_eq!(notice.text, s.localization().format(MessageId::OBJECTS_FLATTEN_DISCARDS_HIDDEN_LAYERS_AND_PATHS, &args));
+    assert_eq!(notice.actions.iter().map(|a| a.id).collect::<Vec<_>>(), [NoticeActionId::Flatten]);
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::Flatten) }).unwrap();
+    assert_eq!(s.state.notice, None, "accepting flattens without asking again");
+    assert!(s.engine.document().scene().vector_layer(vector).is_none());
+}
+
+#[test]
+fn choosing_a_brush_tool_on_a_vector_layer_picks_the_path_pen_and_paint_layers_restore_it() {
+    let mut s = session(Platform::Gtk);
+    s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
+    let paint = s.engine.document().working.occurrence.unwrap();
+    invoke(&mut s, CommandId::Move);
+    layer(&mut s, LayerAction::NewVector);
+    let vector = s.engine.document().working.occurrence.unwrap();
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::Pencil as u32, "the Move tool keeps the brush");
+    layer(&mut s, LayerAction::Tool { tool: LayerCanvasTool::Paint });
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "the brush tool on a vector layer picks the path pen");
+    invoke(&mut s, CommandId::Move);
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    invoke(&mut s, CommandId::Brush);
+    assert_ne!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "a paint layer brings a painting brush back");
+    let painting = s.state.brush.preset;
+    invoke(&mut s, CommandId::Move);
+    layer(&mut s, LayerAction::Select { id: occurrence_token(vector), mask: false });
+    invoke(&mut s, CommandId::Brush);
+    assert_eq!(s.state.brush.preset, DefaultBrushPreset::GPen as u32, "the Brush command on a vector layer picks the path pen");
+    layer(&mut s, LayerAction::Select { id: occurrence_token(paint), mask: false });
+    assert_eq!(s.state.brush.preset, painting);
+}
+
+#[test]
+fn undo_while_drafting_a_path_removes_its_last_point_without_touching_history() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 20);
+    let (drawn, checkpoint) = (s.engine.document().scene().vector_layer(handle).unwrap().clone(), s.engine.checkpoint());
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    for (i, at) in [[100., 100.], [300., 120.], [200., 300.]].into_iter().enumerate() { click(&mut s, 100 + i as u64 * 5, at); }
+    let mut e = event(&s, 120, PenPhase::Down, 0.5);
+    e.surface_position = surface_at(&s, [400., 400.]);
+    s.pen(e);
+    s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+    assert!(!s.command(CommandId::Undo).enabled, "Undo waits while an anchor is being placed");
+    s.pen(PenEvent { phase: PenPhase::Up, ..e });
+    s.frame(e.timestamp_ns + 1, e.timestamp_ns + 1).unwrap();
+    let anchors = |s: &mut UiSession<Recorder>| { let mut overlay = Vec::new(); s.append_layer_overlay(&mut overlay); overlay.iter().filter(|segment| segment.marker == 2.).count() };
+    let placed = anchors(&mut s);
+    for remaining in (0..4).rev() {
+        assert!(s.command(CommandId::Undo).enabled);
+        s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+        assert_eq!((s.engine.checkpoint(), s.engine.document().scene().vector_layer(handle).unwrap()), (checkpoint, &drawn), "no history step is undone");
+        assert_eq!(s.command(CommandId::FinishPath).enabled || s.command(CommandId::CancelPath).enabled, remaining > 0, "the draft goes with its last point");
+        if remaining > 0 { assert!(anchors(&mut s) < placed); }
+    }
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(9_000_000_000, 9_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().path_count(), 0, "with the draft gone Undo undoes the line");
+}
+
+#[test]
+fn path_commands_say_what_to_select_when_they_cannot_apply() {
+    let (mut s, handle) = vector_session();
+    let triangle = straight(2, &[[100., 500.], [300., 500.], [200., 650.]], true);
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 300.], [300., 300.], [500., 300.]], false), triangle.clone(), straight(3, &[[600., 300.], [700., 300.]], false)]);
+    let reason = |s: &UiSession<Recorder>, command| { let state = s.command(command); (!state.enabled).then(|| state.disabled_reason.unwrap_or_default().to_string()) };
+    let text = |s: &UiSession<Recorder>, id| Some(s.localization().text(id).to_string());
+    invoke(&mut s, CommandId::SelectAll);
+    assert_eq!(reason(&s, CommandId::JoinPaths), text(&s, MessageId::COMMANDS_SELECT_OPEN_PATHS_TO_JOIN), "three paths are too many to join");
+    assert_eq!(reason(&s, CommandId::ReleaseCompoundPath), text(&s, MessageId::COMMANDS_SELECT_A_COMPOUND_PATH_TO_RELEASE));
+    assert_eq!(reason(&s, CommandId::SplitPath), text(&s, MessageId::COMMANDS_SELECT_AN_ANCHOR_INSIDE_A_PATH_TO_SPLIT));
+    invoke(&mut s, CommandId::Deselect);
+    let at = surface_at(&s, [200., 500.]);
+    press(&mut s, 10, &[at, at]);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone()), Some([triangle.id].into()));
+    assert_eq!(reason(&s, CommandId::ClosePath), text(&s, MessageId::COMMANDS_SELECT_AN_OPEN_PATH_TO_CLOSE));
+    assert_eq!(reason(&s, CommandId::MakeCompoundPath), text(&s, MessageId::COMMANDS_SELECT_PATHS_TO_MAKE_A_COMPOUND_PATH));
+    assert_eq!(reason(&s, CommandId::JoinPaths), text(&s, MessageId::COMMANDS_SELECT_OPEN_PATHS_TO_JOIN), "a closed path has no ends to join");
+    assert_eq!(s.dispatch(UiAction::Invoke { command: CommandId::ClosePath }).err(), text(&s, MessageId::COMMANDS_SELECT_AN_OPEN_PATH_TO_CLOSE));
+    invoke(&mut s, CommandId::Deselect);
+    assert_eq!(reason(&s, CommandId::JoinPaths), text(&s, MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER));
+}
+
+#[test]
+fn reversing_flipping_or_turning_a_lone_dot_adds_no_undo_step() {
+    let (mut s, handle) = vector_session();
+    let at = surface_at(&s, [413.7, 288.1]);
+    press(&mut s, 1, &[at, at]);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap().anchor_count(), 1);
+    invoke(&mut s, CommandId::SelectAll);
+    let checkpoint = s.engine.checkpoint();
+    for command in [CommandId::ReversePath, CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight] {
+        assert!(s.command(command).enabled, "{command:?}");
+        s.dispatch(UiAction::Invoke { command }).unwrap();
+        assert_eq!(s.engine.checkpoint(), checkpoint, "{command:?} leaves a lone dot as it was");
+    }
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 100.], [300., 160.]], false)]);
+    invoke(&mut s, CommandId::SelectAll);
+    let checkpoint = s.engine.checkpoint();
+    invoke(&mut s, CommandId::ReversePath);
+    assert_ne!(s.engine.checkpoint(), checkpoint, "a line reverses in one step");
+}
+
+#[test]
+fn double_clicking_a_selected_path_edits_the_points_of_the_whole_selection() {
+    use layer_core::authored::vector::ItemId;
+    let (mut s, handle) = vector_session();
+    put_paths(&mut s, handle, vec![straight(1, &[[100., 250.], [500., 350.]], false), straight(2, &[[100., 550.], [500., 450.]], false), straight(3, &[[100., 700.], [500., 800.]], false)]);
+    let selected = |s: &UiSession<Recorder>| s.engine.document().working.vector_items.as_ref().map(|v| (*v.items).clone());
+    let double = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); press(s, first + 2, &[p, p]); };
+    invoke(&mut s, CommandId::Move);
+    let first = surface_at(&s, [300., 300.]);
+    press(&mut s, 10, &[first, first]);
+    s.interaction.modifiers = Modifiers { shift: true, ..Modifiers::default() };
+    let second = surface_at(&s, [300., 500.]);
+    press(&mut s, 20, &[second, second]);
+    s.interaction.modifiers = Modifiers::default();
+    assert_eq!(selected(&s), Some([ItemId(1), ItemId(2)].into()));
+    double(&mut s, 30, [300., 300.]);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::EditPoints);
+    assert_eq!(selected(&s), Some([ItemId(1), ItemId(2)].into()), "Edit Points opens for the whole selection");
+    invoke(&mut s, CommandId::Move);
+    double(&mut s, 40, [300., 750.]);
+    assert_eq!((s.layer_interaction.tool, selected(&s)), (LayerCanvasTool::EditPoints, Some([ItemId(3)].into())), "a path outside the selection is edited alone");
+}

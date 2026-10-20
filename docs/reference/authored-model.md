@@ -217,7 +217,10 @@ layer's item records in immutable chunks of at most 64, each a resource that
 history, saves and duplicates share. Paths keep their geometry and style behind
 `Arc`, and a path longer than 256 anchors keeps them in runs of 256, so an edit
 copies only the chunk, path and run it changes. Item IDs are random nonzero
-`u64` values local to the layer, kept through edits and never reused. Each
+`u64` values local to the layer, kept through edits and never reused. The object
+also keeps its `Slot` list, images and opaque resources that records written by
+a newer version name by index; edits keep it, and paths copied or merged into
+another object drop the unknown data that could name those slots. Each
 chunk keeps its sorted item IDs and container nesting, and an object remembers
 that it validated, so a vector edit that replaces an existing object checks only
 its new chunks and the identities they introduce, and skips resource-closure

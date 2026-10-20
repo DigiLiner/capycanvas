@@ -63,6 +63,14 @@ pub const TAGS: &[Number] = &[
     Number { word: LIVE_SHAPE, name: "live_shape", on: &[PATH], since: 1 },
 ];
 
+const SPACES: [RgbSpace; 4] = [RgbSpace::Srgb, RgbSpace::DisplayP3, RgbSpace::AdobeRgb, RgbSpace::ProPhoto];
+const CAPS: [Cap; 3] = [Cap::Butt, Cap::Round, Cap::Square];
+const JOINS: [Join; 3] = [Join::Miter, Join::Round, Join::Bevel];
+fn code<T: PartialEq>(table: &[T], value: &T) -> u8 { table.iter().position(|entry| entry == value).expect("Every value has a wire code") as u8 }
+fn coded<T: Copy>(table: &[T], value: &[u8], name: &str) -> DecodeResult<T> {
+    match value { [code] => table.get(usize::from(*code)).copied().ok_or_else(|| unsupported(name)), _ => Err(invalid(name)) }
+}
+
 pub const MAX_RECORDS: usize = 1 << 20;
 pub const MAX_PATH_ANCHORS: usize = 1 << 20;
 pub const MAX_PROPERTY_BYTES: usize = 16 << 20;
@@ -141,26 +149,32 @@ fn properties(data: &[u8]) -> DecodeResult<Vec<(u64, &[u8])>> {
     }
     Ok(list)
 }
-fn validate_frame(data: &[u8], depth: u32) -> DecodeResult<()> {
-    if depth > MAX_DEPTH { return Err(unsupported("nesting exceeds the admitted depth")); }
-    for (tag, value) in properties(data)? {
-        match ValueClass::of(tag) {
-            ValueClass::Nested => validate_stream(value, depth + 1)?,
-            ValueClass::Items if value.len() % 8 != 0 => return Err(invalid("item list length")),
-            ValueClass::Slots if !value.is_empty() => return Err(invalid("slot index out of range")),
-            _ => {}
-        }
-    }
+fn slot_indices(value: &[u8], slots: usize) -> DecodeResult<()> {
+    let mut bytes = Bytes::new(value);
+    while !bytes.done() { if bytes.varuint()? >= slots as u64 { return Err(invalid("slot index out of range")); } }
     Ok(())
 }
-fn validate_stream(data: &[u8], depth: u32) -> DecodeResult<()> {
+fn validate_value(tag: u64, value: &[u8], depth: u32, slots: usize) -> DecodeResult<()> {
+    match ValueClass::of(tag) {
+        ValueClass::Nested => validate_stream(value, depth + 1, slots),
+        ValueClass::Items if !value.len().is_multiple_of(8) => Err(invalid("item list length")),
+        ValueClass::Slots => slot_indices(value, slots),
+        _ => Ok(()),
+    }
+}
+fn validate_frame(data: &[u8], depth: u32, slots: usize) -> DecodeResult<()> {
+    if depth > MAX_DEPTH { return Err(unsupported("nesting exceeds the admitted depth")); }
+    for (tag, value) in properties(data)? { validate_value(tag, value, depth, slots)?; }
+    Ok(())
+}
+fn validate_stream(data: &[u8], depth: u32, slots: usize) -> DecodeResult<()> {
     let mut bytes = Bytes::new(data);
     let mut open = 0u32;
     while !bytes.done() {
         match framed(&mut bytes)? {
             None => open = open.checked_sub(1).ok_or_else(|| invalid("unbalanced end marker"))?,
             Some(record) => {
-                validate_frame(record.properties, depth)?;
+                validate_frame(record.properties, depth, slots)?;
                 if record.kind & KIND_PARENT != 0 { open += 1; if open > MAX_DEPTH { return Err(unsupported("nesting exceeds the admitted depth")); } }
             }
         }
@@ -168,9 +182,9 @@ fn validate_stream(data: &[u8], depth: u32) -> DecodeResult<()> {
     if open == 0 { Ok(()) } else { Err(invalid("unbalanced end marker")) }
 }
 fn opaque(record: &Framed) -> OpaqueRecord { OpaqueRecord { kind: record.kind, id: record.id, properties: record.properties.into() } }
-fn unknown_kind(record: &Framed, depth: u32) -> DecodeResult<OpaqueRecord> {
+fn unknown_kind(record: &Framed, depth: u32, slots: usize) -> DecodeResult<OpaqueRecord> {
     if record.kind & KIND_RESERVED != 0 || record.kind & IGNORABLE == 0 { return Err(unsupported("required record kind")); }
-    validate_frame(record.properties, depth)?;
+    validate_frame(record.properties, depth, slots)?;
     Ok(opaque(record))
 }
 fn same_number(a: u64, b: u64, shift: u32) -> bool { a >> shift == b >> shift }
@@ -181,15 +195,13 @@ fn check_kind(word: u64) -> DecodeResult<bool> {
         None => Ok(false),
     }
 }
-fn unknown_property(tag: u64, value: &[u8], owner: u64, depth: u32, unknown: &mut Vec<UnknownProperty>) -> DecodeResult<()> {
+fn unknown_property(tag: u64, value: &[u8], owner: u64, depth: u32, slots: usize, unknown: &mut Vec<UnknownProperty>) -> DecodeResult<()> {
     if let Some(n) = TAGS.iter().find(|n| same_number(n.word, tag, TAG_FLAGS)) {
         if n.word != tag { return Err(invalid("property with altered flags")); }
         if !n.on.contains(&owner) { return Err(unsupported("property on another record kind")); }
     }
     if tag & TAG_RESERVED != 0 || tag & IGNORABLE == 0 { return Err(unsupported("required property")); }
-    if ValueClass::of(tag) == ValueClass::Nested { validate_stream(value, depth + 1)?; }
-    if ValueClass::of(tag) == ValueClass::Items && !value.len().is_multiple_of(8) { return Err(invalid("item list length")); }
-    if ValueClass::of(tag) == ValueClass::Slots && !value.is_empty() { return Err(invalid("slot index out of range")); }
+    validate_value(tag, value, depth, slots)?;
     unknown.push(UnknownProperty { tag, value: value.into() });
     Ok(())
 }
@@ -237,41 +249,41 @@ fn decode_color(value: &[u8]) -> DecodeResult<RgbColor> {
     let (space, form) = (bytes.u8()?, bytes.u8()?);
     let rgba = [bytes.f32()?, bytes.f32()?, bytes.f32()?, bytes.f32()?];
     exact(bytes, ())?;
-    let space = *RgbSpace::ALL.get(space as usize).ok_or_else(|| unsupported("color space"))?;
+    let space = coded(&SPACES, &[space], "color space")?;
     match form {
         0 => RgbColor::new(space, rgba).map_err(|e| invalid(&e)),
         1 => RgbColor::from_linear(space, rgba).map_err(|e| invalid(&e)),
         _ => Err(unsupported("color form")),
     }
 }
-fn decode_paint(value: &[u8], depth: u32) -> DecodeResult<Paint> {
+fn decode_paint(value: &[u8], depth: u32, slots: usize) -> DecodeResult<Paint> {
     let mut bytes = Bytes::new(value);
     let record = framed(&mut bytes)?.ok_or_else(|| invalid("paint requires a record"))?;
     exact(bytes, ())?;
-    if !check_kind(record.kind)? { return Ok(Paint::Opaque(unknown_kind(&record, depth)?)); }
+    if !check_kind(record.kind)? { return Ok(Paint::Opaque(unknown_kind(&record, depth, slots)?)); }
     if record.kind & KIND_PARENT != 0 { return Err(invalid("paint record has children")); }
     if record.kind != COLOR { return Err(unsupported("record kind in a paint")); }
     let (mut color, mut unknown) = (None, Vec::new());
     for (tag, value) in properties(record.properties)? {
-        if tag == COLOR_VALUE { color = Some(decode_color(value)?); } else { unknown_property(tag, value, COLOR, depth, &mut unknown)?; }
+        if tag == COLOR_VALUE { color = Some(decode_color(value)?); } else { unknown_property(tag, value, COLOR, depth, slots, &mut unknown)?; }
     }
     Ok(Paint::Color { color: color.ok_or_else(|| invalid("color paint requires a color"))?, unknown: finish(unknown) })
 }
-fn decode_entry(record: &Framed, depth: u32) -> DecodeResult<PaintEntry> {
-    if !check_kind(record.kind)? { return Ok(PaintEntry::Opaque(unknown_kind(record, depth)?)); }
+fn decode_entry(record: &Framed, depth: u32, slots: usize) -> DecodeResult<PaintEntry> {
+    if !check_kind(record.kind)? { return Ok(PaintEntry::Opaque(unknown_kind(record, depth, slots)?)); }
     if record.kind != FILL && record.kind != STROKE { return Err(unsupported("record kind in a style")); }
     let mut paint = None;
     let mut stroke = Stroke::new(Paint::color(RgbColor::BLACK), Stroke::DEFAULT_WIDTH);
     let mut unknown = Vec::new();
     for (tag, value) in properties(record.properties)? {
         match tag {
-            PAINT => paint = Some(decode_paint(value, depth + 1)?),
+            PAINT => paint = Some(decode_paint(value, depth + 1, slots)?),
             WIDTH if record.kind == STROKE => stroke.width = exact_f64(value)?,
-            CAP if record.kind == STROKE => stroke.cap = match value { [0] => Cap::Butt, [1] => Cap::Round, [2] => Cap::Square, [_] => return Err(unsupported("stroke cap")), _ => return Err(invalid("stroke cap")) },
-            JOIN if record.kind == STROKE => stroke.join = match value { [0] => Join::Miter, [1] => Join::Round, [2] => Join::Bevel, [_] => return Err(unsupported("stroke join")), _ => return Err(invalid("stroke join")) },
+            CAP if record.kind == STROKE => stroke.cap = coded(&CAPS, value, "stroke cap")?,
+            JOIN if record.kind == STROKE => stroke.join = coded(&JOINS, value, "stroke join")?,
             MITER_LIMIT if record.kind == STROKE => stroke.miter_limit = exact_f64(value)?,
             PROFILE if record.kind == STROKE => stroke.profile = Some(Arc::new(decode_profile(value)?)),
-            _ => unknown_property(tag, value, record.kind, depth, &mut unknown)?,
+            _ => unknown_property(tag, value, record.kind, depth, slots, &mut unknown)?,
         }
     }
     let paint = paint.ok_or_else(|| invalid("paint entry requires a paint"))?;
@@ -282,7 +294,7 @@ fn decode_entry(record: &Framed, depth: u32) -> DecodeResult<PaintEntry> {
     Ok(PaintEntry::Stroke(stroke))
 }
 fn exact_f64(value: &[u8]) -> DecodeResult<f64> { let mut bytes = Bytes::new(value); let v = bytes.f64()?; exact(bytes, v) }
-fn decode_style(value: &[u8], depth: u32) -> DecodeResult<Style> {
+fn decode_style(value: &[u8], depth: u32, slots: usize) -> DecodeResult<Style> {
     let mut bytes = Bytes::new(value);
     let mut entries = Vec::new();
     let mut open = 0u32;
@@ -293,12 +305,12 @@ fn decode_style(value: &[u8], depth: u32) -> DecodeResult<Style> {
                 entries.push(PaintEntry::Opaque(OpaqueRecord { kind: 0, id: 0, properties: Arc::from([]) }));
             }
             Some(record) if open > 0 => {
-                validate_frame(record.properties, depth + 1)?;
+                validate_frame(record.properties, depth + 1, slots)?;
                 if record.kind & KIND_PARENT != 0 { open += 1; }
                 entries.push(PaintEntry::Opaque(opaque(&record)));
             }
             Some(record) => {
-                let entry = decode_entry(&record, depth + 1)?;
+                let entry = decode_entry(&record, depth + 1, slots)?;
                 if record.kind & KIND_PARENT != 0 { open += 1; }
                 entries.push(entry);
             }
@@ -308,7 +320,7 @@ fn decode_style(value: &[u8], depth: u32) -> DecodeResult<Style> {
     if open != 0 { return Err(invalid("unbalanced end marker")); }
     Ok(Style::new(entries))
 }
-fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
+fn decode_path(record: &Framed, slots: usize) -> DecodeResult<PathItem> {
     if record.id == 0 { return Err(invalid("path identity")); }
     let mut geometry = None;
     let mut path = PathItem::new(ItemId(record.id), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0.; 2])], false)]).unwrap()), Arc::default());
@@ -318,7 +330,7 @@ fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
         match tag {
             GEOMETRY => geometry = Some(decode_geometry(value)?),
             FILL_RULE => path.fill_rule = match value { [0] => FillRule::NonZero, [1] => FillRule::EvenOdd, [_] => return Err(unsupported("fill rule")), _ => return Err(invalid("fill rule")) },
-            STYLE => path.style = Arc::new(decode_style(value, 1)?),
+            STYLE => path.style = Arc::new(decode_style(value, 1, slots)?),
             HIDDEN => path.hidden = flag(value).ok_or_else(|| invalid("hidden flag"))?,
             NAME => match std::str::from_utf8(value) {
                 Ok(name) if name.len() <= crate::authored::MAX_NAME_BYTES => path.name = Some(name.into()),
@@ -326,7 +338,7 @@ fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
             },
             LOCKED => match flag(value) { Some(locked) => path.locked = locked, None => unknown.push(UnknownProperty { tag, value: value.into() }) },
             LIVE_SHAPE => match decode_shape(value) { Some(recipe) => shape = Some(recipe), None => unknown.push(UnknownProperty { tag, value: value.into() }) },
-            _ => unknown_property(tag, value, PATH, 1, &mut unknown)?,
+            _ => unknown_property(tag, value, PATH, 1, slots, &mut unknown)?,
         }
     }
     path.geometry = Arc::new(geometry.ok_or_else(|| invalid("path requires geometry"))?);
@@ -336,7 +348,7 @@ fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
     Ok(path)
 }
 
-pub fn decode_chunk(data: &[u8], expected: usize, open: &mut u32) -> DecodeResult<VectorChunk> {
+pub fn decode_chunk(data: &[u8], expected: usize, open: &mut u32, slots: usize) -> DecodeResult<VectorChunk> {
     if expected == 0 || expected > CHUNK_RECORDS { return Err(invalid("chunk record count")); }
     let mut bytes = Bytes::new(data);
     let mut records = Vec::with_capacity(expected);
@@ -344,12 +356,12 @@ pub fn decode_chunk(data: &[u8], expected: usize, open: &mut u32) -> DecodeResul
         if records.len() == expected { return Err(invalid("chunk holds more records than declared")); }
         let record = match framed(&mut bytes)? {
             None => { *open = open.checked_sub(1).ok_or_else(|| invalid("unbalanced end marker"))?; Record::End }
-            Some(record) if *open > 0 => { validate_frame(record.properties, *open)?; if record.kind & KIND_PARENT != 0 { *open += 1; } Record::Opaque(opaque(&record)) }
+            Some(record) if *open > 0 => { validate_frame(record.properties, *open, slots)?; if record.kind & KIND_PARENT != 0 { *open += 1; } Record::Opaque(opaque(&record)) }
             Some(record) => {
                 let decoded = if check_kind(record.kind)? {
                     if record.kind != PATH { return Err(unsupported("record kind in an item list")); }
-                    Record::Path(decode_path(&record)?)
-                } else { Record::Opaque(unknown_kind(&record, 0)?) };
+                    Record::Path(decode_path(&record, slots)?)
+                } else { Record::Opaque(unknown_kind(&record, 0, slots)?) };
                 if record.kind & KIND_PARENT != 0 { *open += 1; }
                 decoded
             }
@@ -362,14 +374,14 @@ pub fn decode_chunk(data: &[u8], expected: usize, open: &mut u32) -> DecodeResul
     chunk.note_encoded_len(data.len());
     Ok(chunk)
 }
-pub fn decode_object(chunks: &[(&[u8], usize)]) -> DecodeResult<Vec<VectorChunk>> {
+pub fn decode_object(chunks: &[(&[u8], usize)], slots: usize) -> DecodeResult<Vec<VectorChunk>> {
     let mut open = 0;
     let mut total = 0usize;
     let mut ids = std::collections::HashSet::new();
     let decoded = chunks.iter().map(|(data, count)| {
         total += count;
         if total > MAX_RECORDS { return Err(unsupported("vector object exceeds the admitted record count")); }
-        let chunk = decode_chunk(data, *count, &mut open)?;
+        let chunk = decode_chunk(data, *count, &mut open, slots)?;
         for id in chunk.records().iter().filter_map(Record::id) {
             if !ids.insert(id) { return Err(invalid("duplicate item identity")); }
         }
@@ -426,7 +438,7 @@ fn encode_profile(profile: &WidthProfile) -> Vec<u8> {
     out
 }
 fn encode_color(color: &RgbColor) -> Vec<u8> {
-    let space = RgbSpace::ALL.iter().position(|s| *s == color.space).unwrap() as u8;
+    let space = code(&SPACES, &color.space);
     let (form, rgba) = match color.linear_rgb { Some([r, g, b]) => (1, [r, g, b, color.rgba[3]]), None => (0, color.rgba) };
     let mut out = vec![space, form];
     for v in rgba { out.extend_from_slice(&v.to_le_bytes()); }
@@ -455,8 +467,8 @@ pub(super) fn encode_style(style: &Style) -> Vec<u8> {
                 let mut p = Properties::new();
                 p.put(PAINT, encode_paint(&s.paint));
                 if s.width != Stroke::DEFAULT_WIDTH { p.put(WIDTH, s.width.to_le_bytes().to_vec()); }
-                if s.cap != Cap::Butt { p.put(CAP, vec![s.cap as u8]); }
-                if s.join != Join::Miter { p.put(JOIN, vec![s.join as u8]); }
+                if s.cap != Cap::Butt { p.put(CAP, vec![code(&CAPS, &s.cap)]); }
+                if s.join != Join::Miter { p.put(JOIN, vec![code(&JOINS, &s.join)]); }
                 if s.miter_limit != Stroke::DEFAULT_MITER_LIMIT { p.put(MITER_LIMIT, s.miter_limit.to_le_bytes().to_vec()); }
                 if let Some(profile) = &s.profile { p.put(PROFILE, encode_profile(profile)); }
                 p.unknown(&s.unknown);

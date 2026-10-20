@@ -7,7 +7,7 @@ pub(super) const BYTE_BUDGET: usize = 512 * 1024 * 1024;
 pub(super) const ENTRY_BUDGET: usize = 256;
 
 #[derive(Default)]
-pub(super) struct Accounting {
+pub(crate) struct Accounting {
     roots: HashSet<u64>,
     tiles: HashSet<u64>,
     sources: color::source::SourceAccounting,
@@ -138,7 +138,7 @@ impl Accounting {
         for b in &mesh.breakpoints{if self.mesh_arrays.insert(b.as_ptr() as usize){bytes=bytes.saturating_add(b.len()*std::mem::size_of::<f32>());}}
         bytes
     }
-    pub(super) fn charge_vector(&mut self, object: &authored::vector::VectorObject) -> usize {
+    pub(crate) fn charge_vector(&mut self, object: &authored::vector::VectorObject) -> usize {
         use authored::vector::{PaintEntry, Record, Anchor};
         let mut bytes = 0usize;
         for chunk in object.chunks() {

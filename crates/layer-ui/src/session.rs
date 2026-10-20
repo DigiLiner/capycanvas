@@ -994,7 +994,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let painting = self.layer_interaction.tool == LayerCanvasTool::Paint || self.selection_brush_active();
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
-            && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() && self.vector_erasing_layer(erasing).is_none() }
+            && if painting { self.engine.document().drawing_target().is_none() && !self.vector_brush_accepts(erasing) }
                 else { self.engine.document().drawing_content().is_none() && !self.vector_tool_accepts() } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
@@ -2553,13 +2553,12 @@ impl<R: CanvasRenderer> UiSession<R> {
             | CommandId::CloneFlipHorizontal
             | CommandId::CloneFlipVertical
             | CommandId::CloneResetOffset => self.clone_command_enabled(id),
-            CommandId::Undo => self.canvas_contact_idle() && (self.operation.placing() || self.objects.placing() || self.cropping() || self.engine.can_undo() || self.history_pending()),
+            CommandId::Undo => self.canvas_contact_idle() && (self.operation.placing() || self.objects.placing() || self.cropping() || self.vector_paths.drafting() || self.engine.can_undo() || self.history_pending()),
             CommandId::Redo => self.canvas_contact_idle() && !self.cropping() && !self.objects.placing() && (self.engine.can_redo() || self.undo_deferred()),
             CommandId::SelectAll => self.require_document_idle().is_ok(),
             CommandId::Deselect | CommandId::InvertSelection => {
                 self.require_document_idle().is_ok() && self.has_selection()
             }
-            CommandId::ClearSelected if self.selected_vector_items().is_some() => self.require_document_idle().is_ok(),
             CommandId::ClearSelected | CommandId::ClearOutside => {
                 self.require_document_idle().is_ok() && self.clear_refusal().is_none()
             }
@@ -5197,6 +5196,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             CommandId::Undo | CommandId::Redo => {
                 let redo = command == CommandId::Redo;
+                if !redo && self.remove_vector_path_point()? { return Ok((BRUSH | DOCUMENT | COMMANDS, true)); }
                 if self.operation.placing() || self.cropping() {
                     if redo {
                         return Err(if self.operation.placing() {
@@ -5476,6 +5476,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.brush.tool = tools::group(id).tool();
         self.state.brush.diameter = brush.diameter;
         self.state.brush.opacity = brush.opacity;
+        self.dismiss_other_brush_refusal(id);
         self.apply_brush()?;
         self.remember_vector_pen(id);
         Ok(())
@@ -5745,6 +5746,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn contact_idle(&self, navigation: bool) -> bool {
         !self.painted_selections.has_contact()
             && !self.deferred_contact().unwrap_or(self.pen_contact)
+            && !self.vector_contact()
             && self.effect_gesture.is_none()
             && self.object_motion.is_none()
             && self.layer_interaction.gradient_before.is_none()
@@ -5800,6 +5802,9 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn changed(&mut self, regions: u32, canvas_wake: bool) -> UiChange {
         let mut regions = regions | if std::mem::take(&mut self.host_requests_changed) { regions::HOST } else { 0 };
         if regions & (regions::COMMANDS | regions::LAYOUT) != 0 && self.refresh_tool_set() {
+            regions |= regions::BRUSH;
+        }
+        if regions & (regions::DOCUMENT | regions::BRUSH) != 0 && self.follow_layer_brush() {
             regions |= regions::BRUSH;
         }
         if regions & (regions::DOCUMENT | regions::BRUSH) != 0 && self.vector_tool_context_changed() {
@@ -5974,7 +5979,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.filter_picker.selected = doc.working.occurrence.and_then(|handle| doc.scene().effect(handle)).map(|effect| effect.program.id.clone());
         let drawing_target = doc.drawing_target();
         self.end_dry_mask_session(drawing_target);
-        self.follow_layer_brush();
+        let _ = self.follow_layer_brush();
         self.refresh_layer_presentation();
     }
 

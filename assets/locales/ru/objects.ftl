@@ -18,3 +18,9 @@ objects-action-use-brush = Взять { $brush }
 objects-action-reset-setting = Сбросить «{ $setting }»
 objects-action-new-paint-layer-below = Новый слой рисования ниже
 objects-merge-turns-paths-into-pixels = При объединении контуры в «{ $layers }» станут пикселями.
+objects-flatten-discards-hidden-layers-and-paths = { $count ->
+    [one] При сведении будет удалён { $count } скрытый слой, а контуры в «{ $layers }» станут пикселями.
+    [few] При сведении будут удалены { $count } скрытых слоя, а контуры в «{ $layers }» станут пикселями.
+    [many] При сведении будут удалены { $count } скрытых слоёв, а контуры в «{ $layers }» станут пикселями.
+   *[other] При сведении будут удалены { $count } скрытого слоя, а контуры в «{ $layers }» станут пикселями.
+    }

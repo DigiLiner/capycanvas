@@ -224,7 +224,7 @@ fn well_formed_combinations_a_later_version_may_allow_preserve_the_package() {
             0=>record(manifest,3)["data"]["blend"]="pass_through".into(),
             1=>record(manifest,3)["data"]["alpha_locked"]=true.into(),
             2=>record(manifest,3)["data"]["content"]=json!({"paint":resources::reference(identity(9))}),
-            3=>record(manifest,3)["data"]["content"]=json!({"objects":resources::reference(identity(11))}),
+            3=>record(manifest,3)["data"]["content"]=json!({"object":resources::reference(identity(11))}),
             4=>record(manifest,4)["data"]["mask"]=json!({"source":resources::reference(identity(12))}),
             5=>record(manifest,9)["data"]["image"]=resources::reference(identity(7)),
             6=>record(manifest,5)["data"]["attachment"]="clip".into(),
@@ -277,7 +277,7 @@ fn ancillary_only_images_are_dropped_and_unplaced_hidden_authored_uses_are_kept(
             records.push(json!({"id":identity(901),"type":"example.note/1","ancillary":true,"copy_safe":true,"data":{"image":resources::reference(identity(900))}}));
             if authored_use {
                 records.push(json!({"id":identity(903),"type":"capy.image-object/1","data":{"image":resources::reference(identity(900))}}));
-                records.push(json!({"id":identity(905),"type":"capy.occurrence/3","data":{"content":{"objects":resources::reference(identity(903))},"visible":false}}));
+                records.push(json!({"id":identity(905),"type":"capy.occurrence/3","data":{"content":{"object":resources::reference(identity(903))},"visible":false}}));
             }
         });
         let artwork=editable(changed);let prepared=prepare(&artwork,false);

@@ -69,14 +69,23 @@ fn profile(spans: &[Span]) -> Option<WidthProfile> {
     WidthProfile::new(simplified(knots)).ok()
 }
 
+fn rebased(width: f64, others: impl IntoIterator<Item = f64>) -> f64 {
+    if width > 0. { width } else { others.into_iter().find(|w| *w > 0.).unwrap_or(width) }
+}
+
+fn relative(width: f64, base: f64) -> f64 { if base > 0. { width / base } else { 1. } }
+
 fn stroke_width(path: &PathItem) -> Option<(f64, Option<&WidthProfile>)> {
     path.style.strokes().next().map(|stroke| (stroke.width, stroke.profile.as_deref()))
 }
 
 impl PathItem {
-    fn with_spans<'a>(&'a self, geometry: PathGeometry, spans: impl Fn(Option<&'a WidthProfile>, f64) -> Vec<Span<'a>>) -> Result<Self, &'static str> {
+    fn with_spans<'a>(&'a self, geometry: PathGeometry, spans: impl Fn(Option<&'a WidthProfile>, f64) -> (f64, Vec<Span<'a>>)) -> Result<Self, &'static str> {
         let entries = self.style.entries.iter().map(|entry| match entry {
-            PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { profile: profile(&spans(stroke.profile.as_deref(), stroke.width)).map(Arc::new), ..stroke.clone() }),
+            PaintEntry::Stroke(stroke) => {
+                let (width, spans) = spans(stroke.profile.as_deref(), stroke.width);
+                PaintEntry::Stroke(Stroke { width, profile: profile(&spans).map(Arc::new), ..stroke.clone() })
+            }
             other => other.clone(),
         }).collect();
         Ok(PathItem { style: Arc::new(Style::new(entries)), ..self.with_geometry(Arc::new(geometry)) })
@@ -91,35 +100,40 @@ impl PathItem {
             Subpath::new(&anchors, subpath.closed)
         }).collect();
         let closed: Vec<bool> = self.geometry.subpaths().iter().map(|s| s.closed && s.segment_count() > 0).collect();
-        self.with_spans(PathGeometry::new(subpaths)?, |profile, _| ranges.iter().zip(&closed).flat_map(|(range, &closed)| {
+        self.with_spans(PathGeometry::new(subpaths)?, |profile, width| (width, ranges.iter().zip(&closed).flat_map(|(range, &closed)| {
             let open = if closed { range.start..range.end - 1 } else { range.clone() };
-            open.rev().chain(closed.then_some(range.end - 1)).map(move |segment| Span::Part { profile, scale: 1., segment, from: 1., to: 0. })
-        }).collect())
+            open.rev().chain(closed.then(|| range.end - 1)).map(move |segment| Span::Part { profile, scale: 1., segment, from: 1., to: 0. })
+        }).collect()))
     }
     pub fn closed(&self) -> Result<Self, &'static str> {
         let ranges = self.segment_ranges();
         let closing: Vec<bool> = self.geometry.subpaths().iter().map(|s| !s.closed && s.len() >= 2).collect();
         let subpaths = self.geometry.subpaths().iter().zip(&closing).map(|(s, &close)| Subpath::new(&s.to_vec(), s.closed || close)).collect();
-        self.with_spans(PathGeometry::new(subpaths)?, |profile, _| {
+        self.with_spans(PathGeometry::new(subpaths)?, |profile, width| {
             let mut spans = Vec::new();
             for (range, &close) in ranges.iter().zip(&closing) {
                 let first = spans.len();
                 spans.extend(whole(profile, 1., range.clone()));
                 if close { spans.push(Span::Bridge { to: Some(first) }); }
             }
-            spans
+            (width, spans)
         })
     }
     pub fn can_close(&self) -> bool { self.geometry.subpaths().iter().any(|s| !s.closed && s.len() >= 2) }
+    pub fn cuts_at(&self, at: AnchorRef) -> bool {
+        self.geometry.subpaths().get(at.subpath as usize).is_some_and(|subpath| {
+            let (n, k) = (subpath.len(), at.anchor as usize);
+            k < n && subpath.segment_count() > 0 && (subpath.closed || (k > 0 && k + 1 < n))
+        })
+    }
     pub fn split_at(&self, cuts: &BTreeSet<AnchorRef>) -> Result<Vec<Self>, &'static str> {
         let ranges = self.segment_ranges();
         let mut pieces: Vec<(usize, Vec<usize>)> = Vec::new();
         let mut cut = false;
         for (s, subpath) in self.geometry.subpaths().iter().enumerate() {
             let n = subpath.len();
-            let at: Vec<usize> = cuts.iter().filter(|c| c.subpath as usize == s).map(|c| c.anchor as usize)
-                .filter(|&k| k < n && (subpath.closed || (k > 0 && k + 1 < n))).collect();
-            if at.is_empty() || subpath.segment_count() == 0 { pieces.push((s, (0..n).collect())); continue; }
+            let at: Vec<usize> = cuts.iter().filter(|c| c.subpath as usize == s && self.cuts_at(**c)).map(|c| c.anchor as usize).collect();
+            if at.is_empty() { pieces.push((s, (0..n).collect())); continue; }
             cut = true;
             if subpath.closed {
                 for (i, &start) in at.iter().enumerate() {
@@ -149,7 +163,7 @@ impl PathItem {
         let groups: Vec<Vec<usize>> = if self.geometry.subpaths().len() > 1 { vec![(0..built.len()).collect()] } else { (0..built.len()).map(|i| vec![i]).collect() };
         groups.into_iter().map(|group| {
             let geometry = PathGeometry::new(group.iter().map(|&i| built[i].0.clone()).collect())?;
-            self.with_spans(geometry, |profile, _| group.iter().flat_map(|&i| built[i].1.iter().map(move |&segment| Span::Part { profile, scale: 1., segment, from: 0., to: 1. })).collect())
+            self.with_spans(geometry, |profile, width| (width, group.iter().flat_map(|&i| built[i].1.iter().map(move |&segment| Span::Part { profile, scale: 1., segment, from: 0., to: 1. })).collect()))
         }).collect()
     }
     pub fn open_ends(&self) -> Option<[[f64; 2]; 2]> {
@@ -182,28 +196,58 @@ impl PathItem {
         let (count_a, count_b) = (first.segment_count() as u32, second.segment_count() as u32);
         let other_stroke = stroke_width(&b);
         a.with_spans(geometry, |profile, width| {
-            let (scale, other) = other_stroke.map_or((1., None), |(w, p)| (if width > 0. { w / width } else { 1. }, p));
-            whole(profile, 1., 0..count_a).chain((!touching).then_some(Span::Bridge { to: None })).chain(whole(other, scale, 0..count_b)).collect()
+            let (other_width, other) = other_stroke.unwrap_or((width, None));
+            let base = rebased(width, [other_width]);
+            (base, whole(profile, relative(width, base), 0..count_a).chain((!touching).then_some(Span::Bridge { to: None })).chain(whole(other, relative(other_width, base), 0..count_b)).collect())
         })
     }
     pub fn compound(paths: &[PathItem]) -> Result<Self, &'static str> {
         let base = paths.first().ok_or("Select paths first")?;
         let geometry = PathGeometry::new(paths.iter().flat_map(|p| p.geometry.subpaths().iter().cloned()).collect())?;
-        let combined = base.with_spans(geometry, |profile, width| paths.iter().enumerate().flat_map(|(i, path)| {
-            let (scale, other) = if i == 0 { (1., profile) } else { stroke_width(path).map_or((1., None), |(w, p)| (if width > 0. { w / width } else { 1. }, p)) };
-            whole(other, scale, 0..path.geometry.segment_count() as u32)
-        }).collect())?;
+        let combined = base.with_spans(geometry, |profile, width| {
+            let widths: Vec<(f64, Option<&WidthProfile>)> = paths.iter().enumerate().map(|(i, path)| if i == 0 { (width, profile) } else { stroke_width(path).unwrap_or((width, None)) }).collect();
+            let base = rebased(width, widths.iter().map(|(w, _)| *w));
+            (base, paths.iter().zip(&widths).flat_map(|(path, &(w, other))| whole(other, relative(w, base), 0..path.geometry.segment_count() as u32)).collect())
+        })?;
         Ok(PathItem { fill_rule: FillRule::EvenOdd, ..combined })
     }
     pub fn released(&self) -> Result<Vec<Self>, &'static str> {
         let ranges = self.segment_ranges();
         self.geometry.subpaths().iter().zip(ranges).map(|(subpath, range)| {
-            self.with_spans(PathGeometry::new(vec![subpath.clone()])?, |profile, _| whole(profile, 1., range.clone()).collect())
+            self.with_spans(PathGeometry::new(vec![subpath.clone()])?, |profile, width| (width, whole(profile, 1., range.clone()).collect()))
         }).collect()
     }
 }
 
+impl PathItem {
+    pub fn area_around(&self, point: [f64; 2], tolerance: f64) -> f64 {
+        self.geometry.subpaths().iter().filter_map(|subpath| {
+            let mut ring = vec![subpath.anchor(0).point()];
+            for segment in subpath.segments() { segment.flatten(tolerance, |p, _| ring.push(p)); }
+            let (mut winding, mut twice) = (0i32, 0.);
+            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+                twice += a[0] * b[1] - b[0] * a[1];
+                if (a[1] <= point[1]) != (b[1] <= point[1]) && a[0] + (point[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) > point[0] {
+                    winding += if b[1] > a[1] { 1 } else { -1 };
+                }
+            }
+            (winding != 0).then_some(twice.abs() * 0.5)
+        }).fold(f64::INFINITY, f64::min)
+    }
+    pub fn is_known(&self) -> bool {
+        let known = |paint: &Paint| matches!(paint, Paint::Color { unknown: None, .. });
+        self.unknown.is_none() && self.style.entries.iter().all(|entry| match entry {
+            PaintEntry::Fill(fill) => fill.unknown.is_none() && known(&fill.paint),
+            PaintEntry::Stroke(stroke) => stroke.unknown.is_none() && known(&stroke.paint),
+            PaintEntry::Opaque(_) => false,
+        })
+    }
+}
+
 impl VectorObject {
+    pub fn holds_only_known_paths(&self) -> bool {
+        self.slots().is_empty() && self.records().all(|(_, record)| record.path().is_some_and(PathItem::is_known))
+    }
     fn path_positions(&self, ids: &BTreeSet<ItemId>) -> Vec<(Position, &PathItem)> {
         let mut found: Vec<(Position, &PathItem)> = self.positions(ids).into_iter()
             .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 }))

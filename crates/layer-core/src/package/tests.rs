@@ -16,6 +16,14 @@ fn duplicate_keys_and_reserved_reference_ambiguity_are_rejected_before_interpret
 }
 
 #[test]
+fn json_nodes_are_counted_while_parsing() {
+    let array = |count: usize| { let mut bytes = b"[".to_vec(); for index in 0..count { if index > 0 { bytes.push(b','); } bytes.push(b'0'); } bytes.push(b']'); bytes };
+    assert_eq!(parse_json(&array(super::json::MAX_JSON_NODES - 1), 64 << 20).unwrap().as_array().unwrap().len(), super::json::MAX_JSON_NODES - 1);
+    assert!(matches!(parse_json(&array(super::json::MAX_JSON_NODES), 64 << 20), Err(super::values::DecodeError::Unsupported(_))));
+    assert!(matches!(parse_json(br#"{"a":[0,{"b":"#, 4096), Err(super::values::DecodeError::Invalid(_))));
+}
+
+#[test]
 fn local_slots_and_literal_ids_survive_visible_reference_remapping() {
     let first: PortableId = "00000000000000000000000000000001".parse().unwrap();
     let second: PortableId = "00000000000000000000000000000002".parse().unwrap();

@@ -224,8 +224,8 @@ fn metadata_and_reference_limits_apply_before_graph_adoption() {
 fn objects_fixture() -> Value {
     let mut value = fixture("empty");
     value["objects"][1]["data"]["entries"] = json!([reference_value(3),reference_value(7)]);
-    push_object(&mut value,json!({"id":id(3),"type":"capy.occurrence/3","data":{"content":{"objects":reference_value(8)},"offset":["-256","128"]}}));
-    push_object(&mut value,json!({"id":id(7),"type":"capy.occurrence/3","data":{"content":{"objects":reference_value(9)}}}));
+    push_object(&mut value,json!({"id":id(3),"type":"capy.occurrence/3","data":{"content":{"object":reference_value(8)},"offset":["-256","128"]}}));
+    push_object(&mut value,json!({"id":id(7),"type":"capy.occurrence/3","data":{"content":{"object":reference_value(9)}}}));
     for n in [8,9] { push_object(&mut value,json!({"id":id(n),"type":"capy.image-object/1","data":{"image":reference_value(10)}})); }
     push_object(&mut value,json!({"id":id(10),"type":"capy.image/1","data":{"extent":[1,1],"interpretation":{"channels":"rgba","depth":"u8","profile":{"builtin":"srgb"}},"tiles":[]}}));
     value
@@ -238,10 +238,10 @@ fn drawable_ownership_is_distinct_from_immutable_image_sharing() {
     assert_eq!(manifest.support,Support::Editable);
     assert_eq!(manifest.objects[&id(8)]["data"]["image"],manifest.objects[&id(9)]["data"]["image"]);
     let mut duplicated = value.clone();
-    duplicated["objects"][4]["data"]["content"]["objects"] = reference_value(8);
+    duplicated["objects"][4]["data"]["content"]["object"] = reference_value(8);
     assert!(matches!(known(&duplicated,&directory(&[])).support,Support::Preserved(_)));
     let mut shared_child = value.clone();
-    push_object(&mut shared_child,json!({"id":id(11),"type":"capy.occurrence/3","data":{"content":{"objects":reference_value(8)}}}));
+    push_object(&mut shared_child,json!({"id":id(11),"type":"capy.occurrence/3","data":{"content":{"object":reference_value(8)}}}));
     assert!(matches!(known(&shared_child,&directory(&[])).support,Support::Preserved(_)));
     let mut wrong_type = value.clone();
     wrong_type["objects"][5]["data"]["image"] = reference_value(7);

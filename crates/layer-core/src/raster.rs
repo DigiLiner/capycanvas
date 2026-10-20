@@ -174,7 +174,7 @@ fn unshuffle_samples(descriptor: PixelDescriptor, bytes: &[u8]) -> Vec<u8> {
         .bytes_per_pixel()
         .expect("validated multibyte descriptor");
     match bpp {
-        2 => interleave::<2>(bytes), 4 => interleave::<4>(bytes),
+        1 => bytes.to_vec(), 2 => interleave::<2>(bytes), 3 => interleave::<3>(bytes), 4 => interleave::<4>(bytes),
         6 => interleave::<6>(bytes), 8 => interleave::<8>(bytes),
         12 => interleave::<12>(bytes), 16 => interleave::<16>(bytes),
         _ => unreachable!("validated multibyte descriptor"),
@@ -194,6 +194,17 @@ impl TileBlob {
         descriptor.byte_len([TILE_SIZE; 2]).map(lz4_flex::block::get_maximum_output_size)
     }
     pub fn encode(descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, String> {
+        Self::encode_with_id(crate::authored::PortableId::random(), descriptor, bytes)
+    }
+    pub fn from_filtered_deflate(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, stored: &[u8]) -> Result<Self, String> {
+        let size = descriptor.byte_len([TILE_SIZE; 2]).ok_or("Unsupported raster pixels")?;
+        let mut planes = crate::package::archive::inflate(stored, size, true)?;
+        for row in planes.as_chunks_mut::<{ TILE_SIZE as usize }>().0 {
+            for x in 1..row.len() { row[x] = row[x].wrapping_add(row[x - 1]); }
+        }
+        Self::encode_with_id(resource_id, descriptor, &unshuffle_samples(descriptor, &planes))
+    }
+    fn encode_with_id(resource_id: crate::authored::PortableId, descriptor: PixelDescriptor, bytes: &[u8]) -> Result<Self, String> {
         let expected = descriptor
             .byte_len([TILE_SIZE; 2])
             .ok_or("Unsupported raster pixels")?;
@@ -208,7 +219,7 @@ impl TileBlob {
         let compressed = compression::compress(shuffled.as_deref().unwrap_or(bytes))?;
         let encoded_fingerprint = Some(Self::descriptor_digest(descriptor, &compressed));
         Ok(Self {
-            resource_id: crate::authored::PortableId::random(),
+            resource_id,
             owner_identity: next_tile_owner(),
             encoded_fingerprint,
             digest: OnceLock::new(),

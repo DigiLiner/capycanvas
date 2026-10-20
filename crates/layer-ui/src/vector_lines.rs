@@ -27,6 +27,9 @@ fn path(id: ItemId, paint: &Paint, line: (layer_core::authored::vector::PathGeom
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
+    pub(super) fn vector_contact(&self) -> bool {
+        self.vector_lines.active() || self.vector_lines.erasing() || self.vector_moves.gesturing() || self.vector_points.gesturing() || self.vector_paths.placing()
+    }
     pub(super) fn editing_vector_layer(&self) -> Option<OccurrenceHandle> {
         let document = self.engine.document();
         let layer = document.working.occurrence?;
@@ -62,21 +65,26 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn remember_vector_pen(&mut self, id: u32) {
         if tools::group(id).tool() != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
     }
-    pub(super) fn follow_layer_brush(&mut self) {
+    pub(super) fn follow_layer_brush(&mut self) -> bool {
         let vector = self.editing_vector_layer().is_some();
-        if std::mem::replace(&mut self.vector_lines.on_vector, vector) == vector || self.layer_interaction.tool != LayerCanvasTool::Paint { return; }
+        if self.layer_interaction.tool != LayerCanvasTool::Paint || std::mem::replace(&mut self.vector_lines.on_vector, vector) == vector { return false; }
         let current = self.state.brush.preset;
         if !vector {
-            if let Some((brush, pen)) = self.vector_lines.restore.take() && pen == current { let _ = self.select_brush(brush); }
+            if let Some((brush, pen)) = self.vector_lines.restore.take() && pen == current { return self.select_brush(brush).is_ok(); }
         } else if self.state.brush.tool != Tool::Eraser && !self.engine.configured_brush().draws_vector_lines()
             && let Some(pen) = self.vector_pen() && self.select_brush(pen).is_ok() {
             self.vector_lines.restore = Some((current, pen));
+            return true;
         }
+        false
     }
     pub(super) fn vector_drawing_layer(&self) -> Option<OccurrenceHandle> {
         let layer = self.editing_vector_layer()?;
         let erasing = self.state.brush.tool == Tool::Eraser || self.state.colors.transparent();
         (!erasing && self.engine.configured_brush().draws_vector_lines()).then_some(layer)
+    }
+    pub(super) fn vector_brush_accepts(&self, erasing: bool) -> bool {
+        self.vector_drawing_layer().or_else(|| self.vector_erasing_layer(erasing)).is_some_and(|layer| !self.engine.document().is_locked(layer))
     }
     pub(super) fn erasing_event(&self, event: &PenEvent) -> bool {
         event.tool == layer_engine::ToolKind::Eraser || event.flags.contains(SampleFlags::INVERTED)

@@ -18,3 +18,4 @@ objects-action-use-brush = 使用{ $brush }
 objects-action-reset-setting = 重設{ $setting }
 objects-action-new-paint-layer-below = 在下方新增繪畫圖層
 objects-merge-turns-paths-into-pixels = 合併會將「{ $layers }」中的路徑變為像素。
+objects-flatten-discards-hidden-layers-and-paths = 平面化會捨棄 { $count } 個隱藏圖層，並將「{ $layers }」中的路徑變為像素。

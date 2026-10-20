@@ -18,3 +18,7 @@ objects-action-use-brush = Usa { $brush }
 objects-action-reset-setting = Ripristina { $setting }
 objects-action-new-paint-layer-below = Nuovo livello di pittura sotto
 objects-merge-turns-paths-into-pixels = L’unione trasforma i tracciati di «{ $layers }» in pixel.
+objects-flatten-discards-hidden-layers-and-paths = { $count ->
+    [one] L'appiattimento scarta { $count } livello nascosto e trasforma i tracciati di «{ $layers }» in pixel.
+   *[other] L'appiattimento scarta { $count } livelli nascosti e trasforma i tracciati di «{ $layers }» in pixel.
+    }

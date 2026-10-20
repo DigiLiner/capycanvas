@@ -56,8 +56,8 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     for(const type of ['dragEnter','dragOver','drop'])await call('Input.dispatchDragEvent',{type,...p,data:{items:[],files,dragOperationsMask:1}});
   };
   const save=placementSave({evaluate,invoke,idle});
-  const imageLayers=m=>packageOccurrences(m).filter(o=>o.data.content.objects);
-  const objectsIn=m=>imageLayers(m).map(o=>packageObject(m,o.data.content.objects));
+  const imageLayers=m=>packageOccurrences(m).filter(o=>o.data.content.object);
+  const objectsIn=m=>imageLayers(m).map(o=>packageObject(m,o.data.content.object));
   const extent=(m,object)=>packageObject(m,object.data.image).data.extent;
   const affine=object=>object.data.affine??[1,0,0,1,0,0];
   const activeLayer=async()=>(await state()).layers.find(l=>l.editing);
@@ -154,7 +154,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     const reopened=await save(),large=objectsIn(reopened).find(o=>extent(reopened,o)[0]===Math.max(...objectsIn(reopened).map(o=>extent(reopened,o)[0]))),largeExtent=extent(reopened,large);
     const objectAffine=async()=>affine(packageObject(await save(),large.id));
     const start=affine(large),largeCentre=map(start,largeExtent[0]/2,largeExtent[1]/2);
-    const name=packageOccurrences(reopened).find(o=>o.data.content.objects?.ref===large.id).data.name;
+    const name=packageOccurrences(reopened).find(o=>o.data.content.object?.ref===large.id).data.name;
     const layer=(await state()).layers.find(l=>l.object&&l.label===name).id;
     await invoke('move');await selectImage(layer);
     for(const id of ['transform_distort','transform_warp']) {
@@ -294,7 +294,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     await drop(rowPoint,[files[0]]);
     await idle();await placed();await click('.canvas-action-bar [data-command=apply_transform]');
     const grouped=await save(),groupOccurrence=packageOccurrences(grouped).find(o=>o.data.name===group.label&&o.data.content.stack);
-    assert.ok(packageObject(grouped,groupOccurrence.data.content.stack).data.entries.some(ref=>packageObject(grouped,ref).data.content.objects),'A drop on a group row inserts an image layer into the group');
+    assert.ok(packageObject(grouped,groupOccurrence.data.content.stack).data.entries.some(ref=>packageObject(grouped,ref).data.content.object),'A drop on a group row inserts an image layer into the group');
     await invoke('undo');assert.equal((await state()).layers.length,groupCount);
     await evaluate(`layerApp.dispatch({type:'layer',action:{op:'lock',id:${group.id},value:true}})`);await settle();
     await drop(rowPoint,[files[0]]);

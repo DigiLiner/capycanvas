@@ -34,13 +34,13 @@ records! {
     PaintSource, "capy.paint-source/2", Object, ["domain", "tiles", "material", "base", "color_mode"], [];
     Image, "capy.image/1", Object, ["extent", "interpretation", "tiles", "resolution"], [];
     ImageObject, "capy.image-object/1", Object, ["image", "affine", "interpolation"], [];
-    VectorObject, "capy.vector-object/1", Object, ["items", "fallback"], [];
+    VectorObject, "capy.vector-object/1", Object, ["items", "slots", "fallback"], [];
     CoverageSource, "capy.coverage-source/2", Object, ["domain", "tiles", "material", "default_coverage"], [];
     Effect, "capy.effect/2", Object, ["builtin", "version", "program", "values", "spatial"], [];
     Selection, "capy.selection/1", Object, ["shape", "affine", "inverted"], [];
     Guides, "capy.guides/1", Object, ["rulers"], [];
     Output, "capy.output/2", Object, ["source", "name", "context", "sdr", "proof", "representation"], ["representation"];
-    RasterTile, "capy.raster-tile/1", Resource, ["channels", "depth", "transfer", "alpha", "profile"], [];
+    RasterTile, "capy.raster-tile/1", Resource, ["channels", "depth", "transfer", "alpha"], [];
     SelectionCoverage, "capy.selection-coverage/1", Resource, ["depth", "extent", "bounds", "chunk"], [];
     VectorItems, "capy.vector-items/1", Resource, ["records", "decoded_bytes"], [];
     Icc, "capy.icc/1", Resource, ["decoded_bytes"], [];

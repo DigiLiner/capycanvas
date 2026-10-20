@@ -34,12 +34,12 @@ impl VectorIndex {
         for chunk in object.chunks().iter().filter(|chunk| !known.contains_key(&key(chunk))) { self.insert(chunk); }
         self.root = Some(object.clone());
     }
-    fn pickable(chunk: &Resource<VectorChunk>) -> impl Iterator<Item = (u32, [f64; 4])> + '_ {
-        chunk.records().iter().enumerate().filter_map(|(index, record)| record.path().filter(|path| !path.hidden && !path.locked).map(|path| (index as u32, path.bounds())))
+    fn visible(chunk: &Resource<VectorChunk>) -> impl Iterator<Item = (u32, [f64; 4])> + '_ {
+        chunk.records().iter().enumerate().filter_map(|(index, record)| record.path().filter(|path| !path.hidden).map(|path| (index as u32, path.bounds())))
     }
     fn insert(&mut self, chunk: &Resource<VectorChunk>) {
         let chunk_key = key(chunk);
-        for (index, bounds) in Self::pickable(chunk) {
+        for (index, bounds) in Self::visible(chunk) {
             let entry = Entry { chunk: chunk_key, index, bounds };
             let s = span(bounds);
             if spread(s) > SPREAD { self.large.push(entry); continue; }
@@ -50,7 +50,7 @@ impl VectorIndex {
         let chunk_key = key(chunk);
         let mut touched = HashSet::new();
         let mut large = false;
-        for (_, bounds) in Self::pickable(chunk) {
+        for (_, bounds) in Self::visible(chunk) {
             let s = span(bounds);
             if spread(s) > SPREAD { large = true; continue; }
             for y in s[1]..=s[3] { for x in s[0]..=s[2] { touched.insert([x, y]); } }
@@ -83,7 +83,7 @@ impl VectorIndex {
     pub fn hit(&mut self, object: &VectorObject, point: [f64; 2], slop: f64) -> Option<ItemId> {
         self.update(object);
         self.candidates([point[0] - slop, point[1] - slop, point[0] + slop, point[1] + slop]).into_iter()
-            .filter_map(|at| self.path(at)).find(|path| path.hit(point, slop)).map(|path| path.id)
+            .filter_map(|at| self.path(at)).find(|path| path.pickable() && path.hit(point, slop)).map(|path| path.id)
     }
     pub fn near(&mut self, object: &VectorObject, area: [f64; 4]) -> Vec<Position> {
         self.update(object);
@@ -92,7 +92,7 @@ impl VectorIndex {
     pub fn within(&mut self, object: &VectorObject, area: [f64; 4]) -> BTreeSet<ItemId> {
         self.update(object);
         let inside = |b: [f64; 4]| b[0] >= area[0] && b[1] >= area[1] && b[2] <= area[2] && b[3] <= area[3];
-        self.candidates(area).into_iter().filter_map(|at| self.path(at)).filter(|path| inside(path.bounds())).map(|path| path.id).collect()
+        self.candidates(area).into_iter().filter_map(|at| self.path(at)).filter(|path| path.pickable() && inside(path.bounds())).map(|path| path.id).collect()
     }
 }
 

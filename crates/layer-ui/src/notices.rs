@@ -30,7 +30,7 @@ pub struct NoticeAction {
 #[derive(Clone)]
 enum NoticeCopy {
     Drawing(DrawingRefusal), Stroke(StrokeRefusal), Message(MessageId), Reference { message: MessageId, name: std::sync::Arc<str> },
-    Object { layer: OccurrenceHandle, name: std::sync::Arc<str> }, Flatten { hidden: usize },
+    Object { layer: OccurrenceHandle, name: std::sync::Arc<str> }, Flatten { hidden: usize, names: Vec<std::sync::Arc<str>> },
     Vector { layer: OccurrenceHandle, name: std::sync::Arc<str>, reason: VectorRefusal },
     Rasterizing { command: CommandId, names: Vec<std::sync::Arc<str>> },
 }
@@ -61,9 +61,11 @@ impl NoticeCopy {
                 };
                 return localization.format(message, &args);
             }
-            Self::Flatten { hidden } => {
+            Self::Flatten { hidden, names } => {
                 let mut args = FluentArgs::new(); args.set("count", *hidden);
-                return localization.format(MessageId::COMMANDS_FLATTEN_DISCARDS_HIDDEN_LAYERS, &args);
+                if names.is_empty() { return localization.format(MessageId::COMMANDS_FLATTEN_DISCARDS_HIDDEN_LAYERS, &args); }
+                args.set("layers", names.iter().map(|name| name.as_ref()).collect::<Vec<_>>().join(", "));
+                return localization.format(MessageId::OBJECTS_FLATTEN_DISCARDS_HIDDEN_LAYERS_AND_PATHS, &args);
             }
             Self::Rasterizing { names, .. } => {
                 let mut args = FluentArgs::new();
@@ -103,7 +105,7 @@ impl NoticeCopy {
 }
 
 #[derive(Clone)]
-pub(super) enum NoticeRun { Dispatch(Box<UiAction>), RevealMask(OccurrenceHandle), Bake(layer_core::MergeKind) }
+pub(super) enum NoticeRun { Dispatch(Box<UiAction>), RevealMask(OccurrenceHandle), Bake(layer_core::MergeKind), PaintLayerUnder }
 
 #[derive(Default)]
 pub(super) struct Notices {
@@ -210,7 +212,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let id = occurrence_token(layer);
         let rasterize = self.command(CommandId::RasterizeLayer);
         let dispatch = |action: UiAction| NoticeRun::Dispatch(Box::new(action));
-        let new_layer = |action: LayerAction, id| self.notice_choice(copy, id, dispatch(UiAction::Layer { action }), parent_locked.clone());
+        let new_layer = |run: NoticeRun, id| self.notice_choice(copy, id, run, parent_locked.clone());
         let first = match copy {
             NoticeCopy::Vector { reason: VectorRefusal::Brush { pen: Some(pen) }, .. } => Some(self.notice_choice(copy, NoticeActionId::UseVectorPen, dispatch(UiAction::SelectBrush { id: *pen }), None)),
             NoticeCopy::Vector { reason: VectorRefusal::Setting { id, .. }, .. } => Some(self.notice_choice(copy, NoticeActionId::ResetSetting, dispatch(UiAction::ResetToolSetting { id: (*id).into() }), None)),
@@ -221,8 +223,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             }),
         };
         let paint = match copy {
-            NoticeCopy::Vector { reason: VectorRefusal::Tool { below: true }, .. } => new_layer(LayerAction::NewBelow, NoticeActionId::NewPaintLayerBelow),
-            _ => new_layer(LayerAction::New { group: false, clipped: false }, NoticeActionId::NewPaintLayer),
+            NoticeCopy::Vector { reason: VectorRefusal::Tool { below: true }, .. } => new_layer(NoticeRun::PaintLayerUnder, NoticeActionId::NewPaintLayerBelow),
+            _ => new_layer(dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }), NoticeActionId::NewPaintLayer),
         };
         first.into_iter().chain([paint, self.notice_choice(copy, NoticeActionId::RasterizeLayer, dispatch(UiAction::Invoke { command: CommandId::RasterizeLayer }),
             (!rasterize.enabled).then(|| rasterize.disabled_reason.clone().unwrap_or_default()))]).collect()
@@ -271,6 +273,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.layer_tools.tool = LayerCanvasTool::Paint;
         self.refresh_tools();
         Ok(())
+    }
+
+    pub(super) fn dismiss_other_brush_refusal(&mut self, brush: u32) {
+        if matches!(&self.notices.copy, Some(NoticeCopy::Vector { reason: VectorRefusal::Setting { pen, .. }, .. }) if *pen != brush) { self.dismiss_notice(); }
     }
 
     pub(super) fn dismiss_notice(&mut self) {
@@ -339,6 +345,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             NoticeRun::Bake(kind) => {
                 self.bake(kind)?;
                 Ok(self.changed(regions::DOCUMENT | regions::COMMANDS, true))
+            }
+            NoticeRun::PaintLayerUnder => {
+                self.new_paint_layer_under()?;
+                self.refresh_document();
+                Ok(self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true))
             }
         }
     }
@@ -455,8 +466,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.raise_notice(copy.text(self.localization()), vec![action]);
         self.notices.copy = Some(copy);
     }
-    pub(super) fn offer_flatten(&mut self, hidden: usize) {
-        let copy = NoticeCopy::Flatten { hidden };
+    pub(super) fn offer_flatten(&mut self, hidden: usize, names: Vec<std::sync::Arc<str>>) {
+        let copy = NoticeCopy::Flatten { hidden, names };
         let action = self.notice_choice(&copy, NoticeActionId::Flatten, NoticeRun::Dispatch(Box::new(UiAction::Layer { action: LayerAction::Flatten })), None);
         self.raise_notice(copy.text(self.localization()), vec![action]);
         self.notices.copy = Some(copy);

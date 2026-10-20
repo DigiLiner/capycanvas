@@ -209,6 +209,7 @@ impl Document {
         let (top, bottom) = (plain(upper)?, plain(lower)?);
         let (OccurrenceContent::Vector(top_object), OccurrenceContent::Vector(bottom_object)) = (&top.content, &bottom.content) else { return None };
         let (paths, base) = (self.artwork.vectors.get(*top_object)?, self.artwork.vectors.get(*bottom_object)?);
+        if !paths.holds_only_known_paths() { return None; }
         let [ux, uy] = scene.occurrence_offset64(upper);
         let [lx, ly] = scene.occurrence_offset64(lower);
         let moved = paths.transformed(Affine64([1., 0., 0., 1., ux - lx, uy - ly])).ok()?;

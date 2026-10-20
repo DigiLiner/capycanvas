@@ -18,3 +18,4 @@ objects-action-use-brush = { $brush }を使う
 objects-action-reset-setting = { $setting }をリセット
 objects-action-new-paint-layer-below = 下に新規ペイントレイヤー
 objects-merge-turns-paths-into-pixels = 結合すると「{ $layers }」のパスはピクセルになります。
+objects-flatten-discards-hidden-layers-and-paths = 統合すると、非表示のレイヤー{ $count }個が破棄され、「{ $layers }」のパスはピクセルになります。

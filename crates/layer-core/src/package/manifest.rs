@@ -7,7 +7,7 @@ use super::values::{DecodeError, DecodeResult};
 #[derive(Clone, Copy, Debug)]
 pub struct ManifestLimits { pub metadata_bytes: usize, pub graph: GraphLimits, pub resources: usize, pub traversal_nodes: usize }
 impl Default for ManifestLimits {
-    fn default() -> Self { Self { metadata_bytes: 64 * 1024 * 1024, graph: GraphLimits::default(), resources: 262_144, traversal_nodes: 4_194_304 } }
+    fn default() -> Self { Self { metadata_bytes: 64 * 1024 * 1024, graph: GraphLimits::default(), resources: 262_144, traversal_nodes: super::json::MAX_JSON_NODES } }
 }
 #[derive(Debug)]
 pub enum ManifestRead { Known(Manifest), UnsupportedEnvelope(Value), Limited { value: Value, reason: String } }
@@ -98,7 +98,7 @@ fn shape(record: &Value, refs: &[PortableId], context: RecordContext, reasons: &
         RecordKind::Stack => Shape::Stack { entries: data.get("entries").map_or(Ok(Vec::new()), |v| array(v)?.iter().map(reference).collect())? },
         RecordKind::Occurrence => {
             let content = object(required(data, "content")?)?;
-            let alternatives: &[&str] = &["paint", "stack", "effect", "selection", "objects"];
+            let alternatives: &[&str] = &["paint", "stack", "effect", "selection", "object"];
             let recognized: Vec<_> = alternatives.iter().copied().filter(|key| content.contains_key(*key)).collect();
             if content.is_empty() || recognized.len() > 1 { return Err("Invalid occurrence content".into()); }
             if extras(content, alternatives) { reasons.insert("Unknown occurrence content"); }
@@ -107,7 +107,7 @@ fn shape(record: &Value, refs: &[PortableId], context: RecordContext, reasons: &
                 Some("stack") => Some(Content::Group(reference(&content["stack"])?)),
                 Some("effect") => Some(Content::Effect(reference(&content["effect"])?)),
                 Some("selection") => Some(Content::Selection(reference(&content["selection"])?)),
-                Some("objects") => Some(Content::Objects(reference(&content["objects"])?)),
+                Some("object") => Some(Content::Objects(reference(&content["object"])?)),
                 _ => None,
             };
             if let Some(offset) = data.get("offset") { integer_offset(offset)?; }
@@ -152,14 +152,14 @@ pub(crate) fn resource_supported(record: &Value) -> Result<bool, String> {
     let data = object(required(fields, "data")?)?;
     let encoding = string(required(fields, "encoding")?)?;
     let name = kind(record)?;
-    let compressed = encoding == "capy.lz4-bytes/1";
+    let compressed = super::resources::WRAPPERS.contains(&encoding);
     if compressed { decimal_u64(required(data, "decoded_bytes")?)?; }
-    else if matches!(encoding, "raw" | "utf8" | "capy.rgb-f32/1" | "capy.lz4-tile/1" | "capy.lz4-coverage/1" | "capy.vector-records/1") && data.contains_key("decoded_bytes") {
+    else if matches!(encoding, "raw" | "utf8" | "capy.rgb-f32/1" | "capy.lz4-tile/1" | "capy.deflate-tile/1" | "capy.lz4-coverage/1" | "capy.vector-records/1") && data.contains_key("decoded_bytes") {
         return Err("Decoded length on an unwrapped resource".into());
     }
     let Some(descriptor) = registry::descriptor(name).filter(|record| record.role == RecordRole::Resource) else { return Ok(false); };
     let encoding_supported = match descriptor.kind {
-        RecordKind::RasterTile => encoding == "capy.lz4-tile/1",
+        RecordKind::RasterTile => matches!(encoding, "capy.lz4-tile/1" | "capy.deflate-tile/1"),
         RecordKind::SelectionCoverage => encoding == "capy.lz4-coverage/1",
         RecordKind::VectorItems => compressed || encoding == "capy.vector-records/1",
         RecordKind::Icc => compressed || encoding == "raw",
@@ -171,7 +171,7 @@ pub(crate) fn resource_supported(record: &Value) -> Result<bool, String> {
     let mut values_supported = true;
     let enums: &[(&str, &[&str])] = match descriptor.kind {
         RecordKind::RasterTile => &[("channels", &["coverage", "gray", "gray_alpha", "rgb", "rgba", "cmyk"]),
-            ("depth", &["u8", "u16", "f16", "f32"]), ("transfer", &["linear", "srgb", "profile"]), ("alpha", &["none", "straight", "premultiplied_linear"])],
+            ("depth", &["u8", "u16", "f16", "f32"]), ("transfer", &["linear", "profile"]), ("alpha", &["none", "straight"])],
         RecordKind::SelectionCoverage => &[("depth", &["u4", "u8"])],
         RecordKind::PhotoMetadata => &[("kind", &["exif", "xmp", "iptc"])],
         _ => &[],
@@ -299,12 +299,18 @@ impl Manifest {
         let mut graph = GraphShape { outputs: outputs.clone(), default_output, resources: resources.keys().copied().collect(), ..Default::default() };
         let mut required_resources = BTreeSet::new();
         let mut ancillary_resources = BTreeSet::new();
+        let mut slot_resources = BTreeSet::new();
         for (id, record) in &objects {
             let refs = references(record, limits.traversal_nodes)?;
             let shape = shape(record, &refs, context, &mut reasons)?;
             let ancillary = matches!(shape, Shape::Unknown { ancillary: true, .. });
+            let slotted = match (&shape, record["data"].get("slots")) {
+                (Shape::VectorObject { .. }, Some(slots)) => references(slots, limits.traversal_nodes)?,
+                _ => Vec::new(),
+            };
             let targets = if ancillary { &mut ancillary_resources } else { &mut required_resources };
-            targets.extend(refs.iter().filter(|id| resources.contains_key(id)).copied());
+            targets.extend(refs.iter().filter(|id| resources.contains_key(id) && !slotted.contains(id)).copied());
+            slot_resources.extend(slotted.into_iter().filter(|id| resources.contains_key(id)));
             graph.objects.insert(*id, shape);
         }
         if let Some(metadata) = &metadata {
@@ -332,7 +338,7 @@ impl Manifest {
             let location = object(required(object(&record.value)?, "location")?)?;
             let location_supported = (directory.is_none() || record.range.is_some()) && !extras(location, if location.contains_key("member") { &["member"] } else { &["pack", "offset"] });
             if !location_supported { reasons.insert("Unknown resource location"); }
-            if !resource_supported(&record.value)? && (required_resources.contains(id) || !ancillary_resources.contains(id)) { reasons.insert("Unknown required resource"); }
+            if !resource_supported(&record.value)? && (required_resources.contains(id) || !ancillary_resources.contains(id) && !slot_resources.contains(id)) { reasons.insert("Unknown required resource"); }
         }
         for member in directory.into_iter().flat_map(|d|d.members.iter()) {
             if data_name(&member.name) {

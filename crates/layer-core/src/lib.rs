@@ -924,6 +924,7 @@ impl BrushSnapshot {
         contact.bristles.is_none() && contact.dry.is_none() && contact.paper == 0. && contact.edge_roughness == 0.
             && contact.fiber_strength == 0. && contact.pooling == 0. && contact.depletion == 0.
             && self.tip == BrushTip::AnalyticEllipse && self.execution_class() == BrushExecution::Dry && self.grain.is_none()
+            && self.hardness >= contact_presets::PEN_HARDNESS && self.flow >= contact_presets::PEN_FLOW
             && (self.aspect - 1.).abs() < 1e-3 && self.transport.is_none() && self.shape.count <= 1
             && self.shape.size_jitter == 0. && self.shape.count_jitter == 0.
             && self.color_dynamics.stamp_hue_jitter == 0. && self.color_dynamics.stamp_saturation_jitter == 0.
