@@ -394,7 +394,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         let id = binding
             .filter(|id| self.items().iter().any(|i| &i.id == id))
             .or(prior_workspace)
-            .unwrap_or_else(|| DEFAULT_WORKSPACES[1].0.into());
+            .unwrap_or_else(|| DEFAULT_WORKSPACES[0].0.into());
         self.prepare_startup(&id, now).await
     }
 

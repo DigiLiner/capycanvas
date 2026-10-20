@@ -48,6 +48,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
   const directory=process.env.LAYER_TEST_ARTIFACTS || '/tmp/capy-workspace-evidence/web'; await mkdir(directory,{recursive:true});
   const shot=async name=>{const s=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${name}.png`,Buffer.from(s.data,'base64'));};
   await evaluate(`window.workspaceTestEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{workspaceTestEvents.push({type,target:e.target.outerHTML.slice(0,150),x:e.clientX,y:e.clientY,prevented:e.defaultPrevented,active:document.activeElement?.outerHTML.slice(0,80)});if(workspaceTestEvents.length>40)workspaceTestEvents.shift();},{capture:true});`);
+  await send({type:"workspace_manager",command:{type:"switch",id:"builtin:workspace:illustrator"}});
   await idle(); await send({type:"set_theme",theme:process.env.CAPY_TEST_THEME || "dark"}); const original = (await view()).id, originalCapture = await capture(), originalLayout = await evaluate('layerApp.state().workspace.layout'); let created;
   try {
     console.log('Workspace UI: opening manager'); await menu('Manage Workspaces…');

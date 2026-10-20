@@ -169,7 +169,7 @@ retain their ordinary docked Properties panels.
 
 ## Workspace behavior
 
-- Fresh installations open Paint. Startup resumes the saved workspace when
+- Fresh installations open Sketch. Startup resumes the saved workspace when
   available. If another window owns it, reuse an available built-in (Paint,
   Sketch, then Photo), then an existing user workspace; only when every
   workspace is in use does the window create a copy named after its source.

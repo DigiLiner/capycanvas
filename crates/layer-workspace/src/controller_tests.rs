@@ -1457,7 +1457,7 @@ fn assert_started<S: WorkspaceStore + 'static>(
     assert!(!controller.view.busy, "{context}");
     assert_eq!(
         controller.manager.current().map(|e| e.id),
-        Some(DEFAULT_WORKSPACES[1].0.to_string()),
+        Some(DEFAULT_WORKSPACES[0].0.to_string()),
         "{context}"
     );
     assert!(host.session.capture_workspace().is_ok(), "{context}");
@@ -1481,6 +1481,36 @@ fn startup_on_every_platform_adopts_from_empty_or_unusable_storage() {
             )
         );
     }
+}
+
+#[test]
+fn startup_on_every_platform_restores_the_last_selected_workspace() {
+    pollster::block_on(async {
+        for platform in Platform::ALL {
+            let store = Store(Rc::new(Backend::default()));
+            store.0.now.set(1000);
+            let mut manager = WorkspaceManager::new(store.clone(), platform);
+            let incoming = manager.initialize(1000).await.unwrap();
+            manager.activate(incoming);
+            let custom = manager.create_workspace("My Workspace", 1000).await.unwrap();
+            let custom_id = custom.entity.id.clone();
+            manager.release(&custom).await;
+            for id in [DEFAULT_WORKSPACES[1].0, DEFAULT_WORKSPACES[2].0, DEFAULT_WORKSPACES[0].0, &custom_id] {
+                let incoming = manager.prepare_switch(id, 1000).await.unwrap();
+                let expected = incoming.entity.capture().unwrap();
+                let outgoing = manager.activate(incoming).unwrap();
+                manager.release(&outgoing).await;
+                manager.close().await.unwrap();
+
+                manager = WorkspaceManager::new(store.clone(), platform);
+                let restored = manager.initialize(1000).await.unwrap();
+                assert_eq!(restored.entity.id, id, "{platform:?}");
+                assert_eq!(restored.entity.capture().unwrap(), expected, "{platform:?}: {id}");
+                manager.activate(restored);
+            }
+            manager.close().await.unwrap();
+        }
+    });
 }
 
 #[test]
@@ -1661,7 +1691,7 @@ fn workspace_projection_uses_one_identity_without_publishing_or_dirtying() {
         assert_eq!(manager.active_name().as_deref(), Some(expected.as_str()));
         assert_eq!(manager.binding().unwrap().name, expected);
         assert_eq!(manager.details(&stored, true, 1000).title, expected);
-        let rows = manager.rows(ManagerPage::Workspaces, "Ｐａｉｎｔ", 1000);
+        let rows = manager.rows(ManagerPage::Workspaces, "Ｓｋｅｔｃｈ", 1000);
         assert_eq!(rows[0].title, expected);
         let prompt = manager.form_prompt(&ManagerAction::Delete(id), Some(&stored.entity.metadata)).unwrap();
         assert!(prompt.message.contains(&expected));
