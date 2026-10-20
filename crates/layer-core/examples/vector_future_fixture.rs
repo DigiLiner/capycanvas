@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut newer = ImageObject::new(fallback);
     newer.affine = layer_core::authored::Affine64([2., 0., 0., 2., 30., 20.]);
     newer.vector = Some(PreservedVector(Arc::from([(serde_json::json!({"records": 1}), Resource::new(items))]),
-        Arc::from([Slot::Resource(resource), Slot::Image(texture)])));
+        Arc::from([Slot::Resource(resource), Slot::Image(texture)]), Some(3)));
     let mut editor = Editor::new(layer_core::Document::from_artwork(Artwork::new([256, 192])?)?);
     let (_, edit) = editor.document().create_object_layer_edit("Newer", newer, None, 0)?;
     editor.perform(edit)?;

@@ -214,8 +214,9 @@ impl Document {
         let [lx, ly] = scene.occurrence_offset64(lower);
         let moved = paths.transformed(Affine64([1., 0., 0., 1., ux - lx, uy - ly])).ok()?;
         let mut taken = BTreeSet::new();
+        let mut fresh = base.allocate_ids().filter(|id| !moved.contains(*id));
         let records = moved.paths().map(|(_, path)| {
-            let id = if base.contains(path.id) || !taken.insert(path.id) { loop { let id = base.allocate_id(); if !moved.contains(id) && taken.insert(id) { break id; } } } else { path.id };
+            let id = if base.contains(path.id) || !taken.insert(path.id) { fresh.next().unwrap_or_default() } else { path.id };
             vector::Record::Path(vector::PathItem { id, ..path.clone() })
         }).collect();
         let mut edits = vec![Edit::Vector(RecordChange::replace(&self.artwork.vectors, *bottom_object, Some(base.insert_front(records))).ok()?)];

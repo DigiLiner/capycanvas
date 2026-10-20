@@ -36,7 +36,7 @@ fn chunk(records: Vec<Record>) -> VectorChunk { VectorChunk::new(records) }
 fn round_trip(records: Vec<Record>) -> (Vec<u8>, VectorChunk) {
     let original = chunk(records);
     let bytes = encode_chunk(&original);
-    let decoded = decode_chunk(&bytes, original.records().len(), &mut 0, 0).unwrap();
+    let decoded = decode_chunk(&bytes, original.records().len(), &mut Reading::default()).unwrap();
     assert_eq!(decoded, original);
     assert_eq!(encode_chunk(&decoded), bytes);
     (bytes, decoded)
@@ -46,7 +46,7 @@ fn record_bytes(kind: u64, id: u64, properties: &[(u64, Vec<u8>)]) -> Vec<u8> {
     for (tag, value) in properties { put_varuint(&mut props, *tag); put_varuint(&mut props, value.len() as u64); props.extend_from_slice(value); }
     let mut out = Vec::new();
     put_varuint(&mut out, kind);
-    if kind != 0 { out.extend_from_slice(&id.to_le_bytes()); put_varuint(&mut out, props.len() as u64); out.extend(props); }
+    if kind != 0 { put_varuint(&mut out, id); put_varuint(&mut out, props.len() as u64); out.extend(props); }
     out
 }
 fn geometry_bytes() -> Vec<u8> {
@@ -68,7 +68,7 @@ fn every_v0_property_round_trips_canonically() {
 #[test]
 fn defaults_are_omitted_and_framing_is_minimal() {
     let (bytes, _) = round_trip(vec![Record::Path(PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.])], false)]).unwrap()), Arc::default()))]);
-    assert_eq!(bytes.len(), 1 + 8 + 1 + 2 + 3 + 25);
+    assert_eq!(bytes.len(), 1 + 1 + 1 + 2 + 3 + 3);
 }
 
 #[test]
@@ -88,9 +88,9 @@ fn unknown_ignorable_data_survives_and_required_data_is_unsupported() {
     let geometry = geometry_bytes();
     let keep = tag_word(900, IGNORABLE | COPY_SAFE, ValueClass::Data);
     let volatile = tag_word(901, IGNORABLE, ValueClass::Nested);
-    let nested = record_bytes(kind_word(77) | IGNORABLE, 0, &[(tag_word(3, IGNORABLE, ValueClass::Items), 42u64.to_le_bytes().to_vec())]);
+    let nested = record_bytes(kind_word(77) | IGNORABLE, 0, &[(tag_word(3, IGNORABLE, ValueClass::Items), vec![42])]);
     let bytes = record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (keep, vec![1, 2, 3]), (volatile, nested.clone())]);
-    let chunk = decode_chunk(&bytes, 1, &mut 0, 0).unwrap();
+    let chunk = decode_chunk(&bytes, 1, &mut Reading::default()).unwrap();
     assert_eq!(encode_chunk(&chunk), bytes);
     let Record::Path(path) = &chunk.records()[0] else { panic!() };
     let moved = path.with_geometry(path.geometry.clone());
@@ -98,14 +98,14 @@ fn unknown_ignorable_data_survives_and_required_data_is_unsupported() {
     let renamed = PathItem { name: Some("Renamed".into()), ..path.clone() };
     assert_eq!(renamed.unknown, path.unknown);
 
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, 0, ValueClass::Data), vec![])]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, IGNORABLE | 16, ValueClass::Data), vec![])]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (WIDTH, 1f64.to_le_bytes().to_vec())]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50), 3, &[]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | IGNORABLE | KIND_PARENT | 8, 3, &[]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | COPY_SAFE, 3, &[]), 1, &mut 0, 0)));
-    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (FILL_RULE, vec![7])]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry), (FILL_RULE, vec![0, 0])]), 1, &mut 0, 0)));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, 0, ValueClass::Data), vec![])]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (tag_word(902, IGNORABLE | 16, ValueClass::Data), vec![])]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (WIDTH, 1f64.to_le_bytes().to_vec())]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50), 3, &[]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | IGNORABLE | KIND_PARENT | 8, 3, &[]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(kind_word(50) | COPY_SAFE, 3, &[]), 1, &mut Reading::default())));
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (FILL_RULE, vec![7])]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry), (FILL_RULE, vec![0, 0])]), 1, &mut Reading::default())));
 }
 
 #[test]
@@ -115,40 +115,40 @@ fn unknown_parents_are_atomic_and_may_span_chunks() {
     first.extend(encode_chunk(&chunk(vec![line(12, &[[0., 0.], [1., 1.]], 1.)])));
     let mut second = record_bytes(0, 0, &[]);
     second.extend(encode_chunk(&chunk(vec![line(13, &[[2., 2.], [3., 3.]], 1.)])));
-    let chunks = decode_object(&[(&first, 2), (&second, 2)], 0).unwrap();
+    let chunks = decode_object(&[(&first, 2), (&second, 2)], &mut Reading::default()).unwrap();
     assert!(matches!(chunks[0].records()[0], Record::Opaque(_)));
     assert!(matches!(chunks[0].records()[1], Record::Opaque(_)), "children of an unknown parent stay uninterpreted");
     assert!(matches!(chunks[1].records()[0], Record::End));
     assert!(matches!(chunks[1].records()[1], Record::Path(_)));
     assert_eq!(encode_chunk(&chunks[0]), first);
     assert_eq!(encode_chunk(&chunks[1]), second);
-    assert!(matches!(decode_object(&[(&first, 2)], 0), Err(DecodeError::Invalid(_))));
-    assert!(matches!(decode_object(&[(&second, 2)], 0), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&first, 2)], &mut Reading::default()), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&second, 2)], &mut Reading::default()), Err(DecodeError::Invalid(_))));
 }
 
 #[test]
 fn malformed_framing_is_invalid() {
     let good = encode_chunk(&chunk(vec![line(1, &[[0., 0.], [3., 1.]], 2.)]));
-    for cut in 1..good.len() { assert!(decode_chunk(&good[..cut], 1, &mut 0, 0).is_err(), "truncated at {cut}"); }
-    assert!(is_invalid(decode_chunk(&good, 2, &mut 0, 0)));
+    for cut in 1..good.len() { assert!(decode_chunk(&good[..cut], 1, &mut Reading::default()).is_err(), "truncated at {cut}"); }
+    assert!(is_invalid(decode_chunk(&good, 2, &mut Reading::default())));
     let mut padded = good.clone();
     padded.push(0);
-    assert!(is_invalid(decode_chunk(&padded, 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&padded, 1, &mut Reading::default())));
     let mut overlong = vec![PATH as u8 | 0x80, 0];
     overlong.extend_from_slice(&good[1..]);
-    assert!(is_invalid(decode_chunk(&overlong, 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&overlong, 1, &mut Reading::default())));
     let geometry = geometry_bytes();
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(FILL_RULE, vec![1]), (GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 0, &[(GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH | IGNORABLE, 8, &[(GEOMETRY, geometry.clone())]), 1, &mut 0, 0)));
-    let mut nan = geometry.clone();
-    let at = nan.len() - 4;
-    nan[at..].copy_from_slice(&f32::NAN.to_le_bytes());
-    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, nan)]), 1, &mut 0, 0)));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(FILL_RULE, vec![1]), (GEOMETRY, geometry.clone())]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, geometry.clone()), (GEOMETRY, geometry.clone())]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 0, &[(GEOMETRY, geometry.clone())]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&record_bytes(PATH | IGNORABLE, 8, &[(GEOMETRY, geometry.clone())]), 1, &mut Reading::default())));
+    let mut far = vec![1, 1, 0, 0];
+    put_zigzag(&mut far, 1 << 31);
+    put_zigzag(&mut far, 0);
+    assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, far)]), 1, &mut Reading::default())));
     let two = [encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)])), encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)]))];
-    assert!(matches!(decode_object(&[(&two[0], 1), (&two[1], 1)], 0), Err(DecodeError::Invalid(_))));
+    assert!(matches!(decode_object(&[(&two[0], 1), (&two[1], 1)], &mut Reading::default()), Err(DecodeError::Invalid(_))));
 }
 
 #[test]
@@ -171,11 +171,11 @@ fn seeded_byte_mutations_never_panic_and_decode_to_stable_records() {
             }
             if bytes.is_empty() { break; }
         }
-        let Ok(chunk) = decode_chunk(&bytes, records.len(), &mut 0, 0) else { continue };
+        let Ok(chunk) = decode_chunk(&bytes, records.len(), &mut Reading::default()) else { continue };
         decoded += 1;
         let again = encode_chunk(&chunk);
-        assert_eq!(decode_chunk(&again, chunk.records().len(), &mut 0, 0).as_ref(), Ok(&chunk));
-        assert_eq!(encode_chunk(&decode_chunk(&again, chunk.records().len(), &mut 0, 0).unwrap()), again);
+        assert_eq!(decode_chunk(&again, chunk.records().len(), &mut Reading::default()).as_ref(), Ok(&chunk));
+        assert_eq!(encode_chunk(&decode_chunk(&again, chunk.records().len(), &mut Reading::default()).unwrap()), again);
     }
     assert!(decoded > 0, "some mutations land in values that stay valid");
 }
@@ -202,13 +202,13 @@ fn seeded_unknown_properties_survive_every_position() {
         let flags = next() % 4;
         let class = [ValueClass::Data, ValueClass::Items, ValueClass::Nested][(next() % 3) as usize];
         let value = match class {
-            ValueClass::Items => (0..next() % 3).flat_map(|_| next().to_le_bytes()).collect(),
+            ValueClass::Items => (0..next() % 3).fold(Vec::new(), |mut list, _| { put_varuint(&mut list, 1 + next() % 1000); list }),
             ValueClass::Nested => record_bytes(kind_word(500 + next() % 50) | IGNORABLE, next(), &[]),
             _ => (0..next() % 9).map(|_| next() as u8).collect(),
         };
         let tag = tag_word(number, flags, class);
         let bytes = record_bytes(PATH, 1 + next() % 1000, &[(GEOMETRY, geometry_bytes()), (tag, value)]);
-        let decoded = decode_chunk(&bytes, 1, &mut 0, 0);
+        let decoded = decode_chunk(&bytes, 1, &mut Reading::default());
         if flags & IGNORABLE == 0 { assert!(is_unsupported(decoded)); continue; }
         let chunk = decoded.unwrap();
         assert_eq!(encode_chunk(&chunk), bytes);
@@ -444,7 +444,7 @@ fn rotated(id: u64, kind: ShapeKind, rotation: f64) -> PathItem {
 }
 fn near(a: &PathGeometry, b: &PathGeometry) -> bool {
     a.anchor_count() == b.anchor_count() && a.subpaths().iter().zip(b.subpaths()).all(|(a, b)| a.anchors().zip(b.anchors()).all(|(a, b)|
-        a.bits().iter().zip(b.bits()).all(|(x, y)| (x - y).abs() < 2e-3)))
+        a.bits().iter().zip(b.bits()).all(|(x, y)| f64::from((x - y).abs()) <= 3. / GRID)))
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn live_shapes_round_trip_and_detach_when_a_foreign_writer_changed_their_geometr
     let recipe = encode_shape(edited.shape.as_ref().unwrap(), fingerprint(edited));
     let moved = PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([5., 5.])], false)]).unwrap();
     let stale = record_bytes(PATH, 1, &[(GEOMETRY, encode_geometry(&moved)), (STYLE, encode_style(&edited.style)), (LIVE_SHAPE, recipe)]);
-    let reopened = decode_chunk(&stale, 1, &mut 0, 0).unwrap();
+    let reopened = decode_chunk(&stale, 1, &mut Reading::default()).unwrap();
     let path = reopened.records()[0].path().unwrap();
     assert_eq!(path.shape, None, "a recipe whose fingerprint no longer matches detaches");
     assert_eq!(*path.geometry, moved, "and leaves the geometry unchanged");
@@ -469,7 +469,8 @@ fn live_shapes_round_trip_and_detach_when_a_foreign_writer_changed_their_geometr
 
 #[test]
 fn polygons_and_stars_keep_their_recipe_through_turns_flips_and_stretches() {
-    let corners = |geometry: &PathGeometry| { let mut p: Vec<[i64; 2]> = geometry.subpaths()[0].anchors().map(|a| a.point().map(|v| (v * 1000.).round() as i64)).collect(); p.sort(); p };
+    let corners = |geometry: &PathGeometry| { let mut p: Vec<[f64; 2]> = geometry.subpaths()[0].anchors().map(|a| a.point()).collect(); p.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1]))); p };
+    let regridded = |a: Vec<[f64; 2]>, b: Vec<[f64; 2]>| a.len() == b.len() && a.iter().zip(&b).all(|(a, b)| (0..2).all(|i| (a[i] - b[i]).abs() <= 3. / GRID));
     let polygon = LiveShape { kind: ShapeKind::Polygon { corners: 5 }, center: [50., 50.], size: [40., 40.], rotation: 0. };
     let star = LiveShape { kind: ShapeKind::Star { points: 5, inner: 0.5 }, ..polygon };
     for (shape, count) in [(polygon, 5), (star, 10)] {
@@ -480,11 +481,11 @@ fn polygons_and_stars_keep_their_recipe_through_turns_flips_and_stretches() {
         assert!((top[0] - 50.).abs() < 1e-9 && (top[1] - 30.).abs() < 1e-9, "the first corner is at the top: {top:?}");
         for affine in [Affine64([1., 0., 0., -1., 0., 100.]), Affine64([-1., 0., 0., 1., 100., 0.]), Affine64([0., 1., -1., 0., 100., 0.]), Affine64([2., 0., 0., 1., 0., 0.])] {
             let moved = shape.transformed(affine).expect("a frame-aligned map keeps the recipe");
-            assert_eq!(corners(&moved.geometry().unwrap()), corners(&geometry.transformed(|p| affine.map(p)).unwrap()), "{affine:?}");
+            assert!(regridded(corners(&moved.geometry().unwrap()), corners(&geometry.transformed(|p| affine.map(p)).unwrap())), "{affine:?}");
         }
     }
     let inner = |shape: &LiveShape| { let p = shape.geometry().unwrap().subpaths()[0].anchor(1).point(); (p[0] - 50.).hypot(p[1] - 50.) };
-    assert!((inner(&star) - 10.).abs() < 1e-4, "inner points sit at half the radius");
+    assert!((inner(&star) - 10.).abs() <= 1. / GRID, "inner points sit at half the radius");
     for kind in [ShapeKind::Polygon { corners: 2 }, ShapeKind::Star { points: 101, inner: 0.5 }, ShapeKind::Star { points: 5, inner: 0. }] {
         assert!(!kind.valid() && LiveShape { kind, ..polygon }.geometry().is_err(), "{kind:?}");
     }
@@ -542,6 +543,22 @@ fn vector_fixture_reopens_every_feature_and_saves_byte_for_byte() {
     let hatching = layer("Hatching");
     assert_eq!((hatching.path_count(), hatching.chunks().len()), (65, 2), "a full chunk and one more");
     assert_eq!(layer("Empty").path_count(), 0);
+    let codes = layer("Codes");
+    let colors: BTreeSet<(u8, bool)> = codes.paths().flat_map(|(_, p)| p.style.entries.iter()).filter_map(|e| match e {
+        PaintEntry::Fill(Fill { paint: Paint::Color { color, .. }, .. }) => Some((color.space as u8, color.linear_rgb.is_some())), _ => None }).collect();
+    assert_eq!(colors.len(), 8, "every color space in both forms");
+    let anchors: Vec<Anchor> = codes.paths().flat_map(|(_, p)| p.geometry.subpaths()[0].to_vec()).collect();
+    assert!(anchors.iter().any(|a| a.kind == AnchorKind::SYMMETRIC && a.in_handle() == a.out_handle().map(|v| -v) && a.out_handle() != [0.; 2]), "a symmetric anchor with an implied in-handle");
+    assert!(anchors.iter().any(|a| a.kind == AnchorKind::SYMMETRIC && a.out_handle() == [0.; 2] && a.in_handle() != [0.; 2]), "a symmetric anchor with an explicit in-handle");
+    assert!(codes.paths().any(|(_, p)| p.unknown.as_ref().is_some_and(|u| u.iter().any(|p| p.tag >> 2 & 3 == ValueClass::Items as u64))), "an Items-class unknown property");
+    assert_eq!((codes.next_item(), codes.paths().map(|(_, p)| p.id.0).max()), (15, Some(10)), "the next item stays past deleted identities");
+    let manifest = |bytes: &[u8]| -> serde_json::Value {
+        let directory = super::archive::Directory::read(&mut std::io::Cursor::new(bytes), 16, 1 << 20).unwrap();
+        serde_json::from_slice(&directory.read_member(&mut std::io::Cursor::new(bytes), directory.member("manifest.json").unwrap(), 1 << 20).unwrap()).unwrap()
+    };
+    let resources = manifest(&bytes)["resources"].as_array().unwrap().clone();
+    assert!(resources.iter().any(|r| r["type"] == "capy.vector-items/1" && r["encoding"] == "capy.vector-records/1"), "a raw chunk");
+    assert!(resources.iter().any(|r| r["type"] == "capy.vector-items/1" && r["encoding"] == "capy.lz4-bytes/1"), "a compressed chunk");
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let capture = editor.capture(0, Default::default()).unwrap();
     let mut saved = Vec::new();
@@ -550,7 +567,7 @@ fn vector_fixture_reopens_every_feature_and_saves_byte_for_byte() {
 }
 
 #[test]
-fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
+fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_lower_the_next_item() {
     let mut state = 0x2545_f491_4f6c_dd1du64;
     let mut next = move || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
     let unknown = |number: u64, flags: u64| UnknownProperty { tag: tag_word(number, flags, ValueClass::Data), value: Arc::from(&number.to_le_bytes()[..]) };
@@ -561,7 +578,6 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
         Record::Path(path)
     };
     let mut object = VectorObject::from_records((1..=150).map(decorated).collect());
-    let mut issued: BTreeSet<ItemId> = object.paths().map(|(_, p)| p.id).collect();
     let mut history = vec![object.clone()];
     let pick = |object: &VectorObject, at: u64| object.paths().nth(at as usize % object.path_count().max(1)).map(|(_, p)| p.id);
     for _ in 0..400 {
@@ -591,16 +607,17 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
             3 => match pick(&object, next()) { Some(id) => object.replace([(object.find(id).unwrap(), None)]), None => continue },
             4 => {
                 let id = object.allocate_id();
-                assert!(issued.insert(id), "a new path never reuses an issued identity");
+                assert!(object.paths().all(|(_, p)| p.id < id), "a new path follows every identity in its object");
                 object.insert_front(vec![decorated(id.0)])
             }
             5 if history.len() > 1 => { history.pop(); history.last().unwrap().clone() }
             _ => continue,
         };
-        if step != 5 { history.push(before); history.push(object.clone()); history.swap_remove(history.len() - 2); }
+        if step != 5 { history.push(before.clone()); history.push(object.clone()); history.swap_remove(history.len() - 2); }
+        if step != 5 { assert!(object.next_item() >= before.next_item(), "edits never lower the next item"); }
         object.validate().unwrap();
         let encoded: Vec<(Vec<u8>, usize)> = object.chunks().iter().map(|c| (encode_chunk(c), c.records().len())).collect();
-        let decoded = decode_object(&encoded.iter().map(|(b, n)| (&b[..], *n)).collect::<Vec<_>>(), 0).unwrap();
+        let decoded = decode_object(&encoded.iter().map(|(b, n)| (&b[..], *n)).collect::<Vec<_>>(), &mut Reading::default()).unwrap();
         assert!(decoded.iter().zip(object.chunks()).all(|(a, b)| a.records() == b.records()) && decoded.len() == object.chunks().len(), "every state round-trips exactly");
     }
 }
@@ -720,7 +737,7 @@ fn newer_vector_layers_open_from_their_fallback_locked_and_save_back_unchanged()
     let layer = |bytes: &[u8], records: u64| {
         let mut object = crate::ImageObject::new(image.clone());
         object.affine = crate::authored::Affine64([1., 0., 0., 1., 40., 30.]);
-        object.vector = Some(crate::authored::PreservedVector(Arc::from([(serde_json::json!({"records": records}), crate::authored::Resource::new(Arc::<[u8]>::from(bytes)))]), Arc::default()));
+        object.vector = Some(crate::authored::PreservedVector(Arc::from([(serde_json::json!({"records": records}), crate::authored::Resource::new(Arc::<[u8]>::from(bytes)))]), Arc::default(), Some(records + 7)));
         let mut editor = crate::Editor::new(crate::Document::from_artwork(crate::Artwork::new([200, 150]).unwrap()).unwrap());
         let (_, edit) = editor.document().create_object_layer_edit("Newer", object, None, 0).unwrap();
         editor.perform(edit).unwrap();
@@ -840,7 +857,7 @@ fn colors_caps_and_joins_use_fixed_wire_codes() {
         put_varuint(&mut property, COLOR_VALUE);
         property.extend([18, code, form]);
         assert!(bytes.windows(property.len()).any(|w| w == property), "space {code} form {form}");
-        let decoded = decode_chunk(&bytes, 1, &mut 0, 0).unwrap();
+        let decoded = decode_chunk(&bytes, 1, &mut Reading::default()).unwrap();
         assert_eq!(decoded.records()[0].path().unwrap().style.entries[0], entry);
     }
 }
@@ -848,13 +865,13 @@ fn colors_caps_and_joins_use_fixed_wire_codes() {
 #[test]
 fn slot_values_name_existing_slots_and_stay_behind_when_paths_leave_their_object() {
     let slots = |value: Vec<u8>| record_bytes(PATH, 4, &[(GEOMETRY, geometry_bytes()), (tag_word(1000, IGNORABLE | COPY_SAFE, ValueClass::Slots), value)]);
-    assert!(decode_chunk(&slots(vec![0, 1]), 1, &mut 0, 2).is_ok());
-    assert!(is_invalid(decode_chunk(&slots(vec![0, 2]), 1, &mut 0, 2)));
-    assert!(is_invalid(decode_chunk(&slots(vec![0]), 1, &mut 0, 0)));
-    assert!(is_invalid(decode_chunk(&slots(vec![0x80]), 1, &mut 0, 2)));
-    assert!(decode_chunk(&slots(Vec::new()), 1, &mut 0, 0).is_ok());
+    assert!(decode_chunk(&slots(vec![0, 1]), 1, &mut Reading::slots(2)).is_ok());
+    assert!(is_invalid(decode_chunk(&slots(vec![0, 2]), 1, &mut Reading::slots(2))));
+    assert!(is_invalid(decode_chunk(&slots(vec![0]), 1, &mut Reading::default())));
+    assert!(is_invalid(decode_chunk(&slots(vec![0x80]), 1, &mut Reading::slots(2))));
+    assert!(decode_chunk(&slots(Vec::new()), 1, &mut Reading::default()).is_ok());
     let nested = record_bytes(PATH, 4, &[(GEOMETRY, geometry_bytes()), (tag_word(1001, IGNORABLE, ValueClass::Nested), record_bytes(kind_word(60) | IGNORABLE, 0, &[(tag_word(3, IGNORABLE, ValueClass::Slots), vec![1])]))]);
-    assert!(decode_chunk(&nested, 1, &mut 0, 2).is_ok() && is_invalid(decode_chunk(&nested, 1, &mut 0, 1)));
+    assert!(decode_chunk(&nested, 1, &mut Reading::slots(2)).is_ok() && is_invalid(decode_chunk(&nested, 1, &mut Reading::slots(1))));
 
     let artwork = open(include_bytes!("codec/fixtures/vector-future.capy").to_vec());
     let object = vector(&artwork).clone();

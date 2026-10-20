@@ -1,4 +1,4 @@
-use super::{Affine64, PortableId, Resource};
+use super::{Affine64, Resource};
 use crate::color::RgbColor;
 use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::{BuildHasherDefault, Hasher}, sync::{Arc, OnceLock}};
 
@@ -29,15 +29,6 @@ impl Hasher for IdHasher {
     fn write_u64(&mut self, value: u64) { self.0 = value.wrapping_mul(0x9e37_79b9_7f4a_7c15); }
 }
 type IdSet = HashSet<ItemId, BuildHasherDefault<IdHasher>>;
-impl ItemId {
-    pub fn random() -> Self {
-        loop {
-            let bytes = PortableId::random().bytes();
-            let value = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-            if value != 0 { return Self(value); }
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AnchorKind(pub u8);
@@ -50,17 +41,22 @@ impl AnchorKind {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Anchor { point: [f32; 2], in_handle: [f32; 2], out_handle: [f32; 2], pub kind: AnchorKind }
-fn narrow(v: [f64; 2]) -> [f32; 2] { [v[0] as f32, v[1] as f32] }
+pub const GRID: f64 = 256.;
+pub const MAX_COORDINATE: f64 = 8_388_608.;
+pub fn snap(value: f64) -> f64 { (value * GRID).round() / GRID }
+fn narrow(v: [f64; 2]) -> [f32; 2] { v.map(|value| snap(value) as f32) }
 fn widen(v: [f32; 2]) -> [f64; 2] { [f64::from(v[0]), f64::from(v[1])] }
 impl Anchor {
     pub fn new(point: [f64; 2], in_handle: [f64; 2], out_handle: [f64; 2], kind: AnchorKind) -> Self {
         Self { point: narrow(point), in_handle: narrow(in_handle), out_handle: narrow(out_handle), kind }
     }
     pub fn corner(point: [f64; 2]) -> Self { Self::new(point, [0.; 2], [0.; 2], AnchorKind::CORNER) }
-    pub fn from_bits(values: [f32; 6], kind: AnchorKind) -> Self {
-        let [px, py, ix, iy, ox, oy] = values;
-        Self { point: [px, py], in_handle: [ix, iy], out_handle: [ox, oy], kind }
+    pub fn from_units(units: [i64; 6], kind: AnchorKind) -> Option<Self> {
+        if !units.iter().all(|&unit| unit.unsigned_abs() < 1 << f32::MANTISSA_DIGITS || unit as f32 as i64 == unit) { return None; }
+        let v = units.map(|unit| unit as f32 * (1. / GRID as f32));
+        Some(Self { point: [v[0], v[1]], in_handle: [v[2], v[3]], out_handle: [v[4], v[5]], kind })
     }
+    pub fn units(&self) -> [i64; 6] { self.bits().map(|value| (f64::from(value) * GRID) as i64) }
     pub fn bits(&self) -> [f32; 6] {
         [self.point[0], self.point[1], self.in_handle[0], self.in_handle[1], self.out_handle[0], self.out_handle[1]]
     }
@@ -70,7 +66,7 @@ impl Anchor {
     pub fn with_out_handle(self, handle: [f64; 2]) -> Self { Self { out_handle: narrow(handle), ..self } }
     pub fn incoming(&self) -> [f64; 2] { let [p, h] = [self.point(), self.in_handle()]; [p[0] + h[0], p[1] + h[1]] }
     pub fn outgoing(&self) -> [f64; 2] { let [p, h] = [self.point(), self.out_handle()]; [p[0] + h[0], p[1] + h[1]] }
-    fn finite(&self) -> bool { self.bits().iter().all(|v| v.is_finite()) }
+    fn finite(&self) -> bool { self.bits().iter().all(|v| v.is_finite() && f64::from(v.abs()) < MAX_COORDINATE) }
     pub fn transformed(&self, map: impl Fn([f64; 2]) -> [f64; 2]) -> Self {
         let point = map(self.point());
         let relative = |handle: [f64; 2]| { let [x, y] = map(handle); [x - point[0], y - point[1]] };
@@ -168,7 +164,7 @@ impl PathGeometry {
             anchors += subpath.len();
             segments += subpath.segment_count();
             for anchor in subpath.anchors() {
-                if !anchor.finite() { return Err("Path coordinates must be finite"); }
+                if !anchor.finite() { return Err("Path coordinates must be finite and within the admitted range"); }
                 for point in [anchor.point(), anchor.incoming(), anchor.outgoing()] {
                     if !point.iter().all(|v| v.is_finite()) { return Err("Path coordinates must be finite"); }
                     hull = [hull[0].min(point[0]), hull[1].min(point[1]), hull[2].max(point[0]), hull[3].max(point[1])];
@@ -203,7 +199,6 @@ pub enum Join { #[default] Miter, Round, Bevel }
 pub struct WidthKnot { segment: u32, t: f32, left: f32, right: f32 }
 impl WidthKnot {
     pub fn new(segment: u32, t: f64, left: f64, right: f64) -> Self { Self { segment, t: t as f32, left: left as f32, right: right as f32 } }
-    pub fn from_bits(segment: u32, values: [f32; 3]) -> Self { let [t, left, right] = values; Self { segment, t, left, right } }
     pub fn bits(&self) -> [f32; 3] { [self.t, self.left, self.right] }
     pub fn segment(&self) -> u32 { self.segment }
     pub fn t(&self) -> f64 { f64::from(self.t) }
@@ -290,7 +285,7 @@ impl Stroke {
         half * join.max(cap)
     }
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !(self.width.is_finite() && self.width >= 0.) { return Err("Stroke width must be finite and nonnegative"); }
+        if !(self.width.is_finite() && self.width >= 0. && self.width < MAX_COORDINATE) { return Err("Stroke width must be finite, nonnegative and within the admitted range"); }
         if !(self.miter_limit.is_finite() && self.miter_limit >= 1.) { return Err("Miter limit must be at least one"); }
         Ok(())
     }
@@ -300,7 +295,9 @@ pub enum PaintEntry { Fill(Fill), Stroke(Stroke), Opaque(OpaqueRecord) }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Style { pub entries: Box<[PaintEntry]> }
 impl Style {
-    pub fn new(entries: Vec<PaintEntry>) -> Self { Self { entries: entries.into() } }
+    pub fn new(entries: Vec<PaintEntry>) -> Self {
+        Self { entries: entries.into_iter().map(|entry| match entry { PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: snap(stroke.width), ..stroke }), entry => entry }).collect() }
+    }
     pub fn reach(&self) -> f64 {
         self.entries.iter().map(|e| if let PaintEntry::Stroke(s) = e { s.reach() } else { 0. }).fold(0., f64::max)
     }
@@ -491,9 +488,9 @@ impl PathItem {
     pub fn with_shape(&self, shape: LiveShape) -> Result<Self, &'static str> {
         Ok(Self { shape: Some(Arc::new(shape)), ..self.with_geometry(Arc::new(shape.geometry()?)) })
     }
-    pub fn without_slots(&self) -> Self {
+    pub fn detached(&self, slots: bool) -> Self {
         let keep = |unknown: &Unknown| -> Unknown {
-            let kept: Vec<_> = unknown.iter().flat_map(|u| u.iter()).filter(|p| !matches!(p.tag >> 2 & 3, 2 | 3)).cloned().collect();
+            let kept: Vec<_> = unknown.iter().flat_map(|u| u.iter()).filter(|p| !matches!(p.tag >> 2 & 3, 1 | 3) && (!slots || p.tag >> 2 & 3 != 2)).cloned().collect();
             (!kept.is_empty()).then(|| kept.into())
         };
         let paint = |paint: &Paint| match paint { Paint::Color { color, unknown } => Some(Paint::Color { color: *color, unknown: keep(unknown) }), Paint::Opaque(_) => None };
@@ -519,22 +516,73 @@ impl Record {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ChunkSummary { pub bounds: Option<[f64; 4]>, pub paths: u32, pub anchors: u64, pub opaque: u32 }
+pub struct ChunkSummary { pub bounds: Option<[f64; 4]>, pub paths: u32, pub anchors: u64, pub opaque: u32, pub next_item: u64 }
 impl ChunkSummary {
     fn of(records: &[Record]) -> Self {
         let mut summary = Self::default();
+        let mut highest = 0;
         for record in records {
             match record {
                 Record::Path(path) => {
                     summary.paths += 1;
                     summary.anchors += path.geometry.anchor_count() as u64;
                     if !path.hidden { summary.bounds = Some(union(summary.bounds, path.bounds())); }
+                    highest = highest.max(path.id.0).max(path.referenced());
                 }
-                Record::Opaque(_) => summary.opaque += 1,
+                Record::Opaque(opaque) => { summary.opaque += 1; highest = highest.max(opaque.referenced()); }
                 Record::End => {}
             }
         }
+        summary.next_item = highest.saturating_add(1);
         summary
+    }
+}
+fn varuint(bytes: &[u8], at: &mut usize) -> Option<u64> {
+    let mut value = 0u64;
+    for shift in (0..64).step_by(7) {
+        let byte = *bytes.get(*at)?;
+        *at += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 { return Some(value); }
+    }
+    None
+}
+fn referenced_in(class: u64, value: &[u8], depth: u32) -> u64 {
+    let mut at = 0;
+    let mut highest = 0;
+    match class {
+        1 => while let Some(id) = varuint(value, &mut at) { highest = highest.max(id); },
+        3 if depth < 64 => while let Some(kind) = varuint(value, &mut at) {
+            if kind == 0 { continue; }
+            let (Some(id), Some(length)) = (varuint(value, &mut at), varuint(value, &mut at)) else { break };
+            let Some(properties) = value.get(at..at.saturating_add(length as usize)) else { break };
+            at += properties.len();
+            highest = highest.max(id).max(properties_referenced(properties, depth + 1));
+        },
+        _ => {}
+    }
+    highest
+}
+fn properties_referenced(properties: &[u8], depth: u32) -> u64 {
+    let mut at = 0;
+    let mut highest = 0;
+    while let (Some(tag), Some(length)) = (varuint(properties, &mut at), varuint(properties, &mut at)) {
+        let Some(value) = properties.get(at..at.saturating_add(length as usize)) else { break };
+        at += value.len();
+        highest = highest.max(referenced_in(tag >> 2 & 3, value, depth));
+    }
+    highest
+}
+fn unknown_referenced(unknown: &Unknown) -> u64 { unknown.iter().flat_map(|u| u.iter()).map(|p| referenced_in(p.tag >> 2 & 3, &p.value, 0)).max().unwrap_or(0) }
+impl OpaqueRecord { fn referenced(&self) -> u64 { self.id.max(properties_referenced(&self.properties, 0)) } }
+impl PathItem {
+    fn referenced(&self) -> u64 {
+        let paint = |paint: &Paint| match paint { Paint::Color { unknown, .. } => unknown_referenced(unknown), Paint::Opaque(record) => record.referenced() };
+        self.style.entries.iter().map(|entry| match entry {
+            PaintEntry::Fill(fill) => paint(&fill.paint).max(unknown_referenced(&fill.unknown)),
+            PaintEntry::Stroke(stroke) => paint(&stroke.paint).max(unknown_referenced(&stroke.unknown)),
+            PaintEntry::Opaque(record) => record.referenced(),
+        }).fold(unknown_referenced(&self.unknown), u64::max)
     }
 }
 pub fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
@@ -610,20 +658,22 @@ pub struct Position { pub chunk: u32, pub index: u32 }
 pub enum Slot { Image(super::Image), Resource(Arc<super::OpaqueResource>) }
 
 #[derive(Debug, Default)]
-struct Root { chunks: Box<[Resource<VectorChunk>]>, slots: Arc<[Slot]>, valid: OnceLock<Result<(), &'static str>> }
+struct Root { chunks: Box<[Resource<VectorChunk>]>, slots: Arc<[Slot]>, counter: u64, valid: OnceLock<Result<(), &'static str>> }
 
 #[derive(Clone, Debug, Default)]
 pub struct VectorObject { root: Arc<Root> }
 impl PartialEq for VectorObject {
     fn eq(&self, other: &Self) -> bool {
-        self.same_root(other) || (self.chunks().len() == other.chunks().len() && self.slots() == other.slots()
+        self.same_root(other) || (self.chunks().len() == other.chunks().len() && self.slots() == other.slots() && self.next_item() == other.next_item()
             && self.chunks().iter().zip(other.chunks()).all(|(a, b)| a.same_owner(b) || **a == **b))
     }
 }
 impl VectorObject {
     pub fn from_chunks(chunks: Vec<Resource<VectorChunk>>) -> Self { Self::with_slots(chunks, Arc::default()) }
-    pub fn with_slots(chunks: Vec<Resource<VectorChunk>>, slots: Arc<[Slot]>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), slots, valid: OnceLock::new() }) } }
-    fn rechunked(&self, chunks: Vec<Resource<VectorChunk>>) -> Self { Self::with_slots(chunks, self.root.slots.clone()) }
+    pub fn with_slots(chunks: Vec<Resource<VectorChunk>>, slots: Arc<[Slot]>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), slots, counter: 0, valid: OnceLock::new() }) } }
+    fn rechunked(&self, chunks: Vec<Resource<VectorChunk>>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), slots: self.root.slots.clone(), counter: self.next_item(), valid: OnceLock::new() }) } }
+    pub fn with_next_item(&self, next_item: u64) -> Self { Self { root: Arc::new(Root { chunks: self.root.chunks.clone(), slots: self.root.slots.clone(), counter: next_item, valid: OnceLock::new() }) } }
+    pub fn next_item(&self) -> u64 { self.chunks().iter().map(|chunk| chunk.summary().next_item).fold(self.root.counter.max(1), u64::max) }
     pub fn slots(&self) -> &Arc<[Slot]> { &self.root.slots }
     pub fn shares_slots(&self, other: &Self) -> bool { self.slots().is_empty() || Arc::ptr_eq(self.slots(), other.slots()) }
     pub fn from_records(records: Vec<Record>) -> Self { Self::from_chunks(pack(records)) }
@@ -767,9 +817,9 @@ impl VectorObject {
     }
     pub fn copies(&self, ids: &BTreeSet<ItemId>, target: &VectorObject) -> (BTreeSet<ItemId>, Vec<Record>) {
         let mut fresh = BTreeSet::new();
-        let records = self.selected(ids).into_iter().map(|path| {
-            let id = loop { let id = target.allocate_id(); if fresh.insert(id) { break id; } };
-            let path = if self.shares_slots(target) { path } else { path.without_slots() };
+        let records = self.selected(ids).into_iter().zip(target.allocate_ids()).map(|(path, id)| {
+            fresh.insert(id);
+            let path = if self.same_root(target) { path } else { path.detached(!self.shares_slots(target)) };
             Record::Path(PathItem { id, unknown: retained(&path.unknown, true), ..path })
         }).collect();
         (fresh, records)
@@ -780,9 +830,8 @@ impl VectorObject {
     pub fn items_bounds(&self, ids: &BTreeSet<ItemId>) -> Option<[f64; 4]> {
         self.located(ids).into_iter().filter_map(|position| self.record(position)?.path().map(PathItem::bounds)).fold(None, |a, b| Some(union(a, b)))
     }
-    pub fn allocate_id(&self) -> ItemId {
-        loop { let id = ItemId::random(); if !self.contains(id) { return id; } }
-    }
+    pub fn allocate_ids(&self) -> impl Iterator<Item = ItemId> + use<> { (self.next_item()..=u64::MAX).map(ItemId) }
+    pub fn allocate_id(&self) -> ItemId { ItemId(self.next_item()) }
     pub fn insert_front(&self, records: Vec<Record>) -> Self { self.insert(records, true) }
     pub fn insert_back(&self, records: Vec<Record>) -> Self { self.insert(records, false) }
     fn insert(&self, records: Vec<Record>, front: bool) -> Self {

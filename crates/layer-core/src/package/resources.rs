@@ -277,7 +277,7 @@ pub struct ResourceReader<'a> {
     pub(crate) selections: BTreeMap<SelectionKey, Arc<crate::SelectionPixels>>,
     pub(crate) images: BTreeMap<PortableId, (Value, crate::authored::Image)>,
     pub(crate) programs: BTreeMap<Vec<u8>, Arc<crate::EffectProgram>>,
-    pub(crate) vectors: BTreeMap<PortableId, (u32, u32, usize, Resource<VectorChunk>)>,
+    pub(crate) vectors: BTreeMap<PortableId, (u32, u32, usize, u64, Resource<VectorChunk>)>,
     pub(crate) opaque: BTreeMap<PortableId, Arc<OpaqueResource>>,
 }
 #[derive(Default)]
@@ -287,7 +287,7 @@ pub(crate) struct ResourceCache {
     aliases: BTreeMap<(usize,u64,u64), (PortableId,Value)>, rasters: BTreeMap<PortableId, crate::raster::RasterTile>,
     selections: BTreeMap<SelectionKey, Arc<crate::SelectionPixels>>, images: BTreeMap<PortableId, (Value, crate::authored::Image)>,
     programs: BTreeMap<Vec<u8>, Arc<crate::EffectProgram>>,
-    vectors: BTreeMap<PortableId, (u32, u32, usize, Resource<VectorChunk>)>,
+    vectors: BTreeMap<PortableId, (u32, u32, usize, u64, Resource<VectorChunk>)>,
     opaque: BTreeMap<PortableId, Arc<OpaqueResource>>,
 }
 impl<'a> ResourceReader<'a> {
@@ -415,8 +415,8 @@ impl<'a> ResourceReader<'a> {
         self.opaque.insert(id, resource.clone());
         Ok(resource)
     }
-    pub fn vector_object(&mut self, items: &[Value], slots: Arc<[Slot]>) -> DecodeResult<VectorObject> {
-        let mut open = 0u32;
+    pub fn vector_object(&mut self, items: &[Value], slots: Arc<[Slot]>, next_item: Option<u64>) -> DecodeResult<VectorObject> {
+        let mut reading = super::vector_records::Reading::slots(slots.len());
         let mut records = 0usize;
         let mut chunks = Vec::with_capacity(items.len());
         for item in items {
@@ -425,11 +425,13 @@ impl<'a> ResourceReader<'a> {
             records = records.saturating_add(count);
             if records > super::vector_records::MAX_RECORDS { return Err(DecodeError::Unsupported("Vector object exceeds the admitted record count".into())); }
             let chunk = match self.vectors.get(&id) {
-                Some((start, end, count, chunk)) if *start == open && *count == slots.len() => { open = *end; chunk.clone() }
+                Some((start, end, count, highest, chunk)) if *start == reading.open && *count == slots.len() => { reading.open = *end; reading.highest = reading.highest.max(*highest); chunk.clone() }
                 _ => {
-                    let start = open;
+                    let (start, highest) = (reading.open, std::mem::take(&mut reading.highest));
                     let bytes = self.bytes(item, "capy.vector-items/1", super::vector_records::MAX_CHUNK_BYTES)?;
-                    let chunk = super::vector_records::decode_chunk(&bytes, count, &mut open, slots.len())?;
+                    let chunk = super::vector_records::decode_chunk(&bytes, count, &mut reading)?;
+                    let own = std::mem::replace(&mut reading.highest, highest);
+                    reading.highest = reading.highest.max(own);
                     let resource = match bytes.encoded_if_ready().cloned() {
                         Some(encoded) => Resource::with_id_and_encoded(id, Arc::new(chunk), encoded),
                         None => Resource::with_id(id, Arc::new(chunk)),
@@ -438,13 +440,17 @@ impl<'a> ResourceReader<'a> {
                     self.charge(resident)?;
                     self.decoded += resident;
                     if let Some(integrity) = bytes.encoded_integrity_if_ready() { resource.set_encoded_integrity(integrity)?; }
-                    self.vectors.insert(id, (start, open, slots.len(), resource.clone()));
+                    self.vectors.insert(id, (start, reading.open, slots.len(), own, resource.clone()));
                     resource
                 }
             };
             chunks.push(chunk);
         }
-        let object = VectorObject::with_slots(chunks, slots);
+        let object = match next_item {
+            Some(next) if next > reading.highest => VectorObject::with_slots(chunks, slots).with_next_item(next),
+            None if chunks.is_empty() => VectorObject::with_slots(chunks, slots),
+            _ => return Err("Invalid vector data: the next item must follow every item identity".into()),
+        };
         object.validate().map_err(|e| format!("Invalid vector data: {e}"))?;
         Ok(object)
     }

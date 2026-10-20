@@ -211,6 +211,7 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
             if let Some(vector)=&object.vector {
                 let items=vector.0.iter().map(|(descriptor,bytes)|resources.vector_bytes(bytes,descriptor.clone())).collect::<Result<Vec<_>,_>>()?;
                 let mut fields=json!({"items":items,"fallback":Value::Object(data)});
+                if let Some(next)=vector.2 {fields["next_item"]=next.to_string().into();}
                 slots(&mut fields,&vector.1,resources)?;
                 return Ok(record(change.id,"capy.vector-object/1",fields));
             }
@@ -218,7 +219,7 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
         },
         crate::Edit::Vector(change)=>{let object=change.value.as_ref().ok_or("Cannot encode removed record")?;
             let items=object.chunks().iter().map(|chunk|resources.vector_chunk(chunk)).collect::<Result<Vec<_>,_>>()?;
-            let mut fields=if items.is_empty(){json!({})}else{json!({"items":items})};
+            let mut fields=if items.is_empty(){json!({})}else{json!({"items":items,"next_item":object.next_item().to_string()})};
             slots(&mut fields,object.slots(),resources)?;
             Ok(record(change.id,"capy.vector-object/1",fields))
         },
@@ -321,7 +322,8 @@ fn preserved_vector(record:&Value,reader:&mut ResourceReader<'_>)->DecodeResult<
     let data=&record["data"];
     if data.get("fallback").is_none() {return Ok(false);}
     let items=data.get("items").map(list).transpose()?.unwrap_or_default();
-    match reader.slots(data.get("slots")).and_then(|slots|reader.vector_object(items,slots)) {Ok(_)=>Ok(false),Err(DecodeError::Unsupported(_))=>Ok(true),Err(error)=>Err(error)}
+    let next_item=data.get("next_item").map(super::manifest::decimal_u64).transpose()?;
+    match reader.slots(data.get("slots")).and_then(|slots|reader.vector_object(items,slots,next_item)) {Ok(_)=>Ok(false),Err(DecodeError::Unsupported(_))=>Ok(true),Err(error)=>Err(error)}
 }
 fn decode_image_object(data:&serde_json::Map<String,Value>,reader:&mut ResourceReader<'_>)->DecodeResult<ImageObject> {
     let affine=data.get("affine").map(decode_affine).transpose()?.unwrap_or_default();
@@ -410,11 +412,13 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
                     if let Some(fields)=descriptor.as_object_mut() {fields.remove("decoded_bytes");}
                     Ok((descriptor,reader.bytes(item,"capy.vector-items/1",super::vector_records::MAX_CHUNK_BYTES)?))
                 }).collect::<DecodeResult<Vec<_>>>()?;
-                let object=ImageObject {vector:Some(crate::authored::PreservedVector(preserved.into(),reader.slots(data.get("slots"))?)),..decode_image_object(fallback,reader)?};
+                let next_item=data.get("next_item").map(super::manifest::decimal_u64).transpose()?;
+                let object=ImageObject {vector:Some(crate::authored::PreservedVector(preserved.into(),reader.slots(data.get("slots"))?,next_item)),..decode_image_object(fallback,reader)?};
                 art.objects.install(handle,object)?;
             } else {
                 let slots=reader.slots(data.get("slots"))?;
-                let object=reader.vector_object(items,slots)?;
+                let next_item=data.get("next_item").map(super::manifest::decimal_u64).transpose()?;
+                let object=reader.vector_object(items,slots,next_item)?;
                 art.vectors.install(art.vectors.allocated(*identity).unwrap(),object)?;
             }},
         "capy.coverage-source/2"=> {let data=record_fields(kind,value)?;let domain=dimension(v::required(data,"domain")?,reader)?;

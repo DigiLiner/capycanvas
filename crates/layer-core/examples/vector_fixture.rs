@@ -60,6 +60,33 @@ fn hatching() -> Vec<Record> {
     }).collect()
 }
 
+fn codes() -> Result<VectorObject, Box<dyn std::error::Error>> {
+    use layer_core::{color::RgbSpace, package::vector_records::{ValueClass, put_varuint, tag_word}};
+    let mut records = Vec::new();
+    for (index, space) in [RgbSpace::Srgb, RgbSpace::DisplayP3, RgbSpace::AdobeRgb, RgbSpace::ProPhoto].into_iter().enumerate() {
+        for (form, color) in [(0, RgbColor::new(space, [0.5, 0.25, 0.125, 1.])?), (1, RgbColor::from_linear(space, [1.5, 0.234_567_8, 0.012_345_6, 0.75])?)] {
+            let x = 16. + index as f64 * 56. + form as f64 * 24.;
+            records.push(Record::Path(path(1 + index as u64 * 2 + form, vec![closed(&[[x, 16.], [x + 20., 16.], [x + 10., 36.]])], vec![PaintEntry::Fill(Fill { paint: Paint::color(color), unknown: None })])));
+        }
+    }
+    let anchors = [Anchor::new([40., 120.], [-12., 4.], [12., -4.], AnchorKind::SYMMETRIC), Anchor::new([90., 110.], [0.; 2], [0.; 2], AnchorKind::SYMMETRIC),
+        Anchor::new([140., 130.], [-10., 0.], [0.; 2], AnchorKind::SYMMETRIC), Anchor::new([190., 120.], [-8.5, 3.25], [6., -2.], AnchorKind::SMOOTH)];
+    let mut symmetric = path(9, vec![Subpath::new(&anchors, false)], vec![stroke([0.2, 0.3, 0.4, 1.], 5.5, Cap::Round, Join::Round)]);
+    let mut items = Vec::new();
+    for id in [1, 8] { put_varuint(&mut items, id); }
+    symmetric.unknown = Some(Arc::from([UnknownProperty { tag: tag_word(1200, IGNORABLE | COPY_SAFE, ValueClass::Items), value: Arc::from(items) }]));
+    records.push(Record::Path(symmetric));
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; (state >> 11) as f64 / (1u64 << 53) as f64 };
+    let scattered: Vec<Anchor> = (0..120).map(|_| Anchor::new([next() * 65536. - 32768., next() * 65536. - 32768.], [next() * 512. - 256., next() * 512. - 256.], [next() * 512. - 256., next() * 512. - 256.], AnchorKind::CORNER)).collect();
+    let drawn = VectorObject::from_records(records).insert_back((11..=14).map(|id| Record::Path(path(id, vec![open(&[[0., 0.], [1., 1.]])], vec![fill([0., 0., 0., 1.])]))).collect());
+    let removed = (11..=14).filter_map(|id| drawn.find(ItemId(id))).map(|at| (at, None)).collect::<Vec<_>>();
+    let kept = drawn.replace(removed);
+    let mut chunks = kept.chunks().to_vec();
+    chunks.extend(VectorObject::from_records(vec![Record::Path(path(10, vec![Subpath::new(&scattered, false)], vec![stroke([0.1, 0.1, 0.1, 1.], 0.75, Cap::Butt, Join::Bevel)]))]).chunks().iter().cloned());
+    Ok(VectorObject::from_chunks(chunks).with_next_item(kept.next_item()))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = std::env::args().nth(1).ok_or("OUTPUT.capy is required")?;
     let mut editor = Editor::new(layer_core::Document::from_artwork(Artwork::new([256, 192])?)?);
@@ -67,6 +94,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (_, edit) = editor.document().create_vector_layer_edit(name, VectorObject::from_records(records), None, 0)?;
         editor.perform(edit)?;
     }
+    let (codes, edit) = editor.document().create_vector_layer_edit("Codes", codes()?, None, 0)?;
+    editor.perform(edit)?;
+    let mut hidden = editor.document().scene().occurrence(codes).ok_or("the Codes layer")?.clone();
+    hidden.visible = false;
+    let change = layer_core::RecordChange::replace(&editor.document().artwork.occurrences, codes, Some(hidden)).map_err(|e| format!("{e:?}"))?;
+    editor.perform(layer_core::Edit::Occurrence(change))?;
     let capture = editor.capture(0, EvaluationContext::default())?;
     let cancelled = AtomicBool::new(false);
     let prepared = layer_core::package::codec::PreparedPackage::prepare(&capture, None, &cancelled)?;

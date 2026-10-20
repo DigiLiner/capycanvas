@@ -261,7 +261,7 @@ impl PathItem {
 impl VectorObject {
     pub fn erase(&self, index: &mut VectorIndex, eraser: &Eraser, mode: EraseMode) -> Option<Self> {
         let mut changes = BTreeMap::new();
-        let mut fresh = BTreeSet::new();
+        let mut fresh = self.allocate_ids();
         for position in index.near(self, eraser.bounds()) {
             let Some(path) = self.record(position).and_then(Record::path).filter(|path| path.pickable()) else { continue };
             let replacement = match mode {
@@ -275,7 +275,7 @@ impl VectorObject {
             };
             let Some(pieces) = replacement else { continue };
             let records = pieces.into_iter().enumerate().map(|(i, piece)| {
-                let id = if i == 0 { path.id } else { loop { let id = self.allocate_id(); if fresh.insert(id) { break id; } } };
+                let id = if i == 0 { path.id } else { fresh.next().unwrap_or_default() };
                 Record::Path(PathItem { id, ..piece })
             }).collect();
             changes.insert(position, records);

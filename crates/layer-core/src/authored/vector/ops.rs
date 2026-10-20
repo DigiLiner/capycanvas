@@ -255,21 +255,20 @@ impl VectorObject {
         }
         (!changes.is_empty()).then(|| self.with_paths(changes)).transpose()
     }
-    fn with_fresh_ids(&self, pieces: Vec<PathItem>, taken: &mut BTreeSet<ItemId>) -> Vec<Record> {
+    fn with_fresh_ids(pieces: Vec<PathItem>, ids: &mut impl Iterator<Item = ItemId>) -> Vec<Record> {
         pieces.into_iter().enumerate().map(|(i, piece)| {
             if i == 0 { return Record::Path(piece); }
-            let id = loop { let id = self.allocate_id(); if taken.insert(id) { break id; } };
-            Record::Path(PathItem { id, ..piece })
+            Record::Path(PathItem { id: ids.next().unwrap_or_default(), ..piece })
         }).collect()
     }
     pub fn split_paths(&self, cuts: &BTreeMap<ItemId, BTreeSet<AnchorRef>>) -> Result<Option<(Self, BTreeSet<ItemId>)>, &'static str> {
         let ids: BTreeSet<ItemId> = cuts.keys().copied().collect();
-        let mut taken = BTreeSet::new();
+        let mut fresh = self.allocate_ids();
         let mut changes = BTreeMap::new();
         for (position, path) in self.selected_paths(&ids) {
             let pieces = path.split_at(&cuts[&path.id])?;
             if pieces.len() == 1 && pieces[0].geometry == path.geometry { continue; }
-            changes.insert(position, self.with_fresh_ids(pieces, &mut taken));
+            changes.insert(position, Self::with_fresh_ids(pieces, &mut fresh));
         }
         if changes.is_empty() { return Ok(None); }
         let selected = changes.values().flatten().filter_map(Record::id).collect();
@@ -299,10 +298,10 @@ impl VectorObject {
         Ok(Some((self.splice(changes), id)))
     }
     pub fn release_paths(&self, ids: &BTreeSet<ItemId>) -> Result<Option<(Self, BTreeSet<ItemId>)>, &'static str> {
-        let mut taken = BTreeSet::new();
+        let mut fresh = self.allocate_ids();
         let mut changes = BTreeMap::new();
         for (position, path) in self.selected_paths(ids).into_iter().filter(|(_, path)| path.geometry.subpaths().len() > 1) {
-            changes.insert(position, self.with_fresh_ids(path.released()?, &mut taken));
+            changes.insert(position, Self::with_fresh_ids(path.released()?, &mut fresh));
         }
         if changes.is_empty() { return Ok(None); }
         let selected = changes.values().flatten().filter_map(Record::id).collect();

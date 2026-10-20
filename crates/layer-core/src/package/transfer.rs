@@ -231,7 +231,7 @@ impl PreparedTransfer {
                 VerifiedResource::Vector{payload}=>{
                     if kind!="capy.vector-items/1"{return Err("Transfer vector type mismatch".into());}
                     let bytes=self.bytes(*payload)?;decoded=decoded.saturating_add(bytes.len() as u64);
-                    if let Some(TransferPayload::Vector(chunk,_))=self.payloads.get(*payload) && chunk.records().iter().all(|r|matches!(r,vector::Record::Path(_))) {reader.vectors.insert(*id,(0,0,slot_counts.get(id).copied().unwrap_or(0),chunk.clone()));}
+                    if let Some(TransferPayload::Vector(chunk,_))=self.payloads.get(*payload) && chunk.records().iter().all(|r|matches!(r,vector::Record::Path(_))) {reader.vectors.insert(*id,(0,0,slot_counts.get(id).copied().unwrap_or(0),chunk.summary().next_item-1,chunk.clone()));}
                     reader.bytes.insert(*id,Resource::with_id_and_encoded(*id,bytes.clone(),EncodedBytes{encoding:ResourceEncoding::Raw,bytes}));
                 },
                 VerifiedResource::Tile{..}|VerifiedResource::Opaque{..}=>(),

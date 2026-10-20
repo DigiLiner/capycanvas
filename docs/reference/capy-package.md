@@ -101,7 +101,7 @@ as unsupported and is preserved; there is no conversion reader.
 | `capy.paint-source/2` | Required pixel `domain`; authored `color_mode` (`full_color`, `grayscale`, `two_tone`, default `full_color`), optional `base` image binding, sparse `tiles`, `material`. The binding owns its base offset and color policy. |
 | `capy.image/1` | Immutable sample `extent`, `interpretation`, complete `tiles`; optional physical `resolution`. |
 | `capy.image-object/1` | Required immutable `image` reference; optional F64 `affine`, `interpolation`. |
-| `capy.vector-object/1` | Optional `items`, an ordered array of `capy.vector-items/1` resource references whose record streams concatenate front to back, and optional `slots`, an ordered array of resource or `capy.image/1` references that item records name by index. Absent means none. See [vector records](#vector-records). |
+| `capy.vector-object/1` | Optional `items`, an ordered array of `capy.vector-items/1` resource references whose record streams concatenate front to back; `next_item`, a decimal-string `u64` greater than every item ID in the object, including IDs inside unknown records and Items-class values, required when `items` is present; and optional `slots`, an ordered array of resource or `capy.image/1` references that item records name by index. Absent means none. See [vector records](#vector-records). |
 | `capy.coverage-source/2` | Required pixel `domain`; `default_coverage` and sparse `tiles`. A mask made from a selection stores that selection's coverage in tiles. |
 | `capy.effect/2` | Required inline `builtin`, parameter-data `version` and every keyed `values` entry. Effects consuming authored coordinates require F64 `spatial`. |
 | `capy.selection/1` | Required `shape`; optional `affine` and `inverted`. Pixels use coverage resources; contours keep their geometry. |
@@ -540,11 +540,11 @@ resources keep their IDs and bytes. Items are front to back, as stack entries ar
 
 | Element | Encoding |
 | --- | --- |
-| Record | Kind word (varuint). Kind 0 is the End marker and nothing follows. Otherwise a `u64` item ID and a varuint byte length, then that many bytes of properties. |
+| Record | Kind word (varuint). Kind 0 is the End marker and nothing follows. Otherwise a varuint item ID (0 is anonymous) and a varuint byte length, then that many bytes of properties. |
 | Property | Tag word (varuint), varuint value length, value bytes. Tag numbers strictly ascend within a record. Every value is length-prefixed, so any reader can step over any property. |
 | Kind word | `number << 4` with flags ignorable (1), copy-safe (2), parent (4) and reserved (8). A parent's children and its End marker follow it. |
 | Tag word | `number << 5` with flags ignorable (1), copy-safe (2), a value class in bits 2–3 and reserved (16). |
-| Value class | Data (0) opaque bytes; Items (1) item IDs as `u64` values; Slots (2) varuint indices into the object's `slots`; Nested (3) a record stream with the same framing. |
+| Value class | Data (0) opaque bytes; Items (1) a list of nonzero varuint item IDs; Slots (2) varuint indices into the object's `slots`; Nested (3) a record stream with the same framing. |
 
 Flags belong to a number's identity: a known number with other flags is invalid.
 Numbers are listed, with their flags, owners and the vocabulary revision that
@@ -563,8 +563,9 @@ exists, including slots that no property it understands uses, and never
 interprets a slot resource, so a resource that only slots reference may have a
 type or encoding the reader does not know. A slot resource must not reference
 other records. When paths are copied or merged into another object, unknown
-properties of the Slots or Nested class and unknown paint records are dropped,
-because their slot indices would name the other object's slots.
+properties of the Items and Nested classes and unknown paint records are dropped,
+because their identities belong to the source object, and so are Slots-class
+properties unless both objects share their slots.
 
 **Fallback.** A `capy.vector-object/1` record may carry `fallback`: the
 `image`, `affine` and `interpolation` of an image object that shows the layer.
@@ -575,8 +576,9 @@ descriptor and decoded bytes and every slot, and saves the record back with the
 same items, slots and fallback, in packages, sessions and worker transfers alike.
 Without a fallback, unsupported items make the artwork unsupported.
 
-**Vocabulary.** Item records: Path (kind 1) with a nonzero layer-local ID that is
-never reused. Path tags: `geometry` (required), `fill_rule` (`u8`: 0 nonzero,
+**Vocabulary.** Item records: Path (kind 1) with a nonzero layer-local ID. A writer
+allocates IDs in sequence from `next_item` and advances it, so deleting items
+never lowers it; undo restores an earlier object and its counter. Path tags: `geometry` (required), `fill_rule` (`u8`: 0 nonzero,
 1 even-odd; default nonzero), `style` (nested Fill and Stroke records painted
 first to last; default empty), `hidden` (`u8` flag), and the ignorable,
 copy-safe `name` (UTF-8) and `locked` (`u8` flag), and the ignorable
@@ -585,14 +587,14 @@ copy-safe `name` (UTF-8) and `locked` (`u8` flag), and the ignorable
 record; the only paint kind is Color (kind 4), whose `color` value is a `u8`
 space (0 `srgb`, 1 `display_p3`, 2 `adobe_rgb`, 3 `pro_photo`), a `u8` form (0 encoded
 RGBA, 1 linear RGB) and four F32 values, as portable colors define them. Stroke
-tags are `width` (F64 layer pixels, default 1), `cap` (`u8` 0 butt, 1 round, 2 square;
+tags are `width` (varuint in 1/256 layer pixels, below 2³¹, default 256), `cap` (`u8` 0 butt, 1 round, 2 square;
 default butt), `join` (`u8` 0 miter, 1 round, 2 bevel; default miter), `miter_limit`
 (F64, at least 1, default 4) and `width_profile`.
 
 | Value | Encoding |
 | --- | --- |
-| Geometry | Varuint subpath count, at least one. Per subpath: varuint anchor count (at least one), `u8` flags (bit 0 closed), then per anchor a `u8` kind (0 corner, 1 smooth, 2 symmetric) and six F32 values: point, incoming handle offset, outgoing handle offset. F32 resolves 1/256 pixel across the largest canvas. Segment *i* is the cubic from anchor *i* through its outgoing handle and the next anchor's incoming handle; a closed subpath adds the closing segment. A single-anchor subpath is a dot. |
-| Width profile | Varuint knot count, at least one. Per knot: `u32` segment index counted across subpaths, F32 `t` in `[0,1]`, F32 left and right factors. Knots strictly ascend by (segment, `t`). Each side's offset is half the stroke width times its factor, interpolated linearly in segment plus `t` and held beyond the ends. |
+| Geometry | Varuint subpath count, at least one. Per subpath: varuint anchor count (at least one) and a `u8` flags byte (bit 0 closed; other bits are unsupported). Per anchor a `u8` header, `kind << 2 \| in_present << 1 \| out_present`, with kind 0 corner, 1 smooth or 2 symmetric; then the point as two zigzag varints in 1/256 layer pixels, as a delta from the previous anchor of the path (the first anchor from 0,0); then the incoming and the outgoing handle offset, when present, each as two zigzag varints in 1/256 pixels relative to the point. An absent handle is zero, except that a symmetric anchor's absent incoming handle is its negated outgoing handle. Values of 2³¹ units or more are unsupported, and so is a value that F32 cannot hold exactly. Segment *i* is the cubic from anchor *i* through its outgoing handle and the next anchor's incoming handle; a closed subpath adds the closing segment. A single-anchor subpath is a dot. |
+| Width profile | Varuint knot count, at least one. Per knot: a varuint segment delta from the previous knot (the first counts from segment 0), segments counted across subpaths; a `u8` flags byte (bit 0 `t` is 0, bit 1 `t` is 1, bit 2 the right factor equals the left; bits 0 and 1 together are invalid and bits 3–7 unsupported); then F32 `t` in `[0,1]` unless bit 0 or 1 is set, the F32 left factor, and the F32 right factor unless bit 2 is set. Knots strictly ascend by (segment, `t`). Each side's offset is half the stroke width times its factor, interpolated linearly in segment plus `t` and held beyond the ends. |
 | Live shape | `u8` kind (1 rectangle, 2 ellipse, 3 polygon, 4 star), then F64 center x and y, width, height and rotation in radians; a rectangle adds four F64 corner radii from the top-left corner clockwise in its own frame, a polygon an F64 corner count and a star an F64 point count and an F64 inner radius as a fraction of the outer one, in (0, 1]. Counts are whole numbers from 3 to 100; the first corner or point sits at the top of the frame. Then 16 bytes: the first half of the SHA-256 of the path's kind word followed by its encoded required properties (`geometry`, `fill_rule`, `style`, `hidden`). |
 
 A reader treats an anchor kind it does not know as a corner when editing and
@@ -611,7 +613,10 @@ data under the same rule.
 
 The fixed [`vector-objects.capy`](../../crates/layer-core/src/package/codec/fixtures/vector-objects.capy),
 generated by `cargo run -p layer-core --example vector_fixture -- OUTPUT.capy`,
-covers every V0 feature and must reopen and save byte for byte. The fixed
+covers every V0 feature and must reopen and save byte for byte. Its hidden Codes
+layer holds every color space in both forms, symmetric anchors with implied and
+explicit incoming handles, an Items-class unknown property, a chunk stored raw
+and a `next_item` past deleted IDs. The fixed
 [`vector-future.capy`](../../crates/layer-core/src/package/codec/fixtures/vector-future.capy),
 generated by `cargo run -p layer-core --example vector_future_fixture -- OUTPUT.capy`,
 holds a readable layer whose path keeps an ignorable Slots value naming an image

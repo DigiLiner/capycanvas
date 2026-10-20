@@ -195,7 +195,8 @@ fn move_tool_selects_drags_and_deletes_vector_paths() {
     let moved = s.engine.document().scene().vector_layer(layer).unwrap().clone();
     let delta = |id: layer_core::authored::vector::ItemId| { let p = moved.record(moved.find(id).unwrap()).unwrap().path().unwrap().geometry.subpaths()[0].anchor(0).point(); let q = if id == front.id { on_front } else { back.geometry.subpaths()[0].anchor(0).point() }; [p[0] - q[0], p[1] - q[1]] };
     let scale = f64::from(s.state.camera.input_transform().surface_to_document[0]);
-    assert!((delta(front.id)[0] - 40. * scale).abs() < 1e-3 && (delta(front.id)[1] - 10. * scale).abs() < 1e-3, "{:?}", delta(front.id));
+    let grid = 0.5 / layer_core::authored::vector::GRID;
+    assert!((delta(front.id)[0] - 40. * scale).abs() <= grid && (delta(front.id)[1] - 10. * scale).abs() <= grid, "{:?}", delta(front.id));
     assert_eq!(delta(back.id), [0., 0.], "other paths stay");
     assert_eq!(moved.path_count(), 2);
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
