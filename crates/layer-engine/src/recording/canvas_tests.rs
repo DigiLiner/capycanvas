@@ -39,7 +39,7 @@ fn recorded_production_queries_replay_exactly() {
             .elapsed_micros_at(event.timestamp_ns)
             .unwrap();
         let active = engine.active_stroke.as_ref().unwrap();
-        let mut predictor = active.prediction.clone();
+        let mut predictor = active.tip.prediction.clone();
         let forecast = predictor
             .estimate_for(
                 engine.builder.real_points(),
