@@ -418,7 +418,27 @@ completion, including warm-up, pen-up, undo and deferred captures.
 
 - `AndroidViewportBenchmarkTest` measures pan, pinch and two-finger rotation
   (`-e viewportBenchmark true -e motion pan|pinch|rotate`).
+- `tools/performance/android-viewport-presents.py` runs it under a
+  SurfaceFlinger trace with the tier photo and reports, per gesture, presented
+  canvas frames/s, the present-gap p99, renderer submissions/s and the
+  viewport pass's GPU time (`Native.presentationTimings`, which spans the glass
+  blur and the viewport passes). Install the benchmark APK and its test APK
+  under your own application ID first:
+
+  ```bash
+  python3 tools/performance/android-viewport-presents.py OUT --serial "$CAPY_ANDROID_SERIAL" \
+    --package "$CAPY_APPLICATION_ID" --processor trace_processor_shell \
+    --photo /data/local/tmp/capy-tier-24mp.jpg --width 6000 --height 4000 --label mid
+  ```
+
+  The test fails with "GPU timestamps must be collected" when a gesture yields
+  100 frames or fewer; use `--duration-ms 8000` where the tier presents near
+  20/s. `--extra transparency=off,navigator=false` passes further test
+  arguments.
 - The brush runner's `-e mode pinch` does the same on the photo.
+- The MovinkPad 11 runs at 90 Hz only for apps enabled in Settings › Display ›
+  Adaptive (`com.android.settings/.display.AdaptiveAPPRefreshRateActivity`);
+  every other app is held at 60 Hz whatever it requests.
 
 See [Android development](../development/android.md#benchmarks).
 

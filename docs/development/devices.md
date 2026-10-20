@@ -21,7 +21,8 @@ without disturbing anyone else. Shared machine resources are in
 [Tier hardware](../performance/hardware.md) has the full specifications.
 Device quirks that affect tests:
 
-- The MovinkPad 11 panel presents at 60 Hz, not 90 Hz, and its EGL has no
+- The MovinkPad 11 panel presents at 60 Hz unless the app is switched on in
+  Settings › Display › Adaptive; only listed apps get 90 Hz. Its EGL has no
   `buffer_age`, so the Android UI redraws every frame in full.
 - The TCL needs about 18 s to start from a cold shader cache; waits shorter than
   that time out on the first run after an install.

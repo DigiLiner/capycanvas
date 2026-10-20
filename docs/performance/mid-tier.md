@@ -6,10 +6,16 @@ Reference: Wacom MovinkPad 11 (DTHA116) with a 1440 × 2200, 90 Hz panel. The
 canvas is 6000 × 4000.
 
 - Every row targets **90 fps** unless marked soft.
-- **The panel held 60 Hz in the recorded runs.** The canvas-bar benchmark
-  reported 60 Hz there, although the app requests the panel's fastest mode with
-  `Surface.setFrameRate` and the default display mode is 90 Hz. Wacom's adaptive
-  refresh (`setting.adaptive_refresh.enabled`) can hold 60 Hz.
+- **The panel held 60 Hz in the recorded runs.** The default display mode is
+  60 Hz, and the firmware pins every app to 60 Hz (display policy render range
+  60–60) unless the app is switched on in Settings › Display › Adaptive
+  (`com.android.settings/.display.AdaptiveAPPRefreshRateActivity`), whose list
+  enables only Clip Studio, ibisPaint X and Wacom's apps. The app's
+  `Surface.setFrameRate(90)` reaches SurfaceFlinger but lies outside that range,
+  and setting `peak_refresh_rate` or turning off `setting.adaptive_refresh.enabled`
+  does not lift it. With the test app switched on, the panel runs at 90 Hz.
+  Switch on your own application ID there before measuring a 90 Hz row, and
+  switch it off afterwards.
 - **Until it presents at 90 Hz, no display-paced row can pass.** Renderer rates
   above 90 show that the rendering has headroom.
 - **Huion Kamvas Pad 12 proxy rows.** Rows marked "Huion" come from the Huion
@@ -60,8 +66,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | --- | --- | --- | --- |
 | Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
 | Tool cursor hover, with and without brush size | 90 | Unmeasured on the reference tablet | [Top-tier rendering measurements](top-tier.md#tool-cursors) do not qualify this tier |
-| Pan: Hand tool, one or two fingers | 90 | **Misses:** 58.91–59.00 presented fps, p99 16.78–16.80 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
-| Pinch zoom | 90 | **Misses:** 58.10–58.58 presented fps, p99 33.48–33.49 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
+| Pan: Hand tool, one or two fingers | 90 | **Misses:** 57.0–57.3 presented fps with the panel at 90 Hz, p99 22.4 ms, viewport GPU 13.6–13.7 ms, 24 MP photo, Navigator open, thermal 0; at 60 Hz 57.1–57.7, against 59.7 at `43619c740` | `24269ed6a`, 2026-10-19; [navigation regression](known-gaps.md); `artifacts/navigation-regression-20261019/` |
+| Pinch zoom | 90 | **Misses:** 42.9–44.1 presented fps with the panel at 90 Hz, p99 55.8–122.8 ms, 24 MP photo, Navigator open, thermal 0; at 60 Hz 41.9–42.6, against 52.3–52.8 at `43619c740` | `24269ed6a`, 2026-10-19; [navigation regression](known-gaps.md); `artifacts/navigation-regression-20261019/` |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 90 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Two-finger rotate | 90 | **Misses:** 58.88–58.95 presented fps, p99 16.78–16.81 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Smooth Zoom tool, left/right | 90 | **Misses:** 50.20–50.33 presented fps, p99 67.00–83.73 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |

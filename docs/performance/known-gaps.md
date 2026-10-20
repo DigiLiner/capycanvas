@@ -174,10 +174,73 @@
      should be refused without losing the canvas.
   6. **Navigation also misses without vector content.** With the hatching
      removed, pan presents 38.9 / 57.7 / 19.4/s; the crowded layer costs 8–11% on
-     top of that. On the MovinkPad Pro 14 the viewport presentation pass takes
-     34–36 ms of GPU time for 5.2 MP even with both vector layers hidden.
+     top of that. See the navigation regression below.
 
   The headless renderer benchmarks (`scene::vectors::tests::crowded_vector_layer_drawing_frames`
   and `crowded_vector_layer_edit_frames`) still time renderer frames on a
   4000 × 3000 canvas; they do not account for per-sample session work or
   UI refresh, which dominate the tablet results above.
+- **Navigation regressed on every tier on 2026-10-18 and 2026-10-19.**
+  `AndroidViewportBenchmarkTest` pan on each tier photo with the Navigator open,
+  measured with `tools/performance/android-viewport-presents.py`
+  ([measuring](measuring.md)) on builds of each commit, thermal 0. Cells are
+  presented frames/s / viewport pass GPU p50 in ms; the mid tier's panel was at
+  60 Hz. Raw runs are in `artifacts/navigation-regression-20261019/`.
+
+  | Build | Low | Mid | Top |
+  | --- | --- | --- | --- |
+  | `43619c740`, before both changes | 59.9 / 8.9 | 59.7 / 7.9 | 35.1 / 17.4 |
+  | `33ab1389d`, parent of `c2251bd48` | 60.0 / 9.0 | | 35.7 / 17.3 |
+  | `c2251bd48` Light the paper's texture | 59.9 / 9.1 | | 27.4 / 24.5 |
+  | `c2a4ed732`, before Sketch | 58.7 / 10.6 | 59.7 / 8.9 | 27.7 / 24.2 |
+  | `abc9178e9`, after `deab38451` Open Sketch for new users | 32.6 / 23.5 | 58.1 / 13.3 | 20.9 / 36.9 |
+  | `24269ed6a` | 31.2 / 24.1 | 57.3 / 13.6 | 20.9 / 36.8 |
+
+  1. **Sketch shows more artwork at Fit.** `deab38451` makes Sketch the default
+     workspace (`crates/layer-workspace/src/manager.rs:397`). Its larger work
+     area raises the Fit zoom from 0.180 / 0.175 / 0.162 to 0.298 / 0.246 /
+     0.213, so the artwork covers 2.7 / 2.0 / 1.7 times as many screen pixels
+     (1.07 / 1.45 / 2.74 MP). The pass's cost per artwork pixel did not change;
+     the larger area is what new users see.
+  2. **The paper lighting doubled the top tier's artwork sampling.**
+     `c2251bd48` calls `source_at` in both arms of a uniform branch
+     (`crates/layer-render-wgpu/src/present.wgsl:324–325` at `24269ed6a`).
+     On the Adreno 735 the arm that is not taken still costs as much as
+     sampling the artwork again: 12.6 ms of the 36.8. The Mali tiers do not
+     pay it.
+  3. The low tier also lost 1.5 ms of GPU time between `c2251bd48` and
+     `c2a4ed732`, and the mid tier 1.0 ms between `43619c740` and
+     `c2a4ed732`. No presenter file changed after `c2251bd48`; these ranges
+     are not bisected.
+
+  Attribution on `24269ed6a` with presenter variants built in a scratch copy
+  (pan, GPU p50 in ms):
+
+  | Variant | Low | Mid | Top |
+  | --- | --- | --- | --- |
+  | Current | 24.1 | 13.6 | 36.8 |
+  | `source_at` called once, then the paper branch | 24.7 | 13.6 | 24.2 |
+  | Paper code removed | | 12.6 | 24.1 |
+  | Split vector preview (bindings 17–19) removed | 23.7 | 13.4 | 25.2 with paper removed |
+  | Glass blur off (`transparency=off`) | | | 38.7 |
+  | Finer level only, no blend with the coarser one | 19.2 | | 32.0 |
+  | Coarser level only, with `source_at` once | 18.0 | 12.9 | 15.2 |
+  | Nearest texel instead of bilinear, with `source_at` once | 23.1 | 13.9 | 22.2 |
+  | Flat artwork colour, no artwork sampling | 10.4 | 7.2 | 6.1 |
+
+  So the top tier's 36.8 ms is about 6 ms for the full-screen pass without
+  artwork, 12.6 ms for the duplicated sampling, and 18 ms for sampling the
+  RGBA32F display cache at Fit, where the finer level is read at more than one
+  texel per screen pixel. Filtering is not the cost (nearest saves at most
+  2 ms); the minified reads are. Neither the glass blur nor the split vector
+  preview costs measurable time.
+
+  **Fixes.** Call `source_at` once and branch on its result: measured top
+  36.8 → 24.2 ms and 20.9 → 28.0 presented/s, no change on low and mid.
+  Compiling the paper code only into a paper pipeline saves another 1.0 ms on
+  mid (57.3 → 59.6/s at 60 Hz). Reading the finer level at Fit costs the most:
+  sampling only the coarser level reaches 18.0 / 12.9 / 15.2 ms (40.6 / 59.1 /
+  39.4 presented/s) but blurs the Fit view, so a sharp alternative, such as a
+  half-float display pyramid or a level chosen for the footprint, needs its
+  own measurement. Even the flat-colour floor (10.4 / 7.2 / 6.1 ms) leaves the
+  top tier short of 120/s, presenting 74–79/s.
