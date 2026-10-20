@@ -259,3 +259,76 @@ fn reinterpretation_charges_shared_tiles_once_and_new_profile_ownership() {
         &original
     ));
 }
+
+fn hatched_layer(count: u64) -> (Editor, OccurrenceHandle) {
+    use authored::vector::*;
+    let records = (1..=count).map(|id| {
+        let [x, y] = [(id % 150) as f64 * 40., (id / 150) as f64 * 30.];
+        let anchors = [Anchor::corner([x, y]), Anchor::corner([x + 25., y + 18.]), Anchor::corner([x + 31., y + 4.])];
+        let stroke = Stroke::new(Paint::color(color::RgbColor::BLACK), 3.);
+        Record::Path(PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))
+    }).collect();
+    let doc = document([6000, 4000]);
+    let (layer, edit) = doc.create_vector_layer_edit("Ink", VectorObject::from_records(records), None, 0).unwrap();
+    let mut editor = Editor::new(doc);
+    editor.perform(edit).unwrap();
+    (editor, layer)
+}
+fn move_paths(editor: &Editor, layer: OccurrenceHandle, ids: &[u64], by: f64) -> Edit {
+    let object = editor.document().scene().vector_layer(layer).unwrap();
+    let ids = ids.iter().map(|id| authored::vector::ItemId(*id)).collect();
+    editor.document().vector_object_edit(layer, object.transform_items(&ids, authored::Affine64([1., 0., 0., 1., by, by * 0.5]), true).unwrap()).unwrap()
+}
+fn walked(editor: &mut Editor) -> usize { editor.ledger.get_mut().unwrap().walked }
+
+#[test]
+fn one_path_edits_charge_their_own_chunks_not_the_layers() {
+    let (mut editor, layer) = hatched_layer(20_000);
+    let chunks = editor.document().scene().vector_layer(layer).unwrap().chunks().len();
+    editor.perform(move_paths(&editor, layer, &[7], 2.)).unwrap();
+    for (step, id) in [5_000, 12_345, 19_999].into_iter().enumerate() {
+        let before = walked(&mut editor);
+        editor.perform(move_paths(&editor, layer, &[id], 3.)).unwrap();
+        let visited = walked(&mut editor) - before;
+        assert!(visited <= 2 + 2 * (step + 3), "a one-path edit visited {visited} of {chunks} chunks");
+    }
+}
+
+#[test]
+fn ledger_charges_match_a_full_recount_through_undo_redo_amends_and_previews() {
+    let (mut editor, layer) = hatched_layer(3_000);
+    let recount = |editor: &mut Editor| -> [Vec<usize>; 2] {
+        let mut full = Accounting::new(&editor.document);
+        let full = editor.undo.iter().rev().chain(editor.redo.iter().rev()).map(|entry| {
+            let mut inventory = RootInventory::default();
+            entry.edit.roots(&mut inventory);
+            entry.metadata_bytes + full.charge_inventory(inventory, &[])
+        }).collect();
+        let ledger = editor.ledger.get_mut().unwrap();
+        ledger.sync(&editor.document);
+        let mut ledgered = Accounting::with_ledger(&editor.document, ledger, false);
+        let ledgered = editor.undo.iter().rev().chain(editor.redo.iter().rev()).map(|entry| ledgered.charge(entry)).collect();
+        [full, ledgered]
+    };
+    let check = |editor: &mut Editor, what: &str| { let [full, ledgered] = recount(editor); assert_eq!(full, ledgered, "{what}"); };
+    for (i, ids) in [&[1u64][..], &[40, 41, 900], &(1..400).collect::<Vec<_>>(), &[2_999]].into_iter().enumerate() {
+        editor.perform(move_paths(&editor, layer, ids, 1. + i as f64)).unwrap();
+        check(&mut editor, "after an edit");
+    }
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    check(&mut editor, "after undo");
+    editor.redo().unwrap();
+    check(&mut editor, "after redo");
+    editor.perform(move_paths(&editor, layer, &[2_998], 4.)).unwrap();
+    editor.amend(move_paths(&editor, layer, &[12], 5.)).unwrap();
+    check(&mut editor, "after an amend");
+    editor.preview(move_paths(&editor, layer, &[13, 14], 6.)).unwrap();
+    check(&mut editor, "while previewing");
+    editor.perform(move_paths(&editor, layer, &[15], 7.)).unwrap();
+    check(&mut editor, "after an edit over a preview");
+    let (copy, edit) = editor.document().create_vector_layer_edit("Copy", editor.document().scene().vector_layer(layer).unwrap().clone(), None, 0).unwrap();
+    editor.perform(edit).unwrap();
+    editor.perform(editor.document().delete_layers_edit(&[copy]).unwrap()).unwrap();
+    check(&mut editor, "after sharing and deleting a layer");
+}

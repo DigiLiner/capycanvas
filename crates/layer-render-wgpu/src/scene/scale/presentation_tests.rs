@@ -633,35 +633,74 @@ fn quantile(values: &mut [f64], q: f64) -> f64 {
 fn fit_presentation_frames() {
     let viewport = [2560, 1600];
     for (name, extent, zoom) in [("12 MP at the low tier's Fit", [4248, 2832], 0.298f32), ("61 MP at the top tier's Fit", [9504, 6336], 0.213)] {
+        for omitted in [wgpu::Features::empty(), wgpu::Features::FLOAT32_FILTERABLE] {
+            let doc = photo(extent);
+            let mut r = WgpuRasterizer::native_headless_without(doc.composition().color, omitted).unwrap();
+            submit(&mut r, &doc, fit_view(extent, viewport, zoom, 0.), true);
+            let cache = r.scale_display.as_ref().unwrap();
+            eprintln!("{name}, float32 filtering {}: display level {}, resident {}, footprint {:.2} texels, half-float presentation {} MB", omitted.is_empty(), cache.plan.level, cache.resident_bytes() > 0,
+                1. / zoom / (1 << cache.plan.level) as f32, cache.half.as_ref().map_or(0, hierarchy::Half::bytes) >> 20);
+            let (_texture, target) = create_target(&r.device, viewport, wgpu::TextureFormat::Rgba8UnormSrgb, "fit benchmark target");
+            let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+            presenter.gpu_timings(&r, true);
+            let mut gpu = Vec::new();
+            let mut walls = Vec::new();
+            for frame in 0..160 {
+                let view = fit_view(extent, viewport, zoom, (frame % 40) as f32 * 3.);
+                let started = std::time::Instant::now();
+                r.submit(FramePacket { view, composite_all: false, ..packet(doc.scene(), extent) }).unwrap();
+                presenter.present(&r, &target, view, [0.2, 0.2, 0.2, 1.]).unwrap();
+                r.wait_idle().unwrap();
+                if frame >= 10 { walls.push(started.elapsed().as_secs_f64() * 1e3); }
+                for _ in 0..100 {
+                    let samples = presenter.gpu_timings(&r, true);
+                    if !samples.is_empty() {
+                        if frame >= 10 { gpu.extend(samples.iter().filter(|s| s.status == 1).map(|s| s.elapsed_ns as f64 / 1e6)); }
+                        break;
+                    }
+                    r.wait_idle().unwrap();
+                }
+            }
+            eprintln!("  pan presents: {} GPU samples, presenter GPU p50 {:.3} p95 {:.3} ms; frame wall p50 {:.2} p95 {:.2} ms",
+                gpu.len(), quantile(&mut gpu, 0.5), quantile(&mut gpu, 0.95), quantile(&mut walls, 0.5), quantile(&mut walls, 0.95));
+        }
+    }
+}
+
+#[test]
+#[ignore = "workstation half-float display level conversion benchmark"]
+fn half_float_conversion_frames() {
+    let viewport = [2560, 1600];
+    for (name, extent, zoom) in [("12 MP at the low tier's Fit", [4248, 2832], 0.298f32), ("24 MP at the mid tier's Fit", [6000, 4000], 0.3), ("61 MP at the top tier's Fit", [9504, 6336], 0.213)] {
         let doc = photo(extent);
-        let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let mut r = WgpuRasterizer::native_headless_without(doc.composition().color, wgpu::Features::empty()).unwrap();
         submit(&mut r, &doc, fit_view(extent, viewport, zoom, 0.), true);
-        let cache = r.scale_display.as_ref().unwrap();
-        eprintln!("{name}: display level {}, resident {}, footprint {:.2} texels, half-float presentation {} MB", cache.plan.level, cache.resident_bytes() > 0,
-            1. / zoom / (1 << cache.plan.level) as f32, cache.half.as_ref().map_or(0, hierarchy::Half::bytes) >> 20);
-        let (_texture, target) = create_target(&r.device, viewport, wgpu::TextureFormat::Rgba8UnormSrgb, "fit benchmark target");
-        let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
-        presenter.gpu_timings(&r, true);
+        let mut timer = crate::frame_timing::GpuFrameTimer::new(r.device(), r.queue());
         let mut gpu = Vec::new();
-        let mut walls = Vec::new();
-        for frame in 0..160 {
-            let view = fit_view(extent, viewport, zoom, (frame % 40) as f32 * 3.);
-            let started = std::time::Instant::now();
-            r.submit(FramePacket { view, composite_all: false, ..packet(doc.scene(), extent) }).unwrap();
-            presenter.present(&r, &target, view, [0.2, 0.2, 0.2, 1.]).unwrap();
-            r.wait_idle().unwrap();
-            if frame >= 10 { walls.push(started.elapsed().as_secs_f64() * 1e3); }
+        for frame in 0..60u64 {
+            let cache = r.scale_display.as_ref().unwrap();
+            let next = cache.pixels.next().unwrap();
+            *cache.half_stale.lock().unwrap() = PixelRect::full([next.texture.width() * 2, next.texture.height() * 2]);
+            let mut encoder = r.device.create_command_encoder(&Default::default());
+            let mut uploads = crate::Uploads::new(&r.device, 64 * 1024);
+            timer.begin_encoded(&mut encoder, frame);
+            cache.refresh_half(&r, &mut encoder, &mut uploads).unwrap();
+            timer.end_encoded(&mut encoder);
+            uploads.finish(&encoder);
+            r.queue.submit([encoder.finish()]);
+            timer.submitted(r.queue());
+            let mut samples = [crate::frame_timing::GpuFrameSample::default(); 8];
             for _ in 0..100 {
-                let samples = presenter.gpu_timings(&r, true);
-                if !samples.is_empty() {
-                    if frame >= 10 { gpu.extend(samples.iter().filter(|s| s.status == 1).map(|s| s.elapsed_ns as f64 / 1e6)); }
+                r.wait_idle().unwrap();
+                timer.poll(r.device(), r.queue());
+                let count = timer.take_into(&mut samples);
+                if count > 0 {
+                    if frame >= 10 { gpu.extend(samples[..count].iter().filter(|s| s.status == 1).map(|s| s.elapsed_ns as f64 / 1e6)); }
                     break;
                 }
-                r.wait_idle().unwrap();
             }
         }
-        eprintln!("  pan presents: {} GPU samples, presenter GPU p50 {:.3} p95 {:.3} ms; frame wall p50 {:.2} p95 {:.2} ms",
-            gpu.len(), quantile(&mut gpu, 0.5), quantile(&mut gpu, 0.95), quantile(&mut walls, 0.5), quantile(&mut walls, 0.95));
+        eprintln!("{name}: whole-level half-float conversion GPU p50 {:.3} p95 {:.3} ms over {} samples", quantile(&mut gpu, 0.5), quantile(&mut gpu, 0.95), gpu.len());
     }
 }
 
@@ -713,6 +752,45 @@ fn fit_views_read_one_half_float_level_closer_to_an_area_average() {
 }
 
 #[test]
+fn half_float_levels_present_alike_with_or_without_float32_filtering() {
+    let extent = [1100, 700];
+    let doc = patterned(extent);
+    let color = doc.composition().color;
+    for zoom in [0.2137f32, 0.2976] {
+        let size = extent.map(|n| (n as f32 * zoom).ceil() as u32 + 2);
+        let view = ViewState { width_px: size[0], height_px: size[1], document_to_surface: [zoom, 0., 0., zoom, 1., 1.] };
+        let shown = |mut r: WgpuRasterizer| {
+            submit(&mut r, &doc, view, true);
+            assert!(half_float_presentation(&r), "zoom {zoom} presents half-float levels");
+            present(&r, &mut crate::test_support::float_presenter(&r), view)
+        };
+        let filtered = shown(WgpuRasterizer::new_native_headless(color).unwrap());
+        let texels = shown(WgpuRasterizer::native_headless_without(color, wgpu::Features::FLOAT32_FILTERABLE).unwrap());
+        let error = crate::test_support::max_error(&filtered, &texels);
+        assert!(error < 1e-5, "zoom {zoom}: half-float levels filter alike without float32 filtering: {error}");
+    }
+}
+
+#[test]
+fn the_surround_skips_the_artwork_shader() {
+    let extent = [1100, 700];
+    let doc = patterned(extent);
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let view = ViewState { width_px: 800, height_px: 600, document_to_surface: [0.25, 0., 0., 0.25, 300., 200.] };
+    submit(&mut r, &doc, view, true);
+    let mut presenter = crate::test_support::float_presenter(&r);
+    let shown = present(&r, &mut presenter, view);
+    let [width, height] = [1100. * 0.25, 700. * 0.25];
+    assert!(presenter.shaded_area_pixels() as f32 <= (width + 8.) * (height + 8.), "the artwork shader runs on {} pixels", presenter.shaded_area_pixels());
+    let surround = shown[0];
+    for (index, pixel) in shown.iter().enumerate() {
+        let [x, y] = [(index % 800) as f32 + 0.5, (index / 800) as f32 + 0.5];
+        if x < 300. || y < 200. || x > 300. + width || y > 200. + height { assert_eq!(*pixel, surround, "surround pixel {x}, {y}"); }
+    }
+    assert!(crate::test_support::max_error(&[shown[(200 + 80) * 800 + 400]], &[surround]) > 0.1, "the artwork shows inside the surround");
+}
+
+#[test]
 fn painting_at_fit_updates_the_half_float_level_it_presents() {
     let extent = [1100, 700];
     let doc = patterned(extent);
@@ -726,6 +804,7 @@ fn painting_at_fit_updates_the_half_float_level_it_presents() {
         submit(&mut fresh, &doc, native, true);
         let mut presenter = crate::test_support::float_presenter(&painted);
         let before = present(&painted, &mut presenter, fit);
+        let conversions = painted.metrics.half_level_passes;
         for step in 0..3 {
             let mut dab = crate::tests::test_dab([200. + step as f32 * 250., 300.], [0.9, 0.02, 0.1, 0.8], 1.);
             dab.radii = [60.; 2];
@@ -738,6 +817,7 @@ fn painting_at_fit_updates_the_half_float_level_it_presents() {
                 present(&painted, &mut presenter, fit);
             }
         }
+        assert_eq!(painted.metrics.half_level_passes, conversions, "bounded {bounded}: strokes convert their half-float pixels while reducing them");
         submit(&mut painted, &doc, fit, false);
         submit(&mut fresh, &doc, fit, false);
         assert!(half_float_presentation(&painted) && half_float_presentation(&fresh), "bounded {bounded}");

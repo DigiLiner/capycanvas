@@ -90,9 +90,6 @@
   mid-tier row can pass, it must present at 90 Hz. The Liquify profile verifies
   the 90 Hz mode before its matrix with Adaptive refresh enabled for its
   benchmark application; it does not measure physical presentation per trial.
-- **Navigation on the tier canvas is untested on two tiers.** The low and mid
-  tiers have no pan, zoom or rotate measurements on their canvases. The top tier
-  has only pinch data at 61 MP.
 - **Operations with no timing harness:**
   - Layer opacity scrub, reorder and blend changes.
   - Gradient and curve-point drags.
@@ -108,159 +105,127 @@
   measurements on the three reference canvases. Existing object and placed-photo
   results in the tier tables describe earlier builds. Desktop browser callbacks
   and renderer timings do not establish presented-frame rates or qualify a tier.
-- **Vector layers miss most motion targets once paths are selected or edited.**
-  The reference tablets were measured on 2026-10-19 with the vector benchmark
-  ([measuring](measuring.md#vector-layers-android)) on `crowded_vector_fixture`
-  documents at each tier's canvas with equal path density: 10,000, 20,000 and
-  50,000 hatching paths. Tier tables: [low](low-tier.md#vector-layers),
-  [mid](mid-tier.md#vector-layers), [top](top-tier.md#vector-layers). The
-  native library includes other sessions' uncommitted vector and package edits
-  of that afternoon; the tables name it.
+- **Vector layers: most edits meet their rates; the 5,000-path width scrub,
+  navigation, Fill outside, merges and Rasterize miss.** Measured 2026-10-20 at
+  `2567874a7` on `crowded_vector_fixture` documents at each tier's canvas with
+  equal path density (10,000 / 20,000 / 50,000 paths), with the mid panel at
+  90 Hz; cells marked *r3* were re-measured on the round 2 and 3 tree
+  (`e7cdd234`) and cells marked *r4* on 2026-10-21 on the round 2–4 tree
+  (`e2667d46`; the width scrub on `a4027fb6`). Tier tables: [low](low-tier.md#vector-layers),
+  [mid](mid-tier.md#vector-layers), [top](top-tier.md#vector-layers). Bold
+  cells miss.
 
-  | Presented frames/s, or updates/s for inking | Low (60) | Mid (90, panel at 60 Hz) | Top (120) |
+  | Presented frames/s unless noted | Low (60) | Mid (90) | Top (120) |
   | --- | --- | --- | --- |
-  | G-Pen 24 px on the crowded layer | 88.5–90.2 met | 185.3–187.3 met | 250.0–252.8 met |
-  | Move drag, 1 / 100 / 5,000 paths | 59.8 / 59.8 / 32.4 | 59.7 / 59.5 / 52.8 | 120 / 120 / 96.6 |
-  | Move drag start, 1 / 5,000 paths (limit 100 ms) | 53–79 / 260–279 ms | 79–94 / 198–211 ms | 108–135 / 147–178 ms |
-  | Scale with the Move frame, 100 / 5,000 paths | 1.0–1.4 / 0.2 | 2.6–2.7 / 0.3–0.5 | 29.4–35.2 / 0.9–1.1 |
-  | Edit Points drag, 1 path | 45.6 | 59.7 | 120 met |
-  | Eraser: touched part / whole paths / to intersection | 13.5 / 35.4 / 19.3 | 32.4 / 59.1 / 43.3 | 100.2 / 116.1 met / 93.1 |
-  | Outline width scrub, 100 / 5,000 paths | 2.2 / 0.2 | 4.5 / 0.2 | 20.6 / 0.4 |
-  | Pan with no paths / 5,000 paths selected | 34.5 / 13.5 | 53.3 / 16.6 | 17.6 / 12.3 |
+  | Pen-down after a commit, first completion p95 (33 / 22 / 17 ms) | **40.8–51.0 ms** | **32.8–35.5 ms** | 14.4–**18.0** ms |
+  | Move drag start, 1 / 5,000 paths (100 ms) | 63–77 / 53–85 ms | 58–63 / 55–62 ms | 43–80 / 40–53 ms *r3* |
+  | Rotate, 5,000 paths | **55.4–55.6** | 88.6–89.0 | 120 |
+  | Edit Points, 1 / 100 paths | 60.0 / 59.8–60.0 *r3* | 89.4–89.6 / 89.6 *r4* | 118.6–119.0 |
+  | Outline width scrub, 100 / 5,000 paths, updates/s | 60.0 / **10.4–11.2** *r3* | 89.6 / **24.7–24.9** *r4* | 120.0 / **29.6–32.1** *r4* |
+  | Pan / pinch, nothing selected | **43.1–43.2 / 33.4–33.9** | **57.8–58.0 / 58.2–58.4** | **27.8–28.8 / 36.8–38.9** |
+  | Pinch, 5,000 paths selected | **5.8–28.6** *r3*, one run in three with a 1.25 s gap | **56.7–57.1** | **21.1–21.4** *r3*, gaps 0.67 s |
+  | Fill outside the paths, first change / complete (250 ms) | **0.60–0.64 / 3.15–3.22 s** | **0.80–0.81 / 2.68–2.73 s** | **2.10–2.12 s** |
+  | Merge Down onto a vector layer (100 ms) | **310–320 ms** | **316–331 ms** | **170–178 ms** |
+  | Merge Down onto paint / Rasterize, first change (100 ms) | 78–90 / **112–132 ms** | **1.21–1.34 / 1.17–1.19 s** | **1.93–2.45 / 1.42–2.36 s** |
 
-  Responses: Fill inside a path 47–58 ms and Undo 90–169 ms meet their limits
-  on every tier, and a crowded document opens in 1.2 / 1.1 / 1.7 s. Fill
-  outside the paths takes 1.0–2.6 s on low and mid, and on the top tier stops
-  the renderer with "GPU buffer size overflow". Merge Down onto a paint layer
-  and Rasterize Layer take 1.9–2.3 s on low, 2.3–3.0 s on mid and 3.6–3.7 s on
-  top, with no change on screen until they finish on mid and top; Merge Down
-  onto a vector layer takes 274–476 ms. Rate-limited rows also trail the pen:
-  a 5 s Scale, Rotate or width scrub of 5,000 paths keeps the canvas thread
-  busy for 18–41 s after release.
+  G-Pen inking, Move, Scale, Edit Points, the 100-path width scrub, every
+  eraser, Fill inside, commit, Undo and Open meet their targets on every tier,
+  as does Rotate on the top tier. The incremental history ledger brought commit,
+  Fill inside and Merge Down onto a vector layer back near their earlier times,
+  and pen-down after a commit on the top tier from 28–30 to 8–10 ms p50. A
+  paint-layer thumbnail after filling a whole layer arrives 4.0–4.1 / 3.8 /
+  6.4 s later; editing while it is pending costs no frames. The frame that
+  shows a finished Rasterize takes 95–110 / 231–251 / 63–87 ms of CPU and
+  157 / 222–238 / 87–136 ms of GPU; before it, no canvas frame is presented for
+  about 1.0 / 1.1 / 1.3–2.3 s.
 
-  Causes, from CPU profiles of the canvas thread (`simpleperf`, MovinkPad 11,
-  `artifacts/vector-tablets-20261019/profiles/`) and GPU timestamps, by impact:
-  1. **Previews run once per stylus sample.** Scale and Rotate re-run
-     `transform_items` and `preview_edit` for every 200 Hz sample: 72% of the
-     canvas thread at 100 paths, 5.4 ms per sample on the MovinkPad 11 and
-     8.4 ms on the TCL, where `edit_chunks` re-packs whole chunks and the
-     preview re-validates them. The width scrub does the same per dispatch
-     (`set_path_property`, then `refresh_document`), and the eraser per sample
-     (45% of the thread, `VectorIndex::near` alone 22%). At 200 Hz the queue
-     outgrows the frame. **Fix:** in the shared session, keep only the latest
-     pointer or slider value and apply it once per frame, and preview Scale
-     and Rotate like translation by giving `VectorMotion` an affine for the
-     cached moving image, re-deriving the paths only at release. Expected:
-     Scale and Rotate at the Move rate (60 / 120+ renderer / 120 for 100
-     paths; coalescing alone leaves the top tier GPU-bound near 50/s), no
-     trailing work after release, and a 2–3× faster eraser and width scrub on
-     the low and mid tiers.
-  2. **Selection-sized UI state is rebuilt every frame.** With 5,000 paths
-     selected, `refresh_commands` takes 60% of the canvas thread while panning:
-     command checks such as `layer_step_edit`, `drop_layers_edit` and
-     `vector_disabled_reason` build trial edits whose `repair_working` and
-     `VectorObject::selected` clone every selected path. During a 5,000-path
-     Move, model publication takes 31% (the Layer menu's `group_layers_edit`
-     trial edit about 12%) and `refresh_layer_presentation` 20%
-     (`vector_properties::controls` over the selection). **Fix:** derive
-     command flags, menus and Properties controls once per selection or
-     document change, make the vector checks constant-time predicates instead
-     of trial edits, and skip republishing them while a drag or navigation
-     gesture moves. Expected: navigation with a selection at the
-     no-selection rate (13.5 → 34.5 / 16.6 → 53.3 / 12.3 → 17.6), and the
-     5,000-path Move GPU-bound instead of CPU-bound (about 32 → 50 on low and
-     52 → 60 on mid; the top tier stays near 100 with 10 ms of GPU per frame).
-  3. **Drag start draws two heavy frames.** The first frames after pressing
-     repaint the tiles the moving paths leave and draw the moving image: 47–76 ms
-     of GPU per frame for one path on low and top, and 54–113 ms of CPU plus
-     136–169 ms of GPU for 5,000 paths. **Fix:** prepare the layer without the
-     selection and the moving image when the selection changes, so pressing a
-     selected path presents at once, and repaint only the moving paths'
-     footprint at the display level. Expected: drag start under 50 ms on every
-     tier for selected paths.
-  4. **Crossing into a finer level re-rasterizes the crowded layer at once.**
-     A TCL pinch past zoom 0.5 presents 2.9–19/s with 1.5–1.7 s gaps, against
-     33.8/s without vector layers; the canvas thread spends its time recording
-     the vector jobs' barriers, buffer copies and passes in the Mali driver.
-     **Fix:** keep showing the previous level scaled while the new one renders
-     within a per-frame budget, and batch each frame's vector uploads and passes.
-  5. **Baking derives every path at full resolution on the canvas thread.**
-     Merge Down onto paint and Rasterize Layer spend it in `vector_tile`,
-     `batch_with` and `derived_at` for every page. **Fix:** bake on a worker
-     with immediate on-screen feedback. Fill outside the paths floods the whole
-     canvas: at 9504 × 6336 its 4-byte-per-pixel flood buffer (241 MB) exceeds
-     the storage-binding limit, and the refusal surfaces as a renderer failure.
-     It needs a windowed flood bounded by memory, and an oversize request
-     should be refused without losing the canvas.
-  6. **Navigation also misses without vector content.** With the hatching
-     removed, pan presents 38.9 / 57.7 / 19.4/s; the crowded layer costs 8–11% on
-     top of that. See the navigation regression below.
+  Causes, from canvas-thread `simpleperf` profiles windowed to the slow frames
+  and GPU timestamps with Stats open, with proposed fixes:
+  1. **The 5,000-path width scrub re-derives every outline per step.** On the
+     top tier `Vectors::replacement_batch` and `vector::tiles::derive` take
+     26–28% of the canvas thread, and rebuilding `Arc<[PathItem]>` and the
+     replacement map with its allocator churn about 25% more. The round 2–4
+     tree (`a4027fb6`), whose presenter composes only the layers above the
+     moving paths and paces the scrub to the display, presents 29.6–32.1/s on
+     top (18.5–21.4 on the round 3 tree, 26.1–35.0 at `2567874a7`) and
+     24.7–24.9/s on mid (17.8–18.2); low presented 10.4–11.2/s on the round 3
+     tree. The 100-path scrub holds 120.0 and 89.6/s. **Fix:** derive the
+     outlines on worker threads in batches and patch styles in place instead
+     of rebuilding the selection's item arrays per step. Expected: 5,000 paths
+     at about the 100-path rate on top; 2–4× on mid and low.
+  2. **Mid-tier G-Pen painting matches `8ee87a1e5` again.** At 1536 px with
+     Stats closed the round 2–4 tree paints 23.3–23.6 updates/s against
+     23.1–23.6 for `8ee87a1e5` in alternating runs (21.6–22.0 on the round 3
+     tree). Per-pass GPU timestamps on the round 3 tree had put the whole
+     loss in the half-float conversion, which converted both levels from one
+     invocation per coarse texel: 5.8–6.5 against 3.4–3.6 ms per update.
+     Converting one texel per invocation again removed it. Low painting was
+     unchanged on the round 3 tree (31.6–32.6 against 31.6–32.4).
+  3. **A level change with a selection still renders a whole level in one
+     frame on the low tier.** One pinch run in three makes frames of
+     0.9–1.25 s, also on the round 3 tree: `Scene::compose` → `scale::Cache::render_graph` with 68% in
+     Mali command recording and 11% in `create_target`. The per-frame budget
+     covers the selection's images but not the layer at the new level.
+     **Fix:** budget the layer's composition at the new level as well and keep
+     the previous level scaled until it is ready. Expected: the no-selection
+     pinch rate (33–34/s) without second-long frames; the same applies to the
+     top tier's 0.7 s gaps.
+  4. **Pen-down after a commit on low and mid** is 24–33 ms p50 against 13–23 ms
+     before the history regression. The committed path is presented 157–170 /
+     216–247 ms after pen-up, so the next contact starts while the commit is
+     still in flight; this round did not profile it. **Fix:** submit the
+     committed path's raster as separate low-priority work so the next
+     contact's first update does not queue behind it. Expected: p95 under 33 /
+     22 ms.
+  5. **Low-tier Rotate of 5,000 paths** presents 55.4–55.6/s, GPU bound by the
+     viewport pass plus the rotated moving image. **Fix:** draw it in the
+     presenter's split sampling instead of compositing it each frame.
+     Expected: 60/s.
+  6. **Merge Down onto paint and Rasterize** show nothing until done on mid and
+     top; the bake now records about three passes per window but still holds
+     the canvas for 1.2–2.4 s. **Fix:** present the baked windows
+     progressively. Expected: first change within a frame. **Fill outside**
+     still labels the whole canvas before its first change (0.6–2.1 s); the
+     same progressive presentation applies.
 
-  The headless renderer benchmarks (`scene::vectors::tests::crowded_vector_layer_drawing_frames`
-  and `crowded_vector_layer_edit_frames`) still time renderer frames on a
-  4000 × 3000 canvas; they do not account for per-sample session work or
-  UI refresh, which dominate the tablet results above.
-- **Navigation regressed on every tier on 2026-10-18 and 2026-10-19.**
-  `AndroidViewportBenchmarkTest` pan on each tier photo with the Navigator open,
-  measured with `tools/performance/android-viewport-presents.py`
-  ([measuring](measuring.md)) on builds of each commit, thermal 0. Cells are
-  presented frames/s / viewport pass GPU p50 in ms; the mid tier's panel was at
-  60 Hz. Raw runs are in `artifacts/navigation-regression-20261019/`.
+  Round 3 fixed Edit Points and the 100-path width scrub on Mali (repainting
+  only the moving bounds) and the top tier's drag start (reused images);
+  round 4 fixed the mid-tier painting regression and the top tier's slower
+  5,000-path scrub. Raw summaries, tables, A/B runs and symbolized profiles are
+  in `artifacts/vector-tablets-20261020/round2/`, `round3/` and `round4/`.
+- **Navigation misses on every tier; the viewport pass is the cost.** On the
+  round 2 and 3 tree (`e7cdd234`, 2026-10-20), `AndroidViewportBenchmarkTest`
+  pan on each tier photo with the Navigator open
+  ([`android-viewport-presents.py`](measuring.md)) presents 43.6–43.9 on low
+  and 62.6–62.7 on mid (90 Hz), with viewport-pass GPU p50 16.2–16.3 and
+  11.9 ms; pinch presents 33.3–35.2 and 46.4–47.2. Giving paper lighting its
+  own pipeline changed neither tier (16.2 and 11.9 ms at `2567874a7`). On the
+  top tier pan presents 32.9–36.1 at 18.5–18.7 ms (18.9–19.2 ms at
+  `2567874a7`) and pinch 32.7–37.8; rotate, not re-measured, was 29.6–32.3 at
+  `2567874a7`. Everything the GPU does in a frame, including the compositor,
+  must fit in 16.7 / 11.1 / 8.3 ms.
 
-  | Build | Low | Mid | Top |
-  | --- | --- | --- | --- |
-  | `43619c740`, before both changes | 59.9 / 8.9 | 59.7 / 7.9 | 35.1 / 17.4 |
-  | `33ab1389d`, parent of `c2251bd48` | 60.0 / 9.0 | | 35.7 / 17.3 |
-  | `c2251bd48` Light the paper's texture | 59.9 / 9.1 | | 27.4 / 24.5 |
-  | `c2a4ed732`, before Sketch | 58.7 / 10.6 | 59.7 / 8.9 | 27.7 / 24.2 |
-  | `abc9178e9`, after `deab38451` Open Sketch for new users | 32.6 / 23.5 | 58.1 / 13.3 | 20.9 / 36.9 |
-  | `24269ed6a` | 31.2 / 24.1 | 57.3 / 13.6 | 20.9 / 36.8 |
-
-  1. **Sketch shows more artwork at Fit.** `deab38451` makes Sketch the default
-     workspace (`crates/layer-workspace/src/manager.rs:397`). Its larger work
-     area raises the Fit zoom from 0.180 / 0.175 / 0.162 to 0.298 / 0.246 /
-     0.213, so the artwork covers 2.7 / 2.0 / 1.7 times as many screen pixels
-     (1.07 / 1.45 / 2.74 MP). The pass's cost per artwork pixel did not change;
-     the larger area is what new users see.
-  2. **The paper lighting doubled the top tier's artwork sampling.**
-     `c2251bd48` calls `source_at` in both arms of a uniform branch
-     (`crates/layer-render-wgpu/src/present.wgsl:324–325` at `24269ed6a`).
-     On the Adreno 735 the arm that is not taken still costs as much as
-     sampling the artwork again: 12.6 ms of the 36.8. The Mali tiers do not
-     pay it.
-  3. The low tier also lost 1.5 ms of GPU time between `c2251bd48` and
-     `c2a4ed732`, and the mid tier 1.0 ms between `43619c740` and
-     `c2a4ed732`. No presenter file changed after `c2251bd48`; these ranges
-     are not bisected.
-
-  Attribution on `24269ed6a` with presenter variants built in a scratch copy
-  (pan, GPU p50 in ms):
+  Alternating runs of presenter variants of `2567874a7` (pan GPU p50 / pan
+  presented frames/s):
 
   | Variant | Low | Mid | Top |
   | --- | --- | --- | --- |
-  | Current | 24.1 | 13.6 | 36.8 |
-  | `source_at` called once, then the paper branch | 24.7 | 13.6 | 24.2 |
-  | Paper code removed | | 12.6 | 24.1 |
-  | Split vector preview (bindings 17–19) removed | 23.7 | 13.4 | 25.2 with paper removed |
-  | Glass blur off (`transparency=off`) | | | 38.7 |
-  | Finer level only, no blend with the coarser one | 19.2 | | 32.0 |
-  | Coarser level only, with `source_at` once | 18.0 | 12.9 | 15.2 |
-  | Nearest texel instead of bilinear, with `source_at` once | 23.1 | 13.9 | 22.2 |
-  | Flat artwork colour, no artwork sampling | 10.4 | 7.2 | 6.1 |
+  | Current | 16.3–16.7 ms / 42.0–44.1 | 11.9 ms / 62.1–63.2 | 19.2 ms / 32.3–35.1 |
+  | Surround shaded by the artwork shader again | 17.0–17.1 ms / 41.8–42.5 | 13.3 ms / 57.6–58.3 | 20.4–20.5 ms / 30.8–33.6 |
+  | Half-float levels sampled through `sample_float` again | 17.0–17.1 ms / 41.3–42.5 | 11.8 ms / 62.1–63.8 | |
 
-  So the top tier's 36.8 ms is about 6 ms for the full-screen pass without
-  artwork, 12.6 ms for the duplicated sampling, and 18 ms for sampling the
-  RGBA32F display cache at Fit, where the finer level is read at more than one
-  texel per screen pixel. Filtering is not the cost (nearest saves at most
-  2 ms); the minified reads are. Neither the glass blur nor the split vector
-  preview costs measurable time.
+  Skipping the surround (proposal A) saves 0.7 / 1.4 / 1.2 ms and pinch time
+  alike, and leaves G-Pen painting unchanged (32.0–32.4, 21.6–22.1 and
+  99.1–101.2 updates/s with and without it). Hardware filtering (proposal B)
+  saves 0.5 ms on low and nothing on mid; the top tier filters 32-bit floats
+  already. With the artwork replaced by a flat colour, the top tier's pass
+  takes 15.7–15.8 ms at `24269ed6a`, `b7fb3654a` and `8ee87a1e5` alike, so the
+  non-artwork part did not grow across those commits. On the round 3 tree, with
+  paper lighting in its own pipeline, the flat-artwork pass takes 6.0–6.4 ms
+  and presents 65.0–72.3 frames/s (p99 25 ms) in alternating runs against
+  18.5–18.7 ms with the artwork, so about 12 ms of the top tier's pass goes
+  with sampling the artwork. Pinch adds level refinement on top.
 
-  **Fixes.** Call `source_at` once and branch on its result: measured top
-  36.8 → 24.2 ms and 20.9 → 28.0 presented/s, no change on low and mid.
-  Compiling the paper code only into a paper pipeline saves another 1.0 ms on
-  mid (57.3 → 59.6/s at 60 Hz). Reading the finer level at Fit costs the most:
-  sampling only the coarser level reaches 18.0 / 12.9 / 15.2 ms (40.6 / 59.1 /
-  39.4 presented/s) but blurs the Fit view, so a sharp alternative, such as a
-  half-float display pyramid or a level chosen for the footprint, needs its
-  own measurement. Even the flat-colour floor (10.4 / 7.2 / 6.1 ms) leaves the
-  top tier short of 120/s, presenting 74–79/s.
+  **Fixes.** Profile the artwork sampling in the top tier's viewport pass; with
+  flat artwork the tier still presents only 65–72 frames/s, so the rest of the
+  frame needs its own profile too.

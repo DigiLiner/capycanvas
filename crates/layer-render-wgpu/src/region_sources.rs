@@ -15,6 +15,8 @@ struct Binding {
 
 pub(super) struct RawRegions {
     capture: artwork::Capture,
+    /// One capture per tile of a classification batch.
+    captured: Vec<(wgpu::Texture, wgpu::TextureView)>,
     layout: wgpu::BindGroupLayout,
     cached_layout: wgpu::BindGroupLayout,
     seed_pipeline: Deferred<wgpu::ComputePipeline>,
@@ -127,6 +129,7 @@ impl RawRegions {
         };
         Self {
             capture: Default::default(),
+            captured: Vec::new(),
             layout,
             cached_layout,
             seed_pipeline: pipeline("sample_seed"),
@@ -191,6 +194,7 @@ impl RawRegions {
     }
     pub fn storage_bytes(&self) -> u64 {
         self.capture.storage_bytes()
+            + self.captured.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()
             + self.tonal_parameters.size()
             + self.tonal_statistics.size()
             + self.seed.size()
@@ -471,7 +475,7 @@ impl RawRegions {
         let batches: Vec<_> = (tone.is_none())
             .then_some(std::slice::from_ref(&seed_tile))
             .into_iter()
-            .chain(tiles.chunks(if layer.is_some() && !placed { BATCH_TILES } else { 1 }))
+            .chain(tiles.chunks(if placed { 1 } else { BATCH_TILES }))
             .collect();
         let stride =
             (PARAMETER_BYTES as u32).next_multiple_of(limit.min_uniform_buffer_offset_alignment);
@@ -567,13 +571,10 @@ impl RawRegions {
                     }
                 } else {
                     let region = page_rect(*coordinate).intersect(PixelRect::full([w, h]));
-                    Some(self.capture.region(
-                        r,
-                        frame.as_ref().unwrap().packet([w, h]),
-                        region,
-                        [PAGE_SIZE; 2],
-                        encoder,
-                    )?)
+                    if self.captured.len() <= slot { self.captured.push(crate::create_color_target(&r.device, [PAGE_SIZE; 2], "raw region capture")); }
+                    let (texture, view) = self.captured[slot].clone();
+                    self.capture.region_into(r, frame.as_ref().unwrap().packet([w, h]), region, &texture, encoder)?;
+                    Some(source_access::RawTile { texture, view })
                 };
                 if let Some(source) = &source { leases.extend(r.source_tiles.borrow().lease(&source.view)); }
                 views[slot] = source.map_or_else(|| r.empty_view.clone(), |t| t.view);
@@ -635,10 +636,7 @@ impl RawRegions {
                     group,
                 }
             };
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("raw region tile"),
-                timestamp_writes: None,
-            });
+            let pass = encoder.compute_pass();
             pass.set_bind_group(0, &binding.group, &[(i as u32) * stride]);
             if i == 0 && tone.is_none() {
                 pass.set_pipeline(&self.seed_pipeline);
@@ -655,7 +653,6 @@ impl RawRegions {
                     tiles.len() as u32,
                 );
             }
-            drop(pass);
             if self.bindings.len() == 4 {
                 self.bindings.pop_front();
             }

@@ -45,7 +45,7 @@ impl Editor {
         Ok(())
     }
     pub fn capture_session(&self,capture:ArtworkCapture)->Result<EditorCapture,crate::DocumentError> {
-        let Editor {document,undo,redo,checkpoint:edit_checkpoint,next_checkpoint}=self;
+        let Editor {document,undo,redo,checkpoint:edit_checkpoint,next_checkpoint,..}=self;
         let Document {artwork,working,revision,owner,scene_index:_,next_stroke_id:_}=document;
         let checkpoint=capture.checkpoint;
         if checkpoint.document!=artwork.id || checkpoint.owner!=*owner
@@ -418,7 +418,7 @@ pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLi
     }
     undo.extend(entries(&record.undo,&documents,1,record.current.checkpoint)?);redo.extend(entries(&record.redo,&documents,1+record.undo.len(),record.current.checkpoint)?);
     let mut document=documents.remove(0);document.revision=record.checkpoint.artwork_generation;document.next_stroke_id=record.next_stroke_id;
-    let editor=Editor {document,undo,redo,checkpoint:record.checkpoint.edit_checkpoint,next_checkpoint:record.next_checkpoint};
+    let editor=Editor {document,undo,redo,checkpoint:record.checkpoint.edit_checkpoint,next_checkpoint:record.next_checkpoint,ledger:Default::default()};
     let mut accounting=crate::history_budget::Accounting::new(editor.document());let mut retained=0usize;
     for entry in editor.undo.iter().rev().chain(editor.redo.iter().rev()) {
         retained=retained.saturating_add(accounting.charge(entry));

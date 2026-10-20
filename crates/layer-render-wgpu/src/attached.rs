@@ -171,6 +171,9 @@ impl CanvasRenderer for AttachedRenderer {
     fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_vector_motion(motion); }
     }
+    fn set_vector_motion_paths(&mut self, paths: Option<std::sync::Arc<[layer_core::authored::vector::PathItem]>>) {
+        if let Some(gpu) = self.0.as_mut() { gpu.set_vector_motion_paths(paths); }
+    }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_paper_overlay(overlay); }
     }

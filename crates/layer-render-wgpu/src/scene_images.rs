@@ -287,6 +287,26 @@ impl Scene {
                 self.free(output);
                 return;
             }
+            let n = self.jobs.len();
+            let page = [destination.texture.width(), destination.texture.height()] == [PAGE_SIZE; 2]
+                && [bounds.min_x(), bounds.min_y()] == [tile[0] * PAGE_SIZE, tile[1] * PAGE_SIZE]
+                && destination.texture.usage().contains(wgpu::TextureUsages::STORAGE_BINDING);
+            let drawn = match &self.jobs[n.saturating_sub(2)..] {
+                [Job::Clear(cleared, _), Job::Vector(job)] => cleared == view && job.output == *view && job.base.is_none(),
+                [.., Job::Clear(cleared, _)] => cleared == view,
+                _ => false,
+            };
+            if page && drawn {
+                for job in &mut self.jobs[n.saturating_sub(2)..] {
+                    match job {
+                        Job::Clear(target, _) if target == view => *target = destination.view.clone(),
+                        Job::Vector(job) => job.output = destination.view.clone(),
+                        _ => {}
+                    }
+                }
+                self.free(output);
+                return;
+            }
             self.jobs.push(Job::Copy {
                 source: self.pool[output].texture.clone(),
                 source_origin: [

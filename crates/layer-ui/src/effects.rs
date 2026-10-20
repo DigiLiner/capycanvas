@@ -898,6 +898,8 @@ pub(super) struct EffectGesture {
     key: String,
     detached_curve_point: bool,
     latest: Option<EffectAction>,
+    shown: Option<EffectAction>,
+    pub(super) paths: Vec<layer_core::authored::vector::Position>,
 }
 impl EffectAction {
     fn sets_path_property(&self) -> bool {
@@ -907,13 +909,21 @@ impl EffectAction {
 
 impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn effect_preview_waiting(&self) -> bool { self.effect_gesture.as_ref().is_some_and(|gesture| gesture.latest.is_some()) }
-    pub(super) fn apply_latest_effect(&mut self) -> Result<bool, String> {
-        let Some(action) = self.effect_gesture.as_mut().and_then(|gesture| gesture.latest.take()) else { return Ok(false) };
+    pub(super) fn hold_scrub_value(&mut self, action: &EffectAction) -> bool {
+        let (EffectAction::Set { layer, key, .. } | EffectAction::Number { layer, key, .. }) = action else { return false };
+        let Some(gesture) = self.effect_gesture.as_mut().filter(|gesture| gesture.key == *key && occurrence_token(gesture.original.occurrence()) == *layer && action.sets_path_property()) else { return false };
+        gesture.latest = Some(action.clone());
+        true
+    }
+    pub(super) fn apply_latest_effect(&mut self) -> Result<(), String> {
+        let Some(gesture) = self.effect_gesture.as_mut() else { return Ok(()) };
+        let Some(action) = gesture.latest.take().filter(|action| gesture.shown.as_ref() != Some(action)) else { return Ok(()) };
+        gesture.shown = Some(action.clone());
         if let Err(error) = self.effect_action(action) {
             self.cancel_effect_gesture()?;
             return Err(error);
         }
-        Ok(true)
+        Ok(())
     }
     pub(super) fn sync_paper_preview(&mut self, now_ns: u64) {
         let dragging = self.effect_gesture.as_ref().filter(|gesture| gesture.key == paper::SCALE).map(|gesture| gesture.original.occurrence());
@@ -931,9 +941,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some(gesture) = self.effect_gesture.take() else {
             return Ok(false);
         };
-        self.engine
-            .preview_edit(gesture.original.edit(self.engine.document())?)
-            .map_err(error)?;
+        if matches!(gesture.original, PropertyBaseline::Paths { .. }) { self.end_path_preview(); } else {
+            self.engine.preview_edit(gesture.original.edit(self.engine.document())?).map_err(error)?;
+        }
         self.property_editor.commit_revision(self.engine.document().revision);
         self.refresh_document();
         Ok(true)
@@ -1000,12 +1010,19 @@ impl<R: CanvasRenderer> UiSession<R> {
             if self.engine.document().is_locked(handle) {
                 return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string());
             }
+            let document = self.engine.document();
+            let paths = match (&original, document.working.vector_items.as_ref().filter(|selection| selection.layer == handle)) {
+                (PropertyBaseline::Paths { value, .. }, Some(selection)) => value.selected_paths(&selection.items).into_iter().map(|(position, _)| position).collect(),
+                _ => Vec::new(),
+            };
             self.effect_gesture = Some(EffectGesture {
                 original,
                 layer_opacity,
                 key: key.clone(),
                 detached_curve_point: false,
                 latest: None,
+                shown: None,
+                paths,
             });
         } else if !self
             .effect_gesture
@@ -1028,6 +1045,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         if phase == ContactPhase::Move && action.sets_path_property() {
             gesture.latest = Some(action);
             return Ok(());
+        }
+        if phase == ContactPhase::Up && action.sets_path_property() {
+            self.effect_gesture = None;
+            self.end_path_preview();
+            let committed = self.effect_action(action);
+            self.property_editor.commit_revision(self.engine.document().revision);
+            return committed;
         }
         for action in earlier.into_iter().chain([action]) {
             if let Err(error) = self.effect_action(action) {

@@ -180,6 +180,14 @@ impl DocRect {
         Self { min: self.min.map(|v| v.saturating_sub(i64::from(radius))), max: self.max.map(|v| v.saturating_add(i64::from(radius))) }
     }
     pub fn is_empty(self) -> bool { (0..2).any(|i| self.min[i] >= self.max[i]) }
+    /// The square that holds this rectangle turned by any angle about its center.
+    pub fn turning_reach(self) -> Self {
+        if self.is_empty() { return self; }
+        let [width, height] = [0, 1].map(|i| (self.max[i] - self.min[i]) as f64);
+        let radius = (width.hypot(height) * 0.5).ceil() as i64 + 1;
+        let center = [0, 1].map(|i| self.min[i] + (self.max[i] - self.min[i]) / 2);
+        Self { min: center.map(|c| c - radius), max: center.map(|c| c + radius) }
+    }
     pub fn translated(self, by: [i64; 2]) -> Self {
         Self { min: [self.min[0] + by[0], self.min[1] + by[1]], max: [self.max[0] + by[0], self.max[1] + by[1]] }
     }

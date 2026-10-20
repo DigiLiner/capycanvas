@@ -1,4 +1,4 @@
-use super::{ItemId, PathItem, Position, Resource, VectorChunk, VectorObject};
+use super::{IdBuild, ItemId, PathItem, Position, Resource, VectorChunk, VectorObject};
 use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 
 const CELL: f64 = 256.;
@@ -10,10 +10,10 @@ struct Entry { chunk: usize, index: u32, bounds: [f64; 4] }
 #[derive(Default)]
 pub struct VectorIndex {
     root: Option<VectorObject>,
-    order: HashMap<usize, u32>,
-    cells: HashMap<[i32; 2], Vec<Entry>>,
+    order: HashMap<usize, u32, IdBuild>,
+    cells: HashMap<[i32; 2], Vec<Entry>, IdBuild>,
     large: Vec<Entry>,
-    retired: HashMap<usize, Resource<VectorChunk>>,
+    retired: HashMap<usize, Resource<VectorChunk>, IdBuild>,
 }
 
 fn key(chunk: &Resource<VectorChunk>) -> usize { Arc::as_ptr(chunk.storage()) as usize }
@@ -27,7 +27,7 @@ fn meets(a: [f64; 4], b: [f64; 4]) -> bool { a[0] <= b[2] && b[0] <= a[2] && a[1
 impl VectorIndex {
     fn update(&mut self, object: &VectorObject) {
         if self.root.as_ref().is_some_and(|root| root.same_root(object)) { return; }
-        let order: HashMap<usize, u32> = object.chunks().iter().enumerate().map(|(i, chunk)| (key(chunk), i as u32)).collect();
+        let order: HashMap<usize, u32, IdBuild> = object.chunks().iter().enumerate().map(|(i, chunk)| (key(chunk), i as u32)).collect();
         if let Some(previous) = self.root.take() {
             self.retired.extend(previous.chunks().iter().filter(|chunk| !order.contains_key(&key(chunk))).map(|chunk| (key(chunk), chunk.clone())));
         }

@@ -768,11 +768,11 @@ fn native_capture_pass_budget_keeps_mixed_plane_jobs_in_one_encoder() {
         let passes = job.pass_count(r.native_edit.as_ref().unwrap());
         let markers = NativeJob::TIMING_PASSES;
         let mut encoder = submission::CommandEncoder::new(&r.device, &Default::default());
-        encoder.reserve_passes(512 - passes - markers);
+        encoder.reserve_passes(submission::CommandEncoder::PASSES_PER_SUBMISSION - passes - markers);
         assert!(encoder.can_fit_passes(passes + markers));
         assert!(!encoder.can_fit_passes(passes + markers + 1));
         let mut insufficient = submission::CommandEncoder::new(&r.device, &Default::default());
-        insufficient.reserve_passes(512 - passes - markers + 1);
+        insufficient.reserve_passes(submission::CommandEncoder::PASSES_PER_SUBMISSION - passes - markers + 1);
         assert!(insufficient.can_fit_passes(passes));
         assert!(!insufficient.can_fit_passes(passes + markers));
         let before = encoder.pass_count();

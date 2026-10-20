@@ -110,7 +110,7 @@ impl Editor {
         self.document = prepared.document;
         match prepared.direction {
             Direction::Apply => {
-                self.undo.push(prepared.inverse);
+                self.undo.push(prepared.inverse.linked(&self.document));
                 self.redo.clear();
                 self.checkpoint = self.next_checkpoint;
                 self.next_checkpoint = next_checkpoint.unwrap();
@@ -118,11 +118,11 @@ impl Editor {
             }
             Direction::Undo => {
                 self.checkpoint = self.undo.pop().unwrap().checkpoint;
-                self.redo.push(prepared.inverse);
+                self.redo.push(prepared.inverse.linked(&self.document));
             }
             Direction::Redo => {
                 self.checkpoint = self.redo.pop().unwrap().checkpoint;
-                self.undo.push(prepared.inverse);
+                self.undo.push(prepared.inverse.linked(&self.document));
             }
         }
         Ok(())

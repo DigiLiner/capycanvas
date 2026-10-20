@@ -70,6 +70,7 @@ internal fun runVectorBenchmark(instrumentation: Instrumentation, args: Bundle, 
     val inkSize = args.getString("inkSize", "24")!!.toDouble()
     val fillBelow = args.getString("fillBelow", "true") == "true"
     val sizes = plan.getJSONObject("selections").keys().asSequence().toList().sortedBy { it.toInt() }
+    val navSelection = args.getString("navSelection")
 
     fun layerId(name: String) = state().array("layers").objects().single { it.optString("label") == name }.getLong("id")
     fun selectLayer(name: String) = action(obj("type" to "select_layer", "id" to layerId(name)))
@@ -343,11 +344,134 @@ internal fun runVectorBenchmark(instrumentation: Instrumentation, args: Bundle, 
                 obj("begin_ns" to begun, "begin_boot_ns" to boot, "end_ns" to System.nanoTime(), "end_boot_ns" to SystemClock.elapsedRealtimeNanos(), "values" to sent)
             }
         }) { data -> check(changed(data)) { "The scrub did not restyle paths" }; undo() }
-        "pan", "pinch", "rotate_view" -> runUnit(scenario.replace('_', '-'), {
-            selectLayer("Ink"); deselect(); invoke("pen"); ready(); obj("motion" to scenario, "paths_selected" to pathsSelected())
-        }, { name -> measured(scenario.replace('_', '-'), name) { twoFinger(length(name), scenario, camera()) } }) { data ->
-            check(data.getString("content_after") == data.getString("content_before")) { "Navigation changed the drawing" }
-            invoke("reset_rotation"); invoke("fit_canvas"); settle()
+        "pan", "pinch", "rotate_view" -> {
+            val unit = scenario.replace('_', '-') + (navSelection?.let { "-sel$it" } ?: "")
+            runUnit(unit, {
+                selectLayer("Ink")
+                if (navSelection != null) select(navSelection) else deselect()
+                invoke("pen"); ready()
+                check(pathsSelected() == (navSelection != null)) { "Paths selected: ${pathsSelected()}" }
+                obj("motion" to scenario, "paths_selected" to pathsSelected())
+            }, { name -> measured(unit, name) { twoFinger(length(name), scenario, camera()) } }) { data ->
+                check(data.getString("content_after") == data.getString("content_before")) { "Navigation changed the drawing" }
+                invoke("reset_rotation"); invoke("fit_canvas"); settle()
+            }
+        }
+        "thumbnails" -> {
+            class Poller {
+                @Volatile var running = false
+                val log = JSONArray()
+                val arrivals = java.util.concurrent.CopyOnWriteArrayList<LongArray>()
+                val revisions = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+                val pending = java.util.concurrent.ConcurrentHashMap<Long, LongArray>()
+                var thread: Thread? = null
+                var next = 0L
+                fun tick() {
+                    var layers = JSONArray()
+                    instrumentation.runOnMainSync { layers = JSONArray(host.snapshot!!.getJSONObject("state").getJSONArray("layers").toString()) }
+                    val requests = layers.objects().filter { it.optBoolean("has_thumbnail") }.mapNotNull { layer ->
+                        val id = layer.getLong("id"); val revision = layer.getLong("paint_revision")
+                        if (revisions[id] == revision || pending.values.any { it[1] == id }) null else longArrayOf(++next, id, revision)
+                    }.take((8 - pending.size).coerceAtLeast(0))
+                    val started = System.nanoTime()
+                    val done = CountDownLatch(1)
+                    var reply: Any? = null
+                    host.query(obj("type" to "layer_thumbnails", "requests" to JSONArray(requests.map { JSONArray(listOf(it[0], it[1])) }))) { reply = it; done.countDown() }
+                    check(done.await(30, TimeUnit.SECONDS)) { "The thumbnail query did not reply" }
+                    val replied = System.nanoTime()
+                    val response = reply as? JSONObject ?: return
+                    val accepted = response.array("accepted").values().map { (it as Number).toLong() }.toSet()
+                    requests.filter { it[0] in accepted }.forEach { pending[it[0]] = it }
+                    val images = JSONArray()
+                    response.array("images").values().forEach { raw ->
+                        val image = raw as JSONArray
+                        val request = pending.remove(image.getLong(0)) ?: return@forEach
+                        val width = image.getInt(1); val height = image.getInt(2); val bytes = image.getJSONArray(3)
+                        val pixels = IntArray(width * height) { p -> (bytes.getInt(p*4+3) shl 24) or (bytes.getInt(p*4) shl 16) or (bytes.getInt(p*4+1) shl 8) or bytes.getInt(p*4+2) }
+                        Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888).recycle()
+                        revisions[request[1]] = request[2]
+                        arrivals.add(longArrayOf(request[1], request[2], System.nanoTime()))
+                        images.put(JSONArray(listOf(request[1], request[2], width, height)))
+                    }
+                    synchronized(log) { log.put(JSONArray(listOf(started, replied, requests.size, accepted.size, images, response.optLong("wait_ms")))) }
+                }
+                fun start() {
+                    running = true
+                    thread = Thread { while (running) { tick(); SystemClock.sleep(120) } }.apply { start() }
+                }
+                fun stop() { running = false; thread?.join(60_000); thread = null }
+                fun idle(): Boolean {
+                    var layers = JSONArray()
+                    instrumentation.runOnMainSync { layers = JSONArray(host.snapshot!!.getJSONObject("state").getJSONArray("layers").toString()) }
+                    return pending.isEmpty() && layers.objects().filter { it.optBoolean("has_thumbnail") }.all { revisions[it.getLong("id")] == it.getLong("paint_revision") }
+                }
+                fun drain(): JSONArray = synchronized(log) { JSONArray(log.toString()).also { while (log.length() > 0) log.remove(0) } }
+            }
+            val poller = Poller()
+            fun base() = state().array("layers").objects().single { it.optString("label") == "Base" }
+            fun fillTool() {
+                selectLayer("Base")
+                action(obj("type" to "set_color", "rgba" to JSONArray(listOf(.2, .6, .3, 1.0))))
+                action(obj("type" to "layer", "action" to obj("op" to "tool", "tool" to obj("region" to obj("fill" to true, "source" to "editing")))))
+                ready()
+            }
+            fun penTool() {
+                selectLayer("Base")
+                invoke("pen")
+                action(obj("type" to "select_brush", "id" to 1))
+                action(obj("type" to "set_brush_size", "value" to inkSize))
+                ready()
+            }
+            fun quiet(on: Boolean) { if (on) waitFor("thumbnails to be current", 120_000) { poller.idle() } }
+            fun arrival(layer: Long, revision: Long, after: Long) = poller.arrivals.filter { it[0] == layer && it[1] != revision && it[2] > after }.minOfOrNull { it[2] }
+            fun thumbnailReport(unit: String, name: String, begun: Long, layer: Long, revision: Long, on: Boolean, gesture: JSONObject? = null) {
+                val ready = if (on) {
+                    waitFor("the layer's new thumbnail", 120_000) { arrival(layer, revision, begun) != null }
+                    arrival(layer, revision, begun)
+                } else null
+                File(output, "$label-$unit-$name-thumbnail.json").writeText(obj("layer" to layer, "revision_before" to revision, "begin_ns" to begun,
+                    "ready_ns" to ready, "latency_ms" to ready?.let { (it - begun) / 1e6 }, "gesture_begin_ns" to gesture?.optLong("begin_ns"),
+                    "gesture_end_ns" to gesture?.optLong("end_ns"), "polls" to poller.drain()).toString())
+            }
+            fun fillBase(): LongArray {
+                val layer = base().getLong("id"); val revision = base().getLong("paint_revision")
+                val p = workCenter(camera())
+                val begun = tap(doubleArrayOf(p[0], p[1])).getLong("begin_ns")
+                waitFor("the Fill to change the Base layer", 30_000) { base().getLong("paint_revision") != revision }
+                return longArrayOf(layer, revision, begun)
+            }
+            for (on in listOf(true, false)) {
+                val kind = if (on) "thumb" else "nothumb"
+                runUnit("$kind-fill", { fillTool(); if (on) poller.start(); quiet(on); obj("poller" to on) }, { name ->
+                    quiet(on); poller.drain()
+                    val layer = base().getLong("id"); val revision = base().getLong("paint_revision")
+                    val p = workCenter(camera())
+                    val data = measured("$kind-fill", name) { tap(doubleArrayOf(p[0], p[1])) }
+                    thumbnailReport("$kind-fill", name, data.getJSONObject("motion").getLong("begin_ns"), layer, revision, on)
+                    data
+                }) { data -> check(changed(data)) { "The fill changed nothing" }; undo(); quiet(on) }
+                runUnit("$kind-pan", { fillTool(); quiet(on); obj("poller" to on) }, { name ->
+                    quiet(on); poller.drain()
+                    val (layer, revision, begun) = fillBase().toList()
+                    settle()
+                    val data = measured("$kind-pan", name) { twoFinger(length(name), "pan", camera()) }
+                    thumbnailReport("$kind-pan", name, begun, layer, revision, on, data.getJSONObject("motion"))
+                    data
+                }) { _ -> undo(); invoke("reset_rotation"); invoke("fit_canvas"); settle(); quiet(on) }
+                runUnit("$kind-stroke", { fillTool(); quiet(on); obj("poller" to on) }, { name ->
+                    quiet(on); poller.drain()
+                    val (layer, revision, begun) = fillBase().toList()
+                    settle()
+                    penTool()
+                    val (cx, cy, width, height) = workCenter(camera()).toList()
+                    val rx = min(width, height) * .32
+                    val data = measured("$kind-stroke", name) { contact(length(name)) { t -> doubleArrayOf(cx + rx * sin(t * 3.2), cy + rx * .65 * sin(t * 4.7)) } }
+                    thumbnailReport("$kind-stroke", name, begun, layer, revision, on, data.getJSONObject("motion"))
+                    data
+                }) { data -> check(changed(data)) { "The stroke drew nothing" }; undo(); undo(); fillTool(); quiet(on) }
+                if (on) poller.stop()
+            }
+            selectLayer("Ink")
         }
         "commit" -> runUnit("commit", {
             selectLayer("Ink")

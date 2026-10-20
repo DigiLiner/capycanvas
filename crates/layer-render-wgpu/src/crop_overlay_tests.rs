@@ -126,21 +126,21 @@ fn staged_paper_relief_follows_a_new_scale_at_once_and_reports_only_its_own_bake
     pollster::block_on(presenter.prepare(&r)).unwrap();
     let mut present = |r: &WgpuRasterizer| {
         presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
-        page_bytes(r, &texture)
+        (page_bytes(r, &texture), presenter.paper_lighting_drawn())
     };
-    let baseline = present(&r);
+    let baseline = present(&r).0;
     let paper = |scale: f64| layer_core::paper::PaperBinding { surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
         texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone(),
         mapping: layer_core::paper::with_scale(&layer_core::paper::reference([128; 2], [300.; 2]), scale, [300.; 2]).mapping,
     }), target_offset: [0; 2] };
     let shading = |pixels: &[u8]| (34..94).flat_map(|y| (34..94).map(move |x| (y * 128 + x) * 4))
         .map(|i| f64::from(pixels[i]) - f64::from(baseline[i])).collect::<Vec<_>>();
-    fn settle(r: &mut WgpuRasterizer, paper: &layer_core::paper::PaperBinding, present: &mut impl FnMut(&WgpuRasterizer) -> Vec<u8>) -> Vec<u8> {
+    fn settle(r: &mut WgpuRasterizer, paper: &layer_core::paper::PaperBinding, present: &mut impl FnMut(&WgpuRasterizer) -> (Vec<u8>, bool)) -> Vec<u8> {
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
             r.poll_startup().unwrap();
-            let pixels = present(r);
-            if r.paper_overlay_ready(paper) { return pixels; }
+            let (pixels, lit) = present(r);
+            if r.paper_overlay_ready(paper) && lit { return pixels; }
             assert!(Instant::now() < deadline, "the slope pipelines and bake prepare on demand");
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -150,7 +150,7 @@ fn staged_paper_relief_follows_a_new_scale_at_once_and_reports_only_its_own_bake
     let real_size = shading(&settle(&mut r, &real, &mut present));
     assert!(real_size.iter().any(|v| *v != 0.), "the relief shades the canvas");
     r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: doubled.clone(), opacity: 1., moving: true }));
-    let stretched = shading(&present(&r));
+    let stretched = shading(&present(&r).0);
     assert_ne!(stretched, real_size, "the relief follows the new scale before its bake");
     let held = Instant::now() + Duration::from_millis(500);
     while Instant::now() < held {

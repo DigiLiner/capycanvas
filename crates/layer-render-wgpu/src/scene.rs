@@ -30,7 +30,7 @@ mod objects;
 mod object_cache;
 mod object_spatial;
 mod vectors;
-pub(crate) use vectors::{MotionSplit, Prepared, motion_bounds, motion_split, moved_bounds, prepared, preview_bounds, preview_damage};
+pub(crate) use vectors::{MotionSplit, Prepared, motion_bounds, motion_split, moved_bounds, paths_bounds, prepared, preview_bounds, preview_damage};
 mod bake;
 pub(crate) mod resample;
 pub(crate) mod scale;
@@ -967,6 +967,11 @@ impl Scene {
             self.free(back);
             return front;
         }
+        if !clip && opacity == 1. && let Some(at) = self.untouched_clear(back) {
+            self.jobs.remove(at);
+            self.free(back);
+            return front;
+        }
         let out = self.alloc(r, wgpu::Color::TRANSPARENT);
         self.draw(
             r,
@@ -981,6 +986,19 @@ impl Scene {
         self.free(front);
         self.free(back);
         out
+    }
+    /// The position of the transparent clear `image` still holds when no
+    /// later job reads or writes it. An unclipped blend at full opacity over
+    /// it returns its source unchanged.
+    fn untouched_clear(&self, image: usize) -> Option<usize> {
+        let view = &self.pool[image].view;
+        let at = self.jobs.iter().rposition(|job| matches!(job, Job::Clear(target, color) if target == view && *color == wgpu::Color::TRANSPARENT))?;
+        self.jobs[at + 1..].iter().all(|job| match job {
+            Job::Clear(target, _) => target != view,
+            Job::Vector(job) => job.output != *view && job.base.as_ref().is_none_or(|(base, _)| base != view),
+            Job::Draw { target, sources, .. } => target != view && !sources.contains(view),
+            _ => false,
+        }).then_some(at)
     }
     /// `tile` drawn through `convert` into a new tile, or `tile` itself when
     /// nothing converts.
@@ -1971,6 +1989,14 @@ impl Scene {
                     Some(&captured)
                 }
                 Job::Draw { data, .. } | Job::Effect { data, .. } => Some(data.as_slice()),
+                Job::Clear(target, color) => {
+                    let size = target.texture().size();
+                    let [w, h] = [size.width as f32, size.height as f32];
+                    captured = [0.; 32];
+                    captured[..8].copy_from_slice(&[0., 0., w, h, w, h, 0., 0.]);
+                    captured[12..16].copy_from_slice(&[color.r, color.g, color.b, color.a].map(|v| v as f32));
+                    Some(&captured)
+                }
                 Job::DecodedTile(pending) => pending.data.as_ref().map(|data| data.as_slice()),
                 _ => None,
             };
@@ -1998,6 +2024,8 @@ impl Scene {
                 clip == PixelRect::new(data[0].clamp(0., data[4]) as u32, data[1].clamp(0., data[5]) as u32,
                     (data[0] + data[2]).clamp(0., data[4]) as u32,
                     (data[1] + data[3]).clamp(0., data[5]) as u32)
+                    || (data[0] >= 0. && data[1] >= 0. && [clip.min_x(), clip.min_y()] == [data[0] as u32, data[1] as u32]
+                        && clip.max_x() as f32 <= data[0] + data[2] && clip.max_y() as f32 <= data[1] + data[3])
             })
         };
         let overwritten_clear = |i: usize| {
@@ -2014,6 +2042,11 @@ impl Scene {
                 Job::Clear(previous, color) if previous == target && *color == wgpu::Color::TRANSPARENT),
             _ => false,
         };
+        let compute_clear = |i: usize| matches!(&self.jobs[i], Job::Clear(target, _) if !overwritten_clear(i) && {
+            let texture = target.texture();
+            texture.format() == wgpu::TextureFormat::Rgba32Float && texture.usage().contains(wgpu::TextureUsages::STORAGE_BINDING)
+                && texture.mip_level_count() == 1 && texture.depth_or_array_layers() == 1
+        });
         let material_clear = |i: usize| matches!(self.jobs[i], Job::Clear(..))
             && matches!(self.jobs.get(i + 1), Some(Job::Placement(_) | Job::Watercolor { .. })) && is_material_compute(i + 1);
         let source_bindings = &mut self.source_bindings;
@@ -2073,16 +2106,28 @@ impl Scene {
                 encoded_through = end;
                 continue;
             }
-            if is_compute(job) {
+            if is_compute(job) || compute_clear(i) {
                 let (layout, inputs, pipeline) = &r.scene_pipelines.constant;
-                let end = (i + 1..self.jobs.len()).find(|&j| !is_compute(&self.jobs[j]) && !overwritten_clear(j))
+                let end = (i + 1..self.jobs.len()).find(|&j| !is_compute(&self.jobs[j]) && !compute_clear(j) && !overwritten_clear(j))
                     .unwrap_or(self.jobs.len());
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("scene pointwise tiles"), timestamp_writes: None,
-                });
+                let pass = encoder.compute_pass();
                 self.effect_passes+=u64::from(self.jobs[i..end].iter().any(|job|matches!(job,Job::Effect {..})));
                 for (j, job) in self.jobs.iter().enumerate().take(end).skip(i) {
                     if overwritten_clear(j) { continue; }
+                    if let Job::Clear(target, _) = job {
+                        let size = target.texture().size();
+                        let empty = [r.empty_view.clone(), r.empty_view.clone(), r.empty_view.clone()];
+                        let input = compute_bindings.get(&empty, || compute_source_binding(r, inputs, &empty));
+                        let output = output_bindings.get(target, || crate::bindings::group(&r.device, "scene normal layers destination", layout, [
+                            wgpu::BindingResource::TextureView(target),
+                        ]));
+                        pass.set_pipeline(pipeline);
+                        pass.set_bind_group(0, &self.binding, &[((base + j) * self.stride) as u32]);
+                        pass.set_bind_group(1, input, &[]);
+                        pass.set_bind_group(2, output, &[]);
+                        pass.dispatch_workgroups(size.width.div_ceil(32), size.height.div_ceil(2), 1);
+                        continue;
+                    }
                     if let Job::Effect {target,sources,data,prepared,masks,..}=job {
                         let effects::Pipeline::Compute(pipeline)=&prepared.pipeline else {unreachable!()};
                         let input=source_bindings.get(&(true,sources.clone()),||source_binding(r,&self.effects.sources,sources,false));
@@ -2100,7 +2145,7 @@ impl Scene {
                         pass.dispatch_workgroups(size[0].div_ceil(32),size[1].div_ceil(2),1);
                         continue;
                     }
-                    let Job::Draw { target, sources, data, .. } = job else { unreachable!() };
+                    let Job::Draw { target, sources, data, clip, .. } = job else { unreachable!() };
                     pass.set_pipeline(pipeline);
                     let input = compute_bindings.get(sources, || compute_source_binding(r, inputs, sources));
                     // All independent tiles in a complete image share this
@@ -2114,7 +2159,9 @@ impl Scene {
                     pass.set_bind_group(0, &self.binding, &[((base + j) * self.stride) as u32]);
                     pass.set_bind_group(1, input, &[]);
                     pass.set_bind_group(2, output, &[]);
-                    let size = job_grid(j).map_or([data[2] as u32,data[3] as u32], query_grid_size);
+                    let drawn = clip.filter(|_| !matches!(data[8] as u32, 13 | 15))
+                        .map_or([data[2], data[3]], |clip| [clip.max_x() as f32 - data[0], clip.max_y() as f32 - data[1]]).map(|n| n as u32);
+                    let size = job_grid(j).map_or(drawn, query_grid_size);
                     debug_assert!(!size.contains(&0), "empty pointwise draw job was queued");
                     pass.dispatch_workgroups(size[0].div_ceil(32), size[1].div_ceil(2), 1);
                 }

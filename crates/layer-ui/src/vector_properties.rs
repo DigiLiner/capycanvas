@@ -1,7 +1,7 @@
 use super::*;
 use super::effects::{PropertyControl, PropertyKind};
-use layer_core::{EffectValue, authored::OccurrenceHandle, authored::vector::{Cap, Fill, FillRule, Join, Paint, PaintEntry, PathItem, Position, Stroke, Style}};
-use std::{collections::HashMap, sync::Arc};
+use layer_core::{EffectValue, authored::OccurrenceHandle, authored::vector::{Cap, Fill, FillRule, ItemId, Join, Paint, PaintEntry, PathItem, Position, Stroke, Style}};
+use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 
 const FILL: &str = "path_fill";
 const FILL_COLOR: &str = "path_fill_color";
@@ -132,15 +132,30 @@ impl<R: CanvasRenderer> UiSession<R> {
         let defaults = (Paint::color(self.state.colors.background), Paint::color(self.state.colors.foreground), f64::from(self.state.brush.diameter));
         let rule = match (key, value) { (OVERLAPS, EffectValue::Choice(index)) => Some(*RULES.get(*index as usize).ok_or("Unknown choice")?), (OVERLAPS, _) => return Err("Unknown choice".into()), _ => None };
         let mut styles: HashMap<usize, Option<Arc<Style>>> = HashMap::new();
-        let changes: Vec<(Position, PathItem)> = object.selected_paths(&selection.items).into_iter()
-            .filter_map(|(position, path)| {
-                if let Some(rule) = rule { return (path.fill_rule != rule).then(|| (position, PathItem { fill_rule: rule, ..path.clone() })); }
-                let style = styles.entry(Arc::as_ptr(&path.style) as usize)
-                    .or_insert_with(|| restyled(&path.style, key, value, (&defaults.0, &defaults.1, defaults.2)).map(Arc::new)).clone()?;
-                Some((position, path.with_style(style)))
-            }).collect();
+        let mut restyle = |path: &PathItem| -> Option<PathItem> {
+            if let Some(rule) = rule { return (path.fill_rule != rule).then(|| PathItem { fill_rule: rule, ..path.clone() }); }
+            let style = styles.entry(Arc::as_ptr(&path.style) as usize)
+                .or_insert_with(|| restyled(&path.style, key, value, (&defaults.0, &defaults.1, defaults.2)).map(Arc::new)).clone()?;
+            Some(path.with_style(style))
+        };
+        if let Some(gesture) = &self.effect_gesture {
+            let paths = gesture.paths.iter().filter_map(|position| object.record(*position)?.path()).map(|path| restyle(path).unwrap_or_else(|| path.clone())).collect();
+            self.preview_vector_paths(layer, selection.items, paths);
+            return Ok(());
+        }
+        let changes: Vec<(Position, PathItem)> = object.selected_paths(&selection.items).into_iter().filter_map(|(position, path)| restyle(path).map(|path| (position, path))).collect();
         if changes.is_empty() { return Ok(()); }
         let edit = document.vector_object_edit(layer, object.with_paths(changes).map_err(str::to_string)?).map_err(|e| e.to_string())?;
-        if self.effect_gesture.is_some() { self.engine.preview_edit(edit).map_err(|e| e.to_string()) } else { self.layer_edit(edit) }
+        self.layer_edit(edit)
+    }
+    pub(super) fn preview_vector_paths(&mut self, owner: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, paths: Arc<[PathItem]>) {
+        let backend = self.engine.backend_mut();
+        backend.set_vector_motion(Some(layer_render::VectorMotion { owner, items, transform: layer_core::authored::Affine64([1., 0., 0., 1., 0., 0.]) }));
+        backend.set_vector_motion_paths(Some(paths));
+    }
+    pub(super) fn end_path_preview(&mut self) {
+        let backend = self.engine.backend_mut();
+        backend.set_vector_motion_paths(None);
+        backend.set_vector_motion(None);
     }
 }

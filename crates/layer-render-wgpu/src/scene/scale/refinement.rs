@@ -82,7 +82,7 @@ impl Cache {
         Ok(page_coordinates(self.plan.bounds).filter(|c| !self.refined.contains(c)).collect())
     }
 
-    pub fn approximating(&self) -> bool { !self.approximate.is_empty() }
+    pub fn approximating(&self) -> bool { !self.approximate.is_empty() || self.preparing }
 
     fn next_exact_page(&self) -> Option<[u32; 2]> {
         page_coordinates(self.plan.bounds).find(|page| !self.refined.contains(page))
@@ -162,7 +162,8 @@ impl Cache {
             let coordinate = [region.min_x() / PAGE_SIZE, region.min_y() / PAGE_SIZE];
             if let Some(hierarchy) = &mut self.hierarchy { hierarchy.write(encoder, image, coordinate, region); }
             let [x, y, width, height] = paint_transform::texel_rect(region.window_local(self.output_plan().bounds), 1 << self.plan.level);
-            self.half_stale = self.half_stale.union(PixelRect::new(x, y, x + width, y + height));
+            let stale = self.half_stale.get_mut().unwrap();
+            *stale = stale.union(PixelRect::new(x, y, x + width, y + height));
             r.metrics.composited_pixels += region.area();
             r.metrics.frame_composited_pages.push((0, coordinate));
         }

@@ -24,7 +24,7 @@ fn active(cancel:&AtomicBool)->Result<(),String> {if cancel.load(Ordering::Relax
 impl EditorCapture {
     pub fn retained_tiles(&self)->crate::raster_storage::RetainedTiles {
         let editor=Editor {document:self.document.clone(),undo:self.undo.iter().map(|(edit,checkpoint)|HistoryEntry::new(edit.clone(),*checkpoint)).collect(),
-            redo:self.redo.iter().map(|(edit,checkpoint)|HistoryEntry::new(edit.clone(),*checkpoint)).collect(),checkpoint:self.artwork.checkpoint.edit_checkpoint,next_checkpoint:self.next_checkpoint};
+            redo:self.redo.iter().map(|(edit,checkpoint)|HistoryEntry::new(edit.clone(),*checkpoint)).collect(),checkpoint:self.artwork.checkpoint.edit_checkpoint,next_checkpoint:self.next_checkpoint,ledger:Default::default()};
         editor.retained_tiles()
     }
 }
@@ -110,7 +110,7 @@ impl PreparedSessionTransfer {
         let before=document.working.clone();document.repair_working().map_err(|e|e.to_string())?;
         if before!=document.working {return Err("Invalid session transfer editing target".into());}
         document.validate(limits)?;
-        let editor=Editor {document,undo,redo,checkpoint:capture.checkpoint.edit_checkpoint,next_checkpoint:record.next_checkpoint};
+        let editor=Editor {document,undo,redo,checkpoint:capture.checkpoint.edit_checkpoint,next_checkpoint:record.next_checkpoint,ledger:Default::default()};
         let mut accounting=crate::history_budget::Accounting::new(editor.document());let mut bytes=0usize;
         for entry in editor.undo.iter().chain(&editor.redo) {bytes=bytes.saturating_add(accounting.charge(entry));}
         if bytes>crate::history_budget::BYTE_BUDGET {return Err("Session transfer history exceeds admission".into());}

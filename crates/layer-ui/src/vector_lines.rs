@@ -14,6 +14,7 @@ pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasin
 impl VectorLines {
     pub fn active(&self) -> bool { self.line.is_some() }
     pub fn erasing(&self) -> bool { self.erasing.is_some() }
+    pub fn erase_waiting(&self) -> bool { self.erasing.as_ref().is_some_and(|erasing| !erasing.pending.is_empty()) }
     pub fn corrects(&self, event: &PenEvent) -> bool { self.drawn.as_ref().is_some_and(|drawn| drawn.line.stroke.corrects(event)) }
 }
 
@@ -128,11 +129,12 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn erase_queued_samples(&mut self) {
         let Some(erasing) = &mut self.vector_lines.erasing else { return };
-        for local in std::mem::take(&mut erasing.pending) {
+        let erasers: Vec<Eraser> = std::mem::take(&mut erasing.pending).into_iter().map(|local| {
             let eraser = Eraser { from: erasing.last, to: local, radius: erasing.radius };
             erasing.last = local;
-            if let Some(erased) = erasing.current.erase(&mut self.vector_moves.index, &eraser, erasing.mode) { erasing.current = erased; }
-        }
+            eraser
+        }).collect();
+        if let Some(erased) = erasing.current.erase_along(&mut self.vector_moves.index, &erasers, erasing.mode) { erasing.current = erased; }
     }
     pub(super) fn sync_vector_erase(&mut self) -> Result<(), String> {
         self.erase_queued_samples();

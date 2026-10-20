@@ -44,6 +44,7 @@ pub(super) struct VectorMoves {
 
 impl VectorMoves {
     pub(super) fn gesturing(&self) -> bool { self.gesture.is_some() }
+    pub(super) fn transform_waiting(&self) -> bool { matches!(self.gesture, Some(Gesture::Transform { latest: Some(_), .. })) }
 }
 
 impl<R: CanvasRenderer> UiSession<R> {

@@ -58,8 +58,16 @@ fn portion(segment: Segment, from: f64, to: f64) -> Segment {
     if to < 1. { right.split((to - from) / (1. - from)).0 } else { right }
 }
 
+fn apart(segment: &Segment, area: [f64; 4], reach: f64) -> bool {
+    let [x0, y0, x1, y1] = [segment.from, segment.control[0], segment.control[1], segment.to].iter()
+        .fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]);
+    area[2] < x0 - reach || area[0] > x1 + reach || area[3] < y0 - reach || area[1] > y1 + reach
+}
+
 fn removed(subpath: &Subpath, eraser: &Eraser) -> Vec<(f64, f64)> {
-    (0..subpath.segment_count()).flat_map(|index| eraser.cuts(&subpath.segment(index)).into_iter().map(move |(from, to)| (index as f64 + from, index as f64 + to))).collect()
+    let area = eraser.bounds();
+    (0..subpath.segment_count()).map(|index| (index, subpath.segment(index))).filter(|(_, segment)| !apart(segment, area, 0.))
+        .flat_map(|(index, segment)| eraser.cuts(&segment).into_iter().map(move |(from, to)| (index as f64 + from, index as f64 + to))).collect()
 }
 
 fn reach_stops(removed: Vec<(f64, f64)>, stops: &[f64], length: f64, closed: bool) -> Vec<(f64, f64)> {
@@ -77,11 +85,14 @@ fn reach_stops(removed: Vec<(f64, f64)>, stops: &[f64], length: f64, closed: boo
     out
 }
 
-fn kept(subpath: &Subpath, eraser: &Eraser, stops: Option<&[f64]>) -> Option<Pieces> {
+fn cut(subpath: &Subpath, eraser: &Eraser) -> Option<Vec<(f64, f64)>> {
     if subpath.segment_count() == 0 { return eraser.covers(subpath.anchor(0).point(), 0.).then(Vec::new); }
+    Some(removed(subpath, eraser)).filter(|removed| !removed.is_empty())
+}
+
+fn kept(subpath: &Subpath, mut removed: Vec<(f64, f64)>, stops: Option<&[f64]>) -> Pieces {
+    if subpath.segment_count() == 0 { return Vec::new(); }
     let length = subpath.segment_count() as f64;
-    let mut removed = removed(subpath, eraser);
-    if removed.is_empty() { return None; }
     if let Some(stops) = stops { removed = reach_stops(removed, stops, length, subpath.closed); }
     removed.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut spans: Vec<(f64, f64)> = Vec::new();
@@ -103,7 +114,7 @@ fn kept(subpath: &Subpath, eraser: &Eraser, stops: Option<&[f64]>) -> Option<Pie
         let first = pieces.remove(0);
         pieces.last_mut().unwrap().extend(first);
     }
-    Some(pieces)
+    pieces
 }
 
 fn polyline(subpath: &Subpath, tolerance: f64) -> Vec<([f64; 2], f64)> {
@@ -215,19 +226,27 @@ impl PathItem {
             let mut last = subpath.anchor(0).point();
             if eraser.covers(last, reach) { return true; }
             let mut found = false;
-            for segment in subpath.segments() { segment.flatten(tolerance, |p, _| { found |= eraser.meets(last, p, reach); last = p; }); if found { return true; } }
+            for segment in subpath.segments() {
+                if apart(&segment, area, reach) { last = segment.to; continue; }
+                segment.flatten(tolerance, |p, _| { found |= eraser.meets(last, p, reach); last = p; });
+                if found { return true; }
+            }
             false
         }) || filled && self.hit(eraser.to, eraser.radius)
     }
     pub fn erased(&self, eraser: &Eraser, crossed: Option<&[&PathItem]>) -> Option<Vec<PathItem>> {
+        self.erased_up_to(eraser, crossed.map(|others| move || others.to_vec()))
+    }
+    fn erased_up_to<'a>(&self, eraser: &Eraser, crossed: Option<impl FnOnce() -> Vec<&'a PathItem>>) -> Option<Vec<PathItem>> {
         let [x0, y0, x1, y1] = self.geometry.hull();
         let area = eraser.bounds();
         if area[2] < x0 || area[0] > x1 || area[3] < y0 || area[1] > y1 { return None; }
         let mut base = 0u32;
-        let stops = crossed.map(|others| self.crossings(others, (eraser.radius * 0.25).max(0.05)));
-        let results: Vec<Option<Pieces>> = self.geometry.subpaths().iter().enumerate()
-            .map(|(i, subpath)| kept(subpath, eraser, stops.as_ref().map(|stops| stops[i].as_slice()))).collect();
-        if results.iter().all(Option::is_none) { return None; }
+        let cuts: Vec<Option<Vec<(f64, f64)>>> = self.geometry.subpaths().iter().map(|subpath| cut(subpath, eraser)).collect();
+        if cuts.iter().all(Option::is_none) { return None; }
+        let stops = crossed.map(|others| self.crossings(&others(), (eraser.radius * 0.25).max(0.05)));
+        let results: Vec<Option<Pieces>> = self.geometry.subpaths().iter().zip(cuts).enumerate()
+            .map(|(i, (subpath, cut))| cut.map(|removed| kept(subpath, removed, stops.as_ref().map(|stops| stops[i].as_slice())))).collect();
         let compound = self.geometry.subpaths().len() > 1;
         let mut outputs: Vec<(Vec<Subpath>, Vec<Origin>, Vec<bool>)> = vec![Default::default()];
         for (subpath, result) in self.geometry.subpaths().iter().zip(results) {
@@ -260,25 +279,36 @@ impl PathItem {
 
 impl VectorObject {
     pub fn erase(&self, index: &mut VectorIndex, eraser: &Eraser, mode: EraseMode) -> Option<Self> {
-        let mut changes = BTreeMap::new();
+        self.erase_along(index, std::slice::from_ref(eraser), mode)
+    }
+    pub fn erase_along(&self, index: &mut VectorIndex, erasers: &[Eraser], mode: EraseMode) -> Option<Self> {
+        let mut changes: BTreeMap<Position, Vec<Record>> = BTreeMap::new();
         let mut fresh = self.allocate_ids();
-        for position in index.near(self, eraser.bounds()) {
-            let Some(path) = self.record(position).and_then(Record::path).filter(|path| path.pickable()) else { continue };
-            let replacement = match mode {
-                EraseMode::Whole => path.touched_by(eraser).then(Vec::new),
-                EraseMode::Touched => path.erased(eraser, None),
-                EraseMode::ToIntersection => {
-                    let others: Vec<&PathItem> = index.near(self, path.bounds()).into_iter()
-                        .filter_map(|p| self.record(p).and_then(Record::path)).filter(|other| other.id != path.id).collect();
-                    path.erased(eraser, Some(&others))
+        for eraser in erasers {
+            let mut erased = Vec::new();
+            for position in index.near(self, eraser.bounds()) {
+                let current = changes.get(&position).map_or_else(|| self.record(position).map(std::slice::from_ref).unwrap_or_default(), Vec::as_slice);
+                let mut records = Vec::with_capacity(current.len());
+                let mut cut = false;
+                for record in current {
+                    let Some(path) = record.path().filter(|path| path.pickable()) else { records.push(record.clone()); continue };
+                    let replacement = match mode {
+                        EraseMode::Whole => path.touched_by(eraser).then(Vec::new),
+                        EraseMode::Touched => path.erased(eraser, None),
+                        EraseMode::ToIntersection => path.erased_up_to(eraser, Some(|| index.near(self, path.bounds()).into_iter()
+                            .flat_map(|p| changes.get(&p).map_or_else(|| self.record(p).map(std::slice::from_ref).unwrap_or_default(), Vec::as_slice))
+                            .filter_map(Record::path).filter(|other| other.id != path.id).collect())),
+                    };
+                    let Some(pieces) = replacement else { records.push(record.clone()); continue };
+                    cut = true;
+                    records.extend(pieces.into_iter().enumerate().map(|(i, piece)| {
+                        let id = if i == 0 { path.id } else { fresh.next().unwrap_or_default() };
+                        Record::Path(PathItem { id, ..piece })
+                    }));
                 }
-            };
-            let Some(pieces) = replacement else { continue };
-            let records = pieces.into_iter().enumerate().map(|(i, piece)| {
-                let id = if i == 0 { path.id } else { fresh.next().unwrap_or_default() };
-                Record::Path(PathItem { id, ..piece })
-            }).collect();
-            changes.insert(position, records);
+                if cut { erased.push((position, records)); }
+            }
+            changes.extend(erased);
         }
         (!changes.is_empty()).then(|| self.splice(changes))
     }

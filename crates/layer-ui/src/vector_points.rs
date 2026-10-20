@@ -1,5 +1,5 @@
 use super::*;
-use layer_core::{Point, authored::vector::{Anchor, AnchorKind, AnchorRef, ItemId, PathItem, Record, SegmentHit, VectorObject}};
+use layer_core::{Point, authored::vector::{Anchor, AnchorKind, AnchorRef, ItemId, PathItem, Position, Record, SegmentHit, VectorObject}};
 use layer_render::CursorSegment;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,7 +13,7 @@ pub(super) struct PointRef { path: ItemId, at: AnchorRef }
 enum Part { Anchor(PointRef), Handle(PointRef, bool), Segment(ItemId, SegmentHit) }
 
 enum Gesture {
-    Drag { layer: OccurrenceHandle, part: Part, press: [f64; 2], original: VectorObject, moved: bool, latest: Option<([f64; 2], Modifiers)>, edited: Option<VectorObject> },
+    Drag { layer: OccurrenceHandle, part: Part, press: [f64; 2], original: VectorObject, moved: bool, latest: Option<([f64; 2], Modifiers)>, edited: Option<BTreeMap<Position, PathItem>> },
     Marquee { layer: OccurrenceHandle, start: [f64; 2], end: [f64; 2], adding: bool },
 }
 
@@ -21,6 +21,7 @@ enum Gesture {
 pub(super) struct VectorPoints { gesture: Option<Gesture>, selected: BTreeSet<PointRef>, click: Option<(PointRef, u64)> }
 impl VectorPoints {
     pub(super) fn gesturing(&self) -> bool { self.gesture.is_some() }
+    pub(super) fn waiting(&self) -> bool { matches!(self.gesture, Some(Gesture::Drag { latest: Some(_), .. })) }
 }
 
 fn path_of(object: &VectorObject, id: ItemId) -> Option<&PathItem> { object.record(object.find(id)?)?.path() }
@@ -43,8 +44,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let reach = REACH * self.document_per_surface_pixel();
         self.point_part(object, local, reach).is_some() || object.paths().any(|(_, path)| path.pickable() && path.hit(local, reach))
     }
-    fn edited_paths<'a>(&self, object: &'a VectorObject) -> Vec<&'a PathItem> {
-        let mut paths: Vec<&PathItem> = self.selected_vector_items().map(|selection| object.selected_paths(&selection.items).into_iter().map(|(_, path)| path).collect()).unwrap_or_default();
+    fn edited_paths<'a>(&'a self, object: &'a VectorObject) -> Vec<&'a PathItem> {
+        let replaced = match &self.vector_points.gesture { Some(Gesture::Drag { edited: Some(edited), .. }) => Some(edited), _ => None };
+        let mut paths: Vec<&PathItem> = self.selected_vector_items().map(|selection| object.selected_paths(&selection.items).into_iter()
+            .map(|(position, path)| replaced.and_then(|replaced| replaced.get(&position)).unwrap_or(path)).collect()).unwrap_or_default();
         paths.sort_by_key(|path| path.id);
         paths
     }
@@ -106,7 +109,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     None => return Ok(false),
                 }
                 if event.phase == PenPhase::Up {
-                    self.sync_vector_points()?;
+                    self.take_points_sample()?;
                     self.finish_vector_points()?;
                     self.layer_interaction.changed = true;
                 }
@@ -118,13 +121,22 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(true)
     }
     pub(super) fn sync_vector_points(&mut self) -> Result<(), String> {
-        let Some(Gesture::Drag { latest, .. }) = &mut self.vector_points.gesture else { return Ok(()) };
-        let Some((point, modifiers)) = latest.take() else { return Ok(()) };
+        if !self.take_points_sample()? { return Ok(()); }
+        let items = self.selected_vector_items().map(|selection| selection.items.clone()).unwrap_or_default();
+        let Some(Gesture::Drag { layer, original, edited: Some(edited), .. }) = &self.vector_points.gesture else { return Ok(()) };
+        let shown = original.selected_paths(&items).into_iter().map(|(position, path)| edited.get(&position).unwrap_or(path).clone()).collect();
+        let layer = *layer;
+        self.preview_vector_paths(layer, items, shown);
+        Ok(())
+    }
+    fn take_points_sample(&mut self) -> Result<bool, String> {
+        let Some(Gesture::Drag { latest, .. }) = &mut self.vector_points.gesture else { return Ok(false) };
+        let Some((point, modifiers)) = latest.take() else { return Ok(false) };
         self.drag_vector_points(point, modifiers)
     }
-    fn drag_vector_points(&mut self, point: [f64; 2], modifiers: Modifiers) -> Result<(), String> {
+    fn drag_vector_points(&mut self, point: [f64; 2], modifiers: Modifiers) -> Result<bool, String> {
         let selected = self.vector_points.selected.clone();
-        let Some(Gesture::Drag { layer, part, press, original, moved: true, edited, .. }) = &mut self.vector_points.gesture else { return Ok(()) };
+        let Some(Gesture::Drag { part, press, original, moved: true, edited, .. }) = &mut self.vector_points.gesture else { return Ok(false) };
         let mut delta = [point[0] - press[0], point[1] - press[1]];
         if modifiers.shift && matches!(part, Part::Anchor(_)) {
             let end = FigureShape::Line.constrained_end(Point { x: 0., y: 0. }, Point { x: delta[0] as f32, y: delta[1] as f32 });
@@ -169,20 +181,17 @@ impl<R: CanvasRenderer> UiSession<R> {
                 ]);
             }
         }
-        let mut paths = Vec::new();
+        let mut replaced = BTreeMap::new();
         for (id, anchors) in changes {
             let Some(position) = original.find(id) else { continue };
-            paths.push((position, path_of(original, id).ok_or("The path was removed")?.with_anchors(anchors).map_err(str::to_string)?));
+            replaced.insert(position, path_of(original, id).ok_or("The path was removed")?.with_anchors(anchors).map_err(str::to_string)?);
         }
-        let result = original.with_paths(paths).map_err(str::to_string)?;
-        *edited = Some(result.clone());
-        let edit = self.engine.document().vector_object_edit(*layer, result).map_err(|e| e.to_string())?;
-        self.engine.preview_edit(edit).map_err(|e| e.to_string())
+        *edited = Some(replaced);
+        Ok(true)
     }
-    fn commit_vector_points(&mut self, layer: OccurrenceHandle, original: VectorObject, edited: VectorObject) -> Result<(), String> {
-        let restore = self.engine.document().vector_object_edit(layer, original).map_err(|e| e.to_string())?;
-        self.engine.preview_edit(restore).map_err(|e| e.to_string())?;
-        let edit = self.engine.document().vector_object_edit(layer, edited).map_err(|e| e.to_string())?;
+    fn commit_vector_points(&mut self, layer: OccurrenceHandle, original: VectorObject, edited: BTreeMap<Position, PathItem>) -> Result<(), String> {
+        self.end_path_preview();
+        let edit = self.engine.document().vector_object_edit(layer, original.with_paths(edited).map_err(str::to_string)?).map_err(|e| e.to_string())?;
         self.layer_edit(edit)
     }
     fn finish_vector_points(&mut self) -> Result<(), String> {
@@ -225,8 +234,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn cancel_vector_points(&mut self) -> bool {
         let Some(gesture) = self.vector_points.gesture.take() else { return false };
-        if let Gesture::Drag { layer, original, edited: Some(_), .. } = gesture
-            && let Ok(edit) = self.engine.document().vector_object_edit(layer, original) { let _ = self.engine.preview_edit(edit); }
+        if let Gesture::Drag { edited: Some(_), .. } = gesture { self.end_path_preview(); }
         self.layer_interaction.changed = true;
         true
     }

@@ -2334,6 +2334,7 @@ pub struct Editor {
     redo: Vec<HistoryEntry>,
     checkpoint: u64,
     next_checkpoint: u64,
+    ledger: std::sync::Mutex<history_budget::VectorLedger>,
 }
 pub(crate) fn json_len(value: &impl serde::Serialize) -> usize {
     struct Count(usize);
@@ -2357,6 +2358,7 @@ struct HistoryEntry {
     edit: Edit,
     checkpoint: u64,
     metadata_bytes: usize,
+    vectors: Vec<history_budget::VectorLink>,
 }
 impl HistoryEntry {
     fn new(edit: Edit, checkpoint: u64) -> Self {
@@ -2365,7 +2367,11 @@ impl HistoryEntry {
             edit,
             checkpoint,
             metadata_bytes,
+            vectors: Vec::new(),
         }
+    }
+    fn linked(self, document: &Document) -> Self {
+        Self { vectors: history_budget::VectorLink::of(&self.edit, document), ..self }
     }
 }
 fn edit_metadata(edit: &Edit) -> usize {
@@ -2408,6 +2414,7 @@ impl Editor {
             redo: Vec::new(),
             checkpoint: 0,
             next_checkpoint: 1,
+            ledger: Default::default(),
         }
     }
     pub fn document(&self) -> &Document {
@@ -2532,9 +2539,7 @@ impl Editor {
                 ));
             }
         }
-        if history_budget::Accounting::for_admission(&self.document).charge(&forward) > budget
-            || history_budget::Accounting::for_admission(&candidate).charge(&inverse) > budget
-        {
+        if self.admission_charge(&self.document, &forward) > budget || self.admission_charge(&candidate, &inverse) > budget {
             return Err(DocumentError::InvalidLayerOperation(
                 "This edit exceeds the Undo/Redo memory limit",
             ));
@@ -2571,7 +2576,7 @@ impl Editor {
         } else {
             HistoryEntry::new(self.document.apply(edit)?, self.checkpoint)
         };
-        self.undo.push(inverse);
+        self.undo.push(inverse.linked(&self.document));
         self.redo.clear();
         if let Some(next) = next {
             self.checkpoint = self.next_checkpoint;
@@ -2580,9 +2585,21 @@ impl Editor {
         self.trim_history(budget);
         Ok(())
     }
+    fn admission_charge(&self, document: &Document, entry: &HistoryEntry) -> usize {
+        let mut ledger = self.ledger.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        ledger.sync(document);
+        let mut accounting = history_budget::Accounting::with_ledger(document, &ledger, true);
+        let bytes = accounting.charge(entry);
+        let walked = accounting.walked;
+        ledger.walked += walked;
+        bytes
+    }
     fn trim_history(&mut self, budget: usize) {
-        let mut accounting = history_budget::Accounting::new(&self.document);
-        let bytes = self.undo.iter().chain(&self.redo).fold(0usize, |bytes, entry| bytes.saturating_add(accounting.charge(entry)));
+        let ledger = self.ledger.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        ledger.sync(&self.document);
+        let mut accounting = history_budget::Accounting::with_ledger(&self.document, ledger, false);
+        let bytes = self.undo.iter().rev().chain(self.redo.iter().rev()).fold(0usize, |bytes, entry| bytes.saturating_add(accounting.charge(entry)));
+        let mut walked = accounting.walked;
         if bytes > budget {
             let mut current = RootInventory::default(); current.document(&self.document);
             let current: std::collections::HashSet<_> = current.rasters.iter().map(|r| r.identity()).collect();
@@ -2591,7 +2608,7 @@ impl Editor {
                 for revision in roots { if !current.contains(&revision.identity()) { revision.drop_liquify(); } }
             }
         }
-        let mut accounting = history_budget::Accounting::new(&self.document);
+        let mut accounting = history_budget::Accounting::with_ledger(&self.document, ledger, false);
         let mut bytes = 0usize;
         for history in [&mut self.undo, &mut self.redo] {
             let mut keep = 0;
@@ -2604,6 +2621,8 @@ impl Editor {
             }
             history.drain(..history.len().saturating_sub(keep));
         }
+        walked += accounting.walked;
+        ledger.walked += walked;
     }
     pub fn undo(&mut self) -> Result<bool, DocumentError> {
         self.step(false)
@@ -2622,7 +2641,7 @@ impl Editor {
             (&mut self.undo, &mut self.redo)
         };
         let entry = from.pop().unwrap();
-        to.push(HistoryEntry::new(inverse, self.checkpoint));
+        to.push(HistoryEntry::new(inverse, self.checkpoint).linked(&self.document));
         self.checkpoint = entry.checkpoint;
         Ok(true)
     }
@@ -2635,8 +2654,7 @@ impl Editor {
         let previous = self.last_selection_operation(target, revision)?;
         let edit = self.document.selection_edit(target, coverage)?;
         let (candidate, _) = self.prepare_history_edit(edit, history_budget::BYTE_BUDGET)?;
-        if history_budget::Accounting::for_admission(&candidate).charge(previous)
-            > history_budget::BYTE_BUDGET
+        if self.admission_charge(&candidate, previous) > history_budget::BYTE_BUDGET
         {
             return Err(DocumentError::InvalidLayerOperation(
                 "This edit exceeds the Undo/Redo memory limit",

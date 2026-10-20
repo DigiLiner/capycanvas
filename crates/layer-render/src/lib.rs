@@ -846,6 +846,11 @@ pub trait CanvasRenderer {
     fn paper_overlay_ready(&self, _paper: &layer_core::paper::PaperBinding) -> bool { true }
     fn set_vector_preview(&mut self, _preview: Option<VectorPreview>) {}
     fn set_vector_motion(&mut self, _motion: Option<VectorMotion>) {}
+    /// Paths the motion's moving image draws instead of the selected paths: the
+    /// selection after an unapplied style or geometry edit, in layer order, in
+    /// the layer's coordinates. The layer keeps its own paths until the edit is
+    /// applied; None draws the selected paths themselves.
+    fn set_vector_motion_paths(&mut self, _paths: Option<std::sync::Arc<[layer_core::authored::vector::PathItem]>>) {}
     /// The paths a drag can move next. The renderer prepares their motion while
     /// they stay selected and releases it when the selection clears.
     fn set_vector_selection(&mut self, _selection: Option<&layer_core::authored::VectorItemSelection>) {}

@@ -264,6 +264,7 @@ pub struct UiSession<R: CanvasRenderer> {
     navigation: navigation::Navigation,
     navigator_drag: Option<[f32; 2]>,
     effect_gesture: Option<effects::EffectGesture>,
+    preview_target: u64,
     paper_preview: effects::PaperPreview,
     papers: crate::paper_library::PaperLibrary,
     object_motion: Option<object_motion::ObjectMotion>,
@@ -489,6 +490,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             navigation: Default::default(),
             navigator_drag: None,
             effect_gesture: None,
+            preview_target: 0,
             paper_preview: Default::default(),
             papers: Default::default(),
             object_motion: None,
@@ -3089,6 +3091,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     effects::catalog(&self.effect_catalog, &self.state.filter_picker, self.localization());
                 (DOCUMENT, false)
             }
+            UiAction::Effect { action } if self.hold_scrub_value(&action) => (0, true),
             UiAction::Effect { action } => {
                 if !continuing_effect_gesture {
                     self.require_idle()?;
@@ -4611,8 +4614,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.sync_paper_preview(now_ns);
         self.sync_moving_pixels();
         self.sync_vector_line_preview(now_ns, presentation_ns);
-        let (previews, preview) = self.sync_previews();
-        changed |= previews;
+        let preview = self.sync_previews(now_ns, presentation_ns);
         let clone_source = self.engine.clone_source();
         self.engine
             .render_frame_for(now_ns, presentation_ns)
@@ -4714,7 +4716,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         ))
     }
 
-    fn sync_previews(&mut self) -> (u32, Option<[u64; 2]>) {
+    fn sync_previews(&mut self, now_ns: u64, presentation_ns: u64) -> Option<[u64; 2]> {
+        let waiting = self.vector_moves.transform_waiting() || self.vector_points.waiting() || self.vector_lines.erase_waiting() || self.effect_preview_waiting();
+        if !waiting || (presentation_ns > now_ns && presentation_ns <= self.preview_target) { return None; }
+        self.preview_target = presentation_ns;
         let before = self.engine.document().revision;
         self.sync_vector_transform();
         if let Err(error) = self.sync_vector_points().and_then(|()| self.sync_vector_erase()) {
@@ -4722,11 +4727,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.cancel_vector_erase();
             self.notify(error);
         }
+        if let Err(error) = self.apply_latest_effect() { self.notify(error); }
         let after = self.engine.document().revision;
-        let applied = self.apply_latest_effect().unwrap_or_else(|error| { self.notify(error); true });
-        if !applied { return (0, (before != after).then_some([before, after])); }
-        self.layer_interaction.changed = true;
-        (regions::LAYOUT, None)
+        (before != after).then_some([before, after])
     }
     fn invoke(&mut self, command: CommandId) -> Result<(u32, bool), String> {
         use regions::*;

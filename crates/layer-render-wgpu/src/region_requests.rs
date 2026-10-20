@@ -530,6 +530,7 @@ impl RegionRequests {
             );
         }
         r.uploads.finish(&encoder);
+        r.metrics.command_passes += encoder.pass_count();
         encoder.submit(&r.queue);
         self.pending = Some(region);
         let (tx, rx) = mpsc::channel();

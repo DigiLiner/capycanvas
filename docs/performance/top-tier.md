@@ -53,8 +53,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | --- | --- | --- | --- |
 | Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
 | Tool cursor hover, with and without brush size | 120 | Renderer 119.3–119.6 submissions/s; submission interval p99 15.0–15.6 ms. Presentation unqualified. | [Tool cursors](#tool-cursors) |
-| Pan: Hand tool, one or two fingers | 120 | **Misses (regressed):** 20.3–21.8 presented fps, p99 50.0 ms, viewport GPU 36.6–36.9 ms, 61 MP photo, Navigator open, thermal 0; 34.4–36.3 at `43619c740` | `24269ed6a`, 2026-10-19; [navigation regression](known-gaps.md); `artifacts/navigation-regression-20261019/` |
-| Pinch zoom | 120 | **Misses:** 36.8–38.4 presented fps, p99 58.3–66.7 ms, 61 MP photo, Navigator open, thermal 0; 33.9–37.9 at `43619c740` | `24269ed6a`, 2026-10-19; [navigation regression](known-gaps.md); `artifacts/navigation-regression-20261019/` |
+| Pan: Hand tool, one or two fingers | 120 | **Not met.** 32.9–36.1 presented fps, p99 41.7 ms, viewport GPU 18.5–18.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
+| Pinch zoom | 120 | **Not met.** 32.7–37.8 presented fps, p99 58.3–66.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 120 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Two-finger rotate | 120 | **Misses:** 33.33–45.48 presented fps, p99 33.33–41.67 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
 | Smooth Zoom tool, left/right | 120 | **Misses:** 35.75–42.09 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
@@ -80,10 +80,10 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Selection transform, full canvas | 120 | | |
 | Move tool layer drag | 120 | | |
 | Object Layer placement, Move and Scale/Rotate | 120 | Current Object-layer simplification unmeasured on the reference tablet | [Qualification gap](known-gaps.md) |
-| Vector layer: G-Pen 24 px on 50,000 paths | 120 | **Met.** 250.0–252.8 completed updates/s, gap p99 12.2–12.6 ms | [Vector layers](#vector-layers), 2026-10-19 |
-| Vector paths: Move drag, 1 / 100 / 5,000 paths | 120 | 1 and 100 **met** at 120 presented/s, p99 8.3 ms, but drag start 108–137 ms misses 100 ms; 5,000 **not met** (96.2–96.7/s) | [Vector layers](#vector-layers), 2026-10-19 |
-| Vector paths: Scale/Rotate, eraser, Outline width scrub | 120 | **Not met** except Erase whole paths; Edit Points **met** | [Vector layers](#vector-layers), 2026-10-19 |
-| Navigation over a crowded vector layer | 120 | **Not met.** Pan 17.6, pinch 33.9–36.3 presented/s; the same document without paths reaches only 19.4/s | [Vector layers](#vector-layers), 2026-10-19 |
+| Vector layer: G-Pen 24 px on 50,000 paths | 120 | **Met.** 239.4–244.8 completed updates/s, gap p99 12.8 ms | [Vector layers](#vector-layers), 2026-10-21 |
+| Vector paths: Move drag, 1 / 100 / 5,000 paths | 120 | **Met.** 119.8–120.0 presented/s, p99 ≤8.5 ms, start 40–80 ms | [Vector layers](#vector-layers), 2026-10-20 |
+| Vector paths: Scale/Rotate, eraser, Outline width scrub | 120 | **Met** except the 5,000-path width scrub (29.6–32.1 updates/s); Edit Points **met** | [Vector layers](#vector-layers), 2026-10-21 |
+| Navigation over a crowded vector layer | 120 | **Not met.** Pan 27.7–28.8, pinch 36.8–38.9 (21.1–21.4 with 5,000 paths selected), rotate 25.6–26.1 presented/s | [Vector layers](#vector-layers), 2026-10-20 |
 | Marquee, Lasso or Polygon drag | 120 | Met on a small document: in-stroke interval p50/p99 4.2/6.9 ms with the canvas bar shown, p99 8.8 ms with it off (2048 × 1536) | `ba9483a8`, 2026-09-27 |
 | Enclose and Fill: loop drag and navigation during completion | 120 | Unmeasured on the reference tablet; 61 MP completion exceeds the current 128 MiB component-buffer binding limit | Shared lasso overlay; GPU region discovery starts on release. Desktop checks do not qualify this tier |
 | Selection Brush or Quick Mask, 2048 px | 120 | | |
@@ -4072,45 +4072,50 @@ in `artifacts/navigator-layout-fix/movinkpad14/`, with the matched results in
 
 ## Vector layers
 
-Measured 2026-10-19 on the MovinkPad Pro 14 with `android-vector-benchmark.py`
-and, for inking, `android-brush-benchmark.py`
-([measuring](measuring.md#vector-layers-android)), using the same method,
-native library (`8cb9fcb2e` plus the 2026-10-19 20:24 working tree, library
-SHA-256 `7d7e951c…`) and conditions as the [low tier](low-tier.md#vector-layers).
-The document is a `crowded_vector_fixture` at 9504 × 6336 with 50,000 hatching
-paths, the low tier's density, at Fit (zoom 0.238); the panel presented at
+Measured 2026-10-20 on the MovinkPad Pro 14 at `2567874a7`, built from `git archive`
+(benchmark APK SHA-256 `5ca3906e…`, native library `b177594c…`), with
+`android-vector-benchmark.py` and, for inking, `android-brush-benchmark.py`
+([measuring](measuring.md#vector-layers-android)). The document is a
+`crowded_vector_fixture` generated at that commit, 9504 × 6336, with 50,000
+hatching paths on the edited Ink vector layer below a translucent Tones vector
+layer, an empty Base paint layer and Paper hidden, at Fit (zoom 0.238) in the
+default Sketch workspace with Stats and Navigator closed. The panel presented at
 120 Hz.
+Rows marked *round 3* were re-measured on 2026-10-20 on the round 2 and 3 tree
+(`git archive e7cdd23412d7`, the same fixture generator) in alternating runs
+against `2567874a7` where noted, and rows marked *round 4* on 2026-10-21 on the
+round 2–4 tree (`git archive e2667d46`; the Outline width scrub on
+`git archive a4027fb6`), each with a fixture generated from its tree; the
+other rows are from `2567874a7`.
+Each row has one 1.5 s priming gesture and three 5 s gestures (10 s for
+inking), each undone; thermal status stayed 0. Presented rates join the canvas
+SurfaceView's buffers to SurfaceFlinger presents; drag start is pen-down to the
+present of the first frame submitted after the first move. Responses give the
+first changed present and, where later, the present that completes the work.
+Causes and proposed fixes for the misses are in [known gaps](known-gaps.md);
+summaries and symbolized profiles are in `artifacts/vector-tablets-20261020/`.
 
 | Row | Target | Measured | Result |
 | --- | --- | --- | --- |
-| G-Pen 24 px on the crowded layer | 120 | 250.0–252.8 completed updates/s, gap p99 12.2–12.6 ms | **Met** |
-| Pen-down 5 ms after committing a 195 ms line | 17 ms | First GPU completion p50 9.0–9.5, p95 13.1–14.8, max 13.6–19.1 ms | Met at p95; one contact misses |
-| Move drag, 1 path | 120, 100 ms start | 120.0 presented/s, p99 8.3 ms; start 108–135 ms | Rate **met**; start **not met** |
-| Move drag, 100 paths | 120, 100 ms start | 120.0/s, p99 8.3 ms; start 118–137 ms | Rate **met**; start **not met** |
-| Move drag, 5,000 paths | 120, 100 ms start | 96.2–96.7/s, p99 16.7 ms; start 147–178 ms | **Not met** |
-| Scale with the Move frame, 100 / 5,000 paths | 120 | 29.4–35.2 / 0.9–1.1 presented/s; 5,000 continues 23.1–23.8 s after release | **Not met** |
-| Rotate with the Move frame, 100 / 5,000 paths | 120 | 36.9–38.0 / 0.8–1.0/s; 5,000 continues 21.7–23.5 s after release | **Not met** |
-| Edit Points anchor drag, 1 / 100 paths selected | 120 | 119.6–120.0 / 120.0/s, p99 8.3 ms; start 39–65 ms | **Met** |
-| Eraser, Erase touched part (64 px) | 120 | 99.6–102.3/s, p99 25.0–33.3 ms | **Not met** |
-| Eraser, Erase whole paths | 120 | 115.7–116.5/s, p99 16.7 ms | **Met** |
-| Eraser, Erase up to intersection | 120 | 92.3–94.0/s, p99 25.0–33.3 ms | **Not met** |
-| Properties Outline width scrub, 100 / 5,000 paths | 120 | 20.0–21.0 / 0.4–0.5 updates/s; 5,000 continues 17.6–17.7 s after release | **Not met** |
-| Pan / pinch / rotate, no paths selected | 120 | 17.6 / 33.9–36.3 / 17.0–30.7/s, p99 50–83 ms | **Not met** |
-| Same, 5,000 paths selected | 120 | 12.2–12.4 / 16.4–18.0 / 12.0–12.2/s | **Not met** |
-| Fill inside a closed path | 100 ms | 53–58 ms to present | **Met** |
-| Fill outside the paths (new layer below) | 250 ms | **Fails**: the renderer stops with "GPU buffer size overflow" | **Not met** |
-| Commit after a 3 s line | No separate limit | Committed path presented 73–79 ms after pen-up | See the pen-down row |
-| Undo of that line | 250 ms | 90–106 ms to present | **Met** |
-| Merge Down onto a vector layer | 100 ms response | 274–279 ms to present | **Not met** |
-| Merge Down onto a paint layer, from the notice | 100 ms response | 3.64–3.73 s; nothing changes on screen until it completes | **Not met** |
-| Rasterize Layer | 100 ms response | 3.59–3.75 s; nothing changes until it completes | **Not met** |
-| Open the document | 6 s | Parsed 656–705 ms, first frame 1.03–1.04 s, settled 1.70–1.73 s | **Met** |
-
-Navigation on this tablet misses without any vector content: with the hatching
-removed pan, pinch and rotate present 19.4–19.5, 31.9–34.8 and 18.8/s, and with
-Paper shown and both vector layers hidden pan presents 20.6/s. In every variant
-the viewport presentation pass takes 34–36 ms of GPU time for the 5.2 MP view,
-so the cause is outside the vector renderer and needs its own investigation.
-Fill outside the paths was dropped from the remaining runs after the failure;
-Fill inside, commit, undo, merges and open come from a second launch of the same
-build. Raw reports and summaries are in `artifacts/vector-tablets-20261019/`.
+| G-Pen 24 px on the crowded layer, *round 4* | 120 | 239.4–244.8 completed updates/s, gap p99 12.8 ms; 235.8–240.9 at `2567874a7` | **Met** |
+| Pen-down 5 ms after committing a 195 ms line | 17 ms | First GPU completion p50 8.2–10.3, p95 14.4–18.0, max 16.6–19.4 ms | **Not met** in one run of three (p95 18.0 ms) |
+| Move drag, 1 path, *round 3* | 120, 100 ms start | 119.8–120.0 presented/s, p99 ≤8.5 ms; start 43–80 ms | **Met**; start 123–136 ms at `2567874a7` |
+| Move drag, 100 / 5,000 paths, *round 3* | 120, 100 ms start | 120.0/s, p99 ≤8.5 ms; start 41–59 / 40–53 ms | **Met** |
+| Scale with the Move frame, 100 / 5,000 paths | 120 | 120.0/s each, p99 8.3 ms; 5,000 settles 0.44–0.45 s after release | **Met** |
+| Rotate with the Move frame, 100 / 5,000 paths | 120 | 120.0/s each, p99 8.3 ms | **Met** |
+| Edit Points anchor drag, 1 / 100 paths selected | 120 | 118.8–119.0 / 118.6–119.0/s, p99 ≤8.5 ms; start 66–79 ms | **Met** |
+| Eraser: touched part / whole paths / up to intersection (64 px) | 120 | 119.8–120.0 / 118.8–119.8 / 119.2–120.0/s, p99 ≤16.7 ms | **Met** |
+| Properties Outline width scrub, 100 / 5,000 paths, *round 4* | 120 | 120.0 / 29.6–32.1 updates/s, p99 8.3 / 58.3–66.7 ms, in two sets of three; 5,000 at 18.5–21.4 on `e7cdd234` and 26.1–35.0 at `2567874a7` | 100 **met**; 5,000 **not met**, back to the `2567874a7` rate |
+| Pan / pinch / rotate, no paths selected | 120 | 27.8–28.8 / 36.8–38.9 / 25.9–26.1/s, p99 50 / 83–92 / 50 ms | **Not met** |
+| Same, 5,000 paths selected; pinch *round 3* | 120 | 27.7–28.1 / 21.1–21.4 / 25.6–26.1/s; pinch gaps 0.67 s (0.68–0.70 s at `2567874a7`) | **Not met** |
+| Fill inside a closed path | 100 ms | First change 22–62 ms, complete 122–137 ms | **Met** |
+| Fill outside the paths (new layer below) | 250 ms | Complete 2.10–2.12 s | **Not met** |
+| Commit after a 3 s line | No separate limit | Committed path presented 135–139 ms after pen-up | See the pen-down row |
+| Undo of that line | 250 ms | 146–166 ms | **Met** |
+| Merge Down onto a vector layer | 100 ms response | 170–178 ms | **Not met** |
+| Merge Down onto a paint layer, from the notice | 100 ms response | 1.93–2.45 s; nothing changes on screen until it completes | **Not met** |
+| Rasterize Layer | 100 ms response | 1.42–2.36 s; nothing changes until it completes | **Not met** |
+| Frame that shows the finished Rasterize | Motion only | 63–87 ms CPU and 87–136 ms GPU | Not a motion row |
+| Open the document | 6 s | Parsed 757–806 ms, first frame 1.08–1.14 s, settled 1.78–1.85 s | **Met** |
+| Paint-layer thumbnail after filling the whole Base layer | No limit | 6.40–6.44 s, polling every 120 ms like the Layers panel | Unqualified |
+| Pan / G-Pen stroke while that thumbnail is pending | 120 | 38.8–40.7 / 119.8–120.0/s; 38.7–40.5 / 119.8/s without polling | No extra drops |

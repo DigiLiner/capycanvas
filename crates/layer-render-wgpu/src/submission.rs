@@ -63,9 +63,11 @@ pub(crate) struct CommandEncoder {
 }
 
 impl CommandEncoder {
-    // Leave ample space below Metal's 4096-buffer limit for wgpu's prepasses,
-    // query handling and other encoders sharing the device.
-    const PASSES_PER_SUBMISSION: usize = 512;
+    /// wgpu records each pass and the barriers before it into about two
+    /// command buffers, and Android destroys a command pool that held more
+    /// than 128 once its work completes (`vendor/README.md`), so chunks this
+    /// size keep reusing their pools.
+    pub(crate) const PASSES_PER_SUBMISSION: usize = 56;
 
     pub fn new(device: &wgpu::Device, descriptor: &wgpu::CommandEncoderDescriptor<'_>) -> Self {
         Self {

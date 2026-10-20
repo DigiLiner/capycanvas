@@ -18,6 +18,7 @@ pub(super) enum Expression {
 }
 impl Expression {
     fn color(value: [f32; 4]) -> Node { Arc::new(Self::Color(value.map(f32::to_bits))) }
+    pub(super) fn is_clear(node: &Node) -> bool { matches!(node.as_ref(), Self::Color(c) if *c == [0; 4]) }
     fn combine(front: Node, back: Node, blend: layer_core::LayerBlend, flags: u32) -> Node {
         if blend == layer_core::LayerBlend::Normal && flags == 0 {
             if matches!(front.as_ref(), Self::Color(c) if *c == [0; 4]) { return back; }
@@ -189,6 +190,9 @@ pub(super) struct Graph {
     pub prepared: Option<[Node; 2]>,
     pub split_changed: bool,
     branches: HashMap<Node, Branch>,
+    /// Images of branches no longer wanted, kept within the branch budget for
+    /// the next ones, such as a later selection's halves.
+    spare: Vec<Image>,
     effects: HashMap<OccurrenceHandle, (metadata::Metadata, u64)>,
     revision: u64,
     blend_space: layer_core::BlendSpace,
@@ -197,7 +201,7 @@ pub(super) struct Graph {
 impl Graph {
     pub fn objects(&self)->&object_spatial::SpatialIndex {&self.objects}
     pub fn without_pixels(&self) -> Self {
-        Self { root: self.root.clone(), motion: None, prepared: None, split_changed: false, branches: HashMap::new(), effects: self.effects.clone(),
+        Self { root: self.root.clone(), motion: None, prepared: None, split_changed: false, branches: HashMap::new(), spare: Vec::new(), effects: self.effects.clone(),
             revision: self.revision, blend_space: self.blend_space, objects:self.objects.clone() }
     }
     pub fn prepare(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, sources: &Sources, plan: display_mips::Plan, budget: u64) -> Result<(), GpuRasterError> {
@@ -214,7 +218,7 @@ impl Graph {
         let before = self.motion.take();
         let halves = |split: &super::super::MotionSplit, moving: &(OccurrenceHandle, Moving)| -> Result<[Node; 2], GpuRasterError> {
             let half = |scope| compose(FramePacket { scene: packet.scene.with_scope(scope), ..packet }, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), None, Some(moving))
-                .map(|node| Arc::new(Expression::Combine { front: node, back: Expression::color([0.; 4]), blend: 0, flags: 0 }));
+                .map(|node| if Expression::is_clear(&node) { node } else { Arc::new(Expression::Combine { front: node, back: Expression::color([0.; 4]), blend: 0, flags: 0 }) });
             Ok([half(&split.0)?, half(&split.1)?])
         };
         self.motion = sources.motion_split.as_ref().zip(sources.moving.as_ref()).map(|(split, moving)| halves(split, moving)).transpose()?;
@@ -235,12 +239,13 @@ impl Graph {
         let mut eligible: Vec<_> = all.into_iter().filter(|n| !Arc::ptr_eq(n, &root)
             && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })
             && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. } | Expression::VectorMotion { .. }))).collect();
-        let split = |n: &Node| self.motion.iter().chain(&self.prepared).any(|halves| halves.contains(n));
-        eligible.sort_by_cached_key(|n| (!split(n), n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
-        eligible.truncate((budget / plan.level_bytes(plan.level)) as usize);
+        let split = |n: &Node| self.motion.iter().chain(&self.prepared).flat_map(|halves| halves.iter().position(|half| half == n)).min().unwrap_or(2);
+        eligible.sort_by_cached_key(|n| (split(n), n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
+        let capacity = (budget / plan.level_bytes(plan.level)) as usize;
+        eligible.truncate(capacity);
         let wanted: HashSet<_> = eligible.into_iter().collect();
         let mut reusable: Vec<_> = self.branches.extract_if(|node, _| !wanted.contains(node))
-            .filter_map(|(_, branch)| branch.image.filter(|image| image.plan == plan)).collect();
+            .filter_map(|(_, branch)| branch.image).chain(self.spare.drain(..)).filter(|image| image.plan == plan).collect();
         for node in wanted {
             let dirty = node.damage(sources, plan);
             let branch = self.branches.entry(node).or_insert_with(|| Branch { image: reusable.pop(), valid: BTreeSet::new(),initialized:BTreeSet::new(), stale: BTreeSet::new() });
@@ -250,6 +255,8 @@ impl Graph {
             if before > 0 { branch.stale.extend(branch.valid.iter().copied().filter(|c| dirty.intersects(page_rect(*c)))); }
             branch.valid.retain(|c| !dirty.intersects(page_rect(*c)));
         }
+        reusable.truncate(capacity.saturating_sub(self.branches.len()));
+        self.spare = reusable;
         self.root = Some(root);
         Ok(())
     }
@@ -258,14 +265,19 @@ impl Graph {
         let image = branch.image.as_ref()?;
         pages.iter().all(|page| branch.valid.contains(page)).then_some((&image.view, image.plan))
     }
+    pub fn caches(&self, node: &Node) -> bool { self.branches.contains_key(node) }
     pub fn branch_valid(&self, node: &Node, page: [u32; 2]) -> bool {
         self.branches.get(node).is_some_and(|branch| branch.image.is_some() && branch.valid.contains(&page))
     }
     #[cfg(test)]
     pub fn cached_branches(&self) -> usize { self.branches.values().filter(|branch| branch.image.is_some()).count() }
+    #[cfg(test)]
+    pub fn spare_textures(&self) -> Vec<wgpu::Texture> { self.spare.iter().map(|image| image.texture.clone()).collect() }
+    #[cfg(test)]
+    pub fn branch_textures(&self) -> Vec<wgpu::Texture> { self.branches.values().filter_map(|branch| branch.image.as_ref().map(|image| image.texture.clone())).collect() }
     pub fn reserved_bytes(&self, plan: display_mips::Plan) -> u64 { self.branches.len() as u64 * plan.level_bytes(plan.level) }
     pub fn storage_bytes(&self) -> u64 {
-        self.branches.values().filter_map(|b| b.image.as_ref()).map(|i| texture_bytes(&i.texture)).sum::<u64>() + self.objects.storage_bytes()
+        self.branches.values().filter_map(|b| b.image.as_ref()).chain(&self.spare).map(|i| texture_bytes(&i.texture)).sum::<u64>() + self.objects.storage_bytes()
     }
 }
 

@@ -3,6 +3,7 @@ struct Record { tile: vec4<u32>, options: vec4<u32>, color: vec4<f32>, rendition
 @group(1) @binding(0) var<uniform> record: Record;
 @group(1) @binding(1) var pixels: texture_2d<f32>;
 @group(1) @binding(2) var sampling: sampler;
+@group(1) @binding(4) var painted: texture_2d<f32>;
 struct AtomicBounds { x: atomic<u32>, y: atomic<u32>, right: atomic<u32>, bottom: atomic<u32> }
 @group(0) @binding(0) var<storage, read_write> output_bounds: AtomicBounds;
 @group(0) @binding(1) var<storage, read> bounds: vec4<u32>;
@@ -19,8 +20,16 @@ fn measure(@builtin(local_invocation_index) i: u32, @builtin(global_invocation_i
             var a = raw.a;
             if record.options.x == 1u { a = select(raw.r, 1. - raw.r, record.options.y == 1u); }
             if record.options.x == 3u { a = select(record.color.x, 1. - record.color.x, record.options.y == 1u); }
+            var low = world;
+            var high = min(world + footprint, record.tile.zw);
+            if record.options.w == 1u {
+                let reach = vec4<u32>(textureLoad(painted, vec2<i32>(p), 0));
+                a = f32(reach.w);
+                low = world + reach.xy;
+                high = world + reach.zw;
+            }
             a *= brush_selection_at(vec2<f32>(world) + .5);
-            if a > 0. { b = vec4<u32>(min(b.xy, world), max(b.zw, min(world + footprint, record.tile.zw))); }
+            if a > 0. { b = vec4<u32>(min(b.xy, low), max(b.zw, high)); }
         }
     }}
     partial[i] = b;
@@ -47,6 +56,14 @@ struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f3
     }
     return Vertex(vec4<f32>(p.x/16.-1., 1.-p.y/16., 0., 1.), uv);
 }
+fn painted_at(uv: vec2<f32>) -> vec4<f32> {
+    let position = uv * 256.;
+    let texel = min(vec2<i32>(position), vec2(255));
+    let local = (position - vec2<f32>(texel)) * f32(record.options.z);
+    let reach = textureLoad(painted, texel, 0);
+    if any(local < reach.xy) || any(local >= reach.zw) { return vec4(0.); }
+    return textureLoad(pixels, texel, 0);
+}
 @fragment fn fragment_main(v: Vertex) -> @location(0) vec4<f32> {
     if record.options.x == 4u {
         let size = vec2<f32>(record.tile.zw) / f32(record.options.z);
@@ -59,7 +76,7 @@ struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f3
     }
     if any(v.uv < vec2<f32>(0.)) || any(v.uv > vec2<f32>(1.)) { discard; }
     if any(vec2<f32>(record.tile.xy) + v.uv * 256. * f32(max(record.options.z, 1u)) >= vec2<f32>(record.tile.zw)) { discard; }
-    let raw = sample_float(pixels, sampling, v.uv, 0.);
+    let raw = select(sample_float(pixels, sampling, v.uv, 0.), painted_at(v.uv), record.options.w == 1u);
     if record.options.x == 1u {
         let gray = select(raw.r, 1.-raw.r, record.options.y == 1u);
         return vec4<f32>(gray, gray, gray, 1.);

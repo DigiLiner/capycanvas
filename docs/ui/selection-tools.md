@@ -92,7 +92,11 @@ creating new closed regions. Source pixels are never changed by discovery.
 component pipeline. Classification covers the source before the enclosure is
 applied; an extra pass marks exterior components. The shared asynchronous region
 queue owns source snapshots, cancellation, stale-result rejection and publication.
-No canvas pixels are read back to classify regions. Like Bucket, component
+No canvas pixels are read back to classify regions. A scene source, such as the
+paths of Fill outside the paths, is captured 16 pages at a time into separate
+tiles that one dispatch classifies, and a single page of vector paths draws
+straight into its tile, so classification records about one pass per page
+(`filling_outside_paths_classifies_captured_pages_in_batches`). Like Bucket, component
 labeling ([`flood.rs`](../../crates/layer-render-wgpu/src/flood.rs)) labels one
 window of at most 2048 × 2048 pixels at a time, keeps labels and exterior flags
 only for the windows' border pixels, joins components across window edges, then

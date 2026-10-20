@@ -460,7 +460,8 @@ completion, including warm-up, pen-up, undo and deferred captures.
 - The brush runner's `-e mode pinch` does the same on the photo.
 - The MovinkPad 11 runs at 90 Hz only for apps enabled in Settings › Display ›
   Adaptive (`com.android.settings/.display.AdaptiveAPPRefreshRateActivity`);
-  every other app is held at 60 Hz whatever it requests.
+  every other app is held at 60 Hz whatever it requests. Installing the app
+  again, with or without `-r`, switches it off.
 
 See [Android development](../development/android.md#benchmarks).
 
@@ -676,3 +677,12 @@ area, which can move press points onto Move-frame handles), and
 unit. Inking on the crowded layer uses the brush runner as described under
 Brushes, with `--paint-layer-name Ink --fixture-layers 4`; `--mode lifts`
 measures pen-down after each commit.
+
+Generate the fixture with the generator of the commit you measure: the package
+format can change between commits, and the generator writes new document
+identities on every run. `--nav-selection 5000` selects that marquee before
+pan, pinch and rotate. `--scenarios thumbnails` is not in the default list: it
+fills the empty Base paint layer, polls its thumbnail every 120 ms as the
+Layers panel does, and reports `thumbnail_ms`; it repeats the Fill before a pan
+and a G-Pen stroke, with and without polling, to show frames lost while the
+thumbnail is pending.

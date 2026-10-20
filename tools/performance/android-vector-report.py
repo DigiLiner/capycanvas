@@ -15,7 +15,7 @@ import pathlib
 import re
 import subprocess
 
-MOTION = ("move-", "scale-", "rotate-", "points-", "erase-", "width-", "pan", "pinch", "rotate-view")
+MOTION = ("move-", "scale-", "rotate-", "points-", "erase-", "width-", "pan", "pinch", "rotate-view", "thumb-pan", "thumb-stroke", "nothumb-pan", "nothumb-stroke")
 
 
 def quantile(values, q):
@@ -118,14 +118,21 @@ def main():
         trace = args.directory / f"{label}-{unit}.perfetto-trace"
         shown = presents(args.processor, trace, args.package) if trace.exists() else {}
         runs = {}
+        thumbnails = {}
         for path in sorted(args.directory.glob(f"{label}-{unit}-*.json")):
             run = path.name.removeprefix(f"{label}-{unit}-").removesuffix(".json")
             if run == "info" or run.startswith("prime") or run.endswith("state"):
                 continue
             report = json.loads(path.read_text())
+            if run.endswith("-thumbnail"):
+                thumbnails[run.removesuffix("-thumbnail")] = report.get("latency_ms")
+                continue
             if "motion" not in report:
                 continue
             runs[run] = motion_run(report, shown) if unit.startswith(MOTION) else response_run(report, shown)
+        for run, latency in thumbnails.items():
+            if run in runs and latency is not None:
+                runs[run]["thumbnail_ms"] = latency
         environment = " ".join((args.directory / f"{label}-{unit}-environment-{when}.txt").read_text()
                                for when in ("before", "after") if (args.directory / f"{label}-{unit}-environment-{when}.txt").exists())
         summary[f"{label}/{unit}"] = {"thermal_status": sorted(set(re.findall(r"Thermal Status: (\d)", environment))), "runs": runs}

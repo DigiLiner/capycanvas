@@ -33,7 +33,7 @@ impl Thumbnails {
         let paint = self.gpu.as_ref().map_or(0, |gpu| gpu.prepared.iter()
             .map(|p| p.records.size() + 16 + texture_bytes(&p.result.texture)
                 + p.generated.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()).sum::<u64>()
-            + gpu.reduced.iter().map(|layer| texture_bytes(&layer.image.0)).sum::<u64>()
+            + gpu.reduced.iter().map(|layer| layer.image.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()).sum::<u64>()
             + gpu.generators.as_ref().map_or(0, scene::Scene::scratch_bytes) + gpu.capture.storage_bytes());
         paint + self.sources.as_ref().map_or(0, |s| s.storage_bytes())
     }
@@ -318,7 +318,7 @@ struct ReducedLayer {
     extent: [u32; 2],
     origin: [u32; 2],
     level: u32,
-    image: (wgpu::Texture, wgpu::TextureView),
+    image: [(wgpu::Texture, wgpu::TextureView); 2],
     tiles: BTreeMap<[u32; 2], (Option<u64>, u64)>,
     valid: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -391,6 +391,7 @@ impl PreviewPipeline {
             crate::bindings::buffer(0, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(32)),
             crate::bindings::texture(1, wgpu::ShaderStages::COMPUTE, false),
             crate::bindings::storage_texture(2, wgpu::ShaderStages::COMPUTE, wgpu::TextureFormat::Rgba32Float, wgpu::StorageTextureAccess::WriteOnly),
+            crate::bindings::storage_texture(3, wgpu::ShaderStages::COMPUTE, wgpu::TextureFormat::Rgba16Float, wgpu::StorageTextureAccess::WriteOnly),
         ]);
         let reduce_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("thumbnail page reduction"), source: wgpu::ShaderSource::Wgsl(include_str!("thumbnail_reduce.wgsl").into()),
@@ -421,7 +422,7 @@ impl PreviewPipeline {
     }
     fn reduce_layer(&mut self, r: &mut WgpuRasterizer, id: SourceTarget, (origin, level): ([u32; 2], u32),
         encoder: &mut crate::submission::CommandEncoder, limit: &mut usize,
-    ) -> Result<Option<(wgpu::Texture, wgpu::TextureView)>, GpuRasterError> {
+    ) -> Result<Option<[(wgpu::Texture, wgpu::TextureView); 2]>, GpuRasterError> {
         let extent = r.document_extent;
         self.reduced.retain(|layer| layer.valid.load(std::sync::atomic::Ordering::Acquire));
         let cached = self.reduced.iter().position(|layer| layer.id == id && layer.extent == extent && layer.origin == origin && layer.level == level);
@@ -429,8 +430,15 @@ impl PreviewPipeline {
             Some(index) => self.reduced.remove(index).unwrap(),
             None => {
                 self.reduced.retain(|layer| layer.id != id);
+                let painted = r.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("reduced layer painted bounds"),
+                    size: wgpu::Extent3d { width: PAGE_SIZE, height: PAGE_SIZE, depth_or_array_layers: 1 },
+                    mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[],
+                });
+                let view = painted.create_view(&Default::default());
                 ReducedLayer { id, extent, origin, level, tiles: BTreeMap::new(), valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-                    image: create_color_target(&r.device, [PAGE_SIZE; 2], "reduced layer thumbnail") }
+                    image: [create_color_target(&r.device, [PAGE_SIZE; 2], "reduced layer thumbnail"), (painted, view)] }
             }
         };
         let current = layer.current(r);
@@ -467,7 +475,8 @@ impl PreviewPipeline {
                 let binding = crate::bindings::group(&r.device, "thumbnail page", &self.reduce_layout, [
                     wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &records, offset: 0, size: NonZeroU64::new(32) }),
                     wgpu::BindingResource::TextureView(view),
-                    wgpu::BindingResource::TextureView(&layer.image.1),
+                    wgpu::BindingResource::TextureView(&layer.image[0].1),
+                    wgpu::BindingResource::TextureView(&layer.image[1].1),
                 ]);
                 pass.set_bind_group(0, &binding, &[((chunk * SOURCE_SLOTS + index) as u64 * u64::from(stride)) as u32]);
                 let valid = std::array::from_fn::<_, 2, _>(|i| (extent[i] - c[i] * PAGE_SIZE).min(PAGE_SIZE));
@@ -596,6 +605,7 @@ impl PreviewPipeline {
             record[4] = if i == 0 { 2 } else if generator.is_some() { 4 } else { u32::from(mask.is_some()) };
             record[6] = footprint;
             record[5] = u32::from(!placed && inverted);
+            record[7] = u32::from(reduced.is_some());
             record[8..12].copy_from_slice(&background.map(f32::to_bits));
             if mask.is_none() { record[12..20].copy_from_slice(&r.ui_rendition_parameters().map(f32::to_bits)); }
             for (dst, value) in bytes[i * stride..i * stride + 80]
@@ -658,7 +668,7 @@ impl PreviewPipeline {
                 self.prepared.push_back(prepared);
                 return Ok(false);
             };
-            prepared.generated = vec![content];
+            prepared.generated = content.to_vec();
         }
         let write = crate::submission::CacheWrite::new();
         let capture = &mut self.capture;
@@ -684,11 +694,13 @@ impl PreviewPipeline {
                                 .view
                         }
                     };
+                    let painted = match coordinate { Some(_) if prepared.reduced.is_some() => &prepared.generated[1].1, _ => &view };
                     Ok(crate::bindings::group(&r.device, "thumbnail page", &self.records, [
                         wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &prepared.records, offset: 0, size: NonZeroU64::new(80), }),
                         wgpu::BindingResource::TextureView(&view),
                         wgpu::BindingResource::Sampler(&r.sampler),
                         self.bounds.empty_selection.as_entire_binding(),
+                        wgpu::BindingResource::TextureView(painted),
                     ]))
                 })
                 .collect()
@@ -798,6 +810,7 @@ impl BoundsPipeline {
             crate::bindings::float_texture(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::sampler(2, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
             crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Storage { read_only: true }, false, NonZeroU64::new(48)),
+            crate::bindings::float_texture(4, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
         ]);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("content bounds reduction"),
@@ -841,7 +854,7 @@ impl BoundsPipeline {
         let view = texture.create_view(&Default::default());
         let record = crate::bindings::group(device, "content bounds page", &self.records, [
             record.as_entire_binding(), wgpu::BindingResource::TextureView(&view), wgpu::BindingResource::Sampler(&self.sampler),
-            selection.unwrap_or(&self.empty_selection).as_entire_binding(),
+            selection.unwrap_or(&self.empty_selection).as_entire_binding(), wgpu::BindingResource::TextureView(&view),
         ]);
         let output = crate::bindings::group(device, "content bounds result", &self.write, [output.as_entire_binding()]);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());

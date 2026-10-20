@@ -186,7 +186,12 @@ The viewport is the presentation of that document at the current camera position
 zoom and rotation. The shared
 [`ViewportPresenter`](../../crates/layer-render-wgpu/src/present.rs) samples the
 composed image into the platform's target. Panning the view does not, by itself,
-require repainting committed raster tiles.
+require repainting committed raster tiles. Only the artwork's bounding box on
+screen runs the artwork shader; the surround around it draws with a shader that
+computes the surround color alone (`the_surround_skips_the_artwork_shader`).
+The artwork pipelines leave out the paper lighting code; a second set with it
+compiles the first time paper lighting shows, in the background where a startup
+compiler runs, and the plain set draws until it is ready.
 
 When the view is reduced, each screen pixel spans one to two texels of the
 display level and reads only that level, bilinearly. A bilinear sample of the
@@ -194,11 +199,15 @@ finer level stays closer to the pixel's area average than a blend with the
 coarser level until the pixel spans almost two texels, so only the last fifth
 of an octave before the next level blends into the coarser one, which the next
 plan then presents alone. At the tiers' Fit zooms the presenter therefore reads one
-level. Reduced levels reach the presenter as `Rgba16Float` copies that the
-display cache converts wherever it writes the level and in full when the level's
-texture changes, halving what each pixel reads. A copy keeps every lane that is
-in range in range and every clipped lane clipped, so clipping marks agree with
-the `Rgba32Float` level. Native views keep reading `Rgba32Float` levels.
+level. Reduced levels reach the presenter as `Rgba16Float` copies, halving what
+each pixel reads. A new level texture converts in full; later writes accumulate
+until the presenter converts them, once per presented frame, so painting updates
+add no conversion. The presenter filters the
+copies in hardware on every device
+(`half_float_levels_present_alike_with_or_without_float32_filtering`). A copy
+keeps every lane that is in range in range and every clipped lane clipped, so
+clipping marks agree with the `Rgba32Float` level. Native views keep reading
+`Rgba32Float` levels.
 The copies never take budget from the composition: window caches keep room for
 them in the source allowance and admit them from what the composition leaves,
 complete pyramids admit them against the pyramid's allowance, and a copy that
@@ -372,12 +381,13 @@ the window repaints exactly once when complete. Pending object work keeps frames
 coming until every visible path is derived, so opening or zooming a crowded
 layer fills in over several frames instead of stalling one; on the Web host this
 keeps the browser's single thread responsive. Exact captures, exports
-and thumbnails derive everything they draw. With a vector layer visible, zooming
-into a finer display level first shows the coarser level, resampled, on the
-pages it held. Each frame then
-renders at most four of those pages exactly, nearest the view centre first and
-only once their paths are derived within the frame's 6 ms
-(`zooming_into_a_finer_level_shows_the_coarser_one_scaled_and_refines_a_few_pages_a_frame`).
+and thumbnails derive everything they draw. With a vector layer visible, a new
+display level first shows the level it replaces, resampled, on the pages that
+level held, and when zooming out, its overview on the rest; a window that grows
+at the same level during a zoom does the same. Each frame then renders at most
+four of those pages exactly, nearest the view centre first and only once their
+paths are derived within the frame's 6 ms
+(`crossing_a_level_shows_the_previous_one_resampled_and_refines_a_few_pages_a_frame`).
 
 A bake that draws vector layers, such as Merge Down onto paint or Rasterize
 Layer, waits in `raster_dependencies_ready` until every path of those layers has
@@ -385,6 +395,18 @@ full-resolution geometry. Worker threads derive it while frames keep presenting;
 the Web host derives it within each frame's 6 ms instead. The bake's regions then
 draw from it, so the canvas thread derives no path while baking
 (`baking_crowded_paths_derives_them_off_the_canvas_thread_and_keeps_the_picture`).
+A blend at full opacity and unclipped over a transparent tile that nothing else
+has touched returns its source, and standalone clears of single-level
+`Rgba32Float` storage tiles and pointwise draws, including draws clipped from
+their origin, run in the encoder's shared compute pass. A region of 16 vector
+pages therefore records about three passes instead of five per page
+(`baking_a_window_of_paths_records_a_few_passes_not_several_per_page`).
+
+`submission::CommandEncoder` starts another wgpu encoder every 56 passes. wgpu
+records each pass and its barriers into about two command buffers, and Android
+destroys a command pool that held more than 128 once its work completes
+([vendored wgpu](../../vendor/README.md)), so smaller chunks keep reusing their
+pools and the driver memory behind them.
 
 A frame's coverage batches upload into one reusable buffer from the encoder's
 prologue, as do new geometry, so consecutive vector dispatches share one compute
@@ -410,14 +432,23 @@ pages without them. The moving paths render once into a texture at the display
 level. When the vector layer, its groups and every layer above it blend normally
 at full opacity, with no mask, attached filter, adjustment layer or clipping that
 reaches down to it, the composition graph splits its root into the layers above
-and everything below, the rest of the vector layer included, and caches both
-only over the pages the moving paths cover at their start and where the
-transform takes them, filling pages as the motion reaches them. Splitting or
-unsplitting the graph keeps every other page, whose composite already equals
-above over below. Where the moving texture has coverage, the viewport presenter
-draws above, moving paths and below, sampling the moving texture through the
-inverse affine; elsewhere it shows the composite. Motion frames recomposite no
-pages, and the overview and the Navigator keep the paths where they were until
+and everything below, the rest of the vector layer included. It caches the
+layers above first, and below when the budget holds a second image, only over
+the pages the moving paths cover at their start and where the transform takes
+them, filling pages as the motion reaches them. Splitting or unsplitting the
+graph keeps every other page, whose composite already equals above over below.
+Where the moving texture has coverage, the viewport presenter draws the moving
+paths between the layers above and the rest, sampling the moving texture through
+the inverse affine. The composite already holds above over below, so the presenter
+needs only the layers above: `above + moving × (1 − above alpha) + (composite −
+above) × (1 − moving alpha)`. Elsewhere it shows the composite. A 61 MP
+document at the top tier's Fit, whose display budget keeps one image of its
+level, still presents a moving selection without composing pages
+(`width_previews_on_a_display_level_that_keeps_one_layer_image_show_the_paths_and_compose_no_pages`).
+When only the moving texture
+changes, the presenter repaints its previous and new bounds
+(`replacement_previews_present_only_the_moving_images_bounds`). Motion frames
+recomposite no pages, and the overview and the Navigator keep the paths where they were until
 the motion commits. Otherwise the composition graph resamples the moving texture
 through the affine, translations rounded to the level's pixels, above the cached
 layer. Moving paths draw above the rest of their layer until the motion commits,
@@ -427,11 +458,30 @@ until the transform commits and re-derives them
 
 The engine forwards the working path selection through `set_vector_selection`.
 While paths stay selected and nothing moves, the renderer prepares their moving
-texture and, for a split layer, the above and below images over the pages they
-cover, so pressing selected paths recomposites those pages from cached images and
-draws no paths. The prepared images count against the display cache budget and
-the moving texture's 4-megapixel limit, and clearing the selection releases them
+texture and, for a split layer, the above and, budget allowing, below images over the square any
+turn of the paths about their center reaches, a few pages a frame, nearest the
+view first. Pressing selected paths then recomposites only the pages they cover,
+from cached images, and draws no paths; turning them composes no pages
+(`turning_prepared_paths_composes_no_pages`). After a display level change the
+previous images stay on screen, scaled, while the new level is prepared the same
+way (`crossing_a_level_with_selected_paths_prepares_a_few_pages_a_frame_and_keeps_the_moving_image`).
+The prepared images count against the display cache budget and the moving
+texture's 4-megapixel limit; images the budget cannot keep are not prepared.
+Clearing the selection releases them but keeps the moving texture, and the
+images of branches no longer wanted, within the branch budget; the next
+selection or press draws into those instead of allocating
 (`pressing_selected_paths_draws_nothing_their_selection_prepared_and_deselecting_releases_it`).
+
+An unapplied style or geometry edit of moving paths arrives through
+`set_vector_motion_paths`: the selection after the edit, in layer order and the
+layer's coordinates, while a motion of those paths is set. The moving texture
+redraws from those paths at its level, deriving on up to four threads only the
+paths whose geometry or outline changed, into the buffers of their previous
+derivation, and keeping each other derivation; a color change derives nothing
+(`replacement_paths_derive_only_changed_outlines_once`). The layer keeps its own
+paths, so a width scrub or anchor drag recomposites no pages
+(`replacement_paths_redraw_only_the_moving_image_and_match_the_applied_edit`).
+Applying the edit clears the paths and the motion along with the document change.
 
 ## Native SDR working color
 
@@ -1157,7 +1207,11 @@ unfinished request before a replacement can publish.
 
 A paint layer's thumbnail frames and draws one reduced image of the layer: the
 smallest power-of-two level at which the pages it holds fit 256 × 256 texels,
-each texel averaging the layer pixels under it. A preparation reduces up to 48
+each texel keeping the bounds of the painted pixels under it and their average
+over those bounds. Framing reads those bounds, so it is exact to the pixel even
+when the content covers a few texels of mostly transparent pages, and drawing
+shows a texel only inside them, so an edge that crosses a texel stays solid
+instead of thinning toward the checkerboard. A preparation reduces up to 48
 changed pages into that image, one pass per page, and keeps the image across
 revisions: a page is reduced again only when its committed tile or, for a page
 without one, the artwork revision changes, so a stroke re-reduces the pages it
@@ -1212,9 +1266,10 @@ and blends the others:
   supplies `textureSampleLevel` when the device can filter Float32 textures, and
   otherwise bilinear and linear-mip interpolation from four texel loads per level
   with clamp-to-edge addressing. A9–A16 iPads, the iOS simulator and several
-  Android GPU families take the texel path. 8-bit tips, grain and paper keep
-  hardware filtering everywhere. Renderer tests run the texel path on any GPU
-  through `WgpuRasterizer::native_headless_without`.
+  Android GPU families take the texel path. 8-bit tips, grain, paper and the
+  presenter's `Rgba16Float` display levels keep hardware filtering everywhere.
+  Renderer tests run the texel path on any GPU through
+  `WgpuRasterizer::native_headless_without`.
 - **Blending.** Without Float32 blending, `portable_blend` replaces
   fixed-function attachment blending with a compute merge.
 

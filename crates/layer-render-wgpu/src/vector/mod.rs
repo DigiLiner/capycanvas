@@ -128,9 +128,7 @@ impl Pool {
     pub fn release(&mut self, offset: u32, geometry: &LevelGeometry) { self.free_words(offset, (geometry.words.len() as u32).max(1)); }
     /// Free space this frame may have read once the next frame begins.
     pub fn retire(&mut self, offset: u32, geometry: &LevelGeometry) {
-        let len = (geometry.words.len() as u32).max(1);
-        self.pending.retain(|(o, _)| *o < offset || *o >= offset + len);
-        self.retired.push((offset, len));
+        self.retired.push((offset, (geometry.words.len() as u32).max(1)));
     }
     pub fn restart(&mut self) {
         for (offset, len) in std::mem::take(&mut self.retired) { self.free_words(offset, len); }

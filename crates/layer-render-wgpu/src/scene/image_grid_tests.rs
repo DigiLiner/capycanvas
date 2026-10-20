@@ -100,7 +100,7 @@ fn complete_compute_composition_replaces_the_clear_but_partial_writes_preserve_i
                 assert!((f32::from_le_bytes(bytes.try_into().unwrap()) - value).abs() < 1e-6);
             }
         }
-        assert_eq!(passes, if width == PAGE_SIZE { 1 } else { 2 }, "width {width}");
+        assert_eq!(passes, 1, "width {width}: the clear and the composition share one compute pass");
         scene.free(output);
     }
 }

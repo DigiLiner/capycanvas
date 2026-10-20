@@ -19,6 +19,7 @@ struct Camera {
     split_size: vec4<f32>,
     split_region: vec4<f32>,
     motion_inverse: vec4<f32>,
+    levels: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var moved: texture_2d<f32>;
@@ -37,7 +38,8 @@ struct PaperShade { tile: vec4<f32>, light: vec4<f32>, paper: vec4<f32>, state: 
 @group(0) @binding(16) var paper_sampler: sampler;
 @group(0) @binding(17) var moving_paths: texture_2d<f32>;
 @group(0) @binding(18) var above_paths: texture_2d<f32>;
-@group(0) @binding(19) var below_paths: texture_2d<f32>;
+@group(0) @binding(19) var moved_level: texture_2d<f32>;
+@group(0) @binding(20) var kept_level: texture_2d<f32>;
 
 // The backing buffer follows the display's native orientation. All artwork,
 // cursor and UI geometry continues to use the host's logical viewport.
@@ -86,7 +88,12 @@ fn detail_point(p: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);
     let q = vec2(mip_coordinate(p.x, extent.x, scale), mip_coordinate(p.y, extent.y, scale));
     if any(q < vec2<f32>(cache.window.xy)) || any(q > vec2<f32>(cache.window.zw - 1u)) { return coarse_point(p); }
-    return sample_float(moved, linear_sampler, (q - vec2<f32>(cache.window.xy) + .5) / vec2<f32>(textureDimensions(moved)), 0.);
+    return level_sample(moved, moved_level, (q - vec2<f32>(cache.window.xy) + .5) / vec2<f32>(textureDimensions(moved)));
+}
+// Half-float display levels filter in hardware on every device.
+fn level_sample(image: texture_2d<f32>, filtered: texture_2d<f32>, uv: vec2<f32>) -> vec4<f32> {
+    if camera.levels.x != 0. { return textureSampleLevel(filtered, linear_sampler, uv, 0.); }
+    return sample_float(image, linear_sampler, uv, 0.);
 }
 fn placed_at(p:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>,linear:bool)->vec4<f32> {
     let span=abs(dx)+abs(dy);
@@ -164,11 +171,8 @@ fn moving_between(p: vec2<f32>, composite: vec4<f32>) -> vec4<f32> {
     if any(q < vec2<f32>(-1.)) || any(q > size + 1.) { return composite; }
     let moving = sample_float(moving_paths, linear_sampler, q / size, 0.);
     if moving.a <= 0. { return composite; }
-    let s = (p - camera.split.xy) / camera.split.z / camera.split_size.xy;
-    let below = sample_float(below_paths, linear_sampler, s, 0.);
-    let above = sample_float(above_paths, linear_sampler, s, 0.);
-    let lower = moving + below * (1. - moving.a);
-    return above + lower * (1. - above.a);
+    let above = sample_float(above_paths, linear_sampler, (p - camera.split.xy) / camera.split.z / camera.split_size.xy, 0.);
+    return above + moving * (1. - above.a) + (composite - above) * (1. - moving.a);
 }
 fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);
@@ -178,7 +182,7 @@ fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let extent = camera.offset_document.zw;
     let q = vec2(mip_coordinate(p.x, extent.x, next_scale), mip_coordinate(p.y, extent.y, next_scale));
     let origin = vec2<f32>(cache.window.xy) * (scale / next_scale);
-    let reduced = sample_float(kept, linear_sampler, (q - origin + .5) / vec2<f32>(textureDimensions(kept)), 0.);
+    let reduced = level_sample(kept, kept_level, (q - origin + .5) / vec2<f32>(textureDimensions(kept)));
     if coarser == 1. { return reduced; }
     return mix(detail_point(p), reduced, coarser);
 }
@@ -304,32 +308,37 @@ fn window_coverage(surface: vec2<f32>) -> f32 {
 @fragment fn fs_main(vertex: Vertex) -> @location(0) vec4<f32> {return surface_color(vertex,0u);}
 @fragment fn fs_placed(vertex: Vertex) -> @location(0) vec4<f32> {return surface_color(vertex,1u);}
 @fragment fn fs_mapped(vertex: Vertex) -> @location(0) vec4<f32> {return surface_color(vertex,2u);}
+@fragment fn fs_surround(vertex: Vertex) -> @location(0) vec4<f32> {
+    let surface = logical_surface(vertex.position.xy * camera.rotation.w);
+    return surround_color(surface, vec2<f32>(dot(camera.inverse.xz, surface), dot(camera.inverse.yw, surface)) + camera.offset_document.xy);
+}
+fn surround_color(surface: vec2<f32>, p: vec2<f32>) -> vec4<f32> {
+    var rgb = view_ui_rgb(camera.surround.rgb);
+    if camera.crop_offset.w > .5 && inside_crop(p) {
+        rgb = vec3<f32>(transparency_checker(p, 16.));
+    }
+    if camera.viewport.z > .5 { rgb = display_color(rgb); }
+    let coverage = window_coverage(surface);
+    return view_store(vec4<f32>(rgb * coverage, coverage));
+}
 fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
     let footprint = camera.rotation.w;
     let surface = logical_surface(vertex.position.xy * footprint);
     let p = vec2<f32>(dot(camera.inverse.xz, surface), dot(camera.inverse.yw, surface)) + camera.offset_document.xy;
     let extent = camera.offset_document.zw;
     let cropping = camera.crop_offset.w > .5;
-    if any(p < vec2<f32>(0.)) || any(p >= extent) {
-        var rgb = view_ui_rgb(camera.surround.rgb);
-        if cropping && inside_crop(p) {
-            rgb = vec3<f32>(transparency_checker(p, 16.));
-        }
-        if camera.viewport.z > .5 { rgb = display_color(rgb); }
-        let coverage = window_coverage(surface);
-        return view_store(vec4<f32>(rgb * coverage, coverage));
-    }
+    if any(p < vec2<f32>(0.)) || any(p >= extent) { return surround_color(surface, p); }
     // Explicit LOD keeps sampling valid across the finite-canvas boundary.
     let dx = camera.inverse.xy * footprint;
     let dy = camera.inverse.zw * footprint;
-    let sampled = source_at(source, p, dx, dy, paper_shade.state.y == 0.);
-    var artwork: vec4<f32>;
-    if paper_shade.state.y != 0. { artwork = paper_composite(sampled, p, dx, dy); }
-    else { artwork = paper_relief(sampled, 1., p, dx, dy); }
+    let sampled = source_at(source, p, dx, dy, !PAPER || paper_shade.state.y == 0.);
+    var artwork = sampled;
+    if PAPER && paper_shade.state.y != 0. { artwork = paper_composite(sampled, p, dx, dy); }
+    else if PAPER { artwork = paper_relief(sampled, 1., p, dx, dy); }
     let paint = proof_artwork(artwork,p);
     let checker = transparency_checker(p, 16.);
     var rgb = screen_marked(paint, view_working_rgb(paint.rgb) + vec3<f32>(checker) * (1.0 - paint.a), checker);
-    if paper_shade.state.z != 0. { rgb = paper_lit(vec4<f32>(rgb, 1.), paper_slope_shade(p, dx, dy), 1.).rgb; }
+    if PAPER && paper_shade.state.z != 0. { rgb = paper_lit(vec4<f32>(rgb, 1.), paper_slope_shade(p, dx, dy), 1.).rgb; }
     if (bitcast<u32>(artwork.a)&0x7fffffffu)!=0u {
         let bits=bitcast<vec3<u32>>(artwork.rgb);
         let shadows=camera.composite.z!=0. && (any((bits&vec3(0x7fffffffu))==vec3(0u)) || any((bits>>vec3(31u))!=vec3(0u)));

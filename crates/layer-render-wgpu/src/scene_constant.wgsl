@@ -18,7 +18,9 @@ fn compose_constant(@builtin(global_invocation_id) id: vec3<u32>) {
     if any(local < vec2(0.)) || any(local >= settings.rect.zw) || any(p < vec2(0.)) || any(p >= settings.extent.xy) { return; }
     let v = Vertex(vec4(p,0.,1.), local/settings.rect.zw);
     var result: vec4<f32>;
-    if u32(settings.options.x) == 15u {
+    if u32(settings.options.x) == 0u {
+        result = settings.color;
+    } else if u32(settings.options.x) == 15u {
         result = scene_normal_stack(scene_read(front,v), scene_read(back,v), v);
     } else {
         result = scene_pointwise(scene_read(front,v),v);

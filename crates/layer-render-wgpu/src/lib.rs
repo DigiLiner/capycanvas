@@ -282,6 +282,8 @@ pub struct GpuRasterMetrics {
     /// Texels that display level reductions read: four for each filtered
     /// sample and one for each load.
     pub display_reduction_reads: u64,
+    /// Passes that convert display levels to half float outside a reduction.
+    pub half_level_passes: u64,
     pub frame_composited_pages: Vec<(u32, [u32; 2])>,
     /// 16-pixel tiles the vector coverage kernel drew.
     pub vector_tiles: u64,
@@ -896,6 +898,8 @@ pub struct WgpuRasterizer {
     vector_preview_damage: Vec<DocRect>,
     vector_motion: Option<layer_render::VectorMotion>,
     vector_motion_drawn: Option<(layer_render::VectorMotion, DocRect)>,
+    vector_motion_paths: Option<Arc<[layer_core::authored::vector::PathItem]>>,
+    vector_motion_paths_drawn: Option<Arc<[layer_core::authored::vector::PathItem]>>,
     vector_motion_damage: Vec<DocRect>,
     vector_exclusion_damage: Vec<DocRect>,
     vector_motion_split: Option<scene::MotionSplit>,
@@ -1295,6 +1299,8 @@ impl WgpuRasterizer {
             vector_preview_damage: Vec::new(),
             vector_motion: None,
             vector_motion_drawn: None,
+            vector_motion_paths: None,
+            vector_motion_paths_drawn: None,
             vector_motion_damage: Vec::new(),
             vector_exclusion_damage: Vec::new(),
             vector_motion_split: None,
@@ -1507,19 +1513,19 @@ impl WgpuRasterizer {
         let (bounds, moved) = self.vector_motion_moved()?;
         Some(DocRect { min: bounds.min.map(|v| v - 2), max: bounds.max.map(|v| v + 2) }.union(moved).in_frame(extent))
     }
-    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;24],DocRect)> {
+    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;2],[f32;24],DocRect,u64)> {
         let (motion, _) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
         let (_, moved) = self.vector_motion_moved()?;
         let region = self.vector_motion_region(self.document_extent)?;
-        let (view, window, level, size) = self.scene.as_ref()?.presented_motion(motion)?;
-        let [(above, plan), (below, _)] = self.scale_display.as_ref()?.motion_layers(region)?;
+        let (view, window, level, size, revision) = self.scene.as_ref()?.presented_motion(motion)?;
+        let (above, plan) = self.scale_display.as_ref()?.motion_above(region)?;
         let [x, y] = window.min.map(|v| v as f32);
         let [w, h] = size.map(|v| v as f32);
         let [sx, sy] = plan.doc_bounds.min.map(|v| v as f32);
         let [sw, sh] = plan.size.map(|v| v as f32);
         let [a, b, c, d, tx, ty] = motion.transform.inverse()?.0.map(|v| v as f32);
         let [rx0, ry0, rx1, ry1] = [region.min_x(), region.min_y(), region.max_x(), region.max_y()].map(|v| v as f32);
-        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., tx, ty, w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0., rx0, ry0, rx1, ry1, a, b, c, d], moved))
+        Some(([view, above.unwrap_or(&self.empty_view)], [x, y, (1u32 << level) as f32, 1., tx, ty, w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0., rx0, ry0, rx1, ry1, a, b, c, d], moved, revision))
     }
     pub(crate) fn display_placement(&self)->[f32;20] {
         self.display_backup.as_ref().map_or_else(||self.scale_display.as_ref().unwrap().placement_values(),|backup|backup.placement)
@@ -3672,6 +3678,9 @@ impl CanvasRenderer for WgpuRasterizer {
     fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) {
         self.vector_motion = motion;
     }
+    fn set_vector_motion_paths(&mut self, paths: Option<Arc<[layer_core::authored::vector::PathItem]>>) {
+        self.vector_motion_paths = paths;
+    }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if let Some(overlay) = &overlay && self.require_paper_slope(&overlay.paper, startup::VALIDATION).is_err() {
             return;
@@ -3927,6 +3936,7 @@ impl WgpuRasterizer {
             && self.moving_layer.is_none() && self.moving_pixels.is_none()
             && self.vector_preview.as_ref().map(|p| (p.owner, p.revision)) == self.vector_preview_shown.map(|(owner, revision, _)| (owner, revision))
             && self.vector_motion.as_ref() == self.vector_motion_drawn.as_ref().map(|(motion, _)| motion)
+            && self.vector_motion_paths.as_ref().filter(|_| self.vector_motion.is_some()).map(Arc::as_ptr) == self.vector_motion_paths_drawn.as_ref().map(Arc::as_ptr)
             && !self.vector_selection_changed
             && self.artwork_frame.as_ref().is_some_and(|frame|
                 frame.view == packet.view && frame.same_artwork(packet))
@@ -3970,13 +3980,16 @@ impl WgpuRasterizer {
         }
         self.vector_motion_damage.clear();
         self.vector_exclusion_damage.clear();
-        let motion_changed = self.vector_motion.as_ref() != self.vector_motion_drawn.as_ref().map(|(motion, _)| motion);
+        let paths = self.vector_motion_paths.clone().filter(|_| self.vector_motion.is_some());
+        let paths_changed = paths.as_ref().map(Arc::as_ptr) != self.vector_motion_paths_drawn.as_ref().map(Arc::as_ptr);
+        let motion_changed = self.vector_motion.as_ref() != self.vector_motion_drawn.as_ref().map(|(motion, _)| motion) || paths_changed;
         if motion_changed {
             let same = |a: &layer_render::VectorMotion, owner: OccurrenceHandle, items: &Arc<std::collections::BTreeSet<layer_core::authored::vector::ItemId>>| a.owner == owner && Arc::ptr_eq(&a.items, items);
             let drawn = self.vector_motion.as_ref().map(|motion| {
                 let unchanged = self.vector_motion_drawn.as_ref().filter(|(old, _)| same(old, motion.owner, &motion.items)).map(|(_, bounds)| *bounds)
                     .or_else(|| self.vector_prepared.as_ref().filter(|((_, (owner, items), _), ..)| same(motion, *owner, &items.0)).map(|((_, _, bounds), ..)| *bounds));
-                (motion.clone(), unchanged.unwrap_or_else(|| scene::motion_bounds(packet.scene, motion.owner, &motion.items)))
+                let bounds = unchanged.unwrap_or_else(|| scene::motion_bounds(packet.scene, motion.owner, &motion.items));
+                (motion.clone(), paths.as_ref().map_or(bounds, |paths| bounds.union(scene::paths_bounds(packet.scene, motion.owner, paths))))
             });
             let moving = |drawn: &Option<(layer_render::VectorMotion, DocRect)>| drawn.as_ref().map(|(motion, _)| (motion.owner, Arc::as_ptr(&motion.items)));
             if moving(&drawn) != moving(&self.vector_motion_drawn) {
@@ -3990,6 +4003,7 @@ impl WgpuRasterizer {
                 if !rect.is_empty() { self.vector_motion_damage.push(bounds); self.document_damage.push(rect); }
             }
             self.vector_motion_drawn = drawn;
+            self.vector_motion_paths_drawn = paths;
             self.vector_motion_split = split;
         }
         let prepared = self.vector_selection.as_ref().filter(|_| self.vector_motion.is_none())

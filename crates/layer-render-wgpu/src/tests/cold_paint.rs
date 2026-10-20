@@ -694,6 +694,39 @@ fn edited_layer_thumbnails_reduce_only_their_changed_pages_in_bounded_batches() 
 }
 
 #[test]
+fn reduced_thumbnails_frame_and_fill_content_that_leaves_most_of_its_pages_transparent() {
+    let extent = [2048, 2048];
+    let (content, ink) = (PixelRect::new(517, 303, 853, 805), [0u8, 0, 0, 255]);
+    let mut document = Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames { paint: "Kept".into(), paper: "Paper".into() });
+    let paper = document.scene().order()[1];
+    document.artwork.occurrences.get_mut(paper).unwrap().visible = false;
+    let descriptor = document.composition().color.paint_descriptor();
+    let tiles = page_coordinates(PixelRect::full(extent)).map(|c| {
+        let page = page_rect(c);
+        let pixels: Vec<u8> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|i| {
+            let [x, y] = [page.min_x() + i % PAGE_SIZE, page.min_y() + i / PAGE_SIZE];
+            if (content.min_x()..content.max_x()).contains(&x) && (content.min_y()..content.max_y()).contains(&y) { ink } else { [0; 4] }
+        }).collect();
+        (TileKey { plane: RasterPlane::Color, coordinate: c }, RasterTile::backed(TileBlob::encode(descriptor, &pixels).unwrap()))
+    }).collect();
+    paint_mut(&mut document).raster = RasterRevision::backed(RasterData { tiles, ..Default::default() });
+    let id = target(&document);
+    let frame = FramePacket { view: crate::test_support::view(extent), composite_all: true, ..crate::test_support::packet(document.scene(), extent) };
+    let mut r = renderer_with(&document, u64::MAX, frame);
+    let image = thumbnail(&mut r, id);
+    let size = [content.width(), content.height()].map(|v| v as f32 * 32. / content.width().max(content.height()) as f32);
+    let low = size.map(|v| (32. - v) / 2.);
+    let rows: Vec<String> = image.chunks_exact(32 * 4).map(|row| row.chunks_exact(4).map(|p| if p[0] < 100 { '#' } else { 'o' }).collect()).collect();
+    for (i, pixel) in image.chunks_exact(4).enumerate() {
+        let p = [i % 32, i / 32].map(|v| v as f32);
+        let inside = (0..2).all(|a| p[a] >= low[a] && p[a] + 1. <= low[a] + size[a]);
+        let outside = (0..2).any(|a| p[a] + 1. <= low[a] || p[a] >= low[a] + size[a]);
+        assert!(!inside || pixel[0] < 32, "thumbnail pixel {p:?} inside the content shows the ink, got {pixel:?}:\n{}", rows.join("\n"));
+        assert!(!outside || pixel[0] > 200, "thumbnail pixel {p:?} outside the content shows the checkerboard, got {pixel:?}:\n{}", rows.join("\n"));
+    }
+}
+
+#[test]
 #[ignore = "workstation thumbnail latency and frame cost benchmark"]
 fn thumbnail_latency_and_frames_with_thumbnails_pending() {
     let document = filled([40, 90, 200, 255]);

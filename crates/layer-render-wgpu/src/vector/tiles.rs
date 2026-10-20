@@ -31,18 +31,28 @@ impl Frame {
     fn map(&self, p: [f64; 2]) -> [f64; 2] { [(p[0] + self.origin[0]) * self.scale, (p[1] + self.origin[1]) * self.scale] }
 }
 
+/// Working buffers that derivations of many paths on one thread share.
+#[derive(Default)]
+pub(crate) struct Scratch { touches: Vec<([i32; 2], u32)>, solids: Vec<[i32; 2]>, runs: Vec<(u32, u32)>, centerline: Vec<([f64; 2], [f64; 2])> }
+
 pub(crate) fn derive(path: &PathItem, frame: &Frame) -> LevelGeometry {
     let mut out = LevelGeometry::default();
-    if path.hidden { return out; }
+    derive_into(path, frame, &mut out, &mut Scratch::default());
+    out
+}
+/// Derive `path` into `out`, reusing its buffers and `scratch`.
+pub(crate) fn derive_into(path: &PathItem, frame: &Frame, out: &mut LevelGeometry, scratch: &mut Scratch) {
+    out.tiles.clear();
+    out.words.clear();
+    if path.hidden { return; }
     for (entry, paint) in path.style.entries.iter().enumerate() {
         match paint {
-            PaintEntry::Fill(_) => fill(&mut out, entry as u16, path, frame),
-            PaintEntry::Stroke(stroke) if stroke.width > 0. => self::stroke(&mut out, entry as u16, path, stroke, frame),
+            PaintEntry::Fill(_) => fill(out, entry as u16, path, frame),
+            PaintEntry::Stroke(stroke) if stroke.width > 0. => self::stroke(out, entry as u16, path, stroke, frame, scratch),
             _ => {}
         }
     }
     out.tiles.sort_by_key(|t| (t.tile[1], t.tile[0], t.entry));
-    out
 }
 
 fn polylines(path: &PathItem, frame: &Frame) -> Vec<Vec<[f64; 2]>> {
@@ -142,7 +152,7 @@ fn fill(out: &mut LevelGeometry, entry: u16, path: &PathItem, frame: &Frame) {
     if columns[0] < columns[1] { emit_fill(out, entry, path.fill_rule, bins, columns); }
 }
 
-fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke, frame: &Frame) {
+fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke, frame: &Frame, scratch: &mut Scratch) {
     if stroke.join != Join::Round || stroke.cap != Cap::Round {
         let outline = super::outline::outline(path, stroke, frame);
         let mut bins = FillBins { pieces: Vec::new(), crossings: Vec::new() };
@@ -161,13 +171,15 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
         return;
     }
     let half = stroke.width * 0.5 * frame.scale;
-    let mut touches: Vec<([i32; 2], u32)> = Vec::new();
-    let mut solids: Vec<[i32; 2]> = Vec::new();
+    let Scratch { touches, solids, runs, centerline: line } = scratch;
+    touches.clear();
+    solids.clear();
     let base = out.words.len() as u32;
     let mut point = 0u32;
     let mut segment_base = 0u32;
     for subpath in path.geometry.subpaths() {
-        let centerline = centerline(subpath, segment_base, stroke, half, frame);
+        centerline(subpath, segment_base, stroke, half, frame, line);
+        let centerline = &*line;
         segment_base += subpath.segment_count() as u32;
         let first = point;
         for (i, (p, [left, right])) in centerline.iter().enumerate() {
@@ -185,7 +197,7 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
             out.words.extend_from_within(out.words.len() - 3..);
             point += 1;
         }
-        for capsule in first..point - 1 { capsule_tiles(&out.words[(base + capsule * 3) as usize..], capsule, frame.clip, &mut touches, &mut solids); }
+        for capsule in first..point - 1 { capsule_tiles(&out.words[(base + capsule * 3) as usize..], capsule, frame.clip, touches, solids); }
     }
     solids.sort_unstable_by_key(|t| (t[1], t[0]));
     solids.dedup();
@@ -193,7 +205,7 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
     let mut index = 0;
     while index < touches.len() {
         let tile = touches[index].0;
-        let mut runs: Vec<(u32, u32)> = Vec::new();
+        runs.clear();
         while index < touches.len() && touches[index].0 == tile {
             let capsule = touches[index].1;
             match runs.last_mut() { Some((start, count)) if *start + *count == capsule => *count += 1, _ => runs.push((capsule, 1)) }
@@ -204,20 +216,20 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
             continue;
         }
         let last = runs.len() - 1;
-        for (i, (start, count)) in runs.into_iter().enumerate() {
+        for (i, &(start, count)) in runs.iter().enumerate() {
             out.tiles.push(ItemTile { tile, entry, kind: STROKE | if i < last { CONTINUE } else { 0 }, backdrop: 0, start: base + start * 3, count });
         }
     }
 }
 
-fn centerline(subpath: &Subpath, segment_base: u32, stroke: &Stroke, half: f64, frame: &Frame) -> Vec<([f64; 2], [f64; 2])> {
+fn centerline(subpath: &Subpath, segment_base: u32, stroke: &Stroke, half: f64, frame: &Frame, points: &mut Vec<([f64; 2], [f64; 2])>) {
     let width = |segment: u32, t: f64| stroke.profile.as_ref().map_or([half; 2], |p| p.at(segment, t).map(|f| f * half));
-    let mut points = vec![(frame.map(subpath.anchor(0).point()), width(segment_base, 0.))];
+    points.clear();
+    points.push((frame.map(subpath.anchor(0).point()), width(segment_base, 0.)));
     for (index, segment) in subpath.segments().enumerate() {
         let global = segment_base + index as u32;
         segment.map(|p| frame.map(p)).flatten(TOLERANCE, |p, t| points.push((p, width(global, t))));
     }
-    points
 }
 
 pub(crate) fn capsule(words: &[u32]) -> [f64; 8] {

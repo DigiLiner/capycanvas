@@ -284,36 +284,36 @@ fn derivation_work(r: &WgpuRasterizer, since: u64, known: &mut HashSet<usize>) -
 }
 
 #[test]
-fn zooming_into_a_finer_level_shows_the_coarser_one_scaled_and_refines_a_few_pages_a_frame() {
+fn crossing_a_level_shows_the_previous_one_resampled_and_refines_a_few_pages_a_frame() {
     let extent = [1200u32, 900u32];
     let records: Vec<Record> = crate::vector::bench::scene_b([1200., 900.], 5000).into_iter().map(Record::Path).collect();
     let (editor, _) = document(extent, records);
     let at = |zoom: f32| layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 300. - 600. * zoom, 225. - 450. * zoom] };
-    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
-    submit_ready(&mut r, FramePacket { view: at(0.4), ..packet(editor.document().scene(), extent) });
-    let coarse = r.scale_display.as_ref().unwrap().plan.level;
-    let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
-    submit_ready(&mut fresh, FramePacket { view: at(0.6), ..packet(editor.document().scene(), extent) });
-    let expected = presented(&fresh, at(0.6));
-    let composited = r.metrics.composited_pixels;
-    r.submit(FramePacket { view: at(0.6), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
-    r.wait_idle().unwrap();
-    assert!(r.scale_display.as_ref().unwrap().plan.level < coarse, "the zoom crosses into a finer level");
-    let pages = (r.metrics.composited_pixels - composited) / u64::from(PAGE_SIZE * PAGE_SIZE);
-    assert!(pages <= scale::APPROXIMATE_PAGES as u64, "the first finer frame renders {pages} pages exactly");
-    let scaled = presented(&r, at(0.6));
-    let error = scaled.iter().zip(&expected).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / expected.len() as f64;
-    assert!(error < 16., "the coarser level stands in for the finer one: mean byte error {error}");
-    let mut frames = 0;
-    while r.has_pending_work() {
-        let before = r.metrics.composited_pixels;
-        r.submit(FramePacket { view: at(0.6), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+    for (from, to) in [(0.4f32, 0.6f32), (0.9, 0.45)] {
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut r, FramePacket { view: at(from), ..packet(editor.document().scene(), extent) });
+        let level = r.scale_display.as_ref().unwrap().plan.level;
+        let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut fresh, FramePacket { view: at(to), ..packet(editor.document().scene(), extent) });
+        let expected = presented(&fresh, at(to));
+        r.submit(FramePacket { view: at(to), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
         r.wait_idle().unwrap();
-        assert!(r.metrics.composited_pixels - before <= (scale::APPROXIMATE_PAGES as u64 + 4) * u64::from(PAGE_SIZE * PAGE_SIZE), "refinement stays within its budget");
-        frames += 1;
-        assert!(frames < 500, "refinement finishes");
+        assert_ne!(r.scale_display.as_ref().unwrap().plan.level, level, "the zoom from {from} to {to} crosses a level");
+        let pages = r.metrics.frame_composited_pages.len();
+        assert!(pages <= scale::APPROXIMATE_PAGES, "the first frame at {to} renders {pages} pages exactly");
+        let resampled = presented(&r, at(to));
+        let error = resampled.iter().zip(&expected).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / expected.len() as f64;
+        assert!(error < 16., "the level at {from} stands in for the one at {to}: mean byte error {error}");
+        let mut frames = 0;
+        while r.has_pending_work() {
+            r.submit(FramePacket { view: at(to), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            r.wait_idle().unwrap();
+            assert!(r.metrics.frame_composited_pages.len() <= scale::APPROXIMATE_PAGES + 4, "refinement stays within its budget");
+            frames += 1;
+            assert!(frames < 500, "refinement finishes");
+        }
+        assert!(max_error(&display(&r), &display(&fresh)) < 1e-5, "the refined level at {to} matches a fresh render");
     }
-    assert!(max_error(&display(&r), &display(&fresh)) < 1e-5, "the refined level matches a fresh render");
 }
 
 #[test]
@@ -535,9 +535,207 @@ fn pressing_selected_paths_draws_nothing_their_selection_prepared_and_deselectin
         r.set_vector_motion(None);
         r.set_vector_selection(None);
         submit_ready(&mut r, frame);
-        assert!(r.scene.as_ref().unwrap().vectors.motion.is_none(), "deselecting drops the moving image");
-        assert!(layer_render::CanvasRenderer::telemetry(&r).resident_bytes <= idle, "deselecting releases what the selection prepared: {} after {idle}", layer_render::CanvasRenderer::telemetry(&r).resident_bytes);
+        let vectors = &r.scene.as_ref().unwrap().vectors;
+        assert!(vectors.motion.is_none(), "deselecting drops the moving image");
+        let retained = vectors.spare_motion.as_ref().map(|image| image.texture.clone()).expect("the moving image's texture is kept for the next selection");
+        let spare = r.scale_display.as_ref().unwrap().spare_branch_textures();
+        assert!(!spare.is_empty(), "deselecting keeps the halves' images for the next selection at zoom {zoom}");
+        let resident = layer_render::CanvasRenderer::telemetry(&r).resident_bytes;
+        assert!(resident <= idle + texture_bytes(&retained) + spare.iter().map(texture_bytes).sum::<u64>(),
+            "deselecting releases what the selection prepared but the textures kept for the next one: {resident} after {idle}");
         assert!(presented(&r, view).iter().zip(&shown).all(|(a, b)| a.abs_diff(*b) <= 1), "the cancelled drag restores the paths at zoom {zoom}");
+        let fewer = Arc::new(items.iter().take(2).copied().collect::<std::collections::BTreeSet<_>>());
+        r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: fewer }));
+        submit_ready(&mut r, frame);
+        assert_eq!(r.scene.as_ref().unwrap().vectors.motion.as_ref().map(|motion| motion.image.texture.clone()), Some(retained),
+            "selecting other paths draws their moving image into the kept texture instead of allocating one at zoom {zoom}");
+        let branches = r.scale_display.as_ref().unwrap().branch_textures();
+        assert!(spare.iter().all(|texture| branches.contains(texture)), "the other paths' halves reuse the kept images at zoom {zoom}");
+    }
+}
+
+#[test]
+fn crossing_a_level_with_selected_paths_prepares_a_few_pages_a_frame_and_keeps_the_moving_image() {
+    use std::collections::BTreeSet;
+    let extent = [1200u32, 900u32];
+    let (editor, layer, _) = motion_fixture(layer_core::LayerBlend::Normal, 1.);
+    let items: Arc<BTreeSet<ItemId>> = Arc::new(editor.document().scene().vector_layer(layer).unwrap().paths().map(|(_, path)| path.id).collect());
+    let at = |zoom: f32| layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, FramePacket { view: at(1.), ..packet(editor.document().scene(), extent) });
+    r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+    submit_ready(&mut r, FramePacket { view: at(1.), composite_all: false, ..packet(editor.document().scene(), extent) });
+    let texture = |r: &WgpuRasterizer| r.scene.as_ref().unwrap().vectors.motion.as_ref().map(|motion| (motion.image.texture.clone(), motion.key.2));
+    let (prepared, level) = texture(&r).expect("selecting prepares the moving image");
+    let mut frames = 0;
+    loop {
+        let (pages, before) = (r.scale_display.as_ref().unwrap().prepared_pages(), texture(&r).unwrap());
+        r.submit(FramePacket { view: at(0.5), composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+        r.wait_idle().unwrap();
+        let cache = r.scale_display.as_ref().unwrap();
+        let (now, image) = (cache.prepared_pages(), texture(&r).unwrap());
+        assert!(now.saturating_sub(pages) <= scale::APPROXIMATE_PAGES * 2, "frame {frames} prepares {} pages of the selection's halves", now.saturating_sub(pages));
+        assert!(image.1 == level && image.0 == prepared || image.1 != level, "the moving image stays until its new level is ready");
+        if image.1 != before.1 { assert_ne!(image.1, level); }
+        frames += 1;
+        if !r.has_pending_work() { break; }
+        assert!(frames < 400, "preparation finishes");
+    }
+    assert!(frames > 2, "a level crossing spreads the selection's preparation over frames: {frames}");
+    assert_ne!(texture(&r).unwrap().1, level, "the moving image reaches the new level");
+    let extent = [4000u32, 3000u32];
+    let (editor, layer) = crowded(extent, 2000);
+    let items: Arc<BTreeSet<ItemId>> = Arc::new(editor.document().scene().vector_layer(layer).unwrap().paths().step_by(10).map(|(_, path)| path.id).collect());
+    let view = layer_render::ViewState { width_px: 4000, height_px: 3000, document_to_surface: [1., 0., 0., 1., 0., 0.] };
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items }));
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let passes = r.metrics.command_passes;
+    for _ in 0..3 { submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }); }
+    assert_eq!(r.metrics.command_passes, passes, "selected paths whose halves the display cannot keep prepare nothing in later frames");
+}
+
+fn widened(paths: Vec<PathItem>, width: f64) -> Arc<[PathItem]> {
+    paths.into_iter().map(|path| {
+        let entries = path.style.entries.iter().map(|entry| match entry { PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width, ..stroke.clone() }), entry => entry.clone() }).collect();
+        path.with_style(Arc::new(Style::new(entries)))
+    }).collect()
+}
+#[test]
+fn replacement_paths_redraw_only_the_moving_image_and_match_the_applied_edit() {
+    let extent = [1200u32, 900u32];
+    for (zoom, opacity) in [(1f32, 1f32), (0.5, 1.), (0.5, 0.8)] {
+        let split = opacity == 1.;
+        let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+        let (mut editor, layer, items) = motion_fixture(layer_core::LayerBlend::Normal, opacity);
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        fn frame(editor: &layer_core::Editor, view: layer_render::ViewState, extent: [u32; 2]) -> FramePacket<'_> { FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) } }
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+        submit_ready(&mut r, frame(&editor, view, extent));
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0., 0.]) }));
+        submit_ready(&mut r, frame(&editor, view, extent));
+        let layer_display = display(&r);
+        let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+        let shown = |r: &WgpuRasterizer| -> Vec<f32> { if split { presented(r, view).into_iter().map(|v| f32::from(v) / 255.).collect() } else { display(r).into_iter().flatten().collect() } };
+        let close = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0., f32::max);
+        let tolerance = if split { 2.5 / 255. } else { 1e-5 };
+        for width in [12., 3., 16.] {
+            let paths = widened(object.selected(&items), width);
+            r.set_vector_motion_paths(Some(paths.clone()));
+            let tiles = r.metrics.vector_tiles;
+            r.submit(frame(&editor, view, extent)).unwrap();
+            r.wait_idle().unwrap();
+            assert!(r.metrics.vector_tiles > tiles, "a {width} px width preview redraws the moving image");
+            if split {
+                assert!(r.metrics.frame_composited_pages.is_empty(), "a {width} px width preview at zoom {zoom} recomposites no layer pages: {:?}", r.metrics.frame_composited_pages);
+                assert!(!r.has_pending_work(), "a {width} px width preview is complete in its frame");
+            }
+            submit_ready(&mut r, frame(&editor, view, extent));
+            let edited = object.with_paths(object.selected_paths(&items).into_iter().map(|(position, _)| position).zip(paths.iter().cloned())).unwrap();
+            let mut applied = layer_core::Editor::new(editor.document().clone());
+            applied.perform(applied.document().vector_object_edit(layer, edited).unwrap()).unwrap();
+            let mut fresh = WgpuRasterizer::new_native_headless(applied.document().composition().color).unwrap();
+            submit_ready(&mut fresh, FramePacket { view, ..packet(applied.document().scene(), extent) });
+            let error = close(&shown(&r), &shown(&fresh));
+            assert!(error <= tolerance, "a {width} px width preview at zoom {zoom}, opacity {opacity} shows what applying it draws: {error}");
+        }
+        assert!(!split || max_error(&display(&r), &layer_display) == 0., "the layer keeps its own paths until the edit is applied");
+        let paths = widened(object.selected(&items), 16.);
+        let edited = object.with_paths(object.selected_paths(&items).into_iter().map(|(position, _)| position).zip(paths.iter().cloned())).unwrap();
+        editor.perform(editor.document().vector_object_edit(layer, edited).unwrap()).unwrap();
+        r.set_vector_motion_paths(None);
+        r.set_vector_motion(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut fresh, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        assert!(close(&shown(&r), &shown(&fresh)) <= tolerance, "applying the edit at zoom {zoom}, opacity {opacity} hands off without change");
+        assert!(r.scene.as_ref().unwrap().vectors.replacement_count() == 0, "applying the edit releases the replacement derivations");
+    }
+}
+
+#[test]
+fn replacement_paths_derive_only_changed_outlines_once() {
+    let extent = [1200u32, 900u32];
+    let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let (editor, layer, items) = motion_fixture(layer_core::LayerBlend::Normal, 1.);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let frame = FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) };
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0.; 2]) }));
+    submit_ready(&mut r, frame);
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    let recolored = |paths: &[PathItem], rgba: [f32; 4]| -> Arc<[PathItem]> { paths.iter().map(|path| {
+        let entries = path.style.entries.iter().map(|entry| match entry { PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { paint: paint(rgba), ..stroke.clone() }), entry => entry.clone() }).collect();
+        path.with_style(Arc::new(Style::new(entries)))
+    }).collect() };
+    let derived = |r: &WgpuRasterizer| r.scene.as_ref().unwrap().vectors.derived_paths();
+    let wide = widened(object.selected(&items), 14.);
+    for (paths, expected, change) in [(wide.clone(), items.len(), "a width"), (recolored(&wide, [0.1, 0.8, 0.2, 1.]), 0, "a color"),
+        (recolored(&wide, [0.1, 0.8, 0.2, 1.]).iter().cloned().collect(), 0, "the same color again"), (widened(wide.to_vec(), 5.), items.len(), "another width")] {
+        let (before, tiles) = (derived(&r), r.metrics.vector_tiles);
+        r.set_vector_motion_paths(Some(paths));
+        submit_ready(&mut r, frame);
+        assert_eq!(derived(&r) - before, expected as u64, "{change} change derives only the paths whose outline changed, once");
+        assert!(r.metrics.vector_tiles > tiles, "{change} change redraws the moving image");
+    }
+}
+
+#[test]
+fn replacement_previews_present_only_the_moving_images_bounds() {
+    let extent = [1200u32, 900u32];
+    let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let (editor, layer, items) = motion_fixture(layer_core::LayerBlend::Normal, 1.);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let frame = FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) };
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+    submit_ready(&mut r, frame);
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0.; 2]) }));
+    submit_ready(&mut r, frame);
+    let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "replacement presentation");
+    let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.set_target_retention(true);
+    presenter.present(&r, &target, view, [1.; 4]).unwrap();
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    for width in [14., 4., 20.] {
+        let before = r.display_motion().unwrap().2;
+        r.set_vector_motion_paths(Some(widened(object.selected(&items), width)));
+        submit_ready(&mut r, frame);
+        let after = r.display_motion().unwrap().2;
+        presenter.present(&r, &target, view, [1.; 4]).unwrap();
+        let mut expected = Vec::new();
+        for moved in [before, after] { crate::present_damage::add_region(&mut expected, crate::present_damage::damage(moved.in_frame(extent), view, 0)); }
+        let expected: u64 = expected.iter().map(|area| area.intersect(PixelRect::full([view.width_px, view.height_px])).area()).sum();
+        assert_eq!(presenter.damage_area_pixels(), expected, "a {width} px preview presents the moving image's old and new bounds");
+        assert!(expected * 4 < u64::from(view.width_px * view.height_px), "the moving bounds are a small part of the view: {expected}");
+        let error = crate::layer_tests::page_bytes(&r, &texture).iter().zip(presented(&r, view)).map(|(a, b)| a.abs_diff(b)).max().unwrap();
+        assert!(error <= 1, "the {width} px preview's partial presentation matches a full one: {error}");
+    }
+}
+
+#[test]
+fn turning_prepared_paths_composes_no_pages() {
+    let extent = [1200u32, 900u32];
+    let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let (editor, layer, items) = motion_fixture(layer_core::LayerBlend::Normal, 1.);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let frame = FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) };
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+    submit_ready(&mut r, frame);
+    let [x0, y0, x1, y1] = editor.document().scene().vector_layer(layer).unwrap().items_bounds(&items).unwrap();
+    let center = [(x0 + x1) * 0.5, (y0 + y1) * 0.5];
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0.; 2]) }));
+    submit_ready(&mut r, frame);
+    for degrees in [10f64, 25., 40., 60., 90.] {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let transform = layer_core::authored::Affine64([cos, sin, -sin, cos, center[0] - cos * center[0] + sin * center[1], center[1] - sin * center[0] - cos * center[1]]);
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform }));
+        r.submit(frame).unwrap();
+        r.wait_idle().unwrap();
+        assert!(r.display_motion().is_some(), "a {degrees}° turn presents through the split");
+        assert!(r.metrics.frame_composited_pages.is_empty(), "a {degrees}° turn of prepared paths composes {:?}", r.metrics.frame_composited_pages);
     }
 }
 
@@ -682,6 +880,40 @@ fn crowded_vector_layer_edit_frames() {
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         report(&format!("turn {k} of {count} through the moving image"), &mut turns);
         report(&format!("turn {k} of {count} by re-deriving the paths"), &mut previewed);
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0., 0.]) }));
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        let mut scrubbed = Vec::new();
+        let mut damage = 0;
+        for i in 1..=30 {
+            let start = std::time::Instant::now();
+            r.set_vector_motion_paths(Some(widened(object.selected(&selected), 1. + i as f64 * 0.2)));
+            r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            presenter.present(&r, &target, view, [1.; 4]).unwrap();
+            let cpu = start.elapsed().as_secs_f64() * 1e3;
+            r.wait_idle().unwrap();
+            scrubbed.push((cpu, start.elapsed().as_secs_f64() * 1e3));
+            damage += presenter.damage_area_pixels();
+        }
+        eprintln!("width scrub {k}: presented {} pixels a frame of {}", damage / 30, view.width_px * view.height_px);
+        r.set_vector_motion_paths(None);
+        r.set_vector_motion(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        let mut edited = Vec::new();
+        let mut preview = layer_core::Editor::new(editor.document().clone());
+        let positions: Vec<_> = object.selected_paths(&selected).into_iter().map(|(position, _)| position).collect();
+        for i in 1..=10 {
+            let start = std::time::Instant::now();
+            let widths = object.with_paths(positions.iter().copied().zip(widened(object.selected(&selected), 1. + i as f64 * 0.2).iter().cloned())).unwrap();
+            preview.perform(preview.document().vector_object_edit(layer, widths).unwrap()).unwrap();
+            r.submit(FramePacket { view, composite_all: false, ..packet(preview.document().scene(), extent) }).unwrap();
+            presenter.present(&r, &target, view, [1.; 4]).unwrap();
+            let cpu = start.elapsed().as_secs_f64() * 1e3;
+            r.wait_idle().unwrap();
+            edited.push((cpu, start.elapsed().as_secs_f64() * 1e3));
+        }
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        report(&format!("width scrub {k} of {count} through the moving image"), &mut scrubbed);
+        report(&format!("width scrub {k} of {count} by editing the layer"), &mut edited);
         r.set_vector_selection(None);
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         let start = std::time::Instant::now();
@@ -778,6 +1010,31 @@ fn rasterizing_a_vector_layer_bakes_what_it_shows() {
     let rasterized = native(engine.backend_mut(), &document);
     assert!(rasterized.iter().filter(|p| p[3] > 0.5).count() > 5000, "the paint layer holds the paths' pixels");
     assert!(max_error(&rasterized, &shown) < 2. / 255., "Rasterize Layer keeps the picture: {}", max_error(&rasterized, &shown));
+}
+
+#[test]
+fn baking_a_window_of_paths_records_a_few_passes_not_several_per_page() {
+    let extent = [2048u32, 2048u32];
+    let (editor, layer) = crowded(extent, 3000);
+    let view = layer_render::ViewState { width_px: 1024, height_px: 1024, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let mut engine = layer_engine::CanvasEngine::new(r, editor.document().clone(), layer_engine::input_queue(16).1, view, layer_engine::ViewTransform::IDENTITY).unwrap();
+    settle(&mut engine);
+    let plan = engine.document().rasterize_plan(layer, false).unwrap();
+    engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+    let mut windows = 0;
+    for _ in 0..2000 {
+        let passes = engine.backend().metrics.command_passes;
+        engine.render_frame().unwrap();
+        engine.backend_mut().wait_idle().unwrap();
+        let recorded = engine.backend().metrics.command_passes - passes;
+        if !engine.has_pending_document_edits() { break; }
+        if recorded > 0 {
+            windows += 1;
+            assert!(recorded <= 4, "baking a 1024-pixel window of 16 pages records {recorded} passes");
+        }
+    }
+    assert!(windows >= 3, "Rasterize bakes the layer a window a frame: {windows} windows");
 }
 
 #[test]
@@ -913,10 +1170,12 @@ fn report(name: &str, frames: &mut [(f64, f64)]) {
 #[ignore = "crowded vector layer zoom benchmark"]
 fn crowded_vector_layer_zoom_frames() {
     let extent = [4000u32, 3000u32];
-    let (editor, _) = crowded(extent, 50_000);
+    let (editor, layer) = crowded(extent, 50_000);
     let at = |zoom: f32| layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 960. - 2000. * zoom, 600. - 1500. * zoom] };
-    for (from, to) in [(0.4f32, 0.8f32), (0.2, 0.4)] {
+    let selected: Arc<std::collections::BTreeSet<ItemId>> = Arc::new(editor.document().scene().vector_layer(layer).unwrap().paths().step_by(10).map(|(_, path)| path.id).collect());
+    for (from, to, selection) in [(0.4f32, 0.8f32, false), (0.2, 0.4, false), (0.4, 0.8, true), (0.8, 0.4, false), (0.8, 0.4, true), (0.4, 0.2, true)] {
         let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        if selection { r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: selected.clone() })); }
         let (_texture, target) = crate::create_target(r.device(), [1920, 1200], wgpu::TextureFormat::Rgba8UnormSrgb, "vector zoom presentation");
         let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
         presenter.set_target_retention(true);
@@ -935,7 +1194,7 @@ fn crowded_vector_layer_zoom_frames() {
             frames.push((cpu, start.elapsed().as_secs_f64() * 1e3));
             passes.push(r.metrics.command_passes - recorded);
         }
-        eprintln!("  passes per frame: max {}, crossing frame {}", passes.iter().max().unwrap(), passes[20]);
+        eprintln!("  passes per frame: max {} at frame {:?}", passes.iter().max().unwrap(), passes.iter().position(|p| p == passes.iter().max().unwrap()));
         let start = std::time::Instant::now();
         let mut settling = 0;
         while r.has_pending_work() && settling < 2000 {
@@ -945,18 +1204,227 @@ fn crowded_vector_layer_zoom_frames() {
             settling += 1;
         }
         eprintln!("  frame walls {:?}", frames.iter().map(|f| f.1.round() as u64).collect::<Vec<_>>());
-        report(&format!("zoom {from}->{to} over 50000 paths"), &mut frames);
+        report(&format!("zoom {from}->{to} over 50000 paths, {} selected", if selection { selected.len() } else { 0 }), &mut frames);
         eprintln!("  settled after {settling} more frames, {:.1} ms", start.elapsed().as_secs_f64() * 1e3);
+    }
+}
+
+#[test]
+fn filling_outside_paths_classifies_captured_pages_in_batches() {
+    let extent = [4096u32, 4096u32];
+    let (editor, layer) = crowded(extent, 3000);
+    let view = layer_render::ViewState { width_px: 128, height_px: 128, document_to_surface: [1. / 32., 0., 0., 1. / 32., 0., 0.] };
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let request = layer_render::RegionRequest {
+        enclosure: None, contiguous: true, selection: None, request_id: 7,
+        source: layer_render::RegionSource::Scene { snapshot: editor.document().snapshot(), scope: layer_core::authored::SceneScope::RawObjects(layer) },
+        position: [extent[0] - 2, extent[1] - 2], tolerance: 0.1, refinement: Default::default(), limit: None,
+    };
+    let passes = r.metrics.command_passes;
+    let result = crate::test_support::receive_request(&mut r, request);
+    let pages = page_coordinates(PixelRect::full(extent)).count() as u64;
+    let recorded = r.metrics.command_passes - passes;
+    assert!(recorded <= pages + pages / 4, "classifying {pages} captured pages records {recorded} passes");
+    assert_eq!(result.pixels.extent(), extent);
+}
+
+fn hatching(extent: [f64; 2], count: u64) -> Vec<Record> {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; (state >> 11) as f64 / (1u64 << 53) as f64 };
+    (0..count).map(|i| {
+        let start = [next() * extent[0], next() * extent[1]];
+        let (angle, length, bend) = (0.4 + 0.5 * next(), 40. + 180. * next(), 40. * next() - 20.);
+        let anchors: Vec<Anchor> = (0..4).map(|k| { let t = f64::from(k) / 3.; Anchor::corner([start[0] + angle.cos() * length * t - angle.sin() * bend * t * (1. - t) * 4., start[1] + angle.sin() * length * t + angle.cos() * bend * t * (1. - t) * 4.]) }).collect();
+        let mut stroke = Stroke::new(paint([next() as f32 * 0.3, next() as f32 * 0.3, next() as f32 * 0.3, 1.]), 2. + 4. * next());
+        (stroke.cap, stroke.join) = (Cap::Round, Join::Round);
+        stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.1), WidthKnot::new(1, 0.5, 1., 1.), WidthKnot::new(2, 1., 0.05, 0.05)]).unwrap()));
+        Record::Path(PathItem::new(ItemId(i + 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))
+    }).collect()
+}
+fn thread_cpu_ms(clock: libc::clockid_t) -> f64 {
+    let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    assert_eq!(unsafe { libc::clock_gettime(clock, &mut time) }, 0);
+    time.tv_sec as f64 * 1e3 + time.tv_nsec as f64 * 1e-6
+}
+
+/// `records` on "Ink" under translucent "Tones" columns, and Ink's paths
+/// nearest the center first.
+fn hatched(extent: [u32; 2], records: Vec<Record>) -> (layer_core::Editor, OccurrenceHandle, Vec<ItemId>) {
+    let (mut editor, layer) = document(extent, records);
+    let tones = VectorObject::from_records((0..12u64).map(|i| {
+        let x = f64::from(extent[0]) * i as f64 / 12.;
+        shape(i + 1, [x, 0., x + f64::from(extent[0]) / 20., f64::from(extent[1])], [0.2, 0.4, 0.9, 0.25])
+    }).collect());
+    let (_, edit) = editor.document().create_vector_layer_edit("Tones", tones, None, 0).unwrap();
+    editor.perform(edit).unwrap();
+    let center = extent.map(|v| f64::from(v) * 0.5);
+    let mut nearest: Vec<(f64, ItemId)> = editor.document().scene().vector_layer(layer).unwrap().paths()
+        .map(|(_, p)| { let b = p.bounds(); ((b[0] + b[2] - 2. * center[0]).hypot(b[1] + b[3] - 2. * center[1]), p.id) }).collect();
+    nearest.sort_by(|x, y| x.0.total_cmp(&y.0));
+    (editor, layer, nearest.into_iter().map(|(_, id)| id).collect())
+}
+fn centered(extent: [u32; 2], size: [u32; 2], zoom: f32) -> layer_render::ViewState {
+    layer_render::ViewState { width_px: size[0], height_px: size[1],
+        document_to_surface: [zoom, 0., 0., zoom, (size[0] as f32 - extent[0] as f32 * zoom) / 2., (size[1] as f32 - extent[1] as f32 * zoom) / 2.] }
+}
+
+#[test]
+fn width_previews_on_a_display_level_that_keeps_one_layer_image_show_the_paths_and_compose_no_pages() {
+    let extent = [9504u32, 6336u32];
+    let mut records: Vec<Record> = (0..60u64).map(|i| stroke(9000 + i, &[[4200. + (i % 10) as f64 * 110., 2700. + (i / 10) as f64 * 160.], [4300. + (i % 10) as f64 * 100., 2850. + (i / 10) as f64 * 150.]], 6., [0.8, 0.3, 0.1, 0.9])).collect();
+    records.extend(hatching(extent.map(f64::from), 2000));
+    let (editor, layer, _) = hatched(extent, records);
+    let view = centered(extent, [2880, 1800], 0.3);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let frame = FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) };
+    for frame in [FramePacket { view: centered(extent, [2880, 1800], 0.2), ..frame }, frame] {
+        r.submit(frame).unwrap();
+        for frames in 0.. {
+            r.wait_idle().unwrap();
+            if !r.has_pending_work() { break; }
+            assert!(frames < 1000, "the display settles at a new level");
+            r.submit(frame).unwrap();
+        }
+    }
+    let items: Arc<std::collections::BTreeSet<ItemId>> = Arc::new((9000..9060).map(ItemId).collect());
+    r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0., 0.]) }));
+    submit_ready(&mut r, frame);
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    for width in [12., 3.] {
+        let paths = widened(object.selected(&items), width);
+        r.set_vector_motion_paths(Some(paths.clone()));
+        r.submit(frame).unwrap();
+        r.wait_idle().unwrap();
+        assert!(r.metrics.frame_composited_pages.is_empty(), "a {width} px width preview recomposites no layer pages: {}", r.metrics.frame_composited_pages.len());
+        assert!(r.display_motion().is_some(), "the presenter draws the {width} px preview");
+        submit_ready(&mut r, frame);
+        let edited = object.with_paths(object.selected_paths(&items).into_iter().map(|(position, _)| position).zip(paths.iter().cloned())).unwrap();
+        let mut applied = layer_core::Editor::new(editor.document().clone());
+        applied.perform(applied.document().vector_object_edit(layer, edited).unwrap()).unwrap();
+        let mut fresh = WgpuRasterizer::new_native_headless(applied.document().composition().color).unwrap();
+        submit_ready(&mut fresh, FramePacket { view, ..packet(applied.document().scene(), extent) });
+        let (shown, expected) = (presented(&r, view), presented(&fresh, view));
+        let differing = shown.chunks_exact(4).zip(expected.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        assert!(differing <= 64, "the {width} px preview shows what applying it draws, but for {differing} pixels");
+    }
+}
+
+#[test]
+#[ignore = "crowded vector layer width scrub benchmark"]
+fn crowded_vector_layer_width_scrub_frames() {
+    let extent = [9504u32, 6336u32];
+    let (editor, layer, nearest) = hatched(extent, hatching(extent.map(f64::from), 50_000));
+    let view = centered(extent, [2880, 1800], (2880. / extent[0] as f32).min(1800. / extent[1] as f32));
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let frame = || FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) };
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "width scrub presentation");
+    let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.set_target_retention(true);
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    for count in [100usize, 5000] {
+        let selected: std::collections::BTreeSet<ItemId> = nearest.iter().take(count).copied().collect();
+        let items = Arc::new(selected.clone());
+        r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0., 0.]) }));
+        submit_ready(&mut r, frame());
+        presenter.present(&r, &target, view, [1.; 4]).unwrap();
+        r.wait_idle().unwrap();
+        let paths = object.selected(&selected);
+        let (mut canvas, mut process, mut frames, mut pages) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for i in 0..120 {
+            let widened = widened(paths.clone(), 4. + 3. * (i as f64 * 0.05).sin());
+            let (thread, all, start) = (thread_cpu_ms(libc::CLOCK_THREAD_CPUTIME_ID), thread_cpu_ms(libc::CLOCK_PROCESS_CPUTIME_ID), std::time::Instant::now());
+            r.set_vector_motion_paths(Some(widened));
+            r.submit(frame()).unwrap();
+            pages.push(r.metrics.frame_composited_pages.len() as f64);
+            presenter.present(&r, &target, view, [1.; 4]).unwrap();
+            let cpu = start.elapsed().as_secs_f64() * 1e3;
+            canvas.push(thread_cpu_ms(libc::CLOCK_THREAD_CPUTIME_ID) - thread);
+            process.push(thread_cpu_ms(libc::CLOCK_PROCESS_CPUTIME_ID) - all);
+            r.wait_idle().unwrap();
+            frames.push((cpu, start.elapsed().as_secs_f64() * 1e3));
+        }
+        report(&format!("width scrub {count} of 50000 on 61 MP"), &mut frames);
+        eprintln!("  canvas thread cpu p50 {:.2} p95 {:.2} max {:.2} ms; process cpu p50 {:.2} p95 {:.2} max {:.2} ms; composited pages p50 {} max {}",
+            percentile(&mut canvas, 0.5), percentile(&mut canvas, 0.95), percentile(&mut canvas, 1.), percentile(&mut process, 0.5), percentile(&mut process, 0.95), percentile(&mut process, 1.),
+            percentile(&mut pages, 0.5), percentile(&mut pages, 1.));
+        r.set_vector_motion_paths(None);
+        r.set_vector_motion(None);
+        r.set_vector_selection(None);
+        submit_ready(&mut r, frame());
+    }
+}
+
+#[test]
+#[ignore = "crowded vector layer drag start benchmark"]
+fn crowded_vector_layer_press_frames() {
+    let extent = [9504u32, 6336u32];
+    let (editor, layer) = crowded(extent, 10_000);
+    let view = layer_render::ViewState { width_px: 2880, height_px: 1800, document_to_surface: [0.2, 0., 0., 0.2, 490., 266.] };
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "press presentation");
+    let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.set_target_retention(true);
+    let ids: Vec<ItemId> = editor.document().scene().vector_layer(layer).unwrap().paths().map(|(_, path)| path.id).collect();
+    for (press, id) in ids.iter().step_by(997).take(4).enumerate() {
+        let items = Arc::new(std::collections::BTreeSet::from([*id]));
+        let start = std::time::Instant::now();
+        r.set_vector_selection(Some(&layer_core::authored::VectorItemSelection { layer, items: items.clone() }));
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([4., 3.]) }));
+        r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+        presenter.present(&r, &target, view, [1.; 4]).unwrap();
+        let cpu = start.elapsed().as_secs_f64() * 1e3;
+        r.wait_idle().unwrap();
+        eprintln!("press {press}: first frame cpu {cpu:.2} wall {:.2} ms", start.elapsed().as_secs_f64() * 1e3);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        r.set_vector_motion(None);
+        r.set_vector_selection(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+    }
+}
+
+#[test]
+#[ignore = "crowded vector layer fill benchmark"]
+fn crowded_vector_layer_fill_outside_frames() {
+    for (extent, count, zoom) in [([4248u32, 2832u32], 10_000u64, 0.344f32), ([9504, 6336], 10_000, 0.2)] {
+        let (editor, layer) = crowded(extent, count);
+        let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let request = layer_render::RegionRequest {
+            enclosure: None, contiguous: true, selection: None, request_id: 1,
+            source: layer_render::RegionSource::Scene { snapshot: editor.document().snapshot(), scope: layer_core::authored::SceneScope::RawObjects(layer) },
+            position: [extent[0] - 2, extent[1] - 2], tolerance: 0.1, refinement: Default::default(), limit: None,
+        };
+        let (start, passes) = (std::time::Instant::now(), r.metrics.command_passes);
+        assert!(r.request_region(request).unwrap());
+        let requested = start.elapsed().as_secs_f64() * 1e3;
+        let passes = r.metrics.command_passes - passes;
+        let mut frames = Vec::new();
+        let result = loop {
+            let frame = std::time::Instant::now();
+            r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            let polled = r.take_region();
+            frames.push((frame.elapsed().as_secs_f64() * 1e3, frame.elapsed().as_secs_f64() * 1e3));
+            if let Some(result) = polled { break result.unwrap(); }
+            assert!(start.elapsed() < std::time::Duration::from_secs(60), "the region must finish");
+        };
+        let total = start.elapsed().as_secs_f64() * 1e3;
+        eprintln!("fill outside {count} paths over {extent:?}: request {requested:.1} ms recording {passes} passes, result after {total:.1} ms and {} frames, {} pixels wide", frames.len(), result.pixels.extent()[0]);
+        report("  frames until the result", &mut frames);
     }
 }
 
 #[test]
 #[ignore = "crowded vector layer bake benchmark"]
 fn crowded_vector_layer_bake_frames() {
-    let extent = [4000u32, 3000u32];
-    let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [0.4, 0., 0., 0.4, 160., 0.] };
-    for merge in [false, true] {
-        let (editor, layer) = crowded(extent, 50_000);
+    for ((extent, count, zoom), merge) in [([4000u32, 3000u32], 50_000u64, 0.4f32), ([9504, 6336], 10_000, 0.2)].into_iter().flat_map(|size| [(size, false), (size, true)]) {
+        let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+        let (editor, layer) = crowded(extent, count);
         let r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
         let mut engine = layer_engine::CanvasEngine::new(r, editor.document().clone(), layer_engine::input_queue(16).1, view, layer_engine::ViewTransform::IDENTITY).unwrap();
         settle(&mut engine);
@@ -970,18 +1438,22 @@ fn crowded_vector_layer_bake_frames() {
         let mut frames = Vec::new();
         let start = std::time::Instant::now();
         engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+        let mut work = Vec::new();
         loop {
             let frame = std::time::Instant::now();
+            let (passes, submissions) = (engine.backend().metrics.command_passes, engine.backend().metrics.submissions);
             engine.render_frame().unwrap();
             let cpu = frame.elapsed().as_secs_f64() * 1e3;
             engine.backend_mut().wait_idle().unwrap();
             frames.push((cpu, frame.elapsed().as_secs_f64() * 1e3));
+            work.push((engine.backend().metrics.command_passes - passes, engine.backend().metrics.submissions - submissions));
             if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
-            assert!(frames.len() < 5000, "the bake must finish");
+            assert!(start.elapsed() < std::time::Duration::from_secs(60), "the bake must finish");
         }
         let total = start.elapsed().as_secs_f64() * 1e3;
         eprintln!("  frame walls {:?}", frames.iter().map(|f| f.1.round() as u64).collect::<Vec<_>>());
-        report(&format!("{} of 50000 paths", if merge { "Merge Down onto paint" } else { "Rasterize Layer" }), &mut frames);
+        eprintln!("  passes and submissions per frame {work:?}");
+        report(&format!("{} of {count} paths over {extent:?}", if merge { "Merge Down onto paint" } else { "Rasterize Layer" }), &mut frames);
         eprintln!("  complete after {total:.1} ms");
     }
 }

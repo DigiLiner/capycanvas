@@ -74,6 +74,8 @@ pub(crate) struct Recorder {
     pub(crate) raster_dependencies_blocked: bool,
     pub(crate) vector_preview: Option<layer_render::VectorPreview>,
     pub(crate) vector_motion: Option<layer_render::VectorMotion>,
+    pub(crate) vector_motion_paths: Option<std::sync::Arc<[layer_core::authored::vector::PathItem]>>,
+    pub(crate) motion_path_updates: usize,
 }
 impl CanvasRenderer for Recorder {
     type Error = BackendError;
@@ -82,6 +84,10 @@ impl CanvasRenderer for Recorder {
     fn set_clipping_preview(&mut self, shadows:bool, highlights:bool) {self.clipping_previews.push((shadows,highlights));}
     fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) { self.vector_preview = preview; }
     fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) { self.vector_motion = motion; }
+    fn set_vector_motion_paths(&mut self, paths: Option<std::sync::Arc<[layer_core::authored::vector::PathItem]>>) {
+        self.motion_path_updates += usize::from(paths.is_some());
+        self.vector_motion_paths = paths;
+    }
     fn has_pending_submission(&self) -> bool { self.settling }
     fn paint_ready(&self, _document: &Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { !self.painting_unready }
     fn has_pending_work(&self) -> bool { self.refining }

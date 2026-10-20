@@ -41,17 +41,17 @@ const HALF_REGION: u32 = 256;
 pub(super) struct Half {
     sources: [wgpu::Texture; 2],
     images: [(wgpu::Texture, wgpu::TextureView); 2],
-    bindings: [wgpu::BindGroup; 2],
-    regions: wgpu::Buffer,
+    binding: wgpu::BindGroup,
+    region: wgpu::Buffer,
     region_binding: wgpu::BindGroup,
 }
 impl Half {
     fn new(r: &WgpuRasterizer, sources: [&Image; 2], previous: Option<Self>) -> Self {
-        let regions = previous.as_ref().map_or_else(|| r.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("half-float display regions"), size: u64::from(2 * HALF_REGION),
+        let region = previous.as_ref().map_or_else(|| r.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("half-float display region"), size: u64::from(HALF_REGION),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
-        }), |half| half.regions.clone());
-        let region_binding = Commands::record_binding(r, &regions);
+        }), |half| half.region.clone());
+        let region_binding = Commands::record_binding(r, &region);
         let mut previous = previous.map(|half| half.images.map(Some));
         let images = std::array::from_fn(|index| {
             let size = [sources[index].texture.width(), sources[index].texture.height()];
@@ -68,15 +68,27 @@ impl Half {
                 (texture, view)
             })
         });
-        let bindings = std::array::from_fn(|index| crate::bindings::group(&r.device, "half-float display level",
-            &r.scene_pipelines.scale.half_inputs, [
-                wgpu::BindingResource::TextureView(&sources[index].view),
-                wgpu::BindingResource::TextureView(&images[index].1),
-            ]));
-        Self { sources: sources.map(|image| image.texture.clone()), images, bindings, regions, region_binding }
+        let binding = crate::bindings::group(&r.device, "half-float display levels", &r.scene_pipelines.scale.half_inputs, [
+            wgpu::BindingResource::TextureView(&sources[0].view),
+            wgpu::BindingResource::TextureView(&sources[1].view),
+            wgpu::BindingResource::TextureView(&images[0].1),
+            wgpu::BindingResource::TextureView(&images[1].1),
+        ]);
+        Self { sources: sources.map(|image| image.texture.clone()), images, binding, region, region_binding }
     }
-    fn presents(&self, sources: [&Image; 2]) -> bool {
+    pub(super) fn presents(&self, sources: [&Image; 2]) -> bool {
         self.sources[0] == sources[0].texture && self.sources[1] == sources[1].texture
+    }
+    /// Convert `region` of the coarser level, and the finer level's texels
+    /// that reduce into it.
+    fn convert(&self, pipeline: &wgpu::ComputePipeline, encoder: &mut wgpu::CommandEncoder, uploads: &mut crate::Uploads, region: PixelRect) -> Result<(), GpuRasterError> {
+        uploads.write_at(encoder, &self.region, 0, &[region.min_x(), region.min_y(), region.width(), region.height()].map(u32::to_le_bytes).concat())?;
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("half-float display levels"), timestamp_writes: None });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.region_binding, &[0]);
+        pass.set_bind_group(1, &self.binding, &[]);
+        pass.dispatch_workgroups((region.width() * 2).div_ceil(8), (region.height() * 2 + region.height().div_ceil(2)).div_ceil(8), 1);
+        Ok(())
     }
     pub fn bytes(&self) -> u64 { self.images.iter().map(|(texture, _)| texture_bytes(texture)).sum() }
 }
@@ -169,45 +181,48 @@ impl Cache {
     pub(super) fn half_reserve(&self) -> u64 {
         if self.plan.level == 0 || self.hierarchy.is_some() { 0 } else { (self.plan.level_bytes(self.plan.level) + self.plan.level_bytes(self.plan.level + 1)) / 2 }
     }
+    /// Create the half-float copies of the presented levels when those levels
+    /// change. Later writes accumulate in `half_stale` for the presenter.
     pub(super) fn present_half(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
-        let stale = std::mem::replace(&mut self.half_stale, PixelRect::EMPTY);
         let (Some(root), Some(next)) = (self.pixels.root(), self.pixels.next()) else { self.half = None; return Ok(()) };
         if self.plan.level == 0 || self.placed.is_some() { self.half = None; return Ok(()); }
         let sources = [root, next];
-        let current = self.half.as_ref().is_some_and(|half| half.presents(sources));
-        if !current {
-            let previous = self.half.take();
-            let admitted = match &self.hierarchy {
-                Some(hierarchy) => hierarchy.bytes + half_bytes(sources) <= Hierarchy::budget(r, hierarchy.bytes),
-                None => half_bytes(sources) <= self.auxiliary_budget(r, packet),
-            };
-            if !admitted { return Ok(()); }
-            self.half = Some(Half::new(r, sources, previous));
-        }
-        let full = sources.map(|image| PixelRect::full([image.texture.width(), image.texture.height()]));
-        let regions = if current {
-            [stale, PixelRect::new(stale.min_x() / 2, stale.min_y() / 2, stale.max_x().div_ceil(2), stale.max_y().div_ceil(2))]
-        } else { full };
-        let regions = std::array::from_fn::<_, 2, _>(|index| regions[index].intersect(full[index]));
-        if regions.iter().all(|region| region.is_empty()) { return Ok(()); }
-        let half = self.half.as_ref().unwrap();
-        let mut bytes = [0; 2 * HALF_REGION as usize];
-        for (index, region) in regions.iter().enumerate() {
-            let start = index * HALF_REGION as usize;
-            bytes[start..start + 16].copy_from_slice(&[region.min_x(), region.min_y(), region.width(), region.height()].map(u32::to_le_bytes).concat());
-        }
-        r.uploads.write_at(encoder, &half.regions, 0, &bytes)?;
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("half-float display levels"), timestamp_writes: None });
-        pass.set_pipeline(&r.scene_pipelines.scale.half);
-        for (index, region) in regions.into_iter().enumerate().filter(|(_, region)| !region.is_empty()) {
-            pass.set_bind_group(0, &half.region_binding, &[index as u32 * HALF_REGION]);
-            pass.set_bind_group(1, &half.bindings[index], &[]);
-            pass.dispatch_workgroups(region.width().div_ceil(8), region.height().div_ceil(8), 1);
-        }
+        if self.half.as_ref().is_some_and(|half| half.presents(sources)) { return Ok(()); }
+        let previous = self.half.take();
+        let admitted = match &self.hierarchy {
+            Some(hierarchy) => hierarchy.bytes + half_bytes(sources) <= Hierarchy::budget(r, hierarchy.bytes),
+            None => half_bytes(sources) <= self.auxiliary_budget(r, packet),
+        };
+        if !admitted { return Ok(()); }
+        let half = Half::new(r, sources, previous);
+        *self.half_stale.get_mut().unwrap() = PixelRect::EMPTY;
+        r.metrics.half_level_passes += 1;
+        encoder.reserve_passes(1);
+        half.convert(&r.scene_pipelines.scale.half, encoder, &mut r.uploads, PixelRect::full([next.texture.width(), next.texture.height()]))?;
+        self.half = Some(half);
         Ok(())
+    }
+    /// Convert the parts of the presented levels written since the last
+    /// presentation into their half-float copies.
+    pub(crate) fn refresh_half(&self, r: &WgpuRasterizer, encoder: &mut wgpu::CommandEncoder, uploads: &mut crate::Uploads) -> Result<(), GpuRasterError> {
+        let (Some(half), Some(root), Some(next)) = (&self.half, self.pixels.root(), self.pixels.next()) else { return Ok(()) };
+        if !half.presents([root, next]) { return Ok(()); }
+        let stale = std::mem::replace(&mut *self.half_stale.lock().unwrap(), PixelRect::EMPTY);
+        let region = PixelRect::new(stale.min_x() / 2, stale.min_y() / 2, stale.max_x().div_ceil(2), stale.max_y().div_ceil(2))
+            .intersect(PixelRect::full([next.texture.width(), next.texture.height()]));
+        if region.is_empty() { return Ok(()); }
+        half.convert(&r.scene_pipelines.scale.half, encoder, uploads, region)
     }
     #[cfg(test)]
     pub(crate) fn cached_branches(&self) -> usize { self.graph.cached_branches() }
+    #[cfg(test)]
+    pub(crate) fn spare_branch_textures(&self) -> Vec<wgpu::Texture> { self.graph.spare_textures() }
+    #[cfg(test)]
+    pub(crate) fn branch_textures(&self) -> Vec<wgpu::Texture> { self.graph.branch_textures() }
+    #[cfg(test)]
+    pub(crate) fn prepared_pages(&self) -> usize {
+        self.graph.prepared.iter().flatten().map(|half| page_coordinates(self.plan.bounds).filter(|page| self.graph.branch_valid(half, *page)).count()).sum()
+    }
     pub(crate) fn presented_views(&self) -> [&wgpu::TextureView; 2] {
         match (&self.half, self.pixels.root(), self.pixels.next()) {
             (Some(half), Some(root), Some(next)) if self.placed.is_none() && half.presents([root, next]) => [&half.images[0].1, &half.images[1].1],

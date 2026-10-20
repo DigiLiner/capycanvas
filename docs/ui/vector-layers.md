@@ -243,12 +243,15 @@ restored with a session.
 Scaling and rotating with the Move frame shows the selected paths' image
 through the frame's transform, as a drag shows it moved, and derives the paths
 once at release, so outline widths under uneven scaling, or with Scale outline
-widths off, settle only then. Edit Points drags, eraser strokes and scrubs of
-the path Properties keep only the latest pen sample or value between frames and
-preview it once in the next frame; the eraser still cuts along every sample's
-segment, in order. Release applies the last sample, so the committed paths match
-a preview after every sample. Previews replace the edited paths in place without
-revalidating the layer. While a drag moves, the menus, layer rows and Properties
+widths off, settle only then. Edit Points drags and scrubs of the path
+Properties draw the selection's edited paths in place of the selection and
+leave the layer as it was until release. These, and eraser strokes, keep only
+the latest pen sample or value between frames, including plain sets sent during
+a scrub, and preview it once in the next frame, and once per presentation
+target when a host draws several frames for the same display refresh; the eraser still
+cuts along every sample's segment, in order. Release
+applies the last sample, so the committed paths match a preview after every
+sample. Edits replace paths in place without revalidating the layer. While a drag moves, the menus, layer rows and Properties
 are published again only when a preview changes the selected paths' Properties
 values. Command checks for the selected paths are computed once per selection
 and layer version, and trial layer edits behind menu and command availability
@@ -354,7 +357,13 @@ checks that bursts of samples or width updates preview once per frame and
 commit the same paths as a frame after every sample,
 `scaling_and_turning_paths_preview_through_their_motion_and_commit_at_release`
 checks that the frame previews through the motion transform and commits the
-paths that transform showed, and
+paths that transform showed,
+`path_scrubs_and_anchor_drags_preview_through_motion_paths_until_release`
+checks that width scrubs and anchor drags draw replacement paths at most once a
+frame and edit the layer only at release,
+`scrub_values_rebuild_the_preview_once_per_presentation_target` checks a 120 Hz
+scrub with jittered frames and the Android benchmark's scrub with a frame after
+every update, and
 `moving_or_turning_a_large_path_selection_republishes_nothing_until_release`
 checks that a drag of 2,000 selected paths publishes nothing until release; the
 ignored `crowded_vector_gesture_costs` times those gestures, panning and the

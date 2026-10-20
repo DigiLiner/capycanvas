@@ -10,6 +10,16 @@ const MOTION_PIXELS: u64 = 4 << 20;
 const DERIVE_TIME: std::time::Duration = std::time::Duration::from_millis(6);
 type Colors = Arc<[[f32; 4]]>;
 type PreviewGeometry = ((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Colors);
+type ReplacementKey = (ItemId, u32);
+/// A replacement path's derivation at a level and its colors, with the
+/// geometry, style and offset they were made from.
+struct Replacement { geometry: Arc<LevelGeometry>, base: Option<u32>, colors: Vec<[f32; 4]>, used: u64, path: PathItem, offset: [u64; 2] }
+impl Replacement {
+    fn derives(&self, path: &PathItem, offset: [u64; 2]) -> bool {
+        Arc::ptr_eq(&self.path.geometry, &path.geometry) && self.path.fill_rule == path.fill_rule && self.offset == offset
+            && (Arc::ptr_eq(&self.path.style, &path.style) || same_outline(&self.path.style, &path.style))
+    }
+}
 
 struct Derived { level: u32, offset: [i64; 2], geometry: Arc<LevelGeometry>, base: Option<u32>, used: u64 }
 struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Colors, derived: Vec<Derived>, seen: u64 }
@@ -53,17 +63,25 @@ fn cells(bounds: [f64; 4]) -> [i32; 4] {
 fn same(a: &PathItem, b: &PathItem) -> bool {
     Arc::ptr_eq(&a.geometry, &b.geometry) && Arc::ptr_eq(&a.style, &b.style) && a.fill_rule == b.fill_rule && a.hidden == b.hidden
 }
-fn colors(path: &PathItem, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Colors {
-    path.style.entries.iter().map(|entry| {
+fn colors(path: &PathItem, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> impl Iterator<Item = [f32; 4]> + '_ {
+    path.style.entries.iter().map(move |entry| {
         let paint = match entry { PaintEntry::Fill(f) => f.paint.rgb(), PaintEntry::Stroke(s) => s.paint.rgb(), PaintEntry::Opaque(_) => None };
         paint.and_then(|c| c.linear_in(palette.0).ok()).map_or([0.; 4], |[r, g, b, a]| palette.1.composite(palette.0, [r * a, g * a, b * a, a]))
-    }).collect()
+    })
+}
+/// Whether two styles derive the same coverage, differing at most in paint.
+fn same_outline(a: &layer_core::authored::vector::Style, b: &layer_core::authored::vector::Style) -> bool {
+    a.entries.len() == b.entries.len() && a.entries.iter().zip(&b.entries).all(|pair| match pair {
+        (PaintEntry::Fill(_), PaintEntry::Fill(_)) | (PaintEntry::Opaque(_), PaintEntry::Opaque(_)) => true,
+        (PaintEntry::Stroke(a), PaintEntry::Stroke(b)) => a.width == b.width && a.cap == b.cap && a.join == b.join && a.miter_limit == b.miter_limit && a.profile == b.profile,
+        _ => false,
+    })
 }
 
 impl LayerCache {
     fn insert(&mut self, path: PathItem, chunk: usize, index: u32, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> [f64; 4] {
         let bounds = path.bounds();
-        let item = Item { colors: colors(&path, palette), cells: cells(bounds), bounds, chunk, index, derived: Vec::new(), seen: 0, path };
+        let item = Item { colors: colors(&path, palette).collect(), cells: cells(bounds), bounds, chunk, index, derived: Vec::new(), seen: 0, path };
         let slot = self.free.pop().unwrap_or_else(|| { self.items.push(None); self.items.len() as u32 - 1 });
         let [x0, y0, x1, y1] = item.cells;
         for y in y0..y1 { for x in x0..x1 { self.grid.entry([x, y]).or_default().push(slot); } }
@@ -96,7 +114,7 @@ impl LayerCache {
         let mut damage = Vec::new();
         if self.palette != Some(palette) {
             self.palette = Some(palette);
-            for item in self.items.iter_mut().flatten() { item.colors = colors(&item.path, palette); damage.push(item.bounds); }
+            for item in self.items.iter_mut().flatten() { item.colors = colors(&item.path, palette).collect(); damage.push(item.bounds); }
         }
         let previous_root = std::mem::take(&mut self.root);
         let old: HashSet<usize> = previous_root.chunks().iter().map(chunk_key).collect();
@@ -240,7 +258,10 @@ pub(super) struct Vectors {
     frame: u64,
     stamp: u64,
     preview: Option<PreviewGeometry>,
+    replacements: HashMap<ReplacementKey, Replacement>,
     pub(super) motion: Option<MotionImage>,
+    spare_motion: Option<super::Image>,
+    motion_revision: u64,
     batches: crate::vector::Arena,
     evicted: u64,
     trimmed: usize,
@@ -257,15 +278,35 @@ struct Waiting { owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u
 type Baked = Vec<(u32, Arc<layer_core::authored::vector::PathGeometry>, LevelGeometry)>;
 /// Full-resolution geometry a bake draws, derived off the canvas thread.
 struct Baking { key: (VectorHandle, [i64; 2], [u32; 2]), results: std::sync::mpsc::Receiver<Baked> }
+fn derive_lanes() -> usize {
+    if cfg!(target_arch = "wasm32") { return 1; }
+    std::thread::available_parallelism().map_or(1, |count| count.get().saturating_sub(2).clamp(1, 4))
+}
+fn derive_together(paths: &[&PathItem], frame: &Frame, geometry: &mut [LevelGeometry]) {
+    let lane = paths.len().div_ceil(derive_lanes()).max(256);
+    let derive = |paths: &[&PathItem], geometry: &mut [LevelGeometry]| {
+        let mut scratch = tiles::Scratch::default();
+        for (path, geometry) in paths.iter().zip(geometry) { tiles::derive_into(path, frame, geometry, &mut scratch); }
+    };
+    if paths.len() <= lane { return derive(paths, geometry); }
+    std::thread::scope(|scope| for (paths, geometry) in paths.chunks(lane).zip(geometry.chunks_mut(lane)) { scope.spawn(move || derive(paths, geometry)); });
+}
 fn derive_off_thread(paths: Vec<(u32, PathItem)>, frame: Frame) -> std::sync::mpsc::Receiver<Baked> {
     let (send, results) = std::sync::mpsc::channel();
-    let lanes = std::thread::available_parallelism().map_or(1, |count| count.get().saturating_sub(2).clamp(1, 4));
+    let lanes = derive_lanes();
     std::thread::Builder::new().name("capy-vector-bake".into()).spawn(move || std::thread::scope(|scope| {
         for lane in paths.chunks(paths.len().div_ceil(lanes).max(1)) {
             let send = send.clone();
-            scope.spawn(move || for chunk in lane.chunks(256) {
-                let baked = chunk.iter().map(|(slot, path)| (*slot, path.geometry.clone(), tiles::derive(path, &frame))).collect();
-                if send.send(baked).is_err() { return; }
+            scope.spawn(move || {
+                let mut scratch = tiles::Scratch::default();
+                for chunk in lane.chunks(256) {
+                    let baked = chunk.iter().map(|(slot, path)| {
+                        let mut geometry = LevelGeometry::default();
+                        tiles::derive_into(path, &frame, &mut geometry, &mut scratch);
+                        (*slot, path.geometry.clone(), geometry)
+                    }).collect();
+                    if send.send(baked).is_err() { return; }
+                }
             });
         }
     })).expect("vector bake worker");
@@ -279,7 +320,11 @@ impl Eq for Moving {}
 impl PartialOrd for Moving { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
 impl Ord for Moving { fn cmp(&self, other: &Self) -> std::cmp::Ordering { Arc::as_ptr(&self.0).cmp(&Arc::as_ptr(&other.0)) } }
 impl std::hash::Hash for Moving { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { Arc::as_ptr(&self.0).hash(state) } }
-pub(super) struct MotionImage { pub key: (OccurrenceHandle, Moving, u32, [i64; 2]), pub window: DocRect, pub image: super::Image }
+/// The paths a motion draws instead of the moving ones, compared by identity.
+#[derive(Clone, Debug)]
+pub(crate) struct Replaced(pub Option<Arc<[PathItem]>>);
+impl PartialEq for Replaced { fn eq(&self, other: &Self) -> bool { self.0.as_ref().map(Arc::as_ptr) == other.0.as_ref().map(Arc::as_ptr) } }
+pub(super) struct MotionImage { pub key: (OccurrenceHandle, Moving, u32, [i64; 2], Replaced), pub window: DocRect, pub image: super::Image, pub revision: u64 }
 #[derive(Clone)]
 pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<(wgpu::TextureView, [i32; 2])> }
 
@@ -330,29 +375,40 @@ impl Scene {
         self.vectors.trim();
         crate::performance_trace::counter(c"Capy vector paths derived", self.vectors.derived_paths());
     }
-    pub(crate) fn presented_motion(&self, motion: &layer_render::VectorMotion) -> Option<(&wgpu::TextureView, DocRect, u32, [u32; 2])> {
+    pub(crate) fn presented_motion(&self, motion: &layer_render::VectorMotion) -> Option<(&wgpu::TextureView, DocRect, u32, [u32; 2], u64)> {
         let image = self.vectors.motion.as_ref().filter(|m| m.key.0 == motion.owner && Arc::ptr_eq(&m.key.1.0, &motion.items))?;
-        Some((&image.image.view, image.window, image.image.plan.level, image.image.plan.size))
+        Some((&image.image.view, image.window, image.image.plan.level, [image.image.texture.width(), image.image.texture.height()], image.revision))
     }
     pub(super) fn prepare_presented_motion(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
         let presented = r.vector_motion_drawn.as_ref().filter(|_| r.vector_motion_split.is_some()).map(|(motion, bounds)| (motion.owner, Moving(motion.items.clone()), *bounds))
             .or_else(|| r.vector_prepared.as_ref().map(|((_, (owner, items), bounds), ..)| (*owner, items.clone(), *bounds)));
+        let paths = r.vector_motion_paths_drawn.clone().filter(|_| r.vector_motion_drawn.is_some());
+        if paths.is_none() { self.vectors.release_replacements(); }
         let Some((owner, items, bounds)) = presented else {
-            if r.vector_motion_drawn.is_none() { self.vectors.motion = None; }
+            if r.vector_motion_drawn.is_none() { self.vectors.release_motion(); }
             return Ok(());
         };
         let extent = packet.document_extent;
         let area = bounds.in_frame(extent);
         let display = r.scale_display.as_ref().map_or(0, |cache| cache.plan.level);
         let level = (display..display_mips::MAX_LEVEL).find(|level| area.area() >> (2 * level) <= MOTION_PIXELS).unwrap_or(display_mips::MAX_LEVEL);
-        let key = (owner, items, level, packet.scene.occurrence_offset64(owner).map(|v| v as i64));
+        let key = (owner, items, level, packet.scene.occurrence_offset64(owner).map(|v| v as i64), Replaced(paths.clone()));
         if self.vectors.motion.as_ref().is_some_and(|m| m.key == key) || area.is_empty() { return Ok(()); }
+        let palette = Self::vector_palette(r, packet);
+        let shown = self.vectors.motion.as_ref().is_some_and(|m| m.key.0 == key.0 && m.key.1 == key.1 && m.key.3 == key.3 && m.key.4 == key.4);
+        if shown && !self.vectors.motion_ready(packet.scene, owner, &key.1.0, level, extent, palette) {
+            self.vectors.deferred = true;
+            return Ok(());
+        }
         let plan = display_mips::Plan::window(extent, level, DocRect::from(area).aligned(1 << level).in_frame(extent));
-        let image = super::Image::new(r, plan, "vector motion");
-        let batch = self.vectors.motion_batch(packet.scene, owner, &key.1.0, plan.doc_bounds.min, level, plan.size, extent, Self::vector_palette(r, packet));
+        let image = self.vectors.motion_image(r, plan);
+        let batch = match &paths {
+            Some(paths) => self.vectors.replacement_batch(paths, packet.scene.occurrence_offset64(owner), plan.doc_bounds.min, level, plan.size, extent, palette),
+            None => self.vectors.motion_batch(packet.scene, owner, &key.1.0, plan.doc_bounds.min, level, plan.size, extent, palette),
+        };
         r.encode_clear(encoder, &image.view, "vector motion");
         if batch.tile_count() > 0 { self.vectors.encode(r, encoder, &VectorJob { batch, output: image.view.clone(), base: None })?; }
-        self.vectors.motion = Some(MotionImage { key, window: plan.doc_bounds, image });
+        self.vectors.replace_motion(MotionImage { key, window: plan.doc_bounds, image, revision: 0 });
         Ok(())
     }
 }
@@ -402,11 +458,51 @@ impl Vectors {
         self.baking.push(Baking { key, results: derive_off_thread(missing, frame) });
         false
     }
-    /// Paths this thread derived.
+    /// Paths the canvas thread derived or waited for.
     pub fn derived_paths(&self) -> u64 { self.derived_paths + self.layers.values().map(|layer| layer.derived_paths).sum::<u64>() }
     pub fn storage_bytes(&self) -> u64 {
         self.pool.as_ref().map_or(0, Pool::storage_bytes) + self.batches.storage_bytes()
-            + self.motion.as_ref().map_or(0, |motion| motion.image.bytes())
+            + self.motion.as_ref().map_or(0, |motion| motion.image.bytes()) + self.spare_motion.as_ref().map_or(0, super::Image::bytes)
+    }
+    pub(super) fn motion_image(&mut self, r: &WgpuRasterizer, plan: display_mips::Plan) -> super::Image {
+        let size = plan.size.map(|n| n.div_ceil(256) * 256);
+        let fits = |image: &super::Image| image.texture.width() >= plan.size[0] && image.texture.height() >= plan.size[1]
+            && u64::from(image.texture.width()) * u64::from(image.texture.height()) <= 4 * u64::from(size[0]) * u64::from(size[1]);
+        let image = self.spare_motion.take().filter(fits)
+            .unwrap_or_else(|| super::Image::new(r, display_mips::Plan { size, ..plan }, "vector motion"));
+        super::Image { plan, ..image }
+    }
+    pub(super) fn replace_motion(&mut self, motion: MotionImage) {
+        self.motion_revision += 1;
+        if let Some(old) = self.motion.replace(MotionImage { revision: self.motion_revision, ..motion }) { self.spare_motion = Some(old.image); }
+    }
+    fn release_motion(&mut self) {
+        if let Some(old) = self.motion.take() { self.spare_motion = Some(old.image); }
+    }
+    /// Whether every path of `items` is derived at `level`, deriving within
+    /// the frame's derivation time.
+    pub fn motion_ready(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, items: &BTreeSet<ItemId>, level: u32, extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> bool {
+        let (Some(handle), Some(object)) = (scene.vector_handle(owner), scene.vector_layer(owner)) else { return true };
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let layer = self.layers.entry(handle).or_default();
+        layer.update(object, palette, pool);
+        let slots = items.iter().filter_map(|id| layer.ids.get(id).copied()).collect();
+        self.derive_within_deadline(handle, slots, scene.occurrence_offset64(owner), level, extent)
+    }
+    fn derive_within_deadline(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> bool {
+        let (frame, integer, frame_number) = (level_frame(offset, level, extent), offset.map(|v| v as i64), self.frame);
+        self.levels.insert((handle, level), frame_number);
+        let Some(layer) = self.layers.get_mut(&handle) else { return true };
+        for slot in slots {
+            let item = layer.items[slot as usize].as_mut().unwrap();
+            if item.derived(level, integer).is_some() { continue; }
+            let now = web_time::Instant::now();
+            if self.deadline.is_some_and(|deadline| now > deadline) { return false; }
+            self.deadline.get_or_insert(now + DERIVE_TIME);
+            let at = item.derived_at(level, integer, &frame, &mut layer.derived_bytes, &mut layer.derived_paths);
+            item.derived[at].used = frame_number;
+        }
+        true
     }
     pub fn begin_frame(&mut self) {
         self.frame += 1;
@@ -479,19 +575,7 @@ impl Vectors {
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
     pub fn window_ready(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> bool {
         let Some((handle, slots, offset)) = self.window_slots(scene, Waiting { owner, origin, level, size, extent }, palette, None) else { return true };
-        let (frame, integer, frame_number) = (level_frame(offset, level, extent), offset.map(|v| v as i64), self.frame);
-        self.levels.insert((handle, level), frame_number);
-        let Some(layer) = self.layers.get_mut(&handle) else { return true };
-        for slot in slots {
-            let item = layer.items[slot as usize].as_mut().unwrap();
-            if item.derived(level, integer).is_some() { continue; }
-            let now = web_time::Instant::now();
-            if self.deadline.is_some_and(|deadline| now > deadline) { return false; }
-            self.deadline.get_or_insert(now + DERIVE_TIME);
-            let at = item.derived_at(level, integer, &frame, &mut layer.derived_bytes, &mut layer.derived_paths);
-            item.derived[at].used = frame_number;
-        }
-        true
+        self.derive_within_deadline(handle, slots, offset, level, extent)
     }
     pub fn deriving(&self) -> bool { self.deadline.is_none_or(|deadline| web_time::Instant::now() <= deadline) }
     pub fn damage(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Vec<DocRect> {
@@ -672,7 +756,7 @@ impl Vectors {
             if self.preview.as_ref().is_none_or(|p| p.0 != key) {
                 if let Some(previous) = self.preview.take() { pool.retire(previous.1, &previous.2); }
                 let geometry = Arc::new(tiles::derive(path, &frame));
-                if let Some(base) = pool.allocate(&geometry) { self.preview = Some((key, base, geometry, colors(path, palette))); }
+                if let Some(base) = pool.allocate(&geometry) { self.preview = Some((key, base, geometry, colors(path, palette).collect())); }
             }
             if let Some((_, base, geometry, colors)) = &self.preview { entries.push((geometry.clone(), *base, colors.clone())); }
         }
@@ -690,12 +774,73 @@ impl Vectors {
             let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
             let geometry = Arc::new(tiles::derive(path, &Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] }));
             let Some(base) = pool.allocate(&geometry) else { return Batch::default() };
-            self.preview = Some((key, base, geometry, colors(path, palette)));
+            self.preview = Some((key, base, geometry, colors(path, palette).collect()));
         }
         let (_, base, geometry, colors) = self.preview.as_ref().unwrap();
         let mut batch = Batch::default();
         batch.build(&[Layer { geometry, base: *base, colors }], [origin[0].div_euclid(side), origin[1].div_euclid(side)], size);
         batch
+    }
+    /// A batch drawing `paths`, in layer order, instead of the layer's own.
+    /// A path keeps its derivation while its geometry and outline stay the
+    /// same, and a changed one is derived again into its own buffers.
+    #[expect(clippy::too_many_arguments, reason = "A replacement batch names its paths, placement, level, window, extent and color domain")]
+    pub fn replacement_batch(&mut self, paths: &[PathItem], offset: [f64; 2], origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
+        let frame = level_frame(offset, level, extent);
+        let (frame_number, offset) = (self.frame, offset.map(f64::to_bits));
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let shown: Vec<&PathItem> = paths.iter().rev().filter(|path| !path.hidden).collect();
+        let mut missing = Vec::new();
+        for path in &shown {
+            match self.replacements.get_mut(&(path.id, level)) {
+                Some(entry) if entry.derives(path, offset) => {
+                    if !Arc::ptr_eq(&entry.path.style, &path.style) {
+                        entry.colors.clear();
+                        entry.colors.extend(colors(path, palette));
+                        entry.path = (*path).clone();
+                    }
+                    entry.used = frame_number;
+                }
+                entry => {
+                    let buffer = entry.and_then(|entry| {
+                        if let Some(base) = entry.base.take() { pool.retire(base, &entry.geometry); }
+                        Arc::get_mut(&mut entry.geometry).map(std::mem::take)
+                    });
+                    missing.push((*path, buffer.unwrap_or_default()));
+                }
+            }
+        }
+        let (derived, mut geometry): (Vec<&PathItem>, Vec<LevelGeometry>) = missing.into_iter().unzip();
+        derive_together(&derived, &frame, &mut geometry);
+        self.derived_paths += derived.len() as u64;
+        for (path, geometry) in derived.into_iter().zip(geometry) {
+            let entry = self.replacements.entry((path.id, level)).or_insert_with(|| Replacement {
+                geometry: Arc::default(), base: None, colors: Vec::new(), used: 0, path: path.clone(), offset });
+            match Arc::get_mut(&mut entry.geometry) { Some(owned) => *owned = geometry, None => entry.geometry = Arc::new(geometry) }
+            entry.base = pool.allocate(&entry.geometry);
+            entry.colors.clear();
+            entry.colors.extend(colors(path, palette));
+            entry.path = path.clone();
+            entry.offset = offset;
+            entry.used = frame_number;
+        }
+        self.replacements.retain(|_, entry| {
+            if entry.used == frame_number { return true; }
+            if let Some(base) = entry.base { pool.retire(base, &entry.geometry); }
+            false
+        });
+        let layers: Vec<Layer> = shown.iter().filter_map(|path| self.replacements.get(&(path.id, level)))
+            .filter_map(|entry| Some(Layer { geometry: &entry.geometry, base: entry.base?, colors: &entry.colors })).collect();
+        let side = 1i64 << level;
+        let mut batch = Batch::default();
+        batch.build(&layers, origin.map(|v| v.div_euclid(side)), size);
+        batch
+    }
+    #[cfg(test)]
+    pub(crate) fn replacement_count(&self) -> usize { self.replacements.len() }
+    fn release_replacements(&mut self) {
+        let Some(pool) = self.pool.as_mut() else { return };
+        for (_, entry) in self.replacements.drain() { if let Some(base) = entry.base { pool.retire(base, &entry.geometry); } }
     }
     pub fn encode(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, job: &VectorJob) -> Result<(), GpuRasterError> {
         r.metrics.vector_tiles += job.batch.tile_count() as u64;
@@ -768,6 +913,13 @@ pub(crate) fn motion_split(scene: SceneView<'_>, owner: OccurrenceHandle) -> Opt
     Some(Arc::new((layer_core::authored::SceneScope::Members(above.into()), layer_core::authored::SceneScope::Members(below.into()))))
 }
 pub(crate) type Prepared = (MotionSplit, (OccurrenceHandle, Moving), DocRect);
+pub(crate) fn paths_bounds(scene: SceneView<'_>, owner: OccurrenceHandle, paths: &[PathItem]) -> DocRect {
+    let offset = scene.occurrence_offset64(owner);
+    paths.iter().filter(|path| !path.hidden).map(PathItem::bounds).fold(DocRect::default(), |bounds, [x0, y0, x1, y1]| bounds.union(DocRect {
+        min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16],
+        max: [(x1 + offset[0]).ceil() as i64 + 16, (y1 + offset[1]).ceil() as i64 + 16],
+    }))
+}
 pub(crate) fn motion_bounds(scene: SceneView<'_>, owner: OccurrenceHandle, items: &BTreeSet<ItemId>) -> DocRect {
     let Some(object) = scene.vector_layer(owner) else { return DocRect::default() };
     let offset = scene.occurrence_offset64(owner);

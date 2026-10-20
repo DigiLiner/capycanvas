@@ -207,3 +207,25 @@ fn replacing_paths_in_place_matches_a_full_replace_and_needs_no_revalidation() {
     assert_eq!(invalid.root.valid.get(), None);
     assert!(invalid.validate().is_err(), "an invalid replacement is still refused");
 }
+
+#[test]
+fn erasing_along_a_frames_segments_matches_erasing_them_one_at_a_time() {
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; (seed >> 11) as f64 / (1u64 << 53) as f64 };
+    let records: Vec<Record> = (1..=600).map(|id| {
+        let [x, y] = [next() * 900., next() * 700.];
+        Record::Path(path(id, &[[x, y], [x + 90. * next() - 45., y + 80.], [x + 60., y + 120. * next() - 60.]], id % 9 == 0, 3., None))
+    }).collect();
+    let object = VectorObject::from_records(records);
+    let erasers: Vec<Eraser> = (0..12).map(|i| { let t = f64::from(i); Eraser { from: [100. + t * 60., 120. + t * 40.], to: [160. + t * 60., 160. + t * 40. + (t * 1.7).sin() * 30.], radius: 18. } }).collect();
+    let shapes = |o: &VectorObject| o.paths().map(|(_, p)| (p.id, p.geometry.clone(), p.style.clone())).collect::<Vec<_>>();
+    for mode in [EraseMode::Touched, EraseMode::Whole, EraseMode::ToIntersection] {
+        let mut index = VectorIndex::default();
+        let one_by_one = erasers.iter().fold(object.clone(), |current, eraser| current.erase(&mut index, eraser, mode).unwrap_or(current));
+        let along = object.erase_along(&mut VectorIndex::default(), &erasers, mode).unwrap();
+        assert_ne!(shapes(&along), shapes(&object), "{mode:?} erases something");
+        assert_eq!(shapes(&along), shapes(&one_by_one), "{mode:?}");
+        assert_eq!(along.next_item(), one_by_one.next_item());
+        along.validate().unwrap();
+    }
+}

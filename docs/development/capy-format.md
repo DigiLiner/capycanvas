@@ -359,6 +359,11 @@ publish with the matching renderer generation. Undo restores source and paramete
 roots, not a reconstructed picture. Restore both directions' memory admission and
 shared-ownership accounting in
 [`history_budget.rs`](../../crates/layer-core/src/history_budget.rs).
+Vector chunks cache their charge and the paths, anchors and styles it shares. The
+editor keeps a ledger of the current document's vector chunks, updated by the
+chunks each edit adds or releases, and each history entry records the chunks its
+edit released, so trimming and admission visit an edit's own chunks rather than
+every path of every layer. Results equal a full recount.
 
 Keep working selection and active-target state in shared core ownership even
 though the portable writer omits them. Preserve selection undo, target repair

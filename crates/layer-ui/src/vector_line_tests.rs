@@ -1910,6 +1910,14 @@ fn crowded_vector_gesture_costs() {
             s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(2. + i as f32 * 0.1) }) } }).unwrap();
         }));
         report(&format!("outline width scrub {selected} paths"), costs);
+        let (mut s, layer) = crowded(selected);
+        let token = occurrence_token(layer);
+        let costs = run(&mut s, 120, Box::new(move |s: &mut UiSession<Recorder>, i: usize, now: u64| {
+            let phase = if i == 0 { ContactPhase::Down } else if i + 1 == 120 { ContactPhase::Up } else { ContactPhase::Move };
+            s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Number { layer: token, key: "path_width".into(), operation: crate::NumericOperation::Value { value: 4. + 3. * (i as f64 * 0.005 * std::f64::consts::PI).sin() } }) } }).unwrap();
+            s.frame(now, now + FRAME_NS).unwrap();
+        }));
+        report(&format!("width scrub, frame per update, {selected}"), costs);
         let (mut s, _) = crowded(selected);
         let costs = run(&mut s, 120, Box::new(move |s: &mut UiSession<Recorder>, i: usize, _| {
             let change = s.gesture([960., 600.], [960. + if i % 2 == 0 { 3. } else { -3. }, 600.], 1., 0.).unwrap();
@@ -2098,4 +2106,127 @@ fn scaling_and_turning_paths_preview_through_their_motion_and_commit_at_release(
         s.frame(first * 1_000_000_000, first * 1_000_000_000).unwrap();
         assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &original, "one undo step");
     }
+}
+
+#[test]
+fn path_scrubs_and_anchor_drags_preview_through_motion_paths_until_release() {
+    use layer_core::authored::vector::{ItemId, PathItem};
+    let (mut s, layer) = hatched_session(400);
+    invoke(&mut s, CommandId::Move);
+    let original = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let chosen: std::collections::BTreeSet<ItemId> = original.paths().filter(|(_, p)| { let [x0, y0, x1, y1] = p.bounds(); x0 > 300. && y0 > 300. && x1 < 700. && y1 < 700. }).map(|(_, p)| p.id).collect();
+    let items = s.select_vector_items(layer, chosen.clone()).unwrap();
+    s.frame(2, 2).unwrap();
+    let token = occurrence_token(layer);
+    let width = |path: &PathItem| path.style.strokes().last().unwrap().width;
+    let revision = s.engine.document().revision;
+    let updates = s.engine.backend().motion_path_updates;
+    let mut frames = 0;
+    for i in 0..=12 {
+        let phase = if i == 0 { ContactPhase::Down } else if i == 12 { ContactPhase::Up } else { ContactPhase::Move };
+        s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(if i == 12 { 9. } else { 2. + i as f32 * 0.5 }) }) } }).unwrap();
+        if phase == ContactPhase::Up { break; }
+        assert_eq!(s.engine.document().revision, revision, "update {i} leaves the layer as it was");
+        if i % 4 == 3 {
+            s.frame(10 + i as u64, 10 + i as u64).unwrap();
+            frames += 1;
+            assert_eq!(s.engine.document().revision, revision, "frame {i} previews without editing the layer");
+            let shown = s.engine.backend().vector_motion_paths.clone().expect("the selection draws its preview paths");
+            assert!(shown.iter().map(|p| p.id).eq(original.selected(&chosen).iter().map(|p| p.id)) && shown.iter().all(|p| width(p) == 2. + i as f64 * 0.5));
+            assert!(s.engine.backend().vector_motion.as_ref().is_some_and(|motion| motion.owner == layer && Arc::ptr_eq(&motion.items, &items)));
+        }
+    }
+    assert!(s.engine.backend().motion_path_updates - updates <= frames + 1, "one preview for the press and one per frame");
+    assert!(s.engine.backend().vector_motion.is_none() && s.engine.backend().vector_motion_paths.is_none(), "release ends the preview");
+    let scrubbed = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    assert!(scrubbed.selected(&chosen).iter().all(|p| width(p) == 9.));
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(100, 100).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &original, "the scrub is one undo step");
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(9.) } }).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &scrubbed, "a scrub commits what setting its last value commits");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(200, 200).unwrap();
+    let path = original.selected(&chosen)[0].clone();
+    s.select_vector_items(layer, [path.id].into()).unwrap();
+    invoke(&mut s, CommandId::EditPoints);
+    let anchor = path.geometry.subpaths()[0].anchor(1).point();
+    let revision = s.engine.document().revision;
+    let updates = s.engine.backend().motion_path_updates;
+    let mut frames = 0;
+    for i in 0..=20u64 {
+        let phase = if i == 0 { PenPhase::Down } else if i == 20 { PenPhase::Up } else { PenPhase::Move };
+        let t = i.min(19) as f64 / 19.;
+        let mut e = event(&s, 300 + i, phase, 0.5);
+        e.surface_position = surface_at(&s, [anchor[0] + 60. * t, anchor[1] + 40. * t]);
+        s.pen(e);
+        if phase == PenPhase::Up { break; }
+        assert_eq!(s.engine.document().revision, revision, "sample {i} leaves the layer as it was");
+        if i % 5 == 4 || i == 19 {
+            s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+            frames += 1;
+            assert_eq!(s.engine.document().revision, revision, "frame {i} previews without editing the layer");
+        }
+    }
+    let shown = s.engine.backend().vector_motion_paths.clone();
+    assert!(s.engine.backend().motion_path_updates - updates <= frames, "at most one preview per frame");
+    let committed = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    assert_ne!(committed, original);
+    assert!(s.engine.backend().vector_motion.is_none() && s.engine.backend().vector_motion_paths.is_none(), "release ends the preview");
+    assert!(shown.is_none(), "release clears the preview in the same frame");
+    let moved = committed.selected(&[path.id].into());
+    assert!((moved[0].geometry.subpaths()[0].anchor(1).point()[0] - anchor[0] - 60.).abs() < 0.5, "the anchor lands where it was dragged");
+}
+
+#[test]
+fn scrub_values_rebuild_the_preview_once_per_presentation_target() {
+    use crate::NumericOperation;
+    let (mut s, layer) = hatched_session(400);
+    invoke(&mut s, CommandId::Move);
+    let original = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let chosen: std::collections::BTreeSet<_> = original.paths().filter(|(_, p)| { let [x0, y0, x1, y1] = p.bounds(); x0 > 200. && y0 > 200. && x1 < 800. && y1 < 800. }).map(|(_, p)| p.id).collect();
+    s.select_vector_items(layer, chosen.clone()).unwrap();
+    s.frame(2, 2).unwrap();
+    let token = occurrence_token(layer);
+    let number = |value: f64| EffectAction::Number { layer: token, key: "path_width".into(), operation: NumericOperation::Value { value } };
+    let gesture = |phase, value| UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(number(value)) } };
+    let width = |i: u64| 4. + 3. * (i as f64 * 0.005 * std::f64::consts::PI).sin();
+    let revision = s.engine.document().revision;
+    const VSYNC_120: u64 = 8_333_333;
+    let start = 1_000_000_000u64;
+    let updates = s.engine.backend().motion_path_updates;
+    s.dispatch(gesture(ContactPhase::Down, 4.)).unwrap();
+    for k in 1..=60u64 {
+        s.dispatch(gesture(ContactPhase::Move, width(k))).unwrap();
+        let now = start + k * VSYNC_120 + [2_900_000, 200_000, 2_700_000, 400_000][k as usize % 4];
+        s.frame(now, start + (k + 1) * VSYNC_120).unwrap();
+        assert_eq!(s.engine.document().revision, revision, "frame {k} leaves the layer as it was");
+    }
+    assert_eq!(s.engine.backend().motion_path_updates - updates, 61, "at 120 Hz the press and every frame build, however callbacks jitter");
+    s.dispatch(gesture(ContactPhase::Up, width(60))).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(start * 2, start * 2).unwrap();
+    const VSYNC_60: u64 = 16_666_667;
+    let start = start * 3;
+    let revision = s.engine.document().revision;
+    let updates = s.engine.backend().motion_path_updates;
+    let mut targets = std::collections::BTreeSet::new();
+    s.dispatch(gesture(ContactPhase::Down, 4.)).unwrap();
+    for i in 1..=120u64 {
+        let now = start + i * 5_000_000;
+        let update = if i % 7 == 0 { UiAction::Effect { action: EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(width(i) as f32) } } } else { gesture(ContactPhase::Move, width(i)) };
+        s.dispatch(update).unwrap();
+        let target = (now / VSYNC_60 + 1) * VSYNC_60;
+        targets.insert(target);
+        s.frame(now, target).unwrap();
+        assert_eq!(s.engine.document().revision, revision, "update {i} leaves the layer as it was");
+    }
+    assert_eq!(s.engine.backend().motion_path_updates - updates, targets.len() + 1, "frames after each 5 ms update build once per vsync target");
+    s.dispatch(gesture(ContactPhase::Up, width(120))).unwrap();
+    assert!(s.engine.backend().vector_motion_paths.is_none());
+    let scrubbed = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(start * 2, start * 2).unwrap();
+    s.dispatch(UiAction::Effect { action: number(width(120)) }).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &scrubbed, "the scrub commits its last value once");
 }

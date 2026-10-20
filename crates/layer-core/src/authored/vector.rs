@@ -22,13 +22,16 @@ pub struct ItemId(pub u64);
 pub enum Arrange { Front, Forward, Backward, Back }
 
 #[derive(Default)]
-struct IdHasher(u64);
+pub(crate) struct IdHasher(u64);
 impl Hasher for IdHasher {
     fn finish(&self) -> u64 { self.0 }
     fn write(&mut self, bytes: &[u8]) { for byte in bytes { self.write_u64(u64::from(*byte) ^ self.0.rotate_left(8)); } }
-    fn write_u64(&mut self, value: u64) { self.0 = value.wrapping_mul(0x9e37_79b9_7f4a_7c15); }
+    fn write_u64(&mut self, value: u64) { self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x9e37_79b9_7f4a_7c15); }
+    fn write_usize(&mut self, value: usize) { self.write_u64(value as u64); }
+    fn write_i32(&mut self, value: i32) { self.write_u64(u64::from(value as u32)); }
 }
-type IdSet = HashSet<ItemId, BuildHasherDefault<IdHasher>>;
+pub(crate) type IdBuild = BuildHasherDefault<IdHasher>;
+type IdSet = HashSet<ItemId, IdBuild>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AnchorKind(pub u8);
@@ -618,7 +621,10 @@ pub struct VectorChunk {
     nesting: Nesting,
     local: Result<(), &'static str>,
     encoded_len: OnceLock<usize>,
+    footprint: OnceLock<Footprint>,
 }
+#[derive(Clone, Debug)]
+pub(crate) struct Footprint { pub bytes: usize, pub parts: Box<[(usize, usize)]> }
 impl PartialEq for VectorChunk { fn eq(&self, other: &Self) -> bool { self.records == other.records } }
 impl VectorChunk {
     pub fn new(records: Vec<Record>) -> Self {
@@ -627,7 +633,7 @@ impl VectorChunk {
         ids.sort_unstable();
         let local = records.iter().filter_map(Record::path).try_for_each(PathItem::validate)
             .and_then(|()| if ids.windows(2).any(|pair| pair[0].0 == pair[1].0) { Err(DUPLICATE) } else { Ok(()) });
-        Self { nesting: Nesting::of(&records), records: records.into(), summary, ids: ids.into(), local, encoded_len: OnceLock::new() }
+        Self { nesting: Nesting::of(&records), records: records.into(), summary, ids: ids.into(), local, encoded_len: OnceLock::new(), footprint: OnceLock::new() }
     }
     fn with_paths(&self, paths: Vec<(usize, PathItem)>) -> Result<Self, &'static str> {
         let mut records = self.records.to_vec();
@@ -638,7 +644,29 @@ impl VectorChunk {
             records[index] = Record::Path(path);
         }
         if self.local.is_err() { return Ok(Self::new(records)); }
-        Ok(Self { summary: ChunkSummary::of(&records), records: records.into(), ids: self.ids.clone(), nesting: self.nesting, local, encoded_len: OnceLock::new() })
+        Ok(Self { summary: ChunkSummary::of(&records), records: records.into(), ids: self.ids.clone(), nesting: self.nesting, local, encoded_len: OnceLock::new(), footprint: OnceLock::new() })
+    }
+    pub(crate) fn footprint(&self) -> &Footprint {
+        self.footprint.get_or_init(|| {
+            let mut bytes = 128 + std::mem::size_of_val(self.records());
+            let mut parts = Vec::new();
+            for record in self.records() {
+                match record {
+                    Record::Path(path) => {
+                        parts.push((Arc::as_ptr(&path.geometry) as usize, 64 + std::mem::size_of_val(path.geometry.subpaths())));
+                        parts.extend(path.geometry.subpaths().iter().flat_map(|s| s.runs()).map(|run| (run.as_ptr() as usize, run.len() * std::mem::size_of::<Anchor>())));
+                        parts.push((Arc::as_ptr(&path.style) as usize, path.style.entries.iter().map(|e| std::mem::size_of::<PaintEntry>() + match e {
+                            PaintEntry::Stroke(s) => s.profile.as_ref().map_or(0, |p| p.knots().len() * 32),
+                            PaintEntry::Opaque(o) => o.properties.len(),
+                            PaintEntry::Fill(_) => 0,
+                        }).sum::<usize>()));
+                    }
+                    Record::Opaque(opaque) => bytes = bytes.saturating_add(opaque.properties.len()),
+                    Record::End => {}
+                }
+            }
+            Footprint { bytes, parts: parts.into() }
+        })
     }
     pub fn encoded_len(&self) -> Option<usize> { self.encoded_len.get().copied() }
     pub fn note_encoded_len(&self, length: usize) { let _ = self.encoded_len.set(length); }
@@ -662,6 +690,11 @@ struct Root { chunks: Box<[Resource<VectorChunk>]>, slots: Arc<[Slot]>, counter:
 
 #[derive(Clone, Debug, Default)]
 pub struct VectorObject { root: Arc<Root> }
+#[derive(Clone, Debug)]
+pub(crate) struct WeakVectorObject(std::sync::Weak<Root>);
+impl WeakVectorObject {
+    pub(crate) fn identity(&self) -> Option<usize> { (self.0.strong_count() > 0).then_some(self.0.as_ptr() as usize) }
+}
 impl PartialEq for VectorObject {
     fn eq(&self, other: &Self) -> bool {
         self.same_root(other) || (self.chunks().len() == other.chunks().len() && self.slots() == other.slots() && self.next_item() == other.next_item()
@@ -679,6 +712,8 @@ impl VectorObject {
     pub fn from_records(records: Vec<Record>) -> Self { Self::from_chunks(pack(records)) }
     pub fn chunks(&self) -> &[Resource<VectorChunk>] { &self.root.chunks }
     pub fn same_root(&self, other: &Self) -> bool { Arc::ptr_eq(&self.root, &other.root) }
+    pub(crate) fn identity(&self) -> usize { Arc::as_ptr(&self.root) as usize }
+    pub(crate) fn downgrade(&self) -> WeakVectorObject { WeakVectorObject(Arc::downgrade(&self.root)) }
     pub fn records(&self) -> impl DoubleEndedIterator<Item = (Position, &Record)> {
         self.chunks().iter().enumerate().flat_map(|(c, chunk)| chunk.records().iter().enumerate()
             .map(move |(i, record)| (Position { chunk: c as u32, index: i as u32 }, record)))

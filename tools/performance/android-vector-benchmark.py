@@ -201,6 +201,7 @@ def main():
     p.add_argument("--show-layers", default="", help="Comma-separated layer names to show before measuring, such as Paper")
     p.add_argument("--hide-layers", default="", help="Comma-separated layer names to hide before measuring")
     p.add_argument("--profile-seconds", type=int, default=0, help="Sample the app with simpleperf for this long from the start of each unit")
+    p.add_argument("--nav-selection", default="", help="Select this many paths (a planned marquee size) before pan, pinch and rotate")
     p.add_argument("--prefix", default="vector")
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -223,7 +224,7 @@ def main():
                            inkSize=args.ink_size, fillBelow=str(not args.skip_fill_below).lower(), statsPanel=str(args.stats).lower(),
                            waitForTrace="true").items():
         cmd += ["-e", key, str(value)]
-    for key, value in (("vectorShow", args.show_layers), ("vectorHide", args.hide_layers)):
+    for key, value in (("vectorShow", args.show_layers), ("vectorHide", args.hide_layers), ("navSelection", args.nav_selection)):
         if value:
             cmd += ["-e", key, value]
     cmd += [f"{args.package}/art.capycanvas.BrushBenchmarkInstrumentation"]

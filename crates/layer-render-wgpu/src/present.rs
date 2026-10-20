@@ -3,8 +3,40 @@
 use crate::{BackdropBlurStyle, BackdropRegion, GpuRasterError, SdrSurfaceColor, Uploads, WgpuRasterizer};
 use layer_render::{CanvasRenderer, CursorSegment, ViewState};
 
-const CAMERA_SIZE: u64 = 608;
+const CAMERA_SIZE: u64 = 624;
 const SOURCE_CAMERA: u32 = 768;
+
+/// The viewport shader for `format` and `color`; `paper` keeps the paper
+/// lighting code, which the plain variant leaves out.
+fn viewport_shader(device: &crate::PipelineDevice, format: wgpu::TextureFormat, color: SdrSurfaceColor, paper: bool) -> wgpu::ShaderModule {
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(if paper { "viewport shader with paper lighting" } else { "viewport shader" }),
+        source: wgpu::ShaderSource::Wgsl(
+            format!(
+                "const PAPER:bool={};\nconst VIEW_8BIT:bool={};\nconst VIEW_SRGB_ATTACHMENT:bool={};\nconst VIEW_FLOAT16:bool={};\nconst VIEW_WHITE_SCALE:f32={};\nconst VIEW_PQ:bool={};\nconst VIEW_EXTENDED_SRGB:bool={};\nconst SCREEN_SAMPLE_STRIDE:u32={}u;\nconst CANVAS_SPACE:u32={}u;\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                paper,
+                matches!(format,wgpu::TextureFormat::Rgba8Unorm|wgpu::TextureFormat::Bgra8Unorm|wgpu::TextureFormat::Rgba8UnormSrgb|wgpu::TextureFormat::Bgra8UnormSrgb),
+                format.is_srgb(),
+                format == wgpu::TextureFormat::Rgba16Float,
+                if color == SdrSurfaceColor::WindowsScrgb { 2.5375 } else { 1. },
+                color == SdrSurfaceColor::Bt2100Pq,
+                color == SdrSurfaceColor::ExtendedSrgb,
+                crate::present_screen::SAMPLE_STRIDE,
+                crate::working_color::space_id(device.working_space()),
+                crate::view_color::matrix_shader("view_bt2020", layer_core::color::hdr::srgb_to_bt2020()),
+                crate::view_color::shader(device.working_space(), color.primaries()),
+                concat!(include_str!("sdr_color.wgsl"), "\n", include_str!("dither.wgsl")),
+                crate::view_color::hdr_shader(device.working_space(), color.primaries()),
+                concat!(include_str!("float_number.wgsl"), "\n", include_str!("guide_luminance.wgsl"), "\n", include_str!("hdr_view.wgsl")),
+                concat!(include_str!("tetrahedron.wgsl"), "\n", include_str!("proof_view.wgsl")),
+                [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("paper_shade.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
+                crate::view_color::checker_shader(),
+                include_str!("present_screen.wgsl")
+            )
+            .into(),
+        ),
+    })
+}
 
 /// A native UI's document overview, sampled from the existing GPU image.
 /// Bounds and work-area corners use physical target-surface pixels. Hosts can
@@ -46,6 +78,9 @@ impl OverviewPlacement {
 pub struct ViewportPresenter {
     timing: Option<crate::frame_timing::GpuFrameTimer>,
     pipeline: [crate::Deferred<wgpu::RenderPipeline>; 3],
+    paper_pipeline: Option<[crate::Deferred<wgpu::RenderPipeline>; 3]>,
+    presented_paper: Option<bool>,
+    surround_pipeline: crate::Deferred<wgpu::RenderPipeline>,
     layout: wgpu::BindGroupLayout,
     uniform: wgpu::Buffer,
     proof_buffer: wgpu::Buffer,
@@ -64,6 +99,7 @@ pub struct ViewportPresenter {
     selection_buffer: Option<wgpu::Buffer>,
     saved_selection_buffer: Option<wgpu::TextureView>,
     empty_saved_selection:wgpu::TextureView,
+    empty_level: wgpu::TextureView,
     composite_view: Option<wgpu::TextureView>,
     coarse_view: Option<wgpu::TextureView>,
     next_view: Option<wgpu::TextureView>,
@@ -78,18 +114,19 @@ pub struct ViewportPresenter {
     cursor_buffer: wgpu::Buffer,
     cursor_vertices: Vec<CursorSegment>,
     uploads: Uploads,
-    camera_data: Option<[f32; 152]>,
+    camera_data: Option<[f32; 156]>,
     quarter_turns: u32,
     retained: bool,
     history: crate::present_damage::Retained,
     presented_view: Option<(ViewState, [f32; 4], u32, f32)>,
     presented_selection_overlay: Option<layer_render::SelectionOverlay>,
-    presented_motion: Option<([f32; 24], crate::pixel_rect::DocRect)>,
-    motion_views: Option<[wgpu::TextureView; 3]>,
+    presented_motion: Option<([f32; 24], crate::pixel_rect::DocRect, u64)>,
+    motion_views: Option<[wgpu::TextureView; 2]>,
     overlays_changed: bool,
     backdrop: Option<crate::backdrop_blur::BackdropBlur>,
-    source_camera: Option<[f32; 152]>,
+    source_camera: Option<[f32; 156]>,
     presented_area: u64,
+    shaded_area: u64,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
@@ -398,16 +435,31 @@ impl ViewportPresenter {
     }
 
     pub async fn prepare(&mut self, renderer: &WgpuRasterizer) -> Result<(), GpuRasterError> {
-        crate::Deferred::prepare_all(self.pipeline.iter().chain([&self.cursor_pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
+        crate::Deferred::prepare_all(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
             .await.map_err(GpuRasterError::Effect)?;
         crate::Deferred::prepare_all(renderer.scene_pipelines.scale_pipelines())
             .await.map_err(GpuRasterError::Effect)?;
         Ok(())
     }
 
+    /// Whether the paper-lighting pipelines can draw this frame, starting
+    /// their compilation when first wanted. Until then the plain pipelines draw.
+    fn paper_ready(&mut self, renderer: &WgpuRasterizer) -> bool {
+        let (device, format, color) = (&renderer.device, self.format, self.color);
+        let layout = &self.pipeline_layout;
+        let paper = self.paper_pipeline.get_or_insert_with(|| {
+            let shader = viewport_shader(device, format, color, true);
+            ["fs_main", "fs_placed", "fs_mapped"].map(|entry| surface_pipeline(device, "viewport presentation with paper lighting", layout, &shader, ["vs_main", entry], None, format, None))
+        });
+        let Some(startup) = &renderer.startup else { return true };
+        let ready = startup.compiler.require(paper.iter(), crate::startup::DOCUMENT);
+        startup.compiler.start();
+        ready
+    }
+
     pub fn pipelines_ready(&self, renderer: &WgpuRasterizer) -> bool {
         let Some(startup) = &renderer.startup else { return true; };
-        let mut ready = startup.compiler.require(self.pipeline.iter().chain([&self.cursor_pipeline]), crate::startup::DOCUMENT);
+        let mut ready = startup.compiler.require(self.pipeline.iter().chain([&self.surround_pipeline, &self.cursor_pipeline]), crate::startup::DOCUMENT);
         ready &= startup.compiler.require(self.overview_pipeline.iter().chain(self.picker.pipeline.iter()), crate::startup::BRUSH);
         if let Some(backdrop) = &self.backdrop { ready &= startup.compiler.require(backdrop.pipelines(), crate::startup::DOCUMENT); }
         startup.compiler.start();
@@ -527,41 +579,18 @@ impl ViewportPresenter {
             crate::bindings::sampler(16, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
             crate::bindings::float_texture(17, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::float_texture(18, wgpu::ShaderStages::FRAGMENT, device),
-            crate::bindings::float_texture(19, wgpu::ShaderStages::FRAGMENT, device),
+            crate::bindings::texture(19, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::texture(20, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
         ]);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("viewport layout"),
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("viewport shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!(
-                    "const VIEW_8BIT:bool={};\nconst VIEW_SRGB_ATTACHMENT:bool={};\nconst VIEW_FLOAT16:bool={};\nconst VIEW_WHITE_SCALE:f32={};\nconst VIEW_PQ:bool={};\nconst VIEW_EXTENDED_SRGB:bool={};\nconst SCREEN_SAMPLE_STRIDE:u32={}u;\nconst CANVAS_SPACE:u32={}u;\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-                    matches!(format,wgpu::TextureFormat::Rgba8Unorm|wgpu::TextureFormat::Bgra8Unorm|wgpu::TextureFormat::Rgba8UnormSrgb|wgpu::TextureFormat::Bgra8UnormSrgb),
-                    format.is_srgb(),
-                    format == wgpu::TextureFormat::Rgba16Float,
-                    if color == SdrSurfaceColor::WindowsScrgb { 2.5375 } else { 1. },
-                    color == SdrSurfaceColor::Bt2100Pq,
-                    color == SdrSurfaceColor::ExtendedSrgb,
-                    crate::present_screen::SAMPLE_STRIDE,
-                    crate::working_color::space_id(device.working_space()),
-                    crate::view_color::matrix_shader("view_bt2020", layer_core::color::hdr::srgb_to_bt2020()),
-                    crate::view_color::shader(device.working_space(), color.primaries()),
-                    concat!(include_str!("sdr_color.wgsl"), "\n", include_str!("dither.wgsl")),
-                    crate::view_color::hdr_shader(device.working_space(), color.primaries()),
-                    concat!(include_str!("float_number.wgsl"), "\n", include_str!("guide_luminance.wgsl"), "\n", include_str!("hdr_view.wgsl")),
-                    concat!(include_str!("tetrahedron.wgsl"), "\n", include_str!("proof_view.wgsl")),
-                    [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("paper_shade.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
-                    crate::view_color::checker_shader(),
-                    include_str!("present_screen.wgsl")
-                )
-                .into(),
-            ),
-        });
+        let shader = viewport_shader(device, format, color, false);
         let pipeline = ["fs_main", "fs_placed", "fs_mapped"].map(|entry|
             surface_pipeline(device, "viewport presentation", &pipeline_layout, &shader, ["vs_main", entry], None, format, None));
+        let surround_pipeline = surface_pipeline(device, "viewport surround", &pipeline_layout, &shader, ["vs_main", "fs_surround"], None, format, None);
         let cursor_icon_layout = crate::bindings::layout(device, "tool cursor icons", &[
             crate::bindings::texture_of(0, wgpu::ShaderStages::FRAGMENT,
                 wgpu::TextureSampleType::Float { filterable: false }, wgpu::TextureViewDimension::D2Array),
@@ -614,6 +643,9 @@ impl ViewportPresenter {
         });
         Self {
             pipeline,
+            paper_pipeline: None,
+            presented_paper: None,
+            surround_pipeline,
             layout,
             uniform,
             proof_buffer: device.create_buffer(&wgpu::BufferDescriptor {
@@ -652,6 +684,7 @@ impl ViewportPresenter {
             bind_group: None,
             selection_buffer: None,
             saved_selection_buffer: None,
+            empty_level: device.create_texture(&wgpu::TextureDescriptor { label: Some("empty half-float level"), size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 }, mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba16Float, usage: wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[] }).create_view(&Default::default()),
             empty_saved_selection: device.create_texture(&wgpu::TextureDescriptor {label:Some("empty saved overlay"),size:wgpu::Extent3d {width:1,height:1,depth_or_array_layers:1},mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::R32Uint,usage:wgpu::TextureUsages::TEXTURE_BINDING,view_formats:&[]}).create_view(&Default::default()),
             composite_view: None,
             coarse_view: None,
@@ -682,6 +715,7 @@ impl ViewportPresenter {
             backdrop: None,
             source_camera: None,
             presented_area: 0,
+            shaded_area: 0,
             shader,
             pipeline_layout,
             format,
@@ -783,6 +817,11 @@ impl ViewportPresenter {
     }
 
     pub fn damage_area_pixels(&self) -> u64 { self.presented_area }
+    /// Whether the last presentation drew the paper lighting; its pipelines
+    /// compile when lighting is first shown.
+    pub fn paper_lighting_drawn(&self) -> bool { self.presented_paper == Some(true) }
+    /// Pixels of the last presentation that ran the artwork shader.
+    pub fn shaded_area_pixels(&self) -> u64 { self.shaded_area }
 
     /// Reset destination history on every swapchain reconfiguration. Retention
     /// requires the same image to survive presentations; buffered images redraw fully.
@@ -825,7 +864,9 @@ impl ViewportPresenter {
         !previous.valid
             || self.presented_view != Some((view, surround_linear, self.quarter_turns, self.corner_radius))
             || self.presented_selection_overlay != renderer.selection_overlay
-            || self.presented_motion != renderer.display_motion().map(|(_, values, moved)| (values, moved))
+            || self.presented_motion != renderer.display_motion().map(|(_, values, moved, revision)| (values, moved, revision))
+            || (self.presented_paper == Some(false) && renderer.paper_shade().is_some()
+                && self.paper_pipeline.as_ref().is_some_and(|paper| paper.iter().all(crate::Deferred::ready)))
             || (previous.revision != renderer.composite_revision
                 && (previous.artwork_revision != renderer.artwork_revision || renderer.scale_display.as_ref().is_none_or(|cache|!cache.has_pending_work(renderer))))
             || previous.selection_revision != renderer.selection_paint_revision
@@ -934,10 +975,13 @@ impl ViewportPresenter {
         overview_only: bool,
     ) -> Result<(), GpuRasterError> {
         let Some([composite,coarse,next]) = renderer.presentation_views() else { return Ok(()); };
+        if renderer.display_backup.is_none() && let Some(cache) = &renderer.scale_display { cache.refresh_half(renderer, encoder, &mut self.uploads)?; }
+        let lit = renderer.paper_shade().is_some() && self.paper_ready(renderer);
         let navigator = renderer.navigator.view().unwrap_or(&renderer.empty_view);
         let motion = renderer.display_motion();
-        let motion_views = motion.map_or([&renderer.empty_view; 3], |(views, ..)| views);
+        let motion_views = motion.map_or([&renderer.empty_view; 2], |(views, ..)| views);
         let geometry = renderer.display_geometry().unwrap();
+        let levels = [composite, next].map(|view| if view.texture().format() == wgpu::TextureFormat::Rgba16Float { view } else { &self.empty_level });
         let device = &renderer.device;
         let selection = renderer.display_selection.as_ref();
         let coverage = selection.map_or(&renderer.unclipped, |(_, buffer)| buffer);
@@ -945,17 +989,17 @@ impl ViewportPresenter {
         let selection_changed = self.selection_buffer.as_ref() != Some(coverage);
         let shade = renderer.paper_shade();
         let slope = shade.map_or(&self.shade.flat, |(view, _, _)| view);
+        let motion_rebound = self.motion_views.as_ref().map(|views| views.each_ref()) != Some(motion_views);
         let bindings_changed = self.shade.view.as_ref() != Some(slope)
             || self.bind_group.is_none()
             || self.navigator_view.as_ref() != Some(navigator)
-            || self.motion_views.as_ref().map(|views| views.each_ref()) != Some(motion_views)
             || self.saved_selection_buffer.as_ref() != Some(saved)
             || self.document_extent != renderer.document_extent
             || self.composite_view.as_ref() != Some(composite)
             || self.coarse_view.as_ref() != Some(coarse)
             || self.next_view.as_ref() != Some(next)
             || self.display_geometry.as_ref() != Some(geometry);
-        if bindings_changed || selection_changed {
+        if bindings_changed || motion_rebound || selection_changed {
             self.bind_group = Some(crate::bindings::group(device, "viewport composite", &self.layout, [
                 wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                     buffer: &self.uniform,
@@ -980,7 +1024,8 @@ impl ViewportPresenter {
                 wgpu::BindingResource::Sampler(&self.shade.sampler),
                 wgpu::BindingResource::TextureView(motion_views[0]),
                 wgpu::BindingResource::TextureView(motion_views[1]),
-                wgpu::BindingResource::TextureView(motion_views[2]),
+                wgpu::BindingResource::TextureView(levels[0]),
+                wgpu::BindingResource::TextureView(levels[1]),
             ]));
             self.shade.view = Some(slope.clone());
             self.navigator_view = Some(navigator.clone());
@@ -1016,7 +1061,7 @@ impl ViewportPresenter {
         let overlay_color = overlay.map_or([0.;4],|o| o.color);
         let crop = renderer.crop_overlay.filter(|c| c.to_crop.inverse().is_some());
         let [ca, cb, cc, cd, cx, cy] = crop.map_or([0.; 6], |c| c.to_crop.0);
-        let mut data = [0.; 152];
+        let mut data = [0.; 156];
         data[..40].copy_from_slice(&[
             d / det,
             -b / det,
@@ -1054,7 +1099,8 @@ impl ViewportPresenter {
         data[60] = f32::from(renderer.blend_space == layer_core::BlendSpace::Perceptual);
         data[61] = renderer.navigator.scale();
         data[62..64].copy_from_slice(&renderer.clipping_preview.map(f32::from));
-        data[128..152].copy_from_slice(&motion.map_or([0.; 24], |(_, values, _)| values));
+        data[128..152].copy_from_slice(&motion.map_or([0.; 24], |(_, values, ..)| values));
+        data[152] = f32::from(composite.texture().format() == wgpu::TextureFormat::Rgba16Float);
         // A fixed f32 array has no padding or uninitialized bytes.
         let bytes = unsafe {
             std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(&data))
@@ -1137,7 +1183,7 @@ impl ViewportPresenter {
                     && previous.selection_revision.wrapping_add(1) != renderer.selection_paint_revision)
                 || (previous.revision != renderer.composite_revision
                     && previous.revision.wrapping_add(1) != renderer.composite_revision);
-            let full = content || bindings_changed || camera_changed || (selection_changed && outline.is_none());
+            let full = content || bindings_changed || camera_changed || (selection_changed && outline.is_none()) || self.presented_paper != Some(lit);
             let cursor =
                 crate::present_damage::cursor_bounds(&self.cursor_vertices, view, self.quarter_turns);
             let repaint = if full {
@@ -1158,9 +1204,9 @@ impl ViewportPresenter {
                 crate::present_damage::add_region(&mut regions, crate::present_damage::surface_bounds(bounds, view, self.quarter_turns));
             }
             crate::present_damage::add_region(&mut regions, repaint);
-            let motion_now = motion.map(|(_, values, moved)| (values, moved));
-            if !full && self.presented_motion != motion_now {
-                for (_, moved) in self.presented_motion.iter().chain(&motion_now) {
+            let motion_now = motion.map(|(_, values, moved, revision)| (values, moved, revision));
+            if !full && (self.presented_motion != motion_now || motion_rebound) {
+                for (_, moved, _) in self.presented_motion.iter().chain(&motion_now) {
                     crate::present_damage::add_region(&mut regions, crate::present_damage::damage(moved.in_frame(renderer.document_extent), view, self.quarter_turns));
                 }
             }
@@ -1228,7 +1274,7 @@ impl ViewportPresenter {
             })
         };
         let mut began = false;
-        let pipeline = &self.pipeline[data[53] as usize];
+        let pipeline = match &self.paper_pipeline { Some(paper) if lit => &paper[data[53] as usize], _ => &self.pipeline[data[53] as usize] };
         if let Some(backdrop) = self.backdrop.as_mut().filter(|_| !overview_only) {
             let group = self.bind_group.as_ref().unwrap();
             let mut glass = Vec::new();
@@ -1264,6 +1310,8 @@ impl ViewportPresenter {
         let bounds = crate::pixel_rect::PixelRect::full([size.width, size.height]);
         let regions: Vec<_> = regions.into_iter().map(|r| r.intersect(bounds)).filter(|r| !r.is_empty()).collect();
         self.presented_area = regions.iter().map(|r| r.area()).sum();
+        self.shaded_area = 0;
+        let artwork = crate::present_damage::damage(crate::pixel_rect::PixelRect::full(self.document_extent), view, self.quarter_turns);
         crate::performance_trace::counter(c"Capy viewport regions", regions.len() as u64);
         for (index, repaint) in regions.iter().enumerate() {
             // Each pass needs its own view: wgpu can defer encoding until
@@ -1327,14 +1375,18 @@ impl ViewportPresenter {
             );
             pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[0]);
             if !overview_only {
-                pass.set_pipeline(pipeline);
                 let mut visible = vec![*repaint];
                 for hole in self.backdrop.iter().flat_map(|b| b.interiors()) {
                     visible = visible.into_iter().flat_map(|r| r.subtract(*hole)).filter(|r| !r.is_empty()).collect();
                 }
                 for area in visible {
-                    pass.set_scissor_rect(area.min_x(), area.min_y(), area.width(), area.height());
-                    pass.draw(0..3, 0..1);
+                    let shaded = area.intersect(artwork);
+                    self.shaded_area += shaded.area();
+                    for (part, pipeline) in std::iter::once((shaded, pipeline)).chain(area.subtract(artwork).map(|part| (part, &self.surround_pipeline))).filter(|(part, _)| !part.is_empty()) {
+                        pass.set_pipeline(pipeline);
+                        pass.set_scissor_rect(part.min_x(), part.min_y(), part.width(), part.height());
+                        pass.draw(0..3, 0..1);
+                    }
                 }
                 pass.set_scissor_rect(repaint.min_x(), repaint.min_y(), repaint.width(), repaint.height());
                 if shade.is_some_and(|(_, _, flash)| flash) {
@@ -1363,6 +1415,7 @@ impl ViewportPresenter {
         self.uploads.finish(encoder);
         self.presented_view = Some((view, surround_linear, self.quarter_turns, self.corner_radius));
         self.presented_selection_overlay = renderer.selection_overlay;
+        self.presented_paper = Some(lit);
         self.overlays_changed = false;
         Ok(())
     }
