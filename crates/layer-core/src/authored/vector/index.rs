@@ -1,5 +1,5 @@
 use super::{ItemId, PathItem, Position, Resource, VectorChunk, VectorObject};
-use std::{collections::{BTreeSet, HashMap, HashSet}, sync::Arc};
+use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 
 const CELL: f64 = 256.;
 const SPREAD: i64 = 64;
@@ -13,6 +13,7 @@ pub struct VectorIndex {
     order: HashMap<usize, u32>,
     cells: HashMap<[i32; 2], Vec<Entry>>,
     large: Vec<Entry>,
+    retired: HashMap<usize, Resource<VectorChunk>>,
 }
 
 fn key(chunk: &Resource<VectorChunk>) -> usize { Arc::as_ptr(chunk.storage()) as usize }
@@ -28,10 +29,18 @@ impl VectorIndex {
         if self.root.as_ref().is_some_and(|root| root.same_root(object)) { return; }
         let order: HashMap<usize, u32> = object.chunks().iter().enumerate().map(|(i, chunk)| (key(chunk), i as u32)).collect();
         if let Some(previous) = self.root.take() {
-            for chunk in previous.chunks().iter().filter(|chunk| !order.contains_key(&key(chunk))) { self.remove(chunk); }
+            self.retired.extend(previous.chunks().iter().filter(|chunk| !order.contains_key(&key(chunk))).map(|chunk| (key(chunk), chunk.clone())));
         }
         let known = std::mem::replace(&mut self.order, order);
-        for chunk in object.chunks().iter().filter(|chunk| !known.contains_key(&key(chunk))) { self.insert(chunk); }
+        for chunk in object.chunks().iter().filter(|chunk| !known.contains_key(&key(chunk))) {
+            if self.retired.remove(&key(chunk)).is_none() { self.insert(chunk); }
+        }
+        if self.retired.len() > self.order.len().max(64) {
+            let order = &self.order;
+            self.cells.retain(|_, entries| { entries.retain(|entry| order.contains_key(&entry.chunk)); !entries.is_empty() });
+            self.large.retain(|entry| order.contains_key(&entry.chunk));
+            self.retired.clear();
+        }
         self.root = Some(object.clone());
     }
     fn visible(chunk: &Resource<VectorChunk>) -> impl Iterator<Item = (u32, [f64; 4])> + '_ {
@@ -46,27 +55,10 @@ impl VectorIndex {
             for y in s[1]..=s[3] { for x in s[0]..=s[2] { self.cells.entry([x, y]).or_default().push(entry); } }
         }
     }
-    fn remove(&mut self, chunk: &Resource<VectorChunk>) {
-        let chunk_key = key(chunk);
-        let mut touched = HashSet::new();
-        let mut large = false;
-        for (_, bounds) in Self::visible(chunk) {
-            let s = span(bounds);
-            if spread(s) > SPREAD { large = true; continue; }
-            for y in s[1]..=s[3] { for x in s[0]..=s[2] { touched.insert([x, y]); } }
-        }
-        for cell in touched {
-            if let Some(entries) = self.cells.get_mut(&cell) {
-                entries.retain(|entry| entry.chunk != chunk_key);
-                if entries.is_empty() { self.cells.remove(&cell); }
-            }
-        }
-        if large { self.large.retain(|entry| entry.chunk != chunk_key); }
-    }
     fn candidates(&self, area: [f64; 4]) -> Vec<(u32, u32)> {
         let s = span(area);
         let mut found: Vec<(u32, u32)> = Vec::new();
-        let mut take = |entries: &[Entry]| found.extend(entries.iter().filter(|entry| meets(entry.bounds, area)).map(|entry| (self.order[&entry.chunk], entry.index)));
+        let mut take = |entries: &[Entry]| found.extend(entries.iter().filter(|entry| meets(entry.bounds, area)).filter_map(|entry| Some((*self.order.get(&entry.chunk)?, entry.index))));
         if spread(s) > self.cells.len() as i64 {
             for (cell, entries) in &self.cells { if (s[0]..=s[2]).contains(&cell[0]) && (s[1]..=s[3]).contains(&cell[1]) { take(entries); } }
         } else {
@@ -100,6 +92,7 @@ impl VectorIndex {
 mod tests {
     use super::*;
     use crate::authored::vector::*;
+    use std::collections::HashSet;
 
     fn line(id: u64, from: [f64; 2], to: [f64; 2]) -> Record {
         let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(from), Anchor::corner(to)], false)]).unwrap();
@@ -166,5 +159,24 @@ mod tests {
             assert!(counts[0].0 > 0 && counts[1].0 <= counts[0].0 + 4, "probe candidates grew with the layer: {counts:?}");
             assert_eq!(counts[0].1, counts[1].1, "a one-path edit reindexes the same number of records: {counts:?}");
         }
+    }
+
+    #[test]
+    fn replaced_chunks_stay_bounded_in_the_index_and_return_with_undo() {
+        let object = hatching(10_000);
+        let mut index = VectorIndex::default();
+        index.update(&object);
+        let entries = |index: &VectorIndex| index.cells.values().map(Vec::len).sum::<usize>() + index.large.len();
+        let fresh = entries(&index);
+        let mut current = object.clone();
+        for i in 0..2_000u64 {
+            let one = BTreeSet::from([ItemId(i * 7_919 % 10_000 + 1)]);
+            current = current.transform_items(&one, crate::authored::Affine64([1., 0., 0., 1., 0.5, 0.5]), true).unwrap();
+            index.update(&current);
+            assert!(entries(&index) <= fresh * 2 + CHUNK_RECORDS * 64, "edit {i}: {} entries against {fresh}", entries(&index));
+        }
+        let area = [100., 100., 900., 900.];
+        assert_eq!(index.within(&object, area), VectorIndex::default().within(&object, area), "undo to the first version finds what a fresh index finds");
+        assert_eq!(index.within(&current, area), VectorIndex::default().within(&current, area));
     }
 }

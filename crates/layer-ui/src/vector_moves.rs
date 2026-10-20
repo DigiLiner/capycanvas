@@ -1,8 +1,8 @@
 use super::*;
-use layer_core::{Edit, Point, authored::{Affine64, VectorItemSelection, vector::{ItemId, PathItem, VectorIndex, VectorObject}}};
+use layer_core::{Edit, Point, authored::{Affine64, VectorItemSelection, vector::{ItemId, PathItem, Position, VectorIndex, VectorObject}}};
 use layer_render::CursorSegment;
 use std::{cell::RefCell, collections::BTreeSet, sync::Arc};
-use super::transform_frame::{Frame, FrameHandle, about, translation};
+use super::{transform_frame::{Frame, FrameHandle, about, translation}, vector_properties::PathStyles};
 
 const HIT_SLOP: f64 = 6.;
 const CLICK: f64 = 3.;
@@ -11,15 +11,30 @@ const DOUBLE_CLICK_NS: u64 = 400_000_000;
 enum Gesture {
     Drag { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, start: [f64; 2], offset: [f64; 2], nudge: Option<String>, original: Option<VectorObject> },
     Marquee { layer: OccurrenceHandle, start: [f64; 2], end: [f64; 2], adding: bool },
-    Transform { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, frame: Frame, handle: FrameHandle, press: [f64; 2], original: VectorObject, transformed: Option<VectorObject> },
+    Transform { layer: OccurrenceHandle, paths: Vec<Position>, frame: Frame, handle: FrameHandle, press: [f64; 2], original: VectorObject, latest: Option<([f64; 2], Modifiers)>, transformed: Option<VectorObject> },
 }
 
-type SelectionBounds = (VectorObject, Arc<BTreeSet<ItemId>>, Option<[f64; 4]>);
+#[derive(Clone, Default)]
+pub(super) struct SelectedPaths { bounds: Option<[f64; 4]>, count: usize, closable: bool, joinable: usize, compound: bool, styles: Option<PathStyles> }
+impl SelectedPaths {
+    fn of(paths: &[(Position, &PathItem)]) -> Self {
+        let facts = paths.iter().fold(Self::default(), |facts, (_, path)| Self {
+            bounds: Some(layer_core::authored::vector::union(facts.bounds, path.bounds())),
+            count: facts.count + 1,
+            closable: facts.closable || path.can_close(),
+            joinable: facts.joinable + usize::from(path.joinable()),
+            compound: facts.compound || path.geometry.subpaths().len() > 1,
+            styles: None,
+        });
+        Self { styles: PathStyles::of(paths.iter().map(|(_, path)| *path)), ..facts }
+    }
+}
 
 #[derive(Default)]
 pub(super) struct VectorMoves {
     gesture: Option<Gesture>,
-    bounds: RefCell<Option<SelectionBounds>>,
+    selected: RefCell<Option<(VectorObject, Arc<BTreeSet<ItemId>>, SelectedPaths)>>,
+    pub(super) shown_styles: Option<PathStyles>,
     pub(super) index: VectorIndex,
     context: (bool, bool),
     click: Option<(ItemId, u64)>,
@@ -47,33 +62,45 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.changed = true;
         Ok(items)
     }
+    fn path_facts(&self, selection: &VectorItemSelection) -> Option<SelectedPaths> {
+        let object = self.engine.document().scene().vector_layer(selection.layer)?;
+        let mut cached = self.vector_moves.selected.borrow_mut();
+        if !cached.as_ref().is_some_and(|(root, items, _)| root.same_root(object) && Arc::ptr_eq(items, &selection.items)) {
+            *cached = Some((object.clone(), selection.items.clone(), SelectedPaths::of(&object.selected_paths(&selection.items))));
+        }
+        cached.as_ref().map(|(_, _, facts)| facts.clone())
+    }
+    pub(super) fn selected_path_facts(&self) -> Option<SelectedPaths> { self.path_facts(self.selected_vector_items()?) }
+    pub(super) fn path_styles(&self) -> Option<PathStyles> {
+        let document = self.engine.document();
+        let selection = document.working.vector_items.as_ref().filter(|selection| Some(selection.layer) == document.working.occurrence)?;
+        self.path_facts(selection)?.styles
+    }
     pub(super) fn vector_frame(&self) -> Option<Frame> {
         let selection = self.selected_vector_items()?;
-        let doc = self.engine.document();
-        let object = doc.scene().vector_layer(selection.layer)?;
-        let mut cached = self.vector_moves.bounds.borrow_mut();
-        if !cached.as_ref().is_some_and(|(root, items, _)| root.same_root(object) && Arc::ptr_eq(items, &selection.items)) {
-            *cached = Some((object.clone(), selection.items.clone(), object.items_bounds(&selection.items)));
-        }
-        let [x0, y0, x1, y1] = cached.as_ref().and_then(|(_, _, bounds)| *bounds)?;
-        let [ox, oy] = doc.scene().occurrence_offset64(selection.layer);
+        let [x0, y0, x1, y1] = self.selected_path_facts()?.bounds?;
+        let [ox, oy] = self.engine.document().scene().occurrence_offset64(selection.layer);
         let (min, size) = ([x0 + ox, y0 + oy], [(x1 - x0).max(1e-3), (y1 - y0).max(1e-3)]);
         Some(Frame { unit: Affine64([size[0], 0., 0., size[1], min[0], min[1]]), pivot: [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5] })
     }
     fn begin_vector_transform(&mut self, layer: OccurrenceHandle, point: [f64; 2]) -> Option<Gesture> {
         let frame = self.vector_frame()?;
         let handle = frame.hit(point, f64::from(self.ruler_reach())).filter(|handle| matches!(handle, FrameHandle::Scale(_) | FrameHandle::Rotate))?;
-        let items = self.selected_vector_items()?.items.clone();
         let original = self.engine.document().scene().vector_layer(layer)?.clone();
-        Some(Gesture::Transform { layer, items, frame, handle, press: point, original, transformed: None })
+        let paths = original.selected_paths(&self.selected_vector_items()?.items).into_iter().map(|(position, _)| position).collect();
+        Some(Gesture::Transform { layer, paths, frame, handle, press: point, original, latest: None, transformed: None })
     }
-    fn transform_vector_items(&mut self, point: [f64; 2]) -> Result<(), String> {
-        let modifiers = self.interaction.modifiers;
-        let Some(Gesture::Transform { layer, items, frame, handle, press, original, transformed }) = &mut self.vector_moves.gesture else { return Ok(()) };
+    pub(super) fn sync_vector_transform(&mut self) -> Result<(), String> {
+        let Some(Gesture::Transform { latest, .. }) = &mut self.vector_moves.gesture else { return Ok(()) };
+        let Some((point, modifiers)) = latest.take() else { return Ok(()) };
+        self.transform_vector_items(point, modifiers)
+    }
+    fn transform_vector_items(&mut self, point: [f64; 2], modifiers: Modifiers) -> Result<(), String> {
+        let Some(Gesture::Transform { layer, paths, frame, handle, press, original, transformed, .. }) = &mut self.vector_moves.gesture else { return Ok(()) };
         let Some(delta) = frame.delta(*handle, *press, point, modifiers.shift, false, modifiers.alt) else { return Ok(()) };
         let [ox, oy] = self.engine.document().scene().occurrence_offset64(*layer);
         let local = translation([-ox, -oy]).compose(delta).compose(translation([ox, oy]));
-        let result = original.transform_items(items, local, !self.state.settings.keep_outline_widths).map_err(str::to_string)?;
+        let result = original.transform_paths(paths, local, !self.state.settings.keep_outline_widths).map_err(str::to_string)?;
         *transformed = Some(result.clone());
         let edit = self.engine.document().vector_object_edit(*layer, result).map_err(|e| e.to_string())?;
         self.engine.preview_edit(edit).map_err(|e| e.to_string())
@@ -125,6 +152,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 Ok(true)
             }
             PenPhase::Move | PenPhase::Up => {
+                let modifiers = self.interaction.modifiers;
                 let Some(gesture) = &mut self.vector_moves.gesture else { return Ok(false) };
                 let mut motion = None;
                 match gesture {
@@ -133,9 +161,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset });
                     }
                     Gesture::Marquee { end, .. } => *end = point,
-                    Gesture::Transform { .. } => self.transform_vector_items(point)?,
+                    Gesture::Transform { latest, .. } if event.phase == PenPhase::Move => *latest = Some((point, modifiers)),
+                    Gesture::Transform { .. } => self.transform_vector_items(point, modifiers)?,
                 }
-                self.layer_interaction.changed = true;
                 if event.phase == PenPhase::Up { return self.finish_vector_move().map(|()| true); }
                 if let Some(motion) = motion { self.engine.backend_mut().set_vector_motion(Some(motion)); }
                 Ok(true)
@@ -182,7 +210,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         *offset = [offset[0] + delta[0], offset[1] + delta[1]];
         let motion = layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset };
         self.engine.backend_mut().set_vector_motion(Some(motion));
-        self.layer_interaction.changed = true;
         Ok(true)
     }
     pub(super) fn cancel_vector_move(&mut self) -> bool {
@@ -270,12 +297,12 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::ScaleRotate | CommandId::TransformFlipHorizontal | CommandId::TransformFlipVertical
             | CommandId::TransformRotateLeft | CommandId::TransformRotateRight | CommandId::ReversePath => idle && self.vector_paths_editable(),
             CommandId::JoinPaths | CommandId::ClosePath | CommandId::MakeCompoundPath | CommandId::ReleaseCompoundPath => idle && self.vector_paths_editable() && {
-                let paths = self.engine.document().scene().vector_layer(layer).map(|object| object.selected(&self.selected_vector_items().unwrap().items)).unwrap_or_default();
+                let paths = self.selected_path_facts().unwrap_or_default();
                 match id {
-                    CommandId::JoinPaths => matches!(&paths[..], [one] if one.can_close()) || matches!(&paths[..], [a, b] if a.joinable() && b.joinable()),
-                    CommandId::ClosePath => paths.iter().any(PathItem::can_close),
-                    CommandId::MakeCompoundPath => paths.len() > 1,
-                    _ => paths.iter().any(|path| path.geometry.subpaths().len() > 1),
+                    CommandId::JoinPaths => (paths.count == 1 && paths.closable) || (paths.count == 2 && paths.joinable == 2),
+                    CommandId::ClosePath => paths.closable,
+                    CommandId::MakeCompoundPath => paths.count > 1,
+                    _ => paths.compound,
                 }
             },
             CommandId::SplitPath => idle && self.vector_paths_editable() && self.vector_points_split(),

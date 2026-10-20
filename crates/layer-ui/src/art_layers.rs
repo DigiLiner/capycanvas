@@ -529,7 +529,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn layer_reparent_edit(&self, id: u64, parent: Option<u64>, index: u32) -> Result<Option<Edit>, String> {
         let doc = self.engine.document();
         let edit = doc.reparent_occurrence_edit(occurrence_handle(id)?, parent.map(occurrence_handle).transpose()?, index as usize).map_err(error)?;
-        let mut probe = doc.clone();
+        let mut probe = doc.without_path_selection();
         probe.apply(edit.clone()).map_err(error)?;
         Ok((probe.artwork != doc.artwork).then_some(edit))
     }
@@ -544,7 +544,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             if fraction < 0.5 { LayerDropPosition::Above } else { LayerDropPosition::Below }
         } else { position };
         let plan=doc.drop_layers_edit(&roots,target,position).map_err(error)?;
-        let mut probe=doc.clone();probe.apply(plan.edit.clone()).map_err(error)?;
+        let mut probe=doc.without_path_selection();probe.apply(plan.edit.clone()).map_err(error)?;
         let effect_owner=probe.scene().effect_owner(handle).filter(|owner|roots.iter().all(|id|probe.scene().effect_owner(*id)==Some(*owner))).map(occurrence_token);
         Ok((probe.artwork!=doc.artwork).then_some((plan.edit,LayerDropHint{target:occurrence_token(plan.target),position:plan.position,effect_owner})))
     }

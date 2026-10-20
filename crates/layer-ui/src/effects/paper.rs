@@ -240,7 +240,7 @@ mod tests {
     fn paper_properties_offer_the_built_in_papers_and_scale_at_real_size() {
         let l = Localizer::shared(UiLanguage::English);
         let document = document();
-        let view = properties(&document, Default::default(), &PaperLibrary::default(), &l);
+        let view = properties(&document, Default::default(), &PaperLibrary::default(), None, &l);
         assert_eq!(view.title, "Paper");
         assert_eq!(view.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", TEXTURE, SCALE, paper::RELIEF, paper::LIGHT, paper::THROUGH_PAINT]);
         assert_eq!(view.controls.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()[3..], ["Texture visibility", "Light", "Shows through paint"]);

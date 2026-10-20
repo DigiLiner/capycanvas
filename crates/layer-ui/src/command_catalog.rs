@@ -696,7 +696,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             && !self.selection_masks.quick()
             && document.working.occurrence.and_then(|handle| document.scene().occurrence(handle)).is_some_and(|l| l.kind() != LayerKind::Selection)
         {
-            let canonical_properties = effects::properties(document, self.state.settings.selection_painting, &self.papers, &english);
+            let canonical_properties = effects::properties(document, self.state.settings.selection_painting, &self.papers, self.path_styles().as_ref(), &english);
             let set = |key: &str, value| UiAction::Effect {
                 action: EffectAction::Set { layer: active, key: key.into(), value },
             };

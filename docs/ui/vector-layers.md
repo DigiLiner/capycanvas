@@ -240,6 +240,17 @@ draw above the rest of their layer; they return to their place in the layer's
 order when the move commits. Path selections are not undo steps and are not
 restored with a session.
 
+Frame scaling and rotation, Edit Points drags, eraser strokes and scrubs of the
+path Properties keep only the latest pen sample or value between frames and preview it
+once in the next frame; the eraser still cuts along every sample's segment, in
+order. Release applies the last sample, so the committed paths match a preview
+after every sample. Previews replace the edited paths in place without
+revalidating the layer. While a drag moves, the menus, layer rows and Properties
+are published again only when a preview changes the selected paths' Properties
+values. Command checks for the selected paths are computed once per selection
+and layer version, and trial layer edits behind menu and command availability
+leave the path selection out.
+
 ## Rasterize Layer
 
 **Rasterize Layer** turns a vector layer into a paint layer holding what its
@@ -334,7 +345,14 @@ same path as fitting at pen-up.
 `edit_transform_shows_the_move_frame_and_outline_widths_can_stay` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
-the session rules, and `vector_layer_shortcuts_hold_in_every_keymap_preset` in
+the session rules. There,
+`sample_bursts_preview_once_per_frame_and_commit_what_frame_by_frame_previews_commit`
+checks that bursts of samples or width updates preview once per frame and
+commit the same paths as a frame after every sample, and
+`moving_or_turning_a_large_path_selection_republishes_nothing_until_release`
+checks that a drag of 2,000 selected paths publishes nothing until release; the
+ignored `crowded_vector_gesture_costs` times those gestures, panning and the
+eraser modes on 20,000 paths. `vector_layer_shortcuts_hold_in_every_keymap_preset` in
 [`keymap_tests.rs`](../../crates/layer-ui/src/keymap_tests.rs) checks their keys. `vector_paths_follow_rotation_flip_and_resize` in
 [`canvas_geometry_tests.rs`](../../crates/layer-core/src/canvas_geometry_tests.rs),
 `merging_a_vector_layer_down_bakes_its_paths` and
@@ -352,7 +370,8 @@ the path commands' geometry and width profiles, including
 `path_commands_keep_single_anchor_dots`,
 `erasing_up_to_intersection_stops_at_locked_lines_and_passes_hidden_ones`,
 `mirroring_a_path_keeps_each_side_width_on_its_mirrored_side` and
-`joining_or_combining_onto_a_zero_width_outline_keeps_the_other_widths`;
+`joining_or_combining_onto_a_zero_width_outline_keeps_the_other_widths` and
+`replacing_paths_in_place_matches_a_full_replace_and_needs_no_revalidation`;
 `deleting_anchors_keeps_the_widths_and_closing_of_untouched_parts` in
 [`points.rs`](../../crates/layer-core/src/authored/vector/points.rs) covers
 deleting anchors. The GTK journey `native_vector_draw_move_and_delete` draws two

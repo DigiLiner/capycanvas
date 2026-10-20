@@ -1791,3 +1791,265 @@ fn double_clicking_a_selected_path_edits_the_points_of_the_whole_selection() {
     double(&mut s, 40, [300., 750.]);
     assert_eq!((s.layer_interaction.tool, selected(&s)), (LayerCanvasTool::EditPoints, Some([ItemId(3)].into())), "a path outside the selection is edited alone");
 }
+
+fn crowded_hatching(extent: [f64; 2], count: u64) -> Vec<layer_core::authored::vector::Record> {
+    use layer_core::authored::vector::*;
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; (seed >> 11) as f64 / (1u64 << 53) as f64 };
+    (0..count).map(|i| {
+        let start = [next() * extent[0], next() * extent[1]];
+        let (angle, length, bend) = (0.4 + 0.5 * next(), 40. + 180. * next(), 40. * next() - 20.);
+        let anchors: Vec<Anchor> = (0..4).map(|k| { let t = f64::from(k) / 3.; Anchor::corner([start[0] + angle.cos() * length * t - angle.sin() * bend * t * (1. - t) * 4., start[1] + angle.sin() * length * t + angle.cos() * bend * t * (1. - t) * 4.]) }).collect();
+        let mut stroke = Stroke::new(Paint::color(layer_core::color::RgbColor::BLACK), 2. + 4. * next());
+        (stroke.cap, stroke.join) = (Cap::Round, Join::Round);
+        stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.1), WidthKnot::new(1, 0.5, 1., 1.), WidthKnot::new(2, 1., 0.05, 0.05)]).unwrap()));
+        Record::Path(PathItem::new(ItemId(i + 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))
+    }).collect()
+}
+
+#[test]
+#[ignore = "crowded vector gesture costs"]
+fn crowded_vector_gesture_costs() {
+    use layer_core::authored::vector::*;
+    const SAMPLE_NS: u64 = 5_000_000;
+    const FRAME_NS: u64 = 16_666_667;
+    let crowded = |selected: usize| {
+        let document = Document::new(layer_core::PortableId::random(), 6000, 4000, layer_core::DocumentNames { paint: "Base".into(), paper: "Paper".into() });
+        let mut s = UiSession::new(Recorder::default(), document, [1920, 1200], Platform::Android).unwrap();
+        s.set_viewport([1920., 1200.], [1920, 1200]).unwrap();
+        s.select_brush(DefaultBrushPreset::GPen as u32).unwrap();
+        layer(&mut s, LayerAction::NewVector);
+        let layer = s.engine.document().working.occurrence.unwrap();
+        let edit = s.engine.document().vector_object_edit(layer, VectorObject::from_records(crowded_hatching([6000., 4000.], 20_000))).unwrap();
+        s.engine.apply_edit(edit).unwrap();
+        s.frame(1, 1).unwrap();
+        invoke(&mut s, CommandId::Move);
+        let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let mut ids: Vec<(f64, ItemId)> = object.paths().map(|(_, p)| { let [x0, y0, x1, y1] = p.bounds(); ((x0 + x1 - 6000.).hypot(y0 + y1 - 4000.), p.id) }).collect();
+        ids.sort_by(|a, b| a.0.total_cmp(&b.0));
+        if selected > 0 { s.select_vector_items(layer, ids.iter().take(selected).map(|(_, id)| *id).collect()).unwrap(); }
+        s.frame(2, 2).unwrap();
+        (s, layer)
+    };
+    struct Costs { input: f64, frames: f64, publish: f64, inputs: usize, count: usize, published: usize, release: f64 }
+    let run = |s: &mut UiSession<Recorder>, inputs: usize, mut input: Box<dyn FnMut(&mut UiSession<Recorder>, usize, u64)>| {
+        let mut costs = Costs { input: 0., frames: 0., publish: 0., inputs: 0, count: 0, published: 0, release: 0. };
+        let mut model = s.workspace_model_revision();
+        let mut now = 10_000_000_000u64;
+        let mut next_frame = now;
+        for i in 0..inputs {
+            let start = std::time::Instant::now();
+            input(s, i, now);
+            let elapsed = start.elapsed().as_secs_f64() * 1e3;
+            if i + 1 == inputs { costs.release += elapsed; } else { costs.input += elapsed; costs.inputs += 1; }
+            now += SAMPLE_NS;
+            if now >= next_frame || i + 1 == inputs {
+                next_frame += FRAME_NS;
+                let start = std::time::Instant::now();
+                s.frame(now, now + FRAME_NS).unwrap();
+                let mut overlay = Vec::new();
+                s.append_layer_overlay(&mut overlay);
+                let elapsed = start.elapsed().as_secs_f64() * 1e3;
+                let start = std::time::Instant::now();
+                if s.workspace_model_revision() != model {
+                    model = s.workspace_model_revision();
+                    costs.published += 1;
+                    for menu in ApplicationMenu::ALL { std::hint::black_box(s.application_menu(menu)); }
+                    std::hint::black_box(serde_json::to_vec(s.state()).unwrap());
+                }
+                let publish = start.elapsed().as_secs_f64() * 1e3;
+                if i + 1 == inputs { costs.release += elapsed + publish; } else { costs.frames += elapsed; costs.publish += publish; costs.count += 1; }
+            }
+        }
+        costs
+    };
+    let pen = |s: &mut UiSession<Recorder>, phase: PenPhase, at: [f64; 2], now: u64| {
+        let mut e = event(s, now / SAMPLE_NS, phase, 0.5);
+        e.timestamp_ns = now;
+        e.surface_position = surface_at(s, at);
+        s.pen(e);
+    };
+    let drag = move |from: [f64; 2], to: [f64; 2], samples: usize| Box::new(move |s: &mut UiSession<Recorder>, i: usize, now: u64| {
+        let t = i as f64 / (samples - 1) as f64;
+        let phase = if i == 0 { PenPhase::Down } else if i + 1 == samples { PenPhase::Up } else { PenPhase::Move };
+        pen(s, phase, [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t + 40. * (t * 9.).sin()], now);
+    }) as Box<dyn FnMut(&mut UiSession<Recorder>, usize, u64)>;
+    let report = |name: &str, c: Costs| eprintln!("{name:<34} per input {:7.3} ms ({:4} inputs) | per frame: frame {:7.3} ms, publish {:7.3} ms, total CPU {:7.3} ms ({:3} frames, {:3} published) | release {:8.2} ms",
+        c.input / c.inputs.max(1) as f64, c.inputs, c.frames / c.count.max(1) as f64, c.publish / c.count.max(1) as f64, (c.input + c.frames + c.publish) / c.count.max(1) as f64, c.count, c.published, c.release);
+    const SAMPLES: usize = 200;
+    for selected in [100usize, 5000] {
+        for rotate in [false, true] {
+            let (mut s, _) = crowded(selected);
+            let frame = s.vector_frame().unwrap();
+            let (from, to) = if rotate {
+                let [x, y] = frame.unit.map([0.5, 0.]);
+                ([x, y - f64::from(s.ruler_reach()) * 2.5], [x + 600., y + 300.])
+            } else { let corner = frame.unit.map([1., 1.]); (corner, [corner[0] + 400., corner[1] + 250.]) };
+            let costs = run(&mut s, SAMPLES, drag(from, to, SAMPLES));
+            report(&format!("{} {selected} paths", if rotate { "rotate" } else { "scale" }), costs);
+        }
+        let (mut s, layer) = crowded(selected);
+        let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let items = s.selected_vector_items().unwrap().items.clone();
+        let path = object.selected(&items).into_iter().next().unwrap();
+        let start = path.geometry.subpaths()[0].anchor(1).point();
+        let costs = run(&mut s, SAMPLES, drag(start, [start[0] + 300., start[1] + 200.], SAMPLES));
+        report(&format!("move {selected} paths"), costs);
+        let (mut s, layer) = crowded(selected);
+        let token = occurrence_token(layer);
+        let costs = run(&mut s, 120, Box::new(move |s: &mut UiSession<Recorder>, i: usize, _| {
+            let phase = if i == 0 { ContactPhase::Down } else if i + 1 == 120 { ContactPhase::Up } else { ContactPhase::Move };
+            s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(2. + i as f32 * 0.1) }) } }).unwrap();
+        }));
+        report(&format!("outline width scrub {selected} paths"), costs);
+        let (mut s, _) = crowded(selected);
+        let costs = run(&mut s, 120, Box::new(move |s: &mut UiSession<Recorder>, i: usize, _| {
+            let change = s.gesture([960., 600.], [960. + if i % 2 == 0 { 3. } else { -3. }, 600.], 1., 0.).unwrap();
+            std::hint::black_box(change);
+        }));
+        report(&format!("pan, {selected} paths selected"), costs);
+    }
+    let (mut s, layer) = crowded(1);
+    invoke(&mut s, CommandId::EditPoints);
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let path = object.selected(&s.selected_vector_items().unwrap().items).into_iter().next().unwrap();
+    let anchor = path.geometry.subpaths()[0].anchor(1).point();
+    let [ox, oy] = s.engine.document().scene().occurrence_offset64(layer);
+    let anchor = [anchor[0] + ox, anchor[1] + oy];
+    let costs = run(&mut s, SAMPLES, drag(anchor, [anchor[0] + 300., anchor[1] + 200.], SAMPLES));
+    report("edit points anchor drag, 1 path", costs);
+    for mode in [CommandId::EraseTouchedPart, CommandId::EraseWholePaths, CommandId::EraseToIntersection] {
+        let (mut s, _) = crowded(0);
+        invoke(&mut s, CommandId::Eraser);
+        invoke(&mut s, mode);
+        s.dispatch(UiAction::SetBrushSize { value: 64. }).unwrap();
+        let costs = run(&mut s, SAMPLES, drag([2000., 1500.], [4000., 2500.], SAMPLES));
+        report(&format!("eraser {mode:?}"), costs);
+    }
+}
+
+fn hatched_session(count: u64) -> (UiSession<Recorder>, OccurrenceHandle) {
+    let (mut s, layer) = vector_session();
+    let object = layer_core::authored::vector::VectorObject::from_records(crowded_hatching([1000., 1000.], count));
+    let edit = s.engine.document().vector_object_edit(layer, object).unwrap();
+    s.layer_edit(edit).unwrap();
+    s.frame(1, 1).unwrap();
+    (s, layer)
+}
+fn drag_in_bursts(s: &mut UiSession<Recorder>, first: u64, points: &[[f64; 2]], per_frame: usize) {
+    for (i, point) in points.iter().enumerate() {
+        let phase = if i == 0 { PenPhase::Down } else if i + 1 == points.len() { PenPhase::Up } else { PenPhase::Move };
+        let mut e = event(s, first + i as u64, phase, 0.5);
+        e.surface_position = surface_at(s, *point);
+        let revision = s.engine.document().revision;
+        s.pen(e);
+        if phase == PenPhase::Move { assert_eq!(s.engine.document().revision, revision, "a sample waits for the next frame"); }
+        if (i + 1) % per_frame == 0 || phase == PenPhase::Up {
+            let revision = s.engine.document().revision;
+            s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+            assert!(s.engine.document().revision <= revision + 1, "a frame previews once");
+        }
+    }
+}
+
+#[test]
+fn sample_bursts_preview_once_per_frame_and_commit_what_frame_by_frame_previews_commit() {
+    use layer_core::authored::vector::*;
+    let (mut s, layer) = hatched_session(400);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let original = object(&s);
+    let line = |from: [f64; 2], to: [f64; 2]| (0..=24).map(|i| { let t = f64::from(i) / 24.; [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t + 30. * (t * 7.).sin()] }).collect::<Vec<_>>();
+    let committed = |s: &mut UiSession<Recorder>, first: u64, points: &[[f64; 2]]| -> [VectorObject; 2] {
+        [1, 5].map(|per_frame| {
+            drag_in_bursts(s, first + per_frame as u64 * 100, points, per_frame);
+            let result = object(s);
+            s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+            s.frame(first * 1_000_000_000, first * 1_000_000_000).unwrap();
+            assert_eq!(object(s), original, "each gesture is one undo step");
+            result
+        })
+    };
+    invoke(&mut s, CommandId::Move);
+    let chosen: std::collections::BTreeSet<ItemId> = original.paths().filter(|(_, p)| { let [x0, y0, x1, y1] = p.bounds(); x0 > 300. && y0 > 300. && x1 < 700. && y1 < 700. }).map(|(_, p)| p.id).collect();
+    assert!(chosen.len() > 20);
+    s.select_vector_items(layer, chosen.clone()).unwrap();
+    s.frame(2, 2).unwrap();
+    let frame = s.vector_frame().unwrap();
+    let corner = frame.unit.map([1., 1.]);
+    let [scaled, scaled_in_bursts] = committed(&mut s, 1_000, &line(corner, [corner[0] + 150., corner[1] + 90.]));
+    assert_ne!(scaled, original);
+    assert_eq!(scaled, scaled_in_bursts, "scaling commits the same paths however samples share frames");
+    let [x, y] = frame.unit.map([0.5, 0.]);
+    let handle = [x, y - f64::from(s.ruler_reach()) * 2.5];
+    let [turned, turned_in_bursts] = committed(&mut s, 2_000, &line(handle, [handle[0] + 300., handle[1] + 200.]));
+    assert_ne!(turned, original);
+    assert_eq!(turned, turned_in_bursts, "rotating commits the same paths however samples share frames");
+    let anchor = original.selected(&chosen)[0].geometry.subpaths()[0].anchor(1).point();
+    s.select_vector_items(layer, [original.selected(&chosen)[0].id].into()).unwrap();
+    invoke(&mut s, CommandId::EditPoints);
+    let [edited, edited_in_bursts] = committed(&mut s, 3_000, &line(anchor, [anchor[0] + 60., anchor[1] + 40.]));
+    assert_ne!(edited, original);
+    assert_eq!(edited, edited_in_bursts, "an anchor drag commits the same path however samples share frames");
+    invoke(&mut s, CommandId::Eraser);
+    invoke(&mut s, CommandId::EraseToIntersection);
+    s.dispatch(UiAction::SetBrushSize { value: 12. }).unwrap();
+    let shapes = |o: &VectorObject| o.paths().map(|(_, p)| (p.geometry.clone(), p.style.clone())).collect::<Vec<_>>();
+    let [erased, erased_in_bursts] = committed(&mut s, 4_000, &line([250., 250.], [750., 700.]));
+    assert!(erased.path_count() != original.path_count() || shapes(&erased) != shapes(&original));
+    assert_eq!(shapes(&erased), shapes(&erased_in_bursts), "erasing cuts along every sample however samples share frames");
+    s.select_vector_items(layer, chosen.clone()).unwrap();
+    s.frame(3, 3).unwrap();
+    let token = occurrence_token(layer);
+    let scrub = |s: &mut UiSession<Recorder>, every: usize| {
+        for i in 0..12 {
+            let phase = if i == 0 { ContactPhase::Down } else if i == 11 { ContactPhase::Up } else { ContactPhase::Move };
+            let revision = s.engine.document().revision;
+            s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Set { layer: token, key: "path_width".into(), value: layer_core::EffectValue::Number(2. + i as f32) }) } }).unwrap();
+            if phase == ContactPhase::Move { assert_eq!(s.engine.document().revision, revision, "a width update waits for the next frame"); }
+            if i % every == 0 {
+                let revision = s.engine.document().revision;
+                s.frame(5_000 + i as u64, 5_000 + i as u64).unwrap();
+                assert!(s.engine.document().revision <= revision + 1, "a frame previews once");
+            }
+        }
+        let result = object(s);
+        s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+        s.frame(6_000, 6_000).unwrap();
+        result
+    };
+    let [widened, widened_in_bursts] = [1, 4].map(|every| scrub(&mut s, every));
+    assert!(widened.selected(&chosen).iter().all(|p| p.style.strokes().last().unwrap().width == 13.));
+    assert_eq!(widened, widened_in_bursts, "a width scrub commits its last value however updates share frames");
+}
+
+#[test]
+fn moving_or_turning_a_large_path_selection_republishes_nothing_until_release() {
+    let (mut s, layer) = hatched_session(2_000);
+    invoke(&mut s, CommandId::SelectAll);
+    s.frame(2, 2).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::ScaleOutlineWidths }).unwrap();
+    assert!(s.state.settings.keep_outline_widths);
+    for (first, scale) in [(100, false), (200, true)] {
+        let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let from = if scale { s.vector_frame().unwrap().unit.map([1., 1.]) } else {
+            object.paths().map(|(_, p)| p.geometry.subpaths()[0].anchor(0).point()).find(|p| p.iter().all(|v| (300. ..700.).contains(v))).unwrap()
+        };
+        let to = [from[0] + 80., from[1] + 50.];
+        let revision = s.engine.document().revision;
+        let mut published = None;
+        for i in 0..=20u64 {
+            let phase = if i == 0 { PenPhase::Down } else if i == 20 { PenPhase::Up } else { PenPhase::Move };
+            let t = i as f64 / 20.;
+            let mut e = event(&s, first + i, phase, 0.5);
+            e.surface_position = surface_at(&s, [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+            s.pen(e);
+            let change = s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+            if phase == PenPhase::Move {
+                assert_eq!(change.regions & (regions::DOCUMENT | regions::COMMANDS | regions::LAYOUT), 0, "sample {i} of the drag from {from:?}");
+                assert_eq!(*published.get_or_insert(s.workspace_model_revision()), s.workspace_model_revision(), "the menus, layers and Properties stay published as they were");
+            }
+        }
+        assert_ne!(s.engine.document().revision, revision, "the drag commits");
+        assert_ne!(published, Some(s.workspace_model_revision()), "release publishes the result");
+    }
+}

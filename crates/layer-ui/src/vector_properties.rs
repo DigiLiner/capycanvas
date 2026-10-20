@@ -1,6 +1,6 @@
 use super::*;
 use super::effects::{PropertyControl, PropertyKind};
-use layer_core::{EffectValue, authored::OccurrenceHandle, authored::vector::{Cap, Fill, FillRule, Join, Paint, PaintEntry, PathItem, Position, Record, Stroke, Style}};
+use layer_core::{EffectValue, authored::OccurrenceHandle, authored::vector::{Cap, Fill, FillRule, Join, Paint, PaintEntry, PathItem, Position, Stroke, Style}};
 use std::{collections::HashMap, sync::Arc};
 
 const FILL: &str = "path_fill";
@@ -19,8 +19,7 @@ const JOINS: [Join; 3] = [Join::Miter, Join::Round, Join::Bevel];
 
 pub(super) fn is_path_property(key: &str) -> bool { key.starts_with("path_") }
 
-fn values(path: &PathItem) -> [Option<EffectValue>; 9] {
-    let style = &path.style;
+fn values(style: &Style, fill_rule: FillRule) -> [Option<EffectValue>; 9] {
     let fill = style.entries.iter().find_map(|entry| if let PaintEntry::Fill(fill) = entry { Some(fill) } else { None });
     let outline = style.strokes().last();
     [
@@ -32,25 +31,32 @@ fn values(path: &PathItem) -> [Option<EffectValue>; 9] {
         outline.map(|stroke| EffectValue::Choice(CAPS.iter().position(|cap| *cap == stroke.cap).unwrap_or(0) as u32)),
         outline.map(|stroke| EffectValue::Choice(JOINS.iter().position(|join| *join == stroke.join).unwrap_or(0) as u32)),
         outline.map(|stroke| EffectValue::Number(stroke.miter_limit as f32)),
-        Some(EffectValue::Choice(RULES.iter().position(|rule| *rule == path.fill_rule).unwrap_or(0) as u32)),
+        Some(EffectValue::Choice(RULES.iter().position(|rule| *rule == fill_rule).unwrap_or(0) as u32)),
     ]
 }
 
-pub(super) fn controls(doc: &Document, layer: OccurrenceHandle, l: &Localizer) -> Vec<PropertyControl> {
-    let Some(selection) = doc.working.vector_items.as_ref().filter(|selection| selection.layer == layer) else { return Vec::new() };
-    let paths = doc.scene().vector_layer(layer).map(|object| object.selected(&selection.items)).unwrap_or_default();
-    let Some(path) = paths.first() else { return Vec::new() };
-    let front = values(path);
-    let mut mixed = [false; 9];
-    let mut seen: Vec<*const Style> = vec![Arc::as_ptr(&path.style)];
-    for other in &paths[1..] {
-        mixed[8] |= other.fill_rule != path.fill_rule;
-        if seen.contains(&Arc::as_ptr(&other.style)) { continue; }
-        if seen.len() < 64 { seen.push(Arc::as_ptr(&other.style)); }
-        for (flag, (a, b)) in mixed.iter_mut().zip(front.iter().zip(values(other))).take(8) { *flag |= *a != b; }
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct PathStyles { style: Arc<Style>, fill_rule: FillRule, mixed: [bool; 9] }
+impl PathStyles {
+    pub(super) fn of<'a>(mut paths: impl Iterator<Item = &'a PathItem>) -> Option<Self> {
+        let path = paths.next()?;
+        let front = values(&path.style, path.fill_rule);
+        let mut mixed = [false; 9];
+        let mut seen: Vec<*const Style> = vec![Arc::as_ptr(&path.style)];
+        for other in paths {
+            mixed[8] |= other.fill_rule != path.fill_rule;
+            if seen.contains(&Arc::as_ptr(&other.style)) { continue; }
+            if seen.len() < 64 { seen.push(Arc::as_ptr(&other.style)); }
+            for (flag, (a, b)) in mixed.iter_mut().zip(front.iter().zip(values(&other.style, other.fill_rule))).take(8) { *flag |= *a != b; }
+        }
+        Some(Self { style: path.style.clone(), fill_rule: path.fill_rule, mixed })
     }
-    let fill = path.style.entries.iter().find_map(|entry| if let PaintEntry::Fill(fill) = entry { fill.paint.rgb() } else { None });
-    let outline = path.style.strokes().last();
+}
+
+pub(super) fn controls(paths: &PathStyles, l: &Localizer) -> Vec<PropertyControl> {
+    let PathStyles { style, fill_rule, mixed } = paths;
+    let fill = style.entries.iter().find_map(|entry| if let PaintEntry::Fill(fill) = entry { fill.paint.rgb() } else { None });
+    let outline = style.strokes().last();
     let unchanged = |key: &str, label: MessageId, kind: PropertyKind, value: EffectValue| {
         let at = KEYS.iter().position(|k| *k == key).unwrap();
         let label = if mixed[at] {
@@ -64,7 +70,7 @@ pub(super) fn controls(doc: &Document, layer: OccurrenceHandle, l: &Localizer) -
     controls.extend(fill.map(|color| unchanged(FILL_COLOR, MessageId::RESOURCES_PATH_FILL_COLOR, PropertyKind::Color { opaque: false }, EffectValue::Color(color))));
     if fill.is_some() {
         let rules = [MessageId::RESOURCES_PATH_OVERLAPS_FILLED, MessageId::RESOURCES_PATH_OVERLAPS_HOLES].map(|id| l.text(id)).into();
-        controls.push(unchanged(OVERLAPS, MessageId::RESOURCES_PATH_OVERLAPS, PropertyKind::Choice { options: rules }, EffectValue::Choice(RULES.iter().position(|rule| *rule == path.fill_rule).unwrap_or(0) as u32)));
+        controls.push(unchanged(OVERLAPS, MessageId::RESOURCES_PATH_OVERLAPS, PropertyKind::Choice { options: rules }, EffectValue::Choice(RULES.iter().position(|rule| rule == fill_rule).unwrap_or(0) as u32)));
     }
     controls.push(unchanged(OUTLINE, MessageId::RESOURCES_PATH_OUTLINE, PropertyKind::Toggle, EffectValue::Toggle(outline.is_some())));
     if let Some(stroke) = outline {
@@ -126,17 +132,15 @@ impl<R: CanvasRenderer> UiSession<R> {
         let defaults = (Paint::color(self.state.colors.background), Paint::color(self.state.colors.foreground), f64::from(self.state.brush.diameter));
         let rule = match (key, value) { (OVERLAPS, EffectValue::Choice(index)) => Some(*RULES.get(*index as usize).ok_or("Unknown choice")?), (OVERLAPS, _) => return Err("Unknown choice".into()), _ => None };
         let mut styles: HashMap<usize, Option<Arc<Style>>> = HashMap::new();
-        let changes: Vec<(Position, Option<Record>)> = object.positions(&selection.items).into_iter()
-            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 }))
-            .filter_map(|position| {
-                let path = object.record(position)?.path()?;
-                if let Some(rule) = rule { return (path.fill_rule != rule).then(|| (position, Some(Record::Path(PathItem { fill_rule: rule, ..path.clone() })))); }
+        let changes: Vec<(Position, PathItem)> = object.selected_paths(&selection.items).into_iter()
+            .filter_map(|(position, path)| {
+                if let Some(rule) = rule { return (path.fill_rule != rule).then(|| (position, PathItem { fill_rule: rule, ..path.clone() })); }
                 let style = styles.entry(Arc::as_ptr(&path.style) as usize)
                     .or_insert_with(|| restyled(&path.style, key, value, (&defaults.0, &defaults.1, defaults.2)).map(Arc::new)).clone()?;
-                Some((position, Some(Record::Path(path.with_style(style)))))
+                Some((position, path.with_style(style)))
             }).collect();
         if changes.is_empty() { return Ok(()); }
-        let edit = document.vector_object_edit(layer, object.replace(changes)).map_err(|e| e.to_string())?;
+        let edit = document.vector_object_edit(layer, object.with_paths(changes).map_err(str::to_string)?).map_err(|e| e.to_string())?;
         if self.effect_gesture.is_some() { self.engine.preview_edit(edit).map_err(|e| e.to_string()) } else { self.layer_edit(edit) }
     }
 }

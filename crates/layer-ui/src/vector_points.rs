@@ -13,7 +13,7 @@ pub(super) struct PointRef { path: ItemId, at: AnchorRef }
 enum Part { Anchor(PointRef), Handle(PointRef, bool), Segment(ItemId, SegmentHit) }
 
 enum Gesture {
-    Drag { layer: OccurrenceHandle, part: Part, press: [f64; 2], original: VectorObject, edited: Option<VectorObject> },
+    Drag { layer: OccurrenceHandle, part: Part, press: [f64; 2], original: VectorObject, moved: bool, latest: Option<([f64; 2], Modifiers)>, edited: Option<VectorObject> },
     Marquee { layer: OccurrenceHandle, start: [f64; 2], end: [f64; 2], adding: bool },
 }
 
@@ -34,7 +34,11 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn points_layer(&self) -> Option<OccurrenceHandle> {
         self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::EditPoints)
     }
-    fn edited_paths(&self) -> BTreeSet<ItemId> { self.selected_vector_items().map(|selection| (*selection.items).clone()).unwrap_or_default() }
+    fn edited_paths<'a>(&self, object: &'a VectorObject) -> Vec<&'a PathItem> {
+        let mut paths: Vec<&PathItem> = self.selected_vector_items().map(|selection| object.selected_paths(&selection.items).into_iter().map(|(_, path)| path).collect()).unwrap_or_default();
+        paths.sort_by_key(|path| path.id);
+        paths
+    }
     fn local_point(&self, layer: OccurrenceHandle, p: Point) -> [f64; 2] {
         let [ox, oy] = self.engine.document().scene().occurrence_offset64(layer);
         [f64::from(p.x) - ox, f64::from(p.y) - oy]
@@ -43,7 +47,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let handles = self.vector_points.selected.iter().filter_map(|r| anchor_of(object, *r).map(|a| (*r, a)))
             .flat_map(|(r, a)| [(Part::Handle(r, false), a.incoming(), a.in_handle()), (Part::Handle(r, true), a.outgoing(), a.out_handle())])
             .filter(|(_, _, offset)| *offset != [0.; 2]).map(|(part, at, _)| (part, at));
-        let paths: Vec<&PathItem> = self.edited_paths().into_iter().filter_map(|id| path_of(object, id)).collect();
+        let paths = self.edited_paths(object);
         let anchors = paths.iter().flat_map(|path| path.geometry.subpaths().iter().enumerate().flat_map(move |(s, subpath)| subpath.anchors().enumerate()
             .map(move |(i, a)| (Part::Anchor(PointRef { path: path.id, at: AnchorRef { subpath: s as u32, anchor: i as u32 } }), a.point()))));
         handles.chain(anchors).map(|(part, at)| (distance(at, point), part)).filter(|(d, _)| *d <= reach)
@@ -80,29 +84,39 @@ impl<R: CanvasRenderer> UiSession<R> {
                         self.vector_points.selected = [r].into();
                     }
                 }
-                self.vector_points.gesture = Some(Gesture::Drag { layer, part, press: point, original: object, edited: None });
+                self.vector_points.gesture = Some(Gesture::Drag { layer, part, press: point, original: object, moved: false, latest: None, edited: None });
             }
             PenPhase::Move | PenPhase::Up => {
+                let (modifiers, reach) = (self.interaction.modifiers, REACH * self.document_per_surface_pixel());
                 match &mut self.vector_points.gesture {
                     Some(Gesture::Marquee { end, .. }) => *end = point,
-                    Some(Gesture::Drag { .. }) => self.drag_vector_points(point)?,
+                    Some(Gesture::Drag { press, moved, latest, .. }) => {
+                        *moved |= distance(point, *press) >= reach * 0.5;
+                        *latest = Some((point, modifiers));
+                    }
                     None => return Ok(false),
                 }
-                if event.phase == PenPhase::Up { self.finish_vector_points()?; }
+                if event.phase == PenPhase::Up {
+                    self.sync_vector_points()?;
+                    self.finish_vector_points()?;
+                    self.layer_interaction.changed = true;
+                }
             }
             PenPhase::Cancel => { self.cancel_vector_points(); }
             PenPhase::Hover => return Ok(false),
         }
-        self.layer_interaction.changed = true;
+        if event.phase == PenPhase::Down { self.layer_interaction.changed = true; }
         Ok(true)
     }
-    fn drag_vector_points(&mut self, point: [f64; 2]) -> Result<(), String> {
-        let modifiers = self.interaction.modifiers;
-        let reach = REACH * self.document_per_surface_pixel();
+    pub(super) fn sync_vector_points(&mut self) -> Result<(), String> {
+        let Some(Gesture::Drag { latest, .. }) = &mut self.vector_points.gesture else { return Ok(()) };
+        let Some((point, modifiers)) = latest.take() else { return Ok(()) };
+        self.drag_vector_points(point, modifiers)
+    }
+    fn drag_vector_points(&mut self, point: [f64; 2], modifiers: Modifiers) -> Result<(), String> {
         let selected = self.vector_points.selected.clone();
-        let Some(Gesture::Drag { layer, part, press, original, edited }) = &mut self.vector_points.gesture else { return Ok(()) };
+        let Some(Gesture::Drag { layer, part, press, original, moved: true, edited, .. }) = &mut self.vector_points.gesture else { return Ok(()) };
         let mut delta = [point[0] - press[0], point[1] - press[1]];
-        if edited.is_none() && delta[0].hypot(delta[1]) < reach * 0.5 { return Ok(()); }
         if modifiers.shift && matches!(part, Part::Anchor(_)) {
             let end = FigureShape::Line.constrained_end(Point { x: 0., y: 0. }, Point { x: delta[0] as f32, y: delta[1] as f32 });
             delta = [f64::from(end.x), f64::from(end.y)];
@@ -146,13 +160,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 ]);
             }
         }
-        let mut records = Vec::new();
+        let mut paths = Vec::new();
         for (id, anchors) in changes {
             let Some(position) = original.find(id) else { continue };
-            let path = path_of(original, id).ok_or("The path was removed")?.with_anchors(anchors).map_err(str::to_string)?;
-            records.push((position, Some(Record::Path(path))));
+            paths.push((position, path_of(original, id).ok_or("The path was removed")?.with_anchors(anchors).map_err(str::to_string)?));
         }
-        let result = original.replace(records);
+        let result = original.with_paths(paths).map_err(str::to_string)?;
         *edited = Some(result.clone());
         let edit = self.engine.document().vector_object_edit(*layer, result).map_err(|e| e.to_string())?;
         self.engine.preview_edit(edit).map_err(|e| e.to_string())
@@ -181,7 +194,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let area = [start[0].min(end[0]), start[1].min(end[1]), start[0].max(end[0]), start[1].max(end[1])];
                 let inside = |p: [f64; 2]| p[0] >= area[0] && p[0] <= area[2] && p[1] >= area[1] && p[1] <= area[3];
                 let mut found = Vec::new();
-                for path in self.edited_paths().into_iter().filter_map(|id| path_of(object, id)) {
+                for path in self.edited_paths(object) {
                     for (s, subpath) in path.geometry.subpaths().iter().enumerate() {
                         found.extend(subpath.anchors().enumerate().filter(|(_, a)| inside(a.point())).map(|(i, _)| PointRef { path: path.id, at: AnchorRef { subpath: s as u32, anchor: i as u32 } }));
                     }
@@ -211,7 +224,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn selected_points(&self) -> BTreeMap<ItemId, BTreeSet<AnchorRef>> {
         let mut grouped: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
         if self.points_layer().is_none() { return grouped; }
-        let edited = self.edited_paths();
+        let edited = self.selected_vector_items().map(|selection| selection.items.clone()).unwrap_or_default();
         for r in self.vector_points.selected.iter().filter(|r| edited.contains(&r.path)) { grouped.entry(r.path).or_default().insert(r.at); }
         grouped
     }
@@ -254,8 +267,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             for i in 0..4 { segments.push(CursorSegment { from: corners[i], to: corners[(i + 1) % 4], distance: 0., marker: 1., scale: 1. }); }
         };
         let mut handles = Vec::new();
-        for id in self.edited_paths() {
-            let Some(path) = path_of(object, id) else { continue };
+        for path in self.edited_paths(object) {
+            let id = path.id;
             for (s, subpath) in path.geometry.subpaths().iter().enumerate() {
                 for (i, anchor) in subpath.anchors().enumerate() {
                     let r = PointRef { path: id, at: AnchorRef { subpath: s as u32, anchor: i as u32 } };

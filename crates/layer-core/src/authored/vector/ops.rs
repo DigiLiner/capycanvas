@@ -248,19 +248,12 @@ impl VectorObject {
     pub fn holds_only_known_paths(&self) -> bool {
         self.slots().is_empty() && self.records().all(|(_, record)| record.path().is_some_and(PathItem::is_known))
     }
-    fn path_positions(&self, ids: &BTreeSet<ItemId>) -> Vec<(Position, &PathItem)> {
-        let mut found: Vec<(Position, &PathItem)> = self.positions(ids).into_iter()
-            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 }))
-            .filter_map(|position| Some((position, self.record(position)?.path()?))).collect();
-        found.sort_by_key(|(position, _)| *position);
-        found
-    }
     pub fn map_paths(&self, ids: &BTreeSet<ItemId>, map: impl Fn(&PathItem) -> Result<Option<PathItem>, &'static str>) -> Result<Option<Self>, &'static str> {
         let mut changes = Vec::new();
-        for (position, path) in self.path_positions(ids) {
-            if let Some(changed) = map(path)? { changes.push((position, Some(Record::Path(changed)))); }
+        for (position, path) in self.selected_paths(ids) {
+            if let Some(changed) = map(path)? { changes.push((position, changed)); }
         }
-        Ok((!changes.is_empty()).then(|| self.replace(changes)))
+        (!changes.is_empty()).then(|| self.with_paths(changes)).transpose()
     }
     fn with_fresh_ids(&self, pieces: Vec<PathItem>, taken: &mut BTreeSet<ItemId>) -> Vec<Record> {
         pieces.into_iter().enumerate().map(|(i, piece)| {
@@ -273,7 +266,7 @@ impl VectorObject {
         let ids: BTreeSet<ItemId> = cuts.keys().copied().collect();
         let mut taken = BTreeSet::new();
         let mut changes = BTreeMap::new();
-        for (position, path) in self.path_positions(&ids) {
+        for (position, path) in self.selected_paths(&ids) {
             let pieces = path.split_at(&cuts[&path.id])?;
             if pieces.len() == 1 && pieces[0].geometry == path.geometry { continue; }
             changes.insert(position, self.with_fresh_ids(pieces, &mut taken));
@@ -283,7 +276,7 @@ impl VectorObject {
         Ok(Some((self.splice(changes), selected)))
     }
     pub fn join_paths(&self, ids: &BTreeSet<ItemId>, tolerance: f64) -> Result<Option<(Self, ItemId)>, &'static str> {
-        let found = self.path_positions(ids);
+        let found = self.selected_paths(ids);
         let joined = match found[..] {
             [(position, path)] if path.can_close() => (path.closed()?, vec![position]),
             [(front, a), (back, b)] if a.joinable() && b.joinable() => (a.joined(b, tolerance)?, vec![front, back]),
@@ -296,7 +289,7 @@ impl VectorObject {
         Ok(Some((self.splice(changes), id)))
     }
     pub fn compound_paths(&self, ids: &BTreeSet<ItemId>) -> Result<Option<(Self, ItemId)>, &'static str> {
-        let found = self.path_positions(ids);
+        let found = self.selected_paths(ids);
         if found.len() < 2 { return Ok(None); }
         let back = found.iter().rev().map(|(_, path)| (*path).clone()).collect::<Vec<_>>();
         let combined = PathItem::compound(&back)?;
@@ -308,7 +301,7 @@ impl VectorObject {
     pub fn release_paths(&self, ids: &BTreeSet<ItemId>) -> Result<Option<(Self, BTreeSet<ItemId>)>, &'static str> {
         let mut taken = BTreeSet::new();
         let mut changes = BTreeMap::new();
-        for (position, path) in self.path_positions(ids).into_iter().filter(|(_, path)| path.geometry.subpaths().len() > 1) {
+        for (position, path) in self.selected_paths(ids).into_iter().filter(|(_, path)| path.geometry.subpaths().len() > 1) {
             changes.insert(position, self.with_fresh_ids(path.released()?, &mut taken));
         }
         if changes.is_empty() { return Ok(None); }

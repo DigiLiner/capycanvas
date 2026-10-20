@@ -183,3 +183,27 @@ fn joining_or_combining_onto_a_zero_width_outline_keeps_the_other_widths() {
     assert!(near(width(&compound, 0, 0.5), [0., 0.]) && near(width(&compound, 1, 0.5), [4., 4.]), "{:?}", compound.style);
     assert_eq!(inked.joined(&hairless, 0.5).unwrap().style.strokes().next().unwrap().width, 4., "a wider front path keeps its own width");
 }
+
+#[test]
+fn replacing_paths_in_place_matches_a_full_replace_and_needs_no_revalidation() {
+    let line = |id: u64| Record::Path(path(id, &[[id as f64, 0.], [id as f64 + 5., 9.]], false, 2., None));
+    let chunk = |ids: std::ops::Range<u64>| Resource::new(Arc::new(VectorChunk::new(ids.map(line).collect())));
+    let object = VectorObject::from_chunks(vec![chunk(1..11), chunk(11..21), chunk(21..81), chunk(81..87), chunk(87..91)]);
+    object.validate().unwrap();
+    let ids: BTreeSet<ItemId> = [12, 15, 40, 41, 88].map(ItemId).into();
+    let affine = Affine64([1.5, 0.2, -0.1, 0.8, 30., -12.]);
+    let transformed = object.transform_items(&ids, affine, true).unwrap();
+    let replaced = object.replace(object.selected_paths(&ids).into_iter().map(|(p, path)| (p, Some(Record::Path(path.transformed(affine, true).unwrap())))).collect::<Vec<_>>());
+    assert_eq!(transformed, replaced, "the same records as a full replace");
+    let sizes = |o: &VectorObject| o.chunks().iter().map(|c| c.records().len()).collect::<Vec<_>>();
+    assert_eq!((sizes(&transformed), sizes(&replaced)), (vec![20, 60, 10], vec![20, 60, 10]), "small edited chunks join their neighbours as a full replace joins them");
+    assert_eq!(transformed.root.valid.get(), Some(&Ok(())), "an in-place edit of a valid object needs no validation pass");
+    assert_eq!(replaced.root.valid.get(), None);
+    assert!(ids.iter().all(|id| transformed.find(*id).is_some_and(|p| transformed.record(p).and_then(Record::id) == Some(*id))));
+    let (position, first) = object.selected_paths(&ids)[0];
+    assert!(object.with_paths([(position, PathItem { id: ItemId(10_000), ..first.clone() })]).is_err(), "a replacement keeps its identity");
+    let broken = PathItem { style: Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(paint(), -1.))])), ..first.clone() };
+    let invalid = object.with_paths([(position, broken)]).unwrap();
+    assert_eq!(invalid.root.valid.get(), None);
+    assert!(invalid.validate().is_err(), "an invalid replacement is still refused");
+}

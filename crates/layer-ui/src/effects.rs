@@ -675,7 +675,7 @@ const LAYER_COLOR_MODES: [layer_core::color::LayerColorMode; 3] = [
     layer_core::color::LayerColorMode::Grayscale,
     layer_core::color::LayerColorMode::TwoTone,
 ];
-pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBehavior, papers: &crate::paper_library::PaperLibrary, l: &Localizer) -> LayerPropertiesView {
+pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBehavior, papers: &crate::paper_library::PaperLibrary, paths: Option<&super::vector_properties::PathStyles>, l: &Localizer) -> LayerPropertiesView {
     let scene = doc.scene();
     let Some((handle, layer)) = doc.working.occurrence.and_then(|handle| scene.occurrence(handle).map(|layer| (handle, layer))) else {
         return LayerPropertiesView::default();
@@ -759,7 +759,7 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
             controls.push(PropertyControl::new("color_mode", &l.text(MessageId::RESOURCES_LAYER_COLOR_MODE), PropertyKind::Choice { options },
                 EffectValue::Choice(value), EffectValue::Choice(0)));
         }
-        controls.extend(super::vector_properties::controls(doc, handle, l));
+        controls.extend(paths.map(|paths| super::vector_properties::controls(paths, l)).unwrap_or_default());
         String::new()
     };
     LayerPropertiesView {
@@ -897,9 +897,24 @@ pub(super) struct EffectGesture {
     layer_opacity: bool,
     key: String,
     detached_curve_point: bool,
+    latest: Option<EffectAction>,
+}
+impl EffectAction {
+    fn sets_path_property(&self) -> bool {
+        matches!(self, Self::Set { key, .. } | Self::Number { key, operation: NumericOperation::Value { .. }, .. } if super::vector_properties::is_path_property(key))
+    }
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
+    pub(super) fn effect_preview_waiting(&self) -> bool { self.effect_gesture.as_ref().is_some_and(|gesture| gesture.latest.is_some()) }
+    pub(super) fn apply_latest_effect(&mut self) -> Result<bool, String> {
+        let Some(action) = self.effect_gesture.as_mut().and_then(|gesture| gesture.latest.take()) else { return Ok(false) };
+        if let Err(error) = self.effect_action(action) {
+            self.cancel_effect_gesture()?;
+            return Err(error);
+        }
+        Ok(true)
+    }
     pub(super) fn sync_paper_preview(&mut self, now_ns: u64) {
         let dragging = self.effect_gesture.as_ref().filter(|gesture| gesture.key == paper::SCALE).map(|gesture| gesture.original.occurrence());
         if let Some(overlay) = self.paper_preview.update(self.engine.document(), self.engine.backend(), dragging, now_ns) {
@@ -990,6 +1005,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 layer_opacity,
                 key: key.clone(),
                 detached_curve_point: false,
+                latest: None,
             });
         } else if !self
             .effect_gesture
@@ -1007,9 +1023,17 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.cancel_effect_gesture()?;
             return Ok(());
         }
-        if let Err(error) = self.effect_action(action) {
-            self.cancel_effect_gesture()?;
-            return Err(error);
+        let gesture = self.effect_gesture.as_mut().unwrap();
+        let earlier = gesture.latest.take().filter(|_| !action.sets_path_property());
+        if phase == ContactPhase::Move && action.sets_path_property() {
+            gesture.latest = Some(action);
+            return Ok(());
+        }
+        for action in earlier.into_iter().chain([action]) {
+            if let Err(error) = self.effect_action(action) {
+                self.cancel_effect_gesture()?;
+                return Err(error);
+            }
         }
         if phase == ContactPhase::Up {
             let gesture = self.effect_gesture.take().unwrap();
@@ -1371,7 +1395,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             EffectAction::UseCurrentColor { layer, ref key }
             | EffectAction::Number { layer, ref key, .. }
             | EffectAction::Reset { layer, ref key } => {
-                let view = properties(self.engine.document(), self.state.settings.selection_painting, &self.papers, &self.state.localization);
+                let view = properties(self.engine.document(), self.state.settings.selection_painting, &self.papers, self.path_styles().as_ref(), &self.state.localization);
                 if view.layer != Some(layer) {
                     return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_SELECT_PROPERTY_LAYER).to_string());
                 }
@@ -1518,7 +1542,7 @@ mod resource_tests {
             let mut doc = Document::new(layer_core::authored::PortableId::random(), 32, 32, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
             let fill = occurrence_handle(2).unwrap();
             doc.apply(doc.select_occurrence_edit(fill).unwrap()).unwrap();
-            assert_eq!(properties(&doc, Default::default(), &Default::default(), &l).title, paper_title);
+            assert_eq!(properties(&doc, Default::default(), &Default::default(), None, &l).title, paper_title);
             for (kind, name, expected) in [
                 (LayerKind::Paint, "Paper", "Paper"),
                 (LayerKind::Object, "Photographs", "Photographs"),
@@ -1545,7 +1569,7 @@ mod resource_tests {
                     }
                 };
                 *selected.artwork.occurrences.get_mut(fill).unwrap() = layer_core::authored::Occurrence::new(content, name);
-                let view = properties(&selected, Default::default(), &Default::default(), &l);
+                let view = properties(&selected, Default::default(), &Default::default(), None, &l);
                 assert_eq!(view.title, expected);
                 assert_eq!(view.name, name);
                 let layer_type = match kind {

@@ -90,6 +90,11 @@ pub struct OccurrenceDropPlan {
 }
 
 impl Document {
+    pub fn without_path_selection(&self) -> Self {
+        let mut document = self.clone();
+        document.working.vector_items = None;
+        document
+    }
     pub fn group_blend_refusal(&self,id:OccurrenceHandle,blend:crate::LayerBlend)->Option<DocumentError> {
         let scene=self.scene();let Some(original)=scene.occurrence(id) else{return Some(DocumentError::MissingOccurrence(id));};
         if !matches!(original.content,OccurrenceContent::Stack(_)){return Some(invalid("Choose a group"));}
@@ -147,7 +152,7 @@ impl Document {
         if clipping_gap(scene,scene.children(parent),index){Attachment::Clip}else{Attachment::None}
     }
     pub(crate) fn checked_relationship_edit(&self,edit:Edit,changed:&[OccurrenceHandle])->Result<Edit,DocumentError> {
-        let mut candidate=self.clone();candidate.apply(edit.clone())?;let old=self.scene();let new=candidate.scene();
+        let mut candidate=self.without_path_selection();candidate.apply(edit.clone())?;let old=self.scene();let new=candidate.scene();
         for &h in old.order() {
             if old.attached_effects(h)!=new.attached_effects(h)&&self.is_locked(h){return Err(DocumentError::ProtectedOccurrence(h));}
             if !changed.contains(&h)&&old.attachment_target(h)!=new.attachment_target(h){return Err(invalid("Keep unrelated layers with their current clipping base and effect owner"));}
@@ -221,7 +226,7 @@ impl Document {
         if scene.parent(id)==parent {index-=siblings[..index].iter().filter(|h|moving.contains(h)).count();}
         let edit=self.reparent_occurrence_edit(id,parent,index)?;
         if into{return Ok(OccurrenceDropPlan{edit,target,position});}
-        let mut candidate=self.clone();candidate.apply(edit.clone())?;
+        let mut candidate=self.without_path_selection();candidate.apply(edit.clone())?;
         let (target,position)=drop_gap(candidate.scene(),&moving)?;
         Ok(OccurrenceDropPlan{edit,target,position})
     }
@@ -237,7 +242,7 @@ impl Document {
         let mut units: Vec<_> = roots.iter().copied().filter(|id|
             !roots.iter().any(|other| other != id && self.relationship_roots(&[*other]).contains(id))).collect();
         if position != OccurrenceDropPosition::Above { units.reverse(); }
-        let mut candidate = self.clone();
+        let mut candidate = self.without_path_selection();
         let mut edits = Vec::new();
         for id in units {
             let plan = candidate.drop_occurrence_edit(id, target, position)?;

@@ -1,6 +1,6 @@
 use super::{Affine64, PortableId, Resource};
 use crate::color::RgbColor;
-use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::{BuildHasherDefault, Hasher}, sync::{Arc, OnceLock}};
 
 mod erase;
 mod index;
@@ -20,6 +20,15 @@ pub struct ItemId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Arrange { Front, Forward, Backward, Back }
+
+#[derive(Default)]
+struct IdHasher(u64);
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 { self.0 }
+    fn write(&mut self, bytes: &[u8]) { for byte in bytes { self.write_u64(u64::from(*byte) ^ self.0.rotate_left(8)); } }
+    fn write_u64(&mut self, value: u64) { self.0 = value.wrapping_mul(0x9e37_79b9_7f4a_7c15); }
+}
+type IdSet = HashSet<ItemId, BuildHasherDefault<IdHasher>>;
 impl ItemId {
     pub fn random() -> Self {
         loop {
@@ -535,6 +544,7 @@ pub fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
 const DUPLICATE: &str = "Duplicate item identity";
 const UNBALANCED: &str = "Unbalanced end marker";
 const CONTAINED: &str = "Contents of unknown containers stay uninterpreted";
+const REPLACED: &str = "A replaced path keeps its identity and place";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Nesting { net: i64, low: i64, deepest_path: Option<i64> }
@@ -556,7 +566,7 @@ impl Nesting {
 pub struct VectorChunk {
     records: Box<[Record]>,
     summary: ChunkSummary,
-    ids: Box<[ItemId]>,
+    ids: Box<[(ItemId, u32)]>,
     nesting: Nesting,
     local: Result<(), &'static str>,
     encoded_len: OnceLock<usize>,
@@ -565,17 +575,32 @@ impl PartialEq for VectorChunk { fn eq(&self, other: &Self) -> bool { self.recor
 impl VectorChunk {
     pub fn new(records: Vec<Record>) -> Self {
         let summary = ChunkSummary::of(&records);
-        let mut ids: Vec<ItemId> = records.iter().filter_map(Record::id).collect();
+        let mut ids: Vec<(ItemId, u32)> = records.iter().enumerate().filter_map(|(index, record)| Some((record.id()?, index as u32))).collect();
         ids.sort_unstable();
         let local = records.iter().filter_map(Record::path).try_for_each(PathItem::validate)
-            .and_then(|()| if ids.windows(2).any(|pair| pair[0] == pair[1]) { Err(DUPLICATE) } else { Ok(()) });
+            .and_then(|()| if ids.windows(2).any(|pair| pair[0].0 == pair[1].0) { Err(DUPLICATE) } else { Ok(()) });
         Self { nesting: Nesting::of(&records), records: records.into(), summary, ids: ids.into(), local, encoded_len: OnceLock::new() }
+    }
+    fn with_paths(&self, paths: Vec<(usize, PathItem)>) -> Result<Self, &'static str> {
+        let mut records = self.records.to_vec();
+        let mut local = self.local;
+        for (index, path) in paths {
+            if records.get(index).and_then(Record::path).is_none_or(|old| old.id != path.id) { return Err(REPLACED); }
+            local = local.and_then(|()| path.validate());
+            records[index] = Record::Path(path);
+        }
+        if self.local.is_err() { return Ok(Self::new(records)); }
+        Ok(Self { summary: ChunkSummary::of(&records), records: records.into(), ids: self.ids.clone(), nesting: self.nesting, local, encoded_len: OnceLock::new() })
     }
     pub fn encoded_len(&self) -> Option<usize> { self.encoded_len.get().copied() }
     pub fn note_encoded_len(&self, length: usize) { let _ = self.encoded_len.set(length); }
     pub fn records(&self) -> &[Record] { &self.records }
     pub fn summary(&self) -> &ChunkSummary { &self.summary }
-    pub fn contains(&self, id: ItemId) -> bool { self.ids.binary_search(&id).is_ok() }
+    fn index_of(&self, id: ItemId) -> Option<usize> {
+        let at = self.ids.partition_point(|(other, _)| *other < id);
+        self.ids.get(at).filter(|(other, _)| *other == id).map(|(_, index)| *index as usize)
+    }
+    pub fn contains(&self, id: ItemId) -> bool { self.index_of(id).is_some() }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -626,7 +651,7 @@ impl VectorObject {
             let mut ids = HashSet::with_capacity(self.record_count());
             for chunk in self.chunks() {
                 chunk.local?;
-                if !chunk.ids.iter().all(|id| ids.insert(*id)) { return Err(DUPLICATE); }
+                if !chunk.ids.iter().all(|(id, _)| ids.insert(*id)) { return Err(DUPLICATE); }
             }
             Ok(())
         })
@@ -654,41 +679,50 @@ impl VectorObject {
         for chunk in self.chunks() {
             if present.insert(key(chunk)) && before.contains(&key(chunk)) { kept.push(chunk); } else { added.push(chunk); }
         }
-        let removed: HashSet<ItemId> = previous.chunks().iter().filter(|chunk| !present.contains(&key(chunk)))
-            .flat_map(|chunk| chunk.ids.iter().copied()).collect();
-        let mut fresh = HashSet::new();
-        let mut unseen = Vec::new();
+        let mut removed: Vec<ItemId> = previous.chunks().iter().filter(|chunk| !present.contains(&key(chunk)))
+            .flat_map(|chunk| chunk.ids.iter().map(|(id, _)| *id)).collect();
+        removed.sort_unstable();
+        let mut fresh = Vec::new();
         for chunk in added {
             chunk.local?;
-            for &id in chunk.ids.iter() {
-                if !fresh.insert(id) { return Err(DUPLICATE); }
-                if !removed.contains(&id) { unseen.push(id); }
-            }
+            fresh.extend(chunk.ids.iter().map(|(id, _)| *id));
         }
+        fresh.sort_unstable();
+        if fresh.windows(2).any(|pair| pair[0] == pair[1]) { return Err(DUPLICATE); }
+        let unseen: Vec<ItemId> = fresh.into_iter().filter(|id| removed.binary_search(id).is_err()).collect();
         let kept_ids: usize = kept.iter().map(|chunk| chunk.ids.len()).sum();
         let collides = if unseen.len().saturating_mul(kept.len()) <= kept_ids {
             unseen.iter().any(|&id| kept.iter().any(|chunk| chunk.contains(id)))
         } else {
-            let unseen: HashSet<ItemId> = unseen.into_iter().collect();
-            kept.iter().any(|chunk| chunk.ids.iter().any(|id| unseen.contains(id)))
+            kept.iter().any(|chunk| chunk.ids.iter().any(|(id, _)| unseen.binary_search(id).is_ok()))
         };
         if collides { Err(DUPLICATE) } else { Ok(()) }
     }
     pub fn contains(&self, id: ItemId) -> bool { self.chunks().iter().any(|chunk| chunk.contains(id)) }
     pub fn find(&self, id: ItemId) -> Option<Position> {
-        let chunk = self.chunks().iter().position(|chunk| chunk.contains(id))?;
-        let index = self.chunks()[chunk].records().iter().position(|record| record.id() == Some(id))?;
-        Some(Position { chunk: chunk as u32, index: index as u32 })
+        self.chunks().iter().enumerate().find_map(|(chunk, records)| Some(Position { chunk: chunk as u32, index: records.index_of(id)? as u32 }))
+    }
+    fn located(&self, ids: &BTreeSet<ItemId>) -> Vec<Position> {
+        if ids.len().saturating_mul(self.chunks().len()) <= self.record_count() {
+            ids.iter().filter_map(|&id| self.find(id)).collect()
+        } else {
+            let ids: IdSet = ids.iter().copied().collect();
+            self.chunks().iter().enumerate().flat_map(|(chunk, records)| records.ids.iter().filter(|(id, _)| ids.contains(id))
+                .map(move |&(_, index)| Position { chunk: chunk as u32, index })).collect()
+        }
     }
     pub fn positions(&self, ids: &BTreeSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
         let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        let mut note = |chunk: usize, id: ItemId| if let Some(index) = self.chunks()[chunk].records().iter().position(|r| r.id() == Some(id)) { found.entry(chunk).or_default().push(index); };
-        if ids.len().saturating_mul(self.chunks().len()) <= self.record_count() {
-            for &id in ids { if let Some(chunk) = self.chunks().iter().position(|chunk| chunk.contains(id)) { note(chunk, id); } }
-        } else {
-            for (chunk, records) in self.chunks().iter().enumerate() { for &id in records.ids.iter().filter(|id| ids.contains(id)) { note(chunk, id); } }
-        }
+        for position in self.located(ids) { found.entry(position.chunk as usize).or_default().push(position.index as usize); }
         found
+    }
+    fn ordered(&self, ids: &BTreeSet<ItemId>) -> Vec<Position> {
+        let mut positions = self.located(ids);
+        positions.sort_unstable();
+        positions
+    }
+    pub fn selected_paths(&self, ids: &BTreeSet<ItemId>) -> Vec<(Position, &PathItem)> {
+        self.ordered(ids).into_iter().filter_map(|position| Some((position, self.record(position)?.path()?))).collect()
     }
     pub fn transformed(&self, affine: Affine64) -> Result<Self, &'static str> {
         let mut edits = BTreeMap::new();
@@ -702,21 +736,34 @@ impl VectorObject {
         Ok(self.edit_chunks(edits))
     }
     pub fn transform_items(&self, ids: &BTreeSet<ItemId>, affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
-        let mut edits = BTreeMap::new();
-        for (chunk, indices) in self.positions(ids) {
-            let mut records = self.chunks()[chunk].records().to_vec();
-            for index in indices {
-                if let Record::Path(path) = &records[index] { records[index] = Record::Path(path.transformed(affine, scale_widths)?); }
+        self.transform_paths(&self.selected_paths(ids).into_iter().map(|(position, _)| position).collect::<Vec<_>>(), affine, scale_widths)
+    }
+    pub fn transform_paths(&self, positions: &[Position], affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
+        let paths = positions.iter().filter_map(|&position| Some((position, self.record(position)?.path()?)))
+            .map(|(position, path)| path.transformed(affine, scale_widths).map(|path| (position, path))).collect::<Result<Vec<_>, _>>()?;
+        self.with_paths(paths)
+    }
+    pub fn with_paths(&self, paths: impl IntoIterator<Item = (Position, PathItem)>) -> Result<Self, &'static str> {
+        let mut grouped: BTreeMap<usize, Vec<(usize, PathItem)>> = BTreeMap::new();
+        for (position, path) in paths { grouped.entry(position.chunk as usize).or_default().push((position.index as usize, path)); }
+        if grouped.keys().next_back().is_some_and(|last| *last >= self.chunks().len()) { return Err(REPLACED); }
+        let mut valid = self.root.valid.get().copied().filter(Result::is_ok);
+        let mut chunks: Vec<Resource<VectorChunk>> = Vec::with_capacity(self.chunks().len());
+        for (index, chunk) in self.chunks().iter().enumerate() {
+            let Some(paths) = grouped.remove(&index) else { chunks.push(chunk.clone()); continue };
+            let edited = chunk.with_paths(paths)?;
+            if edited.local.is_err() { valid = None; }
+            match chunks.last_mut() {
+                Some(last) if joins(last, edited.records().len()) => *last = Resource::new(Arc::new(VectorChunk::new(last.records().iter().chain(edited.records()).cloned().collect()))),
+                _ => chunks.push(Resource::new(Arc::new(edited))),
             }
-            edits.insert(chunk, records);
         }
-        Ok(self.edit_chunks(edits))
+        let object = self.rechunked(chunks);
+        if let Some(valid) = valid { let _ = object.root.valid.set(valid); }
+        Ok(object)
     }
     pub fn selected(&self, ids: &BTreeSet<ItemId>) -> Vec<PathItem> {
-        let mut positions: Vec<Position> = self.positions(ids).into_iter()
-            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 })).collect();
-        positions.sort_unstable();
-        positions.into_iter().filter_map(|p| self.record(p).and_then(Record::path).cloned()).collect()
+        self.selected_paths(ids).into_iter().map(|(_, path)| path.clone()).collect()
     }
     pub fn copies(&self, ids: &BTreeSet<ItemId>, target: &VectorObject) -> (BTreeSet<ItemId>, Vec<Record>) {
         let mut fresh = BTreeSet::new();
@@ -728,11 +775,10 @@ impl VectorObject {
         (fresh, records)
     }
     pub fn present(&self, ids: &BTreeSet<ItemId>) -> BTreeSet<ItemId> {
-        self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].id())).collect()
+        self.located(ids).into_iter().filter_map(|position| self.record(position)?.id()).collect()
     }
     pub fn items_bounds(&self, ids: &BTreeSet<ItemId>) -> Option<[f64; 4]> {
-        self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].path().map(PathItem::bounds)))
-            .fold(None, |a, b| Some(union(a, b)))
+        self.located(ids).into_iter().filter_map(|position| self.record(position)?.path().map(PathItem::bounds)).fold(None, |a, b| Some(union(a, b)))
     }
     pub fn allocate_id(&self) -> ItemId {
         loop { let id = ItemId::random(); if !self.contains(id) { return id; } }
@@ -763,9 +809,7 @@ impl VectorObject {
         }
     }
     pub fn arrange(&self, ids: &BTreeSet<ItemId>, arrange: Arrange) -> Self {
-        let mut selected: Vec<Position> = self.positions(ids).into_iter()
-            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 })).collect();
-        selected.sort_unstable();
+        let selected = self.ordered(ids);
         let record = |p: Position| self.record(p).cloned().unwrap();
         let forward = matches!(arrange, Arrange::Front | Arrange::Forward);
         if matches!(arrange, Arrange::Front | Arrange::Back) {
@@ -805,13 +849,13 @@ impl VectorObject {
         }).collect();
         self.edit_chunks(edits)
     }
-    pub fn edit_chunks(&self, edits: BTreeMap<usize, Vec<Record>>) -> Self {
+    pub fn edit_chunks(&self, mut edits: BTreeMap<usize, Vec<Record>>) -> Self {
         let mut chunks: Vec<Resource<VectorChunk>> = Vec::with_capacity(self.chunks().len() + edits.len());
         for (index, chunk) in self.chunks().iter().enumerate() {
-            let Some(records) = edits.get(&index) else { chunks.push(chunk.clone()); continue };
-            for packed in pack(records.clone()) {
+            let Some(records) = edits.remove(&index) else { chunks.push(chunk.clone()); continue };
+            for packed in pack(records) {
                 if let Some(last) = chunks.last()
-                    && packed.records().len() < CHUNK_RECORDS / 4 && last.records().len() + packed.records().len() <= CHUNK_RECORDS / 2 {
+                    && joins(last, packed.records().len()) {
                     let mut joined = last.records().to_vec();
                     joined.extend(packed.records().iter().cloned());
                     *chunks.last_mut().unwrap() = Resource::new(Arc::new(VectorChunk::new(joined)));
@@ -823,6 +867,7 @@ impl VectorObject {
         self.rechunked(chunks)
     }
 }
+fn joins(last: &VectorChunk, records: usize) -> bool { records < CHUNK_RECORDS / 4 && last.records().len() + records <= CHUNK_RECORDS / 2 }
 fn pack(records: Vec<Record>) -> Vec<Resource<VectorChunk>> {
     if records.is_empty() { return Vec::new(); }
     let pieces = records.len().div_ceil(CHUNK_RECORDS);

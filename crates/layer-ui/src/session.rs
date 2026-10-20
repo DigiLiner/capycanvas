@@ -3078,9 +3078,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 let paper = self.state.settings.new_document.paper.clone();
                 self.effect_action(action)?;
-                self.refresh_document();
-                save_settings = self.state.settings.new_document.paper != paper;
-                (DOCUMENT | LAYOUT | if save_settings { SETTINGS } else { 0 }, true)
+                if self.effect_preview_waiting() { (0, true) } else {
+                    self.refresh_document();
+                    save_settings = self.state.settings.new_document.paper != paper;
+                    (DOCUMENT | LAYOUT | if save_settings { SETTINGS } else { 0 }, true)
+                }
             }
             UiAction::Selection { action } => {
                 if matches!(
@@ -4561,6 +4563,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.sync_paper_preview(now_ns);
         self.sync_moving_pixels();
         self.sync_vector_line_preview(now_ns, presentation_ns);
+        let (previews, preview) = self.sync_previews();
+        changed |= previews;
         let clone_source = self.engine.clone_source();
         self.engine
             .render_frame_for(now_ns, presentation_ns)
@@ -4632,7 +4636,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.cancel_picker();
             changed |= regions::BRUSH | regions::COMMANDS | regions::CUSTOMIZATION | regions::COLOR_PREVIEW;
         }
-        if self.engine.document().revision != revision || self.layer_interaction.changed {
+        let unpublished_preview = preview == Some([revision, self.engine.document().revision]) && !self.layer_interaction.changed
+            && self.engine.document().working.generation == working_generation && self.path_styles() == self.vector_moves.shown_styles;
+        if (self.engine.document().revision != revision || self.layer_interaction.changed) && !unpublished_preview {
             self.layer_interaction.changed = false;
             self.refresh_document();
             changed |= regions::DOCUMENT;
@@ -4660,6 +4666,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         ))
     }
 
+    fn sync_previews(&mut self) -> (u32, Option<[u64; 2]>) {
+        let before = self.engine.document().revision;
+        if let Err(error) = self.sync_vector_transform().and_then(|()| self.sync_vector_points()).and_then(|()| self.sync_vector_erase()) {
+            let _ = self.cancel_layer_gesture();
+            self.cancel_vector_erase();
+            self.notify(error);
+        }
+        let after = self.engine.document().revision;
+        let applied = self.apply_latest_effect().unwrap_or_else(|error| { self.notify(error); true });
+        if !applied { return (0, (before != after).then_some([before, after])); }
+        self.layer_interaction.changed = true;
+        (regions::LAYOUT, None)
+    }
     fn invoke(&mut self, command: CommandId) -> Result<(u32, bool), String> {
         use regions::*;
         if let Some(result) = self.object_command(command) {
@@ -5984,6 +6003,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn refresh_layer_presentation(&mut self) {
+        let paths = self.path_styles();
+        self.vector_moves.shown_styles.clone_from(&paths);
         let ui_rendition = self.effective_sdr_rendition();
         let doc = self.engine.document();
         let selected = &doc.working.layer_selection;
@@ -6094,7 +6115,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             mask_id: l.mask.as_ref().map(|m| layer_core::authored::SourceTarget::Coverage(m.source).wire_id()),
         }};
         self.state.layer_tools.editing_layer = doc.working.occurrence.filter(|id| doc.scene().occurrence(*id).is_some()).map(layer_state);
-        self.state.layer_properties = effects::properties(doc, self.state.settings.selection_painting, &self.papers, self.localization());
+        self.state.layer_properties = effects::properties(doc, self.state.settings.selection_painting, &self.papers, paths.as_ref(), self.localization());
         self.state.layer_tools.controls = doc.working.occurrence.and_then(|id| doc.scene().occurrence(id).map(|l| art_layers::LayerControls::for_layer(doc, id, l))).unwrap_or_default();
         self.state.layers = doc.ordered_layers().iter().copied().filter(|id| !self.layer_interaction.hidden_by_group(doc, *id)).map(layer_state).collect();
         self.state.layer_tools.attachment = crate::layer_relationships::attachment_control(doc, doc.working.occurrence, self.localization());

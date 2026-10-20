@@ -7,7 +7,7 @@ const LINE_TOLERANCE: f64 = 0.5;
 
 struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample>, continues: Option<PathItem> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
-struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, mode: layer_core::authored::vector::EraseMode }
+struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, shown: VectorObject, last: [f64; 2], pending: Vec<[f64; 2]>, radius: f64, mode: layer_core::authored::vector::EraseMode }
 
 #[derive(Default)]
 pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasing: Option<Erasing>, revision: u64, pen: Option<u32>, restore: Option<(u32, u32)>, on_vector: bool }
@@ -108,43 +108,52 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let offset = document.scene().occurrence_offset64(layer);
                 let local = [point[0] - offset[0], point[1] - offset[1]];
                 let radius = f64::from(self.engine.configured_brush().diameter).max(1.) * 0.5;
-                self.vector_lines.erasing = Some(Erasing { layer, original: object.clone(), current: object, last: local, radius, mode: self.state.settings.vector_eraser.mode() });
-                self.erase_vector_sample(point)
+                self.vector_lines.erasing = Some(Erasing { layer, original: object.clone(), current: object.clone(), shown: object, last: local, pending: vec![local], radius, mode: self.state.settings.vector_eraser.mode() });
+                Ok(())
             }
-            PenPhase::Move => self.erase_vector_sample(point),
+            PenPhase::Move => { self.queue_vector_erase(point); Ok(()) }
             PenPhase::Up => {
-                self.erase_vector_sample(point)?;
+                self.queue_vector_erase(point);
+                self.erase_queued_samples();
                 self.finish_vector_erase()
             }
             PenPhase::Cancel => { self.cancel_vector_erase(); Ok(()) }
             PenPhase::Hover => Ok(()),
         }
     }
-    fn erase_vector_sample(&mut self, point: [f64; 2]) -> Result<(), String> {
-        let Some(erasing) = &mut self.vector_lines.erasing else { return Ok(()) };
+    fn queue_vector_erase(&mut self, point: [f64; 2]) {
+        let Some(erasing) = &mut self.vector_lines.erasing else { return };
         let offset = self.engine.document().scene().occurrence_offset64(erasing.layer);
-        let local = [point[0] - offset[0], point[1] - offset[1]];
-        let eraser = Eraser { from: erasing.last, to: local, radius: erasing.radius };
-        erasing.last = local;
-        let Some(erased) = erasing.current.erase(&mut self.vector_moves.index, &eraser, erasing.mode) else { return Ok(()) };
-        erasing.current = erased.clone();
-        let layer = erasing.layer;
-        let edit = self.engine.document().vector_object_edit(layer, erased).map_err(|e| e.to_string())?;
-        self.engine.preview_edit(edit).map_err(|e| e.to_string())?;
-        self.layer_interaction.changed = true;
-        Ok(())
+        erasing.pending.push([point[0] - offset[0], point[1] - offset[1]]);
+    }
+    fn erase_queued_samples(&mut self) {
+        let Some(erasing) = &mut self.vector_lines.erasing else { return };
+        for local in std::mem::take(&mut erasing.pending) {
+            let eraser = Eraser { from: erasing.last, to: local, radius: erasing.radius };
+            erasing.last = local;
+            if let Some(erased) = erasing.current.erase(&mut self.vector_moves.index, &eraser, erasing.mode) { erasing.current = erased; }
+        }
+    }
+    pub(super) fn sync_vector_erase(&mut self) -> Result<(), String> {
+        self.erase_queued_samples();
+        let Some(erasing) = self.vector_lines.erasing.as_mut().filter(|erasing| !erasing.shown.same_root(&erasing.current)) else { return Ok(()) };
+        erasing.shown = erasing.current.clone();
+        let edit = self.engine.document().vector_object_edit(erasing.layer, erasing.current.clone()).map_err(|e| e.to_string())?;
+        self.engine.preview_edit(edit).map_err(|e| e.to_string())
     }
     fn finish_vector_erase(&mut self) -> Result<(), String> {
         let Some(erasing) = self.vector_lines.erasing.take() else { return Ok(()) };
         if erasing.current.same_root(&erasing.original) { return Ok(()); }
-        let document = self.engine.document();
-        self.engine.preview_edit(document.vector_object_edit(erasing.layer, erasing.original).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if !erasing.shown.same_root(&erasing.original) {
+            let restore = self.engine.document().vector_object_edit(erasing.layer, erasing.original).map_err(|e| e.to_string())?;
+            self.engine.preview_edit(restore).map_err(|e| e.to_string())?;
+        }
         let edit = self.engine.document().vector_object_edit(erasing.layer, erasing.current).map_err(|e| e.to_string())?;
         self.layer_edit(edit)
     }
     pub(super) fn cancel_vector_erase(&mut self) {
         let Some(erasing) = self.vector_lines.erasing.take() else { return };
-        if erasing.current.same_root(&erasing.original) { return; }
+        if erasing.shown.same_root(&erasing.original) { return; }
         if let Ok(edit) = self.engine.document().vector_object_edit(erasing.layer, erasing.original) { let _ = self.engine.preview_edit(edit); }
         self.layer_interaction.changed = true;
     }
