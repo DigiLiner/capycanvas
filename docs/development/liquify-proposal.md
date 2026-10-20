@@ -68,22 +68,29 @@ confirmed in Procreate.
 
 ## Sessions
 
-A session belongs to one paint source. It holds the starting pixel version
-$I_0$, an immutable revision that is referenced rather than copied, the current
-map and the pixel version its last stroke produced. Selecting a Liquify brush
-creates nothing; the first effective dab starts a session.
+A session belongs to one paint source. It holds $I_0$, the source's raw pixels
+when the session started, as a `SceneSnapshot` with `SceneScope::Raw`; that
+snapshot already retains base images and pixel storage, so nothing is copied.
+It also holds the current map and the `PaintSource` record its last stroke
+produced. The session keeps $I_0$ alive itself, independently of history.
+Selecting a Liquify brush creates nothing; the first effective dab starts a
+session.
 
 Each completed chunk of dabs writes $I_0$ through the updated map into the
-layer's tiles in its region, and the unfinished chunk draws as a replaceable
-preview ([update points](#evaluation-and-fixed-update-points)). Those tiles are
-output only. The next dab reads $I_0$ and the map, never the previous result, so
-at pen-up the layer is current and leaving Liquify has nothing to finish.
+layer's tiles where its dabs act, and the unfinished chunk draws as a
+replaceable preview ([update points](#evaluation-and-fixed-update-points)).
+Those tiles are output only. The next dab reads $I_0$ and the map, never the
+previous result, so at pen-up the layer is current and leaving Liquify has
+nothing to finish.
 
 **Continuation rule.** At a Liquify dab, shared Rust compares the target's
-current pixel version (`RasterRevision::identity`) with the versions that carry
-a session map: the live session's last version and every undo step that stores
-map tiles. A match continues that session from its map. Any other version starts
-a new session from the current pixels. One check covers every tool and command,
+current `PaintSource` record, meaning its pixel version, base image, color mode,
+domain and operations, with the records that carry a session map: the live
+session's last record and every undo step that stores map tiles. The pixel
+version alone is not enough: replacing a photo layer's base image keeps its
+pixel version (`rasterized_source` in `crates/layer-ui/src/source_edit.rs`). A
+match continues that session from its map. Any other record starts a new
+session from the current pixels. One check covers every tool and command,
 including ones added later.
 
 | Artist action | Behavior |
@@ -114,8 +121,9 @@ share unchanged tiles, and history charges each tile once.
 
 - **Undo and Redo restore pixels at once** through ordinary raster history. The
   map is needed only when Liquify continues: the next Liquify dab loads the map
-  tiles whose identity differs between the step and the GPU's current map. The
-  work is bounded by the liquified area, however many steps were undone.
+  tiles whose identity differs between the step and the GPU's current map, and
+  clears the GPU tiles the step does not have, which are back to the identity.
+  The work is bounded by the liquified area, however many steps were undone.
 - **Undo runs in order.** A middle stroke cannot be removed while later strokes
   are kept, because each later stroke deformed the result of the earlier ones.
   Reconstruct takes back a deformation in one area.
@@ -128,13 +136,15 @@ share unchanged tiles, and history charges each tile once.
   Liquify from it starts a new session. Once history spills the active drawing
   to disk, a retention limit keeps map tiles in only the most recent steps.
   Choose that limit from measured disk use.
-- **Steps keep the starting image.** Steps with map tiles keep $I_0$ alive. It is
-  released with the last step that refers to it.
+- **The session and its steps keep the starting image.** The live session and
+  every step with map tiles keep $I_0$ alive; it is released with the last of
+  them.
 - **Pen corrections replay one stroke.** A late correction replays the corrected
   stroke from the previous step's map, as `CanvasEngine::replay_completed` does
   for other brushes, and amends that step's pixel and map tiles.
-- **Cancelling restores the map.** Cancelling an unfinished contact restores its
-  starting map.
+- **Cancelling restores pixels and map together.** Cancelling a contact returns
+  both to the stroke's start, including chunks it already committed; the stroke
+  keeps its starting tiles until pen-up.
 - **Recovery and files hold pixels only.** Session recovery keeps pixels and undo
   history but not map tiles. Save, export and copy read the layer's tiles, and
   portable artwork never contains the map. Follow the
@@ -221,11 +231,42 @@ $$
 tracing $G$ analytically from the newest dab and reading the stored field
 $\tilde u_n$ bilinearly at $G(x)$. That read is the only interpolation. It
 slightly smooths the deformation but, unlike color interpolation, does not
-soften pixels. The result depends on where updates fall, so:
+soften pixels.
+
+Both passes below also need the Jacobian $J_F$ for the filter footprint. The
+trace carries it by the chain rule: starting from $J=I$ and $y=x$, each dab or
+sub-step $j$, newest first, sets $J\leftarrow J_{g_j}(y)\,J$ and then
+$y\leftarrow g_j(y)$, one 2×2 product each, with $J_{g_j}$ from
+[Jacobians and folding](#jacobians-and-folding). At the end,
+
+$$
+J_F(x)=\bigl(I+\nabla\tilde u_n(G(x))\bigr)\,J_G(x).
+$$
+
+The stored map's derivative alone would miss the unfinished chunk: three Pinch
+dabs at strength 0.5 over an unchanged map give $1.175^3\approx1.62$ at their
+center, where the stored derivative is 1. $\nabla\tilde u_n$ is a limited
+difference at the pixel center $p$ nearest $G(x)$, per component,
+
+$$
+\partial_x\tilde u\approx\operatorname{minmod}\bigl(\tilde u(p+e_x)-\tilde u(p),\ \tilde u(p)-\tilde u(p-e_x)\bigr),
+$$
+
+and likewise along $y$, where $\operatorname{minmod}(a,b)$ is whichever of $a$
+and $b$ is smaller in magnitude when their signs agree, and 0 otherwise. Across
+a jump, such as a Crystals cell edge or a moved pixel beside an unmoved one, the
+limiter takes the side without the jump, so the jump is not mistaken for
+compression. With the bilinear value, a pixel reads a 3×3 neighborhood of the
+stored map, mostly shared with its neighbors.
+
+The result depends on where updates fall, so:
 
 - **Updates follow the stroke, not the frame.** The stored map is updated after
   every $K$ dabs and at pen-up. The same dabs and pen lifts give the same result
   at any frame rate, batching or prediction.
+- **Writes happen only where dabs act.** A pass writes only pixels at which some
+  dab of its chunk has $s>0$ at its traced position. Other pixels keep their
+  values, so unselected and untouched pixels never change.
 - **One preview pass per frame.** A frame evaluates the unfinished chunk as a
   replaceable preview: each pixel traces the chunk's dabs, reads the stored map
   once and reconstructs color once. Predicted dabs appear only in this preview
@@ -286,8 +327,12 @@ $$
 per component, with $D$ the distortion and $s(x)$ the per-pixel influence every
 mode uses. The two components of $N_{\text{cell}}\in[0,1)^2$ come independently
 from an integer hash of the cell $\lfloor x/4\rfloor$, the stroke seed and the
-dab index. CPU and GPU both round with $\lfloor\cdot+\tfrac12\rfloor$, because
-WGSL's `round` rounds halves to even and Rust's rounds them away from zero.
+dab index. CPU and GPU both round with $\lfloor\cdot+\tfrac12\rfloor$ in 32-bit
+floats, because WGSL's `round` rounds halves to even and Rust's rounds them away
+from zero. Coverage involves a square root and a division that GPUs need not
+round exactly, so an offset within float error of a half pixel can still round
+differently; such pixels differ by one pixel. Crystals' Jacobian is $I$ between
+its jumps, so its trace leaves $J$ unchanged.
 
 - **Selection and coverage apply per pixel.** An unselected pixel never moves,
   even in a partly selected cell, and nothing moves outside the tip. Where $s$ is
@@ -308,31 +353,45 @@ WGSL's `round` rounds halves to even and Rust's rounds them away from zero.
 - **Smooth dabs over Crystals still interpolate across cell edges.** Measure how
   visible that is.
 
-### Folding
+### Jacobians and folding
+
+Each dab's Jacobian serves twice: for folding and for the filter footprint. With
+$a=0.35$, $\theta=\pm0.75s$, $q=n\cdot(x-c)$ and
+$J_{90}=\left[\begin{smallmatrix}0&-1\\1&0\end{smallmatrix}\right]$:
+
+| Mode | $J_g$ | $\det J_g$ |
+| --- | --- | --- |
+| Push | $I-(1+m)\,v\,\nabla s^{T}$ | $1-(1+m)\,\nabla s\cdot v$ |
+| Twirl | $R(\theta)\bigl(I+J_{90}(x-c)\,\nabla\theta^{T}\bigr)$ | $1+\nabla\theta\cdot J_{90}(x-c)$ |
+| Pinch | $(1+as)I+a(x-c)\,\nabla s^{T}$ | $(1+as)\bigl(1+as+a\,\nabla s\cdot(x-c)\bigr)$ |
+| Expand | $(1-as)I-a(x-c)\,\nabla s^{T}$ | $(1-as)\bigl(1-as-a\,\nabla s\cdot(x-c)\bigr)$ |
+| Edge | $I+as\,nn^{T}+aq\,n\,\nabla s^{T}$ | $1+as+aq\,(n\cdot\nabla s)$ |
+| Crystals | $I$ between jumps | Not applicable |
 
 A map folds where $\det J\le 0$, and content is then repeated or mirrored.
-Composing maps that do not fold gives a deformation that does not fold, so
-limiting each dab keeps the exact deformation fold-free. Crystals moves cells
-independently by design and is excluded.
+Composing maps that do not fold gives a deformation that does not fold, so where
+the limits below apply, limiting each dab keeps the exact deformation
+fold-free. Crystals jumps by design, and Reconstruct and Adjust can collapse
+content ([map edits](#map-edits)).
 
-The round analytic tip with radius $r$ and hardness $h$ falls off linearly over
-a relative edge width $e=\max(1-h,1/r)$, so without a selection
-$s(x)=\sigma(\rho)$ depends only on $\rho=|x-c|$, with $-k/(e\,r)\le\sigma'\le0$.
-For that tip, with $a=0.35$ and $q=n\cdot(x-c)$:
+Liquify tips have a radius of at least 1 px and a hardness of at most
+$1-e_{\min}$. The round analytic tip then falls off linearly over a relative
+edge width $e=\max(1-h,1/r)\le1$ and is continuous. Below 1 px,
+`analytic_coverage` jumps at the center, to 1 from $1/e$ beside it, and two
+points can map to one even for a tiny Push. Without a selection,
+$s(x)=\sigma(\rho)$ with $\rho=|x-c|$, $\nabla s=\sigma'(\rho)(x-c)/\rho$ and
+$-k/(e\,r)\le\sigma'\le0$, so:
 
-| Mode | $\det J_g$ | Folds exactly when |
-| --- | --- | --- |
-| Push | $1-(1+m)\nabla s\cdot v$ | $(1+m)k\lvert v\rvert\ge e\,r$ |
-| Pinch | $(1+a\sigma)(1+a\sigma+a\rho\sigma')$ | $ak\ge e$ |
-| Edge | $1+a\sigma+a\sigma'q^2/\rho$ | $ak\ge e$ |
-| Expand | $(1-a\sigma)(1-a\sigma-a\rho\sigma')$ | Never |
-| Twirl | $1$ | Never |
+| Mode | Folds exactly when |
+| --- | --- |
+| Push | $(1+m)k\lvert v\rvert\ge e\,r$ |
+| Pinch, Edge | $ak\ge e$ |
+| Expand, Twirl | Never |
 
 At one spacing step, $\lvert v\rvert=2r\cdot\text{spacing}$, so Push folds once
-spacing reaches $e/(2(1+m)k)$. That is about 0.31 for the preset, but 0.048 at
-hardness 0.9, below the 0.08 default. With a selection, or a textured or
-non-round tip, $s$ is not radial and only the general determinant applies; Twirl
-can then fold too.
+spacing reaches $e/(2(1+m)k)$: about 0.31 for the preset and 0.12 at
+$e=e_{\min}=0.25$. With a selection, or a textured or non-round tip, $s$ is not
+radial and only the general determinant applies; Twirl can then fold too.
 
 - **Sub-steps.** Split a dab that would fold into $n$ sub-steps, each applying
   $1/n$ of its motion (Push) or of $a$ (Pinch, Edge), so every sub-step keeps
@@ -340,13 +399,20 @@ can then fold too.
   Push and $n=\lceil ak/(e(1-\delta))\rceil$ for Pinch and Edge. The sub-steps
   approximate the unsplit dab. With $\delta\le0.7$, every preset needs $n=1$ at
   its default hardness and spacing.
+- **The minimum edge bounds the work.** Per brush width of travel, Push needs
+  about $2(1+m)k/(e(1-\delta))$ sub-steps whatever the spacing, so a hard tip
+  multiplies the work: at hardness 1, a 512 px Push would need 86 sub-steps per
+  dab. At $e_{\min}=0.25$ and $\delta=\tfrac12$, the default Push needs 2 per
+  dab, full strength with momentum 1 about 32 per brush width, and Pinch and
+  Edge at most 3 per dab. Choose $e_{\min}$, $\delta$ and $K$ together from
+  measurement.
 - **The tip sets the count.** $n$ is computed once per dab from the tip, so
   frames and batches cannot change it. A selection edge is much steeper, about
   $k$ per pixel when antialiased, and would need tens of sub-steps per dab
-  (87 for a 41 px Push step at $\delta=\tfrac12$), so it does not count. A Push
-  dab that moves content away from a hard selection edge therefore copies a
-  strip of the unselected content beside the edge, up to $(1+m)k\lvert v\rvert$
-  wide, into the selection.
+  (86 for a 512 px Push at default spacing and $\delta=\tfrac12$), so it does
+  not count. A Push dab that moves content away from a hard selection edge
+  therefore copies a strip of the unselected content beside the edge, up to
+  $(1+m)k\lvert v\rvert$ wide, into the selection.
 - **The stored map can still fold.** It samples the exact deformation at pixel
   centers, and updates read it bilinearly. Where the deformation turns or
   squeezes faster than one pixel can represent, the bilinear interpolant can
@@ -359,9 +425,8 @@ can then fold too.
   exactly when its four corner determinants, cross products of the cell's edge
   differences, are positive. A single central difference can miss a fold
   ([Liu et al.](https://arxiv.org/abs/2212.06060) analyze the same problem for
-  pixel grids). Use the corner test to size the filter footprint and in the
-  acceptance checks, and measure how often and how visibly stored maps fold at
-  ordinary brush sizes.
+  pixel grids). Use the corner test in the acceptance checks, and measure how
+  often and how visibly stored maps fold at ordinary brush sizes.
 
 ### Map edits
 
@@ -377,9 +442,11 @@ changed some other way.
 
 A Reconstruct dab fits the newest-first trace: it blends the remaining trace's
 result with the position the trace reached it at, $F'(y)=y+(1-s(y))(F(y)-y)$, so
-a pixel still reads the stored map once. Scaling a displacement can collapse
-content: halfway between the identity and a 180-degree rotation maps every point
-to the center, so Reconstruct and Adjust are not fold-free. GIMP's Erase scales
+a pixel still reads the stored map once. Its Jacobian is
+$J_{F'}=s\,I+(1-s)\,J_F-(F(y)-y)\,\nabla s^{T}$, and Adjust's is
+$(1-t)I+t\,J_A$, with $J_A$ the Jacobian of $x+u_A$. Scaling a displacement can
+collapse content: halfway between the identity and a 180-degree rotation maps
+every point to the center, so Reconstruct and Adjust are not fold-free. GIMP's Erase scales
 its field the same way; accept it rather than restrict these tools.
 
 ### Procreate behaviors (milestone 2)
@@ -389,6 +456,9 @@ its field the same way; accept it rather than restrict these tools.
   content faster than the pen, through the $1+m$ factor. Give it Procreate's
   meaning: after pen-up, dabs continue along the final direction with decaying
   strength, derived from the final pen samples so replay and undo stay exact.
+  The continuation is fixed at pen-up and belongs to the stroke; any new input
+  or edit first applies the rest of it at once, so the result never depends on
+  timing.
 - **Distortion.** Procreate presents Distortion as making effects “more twirly,
   jagged, or twisted”; Capy Canvas exposes it only for Crystals. Check which
   modes it changes in Procreate before designing it.
@@ -421,6 +491,9 @@ its field the same way; accept it rather than restrict these tools.
   acquire no colored fringe. In a Perceptual document a squeezed dark line
   therefore comes out lighter than resampling encoded values would make it,
   exactly as with Transform; change both together if that changes.
+- **Alpha lock.** An alpha-locked layer keeps $I_0$'s alpha at $x$ and takes the
+  straight color of the sample at $F(x)$. Where that sample is fully
+  transparent, the pixel keeps $I_0(x)$; the current shader writes black there.
 - **True source extent.** Respect the source's sparse extent and off-frame
   authored content. Cache edges, missing residency and tile borders are not
   image boundaries. Map interpolation and image reconstruction need their own
@@ -430,14 +503,23 @@ its field the same way; accept it rather than restrict these tools.
   it. Reuse the transform pass's filter helpers
   ([resampling](../internals/rendering.md#resampling),
   `pixel_transform/area.wgsl`) with Liquify's own source access and map. The
-  footprint vectors are $\partial F/\partial x$ and $\partial F/\partial y$,
-  central differences of the stored map. A destination pixel averages a grid of
-  bilinear taps over that parallelogram, as many per axis as source pixels it
-  spans, with Transform's caps: a low cap in the live preview and up to 16 for
-  committed tiles. Where a cell's corner determinants are not all positive, or
-  the map changes faster than its grid resolves, as after several turns of
-  Twirl, clamp the footprint to the cap. Sharing the helpers also gives both
-  tools the same color handling.
+  footprint vectors are the columns of $J_F$, carried through the trace
+  ([evaluation](#evaluation-and-fixed-update-points)). A destination pixel
+  averages a grid of bilinear taps over that parallelogram, as many per axis as
+  source pixels it spans, with Transform's caps: a low cap in the live preview
+  and up to 16 for committed tiles. Sharing the helpers also gives both tools
+  the same color handling.
+- **Reduced levels beyond the cap.** Past the cap, taps alone alias: at 32:1,
+  16 taps per axis on one-pixel stripes can all land on one color, though the
+  correct average is gray. So sample reduced levels of $I_0$. Level $\ell$
+  averages 2×2 texels of level $\ell-1$ in premultiplied linear color, built per
+  256 px tile on first use and kept with the session. Use the smallest
+  $\ell\ge0$ at which both per-axis counts, $\lvert\partial F/\partial x\rvert/2^{\ell}$
+  and $\lvert\partial F/\partial y\rvert/2^{\ell}$, fit the cap. Where $\ell$
+  changes, sharpness steps by one level; measure whether that is visible before
+  blending levels. Transform has the same 16-tap limit and can share the levels.
+  Where the map changes faster than its grid resolves, as after several turns
+  of Twirl, the stored derivative is only approximate.
   [Heckbert's research on image warping](https://www2.eecs.berkeley.edu/Pubs/TechRpts/1989/5504.html)
   describes the mapping-dependent filtering problem. Judge sharpness against a
   single-resampling reference, not an unfiltered, aliased image.
@@ -454,25 +536,31 @@ its field the same way; accept it rather than restrict these tools.
   are the slowest, and `push_batches` evaluates one Liquify dab per batch. That
   suggests per-dab passes dominate; profile before choosing kernels.
 - **Per-frame work.** Every frame runs one preview pass over the unfinished
-  chunk's footprint. Each pixel does up to $K$ dab evaluations, skipping dabs
-  whose coverage is zero at the traced position, one four-tap map read, one
-  color reconstruction, with more taps where content is compressed, and one
-  write. A frame that reaches an update point also runs one update pass over the
-  completed chunk's footprint, with the same per-pixel work plus a map tile
-  write. Before implementing, model each tier's cost of both passes from those
-  reads, writes and taps against kernels measured on the reference device, under
-  the [measuring rules](../performance/measuring.md).
+  chunk's footprint. Each pixel evaluates the chunk's sub-steps, $\sum_j n_j$
+  over its dabs, skipping dabs whose coverage is zero at the traced position,
+  with one 2×2 Jacobian product each. It also reads a 3×3 neighborhood of the
+  stored map, reconstructs color with more taps where content is compressed and
+  writes once. A frame that reaches an update point also runs one update pass
+  over the completed chunk's footprint, with the same per-pixel work plus a map
+  tile write. Count sub-steps, not dabs: at $e_{\min}=0.25$, a default Push
+  chunk of 8 dabs is 16 sub-steps. Before implementing, model each tier's cost
+  of both passes from those evaluations, reads, writes and taps against kernels
+  measured on the reference device, under the
+  [measuring rules](../performance/measuring.md).
 - **Transitions.** Tool switches do no work, so they need no latency target.
   Undoing and continuing loads at most the liquified area's map tiles; how long
   that delays the first dab, from RAM and from disk, is unmeasured.
 - **Readback.** Each Liquify stroke reads back 8 bytes of map per changed pixel
   beside its pixel tiles. Check on the Mali tablets that this does not slow the
   next stroke.
-- **Current map.** The map lives in GPU memory, which is system RAM on the
+- **Peak memory.** The map lives in GPU memory, which is system RAM on the
   tablets: 8 bytes per pixel of every touched tile, up to 92, 183 and 459 MiB
-  for a fully liquified low, mid and top tier canvas. Count it in the same
-  accounting as history and open drawings, and measure a whole-canvas session on
-  the TCL TAB 11 Gen 2 (6 GB).
+  for a fully liquified low, mid and top tier canvas. An update writes new tiles
+  beside the ones it reads, which history or readback may still hold. Peak
+  accounting also includes $I_0$ while the session lives, its reduced levels (at
+  most a third more than its touched tiles), pending readbacks and the preview.
+  Count all of it in the same accounting as history and open drawings, and
+  measure a whole-canvas session on the TCL TAB 11 Gen 2 (6 GB).
 - **History cost.** Before compression, a Liquify step costs about three times
   an ordinary stroke on an 8-bit layer, twice on a 16-bit or half-float layer and
   one and a half times on a float layer.
@@ -492,11 +580,15 @@ references and real host journeys establish all of the following:
 - The same dabs and pen lifts give identical results at any frame rate, batching
   or prediction. Mixed-mode order matches direct map composition within the
   interpolation of its update points.
-- Crystals matches a CPU reference exactly, moves pixels by whole pixels and
-  moves no unselected pixel.
-- No dab folds after sub-stepping at any spacing, hardness or pressure. The
-  corner test reports how often stored maps fold for each preset across brush
-  sizes, and the visible effect is compared with the exact composition.
+- Crystals moves pixels by whole pixels and moves no unselected pixel. It
+  agrees with a 32-bit CPU reference except where an offset lies within float
+  error of a half pixel, where it differs by one pixel.
+- No dab of a round tip folds after sub-stepping, at any allowed spacing,
+  hardness or pressure, away from selection edges. The corner test reports how
+  often stored maps fold for each preset across brush sizes, and the visible
+  effect is compared with the exact composition.
+- Filtering copies whole-pixel Crystals offsets exactly, leaves unselected
+  pixels unchanged and averages one-pixel stripes to gray at 32:1 and 64:1.
 - Fine lines, checkerboards, transparent edges, strong compression, large
   coordinates, sparse sources and tile crossings meet the sampling and geometry
   error budgets.
@@ -506,7 +598,12 @@ references and real host journeys establish all of the following:
   liquifying again; while the last stroke is still pending on the GPU; and after
   a late pen correction.
 - A step whose map tiles were dropped restores exact pixels and starts a new
-  session, and so does restart.
+  session, and so does restart. A live session keeps working after history
+  drops every step's map tiles.
+- Cancelling a stroke restores its pixels and map, including chunks it already
+  committed.
+- Continuation stops when anything in the target's `PaintSource` record
+  changes, including a replaced base image with the same pixel version.
 - Every journey in the session table works on each affected host, with native
   input preserved and navigation responsive.
 - Measurements on each tier's reference hardware establish the stroke rate of
