@@ -140,6 +140,10 @@ fn native_filter_fill_layers_and_selection_masks() {
 #[ignore = "isolated native-input.js --native-test=native_liquify_pinch_stroke_on_a_pattern --tablet"]
 fn native_liquify_pinch_stroke_on_a_pattern() {
     let (_app, w, mut input) = start("art.capycanvas.LiquifyPinch");
+    w.dispatch(UiAction::RestoreWorkspace {
+        workspace: Box::new(tool_settings_workspace(&w, &[], true, true)),
+    });
+    until(|| w.panel_widget(Panel::ToolSettings).is_mapped(), "Tool Settings panel is visible");
     let (width, height) = {
         let doc = document(&w);
         (doc.composition().size[0] as f32, doc.composition().size[1] as f32)
@@ -153,30 +157,103 @@ fn native_liquify_pinch_stroke_on_a_pattern() {
     let paint = document(&w).working.occurrence.unwrap();
     let pattern = document(&w).scene().paint_source(paint).unwrap().raster.identity();
     w.dispatch(UiAction::Invoke { command: CommandId::Liquify });
-    w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::LiquifyPinch as u32 });
-    w.dispatch(UiAction::SetBrushSize { value: 400. });
-    pump(300);
-    let selected = state(&w);
-    assert_eq!(selected.brush.preset, layer_core::DefaultBrushPreset::LiquifyPinch as u32);
-    assert!(layer_ui::brush_catalog().any(|b| b.id == selected.brush.preset && b.label.as_ref() == "Liquify Pinch"));
     let far = [width * 0.95, height * 0.08];
     let untouched = shown(&w, far);
-    let from = window_point(&w, [width * 0.3, height * 0.45]);
-    let to = window_point(&w, [width * 0.7, height * 0.45]);
-    let mut events = vec![json!({"pen": "down", "point": from})];
-    for i in 1..=24 {
-        let t = i as f32 / 24.;
-        events.push(json!({"wait_ms": 16}));
-        events.push(json!({"pen": "move", "point": [from[0] + (to[0] - from[0]) * t, from[1]]}));
+    let revision = || document(&w).scene().paint_source(paint).unwrap().raster.identity();
+    let stroke = |input: &mut RemoteInput| {
+        let from = window_point(&w, [width * 0.3, height * 0.45]);
+        let to = window_point(&w, [width * 0.7, height * 0.45]);
+        let mut events = vec![json!({"pen": "down", "point": from})];
+        for i in 1..=12 {
+            let t = i as f32 / 12.;
+            events.push(json!({"wait_ms": 16}));
+            events.push(json!({"pen": "move", "point": [from[0] + (to[0] - from[0]) * t, from[1]]}));
+        }
+        events.extend([json!({"pen": "up"}), json!({"pen": "leave"})]);
+        input.perform(json!(events));
+        pump(300);
+        assert!(state(&w).host_error.is_none(), "{:?}", state(&w).host_error);
+    };
+    let modes = [
+        layer_core::DefaultBrushPreset::LiquifyPinch,
+        layer_core::DefaultBrushPreset::LiquifyPush,
+        layer_core::DefaultBrushPreset::LiquifyTwirl,
+        layer_core::DefaultBrushPreset::LiquifyTwirlClockwise,
+        layer_core::DefaultBrushPreset::LiquifyExpand,
+        layer_core::DefaultBrushPreset::LiquifyCrystals,
+        layer_core::DefaultBrushPreset::LiquifyEdge,
+        layer_core::DefaultBrushPreset::LiquifyReconstruct,
+    ];
+    let mut original = None;
+    for mode in modes {
+        w.dispatch(UiAction::SelectBrush { id: mode as u32 });
+        w.dispatch(UiAction::SetBrushSize { value: 400. });
+        pump(300);
+        let selected = state(&w);
+        assert_eq!(selected.brush.preset, mode as u32);
+        assert!(selected.tool_settings.iter().any(|setting| setting.id == "strength"));
+        let before = revision();
+        stroke(&mut input);
+        until(|| revision() != before, &format!("{mode:?} edits the pattern"));
+        let after = revision();
+        let map = document(&w).scene().paint_source(paint).unwrap().raster.liquify().expect("Liquify keeps a live deformation map");
+        if let Some(start) = &original {
+            assert!(std::sync::Arc::ptr_eq(start, &map.original), "{mode:?} continues the same session");
+        } else {
+            original = Some(map.original.clone());
+        }
+        assert_eq!(shown(&w, far), untouched, "{mode:?} leaves distant pixels alone");
+        w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+        until(|| revision() == before, &format!("Undo restores the pattern before {mode:?}"));
+        w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+        until(|| revision() == after, &format!("Redo restores {mode:?}"));
+        if mode == layer_core::DefaultBrushPreset::LiquifyPinch {
+            w.dispatch(UiAction::Invoke { command: CommandId::Pen });
+            assert_eq!(revision(), after, "leaving Liquify keeps the deformed pixels");
+            w.dispatch(UiAction::Invoke { command: CommandId::Liquify });
+        }
     }
-    events.extend([json!({"pen": "up"}), json!({"pen": "leave"})]);
-    input.perform(json!(events));
-    until(|| document(&w).scene().paint_source(paint).unwrap().raster.identity() != pattern, "the Pinch stroke edits the pattern");
-    assert!(state(&w).host_error.is_none(), "{:?}", state(&w).host_error);
-    pump(300);
-    assert_eq!(shown(&w, far), untouched, "pixels away from the stroke stay");
+    w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::LiquifyPush as u32 });
+    w.dispatch(UiAction::SetToolSetting { id: "strength".into(), value: 0. });
+    let before_zero = revision();
+    stroke(&mut input);
+    assert_eq!(revision(), before_zero, "zero Strength creates no edit");
+    w.dispatch(UiAction::ResetToolSetting { id: "strength".into() });
+    w.dispatch(UiAction::Invoke { command: CommandId::LiquifyAdjust });
+    assert!(state(&w).tool_settings.iter().any(|setting| setting.id == "liquify_amount" && setting.value == 1.));
+    w.dispatch(UiAction::SetToolSetting { id: "liquify_amount".into(), value: 0.5 });
+    until(|| revision() != before_zero, "Adjust Amount changes the deformation");
+    let half = revision();
+    w.dispatch(UiAction::SetToolSetting { id: "liquify_amount".into(), value: 0. });
+    until(|| revision() != half, "zero Amount restores the starting appearance");
+    assert!(state(&w).tool_settings.iter().any(|setting| setting.id == "liquify_amount" && setting.value == 0.));
+    w.dispatch(UiAction::ResetToolSetting { id: "liquify_amount".into() });
+    until(|| revision() != half && revision() != before_zero, "Reset Amount restores the full deformation");
+    until(|| {
+        let session = ui_session(&w);
+        !session.engine().raster_backing_pending()
+            && !session.engine().has_pending_document_edits()
+            && session.state().commands.iter().any(|command| command.id == CommandId::LiquifyReset && command.enabled)
+    }, "Reset Liquify becomes available after Amount settles");
+    let reset = named::<gtk::Button>(&w.panel_widget(Panel::ToolSettings), "tool-action-LiquifyReset");
+    assert!(reset.is_mapped() && reset.is_sensitive(), "Reset control is visible and enabled");
+    let scroll = reset.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+    let bounds = reset.compute_bounds(&scroll).unwrap();
+    let delta = if bounds.y() < 0. { bounds.y() } else { (bounds.y() + bounds.height() - scroll.height() as f32).max(0.) };
+    let adjustment = scroll.vadjustment();
+    adjustment.set_value(adjustment.value() + f64::from(delta));
+    pump(100);
+    let point = screen_point(reset.upcast_ref(), &w.window, [0.5, 0.5]);
+    let hit = w.window.pick(point[0] as f64, point[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+    assert!(hit == reset || hit.is_ancestor(&reset), "Reset click hits {}, not the button", hit.widget_name());
+    let clicked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let counter = clicked.clone();
+    reset.connect_clicked(move |_| counter.set(counter.get() + 1));
+    input.click(point);
+    assert_eq!(clicked.get(), 1, "native Reset click reaches the GTK control");
+    until(|| revision() == pattern, "Reset Liquify restores the painted pattern");
     w.dispatch(UiAction::Invoke { command: CommandId::Undo });
-    until(|| document(&w).scene().paint_source(paint).unwrap().raster.identity() == pattern, "one undo step restores the pattern");
+    until(|| revision() != pattern, "Undo restores the deformation after Reset");
     input.finish();
     w.window.close();
     pump(50);

@@ -87,7 +87,7 @@ impl TonalOptions {
                 ..NumericControl::percent()
             } }
     pub fn softness_control(&self, localizer: &Localizer) -> ToolSetting {
-        ToolSetting {
+        ToolSetting { preview: false,
             id: "tonal_softness",
             label: localizer.text(MessageId::TOOL_CONTROL_TONAL_SELECTION_SOFTNESS),
             label_id: MessageId::TOOL_CONTROL_TONAL_SELECTION_SOFTNESS,
@@ -109,7 +109,7 @@ impl TonalOptions {
                 ("tonal_lower", MessageId::TOOL_CONTROL_TONAL_LOWER, self.custom[0]),
                 ("tonal_upper", MessageId::TOOL_CONTROL_TONAL_UPPER, self.custom[1]),
             ] {
-                controls.push(ToolSetting {
+                controls.push(ToolSetting { preview: false,
                     id,
                     label: localizer.text(label),
                     label_id: label,

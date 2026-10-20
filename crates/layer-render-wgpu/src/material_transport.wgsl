@@ -20,16 +20,6 @@ fn local_canvas_load(document_position: vec2<f32>) -> vec4<f32> {
         || any(document_position >= render_target.document_extent.xy) {
         return vec4<f32>(0.0);
     }
-    if MATERIAL_GATHERED {
-        let page = vec2<u32>(floor(document_position / 256.0));
-        let local = vec2<i32>(floor(document_position)) - vec2<i32>(page * 256u);
-        for (var index = 0u; index < material_sources.header.y; index += 1u) {
-            if all(page == material_sources.pages[index].xy) {
-                return load_neighborhood(i32(index), local);
-            }
-        }
-        return vec4<f32>(0.0);
-    }
     let relative = document_position - render_target.origin_extent.xy;
     if all(relative >= vec2<f32>(0.0)) && all(relative < vec2<f32>(256.0)) {
         return textureLoad(source_11, vec2<i32>(relative), 0);
@@ -286,39 +276,6 @@ fn watercolor_fragment(
     );
 }
 
-fn deform_coordinate(initial: vec2<f32>, first: u32, count: u32) -> vec2<f32> {
-    var coordinate = initial;
-    var remaining = count;
-    loop {
-        if remaining == 0u { break; }
-        remaining -= 1u;
-        let dab = dabs[first + remaining];
-        let coverage = contact_coverage(dab, coordinate);
-        if coverage <= 0.0 { continue; }
-        let strength = clamp(dab.material.w * coverage, 0.0, 1.0);
-        let motion = dab.motion * (1.0 + style.deformation.w);
-        let mode = style.deformation.x;
-        if mode < 0.5 {
-            coordinate -= motion * strength;
-        } else if mode < 2.5 {
-            let direction = select(-1.0, 1.0, mode < 1.5);
-            let angle = direction * strength * 0.75;
-            coordinate = dab.center + rotate(coordinate - dab.center, cos(angle), sin(angle));
-        } else if mode < 4.5 {
-            let direction = select(-1.0, 1.0, mode < 3.5);
-            coordinate = dab.center + (coordinate - dab.center) * (1.0 + direction * strength * 0.35);
-        } else if mode < 5.5 {
-            let noise = random_unit(floor(coordinate * 0.25) + dab.center);
-            coordinate += (vec2<f32>(noise, fract(noise * 7.13)) - 0.5)
-                * strength * style.render_mode.w * 24.0;
-        } else {
-            let perpendicular = vec2<f32>(-motion.y, motion.x);
-            coordinate -= normalize(perpendicular + vec2<f32>(0.0001)) * strength * length(motion);
-        }
-    }
-    return coordinate;
-}
-
 fn wet_fragment(
     fragment_position: vec2<f32>,
     world: vec2<f32>,
@@ -408,24 +365,6 @@ fn wet_fragment(
         vec4<f32>(stroke_coverage, 0.0, 0.0, 1.0),
         vec4<f32>(0.0),
     );
-}
-
-fn liquify_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, count: u32) -> MaterialOutput {
-    if material_sources.header.x == 2u {
-        return MaterialOutput(
-            textureLoad(reservoir_texture, vec2<i32>(floor(fragment_position)), 0),
-            vec4<f32>(0.0), vec4<f32>(0.0),
-        );
-    }
-    return MaterialOutput(
-        canvas_sample(deform_coordinate(world, first, count)),
-        vec4<f32>(0.0),
-        vec4<f32>(0.0),
-    );
-}
-
-fn liquify_gathered(world: vec2<f32>) -> vec4<f32> {
-    return canvas_sample(deform_coordinate(world, style.operation.x, style.operation.y));
 }
 
 fn material_result(fragment_position:vec4<f32>)->MaterialOutput {

@@ -481,6 +481,8 @@ command_ids! {
     Decoration,
     Blend,
     Liquify,
+    LiquifyReset,
+    LiquifyAdjust,
     Lasso,
     Select,
     RectangleSelect,
@@ -780,6 +782,8 @@ impl CommandId {
             Self::Decoration => "decoration",
             Self::Blend => "blend",
             Self::Liquify => "liquify",
+            Self::LiquifyReset => "reset",
+            Self::LiquifyAdjust => "opacity",
             Self::Lasso => "lasso",
             Self::Select => "select",
             Self::RectangleSelect => "rectangle-select",
@@ -1067,6 +1071,8 @@ impl CommandId {
             Self::Decoration => MessageId::COMMAND_DECORATION,
             Self::Blend => MessageId::COMMAND_BLEND,
             Self::Liquify => MessageId::COMMAND_LIQUIFY,
+            Self::LiquifyReset => MessageId::COMMAND_LIQUIFY_RESET,
+            Self::LiquifyAdjust => MessageId::COMMAND_LIQUIFY_ADJUST,
             Self::Lasso => MessageId::COMMAND_LASSO,
             Self::Select => MessageId::COMMAND_SELECT,
             Self::RectangleSelect => MessageId::COMMAND_RECTANGLE_SELECT,
@@ -1636,6 +1642,12 @@ pub enum UiAction {
     SetToolSetting {
         id: String,
         value: f32,
+    },
+    ToolSettingContact {
+        id: String,
+        phase: ContactPhase,
+        #[serde(default)]
+        value: Option<f32>,
     },
     StepToolSetting {
         id: String,

@@ -8,15 +8,14 @@
     of memory; a slower device keeps the rest of the input queued and the
     stroke trails the pen.
   - On the TCL (12 MP) they complete 1.0–2.5 updates/s, at most 1.8 GB
-    resident; Liquify completes 5.2 (Push) to 35 (Twirl) updates/s.
+    resident.
   - On the MovinkPad 11 (24 MP) wet and watercolor brushes complete 1.6–2.6
     updates/s, at most 2.6 GB resident, and the blenders 1.1 (Blending Knife)
-    to 31.5 (Sharpen); Smudge completes 8.7 and Liquify 6.1 (Crystals) to 28
-    (Twirl) updates/s. Natural Blender (2.3 to 1.9) and Palette Knife (1.8 to
-    1.6) are slower than before the blender suite.
+    to 31.5 (Sharpen); Smudge completes 8.7 updates/s. Natural Blender (2.3 to
+    1.9) and Palette Knife (1.8 to 1.6) are slower than before the blender suite.
   - The blender suite is unmeasured on the TCL and the MovinkPad Pro 14.
   - On the MovinkPad Pro 14 (61 MP) they complete 7.7 (Loaded Oil) to 54
-    (Smudge) updates/s; every Liquify preset meets 120 updates/s.
+    (Smudge) updates/s.
   - Multiply Glaze at 1024 px completes 86.8 updates/s on the MovinkPad Pro 14
     and 12.1 on the MovinkPad 11, where its compute kernel is slower than the
     fragment path it replaced (14.4).
@@ -66,14 +65,26 @@
     build TCL Web Pencil took 14.80 s and the primed native probe 35.53 s, with
     driver caches retained; neither has been remeasured. Cached selection is
     quick; that does not qualify first-use latency.
-- **Liquify at 512 px** completes 28–74 updates/s on the top tier, 1.2–6.5 on
-  the mid tier and 0.8–12 on the low tier.
+- **Liquify's retained-map implementation has its own qualification.**
+  Measurements of the removed color-feedback implementation do not qualify it.
+  The [low](low-tier.md#retained-map-liquify),
+  [mid](mid-tier.md#retained-map-liquify) and
+  [top](top-tier.md#retained-map-liquify) tables measure deformation of the Photo
+  layer itself: Low reaches 18.11–34.84 fresh updates/s, Mid 31.12–55.95/s,
+  and Top 134.58–172.79/s. Low and Mid miss rate and gap
+  limits. Top meets the rate in every mode, but only Reconstruct meets the
+  fresh completion-gap limit. Empty-layer workloads only exercise geometry.
+  A guarded full-width sweep covers the 61 MP canvas without exhausting memory,
+  but continued drawing after Undo and map eviction takes 1649 ms in that
+  broad-coverage case.
 - **The retouching brushes at 512 px** (Clone Stamp, Healing and Spot Healing)
   complete 57–62 updates/s on the mid tier (target 90). Their soft edge keeps
   a wide band of pixels in the dab loop. The low and top tiers are not
   measured.
-- **The MovinkPad 11 presents at 60 Hz.** Before any display-paced mid-tier row
-  can pass, it must present at 90 Hz.
+- **Some MovinkPad 11 measurements use 60 Hz.** Before any display-paced
+  mid-tier row can pass, it must present at 90 Hz. The Liquify profile verifies
+  the 90 Hz mode before its matrix with Adaptive refresh enabled for its
+  benchmark application; it does not measure physical presentation per trial.
 - **Navigation on the tier canvas is untested on two tiers.** The low and mid
   tiers have no pan, zoom or rotate measurements on their canvases. The top tier
   has only pinch data at 61 MP.

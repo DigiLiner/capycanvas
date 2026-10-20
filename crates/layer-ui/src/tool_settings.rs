@@ -150,6 +150,7 @@ tool_action_groups! {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ToolSetting {
+    pub preview: bool,
     pub id: &'static str,
     pub label: Arc<str>,
     #[serde(skip)]
@@ -559,14 +560,14 @@ const DEFINITIONS: &[Definition] = &[
         label: MessageId::TOOL_SETTING_DISTORTION,
         group: Some(MessageId::TOOL_SETTING_GROUP_LIQUIFY),
         numeric: NumericControl::percent,
-        field: |b| liquify(b, LiquifyMode::Crystals).then_some(&mut b.deform.distortion),
+        field: |b| (b.execution == BrushExecution::Liquify && b.deform.mode != LiquifyMode::Reconstruct).then_some(&mut b.deform.distortion),
     },
     Definition {
         id: "momentum",
         label: MessageId::TOOL_SETTING_MOMENTUM,
         group: Some(MessageId::TOOL_SETTING_GROUP_LIQUIFY),
         numeric: NumericControl::percent,
-        field: |b| liquify(b, LiquifyMode::Push).then_some(&mut b.deform.momentum),
+        field: |b| (b.execution == BrushExecution::Liquify && b.deform.mode != LiquifyMode::Reconstruct).then_some(&mut b.deform.momentum),
     },
     Definition {
         id: "smoothing_strength",
@@ -591,10 +592,6 @@ fn four_times() -> NumericControl {
     NumericControl { max: 4., soft_max: 4., ..NumericControl::percent() }
 }
 
-fn liquify(b: &BrushSnapshot, mode: LiquifyMode) -> bool {
-    b.execution == BrushExecution::Liquify && b.deform.mode == mode
-}
-
 pub(crate) fn controls(brush: &BrushSnapshot, localizer: &Localizer) -> Vec<ToolSetting> {
     let primary = primary(brush);
     let mut brush = brush.clone();
@@ -610,7 +607,7 @@ pub(crate) fn controls(brush: &BrushSnapshot, localizer: &Localizer) -> Vec<Tool
             let group = if rank.is_some() { None } else { d.group };
             let order = rank.map_or((1, group_order(group.map_or("", MessageId::key)), index),
                 |rank| (0, rank, 0));
-            Some((order, ToolSetting {
+            Some((order, ToolSetting { preview: false,
                 id: d.id,
                 label: localizer.text(d.label),
                 label_id: d.label,
@@ -736,13 +733,14 @@ mod tests {
     }
 
     #[test]
-    fn liquify_shows_distortion_for_crystals_and_momentum_for_push() {
+    fn liquify_shows_distortion_and_momentum_for_deformation() {
         let ids = |preset| -> Vec<_> { controls(&default_brush(preset), &Localizer::shared(UiLanguage::English)).iter().map(|c| c.id).collect() };
         for (preset, distortion, momentum) in [
-            (DefaultBrushPreset::LiquifyPush, false, true),
-            (DefaultBrushPreset::LiquifyTwirl, false, false),
-            (DefaultBrushPreset::LiquifyPinch, false, false),
-            (DefaultBrushPreset::LiquifyCrystals, true, false),
+            (DefaultBrushPreset::LiquifyPush, true, true),
+            (DefaultBrushPreset::LiquifyTwirl, true, true),
+            (DefaultBrushPreset::LiquifyPinch, true, true),
+            (DefaultBrushPreset::LiquifyCrystals, true, true),
+            (DefaultBrushPreset::LiquifyReconstruct, false, false),
         ] {
             let ids = ids(preset);
             assert!(ids.contains(&"strength"), "{preset:?}");
@@ -751,7 +749,7 @@ mod tests {
         }
         let crystals = default_brush(DefaultBrushPreset::LiquifyCrystals);
         assert_eq!(edit(&crystals, "distortion", 0.9, &Localizer::shared(UiLanguage::English)).unwrap().deform.distortion, 0.9);
-        assert!(edit(&crystals, "momentum", 0.5, &Localizer::shared(UiLanguage::English)).is_err());
+        assert_eq!(edit(&crystals, "momentum", 0.5, &Localizer::shared(UiLanguage::English)).unwrap().deform.momentum, 0.5);
     }
 
     #[test]

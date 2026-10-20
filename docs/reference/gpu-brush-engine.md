@@ -271,8 +271,8 @@ by 0.24 diameters of the tip's long axis or 128 px of travel, and by damage.
 Its incomplete live chunk and the predicted contacts are rendered through the
 replaceable GPU preview in one pass up to the travel limit, and become
 persistent only at a stable chunk boundary or pen-up, so results do not depend
-on display cadence. Liquify retains
-one ordered contact per step. Contact placement and dynamics are sequential CPU
+on display cadence. Liquify composes its coordinate map in deterministic chunks
+of at most eight contacts. Contact placement and dynamics are sequential CPU
 work; canvas sampling, coverage, material transfer, state writes, reservoir
 exchange, and deformation are parallel GPU work. Non-watercolor wet brushes keep
 no canvas wetness; their state is the reservoir.
@@ -285,12 +285,12 @@ swaps them. The same rule applies to the brush reservoir. This is deterministic,
 removes data races between neighboring pixels, and stays within portable WebGPU
 resource rules. It also makes damaged-region checkpoints possible for undo.
 
-Smudge, Liquify, wet and watercolor brushes write their destination pages from
+Smudge, wet and watercolor brushes write their destination pages from
 compute kernels through write-only storage. A page job stores the material
 result inside its dirty rectangle and the unchanged source texel elsewhere,
 including stroke coverage, so no page copy or coverage clear precedes it. One compute pass,
-shared by a frame's consecutive batches and their watercolor transport, dispatches every job of a batch, together with the gather dispatches of jobs
-whose samples reach beyond their 3×3 neighborhood and, after a committed wet
+shared by a frame's consecutive batches and their watercolor transport,
+dispatches every job of a batch and, after a committed wet
 batch's jobs, its reservoir exchange. At stroke start the exchange begins from
 the selected pigment instead of the stored reservoir. Watercolor stores wetness
 only inside the dirty rectangle, except that the first job of an update on a
@@ -301,6 +301,13 @@ Each dispatch is its own WebGPU usage scope, so a
 later dispatch reads earlier writes in recorded order. Only a job that binds
 decoded source tiles ends the pass first, because preparing it may reuse a cache
 slot that an earlier job still reads.
+
+Liquify uses separate coordinate-map and color-reconstruction passes. Its map
+chunks read earlier immutable map tiles; color reconstruction reads the
+session's immutable starting pixels. Each pass batches the affected tiles, and
+first-touch source mip reductions share another pass. See
+[Liquify](../internals/liquify.md#performance-and-memory) for source grouping,
+display-sized prediction and memory ownership.
 
 When sparse storage is justified, affected regions gain a filtering halo and
 neighbor material state. The public API still reports only document-space
@@ -314,23 +321,26 @@ their draw order. Wet paint uses ordered microbatches of at most three contacts.
 Smudge contacts are reverse-composed in deterministic chunks of at most six;
 distance-normalized influence keeps strength stable when spacing changes, while
 short chunks bound the visual approximation to sequential destination feedback.
-Liquify depends directly on the preceding destination and uses one contact per
-source/destination swap. All pixels inside each step remain parallel. No public
-API exposes contact reordering.
+Liquify reverse-composes up to eight dab maps before interpolating its retained
+map once, with stable chunk boundaries and a replaceable unfinished preview.
+All pixels inside each step remain parallel. No public API exposes contact
+reordering.
 
 The Liquify presets are Push, Twirl Counterclockwise, Twirl Clockwise, Pinch,
-Expand and Crystals. Pinch shrinks content toward the dab centre and Expand
-bulges it. `LiquifyMode::TwirlClockwise` turns content counterclockwise on the
-y-down canvas (its name follows the rotation of the sampled coordinate), so the
-presets are labelled by the turn they make. Crystals scatters by the preset's
-Distortion, which must be above zero; Push carries its Momentum. The GPU oracle
+Expand, Crystals, Edge and Reconstruct. Pinch shrinks content toward the dab
+centre, Expand bulges it, and Edge pulls toward the stroke line. Twirl modes are
+named by the visible turn on the y-down canvas. Crystals scatters by whole
+pixels; Reconstruct restores local deformation toward the identity map.
+Momentum continues the stroke after pen-up with bounded travel and strength
+decay. The GPU oracle
 `liquify_modes_move_a_marker_in_their_labelled_direction` measures each
 direction, and the CPU source bounds in `material_sources.rs` mirror the shader.
 
 ## Persistence and undo
 
-All current state is a deterministic derivative of immutable strokes and can be
-rebuilt from them after undo, load, or device loss. A future time-evolving
+Authored pixels and undo history survive load and device loss. Liquify keeps its
+map with each live raster revision, but does not serialize it: a restored pixel
+revision without a map starts a new session from those pixels. A future time-evolving
 wet-media simulation will require versioned material checkpoints; replaying only
 input points would then couple old projects to wall-clock evolution and changing
 simulation code. That persistence format is deliberately deferred.

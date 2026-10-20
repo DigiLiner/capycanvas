@@ -217,3 +217,7 @@ brush-preset-mixing-brush = Karıştıran fırça
 brush-preset-sharpen = Keskinleştirme
 brush-preset-texture-blender = Dokuyu koruyan karıştırıcı
 brush-preset-hue-blender = Ton karıştırıcı
+
+brush-preset-liquify-edge = Kenar
+brush-preset-liquify-reconstruct = Yeniden oluştur
+tool-control-liquify-amount = Miktar

@@ -244,7 +244,11 @@ private extension ToolSettingsControls {
     }
     func setting(_ item: JSON, editingContext: String, valueOnly: Bool = false) -> some View {
         NumberControl(store: store, label: item["label"].string, value: item["value"].number,
-            control: item["numeric"], identifier: "tool-" + item.settingID, valueOnly: valueOnly, reset: {
+            control: item["numeric"], identifier: "tool-" + item.settingID, valueOnly: valueOnly,
+            gestureChange: item["preview"].bool ? { phase, value, completion in
+                guard editingContext == context else { completion(nil); return }
+                store.edit(["type": "tool_setting_contact", "id": item.settingID, "phase": phase, "value": value], completion: completion)
+            } : nil, reset: {
                 guard editingContext == context else { return }
                 store.edit(["type": "reset_tool_setting", "id": item.settingID]) { _ in }
             }) { value, completion in

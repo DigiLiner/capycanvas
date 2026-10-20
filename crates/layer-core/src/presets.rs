@@ -78,10 +78,12 @@ pub enum DefaultBrushPreset {
     Sharpen = 60,
     TextureBlender = 61,
     HueBlender = 62,
+    LiquifyEdge = 63,
+    LiquifyReconstruct = 64,
 }
 
 impl DefaultBrushPreset {
-    pub const ALL: [Self; 62] = [
+    pub const ALL: [Self; 64] = [
         Self::GPen, Self::Pencil, Self::Eraser, Self::Paintbrush, Self::Airbrush, Self::Chalk, Self::Marker,
         Self::Spray, Self::DualTexture, Self::Smudge, Self::WetRound, Self::LiquifyPush, Self::LiquifyTwirl,
         Self::MultiplyGlaze, Self::TexturedFlat, Self::DryScumble, Self::PastelBlock, Self::TransparentGlaze,
@@ -94,6 +96,7 @@ impl DefaultBrushPreset {
         Self::ScatterBlender, Self::PainterlyBlender, Self::CrystalBlender, Self::Marbling, Self::CombBlender,
         Self::EdgeKeepingBlender, Self::DitherBlender, Self::BlendingKnife, Self::WetBlender, Self::ColorMixer,
         Self::MixingBrush, Self::Sharpen, Self::TextureBlender, Self::HueBlender,
+        Self::LiquifyEdge, Self::LiquifyReconstruct,
     ];
 }
 
@@ -247,7 +250,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             strength: 0.82, momentum: 0.28, ..Default::default()
         }),
         DefaultBrushPreset::LiquifyTwirl | DefaultBrushPreset::LiquifyTwirlClockwise => liquify(620.0, 0.22, 0.22, BrushDeform {
-            mode: if preset == DefaultBrushPreset::LiquifyTwirl { LiquifyMode::TwirlClockwise } else { LiquifyMode::TwirlCounterClockwise },
+            mode: if preset == DefaultBrushPreset::LiquifyTwirl { LiquifyMode::TwirlCounterclockwise } else { LiquifyMode::TwirlClockwise },
             strength: 0.72, ..Default::default()
         }),
         DefaultBrushPreset::LiquifyPinch | DefaultBrushPreset::LiquifyExpand => liquify(520.0, 0.3, 0.16, BrushDeform {
@@ -293,6 +296,12 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             brush.mappings = Arc::from([pressure_flow(0.35, 0.65)]);
             brush
         }
+        DefaultBrushPreset::LiquifyEdge => liquify(520., 0.3, 0.16, BrushDeform {
+            mode: LiquifyMode::Edge, ..Default::default()
+        }),
+        DefaultBrushPreset::LiquifyReconstruct => liquify(420., 0.34, 0.12, BrushDeform {
+            mode: LiquifyMode::Reconstruct, ..Default::default()
+        }),
         DefaultBrushPreset::CloneStamp => retouching(BrushExecution::Clone, 160.0, 0.5),
         DefaultBrushPreset::HealingBrush => retouching(BrushExecution::Heal, 120.0, 0.5),
         DefaultBrushPreset::SpotHealingBrush => retouching(BrushExecution::SpotHeal, 60.0, 0.6),
@@ -539,7 +548,11 @@ fn wet_blender(pull: f32, average: f32, charge_depletion: f32) -> BrushSnapshot 
 /// A retouching brush: a round tip whose stroke coverage is uniform, so each
 /// pixel takes the source once however many dabs cross it.
 fn liquify(diameter: f32, hardness: f32, spacing: f32, deform: BrushDeform) -> BrushSnapshot {
-    BrushSnapshot { diameter, hardness, spacing, deform, flow: 1.0,
+    let twirl = matches!(deform.mode, LiquifyMode::TwirlCounterclockwise | LiquifyMode::TwirlClockwise);
+    BrushSnapshot { diameter, hardness, spacing, deform, flow: 1.,
+        path: BrushPath { continuous_rate_hz: if matches!(deform.mode, LiquifyMode::Push | LiquifyMode::Crystals) { 0. } else { 20. }, ..Default::default() },
+        mappings: if twirl { Arc::from([BrushMapping { sensor: BrushSensor::Twist, target: BrushTarget::DeformStrength,
+            combine: BrushCombine::Multiply, input_min: 0., input_max: 1., output_scale: 1., output_bias: 0., curve: BrushCurve::LINEAR }]) } else { Arc::default() },
         execution: BrushExecution::Liquify, ..Default::default() }
 }
 
@@ -695,8 +708,8 @@ mod tests {
     fn liquify_presets_use_their_modes_and_crystals_distorts() {
         for (preset, mode) in [
             (DefaultBrushPreset::LiquifyPush, LiquifyMode::Push),
-            (DefaultBrushPreset::LiquifyTwirl, LiquifyMode::TwirlClockwise),
-            (DefaultBrushPreset::LiquifyTwirlClockwise, LiquifyMode::TwirlCounterClockwise),
+            (DefaultBrushPreset::LiquifyTwirl, LiquifyMode::TwirlCounterclockwise),
+            (DefaultBrushPreset::LiquifyTwirlClockwise, LiquifyMode::TwirlClockwise),
             (DefaultBrushPreset::LiquifyPinch, LiquifyMode::Pinch),
             (DefaultBrushPreset::LiquifyExpand, LiquifyMode::Expand),
             (DefaultBrushPreset::LiquifyCrystals, LiquifyMode::Crystals),

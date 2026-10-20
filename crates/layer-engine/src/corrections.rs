@@ -128,23 +128,33 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
 
     fn rebuild_corrected_active(&mut self) {
         let active = self.active_stroke.as_mut().unwrap();
+        let momentum = active.momentum.take().map(|(_, emitted)| emitted);
         let count = if active.feedback.enabled {
             self.finalized_real_points
         } else {
             self.builder.real_points().len()
         };
         active.persistent_started = false;
-        active.committed_smudge_dabs = 0;
+        active.committed_chunk_dabs = 0;
         self.dab_generator
             .reset_for_stroke(active.id, &active.brush);
         self.dab_generator.set_barrel_twist(active.barrel_twist);
-        self.pending_smudge_dabs.clear();
+        self.pending_chunk_dabs.clear();
         // A correction may invalidate persistent pigment or smudge work. Replay
         // faithfully; do not try to cover the old result with a second stroke.
         self.dabs.clear();
         self.batches.clear();
         for index in 0..count {
             self.append_real_dab(self.builder.real_points()[index], index, false);
+        }
+        if let Some(emitted) = momentum {
+            let active = self.active_stroke.as_mut().unwrap();
+            self.dab_generator.finish_contact(&active.brush, &mut self.pending_chunk_dabs);
+            let tail = self.dab_generator.momentum(&active.brush);
+            let emitted = emitted.min(tail.len());
+            self.pending_chunk_dabs.extend_from_slice(&tail[..emitted]);
+            active.momentum = Some((tail, emitted));
+            self.flush_material_chunks(false);
         }
         self.rebuild_all = true;
     }

@@ -218,3 +218,7 @@ brush-preset-mixing-brush = Смешивающая кисть
 brush-preset-sharpen = Резкость
 brush-preset-texture-blender = Смешивание с сохранением фактуры
 brush-preset-hue-blender = Смешивание оттенка
+
+brush-preset-liquify-edge = Край
+brush-preset-liquify-reconstruct = Восстановить
+tool-control-liquify-amount = Степень

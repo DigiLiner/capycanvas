@@ -217,3 +217,7 @@ brush-preset-mixing-brush = Mischender Pinsel
 brush-preset-sharpen = Scharfzeichner
 brush-preset-texture-blender = Struktur-erhaltender Mischpinsel
 brush-preset-hue-blender = Farbton-Mischpinsel
+
+brush-preset-liquify-edge = Kante
+brush-preset-liquify-reconstruct = Wiederherstellen
+tool-control-liquify-amount = Stärke

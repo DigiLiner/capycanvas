@@ -676,3 +676,7 @@ command-release-compound-path = Release compound path
 menu-path = Path
 command-erase-touched-part = Erase touched part
 command-erase-to-intersection = Erase up to intersection
+
+command-liquify-reset = Reset Liquify
+command-liquify-adjust = Adjust Liquify
+commands-liquify-no-changes = Apply Liquify to this layer first

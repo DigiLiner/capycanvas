@@ -48,6 +48,7 @@ mod material_sources;
 mod brush_tiles;
 mod dry_material;
 mod destination_material;
+mod liquify;
 mod brush_stamp;
 mod changed_cells;
 mod material_tiles;
@@ -305,11 +306,6 @@ pub struct GpuRasterMetrics {
     pub source_tile_evictions: u64,
     pub moving_image_evictions: u64,
     pub moving_image_request_bytes: u64,
-    /// Cumulative output-page gathers/passes for distant material samples.
-    /// Storage counts the reusable Float32 fields and both metadata buffers,
-    /// excluding source-cache tiles, staging and driver memory.
-    pub material_sample_jobs: u64,
-    pub material_sample_passes: u64,
     pub material_sample_storage_bytes: u64,
     /// Retouching stroke-start pages, the reference composite cache and its
     /// capture scratch, excluding driver memory.
@@ -484,7 +480,6 @@ enum MaterialInputs<'a> {
     /// The pages around the destination.
     Neighborhood,
     /// A gathered sample field.
-    Gathered(&'a wgpu::TextureView),
     /// A retouching source's target and reference pages, in the eight slots
     /// around the destination.
     Retouch(&'a [wgpu::TextureView; 8]),
@@ -523,6 +518,11 @@ impl BrushEncodingTarget {
     fn is_preview(self) -> bool {
         matches!(self, Self::Preview { .. })
     }
+}
+
+fn has_brush_work(batch: &DabBatch) -> bool {
+    batch.dab_count > 0 || batch.style.liquify.as_ref().is_some_and(|c| c.amount.is_some()
+        || batch.kind == DabBatchKind::Preview && !batch.stroke_start)
 }
 
 #[derive(Clone, Copy)]
@@ -1004,6 +1004,8 @@ pub struct WgpuRasterizer {
     dry_display_inputs: Vec<dry_material::DisplayInputs>,
     material_gather: Option<material_sources::Gather>,
     retouch: Option<Box<retouch_sources::RetouchSources>>,
+    liquify: Option<Box<liquify::Liquify>>,
+    liquify_pipelines: std::sync::OnceLock<Arc<liquify::Pipelines>>,
     retouch_pipelines: Option<Arc<retouch_sources::Pipelines>>,
     edge_layout: wgpu::BindGroupLayout,
     watercolor_layout: wgpu::BindGroupLayout,
@@ -1404,6 +1406,8 @@ impl WgpuRasterizer {
             dry_display_inputs: Vec::new(),
             material_gather: None,
             retouch: None,
+            liquify: None,
+            liquify_pipelines: Default::default(),
             retouch_pipelines: None,
             edge_layout,
             watercolor_layout,
@@ -1817,13 +1821,6 @@ impl WgpuRasterizer {
         batches: &[DabBatch],
     ) -> Result<(), GpuRasterError> {
         for batch in batches {
-            if batch.style.execution == BrushExecution::Liquify
-                && batch.style.deform.mode == LiquifyMode::Reconstruct
-            {
-                return Err(GpuRasterError::UnsupportedBrushFeature(
-                    "liquify reconstruct snapshot",
-                ));
-            }
             self.ensure_texture_set(&batch.style)?;
         }
         Ok(())
@@ -1940,6 +1937,7 @@ impl WgpuRasterizer {
         let mut destination_pages = std::collections::BTreeSet::new();
         for (batch, tiles) in batches.iter().zip(tiles).filter(|(batch, _)| {
             batch.kind == DabBatchKind::Persistent
+                && batch.style.execution != BrushExecution::Liquify
                 && BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
         }) {
             let revisits = batch.stroke_end && batch.style.rendering.edge_after_stroke;
@@ -1973,12 +1971,9 @@ impl WgpuRasterizer {
         }
     }
 
-    /// The source pages a material job binds around its destination. Dry
-    /// paint reads only its destination pixel, and completed gather fields
-    /// already hold distant samples: neither decodes surrounding tiles.
-    fn material_offsets(&self, batch: &DabBatch, gathered: bool) -> [Option<[i32; 2]>; 9] {
+    fn material_offsets(&self, batch: &DabBatch) -> [Option<[i32; 2]>; 9] {
         let stored = self.in_place_dry_material(batch) || self.compact_preview_contribution(batch);
-        let center = pointwise(&batch.style) || gathered;
+        let center = pointwise(&batch.style);
         std::array::from_fn(|i| (!stored && (!center || i == 4)).then_some([i as i32 % 3 - 1, i as i32 / 3 - 1]))
     }
 
@@ -1992,11 +1987,7 @@ impl WgpuRasterizer {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
         let in_place = self.in_place_dry_material(batch);
-        let gathered = match inputs {
-            MaterialInputs::Gathered(field) => Some(field),
-            _ => None,
-        };
-        let offsets = self.material_offsets(batch, gathered.is_some());
+        let offsets = self.material_offsets(batch);
         self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
         if pointwise(&batch.style) && batch.style.opacity < 1. {
             let committed_start = self.paint_layers.iter().find(|l| l.id == batch.target)
@@ -2070,7 +2061,7 @@ impl WgpuRasterizer {
             &views,
             &self.dab_buffer,
             coverage,
-            gathered.unwrap_or(auxiliary),
+            auxiliary,
             wgpu::BindingResource::Buffer(self.material_records.binding()),
         );
         let display = display.map(|slot| self.dry_display_inputs[slot].inputs(self, views));
@@ -2091,6 +2082,7 @@ impl WgpuRasterizer {
         let mut coordinates = Vec::new();
         for batch in batches.iter().filter(|batch| {
             batch.kind == DabBatchKind::Preview
+                && batch.style.execution != BrushExecution::Liquify
                 && BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
         }) {
             let damage = batch_pixel_rect(batch, self.target_extent(batch.target));
@@ -2113,7 +2105,8 @@ impl WgpuRasterizer {
 
     fn ensure_persistent_pages(&mut self, batches: &[DabBatch], tiles: &[Vec<BrushTile>]) -> Result<(), GpuRasterError> {
         for (batch, tiles) in batches.iter().zip(tiles)
-            .filter(|(batch, _)| batch.kind == DabBatchKind::Persistent && batch.dab_count != 0)
+            .filter(|(batch, _)| batch.kind == DabBatchKind::Persistent
+                && (batch.dab_count != 0 || batch.style.liquify.as_ref().is_some_and(|context| context.amount.is_some())))
         {
             if tiles.is_empty() {
                 continue;
@@ -2390,6 +2383,7 @@ impl WgpuRasterizer {
         self.metrics.paint_state_storage_bytes += self.paint_layers.iter().flat_map(|l| &l.pages)
             .chain(&self.preview_pages).filter_map(|p| p.stroke_start.as_ref())
             .map(|(_, start)| start.storage_bytes()).sum::<u64>();
+        self.metrics.paint_state_storage_bytes += self.liquify.as_ref().map_or(0, |l| l.storage_bytes());
         self.metrics.paint_state_storage_bytes += self.changed_cells.as_ref().map_or(0, changed_cells::ChangedCells::storage_bytes);
         self.metrics.retouch_storage_bytes =
             self.retouch.as_ref().map_or(0, |retouch| retouch.storage_bytes());
@@ -2702,10 +2696,17 @@ impl WgpuRasterizer {
         context: BrushEncodingContext<'_>,
     ) -> Result<(), GpuRasterError> {
         let damage = batch_pixel_rect(batch, context.target_extent);
-        if batch.dab_count == 0 || damage.is_empty() {
+        if if batch.style.execution == BrushExecution::Liquify { context.tiles.is_empty() }
+            else { batch.dab_count == 0 || damage.is_empty() } {
             return Ok(());
         }
         self.prepare_target_selection(encoder, &batch.style, self.target_extent(batch.target))?;
+        if batch.style.execution == BrushExecution::Liquify {
+            let mut liquify = self.liquify.take().unwrap_or_else(|| Box::new(liquify::Liquify::new(self)));
+            let result = liquify.encode(self, encoder, batch_index, batch, context);
+            self.liquify = Some(liquify);
+            return result;
+        }
 
         let plan = BrushPassPlan::for_device(&batch.style, &self.device);
         if plan.requires_destination() {
@@ -4082,6 +4083,7 @@ impl WgpuRasterizer {
         let reset = packet.reset_layers || resized;
         self.note_retouch_batches(packet.dab_batches, reset);
         if reset {
+            if let Some(liquify) = &mut self.liquify { liquify.reset(); }
             self.layer_masks.pages.clear();
             if let Some(t) = &mut self.transforms {
                 t.discard_preview();
@@ -4101,6 +4103,7 @@ impl WgpuRasterizer {
             self.preview_requires_base = false;
             self.preview_contribution = false;
         }
+        liquify::Liquify::extend_plans(self, packet, &mut batch_tiles);
         let mut encoder = crate::submission::CommandEncoder::new(
             &self.device,
             &wgpu::CommandEncoderDescriptor {
@@ -4169,7 +4172,10 @@ impl WgpuRasterizer {
             let start = batch.first_dab as usize;
             let dabs = &packet.dabs[start..start + batch.dab_count as usize];
             let batch_dirty = batch_pixel_rect(batch, self.target_extent(batch.target));
-            let visual_dirty = if batch.style.execution == BrushExecution::Watercolor {
+            let visual_dirty = if batch.style.execution == BrushExecution::Liquify {
+                tiles.iter().fold(PixelRect::EMPTY, |bounds, tile| bounds.union(page_rect(tile.coordinate)))
+                    .intersect(PixelRect::full(self.target_extent(batch.target)))
+            } else if batch.style.execution == BrushExecution::Watercolor {
                 batch_dirty.expand(
                     WatercolorLayerStyle::from_dab_style(&batch.style).radius(),
                     self.target_extent(batch.target),
@@ -4186,11 +4192,11 @@ impl WgpuRasterizer {
             dirty = self.stroke_finish_pages(batch).fold(dirty, |damage, page| {
                 damage.union(page_rect(page).intersect(PixelRect::full(packet.document_extent)))
             });
-            if batch_dirty.is_empty() || dabs.is_empty() {
+            if tiles.is_empty() || (batch.style.execution != BrushExecution::Liquify && (batch_dirty.is_empty() || dabs.is_empty())) {
                 continue;
             }
             if batch.kind == DabBatchKind::Preview {
-                if pointwise(&batch.style)
+                if (pointwise(&batch.style) || batch.style.execution == BrushExecution::Liquify)
                     && !batch.style.rendering.edge_after_stroke {
                     if let Some(sparse) = &mut new_preview_contact_tiles {
                         sparse.extend(tiles.iter().map(|tile| tile.coordinate));
@@ -4221,7 +4227,7 @@ impl WgpuRasterizer {
             .iter()
             .filter(|batch| {
                 batch.kind == DabBatchKind::Preview
-                    && batch.dab_count != 0
+                    && has_brush_work(batch)
                     && BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
             })
             .count();
@@ -4230,23 +4236,24 @@ impl WgpuRasterizer {
             && packet
                 .dab_batches
                 .iter()
-                .filter(|batch| batch.kind == DabBatchKind::Preview && batch.dab_count != 0)
+                .filter(|batch| batch.kind == DabBatchKind::Preview && has_brush_work(batch))
                 .all(|batch| {
                     BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
                 });
         let native_dry_preview = packet.dab_batches.iter()
-            .filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
+            .filter(|b|b.kind==DabBatchKind::Preview && has_brush_work(b))
             .all(|b|dry_material::native_dry_preview_eligible(&b.style));
         let mut preview_contribution=new_preview_from_persistent && self.scale_display.as_ref().is_some_and(|cache|
                 new_preview_layer.is_some_and(|id|cache.native_preview_input(packet,id)))
-            && packet.dab_batches.iter().filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
+            && packet.dab_batches.iter().filter(|b|b.kind==DabBatchKind::Preview && has_brush_work(b))
                 .all(|b|b.style.opacity==1. && dry_material::reduced_preview_eligible(&b.style) && b.style.mode==DabMode::Paint
                     && b.style.blend_space==packet.blend_space
                     && packet.scene.color_mode(b.target)==layer_core::color::LayerColorMode::FullColor);
         if preview_contribution {new_preview_requires_base=false;}
         let preview_level = self.scale_display.as_ref().filter(|_| new_preview_from_persistent
-            && packet.dab_batches.iter().filter(|b| b.kind == DabBatchKind::Preview && b.dab_count != 0)
-                .all(|b| dry_material::reduced_preview_eligible(&b.style)))
+            && packet.dab_batches.iter().filter(|b| b.kind == DabBatchKind::Preview && has_brush_work(b))
+                .all(|b| dry_material::reduced_preview_eligible(&b.style)
+                    || b.style.execution == BrushExecution::Liquify && b.style.deform.mode != LiquifyMode::Crystals))
             .map_or(0, |cache| new_preview_layer.map_or(0, |id| cache.preview_level(self, packet, id, preview_contribution)));
         preview_contribution &= preview_level>0 || native_dry_preview;
         if !preview_contribution && new_preview_from_persistent {new_preview_requires_base=true;}
@@ -4489,6 +4496,7 @@ impl WgpuRasterizer {
         trace_phase.next(c"capy.capture");
         self.telemetry.phase_end(0, &mut encoder);
         let replay_window = !packet.commit_rasters && packet.dab_batches.iter().any(|batch| batch.kind == DabBatchKind::Persistent);
+        if let Some(liquify) = &mut self.liquify { liquify.publish(packet.scene, packet.dab_batches); }
         let native_commit = match settled_commit {
             Some(frame) => Some(frame),
             None if replay_window => None,
@@ -4748,7 +4756,7 @@ impl WgpuRasterizer {
             && watercolor_style_dirty.is_empty()
             && original_batches.iter().all(|b| {
                 matches!(b.kind, DabBatchKind::Persistent | DabBatchKind::Preview)
-                    && pointwise(&b.style)
+                    && (pointwise(&b.style) || b.style.execution == BrushExecution::Liquify)
                     && !b.style.rendering.edge_after_stroke
             });
         let mut changed_cells = self.changed_cells.take().unwrap();
@@ -4775,11 +4783,17 @@ impl WgpuRasterizer {
             };
             if let Some(id) = old_preview_layer {
                 if let Some(sparse) = &old_preview_contact_tiles {
-                    for &coordinate in sparse { include(id, page_rect(coordinate)); }
+                    for &coordinate in sparse {
+                        if !self.liquify.as_ref().is_some_and(|l| l.preview_unchanged(id, coordinate)) { include(id, page_rect(coordinate)); }
+                    }
                 } else { include(id, old_preview_damage); }
             }
             for (batch, planned) in original_batches.iter().zip(&batch_tiles) {
-                for tile in planned { include(batch.target, scene::scale::Damage::tile_region(tile)); }
+                for tile in planned {
+                    if batch.kind != DabBatchKind::Preview
+                        || !self.liquify.as_ref().is_some_and(|l| l.preview_unchanged(batch.target, tile.coordinate))
+                    { include(batch.target, scene::scale::Damage::tile_region(tile)); }
+                }
             }
         }
         for &(layer, bounds) in &self.transform_damage {
@@ -5126,7 +5140,7 @@ impl StyleGpu {
         result.deformation = [
             liquify_mode_code(style.deform.mode),
             style.deform.strength,
-            style.deform.pressure,
+            style.liquify.as_ref().and_then(|c| c.amount).unwrap_or(-1.),
             style.deform.momentum,
         ];
         let perceptual = style.blend_space == layer_core::BlendSpace::Perceptual;
@@ -5204,8 +5218,8 @@ pub(crate) fn blend_code(blend: layer_core::LayerBlend, device: &PipelineDevice,
 fn liquify_mode_code(mode: LiquifyMode) -> f32 {
     match mode {
         LiquifyMode::Push => 0.0,
-        LiquifyMode::TwirlClockwise => 1.0,
-        LiquifyMode::TwirlCounterClockwise => 2.0,
+        LiquifyMode::TwirlCounterclockwise => 1.0,
+        LiquifyMode::TwirlClockwise => 2.0,
         LiquifyMode::Pinch => 3.0,
         LiquifyMode::Expand => 4.0,
         LiquifyMode::Crystals => 5.0,
@@ -5481,7 +5495,7 @@ fn create_target(
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC
             | wgpu::TextureUsages::COPY_DST
-            | if matches!(format, wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::R32Float) {
+            | if matches!(format, wgpu::TextureFormat::Rgba32Float | wgpu::TextureFormat::R32Float | wgpu::TextureFormat::Rgba32Uint) {
                 wgpu::TextureUsages::STORAGE_BINDING
             } else { wgpu::TextureUsages::empty() },
         view_formats: &[],
@@ -6212,6 +6226,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
             transport: None,
             deform: BrushDeform::default(),
             blender: layer_core::BrushBlender::default(),
+            liquify: None,
             contact: None,
             retouch: None,
             blend_space: layer_core::BlendSpace::Linear,

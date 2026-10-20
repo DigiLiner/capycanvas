@@ -1,4 +1,4 @@
-//! Liquify, Smudge, Wet and watercolor read only the pre-batch pages around
+//! Smudge, Wet and watercolor read only the pre-batch pages around
 //! each page they write, so one compute pass dispatches every page job of a
 //! batch. A job writes its whole inactive page: the material result inside its
 //! dirty rectangle and the unchanged texel elsewhere, so no page copy precedes
@@ -7,12 +7,12 @@ use super::*;
 use dry_material::{Entries, MATERIAL_BLENDS, MATERIAL_SLOTS};
 use material_sources::{elapsed, record, rect_words};
 
-pub(super) const OPERATIONS: [MaterialOperation; 4] = [MaterialOperation::Liquify, MaterialOperation::Smudge,
+pub(super) const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Smudge,
     MaterialOperation::Wet, MaterialOperation::Watercolor];
 
-/// The workgroup of an operation's page, gather and reservoir kernels.
+/// The workgroup of an operation's page and reservoir kernels.
 pub(super) fn workgroup(operation: MaterialOperation) -> [u32; 2] {
-    if matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge) { [16, 8] } else { [8, 8] }
+    if operation == MaterialOperation::Smudge { [16, 8] } else { [8, 8] }
 }
 
 pub(super) fn transported(style: &layer_render::DabStyle) -> bool {
@@ -21,7 +21,6 @@ pub(super) fn transported(style: &layer_render::DabStyle) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Entry {
-    Gather,
     Color,
     Coverage,
     Reservoir,
@@ -31,7 +30,6 @@ pub(super) enum Entry {
 impl Entry {
     pub(super) fn name(self) -> &'static str {
         match self {
-            Self::Gather => "gather_samples",
             Self::Color => "transport_color",
             Self::Coverage => "transport_coverage",
             Self::Reservoir => "reservoir_exchange",
@@ -44,20 +42,17 @@ impl Entry {
         match self {
             Self::Coverage => 1,
             Self::Watercolor => 2,
-            Self::Gather | Self::Color | Self::Reservoir => 0,
+            Self::Color | Self::Reservoir => 0,
         }
     }
 }
 
-/// Liquify gathers distant samples; Smudge's chunks keep every sample within
-/// a page's neighbourhood; Wet exchanges its reservoir with the canvas after
-/// each committed batch; watercolor always writes coverage and wetness.
 pub(super) fn entries(operation: MaterialOperation) -> &'static [Entry] {
     match operation {
         MaterialOperation::Wet => &[Entry::Color, Entry::Coverage, Entry::Reservoir],
         MaterialOperation::Watercolor => &[Entry::Watercolor],
         MaterialOperation::Smudge => &[Entry::Color, Entry::Coverage],
-        _ => &[Entry::Gather, Entry::Color, Entry::Coverage],
+        _ => unreachable!("operation uses its own pipeline"),
     }
 }
 
@@ -67,10 +62,9 @@ pub(super) fn blenders(operation: MaterialOperation) -> &'static [layer_core::Bl
 }
 
 /// The module that provides `entry` of `operation` for one blend code and blender.
-pub(super) fn module(operation: MaterialOperation, entry: Entry, blend: u32, blender: layer_core::BlenderKind) -> Entries {
-    match (entry, operation) {
-        (Entry::Gather, _) => Entries::Gather,
-        (_, MaterialOperation::Smudge) => Entries::Blend(blender),
+pub(super) fn module(operation: MaterialOperation, blend: u32, blender: layer_core::BlenderKind) -> Entries {
+    match operation {
+        MaterialOperation::Smudge => Entries::Blend(blender),
         _ => Entries::Transport(blend),
     }
 }
@@ -80,11 +74,11 @@ pub(super) fn selected(plan: BrushPassPlan, preview: bool) -> impl Iterator<Item
     entries(plan.material).iter().copied().filter(move |&entry| match entry {
         Entry::Color => preview || !plan.state.coverage,
         Entry::Coverage => plan.state.coverage,
-        Entry::Gather | Entry::Reservoir | Entry::Watercolor => true,
+        Entry::Reservoir | Entry::Watercolor => true,
     })
 }
 
-/// Wet and watercolor deposit through the brush blend. Liquify and Smudge only
+/// Wet and watercolor deposit through the brush blend. Smudge only
 /// move paint, so every blend shares the normal slot of their contact.
 pub(super) fn blended(operation: MaterialOperation) -> bool {
     matches!(operation, MaterialOperation::Wet | MaterialOperation::Watercolor)
@@ -109,12 +103,11 @@ impl Pipelines {
             if !blended(operation) && slot % MATERIAL_BLENDS.len() != 0 { continue; }
             let (flags, blend) = dry_material::material_entries(slot);
             for &blender in blenders(operation) {
-                let transport = dry_material::material_shader(device, module(operation, Entry::Color, blend, blender), flags, operation);
+                let transport = dry_material::material_shader(device, module(operation, blend, blender), flags, operation);
                 for &entry in entries(operation) {
-                    let shader = if entry == Entry::Gather { dry_material::material_shader(device, Entries::Gather, flags, operation) } else { transport.clone() };
                     kernels.insert((operation as u32, slot, entry, blender as u8), Deferred::compute(device,
                         format!("destination material {} operation={} contact={flags:#x} blend={blend} blender={blender:?}", entry.name(), operation as u32),
-                        &pipeline_layouts[entry.outputs()], &shader, entry.name()));
+                        &pipeline_layouts[entry.outputs()], &transport, entry.name()));
                 }
             }
         }
@@ -144,11 +137,6 @@ pub(super) struct Dispatch {
 }
 
 impl WgpuRasterizer {
-    /// A job's distant samples accumulate chunk by chunk into a gather field
-    /// that its kernel reads. Records hold each job's chunk page lists, then
-    /// its dirty rectangle. A committed Wet batch then exchanges its reservoir
-    /// with the pre-batch pages at its last dab; its record holds the starting
-    /// reservoir of a new stroke.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn encode_transport_jobs(
         &mut self,
@@ -164,23 +152,18 @@ impl WgpuRasterizer {
         let started = self.telemetry.enabled.then(web_time::Instant::now);
         let extent = self.target_extent(batch.target);
         let operation = BrushPassPlan::for_style(&batch.style).material;
-        let gathers = entries(operation).contains(&Entry::Gather);
-        let distant = jobs.iter().map(|job| gathers.then(|| material_sources::distant_pages(batch, dabs, job.coordinate, extent)).flatten())
-            .collect::<Vec<_>>();
         let exchange = dabs.first().zip(dabs.last()).filter(|_| !preview && operation == MaterialOperation::Wet);
         let seeds: Vec<_> = jobs.iter().map(|job| operation == MaterialOperation::Watercolor && !self.watercolor_written.contains(&job.coordinate)).collect();
         self.watercolor_written.extend(jobs.iter().zip(&seeds).filter(|(_, seed)| **seed).map(|(job, _)| job.coordinate));
         self.metrics.material_cpu_ms[0] += elapsed(started);
-        let mut first_record = self.prepare_records(jobs.iter().zip(&distant).zip(&seeds).flat_map(|((job, pages), &seed)| {
-            pages.iter().flat_map(|pages| pages.chunks(9)).enumerate()
-                .map(|(chunk, pages)| record([1, pages.len() as u32, u32::from(chunk > 0), 0], pages.iter().map(|p| [p[0], p[1], 0, 0])))
-                .chain(std::iter::once(record([if pages.is_some() { 2 } else { 0 }, 0, 0, u32::from(seed)], [rect_words(job.local)])))
+        let mut first_record = self.prepare_records(jobs.iter().zip(&seeds).map(|(job, &seed)| {
+            record([0, 0, 0, u32::from(seed)], [rect_words(job.local)])
         }).chain(exchange.map(|(first, _)| {
             let color = first.color_rgba_linear;
             record([0; 4], [[color[0], color[1], color[2], batch.style.wet_mix.amount_of_paint * first.material[2]].map(f32::to_bits)])
         })), encoder)?;
         let mut dispatches = Vec::with_capacity(jobs.len());
-        for (job, pages) in jobs.iter().zip(&distant) {
+        for job in jobs {
             let layer = &self.paint_layers[layer_index];
             let (color_pages, coverage_pages, wetness_pages) = if preview {
                 (&self.preview_pages, &self.preview_coverage_pages, &self.preview_watercolor_wetness_pages)
@@ -195,13 +178,13 @@ impl WgpuRasterizer {
             destination.preview.set(None);
             let output = self.pipelines.destination_material.output(self, destination, coverage, wetness);
             let entry = if wetness.is_some() { Entry::Watercolor } else if coverage.is_some() { Entry::Coverage } else { Entry::Color };
-            self.add_transport_job(encoder, batch_index, batch, job.coordinate, pages.as_deref(), first_record, sources_preview, entry, output, &mut dispatches)?;
-            first_record += pages.as_ref().map_or(0, |pages| pages.len().div_ceil(9)) + 1;
+            self.add_transport_job(encoder, batch_index, batch, job.coordinate, first_record, sources_preview, entry, output, &mut dispatches)?;
+            first_record += 1;
         }
         if let Some((_, last)) = exchange {
             let coordinate = std::array::from_fn(|i| ([last.center.x, last.center.y][i].max(0.) as u32 / PAGE_SIZE).min(extent[i].saturating_sub(1) / PAGE_SIZE));
             let output = self.pipelines.destination_material.output(self, self.reservoir.inactive(), None, None);
-            self.add_transport_job(encoder, batch_index, batch, coordinate, None, first_record, false, Entry::Reservoir, output, &mut dispatches)?;
+            self.add_transport_job(encoder, batch_index, batch, coordinate, first_record, false, Entry::Reservoir, output, &mut dispatches)?;
         }
         self.encode_transport(encoder, batch_index, batch, &dispatches);
         if exchange.is_some() { self.reservoir.active_secondary = !self.reservoir.active_secondary; }
@@ -215,53 +198,17 @@ impl WgpuRasterizer {
         batch_index: usize,
         batch: &DabBatch,
         coordinate: [u32; 2],
-        distant: Option<&[[u32; 2]]>,
-        mut record_index: usize,
+        record_index: usize,
         preview: bool,
         entry: Entry,
         output: wgpu::BindGroup,
         dispatches: &mut Vec<Dispatch>,
     ) -> Result<(), GpuRasterError> {
         let timing = self.telemetry.enabled;
-        let mut field = None;
-        if let Some(pages) = distant {
-            self.ensure_material_gather();
-            self.metrics.material_sample_jobs += 1;
-            for (chunk, pages) in pages.chunks(9).enumerate() {
-                let started = timing.then(web_time::Instant::now);
-                self.metrics.material_sample_passes += 1;
-                let offsets = std::array::from_fn::<_, 9, _>(|i| {
-                    pages.get(i).map(|p| [p[0] as i32 - coordinate[0] as i32, p[1] as i32 - coordinate[1] as i32])
-                });
-                self.encode_before_borrowing(encoder, batch_index, batch, coordinate, offsets, preview, dispatches);
-                self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
-                self.metrics.material_cpu_ms[1] += elapsed(started);
-                let started = timing.then(web_time::Instant::now);
-                let layer = self.paint_layers.iter().find(|l| l.id == batch.target)
-                    .ok_or(GpuRasterError::MissingPaintLayer(batch.target))?;
-                let sources = self.source_tiles.borrow();
-                let views = self.raw_layer_neighborhood(&sources, layer, coordinate, offsets, preview);
-                let fields = &self.material_gather.as_ref().unwrap().fields;
-                let accumulated = if chunk == 0 { &self.empty_view } else { &fields[1 - chunk % 2].view };
-                dispatches.push(Dispatch {
-                    entry: Entry::Gather,
-                    output: self.pipelines.destination_material.output(self, &fields[chunk % 2], None, None),
-                    sources: create_material_bind_group(&self.device, &self.material_layout, &views, &self.dab_buffer,
-                        &self.empty_scalar_view, accumulated, wgpu::BindingResource::Buffer(self.material_records.binding())),
-                    coordinate,
-                    record_offset: self.material_records.offset(record_index),
-                });
-                drop(sources);
-                record_index += 1;
-                field = Some(fields[chunk % 2].view.clone());
-                self.metrics.material_cpu_ms[2] += elapsed(started);
-            }
-        }
-        let offsets = self.material_offsets(batch, field.is_some());
+        let offsets = self.material_offsets(batch);
         self.encode_before_borrowing(encoder, batch_index, batch, coordinate, offsets, preview, dispatches);
         let started = timing.then(web_time::Instant::now);
-        let inputs = field.as_ref().map_or(MaterialInputs::Neighborhood, MaterialInputs::Gathered);
-        let (sources, _) = self.material_bind_group(batch, coordinate, preview, inputs, None, encoder)?;
+        let (sources, _) = self.material_bind_group(batch, coordinate, preview, MaterialInputs::Neighborhood, None, encoder)?;
         self.metrics.material_cpu_ms[4] += elapsed(started);
         dispatches.push(Dispatch { entry, output, sources, coordinate, record_offset: self.material_records.offset(record_index) });
         Ok(())
@@ -315,11 +262,11 @@ mod tests {
     use layer_core::DefaultBrushPreset as Preset;
 
     #[test]
-    fn selecting_a_transported_brush_compiles_only_its_page_and_gather_kernels() {
+    fn selecting_a_transported_brush_compiles_only_its_page_and_reservoir_kernels() {
         let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let document = layer_core::Document::new(layer_core::authored::PortableId::random(), 128, 128,
             layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
-        for (preset, expected) in [(Preset::LiquifyPush, 2), (Preset::Smudge, 1), (Preset::NaturalBlender, 1), (Preset::WetRound, 2),
+        for (preset, expected) in [(Preset::Smudge, 1), (Preset::NaturalBlender, 1), (Preset::WetRound, 2),
             (Preset::OpaqueGouache, 3), (Preset::LoadedOil, 3), (Preset::PaletteKnife, 3), (Preset::WatercolorWash, 1), (Preset::WetWatercolor, 1)] {
             let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
             renderer.shader_idle(false, false);
@@ -330,7 +277,7 @@ mod tests {
             let pipelines = &renderer.pipelines;
             let transport = &pipelines.destination_material;
             let ready = transport.kernels.values().filter(|p| p.ready()).count();
-            assert_eq!(ready, expected, "{preset:?} compiles its commit, prediction and gather or reservoir kernels");
+            assert_eq!(ready, expected, "{preset:?} compiles its commit, prediction and reservoir kernels");
             let normal = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
             brush.rendering.blend_mode = BrushBlendMode::Multiply;
             let multiply = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
@@ -347,7 +294,7 @@ mod tests {
         for operation in OPERATIONS {
             for (&entry, &blender) in entries(operation).iter().flat_map(|entry| blenders(operation).iter().map(move |blender| (entry, blender))) {
                 let source = dry_material::material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true),
-                    module(operation, entry, 0, blender), 0, operation);
+                    module(operation, 0, blender), 0, operation);
                 let module = naga::front::wgsl::parse_str(&source).unwrap();
                 let kernel = module.entry_points.iter().find(|e| e.name == entry.name()).unwrap();
                 let [width, height] = workgroup(operation);

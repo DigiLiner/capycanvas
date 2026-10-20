@@ -78,6 +78,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub(super) fn discard_render_requests(&mut self) {
+        self.engine.clear_liquify_preview();
+        self.operation.liquify = None;
         self.operation.next_tool = None;
         self.cancel_content_bounds();
         self.content_bounds = Default::default();

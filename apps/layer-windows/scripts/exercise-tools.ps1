@@ -310,6 +310,25 @@ $tools=@('pen','pencil','brush','eraser','airbrush','decoration','blend','liquif
 foreach($tool in $tools){
     Select-Tool $tool;Check-Projection
     Check-Geometry $tool
+    if($tool -eq 'liquify'){
+        foreach($preset in @(63,64)){
+            $choice=@((Model).state.tool_set.subtools|Where-Object preview -eq $preset)
+            if($choice.Count -ne 1){throw "Liquify preset $preset is missing from the native Tool Set"}
+            $index=0
+            while((Model).state.tool_set.subtools[$index].preview -ne $preset){$index++}
+            Invoke-Id ('tool-subtool-'+$index)
+            Wait-Until {(Model).state.brush.preset -eq $preset -and (Model).brush_ready} "Liquify preset $preset did not activate"
+            Check-Projection
+            $ids=@((Model).state.tool_settings|ForEach-Object id)
+            if('size' -notin $ids -or 'strength' -notin $ids){throw "Liquify preset $preset lacks Size or Strength"}
+            if($preset -eq 64 -and @($ids|Where-Object {$_ -in @('distortion','momentum')}).Count){throw 'Reconstruct exposes deformation-only controls'}
+            if($preset -eq 63 -and @($ids|Where-Object {$_ -in @('distortion','momentum')}).Count -ne 2){throw 'Edge lacks Distortion or Momentum'}
+            foreach($command in @('liquify_adjust','liquify_reset')){
+                if(!@((Model).state.tool_actions|Where-Object command -eq $command).Count){throw "Liquify action $command is missing"}
+            }
+            Check-Geometry ("liquify-$preset")
+        }
+    }
     if($tool -eq 'eyedropper'){
         if((Model).state.layer_tools.tool -notlike 'pick_*'){throw 'Eyedropper did not start temporary picking'}
         Select-Tool 'eyedropper' -Cancel

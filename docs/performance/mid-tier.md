@@ -678,7 +678,10 @@ proof are under `artifacts/dry-defaults-final/midtop/`.
 
 Except for G-Pen and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.0% zoom.
 
-Multiply Glaze and the Liquify rows other than Push were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99. The other very complex rows were measured on 2026-10-20 with the same profile, using a release benchmark build of the blender suite on `13bec703f`. Every one of them is past the tier's GPU capacity at this size, so the backlog grows through each stroke. Comb and Sharpen skip most of their work on the empty layer, so painted layers cost them more. The Blending Knife's and Natural Blender's elongated tips are four and 1.6 times a round tip's area at 512 px.
+Multiply Glaze was measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; its gap is the completion-gap p99. The measured very complex rows were recorded on 2026-10-20 with the same profile, using a release benchmark build of the blender suite on `13bec703f`. Every one of them is past the tier's GPU capacity at this size, so the backlog grows through each stroke. Comb and Sharpen skip most of their work on the empty layer, so painted layers cost them more. The Blending Knife's and Natural Blender's elongated tips are four and 1.6 times a round tip's area at 512 px.
+
+Liquify uses the separate Photo-layer profile below. Its measurements deform
+the photo itself; the reference tablet's 90 Hz mode was verified before the runs.
 
 The older 2048 px simple-brush rows are above the 1536 px guarantee and do not
 classify performance at the guaranteed size. G-Pen, Pencil, Pointy Pencil and Charcoal have current 1536 px measurements; the remaining
@@ -738,17 +741,43 @@ simple brushes retain unqualified rows.
 | Edge-Keeping Blender (54) | Very complex | 512 px | 1.3 updates/s (1.2–1.3); input 1.5/s; completion-gap p99 1156.2 ms | **Not met** |
 | Scatter Blender (49) | Very complex | 512 px | 25.5 updates/s (25.3–25.7); input 25.7/s; completion-gap p99 54.7 ms | **Not met** |
 | Dither Blender (55) | Very complex | 512 px | 1.8 updates/s (1.7–1.8); input 2.0/s; completion-gap p99 835.8 ms | **Not met** |
-| Liquify Push (12) | Very complex | 512 px | 22.8 updates/s (22.7–23.0); input 23.0/s; completion-gap p99 66.7 ms | **Not met** |
-| Liquify Twirl Clockwise (36) | Very complex | 512 px | 27.6 updates/s (27.5–28.4); input 27.6/s; completion-gap p99 56.0 ms | **Not met** |
-| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 27.0 updates/s (27.0–27.1); input 27.0/s; completion-gap p99 59.7 ms | **Not met** |
-| Liquify Pinch (37) | Very complex | 512 px | 23.5 updates/s (23.4–23.7); input 23.5/s; completion-gap p99 64.2 ms | **Not met** |
-| Liquify Expand (38) | Very complex | 512 px | 23.8 updates/s (23.4–24.2); input 23.8/s; completion-gap p99 63.8 ms | **Not met** |
-| Liquify Crystals (39) | Very complex | 512 px | 6.1 updates/s (6.0–6.1); input 6.1/s; completion-gap p99 223.6 ms | **Not met** |
+| Liquify Push (12) | Very complex | 512 px | 45.89 fresh updates/s (45.47–46.07); fresh completion-gap p99 ≤44.84 ms | **Not met** |
+| Liquify Twirl Clockwise (36) | Very complex | 512 px | 31.52 fresh updates/s (31.34–31.96); fresh completion-gap p99 ≤83.66 ms | **Not met** |
+| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 31.12 fresh updates/s (30.55–31.15); fresh completion-gap p99 ≤87.86 ms | **Not met** |
+| Liquify Pinch (37) | Very complex | 512 px | 53.85 fresh updates/s (45.30–54.14); fresh completion-gap p99 ≤67.69 ms | **Not met** |
+| Liquify Expand (38) | Very complex | 512 px | 55.95 fresh updates/s (55.69–56.71); fresh completion-gap p99 ≤47.49 ms | **Not met** |
+| Liquify Crystals (39) | Very complex | 512 px | 33.94 fresh updates/s (33.92–34.10); fresh completion-gap p99 ≤56.98 ms | **Not met** |
+| Liquify Edge (63) | Very complex | 512 px | 45.08 fresh updates/s (43.46–46.76); fresh completion-gap p99 ≤71.68 ms | **Not met** |
+| Liquify Reconstruct (64) | Very complex | 512 px | 55.70 fresh updates/s (53.27–56.83); fresh completion-gap p99 ≤57.81 ms | **Not met** |
 | Clone Stamp (40) | Very complex | 512 px | 115.7 fresh updates/s; completion gap p99 15.2 ms | **Met for drawing** |
 | Healing Brush (41) | Very complex | 512 px | 113.7 fresh updates/s; completion gap p99 15.2 ms | **Met for drawing** |
 | Spot Healing Brush (42) | Very complex | 512 px | 119.7 fresh updates/s; completion gap p99 13.6 ms | **Met for drawing** |
 
 Retouching rows use the integrated-compositor measurements below, copying from the photo marked as a reference layer.
+
+### Retained-map Liquify
+
+Measured on 2026-10-20 on the Wacom MovinkPad 11, Mali-G57 MC2, with the
+retained-map implementation based on `b7fb3654a`. Benchmark APK SHA-256:
+`7a5a27c61b93890c744413a0f31a4d6c54c074377884af3ac8e7c3bb2f115c05`.
+The eight rows above use the 6000 × 4000 photo, Size 512, full pressure,
+16 ms prediction and three five-second contacts after shader warm-up.
+`--paint-layer-name Photo` selects the photo itself. Reconstruct first seeds
+its map with a five-second Push stroke; each measured contact is undone before
+the next.
+
+The 300 × 180 screen-pixel semiaxes run at Fit zoom 0.296438 in the
+2200 × 1440 viewport. Sketch is collapsed and Stats is closed; thermal status
+is zero. Adaptive refresh is enabled for the benchmark application. A display
+dump before the matrix verifies the active 90 Hz mode; all 24 trials record
+the host's nominal 11.111111 ms interval, not physical display timing. Hardware
+refresh was not captured per trial. Values are median completed
+updates consuming fresh input per second with the three-run range, and the
+worst run's fresh completion-gap p99. Completed nonempty and fresh-input rates
+are equal except for two additional completed updates in one Expand trial.
+They do not measure physical scanout or pen-to-display latency. Every mode
+misses both 90/s and the 22.2 ms gap limit. Ordinary-stroke
+pen-up settlement reaches 846 ms for Push, including momentum and publication.
 
 ## Layer attachment comparison
 

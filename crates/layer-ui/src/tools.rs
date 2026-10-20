@@ -302,6 +302,8 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
         MessageId::BRUSH_PRESET_LIQUIFY_CRYSTALS,
         ToolGroup::Liquify,
     ),
+    (DefaultBrushPreset::LiquifyEdge, MessageId::BRUSH_PRESET_LIQUIFY_EDGE, ToolGroup::Liquify),
+    (DefaultBrushPreset::LiquifyReconstruct, MessageId::BRUSH_PRESET_LIQUIFY_RECONSTRUCT, ToolGroup::Liquify),
     (DefaultBrushPreset::CloneStamp, MessageId::BRUSH_PRESET_CLONE_STAMP, ToolGroup::Clone),
     (DefaultBrushPreset::HealingBrush, MessageId::BRUSH_PRESET_HEALING_BRUSH, ToolGroup::Heal),
     (DefaultBrushPreset::SpotHealingBrush, MessageId::BRUSH_PRESET_SPOT_HEALING_BRUSH, ToolGroup::SpotHeal),
@@ -687,7 +689,7 @@ mod tests {
 
     #[test]
     fn every_brush_has_one_tool_and_group_and_every_group_is_populated() {
-        assert_eq!(PRESETS.len(), 62);
+        assert_eq!(PRESETS.len(), 64);
         let mut ids = std::collections::BTreeSet::new();
         for &(preset, _, group) in PRESETS {
             assert!(ids.insert(preset as u32));

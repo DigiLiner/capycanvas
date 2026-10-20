@@ -275,7 +275,7 @@ impl UiState {
                 self.layer_tools.tool == LayerCanvasTool::Paint && !self.toolbar_context().operation
             }
             UiAction::SetBrushStrength { .. } => ToolbarNumericBinding::BrushStrength.field(self).is_some(),
-            UiAction::SetToolSetting { id, .. } | UiAction::ResetToolSetting { id } => {
+            UiAction::SetToolSetting { id, .. } | UiAction::ResetToolSetting { id } | UiAction::ToolSettingContact { id, .. } => {
                 self.tool_settings.iter().any(|f| f.id == id)
             }
             UiAction::Invoke { command }

@@ -32,6 +32,7 @@ pub use lut3d::Lut3d;
 #[cfg(test)]
 mod lut3d_tests;
 pub mod raster;
+pub mod liquify;
 pub mod raster_storage;
 pub use effect_catalog::*;
 mod layers;
@@ -504,11 +505,10 @@ impl ColorMixSpace {
 pub enum LiquifyMode {
     #[default]
     Push,
-    /// Turns content counterclockwise on the y-down canvas. The name follows
-    /// the rotation applied to the sampled coordinate.
+    #[serde(rename = "TwirlClockwise")]
+    TwirlCounterclockwise,
+    #[serde(rename = "TwirlCounterClockwise")]
     TwirlClockwise,
-    /// Turns content clockwise on the y-down canvas.
-    TwirlCounterClockwise,
     /// Shrinks content toward the dab centre.
     Pinch,
     /// Bulges content away from the dab centre.
@@ -2550,6 +2550,16 @@ impl Editor {
     }
     fn trim_history(&mut self, budget: usize) {
         let mut accounting = history_budget::Accounting::new(&self.document);
+        let bytes = self.undo.iter().chain(&self.redo).fold(0usize, |bytes, entry| bytes.saturating_add(accounting.charge(entry)));
+        if bytes > budget {
+            let mut current = RootInventory::default(); current.document(&self.document);
+            let current: std::collections::HashSet<_> = current.rasters.iter().map(|r| r.identity()).collect();
+            for entry in self.undo.iter().chain(&self.redo) {
+                let mut roots = Vec::new(); entry.edit.raster_roots(&mut roots);
+                for revision in roots { if !current.contains(&revision.identity()) { revision.drop_liquify(); } }
+            }
+        }
+        let mut accounting = history_budget::Accounting::new(&self.document);
         let mut bytes = 0usize;
         for history in [&mut self.undo, &mut self.redo] {
             let mut keep = 0;
@@ -2696,6 +2706,11 @@ impl Editor {
         }
     }
     pub fn finish_raster_submission(&mut self) {
+        let mut budget = false;
+        for state in self.document.artwork.paint.iter().filter_map(|(_, _, s)| s.raster.liquify()) {
+            budget |= state.needs_budget();
+        }
+        if budget { self.trim_history(history_budget::BYTE_BUDGET); }
         let paint: Vec<_> = self
             .document
             .artwork

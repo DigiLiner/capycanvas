@@ -80,7 +80,11 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val blending = arguments.getString("blending")
             check(blending == null || blending in listOf("linear", "perceptual"))
             check(duration in 1000..60000 && repeats in 1..100)
-            check(mode in listOf("constant", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine", "vector"))
+            check(mode in listOf("constant", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine", "vector", "coverage"))
+            val coverageMinAvailableMiB = arguments.getString("coverageMinAvailableMiB", "1024")!!.toInt()
+            val coverageMaxStripes = arguments.getString("coverageMaxStripes", "32")!!.toInt()
+            check(coverageMinAvailableMiB in 512..8192 && coverageMaxStripes in 1..32)
+            check(mode != "coverage" || (preset == 12 && memorySnapshots && repeats == 1 && size in 256.0..1024.0))
             check(mode != "object-affine" || objectWorkload)
             val pauseMs = arguments.getString("pauseMs", "100")!!.toInt()
             val contactMs = arguments.getString("contactMs", "100")!!.toInt()
@@ -163,6 +167,20 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 check(host.actionError == null) { host.actionError!! }
             }
             fun invoke(command: String) = action(obj("type" to "invoke", "command" to command))
+            fun enabledCommand(id: String): Boolean {
+                val commands = state().getJSONArray("commands")
+                return (0 until commands.length()).any { commands.getJSONObject(it).let { command ->
+                    command.getString("id") == id && command.getBoolean("enabled")
+                } }
+            }
+            fun undoStroke() {
+                val before = if (preset == 64) state().getJSONObject("document_file").getLong("revision") else 0L
+                invoke("undo")
+                if (preset == 64) {
+                    waitFor { state().getJSONObject("document_file").getLong("revision") > before && !native { Native.renderingPending(it) } }
+                    check(enabledCommand("liquify_reset")) { "Undo must retain the predeformed Reconstruct session" }
+                }
+            }
             fun report(reset: Boolean): JSONObject {
                 val done = CountDownLatch(1)
                 var value = JSONObject()
@@ -443,6 +461,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val cy = area.getDouble(1) + area.getDouble(3) / 2
             val rx = min(arguments.getString("radiusX", "520")!!.toDouble(), area.getDouble(2) * .45)
             val ry = min(arguments.getString("radiusY", "299")!!.toDouble(), area.getDouble(3) * .45)
+            val coverageRows = ceil(photoHeight / size).toInt()
+            var coverageRow = 0
             val sampleInterval = 5_000_000L
             if (mode == "pinch") {
                 runPinchBenchmark(this, arguments, host, output, label, cx, cy)
@@ -526,6 +546,14 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                     if (phase == MotionEvent.ACTION_DOWN) down = SystemClock.uptimeMillis()
                     coords[0].x = (cx + (if (kind == "stationary") 0.0 else rx * cos(angle))).toFloat() + host.surfaceOrigin.x
                     coords[0].y = (cy + (if (kind == "stationary") 0.0 else ry * sin(angle))).toFloat() + host.surfaceOrigin.y
+                    if (kind == "coverage") {
+                        val translation = camera.getJSONArray("translation")
+                        val start = size / 2
+                        val x = start + (photoWidth - size) * progress
+                        val y = photoHeight * (coverageRow + .5) / coverageRows
+                        coords[0].x = (translation.getDouble(0) + x * camera.getDouble("zoom") + host.surfaceOrigin.x).toFloat()
+                        coords[0].y = (translation.getDouble(1) + y * camera.getDouble("zoom") + host.surfaceOrigin.y).toFloat()
+                    }
                     coords[0].pressure = if (phase == MotionEvent.ACTION_UP) 0f else if (kind == "pressure") (.55 + .45 * sin(t * 2 * PI)).toFloat() else 1f
                     coords[0].setAxisValue(MotionEvent.AXIS_TILT, tilt ?: if (kind == "tilt") .9f else 0f)
                     coords[0].orientation = if (tilt != null) (-PI/2).toFloat() else if (kind == "tilt") .5f else 0f
@@ -563,10 +591,32 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 SystemClock.sleep(1000)
                 waitFor { host.snapshot?.optBoolean("brush_ready") == true }
             }
+            var reconstructFixture: JSONObject? = null
+            if (preset == 64) {
+                val before = state().getJSONObject("document_file").getLong("revision")
+                prepared(obj("type" to "select_brush", "id" to 12))
+                prepared(obj("type" to "set_brush_size", "value" to size))
+                val seedDuration = maxOf(2000, duration)
+                val motion = stroke(seedDuration, "constant")
+                waitFor { state().getJSONObject("document_file").getLong("revision") > before }
+                waitFor { !native { Native.renderingPending(it) } }
+                val seeded = state().getJSONObject("document_file").getLong("revision")
+                prepared(obj("type" to "select_brush", "id" to 64))
+                prepared(obj("type" to "set_brush_size", "value" to size))
+                strength?.let { action(obj("type" to "set_brush_strength", "value" to it)) }
+                opacity?.let { action(obj("type" to "set_brush_opacity", "value" to it)) }
+                smoothing?.let { action(obj("type" to "set_tool_setting", "id" to "smoothing_strength", "value" to it)) }
+                waitFor { host.snapshot?.optBoolean("brush_ready") == true && !native { Native.renderingPending(it) } }
+                check(enabledCommand("liquify_reset")) { "Reconstruct must start from a deformed session" }
+                reconstructFixture = obj("seed_preset" to 12, "duration_ms" to seedDuration,
+                    "before_revision" to before, "after_revision" to seeded, "pending" to false,
+                    "session_ready" to true, "motion" to motion, "settled_ns" to System.nanoTime())
+                stage("reconstruct-seeded")
+            }
             val displayInfo = display()
             check(displayInfo.getString("present_mode") in listOf("SharedDemandRefresh", "Fifo"))
             File(output, "$label-info.json").writeText(obj("label" to label, "preset" to preset,
-                "brush_probes" to brushProbes,
+                "brush_probes" to brushProbes, "reconstruct_fixture" to reconstructFixture,
                 "shaders_complete_at_selection" to shadersCompleteAtSelection,
                 "shaders_complete_at_ready" to (host.snapshot?.optBoolean("shaders_ready") == true),
                 "wait_for_warmup" to waitForWarmup,
@@ -588,6 +638,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 "memory_idle_ms" to memoryIdleMs,
                 "pause_ms" to pauseMs,
                 "contact_ms" to contactMs,
+                "coverage_min_available_mib" to coverageMinAvailableMiB,
+                "coverage_max_stripes" to coverageMaxStripes,
                 "settle_delay_ms" to settleDelayMs,
                 "state" to state(), "display" to displayInfo, "resources" to resources(), "renderer" to stats(),
                 "setup_stages" to setupStages,
@@ -619,11 +671,113 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                     .put("resources_after", resources())
                     .put("completions", native { JSONArray(Native.completionTimings(it, false)) }).toString())
             }
-            invoke("undo")
+            undoStroke()
             SystemClock.sleep(1500)
             File(output, "$label-ready").writeText("ready")
             sendStatus(0, Bundle().apply { putString("stream", "BRUSH_READY $label\n") })
             if (arguments.getString("waitForTrace") == "true") waitFor { File(output, "$label-go").isFile }
+            if (mode == "coverage") {
+                val stripes = JSONArray()
+                val geometricTiles = mutableSetOf<Pair<Int, Int>>()
+                val tilesWide = ceil(photoWidth / 256.0).toInt()
+                val tilesHigh = ceil(photoHeight / 256.0).toInt()
+                val minimumAvailableKiB = coverageMinAvailableMiB * 1024L
+                fun availableKiB(resource: JSONObject): Long = Regex("MemAvailable:\\s+(\\d+) kB")
+                    .find(resource.getString("meminfo"))!!.groupValues[1].toLong()
+                fun awaitCoverageRevision(before: Long): Long {
+                    val deadline = SystemClock.uptimeMillis() + 60_000
+                    while (native { Native.renderingPending(it) } || state().getJSONObject("document_file").getLong("revision") <= before) {
+                        check(host.failure == null) { host.failure!! }
+                        check(host.actionError == null) { host.actionError!! }
+                        check(SystemClock.uptimeMillis() < deadline) { "Timed out settling coverage stroke" }
+                        SystemClock.sleep(20)
+                    }
+                    return System.nanoTime()
+                }
+                var stopReason = if (coverageMaxStripes < coverageRows) "configured stripe limit" else "geometric rows complete"
+                val beforeCoverage = resources()
+                for (row in 0 until min(coverageRows, coverageMaxStripes)) {
+                    val beforeResources = resources()
+                    if (availableKiB(beforeResources) < minimumAvailableKiB + 512L * 1024) {
+                        stopReason = "MemAvailable below guarded pre-stripe headroom"
+                        break
+                    }
+                    val beforeRevision = state().getJSONObject("document_file").getLong("revision")
+                    coverageRow = row
+                    native { Native.completionTimings(it, true) }
+                    val motion = stroke(1000, "coverage")
+                    val pendingAtPenUp = native { Native.renderingPending(it) }
+                    val settled = awaitCoverageRevision(beforeRevision)
+                    val afterResources = resources()
+                    val y = photoHeight * (row + .5) / coverageRows
+                    val firstTileY = floor((y - size / 2) / 256).toInt().coerceAtLeast(0)
+                    val pastTileY = ceil((y + size / 2) / 256).toInt().coerceAtMost(tilesHigh)
+                    for (tileY in firstTileY until pastTileY) for (tileX in 0 until tilesWide)
+                        geometricTiles.add(tileX to tileY)
+                    stripes.put(obj("row" to row, "document_y" to y, "motion" to motion,
+                        "pending_at_pen_up" to pendingAtPenUp, "settled_ns" to settled,
+                        "completions" to JSONArray(native { Native.completionTimings(it, false) }),
+                        "revision_after" to state().getJSONObject("document_file").getLong("revision"),
+                        "geometric_support_upper_bound_tiles" to geometricTiles.size, "resources_before" to beforeResources,
+                        "resources_after" to afterResources))
+                    File(output, "$label-coverage.json").writeText(obj("stripes" to stripes,
+                        "stop_reason" to "running", "geometric_support_upper_bound_tiles" to geometricTiles.size,
+                        "possible_tile_cells" to tilesWide * tilesHigh).toString())
+                    if (availableKiB(afterResources) < minimumAvailableKiB) {
+                        stopReason = "MemAvailable below guarded post-stripe headroom"
+                        break
+                    }
+                }
+                val afterCoverage = resources()
+                val history = JSONObject()
+                if (stripes.length() > 0) {
+                    history.put("reset_enabled_after_coverage", enabledCommand("liquify_reset"))
+                    val beforeUndo = state().getJSONObject("document_file").getLong("revision")
+                    history.put("undo_started_ns", System.nanoTime())
+                    undoStroke()
+                    history.put("undo_settled_ns", awaitCoverageRevision(beforeUndo))
+                        .put("reset_enabled_after_undo", enabledCommand("liquify_reset"))
+                        .put("after_undo", resources())
+                    if (availableKiB(resources()) >= minimumAvailableKiB + 256L * 1024) {
+                        native { Native.completionTimings(it, true) }
+                        val beforeContinued = state().getJSONObject("document_file").getLong("revision")
+                        val continued = stroke(200, "constant")
+                        history.put("continued_motion", continued)
+                            .put("continued_pending_at_pen_up", native { Native.renderingPending(it) })
+                            .put("continued_settled_ns", awaitCoverageRevision(beforeContinued))
+                            .put("continued_completions", JSONArray(native { Native.completionTimings(it, false) }))
+                            .put("after_continued", resources())
+                        val undoAll = JSONArray()
+                        repeat(stripes.length()) {
+                            val before = state().getJSONObject("document_file").getLong("revision")
+                            undoStroke()
+                            awaitCoverageRevision(before)
+                            undoAll.put(obj("revision" to state().getJSONObject("document_file").getLong("revision"),
+                                "reset_enabled" to enabledCommand("liquify_reset"), "resources" to resources()))
+                        }
+                        history.put("undo_all_steps", undoAll).put("after_undo_all", resources())
+                        if (availableKiB(resources()) >= minimumAvailableKiB + 256L * 1024) {
+                            val beforeTrim = state().getJSONObject("document_file").getLong("revision")
+                            history.put("trim_motion", stroke(200, "constant"))
+                                .put("trim_settled_ns", awaitCoverageRevision(beforeTrim))
+                                .put("reset_enabled_after_redo_trim", enabledCommand("liquify_reset"))
+                                .put("after_redo_trim", resources())
+                            SystemClock.sleep(2000)
+                            history.put("after_redo_trim_idle", resources())
+                        }
+                    } else history.put("continued_skipped", "MemAvailable below continued-input headroom")
+                }
+                File(output, "$label-coverage.json").writeText(obj("stripes" to stripes,
+                    "stop_reason" to stopReason, "geometric_support_upper_bound_tiles" to geometricTiles.size,
+                    "possible_tile_cells" to tilesWide * tilesHigh,
+                    "rows_planned" to coverageRows, "rows_limit" to coverageMaxStripes,
+                    "minimum_available_mib" to coverageMinAvailableMiB,
+                    "resources_before" to beforeCoverage, "resources_after" to afterCoverage,
+                    "history" to history).toString(2))
+                result.putString("stream", "\nBRUSH_COMPLETE $label\n")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
             repeat(repeats) { run ->
                 if (colorBeforeStrokes) {
                     action(obj("type" to "color", "action" to obj("op" to "quick_color", "white" to (run % 2 == 0))))
@@ -736,7 +890,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                     SystemClock.sleep(memoryIdleMs)
                     File(output, "$label-idle-after.json").writeText(resources().toString())
                 }
-                if (mode in listOf("lifts", "pauses")) repeat(duration / (if (mode == "pauses") contactCycle * 5 else 200)) { invoke("undo") } else repeat(if (mode == "settle") 2 else 1) { invoke("undo") }
+                if (mode in listOf("lifts", "pauses")) repeat(duration / (if (mode == "pauses") contactCycle * 5 else 200)) { undoStroke() } else repeat(if (mode == "settle") 2 else 1) { undoStroke() }
                 if (mode == "settle") invoke("fit_canvas")
                 SystemClock.sleep(2000)
             }

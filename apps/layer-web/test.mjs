@@ -83,6 +83,7 @@ import { checkBlending } from "./blending-journey.test.mjs";
 import { checkScreenStatus } from "./screen-status-journey.test.mjs";
 import { checkPipelineReadiness, checkPaperTextureReadiness, checkTipResizeReadiness } from "./pipeline-readiness.test.mjs";
 import { checkPhotoEdit } from "./photo-edit-journey.test.mjs";
+import { checkLiquify } from "./liquify-journey.test.mjs";
 import { checkCanvasSize } from "./canvas-size-journey.test.mjs";
 import { checkNewDrawing } from "./new-drawing-journey.test.mjs";
 import { checkCrop } from "./crop-journey.test.mjs";
@@ -256,6 +257,8 @@ try {
     [process.argv.includes("--pass-through"), () => checkPassThrough({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--blending"), () => checkBlending({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--photo-edit"), () => checkPhotoEdit({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--liquify-amount-bench"), () => checkLiquify({call,evaluate,settle},{benchmark:true}), checkErrors],
+    [process.argv.includes("--liquify-journey"), () => checkLiquify({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--clipboard"), () => checkClipboard({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--canvas-size"), () => checkCanvasSize({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--new-drawing"), () => checkNewDrawing({call,evaluate,settle}), checkErrors],

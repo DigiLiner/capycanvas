@@ -104,8 +104,6 @@ pub(super) enum Entries {
     Transport(u32),
     /// Smudge page kernels for one blender.
     Blend(layer_core::BlenderKind),
-    /// Distant samples gathered for Liquify.
-    Gather,
 }
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
@@ -140,17 +138,15 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         M::Deposit|M::Coverage|M::Clone => compose_wgsl(&[include_str!("material_pointwise.wgsl"),
             "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}"]),
         _ => {
-            let name=match operation {M::Liquify=>"liquify",M::Smudge=>"smudge",M::Wet=>"wet",_=>"watercolor"};
-            let gathered=entries==Entries::Gather;
+            let name=match operation {M::Liquify=>unreachable!("liquify reconstructs its original source"),M::Smudge=>"smudge",M::Wet=>"wet",_=>"watercolor"};
             let [width,height]=crate::destination_material::workgroup(operation);
-            let mut source=format!("{}\nconst MATERIAL_GATHERED: bool = {gathered};\n\
+            let mut source=format!("{}\n\
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
             if let Entries::Blend(kind)=entries {
                 source+=&format!("const BLENDER: u32 = {}u;\n{}", kind as u8, include_str!("material_blend.wgsl"));
             }
-            if gathered {source+=&format!("fn gathered_sample(w:vec2<f32>)->vec4<f32> {{return {name}_gathered(w);}}\n");}
             if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()
         }
@@ -158,9 +154,8 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
     let entry=match entries {
         Entries::Kernel(..) => include_str!("material_compute.wgsl"),
         Entries::Transport(_) | Entries::Blend(_) => include_str!("material_destination.wgsl"),
-        Entries::Gather => include_str!("material_gather.wgsl"),
     };
-    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Blend(_) | Entries::Gather => 0};
+    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Blend(_) => 0};
     let blend=blend_source(blend_code);
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
@@ -786,7 +781,7 @@ mod tests {
             let kernels = destination::OPERATIONS.into_iter()
                 .filter(|&operation| destination::blended(operation) || slot % MATERIAL_BLENDS.len() == 0)
                 .flat_map(|operation| destination::entries(operation).iter().flat_map(move |&entry| destination::blenders(operation).iter()
-                    .map(move |&blender| (destination::module(operation, entry, blend, blender), operation, entry.name()))));
+                    .map(move |&blender| (destination::module(operation, blend, blender), operation, entry.name()))));
             for (entries, operation, entry) in pointwise.chain(kernels) {
                 let source = material_source(Default::default(), sampling, entries, flags, operation);
                 assert_logical_operators_grouped(&source);
@@ -821,7 +816,7 @@ mod tests {
         let clone = names(&[include_str!("retouch_sample.wgsl"), include_str!("material_clone.wgsl")], &["clone_source_at"]);
         let blend = names(&[include_str!("blend_modes.wgsl")], &["blend"]);
         let pointwise = names(&[include_str!("material_pointwise.wgsl")], &[]);
-        let fragments = ["liquify_fragment", "smudge_fragment", "wet_fragment", "watercolor_fragment"];
+        let fragments = ["smudge_fragment", "wet_fragment", "watercolor_fragment"];
         let absent = |present: &BTreeSet<String>, feature: &BTreeSet<String>, what: &str| {
             let found: Vec<_> = present.intersection(feature).collect();
             assert!(found.is_empty(), "{what} reaches {found:?}");
@@ -845,10 +840,10 @@ mod tests {
         use crate::destination_material::{self as destination, Entry};
         for flags in [0, 128] {for operation in destination::OPERATIONS {for &entry in destination::entries(operation) {
             let what = format!("{operation:?} {entry:?} {flags:#x}");
-            let present = compiled(destination::module(operation, entry, 0, layer_core::BlenderKind::Soft), flags, operation, entry.name());
+            let present = compiled(destination::module(operation, 0, layer_core::BlenderKind::Soft), flags, operation, entry.name());
             for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
-            assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Gather | Entry::Reservoir)), "{what} reaches {operations:?}");
+            assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Reservoir)), "{what} reaches {operations:?}");
         }}}
         let multiply = layer_core::LayerBlend::from(BrushBlendMode::Multiply).code();
         let formulas = blend.iter().filter(|f| *f != "blend_luma").cloned().collect();

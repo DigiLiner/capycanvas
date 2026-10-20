@@ -218,3 +218,7 @@ brush-preset-mixing-brush = 混色画笔
 brush-preset-sharpen = 锐化
 brush-preset-texture-blender = 保留质感混色
 brush-preset-hue-blender = 色相混色
+
+brush-preset-liquify-edge = 边缘
+brush-preset-liquify-reconstruct = 重建
+tool-control-liquify-amount = 程度

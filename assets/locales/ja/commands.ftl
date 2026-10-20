@@ -672,3 +672,7 @@ command-release-compound-path = 複合パスを解除
 menu-path = パス
 command-erase-touched-part = 触れた部分を消去
 command-erase-to-intersection = 交点まで消去
+
+command-liquify-reset = ゆがみをリセット
+command-liquify-adjust = ゆがみを調整
+commands-liquify-no-changes = 先にこのレイヤーにゆがみを適用してください

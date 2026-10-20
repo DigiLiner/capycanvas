@@ -374,7 +374,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Vec::new();
         };
         let limit = f64::from(self.engine.geometry_limits().canvas_dimension());
-        let pixels = |label| tool_settings::ToolSetting {
+        let pixels = |label| tool_settings::ToolSetting { preview: false,
             id: "",
             label: localizer.text(label),
             label_id: label,
@@ -394,7 +394,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         vec![
             tool_settings::ToolSetting { id: "crop_width", value: w, ..pixels(MessageId::TOOL_CONTROL_CROP_WIDTH) },
             tool_settings::ToolSetting { id: "crop_height", value: h, ..pixels(MessageId::TOOL_CONTROL_CROP_HEIGHT) },
-            tool_settings::ToolSetting { id: "crop_angle", label: localizer.text(MessageId::TOOL_CONTROL_CROP_STRAIGHTEN), label_id: MessageId::TOOL_CONTROL_CROP_STRAIGHTEN, group_id: "", group: std::sync::Arc::from(""), numeric: degrees, value: session.frame.angle },
+            tool_settings::ToolSetting { preview: false, id: "crop_angle", label: localizer.text(MessageId::TOOL_CONTROL_CROP_STRAIGHTEN), label_id: MessageId::TOOL_CONTROL_CROP_STRAIGHTEN, group_id: "", group: std::sync::Arc::from(""), numeric: degrees, value: session.frame.angle },
         ]
     }
 

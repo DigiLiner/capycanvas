@@ -5444,83 +5444,227 @@ class AndroidInteractionTest {
     }
 
     @Test fun liquifyPinchStrokeMovesThePixelsUnderTheStylus() {
+        systemInput = true
         val keep = layerStates().map { it.getLong("id") }.toSet()
-        val (width, height) = cleanDocument(keep)
-        tool = MotionEvent.TOOL_TYPE_STYLUS
-        layerAction(obj("op" to "new", "group" to false, "clipped" to false))
-        val paint = editingLayer()
-        command("brush")
-        action(obj("type" to "select_brush", "id" to 1))
-        action(obj("type" to "set_brush_size", "value" to height * .03))
-        action(obj("type" to "set_color", "rgba" to JSONArray(listOf(.05, .1, .6, 1.0))))
-        for (row in 0..6) {
-            val y = height * (.25 + .07 * row)
-            drag(documentPoint(width * .15, y), documentPoint(width * .85, y), 12)
+        val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
+        val reports = JSONArray()
+        try {
+            for (theme in listOf("light", "dark")) {
+                val (width, height) = cleanDocument(keep)
+                action(obj("type" to "set_theme", "theme" to theme))
+                customize(obj("type" to "set_panel_visible", "panel" to "tool_settings", "visible" to true))
+                action(obj("type" to "select_panel_tab", "group" to group("tool_settings").getInt("id"), "panel" to "tool_settings"))
+                tool = MotionEvent.TOOL_TYPE_STYLUS
+                val cancelAt = SystemClock.uptimeMillis()
+                val cancel = MotionEvent.obtain(cancelAt, cancelAt, MotionEvent.ACTION_CANCEL, 0f, 0f, 0).apply { source = InputDevice.SOURCE_STYLUS }
+                try { instrumentation.uiAutomation.injectInputEvent(cancel, true) } finally { cancel.recycle() }
+                layerAction(obj("op" to "new", "group" to false, "clipped" to false))
+                val paint = editingLayer()
+                command("brush")
+                action(obj("type" to "select_brush", "id" to 1))
+                action(obj("type" to "set_brush_size", "value" to height * .03))
+                action(obj("type" to "set_color", "rgba" to JSONArray(listOf(.05, .1, .6, 1.0))))
+                for (row in 0..6) {
+                    val y = height * (.25 + .07 * row)
+                    drag(documentPoint(width * .15, y), documentPoint(width * .85, y), 12)
+                }
+                waitFor("the striped pattern is painted", 30_000) { paintRevision(paint) > 0 }
+                fun settleLiquify() = kotlinx.coroutines.runBlocking {
+                    kotlinx.coroutines.withTimeout(120_000) {
+                        while (host.withNative { Native.renderingPending(it) }) kotlinx.coroutines.delay(20)
+                    }
+                }
+                settleLiquify()
+                fun parkCursor() {
+                    val at = documentPoint(width * .1, height * .85)
+                    val base = IntArray(2)
+                    onMain { owner.view.getLocationOnScreen(base) }
+                    val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 7; toolType = MotionEvent.TOOL_TYPE_STYLUS })
+                    val coords = arrayOf(MotionEvent.PointerCoords().apply { x = at.x + base[0]; y = at.y + base[1]; pressure = 0f })
+                    val now = SystemClock.uptimeMillis()
+                    val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 1, properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
+                    try {
+                        assertTrue("the system accepts stylus hover", instrumentation.uiAutomation.injectInputEvent(event, true))
+                        event.action = MotionEvent.ACTION_HOVER_EXIT
+                        assertTrue("the system accepts the stylus leaving", instrumentation.uiAutomation.injectInputEvent(event, true))
+                    } finally { event.recycle() }
+                    settle()
+                }
+                parkCursor()
+                val profile = (0..200).map { documentPoint(width * .5, height * (.35 + .001 * it)) }
+                val profilePixels = screenPixels(profile)
+                val edges = (1 until profile.size).filter { blue(profilePixels[it]) != blue(profilePixels[it - 1]) }
+                assertTrue("the fixture has contrasting stripe edges", edges.size >= 4)
+                val probes = (0..8).flatMap { i -> edges.flatMap { edge ->
+                    val x = documentPoint(width * (.3 + .05 * i), 0.0).x
+                    listOf(Offset(x, profile[edge - 1].y), Offset(x, profile[edge].y))
+                } }
+                val far = documentPoint(width * .5, height * .9)
+                val points = probes + far
+                val original = screenPixels(points)
+                fun ready(preset: Int) {
+                    command("liquify")
+                    action(obj("type" to "select_brush", "id" to preset))
+                    action(obj("type" to "set_brush_size", "value" to height * .3))
+                    waitFor("Liquify $preset is ready", 120_000) {
+                        state().getJSONObject("brush").getInt("preset") == preset && snapshot().optBoolean("brush_ready")
+                    }
+                    settleLiquify()
+                    parkCursor()
+                }
+                fun stroke() {
+                    val revision = paintRevision(paint)
+                    val from = documentPoint(width * .3, height * .35)
+                    val to = documentPoint(width * .7, height * .55)
+                    val base = IntArray(2)
+                    onMain { owner.view.getLocationOnScreen(base) }
+                    val count = 360
+                    val began = System.nanoTime()
+                    val down = SystemClock.uptimeMillis()
+                    for (i in 0..count) {
+                        val left = began + i * 1_500_000_000L / count - System.nanoTime()
+                        if (left > 0) java.util.concurrent.locks.LockSupport.parkNanos(left)
+                        val at = from + (to - from) * (i / count.toFloat())
+                        val phase = if (i == 0) MotionEvent.ACTION_DOWN else if (i == count) MotionEvent.ACTION_UP else MotionEvent.ACTION_MOVE
+                        val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 7; toolType = MotionEvent.TOOL_TYPE_STYLUS })
+                        val coords = arrayOf(MotionEvent.PointerCoords().apply { x = at.x + base[0]; y = at.y + base[1]; pressure = if (phase == MotionEvent.ACTION_UP) 0f else .7f })
+                        val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), phase, 1, properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
+                        try { assertTrue("the system accepts the stylus stroke", instrumentation.uiAutomation.injectInputEvent(event, false)) } finally { event.recycle() }
+                    }
+                    waitFor("Liquify commits the stylus stroke", 120_000) { paintRevision(paint) != revision }
+                    settleLiquify()
+                    parkCursor()
+                    assertNull(host.failure)
+                    assertNull(host.actionError)
+                }
+                fun restored(label: String, expected: List<Int>) {
+                    settleLiquify()
+                    parkCursor()
+                    awaitPixels(label, points) { pixels -> pixels.indices.all { same(pixels[it], expected[it]) } }
+                }
+                fun revealControl(tag: String) {
+                    waitFor(tag) { exists(tag) }
+                    onMain {
+                        val item = find(tag)!!
+                        generateSequence(item.parent) { it.parent }.firstOrNull { it.config.getOrNull(SemanticsActions.ScrollBy) != null }?.let { list ->
+                            val by = if (item.boundsInRoot.top < list.boundsInRoot.top) item.boundsInRoot.top - list.boundsInRoot.top - 8 * density
+                                else (item.boundsInRoot.bottom - list.boundsInRoot.bottom + 8 * density).coerceAtLeast(0f)
+                            if (by != 0f) list.config[SemanticsActions.ScrollBy].action!!.invoke(0f, by)
+                        }
+                    }
+                    settle()
+                }
+                for (preset in listOf(12, 13, 36, 37, 38, 39, 63, 64)) {
+                    println("LIQUIFY_STAGE $theme/$preset")
+                    if (preset == 64) { ready(12); stroke() }
+                    ready(preset)
+                    val before = screenPixels(points)
+                    File(instrumentation.targetContext.getExternalFilesDir(null), "validation/liquify/$theme-$preset-before.json").apply { parentFile!!.mkdirs() }.writeText(obj("pixels" to JSONArray(before), "camera" to state().getJSONObject("camera")).toString(2))
+                    stroke()
+                    screenshot("validation/liquify/$theme-$preset.png")
+                    File(instrumentation.targetContext.getExternalFilesDir(null), "validation/liquify/$theme-$preset-after.json").writeText(obj("pixels" to JSONArray(screenPixels(points)), "camera" to state().getJSONObject("camera")).toString(2))
+                    awaitPixels("$theme/$preset moves nearby stripes and leaves distant pixels", points) { after ->
+                        probes.indices.count { !same(after[it], before[it]) } >= probes.size / 4 && same(after.last(), before.last())
+                    }
+                    val after = screenPixels(points)
+                    command("undo"); restored("$theme/$preset Undo restores the prior pixels", before)
+                    command("redo"); restored("$theme/$preset Redo restores deformed pixels", after)
+                    if (preset == 12) {
+                        revealControl("tool-action-liquify_adjust")
+                        tap(bounds("tool-action-liquify_adjust").center)
+                        fun amount(text: String, value: Double) {
+                            revealControl("number-value-liquify_amount")
+                            tap(settledBounds("number-value-liquify_amount").center)
+                            val editTag = "number-" + state().array("tool_settings").objects().first { it.getString("id") == "liquify_amount" }.getString("label")
+                            waitFor("Liquify Amount takes the keys") { host.editingText && tagged(editTag)?.second?.config?.getOrNull(SemanticsProperties.Focused) == true }
+                            pressKey(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+                            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL)
+                            instrumentation.sendStringSync(text)
+                            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
+                            waitFor("Liquify Amount $text") { kotlin.math.abs(setting("liquify_amount") - value) < .001 }
+                            if (keyboard()) instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+                            waitFor("Liquify Amount editor closes") { !host.editingText && !keyboard() }
+                            settleLiquify()
+                        }
+                        amount("0", 0.0); restored("Adjust zero restores the original", original)
+                        amount("50", .5)
+                        awaitPixels("Adjust half differs from zero and full", points) { pixels ->
+                            probes.indices.any { !same(pixels[it], original[it]) } && probes.indices.any { !same(pixels[it], after[it]) } && same(pixels.last(), original.last())
+                        }
+                        screenshot("validation/liquify/$theme-adjust-half.png")
+                        amount("100", 1.0); restored("Adjust one restores full deformation", after)
+                        val amountLabel = state().array("tool_settings").objects().first { it.getString("id") == "liquify_amount" }.getString("label")
+                        val sliderTag = "number-slider-$amountLabel"
+                        fun dragAmount(cancel: Boolean): List<Int> {
+                            revealControl(sliderTag)
+                            val slider = settledBounds(sliderTag)
+                            val revision = state().getJSONObject("document_file").getLong("revision")
+                            val raster = paintRevision(paint)
+                            event(MotionEvent.ACTION_DOWN, Offset(slider.right - 12 * density, slider.center.y))
+                            for (position in listOf(.8f, .65f, .5f)) {
+                                val previous = setting("liquify_amount")
+                                event(MotionEvent.ACTION_MOVE, Offset(slider.left + slider.width * position, slider.center.y))
+                                waitFor("Amount previews each held Move") { kotlin.math.abs(setting("liquify_amount") - previous) > .01 }
+                                awaitPixels("Amount Move displays the preview", points) { pixels ->
+                                    probes.indices.any { !same(pixels[it], after[it]) } && same(pixels.last(), after.last())
+                                }
+                                assertEquals("Amount Move authors no document revision", revision, state().getJSONObject("document_file").getLong("revision"))
+                                assertEquals("Amount Move keeps the authored raster", raster, paintRevision(paint))
+                            }
+                            awaitPixels("Amount Move previews deformation", points) { pixels ->
+                                probes.indices.any { !same(pixels[it], after[it]) } && same(pixels.last(), after.last())
+                            }
+                            screenshot("validation/liquify/$theme-amount-${if (cancel) "cancel" else "commit"}-move.png")
+                            event(if (cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP)
+                            if (cancel) {
+                                waitFor("Cancel restores Amount") { kotlin.math.abs(setting("liquify_amount") - 1.0) < .001 }
+                                restored("Amount Cancel restores exact full pixels", after)
+                                assertEquals("Amount Cancel authors no document revision", revision, state().getJSONObject("document_file").getLong("revision"))
+                                assertEquals("Amount Cancel keeps the authored raster", raster, paintRevision(paint))
+                            } else {
+                                waitFor("Amount Up authors the adjustment", 120_000) { paintRevision(paint) != raster }
+                                settleLiquify()
+                                parkCursor()
+                                awaitPixels("Amount Up keeps the committed preview", points) { pixels ->
+                                    probes.indices.any { !same(pixels[it], after[it]) } && same(pixels.last(), after.last())
+                                }
+                            }
+                            return screenPixels(points)
+                        }
+                        dragAmount(true)
+                        val committedAmount = dragAmount(false)
+                        command("undo"); restored("One Undo restores the pre-drag Amount pixels", after)
+                        command("redo"); restored("Redo restores the one committed Amount drag", committedAmount)
+                        command("undo"); restored("Undo Amount returns the full-deformation fixture", after)
+                        if (state().array("tool_settings").objects().none { it.getString("id") == "liquify_amount" }) {
+                            revealControl("tool-action-liquify_adjust")
+                            tap(bounds("tool-action-liquify_adjust").center)
+                        }
+                        amount("100", 1.0); restored("Amount contact checks return to full deformation", after)
+                        revealControl("tool-action-liquify_adjust")
+                        tap(bounds("tool-action-liquify_adjust").center)
+                        revealControl("tool-action-liquify_reset")
+                        tap(bounds("tool-action-liquify_reset").center); restored("Reset restores original pixels", original)
+                        command("undo"); restored("Undo Reset restores deformation", after)
+                        tap(bounds("tool-action-liquify_reset").center); restored("Reset returns the fixture", original)
+                    } else {
+                        command("undo"); restored("Undo restores the next mode's fixture", before)
+                        if (preset == 64) { command("undo"); restored("Undo seed restores original stripes", original) }
+                    }
+                    reports.put(obj("theme" to theme, "preset" to preset, "changed_probes" to probes.indices.count { !same(before[it], after[it]) }, "undo_redo" to true,
+                        "amount_contact_phases" to (preset == 12)))
+                    File(instrumentation.targetContext.getExternalFilesDir(null), "validation/liquify/journeys.json").apply { parentFile!!.mkdirs() }.writeText(reports.toString(2))
+                    println("PASS Liquify $theme/$preset")
+                }
+            }
+        } finally {
+            if (contact) event(MotionEvent.ACTION_CANCEL)
+            runCatching { screenshot("validation/liquify/last-state.png") }
+            action(obj("type" to "set_theme", "theme" to originalTheme))
+            systemInput = false
         }
-        waitFor("the striped pattern is painted", 5_000) { paintRevision(paint) > 0 }
-        command("liquify")
-        action(obj("type" to "select_brush", "id" to 37))
-        action(obj("type" to "set_brush_size", "value" to height * .3))
-        waitFor("Liquify Pinch", 5_000) { state().getJSONObject("brush").getInt("preset") == 37 && host.snapshot?.optBoolean("brush_ready") == true }
-        SystemClock.sleep(500)
-        val probes = (0..8).flatMap { i -> listOf(.39, .42, .48, .51).map { y -> documentPoint(width * (.3 + .05 * i), height * y) } }
-        val far = documentPoint(width * .5, height * .9)
-        val before = screenPixels(probes + far)
-        val revision = paintRevision(paint)
-        val from = documentPoint(width * .3, height * .45)
-        val to = documentPoint(width * .7, height * .45)
-        val base = IntArray(2)
-        onMain { owner.view.getLocationOnScreen(base) }
-        val interval = 1000.0 / 240
-        val duration = 1500
-        fun inject(action: Int, down: Long, at: Offset) {
-            val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 7; toolType = MotionEvent.TOOL_TYPE_STYLUS })
-            val coords = arrayOf(MotionEvent.PointerCoords().apply {
-                x = at.x + base[0]; y = at.y + base[1]; pressure = if (action == MotionEvent.ACTION_UP) 0f else .7f
-            })
-            val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, 1, properties, coords, 0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
-            try { assertTrue("the system accepts the stylus stroke", instrumentation.uiAutomation.injectInputEvent(event, false)) } finally { event.recycle() }
-        }
-        kotlinx.coroutines.runBlocking { host.withNative { Native.completionTimings(it, true) } }
-        host.measurementReport(true)
-        val count = (duration / interval).toInt()
-        val began = System.nanoTime()
-        val down = SystemClock.uptimeMillis()
-        for (i in 0..count) {
-            val left = began + (i * interval * 1e6).toLong() - System.nanoTime()
-            if (left > 0) java.util.concurrent.locks.LockSupport.parkNanos(left)
-            inject(if (i == 0) MotionEvent.ACTION_DOWN else if (i == count) MotionEvent.ACTION_UP else MotionEvent.ACTION_MOVE, down, from + (to - from) * (i / count.toFloat()))
-        }
-        val ended = System.nanoTime()
-        SystemClock.sleep(300)
-        val completions = kotlinx.coroutines.runBlocking { host.withNative { JSONArray(Native.completionTimings(it, false)) } }
-        val frames = host.measurementReport(false).getJSONArray("frames").let { rows -> (0 until rows.length()).map { rows.getJSONArray(it) } }
-            .filter { it.getLong(1) in began..ended && it.getLong(6) > 0 }
-        waitFor("the Pinch stroke edits the pattern", 5_000) { paintRevision(paint) != revision }
-        assertNull(host.actionError)
-        awaitPixels("the Pinch stroke moves the stripes under it and nothing far from it", probes + far) { after ->
-            probes.indices.count { !same(after[it], before[it]) } >= probes.size / 4 && same(after.last(), before.last())
-        }
-        fun quantiles(values: List<Double>) = values.sorted().let { v ->
-            if (v.isEmpty()) obj("n" to 0)
-            else obj("n" to v.size, "p50" to v[(v.size - 1) / 2], "p99" to v[((v.size - 1) * .99).toInt()], "max" to v.last(), "over_8_33" to v.count { it > 8.333 })
-        }
-        val completed = (0 until completions.length()).map { completions.getJSONArray(it) }.filter { it.getLong(1) in began..ended }.map { it.getLong(2) }.sorted()
-        val seconds = (ended - began) / 1e9
-        var refresh = 0f
-        onMain { refresh = owner.view.display.refreshRate }
-        val result = obj("display_hz" to refresh, "seconds" to seconds, "debuggable" to BuildConfig.DEBUG, "input_hz" to 1000 / interval,
-            "submitted_hz" to frames.size / seconds, "completed_hz" to completed.size / seconds,
-            "submitted_vsync_interval_ms" to quantiles(frames.map { it.getLong(0) }.sorted().zipWithNext { a, b -> (b - a) / 1e6 }),
-            "gpu_completion_interval_ms" to quantiles(completed.zipWithNext { a, b -> (b - a) / 1e6 }),
-            "owner_cpu_ms" to quantiles(frames.map { it.getLong(17) / 1e6 }))
-        File(instrumentation.targetContext.getExternalFilesDir(null), "validation/photo-edit/pinch-frames.json").apply { parentFile!!.mkdirs() }.writeText(result.toString(2))
-        println("PINCH FRAMES $result")
-        assertTrue("the stroke presents frames throughout: $result", completed.size > 60 * seconds)
-        captureCanvasBar("liquify-pinch", "photo-edit")
-        command("undo")
-        awaitPixels("one undo step restores the pattern", probes) { after -> probes.indices.all { same(after[it], before[it]) } }
-        println("PASS Liquify Pinch: a stylus stroke moves the striped pixels under it, leaves distant pixels, and undoes in one step")
+        File(instrumentation.targetContext.getExternalFilesDir(null), "validation/liquify/journeys.json").apply { parentFile!!.mkdirs() }.writeText(reports.toString(2))
+        println("PASS Liquify: all eight stylus modes, pixels, Undo/Redo, Adjust 0/50/100 and Reset in light/dark")
     }
 
     /** The source disc, its bar, Set Source and the strokes of the retouching journeys, which paint `target`. */

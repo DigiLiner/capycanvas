@@ -35,8 +35,7 @@ pub struct Stats {
     /// Frame id, cumulative recomposited pixels, display bytes, source tile misses,
     /// and this canvas frame's source misses (excludes background thumbnail work).
     pub camera_work: Vec<[u64; 5]>,
-    /// Frame id, cumulative full-resolution material gather jobs/passes, field bytes.
-    pub material_samples: Vec<[u64; 4]>,
+    pub material_sample_bytes: Vec<[u64; 2]>,
     pub renderer_phases: Vec<(u64, [f64; 6])>,
     pub material_phases: Vec<(u64, [f64; 5])>,
     /// Frame id, cumulative source upload submissions, peak staging bytes.
@@ -104,8 +103,7 @@ impl Timing {
         stats.camera_work.push([self.id, metrics.composited_pixels,
             metrics.composite_storage_bytes, metrics.source_tile_misses,
             metrics.source_tile_misses.saturating_sub(self.source_misses_before)]);
-        stats.material_samples.push([self.id, metrics.material_sample_jobs,
-            metrics.material_sample_passes, metrics.material_sample_storage_bytes]);
+        stats.material_sample_bytes.push([self.id, metrics.material_sample_storage_bytes]);
         stats.renderer_phases.push((self.id, metrics.frame_cpu_ms));
         stats.material_phases.push((self.id, metrics.material_cpu_ms));
         stats.source_transfers.push([self.id, metrics.source_upload_submissions,

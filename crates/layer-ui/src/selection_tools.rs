@@ -126,7 +126,7 @@ impl SelectionOptions {
         Ok(())
     }
     pub fn edge_controls(&self, localizer: &Localizer) -> Vec<ToolSetting> {
-        vec![ToolSetting {
+        vec![ToolSetting { preview: false,
             id: "selection_feather",
             label: localizer.text(MessageId::TOOL_CONTROL_SELECTION_TOOLS_FEATHER_RADIUS),
             label_id: MessageId::TOOL_CONTROL_SELECTION_TOOLS_FEATHER_RADIUS,
@@ -153,7 +153,7 @@ impl SelectionOptions {
             ),
         };
         (0..2)
-            .map(|i| ToolSetting {
+            .map(|i| ToolSetting { preview: false,
                 id: ids[i],
                 label: localizer.text(labels[i]),
                 label_id: labels[i],

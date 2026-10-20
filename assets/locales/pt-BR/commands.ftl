@@ -677,3 +677,7 @@ command-release-compound-path = Liberar caminho composto
 menu-path = Caminho
 command-erase-touched-part = Apagar a parte tocada
 command-erase-to-intersection = Apagar até a interseção
+
+command-liquify-reset = Redefinir Dissolver
+command-liquify-adjust = Ajustar Dissolver
+commands-liquify-no-changes = Aplique Dissolver a esta camada primeiro

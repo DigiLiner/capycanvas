@@ -62,11 +62,12 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     toolbar: Boolean = false, showUnits: Boolean = true, showSlider: Boolean = true, valueOnly: Boolean = false,
     limits: ClosedFloatingPointRange<Float>? = null, onTyping: (Boolean) -> Unit = {}, onText: (TextFieldValue) -> Unit = {},
     registerCommit: (Any, ((Boolean) -> Boolean)?) -> Unit = { _, _ -> },
+    onEditPhase: ((String) -> Unit)? = null,
     onReset: (() -> Unit)? = null,
     onChange: (Float) -> Unit) {
     NumericSetting(label, value.toDouble(), control, modifier, enabled, description, settings, id, inline,
         toolbar, showUnits, showSlider, valueOnly, limits?.let { it.start.toDouble()..it.endInclusive.toDouble() },
-        onTyping, onText, registerCommit, onReset = onReset, onChange = { onChange(it.toFloat()) })
+        onTyping, onText, registerCommit, onEditPhase = onEditPhase, onReset = onReset, onChange = { onChange(it.toFloat()) })
 }
 
 @Composable internal fun NumericSetting(label: String, value: Double, control: JSONObject,
@@ -228,8 +229,12 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
             focus.clearFocus(); beginEdit(); var released = false
             try {
                 while (true) {
-                    val change = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) { released = true; endEdit(); break }
+                    val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) {
+                        val cancelled = change.isConsumed
+                        if (!cancelled) awaitPointerEvent(PointerEventPass.Final)
+                        released = true; endEdit(cancel = cancelled); break
+                    }
                 }
             } finally { if (!released) endEdit(cancel = true) }
         }

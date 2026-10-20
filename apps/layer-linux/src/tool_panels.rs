@@ -421,6 +421,9 @@ impl ToolSettings {
                 if grouped.is_some() { input.set_slider_visible(false); }
                 input.set_widget_name(&format!("tool-setting-{}", control.id));
                 let id = control.id;
+                if control.preview { input.connect_edit_phase(glib::clone!(#[weak] workspace, move |phase| {
+                    workspace.dispatch(UiAction::ToolbarEdit { context, action: Box::new(UiAction::ToolSettingContact { id: id.into(), phase, value: None }) });
+                })); }
                 input.connect_reset_requested(glib::clone!(#[weak] workspace, move || {
                     workspace.dispatch(UiAction::ToolbarEdit { context, action: Box::new(UiAction::ResetToolSetting { id: id.into() }) });
                 }));

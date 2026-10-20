@@ -672,3 +672,7 @@ command-release-compound-path = แยกพาธผสม
 menu-path = พาธ
 command-erase-touched-part = ลบส่วนที่แตะ
 command-erase-to-intersection = ลบถึงจุดตัด
+
+command-liquify-reset = รีเซ็ตการบิดรูป
+command-liquify-adjust = ปรับการบิดรูป
+commands-liquify-no-changes = ใช้การบิดรูปกับเลเยอร์นี้ก่อน

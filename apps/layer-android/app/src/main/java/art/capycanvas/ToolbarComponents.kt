@@ -58,10 +58,11 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
 
 /** Native contacts use the same normalized scale as the Rust numeric control. */
 @Composable internal fun Modifier.toolbarNumberScrub(control: JSONObject, fill: Float, enabled: Boolean,
-    position: (Float) -> Unit, step: (Int) -> Unit): Modifier {
+    position: (Float) -> Unit, step: (Int) -> Unit, phase: ((String) -> Unit)? = null): Modifier {
     val current by rememberUpdatedState(fill)
     val onPosition by rememberUpdatedState(position)
     val onStep by rememberUpdatedState(step)
+    val onPhase by rememberUpdatedState(phase)
     return pointerInput(control.toString(), enabled) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
@@ -69,14 +70,16 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
             if (down.type == PointerType.Mouse) return@awaitEachGesture
             val start = current
             var moved = false
-            while (true) {
+            var released = false
+            try { while (true) {
                 val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
                 if (change.isConsumed) break
-                if (!change.pressed) { if (moved) change.consume(); break }
+                if (!change.pressed) { released = true; if (moved) change.consume(); break }
                 val delta = (down.position.y - change.position.y) / density
                 if (!moved && abs(delta) <= viewConfiguration.touchSlop / density) continue
+                if (!moved) onPhase?.invoke("down")
                 moved = true; change.consume(); onPosition(start + delta / 200f)
-            }
+            } } finally { if (moved) onPhase?.invoke(if (released) "up" else "cancel") }
         }
     }.pointerInput(enabled) {
         if (!enabled) return@pointerInput
@@ -350,12 +353,15 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
     val info = remember(id, control.toString(), host.languageTag) { toolbarUi(host.languageTag, obj("type" to "numeric_info", "id" to id, "control" to control, "compact" to true, "units" to true)) }
     val change: (Float) -> Unit = { edit(obj("type" to "set_tool_setting", "id" to id, "value" to it)) }
     val reset = { edit(obj("type" to "reset_tool_setting", "id" to id)) }
+    val phase: ((String) -> Unit)? = if (!field.optBoolean("preview")) null else {
+        { phase -> edit(obj("type" to "tool_setting_contact", "id" to id, "phase" to phase)) }
+    }
     val shown = formatted(host.languageTag, control, value, style != "small")
     var open by remember { mutableStateOf(false) }
     if (vertical) Box(Modifier.fillMaxSize().testTag("toolbar-setting-$id")) {
         val face = Modifier.fillMaxSize().clip(ControlShape).toolbarNumberScrub(control, shown.number("fill"), true,
             { change(JSONObject(Native.number(obj("control" to control, "value" to value, "operation" to obj("type" to "position", "position" to it)).toString(), host.languageTag)).number("value")) },
-            { change(JSONObject(Native.number(obj("control" to control, "value" to value, "operation" to obj("type" to "step", "steps" to it)).toString(), host.languageTag)).number("value")) })
+            { change(JSONObject(Native.number(obj("control" to control, "value" to value, "operation" to obj("type" to "step", "steps" to it)).toString(), host.languageTag)).number("value")) }, phase)
             .clickable { open = true }.padding(horizontal = if (labeled) 8.dp else 2.dp, vertical = if (style == "small") 1.dp else 3.dp)
         if (labeled) Row(face, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             SharedIcon(info.getString("icon"), label, Modifier.size(16.dp))
@@ -374,7 +380,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
         DropdownMenu(open, { open = false }, Modifier.testTag("toolbar-number-menu"),
             properties = if (typing) PopupProperties(focusable = true) else WindowlessMenu) {
             Box(Modifier.width(240.dp).padding(10.dp)) {
-                NumericSetting(label, value, control, onTyping = { if (it) typing = true }, onReset = reset, onChange = change)
+                NumericSetting(label, value, control, onTyping = { if (it) typing = true }, onReset = reset, onEditPhase = phase, onChange = change)
             }
         }
     } else Row(Modifier.fillMaxSize().testTag("toolbar-setting-$id"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -383,7 +389,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
             else SharedIcon(info.getString("icon"), label, Modifier.size(16.dp))
         }
         NumericSetting(label, value, control, Modifier.weight(1f), id = "toolbar-$id", inline = true, toolbar = true,
-            showSlider = preferences.getBoolean("sliders"), onChange = change)
+            showSlider = preferences.getBoolean("sliders"), onEditPhase = phase, onChange = change)
     }
 }
 

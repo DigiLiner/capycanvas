@@ -157,13 +157,19 @@ import kotlinx.coroutines.withContext
         val generation = state.optLong("toolbar_context_generation")
         val fieldControl: @Composable (JSONObject, Boolean) -> Unit = { field, compact ->
             val id = field.getString("id")
+            val phase: ((String) -> Unit)? = if (!field.optBoolean("preview")) null else {
+                { phase ->
+                if (host.snapshot?.getJSONObject("state")?.optLong("toolbar_context_generation") == generation)
+                    host.dispatch(obj("type" to "tool_setting_contact", "id" to id, "phase" to phase))
+                }
+            }
             Box(Modifier.testTag("tool-setting-$id")) {
                 if (compact) Row(Modifier.fillMaxWidth().height(metrics.height), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.spacing)) {
                     Text(field.getString("label"), Modifier.weight(1f), maxLines = 1)
-                    NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), id = id, inline = true, showSlider = false) {
+                    NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), id = id, inline = true, showSlider = false, onEditPhase = phase) {
                         host.dispatch(obj("type" to "set_tool_setting", "id" to id, "value" to it))
                     }
-                } else NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), id = id,
+                } else NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), id = id, onEditPhase = phase,
                     onReset = { if (host.snapshot?.getJSONObject("state")?.optLong("toolbar_context_generation") == generation) host.dispatch(obj("type" to "reset_tool_setting", "id" to id)) }) {
                     if (host.snapshot?.getJSONObject("state")?.optLong("toolbar_context_generation") == generation) host.dispatch(obj("type" to "set_tool_setting", "id" to id, "value" to it))
                 }

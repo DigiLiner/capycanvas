@@ -218,3 +218,7 @@ brush-preset-mixing-brush = Mixing Brush
 brush-preset-sharpen = Sharpen
 brush-preset-texture-blender = Texture-Keeping Blender
 brush-preset-hue-blender = Hue Blender
+
+brush-preset-liquify-edge = Edge
+brush-preset-liquify-reconstruct = Reconstruct
+tool-control-liquify-amount = Amount

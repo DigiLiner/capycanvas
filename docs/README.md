@@ -45,7 +45,7 @@ These documents assume familiarity with the concept guides above.
 | Area | References |
 | --- | --- |
 | Document files | [Project format](reference/project-format.md), [authored model contract](reference/authored-model.md), [package contract](reference/capy-package.md), [binary payload boundaries](internals/binary-payloads.md). |
-| Brushes | [Dab layout and raster rules](brush-renderer.md), [GPU brush stages](reference/gpu-brush-engine.md), [painterly paint state](reference/painterly-paint-state.md). |
+| Brushes | [Dab layout and raster rules](brush-renderer.md), [GPU brush stages](reference/gpu-brush-engine.md), [painterly paint state](reference/painterly-paint-state.md), [Liquify sessions and deformation](internals/liquify.md). |
 | Input | [Stroke feedback and platform mapping](reference/instant-stroke-feedback.md). |
 | UI | [Shared UI contract](ui/shared-ui.md), [panel customization](ui/panel-customization.md), [numeric controls](ui/numeric-controls.md), [theme colors](ui/theme-colors.md). |
 | Extensions | [Runtime filters](reference/runtime-filters.md). |

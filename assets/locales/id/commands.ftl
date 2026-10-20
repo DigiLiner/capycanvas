@@ -1256,3 +1256,7 @@ command-release-compound-path = Lepas jalur gabungan
 menu-path = Jalur
 command-erase-touched-part = Hapus bagian yang tersentuh
 command-erase-to-intersection = Hapus sampai perpotongan
+
+command-liquify-reset = Atur ulang Liquify
+command-liquify-adjust = Sesuaikan Liquify
+commands-liquify-no-changes = Terapkan Liquify ke lapisan ini terlebih dahulu

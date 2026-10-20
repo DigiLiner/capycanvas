@@ -4,6 +4,8 @@
 Build/install the benchmark variant with application id art.capycanvas.brushbench
 and push the 9504x6336 Sony photo to /data/local/tmp/capy-brush-photo.jpg first.
 --photo selects another JPEG under /data/local/tmp; the canvas takes its size.
+Liquify presets are 12,13,36,37,38,39,63,64. Reconstruct (64) requires the
+runner's settled Push seed; setup validation rejects missing seed evidence.
 """
 import argparse
 import json
@@ -29,6 +31,7 @@ PRESETS = {
     49: "scatter-blender", 50: "painterly-blender", 51: "crystal-blender", 52: "marbling", 53: "comb-blender",
     54: "edge-keeping-blender", 55: "dither-blender", 56: "blending-knife", 57: "wet-blender", 58: "color-mixer",
     59: "mixing-brush", 60: "sharpen", 61: "texture-keeping-blender", 62: "hue-blender",
+    63: "liquify-edge", 64: "liquify-reconstruct",
 }
 DRY_PRESETS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 
@@ -86,6 +89,9 @@ def main():
     p.add_argument("--profile", action="store_true", help="Also sample the isolated process with simpleperf")
     p.add_argument("--memory", action="store_true", help="Sample GPU allocations outside rate qualification runs")
     p.add_argument("--memory-idle-ms", type=int, default=0, help="Retain the final stroke while sampling idle memory")
+    p.add_argument("--coverage-min-available-mib", type=int, default=1024,
+                   help="Stop guarded coverage before the next stripe if memory headroom is too low")
+    p.add_argument("--coverage-max-stripes", type=int, default=32)
     p.add_argument("--stats", action="store_true", help="Open Stats and enable GPU timing; omit for the default workspace")
     p.add_argument("--prefix", default="screen")
     args = p.parse_args()
@@ -101,6 +107,11 @@ def main():
         p.error("--image-count must be between 1 and 32")
     if not 0 <= args.memory_idle_ms <= 120000 or (args.memory_idle_ms and (not args.memory or args.mode == "pinch")):
         p.error("--memory-idle-ms requires --memory, a stroke mode, and 0..120000 ms")
+    if args.mode == "coverage" and (args.presets != "12" or not args.memory or args.repeats != 1
+                                    or args.paint_layer_name != "Photo"):
+        p.error("--mode coverage requires --presets 12 --memory --repeats 1 --paint-layer-name Photo")
+    if not 512 <= args.coverage_min_available_mib <= 8192 or not 1 <= args.coverage_max_stripes <= 32:
+        p.error("coverage guards require 512..8192 MiB available and 1..32 stripes")
     for name in ("paint_load", "strength", "opacity", "smoothing"):
         if getattr(args, name) is not None and not 0 <= getattr(args, name) <= 1:
             p.error(f"--{name.replace('_', '-')} must be between 0 and 1")
@@ -150,6 +161,7 @@ def main():
             requested["fixture_layers"] = args.fixture_layers
         if args.paint_layer_name:
             del requested["paint_layer_index"]
+            requested["paint_layer_name"] = args.paint_layer_name
         if args.navigation_between_strokes:
             requested.update(navigation_between_strokes=True, navigation_settle_ms=args.navigation_settle_ms)
         if args.live_filter:
@@ -183,6 +195,8 @@ def main():
                                navigationBetweenStrokes=str(args.navigation_between_strokes).lower(),
                                navigationSettleMs=args.navigation_settle_ms,
                                memorySnapshots=str(args.memory).lower(), memoryIdleMs=args.memory_idle_ms, statsPanel=str(args.stats).lower(),
+                               coverageMinAvailableMiB=args.coverage_min_available_mib,
+                               coverageMaxStripes=args.coverage_max_stripes,
                                waitForTrace="true").items():
             cmd += ["-e", key, str(value)]
         if args.wait_for_warmup:
@@ -270,7 +284,8 @@ data_sources {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
                     stdout=profile_log, stderr=profile_log)
                 time.sleep(1)
             run("shell", f"touch {remote}/{label}-go")
-            process.wait(timeout=args.repeats * (args.duration / 1000 + 15) + args.memory_idle_ms / 1000 + 120)
+            process.wait(timeout=(900 if args.mode == "coverage" else
+                                  args.repeats * (args.duration / 1000 + 15) + args.memory_idle_ms / 1000 + 120))
             if args.memory:
                 run("pull", f"{remote}/{label}-memory.jsonl", str(args.output / f"{label}-memory.jsonl"))
             if trace:
@@ -287,7 +302,7 @@ data_sources {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
         if f"{complete} {label}" not in log or process.returncode != 0:
             # A native crash may leave no screenshot or completed stroke report.
             # Preserve its evidence and continue the remaining preset matrix.
-            for suffix in ["-info.json", "-error.txt", "-failed-state.json", "-failure-state.json",
+            for suffix in ["-info.json", "-coverage.json", "-error.txt", "-failed-state.json", "-failure-state.json",
                     "-failure-measurements.json", "-failure-gpu.json", "-memory.jsonl"] + [suffix for i in range(args.repeats)
                     for suffix in (f"-{i}.json", f"-{i}-diagnostic.json")] + (["-cold-setup.json", "-prime.json"] if args.workload.startswith("objects") else []):
                 subprocess.run(adb + ["pull", f"{remote}/{label}{suffix}",
@@ -304,7 +319,7 @@ data_sources {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
             continue
         # Pull reports individually; prior benchmark outputs remain on-device.
         suffixes = (["-info.json", "-before.png", "-after.png", "-measurements.json", "-complete.json"]
-                    if args.mode == "pinch" else ["-info.json", ".png"]
+                    if args.mode == "pinch" else ["-info.json", "-coverage.json"] if args.mode == "coverage" else ["-info.json", ".png"]
                     + (["-detail.png"] if args.mode == "visual" else []) + [f"-{i}.json" for i in range(args.repeats)])
         if args.warmup_idle_ms is not None or args.workload.startswith("objects"):
             suffixes += ["-prime.json"]
@@ -322,6 +337,12 @@ data_sources {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
             run("shell", "cat /proc/meminfo; dumpsys thermalservice; dumpsys battery", stdout=out)
         if args.mode == "pinch":
             print(f"DONE {label} navigation measurements retained", flush=True)
+            continue
+        if args.mode == "coverage":
+            coverage = json.loads((args.output / f"{label}-coverage.json").read_text())
+            (args.output / f"{label}-complete.json").write_text(json.dumps(coverage, indent=2))
+            print(f"DONE {label} geometric support upper bound={coverage['geometric_support_upper_bound_tiles']}/{coverage['possible_tile_cells']}"
+                  f" stripes={len(coverage['stripes'])}/{coverage['rows_planned']} stop={coverage['stop_reason']}", flush=True)
             continue
         summary = []
         for i in range(args.repeats):

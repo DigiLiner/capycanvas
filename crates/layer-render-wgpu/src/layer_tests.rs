@@ -212,6 +212,7 @@ pub(crate) fn preset_style(preset: layer_core::DefaultBrushPreset) -> DabStyle {
         transport: brush.transport,
         deform: brush.deform,
         blender: brush.blender,
+        liquify: None,
         contact: brush.contact,
         retouch: None,
         blend_space: layer_core::BlendSpace::Linear,

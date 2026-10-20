@@ -47,6 +47,12 @@ function Start-Review([string]$Name){
  $script:firstReady=$start.first
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  if(![CapyRowPointer]::SetForegroundWindow($drawingWindow)){throw 'The owned drawing did not accept foreground input'}
+ if((Model).windows_workspace.id -ne 'builtin:workspace:illustrator'){
+  $switch=Find 'workspace-switch-builtin:workspace:illustrator'
+  if(!$switch){Invoke 'header-workspace-menu';$switch=Control 'Paint' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
+  $switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+  Wait-Until {(Model).windows_workspace.id -eq 'builtin:workspace:illustrator' -and !(Model).windows_workspace.busy} 'Paint workspace did not open' 20
+ }
  [CapyRowPointer]::Initialize([uint32]$review.Id)
 }
 function Close-Review([switch]$Discard){
@@ -110,7 +116,15 @@ function Select-Preset([string]$Label,[int]$Id){
 }
 function Assert-History([uint16]$Key,[string]$Expected,[string]$Paint,[string]$Name){
  Shortcut @(0x11) $Key
- Wait-Until {(Revision) -eq $Paint} "$Name did not restore its paint state"
+ try{Wait-Until {(Revision) -eq $Paint} "$Name did not restore its paint state"}catch{
+  @{name=$Name;expected_revision=$Paint;actual_revision=(Revision);expected_pixels=$Expected;actual_pixels=(Pixels)}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $run 'history-failure.json')
+  throw
+ }
+ Park;Wait-Until {(Pixels) -eq $Expected} "$Name did not restore the exact composed samples"
+ if((Wait-StablePixels {Pixels}) -ne $Expected){throw "$Name composed samples did not remain exact"}
+}
+function Assert-History-Pixels([uint16]$Key,[string]$Expected,[string]$Name){
+ Shortcut @(0x11) $Key
  Park;Wait-Until {(Pixels) -eq $Expected} "$Name did not restore the exact composed samples"
  if((Wait-StablePixels {Pixels}) -ne $Expected){throw "$Name composed samples did not remain exact"}
 }
@@ -154,7 +168,7 @@ try{
  foreach($point in $samplePoints){if(!$projection.bounds.Contains([double]$point[0],[double]$point[1])){throw 'A composed sample lies outside the arranged canvas'}}
  @{projection=$projection;points=$samplePoints}|ConvertTo-Json -Depth 6|Set-Content -LiteralPath (Join-Path $run 'sample-grid.json')
  $cases=[Collections.Generic.List[object]]::new()
- foreach($preset in @(@('Wet Round',11),@('Smudge',10),@('Liquify',12),@('G-Pen',1))){
+ foreach($preset in @(@('Wet Round',11),@('Smudge',10),@('Liquify Push',12),@('G-Pen',1))){
   $traceBefore=@(Shader-Lines|Where-Object {$_ -match '^pipeline begin '}).Count
   Select-Preset $preset[0] $preset[1]
   $selected=Observe ("selected-"+$preset[1]) $null
@@ -172,6 +186,68 @@ try{
   $case=[ordered]@{label=$preset[0];preset=$preset[1];selected=$selected;before_pixels=$before;after_pixels=$after;before_paint=$paintBefore;after_paint=$paintAfter;new_pipeline_begins=$traceAfter-$traceBefore;history='exact'}
   $cases.Add($case)
   $cases|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $run 'brush-cases.json')
+ }
+ $seedPixels=Wait-StablePixels {Pixels}
+ Select-Preset 'Liquify Push' 12
+ $from=Point 110 110;$to=Point 215 140
+ Stroke $from $to
+ Wait-Until {(Pixels) -ne $seedPixels} 'Push did not deform the seeded artwork'
+ $null=Wait-StablePixels {Pixels}
+ foreach($mode in @(@('Edge',63),@('Reconstruct',64))){
+  Select-Preset $mode[0] $mode[1]
+  $settings=@((Model).state.tool_settings|ForEach-Object id)
+  if('strength' -notin $settings -or 'size' -notin $settings){throw "$($mode[0]) lacks native Size or Strength controls"}
+  if($mode[1] -eq 63 -and @($settings|Where-Object {$_ -in @('distortion','momentum')}).Count -ne 2){throw 'Edge lacks Distortion or Momentum'}
+  if($mode[1] -eq 64 -and @($settings|Where-Object {$_ -in @('distortion','momentum')}).Count){throw 'Reconstruct exposes deformation-only controls'}
+  $priorPixels=Wait-StablePixels {Pixels};$priorPaint=Revision
+  Stroke $from $to
+  Wait-Until {(Revision) -ne $priorPaint} "$($mode[0]) did not commit"
+  Wait-Until {(Pixels) -ne $priorPixels} "$($mode[0]) did not change composed seeded artwork"
+  $afterPixels=Wait-StablePixels {Pixels};$afterPaint=Revision
+  Capture ("liquify-"+$mode[1]) -WithModel -Composed
+  Assert-History 0x5a $priorPixels $priorPaint ($mode[0]+' Undo')
+  Assert-History 0x59 $afterPixels $afterPaint ($mode[0]+' Redo')
+  $checks["liquify_$($mode[1])"]='exact'
+  if($mode[1] -eq 63){
+   $adjust=Control 'tool-action-liquify_adjust'
+   $adjust.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+   Wait-Until {@((Model).state.tool_settings|Where-Object id -eq 'liquify_amount').Count -eq 1} 'Adjust did not show Amount'
+   $slider=Control 'tool-setting-liquify_amount-slider' -Type ([System.Windows.Automation.ControlType]::Slider)
+   $scroll=$null
+   if($slider.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scroll)){$scroll.ScrollIntoView()}
+   $bounds=(Control 'tool-setting-liquify_amount-slider' -Arranged).Current.BoundingRectangle
+   $startX=[int]($bounds.Left+$bounds.Width*.9);$endX=[int]($bounds.Left+$bounds.Width*.5);$sliderY=[int]($bounds.Top+$bounds.Height*.5)
+   foreach($ending in @('cancel','up')){
+    [CapyRowPointer]::Down('touch',$startX,$sliderY)
+    try{
+     for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move([int]($startX+($endX-$startX)*$step/6),$sliderY);Start-Sleep -Milliseconds 30}
+     Wait-Until {$setting=@((Model).state.tool_settings|Where-Object id -eq 'liquify_amount');$setting.Count -eq 1 -and $setting[0].value -gt .2 -and $setting[0].value -lt .8} 'Amount drag did not preview a middle value'
+     Wait-Until {(Pixels) -ne $afterPixels} 'Amount drag did not preview composed pixels'
+     if((Revision) -ne $afterPaint){throw 'Amount drag edited artwork before release'}
+     if($ending -eq 'up'){$null=Wait-StablePixels {Pixels}}
+    }finally{if($ending -eq 'cancel'){[CapyRowPointer]::Cancel()}else{[CapyRowPointer]::Up()}}
+    if($ending -eq 'cancel'){
+     Wait-Until {$setting=@((Model).state.tool_settings|Where-Object id -eq 'liquify_amount');$setting.Count -eq 1 -and [Math]::Abs($setting[0].value-1) -lt .001} 'Cancel did not restore Amount'
+     Wait-Until {(Pixels) -eq $afterPixels} 'Cancel did not restore exact composed pixels'
+     if((Wait-StablePixels {Pixels}) -ne $afterPixels -or (Revision) -ne $afterPaint){throw 'Cancel left a Liquify edit'}
+    }
+   }
+   Wait-Until {(Revision) -ne $afterPaint} 'Amount release did not commit artwork'
+   Wait-Until {(Pixels) -ne $afterPixels} 'Adjust did not change composed seeded artwork'
+   $adjustedPixels=Wait-StablePixels {Pixels};$adjustedPaint=Revision
+   Assert-History 0x5a $afterPixels $afterPaint 'Adjust Undo'
+   Assert-History 0x59 $adjustedPixels $adjustedPaint 'Adjust Redo'
+   $reset=Control 'tool-action-liquify_reset'
+   $reset.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+   Wait-Until {(Pixels) -eq $seedPixels} 'Reset did not restore the seeded artwork'
+   $resetPixels=Wait-StablePixels {Pixels}
+   Assert-History-Pixels 0x5a $adjustedPixels 'Reset Undo'
+   Assert-History-Pixels 0x59 $resetPixels 'Reset Redo'
+   $checks.liquify_adjust_reset='exact'
+   Select-Preset 'Liquify Push' 12
+   Stroke $from $to
+   Wait-Until {(Pixels) -ne $seedPixels} 'Push did not prepare artwork for Reconstruct'
+  }
  }
  $checks.brush_cases='passed';Close-Review -Discard
  Start-Review 'close-pending'

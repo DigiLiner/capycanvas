@@ -164,6 +164,12 @@ try{
     [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
     $root=$native.window.Root;$drawingWindow=$native.window.Handle
     Wait-Until {(Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace startup did not complete' 45
+    if((Model).windows_workspace.id -ne 'builtin:workspace:illustrator'){
+        $switch=Find 'workspace-switch-builtin:workspace:illustrator'
+        if(!$switch){Invoke 'header-workspace-menu';$switch=Control 'Paint' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
+        $switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {(Model).windows_workspace.id -eq 'builtin:workspace:illustrator' -and !(Model).windows_workspace.busy} 'Paint workspace did not open' 20
+    }
     # Open secondary tools when the workspace keeps them in a collapsed column.
     if(Find 'column-icon-brushes'){Invoke 'column-icon-brushes'}
     Wait-Until {@((Model).layout.groups|Where-Object active -eq 'brushes').Count -eq 1} 'Secondary tools did not open'

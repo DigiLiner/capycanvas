@@ -676,3 +676,7 @@ command-release-compound-path = Zusammengesetzten Pfad lösen
 menu-path = Pfad
 command-erase-touched-part = Berührten Teil radieren
 command-erase-to-intersection = Bis zum Schnittpunkt radieren
+
+command-liquify-reset = Verflüssigen zurücksetzen
+command-liquify-adjust = Verflüssigen anpassen
+commands-liquify-no-changes = Wende zuerst Verflüssigen auf diese Ebene an

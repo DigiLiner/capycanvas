@@ -14,7 +14,7 @@ area your change touches; hosted validation does not replace hardware journeys.
 
 The renderer's `dry_material::tests` module also runs in CI without a GPU.
 `every_kernel_entry_resolves_its_overrides` validates each generated dry-material
-kernel and the destination, gather and reservoir modules of every material operation.
+kernel and the destination and reservoir modules of every material operation.
 `specialized_modules_omit_unreachable_features` requires every specialized
 module to leave out the relief, bristle, retouch, blend-mode, pointwise and other
 operation code it cannot reach. The first test checks pipeline constants against the overrides used by
@@ -84,6 +84,23 @@ restoration dependency. The GTK
 `native_photo_transform_reference_pivot_snap_and_nudge` journey checks temporary
 panning, accepting a rotation by selecting Pencil, and exact Undo/Redo pixels
 in both themes.
+
+Liquify's `native_liquify_pinch_stroke_on_a_pattern` GTK journey and Web
+`--liquify-journey` cover all eight modes, tool switching, exact Undo/Redo,
+zero Strength, Adjust and Reset in both themes. Run the GTK journey with
+`--tablet` on the private display. Renderer Liquify tests additionally check
+composed translations, integer Crystals jumps, alpha-lock transitions,
+selection and tile boundaries, minification, untouched preview pixels and
+continuation after restoring an older map. Regenerate the affected bundled
+swatches when a preset's rendered behavior changes.
+Fit-view tests also require unchanged authored color during a moving preview,
+all previously touched stroke regions to remain visible, and byte-exact final
+maps and color after an empty pen-up. Inspect the display cache directly:
+document export readback rebuilds a full-resolution result and does not inspect
+the moving Fit preview. Repeating an unchanged Fit preview must perform no
+additional composition or display-mip work. Amount gestures must leave pixels and
+history untouched until release, restore the prior value on cancel, and ignore
+stale events after a target change.
 
 ## Checks by change type
 

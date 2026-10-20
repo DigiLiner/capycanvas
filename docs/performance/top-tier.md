@@ -1881,7 +1881,7 @@ Except for G-Pen, Watercolor Wash and the current dry-media rows, measured on 20
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
-The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender, wet and Liquify Push rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements.
+The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender and wet rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements. Liquify uses the separate Photo-layer profile below.
 
 **The 2026-09-22 G-Pen record used a different stroke.** It recorded 105.76
 updates/s for a 2000 px G-Pen.
@@ -1930,12 +1930,57 @@ are kept separate from the 10 s comparison table below.
 | Wet Round (11) | Very complex | 512 px | 33.1 updates/s (32.8–33.6); input 33.1/s; completion-gap p99 54.1 ms | **Not met** |
 | Natural Blender (24) | Very complex | 512 px | 21.2 updates/s (20.7–21.4); input 21.2/s; completion-gap p99 72.8 ms | **Not met** |
 | Smudge (10) | Very complex | 512 px | 54.2 updates/s (53.8–54.2); input 54.2/s; completion-gap p99 31.1 ms | **Not met** |
-| Liquify Push (12) | Very complex | 512 px | 138.9 updates/s (138.1–141.1); input 137.7/s; completion-gap p99 12.5 ms | Met |
-| Liquify Twirl Clockwise (36) | Very complex | 512 px | 215.0 updates/s (214.7–215.8); input 187.0/s; completion-gap p99 8.9 ms | Met |
-| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 215.2 updates/s (214.9–215.3); input 187.2/s; completion-gap p99 8.8 ms | Met |
-| Liquify Pinch (37) | Very complex | 512 px | 201.7 updates/s (200.3–202.1); input 180.4/s; completion-gap p99 10.0 ms | Met |
-| Liquify Expand (38) | Very complex | 512 px | 204.1 updates/s (201.4–204.4); input 182.3/s; completion-gap p99 9.1 ms | Met |
-| Liquify Crystals (39) | Very complex | 512 px | 160.5 updates/s (158.2–161.4); input 157.6/s; completion-gap p99 11.5 ms | Met |
+| Liquify Push (12) | Very complex | 512 px | 172.79 fresh updates/s (153.97–173.94); fresh completion-gap p99 ≤29.53 ms | **Gap not met** |
+| Liquify Twirl Clockwise (36) | Very complex | 512 px | 134.58 fresh updates/s (132.49–148.14); fresh completion-gap p99 ≤30.61 ms | **Gap not met** |
+| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 143.98 fresh updates/s (132.92–154.05); fresh completion-gap p99 ≤31.46 ms | **Gap not met** |
+| Liquify Pinch (37) | Very complex | 512 px | 162.04 fresh updates/s (151.53–168.59); fresh completion-gap p99 ≤25.05 ms | **Gap not met** |
+| Liquify Expand (38) | Very complex | 512 px | 162.66 fresh updates/s (154.26–164.86); fresh completion-gap p99 ≤22.41 ms | **Gap not met** |
+| Liquify Crystals (39) | Very complex | 512 px | 154.61 fresh updates/s (152.92–154.97); fresh completion-gap p99 ≤22.53 ms | **Gap not met** |
+| Liquify Edge (63) | Very complex | 512 px | 155.55 fresh updates/s (146.84–159.02); fresh completion-gap p99 ≤28.42 ms | **Gap not met** |
+| Liquify Reconstruct (64) | Very complex | 512 px | 172.73 fresh updates/s (171.20–179.56); fresh completion-gap p99 ≤16.54 ms | **Completion limits met** |
+
+### Retained-map Liquify
+
+Measured on 2026-10-20 on the Wacom MovinkPad Pro 14, Adreno 735, with the
+retained-map implementation based on `b7fb3654a`. Benchmark APK SHA-256:
+`7a5a27c61b93890c744413a0f31a4d6c54c074377884af3ac8e7c3bb2f115c05`.
+The eight rows above use the 9504 × 6336 photo, Size 512, full pressure,
+16 ms prediction and three five-second contacts after shader warm-up.
+`--paint-layer-name Photo` selects the photo itself. Reconstruct first seeds
+its map with a five-second Push stroke; each measured contact is undone before
+the next. Every mode changes visible canvas pixels.
+
+The 300 × 180 screen-pixel semiaxes run at Fit zoom 0.23828125 on the
+2880 × 1800 surface. Sketch is collapsed and Stats is closed; thermal status
+is zero. A post-run display dump verifies the active 120 Hz mode; hardware
+refresh was not captured per trial. Values are median completed updates consuming
+fresh input per second with the three-run range, and the worst run's fresh completion-gap p99.
+Completed nonempty median rates span 138.08–191.97/s across modes, while
+fresh-input medians span 134.58–172.79/s. They do not measure physical scanout or
+pen-to-display latency. Every mode reaches the median rate of 120/s;
+Reconstruct also meets the 16.7 ms gap limit. The other seven modes miss that
+limit. The previous empty-layer measurements do not qualify deformation of
+photo pixels.
+
+The diagnostics and broad-coverage check below use APK
+`933d671b62210326655307c6a85e7601c51ba5f670e073757c7a047e6aee79fe`,
+with the same Push map arithmetic, twelve-source chunks and allocation rules.
+A separate Stats-enabled Push diagnostic measures median GPU time of 3.19 ms:
+map updates 0.95 ms, reconstruction 1.82 ms, main composition 0.239 ms and
+display mips 0.066 ms. CPU callback running time is 5.84 ms, including 1.13 ms
+in queue submission. Nested phases must not be summed. GPU deformation alone
+does not explain the remaining completion gaps on this device.
+
+Guarded broad-coverage Push completes all thirteen full-width stripes with a
+1024 MiB available-memory floor and 512 MiB additional pre-stripe allowance.
+Tracked GPU allocation grows from 2640 to 3655 MiB, peaking at 4059 MiB before
+history pruning. MemAvailable stays above 2348 MiB. The geometric support upper
+bound reaches all 950 tile cells; it does not count unique deformed pixels.
+There is no GPU loss or out-of-memory failure. Undo takes 447 ms and continued
+moving Push 1649 ms after the historical map is evicted. Undoing coverage and
+trimming redo reduces tracked GPU allocation to 2472 MiB. One coverage stripe
+takes 1368 ms to settle after pen-up; the others take 439–786 ms, including
+momentum and publication.
 
 ## Windows Surface diagnostic
 

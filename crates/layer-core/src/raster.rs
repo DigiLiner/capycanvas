@@ -482,7 +482,7 @@ impl RasterData {
 /// renderer publishes its sparse index, then the worker publishes tile backing.
 /// Durability is deliberately absent: only atomic file publication grants it.
 #[derive(Clone, Debug)]
-pub struct RasterRevision(Arc<RasterPublication>);
+pub struct RasterRevision(Arc<RasterPublication>, Arc<Mutex<Option<Arc<crate::liquify::State>>>>);
 #[derive(Debug)]
 struct RasterPublication {
     data: Publication<RasterData>,
@@ -532,7 +532,7 @@ impl RasterRevision {
         Self(Arc::new(RasterPublication {
             data: Publication::default(),
             pending_bytes: AtomicU64::new(bytes),
-        }))
+        }), Arc::default())
     }
     /// A producer admitting a larger native publication must account its
     /// retained output before allocating it. This is not an allocation target;
@@ -562,6 +562,18 @@ impl RasterRevision {
     }
     pub fn host_backed(&self) -> bool {
         matches!(self.try_data(), Some(Ok(data)) if data.host_backed())
+    }
+    pub fn liquify(&self) -> Option<Arc<crate::liquify::State>> {
+        self.1.lock().ok()?.clone()
+    }
+    pub fn set_liquify(&self, state: Arc<crate::liquify::State>) {
+        *self.1.lock().expect("liquify revision") = Some(state);
+    }
+    pub fn drop_liquify(&self) {
+        self.1.lock().expect("liquify revision").take();
+    }
+    pub fn without_liquify(&self) -> Self {
+        Self(self.0.clone(), Arc::default())
     }
 }
 

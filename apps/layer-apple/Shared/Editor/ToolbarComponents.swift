@@ -742,6 +742,7 @@ private struct ToolbarNumberField: View {
     let edit: ToolOptionEdit
     @State private var open = false
     @State private var scrubStart: Double?
+    @GestureState private var scrubContact = false
     private var id: String { field["id"].string }
     private var control: JSON { field["numeric"] }
     private var value: Double { field["value"].number }
@@ -777,11 +778,15 @@ private struct ToolbarNumberField: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle())
                 .modifier(ToolbarScrub(gesture: scrub(fill: shown["fill"].number)))
+                .onChange(of: scrubContact) { _, active in if !active { finishScrub("cancel") } }
+                .onDisappear { finishScrub("cancel") }
                 .accessibilityLabel(field["label"].string).accessibilityValue(shown["text"].string)
                 .accessibilityIdentifier("toolbar-setting-" + id)
                 .editorPopover(isPresented: $open, placement: .inward) {
                     NumberControl(store: store, label: field["label"].string, value: value, control: control,
-                        identifier: "toolbar-popover-" + id, reset: { edit(["type": "reset_tool_setting", "id": id], { _ in }) }) { next, completion in change(next, completion) }
+                        identifier: "toolbar-popover-" + id, gestureChange: field["preview"].bool ? { phase, value, completion in
+                            edit(["type": "tool_setting_contact", "id": id, "phase": phase, "value": value], completion)
+                        } : nil, reset: { edit(["type": "reset_tool_setting", "id": id], { _ in }) }) { next, completion in change(next, completion) }
                         .padding(10).frame(width: 240)
                 }
         } else {
@@ -793,17 +798,28 @@ private struct ToolbarNumberField: View {
                     .onTapGesture(count: 2) { edit(["type": "reset_tool_setting", "id": id], { _ in }) }
                 NumberControl(store: store, label: field["label"].string, value: value, control: control,
                     identifier: "toolbar-" + id, inline: true,
-                    toolbar: NumberControl.Toolbar(slider: preferences["sliders"].bool)) { next, completion in
+                    toolbar: NumberControl.Toolbar(slider: preferences["sliders"].bool),
+                    gestureChange: field["preview"].bool ? { phase, value, completion in
+                        edit(["type": "tool_setting_contact", "id": id, "phase": phase, "value": value], completion)
+                    } : nil) { next, completion in
                     change(next, completion)
                 }
             }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-setting-" + id)
         }
     }
     private func scrub(fill: Double) -> some Gesture {
-        DragGesture(minimumDistance: 8).onChanged { event in
-            if scrubStart == nil { scrubStart = fill }
+        DragGesture(minimumDistance: 8).updating($scrubContact) { _, active, _ in active = true }.onChanged { event in
+            if scrubStart == nil {
+                scrubStart = fill
+                if field["preview"].bool { edit(["type": "tool_setting_contact", "id": id, "phase": "down"], { _ in }) }
+            }
             resolve(["type": "position", "position": min(1, max(0, (scrubStart ?? fill) - event.translation.height / 200))])
-        }.onEnded { _ in scrubStart = nil }
+        }.onEnded { _ in finishScrub("up") }
+    }
+    private func finishScrub(_ phase: String) {
+        guard scrubStart != nil else { return }
+        scrubStart = nil
+        if field["preview"].bool { edit(["type": "tool_setting_contact", "id": id, "phase": phase], { _ in }) }
     }
 }
 

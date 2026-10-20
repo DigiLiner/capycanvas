@@ -91,7 +91,8 @@ small dispatches, or CPU submission overhead.
 - Measure release or benchmark builds, warmed up, with at least three gestures
   of 5–10 s each, on the reference device.
 - Brushes: `tools/performance/android-brush-benchmark.py`, with `--photo` set to
-  the tier canvas and `--size` set to the guaranteed size.
+  the tier canvas and `--size` set to the guaranteed size. Liquify also uses
+  `--paint-layer-name Photo` to deform the photo itself.
   `android-brush-report.py` then summarizes the results.
 - Navigation: `AndroidViewportBenchmarkTest`.
 - Transforms, placement, selections and the canvas bar:
@@ -133,6 +134,13 @@ measured on low and mid tiers:
 - The XP-Pen 6 GB memory journey completes 24 MP Frequency Separation around
   2.0 GiB peak PSS, with more than 1 GiB available. Its roughly 10-second
   completion time remains above the 2–5-second engineering aim.
+- Retained-map Liquify at 512 px, deforming the Photo layer itself, reaches
+  18.11–34.84 fresh updates/s on Low, 31.12–55.95 on Mid,
+  and 134.58–172.79 on Top. Low and Mid miss rate and gap limits. Top meets
+  the rate in every mode; Reconstruct also meets the gap limit, while the other
+  seven modes do not. See the [Low](performance/low-tier.md#retained-map-liquify),
+  [Mid](performance/mid-tier.md#retained-map-liquify) and
+  [Top](performance/top-tier.md#retained-map-liquify) profiles.
 
 The tier tables identify the exact frozen builds and measurement conditions.
 Exact GPU bounds queries on the top-tier 61 MP canvas take 95–135 ms for a
@@ -152,7 +160,7 @@ startup and host presentation still need their complete qualification matrices.
 | --- | --- |
 | [Measuring performance](performance/measuring.md) | Frame definitions, pass criteria, the soft-target bandwidth rule and benchmark commands |
 | [Tier hardware](performance/hardware.md) | SoC, CPU, GPU, registers, tile memory, bandwidth, RAM, display and public benchmark scores, with comparable hardware |
-| [Brush classes](performance/brush-classes.md) | Class of each of the 39 presets and the reason for it |
+| [Brush classes](performance/brush-classes.md) | Class of each preset and the reason for it |
 | [Low tier](performance/low-tier.md), [Mid tier](performance/mid-tier.md), [Top tier](performance/top-tier.md) | Every operation and brush with its target and newest measurement |
 | [Responsiveness](performance/responsiveness.md) | Latency limits for taps, pen-down, undo, selections, launch and open |
 | [Known gaps](performance/known-gaps.md) | Failures, unmeasured areas and missing harnesses |

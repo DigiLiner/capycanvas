@@ -679,3 +679,7 @@ command-release-compound-path = Разобрать составной конту
 menu-path = Контур
 command-erase-touched-part = Стирать задетую часть
 command-erase-to-intersection = Стирать до пересечения
+
+command-liquify-reset = Сбросить пластику
+command-liquify-adjust = Настроить пластику
+commands-liquify-no-changes = Сначала примените пластику к этому слою

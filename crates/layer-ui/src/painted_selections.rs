@@ -57,7 +57,7 @@ impl SelectionBrushOptions {
     }
     pub fn controls(&self, localizer: &Localizer) -> Vec<ToolSetting> {
         self.fields().into_iter()
-        .map(|(id, label, value, numeric)| ToolSetting {
+        .map(|(id, label, value, numeric)| ToolSetting { preview: false,
             id,
             label: localizer.text(label),
             label_id: label,

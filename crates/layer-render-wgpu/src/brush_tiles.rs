@@ -340,6 +340,11 @@ fn capsule_touches_quad(motion: [f64; 2], radius: f64, corners: [[f64; 2]; 4]) -
 }
 
 pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<BrushTile> {
+    if let Some(context) = &batch.style.liquify && context.amount.is_some() {
+        return context.field.iter().flat_map(|f| f.tiles()).map(|coordinate| BrushTile {
+            coordinate, local: PixelRect::full([PAGE_SIZE; 2]), dabs: 0..0, indices: Vec::new(),
+        }).collect();
+    }
     let damage = batch_pixel_rect(batch, extent);
     if dabs.is_empty() || damage.is_empty() {
         return Vec::new();

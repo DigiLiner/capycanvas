@@ -328,7 +328,12 @@ python3 tools/performance/android-brush-report.py OUT --package art.capycanvas.b
 ```
 
 The runner defaults to the dry presets. Pass `--presets` to include the wet,
-smudge and Liquify presets. The photo opens as a Perceptual document;
+smudge and Liquify presets. Liquify qualification also requires
+`--paint-layer-name Photo`: without it, the runner creates an empty layer above
+the photo, and the map workload does not establish performance while deforming
+photo pixels. Check the selected layer in the setup report and a visible pixel
+change in the settled canvas. Reconstruct uses a preceding Push stroke to create
+a nonidentity map. The photo opens as a Perceptual document;
 `--blending linear` measures it in linear light. `--color-mode grayscale` or
 `--color-mode two_tone` constrains the empty paint layer; `full_color` is the
 default. The benchmark draws a 200 Hz
@@ -349,6 +354,23 @@ CPU span, pixel count, image age, pending flag and storage counter. Main
 composition includes source updates performed
 inside that view. Trace mode flushes queued composition records before the mip
 timestamp so the mip interval excludes deferred blends.
+Liquify traces split map evaluation, original mip preparation and color
+reconstruction, and report dispatch counts per batch. These intervals can mix
+persistent and predicted batches. Each timer has three nonblocking slots;
+omitted intervals are not zero cost.
+
+For broad Liquify memory coverage, use `--mode coverage --presets 12 --size 512
+--paint-layer-name Photo --memory --repeats 1`. The harness draws settled
+horizontal stripes, records GPU allocations and `MemAvailable` between them,
+then measures Undo, continued input and release of redo history. The
+`--coverage-min-available-mib` floor defaults to 1024; a new stripe additionally
+requires 512 MiB of headroom. `--coverage-max-stripes` bounds the run.
+Report the stopping reason, geometric support upper bound and actual retained
+resources separately: a stroke's bounding rectangle does not prove that every
+pixel changed, and texture-version counts do not count unique canvas tiles.
+Reset availability after Undo distinguishes a retained session from pixel-only
+restoration. These diagnostic runs do not qualify moving-frame rates.
+
 Idle exact refinement uses the main composition phase for native capture and
 the main mip phase for updating the resident hierarchy.
 Ordinary stroke publication has a separate `Capy GPU native capture ns` total.
@@ -462,6 +484,12 @@ through Android's input dispatcher instead, using a helper built from
 `tools/performance/AndroidPenMotion.java`; never pool the two kinds of run.
 `tools/performance/web-refresh.mjs` reloads the tab and records startup
 milestones. Both scripts list their options in their headers.
+The pen runner waits for the paint revision to advance and for input, active
+strokes, backing publication and deferred edits to settle before checking
+Undo/Redo. A fixed delay is not a completion check. Set both
+`LAYER_PEN_PHOTO_WIDTH` and `LAYER_PEN_PHOTO_HEIGHT` when qualifying a particular
+photo size. Browser frame callbacks alone do not establish GPU-completed
+throughput.
 
 **Workspace motion (desktop and Web).** Use
 `tools/performance/workspace-motion.sh` with `LAYER_MOTION_MIN_HZ` at 95% of the

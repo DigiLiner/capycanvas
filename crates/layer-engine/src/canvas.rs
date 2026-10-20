@@ -101,7 +101,7 @@ struct ActiveStroke {
     feedback: InstantFeedbackConfig,
     tip: PreviewTip,
     persistent_started: bool,
-    committed_smudge_dabs: usize,
+    committed_chunk_dabs: usize,
     material_updates: Vec<u32>,
     ruler: Option<layer_core::RulerConstraint>,
     /// The renderer could not sample this retouching stroke's whole source
@@ -110,6 +110,7 @@ struct ActiveStroke {
     /// The Clone source as this stroke found it, before anchoring it.
     clone_start: Option<CloneSource>,
     barrel_twist: bool,
+    momentum: Option<(Vec<Dab>, usize)>,
 }
 
 #[derive(Clone)]
@@ -154,9 +155,10 @@ pub struct CanvasEngine<B: CanvasRenderer> {
     pending_frame: Option<PreparedFrame>,
     rebuild_completed: bool,
     estimates: std::collections::BTreeMap<(u64, u64), corrections::EstimatedPoint>,
-    pending_smudge_dabs: Vec<Dab>,
+    pending_chunk_dabs: Vec<Dab>,
     dabs: Vec<Dab>,
     batches: Vec<DabBatch>,
+    liquify_preview: Option<DabBatch>,
     transform_preview: Option<layer_render::TransformPreview>,
     transform_selection: std::sync::OnceLock<Option<layer_core::Selection>>,
     selection_display: Option<Option<layer_core::Selection>>,
@@ -238,9 +240,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             pending_frame: None,
             rebuild_completed: false,
             estimates: Default::default(),
-            pending_smudge_dabs: Vec::with_capacity(MAX_SMUDGE_DABS_PER_BATCH),
+            pending_chunk_dabs: Vec::with_capacity(MAX_SMUDGE_DABS_PER_BATCH),
             dabs: Vec::with_capacity(DAB_CAPACITY),
             batches: Vec::with_capacity(BATCH_CAPACITY),
+            liquify_preview: None,
             transform_preview: None,
             transform_selection: Default::default(),
             selection_display: None,
@@ -283,7 +286,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             view:_,transforms:_,clone_stroke:_,retouch_points:_,prepared_retouch:_,builder:_,dab_generator:_,
             finalized_real_points:_,active_stroke:_,pending_up:_,frame_clock_ns:_,completed_stroke:_,completed_at:_,completed_publication:_,completed_before:_,
             completed_clone_start:_,restore_rasters:_,pending_frame:_,rebuild_completed:_,estimates:_,
-            pending_smudge_dabs:_,dabs:_,batches:_,transform_preview:_,transform_selection:_,selection_display:_,
+            pending_chunk_dabs:_,dabs:_,batches:_,liquify_preview:_,transform_preview:_,transform_selection:_,selection_display:_,
             scene_preview:_,rebuild_all:_,composite_all:_,raster_dirty:_,animation_origin_ns:_,animation_time:_,
             animation_seed:_,evaluation_context:_,metrics:_}=self;
         editor.capture_session(self.capture_artwork(session_generation)?)
@@ -346,7 +349,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.builder = StrokeBuilder::with_capacity(0);
         self.dabs = Vec::new();
         self.batches = Vec::new();
-        self.pending_smudge_dabs = Vec::new();
+        self.pending_chunk_dabs = Vec::new();
         self.completed_stroke = None;
         self.completed_publication = None;
         self.completed_at = None;
@@ -359,6 +362,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     /// The active builder and queued samples survive; completed history restores
     /// immutable rasters without replaying historical strokes.
     pub fn replace_backend(&mut self, mut backend: B) -> Result<B, EngineError<B::Error>> {
+        self.clear_liquify_preview();
         if backend.document_color() != self.editor.document().composition().color {
             return Err(EngineError::Document(DocumentError::InvalidLayerOperation(
                 "The replacement renderer is not configured for this document's color space and precision",
@@ -373,6 +377,12 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             .resize_surface(self.view.width_px, self.view.height_px)
             .map_err(EngineError::Backend)?;
         backend.seed_evaluation_context(self.evaluation_context.clone());
+        self.editor.discard_liquify_maps();
+        if let Some(active) = &mut self.active_stroke && let Some(context) = &mut active.style.liquify {
+            let context = Arc::make_mut(context);
+            context.field = None;
+            context.original = context.current.clone();
+        }
         self.restore_rasters.clear();
         self.rebuild_all = true;
         self.composite_all = true;
@@ -394,7 +404,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
 
     pub fn raster_backing_pending(&self) -> bool {
         self.pending_up.is_some() || self.pending_frame.is_some() || self.backend.has_pending_submission()
-            || self.batches.iter().any(|batch| matches!(batch.kind, DabBatchKind::RasterOperation(_)))
+            || self.batches.iter().any(raster_edit_batch)
     }
 
     pub fn has_active_stroke(&self) -> bool {
@@ -894,7 +904,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             || self
                 .batches
                 .iter()
-                .any(|b| matches!(b.kind, DabBatchKind::RasterOperation(_)))
+                .any(raster_edit_batch)
     }
     pub fn wants_continuous_frames(&self) -> bool {
         self.has_pending_input()
@@ -1205,6 +1215,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn navigate(&mut self, redo: bool) -> Result<bool, DocumentError> {
+        self.clear_liquify_preview();
         self.require_renderer_color(self.history_color(redo))?;
         self.flush_pending_edits()?;
         self.completed_stroke = None;
@@ -1259,7 +1270,89 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         Ok(())
     }
 
+    pub fn liquify_context(&self) -> Option<(SourceTarget, Arc<layer_core::liquify::Context>, bool)> {
+        let document = self.document();
+        let target = document.working.target?;
+        let SourceTarget::Paint(handle) = target else { return None; };
+        let owner = document.scene().source_owner(target)?;
+        if document.is_locked(owner) { return None; }
+        let alpha_locked = document.scene().occurrence(owner)?.alpha_locked;
+        let context = layer_core::liquify::Context::for_source(document.scene().paint(handle)?, alpha_locked);
+        context.field.is_some().then(|| (target, Arc::new(context), alpha_locked))
+    }
+
+    fn liquify_batch(&mut self, target: SourceTarget, context: &layer_core::liquify::Context,
+        alpha_locked: bool, amount: f32, expected: &layer_core::raster::RasterRevision,
+        kind: DabBatchKind) -> Result<DabBatch, DocumentError> {
+        if !amount.is_finite() || !(0. ..=1.).contains(&amount) { return Err("Invalid Liquify amount".into()); }
+        let document = self.document();
+        let SourceTarget::Paint(handle) = target else { return Err("Liquify requires a paint source".into()); };
+        let owner = document.scene().source_owner(target).ok_or("Missing Liquify target")?;
+        let mut current = document.scene().paint(handle).ok_or("Missing Liquify target")?.clone();
+        if document.working.target != Some(target) || document.is_locked(owner)
+            || document.scene().occurrence(owner).is_none_or(|o| o.alpha_locked != alpha_locked)
+            || current.raster.identity() != expected.identity() { return Err("Liquify target changed".into()); }
+        current.raster = context.current.raster.clone();
+        if current != *context.current { return Err("Liquify source changed".into()); }
+        let field = context.field.as_ref().ok_or(DocumentError::InvalidLayerOperation("No Liquify changes"))?;
+        let damage = field.tiles().iter().fold(Rect::EMPTY, |bounds, tile| {
+            let min = layer_core::Point { x: (tile[0] * 256) as f32, y: (tile[1] * 256) as f32 };
+            bounds.union(Rect { min, max: layer_core::Point { x: min.x + 256., y: min.y + 256. } })
+        });
+        let mut context = context.clone(); context.amount = Some(amount);
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::LiquifyReconstruct);
+        let mut style = DabStyle::for_brush(&brush, StrokeTool::Brush);
+        style.alpha_locked = alpha_locked;
+        style.liquify = Some(Arc::new(context));
+        Ok(DabBatch { material_update: 0, stroke_id: self.editor.allocate_stroke_id(), target, kind,
+            stroke_start: true, stroke_end: kind == DabBatchKind::Persistent, first_dab: 0, dab_count: 0, style, damage })
+    }
+
+    pub fn preview_liquify(&mut self, target: SourceTarget, context: &layer_core::liquify::Context,
+        alpha_locked: bool, amount: f32, expected: &layer_core::raster::RasterRevision) -> Result<(), DocumentError> {
+        if self.active_stroke.is_some() || self.pending_up.is_some()
+            || self.batches.iter().any(|batch| batch.kind != DabBatchKind::Preview)
+            || self.pending_frame.is_some() && self.liquify_preview.is_none() {
+            return Err(DocumentError::InvalidLayerOperation("Raster backing is busy; retry the edit"));
+        }
+        let batch = self.liquify_batch(target, context, alpha_locked, amount, expected, DabBatchKind::Preview)?;
+        self.clear_liquify_preview();
+        self.liquify_preview = Some(batch);
+        self.raster_dirty = true;
+        Ok(())
+    }
+
+    pub fn clear_liquify_preview(&mut self) {
+        if let Some(preview) = self.liquify_preview.take() {
+            self.batches.retain(|batch| batch.kind != DabBatchKind::Preview || batch.stroke_id != preview.stroke_id);
+            if self.batches.is_empty() { self.pending_frame = None; }
+            self.raster_dirty = true;
+        }
+    }
+
+    pub fn adjust_liquify(&mut self, target: SourceTarget, context: &layer_core::liquify::Context,
+        alpha_locked: bool, amount: f32, expected: &layer_core::raster::RasterRevision,
+        amend: Option<u64>) -> Result<layer_core::raster::RasterRevision, DocumentError> {
+        self.clear_liquify_preview();
+        if amend != Some(self.checkpoint()) || self.pending_up.is_some() || self.pending_frame.is_some() {
+            self.flush_pending_edits()?;
+        }
+        self.end_corrections();
+        let batch = self.liquify_batch(target, context, alpha_locked, amount, expected, DabBatchKind::Persistent)?;
+        let revision = layer_core::raster::RasterRevision::pending();
+        let edit = Edit::SetRaster { target, revision: revision.clone() };
+        if amend == Some(self.checkpoint()) {
+            self.editor.amend(edit)?;
+            self.batches.retain(|batch| batch.target != target
+                || batch.style.liquify.as_ref().is_none_or(|context| context.amount.is_none()));
+        } else { self.editor.perform(edit)?; }
+        self.batches.push(batch);
+        self.raster_dirty = true;
+        Ok(revision)
+    }
+
     pub fn apply_edit(&mut self, mut edit: Edit) -> Result<(), DocumentError> {
+        self.clear_liquify_preview();
         self.require_renderer_color(edit.resulting_color(self.document().composition().color))?;
         fn source_operations(edit: &mut Edit, document: &Document, batches: &mut Vec<DabBatch>, replacements: &mut Vec<SourceTarget>) {
             let (target, domain, raster, operations) = match edit {
@@ -1334,7 +1427,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             || self
                 .batches
                 .iter()
-                .any(|b| matches!(b.kind, DabBatchKind::RasterOperation(_)))
+                .any(raster_edit_batch)
         {
             if !self.backend.can_submit() || !self.backend.can_capture_raster() {
                 return Err(DocumentError::InvalidLayerOperation(
@@ -1688,9 +1781,15 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             }
             let ready = self.pending_up.unwrap().1;
             let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(up.timestamp_ns)).unwrap_or(ready);
-            let duration = pen_up_settlement_micros(&self.active_stroke.as_ref().unwrap().brush.stabilization);
+            let active = self.active_stroke.as_ref().unwrap();
+            let duration = active.momentum.as_ref().map_or_else(
+                || pen_up_settlement_micros(&active.brush.stabilization),
+                |(tail, _)| (tail.len() as u32 * 1_000_000).div_ceil(60));
             let interrupted = self.input.peek().is_some_and(|event| event.phase != PenPhase::Hover && !event.flags.contains(SampleFlags::CORRECTION));
-            if (self.frame_clock_ns.is_none() || now.saturating_sub(ready) >= duration || interrupted) && self.backend.can_capture_raster() {
+            let finish = self.frame_clock_ns.is_none() || now.saturating_sub(ready) >= duration || interrupted
+                || active.momentum.as_ref().is_some_and(|(tail, emitted)| *emitted == tail.len());
+            self.advance_momentum(if finish { u32::MAX } else { now.saturating_sub(ready) });
+            if finish && self.backend.can_capture_raster() {
                 self.process_captured_event(up)?;
             }
             return Ok(());
@@ -1832,6 +1931,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 }
                 let mut style = DabStyle::for_brush(&brush, tool);
                 style.alpha_locked = alpha_locked;
+                if brush.execution == BrushExecution::Liquify
+                    && let SourceTarget::Paint(handle) = target
+                    && let Some(source) = self.document().scene().paint(handle)
+                {
+                    style.liquify = Some(std::sync::Arc::new(layer_core::liquify::Context::for_source(source, alpha_locked)));
+                    if brush.deform.mode == layer_core::LiquifyMode::Reconstruct && style.liquify.as_ref().is_some_and(|c| c.field.is_none()) { return Ok(()); }
+                }
                 style.blend_space = if is_mask { layer_core::BlendSpace::Linear } else { self.document().composition().blend };
                 style.paper = style.grain.is_some().then(|| self.document().paper_binding(target));
                 style.retouch = self.settings.retouch.map(|source| Retouch::for_target(self.document(), target, source));
@@ -1857,12 +1963,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     feedback,
                     tip: PreviewTip::default(),
                     persistent_started: false,
-                    committed_smudge_dabs: 0,
+                    committed_chunk_dabs: 0,
                     material_updates: Vec::new(),
                     ruler,
                     replay_after_contact: false,
                     clone_start: None,
                     barrel_twist: event.flags.contains(SampleFlags::BARREL_TWIST),
+                    momentum: None,
                 };
                 self.active_stroke = Some(active);
                 self.recording.begin(
@@ -1881,7 +1988,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                         .prediction
                         .observe(event);
                 }
-                self.pending_smudge_dabs.clear();
+                self.pending_chunk_dabs.clear();
                 self.finalized_real_points = 0;
                 self.builder.begin(event, transform, self.settings.pressure.clone());
                 self.record_builder_sample(event);
@@ -1935,7 +2042,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 if self.active_stroke.is_none() {
                     return Ok(());
                 }
-                if self.pending_up.take().is_none() {
+                let momentum = self.active_stroke.as_ref().unwrap().momentum.is_some();
+                if self.pending_up.take().is_none() && !momentum {
                     self.builder.push(event, transform, self.settings.pressure.clone());
                     self.record_builder_sample(event);
                     self.track_estimate(event, transform);
@@ -1946,7 +2054,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                         return Ok(());
                     }
                 }
-                if !event.flags.contains(SampleFlags::PREDICTED) {
+                if !momentum && !event.flags.contains(SampleFlags::PREDICTED) {
                     if self
                         .active_stroke
                         .as_ref()
@@ -1958,8 +2066,17 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                         let point = *self.builder.real_points().last().expect("up adds a point");
                         self.append_real_dab(point, self.builder.real_points().len() - 1, true);
                     }
+                    let tail = self.dab_generator.momentum(&self.active_stroke.as_ref().unwrap().brush);
+                    if !tail.is_empty() {
+                        self.active_stroke.as_mut().unwrap().momentum = Some((tail, 0));
+                        if let Some(now) = self.frame_clock_ns {
+                            self.pending_up = Some((event, self.builder.elapsed_micros_at(now).unwrap()));
+                            return Ok(());
+                        }
+                        self.advance_momentum(u32::MAX);
+                    }
                 }
-                self.flush_smudge_chunks(true);
+                self.flush_material_chunks(true);
                 self.finish_persistent_stroke();
                 self.record_material_update();
                 self.replay_retouch_misses().map_err(EngineError::Document)?;
@@ -1971,6 +2088,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 {
                     self.settings.clone_source
                         .end_stroke(layer_core::Point { x: last.position.x + offset.x, y: last.position.y + offset.y });
+                }
+                if active.brush.execution == BrushExecution::Liquify && !active.persistent_started {
+                    self.batches.retain(|b| b.stroke_id != active.id);
+                    self.finalized_real_points = 0;
+                    return Ok(());
                 }
                 let replay = active.brush.taper.end_distance_diameters > 0.0 || active.replay_after_contact;
                 let alpha_locked = active.style.alpha_locked;
@@ -2033,11 +2155,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         terminal: bool,
     ) {
         let active = self.active_stroke.as_ref().expect("stroke is active");
-        if active.style.execution == BrushExecution::Smudge {
+        if matches!(active.style.execution, BrushExecution::Smudge | BrushExecution::Liquify) {
             self.dab_generator
-                .append(point, &active.brush, &mut self.pending_smudge_dabs);
-            if terminal { self.dab_generator.finish(&active.brush, &mut self.pending_smudge_dabs); }
-            self.flush_smudge_chunks(false);
+                .append(point, &active.brush, &mut self.pending_chunk_dabs);
+            if terminal { self.dab_generator.finish_contact(&active.brush, &mut self.pending_chunk_dabs); }
+            self.flush_material_chunks(false);
             return;
         }
         let stroke_id = active.id;
@@ -2079,26 +2201,39 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         }
     }
 
-    fn flush_smudge_chunks(&mut self, flush_tail: bool) {
+    fn advance_momentum(&mut self, elapsed_micros: u32) {
+        let Some((tail, emitted)) = self.active_stroke.as_mut().and_then(|a| a.momentum.as_mut()) else { return; };
+        let end = ((u64::from(elapsed_micros) * 60 / 1_000_000) as usize).min(tail.len()).max(*emitted);
+        self.pending_chunk_dabs.extend_from_slice(&tail[*emitted..end]);
+        *emitted = end;
+        self.flush_material_chunks(false);
+    }
+
+    pub fn complete_liquify_momentum(&mut self) {
+        self.advance_momentum(u32::MAX);
+    }
+
+    fn flush_material_chunks(&mut self, flush_tail: bool) {
         let Some(active) = self.active_stroke.as_ref() else {
             return;
         };
-        if active.style.execution != BrushExecution::Smudge {
+        if !matches!(active.style.execution, BrushExecution::Smudge | BrushExecution::Liquify) {
             return;
         }
         let stroke_id = active.id;
         let target = active.target;
         let style = active.style.clone();
+        let liquify = active.style.execution == BrushExecution::Liquify;
 
         let mut consumed = 0;
         loop {
-            let pending = &self.pending_smudge_dabs[consumed..];
-            let chunk_len = next_smudge_chunk_len(pending, DabBatchKind::Persistent);
+            let pending = &self.pending_chunk_dabs[consumed..];
+            let chunk_len = if liquify { pending.len().min(layer_core::liquify::CHUNK_DABS) } else { next_smudge_chunk_len(pending, DabBatchKind::Persistent) };
             if chunk_len == 0 {
                 break;
             }
             let reached_boundary =
-                chunk_len == MAX_SMUDGE_DABS_PER_BATCH || chunk_len < pending.len();
+                chunk_len == if liquify { layer_core::liquify::CHUNK_DABS } else { MAX_SMUDGE_DABS_PER_BATCH } || chunk_len < pending.len();
             if !flush_tail && !reached_boundary {
                 break;
             }
@@ -2130,13 +2265,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             );
             let active = self.active_stroke.as_mut().expect("stroke remains active");
             active.persistent_started = true;
-            active.committed_smudge_dabs = active.committed_smudge_dabs.saturating_add(chunk_len);
+            active.committed_chunk_dabs = active.committed_chunk_dabs.saturating_add(chunk_len);
         }
         if consumed > 0 {
             // One compaction after the event keeps a long coalesced segment
             // linear; draining each tiny chunk would repeatedly shift the
             // unconsumed tail.
-            self.pending_smudge_dabs.drain(..consumed);
+            self.pending_chunk_dabs.drain(..consumed);
         }
     }
 
@@ -2171,12 +2306,17 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         timestamp_ns: Option<u64>,
         presentation_timestamp_ns: Option<u64>,
     ) {
+        if let Some(batch) = &self.liquify_preview { self.batches.push(batch.clone()); }
         let Some(active) = self.active_stroke.as_mut() else {
             return;
         };
         let start = self.dabs.len();
-        if active.style.execution == BrushExecution::Smudge {
-            self.dabs.extend_from_slice(&self.pending_smudge_dabs);
+        if matches!(active.style.execution, BrushExecution::Smudge | BrushExecution::Liquify) {
+            self.dabs.extend_from_slice(&self.pending_chunk_dabs);
+        }
+        if active.momentum.is_some() {
+            self.push_active_preview(start);
+            return;
         }
         if !active.feedback.enabled {
             // Only the current pending contact is provisional; pressure
@@ -2223,10 +2363,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         if self.active_stroke.as_ref().is_some_and(|active| active.brush.contact.is_some_and(|c| c.dry.is_some())) {
             self.dabs.extract_if(start.., |dab| dab.motion == [0.;2]).for_each(drop);
         }
-        if self.dabs.len() == start {
+        let active = self.active_stroke.as_ref().expect("stroke is active");
+        if self.dabs.len() == start && !(active.persistent_started && active.style.execution == BrushExecution::Liquify) {
             return;
         }
-        let active = self.active_stroke.as_ref().expect("stroke is active");
         let damage = damage_for_dabs(&self.dabs[start..]);
         push_batches(
             &mut self.batches,
@@ -2261,6 +2401,14 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             }
             let mut style = DabStyle::for_brush(&stroke.brush, stroke.tool);
             style.alpha_locked = stroke.alpha_locked;
+            if stroke.brush.execution == BrushExecution::Liquify
+                && let SourceTarget::Paint(handle) = stroke.target
+                && let Some(source) = self.document().scene().paint(handle)
+            {
+                let mut source = source.clone();
+                if let Some(before) = &self.completed_before { source.raster = before.clone(); }
+                style.liquify = Some(std::sync::Arc::new(layer_core::liquify::Context::for_source(&source, stroke.alpha_locked)));
+            }
             style.blend_space = stroke.blend_space;
             style.selection = stroke.selection.clone();
             style.retouch = stroke.retouch.clone();
@@ -2268,11 +2416,16 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             let mut generator = DabGenerator::new(self.document().composition().color.space);
             generator.reset_for_replay(stroke);
             let mut started = false;
+            let liquify = stroke.brush.execution == BrushExecution::Liquify;
             for (point_index, point) in stroke.points.iter().copied().enumerate() {
-                let start = self.dabs.len();
+                let start = if liquify { 0 } else { self.dabs.len() };
                 let mut damage = generator.append(point, &stroke.brush, &mut self.dabs);
                 if point_index + 1 == stroke.points.len() {
                     damage = damage.union(generator.finish(&stroke.brush, &mut self.dabs));
+                }
+                if liquify {
+                    if point_index + 1 != stroke.points.len() { continue; }
+                    damage = damage_for_dabs(&self.dabs);
                 }
                 if self.dabs.len() == start {
                     continue;
@@ -2317,12 +2470,16 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             } else {
                 self.builder.real_points().len()
             };
-            if active.style.execution == BrushExecution::Smudge {
+            if matches!(active.style.execution, BrushExecution::Smudge | BrushExecution::Liquify) {
                 let mut replay_dabs = Vec::new();
                 for point in self.builder.real_points()[..point_count].iter().copied() {
                     generator.append(point, &active.brush, &mut replay_dabs);
                 }
-                replay_dabs.truncate(active.committed_smudge_dabs.min(replay_dabs.len()));
+                if let Some((tail, emitted)) = &active.momentum {
+                    generator.finish_contact(&active.brush, &mut replay_dabs);
+                    replay_dabs.extend_from_slice(&tail[..*emitted]);
+                }
+                replay_dabs.truncate(active.committed_chunk_dabs.min(replay_dabs.len()));
                 if !replay_dabs.is_empty() {
                     let start = self.dabs.len();
                     self.dabs.extend_from_slice(&replay_dabs);
@@ -2404,7 +2561,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.builder.cancel();
         self.active_stroke = None;
         self.clone_stroke = None;
-        self.pending_smudge_dabs.clear();
+        self.pending_chunk_dabs.clear();
         self.finalized_real_points = 0;
         self.dab_generator.reset();
         self.rebuild_all = true;
@@ -2414,6 +2571,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
 /// `retouch` copying through the document offset `offset`, in `layer`'s pixels.
 fn clone_mapping(document: &Document, layer: SourceTarget, retouch: Retouch, offset: [f32; 2], flip: [bool; 2]) -> Retouch {
     retouch.cloning(offset, flip, layer_core::offsets::point(document.target_offset(layer)))
+}
+
+fn raster_edit_batch(batch: &DabBatch) -> bool {
+    matches!(batch.kind, DabBatchKind::RasterOperation(_))
+        || batch.kind == DabBatchKind::Persistent && batch.style.liquify.as_ref().is_some_and(|context| context.amount.is_some())
 }
 
 fn push_batches(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBatch) {
@@ -2444,7 +2606,8 @@ fn push_batches(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBatch) {
         (BrushExecution::Watercolor, DabBatchKind::Preview) => u32::MAX,
         (BrushExecution::Dry | BrushExecution::Clone | BrushExecution::Heal | BrushExecution::SpotHeal, _) => u32::MAX,
         (BrushExecution::Wet | BrushExecution::Watercolor, _) => MAX_WET_DABS_PER_BATCH,
-        (BrushExecution::Liquify, _) => 1,
+        (BrushExecution::Liquify, DabBatchKind::Preview) => u32::MAX,
+        (BrushExecution::Liquify, _) => layer_core::liquify::CHUNK_DABS as u32,
         (BrushExecution::Smudge, _) => unreachable!("handled above"),
     };
     if batch.dab_count <= max_dabs {
@@ -2685,6 +2848,150 @@ mod tests {
             view(width, height),
             TRANSFORM,
         )
+    }
+
+    #[test]
+    fn liquify_zero_dab_preview_continues_only_after_persistent_work_starts() {
+        let (mut input, mut engine) = engine("liquify zero dab preview", 256, 128);
+        engine.set_brush(default_brush(DefaultBrushPreset::LiquifyPush)).unwrap();
+        input.push(event(1, PenPhase::Down, 32.)).unwrap();
+        engine.render_frame_at(10_000_000).unwrap();
+        assert!(engine.active_stroke.is_some());
+
+        engine.dabs.clear();
+        engine.pending_chunk_dabs.clear();
+        engine.batches.clear();
+        engine.active_stroke.as_mut().unwrap().persistent_started = false;
+        engine.push_active_preview(0);
+        assert!(engine.batches.is_empty());
+
+        engine.active_stroke.as_mut().unwrap().persistent_started = true;
+        engine.push_active_preview(0);
+        assert_eq!(engine.batches.len(), 1);
+        assert_eq!(engine.batches[0].kind, DabBatchKind::Preview);
+        assert_eq!(engine.batches[0].dab_count, 0);
+        assert!(!engine.batches[0].stroke_start);
+        assert!(!engine.batches[0].stroke_end);
+
+        engine.batches.clear();
+        engine.active_stroke.take();
+        engine.build_predicted_preview(None, None);
+        assert!(engine.batches.is_empty());
+    }
+
+    #[derive(Debug)]
+    struct PreviewField;
+    impl layer_core::liquify::Field for PreviewField {
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn resources(&self, _: &mut dyn FnMut(u64, usize)) {}
+        fn tiles(&self) -> Vec<[u32; 2]> { vec![[0, 0]] }
+    }
+
+    #[test]
+    fn liquify_amount_preview_rejects_other_raster_work() {
+        let (mut input, mut engine) = engine("liquify amount busy", 256, 128);
+        let target = engine.document().working.target.unwrap();
+        let SourceTarget::Paint(handle) = target else { panic!() };
+        let source = engine.document().scene().paint(handle).unwrap().clone();
+        let mut original = source.clone();
+        original.raster = original.raster.without_liquify();
+        source.raster.set_liquify(Arc::new(layer_core::liquify::State::new(
+            Arc::new(original), Arc::new(PreviewField), &source, false)));
+        let (_, context, alpha_locked) = engine.liquify_context().unwrap();
+        let expected = source.raster.clone();
+        engine.preview_liquify(target, &context, alpha_locked, 0.5, &expected).unwrap();
+        engine.clear_liquify_preview();
+
+        let other = engine.liquify_batch(target, &context, alpha_locked, 0.5, &expected, DabBatchKind::Persistent).unwrap();
+        engine.batches.push(other);
+        assert!(engine.preview_liquify(target, &context, alpha_locked, 0.4, &expected).is_err());
+        assert!(engine.liquify_preview.is_none());
+        engine.batches.clear();
+
+        engine.pending_frame = Some(PreparedFrame { reset: false, time: 0., steps: None });
+        assert!(engine.preview_liquify(target, &context, alpha_locked, 0.4, &expected).is_err());
+        assert!(engine.liquify_preview.is_none());
+        engine.pending_frame = None;
+
+        engine.set_brush(default_brush(DefaultBrushPreset::LiquifyPush)).unwrap();
+        input.push(event(1, PenPhase::Down, 32.)).unwrap();
+        engine.render_frame_at(10_000_000).unwrap();
+        assert!(engine.active_stroke.is_some());
+        assert!(engine.preview_liquify(target, &context, alpha_locked, 0.4, &expected).is_err());
+        assert!(engine.liquify_preview.is_none());
+    }
+
+    #[test]
+    fn liquify_momentum_is_one_stroke_and_matches_replay_at_every_frame_rate() {
+        for preset in [DefaultBrushPreset::LiquifyPush, DefaultBrushPreset::LiquifyTwirl,
+            DefaultBrushPreset::LiquifyCrystals, DefaultBrushPreset::LiquifyEdge] {
+            let mut expected = None;
+            for (interval, interrupt) in [(8_333_333, false), (33_333_333, false), (16_666_667, true)] {
+                let (mut input, mut engine) = engine("momentum", 256, 128);
+                let mut brush = default_brush(preset);
+                brush.diameter = 64.; brush.deform.momentum = 0.5;
+                engine.set_brush(brush).unwrap();
+                engine.settings.instant_feedback.enabled = false;
+                for (sequence, phase, x) in [(1, PenPhase::Down, 32.), (21, PenPhase::Move, 64.),
+                    (41, PenPhase::Move, 96.), (42, PenPhase::Up, 96.)] {
+                    input.push(event(sequence, phase, x)).unwrap();
+                }
+                engine.render_frame_at(42_000_000).unwrap();
+                assert!(engine.active_stroke.as_ref().unwrap().momentum.is_some(), "{preset:?}");
+                assert_eq!(engine.metrics.committed_strokes, 0);
+                if interrupt { engine.complete_liquify_momentum(); }
+                let mut now = 42_000_000;
+                while engine.has_active_stroke() {
+                    now += interval;
+                    assert!(now < 1_000_000_000);
+                    engine.render_frame_at(now).unwrap();
+                }
+                assert_eq!(engine.metrics.committed_strokes, 1);
+                let mut replay = Vec::new();
+                DabGenerator::generate(engine.completed_stroke.as_ref().unwrap(),
+                    engine.document().composition().color.space, &mut replay);
+                assert_eq!(engine.backend().persistent, replay, "{preset:?}, {interval}");
+                if let Some(previous) = &expected { assert_eq!(&replay, previous, "{preset:?}"); }
+                expected = Some(replay);
+                assert!(engine.undo().unwrap());
+                assert!(!engine.can_undo());
+            }
+        }
+    }
+
+    #[test]
+    fn liquify_momentum_cancellation_and_sensor_correction_rebuild_the_tail() {
+        for cancel in [false, true] {
+            let (mut input, mut engine) = engine("momentum correction", 256, 128);
+            let mut brush = default_brush(DefaultBrushPreset::LiquifyPush);
+            brush.diameter = 64.; brush.deform.momentum = 1.;
+            engine.set_brush(brush).unwrap();
+            engine.settings.instant_feedback.enabled = false;
+            input.push(event(1, PenPhase::Down, 32.)).unwrap();
+            let mut sample = event(21, PenPhase::Move, 96.);
+            sample.flags = SampleFlags::ESTIMATED;
+            input.push(sample).unwrap();
+            input.push(event(22, PenPhase::Up, 96.)).unwrap();
+            engine.render_frame_at(22_000_000).unwrap();
+            engine.render_frame_at(122_000_000).unwrap();
+            if cancel {
+                input.push(event(123, PenPhase::Cancel, 96.)).unwrap();
+                engine.render_frame().unwrap();
+                engine.render_frame().unwrap();
+                assert!(!engine.has_active_stroke());
+                assert_eq!(engine.metrics.committed_strokes, 1);
+            } else {
+                sample.flags = SampleFlags::CORRECTION;
+                sample.pressure = 0.4;
+                input.push(sample).unwrap();
+                engine.render_frame_at(140_000_000).unwrap();
+                engine.render_frame().unwrap();
+                let mut replay = Vec::new();
+                DabGenerator::generate(engine.completed_stroke.as_ref().unwrap(),
+                    engine.document().composition().color.space, &mut replay);
+                assert_eq!(engine.backend().persistent, replay);
+            }
+        }
     }
 
     #[test]
@@ -6568,8 +6875,8 @@ mod tests {
             &test_dabs,
             make_batch(BrushExecution::Liquify, 0, 4),
         );
-        assert_eq!(liquify.len(), 4);
-        assert!(liquify.iter().all(|batch| batch.dab_count == 1));
+        assert_eq!(liquify.len(), 1);
+        assert_eq!(liquify[0].dab_count, 4);
     }
     #[test]
     fn large_selected_bake_and_cut_erase_stay_bounded_ordered_and_settle_once() {

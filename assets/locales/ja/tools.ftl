@@ -218,3 +218,7 @@ brush-preset-mixing-brush = 混色筆
 brush-preset-sharpen = シャープ
 brush-preset-texture-blender = 質感を保つ混色
 brush-preset-hue-blender = 色相混色
+
+brush-preset-liquify-edge = エッジ
+brush-preset-liquify-reconstruct = 復元
+tool-control-liquify-amount = 適用量

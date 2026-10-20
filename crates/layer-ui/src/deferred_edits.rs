@@ -30,7 +30,7 @@ fn configures_brush(action: &UiAction) -> bool {
         UiAction::ToolbarEdit { action, .. } => configures_brush(action),
         UiAction::SetBrushSize { .. } | UiAction::SetBrushOpacity { .. } | UiAction::SetBrushStrength { .. }
             | UiAction::SetColor { .. } | UiAction::Color { .. } | UiAction::ColorEdit { .. }
-            | UiAction::SetToolSetting { .. } | UiAction::StepToolSetting { .. }
+            | UiAction::SetToolSetting { .. } | UiAction::StepToolSetting { .. } | UiAction::ToolSettingContact { .. }
             | UiAction::ResetToolSetting { .. } => true,
         _ => false,
     }

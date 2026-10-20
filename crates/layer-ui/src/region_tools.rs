@@ -88,7 +88,7 @@ impl RegionTools {
     }
     pub fn controls(&self, localizer: &Localizer) -> Vec<ToolSetting> {
         self.fields().into_iter()
-        .map(|(id, label, group, numeric, value)| ToolSetting {
+        .map(|(id, label, group, numeric, value)| ToolSetting { preview: false,
             id,
             label: localizer.text(label),
             label_id: label,

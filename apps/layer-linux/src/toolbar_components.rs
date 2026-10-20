@@ -1268,6 +1268,7 @@ impl Component {
                 number.add_css_class("toolbar-number");
                 number.set_widget_name(&format!("toolbar-setting-{}", f.id));
                 let id = f.id;
+                if f.preview { number.connect_edit_phase(glib::clone!(#[strong] send, move |phase| send(UiAction::ToolSettingContact { id: id.into(), phase, value: None }))); }
                 number.connect_reset_requested(glib::clone!(#[strong] send, move || send(UiAction::ResetToolSetting { id: id.into() })));
                 for target in [label.upcast_ref::<gtk::Widget>(), icon.upcast_ref()] {
                     target.set_tooltip_text(Some(&format!("{} — double-click to reset", f.tooltip())));

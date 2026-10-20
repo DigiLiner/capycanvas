@@ -54,6 +54,8 @@ pub(crate) use screen_status::screen_headroom_text;
 pub(crate) mod figures;
 #[path = "operation.rs"]
 pub(crate) mod operation;
+#[path = "liquify.rs"]
+mod liquify;
 #[path = "crop.rs"]
 mod crop;
 #[path = "clone_source.rs"]
@@ -2397,6 +2399,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
         let enabled = match id {
             CommandId::SearchCommands => idle && !self.state.settings_open && !self.state.customization.blocks_shortcuts() && !self.state.customization.header_editing,
+            CommandId::LiquifyReset | CommandId::LiquifyAdjust => idle && (self.operation.liquify.is_some() || self.engine.liquify_context().is_some()),
             CommandId::QuickMask | CommandId::NewSelectionLayer => idle && !self.operation.active(),
             CommandId::SaveSelectionLayer => idle && self.has_selection(),
             CommandId::ReturnToArtwork | CommandId::ResetMaskColors | CommandId::SwapMaskColors => idle && self.selection_masks.target().is_some(),
@@ -2655,7 +2658,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         };
         let selection = self.layer_interaction.tool.selection_tool();
         let selection_mode = self.effective_selection_mode();
-        let selected = (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
+        let selected = (id == CommandId::LiquifyAdjust && self.operation.liquify.is_some())
+            || (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
             || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
             || vector_eraser(id) == Some(self.state.settings.vector_eraser)
             || (id == CommandId::ScaleOutlineWidths && !self.state.settings.keep_outline_widths)
@@ -2748,7 +2752,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } = action {
             return self.dispatch(UiAction::Effect { action: action.effect(layer, &key) });
         }
-        if !action.is_host_report() { self.engine.backend_mut().shader_input(); }
+        if !action.is_host_report() {
+            self.engine.complete_liquify_momentum();
+            self.engine.backend_mut().shader_input();
+        }
         if self.defer_document_action(&action) {
             return Ok(self.changed(regions::COMMANDS, true));
         }
@@ -2773,6 +2780,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let UiAction::Notice { id, accept, action } = action {
             return self.notice_action(id, accept, action);
         }
+        self.finish_liquify_contact(&action)?;
         if (self.operation.placing() || self.objects.placing()) && matches!(&action,
             UiAction::SelectLayer { .. } | UiAction::SetLayerVisibility { .. }
             | UiAction::SetLayerOpacity { .. }
@@ -3533,6 +3541,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (BRUSH | COLOR_PREVIEW, true)
             }
             UiAction::ResetToolSetting { id } => {
+                if id == "liquify_amount" { return self.dispatch(UiAction::SetToolSetting { id, value: 1. }); }
                 if !self.state.tool_settings.iter().any(|c| c.id == id) {
                     return Err("This setting is not used by the selected tool".into());
                 }
@@ -3589,7 +3598,25 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }.map_err(|reason| reason.message(&self.state.localization))?;
                 return self.dispatch(UiAction::SetToolSetting { id, value });
             }
+            UiAction::ToolSettingContact { id, phase, value } => {
+                if id != "liquify_amount" {
+                    return if let Some(value) = value { self.dispatch(UiAction::SetToolSetting { id, value }) }
+                        else { Ok(UiChange::default()) };
+                }
+                if phase != ContactPhase::Down && !self.liquify_preview_active() { return Ok(UiChange::default()); }
+                if phase == ContactPhase::Down { self.liquify_contact(phase)?; }
+                if let Some(value) = value.filter(|_| matches!(phase, ContactPhase::Move | ContactPhase::Up)) {
+                    self.adjust_liquify(value)?;
+                }
+                if phase != ContactPhase::Down { self.liquify_contact(phase)?; }
+                return Ok(self.changed(BRUSH | if phase == ContactPhase::Move { 0 } else { COMMANDS }
+                    | if phase == ContactPhase::Up { DOCUMENT } else { 0 }, true));
+            }
             UiAction::SetToolSetting { id, value } => {
+                if id == "liquify_amount" {
+                    self.adjust_liquify(value)?;
+                    return Ok(self.changed(if self.liquify_preview_active() { BRUSH } else { BRUSH | DOCUMENT | COMMANDS }, true));
+                }
                 if id.starts_with("tonal_") {
                     if !self.tonal_active() {return Err("Choose Tonal range first".into());}
                     self.selection_tools.options.tonal.edit(&id,value, &self.state.localization)?;self.queue_tonal(None)?;self.refresh_tools();
@@ -4085,6 +4112,10 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Raw records retain platform timestamp/history/prediction metadata. A
     /// full queue returns the untouched record; hosts must retry after a frame.
     pub fn pen(&mut self, event: PenEvent) {
+        if event.phase == PenPhase::Down
+            && !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
+            && self.liquify_preview_active()
+            && let Err(error) = self.liquify_contact(ContactPhase::Up) { self.notify(error); }
         self.admit_pen(event)
     }
 
@@ -5213,6 +5244,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.select_brush(self.tools.tool(command.paint_tool().unwrap()))?;
                 Ok((BRUSH, false))
             }
+            CommandId::LiquifyReset | CommandId::LiquifyAdjust => {
+                self.liquify_action(command == CommandId::LiquifyReset)?;
+                Ok((BRUSH | DOCUMENT | COMMANDS, true))
+            }
             CommandId::Undo | CommandId::Redo => {
                 let redo = command == CommandId::Redo;
                 if !redo && self.remove_vector_path_point()? { return Ok((BRUSH | DOCUMENT | COMMANDS, true)); }
@@ -5722,6 +5757,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else {
             Vec::new()
         };
+        self.liquify_controls();
         if self.layer_interaction.tool.selection_tool().is_some() && !self.selection_brush_active() {
             let mut edges=self.selection_tools.options.edge_controls(&self.state.localization)
                 .into_iter().map(ToolSetting::ungrouped).collect::<Vec<_>>();

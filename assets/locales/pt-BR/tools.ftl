@@ -218,3 +218,7 @@ brush-preset-mixing-brush = Pincel de mistura
 brush-preset-sharpen = Nitidez
 brush-preset-texture-blender = Misturador que preserva a textura
 brush-preset-hue-blender = Misturador de matiz
+
+brush-preset-liquify-edge = Borda
+brush-preset-liquify-reconstruct = Reconstruir
+tool-control-liquify-amount = Intensidade

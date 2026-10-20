@@ -1,11 +1,14 @@
-// Real Chrome input -> DOM -> Wasm -> WebGPU. Use a dedicated test origin.
+// Real Chrome input -> DOM -> Wasm -> WebGPU. Use a fresh dedicated origin per workload.
 // See docs/performance/measuring.md for device setup.
+// LAYER_PEN_PHOTO_WIDTH/HEIGHT optionally validate the supplied image's dimensions.
+// LAYER_PEN_SETTLE_TIMEOUT_MS bounds commit and Undo settlement (default 30000).
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { connectTab } from "../cdp.mjs";
 import { trackWasmBuild } from "./web-build-provenance.mjs";
+import { photoDimensions, settleStroke } from "./web-pen-settlement.mjs";
 
 const exec = promisify(execFile);
 const options = new Set(process.argv.slice(2));
@@ -16,6 +19,8 @@ const osInput = options.has("--os-input");
 const startupPending = options.has("--startup-pending");
 const photo = process.env.LAYER_PEN_PHOTO;
 const existingDocument = process.env.LAYER_PEN_EXISTING_DOCUMENT === "true";
+const settleTimeout = Number(process.env.LAYER_PEN_SETTLE_TIMEOUT_MS || 30000);
+assert(Number.isSafeInteger(settleTimeout) && settleTimeout > 0 && settleTimeout <= 300000);
 const preset = Number(process.env.LAYER_PEN_PRESET || 1);
 const brushSize = Number(process.env.LAYER_PEN_BRUSH_SIZE || 18);
 const idleMs = Number(process.env.LAYER_PEN_IDLE_MS || 0);
@@ -59,6 +64,20 @@ const cdp = await connectTab(endpoint, tab => tab.url === url, { timeout: 180000
 const { call, evaluate, errors } = cdp;
 // Functions sent here run in the page and must use only their arguments/globals.
 const inPage = (fn, ...args) => evaluate(`(${fn})(...${JSON.stringify(args)})`);
+const settlePaint = before => settleStroke(() => inPage(() => JSON.parse(JSON.stringify({
+  revision: Number(layerApp.state().document_file.revision),
+  pending: layerApp.app.canvas_work_pending(), busy: layerApp.documents.busy(),
+  ready: layerApp.app.brush_ready(), failure: layerApp.app.gpu_failure(),
+  session: layerApp.app.gpu_diagnostics().session,
+}, (_, value) => typeof value === "bigint" ? Number(value) : value))), { before, timeoutMs: settleTimeout });
+const undoPaint = async before => {
+  assert(await inPage(() => layerApp.state().commands.find(command => command.id === "undo")?.enabled), "Stroke must be undoable");
+  await inPage(() => layerApp.dispatch({ type: "invoke", command: "undo" }));
+  const settled = await settlePaint(before);
+  assert(await inPage(() => layerApp.state().commands.find(command => command.id === "redo")?.enabled), "Undo must restore the preceding gesture state");
+  if (preset === 64) assert(await inPage(() => layerApp.state().commands.find(command => command.id === "liquify_reset")?.enabled), "Undo must retain the predeformed Reconstruct session");
+  return settled;
+};
 const waitFor = async condition => {
   const deadline = Date.now() + 300000;
   while (Date.now() < deadline) {
@@ -114,14 +133,19 @@ try {
     });
     await delay(500);
     if (photo) {
-      await inPage(async url => {
+      const imageDimensions = await inPage(async url => {
         const blob = await (await fetch(url)).blob();
+        const image = await createImageBitmap(blob);
+        const dimensions = { width: image.width, height: image.height };
+        image.close();
         await layerApp.documents.openFiles([new File([blob], "tier-photo.jpg", { type: "image/jpeg" })]);
+        return dimensions;
       }, photo);
       await waitFor("!layerApp.documents.busy() && layerApp.app.brush_ready()");
       await inPage(() => layerApp.dispatch({ type: "invoke", command: "add_layer" }));
       const dimensions = await inPage(() => layerApp.state().tabs.find(tab => tab.active));
-      assert.equal(dimensions.width, 4248); assert.equal(dimensions.height, 2832);
+      const expected = photoDimensions(imageDimensions, process.env.LAYER_PEN_PHOTO_WIDTH, process.env.LAYER_PEN_PHOTO_HEIGHT);
+      assert.equal(dimensions.width, expected.width); assert.equal(dimensions.height, expected.height);
       assert(await inPage(() => layerApp.state().commands.find(command => command.id === "blend_perceptual")?.selected), "Tier photo must use Perceptual blending");
     } else {
       await inPage(() => layerApp.dispatch({ type: "invoke", command: "new_document" }));
@@ -165,6 +189,8 @@ try {
   }, (_, value) => typeof value === "bigint" ? Number(value) : value)));
   console.log("Photo and brush ready", JSON.stringify({ selection, startup: info.startup }));
   info.selection = selection; info.photo = photo; info.idle_ms = idleMs;
+  assert.equal(info.brush.preset, preset, "The requested brush must be selected");
+  assert(Math.abs(info.brush.diameter - brushSize) <= Math.max(1e-5, brushSize * 1e-5), "The requested brush size must be committed");
   info.wasm_sha256 = wasmHash;
   info.browser = await inPage(async () => {
     const adapter = await navigator.gpu.requestAdapter();
@@ -276,13 +302,30 @@ try {
       await Promise.all(inflight);
     } finally { if(!picker)await send("mouseReleased", milliseconds / 1000 * speed); }
   };
+  if (preset === 64) {
+    assert(!picker && (photo || existingDocument), "Reconstruct requires a photo or an existing painted document");
+    const before = await evaluate("Number(layerApp.state().document_file.revision)");
+    await inPage(brushSize => {
+      layerApp.dispatch({ type: "select_brush", id: 12 });
+      layerApp.dispatch({ type: "set_brush_size", value: brushSize });
+    }, brushSize);
+    await waitFor("layerApp.app.brush_ready()");
+    await stroke(0, Math.max(2000, duration));
+    const seeded = await settlePaint(before);
+    await inPage(brushSize => {
+      layerApp.dispatch({ type: "select_brush", id: 64 });
+      layerApp.dispatch({ type: "set_brush_size", value: brushSize });
+    }, brushSize);
+    await waitFor("layerApp.app.brush_ready()");
+    assert.equal(await inPage(() => layerApp.state().brush.preset), 64);
+    assert(await inPage(() => layerApp.state().commands.find(command => command.id === "liquify_reset")?.enabled), "Reconstruct must start from a deformed session");
+    info.reconstruct_fixture = { seed_preset: 12, duration_ms: Math.max(2000, duration), before_revision: before, settlement: seeded };
+  }
   if (!options.has("--unprimed")) {
+    const before = await evaluate("Number(layerApp.state().document_file.revision)");
     await stroke(0, 1500);
-    await delay(800);
-    if (photo || existingDocument) {
-      await inPage(() => layerApp.dispatch({ type: "invoke", command: "undo" }));
-      await delay(500);
-    }
+    const primed = picker ? null : await settlePaint(before);
+    if (!picker) await undoPaint(primed.revision);
   }
   if (profile) {
     await call("Profiler.enable");
@@ -313,7 +356,10 @@ try {
     const before = await evaluate("Number(layerApp.state().document_file.revision)");
     const glassBefore = await evaluate("layerApp.app.backdrop_frames?.() ?? [0, 0]");
     await stroke(run + 1, duration);
-    await delay(500);
+    const settlement = picker ? null : await settlePaint(before).catch(async error => {
+      await writeFile(`${output}/${label}-settlement-failure.json`, JSON.stringify({ run, before, error: String(error), diagnostics: await inPage(() => JSON.parse(JSON.stringify(layerApp.app.gpu_diagnostics(), (_, value) => typeof value === "bigint" ? Number(value) : value))) }, null, 2));
+      throw error;
+    });
     const data = await inPage(() => JSON.parse(JSON.stringify({
       frames: penBench.frames, events: penBench.events, raf: penBench.raf, calls: penBench.calls,
       stats: layerApp.app.renderer_stats(), revision: layerApp.state().document_file.revision,
@@ -334,6 +380,7 @@ try {
     const raf = data.raf.filter(time => time >= down && time <= up);
     assert(frames.length, "Stroke must submit drawing frames");
     data.summary = {
+      settlement,
       ...(picker?{wheel:run%2===1,sample_width:sampleWidth}:{}),
       measurement: "CPU frame calls; not fresh GPU updates or presented frames",
       frames: frames.length, updates_per_second: frames.length / ((up - down) / 1000),
@@ -349,6 +396,7 @@ try {
     runs.push(data);
     console.log(label, run, JSON.stringify(data.summary));
     await writeFile(`${output}/${label}.json`, JSON.stringify({ info, label, size, speed, duration, profile, trace, runs, errors }, null, 2));
+    if (!picker) await undoPaint(data.revision);
   }
   if (profiling) {
     const result = await call("Profiler.stop");

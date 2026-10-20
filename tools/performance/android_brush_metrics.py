@@ -112,6 +112,14 @@ def validate_setup(info, requested):
     expected = {key: requested[key] for key in
                 ("preset", "brush_size", "mode", "prediction", "speed", "duration_ms", "repeats")}
     actual = {key: info.get(key) for key in expected}
+    if requested["preset"] == 64:
+        fixture = info.get("reconstruct_fixture") or {}
+        expected.update(reconstruct_seed=12, reconstruct_seed_duration=max(2000, requested["duration_ms"]),
+                        reconstruct_changed=True, reconstruct_settled=True, reconstruct_session=True)
+        actual.update(reconstruct_seed=fixture.get("seed_preset"), reconstruct_seed_duration=fixture.get("duration_ms"),
+                      reconstruct_changed=fixture.get("after_revision", 0) > fixture.get("before_revision", 0),
+                      reconstruct_settled=fixture.get("pending") is False,
+                      reconstruct_session=fixture.get("session_ready") is True)
     for key in ("pause_ms", "contact_ms", "settle_delay_ms", "warmup_idle_ms"):
         if key in requested:
             expected[key] = requested[key]
@@ -160,12 +168,16 @@ def validate_setup(info, requested):
         actual[f"radius_{axis}"] = info["radii"][axis]
     workload = requested.get("workload", "ordinary")
     effect_count = int(workload in ("blurred-base", "objects-effects")) + int(bool(requested.get("live_filter")))
-    expected.update(layers=requested.get("fixture_layers", requested["photo_layers"] + 2 + effect_count),
+    expected.update(layers=requested.get("fixture_layers", requested["photo_layers"] +
+                                            (1 if requested.get("paint_layer_name") else 2) + effect_count),
                     diameter=requested["brush_size"], selected_preset=requested["preset"],
                     feedback=requested["prediction"])
     actual.update(layers=len(state["layers"]), diameter=state["brush"]["diameter"],
                   selected_preset=state["brush"]["preset"],
                   feedback=state["settings"]["feedback"])
+    if requested.get("paint_layer_name"):
+        expected["paint_layer_name"] = [requested["paint_layer_name"]]
+        actual["paint_layer_name"] = [layer.get("label") for layer in state["layers"] if layer.get("selected")]
     expected["workload"] = workload
     actual["workload"] = info.get("workload", "ordinary")
     if requested.get("live_filter"):

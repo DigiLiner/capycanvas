@@ -72,7 +72,7 @@ impl FigureOptions {
             FigureShape::Star => &["figure_points", "figure_inner_radius"],
             _ => &[],
         };
-        FIGURE_SETTINGS.iter().filter(|(id, _)| ids.contains(id)).map(|&(id, label)| ToolSetting {
+        FIGURE_SETTINGS.iter().filter(|(id, _)| ids.contains(id)).map(|&(id, label)| ToolSetting { preview: false,
             id, label: localizer.text(label), label_id: label, group_id: "", group: Arc::from(""),
             numeric: Self::numeric(id), value: self.value(id),
         }).collect()

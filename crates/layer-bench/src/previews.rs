@@ -42,6 +42,10 @@ pub fn generate(directory: &Path) -> Result<(), Box<dyn Error>> {
                         ..layer_core::CloneSource::default()
                     });
                 }
+                if choice.id == Preset::LiquifyReconstruct as u32 {
+                    canvas.set_brush(brush(Preset::LiquifyPush, 42.0, 1.0, color))?;
+                    stroke(&mut canvas, -3.0)?;
+                }
                 canvas.set_brush(brush(layer_ui::preset(choice.id)?, 42.0, 1.0, color))?;
                 stroke(&mut canvas, -3.0)?;
             }

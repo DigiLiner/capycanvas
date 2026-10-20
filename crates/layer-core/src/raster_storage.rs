@@ -216,15 +216,24 @@ impl Editor {
     pub fn retained_images(&self) -> Vec<crate::Image> {
         let mut roots=crate::RootInventory::default();roots.document(&self.document);
         for entry in self.undo.iter().chain(&self.redo) {entry.edit.roots(&mut roots);}
+        let states: Vec<_> = roots.rasters.iter().filter_map(|r| r.liquify()).collect();
+        for state in &states { roots.paint(&state.original); }
         let mut images=std::collections::BTreeMap::new();
         for image in roots.images {images.entry(image.id()).or_insert_with(||image.clone());}
         images.into_values().collect()
+    }
+    pub fn discard_liquify_maps(&self) {
+        let mut roots=crate::RootInventory::default();roots.document(&self.document);
+        for entry in self.undo.iter().chain(&self.redo) {entry.edit.roots(&mut roots);}
+        for raster in roots.rasters { raster.drop_liquify(); }
     }
     pub fn retained_tiles(&self) -> RetainedTiles {
         let mut roots=crate::RootInventory::default();
         roots.document(&self.document);
         let mut metadata_bytes=crate::artwork_metadata(&self.document.artwork).saturating_add(self.document.working.selection_overlays.metadata_bytes());
         for entry in self.undo.iter().chain(&self.redo) {entry.edit.roots(&mut roots);metadata_bytes=metadata_bytes.saturating_add(entry.metadata_bytes);}
+        let states: Vec<_> = roots.rasters.iter().filter_map(|r| r.liquify()).collect();
+        for state in &states { roots.paint(&state.original); }
         let mut seen=HashSet::new();
         let rasters:Vec<_>=roots.rasters.into_iter().filter(|r|seen.insert(r.identity())).cloned().collect();
         for raster in &rasters {
@@ -330,6 +339,9 @@ impl RetainedTiles {
                 None => pending = pending.saturating_add(raster.pending_bytes()),
                 Some(Err(_)) => (),
             }
+        }
+        for state in self.rasters.iter().filter_map(RasterRevision::liquify) {
+            state.field.resources(&mut |id, size| { if seen.insert((2, id)) { bytes = bytes.saturating_add(size); } });
         }
         for backing in &self.backings {
             if seen.insert((1,backing.identity())) {bytes=bytes.saturating_add(backing.resident_bytes());}

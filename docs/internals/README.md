@@ -19,6 +19,7 @@ Subsystem guides:
   [portable photo codecs and color](portable-color.md) and
   [Float32 HDR layers](float32-hdr-scope.md).
 - Brushes and rendering: [contact brush engine](contact-brush-engine.md),
+  [Liquify sessions and deformation](liquify.md),
   [shader readiness](shared-shader-readiness.md) and
   [tonal selection storage](tonal-performance.md).
 

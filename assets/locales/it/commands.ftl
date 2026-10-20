@@ -675,3 +675,7 @@ command-release-compound-path = Rilascia tracciato composto
 menu-path = Tracciato
 command-erase-touched-part = Cancella la parte toccata
 command-erase-to-intersection = Cancella fino all’intersezione
+
+command-liquify-reset = Ripristina Fluidifica
+command-liquify-adjust = Regola Fluidifica
+commands-liquify-no-changes = Applica prima Fluidifica a questo livello

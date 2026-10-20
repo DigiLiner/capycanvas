@@ -9,6 +9,7 @@ pub(super) const ENTRY_BUDGET: usize = 256;
 #[derive(Default)]
 pub(crate) struct Accounting {
     roots: HashSet<u64>,
+    fields: HashSet<u64>,
     tiles: HashSet<u64>,
     sources: color::source::SourceAccounting,
     selections: HashSet<usize>,
@@ -34,27 +35,22 @@ impl Accounting {
         let mut result = Self::default();
         let mut roots = RootInventory {authored_only,..Default::default()};
         roots.document(document);
-        for extensions in roots.extensions { result.charge_extensions(extensions); }
-        for selection in roots.selections { result.charge_selection(selection); }
-        for resource in roots.resources { result.charge_resource(resource); }
-        for mesh in roots.meshes { result.charge_mesh(mesh); }
-        for image in roots.images {result.sources.charge_image(image);}
-        for object in roots.vectors {result.vector_chunks.extend(object.chunks().iter().map(|c|c.owner_identity()));}
-        for source in roots.sources { result.sources.charge(source); }
-        for profile in roots.profiles { result.charge_profile(profile); }
-        for program in roots.programs { result.seed_program(program); }
-        for revision in roots.rasters {
-            result.roots.insert(revision.identity());
-            if let Some(Ok(data)) = revision.try_data() {
-                result.tiles.extend(data.tiles.values().map(|t| t.identity()));
-            }
-        }
+        result.charge_inventory(roots);
         result
     }
 
     pub fn charge(&mut self, entry: &HistoryEntry) -> usize {
-        let mut bytes = entry.metadata_bytes;
         let mut inventory = RootInventory::default(); entry.edit.roots(&mut inventory);
+        entry.metadata_bytes.saturating_add(self.charge_inventory(inventory))
+    }
+
+    fn charge_inventory(&mut self, inventory: RootInventory<'_>) -> usize {
+        let mut bytes = 0usize;
+        for state in inventory.rasters.iter().filter_map(|r| r.liquify()) {
+            state.field.resources(&mut |id, size| { if self.fields.insert(id) { bytes = bytes.saturating_add(size); } });
+            let mut original = RootInventory::default(); original.paint(&state.original);
+            bytes = bytes.saturating_add(self.charge_inventory(original));
+        }
         for extensions in inventory.extensions { bytes=bytes.saturating_add(self.charge_extensions(extensions)); }
         for resource in inventory.resources { bytes=bytes.saturating_add(self.charge_resource(resource)); }
         for mesh in inventory.meshes { bytes=bytes.saturating_add(self.charge_mesh(mesh)); }
@@ -64,9 +60,7 @@ impl Accounting {
         for source in inventory.sources { bytes=bytes.saturating_add(self.sources.charge(source)); }
         for profile in inventory.profiles { bytes=bytes.saturating_add(self.charge_profile(profile)); }
         for program in inventory.programs { bytes=bytes.saturating_add(self.charge_program(program)); }
-        let mut roots = Vec::new();
-        entry.edit.raster_roots(&mut roots);
-        for revision in roots {
+        for revision in inventory.rasters {
             if !self.roots.insert(revision.identity()) {
                 continue;
             }
@@ -106,11 +100,6 @@ impl Accounting {
     }
     pub(super) fn charge_profile(&mut self, profile: &color::ColorProfile) -> usize {
         self.sources.charge_profile(profile)
-    }
-    fn seed_program(&mut self, program:&Arc<EffectProgram>) {
-        self.programs.insert(Arc::as_ptr(program) as usize);
-        self.charge_shader(&program.wgsl);
-        for lookup in program.lookups.iter(){self.charge_shader(&lookup.wgsl);}
     }
     fn charge_shader(&mut self,shader:&EffectShader)->usize {
         match shader {

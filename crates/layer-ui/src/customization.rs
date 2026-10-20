@@ -1139,6 +1139,7 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::Airbrush => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_AIRBRUSH).to_string(),
                 CommandId::Decoration => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_DECORATION).to_string(),
                 CommandId::Blend => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_BLEND).to_string(),
+                CommandId::LiquifyReset | CommandId::LiquifyAdjust => label.to_string(),
                 CommandId::Liquify => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_LIQUIFY).to_string(),
                 CommandId::Lasso => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_LASSO).to_string(),
                 CommandId::EncloseFill => localization.text(MessageId::COMMANDS_HELP_ENCLOSE_FILL).to_string(),

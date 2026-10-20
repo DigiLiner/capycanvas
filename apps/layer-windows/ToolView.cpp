@@ -386,6 +386,8 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                     }
                 }
                 NumberPresentation presentation;presentation.identity=[context]{return context;};
+                if(flag(item,L"preview"))presentation.phase=[weak,id,context](hstring const& phase,double value){if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)
+                    self->data->dispatch(O({{L"type",S(L"tool_setting_contact")},{L"id",S(id)},{L"phase",S(phase)},{L"value",N(value)}}));};
                 presentation.reset=[weak,id,context]{if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)
                     self->data->dispatch(O({{L"type",S(L"reset_tool_setting")},{L"id",S(id)}}));};
                 presentation.title=[weak,id]{if(auto self=weak.lock())return str(find(array(self->data->state,L"tool_settings"),L"id",id),L"label");return hstring();};

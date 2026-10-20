@@ -217,3 +217,7 @@ brush-preset-mixing-brush = พู่กันผสมสี
 brush-preset-sharpen = เพิ่มความคมชัด
 brush-preset-texture-blender = เกลี่ยสีรักษาพื้นผิว
 brush-preset-hue-blender = เกลี่ยสีเฉพาะเฉดสี
+
+brush-preset-liquify-edge = ขอบ
+brush-preset-liquify-reconstruct = คืนรูป
+tool-control-liquify-amount = ปริมาณ

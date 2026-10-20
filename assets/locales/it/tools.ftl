@@ -217,3 +217,7 @@ brush-preset-mixing-brush = Pennello miscelatore
 brush-preset-sharpen = Nitidezza
 brush-preset-texture-blender = Sfumino che preserva la texture
 brush-preset-hue-blender = Sfumino della tinta
+
+brush-preset-liquify-edge = Bordo
+brush-preset-liquify-reconstruct = Ricostruisci
+tool-control-liquify-amount = Intensità

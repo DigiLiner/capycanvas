@@ -676,3 +676,7 @@ command-release-compound-path = Annuler le tracé transparent
 menu-path = Tracé
 command-erase-touched-part = Effacer la partie touchée
 command-erase-to-intersection = Effacer jusqu’à l’intersection
+
+command-liquify-reset = Réinitialiser la fluidité
+command-liquify-adjust = Ajuster la fluidité
+commands-liquify-no-changes = Appliquez d’abord la fluidité à ce calque

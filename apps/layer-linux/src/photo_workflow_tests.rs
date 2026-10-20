@@ -57,7 +57,7 @@ pub(crate) fn frames(stats: &Arc<Mutex<crate::timing::Stats>>) -> Value {
         "cpu": stats.cpu, "cpu_stages": stats.cpu_stages, "thread_cpu": stats.thread_cpu,
         "gpu": stats.gpu, "presented": stats.presented,
         "camera_views": stats.camera_views, "photo_inputs": stats.photo_inputs,
-        "material_samples": stats.material_samples,
+        "material_sample_bytes": stats.material_sample_bytes,
         "renderer_phases": stats.renderer_phases, "material_phases": stats.material_phases,
         "source_transfers": stats.source_transfers,
         "pen_routes": stats.pen_routes,

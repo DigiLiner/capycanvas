@@ -162,6 +162,11 @@ impl Requirements {
             self.render.push(r.layer_masks.brush[index].clone());
             return;
         }
+        if style.execution == BrushExecution::Liquify {
+            let pipelines = r.liquify_pipelines.get_or_init(|| Arc::new(liquify::Pipelines::new(r)));
+            self.compute.extend([pipelines.update(style).clone(), pipelines.reconstruct.clone(), pipelines.mips.reduce.clone(), pipelines.mips.fused_reduce.clone()]);
+            return;
+        }
         let plan = BrushPassPlan::for_device(style, &r.device);
         if pointwise(style) && plan.direct.is_none() {
             let pipelines = &r.pipelines.dry_material;
@@ -214,6 +219,7 @@ struct ShaderBrushKey {
     textures: TextureSetKey,
     mask_tip: bool,
     execution: BrushExecution,
+    liquify: Option<LiquifyMode>,
     paint: BrushPassPlan,
     erase: BrushPassPlan,
     blend: BrushBlendMode,
@@ -239,6 +245,7 @@ impl ShaderBrushKey {
             textures: WgpuRasterizer::texture_set_key(&style),
             mask_tip: matches!(style.tip, BrushTip::Mask(_)),
             execution: style.execution,
+            liquify: (style.execution == BrushExecution::Liquify).then_some(style.deform.mode),
             paint,
             erase,
             blend: style.rendering.blend_mode,

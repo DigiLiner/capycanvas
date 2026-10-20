@@ -42,6 +42,7 @@ import {checkClone,checkHeal} from "./clone-journey.test.mjs";
 import {checkRetouchLayers} from "./retouch-layers-journey.test.mjs";
 import {checkPenRendering} from "./pen-rendering.test.mjs";
 import {checkSmoothing} from "./smoothing.test.mjs";
+import {checkLiquify} from './liquify-journey.test.mjs';
 import {checkPrediction} from "./prediction.test.mjs";
 // Run against an already forwarded Android Chrome endpoint. No profile reset,
 // browser flags or device settings are changed by this harness.
@@ -105,7 +106,7 @@ try {
     const created=(await workspaceIdle()).id; assert.notEqual(created,original);
     workspaceIsolation={original,created,capture,theme};
   }
-  console.log("Tablet",await evaluate('(async()=>{const adapter=await navigator.gpu.requestAdapter();return{agent:navigator.userAgent,viewport:[innerWidth,innerHeight],gpu:{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device,description:adapter.info.description},platform:await navigator.userAgentData?.getHighEntropyValues(["platform","model","architecture"])}})()'));
+  console.log("Tablet",await evaluate('(async()=>{const adapter=await navigator.gpu.requestAdapter();return{agent:navigator.userAgent,viewport:[innerWidth,innerHeight],gpu:{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device,description:adapter.info.description,features:[...adapter.features]},platform:await navigator.userAgentData?.getHighEntropyValues(["platform","model","architecture"])}})()'));
   const checkErrors = () => assert.deepEqual(errors, []);
   if (!await runJourney([
     [process.argv.includes("--compact-workspaces"), () => checkCompactWorkspaces({call,evaluate,settle}), checkErrors],
@@ -122,6 +123,8 @@ try {
       await checkPrediction({call,evaluate,settle});
     }, checkErrors],
     [process.argv.includes("--smoothing"), () => checkSmoothing({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--liquify-amount-bench"), () => checkLiquify({call,evaluate,settle},{benchmark:true}), checkErrors],
+    [process.argv.includes("--liquify-journey"), () => checkLiquify({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--drawing-tabs-recovery"), () => checkDrawingTabRecovery({cdp,call,evaluate,settle}), checkErrors],
     [process.argv.includes("--drawing-tabs"), () => checkDrawingTabs({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--hdr-performance"), () => measureHdr({call,evaluate,settle}), checkErrors],

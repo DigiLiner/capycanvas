@@ -218,3 +218,7 @@ brush-preset-mixing-brush = Cọ trộn màu
 brush-preset-sharpen = Làm sắc nét
 brush-preset-texture-blender = Hòa màu giữ chất liệu
 brush-preset-hue-blender = Hòa màu sắc độ
+
+brush-preset-liquify-edge = Cạnh
+brush-preset-liquify-reconstruct = Khôi phục
+tool-control-liquify-amount = Mức độ

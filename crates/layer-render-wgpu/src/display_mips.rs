@@ -225,14 +225,21 @@ impl CompleteUpdates {
     }
 
     pub fn flush(&mut self, encoder: &mut crate::submission::CommandEncoder) {
-        if self.pending.is_empty() { return; }
+        Self::flush_all(std::slice::from_mut(self), encoder);
+    }
+
+    pub fn flush_all(updates: &mut [Self], encoder: &mut crate::submission::CommandEncoder) {
+        if updates.iter().all(|u| u.pending.is_empty()) { return; }
         let _trace = crate::performance_trace::Span::new(c"capy.mip_encode");
-        // Same pixels and per-level dependency order, fewer driver commands.
-        self.pending.sort_unstable_by_key(|&[x, y]| (y, x));
-        self.pending.dedup();
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("reduce retained display tiles"), timestamp_writes: None,
         });
+        for update in updates { update.encode(&mut pass); }
+    }
+
+    fn encode(&mut self, pass: &mut wgpu::ComputePass<'_>) {
+        self.pending.sort_unstable_by_key(|&[x, y]| (y, x));
+        self.pending.dedup();
         let mut level = 0;
         while level < self.bindings.len() {
             let fused = level % 4 == 0 && level / 4 < self.fused_bindings.len();

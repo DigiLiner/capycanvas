@@ -263,7 +263,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         let point = StrokePoint { position: Point {x:0.,y:0.}, pressure: 1.,
             tilt: [std::f32::consts::FRAC_PI_4, 0.], twist: 0., elapsed_micros: 0 };
         let target = self.engine().document().working.target.unwrap_or(layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::INVALID));
-        let resolve = |brush| -> Result<Vec<layer_render::Dab>, String> {
+        let resolve = |brush: BrushSnapshot| -> Result<Vec<layer_render::Dab>, String> {
+            if brush.execution == layer_core::BrushExecution::Liquify {
+                return Ok(layer_engine::DabGenerator::new(self.engine().document().composition().color.space)
+                    .cursor_contacts(point, &brush));
+            }
             let stroke = Stroke::new(StrokeId(1), target, StrokeTool::Brush, brush,
                 std::sync::Arc::<[StrokePoint]>::from([point])).map_err(|e| e.to_string())?;
             let mut dabs = Vec::new();

@@ -158,6 +158,7 @@ struct Transaction {
 }
 #[derive(Default)]
 pub(super) struct Operation {
+    pub liquify: Option<super::liquify::Adjustment>,
     current: Option<Transaction>,
     pub next_tool: Option<Box<UiAction>>,
     /// An open crop is a canvas operation too, so idle checks wait on it.
@@ -744,7 +745,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         ]
         .into_iter()
         .map(
-            |(id, label, group, numeric, value)| tool_settings::ToolSetting {
+            |(id, label, group, numeric, value)| tool_settings::ToolSetting { preview: false,
                 id,
                 label: localizer.text(label),
                 label_id: label,

@@ -24,6 +24,7 @@ pub(crate) struct Recorder {
     pub(crate) pending_operations: Vec<(SourceTarget, RasterOperation)>,
     pub(crate) last_style: Option<layer_render::DabStyle>,
     pub(crate) recorded_dabs: Vec<layer_render::Dab>,
+    pub(crate) liquify_amount_batches: Vec<f32>,
     pub(crate) dabs: usize,
     pub(crate) composites: usize,
     pub(crate) validation: Option<layer_render::EffectValidationRequest>,
@@ -70,6 +71,7 @@ pub(crate) struct Recorder {
     pub(crate) evaluation: EvaluationContext,
     pub(crate) rebuilds: usize,
     pub(crate) painting_unready: bool,
+    pub(crate) raster_dependencies_blocked: bool,
     pub(crate) vector_preview: Option<layer_render::VectorPreview>,
 }
 impl CanvasRenderer for Recorder {
@@ -84,6 +86,9 @@ impl CanvasRenderer for Recorder {
     fn shader_input(&mut self) { self.shader_inputs += 1; }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { self.shader_idle = (idle, speculative_idle); }
     fn can_submit(&self) -> bool { !self.settling }
+    fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&layer_render::TransformPreview>) -> bool {
+        !self.raster_dependencies_blocked
+    }
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) {self.overlay=overlay;}
     fn document_color(&self) -> layer_core::color::DocumentColor { self.color }
     fn adopt_prepared_color(&mut self, color: layer_core::color::DocumentColor) -> Result<bool, Self::Error> {
@@ -232,10 +237,18 @@ impl CanvasRenderer for Recorder {
         self.evaluation.elapsed = packet.time_seconds;
         self.rebuilds += usize::from(packet.reset_layers);
         self.frame_scene = Some(packet.scene.snapshot());
+        self.liquify_amount_batches = packet.dab_batches.iter()
+            .filter_map(|batch| batch.style.liquify.as_ref()?.amount).collect();
         self.pending_operations.clear();
         for batch in packet.dab_batches {
             if let layer_render::DabBatchKind::RasterOperation(index) = batch.kind {
                 self.pending_operations.push((batch.target, packet.scene.operations(batch.target).unwrap()[index as usize].clone()));
+            }
+            if let (SourceTarget::Paint(handle), Some(context)) = (batch.target,
+                batch.style.liquify.as_ref().filter(|context| context.amount.is_some_and(|amount| amount > 0.)))
+                && let (Some(field), Some(source)) = (&context.field, packet.scene.paint(handle)) {
+                source.raster.set_liquify(std::sync::Arc::new(layer_core::liquify::State::new(
+                    context.original.clone(), field.clone(), source, batch.style.alpha_locked)));
             }
         }
         self.dabs += packet.dabs.len();

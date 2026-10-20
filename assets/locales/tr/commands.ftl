@@ -673,3 +673,7 @@ command-release-compound-path = Bileşik yolu çöz
 menu-path = Yol
 command-erase-touched-part = Dokunulan kısmı sil
 command-erase-to-intersection = Kesişime kadar sil
+
+command-liquify-reset = Sıvılaştırmayı sıfırla
+command-liquify-adjust = Sıvılaştırmayı ayarla
+commands-liquify-no-changes = Önce bu katmana sıvılaştırma uygulayın

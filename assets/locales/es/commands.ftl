@@ -676,3 +676,7 @@ command-release-compound-path = Liberar trazado compuesto
 menu-path = Trazado
 command-erase-touched-part = Borrar la parte tocada
 command-erase-to-intersection = Borrar hasta la intersección
+
+command-liquify-reset = Restablecer Licuar
+command-liquify-adjust = Ajustar Licuar
+commands-liquify-no-changes = Aplica Licuar a esta capa primero

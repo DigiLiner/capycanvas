@@ -672,3 +672,7 @@ command-release-compound-path = 释放复合路径
 menu-path = 路径
 command-erase-touched-part = 擦除触及部分
 command-erase-to-intersection = 擦除到交叉点
+
+command-liquify-reset = 重置液化
+command-liquify-adjust = 调整液化
+commands-liquify-no-changes = 请先对此图层应用液化

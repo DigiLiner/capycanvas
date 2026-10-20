@@ -217,3 +217,7 @@ brush-preset-mixing-brush = Pincel de mezcla
 brush-preset-sharpen = Enfocar
 brush-preset-texture-blender = Mezclador que conserva la textura
 brush-preset-hue-blender = Mezclador de tono
+
+brush-preset-liquify-edge = Borde
+brush-preset-liquify-reconstruct = Reconstruir
+tool-control-liquify-amount = Cantidad

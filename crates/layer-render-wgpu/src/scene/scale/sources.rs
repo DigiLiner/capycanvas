@@ -211,6 +211,7 @@ impl Sources {
             (Some(a), Some(b)) => Arc::ptr_eq(a, b), (None, None) => true, _ => false,
         };
         let mut damage = std::mem::take(&mut source.preview);
+        if let Some(liquify) = &r.liquify { damage = liquify.preview_damage(id, damage); }
         let touched: BTreeSet<_> = packet.dab_batches.iter().zip(batch_tiles).filter(|(b, _)| b.target == id
             && !packet.restore_rasters.iter().any(|(target, _)| *target == id))
             .flat_map(|(_, tiles)| tiles.iter().map(|t| t.coordinate)).collect();
@@ -225,10 +226,10 @@ impl Sources {
         }
         source.backing = backing;
         for (batch, tiles) in packet.dab_batches.iter().zip(batch_tiles).filter(|(b, _)| b.target == id) {
-            let regions = tiles.iter().map(Damage::tile_region);
-            damage.regions.extend(regions.clone());
+            damage.regions.extend(tiles.iter().filter(|tile| batch.kind != DabBatchKind::Preview
+                || !r.liquify.as_ref().is_some_and(|l| l.preview_unchanged(id, tile.coordinate))).map(Damage::tile_region));
             damage.regions.extend(r.stroke_finish_pages(batch).map(page_rect));
-            if batch.kind == DabBatchKind::Preview { source.preview.regions.extend(regions); }
+            if batch.kind == DabBatchKind::Preview { source.preview.regions.extend(tiles.iter().map(Damage::tile_region)); }
         }
         if r.preview_layer_id == Some(id) && source.preview.is_empty() {
             source.preview = Damage::from_tiles(r.preview_damage, r.preview_contact_tiles.as_ref());

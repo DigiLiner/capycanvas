@@ -82,6 +82,19 @@ class SetupTests(unittest.TestCase):
         self.info["radii"] = [754 * .45, 299]
         validate_setup(self.info, self.requested)
 
+    def test_reconstruct_rejects_missing_unchanged_or_unsettled_seed_sessions(self):
+        self.requested["preset"] = self.info["preset"] = self.info["state"]["brush"]["preset"] = 64
+        with self.assertRaisesRegex(ValueError, "reconstruct"):
+            validate_setup(self.info, self.requested)
+        self.info["reconstruct_fixture"] = dict(seed_preset=12, duration_ms=5000, before_revision=2,
+                                                 after_revision=3, pending=False, session_ready=True)
+        validate_setup(self.info, self.requested)
+        for key, value in [("after_revision", 2), ("pending", True), ("session_ready", False), ("duration_ms", 1500)]:
+            info = copy.deepcopy(self.info)
+            info["reconstruct_fixture"][key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "reconstruct"):
+                validate_setup(info, self.requested)
+
     def test_rejects_ignored_arguments_in_old_device_runners(self):
         for change, field in [(lambda d: d.update(radii=[754 * .45, 299]), "radius"),
                               (lambda d: d["state"].update(layers=[{}] * 3), "layers"),
@@ -192,6 +205,19 @@ class SetupTests(unittest.TestCase):
             self.info["state"]["layers"] = [dict(selected=i in selected) for i in range(6)]
             with self.assertRaisesRegex(ValueError, "paint_layer_index"):
                 validate_setup(self.info, self.requested)
+
+    def test_named_photo_target_requires_the_selected_existing_layer(self):
+        self.requested.update(photo_layers=1, paint_layer_name="Photo")
+        self.info["state"]["layers"] = [dict(label="Photo", selected=True), dict(label="Paper")]
+        validate_setup(self.info, self.requested)
+        for layers, field in [([dict(label="Photo"), dict(label="Paper", selected=True)], "paint_layer_name"),
+                              ([dict(label="Photo", selected=True), dict(label="Paper", selected=True)], "paint_layer_name"),
+                              ([dict(label="Photo", selected=True), dict(label="Paper"), {}], "layers")]:
+            with self.subTest(field=field):
+                info = copy.deepcopy(self.info)
+                info["state"]["layers"] = layers
+                with self.assertRaisesRegex(ValueError, field):
+                    validate_setup(info, self.requested)
 
     def test_rejects_missing_or_unmatched_contact_timing(self):
         for key in ("pause_ms", "contact_ms", "settle_delay_ms"):

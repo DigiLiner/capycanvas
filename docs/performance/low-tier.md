@@ -1605,7 +1605,7 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
-The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender, wet and Liquify Push rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements.
+The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender and wet rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements. Liquify uses the separate Photo-layer profile below.
 
 - The older fixtures fit their 520 × 299 px ellipse to 339 × 299 px in the
   TCL's 754 px work area at 16.0% zoom. The current G-Pen row uses the 240 × 120 px semiaxes documented in
@@ -1650,12 +1650,56 @@ The blender suite (presets 45–62) and its material page changes are unmeasured
 | Wet Round (11) | Very complex | 512 px | 1.6 updates/s (1.6–1.6); input 1.6/s; completion-gap p99 913.0 ms | **Not met** |
 | Natural Blender (24) | Very complex | 512 px | 1.8 updates/s (1.8–1.8); input 1.8/s; completion-gap p99 1195.6 ms | **Not met** |
 | Smudge (10) | Very complex | 512 px | 2.5 updates/s (2.5–2.5); input 2.5/s; completion-gap p99 770.5 ms | **Not met** |
-| Liquify Push (12) | Very complex | 512 px | 5.2 updates/s (5.2–5.5); input 5.2/s; completion-gap p99 331.0 ms | **Not met** |
-| Liquify Twirl Clockwise (36) | Very complex | 512 px | 35.1 updates/s (34.8–35.3); input 35.1/s; completion-gap p99 50.0 ms | **Not met** |
-| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 35.3 updates/s (35.0–35.4); input 35.3/s; completion-gap p99 50.9 ms | **Not met** |
-| Liquify Pinch (37) | Very complex | 512 px | 30.0 updates/s (29.0–30.9); input 30.0/s; completion-gap p99 58.3 ms | **Not met** |
-| Liquify Expand (38) | Very complex | 512 px | 29.5 updates/s (29.4–30.0); input 29.5/s; completion-gap p99 56.9 ms | **Not met** |
-| Liquify Crystals (39) | Very complex | 512 px | 9.5 updates/s (9.5–9.6); input 9.5/s; completion-gap p99 143.8 ms | **Not met** |
+| Liquify Push (12) | Very complex | 512 px | 22.49 fresh updates/s (22.09–23.75); fresh completion-gap p99 ≤96.27 ms | **Not met** |
+| Liquify Twirl Clockwise (36) | Very complex | 512 px | 18.36 fresh updates/s (16.57–18.73); fresh completion-gap p99 ≤170.14 ms | **Not met** |
+| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 18.11 fresh updates/s (17.08–18.31); fresh completion-gap p99 ≤158.49 ms | **Not met** |
+| Liquify Pinch (37) | Very complex | 512 px | 29.71 fresh updates/s (29.27–32.24); fresh completion-gap p99 ≤112.90 ms | **Not met** |
+| Liquify Expand (38) | Very complex | 512 px | 31.10 fresh updates/s (30.73–31.65); fresh completion-gap p99 ≤101.72 ms | **Not met** |
+| Liquify Crystals (39) | Very complex | 512 px | 21.28 fresh updates/s (20.90–21.34); fresh completion-gap p99 ≤84.49 ms | **Not met** |
+| Liquify Edge (63) | Very complex | 512 px | 24.50 fresh updates/s (23.93–24.94); fresh completion-gap p99 ≤125.31 ms | **Not met** |
+| Liquify Reconstruct (64) | Very complex | 512 px | 34.84 fresh updates/s (34.66–36.60); fresh completion-gap p99 ≤65.94 ms | **Not met** |
+
+### Retained-map Liquify
+
+Measured on 2026-10-20 on the TCL TAB 11 Gen 2, Mali-G52 MC2, with the
+retained-map implementation based on `b7fb3654a`. Benchmark APK SHA-256:
+`7a5a27c61b93890c744413a0f31a4d6c54c074377884af3ac8e7c3bb2f115c05`.
+The eight rows above use the 4248 × 2832 photo, Size 512, full pressure,
+16 ms prediction and three five-second contacts after shader warm-up.
+`--paint-layer-name Photo` selects the photo itself. Reconstruct first seeds
+its map with a five-second Push stroke; each measured contact is undone before
+the next. Every mode changes visible canvas pixels.
+
+The 300 × 180 screen-pixel semiaxes run at Fit zoom 0.343538 on the
+1920 × 1200 surface. Sketch is collapsed and Stats is closed; thermal status
+is zero. A post-run display dump lists only a 60 Hz mode; hardware refresh
+was not captured per trial. Values are median completed updates consuming fresh
+input per second with the three-run range, and the worst run's fresh completion-gap p99.
+Completed nonempty and fresh-input rates are equal in these runs. They do not measure
+physical scanout or pen-to-display latency. Every mode misses both 60/s and
+the 33.3 ms gap limit. The previous empty-layer measurements exercise map
+geometry but do not qualify deformation of photo pixels.
+
+The diagnostics and broad-coverage check below use APK
+`933d671b62210326655307c6a85e7601c51ba5f670e073757c7a047e6aee79fe`,
+with the same Push/Twirl map arithmetic, twelve-source chunks and allocation
+rules. Separate Stats-enabled diagnostics attribute Push's median 48.25 ms GPU
+interval to map updates at 22.30 ms, reconstruction at 8.15 ms, main composition
+at 4.11 ms and display mips at 0.89 ms. Counterclockwise Twirl takes 45.56 ms,
+with 28.92 ms in map updates and 6.99 ms in reconstruction. Phase timings nest
+and must not be summed. Unchanged preview pages remain visible without
+regenerating their mips or composition; deformation is now the largest measured
+cost. These instrumented runs are separate from the qualification rates above.
+
+Guarded broad-coverage Push completes all six planned full-width stripes
+without GPU loss or out-of-memory failure. Tracked GPU allocation grows from
+846 to 1317 MiB and MemAvailable falls from 2203 to 1677 MiB. The geometric
+support upper bound reaches all 204 tile cells; it does not count unique
+deformed pixels. Undo takes 231 ms and continued moving Push 507 ms.
+History-budget eviction removes the older map, making Reset unavailable after
+Undo; drawing remains usable. Undoing the coverage and trimming redo reduces
+tracked GPU allocation to 884 MiB. Ordinary-stroke pen-up settlement reaches
+856 ms for Push, including momentum and publication.
 
 ## Integrated compositor measurement
 

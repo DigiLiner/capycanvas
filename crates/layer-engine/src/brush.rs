@@ -79,6 +79,7 @@ pub struct DabGenerator {
     bristle_azimuth: Option<f32>,
     barrel_twist: bool,
     fan_slide: f32,
+    edge_normal: [f32; 2],
     touchdown: Point,
     fan_roll: f32,
     fan_axis: [f32; 2],
@@ -92,6 +93,7 @@ pub struct DabGenerator {
     filtered_speed: f32,
     rng: u32,
     stroke_seed: u32,
+    dab_index: u32,
     last_evaluated: Option<DynamicPoint>,
     last_contact: Option<Dab>,
     total_distance: Option<f32>,
@@ -109,6 +111,7 @@ impl Default for DabGenerator {
             bristle_azimuth: None,
             barrel_twist: false,
             fan_slide: 0.,
+            edge_normal: [0.; 2],
             touchdown: Point { x: 0., y: 0. },
             fan_roll: 0.,
             fan_axis: [0.; 2],
@@ -122,6 +125,7 @@ impl Default for DabGenerator {
             filtered_speed: 0.0,
             rng: 1,
             stroke_seed: 1,
+            dab_index: 0,
             last_evaluated: None,
             last_contact: None,
             total_distance: None,
@@ -155,7 +159,8 @@ impl DabGenerator {
         let evaluated = preview.evaluate(current, brush);
         let mut output = Vec::new();
         let mut damage = Rect::EMPTY;
-        preview.emit_contacts(evaluated, brush, &mut output, &mut damage);
+        if brush.execution == layer_core::BrushExecution::Liquify { output.push(evaluated.dab); }
+        else { preview.emit_contacts(evaluated, brush, &mut output, &mut damage); }
         if brush.contact.is_some_and(|c| c.bristles.is_some()) {
             output = output.last().or(preview.pending_contacts.last()).copied().into_iter().collect();
             for fan in &mut output {
@@ -436,6 +441,38 @@ impl DabGenerator {
     /// matters for a pointed lift: copying the preceding large dab rounds it off.
     /// A bristle fan then lifts off the paper.
     pub(crate) fn finish(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
+        let damage = self.finish_contact(brush, output);
+        let tail = self.momentum(brush);
+        let damage = damage.union(damage_for_dabs(&tail));
+        output.extend(tail);
+        damage
+    }
+
+    pub(crate) fn momentum(&self, brush: &BrushSnapshot) -> Vec<Dab> {
+        if brush.execution != layer_core::BrushExecution::Liquify || brush.deform.momentum <= 0.
+            || brush.deform.mode == layer_core::LiquifyMode::Reconstruct { return Vec::new(); }
+        let (Some(last), Some(contact)) = (self.last, self.last_contact) else { return Vec::new(); };
+        let count = (36. * brush.deform.momentum).ceil() as u32;
+        let duration = count as f32 / 60.;
+        let travel = (last.speed * duration * 0.5).min(brush.diameter * brush.deform.momentum);
+        let angle = last.direction_turns * std::f32::consts::TAU;
+        let motion = [angle.cos() * travel / count as f32, angle.sin() * travel / count as f32];
+        if brush.deform.mode == layer_core::LiquifyMode::Push && travel < 0.001 { return Vec::new(); }
+        (0..count).map(|i| {
+            let mut dab = contact;
+            dab.center = Point { x: last.point.position.x + motion[0] * (i + 1) as f32,
+                y: last.point.position.y + motion[1] * (i + 1) as f32 };
+            dab.motion = motion;
+            dab.material[3] *= (1. - (i as f32 + 0.5) / count as f32).powi(2)
+                * 36. * brush.deform.momentum / count as f32;
+            dab.previous_contact[0] = layer_core::liquify::substeps(brush.deform.mode, dab.radii,
+                dab.hardness, dab.material[3], dab.motion) as f32;
+            dab.previous_contact[1] = (self.dab_index.wrapping_add(i) & 0x00ff_ffff) as f32;
+            dab
+        }).collect()
+    }
+
+    pub(crate) fn finish_contact(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
         let mut damage = Rect::EMPTY;
         if let Some(model) = self.position_smoother.take_completion_model() {
             damage = damage.union(self.append_continuation(model.endpoint(), brush, &model, output));
@@ -602,6 +639,8 @@ impl DabGenerator {
 
     fn evaluate(&mut self, point: DynamicPoint, brush: &BrushSnapshot) -> EvaluatedDab {
         let variant = self.next_random();
+        let dab_index = self.dab_index;
+        self.dab_index = self.dab_index.wrapping_add(1);
         let mut values = Registers {
             diameter: brush.diameter,
             opacity: 1.,
@@ -623,6 +662,7 @@ impl DabGenerator {
                 * (1.0 - brush.deform.pressure + brush.deform.pressure * point.point.pressure),
         };
         for (index, mapping) in brush.mappings.iter().take(MAX_BRUSH_MAPPINGS).enumerate() {
+            if brush.execution == layer_core::BrushExecution::Liquify && mapping.sensor == BrushSensor::Twist && !self.barrel_twist { continue; }
             apply_mapping(
                 &mut values,
                 mapping,
@@ -683,9 +723,15 @@ impl DabGenerator {
             }
         }
         let (rotation_sin, rotation_cos) = rotation.sin_cos();
+        let liquify = brush.execution == layer_core::BrushExecution::Liquify;
+        if liquify { radii = radii.map(|radius| radius.max(1.)); }
         let motion = self.last_evaluated.map_or([0.0; 2], |last| {
             [point.position().x - last.position().x, point.position().y - last.position().y]
         });
+        if motion[0].hypot(motion[1]) > 0. {
+            let length = motion[0].hypot(motion[1]);
+            self.edge_normal = [-motion[1] / length, motion[0] / length];
+        }
         self.last_evaluated = Some(point);
         let falloff = if brush.path.falloff_distance > 0.0 {
             (1.0 - point.stroke_distance / (brush.path.falloff_distance * diameter).max(0.01))
@@ -703,6 +749,8 @@ impl DabGenerator {
         } else {
             (strength, point.point.pressure)
         };
+        let hardness = finite_or(values.hardness, brush.hardness).clamp(0., if liquify { layer_core::liquify::MAX_HARDNESS } else { 1. });
+        let deformation = values.deform_strength.clamp(0., 1.);
         EvaluatedDab {
             dab: Dab {
                 center,
@@ -718,7 +766,7 @@ impl DabGenerator {
                     self.stroke_seed,
                 ),
                 flow,
-                hardness: finite_or(values.hardness, brush.hardness).clamp(0.0, 1.0),
+                hardness,
                 texture_sign: [1.0, 1.0],
                 material: [
                     values.grain_depth.clamp(0.0, if brush.contact.is_some_and(|c| c.dry.is_some()) { 2. } else { 1. }),
@@ -736,7 +784,10 @@ impl DabGenerator {
                     point.stroke_distance / brush.diameter.max(0.01),
                     (self.stroke_seed & 65535) as f32,
                 ], |r| [pressure, r[0], r[1], r[2]]),
-                previous_contact: [0.0; 4],
+                previous_contact: if liquify {
+                    [layer_core::liquify::substeps(brush.deform.mode, radii, hardness, deformation, motion) as f32,
+                        (dab_index & 0xffffff) as f32, self.edge_normal[0], self.edge_normal[1]]
+                } else { [0.; 4] },
             },
             spacing: if brush.contact.is_some_and(|c| c.dry.is_some()) { 0. } else { (finite_or(values.spacing, brush.spacing)
                 * (1.0 + signed_unit(hash32(variant ^ 0x7f4a_7c15)) * brush.path.spacing_jitter))
@@ -792,6 +843,15 @@ impl DabGenerator {
         output: &mut Vec<Dab>,
         damage: &mut Rect,
     ) {
+        if brush.execution == layer_core::BrushExecution::Liquify {
+            let dab = evaluated.dab;
+            if dab.material[3] <= 0. || match brush.deform.mode {
+                layer_core::LiquifyMode::Push => dab.motion == [0.; 2],
+                layer_core::LiquifyMode::Edge => dab.previous_contact[2..] == [0.; 2],
+                layer_core::LiquifyMode::Crystals => 12. * brush.deform.distortion * dab.material[3] < 0.5,
+                _ => false,
+            } { return; }
+        }
         if brush.contact.is_some_and(|c| c.bristles.is_some()) {
             self.emit_fan(evaluated.dab, output, damage);
             return;
@@ -819,11 +879,14 @@ impl DabGenerator {
             let variant = self.next_random();
             let mut dab = evaluated.dab;
             let diameter = dab.radii[0] * 2.0;
+            let distortion = if brush.execution == layer_core::BrushExecution::Liquify
+                && !matches!(brush.deform.mode, layer_core::LiquifyMode::Crystals | layer_core::LiquifyMode::Reconstruct)
+                { brush.deform.distortion * 0.1 } else { 0. };
             let along = signed_unit(hash32(variant ^ 0x68bc_21eb))
-                * brush.path.jitter_along.min(MAX_BRUSH_SCATTER_DIAMETERS)
+                * (brush.path.jitter_along + distortion).min(MAX_BRUSH_SCATTER_DIAMETERS)
                 * diameter;
             let across = signed_unit(hash32(variant ^ 0x02e5_be93))
-                * brush.path.jitter_across.min(MAX_BRUSH_SCATTER_DIAMETERS)
+                * (brush.path.jitter_across + distortion).min(MAX_BRUSH_SCATTER_DIAMETERS)
                 * diameter;
             let (sin, cos) = evaluated.direction_radians.sin_cos();
             dab.center.x += cos.mul_add(along, -sin * across);

@@ -218,3 +218,7 @@ brush-preset-mixing-brush = 섞어 칠하기 붓
 brush-preset-sharpen = 선명하게
 brush-preset-texture-blender = 질감 유지 혼색
 brush-preset-hue-blender = 색조 혼색
+
+brush-preset-liquify-edge = 가장자리
+brush-preset-liquify-reconstruct = 복원
+tool-control-liquify-amount = 양

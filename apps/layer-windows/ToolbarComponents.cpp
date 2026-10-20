@@ -556,6 +556,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto set=[weak,id](double value){if(auto self=weak.lock())self->send(O({{L"type",S(L"set_tool_setting")},{L"id",S(id)},{L"value",N(value)}}));};
         auto reset=[weak,id]{if(auto self=weak.lock())self->send(O({{L"type",S(L"reset_tool_setting")},{L"id",S(id)}}));};
         NumberPresentation presentation;
+        if(flag(option,L"preview"))presentation.phase=[weak,id](hstring const& phase,double value){if(auto self=weak.lock())self->send(O({{L"type",S(L"tool_setting_contact")},{L"id",S(id)},{L"phase",S(phase)},{L"value",N(value)}}));};
         presentation.title=[weak,id]{if(auto self=weak.lock())for(auto value:array(self->model,L"options")){
             auto entry=object(value.GetObject(),L"Numeric");if(str(entry,L"id")==id)return str(entry,L"label");
         }return hstring();};
@@ -603,15 +604,16 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             faceValue.Text(text);
             faceValue.FontSize(self->data->textSize()*(self->tileStyle==L"small"&&text.size()>=4?.9:1.));
         };
-        auto clicks=PointerGesture::Clicks(face,[state](uint32_t id,bool){
-            if(state->contact&&state->contact->id==id)state->contact.reset();
+        auto clicks=PointerGesture::Clicks(face,[weak,id,state,preview=bool(presentation.phase)](uint32_t pointer,bool cancel){
+            if(state->contact&&state->contact->id==pointer){auto moved=state->contact->moved;state->contact.reset();
+                if(moved&&preview)if(auto self=weak.lock())self->send(O({{L"type",S(L"tool_setting_contact")},{L"id",S(id)},{L"phase",S(cancel?L"cancel":L"up")}}));}
         });
-        face.Click([weak,state,clicks,settingSpec,currentTitle=presentation.title,set,reset](winrt::Windows::Foundation::IInspectable const& sender,auto&&){
+        face.Click([weak,state,clicks,settingSpec,currentTitle=presentation.title,phase=presentation.phase,set,reset](winrt::Windows::Foundation::IInspectable const& sender,auto&&){
             auto self=weak.lock();if(!self)return;
             if(clicks->SuppressClick())return;
             self->closePopup();
             Bindings bindings;StackPanel content;content.MinWidth(220);content.MaxWidth(320);
-            NumberPresentation presentation;presentation.title=currentTitle;presentation.reset=reset;
+            NumberPresentation presentation;presentation.title=currentTitle;presentation.reset=reset;presentation.phase=phase;
             content.Children().Append(number(self->data,currentTitle(),settingSpec,[state]{return state->value;},set,bindings,nullptr,false,L"",false,presentation));
             for(auto const& bind:bindings)bind();
             self->editor=Flyout();self->editor.Content(content);TrackPopup(self->editor,self->data);
@@ -623,10 +625,11 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             state->contact=Contact{p.PointerId(),p.Position()};
             state->startFill=num(numeric(data->localization.get(),settingSpec,state->value,O({{L"type",S(L"format")}})),L"fill");
         })),true);
-        face.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([state,clicks,settingSpec,set,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
+        face.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([state,clicks,settingSpec,set,phase=presentation.phase,data=data](winrt::Windows::Foundation::IInspectable const& sender,PointerRoutedEventArgs const& e){
             if(!state->contact||state->contact->id!=e.Pointer().PointerId())return;
             auto p=e.GetCurrentPoint(sender.as<UIElement>()).Position();
             if(!state->contact->moved&&std::abs(p.Y-state->contact->start.Y)<8)return;
+            if(!state->contact->moved&&phase)phase(L"down",state->value);
             state->contact->moved=true;clicks->Suppress(e.Pointer().PointerId());
             auto next=numeric(data->localization.get(),settingSpec,state->value,O({{L"type",S(L"position")},{L"position",N(state->startFill+(state->contact->start.Y-p.Y)/200)}}));
             if(num(next,L"value")!=state->value)set(num(next,L"value"));

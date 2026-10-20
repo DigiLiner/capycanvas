@@ -1031,6 +1031,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             | C::CopySelectionToLayer
             | C::CutSelectionToLayer
             | C::DiscardPaintEdits
+            | C::LiquifyAdjust
+            | C::LiquifyReset
             | C::MergeDown
             | C::MergeGroup
             | C::MergeVisible
@@ -1078,6 +1080,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let selection = self.has_selection();
         let apply_refusal = active.and_then(|l| art_layers::apply_mask_refusal(l.kind(), self.localization()));
         let reason: Arc<str> = match command {
+            C::LiquifyAdjust | C::LiquifyReset => l.text(MessageId::COMMANDS_LIQUIFY_NO_CHANGES),
             C::ExportAgain => l.text(MessageId::COMMANDS_EXPORT_FIRST),
             C::Undo => l.text(MessageId::COMMANDS_NOTHING_TO_UNDO),
             C::Redo if self.cropping() => l.text(MessageId::COMMANDS_APPLY_OR_CANCEL_THE_CROP_FIRST),

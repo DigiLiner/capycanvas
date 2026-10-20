@@ -217,3 +217,7 @@ brush-preset-mixing-brush = Pinceau mélangeur
 brush-preset-sharpen = Netteté
 brush-preset-texture-blender = Mélangeur préservant la texture
 brush-preset-hue-blender = Mélangeur de teinte
+
+brush-preset-liquify-edge = Contour
+brush-preset-liquify-reconstruct = Reconstruire
+tool-control-liquify-amount = Quantité

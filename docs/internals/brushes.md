@@ -318,9 +318,8 @@ runs pixel work in parallel while retaining the ordering that each brush require
 Sparse pages and changed-region bounds limit the affected area. Specialized paths
 avoid allocating or updating material state that a brush does not use.
 
-Every brush that reads its destination evaluates one page job per page its
-contact batch touches, each writing its whole page. A frame's consecutive
-Smudge, Liquify, wet and watercolor batches and their watercolor transport
+Smudge, wet and watercolor evaluate one page job per page their contact batch
+touches, each writing its whole page. Consecutive batches and watercolor transport
 share one compute pass, so a large brush or a long frame adds no page copies or
 passes per page or batch; only preparing decoded source tiles, a page's
 starting paint, a pen-up edge or healing ends it. Dry, clone and healing
@@ -334,6 +333,14 @@ as one that keeps up. A replay that repaints a whole stroke, after a late sensor
 correction, an end taper or a renderer rebuild, is submitted in windows of at most
 512 page jobs that never split one watercolor update; the layer is captured once,
 after the last window, so the result matches a single-frame replay.
+
+Liquify composes eight-dab chunks into retained displacement and footprint maps,
+then reconstructs changed color from the original source. At Fit zoom, a cached
+display-resolution preview shows unresolved map changes while full-resolution
+color waits for pen-up. Crystals keeps native-resolution integer sampling.
+Map jobs share a compute pass, as do color jobs and original mip reductions.
+The [Liquify guide](liquify.md) describes session
+ownership, source bounds, sampling and the portable Mali path.
 
 These choices target both performance and energy use. On mobile hardware, memory
 traffic and CPU/driver overhead contribute to power consumption alongside GPU

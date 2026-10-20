@@ -97,15 +97,18 @@ request it.
 The live path has one contiguous contact upload and one small style-table upload.
 Shaders, pipelines, and samplers are prepared. Contact flags and accumulation
 select the material variant for the captured stroke. Startup prepares the brush's
-direct, destination, gather and reservoir recipes before input is ready;
+direct, destination, Liquify and reservoir recipes before input is ready;
 revisiting that style reuses its compiled recipes. Full-opacity Flow contact needs
 no stroke-state page. Destination brushes build small neighborhood bind groups
-for touched sparse pages. Smudge, Liquify, wet and watercolor brushes dispatch
+for touched sparse pages. Smudge, wet and watercolor brushes dispatch
 all page jobs of a batch, and a wet batch's reservoir exchange, in one compute
 pass, with color, color-with-coverage and watercolor kernels; pointwise brushes
 of every blend mode use dry kernels with color and color-with-coverage entries.
 Both prevent an unused coverage feature from writing its state target. A single pass plan supplies the same attachment decision to page
-allocation, committed rendering, and prediction. Only damaged
+allocation, committed rendering, and prediction.
+[Liquify](internals/liquify.md) batches sparse coordinate-map updates and
+reconstructs color from the session's starting pixels, with separate passes for
+the map, first-touch mip reductions and color. Only damaged
 pixels are rasterized and recomposited. Capillary transport uses three
 incommensurate scalar-field-aligned hops rather than iterating one-pixel diffusion
 up to the requested distance. Its first stage writes whole ping-pong pages;

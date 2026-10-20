@@ -144,6 +144,7 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
           }
           const node=numberField(field.numeric,()=>state().tool_settings.find(f=>f.id===field.id)?.label??"",value=>{if(key===next)dispatch({type:"set_tool_setting",id:field.id,value});},compact||!!grouped);
           node.onReset=()=>{if(key===next)dispatch({type:'reset_tool_setting',id:field.id});};
+          if(field.preview)node.onEditPhase=phase=>{if(key===next)dispatch({type:'tool_setting_contact',id:field.id,phase});};
           node.dataset.toolSetting=field.id;
           if(grouped)node.querySelector('.number-track').hidden=true;
           if(compact||grouped){const row=element('label','tonal-numeric-row');row.append(element('span','',()=>state().tool_settings.find(f=>f.id===field.id)?.label??''),node);(grouped??body).append(row);}else body.append(node);

@@ -380,3 +380,7 @@ brush-preset-mixing-brush = Kuas Pencampur
 brush-preset-sharpen = Pertajam
 brush-preset-texture-blender = Pembaur Penjaga Tekstur
 brush-preset-hue-blender = Pembaur Rona
+
+brush-preset-liquify-edge = Tepi
+brush-preset-liquify-reconstruct = Pulihkan
+tool-control-liquify-amount = Jumlah

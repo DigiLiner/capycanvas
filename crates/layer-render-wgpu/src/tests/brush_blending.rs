@@ -376,43 +376,6 @@ fn a_brush_blend_mode_equals_the_layer_blend_mode_when_predicted_or_committed_an
 }
 
 #[test]
-fn distant_liquify_gather_moves_source_color_without_changing_source() {
-    let extent = [1024, 128];
-    let probes = [[824usize, 56usize], [832, 64], [840, 72]];
-    for space in BlendSpace::ALL {
-        let mut canvas = Canvas::at(DocumentColor::default(), space, None, extent);
-        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([64., 64.], [0., 1., 0., 1.], 80., 1.));
-        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([832., 64.], [1., 0., 0., 1.], 80., 1.));
-        let before = canvas.r.readback_srgb_rgba8().unwrap();
-        let pixel = |image: &[u8], [x, y]: [usize; 2]| -> [u8; 4] {
-            image[(y * extent[0] as usize + x) * 4..][..4].try_into().unwrap()
-        };
-        for probe in probes {
-            assert_eq!(pixel(&before, probe), [255, 0, 0, 255], "destination starts red");
-            assert_eq!(pixel(&before, [probe[0] - 768, probe[1]]), [0, 255, 0, 255], "distant source starts green");
-        }
-        let mut style = test_style(BrushExecution::Liquify);
-        style.wet_mix.blur = 0.;
-        style.wet_mix.attack = 1.;
-        style.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
-        style.deform.mode = layer_core::LiquifyMode::Push;
-        style.deform.momentum = 0.;
-        let mut stroke = soft([832., 64.], [0.; 4], 32., 1.);
-        stroke.motion = [768., 0.];
-        stroke.material = [0., 1., 1., 1.];
-        let jobs = canvas.r.metrics.material_sample_jobs;
-        canvas.paint(canvas.base, style, stroke);
-        assert!(canvas.r.metrics.material_sample_jobs > jobs, "{space:?}: distant gather must execute");
-        let after = canvas.r.readback_srgb_rgba8().unwrap();
-        for probe in probes {
-            let source = [probe[0] - 768, probe[1]];
-            assert_eq!(pixel(&after, probe), pixel(&before, source), "{space:?}: destination receives original distant source");
-            assert_eq!(pixel(&after, source), pixel(&before, source), "{space:?}: source remains unchanged");
-        }
-    }
-}
-
-#[test]
 fn erasing_is_the_same_in_both_spaces() {
     let erased = |space| {
         let mut canvas = Canvas::new(DocumentColor::default(), space, None);

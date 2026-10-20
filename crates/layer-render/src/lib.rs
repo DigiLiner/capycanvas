@@ -204,6 +204,7 @@ pub struct DabStyle {
     pub transport: Option<BrushTransport>,
     pub deform: BrushDeform,
     pub blender: layer_core::BrushBlender,
+    pub liquify: Option<std::sync::Arc<layer_core::liquify::Context>>,
     pub contact: Option<layer_core::BrushContact>,
     /// A retouching stroke's source. Renderers keep the target's stroke-start
     /// pixels for it before the stroke first writes each page.
@@ -231,6 +232,7 @@ impl DabStyle {
             transport: brush.transport.clone(),
             deform: brush.deform,
             blender: brush.blender,
+            liquify: None,
             contact: brush.contact.map(|mut material| {
                 material.fibers *= (brush.diameter / 128.).max(1.);
                 material
