@@ -65,8 +65,9 @@ and how parity is checked.
 - [Illustration filters proposal](illustration-filters-proposal.md) defines the
   filter gaps, artist controls, researched GPU approaches, package extensions and
   coordination with the object-layer design.
-- [Liquify proposal](liquify-proposal.md) defines automatic sessions, baking when
-  leaving the tool, coordinate composition and precision requirements.
+- [Liquify proposal](liquify-proposal.md) defines Liquify sessions that continue
+  across tool switches, undo steps that store the map with the pixels,
+  coordinate composition, Procreate parity and precision requirements.
 - [Paper](paper.md) defines the Paper layer, the drawing resolution model, how
   brushes read paper, the paper library and saved data. It is built on GTK and
   awaits review before the other hosts.
