@@ -115,6 +115,10 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Selection translation, full canvas | 60 | Renderer 136–139 submissions/s; GPU interval p99 14.3–17.3 ms (6000 × 4000) | Canvas-bar `selection-handle-drag` and `selection-distort-drag`, 2026-09-27 |
 | Move tool layer drag | 60 | | |
 | Object Layer placement, Move and Scale/Rotate | 60 | Current Object-layer simplification unmeasured on the reference tablet | [Qualification gap](known-gaps.md) |
+| Vector layer: G-Pen 24 px on 10,000 paths | 60 | **Met.** 88.5–90.2 completed updates/s, gap p99 23.4–25.6 ms | [Vector layers](#vector-layers), 2026-10-19 |
+| Vector paths: Move drag, 1 / 100 / 5,000 paths | 60 | 1 and 100 **met** (59.6–59.8 presented/s, p99 ≤16.9 ms); 5,000 **not met** (32.3–32.5/s, start 260–279 ms) | [Vector layers](#vector-layers), 2026-10-19 |
+| Vector paths: Scale/Rotate, Edit Points, eraser, Outline width scrub | 60 | **Not met.** 0.2–45.6 presented/s | [Vector layers](#vector-layers), 2026-10-19 |
+| Navigation over a crowded vector layer | 60 | **Not met.** Pan 34.4–34.6, pinch 18.1–19.2, rotate 34.4–35.0 presented/s | [Vector layers](#vector-layers), 2026-10-19 |
 | Move selected pixels: whole image | 60 | Screen 59.1 presents/s, p99 16.8 ms; renderer 81.0 completed updates/s | Two-page-refinement qualification below, `move-all-drag` |
 | Move selected pixels: partial selection | 60 | Screen 59.4 presents/s, p99 16.8 ms; renderer 134.2 completed updates/s | Two-page-refinement qualification below, `move-part-drag` |
 | Move selected pixels: Leave Copy | 60 | Screen 59.3 presents/s, p99 16.7 ms; renderer 131.1 completed updates/s | Two-page-refinement qualification below, `move-part-leave-copy-drag` |
@@ -2127,3 +2131,55 @@ physical presentation or photon latency. These supplemental XP-Pen measurements
 **do not qualify the TCL 60 fps target**. Raw results and build provenance remain
 in `artifacts/curve-fit-production/xppen-candidate-optimized-summary.json` and its
 referenced reports.
+
+## Vector layers
+
+Measured 2026-10-19 on the reference TCL with `android-vector-benchmark.py` and,
+for inking, `android-brush-benchmark.py`
+([measuring](measuring.md#vector-layers-android)). The document is a
+`crowded_vector_fixture` at 4248 × 2832: 10,000 hatching paths on the edited
+Ink vector layer below a translucent Tones vector layer, an empty Base paint
+layer and Paper hidden, at Fit (zoom 0.344) in the default workspace with Stats
+and Navigator closed. Each row has one 1.5 s priming gesture and three 5 s
+gestures (10 s for inking), each committed and undone; thermal status stayed 0.
+Presented rates join the canvas SurfaceView's buffers to SurfaceFlinger
+display presents; drag start is pen-down to the present of the first frame
+submitted after the first move. Selections of 100 and 5,000 paths are marquees
+planned from the fixture's geometry. The native library is `8cb9fcb2e` plus the
+working tree of 2026-10-19 20:24, including other sessions' uncommitted vector
+and package edits (diff SHA-256 `5cf551a5…`, library SHA-256 `7d7e951c…`).
+
+| Row | Target | Measured | Result |
+| --- | --- | --- | --- |
+| G-Pen 24 px on the crowded layer | 60 | 88.5–90.2 completed updates/s, gap p99 23.4–25.6 ms | **Met** |
+| Pen-down 5 ms after committing a 195 ms line | 33 ms | First GPU completion p50 22.5–23.3, p95 29.4–32.5, max 36.3–49.8 ms | Met at p95; worst contacts miss |
+| Move drag, 1 path | 60, 100 ms start | 59.6–59.8 presented/s, p99 16.8–16.9 ms; start 53–79 ms | **Met** |
+| Move drag, 100 paths | 60, 100 ms start | 59.6–59.8/s, p99 16.8–16.9 ms; start 56–76 ms | **Met** |
+| Move drag, 5,000 paths | 60, 100 ms start | 32.3–32.5/s, p99 50.0 ms; start 260–279 ms | **Not met** |
+| Scale with the Move frame, 100 / 5,000 paths | 60 | 1.0–1.4 / 0.2 presented/s; work continues 3.7–3.9 / 39.5–41.0 s after release | **Not met** |
+| Rotate with the Move frame, 100 / 5,000 paths | 60 | 1.1–1.4 / 0.2/s; continues 3.5–3.6 / 35.5–35.9 s after release | **Not met** |
+| Edit Points anchor drag, 1 / 100 paths selected | 60 | 45.5–45.6 / 39.5–39.8/s, p99 33.4 / 50.0 ms; start 52–82 ms | **Not met** |
+| Eraser, Erase touched part (64 px) | 60 | 13.2–13.5/s, p99 116.6–133.3 ms | **Not met** |
+| Eraser, Erase whole paths | 60 | 34.9–35.5/s, p99 50.1–66.6 ms | **Not met** |
+| Eraser, Erase up to intersection | 60 | 19.0–19.6/s, p99 100.0–133.2 ms | **Not met** |
+| Properties Outline width scrub, 100 / 5,000 paths | 60 | 1.9–2.3 / 0.2 updates/s; continues 2.3 / 39 s after release | **Not met** |
+| Pan / pinch / rotate, no paths selected | 60 | 34.4–34.6 / 18.1–19.2 / 34.4–35.0/s; pinch p99 1.53–1.55 s | **Not met** |
+| Same, 5,000 paths selected | 60 | 13.5–13.6 / 7.6–8.2 / 13.4/s | **Not met** |
+| Fill inside a closed path | 100 ms | 47–49 ms to present | **Met** |
+| Fill outside the paths (new layer below) | 250 ms | First present 1.02–1.81 s, complete 1.04–2.16 s | **Not met** |
+| Commit after a 3 s line | No separate limit | Committed path presented 105–115 ms after pen-up | See the pen-down row |
+| Undo of that line | 250 ms | 99–112 ms to present; owner busy until 299–308 ms | **Met** |
+| Merge Down onto a vector layer | 100 ms response | 344–359 ms first present, 431–476 ms complete | **Not met** |
+| Merge Down onto a paint layer, from the notice | 100 ms response | 111–151 ms first present, 2.09–2.25 s complete | **Not met** |
+| Rasterize Layer | 100 ms response | 115–134 ms first present, 1.87–1.91 s complete | **Not met** |
+| Open the document | 3 s | Parsed 569–643 ms, first frame 857–897 ms, settled 1.19–1.27 s | **Met** |
+
+The navigation baseline on this fixture also misses: with the hatching removed
+(same layers) pan, pinch and rotate present 38.9–39.3, 10.1–16.9 and
+37.9–38.5/s; with Paper shown and both vector layers hidden, pan 37.9/s and
+pinch 33.8/s (p99 183 ms). With Paper shown and the paths visible, pinch drops
+to 2.9/s with 1.7 s gaps: the pinch crosses zoom 0.5 into a finer level, and the
+frames that re-rasterize the crowded layer spend most of the canvas thread in
+the Mali driver recording barriers, buffer copies and render passes. CPU
+attribution of the other misses is in [known gaps](known-gaps.md); raw reports,
+summaries and profiles are in `artifacts/vector-tablets-20261019/`.

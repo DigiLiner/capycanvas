@@ -77,6 +77,10 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Selection transform, full canvas | 90 | Diagnostic only: handle 60.03–192.68 renderer submissions/s; Distort 101.67–191.57/s on a filled 24 MP canvas. Presentation and reference-photo qualification remain open | [Selected-pixel previews](#selected-pixel-previews), 2026-10-09 |
 | Move tool layer drag | 90 | | |
 | Object Layer placement, Move and Scale/Rotate | 90 | Current Object-layer simplification unmeasured on the reference tablet | [Qualification gap](known-gaps.md) |
+| Vector layer: G-Pen 24 px on 20,000 paths | 90 | **Met.** 185.3–187.3 completed updates/s, gap p99 9.0–9.5 ms | [Vector layers](#vector-layers), 2026-10-19 |
+| Vector paths: Move drag, 1 / 100 / 5,000 paths | 90 | Panel-limited at 59.5–59.7 presented/s for 1 and 100 (renderer 125–150/s); 5,000 **not met** (52.6–52.9/s, start 198–211 ms) | [Vector layers](#vector-layers), 2026-10-19 |
+| Vector paths: Scale/Rotate, eraser, Outline width scrub | 90 | **Not met.** 0.2–59.7 presented/s; Edit Points panel-limited at 59.7/s | [Vector layers](#vector-layers), 2026-10-19 |
+| Navigation over a crowded vector layer | 90 | **Not met.** Pan 53.3, pinch 50.7–50.9, rotate 51.9–52.1 presented/s | [Vector layers](#vector-layers), 2026-10-19 |
 | Marquee, Lasso or Polygon drag | 90 | | |
 | Enclose and Fill: loop drag and navigation during completion | 90 | Unmeasured on the reference tablet | Shared lasso overlay; GPU region discovery starts on release. Desktop checks do not qualify this tier |
 | Selection Brush or Quick Mask, 1536 px | 90 | | |
@@ -1258,3 +1262,46 @@ change raises a 12 MP Exposure drag from 3.2 to 39.9 updates/s. The Layers
 opacity field sends each value as its own edit and stays at 2.8/s. Raw reports
 are in `artifacts/paper-android/final-*`.
 
+
+## Vector layers
+
+Measured 2026-10-19 on the MovinkPad 11 with `android-vector-benchmark.py` and,
+for inking, `android-brush-benchmark.py`
+([measuring](measuring.md#vector-layers-android)), using the same method,
+native library (`8cb9fcb2e` plus the 2026-10-19 20:24 working tree, library
+SHA-256 `7d7e951c…`) and conditions as the [low tier](low-tier.md#vector-layers).
+The document is a `crowded_vector_fixture` at 6000 × 4000 with 20,000 hatching
+paths, the low tier's density, at Fit (zoom 0.296). **The panel presented at
+60 Hz**, so no display-paced row can pass; renderer rates show the headroom.
+
+| Row | Target | Measured | Result |
+| --- | --- | --- | --- |
+| G-Pen 24 px on the crowded layer | 90 | 185.3–187.3 completed updates/s, gap p99 9.0–9.5 ms | **Met** |
+| Pen-down 5 ms after committing a 195 ms line | 22 ms | First GPU completion p50 13.4–14.6, p95 25.6–26.7, max 27.4–27.9 ms | **Not met** |
+| Move drag, 1 path | 90, 100 ms start | 59.7 presented/s (renderer 149.6–150.3), p99 16.8–17.0 ms; start 79–94 ms | Panel-limited; start met |
+| Move drag, 100 paths | 90, 100 ms start | 59.5/s (renderer 125.3–125.9), p99 16.9–17.0 ms; start 48–88 ms | Panel-limited; start met |
+| Move drag, 5,000 paths | 90, 100 ms start | 52.6–52.9/s (renderer 51.0–51.3), p99 33.5 ms; start 198–211 ms | **Not met** |
+| Scale with the Move frame, 100 / 5,000 paths | 90 | 2.6–2.7 / 0.3–0.5 presented/s; work continues 0.95–0.99 / 28.2–28.6 s after release | **Not met** |
+| Rotate with the Move frame, 100 / 5,000 paths | 90 | 2.6–3.0 / 0.4/s; continues 0.84–0.89 / 25.0–25.1 s after release | **Not met** |
+| Edit Points anchor drag, 1 / 100 paths selected | 90 | 59.7 / 59.7/s (renderer 115.7–118.5 / 114.6–115.2), p99 ≤17.0 ms; start 47–74 ms | Panel-limited |
+| Eraser, Erase touched part (64 px) | 90 | 30.9–32.8/s, p99 50.3–67.0 ms | **Not met** |
+| Eraser, Erase whole paths | 90 | 59.1–59.7/s (renderer 88.6–91.0), p99 16.8–33.5 ms | **Not met** |
+| Eraser, Erase up to intersection | 90 | 43.0–43.6/s, p99 50.3 ms | **Not met** |
+| Properties Outline width scrub, 100 / 5,000 paths | 90 | 4.4–4.6 / 0.2 updates/s; continues 0.57–0.61 / 25.4–25.6 s after release | **Not met** |
+| Pan / pinch / rotate, no paths selected | 90 | 53.3 / 50.7–50.9 / 51.9–52.1/s, p99 33.5 ms | **Not met** |
+| Same, 5,000 paths selected | 90 | 16.6 / 16.2–16.3 / 16.5/s, p99 67 ms | **Not met** |
+| Fill inside a closed path | 100 ms | 53–56 ms to present | **Met** |
+| Fill outside the paths (new layer below) | 250 ms | First present 1.28–1.48 s, complete 2.40–2.60 s | **Not met** |
+| Commit after a 3 s line | No separate limit | Committed path presented 116–147 ms after pen-up | See the pen-down row |
+| Undo of that line | 250 ms | 108–169 ms to present | **Met** |
+| Merge Down onto a vector layer | 100 ms response | 344–360 ms to present | **Not met** |
+| Merge Down onto a paint layer, from the notice | 100 ms response | 2.74–3.05 s; nothing changes on screen until it completes | **Not met** |
+| Rasterize Layer | 100 ms response | 2.32–2.41 s; nothing changes until it completes | **Not met** |
+| Open the document | 4 s | Parsed 443–481 ms, first frame 759–796 ms, settled 1.04–1.13 s | **Met** |
+
+With the hatching removed (same layers) pan, pinch and rotate present 57.7,
+54.9–55.1 and 56.1–56.5/s, so the crowded layer costs about 8% of navigation
+when nothing is selected. GPU timestamps during the crowded pan put the
+viewport presentation pass at 11.3 ms on average. CPU profiles of these rows on
+this tablet are in `artifacts/vector-tablets-20261019/profiles/` and are
+summarized in [known gaps](known-gaps.md).

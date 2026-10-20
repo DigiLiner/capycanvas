@@ -578,3 +578,53 @@ from the navigation report. Raw visual review remains required.
   [Apple performance](../../apps/layer-apple/PERFORMANCE.md).
 - Offscreen numbers exclude input delivery and presentation. They do not replace
   device measurements.
+
+### Vector layers (Android)
+
+`tools/performance/android-vector-benchmark.py` drives the vector workloads
+through the brush benchmark instrumentation's `vector` mode
+([`VectorBenchmark.kt`](../../apps/layer-android/app/src/benchmark/java/art/capycanvas/VectorBenchmark.kt)).
+Build the optimized benchmark APK under your own application ID as for
+brushes, generate a fixture at the tier canvas with equal path density, and
+push it under `/data/local/tmp`:
+
+```bash
+cargo run --release -p layer-core --example crowded_vector_fixture -- tier.capy 4248 2832 10000
+python3 tools/performance/android-vector-benchmark.py OUT --serial "$CAPY_ANDROID_SERIAL" \
+  --package "$CAPY_APPLICATION_ID" --fixture /data/local/tmp/tier.capy \
+  --canvas-width 4248 --canvas-height 2832 --paths 10000
+python3 tools/performance/android-vector-report.py OUT --processor trace_processor_shell \
+  --package "$CAPY_APPLICATION_ID"
+```
+
+Use 6000 × 4000 with 20,000 paths and 9504 × 6336 with 50,000 paths for the
+mid and top tiers. `--paths` must match the fixture: the runner replays its
+hatching to plan the 100- and 5,000-path marquees, press points clear of other
+paths and of the Move frame's handles, and Edit Points anchors. It checks the
+clearances against the actual camera and fails rather than pressing the wrong
+thing.
+
+Each unit is one scenario and selection size: Move drags of 1, 100 and 5,000
+paths; Scale and Rotate with the Move frame; Edit Points anchor drags; the
+three eraser modes (64 px); an Outline width scrub through the Properties
+gesture actions; pan, pinch and rotate (with no paths selected); Fill inside
+a closed path and outside the paths; a 3 s G-Pen line's commit and undo;
+Merge Down onto a vector and a paint layer and Rasterize Layer; and opening
+the document. `--scenarios` narrows the list. Every unit primes once and runs
+`--repeats` gestures of `--duration` ms, with 200 Hz stylus or 240 Hz touch
+input, and undoes each edit. The runner records a SurfaceFlinger trace per unit; the report joins the
+canvas SurfaceView's buffer numbers to display presents for presented rates,
+gaps and drag start (pen-down to the present of the first frame submitted
+after the first move), and reports response times as the present of the last
+canvas frame before the work settles. Renderer completion times are upper
+bounds: completion callbacks run only when the queue is polled.
+
+Setup hides Paper, as for brushes; `--show-layers Paper` and
+`--hide-layers Tones,Ink` measure controls. `--skip-fill-below` keeps Fill
+outside the paths out of the run. For attribution only: `--trace` adds app trace
+sections, `--stats` opens Stats for GPU phase timestamps (it shrinks the work
+area, which can move press points onto Move-frame handles), and
+`--profile-seconds N` samples the app with `simpleperf` from the start of each
+unit. Inking on the crowded layer uses the brush runner as described under
+Brushes, with `--paint-layer-name Ink --fixture-layers 4`; `--mode lifts`
+measures pen-down after each commit.

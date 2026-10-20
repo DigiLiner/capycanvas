@@ -80,7 +80,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val blending = arguments.getString("blending")
             check(blending == null || blending in listOf("linear", "perceptual"))
             check(duration in 1000..60000 && repeats in 1..100)
-            check(mode in listOf("constant", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine"))
+            check(mode in listOf("constant", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine", "vector"))
             check(mode != "object-affine" || objectWorkload)
             val pauseMs = arguments.getString("pauseMs", "100")!!.toInt()
             val contactMs = arguments.getString("contactMs", "100")!!.toInt()
@@ -447,6 +447,13 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             if (mode == "pinch") {
                 runPinchBenchmark(this, arguments, host, output, label, cx, cy)
                 result.putString("stream", "PINCH_COMPLETE $label\n")
+                finish(Activity.RESULT_OK, result)
+                return
+            }
+            if (mode == "vector") {
+                check(authoredFixture && paintLayerName == "Ink")
+                runVectorBenchmark(this, arguments, host, output, label, photo)
+                result.putString("stream", "\nVECTOR_COMPLETE $label\n")
                 finish(Activity.RESULT_OK, result)
                 return
             }

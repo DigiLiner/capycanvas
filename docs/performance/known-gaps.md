@@ -88,45 +88,96 @@
   measurements on the three reference canvases. Existing object and placed-photo
   results in the tier tables describe earlier builds. Desktop browser callbacks
   and renderer timings do not establish presented-frame rates or qualify a tier.
-- **Vector layers are measured only by headless renderer benchmarks.**
-  `scene::vectors::tests::crowded_vector_layer_drawing_frames` and
-  `crowded_vector_layer_edit_frames` (`VECTOR_ZOOM` sets the zoom) ran on the
-  three reference tablets at `62c9c4c61` (2026-10-18), on a 4000 × 3000 canvas
-  of hatching paths with a 1920 × 1200 view. They time renderer frames, not
-  presented frames or a session, and the canvas is not each tier's canvas. At
-  1.0×:
+- **Vector layers miss most motion targets once paths are selected or edited.**
+  The reference tablets were measured on 2026-10-19 with the vector benchmark
+  ([measuring](measuring.md#vector-layers-android)) on `crowded_vector_fixture`
+  documents at each tier's canvas with equal path density: 10,000, 20,000 and
+  50,000 hatching paths. Tier tables: [low](low-tier.md#vector-layers),
+  [mid](mid-tier.md#vector-layers), [top](top-tier.md#vector-layers). The
+  native library includes other sessions' uncommitted vector and package edits
+  of that afternoon; the tables name it.
 
-  | | Low (TCL) | Mid (MovinkPad 11) | Top (MovinkPad Pro 14) |
+  | Presented frames/s, or updates/s for inking | Low (60) | Mid (90, panel at 60 Hz) | Top (120) |
   | --- | --- | --- | --- |
-  | Open 10,000 / 50,000 paths | 2.2 / 4.9 s | 1.1 / 2.6 s | 0.5 / 1.3 s |
-  | Drawing frame p50 / p95, 50,000 paths | 10.9 / 16.8 ms | 8.0 / 12.0 ms | 4.1 / 17.0 ms |
-  | Drag start, 1 / 100 / 5,000 paths | 67 / 110 / 453 ms | 63 / 116 / 249 ms | 36 / 55 / 160 ms |
-  | Drag frame p50, 1 / 100 / 5,000 paths | 2.8 / 4.4 / 18.4 ms | 1.9 / 2.3 / 10.8 ms | 0.6 / 1.3 / 2.8 ms |
-  | Stroke commit / undo, 50,000 paths | 96 / 93 ms | 51 / 60 ms | 22 / 30 ms |
+  | G-Pen 24 px on the crowded layer | 88.5–90.2 met | 185.3–187.3 met | 250.0–252.8 met |
+  | Move drag, 1 / 100 / 5,000 paths | 59.8 / 59.8 / 32.4 | 59.7 / 59.5 / 52.8 | 120 / 120 / 96.6 |
+  | Move drag start, 1 / 5,000 paths (limit 100 ms) | 53–79 / 260–279 ms | 79–94 / 198–211 ms | 108–135 / 147–178 ms |
+  | Scale with the Move frame, 100 / 5,000 paths | 1.0–1.4 / 0.2 | 2.6–2.7 / 0.3–0.5 | 29.4–35.2 / 0.9–1.1 |
+  | Edit Points drag, 1 path | 45.6 | 59.7 | 120 met |
+  | Eraser: touched part / whole paths / to intersection | 13.5 / 35.4 / 19.3 | 32.4 / 59.1 / 43.3 | 100.2 / 116.1 met / 93.1 |
+  | Outline width scrub, 100 / 5,000 paths | 2.2 / 0.2 | 4.5 / 0.2 | 20.6 / 0.4 |
+  | Pan with no paths / 5,000 paths selected | 34.5 / 13.5 | 53.3 / 16.6 | 17.6 / 12.3 |
 
-  - The headless frame times wait for the GPU after every frame. Inking in the
-    app, measured with presented frames by the Android brush benchmark on a
-    `crowded_vector_fixture` canvas (4248 × 2832, 10,000 paths, Ink under a
-    translucent Tones layer, G-Pen 24 px), keeps frame gaps at p50 4.1–4.2 ms,
-    p95 5.8–6.5 ms and p99 6.7–7.7 ms on the Huion KP1202, whose Mali-G57 MC2
-    is the mid tier's GPU, against 3.5–3.6 / 5.0–5.1 / 6.0 ms for the same
-    strokes on a paint layer (2026-10-18, `628d7e56e`, ABBA). The reference
-    tiers are not yet measured this way.
-  - Gaps against the targets: a 5,000-path drag on the low tier runs slower
-    than 60 fps, with every frame repainting the whole view as a pan does; drag
-    starts of 100 or more paths exceed the 100 ms press response on the low and
-    mid tiers, almost all of it GPU time repainting the crowded tiles the moving
-    paths leave (54 ms of the 86 ms p50 on the Huion); and committing or undoing
-    a long stroke across a crowded layer recomposites its pages for 50–100 ms on
-    the low tier.
-  - Drawing on the top tier spends about 14 ms of CPU on every eighth frame;
-    the desktop and the Mali tablets do not. The cause is not yet traced.
-  - At 0.4× the low tier opens in 1.9 / 3.7 s and drags 5,000 paths at 7.0 ms
-    p50.
-  - The present shader's motion branch costs nothing measurable while
-    painting: against a control without it, canvas updates per second changed
-    by −0.67% (Pencil 1024 px) and +0.09% (G-Pen 1024 px) on the TCL and
-    +0.39% (G-Pen 1024 px) on the MovinkPad 11, in 4 ABBA sets each.
-  - Scale and rotate drags with the Move frame, Edit Points drags, Properties
-    scrubs and eraser strokes preview by re-deriving the edited paths each frame;
-    none is measured on a tablet.
+  Responses: Fill inside a path 47–58 ms and Undo 90–169 ms meet their limits
+  on every tier, and a crowded document opens in 1.2 / 1.1 / 1.7 s. Fill
+  outside the paths takes 1.0–2.6 s on low and mid, and on the top tier stops
+  the renderer with "GPU buffer size overflow". Merge Down onto a paint layer
+  and Rasterize Layer take 1.9–2.3 s on low, 2.3–3.0 s on mid and 3.6–3.7 s on
+  top, with no change on screen until they finish on mid and top; Merge Down
+  onto a vector layer takes 274–476 ms. Rate-limited rows also trail the pen:
+  a 5 s Scale, Rotate or width scrub of 5,000 paths keeps the canvas thread
+  busy for 18–41 s after release.
+
+  Causes, from CPU profiles of the canvas thread (`simpleperf`, MovinkPad 11,
+  `artifacts/vector-tablets-20261019/profiles/`) and GPU timestamps, by impact:
+  1. **Previews run once per stylus sample.** Scale and Rotate re-run
+     `transform_items` and `preview_edit` for every 200 Hz sample: 72% of the
+     canvas thread at 100 paths, 5.4 ms per sample on the MovinkPad 11 and
+     8.4 ms on the TCL, where `edit_chunks` re-packs whole chunks and the
+     preview re-validates them. The width scrub does the same per dispatch
+     (`set_path_property`, then `refresh_document`), and the eraser per sample
+     (45% of the thread, `VectorIndex::near` alone 22%). At 200 Hz the queue
+     outgrows the frame. **Fix:** in the shared session, keep only the latest
+     pointer or slider value and apply it once per frame, and preview Scale
+     and Rotate like translation by giving `VectorMotion` an affine for the
+     cached moving image, re-deriving the paths only at release. Expected:
+     Scale and Rotate at the Move rate (60 / 120+ renderer / 120 for 100
+     paths; coalescing alone leaves the top tier GPU-bound near 50/s), no
+     trailing work after release, and a 2–3× faster eraser and width scrub on
+     the low and mid tiers.
+  2. **Selection-sized UI state is rebuilt every frame.** With 5,000 paths
+     selected, `refresh_commands` takes 60% of the canvas thread while panning:
+     command checks such as `layer_step_edit`, `drop_layers_edit` and
+     `vector_disabled_reason` build trial edits whose `repair_working` and
+     `VectorObject::selected` clone every selected path. During a 5,000-path
+     Move, model publication takes 31% (the Layer menu's `group_layers_edit`
+     trial edit about 12%) and `refresh_layer_presentation` 20%
+     (`vector_properties::controls` over the selection). **Fix:** derive
+     command flags, menus and Properties controls once per selection or
+     document change, make the vector checks constant-time predicates instead
+     of trial edits, and skip republishing them while a drag or navigation
+     gesture moves. Expected: navigation with a selection at the
+     no-selection rate (13.5 → 34.5 / 16.6 → 53.3 / 12.3 → 17.6), and the
+     5,000-path Move GPU-bound instead of CPU-bound (about 32 → 50 on low and
+     52 → 60 on mid; the top tier stays near 100 with 10 ms of GPU per frame).
+  3. **Drag start draws two heavy frames.** The first frames after pressing
+     repaint the tiles the moving paths leave and draw the moving image: 47–76 ms
+     of GPU per frame for one path on low and top, and 54–113 ms of CPU plus
+     136–169 ms of GPU for 5,000 paths. **Fix:** prepare the layer without the
+     selection and the moving image when the selection changes, so pressing a
+     selected path presents at once, and repaint only the moving paths'
+     footprint at the display level. Expected: drag start under 50 ms on every
+     tier for selected paths.
+  4. **Crossing into a finer level re-rasterizes the crowded layer at once.**
+     A TCL pinch past zoom 0.5 presents 2.9–19/s with 1.5–1.7 s gaps, against
+     33.8/s without vector layers; the canvas thread spends its time recording
+     the vector jobs' barriers, buffer copies and passes in the Mali driver.
+     **Fix:** keep showing the previous level scaled while the new one renders
+     within a per-frame budget, and batch each frame's vector uploads and passes.
+  5. **Baking derives every path at full resolution on the canvas thread.**
+     Merge Down onto paint and Rasterize Layer spend it in `vector_tile`,
+     `batch_with` and `derived_at` for every page. **Fix:** bake on a worker
+     with immediate on-screen feedback. Fill outside the paths floods the whole
+     canvas: at 9504 × 6336 its 4-byte-per-pixel flood buffer (241 MB) exceeds
+     the storage-binding limit, and the refusal surfaces as a renderer failure.
+     It needs a windowed flood bounded by memory, and an oversize request
+     should be refused without losing the canvas.
+  6. **Navigation also misses without vector content.** With the hatching
+     removed, pan presents 38.9 / 57.7 / 19.4/s; the crowded layer costs 8–11% on
+     top of that. On the MovinkPad Pro 14 the viewport presentation pass takes
+     34–36 ms of GPU time for 5.2 MP even with both vector layers hidden.
+
+  The headless renderer benchmarks (`scene::vectors::tests::crowded_vector_layer_drawing_frames`
+  and `crowded_vector_layer_edit_frames`) still time renderer frames on a
+  4000 × 3000 canvas; they do not account for per-sample session work or
+  UI refresh, which dominate the tablet results above.
