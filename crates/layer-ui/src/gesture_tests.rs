@@ -511,6 +511,27 @@ fn a_fill_click_without_content_raises_a_notice_at_release_but_not_outside_the_c
 }
 
 #[test]
+fn a_fill_larger_than_the_renderer_can_label_is_refused_with_a_notice() {
+    let mut s = session(Platform::Gtk);
+    s.renderer_mut().region_pixels = Some(0);
+    invoke(&mut s, CommandId::Fill);
+    let layers = s.engine.document().scene().order().len();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 1, PenPhase::Up, 1.));
+    s.frame(2, 2).unwrap();
+    let refusal = s.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY);
+    assert_eq!(notice_text(&s), Some(refusal.as_ref()));
+    assert!(s.renderer_mut().region_requests.is_empty() && s.state.host_error.is_none());
+    assert_eq!(s.engine.document().scene().order().len(), layers);
+    assert!(!s.engine.can_undo(), "the refused fill adds no undo step");
+    s.renderer_mut().region_pixels = None;
+    s.pen(event(&s, 3, PenPhase::Down, 1.));
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
+    s.frame(4, 4).unwrap();
+    assert_eq!(s.renderer_mut().region_requests.len(), 1, "a fill that fits is requested");
+}
+
+#[test]
 fn notices_reject_stale_answers_and_clear_at_the_next_contact() {
     let mut s = session(Platform::Gtk);
     invoke(&mut s, CommandId::Move);

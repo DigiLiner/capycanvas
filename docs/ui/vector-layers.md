@@ -357,10 +357,14 @@ eraser modes on 20,000 paths. `vector_layer_shortcuts_hold_in_every_keymap_prese
 [`canvas_geometry_tests.rs`](../../crates/layer-core/src/canvas_geometry_tests.rs),
 `merging_a_vector_layer_down_bakes_its_paths` and
 `merge_down_keeps_paths_only_when_the_upper_vector_layer_holds_nothing_unknown` in
-[`merge_tests.rs`](../../crates/layer-core/src/merge_tests.rs) and the GPU test
-`rasterizing_a_vector_layer_bakes_what_it_shows` in
+[`merge_tests.rs`](../../crates/layer-core/src/merge_tests.rs) and the GPU tests
+`rasterizing_a_vector_layer_bakes_what_it_shows` and
+`baking_crowded_paths_derives_them_off_the_canvas_thread_and_keeps_the_picture` in
 [`vector_tests.rs`](../../crates/layer-render-wgpu/src/scene/vector_tests.rs)
-cover canvas edits and baking; `paths_paint_over_a_paint_layer_through_a_bake_of_the_layer_and_a_reserved_path_layer`
+cover canvas edits and baking; there
+`pressing_selected_paths_draws_nothing_their_selection_prepared_and_deselecting_releases_it`
+and `scaled_and_rotated_paths_preview_from_their_moving_image_near_the_committed_transform`
+cover drags of selected paths and Scale and Rotate previews; `paths_paint_over_a_paint_layer_through_a_bake_of_the_layer_and_a_reserved_path_layer`
 and the GPU test `paths_painted_onto_paint_layers_match_the_path_drawn_above_them`
 cover paths painted onto paint layers,
 `masks_hide_vector_layers_on_screen_and_once_rasterized_or_merged` covers layer

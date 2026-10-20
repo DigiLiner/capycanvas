@@ -74,18 +74,18 @@ impl Timer {
     }
 }
 fn run(r: &crate::WgpuRasterizer, kernel: &Kernel, uploads: &mut crate::Uploads, timer: &Option<Timer>, batch: &Batch, pool: &wgpu::Buffer, view: &wgpu::TextureView) -> (f64, f64) {
-    let mut scratch = Default::default();
+    let mut arena = super::Arena::default();
     let start = Instant::now();
-    let mut encoder = r.device.create_command_encoder(&Default::default());
+    let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     if let Some(t) = timer { t.marker.write(&mut encoder, &t.query, 0); }
-    kernel.encode(&r.device, &mut encoder, uploads, &mut scratch, batch, pool, None, &r.empty_view, view).unwrap();
+    kernel.encode(&r.device, &mut encoder, uploads, &mut arena, batch, pool, None, &r.empty_view, view).unwrap();
     if let Some(t) = timer {
         t.marker.write(&mut encoder, &t.query, 1);
         encoder.resolve_query_set(&t.query, 0..2, &t.resolved, 0);
         encoder.copy_buffer_to_buffer(&t.resolved, 0, &t.readback, 0, 16);
     }
     uploads.finish(&encoder);
-    let submission = r.queue.submit([encoder.finish()]);
+    let submission = encoder.submit(&r.queue);
     r.device.poll(wgpu::PollType::Wait { submission_index: Some(submission), timeout: Some(std::time::Duration::from_secs(60)) }).unwrap();
     let wall = start.elapsed().as_secs_f64() * 1e3;
     let gpu = timer.as_ref().map_or(f64::NAN, |t| {
@@ -122,10 +122,10 @@ fn vector_kernel_scenes() {
         let mut pool = Pool::new(512 << 20);
         let bases: Vec<u32> = geometry.iter().map(|g| pool.allocate(g).unwrap()).collect();
         let start = Instant::now();
-        let mut encoder = r.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
         let buffer = pool.flush(&r.device, &mut encoder, &mut uploads).unwrap();
         uploads.finish(&encoder);
-        r.queue.submit([encoder.finish()]);
+        encoder.submit(&r.queue);
         let upload = start.elapsed().as_secs_f64() * 1e3;
         let palette: Vec<Vec<[f32; 4]>> = items.iter().map(colors).collect();
         let layers: Vec<Layer> = geometry.iter().zip(&bases).zip(&palette).rev().map(|((geometry, base), colors)| Layer { geometry, base: *base, colors }).collect();

@@ -339,7 +339,7 @@ impl WgpuRasterizer {
         Ok(*r)
     }
 
-    fn initialize_native(&mut self, color: DocumentColor) -> Result<(), GpuRasterError> {
+    pub(crate) fn initialize_native(&mut self, color: DocumentColor) -> Result<(), GpuRasterError> {
         self.document_color = color;
         self.device = self.device.clone().with_depth(color.depth);
         self.ui_rendition = color.depth.is_float().then_some(Default::default());

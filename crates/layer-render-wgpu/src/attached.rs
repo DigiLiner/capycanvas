@@ -44,6 +44,9 @@ impl CanvasRenderer for AttachedRenderer {
     fn max_document_dimension(&self) -> u32 {
         self.0.as_deref().map_or(u32::MAX, CanvasRenderer::max_document_dimension)
     }
+    fn region_fits(&self, extent: [u32; 2]) -> bool {
+        self.0.as_deref().is_none_or(|gpu| gpu.region_fits(extent))
+    }
     fn memory_headroom(&self) -> Option<u64> {
         self.0.as_deref().and_then(CanvasRenderer::memory_headroom)
     }
@@ -161,6 +164,9 @@ impl CanvasRenderer for AttachedRenderer {
     }
     fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_vector_preview(preview); }
+    }
+    fn set_vector_selection(&mut self, selection: Option<&layer_core::authored::VectorItemSelection>) {
+        if let Some(gpu) = self.0.as_mut() { gpu.set_vector_selection(selection); }
     }
     fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_vector_motion(motion); }

@@ -257,14 +257,22 @@ its evaluated density; native completion also invalidates consumers of native im
 inputs. Main and overview refinement preserve each other's completed pixels. Canonical
 captures use the authored kernel, submit bounded worker chunks and check capture
 cancellation between chunks. Display approximations never become capture inputs.
-Untransformed raw paint captures at the source origin restore only the pages
+Composed snapshot captures keep committed paint color, mask coverage and watercolor
+wetness in their lossless backing and decode the pages a region reaches through
+the bounded source cache, like cold live color. Scalar planes decode with the same
+reciprocal as restored pages. Native snapshot workers sample each exact image-object
+page inline, between the jobs of the tile that reads it, into one reusable result
+and accumulation, and submit after each tile that exceeds the idle tap budget.
+Their region plans grow with group nesting, not with the number of paint, masked,
+wet or object layers. A raw capture of one target restores its mask and wetness
+pages. Untransformed raw paint captures at the source origin select only the pages
 intersecting their region when watercolor is absent. Composed, transformed,
-shifted and watercolor captures retain neighboring pages for their sampling
+shifted and watercolor captures select neighboring pages for their sampling
 footprints.
-Snapshot region planning defers pending object work to a separate exact-result
-cache. A region capture first queues the object pages of its whole capture window
-and defers before encoding anything until they are all complete, so one drain
-covers every page of a band. Each drain records up to the idle tap budget, submits
+Web snapshot workers with a browser image decoder defer pending object work to a
+separate exact-result cache instead. A region capture first queues the object pages
+of its whole capture window and defers before encoding anything until they are all
+complete, so one drain covers every page of a band. Each drain records up to the idle tap budget, submits
 and awaits GPU completion, then checks cancellation before resuming; while source
 tiles are still decoding it waits for them instead of submitting empty batches. Successful source commands
 remain in queue order during retries; histogram consumers and final readback run
@@ -348,7 +356,24 @@ the window repaints exactly once when complete. Pending object work keeps frames
 coming until every visible path is derived, so opening or zooming a crowded
 layer fills in over several frames instead of stalling one; on the Web host this
 keeps the browser's single thread responsive. Exact captures, exports
-and thumbnails derive everything they draw.
+and thumbnails derive everything they draw. With a vector layer visible, zooming
+into a finer display level first shows the coarser level, resampled, on the
+pages it held. Each frame then
+renders at most four of those pages exactly, nearest the view centre first and
+only once their paths are derived within the frame's 6 ms
+(`zooming_into_a_finer_level_shows_the_coarser_one_scaled_and_refines_a_few_pages_a_frame`).
+
+A bake that draws vector layers, such as Merge Down onto paint or Rasterize
+Layer, waits in `raster_dependencies_ready` until every path of those layers has
+full-resolution geometry. Worker threads derive it while frames keep presenting;
+the Web host derives it within each frame's 6 ms instead. The bake's regions then
+draw from it, so the canvas thread derives no path while baking
+(`baking_crowded_paths_derives_them_off_the_canvas_thread_and_keeps_the_picture`).
+
+A frame's coverage batches upload into one reusable buffer from the encoder's
+prologue, as do new geometry, so consecutive vector dispatches share one compute
+pass instead of alternating with copies. Geometry space that a frame may have
+read is retired until the next frame begins.
 
 Derived geometry has a 256 MiB budget. Over budget, the cache drops geometry
 not drawn in the last two frames, scanning the layer only when a whole level
@@ -360,23 +385,37 @@ same paths at 10,000 and 50,000.
 
 The provisional line of a pen stroke arrives through `set_vector_preview` and
 draws above the cached layer, damaging only the part of the line that changed.
-A drag arrives through `set_vector_motion` with the moving item IDs and an
-offset. The cached layer leaves those paths out, repainting their tiles once,
-and the moving paths render once into a texture at the display level. When the
-vector layer, its groups and every layer above it blend normally at full
-opacity, with no mask, attached filter, adjustment layer or clipping that reaches
-down to it, the composition graph splits its root into the layers above and
-everything below, the rest of the vector layer included, and caches both
-only over the pages the moving paths cover at their start and at the current
-offset, filling pages as the drag reaches them. Splitting or unsplitting the
-graph keeps every other page, whose composite already equals above over below.
-Where the moving texture has coverage, the viewport presenter draws above,
-moving paths and below at the sub-pixel offset; elsewhere it shows the
-composite. Drag frames recomposite no pages, and the overview and the Navigator
-keep the paths where they were until the move commits. Otherwise the
-composition graph copies the moving texture at the offset rounded to the
-level's pixels above the cached layer. Moving paths draw above the rest of
-their layer until the move commits.
+A motion arrives through `set_vector_motion` with the moving item IDs and a
+document affine, `VectorMotion::transform`: a translation for Move, any affine
+for Scale and Rotate. The layer's graph node leaves those paths out. Where the
+layer's own image is cached, it copies that image and redraws only the 16-pixel
+tiles the moving paths cover at the display level; otherwise it renders the
+pages without them. The moving paths render once into a texture at the display
+level. When the vector layer, its groups and every layer above it blend normally
+at full opacity, with no mask, attached filter, adjustment layer or clipping that
+reaches down to it, the composition graph splits its root into the layers above
+and everything below, the rest of the vector layer included, and caches both
+only over the pages the moving paths cover at their start and where the
+transform takes them, filling pages as the motion reaches them. Splitting or
+unsplitting the graph keeps every other page, whose composite already equals
+above over below. Where the moving texture has coverage, the viewport presenter
+draws above, moving paths and below, sampling the moving texture through the
+inverse affine; elsewhere it shows the composite. Motion frames recomposite no
+pages, and the overview and the Navigator keep the paths where they were until
+the motion commits. Otherwise the composition graph resamples the moving texture
+through the affine, translations rounded to the level's pixels, above the cached
+layer. Moving paths draw above the rest of their layer until the motion commits,
+and a scaled preview samples the moving texture, so enlarged paths look soft
+until the transform commits and re-derives them
+(`scaled_and_rotated_paths_preview_from_their_moving_image_near_the_committed_transform`).
+
+The engine forwards the working path selection through `set_vector_selection`.
+While paths stay selected and nothing moves, the renderer prepares their moving
+texture and, for a split layer, the above and below images over the pages they
+cover, so pressing selected paths recomposites those pages from cached images and
+draws no paths. The prepared images count against the display cache budget and
+the moving texture's 4-megapixel limit, and clearing the selection releases them
+(`pressing_selected_paths_draws_nothing_their_selection_prepared_and_deselecting_releases_it`).
 
 ## Native SDR working color
 

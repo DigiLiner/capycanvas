@@ -18,6 +18,7 @@ struct Camera {
     split: vec4<f32>,
     split_size: vec4<f32>,
     split_region: vec4<f32>,
+    motion_inverse: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var moved: texture_2d<f32>;
@@ -158,7 +159,7 @@ fn artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
 }
 fn moving_between(p: vec2<f32>, composite: vec4<f32>) -> vec4<f32> {
     if camera.split.w == 0. || any(p < camera.split_region.xy) || any(p >= camera.split_region.zw) { return composite; }
-    let q = (p - camera.motion_offset.xy - camera.motion.xy) / camera.motion.z;
+    let q = (camera.motion_inverse.xy * p.x + camera.motion_inverse.zw * p.y + camera.motion_offset.xy - camera.motion.xy) / camera.motion.z;
     let size = camera.motion_offset.zw;
     if any(q < vec2<f32>(-1.)) || any(q > size + 1.) { return composite; }
     let moving = sample_float(moving_paths, linear_sampler, q / size, 0.);
@@ -320,9 +321,10 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
     // Explicit LOD keeps sampling valid across the finite-canvas boundary.
     let dx = camera.inverse.xy * footprint;
     let dy = camera.inverse.zw * footprint;
+    let sampled = source_at(source, p, dx, dy, paper_shade.state.y == 0.);
     var artwork: vec4<f32>;
-    if paper_shade.state.y != 0. { artwork = paper_composite(source_at(source, p, dx, dy, false), p, dx, dy); }
-    else { artwork = paper_relief(source_at(source, p, dx, dy, true), 1., p, dx, dy); }
+    if paper_shade.state.y != 0. { artwork = paper_composite(sampled, p, dx, dy); }
+    else { artwork = paper_relief(sampled, 1., p, dx, dy); }
     let paint = proof_artwork(artwork,p);
     let checker = transparency_checker(p, 16.);
     var rgb = screen_marked(paint, view_working_rgb(paint.rgb) + vec3<f32>(checker) * (1.0 - paint.a), checker);

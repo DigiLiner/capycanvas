@@ -303,7 +303,7 @@ fn gpu_kernel_matches_its_emulation() {
     let kernel = Kernel::new(&r.device);
     let mut uploads = crate::Uploads::new(&r.device, 1 << 20);
     let mut pool = Pool::new(64 << 20);
-    let mut scratch = Default::default();
+    let mut arena = super::Arena::default();
     for (name, item) in scenes() {
         let geometry = Arc::new(tiles::derive(&item, &frame(0)));
         let base = pool.allocate(&geometry).unwrap();
@@ -312,11 +312,11 @@ fn gpu_kernel_matches_its_emulation() {
         batch.build(&[Layer { geometry: &geometry, base, colors: &colors }], [0, 0], [SIZE; 2]);
         let output = crate::test_support::page_texture(&r, wgpu::TextureFormat::Rgba32Float);
         let view = output.create_view(&Default::default());
-        let mut encoder = r.device.create_command_encoder(&Default::default());
+        let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
         let buffer = pool.flush(&r.device, &mut encoder, &mut uploads).unwrap();
-        kernel.encode(&r.device, &mut encoder, &mut uploads, &mut scratch, &batch, &buffer, None, &r.empty_view, &view).unwrap();
+        kernel.encode(&r.device, &mut encoder, &mut uploads, &mut arena, &batch, &buffer, None, &r.empty_view, &view).unwrap();
         uploads.finish(&encoder);
-        r.queue.submit([encoder.finish()]);
+        encoder.submit(&r.queue);
         let gpu = crate::test_support::float_pixels(&r, &output);
         let mut words = vec![0u32; base as usize];
         words.extend_from_slice(&geometry.words);

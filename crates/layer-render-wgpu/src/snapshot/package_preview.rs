@@ -2,6 +2,8 @@ use super::*;
 use layer_core::color::RgbSpace;
 use layer_core::package::{codec::CapturedPreview, preview::{MAX_PREVIEW_DIMENSION, Preview}};
 
+pub(super) const PREVIEW_PIXEL_BYTES: u64 = 128 * 1024 * 1024;
+
 impl SnapshotGpu {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn package_preview(&self, capture: &ArtworkCapture, cancelled: &AtomicBool) -> Option<CapturedPreview> {
@@ -21,7 +23,7 @@ impl SnapshotGpu {
             raster.wait_data_cancellable(cancelled)?;
         }
         let mut renderer = self.capture(capture.clone(), Default::default()).map_err(|e| e.to_string())?;
-        renderer.planned_pixel_bytes = 128 * 1024 * 1024;
+        renderer.planned_pixel_bytes = PREVIEW_PIXEL_BYTES;
         let extent = renderer.extent;
         let working = renderer.color().space;
         let guide = if renderer.sdr_rendition.is_some() { Some(renderer.local_tone_guide_async().await?) } else { None };

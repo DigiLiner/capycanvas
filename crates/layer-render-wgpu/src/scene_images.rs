@@ -555,7 +555,7 @@ impl Scene {
                         .get_or_insert_with(|| Image::new(r, output_grid, "effect mask cache"));
                     if !mask_dirty.is_empty() {
                         for tile in mask_dirty.pages() {
-                            let m = self.mask_tile(r, mask,coverage, mask_offset, tile);
+                            let m = self.mask_tile(r, mask,coverage, mask_offset, tile)?;
                             self.copy_window_tile(m, image, tile);
                         }
                         self.encode_jobs(r, encoder)?;

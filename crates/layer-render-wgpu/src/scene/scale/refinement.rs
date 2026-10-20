@@ -78,6 +78,8 @@ impl Cache {
         Ok(page_coordinates(self.plan.bounds).filter(|c| !self.refined.contains(c)).collect())
     }
 
+    pub fn approximating(&self) -> bool { !self.approximate.is_empty() }
+
     fn next_exact_page(&self) -> Option<[u32; 2]> {
         page_coordinates(self.plan.bounds).find(|page| !self.refined.contains(page))
     }
@@ -93,6 +95,7 @@ impl Cache {
     }
 
     pub fn has_pending_work(&self, r: &WgpuRasterizer) -> bool {
+        if self.approximating() { return true; }
         if r.artwork_frame.as_ref().is_some_and(|frame| frame.scene.view().order().iter().any(|h| frame.scene.view().object_layer(*h).is_some() || frame.scene.view().vector_layer(*h).is_some())) { return false; }
         self.ready && r.moving_layer.is_none() && !self.transform.as_ref().is_some_and(|p| p.moving)
             && self.next_missing_page().is_some()

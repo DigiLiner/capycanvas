@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
+use super::super::vectors::Moving;
 
 pub(super) type Node = Arc<Expression>;
 
@@ -7,7 +8,7 @@ pub(super) type Node = Arc<Expression>;
 pub(super) enum Expression {
     Color([u32; 4]),
     Objects {content:object_spatial::Content,preview:bool},
-    Vector { owner: OccurrenceHandle, offset: [u64; 2] },
+    Vector { owner: OccurrenceHandle, offset: [u64; 2], moving: Option<Moving> },
     VectorPreview { owner: OccurrenceHandle },
     VectorMotion { owner: OccurrenceHandle },
     Source { id: SourceTarget, frame: SourceFrame, extent: [u32; 2], outside: u32 },
@@ -185,6 +186,7 @@ pub(super) struct Branch {
 pub(super) struct Graph {
     pub root: Option<Node>,
     pub motion: Option<[Node; 2]>,
+    pub prepared: Option<[Node; 2]>,
     pub split_changed: bool,
     branches: HashMap<Node, Branch>,
     effects: HashMap<OccurrenceHandle, (metadata::Metadata, u64)>,
@@ -195,7 +197,7 @@ pub(super) struct Graph {
 impl Graph {
     pub fn objects(&self)->&object_spatial::SpatialIndex {&self.objects}
     pub fn without_pixels(&self) -> Self {
-        Self { root: self.root.clone(), motion: None, split_changed: false, branches: HashMap::new(), effects: self.effects.clone(),
+        Self { root: self.root.clone(), motion: None, prepared: None, split_changed: false, branches: HashMap::new(), effects: self.effects.clone(),
             revision: self.revision, blend_space: self.blend_space, objects:self.objects.clone() }
     }
     pub fn prepare(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, sources: &Sources, plan: display_mips::Plan, budget: u64) -> Result<(), GpuRasterError> {
@@ -210,25 +212,31 @@ impl Graph {
             }
         }
         let before = self.motion.take();
-        self.motion = match &sources.motion_split {
-            Some(split) => {
-                let half = |scope| compose(FramePacket { scene: packet.scene.with_scope(scope), ..packet }, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), None)
-                    .map(|node| Arc::new(Expression::Combine { front: node, back: Expression::color([0.; 4]), blend: 0, flags: 0 }));
-                Some([half(&split.0)?, half(&split.1)?])
-            }
-            None => None,
+        let halves = |split: &super::super::MotionSplit, moving: &(OccurrenceHandle, Moving)| -> Result<[Node; 2], GpuRasterError> {
+            let half = |scope| compose(FramePacket { scene: packet.scene.with_scope(scope), ..packet }, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), None, Some(moving))
+                .map(|node| Arc::new(Expression::Combine { front: node, back: Expression::color([0.; 4]), blend: 0, flags: 0 }));
+            Ok([half(&split.0)?, half(&split.1)?])
         };
+        self.motion = sources.motion_split.as_ref().zip(sources.moving.as_ref()).map(|(split, moving)| halves(split, moving)).transpose()?;
+        self.prepared = sources.prepared.as_ref().filter(|_| self.motion.is_none()).map(|(split, moving, _)| halves(split, moving)).transpose()?;
         self.split_changed = before != self.motion;
         let root = match &self.motion {
             Some([above, below]) => Expression::combine(above.clone(), below.clone(), layer_core::LayerBlend::Normal, 0),
-            None => compose(packet, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), Some(&mut self.objects))?,
+            None => compose(packet, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), Some(&mut self.objects), sources.moving.as_ref())?,
         };
         let mut all = HashSet::new();
         Expression::visit(&root, &mut all);
+        for node in self.prepared.iter().flatten() { Expression::visit(node, &mut all); }
+        let unmoved: Vec<Node> = all.iter().filter_map(|node| match node.as_ref() {
+            Expression::Vector { owner, offset, moving: Some(_) } => Some(Arc::new(Expression::Vector { owner: *owner, offset: *offset, moving: None })),
+            _ => None,
+        }).collect();
+        all.extend(unmoved);
         let mut eligible: Vec<_> = all.into_iter().filter(|n| !Arc::ptr_eq(n, &root)
             && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })
             && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. } | Expression::VectorMotion { .. }))).collect();
-        eligible.sort_by_cached_key(|n| (!self.motion.as_ref().is_some_and(|motion| motion.contains(n)), n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
+        let split = |n: &Node| self.motion.iter().chain(&self.prepared).any(|halves| halves.contains(n));
+        eligible.sort_by_cached_key(|n| (!split(n), n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
         eligible.truncate((budget / plan.level_bytes(plan.level)) as usize);
         let wanted: HashSet<_> = eligible.into_iter().collect();
         let mut reusable: Vec<_> = self.branches.extract_if(|node, _| !wanted.contains(node))
@@ -261,16 +269,17 @@ impl Graph {
 
 pub(super) fn scratch_images(packet: FramePacket<'_>, level: u32, space: layer_core::color::RgbSpace, objects:Option<&object_spatial::SpatialIndex>, fine:Option<SourceTarget>) -> Result<u64, GpuRasterError> {
     let mut objects=objects.cloned().unwrap_or_default();
-    let root=compose(packet,None,None,level,space,Some(&mut objects))?;
+    let root=compose(packet,None,None,level,space,Some(&mut objects),None)?;
     Ok(if fine.is_some() && root.fused_target()==fine {1} else {u64::from(root.cost().1)+1})
 }
 
+#[expect(clippy::too_many_arguments, reason = "A graph names its frame, sources, effects, level, color domain, object index and the paths a motion moves")]
 fn compose(
     packet: FramePacket<'_>, sources: Option<&Sources>, effects: Option<&HashMap<OccurrenceHandle, (metadata::Metadata, u64)>>,
-    level: u32, space: layer_core::color::RgbSpace, objects:Option<&mut object_spatial::SpatialIndex>,
+    level: u32, space: layer_core::color::RgbSpace, objects:Option<&mut object_spatial::SpatialIndex>, moving: Option<&(OccurrenceHandle, Moving)>,
 ) -> Result<Node, GpuRasterError> {
     let presented = layer_core::paper::separate_paper(packet.scene).map(|(paper, _)| paper);
-    let mut builder = Builder { packet, sources, effects, level, space, objects, presented };
+    let mut builder = Builder { packet, sources, effects, level, space, objects, presented, moving };
     let output = stack::compose(&mut builder, packet.scene, None, packet.scene.effect_input())?;
     let mut root = Expression::over(&output);
     if let Some(handle) = packet.inspect_mask
@@ -288,6 +297,7 @@ struct Builder<'a> {
     space: layer_core::color::RgbSpace,
     objects:Option<&'a mut object_spatial::SpatialIndex>,
     presented: Option<OccurrenceHandle>,
+    moving: Option<&'a (OccurrenceHandle, Moving)>,
 }
 impl Builder<'_> {
     fn source(&self, handle: OccurrenceHandle, mask: bool) -> Node {
@@ -330,7 +340,8 @@ impl stack::Compositor for Builder<'_> {
                 else {object_spatial::SpatialIndex::default().content(self.packet.scene,index)}.unwrap();
             vec![Arc::new(Expression::Objects {content,preview:self.sources.is_some_and(|sources|sources.object_moving==Some(index))})]
         } else if self.packet.scene.vector_layer(index).is_some() {
-            let vector = Arc::new(Expression::Vector { owner: index, offset: self.packet.scene.occurrence_offset64(index).map(f64::to_bits) });
+            let moving = self.moving.filter(|(owner, _)| *owner == index).map(|(_, items)| items.clone());
+            let vector = Arc::new(Expression::Vector { owner: index, offset: self.packet.scene.occurrence_offset64(index).map(f64::to_bits), moving });
             let moving = Expression::combine(Arc::new(Expression::VectorMotion { owner: index }), vector, layer_core::LayerBlend::Normal, 0);
             vec![Expression::combine(Arc::new(Expression::VectorPreview { owner: index }), moving, layer_core::LayerBlend::Normal, 0)]
         } else { vec![self.source(index, false)] };
@@ -426,7 +437,7 @@ impl Evaluator<'_> {
         let result = self.with_region(evaluation,|compositor| match node.as_ref() {
             Expression::Color(c) => Ok(Value::Color(c.map(f32::from_bits))),
             Expression::Objects {content,preview} => compositor.objects(content,*preview,output),
-            Expression::Vector { owner, .. } => compositor.vector(*owner, output, append),
+            Expression::Vector { owner, moving, .. } => compositor.vector(*owner, moving.as_ref(), output, append),
             Expression::VectorPreview { owner } => compositor.vector_preview(*owner, output),
             Expression::VectorMotion { owner } => compositor.vector_motion(*owner, output),
             Expression::Source { id, frame, extent, outside } => compositor.source(*id, *frame, *extent, f32::from_bits(*outside)),
@@ -610,7 +621,7 @@ mod object_reuse_tests {
         let (mut doc,owner,handles)=object_spatial::tests::document();
         let mut cache=object_spatial::SpatialIndex::default();
         let build=|doc:&layer_core::Document,cache:&mut object_spatial::SpatialIndex| {
-            collection(&compose(crate::test_support::packet(doc.scene(),doc.composition().size),None,None,0,doc.composition().color.space,Some(cache)).unwrap(),owner)
+            collection(&compose(crate::test_support::packet(doc.scene(),doc.composition().size),None,None,0,doc.composition().color.space,Some(cache),None).unwrap(),owner)
         };
         let before=build(&doc,&mut cache);
         let paint=doc.artwork.paint.iter().next().unwrap().0;
@@ -621,7 +632,7 @@ mod object_reuse_tests {
         let packet=crate::test_support::packet(doc.scene(),doc.composition().size);
         assert!(scratch_images(packet,2,doc.composition().color.space,Some(&cache),None).unwrap()>=4);
         let mut planning=cache.clone();
-        let planned=collection(&compose(packet,None,None,2,doc.composition().color.space,Some(&mut planning)).unwrap(),owner);
+        let planned=collection(&compose(packet,None,None,2,doc.composition().color.space,Some(&mut planning),None).unwrap(),owner);
         assert!(before==planned,"scratch planning and display retain the same collection index after a paint edit");
         if let (Expression::Objects {content:a,..},Expression::Objects {content:b,..})=(before.as_ref(),painted.as_ref()) {
             assert!(Arc::ptr_eq(&a.keys(),&b.keys()));

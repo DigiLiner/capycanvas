@@ -321,6 +321,7 @@ impl DecodedTiles {
         let depth = d.depth();
         let mut data = rgb_settings(space, destination, depth, [PAGE_SIZE; 2], d.alpha);
         data[18] = f32::from(d.channels == 1);
+        data[19] = if d.channels == 1 { 1. / depth.maximum() as f32 } else { 0. };
         let (tile, write) =
             self.plan_key(r, Key::raster(blob, space, destination))?;
         let pending = write.map(|write| PendingTile {

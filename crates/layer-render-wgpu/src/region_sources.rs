@@ -422,13 +422,7 @@ impl RawRegions {
             encoder.clear_buffer(&self.tonal_statistics, 0, None);
         }
         let limit = r.device.limits();
-        // Preflight the subsequent connected-component allocation before any
-        // source decoding/submission. Classification does not relax its limit.
-        let parent_bytes = u64::from(w) * u64::from(h) * 4;
-        if !coverage
-            && (parent_bytes > limit.max_storage_buffer_binding_size
-                || parent_bytes > limit.max_buffer_size)
-        {
+        if !coverage && !crate::flood::fits([w, h], &limit) {
             return Err(GpuRasterError::SizeOverflow);
         }
         let mask_bytes = if coverage {

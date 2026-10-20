@@ -146,7 +146,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let items = self.select_vector_items(layer, items)?;
                 if items.contains(&id) {
                     let (items, original) = if self.interaction.modifiers.alt { self.preview_vector_copies(layer, &items)? } else { (items, None) };
-                    self.engine.backend_mut().set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [0.; 2] }));
+                    self.engine.backend_mut().set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), transform: translation([0.; 2]) }));
                     self.vector_moves.gesture = Some(Gesture::Drag { layer, items, start: point, offset: [0.; 2], nudge: None, original });
                 }
                 Ok(true)
@@ -158,7 +158,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 match gesture {
                     Gesture::Drag { layer, items, start, offset, .. } => {
                         *offset = [point[0] - start[0], point[1] - start[1]];
-                        motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset });
+                        motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), transform: translation(*offset) });
                     }
                     Gesture::Marquee { end, .. } => *end = point,
                     Gesture::Transform { latest, .. } if event.phase == PenPhase::Move => *latest = Some((point, modifiers)),
@@ -208,7 +208,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Gesture::Drag { layer, items, offset, nudge, .. } = gesture else { return Ok(false) };
         *nudge = Some(key.into());
         *offset = [offset[0] + delta[0], offset[1] + delta[1]];
-        let motion = layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset };
+        let motion = layer_render::VectorMotion { owner: *layer, items: items.clone(), transform: translation(*offset) };
         self.engine.backend_mut().set_vector_motion(Some(motion));
         Ok(true)
     }

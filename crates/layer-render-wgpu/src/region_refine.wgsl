@@ -79,41 +79,49 @@ fn reopen_v(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroup
     let gap = i32(params.options.y);
     morph(mask_word_id(id, groups), false, false, -(gap+1)/2, gap/2, true);
 }
-@compute @workgroup_size(64)
-fn exclude_exterior(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
+fn window_word(id: vec3<u32>, groups: vec3<u32>) -> vec2<u32> {
     let word = mask_word_id(id, groups);
-    let p = vec2<u32>((word % mask_stride()) * 32u, word / mask_stride());
+    let stride = (size().x + 31u) / 32u;
+    return vec2<u32>((word % stride) * 32u, word / stride);
+}
+@compute @workgroup_size(64)
+fn mark_exterior(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
+    let p = window_word(id, groups);
     let extent = params.extent_seed.xy;
-    if p.y >= extent.y { return; }
-    for (var i = 0u; i < 32u && p.x+i < extent.x; i++) {
-        let q = p + vec2<u32>(i, 0u);
+    if p.y >= size().y { return; }
+    for (var i = 0u; i < 32u && p.x+i < size().x; i++) {
+        let local = p + vec2<u32>(i, 0u);
+        let q = origin() + local;
         if any(q == vec2<u32>(0)) || any(q+vec2<u32>(1) == extent)
             || brush_selection_at(vec2<f32>(q)+.5) < 1. {
-            let label = root(q.y*extent.x+q.x);
-            if label != NONE { atomicOr(&coverage.values[label/32u], 1u << (label%32u)); }
+            let label = root(local_index(local, size()));
+            if label != NONE { set_bit(marks(), label); }
         }
     }
 }
-fn selected_component(index: u32, selected: u32) -> bool {
-    if params.input.y != 0u { return atomicLoad(&parents[index]) != NONE; }
-    let label = root(index);
+fn selected_component(local: vec2<u32>) -> bool {
+    let label = root(local_index(local, size()));
     if label == NONE { return false; }
+    let border = label < perimeter(size());
+    let base = slots() + slot_base(window_index());
     if params.input.z != 0u {
-        return (atomicLoad(&coverage.values[label/32u]) & (1u << (label%32u))) == 0u;
+        if border { return !bit_set(flags(), root(base + label) - slots()); }
+        return !bit_set(marks(), label);
     }
-    return label == selected;
+    let reached = atomicLoad(&parents[seed() + 3u]) != 0u;
+    if border { return reached && root(base + label) == atomicLoad(&parents[seed() + 2u]); }
+    return !reached && atomicLoad(&parents[seed()]) == window_index() && atomicLoad(&parents[seed() + 1u]) == label;
 }
 @compute @workgroup_size(64)
 fn component_mask(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {
-    let word = mask_word_id(id, groups);
-    let p = vec2<u32>((word % mask_stride()) * 32u, word / mask_stride());
-    if p.y >= params.extent_seed.y { return; }
-    let selected = root(params.extent_seed.w * params.extent_seed.x + params.extent_seed.z);
+    let p = window_word(id, groups);
+    if p.y >= size().y { return; }
     var packed = 0u;
-    for (var i = 0u; i < 32u && p.x+i < params.extent_seed.x; i++) {
-        if selected_component(p.y*params.extent_seed.x+p.x+i, selected) { packed |= 1u << i; }
+    for (var i = 0u; i < 32u && p.x+i < size().x; i++) {
+        if selected_component(p + vec2<u32>(i, 0u)) { packed |= 1u << i; }
     }
-    region_mask[word] = packed;
+    let q = origin() + p;
+    region_mask[q.y * mask_stride() + q.x / 32u] = packed;
 }
 @compute @workgroup_size(64)
 fn expand_h(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) groups: vec3<u32>) {

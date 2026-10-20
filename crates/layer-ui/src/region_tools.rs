@@ -197,6 +197,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }).transpose()?;
         if let Some(edit) = found { return edit.map_or(Ok(()), |edit| self.layer_edit(edit)); }
         if self.state.colors.transparent() { return Ok(()); }
+        if !self.engine.backend().region_fits(doc.composition().size) { return Err(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string()); }
         self.new_paint_layer_under()?;
         let source = layer_render::RegionSource::Scene { snapshot: self.engine.document().snapshot(), scope: SceneScope::RawObjects(layer) };
         self.request_region_at(point, None, Some(source));
@@ -219,6 +220,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if fill && from.is_none() && !enclosed && self.selection_masks.target().is_none() && let Some(layer) = self.editing_vector_layer() {
             if let Err(error) = self.fill_vector_layer(layer, point) { self.notify(error); }
+            return;
+        }
+        if !self.engine.backend().region_fits(extent) {
+            self.notify(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string());
             return;
         }
         let doc = self.engine.document();

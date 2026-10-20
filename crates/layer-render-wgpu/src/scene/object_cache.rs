@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 const BYTES: u64 = 64 * 1024 * 1024;
 pub(super) type DamageKey = (u32, Option<OccurrenceHandle>);
 pub(super) const INTERACTIVE_TAPS: u64 = 1 << 20;
-const IDLE_TAPS: u64 = 8 << 20;
+pub(super) const IDLE_TAPS: u64 = 8 << 20;
 const PREFETCH: usize = 18;
 pub(super) const PASS_TAPS: u64 = 1 << 16;
 const REQUESTS: usize = 256;
@@ -329,7 +329,7 @@ impl ObjectCache {
     }
 }
 
-fn working_set(job: &ObjectJob) -> Result<(u64, PixelRect, usize), GpuRasterError> {
+pub(super) fn working_set(job: &ObjectJob) -> Result<(u64, PixelRect, usize), GpuRasterError> {
     let bounds = crate::object_sampling::ObjectSampler::source_bounds(job.inverse, job.size, job.nearest, job.source.extent)?;
     let pages = u64::from(bounds.max_x().div_ceil(PAGE_SIZE) - bounds.min_x() / PAGE_SIZE)
         * u64::from(bounds.max_y().div_ceil(PAGE_SIZE) - bounds.min_y() / PAGE_SIZE);

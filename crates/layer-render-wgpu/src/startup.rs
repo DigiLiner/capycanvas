@@ -390,7 +390,7 @@ impl WgpuRasterizer {
                 required.compute.extend(self.moving_images.pipelines(&self.device).map(Clone::clone));
             }
             if shader.key.vectors {
-                required.compute.push(self.scene_pipelines.vector.pipeline().clone());
+                required.compute.extend(self.scene_pipelines.vector.pipelines().map(Clone::clone));
             }
             if shader.key.operations {
                 required.render.push(self.layer_masks.initialize.clone());

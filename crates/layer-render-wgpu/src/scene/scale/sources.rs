@@ -102,7 +102,10 @@ pub(crate) struct Sources {
     pub(in crate::scene) preview_damage: Vec<DocRect>,
     pub(in crate::scene) vector_motion: Option<(layer_render::VectorMotion, DocRect)>,
     pub(in crate::scene) motion_damage: Vec<DocRect>,
+    pub(in crate::scene) exclusion_damage: Vec<DocRect>,
     pub(in crate::scene) motion_split: Option<super::super::MotionSplit>,
+    pub(in crate::scene) moving: Option<(OccurrenceHandle, super::super::vectors::Moving)>,
+    pub(in crate::scene) prepared: Option<(super::super::MotionSplit, (OccurrenceHandle, super::super::vectors::Moving), DocRect)>,
 }
 impl Sources {
     pub(crate) fn published(&mut self, id: SourceTarget, data: Arc<RasterData>) {
@@ -562,7 +565,7 @@ impl Scene {
         let default = if mask.inverted { 1. - coverage.default_coverage } else { coverage.default_coverage };
         let mut changed = PixelRect::EMPTY;
         for &tile in missing {
-            let scratch = (phase != [0; 2]).then(|| self.mask_at(r, mask, coverage, phase.map(i64::from), tile));
+            let scratch = (phase != [0; 2]).then(|| self.mask_at(r, mask, coverage, phase.map(i64::from), tile)).transpose()?;
             let source = match scratch {
                 Some(slot) => Some(self.pool[slot].view.clone()),
                 None => r.layer_masks.pages.get(&(id, tile)).map(|p| p.view.clone()),

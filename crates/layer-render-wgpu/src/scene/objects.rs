@@ -102,6 +102,59 @@ pub(super) struct ObjectJob {
 }
 
 pub(super) const COLLECTION_PART: u32 = 512;
+pub(super) const INLINE_SAMPLING_BYTES: u64 = PAGE_SIZE as u64 * PAGE_SIZE as u64 * 56;
+
+pub(super) fn inline_sampling(r: &WgpuRasterizer) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    { r.snapshot_worker && r.browser_image_decoder.is_none() }
+    #[cfg(not(target_arch = "wasm32"))]
+    { r.snapshot_worker }
+}
+
+#[derive(Clone)]
+pub(super) enum SamplingStep {
+    Begin { inverse: [f64; 6], size: [u32; 2], nearest: bool, extent: [u32; 2] },
+    Contribute { source: wgpu::TextureView, origin: [i32; 2], extent: [u32; 2] },
+    Normalize,
+}
+
+#[derive(Default)]
+pub(super) struct InlineSampling {
+    result: Option<(wgpu::Texture, wgpu::TextureView)>,
+    uniform: Option<wgpu::Buffer>,
+    accumulation: Option<crate::object_sampling::ObjectAccumulator>,
+    pub taps: u64,
+}
+impl InlineSampling {
+    pub fn encode(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, step: &SamplingStep) -> Result<(), GpuRasterError> {
+        use crate::object_sampling::{SamplingPhase, SamplingRequest};
+        let sampler = r.scene_pipelines.objects.clone();
+        let phase = match step {
+            SamplingStep::Begin { inverse, size, nearest, extent } => {
+                let uniform = self.uniform.get_or_insert_with(|| crate::object_sampling::ObjectSampler::uniform(&r.device)).clone();
+                let output = &self.result.as_ref().ok_or(GpuRasterError::InvalidExtent)?.1;
+                let request = SamplingRequest { inverse: *inverse, size: *size, nearest: *nearest };
+                let accumulation = sampler.reuse(&r.device, self.accumulation.take(), request, output, &r.empty_view, &uniform)?;
+                let length = size[0] * size[1];
+                for first in (0..length).step_by(65536).filter(|_| *nearest) {
+                    let bytes = crate::object_sampling::prepare_nearest_coordinates(*inverse, *size, first, (length - first).min(65536)).map_err(GpuRasterError::Color)?;
+                    sampler.set_nearest_coordinates(encoder, &mut r.uploads, &accumulation, first, &bytes)?;
+                }
+                sampler.initialize(encoder, &accumulation);
+                self.accumulation = Some(accumulation);
+                SamplingPhase::Denominator { extent: *extent }
+            }
+            SamplingStep::Contribute { source, origin, extent } => SamplingPhase::Contribute { source, origin: *origin, extent: *extent },
+            SamplingStep::Normalize => SamplingPhase::Normalize,
+        };
+        let accumulation = self.accumulation.as_ref().ok_or(GpuRasterError::InvalidExtent)?;
+        for step in 0.. {
+            let Some(taps) = sampler.encode_step(&r.device, encoder, &mut r.uploads, accumulation, &phase, step)? else { break; };
+            self.taps += taps.max(object_cache::PASS_TAPS);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct ObjectWindow { pub origin: [f64; 2], pub side: f64, pub size: [u32; 2] }
@@ -287,6 +340,7 @@ impl Scene {
         let window=ObjectWindow {origin:coordinate.map(|v|f64::from(v*PAGE_SIZE)),side:1.,size:[PAGE_SIZE;2]};
         let request=self.collection_job(r,packet,owner,content,window);
         if request.keys.is_empty() {return Ok(self.alloc(r,wgpu::Color::TRANSPARENT));}
+        if inline_sampling(r) && !self.object_display && !self.object_query {return self.inline_object_tile(r,&request);}
         let canonical=if self.object_display||self.object_query {self.object_results.resolve_collection(r,packet.scene,&request)?}
             else {self.exact_object_results.resolve_collection(r,packet.scene,&request)?};
         if let Some(view)=canonical {
@@ -302,6 +356,31 @@ impl Scene {
         self.jobs.push(Job::Collection(Box::new(crate::object_sampling::CollectionPreview {sources,objects,size:window.size,
             output:self.pool[output].view.clone(),scratch:scratch.map(|slot|self.pool[slot].view.clone()),encode:packet.blend_space==layer_core::BlendSpace::Perceptual})));
         if let Some(slot)=scratch {self.free(slot);}
+        Ok(output)
+    }
+    fn inline_object_tile(&mut self, r: &WgpuRasterizer, request: &CollectionJob) -> Result<usize, GpuRasterError> {
+        let job=request.child(0,request.part(0),r.empty_view.clone())?;
+        r.preflight_image_sampling(job.inverse,job.size,job.nearest)?;
+        let (_,bounds,_)=object_cache::working_set(&job)?;
+        let (texture,view)=self.inline_objects.result.get_or_insert_with(||create_color_target(&r.device,[PAGE_SIZE;2],"inline object result")).clone();
+        self.jobs.push(Job::Sampling(Box::new(SamplingStep::Begin {inverse:job.inverse,size:job.size,nearest:job.nearest,extent:job.source.extent})));
+        for coordinate in page_coordinates(bounds) {
+            let (tile,pending)=r.source_tiles.borrow_mut().plan(r,&job.source,coordinate)?;
+            if let Some(pending)=pending {self.jobs.push(Job::DecodedTile(Arc::new(pending)));}
+            let origin=coordinate.map(|v|v*PAGE_SIZE);
+            let extent=std::array::from_fn(|axis|(job.source.extent[axis]-origin[axis]).min(PAGE_SIZE));
+            self.jobs.push(Job::Sampling(Box::new(SamplingStep::Contribute {source:tile.view,origin:origin.map(|v|v as i32),extent})));
+        }
+        self.jobs.push(Job::Sampling(Box::new(SamplingStep::Normalize)));
+        let output=self.reserve(r);
+        if request.blend==layer_core::BlendSpace::Perceptual {
+            let mut data=[0.;32];data[..4].copy_from_slice(&[0.,0.,PAGE_SIZE as f32,PAGE_SIZE as f32]);
+            data[4..8].copy_from_slice(&[PAGE_SIZE as f32,PAGE_SIZE as f32,0.,0.]);
+            data[8]=1.;data[9]=1.;data[31]=Convert::Encode.code();
+            self.jobs.push(Job::Draw {target:self.pool[output].view.clone(),sources:[view,r.empty_view.clone(),r.empty_view.clone()],data,over:false,clip:None,source_target:None});
+        } else {
+            self.jobs.push(Job::Copy {source:texture,source_origin:[0;2],destination:self.pool[output].texture.clone(),origin:[0;2],width:PAGE_SIZE,height:PAGE_SIZE});
+        }
         Ok(output)
     }
 

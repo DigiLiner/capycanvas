@@ -348,8 +348,10 @@ pub struct BrushStampRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorPreview { pub owner: OccurrenceHandle, pub path: std::sync::Arc<layer_core::authored::vector::PathItem>, pub revision: u64 }
+/// Selected paths of a vector layer shown moved by `transform`, a document
+/// affine applied to where the document places them, without re-deriving them.
 #[derive(Clone, Debug, PartialEq)]
-pub struct VectorMotion { pub owner: OccurrenceHandle, pub items: std::sync::Arc<std::collections::BTreeSet<layer_core::authored::vector::ItemId>>, pub offset: [f64; 2] }
+pub struct VectorMotion { pub owner: OccurrenceHandle, pub items: std::sync::Arc<std::collections::BTreeSet<layer_core::authored::vector::ItemId>>, pub transform: layer_core::authored::Affine64 }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum ThumbnailTarget {Occurrence(OccurrenceHandle),Source(SourceTarget),QuickMask}
@@ -750,6 +752,11 @@ pub trait CanvasRenderer {
     fn max_document_dimension(&self) -> u32 {
         u32::MAX
     }
+    /// Whether a connected region (Fill, Magic Wand, Select Color) of
+    /// `extent` fits this renderer's buffers.
+    fn region_fits(&self, _extent: [u32; 2]) -> bool {
+        true
+    }
     /// Device memory still free for this drawing's layers, when the driver
     /// reports it.
     fn memory_headroom(&self) -> Option<u64> {
@@ -837,6 +844,9 @@ pub trait CanvasRenderer {
     fn paper_overlay_ready(&self, _paper: &layer_core::paper::PaperBinding) -> bool { true }
     fn set_vector_preview(&mut self, _preview: Option<VectorPreview>) {}
     fn set_vector_motion(&mut self, _motion: Option<VectorMotion>) {}
+    /// The paths a drag can move next. The renderer prepares their motion while
+    /// they stay selected and releases it when the selection clears.
+    fn set_vector_selection(&mut self, _selection: Option<&layer_core::authored::VectorItemSelection>) {}
     fn set_clipping_preview(&mut self, _shadows: bool, _highlights: bool) {}
     fn set_telemetry_enabled(&mut self, _enabled: bool) {}
     fn telemetry(&self) -> RendererTelemetry {

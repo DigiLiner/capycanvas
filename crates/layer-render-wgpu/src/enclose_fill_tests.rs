@@ -92,16 +92,25 @@ fn box_morph(input: &[bool], [w, h]: [u32; 2], lower: i32, upper: i32, erode: bo
     }).collect()
 }
 fn enclosed(alpha: &[f32], extent: [u32; 2], points: &[[u32; 2]], tolerance: f32, refinement: RegionRefinement) -> Vec<u8> {
+    expected_region(alpha, extent, Some(points), None, tolerance, refinement)
+}
+fn expected_region(alpha: &[f32], extent: [u32; 2], points: Option<&[[u32; 2]]>, seed: Option<[u32; 2]>, tolerance: f32, refinement: RegionRefinement) -> Vec<u8> {
     let [w, h] = extent;
-    let mut eligible: Vec<_> = alpha.iter().map(|a| *a <= tolerance).collect();
+    let reference = seed.map_or(0., |[x, y]| alpha[(y * w + x) as usize]);
+    let mut eligible: Vec<_> = alpha.iter().map(|a| (*a - reference).abs() <= tolerance).collect();
     let gap = refinement.gap_closing as i32;
     if gap > 0 {
         eligible = box_morph(&box_morph(&eligible, extent, -gap / 2, (gap + 1) / 2, true, true),
             extent, -(gap + 1) / 2, gap / 2, false, true);
     }
+    let inside = |x: u32, y: u32| points.is_none_or(|points| within(points, x, y));
     let mut selected = vec![false; alpha.len()];
     let mut seen = vec![false; alpha.len()];
-    for start in 0..alpha.len() {
+    let starts: Vec<usize> = match (points, seed) {
+        (None, Some([x, y])) => vec![(y * w + x) as usize],
+        _ => (0..alpha.len()).collect(),
+    };
+    for start in starts {
         if seen[start] || !eligible[start] { continue; }
         let mut queue = VecDeque::from([start]);
         let mut component = Vec::new();
@@ -109,7 +118,7 @@ fn enclosed(alpha: &[f32], extent: [u32; 2], points: &[[u32; 2]], tolerance: f32
         seen[start] = true;
         while let Some(i) = queue.pop_front() {
             let (x, y) = (i as u32 % w, i as u32 / w);
-            contained &= x > 0 && x + 1 < w && y > 0 && y + 1 < h && within(points, x, y);
+            contained &= x > 0 && x + 1 < w && y > 0 && y + 1 < h && inside(x, y);
             component.push(i);
             for (xx, yy) in [(x as i32 - 1, y as i32), (x as i32 + 1, y as i32),
                 (x as i32, y as i32 - 1), (x as i32, y as i32 + 1)] {
@@ -118,14 +127,14 @@ fn enclosed(alpha: &[f32], extent: [u32; 2], points: &[[u32; 2]], tolerance: f32
                 if eligible[next] && !seen[next] { seen[next] = true; queue.push_back(next); }
             }
         }
-        if contained { for i in component { selected[i] = true; } }
+        if contained || points.is_none() { for i in component { selected[i] = true; } }
     }
     let expansion = refinement.expansion;
     if expansion != 0 {
         selected = box_morph(&selected, extent, -expansion.abs(), expansion.abs(), expansion < 0, false);
     }
     (0..w * h).map(|i| {
-        if !within(points, i % w, i / w) { return 0; }
+        if !inside(i % w, i / w) { return 0; }
         let center = selected[i as usize];
         if refinement.smoothing == 0. { return if center { 255 } else { 0 }; }
         let (x, y) = ((i % w) as i32, (i / w) as i32);
@@ -262,22 +271,72 @@ fn enclose_fill_preserves_polygon_containment_gap_closing_expansion_and_smoothin
     }
 }
 
+fn limited_renderer(storage_binding_bytes: u64) -> WgpuRasterizer {
+    let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let required_limits = wgpu::Limits { max_storage_buffer_binding_size: storage_binding_bytes, ..reference.device().limits() };
+    let (device, queue) = pollster::block_on(reference.adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("limited storage bindings"), required_features: reference.device().features(), required_limits,
+        memory_hints: crate::memory_hints(), ..Default::default() })).unwrap();
+    let mut renderer = *WgpuRasterizer::from_wgpu_inner(reference.adapter.clone(), device.into(), queue, Initialization::Headless).unwrap();
+    renderer.initialize_native(Default::default()).unwrap();
+    renderer
+}
+fn uniform_document(extent: [u32; 2], alpha: &[f32]) -> Document {
+    let mut document = paint_document(extent, "Windowed region reference");
+    placement::set_source(&mut document, depth_source(extent, SampleDepth::F32, RgbSpace::Srgb,
+        extent[0] as usize * extent[1] as usize * 16 + 4096, |x, y| [0.2, 0.3, 0.4, alpha[(y * extent[0] + x) as usize]]));
+    document
+}
+
 #[test]
-fn enclose_fill_rejects_unsupported_parent_storage_before_allocating_it() {
-    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let limits = r.device.limits();
-    let w = 8192.min(limits.max_texture_dimension_2d);
-    let limit = limits.max_storage_buffer_binding_size.min(limits.max_buffer_size);
-    let h = (limit / 4 / u64::from(w)) as u32 + 1;
-    assert!(h <= limits.max_texture_dimension_2d);
-    let document = paint_document([w, h], "Oversized region parent storage");
-    r.submit(FramePacket { reset_layers: true, view: view(), ..packet(document.scene(), [w, h]) }).unwrap();
-    for enclosed in [false, true] {
-        let mut query = request(RegionSource::Composite, rectangle([0, 0, w, h]), Default::default(), 0.);
-        if !enclosed { query.enclosure = None; }
-        assert!(matches!(r.request_region(query), Err(GpuRasterError::SizeOverflow)));
-        assert_eq!(r.regions.as_ref().unwrap().flood.storage_bytes(), 48);
+fn regions_beyond_one_storage_binding_label_bounded_windows_and_match_a_whole_canvas_flood() {
+    let limit = 4u64 << 20;
+    let mut r = limited_renderer(limit);
+    let extent = [1300u32, 900u32];
+    assert!(u64::from(extent[0]) * u64::from(extent[1]) * 4 > limit, "one parent per pixel exceeds the binding");
+    let alpha: Vec<_> = (0..extent[0] * extent[1]).map(|i| {
+        let (x, y) = (i % extent[0], i / extent[0]);
+        let wall = x % 90 == 45 && if (x / 90) % 2 == 0 { y < 870 } else { y > 30 };
+        let boxed = barrier([230, 200, 790, 700], x, y) || barrier([511, 511, 517, 517], x, y);
+        let ring = barrier([1100, 100, 1290, 850], x, y) && !(x == 1100 && y == 513);
+        if wall || boxed || ring || x == y { 1. } else { 0. }
+    }).collect();
+    let document = uniform_document(extent, &alpha);
+    frame(&mut r, &document, extent);
+    let refinements = [RegionRefinement::default(), RegionRefinement { gap_closing: 2, expansion: 2, smoothing: 1. },
+        RegionRefinement { gap_closing: 1, expansion: -1, smoothing: 0. }];
+    for refinement in refinements {
+        for seed in [[3, 890], [240, 300], [514, 514], [512, 511], [230, 600], [1180, 513], [1299, 0]] {
+            let mut query = request(RegionSource::Composite, rectangle([0, 0, 1, 1]), refinement, 0.);
+            (query.enclosure, query.position) = (None, seed);
+            check(&receive_request(&mut r, query), &expected_region(&alpha, extent, None, Some(seed), 0., refinement), extent);
+        }
+        let points = [[6, 9], [1290, 9], [1290, 450], [1250, 450], [1250, 890], [6, 890]];
+        check(&receive_request(&mut r, request(RegionSource::Composite, polygon(&points), refinement, 0.)),
+            &enclosed(&alpha, extent, &points, 0., refinement), extent);
     }
+    let mut query = request(RegionSource::Composite, rectangle([0, 0, 1, 1]), Default::default(), 0.);
+    (query.enclosure, query.position, query.contiguous) = (None, [3, 890], false);
+    let expected: Vec<u8> = alpha.iter().map(|a| if *a == 0. { 255 } else { 0 }).collect();
+    check(&receive_request(&mut r, query), &expected, extent);
+    assert!(r.regions.as_ref().unwrap().flood.storage_bytes() <= limit, "label storage stays within one binding");
+}
+
+#[test]
+fn regions_whose_coverage_exceeds_the_device_are_refused_and_the_renderer_keeps_working() {
+    let mut r = limited_renderer(4 << 20);
+    let large = [4096u32, 2100u32];
+    let extent = [300u32, 200u32];
+    assert!(!layer_render::CanvasRenderer::region_fits(&r, large) && layer_render::CanvasRenderer::region_fits(&r, extent));
+    let document = paint_document(large, "Oversized region");
+    frame(&mut r, &document, large);
+    let mut query = request(RegionSource::Composite, rectangle([0, 0, 1, 1]), Default::default(), 0.);
+    query.enclosure = None;
+    assert!(matches!(r.request_region(query.clone()), Err(GpuRasterError::SizeOverflow)));
+    assert_eq!(r.regions.as_ref().unwrap().flood.storage_bytes(), 48);
+    let alpha = vec![0.; (extent[0] * extent[1]) as usize];
+    frame(&mut r, &uniform_document(extent, &alpha), extent);
+    check(&receive_request(&mut r, query), &vec![255; alpha.len()], extent);
 }
 
 #[test]
@@ -289,9 +348,8 @@ fn enclose_fill_workstation_completion_timings() {
     for extent in [[4248, 2832], [6000, 4000], [9504, 6336]] {
         let [w, h] = extent;
         let limits = r.device.limits();
-        let parent_bytes = u64::from(w) * u64::from(h) * 4;
-        if parent_bytes > limits.max_storage_buffer_binding_size || parent_bytes > limits.max_buffer_size {
-            eprintln!("ENCLOSE_FILL extent={w}x{h} unsupported=parent_storage required_bytes={parent_bytes} max_storage_buffer_binding_size={} max_buffer_size={} qualification=unmeasured",
+        if !crate::flood::fits(extent, &limits) {
+            eprintln!("ENCLOSE_FILL extent={w}x{h} unsupported max_storage_buffer_binding_size={} max_buffer_size={} qualification=unmeasured",
                 limits.max_storage_buffer_binding_size, limits.max_buffer_size);
             continue;
         }
@@ -304,21 +362,23 @@ fn enclose_fill_workstation_completion_timings() {
             }));
         r.submit(FramePacket { reset_layers: true, view: view(), ..packet(document.scene(), extent) }).unwrap();
         let baseline = r.telemetry().resident_bytes;
-        for refinement in [RegionRefinement::default(), RegionRefinement { gap_closing: 2, expansion: 2, smoothing: 1. }] {
+        for (enclosed, refinement) in [false, true].into_iter().flat_map(|enclosed| [RegionRefinement::default(),
+            RegionRefinement { gap_closing: 2, expansion: 2, smoothing: 1. }].map(|refinement| (enclosed, refinement))) {
             let mut samples = Vec::new();
             for run in 0..22 {
                 let started = std::time::Instant::now();
-                let result = receive_request(&mut r, request(RegionSource::Composite,
-                    rectangle([8, 8, w - 8, h - 8]), refinement, 0.));
+                let mut query = request(RegionSource::Composite, rectangle([8, 8, w - 8, h - 8]), refinement, 0.);
+                if !enclosed { (query.enclosure, query.position) = (None, [w / 4, h / 2]); }
+                let result = receive_request(&mut r, query);
                 let elapsed = started.elapsed().as_secs_f64() * 1000.;
                 assert_eq!(value(&result.pixels, w / 4, h / 2), 255);
-                assert_eq!(value(&result.pixels, 3 * w / 4, h / 2), 255);
+                assert_eq!(value(&result.pixels, 3 * w / 4, h / 2), if enclosed { 255 } else { 0 });
                 assert_eq!(value(&result.pixels, 0, 0), 0);
                 if run >= 2 { samples.push(elapsed); }
-                eprintln!("ENCLOSE_FILL extent={w}x{h} refinement={refinement:?} run={run} completed_ms={elapsed:.3}");
+                eprintln!("ENCLOSE_FILL extent={w}x{h} enclosed={enclosed} refinement={refinement:?} run={run} completed_ms={elapsed:.3}");
             }
             samples.sort_by(f64::total_cmp);
-            eprintln!("ENCLOSE_FILL extent={w}x{h} refinement={refinement:?} warm_median_ms={:.3} warm_max_ms={:.3} baseline_gpu_bytes={baseline} gpu_bytes={} region_bytes={} qualification=workstation_only",
+            eprintln!("ENCLOSE_FILL extent={w}x{h} enclosed={enclosed} refinement={refinement:?} warm_median_ms={:.3} warm_max_ms={:.3} baseline_gpu_bytes={baseline} gpu_bytes={} region_bytes={} qualification=workstation_only",
                 (samples[9] + samples[10]) * 0.5, samples[19], r.telemetry().resident_bytes,
                 r.regions.as_ref().unwrap().storage_bytes());
         }

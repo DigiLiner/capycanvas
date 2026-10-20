@@ -197,7 +197,7 @@ impl RegionRequests {
                 ready &= self.raw.prepare_tonal(&startup.compiler);
             } else if !matches!(request.source, layer_render::RegionSource::Selection(_)) {
                 if !matches!(request.source, layer_render::RegionSource::Coverage(_) | layer_render::RegionSource::ObjectCoverage(_)) {
-                    ready &= self.flood.prepare(&startup.compiler, request.refinement, request.enclosure.is_some());
+                    ready &= self.flood.prepare(&startup.compiler, request.refinement, request.enclosure.is_some(), request.contiguous);
                 }
                 ready &= self.raw.prepare(&startup.compiler);
             }

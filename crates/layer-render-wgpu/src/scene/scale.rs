@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use wgpu::util::DeviceExt;
 
 pub(crate) const CACHE_BYTES: u64 = 608 * 1024 * 1024;
+pub(super) const APPROXIMATE_PAGES: usize = 4;
 fn exact_strip(extent: [u32; 2]) -> [u32; 2] {
     let columns = extent[0].div_ceil(PAGE_SIZE).next_power_of_two().min(SOURCE_SLOTS as u32);
     [PAGE_SIZE * columns, PAGE_SIZE * (SOURCE_SLOTS as u32 / columns).min(extent[1].div_ceil(PAGE_SIZE))]
@@ -372,6 +373,7 @@ pub(crate) struct Cache {
     shifted: Option<Box<Cache>>,
     valid: BTreeSet<[u32; 2]>,
     refined: BTreeSet<[u32; 2]>,
+    approximate: BTreeSet<[u32; 2]>,
     exact_tile: Option<Image>,
     unchanged: bool,
     graph: graph::Graph,
@@ -816,7 +818,7 @@ impl Cache {
             ready: false, source_overlap: false, streamed_sources: false,
             hierarchy: None, residency_checked: false,
             reuse_output: false,
-            overview, shifted: None, valid: BTreeSet::new(), refined: BTreeSet::new(), exact_tile: None,
+            overview, shifted: None, valid: BTreeSet::new(), refined: BTreeSet::new(), approximate: BTreeSet::new(), exact_tile: None,
             unchanged: false, graph: Default::default(), transform: r.transform_preview.clone(),
         }
     }
@@ -966,7 +968,7 @@ impl Cache {
         if let Some(overview) = &mut self.overview { overview.reuse_output = false; }
     }
     fn output_complete(&self) -> bool {
-        self.ready && (self.placed.is_some() || page_coordinates(self.plan.bounds).all(|coordinate| self.valid.contains(&coordinate)))
+        self.ready && self.approximate.is_empty() && (self.placed.is_some() || page_coordinates(self.plan.bounds).all(|coordinate| self.valid.contains(&coordinate)))
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
@@ -1038,6 +1040,12 @@ impl Cache {
         let [above, below] = self.graph.motion.as_ref()?;
         Some([layer(above)?, layer(below)?])
     }
+    fn prepared_regions(&self, scene: &Scene, packet: FramePacket<'_>, destination: &Destination<'_>) -> Vec<PixelRect> {
+        let (Destination::View, Some(halves), Some((_, _, bounds))) = (destination, &self.graph.prepared, &scene.scale_sources.prepared) else { return Vec::new() };
+        let region = bounds.expand(2).in_frame(packet.document_extent).intersect(self.plan.bounds);
+        page_coordinates(region).filter(|page| halves.iter().any(|half| !self.graph.branch_valid(half, *page)))
+            .map(|page| paint_transform::aligned(page_rect(page).intersect(self.plan.bounds), 1 << self.plan.level, self.plan.extent).intersect(self.plan.bounds)).collect()
+    }
     fn motion_missing(&self, region: PixelRect) -> Damage {
         let Some(motion) = &self.graph.motion else { return Damage::EMPTY };
         Damage::from_regions(page_coordinates(region.intersect(self.plan.bounds))
@@ -1108,6 +1116,8 @@ impl Cache {
             .filter(|handle| packet.scene.visible(*handle) && packet.scene.occurrence(*handle).unwrap().kind() == LayerKind::Paint
                 && stack::has_content(r, packet.scene, *handle)).collect();
         let copied = self.copy_shifted(r, encoder);
+        let copied = if matches!(destination, Destination::View) { copied.union(self.seed_finer_level(r, packet, encoder)) } else { copied };
+        if matches!(destination, Destination::View) { self.refine_approximate(scene, r, packet); }
         let root = self.graph.root.clone().expect("prepared composition graph");
         let reduced = root.source_domains(packet.scene)[0].clone();
         let input = input_plan(self.plan, packet.scene,Some(self.graph.objects()));
@@ -1115,13 +1125,15 @@ impl Cache {
             .chain(r.transform_damage.iter().map(|&(target, region)|
                 brush_tiles::document_damage(packet.scene, target, region, packet.document_extent)))))
             .union(root.damage(&scene.scale_sources, self.plan))
-            .union(match (&destination, r.vector_motion_region(packet.document_extent)) { (Destination::View, Some(region)) => self.motion_missing(region), _ => Damage::EMPTY });
+            .union(match (&destination, r.vector_motion_region(packet.document_extent)) { (Destination::View, Some(region)) => self.motion_missing(region), _ => Damage::EMPTY })
+            .union(match destination { Destination::View => Damage::from_regions(scene.scale_sources.exclusion_damage.iter().map(|bounds| bounds.in_frame(packet.document_extent))), _ => Damage::EMPTY });
         if objects || packet.scene.order().iter().any(|&owner| packet.scene.vector_layer(owner).is_some()) { self.valid.retain(|c| !invalid.intersects(page_rect(*c))); }
         self.refined.retain(|c| !invalid.intersects(page_rect(*c)));
         let regions = invalid.update_regions(self.plan, &self.valid);
         let changed = regions.iter().fold(PixelRect::EMPTY, |a, b| a.union(*b));
+        let prepared = self.prepared_regions(scene, packet, &destination);
         let required = if scene.scale_sources.reset { input.bounds.into() } else {
-            let changed = Damage::from_regions(regions.iter().copied());
+            let changed = Damage::from_regions(regions.iter().chain(&prepared).copied());
             root.required(changed.clone(), input).union(changed)
         };
         let mut source_plans=std::collections::HashMap::new();
@@ -1168,7 +1180,8 @@ impl Cache {
         let regions: Vec<_> = regions.into_iter().flat_map(|r| r.subtract(covered)).filter(|r| !r.is_empty()).collect();
         let tiled = use_tiles(r, self.plan, packet, self.source_overlap.then_some(&scene.scale_sources), self.streamed_sources, Some(scene))
             && !(self.plan.level > 0 && root.fused_transform(r));
-        let regions = if tiled {
+        let pages = |regions: Vec<PixelRect>| -> Vec<PixelRect> {
+            if !tiled { return regions; }
             regions.into_iter().flat_map(|region| {
                 let [x, y, width, height] = paint_transform::texel_rect(region, side);
                 page_coordinates(PixelRect::new(x, y, x + width, y + height)).map(move |c| {
@@ -1176,7 +1189,8 @@ impl Cache {
                     PixelRect::new(p.min_x() * side, p.min_y() * side, p.max_x() * side, p.max_y() * side).intersect(region)
                 })
             }).collect()
-        } else { regions };
+        };
+        let (regions, prepared) = (pages(regions), pages(prepared));
         self.prepare_native_branches(scene, r, packet, &regions, input, &mut Encoding { encoder, commands })?;
         let mut root_compositions = Vec::new();
         for region in regions {
@@ -1224,6 +1238,14 @@ impl Cache {
             r.metrics.composited_pixels += u64::from(width) * u64::from(height);
             r.metrics.frame_composited_pages.extend(page_coordinates(region).map(|coordinate| (self.plan.level, coordinate)));
         }
+        if let Some(halves) = self.graph.prepared.clone() {
+            for region in prepared {
+                self.used.fill(false);
+                let mut compositor = Evaluator { cache: self, commands, scene, packet, r, encoder, region: region.into(), input, tiled, source_plans: &mut source_plans, root_compositions: &mut root_compositions, defer_root: false };
+                for half in &halves { compositor.evaluate(half)?; }
+            }
+            commands.flush(r, encoder)?;
+        }
         commands.flush_root(scene, r, encoder, &mut root_compositions)?;
         if let Some((finer, changed)) = finer {
             let region = if self.ready { changed } else { covered };
@@ -1251,7 +1273,7 @@ impl Cache {
             }
         }
         if self.plan.level == 0 && self.transform.is_none() {
-            self.refined.clone_from(&self.valid);
+            self.refined = self.valid.difference(&self.approximate).copied().collect();
         }
         if matches!(destination, Destination::View) {
             crate::performance_trace::counter(c"Capy main mip box pixels", written.area());
@@ -1290,12 +1312,68 @@ impl Cache {
                 );
                 self.valid.extend(old.valid.iter().copied().filter(|c| !page_rect(*c).intersect(overlap).is_empty()));
                 self.refined.extend(old.refined.iter().copied().filter(|c| !page_rect(*c).intersect(overlap).is_empty()));
+                self.approximate.extend(old.approximate.iter().copied().filter(|c| !page_rect(*c).intersect(overlap).is_empty()));
                 changed = overlap;
             }
         }
         changed
     }
 
+    /// Show a new, finer level of vector layers at once: the coarser level it
+    /// replaces, scaled, on the pages that level holds, until frames render
+    /// them exactly.
+    fn seed_finer_level(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> PixelRect {
+        if !self.valid.is_empty() || !matches!(self.pixels, hierarchy::Pixels::Window { .. })
+            || !packet.scene.order().iter().any(|owner| packet.scene.visible(*owner) && packet.scene.vector_layer(*owner).is_some()) { return PixelRect::EMPTY; }
+        let Some(old) = self.spare.as_deref().filter(|old| old.plan.level > self.plan.level && old.placed.is_none()) else { return PixelRect::EMPTY };
+        let Some(source) = old.pixels.root() else { return PixelRect::EMPTY };
+        let pages: Vec<_> = page_coordinates(self.plan.bounds).filter(|page| old.valid.contains(page)
+            && page_rect(*page).intersect(self.plan.bounds).intersect(old.plan.bounds) == page_rect(*page).intersect(self.plan.bounds)).collect();
+        let region = pages.iter().fold(PixelRect::EMPTY, |region, page| region.union(page_rect(*page).intersect(self.plan.bounds)));
+        if region.is_empty() { return PixelRect::EMPTY; }
+        self.pixels.ensure(r, self.plan);
+        let side = 1u32 << self.plan.level;
+        let output_bounds = self.output_plan().bounds;
+        let [x, y, width, height] = paint_transform::texel_rect(region.window_local(output_bounds), side);
+        let origin = [i64::from(output_bounds.min_x() + x * side), i64::from(output_bounds.min_y() + y * side)];
+        let old_bounds = old.output_plan().bounds;
+        r.scene_pipelines.vector.resample(&r.device, encoder,
+            crate::vector::Placed { view: &source.view, origin: [i64::from(old_bounds.min_x()), i64::from(old_bounds.min_y())], side: 1 << old.plan.level },
+            crate::vector::Placed { view: self.view(), origin, side }, [x, y], [width, height], Default::default());
+        self.valid.extend(pages.iter().copied());
+        self.approximate.extend(pages);
+        region
+    }
+    /// Render a few pages that still show a coarser level exactly this frame,
+    /// nearest the view first, once their paths are derived.
+    fn refine_approximate(&mut self, scene: &mut Scene, r: &WgpuRasterizer, packet: FramePacket<'_>) {
+        if self.approximate.is_empty() { return; }
+        let [a, b, c, d, tx, ty] = packet.view.document_to_surface.map(f64::from);
+        let det = a * d - b * c;
+        let surface = [f64::from(packet.view.width_px) * 0.5 - tx, f64::from(packet.view.height_px) * 0.5 - ty];
+        let center = [(d * surface[0] - c * surface[1]) / det, (a * surface[1] - b * surface[0]) / det];
+        let mut pages: Vec<_> = self.approximate.iter().copied().collect();
+        pages.sort_by(|p, q| {
+            let distance = |page: &[u32; 2]| { let rect = page_rect(*page); (f64::from(rect.min_x() + rect.max_x()) * 0.5 - center[0]).hypot(f64::from(rect.min_y() + rect.max_y()) * 0.5 - center[1]) };
+            distance(p).total_cmp(&distance(q))
+        });
+        let vectors: Vec<_> = packet.scene.order().iter().copied().filter(|owner| packet.scene.visible(*owner) && packet.scene.vector_layer(*owner).is_some()).collect();
+        let palette = Scene::vector_palette(r, packet);
+        let side = 1u32 << self.plan.level;
+        let mut refined = 0;
+        for page in pages {
+            if refined == APPROXIMATE_PAGES { break; }
+            let rect = page_rect(page).intersect(self.plan.bounds);
+            let origin = [i64::from(rect.min_x()), i64::from(rect.min_y())];
+            let size = [rect.width().div_ceil(side), rect.height().div_ceil(side)];
+            let derived = vectors.iter().fold(true, |ready, owner| scene.vectors.window_ready(packet.scene, *owner, origin, self.plan.level, size, packet.document_extent, palette) && ready);
+            if derived {
+                self.valid.remove(&page);
+                self.approximate.remove(&page);
+                refined += 1;
+            } else if !scene.vectors.deriving() { break; }
+        }
+    }
     fn reduce_output(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, region: PixelRect, commands: &mut Commands) -> Result<(), GpuRasterError> {
         if region.is_empty() { return Ok(()); }
         self.pixels.ensure(r, self.plan);
@@ -1497,7 +1575,7 @@ impl Evaluator<'_> {
         let material = Target { view, slot: Some(Slot::Cache(slot)), plan }.value();
         self.draw(material, value, layer_core::LayerBlend::Normal, 128, None)
     }
-    fn vector(&mut self, owner: OccurrenceHandle, output: Option<Target>, append: bool) -> Result<Value, GpuRasterError> {
+    fn vector(&mut self, owner: OccurrenceHandle, moving: Option<&super::vectors::Moving>, output: Option<Target>, append: bool) -> Result<Value, GpuRasterError> {
         self.commands.flush(self.r, self.encoder)?;
         let mut target = self.target();
         let side = 1u32 << target.plan.level;
@@ -1511,17 +1589,28 @@ impl Evaluator<'_> {
             (output.view.clone(), [texels[0] as i32, texels[1] as i32])
         });
         let (scene, extent) = (self.packet.scene, self.packet.document_extent);
-        let appended = base.as_ref().and_then(|_| self.scene.vectors.append_batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette));
+        let excluded = moving.map(|moving| &*moving.0);
+        let unmoved = excluded.and_then(|_| {
+            let node = Arc::new(graph::Expression::Vector { owner, offset: scene.occurrence_offset64(owner).map(f64::to_bits), moving: None });
+            let pages: Vec<_> = page_coordinates(bounds.in_frame(extent)).collect();
+            let (view, image) = self.cache.graph.branch_image(&node, &pages).filter(|(_, image)| image.level == plan.level)?;
+            let texels = paint_transform::texel_rect(image.doc_bounds.local(bounds), side);
+            Some((view.clone(), [texels[0] as i32, texels[1] as i32]))
+        });
+        let appended = base.as_ref().and_then(|_| self.scene.vectors.append_batch(scene, owner, excluded, bounds.min, plan.level, plan.size, extent, palette));
         let (batch, base, kept) = match appended {
             Some(batch) => (batch, base.clone(), base),
-            None => match base.as_ref().and_then(|_| self.scene.vectors.repaint_batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette)) {
+            None => match base.as_ref().and_then(|_| self.scene.vectors.repaint_batch(scene, owner, excluded, None, bounds.min, plan.level, plan.size, extent, palette)) {
                 Some(batch) => (batch, None, base),
-                None => (self.scene.vectors.batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette), None, None),
+                None => match unmoved.as_ref().and_then(|_| self.scene.vectors.repaint_batch(scene, owner, excluded, excluded, bounds.min, plan.level, plan.size, extent, palette)) {
+                    Some(batch) => (batch, None, unmoved),
+                    None => (self.scene.vectors.batch(scene, owner, excluded, bounds.min, plan.level, plan.size, extent, palette), None, None),
+                },
             },
         };
-        if let Some((_, texels)) = &kept {
+        if let Some((source, texels)) = &kept {
             self.encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo { texture: output.as_ref().unwrap().view.texture(), mip_level: 0, origin: wgpu::Origin3d { x: texels[0] as u32, y: texels[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: source.texture(), mip_level: 0, origin: wgpu::Origin3d { x: texels[0] as u32, y: texels[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyTextureInfo { texture: target.view.texture(), mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 wgpu::Extent3d { width: plan.size[0], height: plan.size[1], depth_or_array_layers: 1 });
         } else { self.r.encode_clear(self.encoder, &target.view, "vector layer"); }
@@ -1536,14 +1625,14 @@ impl Evaluator<'_> {
         let working = self.working_plan();
         let level = working.level;
         let side = 1u32 << level;
-        let shift = super::motion_shift(&motion, level);
+        let Some(inverse) = super::vectors::level_transform(&motion, level).inverse() else { return self.materialize(Value::Color([0.; 4]), output) };
         let moving = moving.aligned(side);
         let window = self.region.intersect(working.doc_bounds).aligned(side);
-        let needed = window.translated(shift.map(|v| -v)).intersect(moving).in_frame(self.packet.document_extent);
+        let needed = super::moved_bounds(inverse, window).expand(side).intersect(moving).in_frame(self.packet.document_extent);
         if needed.is_empty() { return self.materialize(Value::Color([0.; 4]), output); }
         let needed = DocRect::from(needed).aligned(side);
         self.commands.flush(self.r, self.encoder)?;
-        let key = (owner, Arc::as_ptr(&motion.items) as usize, level, self.packet.scene.occurrence_offset64(owner).map(|v| v as i64));
+        let key = (owner, super::vectors::Moving(motion.items.clone()), level, self.packet.scene.occurrence_offset64(owner).map(|v| v as i64));
         let covered = self.scene.vectors.motion.as_ref().is_some_and(|m| m.key == key && m.window.intersect(needed) == needed);
         if !covered {
             let budget = DocRect { min: needed.min.map(|v| v - 512 * i64::from(side)), max: needed.max.map(|v| v + 512 * i64::from(side)) };
@@ -1564,15 +1653,8 @@ impl Evaluator<'_> {
         target.plan.doc_bounds = window; target.plan.size = size.map(|v| v.div_ceil(side)); target.plan.bounds = PixelRect::full(size);
         self.r.encode_clear(self.encoder, &target.view, "vector motion");
         let source = self.scene.vectors.motion.as_ref().unwrap();
-        let from = [0, 1].map(|i| ((needed.min[i] - source.window.min[i]) / i64::from(side)) as u32);
-        let to = [0, 1].map(|i| ((needed.min[i] + shift[i] - window.min[i]) / i64::from(side)) as u32);
-        let extent = [0, 1].map(|i| (((needed.max[i] - needed.min[i]) / i64::from(side)) as u32).min(target.plan.size[i] - to[i]).min(source.image.plan.size[i] - from[i]));
-        if extent.iter().all(|v| *v > 0) {
-            self.encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo { texture: &source.image.texture, mip_level: 0, origin: wgpu::Origin3d { x: from[0], y: from[1], z: 0 }, aspect: wgpu::TextureAspect::All },
-                wgpu::TexelCopyTextureInfo { texture: target.view.texture(), mip_level: 0, origin: wgpu::Origin3d { x: to[0], y: to[1], z: 0 }, aspect: wgpu::TextureAspect::All },
-                wgpu::Extent3d { width: extent[0], height: extent[1], depth_or_array_layers: 1 });
-        }
+        self.r.scene_pipelines.vector.resample(&self.r.device, self.encoder, crate::vector::Placed { view: &source.image.view, origin: source.window.min, side },
+            crate::vector::Placed { view: &target.view, origin: window.min, side }, [0; 2], target.plan.size, inverse);
         let plan = target.plan;
         self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
     }
@@ -1681,7 +1763,7 @@ impl Evaluator<'_> {
             } else {
                 let handle = self.packet.scene.source_owner(id).unwrap();
                 let (mask, source) = self.packet.scene.mask(handle).unwrap();
-                self.scene.mask_at(self.r, mask, source, origin, tile)
+                self.scene.mask_at(self.r, mask, source, origin, tile)?
             };
             self.encode_scene_jobs()?;
             return Ok(Target { view: self.scene.pool[slot].view.clone(), slot: Some(Slot::Scene(slot)), plan: self.working_plan() }.value().with_encoding(encode));

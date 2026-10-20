@@ -902,7 +902,7 @@ impl WgpuRasterizer {
     ) -> Result<bool, GpuRasterError> {
         let mut previews = match self.filter_previews.take() {
             Some(p) => p,
-            None => FilterPreviews::new(self)?,
+            None => Box::new(FilterPreviews::new(self)?),
         };
         let result = previews.start(self, request);
         if result.is_err() {

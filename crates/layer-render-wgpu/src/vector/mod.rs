@@ -89,17 +89,21 @@ fn command(tile: &ItemTile, base: u32, palette: u32) -> [u32; 4] {
     [tile.kind | tile.count << 8, base + tile.start, tile.backdrop as u32, palette + u32::from(tile.entry)]
 }
 
+/// Geometry for every layer's derived paths, uploaded from the encoder's
+/// prologue.
 pub(crate) struct Pool {
     buffer: Option<wgpu::Buffer>,
     capacity: u32,
     limit: u32,
     free: BTreeMap<u32, u32>,
     pending: Vec<(u32, std::sync::Arc<LevelGeometry>)>,
+    retired: Vec<(u32, u32)>,
 }
 impl Pool {
-    pub fn new(limit_bytes: u64) -> Self { Self { buffer: None, capacity: 0, limit: (limit_bytes / 4).min(u64::from(u32::MAX)) as u32, free: BTreeMap::new(), pending: Vec::new() } }
+    pub fn new(limit_bytes: u64) -> Self { Self { buffer: None, capacity: 0, limit: (limit_bytes / 4).min(u64::from(u32::MAX)) as u32, free: BTreeMap::new(), pending: Vec::new(), retired: Vec::new() } }
     #[cfg(test)]
     pub fn used_words(&self) -> u32 { self.capacity - self.free.values().sum::<u32>() }
+    pub fn storage_bytes(&self) -> u64 { self.buffer.as_ref().map_or(0, wgpu::Buffer::size) }
     pub fn allocate(&mut self, geometry: &std::sync::Arc<LevelGeometry>) -> Option<u32> {
         let words = (geometry.words.len() as u32).max(1);
         let found = self.free.iter().find(|(_, len)| **len >= words).map(|(offset, len)| (*offset, *len));
@@ -120,15 +124,26 @@ impl Pool {
         if !geometry.words.is_empty() { self.pending.push((offset, geometry.clone())); }
         Some(offset)
     }
-    pub fn release(&mut self, offset: u32, geometry: &LevelGeometry) {
-        let mut offset = offset;
-        let mut len = (geometry.words.len() as u32).max(1);
+    /// Free space that nothing this frame has read.
+    pub fn release(&mut self, offset: u32, geometry: &LevelGeometry) { self.free_words(offset, (geometry.words.len() as u32).max(1)); }
+    /// Free space this frame may have read once the next frame begins.
+    pub fn retire(&mut self, offset: u32, geometry: &LevelGeometry) {
+        let len = (geometry.words.len() as u32).max(1);
+        self.pending.retain(|(o, _)| *o < offset || *o >= offset + len);
+        self.retired.push((offset, len));
+    }
+    pub fn restart(&mut self) {
+        for (offset, len) in std::mem::take(&mut self.retired) { self.free_words(offset, len); }
+    }
+    fn free_words(&mut self, offset: u32, len: u32) {
+        let (mut offset, mut len) = (offset, len);
         if let Some((&before, &size)) = self.free.range(..offset).next_back() && before + size == offset { self.free.remove(&before); offset = before; len += size; }
         if let Some(&after) = self.free.get(&(offset + len)) { self.free.remove(&(offset + len)); len += after; }
         self.free.insert(offset, len);
         self.pending.retain(|(o, _)| *o < offset || *o >= offset + len);
     }
-    pub fn flush(&mut self, device: &PipelineDevice, encoder: &mut wgpu::CommandEncoder, uploads: &mut Uploads) -> Result<wgpu::Buffer, GpuRasterError> {
+    pub fn flush(&mut self, device: &PipelineDevice, encoder: &mut crate::submission::CommandEncoder, uploads: &mut Uploads) -> Result<wgpu::Buffer, GpuRasterError> {
+        let encoder = encoder.prologue();
         let bytes = u64::from(self.capacity.max(1024)) * 4;
         if self.buffer.as_ref().is_none_or(|b| b.size() < bytes) {
             let grown = device.create_buffer(&wgpu::BufferDescriptor { label: Some("vector geometry"), size: bytes,
@@ -167,19 +182,41 @@ impl Pool {
 pub(crate) struct Kernel {
     layout: wgpu::BindGroupLayout,
     pipeline: Deferred<wgpu::ComputePipeline>,
+    resample_layout: wgpu::BindGroupLayout,
+    resample: Deferred<wgpu::ComputePipeline>,
 }
-const USAGES: [wgpu::BufferUsages; 4] = [wgpu::BufferUsages::UNIFORM, wgpu::BufferUsages::STORAGE, wgpu::BufferUsages::STORAGE, wgpu::BufferUsages::STORAGE];
-fn write_words(uploads: &mut Uploads, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, words: impl Iterator<Item = u32>, len: usize) -> Result<(), GpuRasterError> {
-    uploads.write_mapped(encoder, buffer, 0, (len * 4) as u64, |mapped| {
-        let mut block = [0u8; 4096];
-        let (mut filled, mut offset) = (0usize, 0usize);
-        for word in words {
-            block[filled..filled + 4].copy_from_slice(&word.to_le_bytes());
-            filled += 4;
-            if filled == block.len() { mapped.slice(offset..offset + filled).copy_from_slice(&block); offset += filled; filled = 0; }
+const ALIGNMENT: u64 = 256;
+/// A frame's coverage batches, one after another in a reusable buffer that the
+/// encoder's prologue fills.
+#[derive(Default)]
+pub(crate) struct Arena { buffer: Option<wgpu::Buffer>, used: u64 }
+impl Arena {
+    pub fn restart(&mut self) { self.used = 0; }
+    pub fn storage_bytes(&self) -> u64 { self.buffer.as_ref().map_or(0, wgpu::Buffer::size) }
+    fn place(&mut self, device: &PipelineDevice, bytes: u64) -> Result<(wgpu::Buffer, u64), GpuRasterError> {
+        let limit = device.limits().max_buffer_size;
+        if bytes > limit { return Err(GpuRasterError::SizeOverflow); }
+        let capacity = self.buffer.as_ref().map_or(0, wgpu::Buffer::size);
+        if self.used + bytes > capacity {
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor { label: Some("vector coverage batches"),
+                size: (capacity * 2).max(bytes).max(1 << 20).min(limit),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false }));
+            self.used = 0;
         }
-        if filled > 0 { mapped.slice(offset..offset + filled).copy_from_slice(&block[..filled]); }
-    })
+        let offset = self.used;
+        self.used += bytes.next_multiple_of(ALIGNMENT);
+        Ok((self.buffer.clone().unwrap(), offset))
+    }
+}
+fn fill_words(mapped: &mut wgpu::BufferViewMut, start: usize, words: impl Iterator<Item = u32>) {
+    let mut block = [0u8; 4096];
+    let (mut filled, mut offset) = (0usize, start);
+    for word in words {
+        block[filled..filled + 4].copy_from_slice(&word.to_le_bytes());
+        filled += 4;
+        if filled == block.len() { mapped.slice(offset..offset + filled).copy_from_slice(&block); offset += filled; filled = 0; }
+    }
+    if filled > 0 { mapped.slice(offset..offset + filled).copy_from_slice(&block[..filled]); }
 }
 impl Kernel {
     pub fn new(device: &PipelineDevice) -> Self {
@@ -197,18 +234,41 @@ impl Kernel {
         let shader = Deferred::wgsl(device, "vector coverage", include_str!("coverage.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("vector coverage"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
         let pipeline = Deferred::compute(device, "vector coverage", &pipeline_layout, &shader, "main");
-        Self { layout, pipeline }
+        let resample_layout = crate::bindings::layout(device, "display image resample", &[
+            crate::bindings::buffer(0, stage, wgpu::BufferBindingType::Uniform, false, wgpu::BufferSize::new(64)),
+            crate::bindings::texture(1, stage, false),
+            crate::bindings::storage_texture(2, stage, wgpu::TextureFormat::Rgba32Float, wgpu::StorageTextureAccess::WriteOnly),
+        ]);
+        let resample_shader = Deferred::wgsl(device, "display image resample", include_str!("resample.wgsl"));
+        let resample_pipeline = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("display image resample"), bind_group_layouts: &[Some(&resample_layout)], immediate_size: 0 });
+        let resample = Deferred::compute(device, "display image resample", &resample_pipeline, &resample_shader, "main");
+        Self { layout, pipeline, resample_layout, resample }
     }
     pub fn pipeline(&self) -> &Deferred<wgpu::ComputePipeline> { &self.pipeline }
-    fn buffer(buffers: &mut [Option<wgpu::Buffer>; 4], device: &PipelineDevice, index: usize, size: u64) -> wgpu::Buffer {
-        let size = size.max(32).next_power_of_two();
-        if let Some(buffer) = &buffers[index] && buffer.size() >= size { return buffer.clone(); }
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some("vector coverage data"), size, usage: USAGES[index] | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        buffers[index] = Some(buffer.clone());
-        buffer
+    pub fn pipelines(&self) -> [&Deferred<wgpu::ComputePipeline>; 2] { [&self.pipeline, &self.resample] }
+}
+/// A display image whose texel (0, 0) starts at document `origin` and
+/// covers `side` document pixels.
+pub(crate) struct Placed<'a> { pub view: &'a wgpu::TextureView, pub origin: [i64; 2], pub side: u32 }
+impl Kernel {
+    /// Resample `source` through `inverse` into `size` texels of `output`,
+    /// starting at its texel `at`.
+    pub fn resample(&self, device: &PipelineDevice, encoder: &mut crate::submission::CommandEncoder, source: Placed<'_>, output: Placed<'_>,
+        at: [u32; 2], size: [u32; 2], inverse: layer_core::authored::Affine64) {
+        let [a, b, c, d, x, y] = inverse.0.map(|v| v as f32);
+        let values = [a, b, c, d, x, y, output.side as f32, source.side as f32, output.origin[0] as f32, output.origin[1] as f32, source.origin[0] as f32, source.origin[1] as f32]
+            .map(f32::to_bits).into_iter().chain([size[0], size[1], at[0], at[1]]);
+        let bytes: Vec<u8> = values.flat_map(u32::to_le_bytes).collect();
+        let uniform = wgpu::util::DeviceExt::create_buffer_init(&**device, &wgpu::util::BufferInitDescriptor { label: Some("display image resample"), contents: &bytes, usage: wgpu::BufferUsages::UNIFORM });
+        let binding = crate::bindings::group(device, "display image resample", &self.resample_layout, [uniform.as_entire_binding(),
+            wgpu::BindingResource::TextureView(source.view), wgpu::BindingResource::TextureView(output.view)]);
+        let pass = encoder.compute_pass();
+        pass.set_pipeline(&self.resample);
+        pass.set_bind_group(0, &binding, &[]);
+        pass.dispatch_workgroups(size[0].div_ceil(8), size[1].div_ceil(8), 1);
     }
-    #[expect(clippy::too_many_arguments, reason = "One dispatch binds its batch, scratch buffers, geometry and both textures")]
-    pub fn encode(&self, device: &PipelineDevice, encoder: &mut wgpu::CommandEncoder, uploads: &mut Uploads, scratch: &mut [Option<wgpu::Buffer>; 4], batch: &Batch, pool: &wgpu::Buffer,
+    #[expect(clippy::too_many_arguments, reason = "One dispatch binds its batch, the frame's batches, geometry and both textures")]
+    pub fn encode(&self, device: &PipelineDevice, encoder: &mut crate::submission::CommandEncoder, uploads: &mut Uploads, arena: &mut Arena, batch: &Batch, pool: &wgpu::Buffer,
         base: Option<(&wgpu::TextureView, [i32; 2])>, empty: &wgpu::TextureView, output: &wgpu::TextureView) -> Result<(), GpuRasterError> {
         if batch.tiles.is_empty() { return Ok(()); }
         let tiles = batch.tiles.len() as u32;
@@ -216,15 +276,20 @@ impl Kernel {
         let rows = tiles.div_ceil(columns);
         let base_origin = base.map_or([0; 2], |(_, origin)| origin);
         let params: [u32; 12] = [batch.size[0], batch.size[1], tiles, columns, u32::from(base.is_some()), 0, batch.origin[0] as i32 as u32, batch.origin[1] as i32 as u32, base_origin[0] as u32, base_origin[1] as u32, 0, 0];
-        let sizes = [48, batch.tiles.len() * 16, batch.commands.len().max(1) * 16, batch.colors.len().max(1) * 16];
-        let buffers: Vec<wgpu::Buffer> = (0..4).map(|i| Self::buffer(scratch, device, i, sizes[i] as u64)).collect();
-        write_words(uploads, encoder, &buffers[0], params.into_iter(), 12)?;
-        write_words(uploads, encoder, &buffers[1], batch.tiles.iter().flat_map(|t| t.map(|v| v as u32)), batch.tiles.len() * 4)?;
-        if !batch.commands.is_empty() { write_words(uploads, encoder, &buffers[2], batch.commands.iter().flatten().copied(), batch.commands.len() * 4)?; }
-        if !batch.colors.is_empty() { write_words(uploads, encoder, &buffers[3], batch.colors.iter().flatten().map(|v| v.to_bits()), batch.colors.len() * 4)?; }
-        let binding = crate::bindings::group(device, "vector coverage", &self.layout, buffers.iter().map(|b| b.as_entire_binding())
+        let sizes = [48, batch.tiles.len() as u64 * 16, batch.commands.len().max(1) as u64 * 16, batch.colors.len().max(1) as u64 * 16];
+        let starts: Vec<u64> = sizes.iter().scan(0, |at, size| { let start = *at; *at += size.next_multiple_of(ALIGNMENT); Some(start) }).collect();
+        let total = starts[3] + sizes[3];
+        let (buffer, offset) = arena.place(device, total)?;
+        uploads.write_mapped(encoder.prologue(), &buffer, offset, total, |mapped| {
+            fill_words(mapped, starts[0] as usize, params.into_iter());
+            fill_words(mapped, starts[1] as usize, batch.tiles.iter().flat_map(|t| t.map(|v| v as u32)));
+            fill_words(mapped, starts[2] as usize, batch.commands.iter().flatten().copied());
+            fill_words(mapped, starts[3] as usize, batch.colors.iter().flatten().map(|v| v.to_bits()));
+        })?;
+        let parts = (0..4).map(|i| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset: offset + starts[i], size: wgpu::BufferSize::new(sizes[i]) }));
+        let binding = crate::bindings::group(device, "vector coverage", &self.layout, parts
             .chain([pool.as_entire_binding(), wgpu::BindingResource::TextureView(base.map_or(empty, |(view, _)| view)), wgpu::BindingResource::TextureView(output)]).collect::<Vec<_>>());
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vector coverage"), timestamp_writes: None });
+        let pass = encoder.compute_pass();
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &binding, &[]);
         pass.dispatch_workgroups(columns, rows, 1);

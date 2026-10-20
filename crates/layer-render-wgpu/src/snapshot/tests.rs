@@ -78,6 +78,113 @@ fn package_previews_preserve_capture_color_alpha_sdr_and_source_only_fallback() 
     }
 }
 
+fn layered_pixel(layer: u32, [x, y]: [u32; 2]) -> [u8; 4] {
+    let on = |v: u32| if v.is_multiple_of(2) { 0 } else { 255 };
+    [on(x + layer), on(y + layer), on(x + y + layer / 2), if layer == 0 { 255 } else { (40 + (layer * 7 + x * 3 + y * 5) % 60) as u8 }]
+}
+fn layered_painting(extent: [u32; 2], layers: u32, mixed: bool) -> Document {
+    let mut document = Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames {paint:"Paint 0".into(),paper:"Paper".into()});
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color = DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::U8};
+    hide_paper(&mut document);
+    let color = document.composition().color;
+    let stack = document.composition().result;
+    let bottom = paint_id(&document);
+    let scalar = |value: u32| RasterTile::backed(TileBlob::encode(color.coverage_descriptor(), &[value as u8].repeat(65536)).unwrap());
+    for layer in 0..layers {
+        let kind = if mixed { layer % 4 } else { 0 };
+        if kind == 3 {
+            let image = layer_core::color::source::rgba8_source(extent.map(|v| v / 2), |x, y| [(x * 7 % 256) as u8, (y * 5 % 256) as u8, ((x ^ y) % 256) as u8, 160 + (layer % 64) as u8]);
+            let mut object = ImageObject::new(layer_core::authored::Image::new(image));
+            object.affine = Affine64([2., 0., 0., 2., 0., 0.]);
+            let handle = document.artwork.objects.insert(PortableId::random(), object).unwrap();
+            let occurrence = document.artwork.occurrences.insert(PortableId::random(), Occurrence::new(OccurrenceContent::Objects(handle), format!("Image {layer}"))).unwrap();
+            document.artwork.stacks.get_mut(stack).unwrap().entries.insert(0, occurrence);
+            continue;
+        }
+        let paint = if layer == 0 { bottom } else {
+            let paint = document.artwork.paint.insert(PortableId::random(), PaintSource {color_mode:Default::default(),domain:extent,raster:Default::default(),base:None,operations:Default::default()}).unwrap();
+            let occurrence = document.artwork.occurrences.insert(PortableId::random(), Occurrence::new(OccurrenceContent::Paint(paint), format!("Paint {layer}"))).unwrap();
+            document.artwork.stacks.get_mut(stack).unwrap().entries.insert(0, occurrence);
+            paint
+        };
+        let mut tiles: std::collections::BTreeMap<_, _> = page_coordinates(PixelRect::full(extent)).map(|c| (TileKey {plane:RasterPlane::Color,coordinate:c},
+            RasterTile::backed(TileBlob::encode(color.paint_descriptor(), &layered_pixel(layer, c).repeat(65536)).unwrap()))).collect();
+        let watercolor = (kind == 2).then_some(RasterWatercolor {wet_edge:0.5,burnt_edge:0.2,edge_width:4.});
+        if kind == 2 {
+            tiles.extend(page_coordinates(PixelRect::full(extent)).map(|c| (TileKey {plane:RasterPlane::WatercolorWetness,coordinate:c}, scalar(if (c[0] + c[1] + layer).is_multiple_of(3) { 2 } else { 177 }))));
+        }
+        document.artwork.paint.get_mut(paint).unwrap().raster = RasterRevision::backed(RasterData {tiles,watercolor});
+        if kind == 1 {
+            let coverage = document.artwork.coverage.next_handle();
+            let mut mask = layer_core::CoverageSnapshot::reveal_all(coverage, extent, if layer % 8 == 1 { [0, 0] } else { [13, -7] });
+            mask.source.default_coverage = 0.;
+            mask.source.raster = RasterRevision::backed(RasterData {watercolor:None,tiles:page_coordinates(PixelRect::full(extent))
+                .map(|c| (TileKey {plane:RasterPlane::Mask,coordinate:c}, scalar(55 + (layer * 7 + c[0] * 3 + c[1] * 5) % 200))).collect()});
+            assert_eq!(document.artwork.coverage.insert(PortableId::random(), mask.source).unwrap(), coverage);
+            refresh(&mut document);
+            let owner = document.scene().source_owner(SourceTarget::Paint(paint)).unwrap();
+            document.artwork.occurrences.get_mut(owner).unwrap().mask = Some(mask.use_);
+        }
+    }
+    refresh(&mut document);
+    document
+}
+
+#[test]
+fn package_previews_of_many_full_layers_match_their_composite() {
+    let (extent, layers) = ([4096, 3072], 20);
+    let document = layered_painting(extent, layers, false);
+    let checkpoint = CaptureCheckpoint {document:document.artwork.id,owner:document.owner,session_generation:0,artwork_generation:0,working_generation:0,edit_checkpoint:0};
+    let preview = gpu().package_preview(&document.artwork.capture(checkpoint).unwrap(), &AtomicBool::new(false)).expect("a preview within its memory budget");
+    assert_eq!(preview.preview.size(), [512, 384]);
+    let composite = |tile: [u32; 2]| (0..layers).fold([0.; 4], |below, layer| {
+        let pixel = layered_pixel(layer, tile).map(|code| f32::from(code) / 255.);
+        std::array::from_fn(|c| if c == 3 { pixel[3] } else { pixel[c] * pixel[3] } + below[c] * (1. - pixel[3]))
+    });
+    let pixels = (0..384u32).flat_map(|y| (0..512u32).map(move |x| [x / 32, y / 32])).map(composite).collect();
+    let expected = SnapshotPreview {extent:[512,384],space:RgbSpace::Srgb,pixels}.srgb_bytes().unwrap();
+    for (index, (actual, expected)) in preview.preview.pixels().as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0).enumerate() {
+        assert!(actual.iter().zip(expected).all(|(a, b)| a.abs_diff(*b) <= 1), "preview pixel {index}: {actual:?} != {expected:?}");
+    }
+}
+
+#[test]
+fn package_previews_of_masked_wet_and_object_layers_match_their_export() {
+    let document = layered_painting([2048, 1536], 48, true);
+    let checkpoint = CaptureCheckpoint {document:document.artwork.id,owner:document.owner,session_generation:0,artwork_generation:0,working_generation:0,edit_checkpoint:0};
+    let preview = gpu().package_preview(&document.artwork.capture(checkpoint).unwrap(), &AtomicBool::new(false)).expect("a preview within its memory budget");
+    assert_eq!(preview.preview.size(), [512, 384]);
+    let expected = capture(document).unwrap().preview_document([512; 2], RgbSpace::Srgb).unwrap().srgb_bytes().unwrap();
+    for (index, (actual, expected)) in preview.preview.pixels().as_chunks::<4>().0.iter().zip(expected.as_chunks::<4>().0).enumerate() {
+        assert!(actual.iter().zip(expected).all(|(a, b)| a.abs_diff(*b) <= 1), "preview pixel {index}: {actual:?} != {expected:?}");
+    }
+}
+
+#[test]
+fn snapshot_regions_plan_and_hold_the_same_memory_for_any_layer_count() {
+    let extent = [1024, 768];
+    let measure = |layers| {
+        let mut capture = capture(layered_painting(extent, layers, true)).unwrap();
+        let budget = capture.planned_pixel_bytes;
+        capture.planned_pixel_bytes = 0;
+        let Err(GpuRasterError::CaptureBudget {required, ..}) = capture.read_region([256, 256, 512, 256]) else { panic!("an unbudgeted region") };
+        capture.planned_pixel_bytes = budget;
+        let mut y = 0;
+        while y < extent[1] { y += capture.read_band(y).unwrap().0; }
+        let r = &capture.renderer;
+        let sources = r.source_tiles.borrow();
+        assert!(sources.gpu_bytes() <= sources.admitted_bytes().iter().sum::<u64>());
+        assert_eq!(r.paint_layers.iter().map(|layer| layer.pages.len() + layer.watercolor_wetness_pages.len()).sum::<usize>() + r.layer_masks.pages.len(), 0);
+        let scene = r.scene.as_ref().unwrap();
+        (required, scene.pool_bytes(), scene.scratch_bytes())
+    };
+    let ((required, pool, scratch), (many_required, many_pool, many_scratch)) = (measure(8), measure(48));
+    assert_eq!(required, many_required);
+    assert!(required <= super::package_preview::PREVIEW_PIXEL_BYTES, "{required} planned bytes");
+    assert_eq!(pool, many_pool);
+    assert!(many_scratch - scratch < 40 * 64 * 1024, "{scratch} -> {many_scratch} scratch bytes");
+}
+
 #[test]
 fn gaussian_all_sigmas_export_png_with_valid_opaque_and_partial_coverage() {
     let extent=[33,17];

@@ -181,6 +181,10 @@ pub(super) fn capture_targets(scene: SceneView<'_>, scope: &SceneScope) -> Vec<S
     }).collect()
 }
 
+fn nesting(scene: SceneView<'_>) -> u64 {
+    scene.order().iter().map(|&h| std::iter::successors(Some(h), |&h| scene.evaluation_parent(h)).count()).max().unwrap_or(0) as u64
+}
+
 pub struct SnapshotRenderer {
     scene: Arc<SceneSnapshot>,
     scope: SceneScope,
@@ -340,6 +344,7 @@ impl SnapshotRenderer {
         }
         control.check()?;
         let mut renderer = WgpuRasterizer::native_capture_on_gpu(gpu.adapter.clone(), gpu.device.clone(), gpu.queue.clone(), color)?;
+        if let Some(native) = renderer.native_edit.as_mut() { native.color_cache_bytes = 0; }
         if gpu.device.working_space() == color.space && gpu.device.hdr() == color.depth.is_float() {
             renderer.scene_pipelines = gpu.scene_pipelines.clone(); renderer.scene = None;
             renderer.transforms = Some(paint_transform::PaintTransforms::from_recipes(&gpu.transforms));
@@ -627,18 +632,19 @@ impl SnapshotRenderer {
         let view = self.scene.view().with_scope(&self.scope).with_offset(self.offset);
         let window = scene::Scene::capture_window(view, region, self.extent);
         // Composition operates in page-sized tiles, including translated masks
-        // and neighboring watercolor pigment. Restore their complete footprints.
+        // and neighboring watercolor pigment. Select their complete footprints.
         let mut selected = HashMap::new();
         let mut masks = HashMap::new();
         let material_pages = if self.backing.values().any(|data| data.watercolor.is_some()) {
             scene::Scene::MATERIAL_CACHE_PAGES as u64
         } else { 0 };
-        let mut planned = scene::Scene::capture_image_bound(view, region)
+        let cold = !matches!(self.scope, SceneScope::Raw(_));
+        let mut planned = scene::Scene::capture_plan_bound(&self.renderer, view, region)
             .saturating_add(scene::Scene::geometry_bytes(self.renderer.scene.as_ref()))
             .saturating_add(reserved_bytes)
             .saturating_add(self.renderer.analysis_bytes())
             .saturating_add(region.area().saturating_mul(32)) // output and mapping
-            .saturating_add((view.order().len() as u64 * 3 + 32 + material_pages) * 256 * 256 * 16);
+            .saturating_add((nesting(view) * 3 + 32 + material_pages) * 256 * 256 * 16);
         for id in self.backing.keys().copied() {
                 let mask = id.is_coverage();
                 let extent = view.target_extent(id);
@@ -668,15 +674,8 @@ impl SnapshotRenderer {
                         .map(|(k, t)| (*k, t.clone()))
                         .collect(),
                 };
-                for key in data.tiles.keys() {
-                    planned = planned.saturating_add(
-                        256 * 256
-                            * match key.plane {
-                                RasterPlane::Color => 32,
-                                RasterPlane::WatercolorWetness => 16,
-                                _ => 8,
-                            },
-                    );
+                for key in data.tiles.keys().filter(|key| !cold && key.plane != RasterPlane::Color) {
+                    planned = planned.saturating_add(256 * 256 * if key.plane == RasterPlane::WatercolorWetness { 16 } else { 8 });
                 }
                 selected.insert(id, data);
         }
@@ -723,11 +722,11 @@ impl SnapshotRenderer {
             for tile in data.tiles.values() {
                 tile.wait_backing_cancellable(self.control.cancellation_flag()).map_err(GpuRasterError::Color)?;
             }
-            r.restore_raster(
-                *id,
-                self.resident.get(id).unwrap_or(&RasterData::default()),
-                data,
-            )?;
+            if cold {
+                r.publish_cold_raster(*id, &Arc::new(data.clone()))?;
+            } else {
+                r.restore_live_raster(*id, self.resident.get(id).unwrap_or(&RasterData::default()), &Arc::new(data.clone()))?;
+            }
             // Restoration is atomic per target. Keep the cache index current
             // even if a later target fails or this worker is cancelled.
             self.resident.insert(*id, data.clone());

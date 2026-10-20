@@ -282,6 +282,8 @@ pub struct GpuRasterMetrics {
     /// sample and one for each load.
     pub display_reduction_reads: u64,
     pub frame_composited_pages: Vec<(u32, [u32; 2])>,
+    /// 16-pixel tiles the vector coverage kernel drew.
+    pub vector_tiles: u64,
     pub paint_pages: u64,
     pub preview_pages: u64,
     pub destination_companion_pages: u64,
@@ -893,7 +895,11 @@ pub struct WgpuRasterizer {
     vector_motion: Option<layer_render::VectorMotion>,
     vector_motion_drawn: Option<(layer_render::VectorMotion, DocRect)>,
     vector_motion_damage: Vec<DocRect>,
+    vector_exclusion_damage: Vec<DocRect>,
     vector_motion_split: Option<scene::MotionSplit>,
+    vector_selection: Option<layer_core::authored::VectorItemSelection>,
+    vector_selection_changed: bool,
+    vector_prepared: Option<(scene::Prepared, layer_core::authored::vector::VectorObject, [f64; 2])>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -949,7 +955,7 @@ pub struct WgpuRasterizer {
     composite_damage: PixelRect,
     /// The composite's blend space, from the latest frame.
     blend_space: layer_core::BlendSpace,
-    filter_previews: Option<scene::FilterPreviews>,
+    filter_previews: Option<Box<scene::FilterPreviews>>,
     effect_validation: Option<effect_validation::Pending>,
     validated_effects: Option<effects::Effects>,
     layer_style_records: std::collections::HashMap<OccurrenceHandle, u32>,
@@ -1286,7 +1292,11 @@ impl WgpuRasterizer {
             vector_motion: None,
             vector_motion_drawn: None,
             vector_motion_damage: Vec::new(),
+            vector_exclusion_damage: Vec::new(),
             vector_motion_split: None,
+            vector_selection: None,
+            vector_selection_changed: false,
+            vector_prepared: None,
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -1480,13 +1490,13 @@ impl WgpuRasterizer {
     }
     fn vector_motion_moved(&self) -> Option<(DocRect, DocRect)> {
         let (motion, bounds) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
-        Some((*bounds, DocRect { min: [0, 1].map(|i| (bounds.min[i] as f64 + motion.offset[i]).floor() as i64 - 2), max: [0, 1].map(|i| (bounds.max[i] as f64 + motion.offset[i]).ceil() as i64 + 2) }))
+        Some((*bounds, scene::moved_bounds(motion.transform, *bounds).expand(2)))
     }
     pub(crate) fn vector_motion_region(&self, extent: [u32; 2]) -> Option<PixelRect> {
         let (bounds, moved) = self.vector_motion_moved()?;
         Some(DocRect { min: bounds.min.map(|v| v - 2), max: bounds.max.map(|v| v + 2) }.union(moved).in_frame(extent))
     }
-    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;20],DocRect)> {
+    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;24],DocRect)> {
         let (motion, _) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
         let (_, moved) = self.vector_motion_moved()?;
         let region = self.vector_motion_region(self.document_extent)?;
@@ -1496,9 +1506,9 @@ impl WgpuRasterizer {
         let [w, h] = size.map(|v| v as f32);
         let [sx, sy] = plan.doc_bounds.min.map(|v| v as f32);
         let [sw, sh] = plan.size.map(|v| v as f32);
-        let offset = motion.offset.map(|v| v as f32);
+        let [a, b, c, d, tx, ty] = motion.transform.inverse()?.0.map(|v| v as f32);
         let [rx0, ry0, rx1, ry1] = [region.min_x(), region.min_y(), region.max_x(), region.max_y()].map(|v| v as f32);
-        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., offset[0], offset[1], w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0., rx0, ry0, rx1, ry1], moved))
+        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., tx, ty, w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0., rx0, ry0, rx1, ry1, a, b, c, d], moved))
     }
     pub(crate) fn display_placement(&self)->[f32;20] {
         self.display_backup.as_ref().map_or_else(||self.scale_display.as_ref().unwrap().placement_values(),|backup|backup.placement)
@@ -3474,6 +3484,9 @@ impl CanvasRenderer for WgpuRasterizer {
     fn max_document_dimension(&self) -> u32 {
         self.device.limits().max_texture_dimension_2d
     }
+    fn region_fits(&self, extent: [u32; 2]) -> bool {
+        flood::fits(extent, &self.device.limits())
+    }
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple"))]
     fn memory_headroom(&self) -> Option<u64> {
         crate::display_memory::device_headroom(&self.device)
@@ -3492,6 +3505,7 @@ impl CanvasRenderer for WgpuRasterizer {
         transforms_ready && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
             && self.brush_batches_ready(packet)
             && self.raster_restore_ready(packet) && self.bake_analyses_ready(packet) && self.retouch_analyses_ready(packet)
+            && self.bake_vectors_ready(packet)
     }
     fn has_pending_submission(&self) -> bool { self.settling.is_some() }
     fn poll_pending(&mut self, view: layer_render::ViewState) -> Result<(), Self::Error> {
@@ -3641,6 +3655,11 @@ impl CanvasRenderer for WgpuRasterizer {
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
     fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
         self.vector_preview = preview;
+    }
+    fn set_vector_selection(&mut self, selection: Option<&layer_core::authored::VectorItemSelection>) {
+        let changed = selection.map(|s| (s.layer, Arc::as_ptr(&s.items))) != self.vector_selection.as_ref().map(|s| (s.layer, Arc::as_ptr(&s.items)));
+        self.vector_selection_changed |= changed;
+        if changed { self.vector_selection = selection.cloned(); }
     }
     fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) {
         self.vector_motion = motion;
@@ -3892,6 +3911,7 @@ impl WgpuRasterizer {
         if !self.background_ready.load(std::sync::atomic::Ordering::Acquire) && !self.navigator.pending()
             && !self.moving_images_pending()
             && !self.object_deferred && !self.scene.as_ref().is_some_and(|scene| scene.objects_pending())
+            && !self.scale_display.as_ref().is_some_and(scene::scale::Cache::approximating)
             && packet.commit_rasters && !packet.composite_all && !packet.reset_layers && packet.restore_rasters.is_empty()
             && packet.dabs.is_empty() && packet.dab_batches.is_empty()
             && settled_commit.is_none() && self.transform_preview.is_none()
@@ -3899,6 +3919,7 @@ impl WgpuRasterizer {
             && self.moving_layer.is_none() && self.moving_pixels.is_none()
             && self.vector_preview.as_ref().map(|p| (p.owner, p.revision)) == self.vector_preview_shown.map(|(owner, revision, _)| (owner, revision))
             && self.vector_motion.as_ref() == self.vector_motion_drawn.as_ref().map(|(motion, _)| motion)
+            && !self.vector_selection_changed
             && self.artwork_frame.as_ref().is_some_and(|frame|
                 frame.view == packet.view && frame.same_artwork(packet))
         { return Ok(()); }
@@ -3940,15 +3961,22 @@ impl WgpuRasterizer {
             self.vector_preview_drawn = self.vector_preview.clone();
         }
         self.vector_motion_damage.clear();
+        self.vector_exclusion_damage.clear();
         let motion_changed = self.vector_motion.as_ref() != self.vector_motion_drawn.as_ref().map(|(motion, _)| motion);
         if motion_changed {
+            let same = |a: &layer_render::VectorMotion, owner: OccurrenceHandle, items: &Arc<std::collections::BTreeSet<layer_core::authored::vector::ItemId>>| a.owner == owner && Arc::ptr_eq(&a.items, items);
             let drawn = self.vector_motion.as_ref().map(|motion| {
-                let unchanged = self.vector_motion_drawn.as_ref().filter(|(old, _)| old.owner == motion.owner && Arc::ptr_eq(&old.items, &motion.items));
-                (motion.clone(), unchanged.map_or_else(|| scene::motion_bounds(packet.scene, motion), |(_, bounds)| *bounds))
+                let unchanged = self.vector_motion_drawn.as_ref().filter(|(old, _)| same(old, motion.owner, &motion.items)).map(|(_, bounds)| *bounds)
+                    .or_else(|| self.vector_prepared.as_ref().filter(|((_, (owner, items), _), ..)| same(motion, *owner, &items.0)).map(|((_, _, bounds), ..)| *bounds));
+                (motion.clone(), unchanged.unwrap_or_else(|| scene::motion_bounds(packet.scene, motion.owner, &motion.items)))
             });
+            let moving = |drawn: &Option<(layer_render::VectorMotion, DocRect)>| drawn.as_ref().map(|(motion, _)| (motion.owner, Arc::as_ptr(&motion.items)));
+            if moving(&drawn) != moving(&self.vector_motion_drawn) {
+                self.vector_exclusion_damage.extend(self.vector_motion_drawn.iter().chain(&drawn).map(|(_, bounds)| *bounds));
+            }
             let split = drawn.as_ref().and_then(|(motion, _)| scene::motion_split(packet.scene, motion.owner));
             let moved = |drawn: &Option<(layer_render::VectorMotion, DocRect)>, presented: bool| drawn.iter().filter(move |_| !presented)
-                .map(|(motion, bounds)| bounds.translated(scene::motion_shift(motion, 0))).map(|bounds| DocRect { min: bounds.min.map(|v| v - 64), max: bounds.max.map(|v| v + 64) }).collect::<Vec<_>>();
+                .map(|(motion, bounds)| scene::moved_bounds(motion.transform, *bounds).expand(64)).collect::<Vec<_>>();
             for bounds in moved(&self.vector_motion_drawn, self.vector_motion_split.is_some()).into_iter().chain(moved(&drawn, split.is_some())) {
                 let rect = bounds.in_frame(packet.document_extent);
                 if !rect.is_empty() { self.vector_motion_damage.push(bounds); self.document_damage.push(rect); }
@@ -3956,6 +3984,12 @@ impl WgpuRasterizer {
             self.vector_motion_drawn = drawn;
             self.vector_motion_split = split;
         }
+        let prepared = self.vector_selection.as_ref().filter(|_| self.vector_motion.is_none())
+            .and_then(|selection| scene::prepared(packet.scene, selection, self.vector_prepared.as_ref()));
+        let key = |prepared: &Option<(scene::Prepared, layer_core::authored::vector::VectorObject, [f64; 2])>| prepared.as_ref().map(|((_, moving, bounds), ..)| (moving.clone(), *bounds));
+        let prepared_changed = key(&prepared) != key(&self.vector_prepared);
+        self.vector_prepared = prepared;
+        self.vector_selection_changed = false;
         let packet = FramePacket { composite_all: packet.composite_all && object_damage.is_none(), ..packet };
         self.metrics.frame_composited_pages.clear();
         if let Some(t) = &mut self.transforms {
@@ -3982,6 +4016,7 @@ impl WgpuRasterizer {
         let requested_view = packet.view;
         if let Some(scene) = &mut self.scene {
             scene.begin_frame();
+            scene.restart_vector_uploads();
         }
         let original_batches = packet.dab_batches;
         let filtered: std::borrow::Cow<'_, [DabBatch]> = if original_batches
@@ -4010,7 +4045,7 @@ impl WgpuRasterizer {
         self.validate_and_prepare_brush_resources(packet.dab_batches)?;
         let blending_changed = std::mem::replace(&mut self.blend_space, packet.blend_space) != packet.blend_space;
         let same_artwork = self.artwork_frame.as_ref().is_some_and(|frame| frame.same_artwork(packet));
-        let unchanged = !preview_changed && !motion_changed && same_artwork;
+        let unchanged = !preview_changed && !motion_changed && !prepared_changed && same_artwork;
         let motion_held = self.vector_motion_split.is_some();
         let navigator_unchanged = !preview_changed && (!motion_changed || motion_held) && same_artwork;
         if packet.commit_rasters && (!unchanged || packet.composite_all || packet.reset_layers || self.object_deferred
@@ -4777,7 +4812,8 @@ impl WgpuRasterizer {
         // Newly populated display pages change visible pixels too, even when
         // the document itself did not change (for example after navigation).
         let mut evaluated_objects = false;
-        if !dirty.is_empty() || animated || display_rebuilt || !unchanged || self.object_deferred || self.scene.as_ref().is_some_and(|scene| scene.objects_pending()) {
+        if !dirty.is_empty() || animated || display_rebuilt || !unchanged || self.object_deferred || self.scene.as_ref().is_some_and(|scene| scene.objects_pending())
+            || self.scale_display.as_ref().is_some_and(scene::scale::Cache::approximating) {
             let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
             // A moved target's damage is stored in image coordinates. Round to
             // scene tiles after applying the target's document translation.

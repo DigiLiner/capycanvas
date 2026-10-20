@@ -25,6 +25,7 @@ impl LevelGeometry {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct Frame { pub scale: f64, pub origin: [f64; 2], pub clip: [i32; 4] }
 impl Frame {
     fn map(&self, p: [f64; 2]) -> [f64; 2] { [(p[0] + self.origin[0]) * self.scale, (p[1] + self.origin[1]) * self.scale] }

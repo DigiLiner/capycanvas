@@ -352,6 +352,9 @@ impl ObjectSampler {
     }
     pub(crate) fn uniform(device:&PipelineDevice)->wgpu::Buffer {sampling_uniform(device)}
     pub(crate) fn create(&self,device:&PipelineDevice,request:SamplingRequest,output:&wgpu::TextureView,empty:&wgpu::TextureView,uniform:&wgpu::Buffer) -> Result<ObjectAccumulator,GpuRasterError> {
+        self.reuse(device,None,request,output,empty,uniform)
+    }
+    pub(crate) fn reuse(&self,device:&PipelineDevice,previous:Option<ObjectAccumulator>,request:SamplingRequest,output:&wgpu::TextureView,empty:&wgpu::TextureView,uniform:&wgpu::Buffer) -> Result<ObjectAccumulator,GpuRasterError> {
         let SamplingRequest {inverse,size,nearest}=request;
         let (stretch,bytes)=admission(inverse,size,nearest,device.limits().max_storage_buffer_binding_size)?;
         let radius=[stretch[0]+stretch[1].abs(),stretch[2]+stretch[1].abs()];
@@ -362,9 +365,10 @@ impl ObjectSampler {
         let mut data = [0u8;112];
         for (i,value) in [a,c,tx-anchor[0] as f64,0.,b,d,ty-anchor[1] as f64,0.,stretch[2]/determinant,-stretch[1]/determinant,stretch[0]/determinant,0.,radius[0],radius[1],f64::from(nearest),f64::from(stretch==[1.,0.,1.])].into_iter().enumerate() { let value=if nearest && i<8 {0.} else {value};data[i*4..i*4+4].copy_from_slice(&(value as f32).to_le_bytes()); }
         for (i,value) in size.into_iter().enumerate() { data[80+i*4..84+i*4].copy_from_slice(&value.to_le_bytes()); }
-        let buffer=device.create_buffer(&wgpu::BufferDescriptor {label:Some("image-object sampling accumulation"),size:bytes,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+        let (kept,kept_coordinates)=previous.map_or((None,None),|previous|(Some(previous.buffer),previous.coordinates));
+        let buffer=kept.filter(|buffer|buffer.size()>=bytes).unwrap_or_else(||device.create_buffer(&wgpu::BufferDescriptor {label:Some("image-object sampling accumulation"),size:bytes,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false}));
         let uniform=uniform.clone();
-        let coordinates=nearest.then(||device.create_buffer(&wgpu::BufferDescriptor {label:Some("image-object nearest coordinates"),size:bytes/4,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false}));
+        let coordinates=nearest.then(||kept_coordinates.filter(|buffer|buffer.size()>=bytes/4).unwrap_or_else(||device.create_buffer(&wgpu::BufferDescriptor {label:Some("image-object nearest coordinates"),size:bytes/4,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false})));
         Ok(ObjectAccumulator {buffer,coordinates,coordinates_uploaded:Default::default(),uniform,binding:Default::default(),contribution:Default::default(),output:output.clone(),empty:empty.clone(),inverse,size,stretch,data,nearest})
     }
     pub(crate) fn set_nearest_coordinates(&self,encoder:&mut crate::submission::CommandEncoder,uploads:&mut crate::Uploads,acc:&ObjectAccumulator,first:u32,bytes:&[u8])->Result<(),GpuRasterError> {

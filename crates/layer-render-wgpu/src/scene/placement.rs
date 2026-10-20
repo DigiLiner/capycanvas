@@ -31,11 +31,11 @@ pub(super) struct PlacementJob {
 impl Scene {
     pub(crate) const MATERIAL_CACHE_PAGES: usize = 64;
 
-    pub(super) fn mask_at(&mut self, r: &WgpuRasterizer, mask: &MaskUse, source: &CoverageSource, offset: [i64; 2], tile: [u32; 2]) -> usize {
+    pub(super) fn mask_at(&mut self, r: &WgpuRasterizer, mask: &MaskUse, source: &CoverageSource, offset: [i64; 2], tile: [u32; 2]) -> Result<usize, GpuRasterError> {
         self.mask_tile_input(r, mask, source, offset, tile, None)
     }
 
-    pub(super) fn command_mask_at(&mut self, r: &WgpuRasterizer, coverage: &layer_core::CoverageSnapshot, tile: [u32; 2], command: layer_masks::CommandCoverage) -> usize {
+    pub(super) fn command_mask_at(&mut self, r: &WgpuRasterizer, coverage: &layer_core::CoverageSnapshot, tile: [u32; 2], command: layer_masks::CommandCoverage) -> Result<usize, GpuRasterError> {
         self.mask_tile_input(r, &coverage.use_, &coverage.source, coverage.use_.offset, tile, Some(command))
     }
 
@@ -179,15 +179,23 @@ impl Scene {
                 _ => None,
             }) };
             if let Some(view) = view { return Ok((Some(ColorInput { view: view.clone(), lease: None }), None)); }
-            if let Some(blob) = r.native_plane_tile(source, plane, c)? {
-                let space = r.document_color().space;
-                let (tile, pending) = r.source_tiles.borrow_mut().plan_raster(r, &blob, space, space)?;
-                if let Some(pending) = pending { scene.enqueue_source_decode(pending); }
-                let lease = r.source_tiles.borrow().lease(&tile.view);
-                return Ok((Some(ColorInput { view: tile.view, lease }), None));
-            }
-            Ok((None, None))
+            Ok((scene.cold_plane(r, source, plane, c)?, None))
         })
+    }
+
+    pub(super) fn cold_plane(&mut self, r: &WgpuRasterizer, id: SourceTarget, plane: layer_core::raster::RasterPlane, c: [u32; 2]) -> Result<Option<ColorInput>, GpuRasterError> {
+        let Some(blob) = r.native_plane_tile(id, plane, c)? else { return Ok(None); };
+        let space = r.document_color().space;
+        let (tile, pending) = r.source_tiles.borrow_mut().plan_raster(r, &blob, space, space)?;
+        if let Some(pending) = pending { self.enqueue_source_decode(pending); }
+        let lease = r.source_tiles.borrow().lease(&tile.view);
+        Ok(Some(ColorInput { view: tile.view, lease }))
+    }
+
+    pub(super) fn mask_page(&mut self, r: &WgpuRasterizer, id: SourceTarget, tile: [u32; 2]) -> Result<Option<wgpu::TextureView>, GpuRasterError> {
+        if let Some(page) = r.layer_masks.pages.get(&(id, tile)) { return Ok(Some(page.view.clone())); }
+        if !r.snapshot_worker { return Ok(None); }
+        Ok(self.cold_plane(r, id, layer_core::raster::RasterPlane::Mask, tile)?.map(|input| input.view))
     }
 
     /// Document page `tile` of a paint layer whose pixel (0, 0) lies `offset`

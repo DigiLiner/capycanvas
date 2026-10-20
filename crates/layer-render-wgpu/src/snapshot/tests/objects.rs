@@ -60,15 +60,19 @@ fn deferred_object_snapshot_retries_preserve_filtered_windows_and_histogram() {
 }
 
 #[test]
-fn cancelled_deferred_object_drain_keeps_output_unpublished() {
+fn cancelled_object_captures_keep_output_unpublished() {
     let doc = document();
+    let mut live = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    live.ensure_document_metadata([32; 2], doc.scene()).unwrap();
+    let (texture, _) = create_color_target(&live.device, [32; 2], "cancelled object capture");
+    let mut scene = live.scene.take().unwrap_or_else(|| scene::Scene::new(&live).unwrap());
+    let mut encoder = submission::CommandEncoder::new(&live.device, &Default::default());
+    assert!(matches!(scene.capture_region(&mut live, packet(doc.scene(), [32; 2]), &texture, PixelRect::full([32; 2]), scene::Output::Artwork(None), &mut encoder), Err(GpuRasterError::DeferredObjectWork)));
+    live.snapshot_cancelled = Some(Arc::new(AtomicBool::new(true)));
+    assert!(matches!(pollster::block_on(scene.drain_exact_objects_async(&mut live)), Err(GpuRasterError::Color(message)) if message == "Snapshot capture cancelled"));
     let mut reader = capture(doc).unwrap();
-    let (r, packet, region, mut encoder) = reader.prepare_region_gpu([0, 0, 32, 32], 0).unwrap();
-    let (texture, _) = create_color_target(&r.device, [32; 2], "cancelled object capture");
-    let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r).unwrap());
-    assert!(matches!(scene.capture_region(r, packet, &texture, region, scene::Output::Artwork(None), &mut encoder), Err(GpuRasterError::DeferredObjectWork)));
-    r.snapshot_cancelled.as_ref().unwrap().store(true, Ordering::Relaxed);
-    assert!(matches!(pollster::block_on(scene.drain_exact_objects_async(r)), Err(GpuRasterError::Color(message)) if message == "Snapshot capture cancelled"));
+    reader.control().cancel();
+    assert!(reader.read_region([0, 0, 32, 32]).is_err());
     assert_eq!(reader.control.output_rows(), 0);
 }
 

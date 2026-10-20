@@ -73,7 +73,7 @@ impl WgpuRasterizer {
     }
 
     /// Live reconciliation may keep cold color in its original integer backing.
-    /// Standalone snapshot callers still restore their explicitly selected pages.
+    /// Snapshots have no color cache, so all of their color stays there.
     pub(crate) fn restore_live_raster(
         &mut self,
         target: SourceTarget,
@@ -132,6 +132,14 @@ impl WgpuRasterizer {
             return Ok(());
         }
         self.restore_raster(target, previous, data)
+    }
+
+    pub(crate) fn publish_cold_raster(&mut self, target: SourceTarget, data: &Arc<RasterData>) -> Result<(), GpuRasterError> {
+        let mask = !self.paint_layers.iter().any(|l| l.id == target);
+        data.validate_storage_index(self.target_extent(target), mask, self.document_color()).map_err(GpuRasterError::Effect)?;
+        self.restore_raster(target, &RasterData::default(), &RasterData { watercolor: data.watercolor, tiles: Default::default() })?;
+        if let Some(native) = &mut self.native_edit { native.backing.insert(target, data.clone()); }
+        Ok(())
     }
 
     /// Retire disposable blend scratch, then evict completed canonical color.

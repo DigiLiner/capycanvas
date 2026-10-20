@@ -90,20 +90,27 @@ creating new closed regions. Source pixels are never changed by discovery.
 
 `RegionRequest::enclosure` uses the existing GPU classification and connected
 component pipeline. Classification covers the source before the enclosure is
-applied; an extra pass marks exterior components. The coverage buffer holds these
-flags until the selected components are packed. The shared asynchronous region
+applied; an extra pass marks exterior components. The shared asynchronous region
 queue owns source snapshots, cancellation, stale-result rejection and publication.
 No canvas pixels are read back to classify regions. Like Bucket, component
-labeling needs four bytes per canvas pixel in one storage binding. A 128 MiB
-binding limit admits at most 33,554,432 pixels; the 9504 × 6336 target canvas
-exceeds that limit even when the loop is small.
+labeling ([`flood.rs`](../../crates/layer-render-wgpu/src/flood.rs)) labels one
+window of at most 2048 × 2048 pixels at a time, keeps labels and exterior flags
+only for the windows' border pixels, joins components across window edges, then
+labels each window again to pack the components it keeps. Beyond the window,
+memory grows with the canvas by one bit per pixel for the eligibility planes and
+four bits for the coverage. A region whose planes or coverage exceed the device's
+storage binding (about 268 million pixels for 128 MiB) is refused with a notice
+before anything is allocated (`CanvasRenderer::region_fits`).
 
 ## Verification
 
 - Enclosure tests: shared `enclose_fill_checks` covers source defaults, geometry,
   selection clipping, cancellation and history. GPU `layer_tests::enclose_fill`
   compares complete masks with an independent component oracle, including partial
-  enclosures, canvas edges, alpha thresholds, gap closing and expansion.
+  enclosures, canvas edges, alpha thresholds, gap closing and expansion; on a
+  device with 4 MiB storage bindings it checks seed, enclosed and global regions
+  labeled across windows, and that a region too large for the device is refused
+  while the renderer keeps working.
 - Shared UI tests cover geometry, transforms, fixed size/ratio, modifier keys,
   empty gestures, polygon editing, cancel/focus loss, undo/redo, workspace memory,
   stale color results, sources, and platform gating.
