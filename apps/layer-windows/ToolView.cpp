@@ -103,7 +103,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
                     image.Source(Imaging::BitmapImage(asset(L"brush-previews/"+std::to_wstring(int(preview.GetNumber()))+L"-"+std::wstring(data->theme().c_str())+L".png")));
                     Border frame;frame.CornerRadius({3,3,3,3});frame.Child(image);content.Children().Append(frame);
                 }
-                auto caption=toolLabel(data,item,true,brush,&title);
+                auto caption=toolLabel(data,item,true,brush,&title);twoLines(title);
                 Grid::SetRow(caption,1);content.Children().Append(caption);pick.Content(content);
             }
             buttons.push_back(pick);titles.push_back(title);if(group)groups.Children().Append(pick);else list.Children().Append(pick);

@@ -50,6 +50,41 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     const label=await state(`s.notice.actions.find(a=>a.id===${JSON.stringify(id)}).label`);
     await click(byText('.canvas-notice-action',label));
   };
+  const shown=selector=>`[...document.querySelectorAll(${JSON.stringify(selector)})].some(n=>n.checkVisibility()&&n.getBoundingClientRect().width>0)`;
+  const headerTool=async match=>`document.querySelector('[data-header-item="${await state(`s.workspace.layout.header.zones.flat().find(e=>${match}).id`)}"] .header-tool')`;
+  const steady=async selector=>{
+    const end=Date.now()+20000;let last=null;
+    for(;;){
+      const now=await state(`(n=>n&&JSON.stringify(n.getBoundingClientRect()))([...document.querySelectorAll(${JSON.stringify(selector)})].find(n=>n.checkVisibility()))`);
+      if(now&&now===last)return;
+      assert.ok(Date.now()<end,`${selector} keeps moving`);
+      last=now;await new Promise(r=>setTimeout(r,100));
+    }
+  };
+  const inDrawer=async(match,selector,name,act)=>{
+    const drawer=!(await state(shown(selector)));
+    if(drawer){await click(await headerTool(match));await until(`the drawer for ${name}`,shown(selector));await steady(selector);}
+    await act();
+    if(drawer){await click(await headerTool(match));await until(`the drawer for ${name} closes`,`!${shown(selector)}`);}
+  };
+  const fromDrawer=(match,selector,name,done)=>inDrawer(match,selector,name,async()=>{
+    await click(`[...document.querySelectorAll(${JSON.stringify(selector)})].find(n=>n.checkVisibility())`);
+    await until(name,done);
+  });
+  const layersPanel='e.item.control?.panel==="layers"';
+  const newVectorLayer=(label,name)=>fromDrawer(layersPanel,`.layer-footer [aria-label=${JSON.stringify(label)}]`,name,activeVector);
+  const greenThumbnail=(id,name)=>inDrawer(layersPanel,`[data-layer="${id}"] .layer-thumbnail canvas`,`the thumbnail of layer ${id}`,async()=>{
+    const end=Date.now()+30000;let seen;
+    do{
+      seen=await evaluate(`(()=>{const layer=layerApp.state().layers.find(l=>Number(l.id)===${id}),c=document.querySelector('[data-layer="${id}"] .layer-thumbnail canvas');if(!layer||!c)return null;
+        const d=c.getContext('2d',{willReadFrequently:true}).getImageData(0,0,c.width,c.height).data;let green=0;for(let i=0;i<d.length;i+=4)if(d[i+3]>128&&d[i+1]-Math.max(d[i],d[i+2])>40)green++;
+        return{green,revision:c.dataset.previewRevision,paint:String(layer.paint_revision)}})()`);
+      if(seen?.green>0)break;
+      await new Promise(r=>setTimeout(r,100));
+    }while(Date.now()<end);
+    await capture(`milestone-${name}-thumbnail`);
+    assert.ok(seen?.green>0,`${name}: the filled layer's thumbnail shows no fill ${JSON.stringify(seen)}`);
+  });
   const [pencil,gpen]=[await brush('Pencil'),await brush('G-Pen')];
   for(const theme of ['light','dark']){
     await send({type:'set_theme',theme});
@@ -59,8 +94,7 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await send({type:'select_brush',id:pencil});
     await send({type:'set_brush_size',value:16});
     const label=await evaluate('layerApp.app.catalog().native_copy.layers.new_vector_layer');
-    await click(`document.querySelector('[aria-label=${JSON.stringify(label)}]')`);
-    await until('the footer makes a vector layer',activeVector);
+    await newVectorLayer(label,'the footer makes a vector layer');
     assert.equal(await state('s.brush.preset'),gpen,'a pen that draws paths is chosen');
     await send({type:'set_brush_size',value:16});
     await stroke(line([400,300],[900,330]));
@@ -82,20 +116,20 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await stroke(line([400,700],[900,730]));
     await expect(`${theme} pencil on paint`,[650,715],marked);
 
-    await click(`document.querySelector('[aria-label=${JSON.stringify(label)}]')`);
-    await until('another vector layer',activeVector);
+    await newVectorLayer(label,'another vector layer');
     await tool({figure:{shape:'ellipse',paint:'outline'}});
     await stroke(line([1100,300],[1400,500],8));
     await send({type:'set_color',rgba:[.15,.7,.25,1]});
     await tool({region:{fill:true,source:'visible'}});
     await tap([1250,400]);
     await expect(`${theme} filled inside the outline`,[1250,450],green);
+    const unfilled=await state('s.layers.map(l=>Number(l.id))');
     await tap([1600,900]);
     await expect(`${theme} filled below the lines`,[1600,960],green);
+    await greenThumbnail(await state(`Number(s.layers.find(l=>!${JSON.stringify(unfilled)}.includes(Number(l.id))).id)`),`${theme}-fill-below`);
     await capture(`milestone-${theme}-color`);
     await send({type:'set_color',rgba:[.1,.1,.12,1]});
-    await click(`document.querySelector('[aria-label=${JSON.stringify(label)}]')`);
-    await until('a vector layer for crossing lines',activeVector);
+    await newVectorLayer(label,'a vector layer for crossing lines');
     await invoke('pen');
     await send({type:'select_brush',id:gpen});
     await send({type:'set_brush_size',value:16});
@@ -108,8 +142,7 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await invoke('eraser');
     await send({type:'set_brush_size',value:16});
     const intersection=await evaluate('layerApp.state().commands.find(c=>c.id==="erase_to_intersection").label');
-    await click(`document.querySelector('[data-tool-choice=${JSON.stringify(intersection)}]')`);
-    await until('Erase up to intersection','s.commands.find(c=>c.id==="erase_to_intersection").selected');
+    await fromDrawer('e.item.control?.command==="eraser"',`[data-tool-choice=${JSON.stringify(intersection)}]`,'Erase up to intersection','s.commands.find(c=>c.id==="erase_to_intersection").selected');
     await stroke(line([700,980],[700,1020],4));
     await expect(`${theme} span between crossings`,[780,1000],dark,false);
     await expect(`${theme} kept left part`,[400,1000],dark);

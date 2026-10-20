@@ -404,6 +404,16 @@ function Save-ProjectAs([string]$Path,[scriptblock]$NativeSaved){
     } 'The drawing did not save' 90
     Wait-Until {!(Find 'Save As' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'The Save As dialog did not close'
 }
+function Use-PaintWorkspace{
+    $id='builtin:workspace:illustrator'
+    if((Model).windows_workspace.id -eq $id){return}
+    $found=@{switch=$null;menu=$null}
+    Wait-Until {$found.switch=Find ('workspace-switch-'+$id) -Visible;$found.menu=Find 'header-workspace-menu' -Visible;$found.switch -or $found.menu} 'No Paint workspace switch' 15
+    if(!$found.switch){Invoke-Id 'header-workspace-menu';$found.switch=Control 'Paint' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
+    Wait-Until {try{$found.switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle();$true}catch{$false}} 'The Paint switch stayed unavailable' 20
+    Wait-Until {(Model).windows_workspace.id -eq $id -and !(Model).windows_workspace.busy} 'Paint did not open' 30
+    Wait-Until {Find 'color-edit' -Visible} 'The Paint workspace shows no color control' 20
+}
 function Workspace-Root{
     $traced=[System.Windows.Automation.NotCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,''))
     $workspaces=@($root)

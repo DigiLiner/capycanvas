@@ -21,7 +21,7 @@ struct PreviewPanel:std::enable_shared_from_this<PreviewPanel>{
     Bindings binds;
     NumericAdmissions admissions;
     hstring built;
-    J work,status,bar;
+    J placement,bar;
     std::optional<std::array<double,4>> shown;
     std::function<void()> moved;
     weak_ref<Control> previous;
@@ -93,7 +93,7 @@ struct PreviewPanel:std::enable_shared_from_this<PreviewPanel>{
         if(auto target=previous.get();inside&&target&&target.IsLoaded())target.Focus(FocusState::Programmatic);
         previous=nullptr;
     }
-    void Place(J const& layout){work=object(layout,L"work_area");status=object(layout,L"status");present();}
+    void Place(J const& layout){placement=object(layout,L"notice");present();}
     void Bar(J const& bounds){if(bounds.Size()||built.empty())bar=bounds;present();}
     J Bounds()const{
         if(!shown)return J{};
@@ -102,11 +102,11 @@ struct PreviewPanel:std::enable_shared_from_this<PreviewPanel>{
     }
     void present(){
         auto before=shown;
-        if(built.empty()||!work.Size()){
+        if(built.empty()||!placement.Size()){
             frame.Visibility(Visibility::Collapsed);frame.IsTabStop(false);
             shadow.Layout({float(Offscreen),0,1,1},899,false);shown.reset();
         }else{
-            auto anchor=noticeAnchor(work,status,bar);
+            auto anchor=noticeAnchor(placement,bar);
             frame.Visibility(Visibility::Visible);frame.IsTabStop(true);
             float width=float(std::min(Width,anchor.width));
             frame.Width(width);frame.Height(std::numeric_limits<double>::quiet_NaN());

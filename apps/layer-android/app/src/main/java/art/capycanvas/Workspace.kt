@@ -380,7 +380,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                 }
             }
             CanvasBar(host, dock, layout)
-            NoticeBubble(host, dock, layout.getJSONObject("status"))
+            NoticeBubble(host, dock, layout.getJSONObject("notice"))
             CanvasSizePanel(host, dock, layout.getJSONObject("work_area"), state)
             ImageSizePanel(host, dock, layout.getJSONObject("work_area"), state)
             val tools = state.getJSONObject("layer_tools")

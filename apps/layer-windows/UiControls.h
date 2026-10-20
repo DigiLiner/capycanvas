@@ -345,6 +345,9 @@ inline TextBlock label(std::shared_ptr<WorkspaceData> const& data,hstring const&
     if(bold)result.FontWeight(Windows::UI::Text::FontWeights::Bold());
     return result;
 }
+inline void twoLines(TextBlock const& text){
+    text.TextWrapping(TextWrapping::Wrap);text.MaxLines(2);text.TextTrimming(TextTrimming::CharacterEllipsis);
+}
 inline TextBlock label(std::shared_ptr<WorkspaceData> const& data,LocalizedCopy const& text,bool bold=false){
     auto result=label(data,static_cast<hstring const&>(text),bold);
     data->copyView([weak=make_weak(result),resolve=text.current]{if(auto view=weak.get()){view.Text(resolve());return true;}return false;});

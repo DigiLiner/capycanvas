@@ -118,12 +118,25 @@ function Check-Footer {
  $footer=Bounds 'layer-footer';$first=Bounds 'layer-new';$last=Bounds 'layer-actions'
  $drawer=Visible-DrawerBounds
  if([Math]::Abs(($first.Left-$footer.Left)-($footer.Right-$last.Right)) -gt 1 -or [Math]::Abs(($first.Left-$drawer.Left)/$scale-8) -gt 1 -or [Math]::Abs(($drawer.Right-$last.Right)/$scale-8) -gt 1){throw 'Layers footer first and last actions do not share their eight-point inset'}
- $ids=@('layer-new','layer-new-group','layer-new-selection','layer-add-mask','layer-add-filter','layer-import')
- $previous=$null
- foreach($id in $ids){$r=Bounds $id
+ $ids=@{new_layer='layer-new';new_vector_layer='layer-new-vector';new_group='layer-new-group';new_selection_layer='layer-new-selection';add_mask='layer-add-mask';add_filter='layer-add-filter';import_image='layer-import';delete='layer-delete'}
+ $width=$footer.Width/$scale;$previous=$null;$hidden=@()
+ foreach($slot in @((Model).state.layer_tools.footer)){
+  $id=$ids[$slot.button];$button=Find $id -Visible
+  if($width+.5 -lt $slot.min_width){
+   if($button){throw "Footer keeps $id beside the actions below its $($slot.min_width)-point width at $width points"}
+   $hidden+=$slot.item.label;continue
+  }
+  if(!$button){throw "Footer hides $id at $width points"}
+  $r=$button.Current.BoundingRectangle
   if([Math]::Abs($r.Width/$scale-24) -gt .5 -or [Math]::Abs($r.Height/$scale-24) -gt .5){throw "Footer action does not occupy a 24-point slot: $id"}
   if($previous -and [Math]::Abs(($r.Left-$previous.Right)/$scale-4) -gt .5){throw "Footer action gap differs from four-point panel control spacing: $id"}
   $previous=$r
+ }
+ if($hidden.Count){
+  Press 'layer-actions'
+  foreach($label in $hidden){Wait-Until {Find $label -Name -Visible} "The Layers actions menu does not list $label"}
+  [CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+  Wait-Until {!(Find $hidden[0] -Name -Visible)} 'The Layers actions menu did not close'
  }
  $disclosure=Control 'layer-properties-disclosure' -Arranged;$label=Bounds 'layer-properties-disclosure-label';$r=$disclosure.Current.BoundingRectangle
  $labelInset=($label.Left-$r.Left)/$scale

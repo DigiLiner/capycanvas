@@ -522,6 +522,8 @@ button.layer-row { justify-content: center; gap: var(--panel-group-spacing); fon
 #status:empty { display: none; }
 .canvas-notice { position: absolute; left: 0; top: 0; z-index: 900; display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: max-content; padding: 8px 14px; border-radius: var(--surface-radius); background: var(--popover); color: var(--text); box-shadow: 0 2px 8px #0004; pointer-events: none; user-select: none; -webkit-user-select: none; }
 .canvas-notice[hidden], .canvas-notice [hidden] { display: none; }
+.canvas-notice.stacked { flex-direction: column; align-items: flex-start; }
+.canvas-notice-actions { display: flex; flex-wrap: wrap; }
 .canvas-notice-action { flex: none; margin: -6px -8px -6px 0; padding: 5px 12px; white-space: nowrap; pointer-events: auto; -webkit-tap-highlight-color: transparent; }
 .refine-panel { position: absolute; left: 0; top: 0; z-index: 900; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; padding: 14px 16px 12px; border-radius: var(--surface-radius); background: var(--popover); color: var(--text); box-shadow: 0 2px 8px #0004; outline: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .refine-title { margin: 0; font-size: inherit; font-weight: 700; }
@@ -731,14 +733,14 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 .effect-properties,.renderer-stats { margin:var(--panel-inset); }
 .effect-properties h3 { font-size:inherit; margin:0 0 var(--panel-control-spacing); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .properties-header { display:flex; align-items:center; gap:var(--panel-control-spacing); margin-bottom:var(--panel-group-spacing); min-width:0; }
-.properties-layer-type { flex:1; min-width:0; font-size:.9em; opacity:.55; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.properties-layer-type { flex:1; min-width:0; font-size:.9em; opacity:.55; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:break-word; }
 .effect-properties #properties-add-filter { display:inline-flex; align-items:center; gap:4px; flex:none; min-height:24px; height:24px; line-height:24px; padding:0 6px; }
 .property-controls { display:grid; grid-template-columns:fit-content(45%) minmax(0,1fr); gap:var(--panel-control-spacing); }
 .property-controls > * { grid-column:1 / -1; }
 .property-section { font-size:inherit; font-weight:700; margin:2px 0 0; }
 .property-section:first-child { margin-top:0; }
 .property-row { display:flex; align-items:center; gap:var(--panel-control-spacing); justify-content:space-between; min-width:0; }
-.property-row > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.property-row > span:first-child { min-width:0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:break-word; }
 .property-row:has(> :is(select,.property-texture)):not(.property-resource) { display:contents; }
 .property-row:has(> :is(select,.property-texture)):not(.property-resource) > span:first-child { grid-column:1; align-self:center; }
 .property-row :is(select,.property-texture) { grid-column:2; width:100%; min-width:0; max-width:100%; }
@@ -808,7 +810,7 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 .tool-subtools .tool-choice-button { flex-direction:column; align-items:stretch; gap:0; padding:3px 6px; line-height:18px; }
 .tool-subtools .tool-choice-button:not([data-brush]) { min-height:44px; justify-content:center; }
 .tool-subtools .tool-choice-label { width:100%; min-width:0; }
-.tool-subtools .tool-choice-name { flex:1; min-width:0; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tool-subtools .tool-choice-name { flex:1; min-width:0; text-align:right; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; overflow-wrap:break-word; }
 .tool-subtools .tool-choice-button:not([data-brush]) .tool-choice-name { text-align:left; }
 .tool-settings-control { display:flex; flex-direction:column; gap:var(--panel-group-spacing); }
 .tool-mode-section { display:flex; flex-direction:column; gap:var(--panel-control-spacing); }

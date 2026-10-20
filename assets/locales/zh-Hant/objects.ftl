@@ -10,6 +10,7 @@ objects-action-add-mask = 新增遮色片
 objects-action-edit-mask = 編輯遮色片
 objects-action-new-paint-layer = 新增繪畫圖層
 objects-notice-stale = 圖層已變更，因此未套用此操作。
+objects-notice-name = 提示
 objects-vector-refusal-brush = 「{ $layer }」是向量圖層，只能使用繪製路徑的筆。
 objects-vector-refusal-setting = 「{ $layer }」是向量圖層。{ $setting }使{ $brush }無法繪製路徑。
 objects-vector-refusal-tool = 「{ $layer }」是向量圖層。此工具適用於繪畫圖層。

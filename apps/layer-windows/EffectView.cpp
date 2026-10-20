@@ -125,16 +125,22 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
         Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
         ColumnDefinition caption;caption.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(caption);
         ColumnDefinition value;value.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(value);
-        auto text=label(data,str(property->model(),L"label"));text.VerticalAlignment(VerticalAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);row.Children().Append(text);
-        auto measured=std::make_shared<std::pair<hstring,double>>();
-        auto arrange=[data=data,caption,measured](double width){
+        auto text=label(data,str(property->model(),L"label"));text.VerticalAlignment(VerticalAlignment::Center);twoLines(text);row.Children().Append(text);
+        auto measured=std::make_shared<std::pair<hstring,double>>();auto own=std::make_shared<std::pair<hstring,double>>();
+        auto arrange=[data=data,caption,measured,own,weakText=make_weak(text)](Grid const& row){
+            auto text=weakText.get();if(!text)return;
+            auto width=[data](hstring const& value){auto probe=label(data,value,false,false);probe.Measure({INFINITY,INFINITY});return double(probe.DesiredSize().Width);};
             A labels;for(auto value:array(object(data->state,L"layer_properties"),L"controls")){auto item=value.GetObject();if(str(object(item,L"kind"),L"kind")==L"choice")labels.Append(S(str(item,L"label")));}
             auto key=labels.Stringify()+to_hstring(data->textSize());
-            if(key!=measured->first){double largest=0;for(auto value:labels){auto text=label(data,value.GetString(),false,false);text.Measure({INFINITY,INFINITY});largest=std::max(largest,double(text.DesiredSize().Width));}*measured={key,largest};}
-            caption.Width({std::min(measured->second,width*.45),GridUnitType::Pixel});
+            if(key!=measured->first){double largest=0;for(auto value:labels)largest=std::max(largest,width(value.GetString()));*measured={key,largest};}
+            auto title=text.Text()+to_hstring(data->textSize());
+            if(title!=own->first)*own={title,width(text.Text())};
+            double limit=std::min(measured->second,row.ActualWidth()*.45);
+            caption.Width({limit,GridUnitType::Pixel});
+            text.TextWrapping(own->second>limit?TextWrapping::Wrap:TextWrapping::NoWrap);
         };
-        row.SizeChanged([arrange](auto&&,SizeChangedEventArgs const& event){arrange(event.NewSize().Width);});
-        bindings.emplace_back([property,text,weak=make_weak(row),arrange]{auto title=str(property->model(),L"label");if(text.Text()!=title)text.Text(title);if(auto row=weak.get();row&&row.ActualWidth()>0)arrange(row.ActualWidth());});
+        row.SizeChanged([arrange,weak=make_weak(row)](auto&&,auto&&){if(auto row=weak.get())arrange(row);});
+        bindings.emplace_back([property,text,weak=make_weak(row),arrange]{auto title=str(property->model(),L"label");if(text.Text()!=title)text.Text(title);if(auto row=weak.get();row&&row.ActualWidth()>0)arrange(row);});
         Grid::SetColumn(field,1);row.Children().Append(field);return row;
     }
     static FrameworkElement gate(std::shared_ptr<Property> const& property,FrameworkElement const& field,Bindings& bindings){
@@ -286,7 +292,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
         root.Spacing(data->panelMetric(L"control_spacing"));body.Spacing(data->panelMetric(L"control_spacing"));title=label(data,L"",true);
         title.TextTrimming(TextTrimming::CharacterEllipsis);
         AutomationProperties::SetAutomationId(title,L"properties-layer-name");
-        layerType=label(data,L"");layerType.Opacity(.55);layerType.TextTrimming(TextTrimming::CharacterEllipsis);layerType.VerticalAlignment(VerticalAlignment::Center);
+        layerType=label(data,L"");layerType.Opacity(.55);twoLines(layerType);layerType.VerticalAlignment(VerticalAlignment::Center);
         AutomationProperties::SetAutomationId(layerType,L"properties-layer-type");
         header.ColumnSpacing(data->panelMetric(L"control_spacing"));header.Margin({0,0,0,data->panelMetric(L"group_spacing")-data->panelMetric(L"control_spacing")});
         for(auto width:{GridUnitType::Star,GridUnitType::Auto}){ColumnDefinition column;column.Width({1,width});header.ColumnDefinitions().Append(column);}

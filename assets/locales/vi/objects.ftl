@@ -10,6 +10,7 @@ objects-action-add-mask = Thêm mặt nạ
 objects-action-edit-mask = Sửa mặt nạ
 objects-action-new-paint-layer = Lớp vẽ mới
 objects-notice-stale = Lớp đã thay đổi nên thao tác không được áp dụng.
+objects-notice-name = Thông báo
 objects-vector-refusal-brush = “{ $layer }” là lớp vector, chỉ dùng được bút vẽ đường.
 objects-vector-refusal-setting = “{ $layer }” là lớp vector. { $setting } khiến { $brush } không vẽ được đường.
 objects-vector-refusal-tool = “{ $layer }” là lớp vector. Công cụ này dùng trên lớp vẽ.

@@ -152,6 +152,38 @@ pub struct LayersView {
     pub add_filter: Option<ContextMenu>,
     pub add_paper: Option<PropertyActionView>,
     pub connections: Vec<LayerConnection>,
+    /// Footer buttons in display order; a footer narrower than a button's
+    /// `min_width` lists it at the top of the actions menu instead.
+    pub footer: Vec<LayerFooterSlot>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayerFooterButton { NewLayer, NewVectorLayer, NewGroup, NewSelectionLayer, AddMask, AddFilter, ImportImage, Delete }
+impl LayerFooterButton {
+    pub const ORDER: [Self; 8] = [Self::NewLayer, Self::NewVectorLayer, Self::NewGroup, Self::NewSelectionLayer, Self::AddMask, Self::AddFilter, Self::ImportImage, Self::Delete];
+    const PRIORITY: [Self; 8] = [Self::NewLayer, Self::NewVectorLayer, Self::Delete, Self::AddMask, Self::AddFilter, Self::NewGroup, Self::ImportImage, Self::NewSelectionLayer];
+    /// The narrowest footer, insets included, that holds this button, every
+    /// button that outranks it and the actions button at the trailing edge.
+    pub fn min_width(self) -> f32 {
+        let rank = Self::PRIORITY.iter().position(|button| *button == self).unwrap_or(Self::PRIORITY.len()) as f32 + 1.;
+        let m = crate::PANEL_CONTROL_METRICS;
+        2. * m.inset + (rank + 1.) * m.control_height + rank * m.control_spacing
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LayerFooterSlot {
+    pub button: LayerFooterButton,
+    pub min_width: f32,
+    pub item: ContextMenuItem,
+}
+impl LayerFooterSlot {
+    pub fn shown(&self, width: f32) -> bool { width + 0.5 >= self.min_width }
+}
+/// The footer buttons a footer of `width` moves into its actions menu.
+pub fn layer_footer_overflow(footer: &[LayerFooterSlot], width: f32) -> Vec<ContextMenuItem> {
+    footer.iter().filter(|slot| !slot.shown(width)).map(|slot| slot.item.clone()).collect()
 }
 impl LayersView {
     pub fn drawer_reveal_row(&self, rows: &[LayerState], epoch: u64, previous: Option<(u64, Option<u64>)>) -> Option<u32> {
@@ -1304,6 +1336,33 @@ impl<R: CanvasRenderer> UiSession<R> {
         let handle = occurrence_handle(id)?;
         let layer = self.engine.document().scene().occurrence(handle).ok_or("Unknown layer")?;
         Ok(ContextMenu { title: self.localization().text(MessageId::RESOURCES_LAYER_MENU_BLEND_MODE).to_string(), sections: self.blend_sections(handle, layer) })
+    }
+    pub(super) fn layer_footer(&self) -> Vec<LayerFooterSlot> {
+        use LayerAction as A;
+        let l = self.localization();
+        let tools = &self.state.layer_tools;
+        let invoke = |command: CommandId| (UiAction::Invoke { command }, self.command(command).enabled);
+        let add = self.command(CommandId::AddLayer).enabled;
+        LayerFooterButton::ORDER.into_iter().map(|button| {
+            let item = |label: Arc<str>, icon: &str, (action, enabled): (UiAction, bool)| ContextMenuItem { icon: Some(icon.into()), enabled, ..ContextMenuItem::command(label.as_ref(), action) };
+            let item = match button {
+                LayerFooterButton::NewLayer => item(l.text(MessageId::COMMAND_ADD_LAYER), "add-layer", (UiAction::Layer { action: A::New { group: false, clipped: false } }, add)),
+                LayerFooterButton::NewVectorLayer => item(l.text(MessageId::COMMAND_NEW_VECTOR_LAYER), "add-vector-layer", invoke(CommandId::NewVectorLayer)),
+                LayerFooterButton::NewGroup => item(l.text(MessageId::RESOURCES_LAYER_MENU_NEW_GROUP), "folder", (UiAction::Layer { action: A::New { group: true, clipped: false } }, add)),
+                LayerFooterButton::NewSelectionLayer => item(l.text(MessageId::COMMAND_NEW_SELECTION_LAYER), "selection-brush", invoke(CommandId::NewSelectionLayer)),
+                LayerFooterButton::AddMask => {
+                    let id = tools.editing_layer.as_ref().map_or(0, |layer| layer.id);
+                    item(l.text(MessageId::RESOURCES_LAYER_MENU_ADD_MASK), "mask", (UiAction::Layer { action: A::AddMask { id, replace: false } }, tools.controls.mask && tools.editing_layer.is_some()))
+                }
+                LayerFooterButton::AddFilter => ContextMenuItem {
+                    icon: Some("add-filter".into()),
+                    ..ContextMenuItem::submenu(l.text(MessageId::RESOURCES_LAYER_ADD_FILTER).as_ref(), tools.add_filter.clone().map(|menu| menu.sections).unwrap_or_default())
+                },
+                LayerFooterButton::ImportImage => item(l.text(MessageId::COMMAND_IMPORT_IMAGE), "image", invoke(CommandId::ImportImage)),
+                LayerFooterButton::Delete => item(l.text(MessageId::RESOURCES_LAYER_MENU_DELETE_SELECTED_LAYERS), "delete", (UiAction::Layer { action: A::DeleteSelected }, tools.can_delete)),
+            };
+            LayerFooterSlot { button, min_width: button.min_width(), item }
+        }).collect()
     }
     pub fn layer_menu(&self, id: u64, mask: bool) -> Result<ContextMenu, String> {
         self.layer_menu_with(id, mask, true)

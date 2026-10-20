@@ -406,3 +406,28 @@ walks the same discovery, coloring, erasing and merge steps as Android, as do
 the Apple `EditorLaunchTests/testVectorLayers` and `testVectorLayersDark`
 ([Apple](../development/apple.md)); headless Chrome omits
 WebGPU pixels from screenshots, so run it headed ([Web](../development/web.md)).
+
+The edge journeys walk what painters do around these tools. On GTK,
+`native_vector_input_kinds` (`--tablet`) draws with pen and mouse, checks that one
+finger neither draws nor pans, cuts lines with the pen's eraser end, checks every
+tool's refusal cursor by pen and mouse, and moves paths by pen, mouse and touch,
+with two fingers landing mid-stroke and mid-drag.
+`native_vector_keys_and_touch_points` (`--tablet`) covers Ctrl+A, Escape, Enter,
+Delete, Ctrl+E and Ctrl+Z, including Escape and Ctrl+Z during a drag or stroke,
+and Edit Points by touch. `native_vector_notices_and_german_labels` switches to
+German and checks the Layers footer, the refusal notice across a theme switch, a
+stale notice action and the eraser modes in drawers and docked panels; run it at
+the default size and with `LAYER_MOTION_VIEWPORT=1280x900` and `640x900`.
+`native_vector_layer_rows` renames, duplicates, hides, locks, reorders and deletes
+a vector layer from its row and menu, and `native_vector_save_reopen_and_resize`
+(`--native-storage`) drags a path across a window resize, then saves, reopens and
+restarts with the eraser mode kept. On Web, `--vector-edges` and `--vector-files`
+cover the same ground at 1440, 1280 and 640 px, including the footer's actions
+menu. On Android, `vectorEdgeInputCursorsGesturesAndBackground`,
+`vectorEdgeKeysTouchPointsNoticesAndGermanLabels` and
+`vectorEdgeRowsFilesAndRecreate` do so in landscape and portrait, place their
+points on the fitted paper, background the app mid-stroke and recreate the
+activity. On Windows, the `vector-edges` and `vector-edges:light` fixtures cover
+input, rows, keys, a drag across a window resize, save and reopen, and German
+labels in a maximized and a narrow window; the synthetic pen there has no eraser
+end.

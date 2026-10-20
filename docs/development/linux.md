@@ -369,7 +369,9 @@ Pen pressure changes use `native_pressure_calibration --tablet` in both themes,
 then `native_curve_graph_numbers_pages_and_history` for the shared widget.
 See [pen pressure](../ui/pen-pressure.md) for sustained-motion measurement.
 The tablet proxy reserves its injected object IDs and translates compositor
-object IDs using the installed Wayland protocol XML. Run its clipboard/offer
+object IDs using the installed Wayland protocol XML. It also announces an eraser
+tool; a pen contact with `"tool":"eraser"` uses it, so journeys can draw with the
+pen's eraser end. Run its clipboard/offer
 regressions with `python3 -m unittest discover -s apps/layer-linux/bench -p 'test_*.py'`.
 
 Numeric widget changes use `native_number_controls`, `native_slider_feedback`

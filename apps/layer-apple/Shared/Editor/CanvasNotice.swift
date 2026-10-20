@@ -33,7 +33,7 @@ struct CanvasFloorLayer: View {
     @ObservedObject var presence: CanvasNoticePresence
     @ObservedObject var bar: CanvasBarPresence
     @State private var previewBar: CGRect?
-    private static let margin: CGFloat = 12, barReach: CGFloat = 72, maxWidth: CGFloat = 720, previewWidth: CGFloat = 360
+    private static let margin: CGFloat = 12, previewWidth: CGFloat = 360
     var body: some View {
         let tools = store.state["layer_tools"]
         let preview: (view: JSON, operations: CanvasPreviewPanel.Operations)? = !tools["selection_resize"].isNull ? (tools["selection_resize"], .refine)
@@ -41,11 +41,10 @@ struct CanvasFloorLayer: View {
         ZStack(alignment: .topLeading) {
             Color.clear.frame(width: 0, height: 0)
             if !presence.notice.isNull || preview != nil {
-                let layout = store.snapshot["layout"], area = layout["work_area"].rect, status = layout["status"].rect
-                let floor = min(area.maxY, status.height > 0 ? status.minY : .infinity)
+                let placement = store.snapshot["layout"]["notice"], anchor = CGFloat(placement["y"].number)
                 let below = preview == nil ? bar.bounds : previewBar
-                let bottom = below.map { $0.maxY > floor - Self.barReach ? $0.minY : floor } ?? floor
-                let width = min(Self.maxWidth, max(0, area.width - 2 * Self.margin))
+                let bottom = below.map { $0.maxY > CGFloat(placement["bar_floor"].number) ? min(anchor, $0.minY - Self.margin) : anchor } ?? anchor
+                let width = CGFloat(placement["max_width"].number)
                 let palette = EditorPalette(source: store.state["palette"])
                 VStack(spacing: Self.margin) {
                     if !presence.notice.isNull { notice(palette, width: width) }
@@ -53,8 +52,8 @@ struct CanvasFloorLayer: View {
                         CanvasPreviewPanel(store: store, view: preview.view, operations: preview.operations, palette: palette)
                             .frame(width: min(Self.previewWidth, width))
                     }
-                }.frame(width: width, height: max(0, bottom - Self.margin), alignment: .bottom)
-                    .offset(x: area.midX - width / 2)
+                }.frame(width: width, height: max(0, bottom), alignment: .bottom)
+                    .offset(x: CGFloat(placement["x"].number) - width / 2)
             }
         }.onChange(of: preview == nil) { _, closed in if !closed { previewBar = bar.bounds } }
             .onChange(of: bar.bounds) { _, bounds in if let bounds { previewBar = bounds } }
@@ -66,7 +65,7 @@ struct CanvasFloorLayer: View {
             ForEach(presence.notice["actions"].array.indices, id: \.self) { index in
                 let action = presence.notice["actions"].array[index], token = action["id"].string
                 Button(action["label"].string) { presence.accept(token) }
-                    .focusable(false).disabled(!action["enabled"].bool)
+                    .disabled(!action["enabled"].bool)
                     .help(action["reason"].string).accessibilityHint(action["reason"].string)
                     .accessibilityIdentifier("canvas-notice-action-\(token)")
             }
@@ -77,6 +76,6 @@ struct CanvasFloorLayer: View {
                     .allowsHitTesting(false)
             }
             .frame(maxWidth: width)
-            .accessibilityElement(children: .contain).accessibilityIdentifier("canvas-notice")
+            .accessibilityElement(children: .contain).accessibilityLabel(presence.notice["name"].string).accessibilityIdentifier("canvas-notice")
     }
 }

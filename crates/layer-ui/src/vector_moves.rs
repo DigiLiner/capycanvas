@@ -30,10 +30,12 @@ impl SelectedPaths {
     }
 }
 
+type CachedSelection = (VectorObject, Arc<BTreeSet<ItemId>>, SelectedPaths);
+
 #[derive(Default)]
 pub(super) struct VectorMoves {
     gesture: Option<Gesture>,
-    selected: RefCell<Option<(VectorObject, Arc<BTreeSet<ItemId>>, SelectedPaths)>>,
+    selected: RefCell<Option<CachedSelection>>,
     pub(super) shown_styles: Option<PathStyles>,
     pub(super) index: VectorIndex,
     context: (bool, bool),
@@ -47,6 +49,16 @@ impl VectorMoves {
 impl<R: CanvasRenderer> UiSession<R> {
     fn vector_move_layer(&self) -> Option<OccurrenceHandle> {
         self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::Move)
+    }
+    pub(super) fn vector_move_touch_target(&self, point: [f64; 2]) -> bool {
+        let Some(layer) = self.vector_move_layer().filter(|layer| !self.engine.document().is_locked(*layer)) else { return false };
+        let handle = self.vector_frame().and_then(|frame| frame.hit(point, f64::from(self.ruler_reach())));
+        if matches!(handle, Some(FrameHandle::Scale(_) | FrameHandle::Rotate)) { return true; }
+        let scene = self.engine.document().scene();
+        let Some(object) = scene.vector_layer(layer) else { return false };
+        let [ox, oy] = scene.occurrence_offset64(layer);
+        let slop = HIT_SLOP * self.document_per_surface_pixel();
+        object.paths().any(|(_, path)| path.pickable() && path.hit([point[0] - ox, point[1] - oy], slop))
     }
     pub(super) fn selected_vector_items(&self) -> Option<&VectorItemSelection> {
         let layer = self.editing_vector_layer()?;

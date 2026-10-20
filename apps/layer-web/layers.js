@@ -75,24 +75,43 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     node.layerMenu = () => { const id = getLayer().id, targetMask = typeof mask === "function" ? mask() : mask;
       send({ op: "context", id, mask: targetMask }); return app.layer_menu(id, targetMask); };
   };
+  const footerButtons = new Map();
+  const place = (id, node) => { node.dataset.footerButton = id; footerButtons.set(id, node); footer.append(node); return node; };
   for (const group of [false, true]) {
     const getAction = () => ({ op: "new", group, clipped: false });
-    footer.append(glyphButton(group ? "folder" : "add-layer", ()=>group ? copy.new_group : copy.new_layer, () => send(getAction()), "", getAction));
-    if (!group) footer.append(glyphButton("add-vector-layer", ()=>copy.new_vector_layer, () => dispatch({type:"invoke",command:"new_vector_layer"})));
+    place(group ? "new_group" : "new_layer", glyphButton(group ? "folder" : "add-layer", ()=>group ? copy.new_group : copy.new_layer, () => send(getAction()), "", getAction));
+    if (!group) place("new_vector_layer", glyphButton("add-vector-layer", ()=>copy.new_vector_layer, () => dispatch({type:"invoke",command:"new_vector_layer"})));
   }
-  footer.append(glyphButton("selection-brush", ()=>copy.new_selection_layer, () => dispatch({type:"invoke",command:"new_selection_layer"})));
+  place("new_selection_layer", glyphButton("selection-brush", ()=>copy.new_selection_layer, () => dispatch({type:"invoke",command:"new_selection_layer"})));
   const addMask = () => ({ op: "add_mask", id: active().id, replace: false });
-  const maskButton = glyphButton("mask", ()=>copy.add_mask, () => send(addMask()), "", addMask); footer.append(maskButton);
+  const maskButton = place("add_mask", glyphButton("mask", ()=>copy.add_mask, () => send(addMask()), "", addMask));
   const addFilter = glyphButton("add-filter", ()=>copy.add_filter, () => openMenu(addFilter));
   addFilter.id = "layer-add-filter"; addFilter.menuModel = () => state().layer_tools.add_filter;
-  addFilter.setAttribute("aria-haspopup", "menu"); footer.append(addFilter);
-  footer.append(glyphButton("image", ()=>copy.import_image, () => dispatch({type:"invoke",command:"import_image"})));
+  addFilter.setAttribute("aria-haspopup", "menu"); place("add_filter", addFilter);
+  place("import_image", glyphButton("image", ()=>copy.import_image, () => dispatch({type:"invoke",command:"import_image"})));
   const deleteAction = () => ({ op: "delete_selected" });
-  const deleteButton = glyphButton("delete", ()=>copy.delete_selected, () => send(deleteAction()), "", deleteAction);
-  footer.append(deleteButton);
+  const deleteButton = place("delete", glyphButton("delete", ()=>copy.delete_selected, () => send(deleteAction()), "", deleteAction));
   const more = glyphButton("more-small", ()=>copy.actions, () => more.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true,
     clientX: more.getBoundingClientRect().left, clientY: more.getBoundingClientRect().top })));
-  more.classList.add("layer-more"); menu(more, active, () => active()?.mask_selected ?? false); footer.append(more);
+  const footerWidth = () => footer.getBoundingClientRect().width;
+  const overflow = () => (state().layer_tools.footer ?? []).filter(slot => footerWidth() + 0.5 < slot.min_width).map(slot => slot.item);
+  more.classList.add("layer-more"); more.dataset.context = "{}";
+  more.layerMenu = () => {
+    const layer = active(), mask = layer?.mask_selected ?? false;
+    if (layer) send({ op: "context", id: layer.id, mask });
+    const model = layer ? app.layer_menu(layer.id, mask) : { title: copy.actions, sections: [] };
+    const extra = overflow();
+    return extra.length ? { ...model, sections: [extra, ...model.sections] } : model;
+  };
+  footer.append(more);
+  const fitFooter = () => {
+    const width = footerWidth();
+    for (const slot of state().layer_tools.footer ?? []) {
+      const node = footerButtons.get(slot.button);
+      if (node) node.style.display = width + 0.5 < slot.min_width ? "none" : "";
+    }
+  };
+  const footerResize = new ResizeObserver(fitFooter); footerResize.observe(footer);
   panel.append(header, list, footer);
   const nameIcon = value => value.replace(/^layer-/, "").replace(/-symbolic$/, "");
   const connectionNodes = new Map();
@@ -364,7 +383,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     }
     const view = state().layer_tools, current = view.editing_layer, controls = view.controls;
     if (current) { opacity.update(current.opacity); blendLabel.textContent = current.blend_label; }
-    opacity.setDisabled(!controls.opacity); blend.disabled = !controls.blend; maskButton.disabled = !controls.mask; more.disabled = !current;
+    opacity.setDisabled(!controls.opacity); blend.disabled = !controls.blend; maskButton.disabled = !controls.mask; more.disabled = !current && !overflow().length;
+    fitFooter();
     deleteButton.disabled = !state().layer_tools.can_delete;
     addFilter.disabled = !view.add_filter;
     for (const { b, property, capability } of toggles) {
@@ -490,5 +510,5 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       }
     } catch (error) { message(error); }
   }, 120);
-  return { refresh, dispose(){cancelDrags();cancelAnimationFrame(connectionFrame);connectionResize.disconnect();document.removeEventListener("pointerdown",closeSwipes,true);document.removeEventListener("click",closeOnClick);window.removeEventListener("blur",cancelDrags);window.removeEventListener("keydown",cancelOnEscape);clearInterval(thumbnailTimer); for(const id of owned)pending.delete(id);} };
+  return { refresh, dispose(){cancelDrags();cancelAnimationFrame(connectionFrame);connectionResize.disconnect();footerResize.disconnect();document.removeEventListener("pointerdown",closeSwipes,true);document.removeEventListener("click",closeOnClick);window.removeEventListener("blur",cancelDrags);window.removeEventListener("keydown",cancelOnEscape);clearInterval(thumbnailTimer); for(const id of owned)pending.delete(id);} };
 }

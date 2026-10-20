@@ -206,8 +206,8 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             ?: host.awaitQuery(obj("type" to "drawer", "column" to columnId, "heights" to JSONArray(heights.toList()),
                 "progress" to 1f, "from" to null, "closing" to false))?.objectOrNull("placement")
         if(target == null) { if(current == null) closed(); return@LaunchedEffect }
-        val start = System.nanoTime()
         val duration = 200_000_000f * (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f)
+        val start = if (animate && duration > 0f) withFrameNanos { it } else 0L
         do {
             val progress = if (!animate || duration <= 0f) 1f else ((withFrameNanos { it } - start) / duration).coerceIn(0f, 1f)
             val eased=1f-(1f-progress)*(1f-progress)*(1f-progress)

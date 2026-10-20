@@ -11,6 +11,8 @@ use serde::Serialize;
 pub struct Notice {
     /// Increases with every notice, so a repeated refusal is shown again.
     pub id: u64,
+    /// The bubble's accessible name.
+    pub name: String,
     pub text: String,
     pub actions: Vec<NoticeAction>,
 }
@@ -158,6 +160,10 @@ pub(super) const NO_REFERENCE_BELOW: MessageId = MessageId::COMMANDS_REFUSAL_NOT
 
 impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn refresh_notice_localization(&mut self) {
+        if let Some(notice) = &mut self.state.notice {
+            notice.name = self.state.localization.text(MessageId::OBJECTS_NOTICE_NAME).to_string();
+            self.notices.changed = true;
+        }
         if let (Some(copy), Some(notice)) = (self.notices.copy.clone(), &mut self.state.notice) {
             notice.text = copy.text(&self.state.localization);
             for action in &mut notice.actions { action.label = copy.action_label(action.id, &self.state.localization); }
@@ -195,7 +201,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         notices.changed = true;
         notices.actions = actions.iter().map(|(action, run)| (action.id, run.clone())).collect();
         notices.copy = None;
-        self.state.notice = Some(Notice { id: notices.last_id, text, actions: actions.into_iter().map(|(action, _)| action).collect() });
+        let name = self.state.localization.text(MessageId::OBJECTS_NOTICE_NAME).to_string();
+        self.state.notice = Some(Notice { id: notices.last_id, name, text, actions: actions.into_iter().map(|(action, _)| action).collect() });
     }
 
     fn notice_choice(&self, copy: &NoticeCopy, id: NoticeActionId, run: NoticeRun, reason: Option<std::sync::Arc<str>>) -> (NoticeAction, NoticeRun) {
@@ -332,26 +339,26 @@ impl<R: CanvasRenderer> UiSession<R> {
             let doc = self.engine.document();
             let kept = match copy { Some(NoticeCopy::Vector { .. }) => doc.scene().vector_layer(*layer).is_some(), _ => doc.scene().object_layer(*layer).is_some() };
             if !current || doc.working.occurrence != Some(*layer) || !kept {
-                return Err(self.localization().text(MessageId::OBJECTS_NOTICE_STALE).to_string());
+                self.raise_message_notice(MessageId::OBJECTS_NOTICE_STALE);
+                return Ok(self.changed(0, false));
             }
         }
-        match run {
+        let result = match run {
             NoticeRun::Dispatch(action) => self.dispatch(*action),
-            NoticeRun::RevealMask(layer) => {
-                self.reveal_layer_mask(layer)?;
+            NoticeRun::RevealMask(layer) => self.reveal_layer_mask(layer).map(|()| {
                 self.refresh_document();
-                Ok(self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true))
-            }
-            NoticeRun::Bake(kind) => {
-                self.bake(kind)?;
-                Ok(self.changed(regions::DOCUMENT | regions::COMMANDS, true))
-            }
-            NoticeRun::PaintLayerUnder => {
-                self.new_paint_layer_under()?;
+                self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true)
+            }),
+            NoticeRun::Bake(kind) => self.bake(kind).map(|_| self.changed(regions::DOCUMENT | regions::COMMANDS, true)),
+            NoticeRun::PaintLayerUnder => self.new_paint_layer_under().map(|_| {
                 self.refresh_document();
-                Ok(self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true))
-            }
-        }
+                self.changed(regions::DOCUMENT | regions::BRUSH | regions::COMMANDS, true)
+            }),
+        };
+        result.or_else(|reason| {
+            self.notify(reason);
+            Ok(self.changed(0, false))
+        })
     }
 
     /// At pen-down, explain a brush stroke that will not paint, or will paint

@@ -10,6 +10,7 @@ objects-action-add-mask = 마스크 추가
 objects-action-edit-mask = 마스크 편집
 objects-action-new-paint-layer = 새 페인트 레이어
 objects-notice-stale = 레이어가 바뀌어 작업을 적용하지 않았습니다.
+objects-notice-name = 알림
 objects-vector-refusal-brush = “{ $layer }”은(는) 벡터 레이어이므로 패스를 그리는 펜만 사용할 수 있습니다.
 objects-vector-refusal-setting = “{ $layer }”은(는) 벡터 레이어입니다. { $setting } 때문에 { $brush }(으)로 패스를 그릴 수 없습니다.
 objects-vector-refusal-tool = “{ $layer }”은(는) 벡터 레이어입니다. 이 도구는 페인팅 레이어에서 사용할 수 있습니다.

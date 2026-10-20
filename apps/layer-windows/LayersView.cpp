@@ -122,52 +122,58 @@ void LayersView::init(){
     }});
     repeater.LayoutUpdated([weak](auto&&,auto&&){if(auto self=weak.lock())self->connections();});
     footer.Orientation(Orientation::Horizontal);footer.Spacing(data->panelMetric(L"control_spacing"));footer.Padding({8,4,8,4});
-    auto footerButton=[&](hstring const& iconName,LocalizedCopy const& text,hstring const& id,std::function<void()> action){
+    auto footerButton=[&](hstring const& iconName,LocalizedCopy const& text,hstring const& id,std::function<void()> action,hstring const& slot=L""){
         auto pick=button(data,L"",std::move(action));pick.Width(24);pick.Height(24);pick.Content(icon(iconName,data->theme()));
-        AutomationProperties::SetAutomationId(pick,id);copyName(data,pick,text,true);footer.Children().Append(pick);return pick;
+        AutomationProperties::SetAutomationId(pick,id);copyName(data,pick,text,true);footer.Children().Append(pick);
+        if(!slot.empty())footerButtons.emplace_back(slot,pick);
+        return pick;
     };
     for(bool group:{false,true}){
         auto create=O({{L"op",S(L"new")},{L"group",B(group)},{L"clipped",B(false)}});
         auto pick=footerButton(group?L"folder":L"add-layer",group?data->copyCaption(L"layers",L"new_group"):data->copyCaption(L"layers",L"new_layer"),group?L"layer-new-group":L"layer-new",
-            [weak,create]{if(auto self=weak.lock())self->action(create);});
+            [weak,create]{if(auto self=weak.lock())self->action(create);},group?L"new_group":L"new_layer");
         actionTooltip(data,pick,[create]{return O({{L"type",S(L"layer")},{L"action",create}});});
         if(group)continue;
         auto vectorLayer=footerButton(L"add-vector-layer",data->copyCaption(L"layers",L"new_vector_layer"),L"layer-new-vector",[weak]{if(auto self=weak.lock();self&&!self->data->updating)
-            self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_vector_layer")}}));});
+            self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_vector_layer")}}));},L"new_vector_layer");
         actionTooltip(data,vectorLayer,[]{return O({{L"type",S(L"invoke")},{L"command",S(L"new_vector_layer")}});});
         controls.emplace_back([data=data,vectorLayer](J,J){
             vectorLayer.IsEnabled(flag(find(array(data->state,L"commands"),L"id",L"new_vector_layer"),L"enabled"));vectorLayer.Opacity(vectorLayer.IsEnabled()?1.:.36);
         });
     }
     auto selectionLayer=footerButton(L"selection-brush",data->copyCaption(L"layers",L"new_selection_layer"),L"layer-new-selection",[weak]{if(auto self=weak.lock();self&&!self->data->updating)
-        self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_selection_layer")}}));});
+        self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"new_selection_layer")}}));},L"new_selection_layer");
     controls.emplace_back([data=data,selectionLayer](J,J){
         auto command=find(array(data->state,L"commands"),L"id",L"new_selection_layer");
         selectionLayer.IsEnabled(flag(command,L"enabled"));selectionLayer.Opacity(selectionLayer.IsEnabled()?1.:.36);
     });
     auto mask=footerButton(L"mask",data->copyCaption(L"layers",L"add_mask"),L"layer-add-mask",[weak]{if(auto self=weak.lock()){
         auto layer=self->editing();if(layer.Size())self->action(O({{L"op",S(L"add_mask")},{L"id",layer.GetNamedValue(L"id")},{L"replace",B(false)}}));
-    }});
+    }},L"add_mask");
     controls.emplace_back([mask](J,J capabilities){mask.IsEnabled(flag(capabilities,L"mask"));mask.Opacity(mask.IsEnabled()?1.:.36);});
-    auto addFilter=footerButton(L"add-filter",data->copyCaption(L"layers",L"add_filter"),L"layer-add-filter",[weak]{if(auto self=weak.lock())self->showMenu(object(self->view(),L"add_filter"),self->footer);});
+    auto addFilter=footerButton(L"add-filter",data->copyCaption(L"layers",L"add_filter"),L"layer-add-filter",[weak]{if(auto self=weak.lock())self->showMenu(object(self->view(),L"add_filter"),self->footer);},L"add_filter");
     controls.emplace_back([weak,addFilter](J,J){if(auto self=weak.lock()){addFilter.IsEnabled(object(self->view(),L"add_filter").Size()!=0);addFilter.Opacity(addFilter.IsEnabled()?1.:.36);}});
     auto import=footerButton(L"image",data->copyCaption(L"layers",L"import_image"),L"layer-import",[weak]{if(auto self=weak.lock()){
         self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"import_image")}}));
-    }});
+    }},L"import_image");
     controls.emplace_back([data=data,import](J,J){
         auto file=object(data->state,L"document_file");
         import.IsEnabled(flag(data->model,L"brush_ready")&&!flag(file,L"busy")&&!flag(file,L"close_ready"));import.Opacity(import.IsEnabled()?1.:.36);
     });
-    auto remove=footerButton(L"delete",data->copyCaption(L"layers",L"delete_selected"),L"layer-delete",[weak]{if(auto self=weak.lock())self->action(O({{L"op",S(L"delete_selected")}}));});
+    auto remove=footerButton(L"delete",data->copyCaption(L"layers",L"delete_selected"),L"layer-delete",[weak]{if(auto self=weak.lock())self->action(O({{L"op",S(L"delete_selected")}}));},L"delete");
     controls.emplace_back([weak,remove](J,J){if(auto self=weak.lock()){remove.IsEnabled(flag(self->view(),L"can_delete"));remove.Opacity(remove.IsEnabled()?1.:.36);}});
     auto more=footerButton(L"more-small",data->copyCaption(L"layers",L"actions"),L"layer-actions",[weak]{if(auto self=weak.lock()){
         auto editing=self->editing();
         bool maskRow=flag(self->view(),L"quick_mask")||flag(editing,L"selection_layer");
-        self->context(maskRow?num(editing,L"id",-1):-1,false,self->footer);
+        self->context(maskRow?num(editing,L"id",-1):-1,false,self->footer,{},false,false,self->footerOverflow());
     }});
-    controls.emplace_back([more](J layer,J){more.IsEnabled(layer.Size()!=0);more.Opacity(more.IsEnabled()?1.:.36);});
+    controls.emplace_back([weak,more](J layer,J){
+        auto self=weak.lock();if(!self)return;
+        self->fitFooter();more.IsEnabled(layer.Size()!=0);more.Opacity(more.IsEnabled()?1.:.36);
+    });
     footer.Children().RemoveAtEnd();footer.Padding({0});
     footerFrame.Padding({8,4,8,4});
+    footerFrame.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->fitFooter();});
     ColumnDefinition actionsColumn;actionsColumn.Width({1,GridUnitType::Star});footerFrame.ColumnDefinitions().Append(actionsColumn);
     ColumnDefinition moreColumn;moreColumn.Width({24,GridUnitType::Pixel});footerFrame.ColumnDefinitions().Append(moreColumn);
     footerFrame.Children().Append(footer);Grid::SetColumn(more,1);footerFrame.Children().Append(more);
@@ -325,7 +331,20 @@ void LayersView::showMenu(J spec, FrameworkElement const& anchor){
     ticket.Show(anchor,Primitives::FlyoutShowOptions{});
 }
 
-void LayersView::context(double id,bool mask,UIElement const& anchor,std::optional<Windows::Foundation::Point> at,bool holding,bool blendMenu){
+void LayersView::fitFooter(){
+    double width=footerFrame.ActualWidth();
+    if(width<=0)return;
+    for(auto const& value:array(view(),L"footer")){
+        auto slot=value.GetObject();auto id=str(slot,L"button");
+        for(auto const& [name,pick]:footerButtons)if(name==id)pick.Visibility(width+.5<num(slot,L"min_width")?Visibility::Collapsed:Visibility::Visible);
+    }
+}
+JsonArray LayersView::footerOverflow(){
+    JsonArray items;double width=footerFrame.ActualWidth();
+    for(auto const& value:array(view(),L"footer")){auto slot=value.GetObject();if(width+.5<num(slot,L"min_width"))items.Append(object(slot,L"item"));}
+    return items;
+}
+void LayersView::context(double id,bool mask,UIElement const& anchor,std::optional<Windows::Foundation::Point> at,bool holding,bool blendMenu,JsonArray extra){
     if(data->updating||!anchor.XamlRoot())return;
     if(!holding&&pickup)pickup->Cancel();
     if(id>=0&&!blendMenu)action(O({{L"op",S(L"context")},{L"id",N(id)},{L"mask",B(mask)}}));
@@ -337,8 +356,8 @@ void LayersView::context(double id,bool mask,UIElement const& anchor,std::option
     menu.Closed([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->pickup)self->pickup->MenuChanged();});
     auto query=O({{L"epoch",S(document)},{L"id",id>=0?S(to_hstring(uint64_t(id))):JsonValue::CreateNullValue()},
         {L"mask",id>=0?B(mask):JsonValue::CreateNullValue()},{L"blend",B(blendMenu)}});
-    bool queued=data->query(CanvasQueryKind::LayerMenu,to_string(query.Stringify()),[weak,target,queue,ticket,document,id,at,holding](PreviewPacket packet){
-        queue.TryEnqueue([weak,target,ticket,document,id,at,holding,packet=std::move(packet)]{
+    bool queued=data->query(CanvasQueryKind::LayerMenu,to_string(query.Stringify()),[weak,target,queue,ticket,document,id,at,holding,extra](PreviewPacket packet){
+        queue.TryEnqueue([weak,target,ticket,document,id,at,holding,extra,packet=std::move(packet)]{
             auto self=weak.lock();auto anchor=target.get();
             if(!self||!ticket.Current())return;
             if(epochOf(self->data)!=document||!packet||(id>=0&&!panelRow(self->data->state,id).Size())){ticket.Cancel();return;}
@@ -347,7 +366,10 @@ void LayersView::context(double id,bool mask,UIElement const& anchor,std::option
                 if(str(reply,L"epoch")!=document){ticket.Cancel();return;}
                 auto spec=object(reply,L"menu");if(!spec.Size()){ticket.Cancel();return;}
                 auto menuId=double(std::stoull(to_string(str(reply,L"id"))));
-                NativeMenuItems(self->menu.Items(),array(spec,L"sections"),self->data,[weak,flyout=make_weak(self->menu),document,menuId](J action){
+                JsonArray sections;
+                if(extra&&extra.Size())sections.Append(extra);
+                for(auto const& section:array(spec,L"sections"))sections.Append(section);
+                NativeMenuItems(self->menu.Items(),sections,self->data,[weak,flyout=make_weak(self->menu),document,menuId](J action){
                     if(auto self=weak.lock();self&&self->menu==flyout.get()&&epochOf(self->data)==document
                         &&(panelRow(self->data->state,menuId).Size()||num(self->editing(),L"id",-1)==menuId))self->data->dispatchDocument(action,document);
                 });

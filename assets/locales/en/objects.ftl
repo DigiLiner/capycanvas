@@ -10,6 +10,7 @@ objects-action-add-mask = Add Mask
 objects-action-edit-mask = Edit Mask
 objects-action-new-paint-layer = New Paint Layer
 objects-notice-stale = The layer changed, so the action wasn’t applied.
+objects-notice-name = Notice
 objects-vector-refusal-brush = “{ $layer }” is a vector layer, so only pens that draw paths work here.
 objects-vector-refusal-setting = “{ $layer }” is a vector layer. { $setting } keeps { $brush } from drawing paths.
 objects-vector-refusal-tool = “{ $layer }” is a vector layer. This tool works on paint layers.

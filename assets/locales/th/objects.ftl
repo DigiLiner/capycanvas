@@ -10,6 +10,7 @@ objects-action-add-mask = เพิ่มมาสก์
 objects-action-edit-mask = แก้ไขมาสก์
 objects-action-new-paint-layer = เลเยอร์ระบายสีใหม่
 objects-notice-stale = เลเยอร์เปลี่ยนไป จึงไม่ได้ทำการนี้
+objects-notice-name = การแจ้งเตือน
 objects-vector-refusal-brush = “{ $layer }” เป็นเลเยอร์เวกเตอร์ ใช้ได้เฉพาะปากกาที่วาดพาธ
 objects-vector-refusal-setting = “{ $layer }” เป็นเลเยอร์เวกเตอร์ { $setting } ทำให้ { $brush } วาดพาธไม่ได้
 objects-vector-refusal-tool = “{ $layer }” เป็นเลเยอร์เวกเตอร์ เครื่องมือนี้ใช้กับเลเยอร์ระบายสี

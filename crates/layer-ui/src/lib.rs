@@ -131,7 +131,7 @@ mod glass;
 pub use glass::{BlurStyle, GlassColor, GlassPalette, Transparency};
 mod workspace;
 mod workspace_manager_ui;
-pub use session::{ImageLayerDestination, ImagePlacementContext, LayerAction, LayerCanvasTool, LayerDropHint, LayerDropPosition, LayerDropSurface, LayersView, RegionSource};
+pub use session::{ImageLayerDestination, ImagePlacementContext, LayerAction, LayerCanvasTool, LayerDropHint, LayerDropPosition, LayerDropSurface, LayerFooterButton, LayerFooterSlot, LayersView, RegionSource, layer_footer_overflow};
 pub use workspace_manager_ui::{ManagedWorkspace, WorkspaceChoice, WorkspaceCommand};
 mod stats;
 pub use session::{HistogramAction, HistogramView};
@@ -163,7 +163,7 @@ pub use layout::{
     ColumnIcon, ColumnStack, Divider, DockBand, DockItem,
     DockLayout, DockNode, DockTarget, Edge, EdgeAlignment, FloatingGroup, FloatingResizeHandle,
     FloatingToolbarLayout, GroupPlacement, PANEL_CONFIGURATION_WIDTH, PANEL_EXPANSION_MS, Panel,
-    PanelExpansion, PanelMeasurement, PanelScrollMeasurement, ResizeEdge, ResolvedLayout,
+    NoticePlacement, PanelExpansion, PanelMeasurement, PanelScrollMeasurement, ResizeEdge, ResolvedLayout,
     WorkspacePreset,
 };
 pub use layout::{

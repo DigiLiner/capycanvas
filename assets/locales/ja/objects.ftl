@@ -10,6 +10,7 @@ objects-action-add-mask = マスクを追加
 objects-action-edit-mask = マスクを編集
 objects-action-new-paint-layer = 新規ペイントレイヤー
 objects-notice-stale = レイヤーが変更されたため、操作は適用されませんでした。
+objects-notice-name = お知らせ
 objects-vector-refusal-brush = 「{ $layer }」はベクターレイヤーなので、パスを描くペンだけが使えます。
 objects-vector-refusal-setting = 「{ $layer }」はベクターレイヤーです。{ $setting }のため、{ $brush }はパスを描けません。
 objects-vector-refusal-tool = 「{ $layer }」はベクターレイヤーです。このツールは描画レイヤーで使えます。

@@ -233,6 +233,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
     internal var notice by mutableStateOf<CanvasNotice?>(null)
         private set
     private var publishedNotice: Long? = null
+    private var noticeName = ""
     private val hideNotice = Runnable { notice = null }
     /** The failure the user is shown: a dialog, or a refused command's notice. */
     val actionError: String? get() = dialogError ?: notice?.takeIf { it.id == null }?.text
@@ -348,7 +349,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
             Log.e("CapyCanvas", "Native canvas operation failed", e)
             main.post {
                 if (canvas) failure = e.message ?: e.toString()
-                else notice = CanvasNotice(null, e.toString(), emptyList())
+                else notice = CanvasNotice(null, noticeName, e.toString(), emptyList())
             }
         }
     }
@@ -391,7 +392,8 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
         publishedNotice = id
         notice = published?.let { notice ->
             val actions = notice.optJSONArray("actions")
-            CanvasNotice(id, notice.getString("text"), (0 until (actions?.length() ?: 0)).map { index ->
+            noticeName = notice.getString("name")
+            CanvasNotice(id, noticeName, notice.getString("text"), (0 until (actions?.length() ?: 0)).map { index ->
                 val action = actions!!.getJSONObject(index)
                 CanvasNoticeAction(action.getString("id"), action.getString("label"), action.getBoolean("enabled"), action.optString("reason").takeUnless { action.isNull("reason") })
             })

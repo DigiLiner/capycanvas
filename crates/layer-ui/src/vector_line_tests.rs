@@ -1518,6 +1518,7 @@ fn finishing_a_path_whose_layer_changed_explains_why_and_adds_nothing() {
 #[test]
 fn vector_refusal_actions_check_the_layer_when_pressed() {
     let (mut s, handle) = vector_session();
+    let text = |s: &UiSession<Recorder>, id| s.localization().text(id).to_string();
     draw_line(&mut s, 1, 20);
     let refusal = |s: &mut UiSession<Recorder>, first: u64| {
         s.select_brush(DefaultBrushPreset::Pencil as u32).unwrap();
@@ -1527,16 +1528,22 @@ fn vector_refusal_actions_check_the_layer_when_pressed() {
     let notice = refusal(&mut s, 100);
     let count = s.engine.document().scene().children(None).len();
     layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: true });
-    assert_eq!(s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::RasterizeLayer) }).err().as_deref(), Some(s.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).as_ref()));
+    let change = s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::RasterizeLayer) }).unwrap();
+    assert_ne!(change.regions & regions::HOST, 0);
+    assert_eq!(s.state.notice.as_ref().map(|n| n.text.clone()), Some(text(&s, MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED)));
     assert!(s.engine.document().scene().vector_layer(handle).is_some(), "a locked layer keeps its paths");
     layer(&mut s, LayerAction::Lock { id: occurrence_token(handle), value: false });
     let notice = refusal(&mut s, 200);
     let revision = s.engine.document().revision;
     layer(&mut s, LayerAction::Delete { id: occurrence_token(handle) });
     let deleted = s.engine.document().clone();
+    let change = s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayer) }).unwrap();
+    assert_ne!(change.regions & regions::HOST, 0);
+    let stale = s.state.notice.clone().expect("the stale action explains itself");
+    assert_eq!(stale.text, text(&s, MessageId::OBJECTS_NOTICE_STALE));
+    assert!(stale.actions.is_empty());
     for action in [NoticeActionId::UseVectorPen, NoticeActionId::NewPaintLayer, NoticeActionId::RasterizeLayer] {
-        let stale = s.state.notice.clone().unwrap_or(notice.clone());
-        let _ = s.dispatch(UiAction::Notice { id: stale.id, accept: true, action: Some(action) });
+        assert!(s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(action) }).is_err(), "the old notice is gone");
     }
     assert_ne!(deleted.revision, revision);
     assert_eq!(s.engine.document().scene().children(None).len(), count - 1, "no action reaches a deleted layer");

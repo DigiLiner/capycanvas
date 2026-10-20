@@ -1185,6 +1185,9 @@ impl Workspace {
         content.add_overlay(&notices);
         let notice = crate::notice::NoticeBubble::new();
         content.add_overlay(&notice.root);
+        content.connect_get_child_position(glib::clone!(#[weak(rename_to = root)] notice.root, #[strong] notice, #[upgrade_or] None, move |_, child| {
+            (child == root.upcast_ref::<gtk::Widget>()).then(|| notice.allocation())
+        }));
         let image_drop_label = gtk::Label::new(Some("Add image as layer"));
         image_drop_label.set_halign(gtk::Align::Center);
         image_drop_label.set_valign(gtk::Align::Center);
@@ -1316,6 +1319,12 @@ impl Workspace {
         *this.surface.imp().owner.borrow_mut() = Rc::downgrade(&this);
         this.build_controls(&brushes, &sizes);
         this.canvas_bar.bind(&this);
+        let placed = Cell::new([0; 2]);
+        this.notice.root.add_tick_callback(glib::clone!(#[weak] this, #[upgrade_or] glib::ControlFlow::Break, move |_, _| {
+            let size = [this.surface.width(), this.surface.height()];
+            if placed.replace(size) != size { this.place_notice(); }
+            glib::ControlFlow::Continue
+        }));
         this.view_info.bind(&this);
         this.selection_refine.bind(&this, |apply| UiAction::Selection {
             action: if apply { layer_ui::SelectionAction::ApplyResize } else { layer_ui::SelectionAction::CancelResize },
@@ -2322,18 +2331,15 @@ impl Workspace {
             self.changed(Ok(change));
         }
     }
-    /// Keep a shown notice above the canvas bar after the bar moves or returns.
+    /// Keep a shown notice in its shared placement after the canvas bar or
+    /// the window changes.
     pub(crate) fn place_notice(&self) {
-        self.notice.place(self.notice_clearance());
+        self.notice.place(self.notice_placement());
     }
-    /// Keep the notice above a canvas bar placed along the bottom edge.
-    fn notice_clearance(&self) -> i32 {
-        const MARGIN: f32 = 36.;
-        let height = self.surface.height() as f32;
-        self.canvas_bar
-            .visible_bounds()
-            .filter(|bar| bar.y + bar.height > height - MARGIN * 2.)
-            .map_or(MARGIN, |bar| height - bar.y + 12.) as i32
+    fn notice_placement(&self) -> layer_ui::NoticePlacement {
+        let viewport = [self.surface.width().max(1) as f32, self.surface.height().max(1) as f32];
+        let layout = self.gpu.borrow().as_ref().map(|g| g.session.layout(viewport).notice).unwrap_or_default();
+        layout.above(self.canvas_bar.visible_bounds())
     }
     pub(crate) fn wake_stroke_end(self: &Rc<Self>) {
         self.wake_frame(true, false);
@@ -2832,7 +2838,7 @@ impl Workspace {
             self.canvas_bar.refresh(self, state.canvas_bar.as_ref());
         }
         if regions & regions::HOST != 0 {
-            self.notice.publish(self, state.notice.as_ref(), self.notice_clearance());
+            self.notice.publish(self, state.notice.as_ref(), self.notice_placement());
             if let Some(dialog) = self.new_drawing.borrow().upgrade() { glib::idle_add_local_once(move || dialog.render()); }
         }
         if regions & regions::LAYOUT != 0 && !self.workspaces.loading() {

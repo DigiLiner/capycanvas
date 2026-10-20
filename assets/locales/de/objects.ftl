@@ -10,6 +10,7 @@ objects-action-add-mask = Maske hinzufügen
 objects-action-edit-mask = Maske bearbeiten
 objects-action-new-paint-layer = Neue Malebene
 objects-notice-stale = Die Ebene hat sich geändert, deshalb wurde die Aktion nicht ausgeführt.
+objects-notice-name = Hinweis
 objects-vector-refusal-brush = „{ $layer }“ ist eine Vektorebene, hier funktionieren nur Stifte, die Pfade zeichnen.
 objects-vector-refusal-setting = „{ $layer }“ ist eine Vektorebene. { $setting } verhindert, dass { $brush } Pfade zeichnet.
 objects-vector-refusal-tool = „{ $layer }“ ist eine Vektorebene. Dieses Werkzeug arbeitet auf Malebenen.

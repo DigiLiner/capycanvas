@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 mod column_stacks;
 #[path = "layout_columns.rs"]
 mod columns;
+#[path = "notice_placement.rs"]
+mod notice_placement;
+pub use notice_placement::NoticePlacement;
 pub use column_stacks::{ColumnStack, OpenColumn};
 pub use columns::{CollapsedColumn, CollapsedColumnPlacement, CollapsedGroup, ColumnIcon};
 #[cfg(test)]
@@ -1312,6 +1315,7 @@ pub struct ResolvedLayout {
     pub work_area: Bounds,
     /// HUD strip inside the free area, above any bottom dock.
     pub status: Bounds,
+    pub notice: NoticePlacement,
     pub groups: Vec<GroupPlacement>,
     pub collapsed: Vec<CollapsedColumnPlacement>,
     pub dividers: Vec<Divider>,
@@ -3259,6 +3263,7 @@ impl DockLayout {
             tab_bar_height: TAB_BAR_HEIGHT,
             work_area: remaining,
             status: Bounds::default(),
+            notice: NoticePlacement::default(),
             groups: Vec::new(),
             collapsed: Vec::new(),
             dividers: Vec::new(),
@@ -3409,6 +3414,7 @@ impl DockLayout {
         if !native_header {
             result.work_area.height -= hud_height;
         }
+        result.notice = NoticePlacement::resolve(viewport, result.work_area, result.status);
         for group in &mut result.groups {
             offset(&mut group.bounds);
         }

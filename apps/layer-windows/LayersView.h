@@ -104,6 +104,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     double opacityLayer=-1;
     std::optional<double> revealTarget;
     std::vector<std::function<void(J,J)>> controls;
+    std::vector<std::pair<hstring,Button>> footerButtons;
     Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> source{
         single_threaded_observable_vector<Windows::Foundation::IInspectable>()};
     std::map<void*,std::shared_ptr<LayerRow>> rows;
@@ -125,7 +126,9 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     void connections();
     void showMenu(J spec, FrameworkElement const& anchor);
     void layoutConnections();
+    void fitFooter();
+    JsonArray footerOverflow();
     void context(double id,bool mask,UIElement const& anchor,
-        std::optional<Windows::Foundation::Point> at={},bool holding=false,bool blendMenu=false);
+        std::optional<Windows::Foundation::Point> at={},bool holding=false,bool blendMenu=false,JsonArray extra=nullptr);
 };
 }

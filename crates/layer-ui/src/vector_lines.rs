@@ -204,6 +204,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         let preview = layer_render::VectorPreview { owner: line.layer, path: Arc::new(path(ItemId(1), &line.paint, preview)), revision: self.vector_lines.revision };
         self.engine.backend_mut().set_vector_preview(Some(preview));
     }
+    pub(super) fn cancel_vector_stroke(&mut self) -> bool {
+        let active = self.vector_lines.active() || self.vector_lines.erasing();
+        self.cancel_vector_line();
+        self.cancel_vector_erase();
+        active
+    }
     pub(super) fn cancel_vector_line(&mut self) {
         if self.vector_lines.line.take().is_some() { self.engine.backend_mut().set_vector_preview(None); }
     }

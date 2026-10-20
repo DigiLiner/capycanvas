@@ -10,6 +10,7 @@ objects-action-add-mask = 添加蒙版
 objects-action-edit-mask = 编辑蒙版
 objects-action-new-paint-layer = 新建绘画图层
 objects-notice-stale = 图层已更改，因此未应用此操作。
+objects-notice-name = 提示
 objects-vector-refusal-brush = “{ $layer }”是矢量图层，只能使用绘制路径的笔。
 objects-vector-refusal-setting = “{ $layer }”是矢量图层。{ $setting }使{ $brush }无法绘制路径。
 objects-vector-refusal-tool = “{ $layer }”是矢量图层。此工具适用于绘画图层。

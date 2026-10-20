@@ -68,7 +68,8 @@ beyond the allocated scroll area remains reachable by scrolling. Hosts retain th
 last measured row height while lazy rows are absent and replace it when a row
 reports a new height.
 
-There is no Expand button. Escape closes open columns. Auto-hide consumes the outside canvas contact and
+There is no Expand button. Escape closes open columns, except during a canvas
+drag or stroke, which it only cancels. Auto-hide consumes the outside canvas contact and
 respects popups, nested drawers and active gestures. Open/close is transient;
 membership, preferences, widths and ordinary split ratios are saved. Completed
 stacking and resizing gestures each produce one workspace undo step, with

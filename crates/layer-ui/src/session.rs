@@ -130,7 +130,7 @@ pub use clipboard::{clipboard_document, clipboard_color_changes, ClipboardCaptur
 pub use notices::{Notice, NoticeAction, NoticeActionId};
 pub use canvas_bar::{CANVAS_BAR_REAPPEAR_MS, CanvasBarContext, CanvasBarItem, CanvasBarKind, CanvasBarMenu, CanvasBarLayout, CanvasBarMeasure, CanvasBarPlacement, CanvasBarSide, CanvasBarView, place_canvas_bar};
 pub use art_layers::{
-    GradientToolSettings, ImageLayerDestination, ImagePlacementContext, LayerAction, LayerCanvasTool, LayerControls, LayerDropHint, LayerDropPosition, LayerDropSurface, LayersView, RegionSource,
+    GradientToolSettings, ImageLayerDestination, ImagePlacementContext, LayerAction, LayerCanvasTool, LayerControls, LayerDropHint, LayerDropPosition, LayerDropSurface, LayerFooterButton, LayerFooterSlot, LayersView, RegionSource, layer_footer_overflow,
 };
 #[path = "application_menu.rs"]
 mod application_menu;
@@ -1454,6 +1454,16 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled = true; return Ok(reply);
                     }
                     if key == "escape" && !editing {
+                        let cancelled = self.cancel_layer_gesture()? | self.cancel_vector_stroke();
+                        if cancelled || !self.canvas_contact_idle() {
+                            if cancelled {
+                                self.interaction.pointer = None;
+                                reply.cancel_paint = true;
+                                reply.change = self.changed(regions::DOCUMENT, true);
+                            }
+                            reply.handled = true;
+                            return Ok(reply);
+                        }
                         if !self.interaction.facts.popup_open && self.state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true)) {
                             reply.change = self.dispatch(UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties })?;
                             reply.handled = true;
@@ -1461,12 +1471,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         }
                         self.interaction.keyboard_chrome = true;
                         reply.dismiss_popups = true;
-                        if self.cancel_layer_gesture()? {
-                            self.interaction.pointer = None;
-                            reply.cancel_paint = true;
-                            reply.change = self.changed(regions::DOCUMENT, true);
-                            reply.handled = true;
-                        } else if self.clear_object_selection()? {
+                        if self.clear_object_selection()? {
                             reply.change = self.changed(regions::DOCUMENT | regions::COMMANDS, true);
                             reply.handled = true;
                         } else if self.selection_masks.target().is_some()
@@ -5786,9 +5791,12 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     /// Whether a finger at `position` lands on a canvas object it drags
-    /// rather than navigating: a transform or crop handle, or the source disc.
+    /// rather than navigating: a transform or crop handle, the source disc,
+    /// an image, or a path, anchor or segment that Move or Edit Points takes.
     pub(super) fn object_touch_hit(&self, position: [f32; 2]) -> bool {
+        let point = self.pointer64(position);
         self.transform_touch_hit(position) || self.clone_disc_hit(position) || self.object_touch_target(position)
+            || self.vector_move_touch_target(point) || self.vector_points_touch_target(point)
     }
     fn paint_contact_busy(&self) -> bool {
         self.pen_contact || (!self.engine.backend().has_pending_submission() && (self.input_pending || self.engine.has_active_stroke()))
@@ -6215,6 +6223,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else {
             MessageId::RESOURCES_LAYER_MENU_USE_SELECTED_LAYERS_AS_REFERENCES
         });
+        self.state.layer_tools.footer = self.layer_footer();
         self.state.tabs = vec![DocumentTab {
             id: doc.artwork.id.to_string(),
             title: self.state.document_file.title().into(),
@@ -6640,6 +6649,7 @@ mod tests {
     include!("tonal_tests.rs");
     include!("painted_selection_tests.rs");
     include!("vector_line_tests.rs");
+    include!("vector_edge_tests.rs");
     include!("toolbar_component_tests.rs");
     include!("tool_slot_tests.rs");
     include!("canvas_bar_tests.rs");

@@ -194,6 +194,13 @@ Filter, mask, selection and group properties omit this button. The Layers footer
 uses the same icon.
 Its Add Filter button shares the other footer buttons' theme color and flat style,
 with a transparent resting background.
+A footer too narrow for every button hides the lowest-priority ones and lists them
+at the top of its actions menu: New selection layer goes first, then Import image,
+New group, Add Filter, Add mask and Delete; New layer and New vector layer stay
+longest. `LayersView::footer` publishes each button with the narrowest footer that
+shows it, from the shared 24-unit buttons, 4-unit spacing and 8-unit insets.
+Long layer types, property labels and Tools list rows wrap to two lines before
+they ellipsize.
 Properties dropdowns and their adjacent action buttons share the compact
 24-pixel panel height and 6-pixel horizontal padding, in docks and drawers.
 **Add Filter** is also available in each eligible layer's context menu. It opens

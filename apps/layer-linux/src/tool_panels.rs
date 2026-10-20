@@ -157,7 +157,9 @@ impl ToolSet {
     }
 }
 fn tool_label(item: &ToolSetItem) -> gtk::Box {
-    aligned_icon_label(&item.label, item.icon, if matches!(item.action, UiAction::ColorPicker { .. }) { 0.0 } else { 1.0 })
+    let row = aligned_icon_label(&item.label, item.icon, if matches!(item.action, UiAction::ColorPicker { .. }) { 0.0 } else { 1.0 });
+    if let Some(label) = row.last_child().and_downcast::<gtk::Label>() { crate::panel_controls::two_lines(&label); }
+    row
 }
 
 pub fn icon_label(text: &str, icon: &str) -> gtk::Box {

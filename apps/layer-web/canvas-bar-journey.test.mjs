@@ -92,6 +92,8 @@ export async function checkCanvasBar({call,evaluate,settle,device=false}) {
   const devices=['pen','touch','mouse'];
   try {
     await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
+    await evaluate(`layerApp.app.workspace_input(JSON.stringify({type:'switch',id:'builtin:workspace:illustrator'}));null`);
+    await wait(`(v=>v.id==='builtin:workspace:illustrator'&&!v.busy)(JSON.parse(layerApp.app.workspace_view()))`);
     await send({type:'preferences',action:{type:'edit',id:'transparency',value:3}});
     await evaluate(`window.barProbe={set:layerApp.app.set_glass,pen:layerApp.app.pen,input:layerApp.app.input,boxes:[],pens:0,pointers:0,shown:0};
       layerApp.app.set_glass=(boxes,...rest)=>{barProbe.boxes=Array.from(boxes);barProbe.glassSets=(barProbe.glassSets??0)+1;return barProbe.set.call(layerApp.app,boxes,...rest);};

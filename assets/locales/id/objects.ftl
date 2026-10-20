@@ -10,6 +10,7 @@ objects-action-add-mask = Tambahkan Masker
 objects-action-edit-mask = Edit Masker
 objects-action-new-paint-layer = Lapisan Cat Baru
 objects-notice-stale = Lapisan berubah, jadi tindakan tidak diterapkan.
+objects-notice-name = Pemberitahuan
 objects-vector-refusal-brush = “{ $layer }” adalah lapisan vektor, jadi hanya pena yang menggambar jalur yang berfungsi di sini.
 objects-vector-refusal-setting = “{ $layer }” adalah lapisan vektor. { $setting } membuat { $brush } tidak bisa menggambar jalur.
 objects-vector-refusal-tool = “{ $layer }” adalah lapisan vektor. Alat ini bekerja pada lapisan cat.

@@ -168,16 +168,46 @@ class AndroidVectorLayerTest {
     private fun selectedRow() = state().getJSONArray("layers").objects().first { it.getBoolean("selected") }
     private fun vectorSelected() = selectedRow().optString("content_icon") == "layer-path-symbolic"
     private fun brushId(label: String) = host.catalog.getJSONArray("brush_categories").objects().flatMap { it.getJSONArray("brushes").objects() }.first { it.getString("label") == label }.getLong("id")
+    private fun headerTool(key: String, value: String): String {
+        val zones = state().getJSONObject("workspace").getJSONObject("layout").getJSONObject("header").getJSONArray("zones")
+        val item = (0 until zones.length()).flatMap { zones.getJSONArray(it).objects() }
+            .first { it.optJSONObject("item")?.optJSONObject("control")?.optString(key) == value }
+        return "header-item-${item.get("id")}"
+    }
+    private fun fromDrawer(key: String, value: String, shown: () -> Boolean, act: () -> Unit) {
+        val opener = if (shown()) null else headerTool(key, value)
+        opener?.let { compose.onNodeWithTag(it).performClick(); compose.waitUntil(20_000, shown) }
+        act()
+        opener?.let { compose.onNodeWithTag(it).performClick(); compose.waitUntil(20_000) { !shown() } }
+    }
     private fun clickNewVectorLayer() {
         val label = host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_vector_layer")
-        compose.onAllNodesWithContentDescription(label).onFirst().performClick()
-        compose.waitForIdle()
-        awaitState("new-vector-layer") { vectorSelected() }
+        fromDrawer("panel", "layers", { compose.onAllNodesWithContentDescription(label).fetchSemanticsNodes().isNotEmpty() }) {
+            compose.onAllNodesWithContentDescription(label).onFirst().performClick()
+            compose.waitForIdle()
+            awaitState("new-vector-layer") { vectorSelected() }
+        }
     }
     private fun noticeAction(id: String) {
         awaitState("notice-$id") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.objects()?.any { it.getString("id") == id } == true }
         compose.onNodeWithTag("canvas-notice-action-$id").performClick()
         compose.waitForIdle()
+    }
+    private fun thumbnailGreen(tag: String): Boolean {
+        val center = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.center
+        val origin = IntArray(2).also { instrumentation.runOnMainSync { compose.activity.window.decorView.getLocationOnScreen(it) } }
+        val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return false
+        val readable = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        try { return green(readable.getPixel((center.x + origin[0]).toInt(), (center.y + origin[1]).toInt())) }
+        finally { readable.recycle(); bitmap.recycle() }
+    }
+    private fun awaitThumbnail(id: Long) {
+        val deadline = android.os.SystemClock.uptimeMillis() + 30_000
+        while (compose.onAllNodesWithTag("layer-thumbnail-$id-false", useUnmergedTree = true).fetchSemanticsNodes().isEmpty() || !thumbnailGreen("layer-content-$id")) {
+            assertTrue("the thumbnail of layer $id shows its fill", android.os.SystemClock.uptimeMillis() < deadline)
+            compose.mainClock.advanceTimeBy(120)
+            android.os.SystemClock.sleep(20)
+        }
     }
     private fun dark(color: Int) = maxOf(color shr 16 and 255, color shr 8 and 255, color and 255) < 100
     private fun marked(color: Int) = (color shr 16 and 255) + (color shr 8 and 255) + (color and 255) < 600
@@ -218,9 +248,14 @@ class AndroidVectorLayerTest {
             tool(obj("region" to obj("fill" to true, "source" to "visible")))
             tap(Offset(.66f, .43f))
             awaitPixel("$theme-filled-inside", Offset(.66f, .47f), true)
+            val unfilled = state().getJSONArray("layers").objects().map { it.getLong("id") }.toSet()
             tap(Offset(.66f, .7f))
             awaitPixel("$theme-filled-below", Offset(.66f, .74f), true)
             screenshot("vector-$theme-color.png")
+            val filled = state().getJSONArray("layers").objects().first { it.getLong("id") !in unfilled }.getLong("id")
+            fromDrawer("panel", "layers", { compose.onAllNodesWithTag("layer-content-$filled", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }) {
+                try { awaitThumbnail(filled) } finally { screenshot("vector-$theme-fill-below-thumbnail.png") }
+            }
 
             action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.1, .1, .12, 1.0))))
             clickNewVectorLayer()
@@ -231,8 +266,10 @@ class AndroidVectorLayerTest {
             val intersection = state().getJSONArray("commands").objects().first { it.getString("id") == "erase_to_intersection" }.getString("label")
             action(obj("type" to "invoke", "command" to "eraser"))
             action(obj("type" to "set_brush_size", "value" to 16))
-            compose.onAllNodesWithTag("subtool-$intersection").onFirst().performClick()
-            awaitState("$theme-erase-mode") { s -> s.getJSONArray("commands").objects().first { it.getString("id") == "erase_to_intersection" }.getBoolean("selected") }
+            fromDrawer("command", "eraser", { compose.onAllNodesWithTag("subtool-$intersection").fetchSemanticsNodes().isNotEmpty() }) {
+                compose.onAllNodesWithTag("subtool-$intersection").onFirst().performClick()
+                awaitState("$theme-erase-mode") { s -> s.getJSONArray("commands").objects().first { it.getString("id") == "erase_to_intersection" }.getBoolean("selected") }
+            }
             drag(Offset(.49f, .6f), Offset(.49f, .64f))
             awaitPixel("$theme-between-crossings", Offset(.52f, .62f), false, ::dark)
             awaitPixel("$theme-kept-left", Offset(.39f, .62f), true, ::dark)
@@ -255,5 +292,525 @@ class AndroidVectorLayerTest {
             }
             action(obj("type" to "invoke", "command" to "pen"))
         }
+    }
+
+    private fun source(tool: Int) = when (tool) {
+        android.view.MotionEvent.TOOL_TYPE_STYLUS, android.view.MotionEvent.TOOL_TYPE_ERASER -> android.view.InputDevice.SOURCE_STYLUS
+        android.view.MotionEvent.TOOL_TYPE_MOUSE -> android.view.InputDevice.SOURCE_MOUSE
+        else -> android.view.InputDevice.SOURCE_TOUCHSCREEN
+    }
+    private var downTime = 0L
+    private var paper = floatArrayOf(0f, 0f, 1f, 1f)
+    private fun onPaper(point: Offset) = Offset(paper[0] + point.x * paper[2], paper[1] + point.y * paper[3])
+    private fun fitPaper() {
+        action(obj("type" to "invoke", "command" to "fit_canvas"))
+        var last = ""
+        compose.waitUntil(10_000) { camera().let { next -> (next == last).also { last = next; android.os.SystemClock.sleep(100) } } }
+        val camera = state().getJSONObject("camera")
+        val tab = state().getJSONArray("tabs").objects().first { it.optBoolean("active") }
+        val zoom = camera.getDouble("zoom").toFloat()
+        val (tx, ty) = camera.getJSONArray("translation").let { it.getDouble(0).toFloat() to it.getDouble(1).toFloat() }
+        val (vw, vh) = camera.getJSONArray("viewport").let { it.getInt(0).toFloat() to it.getInt(1).toFloat() }
+        paper = floatArrayOf(tx / vw, ty / vh, tab.getInt("width") * zoom / vw, tab.getInt("height") * zoom / vh)
+    }
+    private fun motion(action: Int, pointers: List<Pair<Int, Offset>>, buttons: Int = 0) {
+        instrumentation.runOnMainSync {
+            val canvas = canvasView()
+            val masked = action and android.view.MotionEvent.ACTION_MASK
+            if (masked == android.view.MotionEvent.ACTION_DOWN || masked == android.view.MotionEvent.ACTION_HOVER_ENTER) downTime = android.os.SystemClock.uptimeMillis()
+            val hover = masked in listOf(android.view.MotionEvent.ACTION_HOVER_ENTER, android.view.MotionEvent.ACTION_HOVER_MOVE, android.view.MotionEvent.ACTION_HOVER_EXIT)
+            val properties = pointers.mapIndexed { i, (tool, _) -> android.view.MotionEvent.PointerProperties().apply { id = i; toolType = tool } }.toTypedArray()
+            val coords = pointers.map { (_, point) -> android.view.MotionEvent.PointerCoords().apply { x = onPaper(point).x * canvas.width; y = onPaper(point).y * canvas.height; pressure = if (hover || masked == android.view.MotionEvent.ACTION_UP) 0f else .8f; size = .05f } }.toTypedArray()
+            val sources = pointers.map { source(it.first) }.reduce { a, b -> a or b }
+            val event = android.view.MotionEvent.obtain(downTime, android.os.SystemClock.uptimeMillis(), action, pointers.size, properties, coords, 0, buttons, 1f, 1f, 1, 0, sources, 0)
+            try { if (hover) canvas.dispatchGenericMotionEvent(event) else canvas.dispatchTouchEvent(event) } finally { event.recycle() }
+        }
+        android.os.SystemClock.sleep(10)
+    }
+    private fun stroke(tool: Int, from: Offset, to: Offset, steps: Int = 24, between: Pair<Int, () -> Unit>? = null) {
+        val buttons = if (tool == android.view.MotionEvent.TOOL_TYPE_MOUSE) android.view.MotionEvent.BUTTON_PRIMARY else 0
+        motion(android.view.MotionEvent.ACTION_DOWN, listOf(tool to from), buttons)
+        for (i in 1..steps) {
+            motion(android.view.MotionEvent.ACTION_MOVE, listOf(tool to from + (to - from) * (i / steps.toFloat())), buttons)
+            if (between?.first == i) between.second()
+        }
+        motion(android.view.MotionEvent.ACTION_UP, listOf(tool to to))
+        compose.waitForIdle()
+    }
+    private fun screenPixels(point: Offset, radius: Int, inspect: (List<Int>) -> Unit) {
+        var origin = IntArray(2); var size = IntArray(2)
+        instrumentation.runOnMainSync { val canvas = canvasView(); canvas.getLocationOnScreen(origin); size = intArrayOf(canvas.width, canvas.height) }
+        val bitmap = instrumentation.uiAutomation.takeScreenshot()!!
+        val readable = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        val at = onPaper(point)
+        val cx = origin[0] + (at.x * size[0]).toInt(); val cy = origin[1] + (at.y * size[1]).toInt()
+        val colors = mutableListOf<Int>()
+        for (y in (cy - radius).coerceAtLeast(0)..(cy + radius).coerceAtMost(readable.height - 1)) for (x in (cx - radius).coerceAtLeast(0)..(cx + radius).coerceAtMost(readable.width - 1)) colors.add(readable.getPixel(x, y))
+        readable.recycle(); bitmap.recycle(); inspect(colors)
+    }
+    private fun ink(point: Offset): Boolean {
+        var found = false
+        screenPixels(point, 5) { colors -> found = colors.any { minOf(it shr 16 and 255, it shr 8 and 255, it and 255) < 110 } }
+        return found
+    }
+    private fun awaitInk(name: String, point: Offset, wanted: Boolean) {
+        motion(android.view.MotionEvent.ACTION_HOVER_EXIT, listOf(stylus to Offset(.99f, .99f)))
+        try { compose.waitUntil(20_000) { ink(point) == wanted || host.failure != null } }
+        catch (e: Throwable) { screenshot("vector-edges-$name-failure.png"); throw AssertionError("$name: wanted ink=$wanted at $point", e) }
+        assertNull(host.failure)
+    }
+    private fun refusalCursor(tool: Int, point: Offset): Boolean {
+        val hover = point + Offset(.002f, .002f)
+        motion(android.view.MotionEvent.ACTION_HOVER_ENTER, listOf(tool to point))
+        motion(android.view.MotionEvent.ACTION_HOVER_MOVE, listOf(tool to hover))
+        compose.waitForIdle(); android.os.SystemClock.sleep(250)
+        var red = 0
+        screenPixels(hover, 24) { colors -> red = colors.count { (it shr 16 and 255) > 170 && (it shr 8 and 255) < 90 && (it and 255) < 90 } }
+        motion(android.view.MotionEvent.ACTION_HOVER_EXIT, listOf(tool to hover))
+        return red > 4
+    }
+    private fun camera() = state().getJSONObject("camera").toString()
+    private fun key(code: Int, meta: Int = 0) {
+        for (phase in listOf(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.ACTION_UP)) {
+            val now = android.os.SystemClock.uptimeMillis()
+            instrumentation.sendKeySync(android.view.KeyEvent(now, now, phase, code, 0, meta, -1, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD))
+        }
+        compose.waitForIdle()
+    }
+    private val control = android.view.KeyEvent.META_CTRL_ON or android.view.KeyEvent.META_CTRL_LEFT_ON
+    private fun toolName() = state().getJSONObject("layer_tools").opt("tool").toString()
+    private fun enabled(id: String) = state().getJSONArray("commands").objects().first { it.getString("id") == id }.getBoolean("enabled")
+    private fun vectorCount() = state().getJSONArray("layers").objects().count { it.optString("content_icon") == "layer-path-symbolic" }
+    private fun freshVector(theme: String) {
+        action(obj("type" to "set_theme", "theme" to theme))
+        for (row in state().getJSONArray("layers").objects().filter { it.isNull("paper") }) {
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to row.getLong("id"), "mask" to false)))
+            action(obj("type" to "layer", "action" to obj("op" to "delete_selected")))
+        }
+        action(obj("type" to "layer", "action" to obj("op" to "new", "group" to false, "clipped" to false)))
+        action(obj("type" to "layer", "action" to obj("op" to "new_vector")))
+        fitPaper()
+        action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.1, .1, .12, 1.0))))
+        action(obj("type" to "invoke", "command" to "pen"))
+        action(obj("type" to "select_brush", "id" to brushId("G-Pen")))
+        action(obj("type" to "set_brush_size", "value" to 24))
+    }
+    private val stylus = android.view.MotionEvent.TOOL_TYPE_STYLUS
+    private val eraser = android.view.MotionEvent.TOOL_TYPE_ERASER
+    private val mouse = android.view.MotionEvent.TOOL_TYPE_MOUSE
+    private val finger = android.view.MotionEvent.TOOL_TYPE_FINGER
+
+    @Test fun vectorEdgeInputCursorsGesturesAndBackground() {
+        val findings = mutableListOf<String>()
+        val rows = listOf(.35f, .45f, .55f)
+        for (theme in listOf("light", "dark")) {
+            freshVector(theme)
+            stroke(stylus, Offset(.3f, rows[0]), Offset(.7f, rows[0]))
+            awaitInk("$theme-stylus", Offset(.5f, rows[0]), true)
+            stroke(mouse, Offset(.3f, rows[1]), Offset(.7f, rows[1]))
+            awaitInk("$theme-mouse", Offset(.5f, rows[1]), true)
+            val view = camera()
+            stroke(finger, Offset(.3f, rows[2]), Offset(.7f, rows[2]), 12)
+            awaitInk("$theme-finger-draws-nothing", Offset(.5f, rows[2]), false)
+            if (camera() != view) findings.add("$theme: one finger moved the view")
+            stroke(stylus, Offset(.3f, rows[2]), Offset(.7f, rows[2]))
+            screenshot("vector-edges-$theme-input.png")
+
+            action(obj("type" to "set_brush_size", "value" to 80))
+            stroke(eraser, Offset(.5f, .28f), Offset(.5f, .62f))
+            for (row in rows) awaitInk("$theme-eraser-end-$row", Offset(.5f, row), false)
+            awaitInk("$theme-eraser-end-keeps", Offset(.36f, rows[0]), true)
+            if (state().getJSONObject("brush").getLong("preset") != brushId("G-Pen")) findings.add("$theme: the eraser end left another brush chosen")
+            screenshot("vector-edges-$theme-eraser-end.png")
+            action(obj("type" to "invoke", "command" to "undo"))
+            awaitInk("$theme-eraser-end-undone", Offset(.5f, rows[0]), true)
+            action(obj("type" to "set_brush_size", "value" to 24))
+
+            val empty = Offset(.8f, .8f)
+            val pencil = brushId("Pencil")
+            for ((name, setup, refused) in listOf<Triple<String, () -> Unit, Boolean>>(
+                Triple("G-Pen", { action(obj("type" to "select_brush", "id" to brushId("G-Pen"))) }, false),
+                Triple("Pencil", { action(obj("type" to "select_brush", "id" to pencil)) }, true),
+                Triple("Eraser", { action(obj("type" to "invoke", "command" to "eraser")) }, false),
+                Triple("Figure", { figure("star", "both") }, false),
+                Triple("Fill", { tool(obj("region" to obj("fill" to true, "source" to "visible"))) }, false),
+                Triple("Gradient", { tool(obj("gradient" to obj("shape" to "Linear"))) }, true),
+                Triple("Move", { action(obj("type" to "invoke", "command" to "move")) }, false),
+                Triple("Edit Points", { action(obj("type" to "invoke", "command" to "edit_points")) }, false),
+            )) {
+                setup()
+                for ((device, tool) in listOf("stylus" to stylus, "mouse" to mouse)) {
+                    val seen = refusalCursor(tool, empty)
+                    if (seen != refused) findings.add("$theme $name by $device: refusal cursor $seen, expected $refused")
+                }
+                if (name == "Gradient") screenshot("vector-edges-$theme-cursor-refused.png")
+            }
+
+            action(obj("type" to "invoke", "command" to "move"))
+            for ((index, pair) in listOf("stylus" to stylus, "mouse" to mouse, "finger" to finger).withIndex()) {
+                val start = Offset(.4f, rows[index]); val end = start + Offset(0f, .04f)
+                stroke(pair.second, start, end, 8)
+                android.os.SystemClock.sleep(400)
+                val moved = !ink(start) && ink(end)
+                if (!moved) findings.add("$theme Move by ${pair.first}: the path did not follow the drag")
+                else { action(obj("type" to "invoke", "command" to "undo")); awaitInk("$theme-undo-${pair.first}", start, true) }
+            }
+
+            action(obj("type" to "invoke", "command" to "pen"))
+            action(obj("type" to "select_brush", "id" to brushId("G-Pen")))
+            val before = camera()
+            val from = Offset(.3f, .7f); val to = Offset(.7f, .7f)
+            motion(android.view.MotionEvent.ACTION_DOWN, listOf(stylus to from))
+            for (i in 1..24) {
+                val pen = stylus to from + (to - from) * (i / 24f)
+                when {
+                    i < 8 || i > 16 -> motion(android.view.MotionEvent.ACTION_MOVE, listOf(pen))
+                    i == 8 -> {
+                        motion(android.view.MotionEvent.ACTION_POINTER_DOWN or (1 shl android.view.MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, finger to Offset(.8f, .2f)))
+                        motion(android.view.MotionEvent.ACTION_POINTER_DOWN or (2 shl android.view.MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, finger to Offset(.8f, .2f), finger to Offset(.9f, .3f)))
+                    }
+                    i < 16 -> { val k = (i - 8) * .02f; motion(android.view.MotionEvent.ACTION_MOVE, listOf(pen, finger to Offset(.8f - k, .2f + k), finger to Offset(.9f + k, .3f + k))) }
+                    else -> {
+                        motion(android.view.MotionEvent.ACTION_POINTER_UP or (2 shl android.view.MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, finger to Offset(.66f, .36f), finger to Offset(1.04f, .44f)))
+                        motion(android.view.MotionEvent.ACTION_POINTER_UP or (1 shl android.view.MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, finger to Offset(.66f, .36f)))
+                    }
+                }
+            }
+            motion(android.view.MotionEvent.ACTION_UP, listOf(stylus to to))
+            compose.waitForIdle()
+            if (camera() != before) { findings.add("$theme: two fingers moved the view while the stylus drew"); fitPaper() }
+            awaitInk("$theme-line-under-fingers", Offset(.65f, .7f), true)
+            screenshot("vector-edges-$theme-two-fingers.png")
+
+            val scenario = compose.activityRule.scenario
+            motion(android.view.MotionEvent.ACTION_DOWN, listOf(stylus to Offset(.3f, .8f)))
+            for (i in 1..8) motion(android.view.MotionEvent.ACTION_MOVE, listOf(stylus to Offset(.3f + i * .02f, .8f)))
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+            android.os.SystemClock.sleep(600)
+            scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+            host.awaitReady(compose = compose)
+            for (i in 9..16) motion(android.view.MotionEvent.ACTION_MOVE, listOf(stylus to Offset(.3f + i * .02f, .8f)))
+            motion(android.view.MotionEvent.ACTION_UP, listOf(stylus to Offset(.62f, .8f)))
+            compose.waitForIdle(); android.os.SystemClock.sleep(500)
+            assertNull("the app keeps working after the background trip", host.failure)
+            val kept = ink(Offset(.4f, .8f))
+            screenshot("vector-edges-$theme-background-$kept.png")
+            stroke(stylus, Offset(.3f, .88f), Offset(.7f, .88f))
+            awaitInk("$theme-after-background", Offset(.5f, .88f), true)
+        }
+        assertTrue("findings:\n${findings.joinToString("\n")}", findings.isEmpty())
+    }
+
+    private fun fits(tagOrLabel: String, byTag: Boolean, place: String, findings: MutableList<String>, within: String? = null) {
+        val window = compose.onRoot().fetchSemanticsNode().boundsInWindow
+        val container = within?.let { tag -> compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().firstOrNull { it.boundsInWindow.width > 0f }?.boundsInWindow }
+        val nodes = (if (byTag) compose.onAllNodesWithTag(tagOrLabel, useUnmergedTree = true) else compose.onAllNodesWithContentDescription(tagOrLabel, useUnmergedTree = true)).fetchSemanticsNodes().filter { it.boundsInWindow.width > 0f }
+        if (nodes.isEmpty()) findings.add("$place: nothing shows $tagOrLabel")
+        for (node in nodes) for ((bounds, name) in listOfNotNull(window to "the window", container?.let { it to within })) {
+            val b = node.boundsInWindow
+            if (b.left < bounds.left - 1 || b.top < bounds.top - 1 || b.right > bounds.right + 1 || b.bottom > bounds.bottom + 1) findings.add("$place: $tagOrLabel at $b leaves $name at $bounds")
+        }
+    }
+    private fun reveal(tag: String) {
+        runCatching { compose.onAllNodesWithTag(tag, useUnmergedTree = true).onFirst().performScrollTo() }
+        compose.waitForIdle()
+    }
+    private fun german(language: String) {
+        if (host.languageTag == language) return
+        val tags = host.bootstrap!!.array("shipped_tags").let { a -> (0 until a.length()).map { a.getString(it) } }
+        host.drain(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "language", "value" to tags.indexOf(language) + 1)))
+        host.awaitMain("language $language", 30_000, { host.bootstrap.toString() }, compose) { host.languageTag == language }
+        compose.waitForIdle()
+    }
+
+    private fun switchWorkspace(id: String) {
+        instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "switch", "id" to "builtin:workspace:$id")) }
+        host.awaitMain("workspace $id", 30_000, { "${host.workspaceManager}" }, compose) { host.workspaceManager?.optString("id") == "builtin:workspace:$id" && host.workspaceManager?.optBoolean("busy") == false }
+        compose.waitForIdle()
+    }
+    @Test fun vectorEdgeKeysTouchPointsNoticesAndGermanLabels() {
+        val findings = mutableListOf<String>()
+        val pencil = brushId("Pencil")
+        val rows = listOf(.35f, .45f, .55f)
+        try { for (theme in listOf("light", "dark")) {
+            freshVector(theme)
+            for (row in rows) stroke(stylus, Offset(.3f, row), Offset(.7f, row))
+            awaitInk("$theme-three-lines", Offset(.5f, rows[2]), true)
+            instrumentation.runOnMainSync { canvasView().requestFocus() }
+            key(android.view.KeyEvent.KEYCODE_A, control)
+            awaitState("$theme-select-all") { enabled("deselect") && toolName() == "move" }
+            key(android.view.KeyEvent.KEYCODE_ESCAPE)
+            awaitState("$theme-escape-clears") { !enabled("deselect") }
+            tap(onPaper(Offset(.5f, rows[0])))
+            awaitState("$theme-tap-selects") { enabled("deselect") }
+            key(android.view.KeyEvent.KEYCODE_ENTER)
+            awaitState("$theme-enter-edit-points") { toolName() == "edit_points" }
+            key(android.view.KeyEvent.KEYCODE_ESCAPE)
+            awaitState("$theme-escape-to-move") { toolName() == "move" && enabled("deselect") }
+            key(android.view.KeyEvent.KEYCODE_FORWARD_DEL)
+            awaitInk("$theme-delete", Offset(.5f, rows[0]), false)
+            key(android.view.KeyEvent.KEYCODE_Z, control)
+            awaitInk("$theme-ctrl-z-restores", Offset(.5f, rows[0]), true)
+
+            stroke(stylus, Offset(.5f, rows[1]), Offset(.5f, rows[1] + .06f), 8, 4 to { key(android.view.KeyEvent.KEYCODE_ESCAPE) })
+            awaitInk("$theme-escape-mid-drag-stays", Offset(.5f, rows[1]), true)
+            awaitInk("$theme-escape-mid-drag-no-preview", Offset(.5f, rows[1] + .06f), false)
+            android.os.SystemClock.sleep(500)
+            stroke(stylus, Offset(.5f, rows[1]), Offset(.5f, rows[1] + .06f), 8, 4 to { key(android.view.KeyEvent.KEYCODE_Z, control) })
+            android.os.SystemClock.sleep(500)
+            motion(android.view.MotionEvent.ACTION_HOVER_EXIT, listOf(stylus to Offset(.99f, .99f)))
+            val landed = ink(Offset(.5f, rows[1] + .06f)); val kept = rows.all { ink(Offset(.4f, it)) || it == rows[1] }
+            if (!landed || !kept) findings.add("$theme: Ctrl+Z during a path drag: the drag landed $landed, the other lines stayed $kept")
+            screenshot("vector-edges-$theme-undo-mid-drag.png")
+
+            freshVector(theme)
+            for (row in rows) stroke(stylus, Offset(.3f, row), Offset(.7f, row))
+            stroke(stylus, Offset(.3f, .7f), Offset(.7f, .7f), 24, 12 to { key(android.view.KeyEvent.KEYCODE_Z, control) })
+            android.os.SystemClock.sleep(500)
+            motion(android.view.MotionEvent.ACTION_HOVER_EXIT, listOf(stylus to Offset(.99f, .99f)))
+            if (!ink(Offset(.65f, .7f)) || !ink(Offset(.5f, rows[2]))) findings.add("$theme: Ctrl+Z during a G-Pen stroke: stroke kept ${ink(Offset(.65f, .7f))}, earlier line kept ${ink(Offset(.5f, rows[2]))}")
+            screenshot("vector-edges-$theme-undo-mid-stroke.png")
+            freshVector(theme)
+            for (row in rows) stroke(stylus, Offset(.3f, row), Offset(.7f, row))
+            awaitInk("$theme-lines-again", Offset(.5f, rows[2]), true)
+
+            action(obj("type" to "invoke", "command" to "move"))
+            tap(onPaper(Offset(.5f, rows[2])))
+            action(obj("type" to "invoke", "command" to "edit_points"))
+            stroke(finger, Offset(.3f, rows[2]), Offset(.3f, rows[2] + .08f), 8)
+            android.os.SystemClock.sleep(400)
+            if (!ink(Offset(.3f, rows[2] + .08f))) findings.add("$theme: Edit Points by touch did not move the anchor")
+            screenshot("vector-edges-$theme-touch-points.png")
+
+            action(obj("type" to "invoke", "command" to "pen"))
+            action(obj("type" to "select_brush", "id" to pencil))
+            stroke(mouse, Offset(.3f, .8f), Offset(.6f, .8f), 6)
+            awaitState("$theme-notice") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.length() == 3 }
+            val notice = state().getJSONObject("notice").getLong("id")
+            compose.onNodeWithTag("canvas-notice").assertIsDisplayed()
+            action(obj("type" to "set_theme", "theme" to if (theme == "light") "dark" else "light"))
+            if (state().optJSONObject("notice")?.getLong("id") != notice || compose.onAllNodesWithTag("canvas-notice").fetchSemanticsNodes().isEmpty()) findings.add("$theme: switching the theme hid the notice")
+            screenshot("vector-edges-$theme-notice-switched.png")
+            action(obj("type" to "set_theme", "theme" to theme))
+            val actionNode = compose.onNodeWithTag("canvas-notice-action-new_paint_layer").fetchSemanticsNode()
+            if (!actionNode.config.contains(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)) findings.add("$theme: notice actions take no keyboard focus")
+            val bubbleName = compose.onNodeWithTag("canvas-notice").fetchSemanticsNode().config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.PaneTitle) { null }
+            if (bubbleName != state().getJSONObject("notice").getString("name")) findings.add("$theme: the notice is named $bubbleName, not ${state().getJSONObject("notice").getString("name")}")
+            val paint = state().getJSONArray("layers").objects().first { !it.getBoolean("selected") && it.isNull("paper") && it.optString("content_icon") != "layer-path-symbolic" }.getLong("id")
+            val vector = selectedLayer()
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to paint, "mask" to false)))
+            if (compose.onAllNodesWithTag("canvas-notice-action-new_paint_layer").fetchSemanticsNodes().isNotEmpty()) {
+                val count = state().getJSONArray("layers").length()
+                compose.onNodeWithTag("canvas-notice-action-new_paint_layer").performClick()
+                compose.waitForIdle(); android.os.SystemClock.sleep(400)
+                if (state().getJSONArray("layers").length() != count) findings.add("$theme: a stale notice action added a layer")
+                val stale = host.actionError ?: host.hostError ?: state().optJSONObject("notice")?.optString("text")
+                if (stale.isNullOrEmpty()) findings.add("$theme: a stale notice action showed nothing")
+                screenshot("vector-edges-$theme-notice-stale.png")
+                compose.waitUntil(15_000) { host.actionError == null }
+            }
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to vector, "mask" to false)))
+
+            german("de")
+            for ((orientation, turn) in listOf<Pair<String, () -> Unit>>("landscape" to { device.landscape(compose.activityRule.scenario) }, "portrait" to { device.portrait(compose.activityRule.scenario) })) {
+                turn(); host.awaitReady(compose = compose); compose.waitForIdle()
+                for (workspace in listOf("illustrator", "painter")) {
+                    switchWorkspace(workspace)
+                    fitPaper()
+                    val place = "$theme $orientation $workspace"
+                    if (workspace == "illustrator") {
+                        val layers = host.catalog.getJSONObject("native_copy").getJSONObject("layers")
+                        for (label in listOf("new_vector_layer", "delete_selected", "actions")) fits(layers.getString(label), false, "$place footer", findings, "layer-inspector")
+                        action(obj("type" to "invoke", "command" to "eraser"))
+                        for (id in listOf("erase_touched_part", "erase_whole_paths", "erase_to_intersection")) {
+                            val label = state().getJSONArray("commands").objects().first { it.getString("id") == id }.getString("label")
+                            reveal("subtool-$label")
+                            fits("subtool-$label", true, "$place eraser mode", findings)
+                        }
+                        screenshot("vector-edges-$theme-$orientation-$workspace-de-panels.png")
+                    }
+                    action(obj("type" to "select_brush", "id" to pencil))
+                    stroke(mouse, Offset(.3f, .5f), Offset(.6f, .5f), 6)
+                    awaitState("$place-de-notice") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.length() == 3 }
+                    fits("canvas-notice", true, "$place notice", findings)
+                    for (id in listOf("use_vector_pen", "new_paint_layer", "rasterize_layer")) fits("canvas-notice-action-$id", true, "$place notice", findings, "canvas-notice")
+                    screenshot("vector-edges-$theme-$orientation-$workspace-de-notice.png")
+                    compose.waitUntil(15_000) { state().isNull("notice") }
+                }
+            }
+            german("en")
+        } } finally { runCatching { german("en") } }
+        assertTrue("findings:\n${findings.joinToString("\n")}", findings.isEmpty())
+    }
+
+    private fun layerMenu(id: Long): JSONObject {
+        val done = CountDownLatch(1); var menu: JSONObject? = null
+        compose.runOnIdle { host.query(obj("type" to "layer_menu", "id" to id, "mask" to false)) { menu = it as? JSONObject; done.countDown() } }
+        assertTrue(done.await(15, TimeUnit.SECONDS))
+        return menu!!
+    }
+    private fun menuPath(sections: org.json.JSONArray, wanted: (JSONObject) -> Boolean): List<String>? {
+        for (section in 0 until sections.length()) for (item in sections.getJSONArray(section).objects()) {
+            if (wanted(item)) return listOf(item.getString("label"))
+            menuPath(item.array("sections"), wanted)?.let { return listOf(item.getString("label")) + it }
+        }
+        return null
+    }
+    private fun labels(sections: org.json.JSONArray): List<String> = (0 until sections.length()).flatMap { i -> sections.getJSONArray(i).objects().flatMap { listOf(it.getString("label")) + labels(it.array("sections")) } }
+    private fun files() = compose.activity.cacheDir
+    private fun tapTag(tag: String) {
+        val center = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.center
+        instrumentation.runOnMainSync {
+            val root = compose.activity.window.decorView
+            val now = android.os.SystemClock.uptimeMillis()
+            for (phase in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                val properties = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = finger })
+                val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = center.x; y = center.y; pressure = 1f; size = .05f })
+                val event = android.view.MotionEvent.obtain(now, now + if (phase == android.view.MotionEvent.ACTION_UP) 60 else 0, phase, 1, properties, coords, 0, 0, 1f, 1f, 1, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                try { root.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+        }
+        compose.waitForIdle()
+    }
+
+    @Test fun vectorEdgeRowsFilesAndRecreate() {
+        val findings = mutableListOf<String>()
+        val saved = java.util.concurrent.atomic.AtomicReference<java.io.File?>()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_CREATE_DOCUMENT && intent.action != android.content.Intent.ACTION_OPEN_DOCUMENT) return null
+                val file = saved.get() ?: return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK, android.content.Intent().setData(android.net.Uri.fromFile(file))
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        val jobs = DocumentController.nativeFileJobsForTest
+        try { for (theme in listOf("light", "dark")) {
+            switchWorkspace("illustrator")
+            freshVector(theme)
+            action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.85, .35, .1, 1.0))))
+            stroke(stylus, Offset(.3f, .35f), Offset(.7f, .35f))
+            figure("rectangle", "both"); stroke(stylus, Offset(.3f, .45f), Offset(.45f, .6f), 6)
+            figure("star", "outline"); stroke(stylus, Offset(.55f, .45f), Offset(.7f, .65f), 6)
+            val layer = selectedLayer()
+            action(obj("type" to "effect", "action" to obj("op" to "set", "layer" to layer, "key" to "path_width", "value" to obj("kind" to "number", "value" to 12))))
+            awaitInk("$theme-files-line", Offset(.5f, .35f), true)
+
+            compose.onNodeWithTag("layer-row-$layer").performTouchInput { longClick(center) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("workspace-menu").fetchSemanticsNodes().isNotEmpty() }
+            val menu = layerMenu(layer)
+            for (label in labels(menu.getJSONArray("sections"))) if (compose.onAllNodes(hasText(label) and hasAnyAncestor(isPopup())).fetchSemanticsNodes().isEmpty() && menuPath(menu.getJSONArray("sections")) { it.getString("label") == label }!!.size == 1) findings.add("$theme: the vector row's menu lacks $label")
+            val rasterize = state().getJSONArray("commands").objects().first { it.getString("id") == "rasterize_layer" }.getString("label")
+            if (rasterize !in labels(menu.getJSONArray("sections"))) findings.add("$theme: the vector row's menu has no $rasterize")
+            screenshot("vector-edges-$theme-row-menu.png")
+            val duplicate = menuPath(menu.getJSONArray("sections")) { it.optJSONObject("action")?.toString()?.contains("\"duplicate") == true }!!
+            for (step in duplicate) { compose.onNode(hasText(step) and hasAnyAncestor(isPopup())).performClick(); compose.waitForIdle() }
+            awaitState("$theme-duplicate") { vectorCount() == 2 }
+            val copy = selectedLayer()
+
+            action(obj("type" to "layer", "action" to obj("op" to "begin_rename", "id" to copy)))
+            compose.waitUntil(10_000) { compose.onAllNodes(hasSetTextAction() and hasAnyAncestor(hasTestTag("layer-row-$copy"))).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("layer-row-$copy"))).performTextReplacement("Ink")
+            compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("layer-row-$copy"))).performImeAction()
+            awaitState("$theme-rename") { s -> s.getJSONArray("layers").objects().any { it.getLong("id") == copy && it.getString("label") == "Ink" } }
+            instrumentation.runOnMainSync { compose.activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(compose.activity.window.decorView.windowToken, 0) }
+            compose.waitForIdle(); android.os.SystemClock.sleep(500)
+
+            tapTag("layer-eye-$copy"); tapTag("layer-eye-$layer")
+            awaitInk("$theme-both-hidden", Offset(.5f, .35f), false)
+            screenshot("vector-edges-$theme-hidden.png")
+            tapTag("layer-eye-$copy"); tapTag("layer-eye-$layer")
+            awaitInk("$theme-shown", Offset(.5f, .35f), true)
+
+            val before = state().getJSONArray("layers").objects().map { it.getLong("id") }
+            val below = before[before.indexOf(layer) + 1]
+            val target = compose.onNodeWithTag("layer-row-$below", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow
+            val grip = compose.onNodeWithTag("layer-grip-$copy", useUnmergedTree = true).fetchSemanticsNode().boundsInWindow.center
+            val down = android.os.SystemClock.uptimeMillis()
+            fun send(phase: Int, point: Offset) {
+                instrumentation.runOnMainSync {
+                    val properties = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0; toolType = finger })
+                    val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = point.x; y = point.y; pressure = 1f; size = .05f })
+                    val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), phase, 1, properties, coords, 0, 0, 1f, 1f, 1, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                    try { compose.activity.window.decorView.dispatchTouchEvent(event) } finally { event.recycle() }
+                }
+                android.os.SystemClock.sleep(30)
+            }
+            send(android.view.MotionEvent.ACTION_DOWN, grip)
+            for (i in 1..12) send(android.view.MotionEvent.ACTION_MOVE, grip + Offset(0f, (target.bottom - 4f - grip.y) * i / 12f))
+            send(android.view.MotionEvent.ACTION_UP, Offset(grip.x, target.bottom - 4f))
+            compose.waitForIdle()
+            awaitState("$theme-reorder") { s -> s.getJSONArray("layers").objects().map { it.getLong("id") } != before }
+            val after = state().getJSONArray("layers").objects().map { it.getLong("id") }
+            if (after.indexOf(copy) < after.indexOf(layer)) findings.add("$theme: dragging the vector row did not move it below: $before -> $after")
+            screenshot("vector-edges-$theme-reordered.png")
+            action(obj("type" to "invoke", "command" to "undo"))
+            awaitState("$theme-reorder-undone") { s -> s.getJSONArray("layers").objects().map { it.getLong("id") } == before }
+
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to copy, "mask" to false)))
+            action(obj("type" to "layer", "action" to obj("op" to "lock", "id" to copy, "value" to true)))
+            action(obj("type" to "invoke", "command" to "pen")); action(obj("type" to "select_brush", "id" to brushId("G-Pen")))
+            stroke(stylus, Offset(.3f, .72f), Offset(.7f, .72f))
+            awaitState("$theme-locked-refusal") { !it.isNull("notice") }
+            compose.waitUntil(15_000) { state().isNull("notice") }
+            awaitInk("$theme-locked-empty", Offset(.5f, .72f), false)
+            action(obj("type" to "layer", "action" to obj("op" to "lock", "id" to copy, "value" to false)))
+            run {
+                val delete = compose.onAllNodesWithContentDescription(host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("delete_selected"), useUnmergedTree = true).fetchSemanticsNodes().first { it.boundsInWindow.width > 0f }.boundsInWindow.center
+                instrumentation.runOnMainSync {
+                    val now = android.os.SystemClock.uptimeMillis()
+                    for (phase in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                        val event = android.view.MotionEvent.obtain(now, now + if (phase == android.view.MotionEvent.ACTION_UP) 60 else 0, phase, delete.x, delete.y, 0)
+                        event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                        try { compose.activity.window.decorView.dispatchTouchEvent(event) } finally { event.recycle() }
+                    }
+                }
+                compose.waitForIdle()
+            }
+            awaitState("$theme-deleted") { vectorCount() == 1 }
+            action(obj("type" to "invoke", "command" to "undo"))
+            awaitState("$theme-delete-undone") { s -> s.getJSONArray("layers").objects().any { it.getString("label") == "Ink" } }
+            action(obj("type" to "layer", "action" to obj("op" to "delete_selected")))
+            action(obj("type" to "layer", "action" to obj("op" to "select", "id" to layer, "mask" to false)))
+
+            action(obj("type" to "invoke", "command" to "eraser"))
+            val whole = state().getJSONArray("commands").objects().first { it.getString("id") == "erase_whole_paths" }.getString("label")
+            reveal("subtool-$whole")
+            compose.onAllNodesWithTag("subtool-$whole").onFirst().performClick()
+            awaitState("$theme-whole-paths") { it.getJSONObject("settings").optString("vector_eraser") == "whole_paths" }
+
+            DocumentController.nativeFileJobsForTest = false
+            val file = java.io.File(files(), "vector-edges-$theme.capy").apply { delete() }
+            saved.set(file)
+            action(obj("type" to "invoke", "command" to "save_document_as"))
+            compose.waitUntil(60_000) { file.length() > 0 && !state().getJSONObject("document_file").getBoolean("busy") && !state().getJSONObject("document_file").getBoolean("modified") }
+            val first = packageManifest(file.readBytes()).artworkRecords().toString()
+            val tabs = state().getJSONArray("tabs").length()
+            val copyFile = java.io.File(files(), "vector-edges-$theme-copy.capy").apply { writeBytes(file.readBytes()) }
+            saved.set(copyFile)
+            action(obj("type" to "invoke", "command" to "open_document"))
+            try { compose.waitUntil(60_000) { state().getJSONObject("document_file").let { f -> !f.getBoolean("busy") && f.optJSONObject("location")?.optString("name") == copyFile.name } } }
+            catch (e: Throwable) { screenshot("vector-edges-$theme-reopen-failure.png"); throw AssertionError("reopen: tabs ${state().getJSONArray("tabs").length()} after $tabs, file ${state().getJSONObject("document_file")}, host ${host.hostError}, action ${host.actionError}, prompt ${host.documents.packagePrompt}", e) }
+            host.awaitReady(compose = compose)
+            fitPaper()
+            awaitInk("$theme-reopened-line", Offset(.5f, .35f), true)
+            awaitInk("$theme-reopened-rectangle", Offset(.375f, .45f), true)
+            if (vectorCount() != 1) findings.add("$theme: the reopened drawing shows ${vectorCount()} vector layers")
+            screenshot("vector-edges-$theme-reopened.png")
+            val again = java.io.File(files(), "vector-edges-$theme-again.capy").apply { delete() }
+            saved.set(again)
+            action(obj("type" to "invoke", "command" to "save_document_as"))
+            compose.waitUntil(60_000) { again.length() > 0 && !state().getJSONObject("document_file").getBoolean("busy") && !state().getJSONObject("document_file").getBoolean("modified") }
+            if (packageManifest(again.readBytes()).artworkRecords().toString() != first) findings.add("$theme: paths, styles or live shapes changed through save and reopen")
+            DocumentController.nativeFileJobsForTest = jobs
+            saved.set(null); file.delete(); again.delete(); copyFile.delete()
+
+            compose.activityRule.scenario.recreate()
+            host.awaitReady(compose = compose)
+            if (state().getJSONObject("settings").optString("vector_eraser") != "whole_paths") findings.add("$theme: the eraser mode did not survive recreating the activity")
+            action(obj("type" to "restore_saved_settings", "saved" to state().getJSONObject("settings").put("vector_eraser", "touched_part").toString()))
+        } } finally { instrumentation.removeMonitor(monitor); DocumentController.nativeFileJobsForTest = jobs; runCatching { switchWorkspace("painter") } }
+        assertTrue("findings:\n${findings.joinToString("\n")}", findings.isEmpty())
     }
 }

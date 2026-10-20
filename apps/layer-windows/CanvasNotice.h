@@ -6,13 +6,12 @@
 #include <winrt/Microsoft.UI.Xaml.Documents.h>
 
 namespace CapyUi {
-struct NoticeAnchor{double x,y,width;};
-inline NoticeAnchor noticeAnchor(J const& work,J const& status,J const& bar){
-    constexpr double Margin=12,BarReach=72,MaxWidth=720;
-    double areaBottom=num(work,L"y")+num(work,L"height");
-    double floor=num(status,L"height")>0?std::min(areaBottom,num(status,L"y")):areaBottom;
-    double y=bar.Size()&&num(bar,L"y")+num(bar,L"height")>floor-BarReach?num(bar,L"y")-Margin:floor-Margin;
-    return {num(work,L"x")+num(work,L"width")/2,y,std::min(MaxWidth,std::max(0.,num(work,L"width")-2*Margin))};
+struct NoticeAnchor{double x,y,width,minText;};
+inline NoticeAnchor noticeAnchor(J const& placement,J const& bar){
+    constexpr double Margin=12;
+    double y=num(placement,L"y");
+    if(bar.Size()&&num(bar,L"y")+num(bar,L"height")>num(placement,L"bar_floor"))y=std::min(y,num(bar,L"y")-Margin);
+    return {num(placement,L"x"),y,num(placement,L"max_width"),num(placement,L"min_text_width")};
 }
 struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
     static constexpr double Offscreen=-100000;
@@ -31,7 +30,7 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
     WorkspaceShadow shadow;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timeout{nullptr};
     std::optional<double> shown;
-    J work,status,bar;
+    J placement,bar;
     bool visible=false;
 
     void init(Canvas const& root){
@@ -65,7 +64,8 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         if(!notice.Size()){Hide();shown.reset();return;}
         auto id=num(notice,L"id");
         auto message=str(notice,L"text");bool changed=text.Text()!=message;
-        if(changed){text.Text(message);AutomationProperties::SetName(frame,message);}
+        if(changed)text.Text(message);
+        if(auto name=str(notice,L"name");AutomationProperties::GetName(frame)!=name)AutomationProperties::SetName(frame,name);
         auto offers=array(notice,L"actions");
         bool rebuild=offers.Size()!=choices.size();
         for(uint32_t i=0;!rebuild&&i<offers.Size();++i)rebuild=str(offers.GetObjectAt(i),L"id")!=unbox_value<hstring>(choices[i].Tag());
@@ -76,7 +76,7 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
                 auto choice=button(data,L"",[weak,token]{if(auto self=weak.lock())self->accept(token);});
                 TextBlock caption;choice.Content(caption);choice.Tag(box_value(token));
                 choice.Padding({12,5,12,5});choice.MinHeight(34);choice.Margin({0,-6,-8,-6});
-                choice.AllowFocusOnInteraction(false);choice.IsTabStop(false);
+                choice.AllowFocusOnInteraction(false);
                 AutomationProperties::SetAutomationId(choice,L"canvas-notice-action-"+token);
                 Microsoft::UI::Xaml::Documents::InlineUIContainer content;content.Child(choice);
                 actionLine.Inlines().Append(content);choices.push_back(choice);
@@ -101,7 +101,7 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         if(auto peer=Automation::Peers::FrameworkElementAutomationPeer::FromElement(frame))
             peer.RaiseAutomationEvent(Automation::Peers::AutomationEvents::LiveRegionChanged);
     }
-    void Place(J const& layout){work=object(layout,L"work_area");status=object(layout,L"status");present();}
+    void Place(J const& layout){placement=object(layout,L"notice");present();}
     void Bar(J const& bounds){bar=bounds;present();}
     void Hide(){
         timeout.Stop();
@@ -118,23 +118,22 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         data->dispatch(O({{L"type",S(L"notice")},{L"id",N(*shown)},{L"accept",B(false)}}));
     }
     void present(){
-        if(!visible||!work.Size()){
+        for(auto const& choice:choices)choice.IsTabStop(visible&&placement.Size());
+        if(!visible||!placement.Size()){
             Canvas::SetLeft(frame,Offscreen);frame.Opacity(0);frame.IsHitTestVisible(false);
             shadow.Layout({float(Offscreen),0,1,1},899,false);
             return;
         }
-        auto anchor=noticeAnchor(work,status,bar);double limit=anchor.width;
+        auto anchor=noticeAnchor(placement,bar);double limit=anchor.width;
         if(reflow||arrangedWidth!=limit){
             reflow=false;arrangedWidth=limit;double gap=choices.empty()?0.:12.,minimum=0;
             for(auto const& choice:choices){choice.Measure({INFINITY,INFINITY});minimum=std::max(minimum,double(choice.DesiredSize().Width));}
             actions.Measure({INFINITY,INFINITY});text.Measure({INFINITY,INFINITY});
             double message=text.DesiredSize().Width,offers=choices.empty()?0.:actions.DesiredSize().Width;
-            double content=std::min(std::max(0.,limit-28),message+offers+gap),available=std::max(0.,content-gap);
-            double actionWidth=message+offers>0?std::clamp(available*offers/(message+offers),std::min(minimum,available),available):0.;
-            text.Measure({float(available-actionWidth),INFINITY});actions.Measure({float(actionWidth),INFINITY});
-            double inlineHeight=std::max(text.DesiredSize().Height,actions.DesiredSize().Height);
-            text.Measure({float(content),INFINITY});actions.Measure({float(content),INFINITY});
-            bool stacked=!choices.empty()&&text.DesiredSize().Height+actions.DesiredSize().Height+gap<inlineHeight;
+            double room=std::max(0.,limit-28),content=std::min(room,message+offers+gap),available=std::max(0.,content-gap);
+            bool stacked=!choices.empty()&&message+offers+gap>room&&room-offers-gap<anchor.minText;
+            double actionWidth=stacked?0.:std::clamp(offers,std::min(minimum,available),available);
+            if(stacked)content=std::min(room,std::max(message,offers));
             row.ColumnDefinitions().GetAt(0).Width({stacked?content:available-actionWidth,GridUnitType::Pixel});
             row.ColumnDefinitions().GetAt(1).Width({stacked?0.:actionWidth,GridUnitType::Pixel});
             Grid::SetColumn(actions,stacked?0:1);Grid::SetRow(actions,stacked?1:0);

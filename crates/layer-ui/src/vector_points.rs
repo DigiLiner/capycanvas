@@ -34,6 +34,15 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn points_layer(&self) -> Option<OccurrenceHandle> {
         self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::EditPoints)
     }
+    pub(super) fn vector_points_touch_target(&self, point: [f64; 2]) -> bool {
+        let Some(layer) = self.points_layer().filter(|layer| !self.engine.document().is_locked(*layer)) else { return false };
+        let scene = self.engine.document().scene();
+        let Some(object) = scene.vector_layer(layer) else { return false };
+        let [ox, oy] = scene.occurrence_offset64(layer);
+        let local = [point[0] - ox, point[1] - oy];
+        let reach = REACH * self.document_per_surface_pixel();
+        self.point_part(object, local, reach).is_some() || object.paths().any(|(_, path)| path.pickable() && path.hit(local, reach))
+    }
     fn edited_paths<'a>(&self, object: &'a VectorObject) -> Vec<&'a PathItem> {
         let mut paths: Vec<&PathItem> = self.selected_vector_items().map(|selection| object.selected_paths(&selection.items).into_iter().map(|(_, path)| path).collect()).unwrap_or_default();
         paths.sort_by_key(|path| path.id);

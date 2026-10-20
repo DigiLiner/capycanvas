@@ -656,7 +656,10 @@ fn painting_on_an_image_layer_offers_mask_paint_and_rasterize_actions_that_reval
     assert_eq!(notice.actions[0].id, NoticeActionId::EditMask);
     let paint = *s.engine.document().scene().order().iter().find(|h| s.engine.document().scene().paint_source(**h).is_some()).unwrap();
     s.layer_action(LayerAction::Select { id: occurrence_token(paint), mask: false }).unwrap();
-    assert!(s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayer) }).is_err(), "the target changed");
+    let layers = s.engine.document().scene().order().len();
+    s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::NewPaintLayer) }).unwrap();
+    assert_eq!(s.engine.document().scene().order().len(), layers, "the target changed");
+    assert_eq!(s.state.notice.as_ref().map(|n| n.text.clone()), Some(s.localization().text(MessageId::OBJECTS_NOTICE_STALE).to_string()));
     s.layer_action(LayerAction::Select { id: occurrence_token(layer), mask: false }).unwrap();
     s.notify_drawing_refusal();
     let notice = s.state.notice.clone().unwrap();

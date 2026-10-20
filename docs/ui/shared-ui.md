@@ -365,12 +365,19 @@ published under `regions::HOST`:
 The core writes the text and the action's label, and keeps the action. Every
 notice has a new `id`, so a repeated refusal shows again.
 `UiAction::Notice { id, accept }` runs the action or dismisses the notice; a
-replaced or cleared id is rejected. The core clears the notice at the next
-canvas contact that raises nothing new, and when another document becomes
-active. Hosts show each id once, in a bubble over the canvas that never takes
-focus, and hide it after about 4 s (answering `accept: false`) or at the next
-canvas contact. Notices overlay the canvas and never resize its viewport or GPU
-surface. `host_error` is kept for file and renderer errors.
+replaced or cleared id is rejected. An action that no longer applies, because
+its layer changed or was locked, raises a new notice that says why. The core
+clears the notice at the next canvas contact that raises nothing new, and when
+another document becomes active. Hosts show each id once, in a bubble named by
+`Notice::name` that does not take focus when it appears; Tab reaches its actions.
+`ResolvedLayout::notice` places it centred at the bottom of the canvas area and no
+wider than that area, or at the window's bottom when the canvas area is too small
+to hold it; a canvas action bar reaching below `bar_floor` lifts it above the bar.
+Its actions stay beside the text while the text keeps `min_text_width`, and take
+their own row otherwise. Hosts hide it after about 4 s (answering
+`accept: false`) or at the next canvas contact. Notices overlay the canvas and
+never resize its viewport or GPU surface. `host_error` is kept for file and
+renderer errors.
 
 Brush previews are cached transparent PNGs from the actual GPU presets, with
 destination paint seeded for blender/eraser/liquify examples. GTK bundles the
@@ -407,7 +414,10 @@ The host calls `frame(now_ns, presentation_ns)` at display time and presents the
 renderer-owned composite through the GPU viewport presenter. Only explicit
 exports and visual tests read pixels back. Camera movement uses the same
 forward/inverse transform for drawing and display. Shared `TouchGesture`
-interprets two fingers as anchored pan/zoom/rotation; one finger does not paint.
+interprets two fingers as anchored pan/zoom/rotation; one finger does not paint,
+draw lines or erase. One finger does drag what Move or Edit Points would take
+under a pen: images, paths, transform handles and anchors, and a tap on a
+segment adds an anchor.
 Mouse and stylus event collectors remain native.
 Wheel input follows Canvas → Mouse wheel (Pan by default, or Zoom).
 Shift-wheel pans horizontally; Ctrl-wheel always zooms around the cursor. Hosts normalize native wheel units and Rust applies the camera gesture.

@@ -10,6 +10,7 @@ objects-action-add-mask = Añadir máscara
 objects-action-edit-mask = Editar máscara
 objects-action-new-paint-layer = Nueva capa de pintura
 objects-notice-stale = La capa cambió, así que la acción no se aplicó.
+objects-notice-name = Aviso
 objects-vector-refusal-brush = «{ $layer }» es una capa vectorial: aquí solo funcionan las plumas que dibujan trazados.
 objects-vector-refusal-setting = «{ $layer }» es una capa vectorial. { $setting } impide que { $brush } dibuje trazados.
 objects-vector-refusal-tool = «{ $layer }» es una capa vectorial. Esta herramienta funciona en capas de pintura.

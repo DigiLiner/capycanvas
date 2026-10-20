@@ -106,6 +106,10 @@ internal class LayerSwipe {
     val addPaper = view.objectOrNull("add_paper")
     var headerHeight by remember { mutableFloatStateOf(0f) }
     var footerHeight by remember { mutableFloatStateOf(0f) }
+    var footerWidth by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    val footer = view.array("footer").objects()
+    val overflow = footer.filter { footerWidth + .5f < it.getDouble("min_width") }
+    fun shown(button: String) = overflow.none { it.getString("button") == button }
     var rowHeight by remember { mutableFloatStateOf(40f) }
     val fixedHeight = headerHeight + footerHeight
     val measured = if (headerHeight > 0f && footerHeight > 0f)
@@ -133,14 +137,23 @@ internal class LayerSwipe {
     LaunchedEffect(epoch) { host.layerSwipe.close(); dragGeneration++; drag = null; menuGeneration++; menu = null; menuRequest = null }
     var contactHeld by remember { mutableStateOf(false) }
     var menuPoint by remember { mutableStateOf(Offset.Zero) }
-    fun contextMenu(layer: JSONObject, mask: Boolean, point: Offset) {
+    fun contextMenu(layer: JSONObject, mask: Boolean, point: Offset, extra: List<JSONObject> = emptyList()) {
         if (drag != null) return
         val request = ++menuGeneration
         val id = layer.getLong("id")
         host.layer(obj("op" to "context", "id" to id, "mask" to mask))
         val query = obj("type" to "layer_menu", "id" to id, "mask" to mask)
         host.query(query) {
-            if (request == menuGeneration && host.menuEpoch() == epoch && drag == null) { menuRequest = query; menu = it as? JSONObject; menuPoint = point - panelOrigin }
+            if (request == menuGeneration && host.menuEpoch() == epoch && drag == null) {
+                val shown = it as? JSONObject
+                if (shown != null && extra.isNotEmpty()) {
+                    val sections = JSONArray().put(JSONArray(extra.map { slot -> slot.getJSONObject("item") }))
+                    val old = shown.array("sections")
+                    for (i in 0 until old.length()) sections.put(old.get(i))
+                    shown.put("sections", sections)
+                }
+                menuRequest = query; menu = shown; menuPoint = point - panelOrigin
+            }
         }
     }
     fun moveLayer(id: Long, point: Offset, finished: Boolean, cancelled: Boolean) {
@@ -267,19 +280,24 @@ internal class LayerSwipe {
                 }
                 LayerConnections(layers,view.array("connections").objects(),thumbnails,Modifier.matchParentSize())
             }
-            Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height / density.density }.padding(horizontal=panelMetrics().inset,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
-                LayerButton(host,"add-layer",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"),action=obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false)))
-                LayerButton(host,"add-vector-layer",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_vector_layer"),action=obj("type" to "invoke","command" to "new_vector_layer"))
-                LayerButton(host,"folder",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_group"),action=obj("type" to "layer","action" to obj("op" to "new","group" to true,"clipped" to false)))
-                LayerButton(host,"selection-brush",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_selection_layer"),action=obj("type" to "invoke","command" to "new_selection_layer"))
-                LayerButton(host,"mask",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("add_mask"),enabled=controls.getBoolean("mask"),action=active?.let { obj("type" to "layer","action" to obj("op" to "add_mask","id" to it.getLong("id"),"replace" to false)) })
-                LayerButton(host,"add-filter",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("add_filter"),Modifier.testTag("layer-add-filter").onGloballyPositioned { filterPoint = it.boundsInRoot().topLeft - panelOrigin },enabled=view.optJSONObject("add_filter")!=null) {
+            Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height / density.density; footerWidth = it.width / density.density }.padding(horizontal=panelMetrics().inset,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
+                val copy = host.catalog.getJSONObject("native_copy").getJSONObject("layers")
+                if (shown("new_layer")) LayerButton(host,"add-layer",copy.getString("new_layer"),action=obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false)))
+                if (shown("new_vector_layer")) LayerButton(host,"add-vector-layer",copy.getString("new_vector_layer"),action=obj("type" to "invoke","command" to "new_vector_layer"))
+                if (shown("new_group")) LayerButton(host,"folder",copy.getString("new_group"),action=obj("type" to "layer","action" to obj("op" to "new","group" to true,"clipped" to false)))
+                if (shown("new_selection_layer")) LayerButton(host,"selection-brush",copy.getString("new_selection_layer"),action=obj("type" to "invoke","command" to "new_selection_layer"))
+                if (shown("add_mask")) LayerButton(host,"mask",copy.getString("add_mask"),enabled=controls.getBoolean("mask"),action=active?.let { obj("type" to "layer","action" to obj("op" to "add_mask","id" to it.getLong("id"),"replace" to false)) })
+                if (shown("add_filter")) LayerButton(host,"add-filter",copy.getString("add_filter"),Modifier.testTag("layer-add-filter").onGloballyPositioned { filterPoint = it.boundsInRoot().topLeft - panelOrigin },enabled=view.optJSONObject("add_filter")!=null) {
                     menuGeneration++; menuRequest = null; menu = view.optJSONObject("add_filter"); menuPoint = filterPoint
                 }
-                LayerButton(host,"image",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("import_image"), action=obj("type" to "invoke", "command" to "import_image"))
-                LayerButton(host,"delete",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("delete_selected"),enabled=view.getBoolean("can_delete"),action=obj("type" to "layer","action" to obj("op" to "delete_selected")))
+                if (shown("import_image")) LayerButton(host,"image",copy.getString("import_image"), action=obj("type" to "invoke", "command" to "import_image"))
+                if (shown("delete")) LayerButton(host,"delete",copy.getString("delete_selected"),enabled=view.getBoolean("can_delete"),action=obj("type" to "layer","action" to obj("op" to "delete_selected")))
                 Spacer(Modifier.weight(1f))
-                LayerButton(host,"more-small",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("actions")) { active?.let { contextMenu(it,it.getBoolean("mask_selected"),panelOrigin+Offset(0f,40f)) } }
+                LayerButton(host,"more-small",copy.getString("actions"),enabled=active!=null||overflow.isNotEmpty()) {
+                    val point = panelOrigin+Offset(0f,40f)
+                    if (active != null) contextMenu(active,active.getBoolean("mask_selected"),point,overflow)
+                    else { menuGeneration++; menuRequest = null; menu = obj("title" to copy.getString("actions"), "sections" to JSONArray().put(JSONArray(overflow.map { it.getJSONObject("item") }))); menuPoint = point - panelOrigin }
+                }
             }
         }
         drag?.let { d -> layers.find { it.getLong("id")==d.id }?.let { layer ->

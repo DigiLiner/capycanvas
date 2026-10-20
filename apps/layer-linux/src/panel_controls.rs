@@ -67,6 +67,13 @@ pub fn update_commands(dropdown: &gtk::DropDown, commands: &[&layer_ui::CommandS
     }
 }
 
+pub(crate) fn two_lines(label: &gtk::Label) {
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_lines(2);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+}
+
 fn choice_factory(shrink: bool) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(move |_, object| {

@@ -1029,9 +1029,19 @@ impl LayerPanel {
         overlay.set_clip_overlay(&connections, true);
         list.vadjustment().connect_value_changed(glib::clone!(#[weak] connections, move |_| connections.queue_draw()));
         root.append(&overlay);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_CONTROL_METRICS.control_spacing as i32);
         footer.add_css_class("layer-footer");
-        root.append(&footer);
+        let footer_room = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .child(&footer)
+            .build();
+        let fitted = Cell::new(-1);
+        footer_room.add_tick_callback(glib::clone!(#[weak] footer, #[upgrade_or] glib::ControlFlow::Break, move |room, _| {
+            if fitted.replace(room.width()) != room.width() { fit_footer(&footer, room.width()); }
+            glib::ControlFlow::Continue
+        }));
+        root.append(&footer_room);
         Self {
             copy: copy.clone(),
             root,
@@ -1226,6 +1236,7 @@ impl LayerPanel {
                 }
             }
         ));
+        mask.set_widget_name("layer-add-mask");
         self.footer.append(mask);
         self.add_filter.set_widget_name("layer-add-filter");
         let filter_menu = gtk::PopoverMenu::from_model(None::<&gio::MenuModel>);
@@ -1267,23 +1278,12 @@ impl LayerPanel {
             #[weak]
             w,
             move |b| {
-                if let Some(id) = active(&w) {
-                    let mask = w.gpu.borrow().as_ref().is_some_and(|g| {
-                        g.session
-                            .state()
-                            .layers
-                            .iter()
-                            .any(|l| l.id == id && l.mask_selected)
-                    });
-                    menu(
-                        &w,
-                        &context,
-                        b.upcast_ref(),
-                        id,
-                        mask,
-                        [0., b.height() as f64],
-                    );
-                }
+                let footer = b.parent().map_or(0, |footer| footer.parent().map_or(footer.width(), |room| room.width()));
+                let overflow = w.gpu.borrow().as_ref().map(|g| layer_ui::layer_footer_overflow(&g.session.state().layer_tools.footer, footer as f32)).unwrap_or_default();
+                let mask = active(&w).is_some_and(|id| w.gpu.borrow().as_ref().is_some_and(|g| {
+                    g.session.state().layers.iter().any(|l| l.id == id && l.mask_selected)
+                }));
+                actions_menu(&w, &context, b.upcast_ref(), active(&w), mask, overflow);
             }
         ));
         self.footer.append(&more);
@@ -1540,13 +1540,51 @@ impl LayerPanel {
         }
     }
 }
+fn footer_button(name: &str) -> Option<layer_ui::LayerFooterButton> {
+    use layer_ui::LayerFooterButton as B;
+    Some(match name {
+        "layer-add-layer-symbolic" => B::NewLayer,
+        "layer-add-vector-layer-symbolic" => B::NewVectorLayer,
+        "layer-folder-symbolic" => B::NewGroup,
+        "new-selection-layer" => B::NewSelectionLayer,
+        "layer-add-mask" => B::AddMask,
+        "layer-add-filter" => B::AddFilter,
+        "import-image-layer" => B::ImportImage,
+        "delete-selected-layers" => B::Delete,
+        _ => return None,
+    })
+}
+fn fit_footer(footer: &gtk::Box, width: i32) {
+    let mut child = footer.first_child();
+    while let Some(widget) = child {
+        if let Some(button) = footer_button(widget.widget_name().as_str()) {
+            widget.set_visible(width as f32 + 0.5 >= button.min_width());
+        }
+        child = widget.next_sibling();
+    }
+}
+fn actions_menu(
+    w: &Rc<Workspace>,
+    context: &gtk::PopoverMenu,
+    anchor: &gtk::Widget,
+    id: Option<u64>,
+    mask: bool,
+    overflow: Vec<layer_ui::ContextMenuItem>,
+) {
+    if let Some(id) = id { action(w, A::Context { id, mask }); }
+    let menu = id.and_then(|id| w.gpu.borrow().as_ref().and_then(|g| g.session.layer_menu(id, mask).ok()));
+    if menu.is_none() && overflow.is_empty() { return; }
+    let mut menu = menu.unwrap_or_else(|| layer_ui::ContextMenu { title: w.localization().text(layer_ui::MessageId::WORKSPACE_CONTROL_LAYER_ACTIONS).to_string(), sections: Vec::new() });
+    if !overflow.is_empty() { menu.sections.insert(0, overflow); }
+    show_menu(w, context, anchor, menu, [0., anchor.height() as f64]);
+}
 fn menu(
     w: &Rc<Workspace>,
     context: &gtk::PopoverMenu,
     anchor: &gtk::Widget,
     id: u64,
     mask: bool,
-    [x, y]: [f64; 2],
+    at: [f64; 2],
 ) {
     action(w, A::Context { id, mask });
     let menu = w
@@ -1555,6 +1593,9 @@ fn menu(
         .as_ref()
         .and_then(|g| g.session.layer_menu(id, mask).ok());
     let Some(menu) = menu else { return };
+    show_menu(w, context, anchor, menu, at);
+}
+fn show_menu(w: &Rc<Workspace>, context: &gtk::PopoverMenu, anchor: &gtk::Widget, menu: layer_ui::ContextMenu, [x, y]: [f64; 2]) {
     w.populate_workspace_menu(context, menu);
     if let Some(p) = context.parent().and_then(|root| {
         anchor.compute_point(&root, &gtk::graphene::Point::new(x as f32, y as f32))

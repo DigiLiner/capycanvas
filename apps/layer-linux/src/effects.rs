@@ -189,7 +189,8 @@ impl EffectPanels {
         properties.append(&title);
         let property_header = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
         property_header.add_css_class("properties-header");
-        let layer_type = gtk::Label::builder().xalign(0.).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let layer_type = gtk::Label::builder().xalign(0.).hexpand(true).build();
+        crate::panel_controls::two_lines(&layer_type);
         layer_type.add_css_class("dim-label");
         layer_type.set_widget_name("properties-layer-type");
         let add_filter = gtk::MenuButton::builder().halign(gtk::Align::End).build();
@@ -1151,7 +1152,7 @@ fn row(title: &str, input: &impl IsA<gtk::Widget>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
     let label = gtk::Label::new(Some(title));
     label.set_xalign(0.);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    crate::panel_controls::two_lines(&label);
     label.set_tooltip_text(Some(title));
     label.set_hexpand(true);
     row.append(&label);

@@ -3,8 +3,8 @@
 //! the actions, their availability and stale-id validation; this widget owns
 //! the timeout and hides at the next canvas contact.
 use crate::workspace::Workspace;
-use gtk::{glib, prelude::*};
-use layer_ui::{Notice, NoticeAction, UiAction};
+use gtk::{gdk, glib, prelude::*};
+use layer_ui::{Notice, NoticeAction, NoticePlacement, UiAction};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -12,26 +12,26 @@ use std::{
 };
 
 const TIMEOUT: Duration = Duration::from_secs(4);
+const GAP: i32 = 12;
+const PADDING: f32 = 24.;
 
 pub struct NoticeBubble {
     pub root: gtk::Box,
     text: gtk::Label,
     actions: gtk::Box,
     published: RefCell<Vec<NoticeAction>>,
+    placement: Cell<NoticePlacement>,
     shown: Cell<Option<u64>>,
     timeout: RefCell<Option<glib::SourceId>>,
 }
 
 impl NoticeBubble {
     pub fn new() -> Rc<Self> {
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, GAP);
         root.set_widget_name("canvas-notice");
         root.add_css_class("workspace-notice");
         root.add_css_class("canvas-notice");
-        root.set_halign(gtk::Align::Center);
-        root.set_valign(gtk::Align::End);
         root.set_visible(false);
-        root.update_property(&[gtk::accessible::Property::Label("Canvas notice")]);
         let text = gtk::Label::new(None);
         text.set_wrap(true);
         text.set_xalign(0.);
@@ -45,6 +45,7 @@ impl NoticeBubble {
             text,
             actions,
             published: RefCell::new(Vec::new()),
+            placement: Cell::new(NoticePlacement::default()),
             shown: Cell::new(None),
             timeout: RefCell::new(None),
         })
@@ -79,20 +80,21 @@ impl NoticeBubble {
         *self.published.borrow_mut() = actions.to_vec();
     }
 
-    /// Show a notice the first time its id is published, `bottom` pixels above
-    /// the window's bottom edge; a cleared notice hides.
-    pub fn publish(self: &Rc<Self>, workspace: &Rc<Workspace>, notice: Option<&Notice>, bottom: i32) {
+    /// Show a notice the first time its id is published at `placement`; a
+    /// cleared notice hides.
+    pub fn publish(self: &Rc<Self>, workspace: &Rc<Workspace>, notice: Option<&Notice>, placement: NoticePlacement) {
         let Some(notice) = notice else {
             self.hide();
             self.shown.set(None);
             return;
         };
         self.text.set_text(&notice.text);
+        self.root.update_property(&[gtk::accessible::Property::Label(&notice.name)]);
         self.rebuild_actions(workspace, &notice.actions);
+        self.place(placement);
         if self.shown.replace(Some(notice.id)) == Some(notice.id) {
             return;
         }
-        self.place(bottom);
         self.root.set_visible(true);
         self.cancel_timeout();
         let id = notice.id;
@@ -113,8 +115,25 @@ impl NoticeBubble {
         *self.timeout.borrow_mut() = Some(source);
     }
 
-    pub fn place(&self, bottom: i32) {
-        self.root.set_margin_bottom(bottom);
+    /// Lay the actions beside the text or on their own row for `placement`.
+    pub fn place(&self, placement: NoticePlacement) {
+        let natural = |widget: &gtk::Widget| widget.measure(gtk::Orientation::Horizontal, -1).1 as f32;
+        let content = placement.max_width - PADDING;
+        let actions = if self.actions.is_visible() { natural(self.actions.upcast_ref()) } else { 0. };
+        let beside = actions == 0. || natural(self.text.upcast_ref()) + GAP as f32 + actions <= content
+            || placement.actions_beside(content, actions, GAP as f32);
+        let orientation = if beside { gtk::Orientation::Horizontal } else { gtk::Orientation::Vertical };
+        if self.root.orientation() != orientation { self.root.set_orientation(orientation); }
+        if self.placement.replace(placement) != placement { self.root.queue_resize(); }
+    }
+
+    /// The bubble's allocation in the overlay: centred on the placement's
+    /// anchor, no wider than its maximum width.
+    pub fn allocation(&self) -> gdk::Rectangle {
+        let placement = self.placement.get();
+        let width = self.root.measure(gtk::Orientation::Horizontal, -1).1.min(placement.max_width.floor() as i32).max(1);
+        let height = self.root.measure(gtk::Orientation::Vertical, width).1;
+        gdk::Rectangle::new((placement.x - width as f32 * 0.5).round() as i32, (placement.y - height as f32).round() as i32, width, height)
     }
 
     /// A canvas contact dismisses the notice without answering its action.

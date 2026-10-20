@@ -10,6 +10,7 @@ objects-action-add-mask = Aggiungi maschera
 objects-action-edit-mask = Modifica maschera
 objects-action-new-paint-layer = Nuovo livello di pittura
 objects-notice-stale = Il livello è cambiato, quindi l’azione non è stata applicata.
+objects-notice-name = Avviso
 objects-vector-refusal-brush = «{ $layer }» è un livello vettoriale: qui funzionano solo le penne che disegnano tracciati.
 objects-vector-refusal-setting = «{ $layer }» è un livello vettoriale. { $setting } impedisce a { $brush } di disegnare tracciati.
 objects-vector-refusal-tool = «{ $layer }» è un livello vettoriale. Questo strumento funziona sui livelli di pittura.

@@ -4,12 +4,12 @@ use super::*;
 use super::selection_tools::{canvas_drag, canvas_point};
 use layer_core::authored::vector::PathItem;
 
-fn paths(d: &Driver) -> Vec<PathItem> {
+pub(super) fn paths(d: &Driver) -> Vec<PathItem> {
     let session = ui_session(&d.w);
     let doc = session.engine().document();
     doc.working.occurrence.and_then(|layer| doc.scene().vector_layer(layer)).map_or_else(Vec::new, |object| object.paths().map(|(_, p)| p.clone()).collect())
 }
-fn until_paths(d: &Driver, what: &str, done: impl Fn(&[PathItem]) -> bool) -> Vec<PathItem> {
+pub(super) fn until_paths(d: &Driver, what: &str, done: impl Fn(&[PathItem]) -> bool) -> Vec<PathItem> {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         pump(20);
@@ -18,7 +18,7 @@ fn until_paths(d: &Driver, what: &str, done: impl Fn(&[PathItem]) -> bool) -> Ve
         assert!(Instant::now() < deadline, "{what} timed out: {}", d.w.status.text());
     }
 }
-fn start(path: &PathItem) -> [f32; 2] { path.geometry.subpaths()[0].anchor(0).point().map(|v| v as f32) }
+pub(super) fn start(path: &PathItem) -> [f32; 2] { path.geometry.subpaths()[0].anchor(0).point().map(|v| v as f32) }
 
 #[test]
 #[ignore = "isolated native-input.js --native-test=native_vector_draw_move_and_delete --tablet"]
@@ -62,14 +62,14 @@ fn native_vector_draw_move_and_delete() {
     d.finish();
 }
 
-fn pen_points(d: &mut Driver, points: &[[f32; 2]]) {
+pub(super) fn pen_points(d: &mut Driver, points: &[[f32; 2]]) {
     let points: Vec<[f32; 2]> = points.iter().map(|p| canvas_point(d, *p)).collect();
     let mut script = vec![serde_json::json!({"pen":"move","point":points[0]}), serde_json::json!({"pen":"down","point":points[0]})];
     script.extend(points[1..].iter().map(|p| serde_json::json!({"pen":"move","point":p})));
     script.extend([serde_json::json!({"pen":"up"}), serde_json::json!({"pen":"leave"})]);
     d.input.perform(serde_json::Value::Array(script));
 }
-fn tool(d: &Driver, tool: LayerCanvasTool) {
+pub(super) fn tool(d: &Driver, tool: LayerCanvasTool) {
     d.w.dispatch(UiAction::Layer { action: LayerAction::Tool { tool } });
     pump(200);
 }
@@ -135,34 +135,34 @@ fn native_vector_tools() {
     d.finish();
 }
 
-fn presented(d: &Driver, document: [f32; 2]) -> [u8; 4] {
+pub(super) fn presented(d: &Driver, document: [f32; 2]) -> [u8; 4] {
     let capture = ui_session(&d.w).engine().backend().capture_in(d.w.view_color()).unwrap();
     let m = state(&d.w).camera.document_to_surface();
     let x = (m[0] * document[0] + m[2] * document[1] + m[4]).round() as usize;
     let y = (m[1] * document[0] + m[3] * document[1] + m[5]).round() as usize;
     capture.bytes[y * capture.stride as usize + x * 4..][..4].try_into().unwrap()
 }
-fn capture(d: &Driver, name: &str) {
+pub(super) fn capture(d: &Driver, name: &str) {
     let _warm = crate::snapshot(&d.w);
     pump(120);
     crate::snapshot(&d.w).save_to_png(d.input.dir.join(name)).unwrap();
 }
-fn inked(pixel: [u8; 4]) -> bool { pixel[..3].iter().all(|v| *v < 100) }
-fn marked(pixel: [u8; 4]) -> bool { pixel[..3].iter().map(|v| u16::from(*v)).sum::<u16>() < 600 }
+pub(super) fn inked(pixel: [u8; 4]) -> bool { pixel[..3].iter().all(|v| *v < 100) }
+pub(super) fn marked(pixel: [u8; 4]) -> bool { pixel[..3].iter().map(|v| u16::from(*v)).sum::<u16>() < 600 }
 fn greenish(pixel: [u8; 4]) -> bool { i16::from(pixel[1]) - i16::from(pixel[0]).max(i16::from(pixel[2])) > 40 }
-fn wait_for(what: &str, done: impl Fn() -> bool) {
+pub(super) fn wait_for(what: &str, done: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(20);
     while !done() {
         pump(20);
         assert!(Instant::now() < deadline, "{what} timed out");
     }
 }
-fn active_vector(d: &Driver) -> bool {
+pub(super) fn active_vector(d: &Driver) -> bool {
     let session = ui_session(&d.w);
     let doc = session.engine().document();
     doc.working.occurrence.is_some_and(|h| doc.scene().vector_layer(h).is_some())
 }
-fn add_vector_layer(d: &mut Driver) {
+pub(super) fn add_vector_layer(d: &mut Driver) {
     let opener = d.header_tool(ToolbarControl::Panel { panel: Panel::Layers });
     if state(&d.w).customization.drawer.is_none() { d.click_name(&opener); }
     pump(150);
@@ -174,12 +174,12 @@ fn add_vector_layer(d: &mut Driver) {
     if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
     pump(150);
 }
-fn press_notice(d: &mut Driver, action: layer_ui::NoticeActionId) {
+pub(super) fn press_notice(d: &mut Driver, action: layer_ui::NoticeActionId) {
     wait_for("the notice", || state(&d.w).notice.as_ref().is_some_and(|n| n.actions.iter().any(|a| a.id == action)));
     let label = state(&d.w).notice.unwrap().actions.into_iter().find(|a| a.id == action).unwrap().label;
     d.click_label(&label);
 }
-fn stroke(from: [f32; 2], to: [f32; 2]) -> Vec<[f32; 2]> {
+pub(super) fn stroke(from: [f32; 2], to: [f32; 2]) -> Vec<[f32; 2]> {
     (0..=24).map(|i| { let u = i as f32 / 24.; [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u] }).collect()
 }
 

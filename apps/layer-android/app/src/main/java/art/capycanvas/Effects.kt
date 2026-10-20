@@ -183,7 +183,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
         Text(view.getString("name"), Modifier.testTag("properties-layer-name"), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (view.getString("layer_type").isNotEmpty() || !view.isNull("add_filter")) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(view.getString("layer_type"), Modifier.weight(1f).testTag("properties-layer-type"), color = LocalPalette.current.secondary,
-                fontSize = LocalTextStyle.current.fontSize * .9f, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                fontSize = LocalTextStyle.current.fontSize * .9f, maxLines = 2, overflow = TextOverflow.Ellipsis)
             view.optJSONObject("add_filter")?.let { model ->
                 var menu by remember { mutableStateOf<JSONObject?>(null) }
                 Box {
@@ -266,7 +266,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
                 }
                 "choice" -> if (!control.isNull("paper")) TextureProperty(host, layer, label, labelWidth, control, enabled)
                 else Row(Modifier.fillMaxWidth().testTag("property-$key"),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)) {
-                    Text(label,Modifier.width(labelWidth),maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Text(label,Modifier.width(labelWidth),maxLines=2,overflow=TextOverflow.Ellipsis)
                     Box(Modifier.weight(1f)){PropertyChoice(label,kind.array("options").values().map{it.toString()},(value as Number).toInt(),enabled){change(it)}}
                 }
                 "color" -> ManagedColorButton(host,label,value as JSONObject,enabled,opaque = kind.optBoolean("opaque"),trailing = {

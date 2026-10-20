@@ -10,6 +10,7 @@ objects-action-add-mask = Maske Ekle
 objects-action-edit-mask = Maskeyi Düzenle
 objects-action-new-paint-layer = Yeni Boya Katmanı
 objects-notice-stale = Katman değişti, bu yüzden işlem uygulanmadı.
+objects-notice-name = Bildirim
 objects-vector-refusal-brush = “{ $layer }” bir vektör katmanı, burada yalnızca yol çizen kalemler çalışır.
 objects-vector-refusal-setting = “{ $layer }” bir vektör katmanı. { $setting }, { $brush } ile yol çizilmesini engelliyor.
 objects-vector-refusal-tool = “{ $layer }” bir vektör katmanı. Bu araç boya katmanlarında çalışır.

@@ -10,6 +10,7 @@ objects-action-add-mask = Ajouter un masque
 objects-action-edit-mask = Modifier le masque
 objects-action-new-paint-layer = Nouveau calque de peinture
 objects-notice-stale = Le calque a changé, l’action n’a donc pas été appliquée.
+objects-notice-name = Avis
 objects-vector-refusal-brush = « { $layer } » est un calque vectoriel : seuls les stylos qui tracent des tracés y fonctionnent.
 objects-vector-refusal-setting = « { $layer } » est un calque vectoriel. { $setting } empêche { $brush } de créer des tracés.
 objects-vector-refusal-tool = « { $layer } » est un calque vectoriel. Cet outil fonctionne sur les calques de peinture.

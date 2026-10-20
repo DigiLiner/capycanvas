@@ -23,13 +23,13 @@ if not display.startswith("layer-bench-"):
     raise SystemExit("Requires the isolated native-input runner")
 path = runtime / "layer-bench-tablet"
 events = Path(os.environ["LAYER_NATIVE_INPUT_DIR"])
-tablet, tool = 0xFF000000, 0xFF000001
-objects = Objects(2)
+tablet, pen, eraser = 0xFF000000, 0xFF000001, 0xFF000002
+objects = Objects(3)
 surfaces = {}
 target = None
 seat = None
 introduced = False
-near = False
+near = None
 serial = 10000
 
 
@@ -51,7 +51,7 @@ def request(message):
     obj, header = struct.unpack_from("=II", message)
     opcode = header & 0xFFFF
     args = message[8:]
-    if obj in (tablet, tool):
+    if obj in (tablet, pen, eraser):
         return False  # Gtk's cursor/destroy requests for our synthetic objects.
     kind = objects.kinds.get(obj)
     if kind == "zwp_tablet_manager_v2" and opcode == 0:
@@ -138,19 +138,25 @@ try:
             event(tablet, 0, string("CapyCanvas test tablet"))
             event(tablet, 1, words(0, 0))
             event(tablet, 3)
-            event(seat, 1, words(tool))
-            event(tool, 0, words(0x140))  # tablet-v2 pen
-            event(tool, 1, words(0, 1))
-            event(tool, 3, words(2))  # pressure
-            event(tool, 4)
+            for tool, kind in ((pen, 0x140), (eraser, 0x141)):  # tablet-v2 pen, eraser
+                event(seat, 1, words(tool))
+                event(tool, 0, words(kind))
+                event(tool, 1, words(0, tool & 0xFF))
+                event(tool, 3, words(2))  # pressure
+                event(tool, 4)
             introduced = True
         file = events / f"pen-{index}.json"
         if introduced and target and file.exists():
             contact = json.loads(file.read_text())
             serial += 1
-            if not near:
+            tool = near if contact["pen"] == "leave" and near else eraser if contact.get("tool") == "eraser" else pen
+            if near not in (None, tool):
+                event(near, 7)
+                event(near, 18, words(int(time.monotonic() * 1000) & 0xFFFFFFFF))
+                near = None
+            if near is None:
                 event(tool, 6, words(serial, tablet, target))
-                near = True
+                near = tool
             if "point" in contact:
                 event(tool, 10, struct.pack("=ii", *(int(v * 256) for v in contact["point"])))
             if contact["pen"] == "down":
@@ -163,7 +169,7 @@ try:
                 event(tool, 17, words(serial, contact["button"], int(contact["down"])))
             elif contact["pen"] == "leave":
                 event(tool, 7)
-                near = False
+                near = None
             event(tool, 18, words(int(time.monotonic() * 1000) & 0xFFFFFFFF))
             index += 1
 finally:

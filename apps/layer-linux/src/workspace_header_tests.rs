@@ -4110,6 +4110,8 @@ fn native_header_window_actions_input() {
 mod selection_tools;
 #[path = "vector_layer_tests.rs"]
 mod vector_layers;
+#[path = "vector_edge_tests.rs"]
+mod vector_edges;
 #[path = "toolbar_component_tests.rs"]
 mod toolbar_components;
 #[path = "color_mixing_tests.rs"]

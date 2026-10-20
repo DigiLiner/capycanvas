@@ -44,6 +44,7 @@ try {
  [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
  Wait-Until {$b=(Find 'drawing-canvas').Current.BoundingRectangle;$b.Width -gt 1200} 'Maximized canvas did not settle' 10
+ Use-PaintWorkspace
  Fit-Canvas;Start-Sleep -Milliseconds 300
  (Find 'Test stroke' -Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {(Model).state.document_file.modified} 'Controlled drawing did not finish'

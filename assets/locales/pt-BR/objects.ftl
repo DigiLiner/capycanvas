@@ -10,6 +10,7 @@ objects-action-add-mask = Adicionar máscara
 objects-action-edit-mask = Editar máscara
 objects-action-new-paint-layer = Nova camada de pintura
 objects-notice-stale = A camada mudou, então a ação não foi aplicada.
+objects-notice-name = Aviso
 objects-vector-refusal-brush = “{ $layer }” é uma camada vetorial, então aqui só funcionam canetas que desenham caminhos.
 objects-vector-refusal-setting = “{ $layer }” é uma camada vetorial. { $setting } impede { $brush } de desenhar caminhos.
 objects-vector-refusal-tool = “{ $layer }” é uma camada vetorial. Esta ferramenta funciona em camadas de pintura.

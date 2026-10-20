@@ -10,6 +10,7 @@ objects-action-add-mask = Добавить маску
 objects-action-edit-mask = Изменить маску
 objects-action-new-paint-layer = Новый слой рисования
 objects-notice-stale = Слой изменился, поэтому действие не применено.
+objects-notice-name = Уведомление
 objects-vector-refusal-brush = «{ $layer }» — векторный слой, здесь работают только перья, которые рисуют контуры.
 objects-vector-refusal-setting = «{ $layer }» — векторный слой. Из-за параметра «{ $setting }» { $brush } не рисует контуры.
 objects-vector-refusal-tool = «{ $layer }» — векторный слой. Этот инструмент работает на рисованных слоях.
