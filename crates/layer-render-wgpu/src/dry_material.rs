@@ -102,7 +102,9 @@ pub(super) enum Entries {
     /// Page kernels of a transported material for one blend code, and Wet's
     /// reservoir exchange.
     Transport(u32),
-    /// Distant samples gathered for Liquify and Smudge.
+    /// Smudge page kernels for one blender.
+    Blend(layer_core::BlenderKind),
+    /// Distant samples gathered for Liquify.
     Gather,
 }
 
@@ -145,6 +147,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
+            if let Entries::Blend(kind)=entries {
+                source+=&format!("const BLENDER: u32 = {}u;\n{}", kind as u8, include_str!("material_blend.wgsl"));
+            }
             if gathered {source+=&format!("fn gathered_sample(w:vec2<f32>)->vec4<f32> {{return {name}_gathered(w);}}\n");}
             if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()
@@ -152,10 +157,10 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
     };
     let entry=match entries {
         Entries::Kernel(..) => include_str!("material_compute.wgsl"),
-        Entries::Transport(_) => include_str!("material_destination.wgsl"),
+        Entries::Transport(_) | Entries::Blend(_) => include_str!("material_destination.wgsl"),
         Entries::Gather => include_str!("material_gather.wgsl"),
     };
-    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Gather => 0};
+    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Blend(_) | Entries::Gather => 0};
     let blend=blend_source(blend_code);
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
@@ -722,6 +727,26 @@ mod tests {
         }
     }
 
+    /// Browsers reject `a || b && c`, which naga accepts.
+    fn assert_logical_operators_grouped(source: &str) {
+        let mut groups = vec![[false; 2]];
+        for (number, line) in source.lines().enumerate() {
+            let code = line.split("//").next().unwrap().as_bytes();
+            for (index, &byte) in code.iter().enumerate() {
+                let pair = code.get(index + 1) == Some(&byte);
+                match byte {
+                    b'(' => groups.push([false; 2]),
+                    b')' if groups.len() > 1 => { groups.pop(); }
+                    b';' | b'{' | b'}' => groups = vec![[false; 2]],
+                    b'&' if pair => groups.last_mut().unwrap()[0] = true,
+                    b'|' if pair => groups.last_mut().unwrap()[1] = true,
+                    _ => {}
+                }
+                assert!(groups.last().unwrap() != &[true; 2], "line {}: `{}` mixes || and && without parentheses", number + 1, line.trim());
+            }
+        }
+    }
+
     #[test]
     fn every_kernel_entry_resolves_its_overrides() {
         let validate = |module: &naga::Module| {
@@ -736,6 +761,7 @@ mod tests {
         for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
             for start in [Start::Stored, Start::Sampled] {
             let source = material_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),Entries::Kernel(start, 0),flags,operation);
+            assert_logical_operators_grouped(&source);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
@@ -751,7 +777,7 @@ mod tests {
                     "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
-        use crate::destination_material::{self as destination, Entry};
+        use crate::destination_material as destination;
         for slot in 0..MATERIAL_SLOTS {for filterable in [true, false] {
             let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
             let (flags, blend) = material_entries(slot);
@@ -759,10 +785,12 @@ mod tests {
                 .flat_map(move |operation| ["compute_color", "compute_coverage"].map(|entry| (Entries::Kernel(start, blend), operation, entry))));
             let kernels = destination::OPERATIONS.into_iter()
                 .filter(|&operation| destination::blended(operation) || slot % MATERIAL_BLENDS.len() == 0)
-                .flat_map(|operation| destination::entries(operation).iter().map(move |&entry|
-                    (if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(blend) }, operation, entry.name())));
+                .flat_map(|operation| destination::entries(operation).iter().flat_map(move |&entry| destination::blenders(operation).iter()
+                    .map(move |&blender| (destination::module(operation, entry, blend, blender), operation, entry.name()))));
             for (entries, operation, entry) in pointwise.chain(kernels) {
-                let mut used = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
+                let source = material_source(Default::default(), sampling, entries, flags, operation);
+                assert_logical_operators_grouped(&source);
+                let mut used = naga::front::wgsl::parse_str(&source).unwrap();
                 validate(&used);
                 used.entry_points.retain(|e| e.name == entry);
                 assert_eq!(used.entry_points.len(), 1, "{entry}/{operation:?}");
@@ -817,7 +845,7 @@ mod tests {
         use crate::destination_material::{self as destination, Entry};
         for flags in [0, 128] {for operation in destination::OPERATIONS {for &entry in destination::entries(operation) {
             let what = format!("{operation:?} {entry:?} {flags:#x}");
-            let present = compiled(if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) }, flags, operation, entry.name());
+            let present = compiled(destination::module(operation, entry, 0, layer_core::BlenderKind::Soft), flags, operation, entry.name());
             for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
             assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Gather | Entry::Reservoir)), "{what} reaches {operations:?}");

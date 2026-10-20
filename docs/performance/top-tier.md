@@ -1881,6 +1881,8 @@ Except for G-Pen, Watercolor Wash and the current dry-media rows, measured on 20
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
+The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender, wet and Liquify Push rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements.
+
 **The 2026-09-22 G-Pen record used a different stroke.** It recorded 105.76
 updates/s for a 2000 px G-Pen.
 That run's wider work area set Fit zoom to 18.0%, so each stroke crossed about 8%

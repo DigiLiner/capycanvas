@@ -75,10 +75,17 @@ charge depletion is the only current material-loss control. Selected pigment
 loads the wet reservoir once at stroke start and is not reintroduced by later
 contacts.
 
-Smudge and Natural Blender do not use that reservoir. Their page kernel
-reverse-composes the ordered contact motion into one semi-Lagrangian backtrace,
-bilinearly samples the immutable canvas once, and mixes straight color in the
-brush's Color mixing space without lowering existing alpha. This prevents
+A wet brush's Average pickup moves each part of the reservoir toward a
+24-tap average of the paint under the footprint after every contact, from
+spatial pickup at zero to Clip Studio Paint's single averaged Blend color at
+one. Persistence keeps the carried color for a half-life in diameters
+travelled, so spacing does not change it, and Pressure refill reloads the
+selected color under firm pressure while a light touch only moves paint.
+
+Smudge and the other blenders do not use that reservoir. Their page kernel
+reverse-composes the ordered contact motion into one backtrace, samples a field
+chosen by the blender kind from the immutable canvas, and mixes straight color
+in the brush's Color mixing space without lowering existing alpha. This prevents
 repeated source-edge scallops, transparent holes, and accidental selected-color
 marks.
 
@@ -88,7 +95,7 @@ existing fixed-size `Dab.material` field, so charge adds no texture lookup or
 new upload. A spatial reservoir preserves brush-local variation for loaded oil
 and palette-knife marks. Its bounded 64×64 ping-pong exchange runs in the same
 compute pass as a wet microbatch of at most three contacts, after its page jobs. Smudge uses short deterministic
-three-contact backtrace chunks with distance-normalized strength; liquify keeps
+six-contact backtrace chunks with distance-normalized strength; liquify keeps
 immediate one-contact destination ordering.
 
 ## Layer-wide watercolor

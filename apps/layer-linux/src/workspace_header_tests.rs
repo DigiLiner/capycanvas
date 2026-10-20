@@ -4114,6 +4114,8 @@ mod vector_layers;
 mod toolbar_components;
 #[path = "color_mixing_tests.rs"]
 mod color_mixing;
+#[path = "blender_tests.rs"]
+mod blenders;
 
 #[test]
 #[ignore = "isolated native-input.js --native-test=native_layer_swipe_alpha_lock"]

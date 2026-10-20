@@ -2,7 +2,7 @@ use crate::{
     AssetId, BrushAccumulation, BrushBlendMode, BrushColorDynamics, BrushCombine, BrushContact, BrushCurve,
     BrushDeform, BrushExecution, BrushGrain, BrushMapping, BrushPath,
     BrushRendering, BrushSensor, BrushShape, BrushSnapshot, BrushStabilization, BrushTarget, BrushTip, BrushTransport,
-    BrushWetMix, ColorMixSpace, LiquifyMode,
+    BrushWetMix, BlenderKind, BrushBlender, ColorMixSpace, LiquifyMode,
 };
 use std::sync::Arc;
 
@@ -60,7 +60,43 @@ pub enum DefaultBrushPreset {
     SpotHealingBrush = 42,
     Crayon = 43,
     Monoline = 44,
+    SoftBlender = 45,
+    Blur = 46,
+    BristleBlender = 47,
+    GrainyBlender = 48,
+    ScatterBlender = 49,
+    PainterlyBlender = 50,
+    CrystalBlender = 51,
+    Marbling = 52,
+    CombBlender = 53,
+    EdgeKeepingBlender = 54,
+    DitherBlender = 55,
+    BlendingKnife = 56,
+    WetBlender = 57,
+    ColorMixer = 58,
+    MixingBrush = 59,
+    Sharpen = 60,
+    TextureBlender = 61,
+    HueBlender = 62,
 }
+
+impl DefaultBrushPreset {
+    pub const ALL: [Self; 62] = [
+        Self::GPen, Self::Pencil, Self::Eraser, Self::Paintbrush, Self::Airbrush, Self::Chalk, Self::Marker,
+        Self::Spray, Self::DualTexture, Self::Smudge, Self::WetRound, Self::LiquifyPush, Self::LiquifyTwirl,
+        Self::MultiplyGlaze, Self::TexturedFlat, Self::DryScumble, Self::PastelBlock, Self::TransparentGlaze,
+        Self::OpaqueGouache, Self::WatercolorWash, Self::WetWatercolor, Self::LoadedOil, Self::PaletteKnife,
+        Self::NaturalBlender, Self::PointyPencil, Self::ShadingPencil, Self::Charcoal, Self::RoughGPen,
+        Self::CalligraphyPen, Self::AntiquePen, Self::RealisticPen, Self::WetInk, Self::BlottyInk, Self::BrushedInk,
+        Self::BristlePaintbrush, Self::LiquifyTwirlClockwise, Self::LiquifyPinch, Self::LiquifyExpand,
+        Self::LiquifyCrystals, Self::CloneStamp, Self::HealingBrush, Self::SpotHealingBrush, Self::Crayon,
+        Self::Monoline, Self::SoftBlender, Self::Blur, Self::BristleBlender, Self::GrainyBlender,
+        Self::ScatterBlender, Self::PainterlyBlender, Self::CrystalBlender, Self::Marbling, Self::CombBlender,
+        Self::EdgeKeepingBlender, Self::DitherBlender, Self::BlendingKnife, Self::WetBlender, Self::ColorMixer,
+        Self::MixingBrush, Self::Sharpen, Self::TextureBlender, Self::HueBlender,
+    ];
+}
+
 
 /// Returns a complete immutable preset snapshot. Callers may override color,
 /// diameter, and opacity before beginning a stroke.
@@ -176,26 +212,10 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             ..BrushSnapshot::default()
         },
         DefaultBrushPreset::Smudge => BrushSnapshot {
-            color_rgba_linear: [0.0, 0.0, 0.0, 1.0],
-            diameter: 220.0,
             hardness: 0.42,
             flow: 0.72,
-            spacing: 0.04,
-            execution: BrushExecution::Smudge,
-            wet_mix: BrushWetMix {
-                amount_of_paint: 0.0,
-                density: 0.92,
-                charge: 1.0,
-                charge_depletion: 0.12,
-                dilution: 0.0,
-                attack: 0.82,
-                pull: 0.88,
-                blur: 0.12,
-                wetness_jitter: 0.0,
-                wetness: 0.08,
-                mix_space: ColorMixSpace::Oklab,
-            },
-            ..BrushSnapshot::default()
+            mappings: Arc::from([BrushMapping::pressure_size()]),
+            ..blender(BlenderKind::Soft, BlenderSpec { reach: 0.05, rate: 40.0, pull: 0.95, ..BlenderSpec::BASE })
         },
         DefaultBrushPreset::WetRound => BrushSnapshot {
             color_rgba_linear: [0.015, 0.18, 0.52, 1.0],
@@ -216,6 +236,9 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
                 wetness_jitter: 0.12,
                 wetness: 0.68,
                 mix_space: ColorMixSpace::Oklab,
+                average: 0.0,
+                refill: 0.0,
+                stretch: 0.0,
             },
             mappings: Arc::from([BrushMapping::pressure_size(), pressure_flow(0.18, 0.72)]),
             ..BrushSnapshot::default()
@@ -234,6 +257,42 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         DefaultBrushPreset::LiquifyCrystals => liquify(360.0, 0.4, 0.1, BrushDeform {
             mode: LiquifyMode::Crystals, strength: 0.7, distortion: 0.6, ..Default::default()
         }),
+        DefaultBrushPreset::SoftBlender => blender(BlenderKind::Soft, BlenderSpec { reach: 0.15, rate: 4.5, pull: 0.6, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::Blur => blender(BlenderKind::Blur, BlenderSpec { reach: 0.2, rate: 6.0, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::Sharpen => blender(BlenderKind::Sharpen, BlenderSpec { reach: 0.06, rate: 3.0, character: 0.8, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::BristleBlender => blender(BlenderKind::Bristle,
+            BlenderSpec { reach: 0.03, rate: 30.0, pull: 0.85, character: 1.0, scale: 0.5, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::GrainyBlender => BrushSnapshot { grain: Some(paper_grain(0.0)),
+            ..blender(BlenderKind::Grainy, BlenderSpec { reach: 0.2, rate: 4.0, pull: 0.3, ..BlenderSpec::BASE }) },
+        DefaultBrushPreset::TextureBlender => blender(BlenderKind::TextureKeeping,
+            BlenderSpec { reach: 0.18, rate: 4.0, pull: 0.4, character: 0.9, scale: 0.05, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::HueBlender => blender(BlenderKind::Hue, BlenderSpec { reach: 0.2, rate: 4.0, pull: 0.2, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::BlendingKnife => BrushSnapshot { aspect: 0.25, flow: 0.95, grain: Some(paper_grain(0.0)),
+            mappings: Arc::from([direction_rotation()]),
+            ..blender(BlenderKind::Knife, BlenderSpec { rate: 20.0, pull: 0.9, character: 0.5, scale: 0.15, hardness: 0.95, ..BlenderSpec::BASE }) },
+        DefaultBrushPreset::ScatterBlender => blender(BlenderKind::Scatter, BlenderSpec { reach: 0.12, rate: 3.0, pull: 0.2, character: 1.0, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::PainterlyBlender => blender(BlenderKind::Painterly, BlenderSpec { reach: 0.25, rate: 8.0, pull: 0.6, character: 2.0, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::CrystalBlender => blender(BlenderKind::Crystal, BlenderSpec { reach: 0.06, rate: 4.0, scale: 0.18, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::Marbling => blender(BlenderKind::Marbling, BlenderSpec { rate: 30.0, pull: 0.4, character: 1.0, scale: 0.45, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::CombBlender => blender(BlenderKind::Comb, BlenderSpec { reach: 0.35, rate: 14.0, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::EdgeKeepingBlender => blender(BlenderKind::EdgeKeeping, BlenderSpec { reach: 0.25, rate: 10.0, character: 0.5, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::DitherBlender => blender(BlenderKind::Dither, BlenderSpec { reach: 0.08, rate: 6.0, hardness: 0.9, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::WetBlender => wet_blender(0.55, 0.0, 0.3),
+        DefaultBrushPreset::ColorMixer => {
+            let mut brush = wet_blender(0.3, 1.0, 0.0);
+            brush.wet_mix.stretch = 0.6;
+            brush
+        }
+        DefaultBrushPreset::MixingBrush => {
+            let mut brush = wet_blender(0.4, 0.0, 0.0);
+            brush.color_rgba_linear = [0.9, 0.86, 0.78, 1.0];
+            brush.hardness = 0.6;
+            brush.wet_mix.amount_of_paint = 0.5;
+            brush.wet_mix.dilution = 0.1;
+            brush.wet_mix.refill = 0.5;
+            brush.mappings = Arc::from([pressure_flow(0.35, 0.65)]);
+            brush
+        }
         DefaultBrushPreset::CloneStamp => retouching(BrushExecution::Clone, 160.0, 0.5),
         DefaultBrushPreset::HealingBrush => retouching(BrushExecution::Heal, 120.0, 0.5),
         DefaultBrushPreset::SpotHealingBrush => retouching(BrushExecution::SpotHeal, 60.0, 0.6),
@@ -405,18 +464,75 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             rendering: BrushRendering::default(),
             wet_mix: wet_mix(0.82, 0.88, 0.025, 0.16, 0.18, 0.08),
         }),
-        DefaultBrushPreset::NaturalBlender => painter_brush(PainterBrushSpec {
-            diameter: 440.0,
-            aspect: 0.64,
-            flow: 0.78,
-            opacity: 0.56,
-            spacing: 0.04,
-            hardness: 0.66,
-            execution: BrushExecution::Smudge,
-            grain: Some(paper_grain(0.36)),
-            rendering: BrushRendering::default(),
-            wet_mix: wet_mix(0.0, 0.94, 0.040, 0.86, 0.0, 0.20),
-        }),
+        DefaultBrushPreset::NaturalBlender => BrushSnapshot {
+            blender: BrushBlender { kind: BlenderKind::Soft, reach: 0.12, rate: 5.5, character: 0.55, scale: 0.6 },
+            ..painter_brush(PainterBrushSpec {
+                diameter: 440.0,
+                aspect: 0.64,
+                flow: 0.78,
+                opacity: 1.0,
+                spacing: 0.04,
+                hardness: 0.66,
+                execution: BrushExecution::Smudge,
+                grain: Some(paper_grain(0.36)),
+                rendering: BrushRendering::default(),
+                wet_mix: BrushWetMix { pull: 0.5, mix_space: ColorMixSpace::Oklab, ..BrushWetMix::default() },
+            })
+        },
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BlenderSpec {
+    reach: f32,
+    rate: f32,
+    pull: f32,
+    character: f32,
+    scale: f32,
+    hardness: f32,
+}
+
+impl BlenderSpec {
+    const BASE: Self = Self { reach: 0.0, rate: 0.0, pull: 0.0, character: 0.0, scale: 0.0, hardness: 0.5 };
+}
+
+fn blender(kind: BlenderKind, spec: BlenderSpec) -> BrushSnapshot {
+    BrushSnapshot {
+        color_rgba_linear: [0.0, 0.0, 0.0, 1.0],
+        diameter: 220.0,
+        hardness: spec.hardness,
+        flow: 0.8,
+        spacing: 0.04,
+        execution: BrushExecution::Smudge,
+        wet_mix: BrushWetMix {
+            amount_of_paint: 0.0,
+            density: 0.92,
+            attack: 0.82,
+            pull: spec.pull,
+            mix_space: ColorMixSpace::Oklab,
+            ..BrushWetMix::default()
+        },
+        blender: BrushBlender { kind, reach: spec.reach, rate: spec.rate, character: spec.character, scale: spec.scale },
+        mappings: Arc::from([pressure_flow(0.15, 0.85)]),
+        ..BrushSnapshot::default()
+    }
+}
+
+fn wet_blender(pull: f32, average: f32, charge_depletion: f32) -> BrushSnapshot {
+    BrushSnapshot {
+        execution: BrushExecution::Wet,
+        wet_mix: BrushWetMix {
+            amount_of_paint: 0.0,
+            density: 0.92,
+            charge_depletion,
+            attack: 0.82,
+            pull,
+            blur: 0.1,
+            mix_space: ColorMixSpace::Oklab,
+            average,
+            ..BrushWetMix::default()
+        },
+        ..blender(BlenderKind::Soft, BlenderSpec::BASE)
     }
 }
 
@@ -523,6 +639,9 @@ fn wet_mix(
         wetness_jitter: 0.10,
         wetness,
         mix_space: ColorMixSpace::Oklab,
+        average: 0.0,
+        refill: 0.0,
+        stretch: 0.0,
     }
 }
 
@@ -592,30 +711,7 @@ mod tests {
 
     #[test]
     fn every_builtin_is_valid() {
-        for preset in crate::CONTACT_BRUSH_PRESETS {
-            default_brush(preset).validate().unwrap();
-        }
-        for preset in [
-            DefaultBrushPreset::Spray,
-            DefaultBrushPreset::Smudge,
-            DefaultBrushPreset::WetRound,
-            DefaultBrushPreset::LiquifyPush,
-            DefaultBrushPreset::LiquifyTwirl,
-            DefaultBrushPreset::LiquifyTwirlClockwise,
-            DefaultBrushPreset::LiquifyPinch,
-            DefaultBrushPreset::LiquifyExpand,
-            DefaultBrushPreset::LiquifyCrystals,
-            DefaultBrushPreset::CloneStamp,
-            DefaultBrushPreset::HealingBrush,
-            DefaultBrushPreset::SpotHealingBrush,
-            DefaultBrushPreset::MultiplyGlaze,
-            DefaultBrushPreset::OpaqueGouache,
-            DefaultBrushPreset::WatercolorWash,
-            DefaultBrushPreset::WetWatercolor,
-            DefaultBrushPreset::LoadedOil,
-            DefaultBrushPreset::PaletteKnife,
-            DefaultBrushPreset::NaturalBlender,
-        ] {
+        for preset in DefaultBrushPreset::ALL {
             default_brush(preset).validate().unwrap();
         }
     }

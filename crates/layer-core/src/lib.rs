@@ -706,6 +706,16 @@ pub struct BrushWetMix {
     /// Dry brushes leave this at zero and allocate no material pages.
     pub wetness: f32,
     pub mix_space: ColorMixSpace,
+    /// How much each part of a wet brush's load mixes with the rest of the
+    /// load: zero keeps the paint where the tip picked it up, one carries a
+    /// single color averaged over the whole tip.
+    pub average: f32,
+    /// How much of the selected color firm pressure reloads into each wet
+    /// contact; a light touch only moves the paint already there.
+    pub refill: f32,
+    /// How far an averaged load keeps its color, as a half-life in diameters
+    /// travelled.
+    pub stretch: f32,
 }
 
 impl Default for BrushWetMix {
@@ -722,6 +732,9 @@ impl Default for BrushWetMix {
             wetness_jitter: 0.0,
             wetness: 0.0,
             mix_space: ColorMixSpace::LinearRgb,
+            average: 0.0,
+            refill: 0.0,
+            stretch: 0.0,
         }
     }
 }
@@ -744,6 +757,78 @@ impl Default for BrushDeform {
             momentum: 0.0,
             distortion: 0.0,
         }
+    }
+}
+
+/// How a Smudge brush moves and mixes the paint under it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
+pub enum BlenderKind {
+    /// Mixes each pixel with its neighbourhood while dragging it along.
+    #[default]
+    Soft,
+    /// Mixes each pixel with its neighbourhood in place.
+    Blur,
+    /// Increases contrast against the neighbourhood, never past its range.
+    Sharpen,
+    /// Drags paint unevenly across the tip, leaving hair streaks.
+    Bristle,
+    /// Blends and puts back the grain that follows the paper.
+    Grainy,
+    /// Blends the broad color and keeps each pixel's fine texture.
+    TextureKeeping,
+    /// Blends hue and saturation and keeps each pixel's lightness.
+    Hue,
+    /// Moves a band of paint along the blade without remixing it.
+    Knife,
+    /// Swaps pixels with random neighbours, dissolving edges into grit.
+    Scatter,
+    /// Flattens paint into stroke-shaped patches that keep their edges.
+    Painterly,
+    /// Mixes paint into flat crystal cells.
+    Crystal,
+    /// Swirls paint into marbled veins.
+    Marbling,
+    /// Smooths along the strands already painted, like combing hair.
+    Comb,
+    /// Mixes only what a pixel reaches without crossing an edge.
+    EdgeKeeping,
+    /// Dithers between colors already present without adding new ones.
+    Dither,
+}
+
+impl BlenderKind {
+    pub const ALL: [Self; 15] = [Self::Soft, Self::Blur, Self::Sharpen, Self::Bristle, Self::Grainy, Self::TextureKeeping,
+        Self::Hue, Self::Knife, Self::Scatter, Self::Painterly, Self::Crystal, Self::Marbling, Self::Comb, Self::EdgeKeeping,
+        Self::Dither];
+}
+
+/// Farthest a blender samples from a pixel's traced position, in document
+/// pixels. With [`SMUDGE_CHUNK_TRAVEL_LIMIT`] it keeps every sample inside a
+/// page job's neighbourhood.
+pub const BLENDER_REACH_LIMIT: f32 = 112.0;
+
+/// Longest path, in document pixels, that one Smudge chunk covers, and so the
+/// farthest it can pull paint.
+pub const SMUDGE_CHUNK_TRAVEL_LIMIT: f32 = 128.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BrushBlender {
+    pub kind: BlenderKind,
+    /// Neighbourhood radius as a fraction of the contact diameter.
+    pub reach: f32,
+    /// Mixing per diameter travelled at full coverage and Strength.
+    pub rate: f32,
+    /// Streaks, grain, texture kept, swirl, edge keeping or sharpening,
+    /// depending on the kind.
+    pub character: f32,
+    /// Bristle, cell or texture size as a fraction of the contact diameter.
+    pub scale: f32,
+}
+
+impl Default for BrushBlender {
+    fn default() -> Self {
+        Self { kind: BlenderKind::Soft, reach: 0.15, rate: 3.0, character: 0.0, scale: 0.0 }
     }
 }
 
@@ -826,6 +911,7 @@ pub struct BrushSnapshot {
     pub wet_mix: BrushWetMix,
     pub transport: Option<BrushTransport>,
     pub deform: BrushDeform,
+    pub blender: BrushBlender,
     pub bounds: BrushBounds,
     /// Optional coherent GPU contact model.
     pub contact: Option<BrushContact>,
@@ -856,6 +942,7 @@ impl Default for BrushSnapshot {
             wet_mix: BrushWetMix::default(),
             transport: None,
             deform: BrushDeform::default(),
+            blender: BrushBlender::default(),
             bounds: BrushBounds::default(),
             contact: None,
         }
@@ -930,6 +1017,16 @@ impl BrushSnapshot {
             && self.color_dynamics.stamp_hue_jitter == 0. && self.color_dynamics.stamp_saturation_jitter == 0.
             && self.color_dynamics.stamp_lightness_jitter == 0. && self.color_dynamics.stamp_secondary_jitter == 0.
     }
+
+    /// Moves or mixes paint already on the canvas without laying its own color.
+    pub fn moves_paint_only(&self) -> bool {
+        match self.execution_class() {
+            BrushExecution::Smudge | BrushExecution::Liquify => true,
+            BrushExecution::Wet => self.wet_mix.amount_of_paint == 0.0 && self.wet_mix.refill == 0.0,
+            _ => false,
+        }
+    }
+
     pub fn execution_class(&self) -> BrushExecution {
         match self.execution {
             BrushExecution::Dry
@@ -977,6 +1074,10 @@ impl BrushSnapshot {
             self.wet_mix.blur,
             self.wet_mix.wetness_jitter,
             self.wet_mix.wetness,
+            self.wet_mix.average,
+            self.wet_mix.refill,
+            self.blender.reach,
+            self.blender.scale,
             self.deform.strength,
             self.deform.pressure,
             self.deform.momentum,
@@ -990,6 +1091,9 @@ impl BrushSnapshot {
             self.taper.start_distance_diameters,
             self.taper.end_distance_diameters,
             self.rendering.edge_width,
+            self.wet_mix.stretch,
+            self.blender.rate,
+            self.blender.character,
         ];
         let taper = [
             self.taper.start_size,

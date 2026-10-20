@@ -1605,6 +1605,8 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
+The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender, wet and Liquify Push rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements.
+
 - The older fixtures fit their 520 × 299 px ellipse to 339 × 299 px in the
   TCL's 754 px work area at 16.0% zoom. The current G-Pen row uses the 240 × 120 px semiaxes documented in
   the current comparison above.

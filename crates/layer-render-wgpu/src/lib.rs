@@ -5100,6 +5100,12 @@ impl StyleGpu {
             f32::from(style.wet_mix.mix_space as u8),
             style.deform.distortion,
         ];
+        if style.execution == BrushExecution::Smudge {
+            result.deformation = [style.blender.reach, style.blender.rate, style.blender.character, style.blender.scale];
+        }
+        if style.execution == BrushExecution::Wet {
+            result.deformation = [style.wet_mix.stretch, 0., style.wet_mix.refill, style.wet_mix.average];
+        }
         if let Some(transport) = &style.transport {
             result.transport_a = [
                 transport.scale,
@@ -6108,6 +6114,7 @@ mod tests {
     mod adjustments;
     mod blend_modes;
     mod blend_space;
+    mod blenders;
     mod brush_blending;
     pub(crate) mod image_windows;
     mod pass_through;
@@ -6168,6 +6175,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
             wet_mix: BrushWetMix::default(),
             transport: None,
             deform: BrushDeform::default(),
+            blender: layer_core::BrushBlender::default(),
             contact: None,
             retouch: None,
             blend_space: layer_core::BlendSpace::Linear,

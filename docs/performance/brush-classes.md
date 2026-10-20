@@ -12,13 +12,16 @@ The class decides a brush's guaranteed size.
 | --- | --- | --- | --- |
 | Simple | Low: 1024 px (goal 2048 px); mid: 1536 px; top: 2048 px | Dry deposit from one tip, with at most paper grain, edge roughness or pooling. No canvas sampling. | G-Pen (1), Monoline (44), Rough G-Pen (28), Calligraphy Pen (29), Antique Pen (30), Realistic Pen (31), Wet Ink (32), Pencil (2), Pointy Pencil (25), Shading Pencil (26), Charcoal (27), Crayon (43), Chalk (6), Eraser (3), Airbrush (5); the Selection Brush and mask painting with a simple preset |
 | Complex | 1024 px | Heavier per-contact work: several textures, bristle fibres with depletion, scatter envelopes, the ordered Multiply path, or measured cost in the slow group | Marker (7), Blotty Ink (33), Realistic Brushed Ink (34), Pastel Block (17), Paintbrush (4), Textured Flat (15), Dry Scumble (16), Transparent Glaze (18), Multiply Glaze (14), Dual Texture (9), Spray (8), Spot Healing Brush (42) |
-| Very complex | 512 px | Samples the canvas or keeps paint state: wet reservoirs and mixing, watercolour transport, smudge backtrace, Liquify gathers. Cost grows with the sampled area, not just the footprint. | Opaque Gouache (19), Watercolor Wash (20), Wet Watercolor (21), Loaded Oil (22), Palette Knife (23), Wet Round (11), Natural Blender (24), Smudge (10), Liquify Push (12), Liquify Twirl Clockwise (36), Liquify Twirl Counterclockwise (13), Liquify Pinch (37), Liquify Expand (38), Liquify Crystals (39), Clone Stamp (40), Healing Brush (41) |
+| Very complex | 512 px | Samples the canvas or keeps paint state: wet reservoirs and mixing, watercolour transport, smudge and blender backtraces, Liquify gathers. Cost grows with the sampled area, not just the footprint. | Opaque Gouache (19), Watercolor Wash (20), Wet Watercolor (21), Loaded Oil (22), Palette Knife (23), Wet Round (11), Natural Blender (24), Smudge (10), Soft Blender (45), Blur (46), Sharpen (60), Blending Knife (56), Grainy Blender (48), Texture-Keeping Blender (61), Hue Blender (62), Wet Blender (57), Color Mixer (58), Mixing Brush (59), Bristle Blender (47), Painterly Blender (50), Crystal Blender (51), Marbling (52), Comb Blender (53), Edge-Keeping Blender (54), Scatter Blender (49), Dither Blender (55), Liquify Push (12), Liquify Twirl Clockwise (36), Liquify Twirl Counterclockwise (13), Liquify Pinch (37), Liquify Expand (38), Liquify Crystals (39), Clone Stamp (40), Healing Brush (41) |
 
 **Notes on specific presets:**
 
 - **Marker** is mechanically simple, but on every measured GPU it runs with the
   complex group.
 - **Wet Ink** does not sample the canvas despite its name.
+- **Blending Knife** and **Natural Blender** are elongated tips: Size sets the
+  short side, so at 512 px the Knife's blade is 512 × 2048 px and the Natural
+  Blender's 512 × 800 px, four and 1.6 times a round tip's area.
 - **Healing Brush** paints the Clone Stamp's copy while the pen is down, and
   **Spot Healing Brush** only a tint with stroke-start page copies; both heal
   once, at pen-up, which the class does not cover.

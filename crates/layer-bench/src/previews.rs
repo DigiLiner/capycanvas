@@ -17,30 +17,34 @@ pub fn generate(directory: &Path) -> Result<(), Box<dyn Error>> {
                 continue;
             }
             let mut canvas = Canvas::configured([400, 80], [0.0; 4])?;
-            // Destination-reading tools need existing color to demonstrate
-            // their effect. These seeds are on the same editable paint layer.
-            let retouching = matches!(choice.group, layer_ui::ToolGroup::Clone | layer_ui::ToolGroup::Heal | layer_ui::ToolGroup::SpotHeal);
-            if matches!(choice.group, layer_ui::ToolGroup::Blend | layer_ui::ToolGroup::Liquify) || retouching || choice.id == 3 {
-                canvas.set_brush(brush(Preset::GPen, 44.0, 0.9, [0.06, 0.3, 0.65, 1.0]))?;
-                stroke(&mut canvas, 0.0)?;
-                canvas.set_brush(brush(Preset::GPen, 20.0, 0.9, [0.85, 0.35, 0.06, 1.0]))?;
-                stroke(&mut canvas, 8.0)?;
-            }
-            let color = if theme == "dark" {
-                [0.9, 0.9, 0.9, 1.0]
+            if choice.group == layer_ui::ToolGroup::Blend {
+                blend_study::signature(&mut canvas, layer_ui::preset(choice.id)?)?;
             } else {
-                [0.012, 0.012, 0.014, 1.0]
-            };
-            if retouching {
-                canvas.engine.set_retouch(Some(layer_core::RetouchSource::Editing));
-                canvas.engine.set_clone_source(layer_core::CloneSource {
-                    point: Some(Point { x: 26.0, y: 37.0 }),
-                    flip: [false, true],
-                    ..layer_core::CloneSource::default()
-                });
+                // Destination-reading tools need existing color to demonstrate
+                // their effect. These seeds are on the same editable paint layer.
+                let retouching = matches!(choice.group, layer_ui::ToolGroup::Clone | layer_ui::ToolGroup::Heal | layer_ui::ToolGroup::SpotHeal);
+                if choice.group == layer_ui::ToolGroup::Liquify || retouching || choice.id == 3 {
+                    canvas.set_brush(brush(Preset::GPen, 44.0, 0.9, [0.06, 0.3, 0.65, 1.0]))?;
+                    stroke(&mut canvas, 0.0)?;
+                    canvas.set_brush(brush(Preset::GPen, 20.0, 0.9, [0.85, 0.35, 0.06, 1.0]))?;
+                    stroke(&mut canvas, 8.0)?;
+                }
+                let color = if theme == "dark" {
+                    [0.9, 0.9, 0.9, 1.0]
+                } else {
+                    [0.012, 0.012, 0.014, 1.0]
+                };
+                if retouching {
+                    canvas.engine.set_retouch(Some(layer_core::RetouchSource::Editing));
+                    canvas.engine.set_clone_source(layer_core::CloneSource {
+                        point: Some(Point { x: 26.0, y: 37.0 }),
+                        flip: [false, true],
+                        ..layer_core::CloneSource::default()
+                    });
+                }
+                canvas.set_brush(brush(layer_ui::preset(choice.id)?, 42.0, 1.0, color))?;
+                stroke(&mut canvas, -3.0)?;
             }
-            canvas.set_brush(brush(layer_ui::preset(choice.id)?, 42.0, 1.0, color))?;
-            stroke(&mut canvas, -3.0)?;
             canvas.write_png(&directory.join(format!("{}-{theme}.png", choice.id)))?;
             eprintln!("swatch: {} ({theme})", choice.label);
         }

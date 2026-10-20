@@ -196,7 +196,7 @@ from Arm Performance Studio:
 
 ```sh
 CAPY_KERNEL_SPIRV=$PWD/target/kernel.comp.spv CAPY_KERNEL_PRESET=35 \
-  cargo test --release -p layer-render-wgpu --lib -- --ignored dry_material_kernel_spirv
+  cargo test --release -p layer-render-wgpu --lib -- --ignored material_kernel_spirv
 malioc -c Mali-G57 --vulkan --compute target/kernel.comp.spv
 ```
 

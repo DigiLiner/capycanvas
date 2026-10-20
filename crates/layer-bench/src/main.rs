@@ -15,6 +15,7 @@ use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+mod blend_study;
 mod previews;
 
 const WIDTH: u32 = 4096;
@@ -509,6 +510,10 @@ fn phase(index: usize, count: usize) -> PenPhase {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--blend-study") {
+        let directory = std::env::args().nth(2).ok_or("--blend-study needs an output directory")?;
+        return blend_study::run(Path::new(&directory), &blend_study::catalog());
+    }
     if std::env::args().nth(1).as_deref() == Some("--brush-previews") {
         return previews::generate(Path::new("apps/layer-web/brush-previews"));
     }

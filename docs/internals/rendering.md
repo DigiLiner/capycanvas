@@ -411,7 +411,7 @@ its own bounds; see [Blend modes](#blend-modes). Region tolerance uses encoded d
 weighted by coverage, independent of display/checker colors.
 
 Paint color mixing (`mix_color` in
-[`material_brush.wgsl`](../../crates/layer-render-wgpu/src/material_brush.wgsl):
+[`material_transport.wgsl`](../../crates/layer-render-wgpu/src/material_transport.wgsl):
 Smudge and blender pickups, the Wet reservoir exchange and Watercolor's
 same-layer exchange) follows the brush's Color mixing choice (`ColorMixSpace`),
 never the document's blending. The choice is a style uniform, so no brush

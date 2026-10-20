@@ -26,6 +26,7 @@ export async function checkColorMixing({call, evaluate, settle}) {
   await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
   const theme = await evaluate('layerApp.state().settings.theme ?? null');
   try {
+    await send({type: 'customize', action: {type: 'set_panel_visible', panel: 'tool_settings', visible: true}});
     await send({type: 'invoke', command: 'fit_canvas'});
     const center = await evaluate('(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1]}})()');
     const stroke = async (y, device, vertical=false) => {
@@ -69,7 +70,27 @@ export async function checkColorMixing({call, evaluate, settle}) {
       await stroke(-40 + i * 40, 'pen',true);
       assert.equal((await command(id)).selected, true, `${id} holds while painting`);
     }
-    console.log('PASS color mixing: mouse, touch and pen choices, Oklab default, hidden for G-Pen, strokes in each space, light and dark');
+    for (const [id, settings] of [[51, ['spread', 'stretch', 'cell_size']], [52, ['swirl', 'swirl_size']], [58, ['average_pickup', 'persistence', 'pressure_refill']]]) {
+      await send({type: 'select_brush', id});
+      for (const setting of settings) await wait(`!!document.querySelector('[data-tool-setting="${setting}"]')`);
+      await stroke(-60 + (id - 51) * 12, 'pen', true);
+    }
+    await send({type: 'select_brush', id: 51});
+    const cell = '[data-tool-setting="cell_size"]';
+    await wait(`!!document.querySelector('${cell} .number-value')`);
+    await contact(`${cell} .number-value`, 'mouse');
+    await wait(`document.activeElement===document.querySelector('${cell} .number-entry')`);
+    await evaluate(`document.querySelector('${cell} .number-entry').select()`);
+    await call('Input.insertText', {text: '30'});
+    for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', {type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13});
+    await wait(`Math.abs(layerApp.state().tool_settings.find(s=>s.id==='cell_size').value-0.3)<0.001`);
+    await stroke(80, 'pen', true);
+    for (const name of ['light', 'dark']) {
+      await send({type: 'set_theme', theme: name});
+      await pause(150);
+      await writeFile(`${directory}/blender-options-${name}.png`, Buffer.from((await call('Page.captureScreenshot', {format: 'png'})).data, 'base64'));
+    }
+    console.log('PASS color mixing: mouse, touch and pen choices, Oklab default, hidden for G-Pen, strokes in each space, blender settings typed and painted, light and dark');
   } catch (error) {
     await writeFile(`${directory}/failure.png`, Buffer.from((await call('Page.captureScreenshot', {format: 'png'})).data, 'base64'));
     throw error;

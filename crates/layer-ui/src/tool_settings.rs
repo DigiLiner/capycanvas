@@ -3,7 +3,7 @@
 use crate::NumericControl;
 use crate::localization::{Localizer, MessageId, UiLanguage};
 use std::sync::Arc;
-use layer_core::{BrushExecution, BrushSnapshot, BrushTip, ColorMixSpace, LiquifyMode};
+use layer_core::{BlenderKind, BrushExecution, BrushSnapshot, BrushTip, ColorMixSpace, LiquifyMode};
 use serde::Serialize;
 
 /// Reusable tool settings actions. Labels, enabled/checked state and shortcuts
@@ -205,7 +205,7 @@ fn primary(brush: &BrushSnapshot) -> &'static [&'static str] {
         match brush.execution {
             BrushExecution::Wet => &["paint", "pull"],
             BrushExecution::Watercolor => &["water_load", "wet_edge"],
-            BrushExecution::Smudge => &["pull"],
+            BrushExecution::Smudge => &["pull", "spread"],
             BrushExecution::Liquify => &[],
             _ => &["hardness"],
         }
@@ -219,6 +219,7 @@ const GROUP_ORDER: &[MessageId] = &[
     MessageId::TOOL_SETTING_GROUP_TEXTURE,
     MessageId::TOOL_SETTING_GROUP_BRISTLES,
     MessageId::TOOL_SETTING_GROUP_MIXING,
+    MessageId::TOOL_SETTING_GROUP_BLENDER,
     MessageId::TOOL_SETTING_GROUP_WATERCOLOR,
     MessageId::TOOL_SETTING_GROUP_BLEED,
     MessageId::TOOL_SETTING_GROUP_LIQUIFY,
@@ -405,6 +406,111 @@ const DEFINITIONS: &[Definition] = &[
         field: |b| mixes_color(b).then_some(&mut b.wet_mix.dilution),
     },
     Definition {
+        id: "average_pickup",
+        label: MessageId::TOOL_SETTING_AVERAGE_PICKUP,
+        group: Some(MessageId::TOOL_SETTING_GROUP_MIXING),
+        numeric: NumericControl::percent,
+        field: |b| (b.execution_class() == BrushExecution::Wet).then_some(&mut b.wet_mix.average),
+    },
+    Definition {
+        id: "persistence",
+        label: MessageId::TOOL_SETTING_PERSISTENCE,
+        group: Some(MessageId::TOOL_SETTING_GROUP_MIXING),
+        numeric: four_times,
+        field: |b| (b.execution_class() == BrushExecution::Wet && b.wet_mix.average > 0.).then_some(&mut b.wet_mix.stretch),
+    },
+    Definition {
+        id: "pressure_refill",
+        label: MessageId::TOOL_SETTING_PRESSURE_REFILL,
+        group: Some(MessageId::TOOL_SETTING_GROUP_MIXING),
+        numeric: NumericControl::percent,
+        field: |b| (b.execution_class() == BrushExecution::Wet).then_some(&mut b.wet_mix.refill),
+    },
+    Definition {
+        id: "spread",
+        label: MessageId::TOOL_SETTING_SPREAD,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| !matches!(kind, BlenderKind::Knife | BlenderKind::Marbling)).then_some(&mut b.blender.reach),
+    },
+    Definition {
+        id: "streaks",
+        label: MessageId::TOOL_SETTING_STREAKS,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| matches!(kind, BlenderKind::Soft | BlenderKind::Bristle | BlenderKind::Knife)).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "sharpness",
+        label: MessageId::TOOL_SETTING_SHARPNESS,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: four_times,
+        field: |b| blender(b, |kind| kind == BlenderKind::Sharpen).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "texture_kept",
+        label: MessageId::TOOL_SETTING_TEXTURE_KEPT,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::TextureKeeping).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "blend_lightness",
+        label: MessageId::TOOL_SETTING_BLEND_LIGHTNESS,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::Hue).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "grit",
+        label: MessageId::TOOL_SETTING_GRIT,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::Scatter).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "stretch",
+        label: MessageId::TOOL_SETTING_STRETCH,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: four_times,
+        field: |b| blender(b, |kind| matches!(kind, BlenderKind::Painterly | BlenderKind::Crystal)).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "swirl",
+        label: MessageId::TOOL_SETTING_SWIRL,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: four_times,
+        field: |b| blender(b, |kind| kind == BlenderKind::Marbling).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "edge_keeping",
+        label: MessageId::TOOL_SETTING_EDGE_KEEPING,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| matches!(kind, BlenderKind::EdgeKeeping | BlenderKind::Comb)).then_some(&mut b.blender.character),
+    },
+    Definition {
+        id: "detail_size",
+        label: MessageId::TOOL_SETTING_DETAIL_SIZE,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::TextureKeeping).then_some(&mut b.blender.scale),
+    },
+    Definition {
+        id: "cell_size",
+        label: MessageId::TOOL_SETTING_CELL_SIZE,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::Crystal).then_some(&mut b.blender.scale),
+    },
+    Definition {
+        id: "swirl_size",
+        label: MessageId::TOOL_SETTING_SWIRL_SIZE,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
+        numeric: NumericControl::percent,
+        field: |b| blender(b, |kind| kind == BlenderKind::Marbling).then_some(&mut b.blender.scale),
+    },
+    Definition {
         id: "wet_edge",
         label: MessageId::TOOL_SETTING_WET_EDGE,
         group: Some(MessageId::TOOL_SETTING_GROUP_WATERCOLOR),
@@ -476,6 +582,14 @@ const DEFINITIONS: &[Definition] = &[
         field: |b| Some(&mut b.stabilization.strength),
     },
 ];
+
+fn blender(b: &BrushSnapshot, kind: fn(BlenderKind) -> bool) -> bool {
+    b.execution == BrushExecution::Smudge && kind(b.blender.kind)
+}
+
+fn four_times() -> NumericControl {
+    NumericControl { max: 4., soft_max: 4., ..NumericControl::percent() }
+}
 
 fn liquify(b: &BrushSnapshot, mode: LiquifyMode) -> bool {
     b.execution == BrushExecution::Liquify && b.deform.mode == mode
@@ -638,6 +752,31 @@ mod tests {
         let crystals = default_brush(DefaultBrushPreset::LiquifyCrystals);
         assert_eq!(edit(&crystals, "distortion", 0.9, &Localizer::shared(UiLanguage::English)).unwrap().deform.distortion, 0.9);
         assert!(edit(&crystals, "momentum", 0.5, &Localizer::shared(UiLanguage::English)).is_err());
+    }
+
+    #[test]
+    fn blenders_show_the_controls_their_kind_uses() {
+        let english = Localizer::shared(UiLanguage::English);
+        let ids = |preset| -> Vec<_> { controls(&default_brush(preset), &english).iter().map(|c| c.id).collect() };
+        for (preset, expected, absent) in [
+            (DefaultBrushPreset::Smudge, &["pull", "spread", "streaks"][..], &["swirl", "average_pickup"][..]),
+            (DefaultBrushPreset::CrystalBlender, &["spread", "stretch", "cell_size"], &["streaks", "swirl_size"]),
+            (DefaultBrushPreset::Marbling, &["swirl", "swirl_size"], &["spread", "cell_size"]),
+            (DefaultBrushPreset::EdgeKeepingBlender, &["spread", "edge_keeping"], &["streaks"]),
+            (DefaultBrushPreset::TextureBlender, &["texture_kept", "detail_size"], &["stretch"]),
+            (DefaultBrushPreset::ColorMixer, &["pull", "average_pickup", "persistence", "pressure_refill"], &["spread"]),
+            (DefaultBrushPreset::WetBlender, &["average_pickup", "pressure_refill"], &["persistence", "spread"]),
+            (DefaultBrushPreset::GPen, &[], &["spread", "average_pickup", "streaks"]),
+        ] {
+            let ids = ids(preset);
+            assert!(expected.iter().all(|id| ids.contains(id)), "{preset:?} shows {expected:?}: {ids:?}");
+            assert!(!absent.iter().any(|id| ids.contains(id)), "{preset:?} hides {absent:?}: {ids:?}");
+        }
+        let crystal = edit(&default_brush(DefaultBrushPreset::CrystalBlender), "cell_size", 0.3, &english).unwrap();
+        assert_eq!(crystal.blender.scale, 0.3);
+        assert!(edit(&crystal, "swirl", 1., &english).is_err());
+        let wet = edit(&default_brush(DefaultBrushPreset::WetBlender), "average_pickup", 0.5, &english).unwrap();
+        assert_eq!(edit(&wet, "persistence", 2., &english).unwrap().wet_mix.stretch, 2.);
     }
 
     #[test]

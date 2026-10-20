@@ -50,8 +50,8 @@ const MAX_WET_DABS_PER_BATCH: u32 = 3;
 // Smudge contacts compose into one bounded semi-Lagrangian backtrace. Live
 // input retains an incomplete chunk as replaceable GPU preview work, so these
 // boundaries depend on the stroke rather than display-frame packet cadence.
-const MAX_SMUDGE_DABS_PER_BATCH: usize = 3;
-const MAX_SMUDGE_TRAVEL_DIAMETERS: f32 = 0.14;
+const MAX_SMUDGE_DABS_PER_BATCH: usize = 6;
+const MAX_SMUDGE_TRAVEL_DIAMETERS: f32 = 0.24;
 const MAX_SMUDGE_DAMAGE_DIAMETERS_SQUARED: f32 = 4.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -2092,7 +2092,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let mut consumed = 0;
         loop {
             let pending = &self.pending_smudge_dabs[consumed..];
-            let chunk_len = next_smudge_chunk_len(pending);
+            let chunk_len = next_smudge_chunk_len(pending, DabBatchKind::Persistent);
             if chunk_len == 0 {
                 break;
             }
@@ -2486,6 +2486,7 @@ fn push_mergeable_batch(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBat
                 && smudge_batch_fits(
                     &dabs[last.first_dab as usize
                         ..batch.first_dab.saturating_add(batch.dab_count) as usize],
+                    batch.kind,
                 )))
         && last.stroke_id == batch.stroke_id
         && last.material_update == batch.material_update
@@ -2506,19 +2507,20 @@ fn push_mergeable_batch(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBat
     batches.push(batch);
 }
 
-fn next_smudge_chunk_len(dabs: &[Dab]) -> usize {
-    if dabs.is_empty() {
-        return 0;
-    }
+/// Committed chunks keep a fixed size so replays split a stroke the same way;
+/// the disposable prediction tail takes as few passes as the travel limit allows.
+fn next_smudge_chunk_len(dabs: &[Dab], kind: DabBatchKind) -> usize {
+    let (most, diameters) = if kind == DabBatchKind::Preview { (usize::MAX, f32::INFINITY) }
+        else { (MAX_SMUDGE_DABS_PER_BATCH, MAX_SMUDGE_TRAVEL_DIAMETERS) };
     let mut damage = Rect::EMPTY;
     let mut travel = 0.0;
     let mut maximum_diameter = 0.0_f32;
-    for (index, dab) in dabs.iter().take(MAX_SMUDGE_DABS_PER_BATCH).enumerate() {
+    for (index, dab) in dabs.iter().take(most).enumerate() {
         let candidate_damage = damage.union(damage_for_dabs(std::slice::from_ref(dab)));
         let candidate_travel = travel + dab.motion[0].hypot(dab.motion[1]);
-        let candidate_diameter = maximum_diameter.max(dab.radii[0] * 2.0);
+        let candidate_diameter = maximum_diameter.max(dab.radii[0].max(dab.radii[1]) * 2.0);
         if index > 0
-            && (candidate_travel > candidate_diameter.max(0.01) * MAX_SMUDGE_TRAVEL_DIAMETERS
+            && (candidate_travel > (candidate_diameter.max(0.01) * diameters).min(layer_core::SMUDGE_CHUNK_TRAVEL_LIMIT)
                 || rect_area(candidate_damage)
                     > candidate_diameter.max(0.01).powi(2) * MAX_SMUDGE_DAMAGE_DIAMETERS_SQUARED)
         {
@@ -2528,13 +2530,11 @@ fn next_smudge_chunk_len(dabs: &[Dab]) -> usize {
         travel = candidate_travel;
         maximum_diameter = candidate_diameter;
     }
-    dabs.len().min(MAX_SMUDGE_DABS_PER_BATCH)
+    dabs.len().min(most)
 }
 
-fn smudge_batch_fits(dabs: &[Dab]) -> bool {
-    !dabs.is_empty()
-        && dabs.len() <= MAX_SMUDGE_DABS_PER_BATCH
-        && next_smudge_chunk_len(dabs) == dabs.len()
+fn smudge_batch_fits(dabs: &[Dab], kind: DabBatchKind) -> bool {
+    !dabs.is_empty() && next_smudge_chunk_len(dabs, kind) == dabs.len()
 }
 
 fn rect_area(rect: Rect) -> f32 {
@@ -6549,24 +6549,17 @@ mod tests {
         assert_eq!(preview.len(), 1);
         assert_eq!(preview[0].dab_count, 7);
 
-        let mut smudge_dabs = test_dabs.clone();
-        for dab in &mut smudge_dabs {
-            dab.radii = [10.0, 10.0];
-            dab.motion = [0.05, 0.0];
-        }
-        let mut smudge = Vec::new();
-        push_batches(
-            &mut smudge,
-            &smudge_dabs,
-            make_batch(BrushExecution::Smudge, 0, 4),
-        );
-        assert_eq!(
-            smudge
-                .iter()
-                .map(|batch| batch.dab_count)
-                .collect::<Vec<_>>(),
-            vec![MAX_SMUDGE_DABS_PER_BATCH as u32, 1]
-        );
+        let smudge_dabs = vec![Dab { radii: [10.0, 10.0], motion: [0.05, 0.0], ..test_dabs[0] }; MAX_SMUDGE_DABS_PER_BATCH + 1];
+        let counts = |dabs: &[Dab], kind| {
+            let mut batches = Vec::new();
+            push_batches(&mut batches, dabs, DabBatch { kind, ..make_batch(BrushExecution::Smudge, 0, dabs.len() as u32) });
+            batches.iter().map(|batch| batch.dab_count).collect::<Vec<_>>()
+        };
+        assert_eq!(counts(&smudge_dabs, DabBatchKind::Persistent), vec![MAX_SMUDGE_DABS_PER_BATCH as u32, 1]);
+        assert_eq!(counts(&smudge_dabs, DabBatchKind::Preview), vec![smudge_dabs.len() as u32], "prediction takes one pass");
+        let blade: Vec<_> = smudge_dabs.iter().map(|dab| Dab { radii: [2.0, 10.0], ..*dab }).collect();
+        assert_eq!(counts(&blade, DabBatchKind::Persistent), vec![MAX_SMUDGE_DABS_PER_BATCH as u32, 1],
+            "a broadside blade is chunked by its length");
 
         let mut liquify = Vec::new();
         push_batches(

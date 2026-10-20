@@ -8,10 +8,10 @@ use layer_core::{BlendSpace, BrushBlendMode, Document, LayerBlend, StrokeId, aut
 const EXTENT: [u32; 2] = [128, 128];
 const WHITE: [f32; 4] = [1.; 4];
 
-struct Canvas {
-    r: WgpuRasterizer,
+pub(super) struct Canvas {
+    pub(super) r: WgpuRasterizer,
     document: Document,
-    base: SourceTarget,
+    pub(super) base: SourceTarget,
     over: Option<SourceTarget>,
     space: BlendSpace,
     strokes: u64,
@@ -19,7 +19,7 @@ struct Canvas {
 }
 
 impl Canvas {
-    fn new(color: DocumentColor, space: BlendSpace, blend: Option<LayerBlend>) -> Self {
+    pub(super) fn new(color: DocumentColor, space: BlendSpace, blend: Option<LayerBlend>) -> Self {
         Self::at(color,space,blend,EXTENT)
     }
 
@@ -40,7 +40,7 @@ impl Canvas {
         Self { r, document, base, over, space, strokes: 0, extent }
     }
 
-    fn paint(&mut self, target: SourceTarget, mut style: DabStyle, dab: Dab) {
+    pub(super) fn paint(&mut self, target: SourceTarget, mut style: DabStyle, dab: Dab) {
         style.blend_space = self.space;
         self.strokes += 1;
         let damage = Rect { min: Point { x: 0., y: 0. }, max: Point { x: self.extent[0] as f32, y: self.extent[1] as f32 } };
@@ -50,7 +50,7 @@ impl Canvas {
             .unwrap();
     }
 
-    fn stroke(&mut self, id: u64, brush: &layer_core::BrushSnapshot, dabs: &[Dab], chunk: usize, erase: bool) {
+    pub(super) fn stroke(&mut self, id: u64, brush: &layer_core::BrushSnapshot, dabs: &[Dab], chunk: usize, erase: bool) {
         if dabs.is_empty() {return;}
         let style=DabStyle::for_brush(brush,if erase {layer_core::StrokeTool::Eraser} else {layer_core::StrokeTool::Brush});
         self.styled_stroke(id,style,dabs,chunk);
@@ -86,14 +86,14 @@ impl Canvas {
         self.pixels()
     }
 
-    fn fill(&mut self, target: SourceTarget, color: [f32; 4]) {
+    pub(super) fn fill(&mut self, target: SourceTarget, color: [f32; 4]) {
         let mut dab = test_dab([64., 64.], color, 1.);
         dab.radii = [200.; 2];
         self.paint(target, test_style(BrushExecution::Dry), dab);
     }
 
     /// The composite, as the document's blend space holds it.
-    fn composite(&mut self) -> Vec<[f64; 4]> {
+    pub(super) fn composite(&mut self) -> Vec<[f64; 4]> {
         self.r.submit(FramePacket { blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
         self.pixels()
     }
@@ -376,40 +376,38 @@ fn a_brush_blend_mode_equals_the_layer_blend_mode_when_predicted_or_committed_an
 }
 
 #[test]
-fn distant_material_gather_moves_source_color_without_changing_source() {
+fn distant_liquify_gather_moves_source_color_without_changing_source() {
     let extent = [1024, 128];
     let probes = [[824usize, 56usize], [832, 64], [840, 72]];
     for space in BlendSpace::ALL {
-        for execution in [BrushExecution::Smudge, BrushExecution::Liquify] {
-            let mut canvas = Canvas::at(DocumentColor::default(), space, None, extent);
-            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([64., 64.], [0., 1., 0., 1.], 80., 1.));
-            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([832., 64.], [1., 0., 0., 1.], 80., 1.));
-            let before = canvas.r.readback_srgb_rgba8().unwrap();
-            let pixel = |image: &[u8], [x, y]: [usize; 2]| -> [u8; 4] {
-                image[(y * extent[0] as usize + x) * 4..][..4].try_into().unwrap()
-            };
-            for probe in probes {
-                assert_eq!(pixel(&before, probe), [255, 0, 0, 255], "destination starts red");
-                assert_eq!(pixel(&before, [probe[0] - 768, probe[1]]), [0, 255, 0, 255], "distant source starts green");
-            }
-            let mut style = test_style(execution);
-            style.wet_mix.blur = 0.;
-            style.wet_mix.attack = 1.;
-            style.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
-            style.deform.mode = layer_core::LiquifyMode::Push;
-            style.deform.momentum = 0.;
-            let mut stroke = soft([832., 64.], [0.; 4], 32., 1.);
-            stroke.motion = [768., 0.];
-            stroke.material = [0., 1., 1., 1.];
-            let jobs = canvas.r.metrics.material_sample_jobs;
-            canvas.paint(canvas.base, style, stroke);
-            assert!(canvas.r.metrics.material_sample_jobs > jobs, "{execution:?}/{space:?}: distant gather must execute");
-            let after = canvas.r.readback_srgb_rgba8().unwrap();
-            for probe in probes {
-                let source = [probe[0] - 768, probe[1]];
-                assert_eq!(pixel(&after, probe), pixel(&before, source), "{execution:?}/{space:?}: destination receives original distant source");
-                assert_eq!(pixel(&after, source), pixel(&before, source), "{execution:?}/{space:?}: source remains unchanged");
-            }
+        let mut canvas = Canvas::at(DocumentColor::default(), space, None, extent);
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([64., 64.], [0., 1., 0., 1.], 80., 1.));
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([832., 64.], [1., 0., 0., 1.], 80., 1.));
+        let before = canvas.r.readback_srgb_rgba8().unwrap();
+        let pixel = |image: &[u8], [x, y]: [usize; 2]| -> [u8; 4] {
+            image[(y * extent[0] as usize + x) * 4..][..4].try_into().unwrap()
+        };
+        for probe in probes {
+            assert_eq!(pixel(&before, probe), [255, 0, 0, 255], "destination starts red");
+            assert_eq!(pixel(&before, [probe[0] - 768, probe[1]]), [0, 255, 0, 255], "distant source starts green");
+        }
+        let mut style = test_style(BrushExecution::Liquify);
+        style.wet_mix.blur = 0.;
+        style.wet_mix.attack = 1.;
+        style.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
+        style.deform.mode = layer_core::LiquifyMode::Push;
+        style.deform.momentum = 0.;
+        let mut stroke = soft([832., 64.], [0.; 4], 32., 1.);
+        stroke.motion = [768., 0.];
+        stroke.material = [0., 1., 1., 1.];
+        let jobs = canvas.r.metrics.material_sample_jobs;
+        canvas.paint(canvas.base, style, stroke);
+        assert!(canvas.r.metrics.material_sample_jobs > jobs, "{space:?}: distant gather must execute");
+        let after = canvas.r.readback_srgb_rgba8().unwrap();
+        for probe in probes {
+            let source = [probe[0] - 768, probe[1]];
+            assert_eq!(pixel(&after, probe), pixel(&before, source), "{space:?}: destination receives original distant source");
+            assert_eq!(pixel(&after, source), pixel(&before, source), "{space:?}: source remains unchanged");
         }
     }
 }

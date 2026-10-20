@@ -94,14 +94,14 @@ pub(super) fn dry_record(local: PixelRect, dabs: std::ops::Range<u32>, mapping: 
     record([0, 0, dabs.start, dabs.len() as u32], std::iter::once(rect_words(local)).chain(mapping.as_chunks::<4>().0.iter().copied()))
 }
 
-/// The pages a Liquify or Smudge job on page `at` samples, when they reach
-/// beyond its neighborhood.
+/// The pages a Liquify job on page `at` samples, when they reach beyond its
+/// neighborhood.
 pub(super) fn distant_pages(batch: &DabBatch, dabs: &[Dab], at: [u32; 2], extent: [u32; 2]) -> Option<Vec<[u32; 2]>> {
     let pages = page_coordinates(sample_bounds(batch, dabs, at, extent)).collect::<Vec<_>>();
     pages.iter().any(|p| p[0].abs_diff(at[0]) > 1 || p[1].abs_diff(at[1]) > 1).then_some(pages)
 }
 
-/// Conservative bounds of every backtrace and blur tap from this output page.
+/// Conservative bounds of every deformed sample from this output page.
 /// Coverage lies in [0,1], so each step includes both zero and full displacement.
 /// The shader still computes the exact nonlinear coordinate for every pixel.
 fn sample_bounds(batch: &DabBatch, dabs: &[Dab], at: [u32; 2], extent: [u32; 2]) -> PixelRect {
@@ -116,60 +116,52 @@ fn sample_bounds(batch: &DabBatch, dabs: &[Dab], at: [u32; 2], extent: [u32; 2])
         },
     };
     for dab in dabs.iter().rev() {
-        let shift = if batch.style.execution == BrushExecution::Smudge {
-            let pull = dab.material[1].clamp(0., 1.);
-            [-dab.motion[0] * pull, -dab.motion[1] * pull]
-        } else {
-            let amount = dab.material[3].clamp(0., 1.);
-            let motion = dab.motion.map(|v| v * (1. + batch.style.deform.momentum));
-            match batch.style.deform.mode {
-                LiquifyMode::Push => [-motion[0] * amount, -motion[1] * amount],
-                LiquifyMode::TwirlClockwise | LiquifyMode::TwirlCounterClockwise => {
-                    let direction = if batch.style.deform.mode == LiquifyMode::TwirlClockwise {
-                        1.
-                    } else {
-                        -1.
-                    };
-                    bounds = swept_rotation(bounds, dab.center, direction * amount * 0.75);
-                    [0.; 2]
-                }
-                LiquifyMode::Pinch | LiquifyMode::Expand => {
-                    let direction = if batch.style.deform.mode == LiquifyMode::Pinch {
-                        1.
-                    } else {
-                        -1.
-                    };
-                    let scale = 1. + direction * amount * 0.35;
-                    let scaled = Rect {
-                        min: Point {
-                            x: dab.center.x + (bounds.min.x - dab.center.x) * scale,
-                            y: dab.center.y + (bounds.min.y - dab.center.y) * scale,
-                        },
-                        max: Point {
-                            x: dab.center.x + (bounds.max.x - dab.center.x) * scale,
-                            y: dab.center.y + (bounds.max.y - dab.center.y) * scale,
-                        },
-                    };
-                    bounds = bounds.union(scaled);
-                    [0.; 2]
-                }
-                LiquifyMode::Crystals => {
-                    bounds = expand(bounds, 12. * amount * batch.style.deform.distortion.abs());
-                    [0.; 2]
-                }
-                LiquifyMode::Edge | LiquifyMode::Reconstruct => {
-                    bounds = expand(bounds, motion[0].hypot(motion[1]) * amount);
-                    [0.; 2]
-                }
+        let amount = dab.material[3].clamp(0., 1.);
+        let motion = dab.motion.map(|v| v * (1. + batch.style.deform.momentum));
+        let shift = match batch.style.deform.mode {
+            LiquifyMode::Push => [-motion[0] * amount, -motion[1] * amount],
+            LiquifyMode::TwirlClockwise | LiquifyMode::TwirlCounterClockwise => {
+                let direction = if batch.style.deform.mode == LiquifyMode::TwirlClockwise {
+                    1.
+                } else {
+                    -1.
+                };
+                bounds = swept_rotation(bounds, dab.center, direction * amount * 0.75);
+                [0.; 2]
+            }
+            LiquifyMode::Pinch | LiquifyMode::Expand => {
+                let direction = if batch.style.deform.mode == LiquifyMode::Pinch {
+                    1.
+                } else {
+                    -1.
+                };
+                let scale = 1. + direction * amount * 0.35;
+                let scaled = Rect {
+                    min: Point {
+                        x: dab.center.x + (bounds.min.x - dab.center.x) * scale,
+                        y: dab.center.y + (bounds.min.y - dab.center.y) * scale,
+                    },
+                    max: Point {
+                        x: dab.center.x + (bounds.max.x - dab.center.x) * scale,
+                        y: dab.center.y + (bounds.max.y - dab.center.y) * scale,
+                    },
+                };
+                bounds = bounds.union(scaled);
+                [0.; 2]
+            }
+            LiquifyMode::Crystals => {
+                bounds = expand(bounds, 12. * amount * batch.style.deform.distortion.abs());
+                [0.; 2]
+            }
+            LiquifyMode::Edge | LiquifyMode::Reconstruct => {
+                bounds = expand(bounds, motion[0].hypot(motion[1]) * amount);
+                [0.; 2]
             }
         };
         bounds.min.x += shift[0].min(0.);
         bounds.max.x += shift[0].max(0.);
         bounds.min.y += shift[1].min(0.);
         bounds.max.y += shift[1].max(0.);
-    }
-    if batch.style.execution == BrushExecution::Smudge {
-        bounds = expand(bounds, batch.style.wet_mix.blur.clamp(0., 1.) * 4.);
     }
     let local = expand(bounds, 1.); // Manual bilinear neighbors.
     if [local.min.x, local.min.y, local.max.x, local.max.y]

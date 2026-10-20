@@ -27,14 +27,14 @@ Startup cannot fail because of shaders needed only by an unused brush.
 Each material operation compiles its own modules, specialized for brushes
 without contact; other contacts share a module that reads each dab's flags.
 Dry kernels for other blend modes and wet and watercolor page kernels are also
-specialized for the brush blend mode; Smudge and Liquify, which never blend, share one module per contact.
+specialized for the brush blend mode; Liquify, which never blends, shares one module per contact, and Smudge has one per contact and blender kind.
 Non-dry operations exclude dry relief. Deposit and coverage retain their
 captured contact capabilities.
 Material recipes use the captured contact flags, accumulation and blend mode, with
 separate entries for destination targets, gathering and reservoir exchange.
-Smudge, Liquify and wet brushes prepare the page kernel their commits write, the
-color kernel their predictions write, and the distant-sample gather or, for wet
-brushes, the reservoir exchange, all compute. Watercolor prepares one kernel that
+Smudge, Liquify and wet brushes prepare the page kernel their commits write and
+the color kernel their predictions write; Liquify adds the distant-sample gather
+and wet brushes the reservoir exchange, all compute. Watercolor prepares one kernel that
 writes color, coverage and wetness for both.
 Readiness requests only the entries used by the selected pass plan, including
 its compute and display-preview eligibility; custom contacts use the same recipe

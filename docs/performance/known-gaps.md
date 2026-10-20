@@ -9,8 +9,12 @@
     stroke trails the pen.
   - On the TCL (12 MP) they complete 1.0–2.5 updates/s, at most 1.8 GB
     resident; Liquify completes 5.2 (Push) to 35 (Twirl) updates/s.
-  - On the MovinkPad 11 (24 MP) they complete 1.6–3.1 updates/s, at most
-    2.6 GB resident; Liquify completes 5.7 (Push) to 28 (Twirl) updates/s.
+  - On the MovinkPad 11 (24 MP) wet and watercolor brushes complete 1.6–2.6
+    updates/s, at most 2.6 GB resident, and the blenders 1.1 (Blending Knife)
+    to 31.5 (Sharpen); Smudge completes 8.7 and Liquify 6.1 (Crystals) to 28
+    (Twirl) updates/s. Natural Blender (2.3 to 1.9) and Palette Knife (1.8 to
+    1.6) are slower than before the blender suite.
+  - The blender suite is unmeasured on the TCL and the MovinkPad Pro 14.
   - On the MovinkPad Pro 14 (61 MP) they complete 7.7 (Loaded Oil) to 54
     (Smudge) updates/s; every Liquify preset meets 120 updates/s.
   - Multiply Glaze at 1024 px completes 86.8 updates/s on the MovinkPad Pro 14

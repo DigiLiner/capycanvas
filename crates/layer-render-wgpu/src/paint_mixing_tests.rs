@@ -42,9 +42,9 @@ fn paint(r: &mut WgpuRasterizer, document: &Document, color: [f32; 4], center: [
     submit(r, document.scene(), &[dab], &[batch(target(document))], reset, space);
 }
 
-/// Smudge drags the green left half 8 px into the red right half with an
-/// influence of exactly one half; Wet deposits red carrying half its load over
-/// green. Both leave the 50% mix at [`PROBE`].
+/// Smudge pulls the green left half 8 px into the red right half and mixes it
+/// in by exactly one half; Wet deposits red carrying half its load over green.
+/// Both leave the 50% mix at [`PROBE`].
 fn pickup(color: DocumentColor, execution: BrushExecution, mix: ColorMixSpace, space: BlendSpace) -> WgpuRasterizer {
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
     let mut document = paint_document([128; 2], "mixing");
@@ -59,7 +59,7 @@ fn pickup(color: DocumentColor, execution: BrushExecution, mix: ColorMixSpace, s
     contact.radii = [200.; 2];
     if execution == BrushExecution::Smudge {
         paint(&mut r, &document, RED, [1066., 64.], 1000., false, space);
-        style.wet_mix.attack = 0.5;
+        style.blender = layer_core::BrushBlender { reach: 0., rate: std::f32::consts::LN_2 * 400. / 16., ..Default::default() };
         contact.motion = [16., 0.];
         contact.material = [0., 0.5, 1., 0.];
     } else {

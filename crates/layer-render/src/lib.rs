@@ -203,6 +203,7 @@ pub struct DabStyle {
     pub wet_mix: BrushWetMix,
     pub transport: Option<BrushTransport>,
     pub deform: BrushDeform,
+    pub blender: layer_core::BrushBlender,
     pub contact: Option<layer_core::BrushContact>,
     /// A retouching stroke's source. Renderers keep the target's stroke-start
     /// pixels for it before the stroke first writes each page.
@@ -229,6 +230,7 @@ impl DabStyle {
             wet_mix: brush.wet_mix,
             transport: brush.transport.clone(),
             deform: brush.deform,
+            blender: brush.blender,
             contact: brush.contact.map(|mut material| {
                 material.fibers *= (brush.diameter / 128.).max(1.);
                 material

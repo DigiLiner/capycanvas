@@ -282,7 +282,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         });
         let bounds = layer_core::Rect { min: Point {x:-radius,y:-radius}, max: Point {x:radius,y:radius} };
         let shape_only = self.state().brush.tool == Tool::Eraser
-            || matches!(brush.execution, layer_core::BrushExecution::Smudge|layer_core::BrushExecution::Liquify)
+            || brush.moves_paint_only()
             || crate::tools::is_retouching(self.state().brush.tool);
         let shape_strength = shape_only.then(|| ToolbarNumericBinding::BrushStrength.field(self.state()).map_or(1., |f| f.value));
         let mut style = DabStyle::for_brush(&brush, StrokeTool::Brush);

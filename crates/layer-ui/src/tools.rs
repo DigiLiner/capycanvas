@@ -235,6 +235,7 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
         ToolGroup::Oil,
     ),
     (DefaultBrushPreset::WetRound, MessageId::BRUSH_PRESET_WET_ROUND, ToolGroup::Oil),
+    (DefaultBrushPreset::MixingBrush, MessageId::BRUSH_PRESET_MIXING_BRUSH, ToolGroup::Oil),
     (DefaultBrushPreset::Eraser, MessageId::BRUSH_PRESET_ERASER, ToolGroup::Eraser),
     (
         DefaultBrushPreset::Airbrush,
@@ -253,6 +254,24 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
         ToolGroup::Blend,
     ),
     (DefaultBrushPreset::Smudge, MessageId::BRUSH_PRESET_SMUDGE, ToolGroup::Blend),
+    (DefaultBrushPreset::SoftBlender, MessageId::BRUSH_PRESET_SOFT_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::Blur, MessageId::BRUSH_PRESET_BLUR, ToolGroup::Blend),
+    (DefaultBrushPreset::Sharpen, MessageId::BRUSH_PRESET_SHARPEN, ToolGroup::Blend),
+    (DefaultBrushPreset::BristleBlender, MessageId::BRUSH_PRESET_BRISTLE_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::GrainyBlender, MessageId::BRUSH_PRESET_GRAINY_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::TextureBlender, MessageId::BRUSH_PRESET_TEXTURE_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::HueBlender, MessageId::BRUSH_PRESET_HUE_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::ScatterBlender, MessageId::BRUSH_PRESET_SCATTER_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::PainterlyBlender, MessageId::BRUSH_PRESET_PAINTERLY_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::CrystalBlender, MessageId::BRUSH_PRESET_CRYSTAL_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::Marbling, MessageId::BRUSH_PRESET_MARBLING, ToolGroup::Blend),
+    (DefaultBrushPreset::CombBlender, MessageId::BRUSH_PRESET_COMB_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::EdgeKeepingBlender, MessageId::BRUSH_PRESET_EDGE_KEEPING_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::DitherBlender, MessageId::BRUSH_PRESET_DITHER_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::BlendingKnife, MessageId::BRUSH_PRESET_BLENDING_KNIFE, ToolGroup::Blend),
+    (DefaultBrushPreset::WetBlender, MessageId::BRUSH_PRESET_WET_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::ColorMixer, MessageId::BRUSH_PRESET_COLOR_MIXER, ToolGroup::Blend),
+
     (
         DefaultBrushPreset::LiquifyPush,
         MessageId::BRUSH_PRESET_LIQUIFY_PUSH,
@@ -668,7 +687,7 @@ mod tests {
 
     #[test]
     fn every_brush_has_one_tool_and_group_and_every_group_is_populated() {
-        assert_eq!(PRESETS.len(), 44);
+        assert_eq!(PRESETS.len(), 62);
         let mut ids = std::collections::BTreeSet::new();
         for &(preset, _, group) in PRESETS {
             assert!(ids.insert(preset as u32));

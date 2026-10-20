@@ -116,6 +116,27 @@ Each preset keeps its own choice with its other edited settings. The choice does
 not follow the document's blending, and it changes no pipeline; see
 [rendering](rendering.md#native-sdr-working-color).
 
+The Blend tools hold the blenders. Each moves or mixes paint already on the
+layer and lays no color of its own:
+
+- **Basics**: Smudge, Natural Blender, Soft Blender, Blur, Sharpen and the
+  Blending Knife, which scrapes paint along in unmixed streaks.
+- **Texture-keeping**: the Grainy Blender puts the paper tooth back, the
+  Texture-Keeping Blender keeps fine brush texture over the blended color, and
+  the Hue Blender blends hue and saturation but keeps every pixel's lightness.
+- **Paint mixers**: the Wet Blender carries what each part of the tip picked
+  up and runs dry; the Color Mixer carries one color averaged over the tip, as
+  Clip Studio Paint's Blend mode does.
+- **Expressive**: Bristle, Painterly, Crystal, Marbling, Comb (along the
+  strands already painted), Edge-Keeping (stops at lines), Scatter and Dither.
+
+Tool Options shows a **Blender** group with Spread and the one setting each
+kind uses: Streaks, Sharpness, Texture kept, Blend lightness, Grit, Stretch,
+Swirl, Edge keeping, Detail size, Cell size or Swirl size. Wet brushes add
+Average pickup, Persistence and Pressure refill to the Mixing group. The Mixing
+Brush in Paint › Oil lays its color under firm pressure and only blends under a
+light touch.
+
 Watercolor uses its own pigment and wetness behavior. It is not a general physical
 fluid simulation, and not every brush uses the same state or passes. The
 [painterly paint-state reference](../reference/painterly-paint-state.md) explains

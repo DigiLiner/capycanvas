@@ -188,21 +188,33 @@ The full brush retains three kinds of state.
 - motion-derived displacement;
 - conservative damage and the source region needed by filtering.
 
-Smudge/blender uses one composed backtrace per destination pixel and bounded
-three-contact chunk:
+Smudge and the blenders compose one backtrace per destination pixel and
+contact chunk, then mix toward a field chosen by the blender kind:
 
 ```text
-a(x) = tip_coverage(x) × pressure × flow
-source_coordinate = reverse_compose(x, ordered_contact_motion × pull × a)
-dragged = bilinear_sample(canvas_old, source_coordinate)
-optical_depth += -log(1 - a) × traveled_distance / reference_distance
-canvas_new(x) = alpha_safe_material_mix(canvas_old(x), dragged,
-                                        1 - exp(-optical_depth))
+a_i(x)        = tip_coverage_i(x) × flow_i
+exposure      = Σ a_i × |motion_i| / short_axis_diameter_i
+amount        = 1 - exp(-rate × exposure)
+trace         = x - clamp(Σ motion_i × pull × a_i × lane_i(x), 128 px)
+radius        = min(reach × diameter × sqrt(rate × exposure / amount), 112 px)
+field         = blender_field(kind, x, trace, radius)   // in the mixing space
+canvas_new(x) = mix_in_mixing_space(canvas_old(x), field, amount)
 ```
 
-It does not use the wet-paint reservoir. Sampling the old canvas once after
-composing contact motion avoids the repeated displaced source silhouettes that
-appear when every dab is independently composited.
+Exposure counts distance travelled, so spacing changes neither how far paint
+moves nor how much it blends. The radius grows with the square root of
+exposure, so one pass averages as widely as the many short passes it replaces.
+Each kind compiles its own page kernel from
+[`material_blend.wgsl`](../../crates/layer-render-wgpu/src/material_blend.wgsl),
+selected by the module constant `BLENDER`: disc averages for Soft, Blur and Hue,
+a paper-guided regression for Grainy, frequency separation for Texture-Keeping,
+a clamped Catmull-Rom backtrace for the Knife, eight-sector minimum variance for
+Painterly, Voronoi cells for Crystal, curl-noise advection for Marbling, a
+structure-tensor streamline for Comb, wall-stopped rays for Edge-Keeping and an
+ordered two-color dither for Dither. The 128 px trace and 112 px radius keep
+every sample inside the page's 3×3 neighbourhood, so these kernels need no
+gather, and a sample inside the page's own texture skips the neighbourhood
+switch. They do not use the wet-paint reservoir and never lower alpha.
 
 Wet paint uses the separate reservoir path. Loaded oils and palette knives keep
 spatial brush-local state:
@@ -254,10 +266,12 @@ The reservoir is initialized from selected pigment once at stroke start. Every
 new contact exchanges with canvas color; selected pigment is not injected again
 per dab. Wet contacts are submitted in ordered microbatches of at most three to
 bound ping-pong/pass overhead without returning to display-frame-rate exchange.
-Smudge uses deterministic chunks of at most three contacts, additionally bounded
-by traveled distance and damage. Its incomplete live chunk is rendered through
-the replaceable GPU preview and becomes persistent only at a stable chunk
-boundary or pen-up, so results do not depend on display cadence. Liquify retains
+Smudge uses deterministic chunks of at most six contacts, additionally bounded
+by 0.24 diameters of the tip's long axis or 128 px of travel, and by damage.
+Its incomplete live chunk and the predicted contacts are rendered through the
+replaceable GPU preview in one pass up to the travel limit, and become
+persistent only at a stable chunk boundary or pen-up, so results do not depend
+on display cadence. Liquify retains
 one ordered contact per step. Contact placement and dynamics are sequential CPU
 work; canvas sampling, coverage, material transfer, state writes, reservoir
 exchange, and deformation are parallel GPU work. Non-watercolor wet brushes keep
@@ -297,7 +311,7 @@ inside `layer-render-wgpu`.
 
 Dry contacts may be instanced together because fixed-function blending preserves
 their draw order. Wet paint uses ordered microbatches of at most three contacts.
-Smudge contacts are reverse-composed in deterministic chunks of at most three;
+Smudge contacts are reverse-composed in deterministic chunks of at most six;
 distance-normalized influence keeps strength stable when spacing changes, while
 short chunks bound the visual approximation to sequential destination feedback.
 Liquify depends directly on the preceding destination and uses one contact per

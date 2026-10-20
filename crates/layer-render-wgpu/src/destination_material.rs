@@ -49,14 +49,29 @@ impl Entry {
     }
 }
 
-/// Liquify and Smudge gather distant samples; Wet exchanges its reservoir
-/// with the canvas after each committed batch; watercolor always writes
-/// coverage and wetness.
+/// Liquify gathers distant samples; Smudge's chunks keep every sample within
+/// a page's neighbourhood; Wet exchanges its reservoir with the canvas after
+/// each committed batch; watercolor always writes coverage and wetness.
 pub(super) fn entries(operation: MaterialOperation) -> &'static [Entry] {
     match operation {
         MaterialOperation::Wet => &[Entry::Color, Entry::Coverage, Entry::Reservoir],
         MaterialOperation::Watercolor => &[Entry::Watercolor],
+        MaterialOperation::Smudge => &[Entry::Color, Entry::Coverage],
         _ => &[Entry::Gather, Entry::Color, Entry::Coverage],
+    }
+}
+
+/// The blenders an operation compiles a module for: every one for Smudge.
+pub(super) fn blenders(operation: MaterialOperation) -> &'static [layer_core::BlenderKind] {
+    if operation == MaterialOperation::Smudge { &layer_core::BlenderKind::ALL } else { &[layer_core::BlenderKind::Soft] }
+}
+
+/// The module that provides `entry` of `operation` for one blend code and blender.
+pub(super) fn module(operation: MaterialOperation, entry: Entry, blend: u32, blender: layer_core::BlenderKind) -> Entries {
+    match (entry, operation) {
+        (Entry::Gather, _) => Entries::Gather,
+        (_, MaterialOperation::Smudge) => Entries::Blend(blender),
+        _ => Entries::Transport(blend),
     }
 }
 
@@ -77,7 +92,7 @@ pub(super) fn blended(operation: MaterialOperation) -> bool {
 
 pub(super) struct Pipelines {
     layouts: [wgpu::BindGroupLayout; 3],
-    kernels: std::collections::BTreeMap<(u32, usize, Entry), Deferred<wgpu::ComputePipeline>>,
+    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8), Deferred<wgpu::ComputePipeline>>,
 }
 
 impl Pipelines {
@@ -93,12 +108,14 @@ impl Pipelines {
         for (slot, operation) in (0..MATERIAL_SLOTS).flat_map(|slot| OPERATIONS.map(|operation| (slot, operation))) {
             if !blended(operation) && slot % MATERIAL_BLENDS.len() != 0 { continue; }
             let (flags, blend) = dry_material::material_entries(slot);
-            let transport = dry_material::material_shader(device, Entries::Transport(blend), flags, operation);
-            for &entry in entries(operation) {
-                let shader = if entry == Entry::Gather { dry_material::material_shader(device, Entries::Gather, flags, operation) } else { transport.clone() };
-                kernels.insert((operation as u32, slot, entry), Deferred::compute(device,
-                    format!("destination material {} operation={} contact={flags:#x} blend={blend}", entry.name(), operation as u32),
-                    &pipeline_layouts[entry.outputs()], &shader, entry.name()));
+            for &blender in blenders(operation) {
+                let transport = dry_material::material_shader(device, module(operation, Entry::Color, blend, blender), flags, operation);
+                for &entry in entries(operation) {
+                    let shader = if entry == Entry::Gather { dry_material::material_shader(device, Entries::Gather, flags, operation) } else { transport.clone() };
+                    kernels.insert((operation as u32, slot, entry, blender as u8), Deferred::compute(device,
+                        format!("destination material {} operation={} contact={flags:#x} blend={blend} blender={blender:?}", entry.name(), operation as u32),
+                        &pipeline_layouts[entry.outputs()], &shader, entry.name()));
+                }
             }
         }
         Self { layouts, kernels }
@@ -108,7 +125,8 @@ impl Pipelines {
         let operation = BrushPassPlan::for_style(style).material;
         let slot = if blended(operation) { dry_material::material_slot(style) }
             else { dry_material::material_contact_slot(style) * MATERIAL_BLENDS.len() };
-        &self.kernels[&(operation as u32, slot, entry)]
+        let blender = if operation == MaterialOperation::Smudge { style.blender.kind } else { layer_core::BlenderKind::Soft };
+        &self.kernels[&(operation as u32, slot, entry, blender as u8)]
     }
 
     fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>, wetness: Option<&PageSurface>) -> wgpu::BindGroup {
@@ -301,7 +319,7 @@ mod tests {
         let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let document = layer_core::Document::new(layer_core::authored::PortableId::random(), 128, 128,
             layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
-        for (preset, expected) in [(Preset::LiquifyPush, 2), (Preset::Smudge, 2), (Preset::NaturalBlender, 3), (Preset::WetRound, 2),
+        for (preset, expected) in [(Preset::LiquifyPush, 2), (Preset::Smudge, 1), (Preset::NaturalBlender, 1), (Preset::WetRound, 2),
             (Preset::OpaqueGouache, 3), (Preset::LoadedOil, 3), (Preset::PaletteKnife, 3), (Preset::WatercolorWash, 1), (Preset::WetWatercolor, 1)] {
             let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
             renderer.shader_idle(false, false);
@@ -327,13 +345,13 @@ mod tests {
     #[test]
     fn transport_kernels_declare_the_workgroup_they_are_dispatched_with() {
         for operation in OPERATIONS {
-            for &entry in entries(operation) {
-                let entries = if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) };
-                let source = dry_material::material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true), entries, 0, operation);
+            for (&entry, &blender) in entries(operation).iter().flat_map(|entry| blenders(operation).iter().map(move |blender| (entry, blender))) {
+                let source = dry_material::material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true),
+                    module(operation, entry, 0, blender), 0, operation);
                 let module = naga::front::wgsl::parse_str(&source).unwrap();
                 let kernel = module.entry_points.iter().find(|e| e.name == entry.name()).unwrap();
                 let [width, height] = workgroup(operation);
-                assert_eq!(kernel.workgroup_size, [width, height, 1], "{operation:?} {entry:?}");
+                assert_eq!(kernel.workgroup_size, [width, height, 1], "{operation:?} {entry:?} {blender:?}");
                 assert_eq!([PAGE_SIZE % width, PAGE_SIZE % height, RESERVOIR_SIZE % width, RESERVOIR_SIZE % height], [0; 4]);
             }
         }
