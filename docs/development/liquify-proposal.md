@@ -34,9 +34,37 @@ the current implementation.
 | Milestone | Contents |
 | --- | --- |
 | 1 | Push, Twirl Counterclockwise, Twirl Clockwise, Pinch, Expand and Crystals on the session, with Reset |
-| 2 | Edge, Reconstruct, Adjust, Momentum after lift-off, Distortion where Procreate applies it, and continuous application while the pen is held |
+| 2 | Edge, Reconstruct, Adjust, Momentum after lift-off, Distortion where Procreate applies it, barrel roll for Twirl, and continuous application while the pen is held |
 
 Persistent, re-editable Liquify filters are outside this proposal.
+
+### Procreate coverage
+
+Every option in Procreate's [Liquify](https://help.procreate.com/procreate/handbook/adjustments/adjustments-liquify)
+has a counterpart:
+
+| Procreate | Capy Canvas | Milestone |
+| --- | --- | --- |
+| Push | Push | 1 |
+| Twirl Left, Twirl Right | Twirl Counterclockwise, Twirl Clockwise | 1 |
+| Pinch | Pinch | 1 |
+| Expand | Expand | 1 |
+| Crystals | Crystals | 1 |
+| Edge | Edge | 2 |
+| Reconstruct | Reconstruct brush | 2 |
+| Size | Size | 1 |
+| Pressure: the maximum effect at full pen pressure; a finger always applies it | Strength, scaled by the pressure mapping; touch input that paints applies full Strength | 1 |
+| Distortion | Distortion, currently Crystals only | 2 |
+| Momentum: the effect continues after lift-off | Momentum, given Procreate's meaning | 2 |
+| Adjust, with its Amount slider | Adjust | 2 |
+| Reset | Reset | 1 |
+| Adjust and Reset appear once there are changes | Both are unavailable, with a reason, until the session has changes | 1 for Reset, 2 for Adjust |
+| Apple Pencil Pro barrel roll sets Twirl's amount | Twirl presets map Twist to Strength | 2 |
+| Commit by leaving Adjustments | Nothing to commit; the layer is already current | 1 |
+
+Third-party guides also describe Twirl, Pinch and Expand continuing while the
+pen is held still; Procreate's handbook does not. Milestone 2 adds it once
+confirmed in Procreate.
 
 ## Sessions
 
@@ -364,6 +392,12 @@ its field the same way; accept it rather than restrict these tools.
 - **Distortion.** Procreate presents Distortion as making effects “more twirly,
   jagged, or twisted”; Capy Canvas exposes it only for Crystals. Check which
   modes it changes in Procreate before designing it.
+- **Barrel roll.** On Apple Pencil Pro, Procreate's Twirl takes its amount from
+  rotating the pencil. The Apple host already delivers the pencil's roll as the
+  `Twist` sensor (`PencilInput.swift`), so the Twirl presets add a `Twist` to
+  `DeformStrength` mapping in shared Rust, with no host code. Check in Procreate whether the amount follows
+  rotation since pen-down or the absolute roll; the mapping uses whichever it
+  is, and pencils without roll keep the plain Strength.
 - **Holding the pen still.** Photoshop, through Rate, and Clip Studio Paint keep
   twirling, pinching and expanding while the pen is held. Here, Liquify dabs
   come only from distance traveled, and the first contact applies a full dab at
@@ -498,8 +532,9 @@ design; those choices must satisfy these criteria.
   undo step ([continuous transform](https://docs.krita.org/en/reference_manual/tools/transform.html)).
 - **Procreate.** [Liquify](https://help.procreate.com/procreate/handbook/adjustments/adjustments-liquify)
   offers Push, Twirl Left and Right, Pinch, Expand, Crystals, Edge and
-  Reconstruct, with Size, Pressure, Distortion, Momentum, Adjust and Reset. It
-  commits when the artist leaves Adjustments.
+  Reconstruct, with Size, Pressure, Distortion, Momentum, Adjust and Reset, and
+  barrel roll for Twirl on Apple Pencil Pro. It commits when the artist leaves
+  Adjustments.
 - **Photoshop.** [Liquify](https://helpx.adobe.com/photoshop/using/liquify-filter.html)
   keeps applying Twirl, Pucker and Bloat while the tool is held still, at the
   speed set by Rate, and offers Reconstruct and Restore All.
