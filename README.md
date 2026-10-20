@@ -24,8 +24,8 @@ Capy Canvas is free, GPU-accelerated painting and photo editing software. We
 want to improve upon the ideas of the past, and build something better.
 
 The gap in creative software is most stark on Linux, where there are not many good
-options for artists. Though, we can also help people on Windows, Mac, iPad and
-Android, and web, so nobody is left behind.
+options for artists. Though, well-designed software should work everywhere:
+Windows, Mac, iPad and Android, and web.
 
 We want artists to build their own tools. We envision a world where painters
 build their own brush engine, and photographers write their effect shaders.
@@ -102,8 +102,9 @@ The *Photo* workspace enables stunning visuals for a new generation of wide-gamu
 
 | Area | Tools and operations |
 | --- | --- |
-| [Brushes](https://capycanvas.art/docs/drawing/brush-tools/) | Pencil, charcoal, ink, bristle, watercolor, oil and airbrush; pressure and tilt, paper grain, textured tips and color mixing. |
-| [Layers](https://capycanvas.art/docs/layers/types/) | Groups, clipping layers, layer masks, blend modes, editable color and gradient fills, and selection layers. |
+| [Brushes](https://capycanvas.art/docs/drawing/brush-tools/) | Pencil, charcoal, chalk, pastel, crayon, ink, bristle, watercolor, oil and airbrush; pressure and tilt, Paper texture, textured tips, smoothing and color mixing. |
+| [Layers](https://capycanvas.art/docs/layers/types/) | Paint, vector, Object and Paper layers; groups, clipping, masks, blend modes, editable color and gradient fills, and saved selections. |
+| [Vector tools](docs/ui/vector-layers.md) | Pressure-sensitive ink, editable shapes, anchor points and handles, path widths, vector erasing, reference-layer fills and path-preserving merges. |
 | [Selections](https://capycanvas.art/docs/selections/tools/) | Rectangle, ellipse, lasso, polygon, contiguous color and tonal range; Quick Mask, feathering and saved selections. |
 | [Effects](https://capycanvas.art/docs/filters/how-filters-apply/) | Linked non-destructive effect chains, adjustment layers and effect masks; Curves, Levels, color grading, blur, sharpening, halftone and painterly effects. |
 | [Retouching](https://capycanvas.art/docs/retouch/clone-heal/) | Clone Stamp, Healing and Spot Healing, dodge and burn, blending and liquify. |
