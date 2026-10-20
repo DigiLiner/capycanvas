@@ -2,6 +2,10 @@
 use super::*;
 use wgpu::util::DeviceExt;
 use layer_render::ThumbnailTarget;
+use std::collections::BTreeMap;
+
+/// Layer pages one preparation reduces into a thumbnail level.
+pub(crate) const BATCH_PAGES: usize = 48;
 pub(super) struct Thumbnails {
     tx: mpsc::Sender<Result<ReadbackImage, GpuRasterError>>,
     rx: mpsc::Receiver<Result<ReadbackImage, GpuRasterError>>,
@@ -29,6 +33,7 @@ impl Thumbnails {
         let paint = self.gpu.as_ref().map_or(0, |gpu| gpu.prepared.iter()
             .map(|p| p.records.size() + 16 + texture_bytes(&p.result.texture)
                 + p.generated.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()).sum::<u64>()
+            + gpu.reduced.iter().map(|layer| texture_bytes(&layer.image.0)).sum::<u64>()
             + gpu.generators.as_ref().map_or(0, scene::Scene::scratch_bytes) + gpu.capture.storage_bytes());
         paint + self.sources.as_ref().map_or(0, |s| s.storage_bytes())
     }
@@ -106,7 +111,8 @@ impl WgpuRasterizer {
     pub fn thumbnails_pending(&self) -> bool {
         self.thumbnails.pending > 0
     }
-    /// Prepare at most four source or paint pages before requesting readback.
+    /// Prepare at most four source or paint pages, or reduce a batch of
+    /// changed layer pages, before requesting readback.
     pub fn prepare_thumbnail_batch(&mut self, target: ThumbnailTarget) -> Result<bool, GpuRasterError> {
         self.validate_thumbnail(target)?;
         let source_target = self.thumbnail_source(target);
@@ -128,7 +134,7 @@ impl WgpuRasterizer {
         else if let Some(source) = source { source }
         else {
             let mut gpu = self.thumbnails.gpu.take().unwrap_or_else(|| PreviewPipeline::new(self));
-            let result = gpu.prepare(self, target, &mut encoder, 4);
+            let result = gpu.prepare(self, target, &mut encoder, 4, BATCH_PAGES);
             self.thumbnails.gpu = Some(gpu);
             result
         };
@@ -301,8 +307,29 @@ struct PreviewPipeline {
     read_bounds: wgpu::BindGroupLayout,
     draw: Deferred<wgpu::RenderPipeline>,
     prepared: std::collections::VecDeque<PreparedPreview>,
+    reduce_layout: wgpu::BindGroupLayout,
+    reduce: Deferred<wgpu::ComputePipeline>,
+    reduced: std::collections::VecDeque<ReducedLayer>,
     capture: artwork::Capture,
     generators: Option<scene::Scene>,
+}
+struct ReducedLayer {
+    id: SourceTarget,
+    extent: [u32; 2],
+    origin: [u32; 2],
+    level: u32,
+    image: (wgpu::Texture, wgpu::TextureView),
+    tiles: BTreeMap<[u32; 2], (Option<u64>, u64)>,
+    valid: Arc<std::sync::atomic::AtomicBool>,
+}
+impl ReducedLayer {
+    fn current(&self, r: &WgpuRasterizer) -> BTreeMap<[u32; 2], Option<u64>> {
+        let backed = |c: [u32; 2]| r.native_backing(self.id).and_then(|data| data.tiles.get(&layer_core::raster::TileKey { plane: layer_core::raster::RasterPlane::Color, coordinate: c })).map(layer_core::raster::RasterTile::identity);
+        let block = PixelRect::new(self.origin[0], self.origin[1], self.origin[0] + (PAGE_SIZE << self.level), self.origin[1] + (PAGE_SIZE << self.level));
+        r.paint_layers.iter().filter(|l| l.id == self.id).flat_map(|l| l.pages.iter().map(|p| p.coordinate)).chain(r.native_color_coordinates(self.id))
+            .filter(|c| !page_rect(*c).intersect(PixelRect::full(self.extent)).is_empty() && page_rect(*c).intersect(block) == page_rect(*c))
+            .map(|c| (c, backed(c))).collect()
+    }
 }
 struct PreparedPreview {
     id: ThumbnailTarget,
@@ -313,6 +340,7 @@ struct PreparedPreview {
     placed: bool,
     generator: Option<OccurrenceHandle>,
     objects: Option<OccurrenceHandle>,
+    reduced: Option<([u32; 2], u32)>,
     generated: Vec<(wgpu::Texture, wgpu::TextureView)>,
     records: wgpu::Buffer,
     stride: u32,
@@ -359,6 +387,17 @@ impl PreviewPipeline {
             device.working_format(),
             "cropped thumbnail",
         );
+        let reduce_layout = crate::bindings::layout(device, "thumbnail page reduction", &[
+            crate::bindings::buffer(0, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(32)),
+            crate::bindings::texture(1, wgpu::ShaderStages::COMPUTE, false),
+            crate::bindings::storage_texture(2, wgpu::ShaderStages::COMPUTE, wgpu::TextureFormat::Rgba32Float, wgpu::StorageTextureAccess::WriteOnly),
+        ]);
+        let reduce_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("thumbnail page reduction"), source: wgpu::ShaderSource::Wgsl(include_str!("thumbnail_reduce.wgsl").into()),
+        });
+        let reduce = Deferred::compute_module(device, "thumbnail page reduction", &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("thumbnail page reduction"), bind_group_layouts: &[Some(&reduce_layout)], immediate_size: 0,
+        }), &reduce_shader, "reduce");
         Self {
             records,
             write_bounds,
@@ -366,9 +405,88 @@ impl PreviewPipeline {
             bounds,
             draw,
             prepared: Default::default(),
+            reduce_layout,
+            reduce,
+            reduced: Default::default(),
             capture: Default::default(),
             generators: None,
         }
+    }
+    fn reduced_block(&self, id: SourceTarget, extent: [u32; 2], window: PixelRect) -> ([u32; 2], u32) {
+        let covers = |origin: [u32; 2], level: u32| origin[0] <= window.min_x() && origin[1] <= window.min_y()
+            && window.max_x() - origin[0] <= PAGE_SIZE << level && window.max_y() - origin[1] <= PAGE_SIZE << level;
+        self.reduced.iter().find(|layer| layer.id == id && layer.extent == extent && covers(layer.origin, layer.level))
+            .map(|layer| (layer.origin, layer.level))
+            .unwrap_or_else(|| ([window.min_x(), window.min_y()], (0..).find(|level| window.width().max(window.height()) <= PAGE_SIZE << level).unwrap()))
+    }
+    fn reduce_layer(&mut self, r: &mut WgpuRasterizer, id: SourceTarget, (origin, level): ([u32; 2], u32),
+        encoder: &mut crate::submission::CommandEncoder, limit: &mut usize,
+    ) -> Result<Option<(wgpu::Texture, wgpu::TextureView)>, GpuRasterError> {
+        let extent = r.document_extent;
+        self.reduced.retain(|layer| layer.valid.load(std::sync::atomic::Ordering::Acquire));
+        let cached = self.reduced.iter().position(|layer| layer.id == id && layer.extent == extent && layer.origin == origin && layer.level == level);
+        let mut layer = match cached {
+            Some(index) => self.reduced.remove(index).unwrap(),
+            None => {
+                self.reduced.retain(|layer| layer.id != id);
+                ReducedLayer { id, extent, origin, level, tiles: BTreeMap::new(), valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                    image: create_color_target(&r.device, [PAGE_SIZE; 2], "reduced layer thumbnail") }
+            }
+        };
+        let current = layer.current(r);
+        let revision = r.artwork_revision;
+        let stale: Vec<_> = layer.tiles.keys().filter(|c| !current.contains_key(*c)).copied()
+            .chain(current.iter().filter(|(c, key)| layer.tiles.get(*c).is_none_or(|(old, at)| old != *key || (key.is_none() && *at != revision))).map(|(c, _)| *c))
+            .collect();
+        let batch = &stale[..stale.len().min(*limit)];
+        if batch.is_empty() {
+            let ready = stale.is_empty().then(|| layer.image.clone());
+            self.reduced.push_back(layer);
+            return Ok(ready);
+        }
+        let write = crate::submission::CacheWrite::shared(layer.valid.clone());
+        let stride = r.device.limits().min_uniform_buffer_offset_alignment.max(32);
+        let records = r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("thumbnail page reductions"),
+            contents: &batch.iter().flat_map(|c| {
+                let mut record = [c[0] * PAGE_SIZE, c[1] * PAGE_SIZE, extent[0], extent[1], (c[0] * PAGE_SIZE - origin[0]) >> level, (c[1] * PAGE_SIZE - origin[1]) >> level,
+                    1 << level, u32::from(!current.contains_key(c))].into_iter().flat_map(u32::to_le_bytes).collect::<Vec<_>>();
+                record.resize(stride as usize, 0);
+                record
+            }).collect::<Vec<_>>(),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        for (chunk, coordinates) in batch.chunks(SOURCE_SLOTS).enumerate() {
+            let views = coordinates.iter().map(|c| match current.get(c) {
+                Some(_) => Ok(r.raw_layer_tile(id, *c, encoder)?.ok_or(GpuRasterError::MissingPaintLayer(id))?.view),
+                None => Ok(r.empty_view.clone()),
+            }).collect::<Result<Vec<_>, GpuRasterError>>()?;
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("thumbnail page reduction"), timestamp_writes: None });
+            pass.set_pipeline(&self.reduce);
+            for (index, (c, view)) in coordinates.iter().zip(&views).enumerate() {
+                let binding = crate::bindings::group(&r.device, "thumbnail page", &self.reduce_layout, [
+                    wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &records, offset: 0, size: NonZeroU64::new(32) }),
+                    wgpu::BindingResource::TextureView(view),
+                    wgpu::BindingResource::TextureView(&layer.image.1),
+                ]);
+                pass.set_bind_group(0, &binding, &[((chunk * SOURCE_SLOTS + index) as u64 * u64::from(stride)) as u32]);
+                let valid = std::array::from_fn::<_, 2, _>(|i| (extent[i] - c[i] * PAGE_SIZE).min(PAGE_SIZE));
+                pass.dispatch_workgroups(valid[0].div_ceil(1 << level), valid[1].div_ceil(1 << level), 1);
+            }
+        }
+        for c in batch {
+            match current.get(c) {
+                Some(key) => { layer.tiles.insert(*c, (*key, revision)); }
+                None => { layer.tiles.remove(c); }
+            }
+        }
+        *limit -= batch.len();
+        r.metrics.thumbnail_pages += batch.len() as u64;
+        write.track(encoder);
+        let ready = (batch.len() == stale.len()).then(|| layer.image.clone());
+        self.reduced.push_back(layer);
+        while self.reduced.len() > 8 { self.reduced.pop_front(); }
+        Ok(ready)
     }
     fn begin(
         &self,
@@ -444,6 +562,10 @@ impl PreviewPipeline {
         if source.is_none() && generator.is_none() && objects.is_none() {
             coordinates.extend(page_coordinates(PixelRect::full(r.document_extent))); placed = true;
         }
+        let window = coordinates.iter().fold(PixelRect::EMPTY, |bounds, c| bounds.union(page_rect(*c))).intersect(PixelRect::full(r.document_extent));
+        let reduced = (!placed && mask.is_none() && generator.is_none() && objects.is_none() && !r.tiled_sources.contains_key(&id) && !window.is_empty())
+            .then(|| self.reduced_block(id, r.document_extent, window));
+        if let Some((origin, _)) = reduced { coordinates = std::iter::once(origin.map(|v| v / PAGE_SIZE)).collect(); }
         let base = r.tiled_sources.get(&id).map(source_access::paint_base_bounds);
         if let Some(offset) = offset.filter(|_| placed) {
             let local = coordinates.iter().fold(base.unwrap_or(PixelRect::EMPTY), |bounds,c| bounds.union(page_rect(*c)));
@@ -461,7 +583,7 @@ impl PreviewPipeline {
         let stride = 80usize.div_ceil(alignment) * alignment;
         let mut bytes = vec![0u8; stride * sources.len()];
         let footprint = if generator.is_some() { 1 << generator_grid(r.document_extent).level }
-            else if objects.is_some() { 1 << object_grid(r.document_extent).level } else { 0 };
+            else if objects.is_some() { 1 << object_grid(r.document_extent).level } else { reduced.map_or(0, |(_, level)| 1 << level) };
         for (i, coordinate) in sources.iter().enumerate() {
             let c = coordinate.unwrap_or([0; 2]);
             let mut record = [0u32; 20];
@@ -496,15 +618,15 @@ impl PreviewPipeline {
             r.device.working_format(), "layer thumbnail");
         PreparedPreview { id:target, revision: (r.artwork_revision, r.selection_paint_revision),
             rendition: r.ui_rendition_parameters(), measure: if full { sources.len() } else { 1 },
-            sources, mask: mask.is_some(), placed, generator, objects, generated: Vec::new(), records, stride: stride as u32, read, write, result, draw: 0,
+            sources, mask: mask.is_some(), placed, generator, objects, reduced, generated: Vec::new(), records, stride: stride as u32, read, write, result, draw: 0,
             valid: Arc::new(std::sync::atomic::AtomicBool::new(true)) }
     }
     fn prepare(&mut self, r: &mut WgpuRasterizer, target: ThumbnailTarget,
-        encoder: &mut crate::submission::CommandEncoder, mut limit: usize,
+        encoder: &mut crate::submission::CommandEncoder, mut limit: usize, mut reductions: usize,
     ) -> Result<bool, GpuRasterError> {
         if let Some(startup) = &r.startup {
             let ready = startup.compiler.require([&self.draw], startup::VALIDATION)
-                & startup.compiler.require([&self.bounds.measure], startup::VALIDATION);
+                & startup.compiler.require([&self.bounds.measure, &self.reduce], startup::VALIDATION);
             startup.compiler.start();
             if !ready { return Ok(false); }
         }
@@ -531,6 +653,13 @@ impl PreviewPipeline {
             };
             prepared.generated = vec![content];
         }
+        if let Some(block) = prepared.reduced.filter(|_| prepared.generated.is_empty()) {
+            let Some(content) = self.reduce_layer(r, id, block, encoder, &mut reductions)? else {
+                self.prepared.push_back(prepared);
+                return Ok(false);
+            };
+            prepared.generated = vec![content];
+        }
         let write = crate::submission::CacheWrite::new();
         let capture = &mut self.capture;
         let mut inputs = |r: &mut WgpuRasterizer,
@@ -546,7 +675,7 @@ impl PreviewPipeline {
                             let count = r.artwork_frame.as_ref().unwrap().scene.view().effect(prepared.generator.unwrap()).unwrap().program.passes.len().max(1);
                             prepared.generated[(count-1)%prepared.generated.len()].1.clone()
                         },
-                        Some(_) if prepared.objects.is_some() => prepared.generated[0].1.clone(),
+                        Some(_) if prepared.objects.is_some() || prepared.reduced.is_some() => prepared.generated[0].1.clone(),
                         Some(c) if prepared.placed => capture.thumbnail_tile(r,target,*c,encoder)?.view,
                         Some(c) if prepared.mask => r.layer_masks.pages[&(id, *c)].view.clone(),
                         Some(c) => {
@@ -628,7 +757,7 @@ impl PreviewPipeline {
     fn render(&mut self, r: &mut WgpuRasterizer, target: ThumbnailTarget,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PageSurface, GpuRasterError> {
-        if !self.prepare(r, target, encoder, usize::MAX)? {
+        if !self.prepare(r, target, encoder, usize::MAX, usize::MAX)? {
             return Err(GpuRasterError::Effect("Thumbnail shader preparation pending".into()));
         }
         Ok(self.prepared.pop_back().unwrap().result)

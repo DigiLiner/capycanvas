@@ -285,6 +285,8 @@ pub struct GpuRasterMetrics {
     pub frame_composited_pages: Vec<(u32, [u32; 2])>,
     /// 16-pixel tiles the vector coverage kernel drew.
     pub vector_tiles: u64,
+    /// Layer pages reduced into thumbnail levels.
+    pub thumbnail_pages: u64,
     pub paint_pages: u64,
     pub preview_pages: u64,
     pub destination_companion_pages: u64,
@@ -1488,6 +1490,11 @@ impl WgpuRasterizer {
         if let Some(backup)=&self.display_backup {return Some([&backup.views[0],&backup.views[2],&backup.views[1]]);}
         if self.object_deferred {return None;}
         self.scale_display.as_ref().map(|cache|[cache.view(),cache.coarse_view(),cache.next_view()])
+    }
+    pub(crate) fn presentation_views(&self)->Option<[&wgpu::TextureView;3]> {
+        if self.display_backup.is_some() {return self.display_views();}
+        if self.object_deferred {return None;}
+        self.scale_display.as_ref().map(|cache|{let [moved,kept]=cache.presented_views();[moved,cache.coarse_view(),kept]})
     }
     pub(crate) fn display_geometry(&self)->Option<&wgpu::Buffer> {
         self.display_backup.as_ref().map(|backup|&backup.geometry).or_else(||self.scale_display.as_ref().map(|cache|&cache.geometry))

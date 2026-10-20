@@ -553,3 +553,32 @@ mod waveform {
         }
     }
 }
+
+#[test]
+fn half_float_fit_levels_keep_each_lane_clipped_or_in_range() {
+    use layer_render::CanvasRenderer;
+    let extent = [64, 64];
+    let view = layer_render::ViewState { width_px: 16, height_px: 16, document_to_surface: [0.25, 0., 0., 0.25, 0., 0.] };
+    for (pixel, clipped) in [([0.9999, 1e-9, 0.5, 1.], false), ([1., 0., 0.5, 1.], true)] {
+        let doc = generated(extent, DocumentColor { depth: SampleDepth::F32, ..Default::default() }, &[pixel]);
+        let mut r = crate::WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let frame = layer_render::FramePacket { view, blend_space: doc.composition().blend, ..crate::test_support::packet(doc.scene(), extent) };
+        r.submit(frame).unwrap();
+        while r.has_pending_work() { r.wait_idle().unwrap(); r.submit(layer_render::FramePacket { composite_all: false, ..frame }).unwrap(); }
+        assert!(r.presentation_views().unwrap()[0].texture().format() == wgpu::TextureFormat::Rgba16Float);
+        let mut presenter = crate::test_support::float_presenter(&r);
+        let (texture, target) = crate::create_target(&r.device, [16, 16], wgpu::TextureFormat::Rgba32Float, "half-float clipping");
+        presenter.present(&r, &target, view, [0.; 4]).unwrap();
+        let baseline = crate::test_support::float_pixels(&r, &texture);
+        r.set_clipping_preview(true, true);
+        presenter.present(&r, &target, view, [0.; 4]).unwrap();
+        let marked = crate::test_support::float_pixels(&r, &texture);
+        for (index, (marked, baseline)) in marked.iter().zip(&baseline).enumerate() {
+            let [x, y] = [index as u32 % 16, index as u32 / 16];
+            if !(1..15).contains(&x) || !(1..15).contains(&y) { continue; }
+            let stripe = ((x + y + 1) / 4) % 2 == 0;
+            let expected = if clipped { [if stripe { 1. } else { 0. }; 3] } else { baseline[..3].try_into().unwrap() };
+            for channel in 0..3 { assert!((marked[channel] - expected[channel]).abs() < 2e-5, "{pixel:?} at {x}/{y}: {marked:?} != {expected:?}"); }
+        }
+    }
+}

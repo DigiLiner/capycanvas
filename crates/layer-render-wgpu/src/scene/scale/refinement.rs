@@ -9,8 +9,11 @@ impl Cache {
         if let Some(overview) = &mut self.overview {
             missing.extend(overview.invalidate_native(scene, r, dirty, encoding, tiles)?);
         }
-        if missing.is_empty() { return Ok(PixelRect::EMPTY); }
         let Encoding { encoder, commands } = encoding;
+        if missing.is_empty() {
+            self.present_half(r, packet, encoder)?;
+            return Ok(PixelRect::EMPTY);
+        }
         self.admit_hierarchy(r, packet, encoder, commands)?;
         let reverse = scene.native_reverse;
         scene.native_reverse = !reverse;
@@ -56,6 +59,7 @@ impl Cache {
                 scene.image_window = None; scene.image_output = None;
             }
         }
+        self.present_half(r, packet, encoder)?;
         Ok(changed)
     }
 
@@ -142,6 +146,7 @@ impl Cache {
         r.telemetry.phase_begin(11, &r.device, &r.queue, encoder);
         if let Some(hierarchy) = &mut self.hierarchy { hierarchy.flush(encoder); }
         r.telemetry.phase_end(11, encoder);
+        self.present_half(r, packet, encoder)?;
         Ok(changed)
     }
 
@@ -156,6 +161,8 @@ impl Cache {
         for &region in regions {
             let coordinate = [region.min_x() / PAGE_SIZE, region.min_y() / PAGE_SIZE];
             if let Some(hierarchy) = &mut self.hierarchy { hierarchy.write(encoder, image, coordinate, region); }
+            let [x, y, width, height] = paint_transform::texel_rect(region.window_local(self.output_plan().bounds), 1 << self.plan.level);
+            self.half_stale = self.half_stale.union(PixelRect::new(x, y, x + width, y + height));
             r.metrics.composited_pixels += region.area();
             r.metrics.frame_composited_pages.push((0, coordinate));
         }

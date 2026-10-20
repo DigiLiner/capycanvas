@@ -61,10 +61,10 @@ the rule. Remaining work:
   where `pyramid_sample` interpolates two levels, at the edge of a perspective or
   mesh-warped layer.
 - If that tier misses its target, share texels between the four taps of an area
-  sample (9 loads instead of 16) before considering approximations. Keeping
-  display images in `Rgba16Float` on these devices would restore hardware
-  filtering and halve bandwidth for display-only data, at the cost of format
-  conversions where display images are copied.
+  sample (9 loads instead of 16) before considering approximations. Reduced
+  display levels already reach the presenter as `Rgba16Float` copies, which every
+  device filters; native-resolution display levels, pages and transform pyramids
+  still take the texel path.
 
 ## Float32 blending
 

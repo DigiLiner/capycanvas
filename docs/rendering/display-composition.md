@@ -161,7 +161,10 @@ until another layer needs its pixels. If it reaches the root unchanged, the
 presenter samples it directly into the surface. This avoids an
 intermediate canvas image and a second resampling step. Its neighboring source
 levels share the scene's validity and memory allowance. Other stacks materialize
-their result and derive an adjacent output mip for trilinear presentation.
+their result and derive the adjacent output mip. The presenter reads one of the
+two levels and blends in the adjacent one only over the last fifth of an octave
+before the view reaches it. Reduced levels reach the presenter as
+[`Rgba16Float` copies](../internals/rendering.md#optional-float32-features).
 
 The expression graph fills a padded, page-aligned viewport window at the selected
 resolution. Retained root images have viewport bounds; finite-radius filters

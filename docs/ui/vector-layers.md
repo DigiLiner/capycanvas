@@ -240,11 +240,14 @@ draw above the rest of their layer; they return to their place in the layer's
 order when the move commits. Path selections are not undo steps and are not
 restored with a session.
 
-Frame scaling and rotation, Edit Points drags, eraser strokes and scrubs of the
-path Properties keep only the latest pen sample or value between frames and preview it
-once in the next frame; the eraser still cuts along every sample's segment, in
-order. Release applies the last sample, so the committed paths match a preview
-after every sample. Previews replace the edited paths in place without
+Scaling and rotating with the Move frame shows the selected paths' image
+through the frame's transform, as a drag shows it moved, and derives the paths
+once at release, so outline widths under uneven scaling, or with Scale outline
+widths off, settle only then. Edit Points drags, eraser strokes and scrubs of
+the path Properties keep only the latest pen sample or value between frames and
+preview it once in the next frame; the eraser still cuts along every sample's
+segment, in order. Release applies the last sample, so the committed paths match
+a preview after every sample. Previews replace the edited paths in place without
 revalidating the layer. While a drag moves, the menus, layer rows and Properties
 are published again only when a preview changes the selected paths' Properties
 values. Command checks for the selected paths are computed once per selection
@@ -348,7 +351,10 @@ same path as fitting at pen-up.
 the session rules. There,
 `sample_bursts_preview_once_per_frame_and_commit_what_frame_by_frame_previews_commit`
 checks that bursts of samples or width updates preview once per frame and
-commit the same paths as a frame after every sample, and
+commit the same paths as a frame after every sample,
+`scaling_and_turning_paths_preview_through_their_motion_and_commit_at_release`
+checks that the frame previews through the motion transform and commits the
+paths that transform showed, and
 `moving_or_turning_a_large_path_selection_republishes_nothing_until_release`
 checks that a drag of 2,000 selected paths publishes nothing until release; the
 ignored `crowded_vector_gesture_costs` times those gestures, panning and the

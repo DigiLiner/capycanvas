@@ -598,3 +598,153 @@ fn centered_view(extent: [u32; 2], viewport: [u32; 2], scale: f32, angle: f32) -
             viewport[1] as f32 * 0.5 - b*x - a*y])
     }
 }
+
+fn photo(extent: [u32; 2]) -> layer_core::Document {
+    let mut doc = layer_core::Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames { paint: "Photo".into(), paper: "Paper".into() });
+    let mut builder = SourceBuilder::new(extent, SourceInterpretation {
+        channels: SourceChannels::Rgb, depth: SampleDepth::U8, profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false,
+    }, 512 * 1024 * 1024).unwrap();
+    let mut row = vec![0u8; extent[0] as usize * 3];
+    for y in 0..extent[1] {
+        for (x, pixel) in row.chunks_exact_mut(3).enumerate() {
+            let x = x as u32;
+            let hash = (x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b)).wrapping_mul(0xc2b2_ae35);
+            let wave = ((x / 37 + y / 23) % 7) * 18;
+            pixel.copy_from_slice(&[(hash >> 24) as u8 / 2 + wave as u8, ((x * 255) / extent[0]) as u8 / 2 + (hash >> 16) as u8 / 4, ((y * 255) / extent[1]) as u8 / 2 + (hash >> 8) as u8 / 4]);
+        }
+        builder.push_row(&row).unwrap();
+    }
+    paint_mut(&mut doc, 0).base = Some(layer_core::authored::PaintBase::new(Arc::new(builder.finish().unwrap()).into()));
+    doc
+}
+
+fn fit_view(extent: [u32; 2], viewport: [u32; 2], zoom: f32, pan: f32) -> ViewState {
+    ViewState { width_px: viewport[0], height_px: viewport[1], document_to_surface: [zoom, 0., 0., zoom,
+        (viewport[0] as f32 - zoom * extent[0] as f32) * 0.5 + pan, (viewport[1] as f32 - zoom * extent[1] as f32) * 0.5] }
+}
+
+fn quantile(values: &mut [f64], q: f64) -> f64 {
+    values.sort_by(f64::total_cmp);
+    values[((values.len() - 1) as f64 * q).round() as usize]
+}
+
+#[test]
+#[ignore = "workstation presenter benchmark at the tiers' Fit zooms"]
+fn fit_presentation_frames() {
+    let viewport = [2560, 1600];
+    for (name, extent, zoom) in [("12 MP at the low tier's Fit", [4248, 2832], 0.298f32), ("61 MP at the top tier's Fit", [9504, 6336], 0.213)] {
+        let doc = photo(extent);
+        let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        submit(&mut r, &doc, fit_view(extent, viewport, zoom, 0.), true);
+        let cache = r.scale_display.as_ref().unwrap();
+        eprintln!("{name}: display level {}, resident {}, footprint {:.2} texels, half-float presentation {} MB", cache.plan.level, cache.resident_bytes() > 0,
+            1. / zoom / (1 << cache.plan.level) as f32, cache.half.as_ref().map_or(0, hierarchy::Half::bytes) >> 20);
+        let (_texture, target) = create_target(&r.device, viewport, wgpu::TextureFormat::Rgba8UnormSrgb, "fit benchmark target");
+        let mut presenter = ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+        presenter.gpu_timings(&r, true);
+        let mut gpu = Vec::new();
+        let mut walls = Vec::new();
+        for frame in 0..160 {
+            let view = fit_view(extent, viewport, zoom, (frame % 40) as f32 * 3.);
+            let started = std::time::Instant::now();
+            r.submit(FramePacket { view, composite_all: false, ..packet(doc.scene(), extent) }).unwrap();
+            presenter.present(&r, &target, view, [0.2, 0.2, 0.2, 1.]).unwrap();
+            r.wait_idle().unwrap();
+            if frame >= 10 { walls.push(started.elapsed().as_secs_f64() * 1e3); }
+            for _ in 0..100 {
+                let samples = presenter.gpu_timings(&r, true);
+                if !samples.is_empty() {
+                    if frame >= 10 { gpu.extend(samples.iter().filter(|s| s.status == 1).map(|s| s.elapsed_ns as f64 / 1e6)); }
+                    break;
+                }
+                r.wait_idle().unwrap();
+            }
+        }
+        eprintln!("  pan presents: {} GPU samples, presenter GPU p50 {:.3} p95 {:.3} ms; frame wall p50 {:.2} p95 {:.2} ms",
+            gpu.len(), quantile(&mut gpu, 0.5), quantile(&mut gpu, 0.95), quantile(&mut walls, 0.5), quantile(&mut walls, 0.95));
+    }
+}
+
+fn patterned(extent: [u32; 2]) -> layer_core::Document {
+    let mut doc = layer_core::Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames { paint: "Pattern".into(), paper: "Paper".into() });
+    paint_mut(&mut doc, 0).base = Some(layer_core::authored::PaintBase::new(layer_core::color::source::rgba8_source(extent, |x, y|
+        [if (x / 5 + y / 7) % 2 == 0 { 40 } else { 220 }, if (x / 13 + y / 17) % 2 == 0 { 40 } else { 220 },
+         if (x / 2 + y / 3) % 2 == 0 { 40 } else { 220 }, 255]).into()));
+    doc
+}
+
+fn half_float_presentation(r: &WgpuRasterizer) -> bool {
+    r.presentation_views().is_some_and(|[moved, _, kept]| [moved, kept].iter().all(|view| view.texture().format() == wgpu::TextureFormat::Rgba16Float))
+}
+
+#[test]
+fn fit_views_read_one_half_float_level_closer_to_an_area_average() {
+    let extent = [1100, 700];
+    let doc = patterned(extent);
+    let color = doc.composition().color;
+    for (zoom, level, bound) in [(0.2137f32, 2, 0.084f32), (0.2976, 1, 0.086)] {
+        for bounded in [false, true] {
+            let mut r = if bounded { bounded_renderer(color) } else { WgpuRasterizer::new_native_headless(color) }.unwrap();
+            let size = extent.map(|n| (n as f32 * zoom).ceil() as u32 + 2);
+            let view = ViewState { width_px: size[0], height_px: size[1], document_to_surface: [zoom, 0., 0., zoom, 1., 1.] };
+            submit(&mut r, &doc, view, true);
+            assert_eq!(r.scale_display.as_ref().unwrap().plan.level, level);
+            assert!(half_float_presentation(&r), "zoom {zoom} presents half-float levels");
+            let actual = present(&r, &mut crate::test_support::float_presenter(&r), view);
+            let mut exact = WgpuRasterizer::new_native_headless(color).unwrap();
+            exact.test.reference = true;
+            let high = ViewState { width_px: size[0] * 8, height_px: size[1] * 8, document_to_surface: view.document_to_surface.map(|n| n * 8.) };
+            submit(&mut exact, &doc, high, true);
+            let reference = present(&exact, &mut crate::test_support::float_presenter(&exact), high);
+            let mut errors = Vec::new();
+            for y in 2..(extent[1] as f32 * zoom) as u32 {
+                for x in 2..(extent[0] as f32 * zoom) as u32 {
+                    let mut expected = [0f32; 4];
+                    for yy in y * 8..(y + 1) * 8 { for xx in x * 8..(x + 1) * 8 {
+                        for c in 0..4 { expected[c] += reference[(yy * high.width_px + xx) as usize][c] / 64.; }
+                    }}
+                    errors.push(actual[(y * size[0] + x) as usize].iter().zip(expected).map(|(a, b)| (a - b).abs()).fold(0., f32::max));
+                }
+            }
+            let mean = errors.iter().sum::<f32>() / errors.len() as f32;
+            assert!(mean < bound, "zoom {zoom} bounded {bounded}: mean area error {mean}");
+        }
+    }
+}
+
+#[test]
+fn painting_at_fit_updates_the_half_float_level_it_presents() {
+    let extent = [1100, 700];
+    let doc = patterned(extent);
+    let color = doc.composition().color;
+    let fit = ViewState { width_px: 330, height_px: 210, document_to_surface: [0.2976, 0., 0., 0.2976, 1., 1.] };
+    let native = crate::test_support::view(extent);
+    for bounded in [false, true] {
+        let renderer = || if bounded { bounded_renderer(color) } else { WgpuRasterizer::new_native_headless(color) }.unwrap();
+        let (mut painted, mut fresh) = (renderer(), renderer());
+        submit(&mut painted, &doc, fit, true);
+        submit(&mut fresh, &doc, native, true);
+        let mut presenter = crate::test_support::float_presenter(&painted);
+        let before = present(&painted, &mut presenter, fit);
+        for step in 0..3 {
+            let mut dab = crate::tests::test_dab([200. + step as f32 * 250., 300.], [0.9, 0.02, 0.1, 0.8], 1.);
+            dab.radii = [60.; 2];
+            let batch = dab_batch(source_at(&doc, 0), crate::layer_tests::preset_style(layer_core::DefaultBrushPreset::GPen), dab.bounds());
+            for kind in [DabBatchKind::Preview, DabBatchKind::Persistent] {
+                let batch = DabBatch { kind, ..batch.clone() };
+                for (r, view) in [(&mut painted, fit), (&mut fresh, native)] {
+                    r.submit(FramePacket { view, dabs: &[dab], dab_batches: std::slice::from_ref(&batch), composite_all: false, ..packet(doc.scene(), extent) }).unwrap();
+                }
+                present(&painted, &mut presenter, fit);
+            }
+        }
+        submit(&mut painted, &doc, fit, false);
+        submit(&mut fresh, &doc, fit, false);
+        assert!(half_float_presentation(&painted) && half_float_presentation(&fresh), "bounded {bounded}");
+        let painted_pixels = present(&painted, &mut presenter, fit);
+        let fresh_pixels = present(&fresh, &mut crate::test_support::float_presenter(&fresh), fit);
+        assert!(crate::test_support::max_error(&painted_pixels, &before) > 0.3, "bounded {bounded}: the strokes show");
+        let error = crate::test_support::max_error(&painted_pixels, &fresh_pixels);
+        assert!(error < 2e-3, "bounded {bounded}: strokes painted at Fit present like a fresh display: {error}");
+    }
+}

@@ -92,6 +92,8 @@ pub(crate) struct Pipelines {
     pub reduce_phased: Deferred<wgpu::ComputePipeline>,
     pub reduce_pair: Deferred<wgpu::ComputePipeline>,
     pub compose: Deferred<wgpu::ComputePipeline>,
+    half_inputs: wgpu::BindGroupLayout,
+    pub half: Deferred<wgpu::ComputePipeline>,
 }
 fn shader_source(space: layer_core::color::RgbSpace, sampling: &str) -> std::borrow::Cow<'static, str> {
     compose_wgsl(&[&working_color::source(space), sampling, include_str!("../blend_codes.wgsl"), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")])
@@ -135,7 +137,19 @@ impl Pipelines {
             "display resolution composition",
             shader_source(device.working_space(), device.float_sampling_wgsl()),
         );
+        let half_inputs = crate::bindings::layout(device, "half-float display level", &[
+            crate::bindings::float_texture(0, wgpu::ShaderStages::COMPUTE, device),
+            crate::bindings::storage_texture(1, wgpu::ShaderStages::COMPUTE, wgpu::TextureFormat::Rgba16Float, wgpu::StorageTextureAccess::WriteOnly),
+        ]);
+        let half_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("half-float display level"),
+            bind_group_layouts: &[Some(&records_layout), Some(&half_inputs)],
+            immediate_size: 0,
+        });
+        let half_shader = Deferred::wgsl(device, "half-float display level", include_str!("scale/half.wgsl"));
         Self {
+            half: Deferred::compute(device, "half-float display level", &half_layout, &half_shader, "convert"),
+            half_inputs,
             records: records_layout,
             inputs,
             reduce: Deferred::compute(
@@ -361,6 +375,8 @@ pub(crate) struct Cache {
     output: Vec<Image>,
     used: Vec<bool>,
     pixels: hierarchy::Pixels,
+    half: Option<hierarchy::Half>,
+    half_stale: PixelRect,
     placed: Option<Presentation>,
     pub geometry: wgpu::Buffer,
     layer_count: usize,
@@ -811,6 +827,8 @@ impl Cache {
             output: Vec::new(),
             used: Vec::new(),
             pixels: Default::default(),
+            half: None,
+            half_stale: PixelRect::EMPTY,
             placed: None,
             geometry,
             layer_count: layers,
@@ -904,6 +922,7 @@ impl Cache {
     }
     pub fn source_budget(&self, r: &WgpuRasterizer, packet: FramePacket<'_>, commands: &Commands, scene: Option<&Scene>) -> u64 {
         let reserve = allocation_for_mode(r, self.plan, packet, scene.map(|s|&s.scale_sources).filter(|_| self.source_overlap), self.streamed_sources, scene,self.evaluation)[1]
+            + self.half_reserve()
             + self.spare.as_ref().map_or(0, |cache| cache.storage_bytes())
             + self.shifted.as_ref().map_or(0, |cache| cache.storage_bytes());
         let retained_records = commands.storage_bytes().saturating_sub(records_for(r, self.plan, packet.scene).next_power_of_two());
@@ -1067,6 +1086,7 @@ impl Cache {
             + self.shifted.as_ref().map_or(0, |cache| cache.storage_bytes())
             + self.graph.storage_bytes()
             + self.exact_tile.as_ref().map_or(0, |image| texture_bytes(&image.texture))
+            + self.half.as_ref().map_or(0, hierarchy::Half::bytes)
             + self.resident_bytes()
     }
     fn allocate(&mut self, r: &WgpuRasterizer, plan: display_mips::Plan) -> usize {
@@ -1098,6 +1118,7 @@ impl Cache {
             self.overview = Some(overview);
             changed = changed.union(result?);
         }
+        self.present_half(r, packet, encoding.encoder)?;
         Ok(changed)
     }
 
@@ -1339,7 +1360,7 @@ impl Cache {
         let old_bounds = old.output_plan().bounds;
         r.scene_pipelines.vector.resample(&r.device, encoder,
             crate::vector::Placed { view: &source.view, origin: [i64::from(old_bounds.min_x()), i64::from(old_bounds.min_y())], side: 1 << old.plan.level },
-            crate::vector::Placed { view: self.view(), origin, side }, [x, y], [width, height], Default::default());
+            crate::vector::Placed { view: self.view(), origin, side }, PixelRect::new(x, y, x + width, y + height), Default::default());
         self.valid.extend(pages.iter().copied());
         self.approximate.extend(pages);
         region
@@ -1366,7 +1387,7 @@ impl Cache {
             let rect = page_rect(page).intersect(self.plan.bounds);
             let origin = [i64::from(rect.min_x()), i64::from(rect.min_y())];
             let size = [rect.width().div_ceil(side), rect.height().div_ceil(side)];
-            let derived = vectors.iter().fold(true, |ready, owner| scene.vectors.window_ready(packet.scene, *owner, origin, self.plan.level, size, packet.document_extent, palette) && ready);
+            let derived = vectors.iter().all(|owner| scene.vectors.window_ready(packet.scene, *owner, origin, self.plan.level, size, packet.document_extent, palette));
             if derived {
                 self.valid.remove(&page);
                 self.approximate.remove(&page);
@@ -1376,6 +1397,7 @@ impl Cache {
     }
     fn reduce_output(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, region: PixelRect, commands: &mut Commands) -> Result<(), GpuRasterError> {
         if region.is_empty() { return Ok(()); }
+        self.half_stale = self.half_stale.union(region);
         self.pixels.ensure(r, self.plan);
         let levels: Vec<_> = match &self.pixels {
             hierarchy::Pixels::Window { root, next } => vec![root.as_ref().unwrap().clone(), next.as_ref().unwrap().clone()],
@@ -1654,7 +1676,7 @@ impl Evaluator<'_> {
         self.r.encode_clear(self.encoder, &target.view, "vector motion");
         let source = self.scene.vectors.motion.as_ref().unwrap();
         self.r.scene_pipelines.vector.resample(&self.r.device, self.encoder, crate::vector::Placed { view: &source.image.view, origin: source.window.min, side },
-            crate::vector::Placed { view: &target.view, origin: window.min, side }, [0; 2], target.plan.size, inverse);
+            crate::vector::Placed { view: &target.view, origin: window.min, side }, PixelRect::full(target.plan.size), inverse);
         let plan = target.plan;
         self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
     }

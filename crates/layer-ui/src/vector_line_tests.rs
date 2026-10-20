@@ -2061,3 +2061,41 @@ fn moving_or_turning_a_large_path_selection_republishes_nothing_until_release() 
         assert_ne!(published, Some(s.workspace_model_revision()), "release publishes the result");
     }
 }
+
+#[test]
+fn scaling_and_turning_paths_preview_through_their_motion_and_commit_at_release() {
+    let (mut s, layer) = hatched_session(400);
+    invoke(&mut s, CommandId::Move);
+    let original = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let chosen: std::collections::BTreeSet<_> = original.paths().filter(|(_, p)| { let [x0, y0, x1, y1] = p.bounds(); x0 > 300. && y0 > 300. && x1 < 700. && y1 < 700. }).map(|(_, p)| p.id).collect();
+    let items = s.select_vector_items(layer, chosen.clone()).unwrap();
+    s.frame(2, 2).unwrap();
+    for (first, rotate) in [(100, false), (200, true)] {
+        let frame = s.vector_frame().unwrap();
+        let from = if rotate { let [x, y] = frame.unit.map([0.5, 0.]); [x, y - f64::from(s.ruler_reach()) * 2.5] } else { frame.unit.map([1., 1.]) };
+        let to = [from[0] + 140., from[1] + 90.];
+        let revision = s.engine.document().revision;
+        let mut shown = None;
+        for i in 0..=12u64 {
+            let phase = if i == 0 { PenPhase::Down } else if i == 12 { PenPhase::Up } else { PenPhase::Move };
+            let t = (i.min(11) as f64) / 11.;
+            let mut e = event(&s, first + i, phase, 0.5);
+            e.surface_position = surface_at(&s, [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+            s.pen(e);
+            s.frame(e.timestamp_ns, e.timestamp_ns).unwrap();
+            if phase == PenPhase::Up { break; }
+            assert_eq!(s.engine.document().revision, revision, "the paths stay as they were until release");
+            let motion = s.engine.backend().vector_motion.clone().expect("the selection moves as one image");
+            assert!(motion.owner == layer && Arc::ptr_eq(&motion.items, &items));
+            shown = Some(motion.transform);
+        }
+        let shown = shown.unwrap();
+        assert_ne!(shown, layer_core::authored::Affine64([1., 0., 0., 1., 0., 0.]), "the frame's affine moves the image");
+        assert!(s.engine.backend().vector_motion.is_none(), "release ends the motion");
+        let committed = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        assert_eq!(committed, original.transform_items(&chosen, shown, true).unwrap(), "release derives the paths the image showed");
+        s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+        s.frame(first * 1_000_000_000, first * 1_000_000_000).unwrap();
+        assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &original, "one undo step");
+    }
+}

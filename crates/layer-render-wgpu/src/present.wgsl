@@ -172,14 +172,15 @@ fn moving_between(p: vec2<f32>, composite: vec4<f32>) -> vec4<f32> {
 }
 fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);
-    let footprint = max(length(dx), length(dy));
-    if footprint <= scale { return detail_point(p); }
+    let coarser = clamp(log2(max(length(dx), length(dy)) / scale) * 5. - 4., 0., 1.);
+    if coarser == 0. { return detail_point(p); }
     let next_scale = f32(cache.next_scale);
     let extent = camera.offset_document.zw;
     let q = vec2(mip_coordinate(p.x, extent.x, next_scale), mip_coordinate(p.y, extent.y, next_scale));
     let origin = vec2<f32>(cache.window.xy) * (scale / next_scale);
     let reduced = sample_float(kept, linear_sampler, (q - origin + .5) / vec2<f32>(textureDimensions(kept)), 0.);
-    return mix(detail_point(p), reduced, clamp(log2(footprint / scale), 0., 1.));
+    if coarser == 1. { return reduced; }
+    return mix(detail_point(p), reduced, coarser);
 }
 // Linear premultiplied artwork from the composite, which holds the
 // document's encoded values when it blends perceptually (composite.x).

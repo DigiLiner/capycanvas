@@ -251,13 +251,13 @@ impl Kernel {
 /// covers `side` document pixels.
 pub(crate) struct Placed<'a> { pub view: &'a wgpu::TextureView, pub origin: [i64; 2], pub side: u32 }
 impl Kernel {
-    /// Resample `source` through `inverse` into `size` texels of `output`,
-    /// starting at its texel `at`.
+    /// Resample `source` through `inverse` into the `texels` of `output`.
     pub fn resample(&self, device: &PipelineDevice, encoder: &mut crate::submission::CommandEncoder, source: Placed<'_>, output: Placed<'_>,
-        at: [u32; 2], size: [u32; 2], inverse: layer_core::authored::Affine64) {
+        texels: crate::pixel_rect::PixelRect, inverse: layer_core::authored::Affine64) {
         let [a, b, c, d, x, y] = inverse.0.map(|v| v as f32);
+        let size = [texels.width(), texels.height()];
         let values = [a, b, c, d, x, y, output.side as f32, source.side as f32, output.origin[0] as f32, output.origin[1] as f32, source.origin[0] as f32, source.origin[1] as f32]
-            .map(f32::to_bits).into_iter().chain([size[0], size[1], at[0], at[1]]);
+            .map(f32::to_bits).into_iter().chain([size[0], size[1], texels.min_x(), texels.min_y()]);
         let bytes: Vec<u8> = values.flat_map(u32::to_le_bytes).collect();
         let uniform = wgpu::util::DeviceExt::create_buffer_init(&**device, &wgpu::util::BufferInitDescriptor { label: Some("display image resample"), contents: &bytes, usage: wgpu::BufferUsages::UNIFORM });
         let binding = crate::bindings::group(device, "display image resample", &self.resample_layout, [uniform.as_entire_binding(),

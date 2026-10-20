@@ -188,6 +188,22 @@ zoom and rotation. The shared
 composed image into the platform's target. Panning the view does not, by itself,
 require repainting committed raster tiles.
 
+When the view is reduced, each screen pixel spans one to two texels of the
+display level and reads only that level, bilinearly. A bilinear sample of the
+finer level stays closer to the pixel's area average than a blend with the
+coarser level until the pixel spans almost two texels, so only the last fifth
+of an octave before the next level blends into the coarser one, which the next
+plan then presents alone. At the tiers' Fit zooms the presenter therefore reads one
+level. Reduced levels reach the presenter as `Rgba16Float` copies that the
+display cache converts wherever it writes the level and in full when the level's
+texture changes, halving what each pixel reads. A copy keeps every lane that is
+in range in range and every clipped lane clipped, so clipping marks agree with
+the `Rgba32Float` level. Native views keep reading `Rgba32Float` levels.
+The copies never take budget from the composition: window caches keep room for
+them in the source allowance and admit them from what the composition leaves,
+complete pyramids admit them against the pyramid's allowance, and a copy that
+does not fit leaves the presenter on the `Rgba32Float` level.
+
 ### Image object layers
 
 Object layers sample one immutable source before applying
@@ -1139,11 +1155,19 @@ sampling without inline source decoding or GPU waits. Region classification
 retains completed batches across deferred captures; cancellation discards the
 unfinished request before a replacement can publish.
 
-Layer-thumbnail preparation shares a four-page budget across original
-photo tiles, painted overrides, alpha-bounds scans and thumbnail drawing.
-Incomplete images stay private. Artwork revisions, selection paint and SDR
-rendition changes invalidate prepared work; discarded command buffers invalidate
-their cache entries. Each host poll advances one request; up to eight partial
+A paint layer's thumbnail frames and draws one reduced image of the layer: the
+smallest power-of-two level at which the pages it holds fit 256 × 256 texels,
+each texel averaging the layer pixels under it. A preparation reduces up to 48
+changed pages into that image, one pass per page, and keeps the image across
+revisions: a page is reduced again only when its committed tile or, for a page
+without one, the artwork revision changes, so a stroke re-reduces the pages it
+touched and a fill of a 24 MP layer is reduced in 8 preparations. Content that
+grows past the image reduces the layer again at a new level. Photo layers, masks
+and moved layers keep the four-page budget across original photo tiles, painted
+overrides, alpha-bounds scans and thumbnail drawing. Incomplete images stay
+private. Artwork revisions, selection paint and SDR rendition changes
+invalidate prepared work; discarded command buffers invalidate their cache
+entries. Each host poll advances one request; up to eight partial
 requests can be retained, and layers sharing a photo reuse its integrated
 original contributions. Generator thumbnails share the filter-picker
 preview execution path, sampling document coordinates on a grid of at most
@@ -1177,8 +1201,10 @@ platform APIs may still need staging or copies.
 
 ### Optional Float32 features
 
-Pages, masks and display images are `Rgba32Float` or `R32Float` on every device.
-Two optional features change only how the renderer reads and blends them:
+Pages, masks and display images are `Rgba32Float` or `R32Float` on every device;
+only the presenter's copies of reduced display levels are `Rgba16Float`, which
+every device filters. Two optional features change only how the renderer reads
+and blends the others:
 
 - **Filtering.** Layout entries that receive Float32 textures use
   `bindings::float_texture`, and shaders read them with

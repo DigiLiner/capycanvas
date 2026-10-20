@@ -4704,7 +4704,8 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn sync_previews(&mut self) -> (u32, Option<[u64; 2]>) {
         let before = self.engine.document().revision;
-        if let Err(error) = self.sync_vector_transform().and_then(|()| self.sync_vector_points()).and_then(|()| self.sync_vector_erase()) {
+        self.sync_vector_transform();
+        if let Err(error) = self.sync_vector_points().and_then(|()| self.sync_vector_erase()) {
             let _ = self.cancel_layer_gesture();
             self.cancel_vector_erase();
             self.notify(error);

@@ -52,10 +52,11 @@ fn packet(document: &Document, all: bool) -> FramePacket<'_> {
         ..crate::test_support::packet(document.scene(), EXTENT)
     }
 }
-fn renderer(document: &Document, limit: u64) -> WgpuRasterizer {
+fn renderer(document: &Document, limit: u64) -> WgpuRasterizer { renderer_with(document, limit, packet(document, true)) }
+fn renderer_with(document: &Document, limit: u64, frame: FramePacket<'_>) -> WgpuRasterizer {
     let mut r = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
     r.native_edit.as_mut().unwrap().color_cache_bytes = limit;
-    r.submit(packet(document, true)).unwrap();
+    r.submit(frame).unwrap();
     r
 }
 fn image(r: &WgpuRasterizer) -> Vec<u8> {
@@ -109,7 +110,7 @@ fn stale_thumbnail_batches_cancel_without_publishing_and_leave_live_artwork_avai
     let stale_occurrence = original.scene().source_owner(stale_source).unwrap();
     let mut r = renderer(&original, 0);
     let stale = ThumbnailTarget::Occurrence(stale_occurrence);
-    assert!(!r.prepare_thumbnail_batch(stale).unwrap());
+    r.prepare_thumbnail_batch(stale).unwrap();
     assert!(!r.thumbnails_pending());
 
     let mut artwork = original.artwork.clone();
@@ -151,16 +152,12 @@ fn stale_thumbnail_batches_cancel_without_publishing_and_leave_live_artwork_avai
 }
 
 #[test]
-fn native_thumbnail_preparation_bounds_both_page_passes() {
+fn native_thumbnail_preparation_reduces_pages_in_bounded_batches() {
     let p = document(DocumentColor { space: RgbSpace::ProPhoto, depth: SampleDepth::U16 });
     let id = target(&p);
     let mut cold = renderer(&p, 0);
-    let mut preparations = 1;
-    while !cold.prepare_thumbnail_batch(ThumbnailTarget::Source(id)).unwrap() {
-        preparations += 1;
-        assert!(preparations < 100);
-    }
-    assert!(preparations >= (33usize * 2 + 1).div_ceil(4), "bounds and drawing share the four-page budget: {preparations}");
+    let (polls, reduced) = polls_until_ready(&mut cold, id);
+    assert_eq!((polls, reduced), (33usize.div_ceil(crate::thumbnails::BATCH_PAGES), 33), "each backed page is reduced once, a batch per poll");
     let mut resident = renderer(&p, u64::MAX);
     assert_eq!(thumbnail(&mut cold, id), thumbnail(&mut resident, id));
 }
@@ -635,5 +632,107 @@ fn cold_native_operations_publish_complete_color_and_restore_exact_history() {
         paint_mut(&mut b).raster = after;
         cold.submit(packet(&b, false)).unwrap();
         close(&image(&cold), &changed);
+    }
+}
+
+const TIER: [u32; 2] = [6000, 4000];
+fn filled(pixel: [u8; 4]) -> Document {
+    let mut document = Document::new(PortableId::random(), TIER[0], TIER[1], layer_core::DocumentNames { paint: "Fill".into(), paper: "Paper".into() });
+    let paper = document.scene().order()[1];
+    document.artwork.occurrences.get_mut(paper).unwrap().visible = false;
+    let tile = RasterTile::backed(TileBlob::encode(document.composition().color.paint_descriptor(), &pixel.repeat(256 * 256)).unwrap());
+    let data = RasterData { tiles: page_coordinates(PixelRect::full(TIER))
+        .map(|coordinate| (TileKey { plane: RasterPlane::Color, coordinate }, tile.clone())).collect(), ..Default::default() };
+    paint_mut(&mut document).raster = RasterRevision::backed(data);
+    document
+}
+fn retiled(document: &Document, coordinate: [u32; 2], pixel: [u8; 4]) -> Document {
+    let mut edited = document.clone();
+    let mut data = (*paint(document).raster.wait_data().unwrap()).clone();
+    data.tiles.insert(TileKey { plane: RasterPlane::Color, coordinate },
+        RasterTile::backed(TileBlob::encode(document.composition().color.paint_descriptor(), &pixel.repeat(256 * 256)).unwrap()));
+    paint_mut(&mut edited).raster = RasterRevision::backed(data);
+    edited
+}
+fn tier_frame(document: &Document, all: bool) -> FramePacket<'_> {
+    FramePacket { view: crate::test_support::view(TIER), composite_all: all, ..crate::test_support::packet(document.scene(), TIER) }
+}
+fn polls_until_ready(r: &mut WgpuRasterizer, id: SourceTarget) -> (usize, u64) {
+    let (mut polls, before) = (0, r.metrics.thumbnail_pages);
+    loop {
+        let pages = r.metrics.thumbnail_pages;
+        polls += 1;
+        let ready = r.prepare_thumbnail_batch(ThumbnailTarget::Source(id)).unwrap();
+        assert!(r.metrics.thumbnail_pages - pages <= crate::thumbnails::BATCH_PAGES as u64, "one poll reduces at most a batch of pages");
+        if ready { return (polls, r.metrics.thumbnail_pages - before); }
+        assert!(polls < 1000);
+    }
+}
+
+#[test]
+fn edited_layer_thumbnails_reduce_only_their_changed_pages_in_bounded_batches() {
+    let blue = [40, 90, 200, 255];
+    let document = filled(blue);
+    let id = target(&document);
+    let pages = page_coordinates(PixelRect::full(TIER)).count();
+    for residency in [0, 256 << 20] {
+        let mut r = renderer_with(&document, residency, tier_frame(&document, true));
+        let (polls, reduced) = polls_until_ready(&mut r, id);
+        assert!(polls <= pages.div_ceil(crate::thumbnails::BATCH_PAGES), "a filled 24 MP layer is ready after {polls} polls");
+        assert_eq!(reduced, pages as u64, "a filled layer reduces each page once");
+        let filled_thumbnail = thumbnail(&mut r, id);
+        assert!(filled_thumbnail[5 * 128..27 * 128].chunks_exact(4).all(|pixel| pixel == blue), "the framed 3:2 layer shows the fill");
+        let edited = retiled(&document, [0, 0], [250, 20, 20, 255]);
+        r.submit(tier_frame(&edited, false)).unwrap();
+        complete(&r);
+        assert_eq!(polls_until_ready(&mut r, id), (1, 1), "a one-page edit reduces one page");
+        let edited_thumbnail = thumbnail(&mut r, id);
+        let corner = &edited_thumbnail[5 * 128..5 * 128 + 4];
+        assert!(corner[0] > 150 && corner[2] < 150, "the edited corner shows: {corner:?}");
+        assert_eq!(&edited_thumbnail[7 * 128..], &filled_thumbnail[7 * 128..], "the rest stays");
+    }
+}
+
+#[test]
+#[ignore = "workstation thumbnail latency and frame cost benchmark"]
+fn thumbnail_latency_and_frames_with_thumbnails_pending() {
+    let document = filled([40, 90, 200, 255]);
+    let id = target(&document);
+    let quantile = |values: &mut Vec<f64>, q: f64| { values.sort_by(f64::total_cmp); values[((values.len() - 1) as f64 * q).round() as usize] };
+    for residency in [0, 256 << 20] {
+        let mut r = renderer_with(&document, residency, tier_frame(&document, true));
+        complete(&r);
+        let (mut cpu, mut gpu, mut polls) = (Vec::new(), Vec::new(), 0);
+        loop {
+            polls += 1;
+            let started = std::time::Instant::now();
+            let ready = r.prepare_thumbnail_batch(ThumbnailTarget::Source(id)).unwrap();
+            cpu.push(started.elapsed().as_secs_f64() * 1e3);
+            let submitted = std::time::Instant::now();
+            complete(&r);
+            gpu.push(submitted.elapsed().as_secs_f64() * 1e3);
+            if ready { break; }
+        }
+        eprintln!("residency {residency}: {polls} polls ({:.1} s at 120 ms); poll CPU p50 {:.2} max {:.2} ms; GPU wait p50 {:.2} max {:.2} ms",
+            polls as f64 * 0.12, quantile(&mut cpu, 0.5), quantile(&mut cpu, 1.), quantile(&mut gpu, 0.5), quantile(&mut gpu, 1.));
+        for pending in [false, true] {
+            let mut edited = retiled(&document, [7, 5], [250, 20, 20, 255]);
+            r.submit(tier_frame(&edited, false)).unwrap();
+            complete(&r);
+            let mut frames = Vec::new();
+            for frame in 0..60u32 {
+                let mut view = crate::test_support::view(TIER);
+                view.width_px = 2560; view.height_px = 1600;
+                view.document_to_surface = [0.4, 0., 0., 0.4, -(frame as f32 * 7.), 0.];
+                if frame % 3 == 0 { edited = retiled(&edited, [frame / 3 % 23, 3], [250, (frame * 4) as u8, 20, 255]); }
+                let started = std::time::Instant::now();
+                r.submit(FramePacket { view, composite_all: false, ..tier_frame(&edited, false) }).unwrap();
+                if pending { r.prepare_thumbnail_batch(ThumbnailTarget::Source(id)).unwrap(); }
+                complete(&r);
+                if frame >= 5 { frames.push(started.elapsed().as_secs_f64() * 1e3); }
+            }
+            eprintln!("  pan and edit frames with thumbnails {}: wall p50 {:.2} p95 {:.2} max {:.2} ms", if pending { "pending" } else { "idle" },
+                quantile(&mut frames, 0.5), quantile(&mut frames, 0.95), quantile(&mut frames, 1.));
+        }
     }
 }

@@ -36,6 +36,52 @@ impl Pixels {
     }
 }
 
+const HALF_REGION: u32 = 256;
+
+pub(super) struct Half {
+    sources: [wgpu::Texture; 2],
+    images: [(wgpu::Texture, wgpu::TextureView); 2],
+    bindings: [wgpu::BindGroup; 2],
+    regions: wgpu::Buffer,
+    region_binding: wgpu::BindGroup,
+}
+impl Half {
+    fn new(r: &WgpuRasterizer, sources: [&Image; 2], previous: Option<Self>) -> Self {
+        let regions = previous.as_ref().map_or_else(|| r.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("half-float display regions"), size: u64::from(2 * HALF_REGION),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+        }), |half| half.regions.clone());
+        let region_binding = Commands::record_binding(r, &regions);
+        let mut previous = previous.map(|half| half.images.map(Some));
+        let images = std::array::from_fn(|index| {
+            let size = [sources[index].texture.width(), sources[index].texture.height()];
+            previous.as_mut().and_then(|images| images[index].take()).filter(|(texture, _)| [texture.width(), texture.height()] == size).unwrap_or_else(|| {
+                let texture = r.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("half-float display level"),
+                    size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                    mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&Default::default());
+                (texture, view)
+            })
+        });
+        let bindings = std::array::from_fn(|index| crate::bindings::group(&r.device, "half-float display level",
+            &r.scene_pipelines.scale.half_inputs, [
+                wgpu::BindingResource::TextureView(&sources[index].view),
+                wgpu::BindingResource::TextureView(&images[index].1),
+            ]));
+        Self { sources: sources.map(|image| image.texture.clone()), images, bindings, regions, region_binding }
+    }
+    fn presents(&self, sources: [&Image; 2]) -> bool {
+        self.sources[0] == sources[0].texture && self.sources[1] == sources[1].texture
+    }
+    pub fn bytes(&self) -> u64 { self.images.iter().map(|(texture, _)| texture_bytes(texture)).sum() }
+}
+fn half_bytes(sources: [&Image; 2]) -> u64 { sources.iter().map(|image| image.bytes() / 2).sum() }
+
 pub(super) struct Hierarchy {
     levels: Arc<[Image]>,
     updates: display_mips::CompleteUpdates,
@@ -120,6 +166,54 @@ impl Hierarchy {
 }
 
 impl Cache {
+    pub(super) fn half_reserve(&self) -> u64 {
+        if self.plan.level == 0 || self.hierarchy.is_some() { 0 } else { (self.plan.level_bytes(self.plan.level) + self.plan.level_bytes(self.plan.level + 1)) / 2 }
+    }
+    pub(super) fn present_half(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
+        let stale = std::mem::replace(&mut self.half_stale, PixelRect::EMPTY);
+        let (Some(root), Some(next)) = (self.pixels.root(), self.pixels.next()) else { self.half = None; return Ok(()) };
+        if self.plan.level == 0 || self.placed.is_some() { self.half = None; return Ok(()); }
+        let sources = [root, next];
+        let current = self.half.as_ref().is_some_and(|half| half.presents(sources));
+        if !current {
+            let previous = self.half.take();
+            let admitted = match &self.hierarchy {
+                Some(hierarchy) => hierarchy.bytes + half_bytes(sources) <= Hierarchy::budget(r, hierarchy.bytes),
+                None => half_bytes(sources) <= self.auxiliary_budget(r, packet),
+            };
+            if !admitted { return Ok(()); }
+            self.half = Some(Half::new(r, sources, previous));
+        }
+        let full = sources.map(|image| PixelRect::full([image.texture.width(), image.texture.height()]));
+        let regions = if current {
+            [stale, PixelRect::new(stale.min_x() / 2, stale.min_y() / 2, stale.max_x().div_ceil(2), stale.max_y().div_ceil(2))]
+        } else { full };
+        let regions = std::array::from_fn::<_, 2, _>(|index| regions[index].intersect(full[index]));
+        if regions.iter().all(|region| region.is_empty()) { return Ok(()); }
+        let half = self.half.as_ref().unwrap();
+        let mut bytes = [0; 2 * HALF_REGION as usize];
+        for (index, region) in regions.iter().enumerate() {
+            let start = index * HALF_REGION as usize;
+            bytes[start..start + 16].copy_from_slice(&[region.min_x(), region.min_y(), region.width(), region.height()].map(u32::to_le_bytes).concat());
+        }
+        r.uploads.write_at(encoder, &half.regions, 0, &bytes)?;
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("half-float display levels"), timestamp_writes: None });
+        pass.set_pipeline(&r.scene_pipelines.scale.half);
+        for (index, region) in regions.into_iter().enumerate().filter(|(_, region)| !region.is_empty()) {
+            pass.set_bind_group(0, &half.region_binding, &[index as u32 * HALF_REGION]);
+            pass.set_bind_group(1, &half.bindings[index], &[]);
+            pass.dispatch_workgroups(region.width().div_ceil(8), region.height().div_ceil(8), 1);
+        }
+        Ok(())
+    }
+    #[cfg(test)]
+    pub(crate) fn cached_branches(&self) -> usize { self.graph.cached_branches() }
+    pub(crate) fn presented_views(&self) -> [&wgpu::TextureView; 2] {
+        match (&self.half, self.pixels.root(), self.pixels.next()) {
+            (Some(half), Some(root), Some(next)) if self.placed.is_none() && half.presents([root, next]) => [&half.images[0].1, &half.images[1].1],
+            _ => [self.view(), self.next_view()],
+        }
+    }
     pub(crate) fn resident_bytes(&self) -> u64 {
         self.hierarchy.as_ref().map_or(0, Hierarchy::storage_bytes)
     }

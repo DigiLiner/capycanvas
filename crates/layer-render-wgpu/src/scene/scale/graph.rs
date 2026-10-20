@@ -261,6 +261,8 @@ impl Graph {
     pub fn branch_valid(&self, node: &Node, page: [u32; 2]) -> bool {
         self.branches.get(node).is_some_and(|branch| branch.image.is_some() && branch.valid.contains(&page))
     }
+    #[cfg(test)]
+    pub fn cached_branches(&self) -> usize { self.branches.values().filter(|branch| branch.image.is_some()).count() }
     pub fn reserved_bytes(&self, plan: display_mips::Plan) -> u64 { self.branches.len() as u64 * plan.level_bytes(plan.level) }
     pub fn storage_bytes(&self) -> u64 {
         self.branches.values().filter_map(|b| b.image.as_ref()).map(|i| texture_bytes(&i.texture)).sum::<u64>() + self.objects.storage_bytes()
@@ -273,7 +275,6 @@ pub(super) fn scratch_images(packet: FramePacket<'_>, level: u32, space: layer_c
     Ok(if fine.is_some() && root.fused_target()==fine {1} else {u64::from(root.cost().1)+1})
 }
 
-#[expect(clippy::too_many_arguments, reason = "A graph names its frame, sources, effects, level, color domain, object index and the paths a motion moves")]
 fn compose(
     packet: FramePacket<'_>, sources: Option<&Sources>, effects: Option<&HashMap<OccurrenceHandle, (metadata::Metadata, u64)>>,
     level: u32, space: layer_core::color::RgbSpace, objects:Option<&mut object_spatial::SpatialIndex>, moving: Option<&(OccurrenceHandle, Moving)>,

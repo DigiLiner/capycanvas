@@ -303,7 +303,7 @@ fn zooming_into_a_finer_level_shows_the_coarser_one_scaled_and_refines_a_few_pag
     assert!(pages <= scale::APPROXIMATE_PAGES as u64, "the first finer frame renders {pages} pages exactly");
     let scaled = presented(&r, at(0.6));
     let error = scaled.iter().zip(&expected).map(|(a, b)| f64::from(a.abs_diff(*b))).sum::<f64>() / expected.len() as f64;
-    assert!(error < 12., "the coarser level stands in for the finer one: mean byte error {error}");
+    assert!(error < 16., "the coarser level stands in for the finer one: mean byte error {error}");
     let mut frames = 0;
     while r.has_pending_work() {
         let before = r.metrics.composited_pixels;

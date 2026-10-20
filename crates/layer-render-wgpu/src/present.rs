@@ -819,7 +819,7 @@ impl ViewportPresenter {
     }
 
     pub fn needs_present(&self, renderer: &WgpuRasterizer, view: ViewState, surround_linear: [f32; 4]) -> bool {
-        let Some([composite,coarse,next]) = renderer.display_views() else { return false; };
+        let Some([composite,coarse,next]) = renderer.presentation_views() else { return false; };
         let geometry=renderer.display_geometry().unwrap();
         let previous = &self.history;
         !previous.valid
@@ -933,7 +933,7 @@ impl ViewportPresenter {
         surround_linear: [f32; 4],
         overview_only: bool,
     ) -> Result<(), GpuRasterError> {
-        let Some([composite,coarse,next]) = renderer.display_views() else { return Ok(()); };
+        let Some([composite,coarse,next]) = renderer.presentation_views() else { return Ok(()); };
         let navigator = renderer.navigator.view().unwrap_or(&renderer.empty_view);
         let motion = renderer.display_motion();
         let motion_views = motion.map_or([&renderer.empty_view; 3], |(views, ..)| views);

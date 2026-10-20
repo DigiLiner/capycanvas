@@ -819,6 +819,7 @@ fn moving_blurred_object_layer_publishes_every_pose_without_queueing_canonical_w
         let (mut doc, owner, handles, view) = tablet_scene(distinct, 4, true);
         let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         settle_frames(&mut r, FramePacket { view, ..packet(doc.scene(), [4248, 2832]) }, 2000);
+        assert_eq!(r.scale_display.as_ref().unwrap().cached_branches(), 5, "presentation copies leave the composition its budget for five branches (distinct={distinct})");
         layer_render::CanvasRenderer::prepare_moving_layer(&mut r, Some(owner));
         let original = doc.scene().object(handles[0]).unwrap().affine;
         for step in 0..24 {

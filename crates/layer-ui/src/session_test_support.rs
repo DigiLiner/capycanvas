@@ -73,6 +73,7 @@ pub(crate) struct Recorder {
     pub(crate) painting_unready: bool,
     pub(crate) raster_dependencies_blocked: bool,
     pub(crate) vector_preview: Option<layer_render::VectorPreview>,
+    pub(crate) vector_motion: Option<layer_render::VectorMotion>,
 }
 impl CanvasRenderer for Recorder {
     type Error = BackendError;
@@ -80,6 +81,7 @@ impl CanvasRenderer for Recorder {
     fn seed_evaluation_context(&mut self, context: EvaluationContext) { self.evaluation = context; }
     fn set_clipping_preview(&mut self, shadows:bool, highlights:bool) {self.clipping_previews.push((shadows,highlights));}
     fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) { self.vector_preview = preview; }
+    fn set_vector_motion(&mut self, motion: Option<layer_render::VectorMotion>) { self.vector_motion = motion; }
     fn has_pending_submission(&self) -> bool { self.settling }
     fn paint_ready(&self, _document: &Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { !self.painting_unready }
     fn has_pending_work(&self) -> bool { self.refining }

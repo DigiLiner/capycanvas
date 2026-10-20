@@ -1581,7 +1581,7 @@ impl Document {
             let mut candidate = self.clone();
             let inverse = candidate.apply_records(edit.clone())?;
             edit.validate_presentation(&candidate)?;
-            candidate.prune_vector_items();
+            candidate.prune_vector_items(Some(self));
             candidate.revision = next_revision;
             *self = candidate;
             return Ok(inverse);
@@ -1610,7 +1610,7 @@ impl Document {
         {
             return Err(DocumentError::MissingOccurrence(h));
         }
-        candidate.repair_working()?;
+        candidate.repair_working_after(Some(self))?;
         if candidate.working != before_working {
             candidate.working.generation = before_working.generation.checked_add(1).ok_or(
                 DocumentError::InvalidLayerOperation("Working state generation exhausted"),
@@ -1677,8 +1677,11 @@ impl Document {
             self.working.selection_overlays.visibility.get(&id).copied().unwrap_or(occurrence.visible)
         }else{occurrence.visible}
     }
-    fn prune_vector_items(&mut self) {
+    fn prune_vector_items(&mut self, before: Option<&Self>) {
         let Some(selection) = &self.working.vector_items else { return };
+        let unchanged = before.is_some_and(|before| before.working.vector_items.as_ref().is_some_and(|previous| previous.layer == selection.layer && Arc::ptr_eq(&previous.items, &selection.items))
+            && before.scene().vector_layer(selection.layer).zip(self.scene().vector_layer(selection.layer)).is_some_and(|(a, b)| a.same_root(b)));
+        if unchanged { return; }
         let present = self.scene().vector_layer(selection.layer).map(|object| object.present(&selection.items));
         self.working.vector_items = match present {
             Some(items) if items.len() == selection.items.len() => return,
@@ -1686,7 +1689,8 @@ impl Document {
             _ => None,
         };
     }
-    fn repair_working(&mut self) -> Result<(), DocumentError> {
+    fn repair_working(&mut self) -> Result<(), DocumentError> { self.repair_working_after(None) }
+    fn repair_working_after(&mut self, before: Option<&Self>) -> Result<(), DocumentError> {
         if let Some(selection) = &self.working.selection {
             selection.validate()?;
         }
@@ -1725,7 +1729,7 @@ impl Document {
         self.working.target = target;
         self.working.inspect_mask = inspect;
         self.working.layer_selection.retain(|h| self.artwork.occurrences.get(*h).is_some());
-        self.prune_vector_items();
+        self.prune_vector_items(before);
         self.working.layer_anchor = self.working.layer_anchor.filter(|h| self.artwork.occurrences.get(*h).is_some());
         if let Some(visibility) = &mut self.working.solo_visibility {
             visibility.retain(|h, _| self.artwork.occurrences.get(*h).is_some());
