@@ -224,16 +224,17 @@ pub(crate) struct SettingsService {
 }
 impl SettingsService {
     #[cfg_attr(not(target_os = "windows"), expect(dead_code, reason = "Used by the Windows host"))]
-    pub(crate) fn launch(preferred_tags: &[&str]) -> Result<(NativeHost, PreparedSettings), String> {
-        Self::launch_at(SettingsFile::environment(), preferred_tags)
+    pub(crate) fn launch(preferred_tags: &[&str], screen: Option<layer_ui::ScreenInfo>) -> Result<(NativeHost, PreparedSettings), String> {
+        Self::launch_at(SettingsFile::environment(), preferred_tags, screen)
     }
-    fn launch_at(file: Result<SettingsFile, String>, preferred_tags: &[&str]) -> Result<(NativeHost, PreparedSettings), String> {
-        let prepared = file.and_then(|file| shared::Hub::with_launch(file, preferred_tags, |saved| {
-            NativeHost::launch(layer_ui::Platform::Windows, saved.unwrap_or_default(), preferred_tags)
+    fn launch_at(file: Result<SettingsFile, String>, preferred_tags: &[&str], screen: Option<layer_ui::ScreenInfo>) -> Result<(NativeHost, PreparedSettings), String> {
+        let prepared = file.and_then(|file| shared::Hub::with_launch(file, preferred_tags, screen, |saved| {
+            let saved = saved.unwrap_or_default();
+            NativeHost::launch_on_screen(layer_ui::Platform::Windows, saved, layer_ui::launch_localization(saved, preferred_tags), screen)
         }));
         let (native, hub) = match prepared {
             Ok((native, hub)) => (native, Ok(hub)),
-            Err(error) => (NativeHost::launch(layer_ui::Platform::Windows, "", preferred_tags)?, Err(error)),
+            Err(error) => (NativeHost::launch_on_screen(layer_ui::Platform::Windows, "", layer_ui::launch_localization("", preferred_tags), screen)?, Err(error)),
         };
         Ok((native, PreparedSettings { hub }))
     }

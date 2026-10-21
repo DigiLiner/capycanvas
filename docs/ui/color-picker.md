@@ -15,7 +15,8 @@
 
 ## Color panel
 
-Without a remembered paint color, every platform starts with sRGB `#51803A`.
+Without a remembered paint color, every platform starts with sRGB `#2E2E2E`
+(30% lightness in the circle's readout).
 
 The Color panel offers an Okhsv circle, an HSV square and an HLS triangle;
 switching shapes keeps the sRGB paint. Only the circle's hue ring is rotated,

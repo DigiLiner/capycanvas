@@ -35,7 +35,7 @@ typedef struct CapyPointer {
 /* Prepare on the startup worker; view borrows launch storage until launch_free.
    Create on XAML with ISwapChainPanelNative, then transfer exclusive canvas
    ownership to the render worker. A launch is adopted at most once. */
-__declspec(dllimport) CapyLaunch* capy_launch(const char* tags);
+__declspec(dllimport) CapyLaunch* capy_launch(const char* tags,const char* screen);
 __declspec(dllimport) const char* capy_launch_view(const CapyLaunch*);
 __declspec(dllimport) void capy_launch_free(CapyLaunch*);
 __declspec(dllimport) CapyLocalization* capy_launch_localization(const CapyLaunch*);

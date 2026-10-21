@@ -40,6 +40,40 @@ fn third_row_shows(grid: &gtk::FlowBox) -> bool {
     last.compute_bounds(&scroller).is_some_and(|bounds| bounds.y() >= 0. && bounds.y() + bounds.height() <= scroller.height() as f32)
 }
 
+fn assert_startup_sheet(w: &Workspace) {
+    let opened = ui_session(w).engine().document().clone();
+    let screen = crate::new_drawing::screen(&w.window.surface().unwrap()).unwrap();
+    let expected = layer_ui::startup_setup(Some(screen));
+    assert_eq!(opened.composition().size, expected.extent());
+    assert_eq!(opened.composition().size[1], screen.extent[1]);
+    assert_eq!(opened.composition().resolution, Some(layer_core::ImageResolution::ppi(expected.resolution)));
+    let paper = opened.bottom_paper().unwrap();
+    assert_eq!(opened.scene().effect(paper).unwrap().constant_color(), Some(expected.paper.color));
+    assert_eq!(layer_core::paper::light(opened.scene().effect(paper).unwrap()).unwrap().relief, 1.);
+    assert_eq!(opened.paper(None).texture, layer_core::paper::built_in_paper("cold_press").unwrap().texture);
+}
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_startup_canvas_uses_current_monitor() {
+    let app = native_test_app("art.capycanvas.StartupCanvas");
+    let output = std::path::Path::new("../../artifacts/startup-defaults/gtk");
+    std::fs::create_dir_all(output).unwrap();
+    let output = output.canonicalize().unwrap();
+    for theme in [Theme::Light, Theme::Dark] {
+        let w = Workspace::new(&app);
+        w.window.present();
+        ready(&w);
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        assert_startup_sheet(&w);
+        assert_eq!((state(&w).brush.preset, state(&w).brush.diameter), (layer_core::DefaultBrushPreset::Pencil as u32, 9.));
+        assert_eq!(state(&w).colors.definition().rgba, [46. / 255., 46. / 255., 46. / 255., 1.]);
+        capture_ui(&w, &output, &format!("{theme:?}.png"));
+        w.window.destroy();
+        pump(100);
+    }
+}
+
 #[test]
 #[ignore = "private Wayland display and hardware GPU"]
 fn native_new_drawing_dialog_review() {
@@ -75,6 +109,7 @@ fn native_new_drawing_dialog_review() {
         until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "new-drawing-dialog"), "New drawing");
         pump(500);
         shot("1-main");
+        assert_eq!(state(&w).new_drawing.as_ref().unwrap().page.orientation, Orientation::Landscape);
         let height = |name: &str| {
             let widget = part::<gtk::Widget>(&w, name);
             (name.to_string(), widget.compute_bounds(&widget).map_or(0, |bounds| bounds.height().round() as i32))
@@ -216,9 +251,7 @@ fn native_new_drawing_dialog_review() {
     let fresh = Workspace::new(&app);
     fresh.window.present();
     ready(&fresh);
-    let opened = ui_session(&fresh).engine().document().clone();
-    assert_eq!(opened.composition().size, [3508, 2480], "a new window opens on a white A4 landscape sheet");
-    assert_eq!(opened.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
+    assert_startup_sheet(&fresh);
     fresh.window.destroy();
     input.finish();
     w.window.destroy();

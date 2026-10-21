@@ -1727,9 +1727,9 @@ fn apple_transform_settings_and_actions_preserve_pixel_transactions() {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
             Some(native_renderer());
-        app.draw_frame();
+        app.draw_until_idle();
         app.stroke();
-        app.draw_frame();
+        app.draw_until_idle();
         let painted = app.pixels();
         app.invoke("scale_rotate");
         assert_eq!(app.state()["tool_settings"].as_array().unwrap().len(), 6);
@@ -1743,13 +1743,13 @@ fn apple_transform_settings_and_actions_preserve_pixel_transactions() {
             );
         }
         app.action(json!({"type":"set_tool_setting","id":"transform_x","value":48}));
-        app.draw_frame();
+        app.draw_until_prepared(true);
         assert!(
             app.pixels() != painted,
             "Numeric edits must update the live GPU preview"
         );
         app.invoke("cancel_transform");
-        app.draw_frame();
+        app.draw_until_idle();
         assert!(
             app.pixels() == painted,
             "Cancel must restore all original document pixels"
@@ -1768,14 +1768,14 @@ fn apple_transform_settings_and_actions_preserve_pixel_transactions() {
             "Rejected scale must preserve accepted fields"
         );
         app.invoke("apply_transform");
-        app.draw_frame();
+        app.draw_until_idle();
         let transformed = app.pixels();
         assert!(transformed != painted);
         app.invoke("undo");
-        app.draw_frame();
+        app.draw_until_idle();
         assert!(app.pixels() == painted);
         app.invoke("redo");
-        app.draw_frame();
+        app.draw_until_idle();
         assert!(app.pixels() == transformed);
     }
 }
@@ -1912,6 +1912,18 @@ fn apple_native_boundaries_preserve_panic_diagnostics() {
     assert!(native.perform(|_| Ok(())).is_none());
     assert_eq!(native.error.as_ref().unwrap().to_str().unwrap(), "Native operation panicked: renderer detail");
     assert_eq!(native.host.poisoned(), Some("Native operation panicked: renderer detail"));
+}
+
+#[test]
+fn apple_launch_configuration_passes_the_display_to_the_startup_sheet() {
+    let source = CString::new(json!({"saved":"", "preferred_languages":["en"], "screen":{"extent":[2880,1800],"ppi":220}}).to_string()).unwrap();
+    for platform in [0, 1] {
+        let app = App(unsafe { launch_json(platform, source.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) });
+        assert!(!app.0.is_null());
+        let document = unsafe { (*app.0).host.session.engine().document() };
+        assert_eq!(document.composition().size, [2400, 1800]);
+        assert_eq!(document.composition().resolution, Some(layer_core::ImageResolution::ppi(220)));
+    }
 }
 
 #[test]

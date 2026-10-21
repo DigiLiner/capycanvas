@@ -794,13 +794,16 @@ pub extern "system" fn Java_art_capycanvas_Native_create(
     _: JClass,
     saved: JString,
     locales: JObjectArray,
+    screen: JString,
     profiling: jboolean,
 ) -> jlong {
     crate::jni_entry!(env, {
     let result = (|| {
         let saved = read(&mut env, &saved)?;
         let locales = locale_tags(&mut env, &locales)?;
-        App::new(&saved, &locales.iter().map(String::as_str).collect::<Vec<_>>())
+        let screen = read(&mut env, &screen)?;
+        let screen = if screen.is_empty() { None } else { serde_json::from_str(&screen).map_err(error)? };
+        App::new(&saved, &locales.iter().map(String::as_str).collect::<Vec<_>>(), screen)
     })();
     match result {
         Ok(mut app) => {

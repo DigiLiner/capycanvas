@@ -205,12 +205,13 @@ mod tests {
         let id = layer_ui::paper_library::paper_identity(&image).unwrap();
         let entry = PaperEntry { id:id.clone(), name:"Library scan".into(), bytes:64, preview:vec![127; 96*96].into() };
         let mut replacement = new_host();replacement.session.inherit_window_state(&host.session).unwrap();host = replacement;
+        let paper = host.session.engine().document().paper(None).texture.clone();
         let checkpoint = host.session.engine().checkpoint();let generation = service.status()["generation"].clone();
         send.send(Ok(Outcome::Imported(Some(layer), id.clone(), image, vec![entry]))).unwrap();service.poll(&mut host).unwrap();
         assert_ne!(service.status()["generation"], generation);
         assert!(host.session.paper_preview(&id).is_some());
         assert_eq!(host.session.engine().checkpoint(), checkpoint);
-        assert_eq!(host.session.engine().document().paper(None).texture, layer_core::paper::default_texture());
+        assert_eq!(host.session.engine().document().paper(None).texture, paper);
         assert!(host.session.state().settings.new_document.paper.is_none());
         let paper = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(), None).unwrap());
         host.dispatch(UiAction::SelectLayer { id:paper }).unwrap();

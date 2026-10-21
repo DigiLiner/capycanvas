@@ -283,13 +283,15 @@ pub(crate) fn stored_selection(s: &mut UiSession<Recorder>, mask: layer_core::au
         .filter(|op| op.kind == layer_core::RasterOperationKind::Coverage).and_then(|op| op.coverage.selection)
 }
 pub(crate) fn session(platform: Platform) -> UiSession<Recorder> {
-    UiSession::new(
+    let mut session = UiSession::new(
         Recorder::default(),
         Document::new(layer_core::PortableId::random(), 1000, 1000, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() }),
         [1000, 1000],
         platform,
     )
-    .unwrap()
+    .unwrap();
+    session.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
+    session
 }
 pub(crate) fn key(
     s: &mut UiSession<Recorder>,

@@ -56,6 +56,7 @@ final class MacCanvasView: NSView {
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if let window { store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) }) }
         documentDelegate.attach(window)
         store.cursorChanged = { [weak self] in self?.input.applyCursor() }
         for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }

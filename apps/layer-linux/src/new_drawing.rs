@@ -286,9 +286,8 @@ pub(crate) struct NewDrawing {
     done: RefCell<(bool, Option<Waker>)>,
 }
 
-fn screen(w: &Workspace) -> Option<ScreenInfo> {
-    let surface = w.window.surface()?;
-    let monitor = surface.display().monitor_at_surface(&surface)?;
+pub(crate) fn screen(surface: &gdk::Surface) -> Option<ScreenInfo> {
+    let monitor = surface.display().monitor_at_surface(surface)?;
     let geometry = monitor.geometry();
     let scale = monitor.scale();
     let extent = [(f64::from(geometry.width()) * scale).round() as u32, (f64::from(geometry.height()) * scale).round() as u32];
@@ -300,7 +299,7 @@ fn screen(w: &Workspace) -> Option<ScreenInfo> {
 pub(crate) async fn run(w: &Rc<Workspace>) -> Result<Option<NewDrawingOrder>, String> {
     let untitled = w.documents.model.borrow().upcoming_untitled(&w.localization());
     let opened = w.gpu.borrow_mut().as_mut().ok_or_else(|| NewDocumentError::CanvasUnavailable.message(&w.localization()))?
-        .session.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: screen(w), untitled } });
+        .session.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: w.window.surface().as_ref().and_then(screen), untitled } });
     w.changed(opened.clone());
     opened?;
     let dialog = NewDrawing::build(w);

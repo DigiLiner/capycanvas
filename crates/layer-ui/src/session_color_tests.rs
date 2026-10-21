@@ -1,8 +1,8 @@
 // Included in session::tests, using the protocol recorder (no simulated pixels).
 #[test]
-fn fresh_sessions_use_green_paint_and_restore_remembered_colors() {
+fn fresh_sessions_use_gray_paint_and_restore_remembered_colors() {
     use layer_core::color::{RgbColor, RgbSpace};
-    let default = RgbColor::new(RgbSpace::Srgb, [81. / 255., 128. / 255., 58. / 255., 1.]).unwrap();
+    let default = RgbColor::new(RgbSpace::Srgb, [46. / 255., 46. / 255., 46. / 255., 1.]).unwrap();
     let remembered = RgbColor::new(RgbSpace::DisplayP3, [0.8, 0.2, 0.4, 1.]).unwrap();
     for platform in Platform::ALL {
         let mut s = session(platform);
@@ -11,6 +11,7 @@ fn fresh_sessions_use_green_paint_and_restore_remembered_colors() {
             assert_eq!(s.state.colors.definition(), default, "{platform:?} {theme:?}");
             assert_eq!(s.state.colors.view().definition, default);
             assert_eq!(s.state.brush.color, default.rgba);
+            assert_eq!(s.state.colors.readout_text()[0], "30%");
         }
         let hue = s.state.colors.components()[0];
         s.dispatch(UiAction::Color { action: ColorAction::QuickColor { white: false } }).unwrap();

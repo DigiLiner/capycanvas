@@ -213,10 +213,10 @@ fn apple_initial_paper_is_prepared_before_publication_and_later_library_reload_d
         let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
         let app=App(unsafe {launch_json(platform,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!app.0.is_null());
         let document=document(&app);
-        assert_eq!(document.paper(None).texture,layer_core::paper::default_texture());
+        assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
         let layer_core::TextureSource::Image(actual)=unsafe { &*app.0 }.host.session.new_drawing_paper() else {panic!("initial remembered image must exist before publication")};
         assert_source_samples(actual.storage(),&paper);
-        assert_eq!(document.composition().size,[3508,2480]);assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(300)));
+        assert_eq!(document.composition().size,[1440,1080]);assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(144)));
         assert!(!app.state()["document_file"]["modified"].as_bool().unwrap());
         assert!(!unsafe { &*app.0 }.host.session.engine().can_undo());assert!(!unsafe { &*app.0 }.host.session.engine().can_redo());
         let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);
@@ -351,7 +351,7 @@ fn apple_failed_initial_material_notifies_once_and_reload_does_not_repeat_the_fa
     let configuration=CString::new(remembered_launch(&directory,&id)).unwrap();
     let app=App(unsafe {launch_json(1,configuration.as_ptr(),std::ptr::null_mut(),std::ptr::null_mut())});assert!(!app.0.is_null());
     let before=document(&app);let mark=checkpoint(&app);let notice=app.state()["notice"]["id"].clone();assert!(!notice.is_null());
-    assert_eq!(before.paper(None).texture,layer_core::paper::default_texture());
+    assert_eq!(before.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
     for _ in 0..2 {let job=PaperJob::new(&app,0,&directory);job.work(None);job.apply(&app);}
     assert_project_document(&document(&app),&before);assert_eq!(checkpoint(&app),mark);
     assert_eq!(app.state()["notice"]["id"],notice);

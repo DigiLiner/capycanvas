@@ -6,6 +6,7 @@
 #include "KeyNames.h"
 #include "NativeKeyRepeats.h"
 #include "NavigationCursors.h"
+#include "NewDrawingDialog.h"
 #include "ExternalImages.h"
 #include <microsoft.ui.xaml.media.dxinterop.h>
 #include <microsoft.ui.xaml.window.h>
@@ -318,13 +319,14 @@ void CanvasWindow::PublishGlass(){
 void CanvasWindow::Start() {
     if(renderer.joinable()||closing)return;
     auto tags=PreferredLanguages();
-    renderer=std::jthread([this,tags=std::move(tags)]{
+    auto screen=to_string(CapyUi::drawingScreen(window).Stringify());
+    renderer=std::jthread([this,tags=std::move(tags),screen=std::move(screen)]{
         try {
         struct Apartment {
             Apartment(){init_apartment(apartment_type::multi_threaded);}
             ~Apartment(){uninit_apartment();}
         } apartment;
-        auto prepared=std::shared_ptr<CapyLaunch>(capy_launch(tags.c_str()),capy_launch_free);
+        auto prepared=std::shared_ptr<CapyLaunch>(capy_launch(tags.c_str(),screen.c_str()),capy_launch_free);
         bool posted=prepared&&dispatcher.TryEnqueue([weak=weak_from_this(),prepared]{
             if(auto self=weak.lock()){
                 bool initialized=false;

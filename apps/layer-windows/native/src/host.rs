@@ -428,12 +428,13 @@ impl CapyHost {
     }
 }
 /// # Safety
-/// Call on the startup worker. `tags` is readable NUL-terminated JSON.
+/// Call on the startup worker. `tags` and non-null `screen` are readable NUL-terminated JSON.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_launch(tags: *const c_char) -> *mut CapyLaunch {
+pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char) -> *mut CapyLaunch {
     let result = catch_unwind(AssertUnwindSafe(|| {
         let tags: Vec<String> = serde_json::from_str(unsafe { read_json(tags) }?).map_err(err)?;
-        let (native, settings) = crate::settings::SettingsService::launch(&tags.iter().map(String::as_str).collect::<Vec<_>>())?;
+        let screen = if screen.is_null() { None } else { serde_json::from_str(unsafe { read_json(screen) }?).map_err(err)? };
+        let (native, settings) = crate::settings::SettingsService::launch(&tags.iter().map(String::as_str).collect::<Vec<_>>(), screen)?;
         let bootstrap = CString::new(serde_json::to_string(&native.bootstrap_view()).map_err(err)?).map_err(err)?;
         Ok::<_, String>(CapyLaunch { native: Some(native), settings: Some(settings), bootstrap })
     }));

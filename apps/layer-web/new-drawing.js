@@ -54,6 +54,11 @@ function sheetArt(app, element, bounds, mini) {
 const text = (node, value) => { if (node.textContent !== value) node.textContent = value; };
 const named = (node, value) => { node.title = value; node.setAttribute('aria-label', value); };
 
+export function screenInfo() {
+  const extent = [screen.width, screen.height].map(side => Math.round(side * (devicePixelRatio || 1)));
+  return extent.every(side => side > 0) ? {extent, ppi:null} : null;
+}
+
 // Presents the session's New drawing dialog: every input is a NewDrawingAction,
 // and every label, choice and state comes from `state().new_drawing`.
 export function createNewDrawing({app, state, applyChange, element, button, icon, numberField, importPaper}) {
@@ -62,10 +67,6 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
   function send(action) {
     try { applyChange(app.dispatch({type:'new_drawing', action})); ui?.report(''); return true; }
     catch (error) { ui?.report(String(error)); return false; }
-  }
-  function screenInfo() {
-    const extent = [screen.width, screen.height].map(side => Math.round(side * (devicePixelRatio || 1)));
-    return extent.every(side => side > 0) ? {extent, ppi:null} : null;
   }
   function refresh() {
     const shown = view();

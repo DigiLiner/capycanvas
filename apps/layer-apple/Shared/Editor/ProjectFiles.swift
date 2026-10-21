@@ -44,6 +44,8 @@ import UIKit
     #if os(macOS)
     weak var presentationWindow: NSWindow?
     private var exportDismissal: AnyCancellable?
+    #else
+    weak var presentationScreen: UIScreen?
     #endif
     var closeWindow: (() -> Void)?
     private var handledClose = false
@@ -312,19 +314,28 @@ import UIKit
     }
     private var newDrawingScreen: [String: Any]? {
         #if os(macOS)
-        guard let screen = presentationWindow?.screen ?? NSScreen.main else { return nil }
+        return Self.screenInfo(presentationWindow?.screen)
+        #else
+        return Self.screenInfo(presentationScreen)
+        #endif
+    }
+    #if os(macOS)
+    static func screenInfo(_ screen: NSScreen? = nil) -> [String: Any]? {
+        guard let screen = screen ?? NSScreen.main else { return nil }
         let scale = screen.backingScaleFactor
         let extent = [screen.frame.width, screen.frame.height].map { UInt32(max(1, ($0 * scale).rounded())) }
         let display = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         let millimetres = display.map { CGDisplayScreenSize(CGDirectDisplayID($0)).width } ?? 0
         let ppi: Any = millimetres > 0 ? UInt32(max(1, (CGFloat(extent[0]) * 25.4 / millimetres).rounded())) : NSNull()
         return ["extent": extent, "ppi": ppi]
-        #else
-        let screen = UIScreen.main
+    }
+    #else
+    static func screenInfo(_ screen: UIScreen? = nil) -> [String: Any]? {
+        let screen = screen ?? UIScreen.main
         let extent = [screen.bounds.width, screen.bounds.height].map { UInt32(max(1, ($0 * screen.nativeScale).rounded())) }
         return ["extent": extent, "ppi": NSNull()]
-        #endif
     }
+    #endif
     private func save(to uri: String, name: String, completion: @escaping (Bool) -> Void) {
         if let destination, destination.absoluteString == uri { write(destination, completion: completion); return }
         task(.save) { [weak self] task in

@@ -12,12 +12,18 @@ import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : ComponentActivity() {
-    val host: CanvasHost by viewModels()
+    val host: CanvasHost by viewModels {
+        viewModelFactory {
+            initializer { CanvasHost(application, screenInfo(androidx.core.content.ContextCompat.getDisplayOrDefault(this@MainActivity))) }
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         host.attachWindow(this)

@@ -14,7 +14,7 @@ export const exportFormats={
   Webp:["webp","image/webp"],
 };
 import {createImageImport} from './image-import.js';
-import {createNewDrawing} from './new-drawing.js';
+import {createNewDrawing, screenInfo} from './new-drawing.js';
 // Browser file transport; document checkpoints, stale-edit guards and unsaved
 // decisions stay in UiSession. File handles never enter a project or localStorage.
 export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady,dispatch,applyChange,wake,element,button,icon,numberField,message,gpuOperation,rasterWorker,resumeCanvas,contentChanged,refreshInputContext}) {
@@ -541,7 +541,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     if(closing||changing||!published.document_file.close_ready)return;
     closing=true;
     const id=app.document_tabs(0).selected;
-    transition(async()=>{let prepared=app.prepare_document_close();try{await recovery.retire(id,true);const close=prepared;prepared=null;applyChange(app.commit_document_close(close));}finally{prepared?.free();}})
+    transition(async()=>{let prepared=app.prepare_document_close(screenInfo());try{await recovery.retire(id,true);const close=prepared;prepared=null;applyChange(app.commit_document_close(close));}finally{prepared?.free();}})
       .catch(error=>{applyChange(app.cancel_document_close());message(error);})
       .finally(()=>{closing=false;tabs.refresh(true);pruneHandles();});
   }};

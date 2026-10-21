@@ -304,9 +304,9 @@ mod tests {
         assert!(prepared.warning.is_none());assert_eq!(prepared.identity.as_deref(),Some(id.as_str()));
         std::fs::write(super::image(&directory,&id),b"changed after worker preparation").unwrap();
         for platform in [layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
-            let host=crate::NativeHost::launch_prepared(platform,settings.clone(),localization.clone(),prepared.clone()).unwrap();
+            let host=crate::NativeHost::launch_prepared(platform,settings.clone(),localization.clone(),prepared.clone(),None).unwrap();
             let document=host.session.engine().document();
-            assert_eq!(document.paper(None).texture,layer_core::paper::default_texture());
+            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
             let layer_core::TextureSource::Image(source)=host.session.new_drawing_paper() else {panic!("prepared image paper")};
             assert_eq!(layer_core::TextureSource::Image(source.clone()),prepared.texture);
             let actual=source.storage();
@@ -319,8 +319,8 @@ mod tests {
                 assert_eq!(found.descriptor,tile.descriptor);
                 assert_eq!(found.decode().unwrap(),tile.decode().unwrap());
             }
-            assert_eq!(document.composition().size,[3508,2480]);
-            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(300)));
+            assert_eq!(document.composition().size,[1440,1080]);
+            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(144)));
             assert!(!host.session.state().document_file.modified);
             assert!(!host.session.engine().can_undo());assert!(!host.session.engine().can_redo());
             assert_eq!(host.session.state().settings.new_document.paper.as_deref(),Some(id.as_str()));
@@ -342,7 +342,7 @@ mod tests {
             let prepared=resolve(&material,(failure!=2).then_some(directory.as_path()),&localization);
             let expected=layer_ui::file_open_failure(&localization,&format!("{id}.png"));
             assert_eq!(prepared.warning.as_deref(),Some(expected.as_str()));assert_eq!(prepared.texture,settings.new_document.paper());
-            let mut host=crate::NativeHost::launch_prepared(layer_ui::Platform::Mac,settings.clone(),localization,prepared).unwrap();
+            let mut host=crate::NativeHost::launch_prepared(layer_ui::Platform::Mac,settings.clone(),localization,prepared,None).unwrap();
             let document=host.session.engine().document().clone();let mark=host.session.engine().checkpoint();
             let notice=host.session.state().notice.as_ref().unwrap().id;
             for _ in 0..2 {host.session.set_paper_library(entries.clone()).unwrap();}

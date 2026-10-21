@@ -70,6 +70,15 @@ private final class StartupErrors: @unchecked Sendable {
     }
 
     @MainActor static func ownerChecks() async throws {
+        let pending = EditorStore(platform: 1, persistence: EditorPersistence(root: nil), managedWorkspaces: false, deferLaunch: true)
+        try require(pending.native == nil, "A deferred store must wait for its window's display")
+        pending.start(on: JSON(["extent": [2880, 1800], "ppi": 220]))
+        try await wait("Display-sized startup sheet", failure: { pending.failure }) { !pending.state["tabs"].array.isEmpty }
+        let sheet = pending.state["tabs"].array[0]
+        try require(sheet["width"].uint == 2400 && sheet["height"].uint == 1800, "The startup sheet must use its window's display")
+        let native = pending.native
+        pending.start(on: JSON(["extent": [1920, 1080], "ppi": 96]))
+        try require(pending.native === native, "Reattachment must retain the initialized session")
         let failures = StartupErrors()
         let owner = try NativeOwner(platform: UInt32.max, persistence: EditorPersistence(root: nil)) { _, error in failures.receive(error) }
         owner.submit(2, JSON(["type": "catalog"]))

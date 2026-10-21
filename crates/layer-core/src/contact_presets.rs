@@ -34,10 +34,10 @@ pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     use DefaultBrushPreset::*;
     let pose = |radii, relief| BrushDryPose { radii, relief };
     let (diameter, flow, paper, loading, corner, gain, poses) = match preset {
-        Pencil => (36./4.8, 1., 1.1, 0.70, 0., 0.7, [
+        Pencil => (9., 1., 1.1, 0.70, 0., 0.7, [
             pose([0.65, 0.65], [0., 0.70, 0.]), pose([1., 0.65], [0., 0.5, 0.25]),
             pose([4.8, 1.2], [0.04, 0.25, 0.5])]),
-        PointyPencil => (18.*0.9/5., 1., 0.9, 0.75, 0., 0.7, [
+        PointyPencil => (6., 1., 0.9, 0.75, 0., 0.7, [
             pose([0.55, 0.55], [0., 0.95, 0.]), pose([0.9, 0.5], [0., 0.8, 0.]),
             pose([5., 0.8], [0.05, 0.35, 0.45])]),
         ShadingPencil => (64./2.6, 1., 1.35, 0.65, 0., 0.63, [

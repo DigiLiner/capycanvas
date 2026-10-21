@@ -367,14 +367,18 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub fn blank_localized(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>) -> Result<Self, String> {
-        let mut session = Self::new_localized(renderer, crate::startup_drawing(&localization)?, viewport, platform, localization)?;
+        Self::blank_on_screen(renderer, viewport, platform, localization, None)
+    }
+
+    pub fn blank_on_screen(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>, screen: Option<ScreenInfo>) -> Result<Self, String> {
+        let mut session = Self::new_localized(renderer, crate::startup_drawing(screen, &localization)?, viewport, platform, localization)?;
         session.mark_startup_drawing();
         Ok(session)
     }
 
     pub fn blank_with_settings(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>,
-        settings: Settings) -> Result<Self, String> {
-        let mut session = Self::blank_localized(renderer, viewport, platform, localization)?;
+        settings: Settings, screen: Option<ScreenInfo>) -> Result<Self, String> {
+        let mut session = Self::blank_on_screen(renderer, viewport, platform, localization, screen)?;
         session.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
         Ok(session)
     }
@@ -452,7 +456,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let mut colors = ColorState::default();
         colors.set_rgb_space(engine.document().composition().color.space)?;
         colors.set_document_depth(engine.document().composition().color.depth)?;
-        let brush = tools::ToolMemory::default().brush_in(DefaultBrushPreset::GPen, engine.document().composition().color.space);
+        let brush = tools::ToolMemory::default().brush_in(DefaultBrushPreset::Pencil, engine.document().composition().color.space);
         engine.set_brush(brush.clone()).map_err(error)?;
         engine.set_paint_color(colors.definition());
         let effect_catalog = layer_core::bundled_effect_catalog().clone();
@@ -559,8 +563,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 fullscreen: false,
                 workspace: WorkspaceState::default(),
                 brush: BrushState {
-                    preset: DefaultBrushPreset::GPen as u32,
-                    tool: Tool::Pen,
+                    preset: DefaultBrushPreset::Pencil as u32,
+                    tool: Tool::Pencil,
                     diameter: brush.diameter,
                     opacity: brush.opacity,
                     color: colors.preview(colors.definition()),
@@ -6299,6 +6303,37 @@ mod tests {
     use super::*;
     use layer_core::{AssetId, Point};
     use layer_engine::{SampleFlags, ToolKind};
+
+    #[test]
+    fn fresh_users_start_with_pencil_and_saved_editing_restores_the_last_brush_and_color() {
+        let mut first = UiSession::blank(Recorder::default(), [1000, 1000], Platform::Gtk).unwrap();
+        assert_eq!((first.state().brush.preset, first.state().brush.tool, first.state().brush.diameter),
+            (DefaultBrushPreset::Pencil as u32, Tool::Pencil, 9.));
+        assert_eq!(first.state().colors.definition(), layer_core::color::RgbColor::new(
+            layer_core::color::RgbSpace::Srgb, [46. / 255., 46. / 255., 46. / 255., 1.]).unwrap());
+        let fresh = EditingState::default();
+        assert_eq!(fresh.preset, first.state().brush.preset);
+        assert_eq!(fresh.colors.definition(), first.state().colors.definition());
+        invoke(&mut first, CommandId::Sculpt);
+        invoke(&mut first, CommandId::DrawingBrush);
+        assert_eq!(first.state().brush.preset, DefaultBrushPreset::Pencil as u32);
+        first.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+        assert_eq!(first.state().brush.diameter, 6.);
+        first.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 17. }).unwrap();
+        first.dispatch(UiAction::SetColor { rgba: [0.6, 0.2, 0.1, 1.] }).unwrap();
+        let saved = serde_json::to_string(&first.editing_state()).unwrap();
+        let mut reopened = UiSession::blank(Recorder::default(), [1000, 1000], Platform::Gtk).unwrap();
+        reopened.restore_editing(serde_json::from_str(&saved).unwrap()).unwrap();
+        assert_eq!(reopened.state().brush.preset, DefaultBrushPreset::PointyPencil as u32);
+        assert_eq!(reopened.state().brush.diameter, 17.);
+        assert_eq!(reopened.state().colors, first.state().colors);
+        for (preset, size) in [(DefaultBrushPreset::Pencil, 9.), (DefaultBrushPreset::PointyPencil, 6.)] {
+            reopened.dispatch(UiAction::SelectBrush { id: preset as u32 }).unwrap();
+            reopened.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 17. }).unwrap();
+            reopened.dispatch(UiAction::ResetToolSetting { id: "size".into() }).unwrap();
+            assert_eq!(reopened.state().brush.diameter, size);
+        }
+    }
 
     #[test]
     fn retained_panel_copy_rejects_stale_tile_identity() {

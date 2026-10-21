@@ -55,6 +55,20 @@ class AndroidFeatureParityTest {
         return JSONArray(listOf(r.width / density, r.height / density))
     }
     private fun capture(name: String) = screenshot("parity-$name.png")
+    @Test fun startupCanvasUsesCurrentDisplayInBothThemes() {
+        val screen = screenInfo(androidx.core.content.ContextCompat.getDisplayOrDefault(compose.activity))!!
+        val height = screen.getJSONArray("extent").getInt(1)
+        val tab = state().array("tabs").objects().first()
+        assertEquals(height, tab.getInt("height"))
+        assertEquals(kotlin.math.round(height * 4.0 / 3.0).toInt(), tab.getInt("width"))
+        assertEquals(9.0, state().getJSONObject("brush").getDouble("diameter"), 0.0)
+        val rgba = state().getJSONObject("colors").getJSONObject("foreground").getJSONArray("rgba")
+        for (channel in 0..2) assertEquals(46.0 / 255.0, rgba.getDouble(channel), 0.000001)
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            capture("startup-$theme")
+        }
+    }
     @Test fun toolSetAndSettingsFollowSelectedTool() {
         action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "tool_settings", "visible" to true)))
         action(obj("type" to "move_panel", "panel" to "tool_settings", "target" to obj("kind" to "float", "position" to JSONArray(listOf(480, 130))), "viewport" to viewport()))

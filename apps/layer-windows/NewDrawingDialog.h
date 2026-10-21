@@ -2,6 +2,7 @@
 #include "UiControls.h"
 
 namespace CapyUi {
+V drawingScreen(Window const& window);
 class NewDrawingDialog {
 public:
     using Dispatch=std::function<void(std::string)>;

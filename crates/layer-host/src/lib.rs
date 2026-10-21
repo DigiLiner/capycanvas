@@ -155,13 +155,16 @@ impl NativeHost {
         Self::launch_localized(platform, saved, layer_ui::launch_localization(saved, preferred_tags))
     }
     pub fn launch_localized(platform: layer_ui::Platform, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Result<Self, String> {
+        Self::launch_on_screen(platform, saved, localization, None)
+    }
+    pub fn launch_on_screen(platform: layer_ui::Platform, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>, screen: Option<layer_ui::ScreenInfo>) -> Result<Self, String> {
         let settings = layer_ui::Settings::restore_localized(saved, &localization);
         let paper = papers::PreparedPaper { texture: settings.new_document.paper(), identity: None, warning: None };
-        Self::launch_prepared(platform, settings, localization, paper)
+        Self::launch_prepared(platform, settings, localization, paper, screen)
     }
     pub fn launch_prepared(platform: layer_ui::Platform, settings: layer_ui::Settings, localization: std::sync::Arc<layer_ui::Localizer>,
-        paper: papers::PreparedPaper) -> Result<Self, String> {
-        let mut session = UiSession::blank_with_settings(Renderer::default(), [1, 1], platform, localization, settings)?;
+        paper: papers::PreparedPaper, screen: Option<layer_ui::ScreenInfo>) -> Result<Self, String> {
+        let mut session = UiSession::blank_with_settings(Renderer::default(), [1, 1], platform, localization, settings, screen)?;
         paper.apply(&mut session);
         Ok(Self::from_session(Box::new(session)))
     }
@@ -1186,11 +1189,11 @@ mod tests {
         let mut settings=layer_ui::Settings::default();
         settings.new_document.paper=Some("rough".into());
         let saved=serde_json::to_string(&settings).unwrap();
-        let sheet=layer_ui::startup_setup();
+        let sheet=layer_ui::startup_setup(None);
         for platform in [layer_ui::Platform::Android,layer_ui::Platform::Windows,layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
             let host=NativeHost::launch(platform,&saved,&["en"]).unwrap();
             let document=host.session.engine().document();
-            assert_eq!(document.paper(None).texture,layer_core::paper::default_texture());
+            assert_eq!(document.paper(None).texture,layer_core::paper::built_in_paper("cold_press").unwrap().texture);
             assert_eq!(document.composition().size,sheet.extent());
             assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(sheet.resolution)));
             assert!(!host.session.state().document_file.modified);
@@ -1207,6 +1210,22 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
         assert_eq!(host.bootstrap_view().active_tag, bootstrap.active_tag);
         assert_eq!(host.session.state().settings.theme, Some(layer_ui::Theme::Dark));
+    }
+
+    #[test]
+    fn native_platforms_use_the_launch_display_for_the_startup_sheet() {
+        for platform in [layer_ui::Platform::Android, layer_ui::Platform::Windows, layer_ui::Platform::Mac, layer_ui::Platform::Ios] {
+            for (extent, ppi, expected, resolution) in [
+                ([2880, 1800], Some(220), [2400, 1800], 220),
+                ([1920, 1080], Some(96), [1440, 1080], 144),
+                ([1080, 1920], None, [2560, 1920], 144),
+            ] {
+                let host = NativeHost::launch_on_screen(platform, "", layer_ui::Localizer::shared(layer_ui::UiLanguage::English), Some(layer_ui::ScreenInfo { extent, ppi })).unwrap();
+                let document = host.session.engine().document();
+                assert_eq!(document.composition().size, expected, "{platform:?}");
+                assert_eq!(document.composition().resolution, Some(layer_core::ImageResolution::ppi(resolution)));
+            }
+        }
     }
 
     #[test]

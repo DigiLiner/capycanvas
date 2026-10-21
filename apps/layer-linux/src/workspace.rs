@@ -2531,6 +2531,16 @@ impl Workspace {
         *self.frame_timer.borrow_mut() = Some(timer);
     }
     fn install_gpu(self: &Rc<Self>) {
+        let has_monitor = Rc::new(Cell::new(false));
+        self.window.connect_realize(glib::clone!(#[weak(rename_to = this)] self, #[strong] has_monitor, move |window| {
+            has_monitor.set(false);
+            if let Some(surface) = window.surface() {
+                surface.connect_enter_monitor(glib::clone!(#[weak] this, #[strong] has_monitor, move |_, _| {
+                    has_monitor.set(true);
+                    if this.area.is_realized() { this.initialize_canvas(&this.area); }
+                }));
+            }
+        }));
         let actions = gtk::gio::SimpleActionGroup::new();
         let wake = gtk::gio::SimpleAction::new("wake", None);
         wake.connect_activate(glib::clone!(#[weak(rename_to = this)] self, move |_, _| this.wake()));
@@ -2545,6 +2555,7 @@ impl Workspace {
         self.area.connect_realize(glib::clone!(
             #[weak(rename_to = this)]
             self,
+            #[strong] has_monitor,
             move |area| {
                 let background = crate::wayland::backdrop::Backdrop::new(area).and_then(|mut background| {
                     background.update(area, this.palette.get().unwrap().bg.0)?;
@@ -2565,16 +2576,8 @@ impl Workspace {
                     this.wake();
                     return;
                 }
-                match GpuCanvas::with_project_localized(area, this.initial_project.borrow_mut().take(), this.localization(), this.initial_settings.borrow_mut().take()) {
-                    Ok(gpu) => {
-                        *this.gpu.borrow_mut() = Some(gpu);
-                        crate::files::paper::load_library(&this);
-                        this.fullscreen_changed(this.window.is_fullscreen());
-                        this.refresh(regions::ALL);
-                        this.workspaces.start(&this);
-                        this.wake();
-                    }
-                    Err(error) => this.gpu_error(&error),
+                if this.initial_project.borrow().is_some() || has_monitor.get() {
+                    this.initialize_canvas(area);
                 }
             }
         ));
@@ -2601,6 +2604,20 @@ impl Workspace {
                 this.backdrop.borrow_mut().take();
             }
         ));
+    }
+    fn initialize_canvas(self: &Rc<Self>, area: &gtk::Picture) {
+        if self.gpu.borrow().is_some() { return; }
+        match GpuCanvas::with_project_localized(area, self.initial_project.borrow_mut().take(), self.localization(), self.initial_settings.borrow_mut().take()) {
+            Ok(gpu) => {
+                *self.gpu.borrow_mut() = Some(gpu);
+                crate::files::paper::load_library(self);
+                self.fullscreen_changed(self.window.is_fullscreen());
+                self.refresh(regions::ALL);
+                self.workspaces.start(self);
+                self.wake();
+            }
+            Err(error) => self.gpu_error(&error),
+        }
     }
     fn gpu_error(self: &Rc<Self>, error: &str) {
         if self

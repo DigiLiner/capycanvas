@@ -14,7 +14,7 @@ internal object Native {
     @JvmStatic external fun prepareLanguage(language: String): Long
     @JvmStatic external fun publishLanguage(handle: Long, generation: Long, context: Long, busy: Boolean)
     @JvmStatic external fun freeLanguage(context: Long)
-    @JvmStatic external fun create(saved: String, locales: Array<String>, profiling: Boolean): Long
+    @JvmStatic external fun create(saved: String, locales: Array<String>, screen: String, profiling: Boolean): Long
     @JvmStatic external fun destroy(handle: Long)
     @JvmStatic external fun attach(handle: Long, surface: Surface, cacheDirectory: String)
     @JvmStatic external fun displayStatus(handle: Long): String

@@ -148,7 +148,7 @@ final class NativeOwner: @unchecked Sendable {
     let receive: @Sendable (JSON?, String?) -> Void
     var sessions: URL? { persistence.locations?.sessions }
 
-    init(platform: UInt32, persistence: EditorPersistence = .shared,
+    init(platform: UInt32, persistence: EditorPersistence = .shared, screen: JSON? = nil,
         traceDuration: TimeInterval? = nil, workload: [String: Any]? = nil, managedWorkspaces: Bool = false,
         receive: @escaping @Sendable (JSON?, String?) -> Void) throws {
         #if DEBUG
@@ -198,7 +198,8 @@ final class NativeOwner: @unchecked Sendable {
             do {
                 let saved = value.settings.map { String(decoding:$0,as:UTF8.self) } ?? ""
                 let configuration = try JSON(["saved":saved,"preferred_languages":preferredLanguages,
-                    "paper_directory":persistence.locations.map { $0.papers.path as Any } ?? NSNull()]).encoded()
+                    "paper_directory":persistence.locations.map { $0.papers.path as Any } ?? NSNull(),
+                    "screen":screen?.raw ?? NSNull()]).encoded()
                 prepared.launch = NativeLaunch(configuration:configuration)
             } catch { prepared.failure = error.localizedDescription }
             loaded.set(prepared); queue.resume()

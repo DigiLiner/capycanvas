@@ -698,6 +698,7 @@ mod tests {
         open(&mut s);
         let opened = view(&s);
         assert_eq!((opened.untitled.as_str(), opened.page.preset.as_str()), ("Untitled 2", "Sketchbook A4"));
+        assert_eq!(opened.page.orientation, Orientation::Landscape);
         assert_eq!(opened.resolutions.iter().filter(|choice| choice.selected).map(|choice| choice.value).collect::<Vec<_>>(), [300]);
         act(&mut s, NewDrawingAction::Name { text: "  Harbor study ".into() });
         act(&mut s, NewDrawingAction::Unit { unit: LengthUnit::Px });
@@ -706,10 +707,10 @@ mod tests {
         act(&mut s, NewDrawingAction::Create);
         assert!(s.state.new_drawing.is_none());
         let order = s.new_drawing_order().unwrap().clone();
-        assert_eq!((order.name.as_str(), order.setup.extent()), ("Harbor study", [1200, 3508]));
+        assert_eq!((order.name.as_str(), order.setup.extent()), ("Harbor study", [1200, 2480]));
         assert_eq!(s.state.settings.new_document.recent, [PresetKey::Last]);
         let project = order.project(order.paper.fallback(), &english()).unwrap();
-        assert_eq!((project.artwork.id, project.composition().size), (order.artwork, [1200, 3508]));
+        assert_eq!((project.artwork.id, project.composition().size), (order.artwork, [1200, 2480]));
         let request = s.state.requests.iter().find(|request| matches!(request.kind, HostRequestKind::Document { request: DocumentRequest::New })).unwrap().id;
         s.complete_document_request(request, Ok(true)).unwrap();
         let mut next = UiSession::from_project(crate::session::test_support::Recorder::default(), project, None, [64, 64], Platform::Gtk).unwrap();

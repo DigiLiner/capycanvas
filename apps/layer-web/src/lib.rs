@@ -328,14 +328,15 @@ impl WebApp {
         });
         self.session.cursor_input(event);
     }
-    pub fn create(canvas: web_sys::HtmlCanvasElement, saved: Option<String>, preferred_tags: JsValue) -> Result<WebApp, JsValue> {
+    pub fn create(canvas: web_sys::HtmlCanvasElement, saved: Option<String>, preferred_tags: JsValue, screen: JsValue) -> Result<WebApp, JsValue> {
         let tags: Vec<String> = serde_wasm_bindgen::from_value(preferred_tags).map_err(js)?;
         let localization = layer_ui::launch_localization(saved.as_deref().unwrap_or(""), &tags.iter().map(String::as_str).collect::<Vec<_>>());
-        let mut session = UiSession::blank_localized(
+        let mut session = UiSession::blank_on_screen(
             AttachedRenderer::default(),
             [canvas.width().max(1), canvas.height().max(1)],
             layer_ui::Platform::Web,
             localization,
+            serde_wasm_bindgen::from_value(screen).map_err(js)?,
         )
         .map_err(js)?;
         if let Some(saved) = saved {

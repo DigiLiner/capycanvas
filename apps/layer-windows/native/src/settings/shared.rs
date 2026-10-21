@@ -19,7 +19,7 @@ struct State {
     listeners: Vec<Weak<Wake>>,
 }
 impl Hub {
-    pub(super) fn with_launch(file: SettingsFile, preferred_tags: &[&str], launch: impl FnOnce(Option<&str>) -> Result<NativeHost, String>) -> Result<(NativeHost, Arc<Self>), String> {
+    pub(super) fn with_launch(file: SettingsFile, preferred_tags: &[&str], screen: Option<layer_ui::ScreenInfo>, launch: impl FnOnce(Option<&str>) -> Result<NativeHost, String>) -> Result<(NativeHost, Arc<Self>), String> {
         static PROFILES: OnceLock<Mutex<HashMap<PathBuf, Arc<Hub>>>> = OnceLock::new();
         let mut profiles = PROFILES.get_or_init(Default::default).lock().unwrap();
         if let Some(hub) = profiles.get(&file.path).cloned() {
@@ -27,7 +27,7 @@ impl Hub {
             let saved = String::from_utf8(state.bytes.clone()).map_err(|error| error.to_string())?;
             let language = layer_ui::resolve_launch_language(state.settings.language, &state.preferred_tags.iter().map(String::as_str).collect::<Vec<_>>());
             drop(state);
-            let native = NativeHost::launch_localized(layer_ui::Platform::Windows, &saved, layer_ui::Localizer::shared(language))?;
+            let native = NativeHost::launch_on_screen(layer_ui::Platform::Windows, &saved, layer_ui::Localizer::shared(language), screen)?;
             return Ok((native, hub));
         }
         let (saved, load_error) = match file.load_saved() {
@@ -47,7 +47,7 @@ impl Hub {
     }
     #[cfg(test)]
     pub(super) fn open(file: SettingsFile, defaults: Settings) -> Result<Arc<Self>, String> {
-        Self::with_launch(file, &["en"], |saved| {
+        Self::with_launch(file, &["en"], None, |saved| {
             let mut native = NativeHost::new_localized(layer_ui::Platform::Windows, layer_ui::Localizer::shared(layer_ui::UiLanguage::English))?;
             let settings = saved.map(|saved| Settings::restore_localized(saved, native.session.localization())).unwrap_or(defaults);
             native.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;

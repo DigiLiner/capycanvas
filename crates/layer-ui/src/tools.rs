@@ -579,7 +579,7 @@ impl ToolMemory {
             .unwrap_or_else(|| tool.default_preset())
     }
     pub(crate) fn drawing(&self) -> u32 {
-        self.drawing.unwrap_or_else(|| self.tool(Tool::Brush))
+        self.drawing.unwrap_or_else(|| self.tool(Tool::Pencil))
     }
     pub(crate) fn sculpt(&self) -> u32 {
         self.sculpt.unwrap_or_else(|| self.tool(Tool::Blend))

@@ -12,7 +12,7 @@ impl EditingState {
         color_library.ensure_starters_localized(localization);
         Self {
             version: 1,
-            preset: layer_core::DefaultBrushPreset::GPen as u32,
+            preset: layer_core::DefaultBrushPreset::Pencil as u32,
             tools: ToolMemory::default(),
             tool_slots: ToolSlotMemory::default(),
             colors: ColorState::default(),

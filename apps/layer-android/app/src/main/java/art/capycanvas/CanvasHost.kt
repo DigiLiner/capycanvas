@@ -36,7 +36,7 @@ internal fun JSONObject.copy() = JSONObject().also { copy -> keys().forEach { co
 
 /** Platform ownership and transport, not application policy. The UI never waits
  * for a GPU submission. One dedicated Looper owns both Rust and the swapchain. */
-class CanvasHost(application: Application) : AndroidViewModel(application) {
+class CanvasHost @JvmOverloads constructor(application: Application, screen: JSONObject? = null) : AndroidViewModel(application) {
     internal val layerSwipe=LayerSwipe()
     internal val palettes=PaletteController(this)
     internal val proof=ProofController(this)
@@ -332,7 +332,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
                 val launch = JSONObject(Native.bootstrap(savedSettings, locales))
                 bootstrapForOwner = launch
                 main.post { bootstrap = launch }
-                handle = Native.create(savedSettings, locales, BuildConfig.DEBUG || BuildConfig.WORKSPACE_BENCHMARK)
+                handle = Native.create(savedSettings, locales, screen?.toString().orEmpty(), BuildConfig.DEBUG || BuildConfig.WORKSPACE_BENCHMARK)
                 choreographer = Choreographer.getInstance()
                 attempt(canvas = false) {
                     updateWorkspaceManager(obj("type" to "start", "directory" to workspaces))

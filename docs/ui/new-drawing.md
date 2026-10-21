@@ -3,9 +3,14 @@
 [Workspace and UI](README.md)
 
 New drawing asks for a sheet the way an art store sells one: a size in the
-unit the artist thinks in, a resolution, a color mode and a paper. A new window
-always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
-8-bit, Drawing paper at 0% Texture visibility).
+unit the artist thinks in, a resolution, a color mode and a paper. A fresh workspace on every platform
+opens on a 4:3 landscape sheet with the current monitor's height in device pixels.
+It uses the monitor's PPI, with a minimum of 144 and a fallback of 144 when unknown,
+sRGB 8-bit color, Cold press paper at 100% Texture visibility and Natural white.
+The selected brush and drawing color are restored from the saved editing state.
+New users start with Pencil and drawing color #2E2E2E (30% lightness). Pencil's
+default size is 9 px and Pointy Pencil's is 6 px; saved custom sizes are preserved.
+If display dimensions are unavailable, the sheet is 1,440 × 1,080 px.
 
 ## What artists see
 
@@ -30,6 +35,11 @@ always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
   comes first once a preset was used; Your presets appears once one is saved.
   Save As… names the current sheet into a category; your own presets have
   Rename and Delete. Select applies the picked preset.
+- **Preset orientation.** General sheets, sketch pads, canvases and art prints
+  start landscape. Pocket books, journals, botanical plates, cards, bookmarks,
+  scrolls, comics pages, zines, posters and portrait device/social formats keep
+  portrait. Leaf, Reed screen and Toilet paper keep their physical proportions.
+  Square presets stay square, and This screen follows the display's orientation.
 - **Paper.** The Choose Texture grid with No paper first, the built-in papers,
   then imported papers, and an Import… tile last. Texture visibility, a 0–300%
   field like W and H, sits at the left of the footer and is disabled for No
@@ -63,6 +73,13 @@ takes the display's pixels and density from the host.
 
 ## Host contract
 
+At startup, hosts capture the current display before creating the blank session.
+GTK waits for monitor assignment and Apple waits for the canvas window. Native
+bridges and Web pass `ScreenInfo` to the shared startup constructor. Physical
+display density is optional: browsers and
+iPadOS report pixels without a known PPI. The shared constructor applies the
+144 PPI minimum and fallback.
+
 1. New drawing raises the `document` request `new`. The host dispatches
    `UiAction::NewDrawing { action: Open { screen, untitled } }` with the
    display it shows the dialog on and the next untitled drawing name.
@@ -89,4 +106,11 @@ sections.
 
 - `cargo test --locked -p layer-ui new_drawing` covers presets, units, limits,
   the dialog's actions and the Create order without a window.
+- `native_startup_canvas_uses_current_monitor` checks the startup sheet, Pencil
+  and drawing color on the private GTK display in both themes.
 - `native_new_drawing_dialog_review` walks the GTK dialog in both themes.
+- Web's `--new-drawing` and Android's
+  `startupCanvasUsesCurrentDisplayInBothThemes` check startup display dimensions,
+  Pencil size and drawing color; their New drawing journeys cover both themes.
+- Native host tests cover every platform's screen sizing and PPI fallback. Apple
+  launch configuration and Windows shared settings tests cover the bridge paths.

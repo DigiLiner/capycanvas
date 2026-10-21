@@ -96,19 +96,21 @@ struct AppleLaunch {
     saved: String,
     preferred_languages: Vec<String>,
     paper_directory: Option<std::path::PathBuf>,
+    screen: Option<layer_ui::ScreenInfo>,
 }
 pub struct CapyAppleLaunch {
     settings: layer_ui::Settings,
     localization: std::sync::Arc<layer_ui::Localizer>,
     paper: layer_host::papers::PreparedPaper,
     directory: Option<std::path::PathBuf>,
+    screen: Option<layer_ui::ScreenInfo>,
 }
 impl CapyAppleLaunch {
-    fn prepare(saved: &str, localization: std::sync::Arc<layer_ui::Localizer>, directory: Option<std::path::PathBuf>) -> Self {
+    fn prepare(saved: &str, localization: std::sync::Arc<layer_ui::Localizer>, directory: Option<std::path::PathBuf>, screen: Option<layer_ui::ScreenInfo>) -> Self {
         let settings = layer_ui::Settings::restore_localized(saved, &localization);
         let material = layer_ui::paper_library::PaperMaterial::capture(&settings.new_document, None);
         let paper = layer_host::papers::resolve(&material, directory.as_deref(), &localization);
-        Self { settings, localization, paper, directory }
+        Self { settings, localization, paper, directory, screen }
     }
 }
 /// # Safety
@@ -123,7 +125,7 @@ pub unsafe extern "C" fn capy_apple_prepare_launch(json: *const c_char, error: *
         let tags: Vec<&str> = launch.preferred_languages.iter().map(String::as_str).collect();
         let localization = layer_ui::launch_localization(&launch.saved, &tags);
         layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
-        Ok(Box::into_raw(Box::new(CapyAppleLaunch::prepare(&launch.saved, localization, launch.paper_directory))))
+        Ok(Box::into_raw(Box::new(CapyAppleLaunch::prepare(&launch.saved, localization, launch.paper_directory, launch.screen))))
     }).unwrap_or_else(|payload| Err(layer_host::panic_diagnostic(&*payload)));
     result.unwrap_or_else(|message: String| {
         if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).unwrap().into_raw() }; }
@@ -173,7 +175,7 @@ pub(crate) fn on_large_stack<T: Send>(name: &str, work: impl FnOnce() -> T + Sen
 }
 #[cfg(test)]
 fn apple_launch_localized(platform: u32, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Result<*mut CapyApple, String> {
-    let prepared = CapyAppleLaunch::prepare(saved, localization, None);
+    let prepared = CapyAppleLaunch::prepare(saved, localization, None, None);
     apple_launch_prepared(platform, &prepared)
 }
 fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<*mut CapyApple, String> {
@@ -186,7 +188,7 @@ fn apple_launch_on_stack(platform: u32, prepared: &CapyAppleLaunch) -> Result<*m
         1 => layer_ui::Platform::Mac,
         _ => return Err(format!("Unknown Apple platform {platform}")),
     };
-    let mut host = NativeHost::launch_prepared(platform, prepared.settings.clone(), prepared.localization.clone(), prepared.paper.clone())?;
+    let mut host = NativeHost::launch_prepared(platform, prepared.settings.clone(), prepared.localization.clone(), prepared.paper.clone(), prepared.screen)?;
     host.ui_color = layer_host::UiColor::Tagged(DISPLAY_SPACE);
     host.dispatch(layer_ui::UiAction::RestoreWorkspace {
         workspace: Box::new(layer_ui::WorkspaceState::for_platform(platform)),

@@ -57,8 +57,6 @@ impl GpuCanvas {
             .native()
             .and_then(|native| native.surface())
             .ok_or("The canvas window has no native surface")?;
-        // Load once before allocating document resources so a new window uses
-        // the same explicit creation defaults as File → New.
         let settings = settings.unwrap_or_else(|| match crate::preferences::load() {
             Ok(settings) => settings.unwrap_or_default(),
             Err(error) => {
@@ -69,7 +67,7 @@ impl GpuCanvas {
         let startup = project.is_none();
         let (project, location) = match project {
             Some(project) => project,
-            None => (layer_ui::startup_drawing(&localization)?, None),
+            None => (layer_ui::startup_drawing(crate::new_drawing::screen(&parent), &localization)?, None),
         };
         let color = project.composition().color;
         let renderer = RenderWorker::new(Parent::new(&parent)?, area.downgrade().into(), color, localization.clone())?;

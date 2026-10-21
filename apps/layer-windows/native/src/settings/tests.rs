@@ -45,6 +45,20 @@ fn preference(id: layer_ui::PreferenceId, value: f32) -> UiAction {
 }
 
 #[test]
+fn launch_keeps_each_windows_display_with_shared_settings_and_load_failures() {
+    let directory = TempDir::new();
+    let screen = |extent, ppi| Some(layer_ui::ScreenInfo { extent, ppi });
+    let (first, retained) = SettingsService::launch_at(Ok(storage(&directory)), &["en"], screen([2880, 1800], Some(220))).unwrap();
+    let (second, _) = SettingsService::launch_at(Ok(storage(&directory)), &["en"], screen([1920, 1080], Some(96))).unwrap();
+    let (fallback, _) = SettingsService::launch_at(Err("unavailable settings".into()), &["en"], screen([1080, 1920], None)).unwrap();
+    for (host, size, ppi) in [(first, [2400, 1800], 220), (second, [1440, 1080], 144), (fallback, [2560, 1920], 144)] {
+        assert_eq!(host.session.engine().document().composition().size, size);
+        assert_eq!(host.session.engine().document().composition().resolution, Some(layer_core::ImageResolution::ppi(ppi)));
+    }
+    drop(retained);
+}
+
+#[test]
 fn settings_round_trip_uses_shared_validation() {
     let directory = TempDir::new();
     let mut file = storage(&directory);
@@ -681,18 +695,18 @@ fn prepared_launch_restores_before_views_and_keeps_the_profile_context() {
     initial.new_document.setups.push(layer_ui::SavedSetup { name: literal.into(), group: layer_ui::PresetGroup::Yours, setup: layer_ui::default_setup() });
     let saved = serde_json::to_string(&initial).unwrap();
     fs::write(directory.path.join("settings.json"), &saved).unwrap();
-    let (first, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["ja-JP", "ko", "en"]).unwrap();
+    let (first, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["ja-JP", "ko", "en"], None).unwrap();
     assert_eq!(first.session.localization().language(), layer_ui::UiLanguage::English);
     assert_eq!(first.session.state().settings.pan_speed, 1.5);
     assert_eq!(first.session.state().settings.new_document.setups[0].name, literal);
     assert_eq!(fs::read_to_string(directory.path.join("settings.json")).unwrap(), saved);
     let active = first.session.localization().clone();
     drop(first);drop(prepared);
-    let (reopened, _) = shared::Hub::with_launch(storage(&directory), &["ja-JP"], |_| panic!("Closing all windows must retain the launch context")).unwrap();
+    let (reopened, _) = shared::Hub::with_launch(storage(&directory), &["ja-JP"], None, |_| panic!("Closing all windows must retain the launch context")).unwrap();
     assert!(Arc::ptr_eq(reopened.session.localization(), &active));
     let japanese = TempDir::new();
     fs::write(japanese.path.join("settings.json"), &saved).unwrap();
-    let (native, hub) = shared::Hub::with_launch(storage(&japanese), &["ja"], |saved| NativeHost::launch_localized(layer_ui::Platform::Windows, saved.unwrap_or_default(), layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese))).unwrap();
+    let (native, hub) = shared::Hub::with_launch(storage(&japanese), &["ja"], None, |saved| NativeHost::launch_localized(layer_ui::Platform::Windows, saved.unwrap_or_default(), layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese))).unwrap();
     let retained = native.session.localization().clone();
     assert!(!Arc::ptr_eq(&active, &retained));
     let mut subscriber = shared::Subscription::new(hub.clone(), || {});
@@ -700,7 +714,7 @@ fn prepared_launch_restores_before_views_and_keeps_the_profile_context() {
     desired.language = layer_ui::LanguagePreference::System;
     subscriber.edit(&desired).unwrap();
     drop(native);drop(subscriber);drop(hub);
-    let (later, prepared) = SettingsService::launch_at(Ok(storage(&japanese)), &["en-US"]).unwrap();
+    let (later, prepared) = SettingsService::launch_at(Ok(storage(&japanese)), &["en-US"], None).unwrap();
     drop(prepared);
     assert!(Arc::ptr_eq(later.session.localization(), &retained));
     assert_eq!(later.session.state().settings.language, layer_ui::LanguagePreference::System);
@@ -726,9 +740,9 @@ fn language_presentation_carries_the_active_delivery_copy() {
 #[test]
 fn profile_language_publication_survives_write_failure_and_defers_an_input_owner() {
     let directory = TempDir::new();
-    let (mut first, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["ja-JP", "en"]).unwrap();
+    let (mut first, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["ja-JP", "en"], None).unwrap();
     let mut service = prepared.start(&mut first, || {});
-    let (mut second, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["en"]).unwrap();
+    let (mut second, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["en"], None).unwrap();
     let mut other = prepared.start(&mut second, || {});
     other.localization_input(true);
     fs::create_dir(directory.path.join("settings.json")).unwrap();
@@ -747,7 +761,7 @@ fn profile_language_publication_survives_write_failure_and_defers_an_input_owner
     assert_eq!(first.localization_generation(), generation + 1);
     other.localization_input(false);other.sync(&mut second).unwrap();
     assert!(Arc::ptr_eq(first.session.localization(), second.session.localization()));
-    let (later, _) = SettingsService::launch_at(Ok(storage(&directory)), &["en"]).unwrap();
+    let (later, _) = SettingsService::launch_at(Ok(storage(&directory)), &["en"], None).unwrap();
     assert!(Arc::ptr_eq(later.session.localization(), first.session.localization()));
     let mut desired = first.session.state().settings.clone();desired.language = layer_ui::LanguagePreference::System;
     let bytes = service.subscription.as_mut().unwrap().edit(&desired).unwrap();

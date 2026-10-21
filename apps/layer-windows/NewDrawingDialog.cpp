@@ -14,6 +14,18 @@
 #include <array>
 
 namespace CapyUi {
+V drawingScreen(Window const& window){
+    HWND handle=nullptr;check_hresult(window.as<IWindowNative>()->get_WindowHandle(&handle));
+    if(auto monitor=MonitorFromWindow(handle,MONITOR_DEFAULTTONEAREST)){
+        MONITORINFO info{};info.cbSize=sizeof(info);UINT dpiX=0,dpiY=0;
+        if(GetMonitorInfoW(monitor,&info)){
+            A extent;extent.Append(N(info.rcMonitor.right-info.rcMonitor.left));extent.Append(N(info.rcMonitor.bottom-info.rcMonitor.top));
+            bool physical=SUCCEEDED(GetDpiForMonitor(monitor,MDT_RAW_DPI,&dpiX,&dpiY))&&dpiX>0;
+            return O({{L"extent",extent},{L"ppi",physical?N(dpiX):V(JsonValue::CreateNullValue())}});
+        }
+    }
+    return JsonValue::CreateNullValue();
+}
 namespace Pickers=winrt::Microsoft::Windows::Storage::Pickers;
 namespace {
 namespace Animation=winrt::Microsoft::UI::Xaml::Media::Animation;
@@ -165,15 +177,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         epoch=num(file,L"epoch");revision=num(file,L"revision");
         HWND handle=nullptr;check_hresult(window.as<IWindowNative>()->get_WindowHandle(&handle));
         if(IsIconic(handle))ShowWindow(handle,SW_RESTORE);
-        V screen=JsonValue::CreateNullValue();
-        if(auto monitor=MonitorFromWindow(handle,MONITOR_DEFAULTTONEAREST)){
-            MONITORINFO info{};info.cbSize=sizeof(info);UINT dpiX=0,dpiY=0;
-            if(GetMonitorInfoW(monitor,&info)){
-                A extent;extent.Append(N(info.rcMonitor.right-info.rcMonitor.left));extent.Append(N(info.rcMonitor.bottom-info.rcMonitor.top));
-                bool physical=SUCCEEDED(GetDpiForMonitor(monitor,MDT_RAW_DPI,&dpiX,&dpiY))&&dpiX>0;
-                screen=O({{L"extent",extent},{L"ppi",physical?N(dpiX):V(JsonValue::CreateNullValue())}});
-            }
-        }
+        auto screen=drawingScreen(window);
         waiting=true;seen=false;creating=false;shown=J{};
         data->dispatch(O({{L"type",S(L"new_drawing")},{L"action",O({{L"op",S(L"open")},{L"screen",screen},{L"untitled",S(str(object(data->model,L"windows_tabs"),L"upcoming_untitled"))}})}}));
         changed();

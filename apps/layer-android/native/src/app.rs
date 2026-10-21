@@ -25,8 +25,8 @@ pub(crate) struct App {
     pub screen_presented: std::time::Instant,
 }
 impl App {
-    pub fn new(saved: &str, preferred_tags: &[&str]) -> Result<Self, String> {
-        let mut host = layer_host::NativeHost::launch_localized(layer_ui::Platform::Android, saved, crate::launch::localization(saved, preferred_tags))?;
+    pub fn new(saved: &str, preferred_tags: &[&str], screen: Option<layer_ui::ScreenInfo>) -> Result<Self, String> {
+        let mut host = layer_host::NativeHost::launch_on_screen(layer_ui::Platform::Android, saved, crate::launch::localization(saved, preferred_tags), screen)?;
         if let Some(language) = crate::launch::current_preference() {
             let mut settings = host.session.state().settings.clone();
             settings.language = language;

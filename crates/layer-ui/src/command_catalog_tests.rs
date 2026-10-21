@@ -704,6 +704,7 @@ fn numeric_parameters_match_active_and_canonical_labels_with_stable_targets() {
     for language in UiLanguage::ALL {
         let mut s = UiSession::blank_localized(Recorder::default(), [256, 256], Platform::Gtk,
             Localizer::shared(language)).unwrap();
+        invoke(&mut s, CommandId::Pen);
         invoke(&mut s, CommandId::AddLayer);
         s.dispatch(UiAction::Effect { action: EffectAction::Insert { effect: "exposure".into() } }).unwrap();
         s.dispatch(UiAction::Layer { action: LayerAction::Rename { id: occurrence_token(s.engine.document().working.occurrence.unwrap()), name: "Literal { $name }".into() } }).unwrap();

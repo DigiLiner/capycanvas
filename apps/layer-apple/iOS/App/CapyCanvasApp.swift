@@ -17,7 +17,7 @@ import SwiftUI
 private struct IPadEditorScene: View {
     @StateObject private var store: EditorStore
     @Environment(\.scenePhase) private var phase
-    init(scene: String) { _store = StateObject(wrappedValue: EditorStore(platform: 0, scene: scene)) }
+    init(scene: String) { _store = StateObject(wrappedValue: EditorStore(platform: 0, scene: scene, deferLaunch: true)) }
     var body: some View {
         // Keep the drawable in full-window coordinates. UIKit's keyboard guide
         // supplies workspace clearance for controls through the shared layout.

@@ -358,7 +358,7 @@ fun findNode(match: (SemanticsNode) -> Boolean, first: ViewRootForTest? = null):
 
 fun findTag(tag: String, first: ViewRootForTest? = null) = findNode(hasTag(tag), first)
 
-internal fun createEnglishHostForTest(profiling: Boolean = false): Long = Native.create("", arrayOf("en"), profiling)
+internal fun createEnglishHostForTest(profiling: Boolean = false): Long = Native.create("", arrayOf("en"), "", profiling)
 
 internal fun CanvasHost.writeDrawingCopy(file: File, compose: ComposeTestRule? = null) = runBlocking {
     val previous = DocumentController.nativeFileJobsForTest

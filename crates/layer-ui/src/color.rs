@@ -231,7 +231,7 @@ impl ColorState {
     pub fn new() -> Self {
         let foreground = RgbColor { linear_rgb: None,
             space: RgbSpace::Srgb,
-            rgba: [81. / 255., 128. / 255., 58. / 255., 1.],
+            rgba: [46. / 255., 46. / 255., 46. / 255., 1.],
         };
         Self {
             foreground,

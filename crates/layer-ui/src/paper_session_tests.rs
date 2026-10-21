@@ -522,7 +522,7 @@ fn recovery_keeps_its_authored_paper_when_the_initial_default_was_prepared_from_
     let remembered=gray_paper(10);let id=paper_identity(&remembered).unwrap();
     let texture=layer_core::TextureSource::Image(layer_core::authored::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(remembered.clone())));
     let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
-    let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings).unwrap();
+    let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings,None).unwrap();
     initial.initialize_paper(Some(id.clone()),texture.clone(),None);initial.frame(0,0).unwrap();
     assert_eq!(initial.new_drawing_paper(),texture);
     assert!(!initial.engine.can_undo());assert!(!initial.engine.can_redo());assert!(!initial.state.document_file.modified);
@@ -644,7 +644,7 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             let decoded=layer_core::paper::decode_png(&layer_core::paper::encode_png(&source).unwrap()).unwrap();
             let texture=layer_core::TextureSource::Image(layer_core::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(decoded)));
             let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
-            let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings).unwrap();
+            let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings,None).unwrap();
             previous.initialize_paper(Some(id.clone()),texture,None);previous.frame(0,0).unwrap();
             if mode==0 {opened.frame(0,0).unwrap();}opened.inherit_window_state(&previous).unwrap();
             opened.set_paper_library(vec![entry]).unwrap();

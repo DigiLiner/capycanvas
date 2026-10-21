@@ -22,7 +22,7 @@ import SwiftUI
 private struct MacEditorScene: View {
     // WindowGroup creates this state per window, never one renderer for the app.
     @StateObject private var store: EditorStore
-    init(scene: String) { _store = StateObject(wrappedValue: EditorStore(platform: 1, scene: scene)) }
+    init(scene: String) { _store = StateObject(wrappedValue: EditorStore(platform: 1, scene: scene, deferLaunch: true)) }
     var body: some View {
         EditorView(store: store) { MacMetalCanvas(store: store) }
             .frame(minWidth: 700, minHeight: 500)

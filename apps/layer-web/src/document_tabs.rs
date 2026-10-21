@@ -184,7 +184,7 @@ impl WebApp {
         self.document_changed()
     }
 
-    pub fn prepare_document_close(&mut self) -> Result<WebDocumentClose, JsValue> {
+    pub fn prepare_document_close(&mut self, screen: JsValue) -> Result<WebDocumentClose, JsValue> {
         if !self.session.state().document_file.close_ready {
             return Err(js("Confirm closing the drawing first"));
         }
@@ -194,11 +194,12 @@ impl WebApp {
             next.inherit_window_state(&self.session).map_err(js)?;
             None
         } else {
-            let mut next = UiSession::blank_localized(
+            let mut next = UiSession::blank_on_screen(
                 AttachedRenderer::default(),
                 self.session.state().camera.viewport,
                 layer_ui::Platform::Web,
                 self.session.localization().clone(),
+                serde_wasm_bindgen::from_value(screen).map_err(js)?,
             )
             .map_err(js)?;
             next.inherit_window_state(&self.session).map_err(js)?;

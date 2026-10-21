@@ -8,7 +8,7 @@ inline std::shared_ptr<CapyLocalization> fixtureContext(wchar_t const* variable)
     winrt::check_bool(SetEnvironmentVariableW(L"CAPY_STORAGE_DIR",directory.c_str()));
     std::shared_ptr<CapyLocalization> context;
     std::jthread startup([&]{
-        std::unique_ptr<CapyLaunch,decltype(&capy_launch_free)> launch(capy_launch("[\"en\"]"),capy_launch_free);
+        std::unique_ptr<CapyLaunch,decltype(&capy_launch_free)> launch(capy_launch("[\"en\"]",nullptr),capy_launch_free);
         if(launch)context=std::shared_ptr<CapyLocalization>(capy_launch_localization(launch.get()),capy_localization_free);
     });
     startup.join();if(!context)throw winrt::hresult_error(E_FAIL);

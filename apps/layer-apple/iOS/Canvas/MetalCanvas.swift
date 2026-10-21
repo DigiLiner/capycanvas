@@ -90,9 +90,11 @@ final class CanvasView: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         sceneGeometry = nil
+        store.projectFiles.presentationScreen = window?.screen
         shaderActivity.view?.removeGestureRecognizer(shaderActivity)
         if window == nil { cancelPickerHold() }
         if let window {
+            store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) })
             shaderActivity.activity = { [weak store] in store?.native?.shaderInput() }
             window.addGestureRecognizer(shaderActivity)
             measureWorkspaceBottom()

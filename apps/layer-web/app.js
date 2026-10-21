@@ -18,6 +18,7 @@ import { createCanvasBar } from "./canvas-bar.js";
 import { createNotice } from "./notice.js";
 import { createZoomReadout } from "./zoom-readout.js";
 import { createScreenStatus } from "./screen-status.js";
+import { screenInfo } from "./new-drawing.js";
 import { createEditorPanels } from "./editor-panels.js";
 import { createWorkspaceChrome, tabHover } from "./workspace-chrome.js";
 import { createGlass } from "./glass.js";
@@ -1773,7 +1774,7 @@ try {
   try { savedPreferences = localStorage.getItem(settingsKey); }
   catch (error) { restoreError = error; }
   const preferredLanguages = Array.from(navigator.languages ?? []);
-  app = WebApp.create(canvas, savedPreferences, preferredLanguages);
+  app = WebApp.create(canvas, savedPreferences, preferredLanguages, screenInfo());
   bootstrap = liveCopy(app, "bootstrap_view");
   delivery = liveCopy(app, "document_delivery_copy");
   document.documentElement.lang = bootstrap.active_tag;

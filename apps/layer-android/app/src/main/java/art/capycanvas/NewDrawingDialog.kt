@@ -101,13 +101,14 @@ private val Thumbnail = 36.dp
 private val Swatch = 44.dp
 
 /** The display's size in device pixels and its physical pixels per inch. */
-internal fun screenInfo(view: android.view.View): JSONObject? {
-    val display = view.display ?: return null
+internal fun screenInfo(view: android.view.View): JSONObject? = screenInfo(view.display)
+internal fun screenInfo(display: android.view.Display?): JSONObject? {
+    display ?: return null
     val metrics = android.util.DisplayMetrics()
     @Suppress("DEPRECATION") display.getRealMetrics(metrics)
     if (metrics.widthPixels <= 0 || metrics.heightPixels <= 0) return null
-    val ppi = ((metrics.xdpi + metrics.ydpi) / 2).roundToInt()
-    return obj("extent" to JSONArray(listOf(metrics.widthPixels, metrics.heightPixels)), "ppi" to ppi.takeIf { it > 0 })
+    val ppi = ((metrics.xdpi + metrics.ydpi) / 2).takeIf { it.isFinite() && it > 0 }?.roundToInt()
+    return obj("extent" to JSONArray(listOf(metrics.widthPixels, metrics.heightPixels)), "ppi" to ppi)
 }
 
 private class NumberDraft(val typing: () -> Boolean, val commit: () -> Boolean)

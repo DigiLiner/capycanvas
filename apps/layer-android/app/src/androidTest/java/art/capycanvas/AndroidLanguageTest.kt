@@ -83,7 +83,7 @@ class AndroidLanguageTest {
                 }
                 assertEquals(owner, runBlocking { host.withNative { it } })
                 val futureTag = runBlocking { host.withNative {
-                    val next = Native.create("{\"language\":{\"Explicit\":\"en\"}}", arrayOf("en-US"), false)
+                    val next = Native.create("{\"language\":{\"Explicit\":\"en\"}}", arrayOf("en-US"), "", false)
                     try { JSONObject(Native.modelUpdate(next)!!).getJSONObject("bootstrap").getString("active_tag") }
                     finally { Native.destroy(next) }
                 } }

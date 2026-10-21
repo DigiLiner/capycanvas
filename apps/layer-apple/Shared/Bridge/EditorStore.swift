@@ -64,6 +64,7 @@ import Darwin
     var navigationCursor: String { snapshot["navigation_cursor"].string }
     var systemSceneID: String?
     let sessionIdentity: String
+    private var launch: ((JSON?) -> Void)?
     private(set) var native: NativeOwner?
     private(set) var workspaces: WorkspaceController?
     private var drawingWorkload: DrawingWorkload?
@@ -106,19 +107,32 @@ import Darwin
     var workspaceMotion: WorkspaceMotion { ui.workspace }
 
     init(platform: UInt32, scene: String = UUID().uuidString, persistence: EditorPersistence = .shared,
-        managedWorkspaces: Bool = true) {
+        managedWorkspaces: Bool = true, deferLaunch: Bool = false) {
         sessionIdentity = UUID(uuidString: scene)?.uuidString ?? UUID().uuidString
         do {
             let workload = try DrawingWorkloadPlan.configured()
-            // Performance runs never read or replace the artist's preferences
-            // or recovery copies. Keep ordinary persistence costs in the run.
             let storage = workload == nil ? persistence : EditorPersistence(root:
                 FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("CapyPerformanceSessions/\(UUID().uuidString)", isDirectory: true))
             paperDirectory = storage.locations?.papers
             colorPreferences = ColorPreferencesStore(locations: storage.locations)
-            let usesWorkspaceLibrary = managedWorkspaces && storage.locations != nil
-            native = try NativeOwner(platform: platform, persistence: storage,
+            launch = { [weak self] screen in
+                self?.initialize(platform: platform, scene: scene, storage: storage,
+                    usesWorkspaceLibrary: managedWorkspaces && storage.locations != nil, workload: workload, screen: screen)
+            }
+            if !deferLaunch { start(on: ProjectFiles.screenInfo().map { JSON($0) }) }
+        } catch { failure = error.localizedDescription }
+        Self.instances.add(self)
+    }
+    func start(on screen: JSON?) {
+        let launch = launch
+        self.launch = nil
+        launch?(screen)
+    }
+    private func initialize(platform: UInt32, scene: String, storage: EditorPersistence,
+        usesWorkspaceLibrary: Bool, workload: DrawingWorkloadPlan?, screen: JSON?) {
+        do {
+            native = try NativeOwner(platform: platform, persistence: storage, screen: screen,
                 traceDuration: workload.map { $0.seconds + ($0.document == nil ? 140 : 240) }, workload: workload?.metadata,
                 managedWorkspaces: usesWorkspaceLibrary) { [weak self] snapshot, failure in
                 DispatchQueue.main.async { self?.receive(snapshot, failure) }
@@ -134,7 +148,6 @@ import Darwin
             }
             if let workload { drawingWorkload = DrawingWorkload(store: self, plan: workload) }
         } catch { failure = error.localizedDescription }
-        Self.instances.add(self)
     }
     private func receive(_ next: JSON?, _ error: String?) {
         if next?["display_poll"].bool == true { observeDisplayHeadroom?(); return }
