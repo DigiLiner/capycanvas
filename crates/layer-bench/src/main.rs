@@ -515,7 +515,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         return blend_study::run(Path::new(&directory), &blend_study::catalog());
     }
     if std::env::args().nth(1).as_deref() == Some("--brush-previews") {
-        return previews::generate(Path::new("apps/layer-web/brush-previews"));
+        let directory = std::env::args().nth(2).unwrap_or_else(|| "apps/layer-web/brush-previews".into());
+        return previews::generate(Path::new(&directory));
     }
     let options = parse_options()?;
     DOCUMENT_COLOR.set(options.color).expect("benchmark color initialized once");

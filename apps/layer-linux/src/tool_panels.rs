@@ -205,12 +205,15 @@ mod preview_row {
         }
         fn size_allocate(&self, width: i32, height: i32, _: i32) {
             let obj = self.obj();
-            let preview = obj.first_child().unwrap();
-            preview.allocate(width, preview.height_request().min(height), -1, None);
             let caption = obj.last_child().unwrap();
             let h = caption.measure(gtk::Orientation::Vertical, width).1.min(height);
             caption.allocate(width, h, -1, Some(gtk::gsk::Transform::new()
                 .translate(&gtk::graphene::Point::new(0., (height - h) as f32))));
+            let preview = obj.first_child().unwrap();
+            let above = height - h;
+            let p = preview.height_request().min(above);
+            preview.allocate(width, p, -1, Some(gtk::gsk::Transform::new()
+                .translate(&gtk::graphene::Point::new(0., ((above - p) / 2) as f32))));
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();

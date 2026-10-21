@@ -9,7 +9,7 @@ const COLUMNS: u32 = 8;
 const ROWS: u32 = 2;
 const PAPER: [f32; 4] = [0.93, 0.92, 0.88, 1.0];
 
-fn srgb(hex: u32) -> [f32; 4] {
+pub(crate) fn srgb(hex: u32) -> [f32; 4] {
     let channel = |shift: u32| {
         let v = ((hex >> shift) & 255) as f32 / 255.0;
         if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
@@ -26,8 +26,8 @@ pub struct Scene {
 }
 
 pub struct Painter<'a> {
-    canvas: &'a mut Canvas,
-    origin: [f32; 2],
+    pub(crate) canvas: &'a mut Canvas,
+    pub(crate) origin: [f32; 2],
 }
 
 impl Painter<'_> {
@@ -86,12 +86,12 @@ impl Painter<'_> {
         self.stroke(&brush, &points).expect("texture stroke");
     }
 
-    fn blend(&mut self, brush: &BrushSnapshot, points: &[(f32, f32, f32)]) {
+    pub(crate) fn blend(&mut self, brush: &BrushSnapshot, points: &[(f32, f32, f32)]) {
         self.stroke(brush, points).expect("blend stroke");
     }
 }
 
-fn line(from: (f32, f32), to: (f32, f32), step: f32) -> Vec<(f32, f32)> {
+pub(crate) fn line(from: (f32, f32), to: (f32, f32), step: f32) -> Vec<(f32, f32)> {
     let length = (to.0 - from.0).hypot(to.1 - from.1);
     let count = (length / step).ceil().max(1.0) as usize;
     (0..=count).map(|i| {
@@ -100,7 +100,7 @@ fn line(from: (f32, f32), to: (f32, f32), step: f32) -> Vec<(f32, f32)> {
     }).collect()
 }
 
-fn pressured(points: Vec<(f32, f32)>, pressure: f32) -> Vec<(f32, f32, f32)> {
+pub(crate) fn pressured(points: Vec<(f32, f32)>, pressure: f32) -> Vec<(f32, f32, f32)> {
     let count = points.len().max(2) - 1;
     points.into_iter().enumerate().map(|(i, (x, y))| {
         let t = i as f32 / count as f32;
@@ -109,7 +109,7 @@ fn pressured(points: Vec<(f32, f32)>, pressure: f32) -> Vec<(f32, f32, f32)> {
     }).collect()
 }
 
-fn polyline(points: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
+pub(crate) fn polyline(points: &[(f32, f32)], step: f32) -> Vec<(f32, f32)> {
     let mut result = vec![points[0]];
     for pair in points.windows(2) {
         result.extend(line(pair[0], pair[1], step).into_iter().skip(1));
@@ -402,7 +402,7 @@ pub struct Blender {
     pub brush: Option<BrushSnapshot>,
 }
 
-fn prepared(mut brush: BrushSnapshot, diameter: f32) -> BrushSnapshot {
+pub(crate) fn prepared(mut brush: BrushSnapshot, diameter: f32) -> BrushSnapshot {
     brush.diameter = diameter * brush.aspect.min(1.0);
     brush.stabilization = BrushStabilization { strength: 0.0, pressure_smoothing: 0.0, ..brush.stabilization };
     brush
@@ -479,7 +479,7 @@ fn write_index(directory: &Path, blenders: &[Blender], scenes: &[Scene]) -> Resu
     Ok(())
 }
 
-fn scrub(from: f32, to: f32, top: f32, bottom: f32, step: f32) -> Vec<(f32, f32, f32)> {
+pub(crate) fn scrub(from: f32, to: f32, top: f32, bottom: f32, step: f32) -> Vec<(f32, f32, f32)> {
     let mut points = vec![];
     let mut x = from;
     let mut down = true;
@@ -491,100 +491,6 @@ fn scrub(from: f32, to: f32, top: f32, bottom: f32, step: f32) -> Vec<(f32, f32,
     pressured(polyline(&points, 2.0), 0.9)
 }
 
-fn cel_tube(p: &mut Painter, light: u32, mid: u32, dark: u32, background: u32) {
-    p.fill(srgb(background), [8.0, 6.0, 392.0, 74.0]);
-    for (color, from, to) in [(dark, 8.0, 72.0), (mid, 8.0, 54.0), (light, 14.0, 32.0)] {
-        let mut y = from + 6.0;
-        while y < to - 6.0 {
-            p.ink(srgb(color), 12.0, &line((14.0, y), (386.0, y), 2.0));
-            y += 5.0;
-        }
-        p.ink(srgb(color), 12.0, &line((14.0, to - 6.0), (386.0, to - 6.0), 2.0));
-    }
-}
 
-fn bands(p: &mut Painter, colors: &[u32]) {
-    let width = 384.0 / colors.len() as f32;
-    for (i, &color) in colors.iter().enumerate() {
-        let x = 8.0 + i as f32 * width;
-        for row in 0..4 {
-            let y = 14.0 + row as f32 * 17.0;
-            p.ink(srgb(color), 22.0, &line((x + 11.0, y), (x + width + 11.0, y), 2.0));
-        }
-    }
-}
 
-fn signature_scene(p: &mut Painter, preset: Preset) -> Vec<(f32, f32, f32)> {
-    match preset {
-        Preset::CombBlender => {
-            p.fill(srgb(0x3b2a20), [8.0, 6.0, 392.0, 74.0]);
-            for (i, color) in [0x8a5c3c, 0xd9a86c, 0xa8774f, 0xe8c08a, 0x6b4a33].into_iter().cycle().take(24).enumerate() {
-                let x = 4.0 + i as f32 * 17.0;
-                let strand: Vec<_> = (0..=20).map(|k| { let t = k as f32 / 20.0; (x + 22.0 * t + 4.0 * (t * 6.0 + i as f32).sin(), 6.0 + 68.0 * t) }).collect();
-                p.texture(Preset::Chalk, srgb(color), 11.0, &strand);
-            }
-            scrub(150.0, 385.0, 18.0, 62.0, 12.0)
-        }
-        Preset::EdgeKeepingBlender => {
-            p.fill(srgb(0xf6e7d7), [8.0, 6.0, 392.0, 74.0]);
-            for (cx, light, mid, dark) in [(70.0, 0xffe0c4, 0xe9a27e, 0xa85a4a), (200.0, 0xd8f0d0, 0x8fc49a, 0x3f7a55), (330.0, 0xd6e6ff, 0x86aee0, 0x3c5f99)] {
-                p.dot(srgb(dark), 64.0, (cx, 40.0));
-                p.dot(srgb(mid), 50.0, (cx - 5.0, 35.0));
-                p.dot(srgb(light), 26.0, (cx - 10.0, 29.0));
-                p.ink(srgb(0x1b1b22), 3.0, &arc((cx, 40.0), 32.0, 0.0, TAU, 1.5));
-            }
-            scrub(150.0, 385.0, 16.0, 64.0, 14.0)
-        }
-        Preset::BlendingKnife => {
-            bands(p, &[0xe4572e, 0xf3a712, 0x29335c, 0x669bbc]);
-            let mut points = vec![];
-            for k in 0..4 { let x = 120.0 + k as f32 * 70.0; points.extend([(x, 12.0 + k as f32 * 4.0), (x + 60.0, 68.0 - k as f32 * 4.0)]); }
-            pressured(polyline(&points, 2.0), 0.9)
-        }
-        Preset::Sharpen => {
-            p.fill(srgb(0xe9e4d8), [8.0, 6.0, 392.0, 74.0]);
-            for (x, color) in [(50.0, 0xd1495b), (120.0, 0x00798c), (190.0, 0xedae49), (260.0, 0x30638e), (330.0, 0x6a4c93)] {
-                p.dot(srgb(color), 44.0, (x, 40.0));
-                p.dot(srgb(0xe9e4d8), 14.0, (x - 6.0, 34.0));
-            }
-            let mut blur = default_brush(Preset::Blur);
-            blur.diameter = 70.0;
-            blur.stabilization = BrushStabilization { strength: 0.0, pressure_smoothing: 0.0, ..blur.stabilization };
-            p.blend(&blur, &line((10.0, 40.0), (390.0, 40.0), 2.0).into_iter().map(|(x, y)| (x, y, 1.0)).collect::<Vec<_>>());
-            scrub(150.0, 385.0, 22.0, 58.0, 8.0)
-        }
-        Preset::HueBlender => {
-            cel_tube(p, 0xffd9b8, 0xd9826a, 0x6e2f45, 0xece4d6);
-            let mut cool = Painter { canvas: p.canvas, origin: [200.0, 0.0] };
-            for (color, from, to) in [(0x23395b, 8.0, 72.0), (0x5d8fc9, 8.0, 54.0), (0xc4ddff, 14.0, 32.0)] {
-                let mut y = from + 6.0;
-                while y < to - 6.0 {
-                    cool.ink(srgb(color), 12.0, &line((0.0, y), (186.0, y), 2.0));
-                    y += 5.0;
-                }
-                cool.ink(srgb(color), 12.0, &line((0.0, to - 6.0), (186.0, to - 6.0), 2.0));
-            }
-            scrub(110.0, 290.0, 14.0, 66.0, 12.0)
-        }
-        Preset::BlendingStump | Preset::Tissue => {
-            for row in 0..5 {
-                let y = 14.0 + row as f32 * 13.0;
-                p.texture(Preset::Charcoal, srgb(0xa0502d), 30.0, &line((12.0, y), (388.0, y + 3.0), 3.0));
-            }
-            scrub(150.0, 385.0, 14.0, 66.0, 10.0)
-        }
-        _ => {
-            cel_tube(p, 0xffd9b8, 0xd9826a, 0x6e2f45, 0xece4d6);
-            scrub(150.0, 385.0, 14.0, 66.0, 16.0)
-        }
-    }
-}
 
-/// The Blend set's swatch: the brush blending the paint it suits most, left
-/// of its first stroke untouched for comparison.
-pub fn signature(canvas: &mut Canvas, preset: Preset) -> Result<(), String> {
-    let mut painter = Painter { canvas, origin: [0.0, 0.0] };
-    let path = signature_scene(&mut painter, preset);
-    painter.blend(&prepared(default_brush(preset), 46.0), &path);
-    canvas.wait_idle()
-}

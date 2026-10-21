@@ -69,6 +69,11 @@ fn choose_in_drawer(d: &mut Driver, preset: P) {
     while !row.is_focusable() { row = row.parent().unwrap(); }
     row.grab_focus();
     pump(250);
+    let content = choice.first_child().unwrap();
+    let preview = content.first_child().unwrap().compute_bounds(&content).unwrap();
+    let caption = content.last_child().unwrap().compute_bounds(&content).unwrap();
+    assert!((preview.y() - (caption.y() - preview.y() - preview.height())).abs() <= 1.0,
+        "{preset:?} preview is centred above its name: {preview:?} {caption:?}");
     crate::capture(&d.w, d.input.dir.join(format!("blend-tools-{preset:?}-{:?}.png", state(&d.w).theme)).to_str().unwrap());
     d.click(&choice);
     assert_eq!(state(&d.w).brush.preset, preset as u32, "{preset:?} chosen from the Blend tool");

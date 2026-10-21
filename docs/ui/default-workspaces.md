@@ -107,7 +107,8 @@ height; Properties and Layers share the remaining space in a 60:40 split.
 
 Sketch's Brush button opens **Brushes → Tools → Tool**: Brushes lists the
 drawing sets (Paint, Pencil, Pastel and the other media), Tools lists the chosen
-set's tools with stroke previews, and Tool holds the settings. Brush restores
+set's tools with stroke previews, each centred in the space above its name, which
+sits at the bottom of the row, and Tool holds the settings. Brush restores
 the most recently selected drawing tool; clicking it while selected opens or
 closes its drawer, and choosing a set keeps the drawer open and restores that
 set's last tool. **Sculpt** opens **Sculpting → Tools → Tool** with the Blend,

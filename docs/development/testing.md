@@ -538,10 +538,12 @@ time does not establish a frame rate. Offscreen GPU numbers from
 `cargo run --locked --release -p layer-bench -- --scenario <name>`
 ([benchmark workloads](gpu-raster-benchmarks.md)) help compare revisions on one
 machine but never replace a measurement on the tier's device. Regenerate bundled
-brush previews with `cargo run --locked --release -p layer-bench -- --brush-previews`;
-the Blend group's previews come from the same scenes as
-`cargo run --locked --release -p layer-bench -- --blend-study <dir>`, which
-paints every blender over fixed scenes for visual review.
+brush previews with `cargo run --locked --release -p layer-bench -- --brush-previews [dir]`.
+Blenders, Liquify, the retouching tools and the Eraser preview on greyscale scenes
+that fill the swatch: a shaded stroke-shaped tube for most blenders, a halftone
+for Liquify, and source and brush rings for Clone and Healing.
+`cargo run --locked --release -p layer-bench -- --blend-study <dir>` paints every
+blender over fixed colour scenes for visual review.
 
 ## Brush slider previews
 
