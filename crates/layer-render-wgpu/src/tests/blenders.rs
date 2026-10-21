@@ -1,8 +1,9 @@
 //! Smudge blenders and the wet blenders on fixed scenes: flat and faint paint
 //! stay put, a colour edge blends along its length, lines stop the
 //! edge-keeping blender, the colour mixer carries one colour, the amount is
-//! independent of spacing, the texture-keeping blenders keep fine detail, the
-//! paper decides what a pressed tip reaches and the Tissue lifts pigment.
+//! independent of spacing, paint pulled into transparency fades without
+//! stripes, the texture-keeping blenders keep fine detail, the paper decides
+//! what a pressed tip reaches and the Tissue lifts pigment.
 use super::brush_blending::Canvas;
 use super::*;
 use layer_core::color::{DocumentColor, RgbSpace, SampleDepth};
@@ -173,6 +174,25 @@ fn blending_amount_follows_distance_not_spacing() {
     };
     let [dense, sparse] = [mixed(0.02), mixed(0.06)];
     assert!((dense - sparse).abs() < 0.3 * dense.max(sparse), "{dense} vs {sparse}");
+}
+
+#[test]
+fn paint_pulled_into_transparency_fades_without_stripes() {
+    for preset in [P::Smudge, P::SoftBlender, P::BlendingStump, P::TextureBlender] {
+        let mut canvas = canvas();
+        let mut block = test_dab([-934., 64.], RED, 1.);
+        block.radii = [1000.; 2];
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), block);
+        let brush = brush(preset, 24.);
+        canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [122., 64.])), 6, false);
+        let after = canvas.composite();
+        let tail: Vec<f64> = (66..128).map(|x| (60..69).map(|y| pixel(&after, x, y)[3]).sum::<f64>() / 9.)
+            .take_while(|&alpha| alpha > 0.01).collect();
+        let fall: f64 = tail.windows(2).map(|w| w[0] - w[1]).sum();
+        let wobble: f64 = tail.windows(3).map(|w| (w[0] - 2. * w[1] + w[2]).abs()).sum();
+        assert!(tail.len() > 8 && tail.windows(2).all(|w| w[1] <= w[0]), "{preset:?} tail fades: {tail:?}");
+        assert!(wobble < 0.35 * fall, "{preset:?} tail wobbles {wobble} over a fall of {fall}: {tail:?}");
+    }
 }
 
 #[test]

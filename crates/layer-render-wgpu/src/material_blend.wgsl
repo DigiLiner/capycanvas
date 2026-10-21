@@ -577,7 +577,7 @@ fn blended_paint(original: vec4<f32>, paint: vec4<f32>, influence: f32) -> vec4<
     if influence <= 0.0 || (!painted && !working_has_color(original.a)) { return original; }
     let dragged = select(vec3<f32>(0.0), paint.rgb / paint.a, painted);
     let own = select(dragged, to_mix_space(working_unassociate(original)), working_has_color(original.a));
-    let alpha = clamp(max(original.a, paint.a * influence), 0.0, 1.0);
+    let alpha = clamp(original.a + max(paint.a - original.a, 0.0) * influence, 0.0, 1.0);
     let color = from_mix_space(mix(own, select(own, dragged, painted), influence * min(paint.a, 1.0)));
     return vec4<f32>(color * alpha, alpha);
 }

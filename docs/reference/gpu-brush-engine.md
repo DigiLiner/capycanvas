@@ -199,7 +199,13 @@ trace         = x - clamp(Σ motion_i × pull × a_i × lane_i(x), 128 px)
 radius        = min(reach × diameter × sqrt(rate × exposure / amount), 112 px)
 field         = blender_field(kind, x, trace, radius)   // in the mixing space
 canvas_new(x) = mix_in_mixing_space(canvas_old(x), field, amount)
+alpha_new(x)  = alpha_old(x) + max(alpha_field - alpha_old(x), 0) × amount
 ```
+
+Alpha rises toward the field's alpha at the rate the colour mixes and never
+falls, so consecutive chunks compose like one longer pass: two passes at half
+the exposure raise alpha as far as one full pass. Paint pulled into
+transparency therefore fades smoothly instead of banding at the chunk spacing.
 
 A kind that touches paper, with Texture strength above 0, compiles a paper
 variant of its kernel. It reads the paper once per pixel after the contact loop
