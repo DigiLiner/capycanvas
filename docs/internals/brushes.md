@@ -122,25 +122,25 @@ not follow the document's blending, and it changes no pipeline; see
 The Blend tool holds the blenders. Each moves or mixes paint already on the
 layer and lays no color of its own. They come in three sets:
 
-- **Blend**, for dry media and everyday softening: Smudge, Soft Blender, the
-  Blending Stump, which pushes pigment into the paper's tooth and deepens the
-  tone without dragging it, the Tissue, which spreads it softly over the peaks
-  and lifts some away, the Grainy Blender, which puts the paper tooth back,
-  Blur, Sharpen, the Hue Blender, which blends hue and saturation but keeps
-  every pixel's lightness, the Texture-Keeping Blender, which keeps fine brush
-  texture over the blended color, and the Edge-Keeping Blender, which stops at
-  lines.
+- **Blend**, for dry media and everyday softening: Smudge, Soft Blender, Blur,
+  the Blending Stump, which pushes pigment into the paper's tooth and deepens
+  the tone without dragging it, the Tissue, which spreads it softly over the
+  peaks and lifts some away, the Grainy Blender, which puts the paper tooth
+  back, the Edge-Keeping Blender, which stops at lines, the Texture-Keeping
+  Blender, which keeps fine brush texture over the blended color, and the Hue
+  Blender, which blends hue and saturation but keeps every pixel's lightness.
 - **Wet paint**, which moves paint as a brush or knife does: the Natural
-  Blender, the Bristle Blender, the Blending Knife, which scrapes paint along in
-  unmixed streaks, the Wet Blender, which carries what each part of the tip
-  picked up and runs dry, and the Color Mixer, which carries one color averaged
-  over the tip, as Clip Studio Paint's Blend mode does.
-- **Effects**: Painterly, Crystal, Marbling, Comb (along the strands already
-  painted), Scatter and Dither.
+  Blender, the Wet Blender, which carries what each part of the tip picked up
+  and runs dry, the Color Mixer, which carries one color averaged over the tip,
+  as Clip Studio Paint's Blend mode does, the Blending Knife, which scrapes
+  paint along in unmixed streaks, and the Bristle Blender.
+- **Effects**: Painterly, Comb (along the strands already painted), Scatter,
+  Sharpen, Marbling, Crystal and Dither.
 
-Sets are tool groups of the Blend tool. Sculpting presets show their tool's icon
-in Tools, on toolbar buttons and as the cursor; only the sets carry their own
-icons.
+Each set lists its blenders from the most to the least broadly useful, and
+Smudge is the Blend tool's default. Sets are tool groups of the Blend tool.
+Sculpting presets show their tool's icon in Tools, on toolbar buttons and as
+the cursor; only the sets carry their own icons.
 
 ### Blenders and the paper
 
