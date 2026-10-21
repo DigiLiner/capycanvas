@@ -83,6 +83,9 @@ an enabled preview lands over 32 ms before publication. With preview off, or
 strength zero, there is no additional preview settlement wait. Live drawing and
 replay use the same completion path, including Smudge.
 
+The [input policy](input.md#prediction-and-corrections) keeps smoothing preview
+available for mouse and screenless tablets without adding input prediction lead.
+
 ## GPU execution
 
 Ordinary ink and erase contacts use coverage and GPU blending. Textured brushes

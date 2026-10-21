@@ -49,7 +49,7 @@ impl SampleFlags {
     /// route a pointer action, or use the correction's delivery-time camera.
     pub const CORRECTION: Self = Self(1 << 5);
     /// The host confirmed that this pen controls an indirect, screenless tablet.
-    /// This affects cursor presentation only; the device is still a pen.
+    /// The device is still a pen, with pressure and pose axes.
     pub const INDIRECT_POINTER: Self = Self(1 << 6);
     /// `twist_radians` is a measured barrel rotation, not a missing axis.
     pub const BARREL_TWIST: Self = Self(1 << 7);

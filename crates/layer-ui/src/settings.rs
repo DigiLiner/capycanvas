@@ -285,6 +285,21 @@ impl Settings {
         }
         config
     }
+    pub(crate) fn feedback_config_for_input(
+        &self,
+        platform: Platform,
+        native_available: bool,
+        event: layer_engine::PenEvent,
+    ) -> layer_engine::InstantFeedbackConfig {
+        let mut config = self.feedback_config_for(platform, native_available);
+        if event.tool == layer_engine::ToolKind::Mouse
+            || event.flags.contains(layer_engine::SampleFlags::INDIRECT_POINTER)
+        {
+            config.prediction_horizon_micros = 0;
+            config.use_platform_prediction = false;
+        }
+        config
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

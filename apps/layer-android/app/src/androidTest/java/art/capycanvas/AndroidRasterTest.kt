@@ -141,7 +141,7 @@ class AndroidRasterTest {
                         val samples = (0..7).flatMap { step -> listOf(viewport.getDouble(0) * .5 + step * 15.0,
                             viewport.getDouble(1) * .5, if (step == 7) 0.0 else .7, 0.0, 0.0, 0.0, 0.0,
                             (now + step * 10_000_000L).toDouble(), when (step) { 0 -> 1.0; 7 -> 3.0; else -> 2.0 }) }.toDoubleArray()
-                        Native.pointer(handle, 71, 0, 0, samples, samples.size, false, false)
+                        Native.pointer(handle, 71, 0, 0, samples, samples.size, false, 0)
                     }
                     output.writeText(evidence.toString(2))
                     compose.waitUntil(120_000) { drawingSettled() && revision() != before }
@@ -230,7 +230,7 @@ class AndroidRasterTest {
         val viewport=host.snapshot!!.getJSONObject("state").getJSONObject("camera").getJSONArray("viewport")
         val bytes=doubleArrayOf(viewport.getDouble(0)*.50+dx,viewport.getDouble(1)*.5+dy,.65,0.0,0.0,0.0,0.0,System.nanoTime().toDouble(),phase.toDouble())
         observe?.invoke(handle, bytes)
-        Native.pointer(handle,71,0,0,bytes,bytes.size,false,false)
+        Native.pointer(handle,71,0,0,bytes,bytes.size,false,0)
         val now=System.nanoTime(); Native.frame(handle,now,now+16_666_667)
     }
         if (phase == 3) {

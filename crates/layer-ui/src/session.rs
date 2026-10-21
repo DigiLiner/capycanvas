@@ -4130,6 +4130,14 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn pen_ready(&mut self, mut event: PenEvent) -> Result<(), PenEvent> {
         self.eraser_end(&mut event);
+        if event.phase == PenPhase::Down
+            && !event.flags.contains(layer_engine::SampleFlags::PREDICTED)
+            && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
+        {
+            self.engine.set_instant_feedback(self.state.settings.feedback_config_for_input(
+                self.state.platform, self.platform_prediction_available(), event,
+            )).expect("stored feedback settings are valid");
+        }
         if let Some(view) = &mut self.state.pressure_calibration
             && !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
             && matches!(event.tool, layer_engine::ToolKind::Pen | layer_engine::ToolKind::Eraser | layer_engine::ToolKind::Pencil | layer_engine::ToolKind::Brush | layer_engine::ToolKind::Airbrush) {

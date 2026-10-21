@@ -262,7 +262,8 @@ class CanvasSurfaceView(context: Context, private val host: CanvasHost,
                 3, 4 -> contacts.remove(id)
             }
         }
-        host.pointer(id, tool, button, samples, used, predicted, twist)
+        val deviceFlags = pointerDeviceFlags(event, index, twist)
+        host.pointer(id, tool, button, samples, used, predicted, deviceFlags)
     }
 
     private var barrelTwistDevice = -1
@@ -275,6 +276,12 @@ class CanvasSurfaceView(context: Context, private val host: CanvasHost,
         }
         return barrelTwistDevice == event.deviceId
     }
+}
+
+internal fun pointerDeviceFlags(event: MotionEvent, index: Int, barrelTwist: Boolean): Int {
+    val pen = event.getToolType(index) == MotionEvent.TOOL_TYPE_STYLUS || event.getToolType(index) == MotionEvent.TOOL_TYPE_ERASER
+    val indirect = event.isFromSource(InputDevice.SOURCE_MOUSE) || event.isFromSource(InputDevice.SOURCE_TOUCHPAD)
+    return (if (pen && indirect) 0x40 else 0) or (if (barrelTwist) 0x80 else 0)
 }
 
 /** Shared packing for real, historical and Android-predicted samples. */

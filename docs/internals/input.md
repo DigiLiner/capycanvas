@@ -65,6 +65,20 @@ The shared [feedback implementation](../../crates/layer-engine/src/feedback.rs)
 can use platform predictions where supplied and shared prediction otherwise.
 Preferences control this behavior.
 
+Each stroke captures its input policy at pen-down. Mouse and confirmed
+screenless tablet input have no prediction lead beyond the latest real sample,
+while enabled [smoothing preview](brushes.md#stroke-smoothing) still compensates
+for the curve's delay. Display pens keep the configured lead. Turning Stroke
+prediction off disables both the input lead and smoothing preview; committed
+smoothing still applies.
+
+GTK uses Linux tablet properties, Windows uses the native pointer device type,
+and Android uses [indirect stylus sources](https://developer.android.com/reference/android/view/InputDevice#SOURCE_MOUSE)
+to identify screenless tablets. [Browser Pointer Events](https://www.w3.org/TR/pointerevents/#dom-pointerevent-pointertype)
+and [AppKit](https://developer.apple.com/documentation/appkit/nsevent) do not
+identify whether a pen tablet has a display; unclassified pens keep the configured
+lead. Adapters preserve pressure, tilt and eraser identity for indirect pens.
+
 Predicted contacts affect a temporary preview, not saved artwork or undo history.
 When real samples arrive, the preview is replaced. For brushes that read existing
 paint, temporary feedback must also avoid changing committed wetness or carried

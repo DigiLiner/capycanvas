@@ -38,7 +38,7 @@ fn consumed_paint_timestamp_advances_only_after_real_input_reaches_the_engine() 
 }
 
 #[test]
-fn mac_manual_prediction_paints_ahead_of_pen_and_mouse_without_committing_the_tip() {
+fn mac_manual_prediction_adds_lead_only_for_the_pen() {
     for tool in [0, 1] {
         for milliseconds in [0, 64] {
             let app = App::new(1);
@@ -79,7 +79,9 @@ fn mac_manual_prediction_paints_ahead_of_pen_and_mouse_without_committing_the_ti
             let pixel = &live[offset..offset + 4];
             let blue = i16::from(pixel[2]) > i16::from(pixel[0]) + 50;
             eprintln!("Mac tool={tool} prediction={milliseconds}ms: pixel 20px ahead of cursor={pixel:?}");
-            assert_eq!(blue, milliseconds == 64, "Manual prediction must reach the rendered preview");
+            let predicts = tool == 0 && milliseconds == 64;
+            assert_eq!(blue, predicts, "Only pen input receives manual prediction lead");
+            assert_eq!(unsafe { &*app.0 }.host.session.engine().metrics().engine_prediction_frames > 0, predicts);
             record[7] += 1_000_000.;
             record[8] = 3.;
             send(&record);

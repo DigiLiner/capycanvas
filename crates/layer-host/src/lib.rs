@@ -50,8 +50,7 @@ pub struct PointerBatch<'a> {
     pub records: &'a [f64],
     pub predicted: bool,
     pub view_revision: u64,
-    /// Twist is a measured barrel rotation rather than an absent axis.
-    pub barrel_twist: bool,
+    pub device_flags: SampleFlags,
 }
 
 pub struct NativeHost {
@@ -491,9 +490,10 @@ impl NativeHost {
             records,
             predicted,
             view_revision,
-            barrel_twist,
+            device_flags,
         } = batch;
-        if records.is_empty()
+        if device_flags.0 & !(SampleFlags::INDIRECT_POINTER.0 | SampleFlags::BARREL_TWIST.0) != 0
+            || records.is_empty()
             || !records.len().is_multiple_of(9)
             || !records.iter().all(|n| n.is_finite())
             || records
@@ -572,11 +572,7 @@ impl NativeHost {
                         } else {
                             0
                         }
-                        | if barrel_twist {
-                            SampleFlags::BARREL_TWIST.0
-                        } else {
-                            0
-                        },
+                        | device_flags.0,
                 ),
             };
             if correction {
@@ -1746,7 +1742,7 @@ mod tests {
         host.pointer_batch(PointerBatch {
             id, tool, button, records, predicted,
             view_revision: host.session.state().camera.revision,
-            barrel_twist: false,
+            device_flags: SampleFlags::NONE,
         })
     }
     fn stroke(host: &mut NativeHost, start: u64) -> Result<(), String> {
@@ -2629,6 +2625,33 @@ mod tests {
     }
 
     #[test]
+    fn packed_pen_device_flags_reach_hover_and_reject_sample_flags() {
+        let mut host = NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let mut settings = host.session.state().settings.clone();
+        settings.cursor = layer_ui::CursorMode::None;
+        host.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
+        for (device_flags, visible) in [
+            (SampleFlags::NONE, false),
+            (SampleFlags::BARREL_TWIST, false),
+            (SampleFlags::INDIRECT_POINTER, true),
+            (SampleFlags(SampleFlags::INDIRECT_POINTER.0 | SampleFlags::BARREL_TWIST.0), true),
+        ] {
+            host.pointer_batch(PointerBatch {
+                id: 7, tool: 0, button: 0, records: &[100., 100., 0.5, 0., 0., 0.5, 0., 1_000_000., 0.],
+                predicted: false, view_revision: host.session.state().camera.revision, device_flags,
+            }).unwrap();
+            let mode = host.session.canvas_cursor().unwrap().mode;
+            assert_eq!(mode, if visible { layer_ui::CursorMode::Sight } else { layer_ui::CursorMode::None });
+        }
+        for device_flags in [SampleFlags::PREDICTED, SampleFlags::CORRECTION, SampleFlags::ESTIMATED, SampleFlags(1 << 15)] {
+            assert!(host.pointer_batch(PointerBatch {
+                id: 7, tool: 0, button: 0, records: &[100., 100., 0.5, 0., 0., 0., 0., 1_000_000., 0.],
+                predicted: false, view_revision: host.session.state().camera.revision, device_flags,
+            }).is_err());
+        }
+    }
+
+    #[test]
     fn typed_touch_uses_the_same_shared_navigation_as_packed_input() {
         for (platform, size, samples) in [
             (layer_ui::Platform::Windows, [1600, 1000], [
@@ -2733,7 +2756,7 @@ mod tests {
                     button: 0,
                     predicted: false,
                     view_revision: revision,
-                    barrel_twist: false,
+                    device_flags: SampleFlags::NONE,
                     records: &[x, 24., 0.25, 0., 0., 0., 0., time, phase],
                 },
                 &[token, pending],
@@ -2780,7 +2803,7 @@ mod tests {
                 button: 0,
                 predicted: false,
                 view_revision: revision,
-                barrel_twist: false,
+                device_flags: SampleFlags::NONE,
                 records: &[24., 24., 0.9, 0.2, -0.3, 1.7, 0., 10_000_000., 1.],
             },
             &[9001, 0],

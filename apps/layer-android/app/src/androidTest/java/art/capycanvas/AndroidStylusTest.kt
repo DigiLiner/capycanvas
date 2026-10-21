@@ -7,6 +7,28 @@ import org.junit.Test
 import kotlin.math.PI
 
 class AndroidStylusTest {
+    @Test fun indirectStylusSourcesPreservePenIdentityAndBarrelTwist() {
+        for (tool in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER, MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER)) {
+            for ((source, indirect) in listOf(
+                InputDevice.SOURCE_STYLUS to false,
+                InputDevice.SOURCE_BLUETOOTH_STYLUS to false,
+                InputDevice.SOURCE_TOUCHSCREEN to false,
+                (InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_MOUSE) to true,
+                (InputDevice.SOURCE_STYLUS or InputDevice.SOURCE_TOUCHPAD) to true,
+            )) {
+                val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 1; toolType = tool })
+                val event = MotionEvent.obtain(100, 100, MotionEvent.ACTION_MOVE, 1, properties,
+                    arrayOf(coordinates(.5f)), 0, 0, 1f, 1f, 0, 0, source, 0)
+                try {
+                    val expected = if (indirect && tool in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER)) 0x40 else 0
+                    assertEquals(expected, pointerDeviceFlags(event, 0, false))
+                    assertEquals(expected or 0x80, pointerDeviceFlags(event, 0, true))
+                    assertEquals(tool, event.getToolType(0))
+                } finally { event.recycle() }
+            }
+        }
+    }
+
     private fun coordinates(azimuth: Float) = MotionEvent.PointerCoords().apply {
         x = 40f; y = 60f; pressure = .7f
         orientation = azimuth

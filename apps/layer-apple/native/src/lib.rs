@@ -875,7 +875,7 @@ unsafe fn apple_pointer(
                 records,
                 predicted: predicted != 0,
                 view_revision,
-                barrel_twist: false,
+                device_flags: layer_engine::SampleFlags::NONE,
             },
             updates,
             correction != 0,

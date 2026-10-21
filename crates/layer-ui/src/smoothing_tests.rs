@@ -1,4 +1,78 @@
 #[test]
+fn pointer_prediction_keeps_smoothing_and_restores_display_pen_lead_on_every_platform() {
+    for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Windows, Platform::Mac, Platform::Ios] {
+        for native in [false, true] {
+            for strength in [0., 0.5] {
+                let mut endpoints = Vec::new();
+                for enabled in [false, true] {
+                    let mut s = session(platform);
+                    s.set_platform_prediction_available(native);
+                    s.apply_settings(Settings { feedback: enabled, prediction_ms: 32., ..Default::default() }).unwrap();
+                    s.dispatch(UiAction::SetToolSetting { id: "smoothing_strength".into(), value: strength }).unwrap();
+                    let mut tips = Vec::new();
+                    for (contact, (tool, indirect)) in [
+                        (ToolKind::Mouse, false),
+                        (ToolKind::Pen, true),
+                        (ToolKind::Eraser, true),
+                        (ToolKind::Pen, false),
+                    ].into_iter().enumerate() {
+                        let before = s.engine.metrics();
+                        let mut last = event(&s, 1, PenPhase::Down, 1.);
+                        for index in 0..101 {
+                            last = PenEvent {
+                                sequence: contact as u64 * 200 + index + 1,
+                                timestamp_ns: 1_000_000_000 + contact as u64 * 2_000_000_000 + index * 4_000_000,
+                                phase: if index == 0 { PenPhase::Down } else { PenPhase::Move },
+                                surface_position: Point { x: 200. + index as f32 * 2., y: 300. },
+                                tool,
+                                flags: SampleFlags(SampleFlags::PRIMARY.0 | if indirect { SampleFlags::INDIRECT_POINTER.0 } else { 0 }),
+                                ..last
+                            };
+                            s.pen(last);
+                            if native && index > 0 {
+                                s.pen(PenEvent {
+                                    timestamp_ns: last.timestamp_ns + 32_000_000,
+                                    phase: PenPhase::Move,
+                                    surface_position: Point { x: last.surface_position.x + 16., ..last.surface_position },
+                                    flags: SampleFlags(last.flags.0 | SampleFlags::PREDICTED.0),
+                                    ..last
+                                });
+                            }
+                            s.renderer_mut().recorded_dabs.clear();
+                            s.frame(last.timestamp_ns, last.timestamp_ns + 32_000_000).unwrap();
+                        }
+                        let after = s.engine.metrics();
+                        let uses_native = enabled && contact == 3 && native && !matches!(platform, Platform::Gtk | Platform::Mac);
+                        assert_eq!(after.engine_prediction_frames > before.engine_prediction_frames, enabled && contact == 3 && !uses_native, "{platform:?}, native={native}");
+                        assert_eq!(after.platform_prediction_frames > before.platform_prediction_frames, uses_native, "{platform:?}, native={native}");
+                        let tip = s.renderer_mut().recorded_dabs.last().unwrap().center;
+                        let [a, b, c, d, x, y] = s.state.camera.document_to_surface();
+                        let tip = Point { x: a * tip.x + c * tip.y + x, y: b * tip.x + d * tip.y + y };
+                        if contact < 3 {
+                            assert!(tip.x <= last.surface_position.x + 0.1, "{tool:?}, strength={strength}, enabled={enabled}: {tip:?}");
+                            if strength == 0. { assert!((tip.x - last.surface_position.x).abs() < 0.1); }
+                        }
+                        tips.push(tip.x);
+                        s.pen(PenEvent { phase: PenPhase::Up, sequence: last.sequence + 1, timestamp_ns: last.timestamp_ns + 4_000_000, ..last });
+                        s.frame(last.timestamp_ns + 100_000_000, last.timestamp_ns + 132_000_000).unwrap();
+                        s.frame(last.timestamp_ns + 200_000_000, last.timestamp_ns + 232_000_000).unwrap();
+                        assert_eq!(s.engine.metrics().committed_strokes, before.committed_strokes + 1);
+                        assert_eq!(s.state.settings.feedback, enabled);
+                        assert_eq!(s.state.settings.prediction_ms, 32.);
+                    }
+                    endpoints.push(tips);
+                }
+                if strength > 0. {
+                    for contact in 0..3 {
+                        assert!(endpoints[1][contact] > endpoints[0][contact] + 1., "smoothing preview: {endpoints:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn smoothing_controls_keep_per_brush_choices_and_restore_defaults() {
     let mut s = session(Platform::Gtk);
     let pen = DefaultBrushPreset::GPen as u32;

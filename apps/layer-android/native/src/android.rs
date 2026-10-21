@@ -1151,7 +1151,7 @@ pub extern "system" fn Java_art_capycanvas_Native_pointer(
     records: JDoubleArray,
     count: jint,
     predicted: jboolean,
-    barrel_twist: jboolean,
+    device_flags: jint,
 ) {
     crate::jni_entry!(env, handle, {
     let result = (|| {
@@ -1176,7 +1176,7 @@ pub extern "system" fn Java_art_capycanvas_Native_pointer(
                     records: &data,
                     predicted: predicted != 0,
                     view_revision,
-                    barrel_twist: barrel_twist != 0,
+                    device_flags: layer_engine::SampleFlags(u16::try_from(device_flags).map_err(|_| "Invalid Android pointer flags")?),
                 })
             });
         app.pointer_records = data;

@@ -36,6 +36,7 @@ export async function checkSmoothing({call, evaluate, settle}) {
     await waitForInk();
     if (await evaluate('layerApp.state().commands.find(c=>c.id==="smoothing_adjust_speed").selected'))
       await action({type:"invoke", command:"smoothing_adjust_speed"});
+    await action({type:"customize",action:{type:"set_panel_visible",panel:"tool_settings",visible:true}});
     await action({type:"move_panel", panel:"tool_settings", target:{kind:"float",position:[10,70]}});
     for (const theme of ["light","dark"]) {
       await action({type:"set_theme", theme});
