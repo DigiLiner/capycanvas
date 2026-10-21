@@ -1605,7 +1605,7 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
-The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender and wet rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements. Liquify uses the separate Photo-layer profile below.
+Smudge, Natural Blender, Soft, Blur, Bristle, Grainy, the Blending Knife, Blending Stump and Tissue were measured on 2026-10-20 at `68012f20a`, after [paper-aware blending](../history/brushes/paper-aware-blenders.md): six runs from two candidate sets interleaved with a control of the previous `main` (three runs for Blending Stump). Soft Blender and Tissue were measured again at `1136a47c9`, which compiles lifting only for the Tissue. Updates per second are quantized at these rates, so the comparison used each run's median queue-present time: Soft Blender's stayed 4–6% above the control's (681 → 720 ms), inside the 630–812 ms spread between runs of one build. The control completed Smudge 1.6, Natural Blender 1.1, Soft 1.6, Blur 1.9, Bristle 1.5 and Grainy 1.5 updates/s; it crashed during the second Blending Knife stroke in both control sets, before Wet Round, and completed a lone Blending Knife run without crashing. The other blenders (presets 49–55 and 57–62) are unmeasured on this tier, and the wet rows predate the blender suite. Liquify uses the separate Photo-layer profile below.
 
 - The older fixtures fit their 520 × 299 px ellipse to 339 × 299 px in the
   TCL's 754 px work area at 16.0% zoom. The current G-Pen row uses the 240 × 120 px semiaxes documented in
@@ -1648,8 +1648,15 @@ The blender suite (presets 45–62) and its material page changes are unmeasured
 | Loaded Oil (22) | Very complex | 512 px | 1.2 updates/s (1.2–1.2); input 1.2/s; completion-gap p99 1122.9 ms | **Not met** |
 | Palette Knife (23) | Very complex | 512 px | 1.2 updates/s (1.2–1.2); input 1.2/s; completion-gap p99 1613.5 ms | **Not met** |
 | Wet Round (11) | Very complex | 512 px | 1.6 updates/s (1.6–1.6); input 1.6/s; completion-gap p99 913.0 ms | **Not met** |
-| Natural Blender (24) | Very complex | 512 px | 1.8 updates/s (1.8–1.8); input 1.8/s; completion-gap p99 1195.6 ms | **Not met** |
-| Smudge (10) | Very complex | 512 px | 2.5 updates/s (2.5–2.5); input 2.5/s; completion-gap p99 770.5 ms | **Not met** |
+| Natural Blender (24) | Very complex | 512 px | 1.2 updates/s (1.1–1.2); input 1.2/s; completion-gap p99 1083.3 ms | **Not met** |
+| Smudge (10) | Very complex | 512 px | 1.7 updates/s (1.6–1.7); input 1.7/s; completion-gap p99 917.0 ms | **Not met** |
+| Soft Blender (45) | Very complex | 512 px | 1.5 updates/s (1.5–1.6); input 1.5/s; completion-gap p99 1004.3 ms | **Not met** |
+| Blur (46) | Very complex | 512 px | 2.2 updates/s (2.2–2.5); input 2.2/s; completion-gap p99 727.9 ms | **Not met** |
+| Bristle Blender (47) | Very complex | 512 px | 2.2 updates/s (2.2–2.3); input 2.2/s; completion-gap p99 768.0 ms | **Not met** |
+| Grainy Blender (48) | Very complex | 512 px | 1.6 updates/s (1.6–1.7); input 1.6/s; completion-gap p99 947.1 ms | **Not met** |
+| Blending Knife (56) | Very complex | 512 px | 0.7 updates/s (0.7–0.7); input 0.7/s; completion-gap p99 2212.5 ms | **Not met** |
+| Blending Stump (65) | Very complex | 512 px | 1.8 updates/s (1.7–1.8); input 1.8/s; completion-gap p99 917.2 ms | **Not met** |
+| Tissue (66) | Very complex | 512 px | 1.6 updates/s (1.6–1.6); input 1.6/s; completion-gap p99 960.3 ms | **Not met** |
 | Liquify Push (12) | Very complex | 512 px | 22.49 fresh updates/s (22.09–23.75); fresh completion-gap p99 ≤96.27 ms | **Not met** |
 | Liquify Twirl Clockwise (36) | Very complex | 512 px | 18.36 fresh updates/s (16.57–18.73); fresh completion-gap p99 ≤170.14 ms | **Not met** |
 | Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 18.11 fresh updates/s (17.08–18.31); fresh completion-gap p99 ≤158.49 ms | **Not met** |

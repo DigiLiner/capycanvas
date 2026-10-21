@@ -10,12 +10,17 @@
   - On the TCL (12 MP) they complete 1.0–2.5 updates/s, at most 1.8 GB
     resident.
   - On the MovinkPad 11 (24 MP) wet and watercolor brushes complete 1.6–2.6
-    updates/s, at most 2.6 GB resident, and the blenders 1.1 (Blending Knife)
-    to 31.5 (Sharpen); Smudge completes 8.7 updates/s. Natural Blender (2.3 to
+    updates/s, at most 2.6 GB resident, and the blenders 1.2 (Blending Knife)
+    to 31.5 (Sharpen); Smudge completes 8.5 updates/s. Natural Blender (2.3 to
     1.9) and Palette Knife (1.8 to 1.6) are slower than before the blender suite.
-  - The blender suite is unmeasured on the TCL and the MovinkPad Pro 14.
-  - On the MovinkPad Pro 14 (61 MP) they complete 7.7 (Loaded Oil) to 54
-    (Smudge) updates/s.
+  - On the TCL the measured blenders complete 0.7 (Blending Knife) to 2.2
+    (Blur, Bristle) updates/s.
+  - On the MovinkPad Pro 14 (61 MP) wet brushes complete 7.7 (Loaded Oil) to 33
+    (Wet Round) updates/s and the measured blenders 9.4 (Blending Knife) to 187
+    (Blur); Smudge, Soft, Blur, Grainy, Blending Stump and Tissue meet 120.
+  - On the TCL and the MovinkPad Pro 14 only Smudge, Natural Blender, Soft,
+    Blur, Bristle, Grainy, the Blending Knife, Blending Stump and Tissue are
+    measured.
   - Multiply Glaze at 1024 px completes 86.8 updates/s on the MovinkPad Pro 14
     and 12.1 on the MovinkPad 11, where its compute kernel is slower than the
     fragment path it replaced (14.4).

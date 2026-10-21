@@ -1881,7 +1881,7 @@ Except for G-Pen, Watercolor Wash and the current dry-media rows, measured on 20
 
 Multiply Glaze and the very complex material rows were measured on 2026-10-19 with the same profile, using a release benchmark build of `66c1142ee`, which runs every material brush as compute kernels; their gap is the completion-gap p99.
 
-The blender suite (presets 45–62) and its material page changes are unmeasured on this tier; the Smudge, Natural Blender and wet rows predate them. See the [mid tier](mid-tier.md#retained-photo-brush-measurements) for current blender measurements. Liquify uses the separate Photo-layer profile below.
+Smudge, Natural Blender, Soft, Blur, Bristle, Grainy, the Blending Knife, Blending Stump and Tissue were measured on 2026-10-20 at `68012f20a`, after [paper-aware blending](../history/brushes/paper-aware-blenders.md), with the 9504 × 6336 photo: six runs from two candidate sets interleaved with a control of the previous `main` (three runs for the new presets). Every run of the rows marked met completed at least 160 updates/s with a gap p99 of at most 12.7 ms. The control completed Smudge 143.4, Natural Blender 85.0, Soft 142.0, Blur 178.3, Bristle 80.6, Grainy 122.9 and Blending Knife 10.0 updates/s. The other blenders (presets 49–55 and 57–62) are unmeasured on this tier, and the wet rows predate the blender suite. Liquify uses the separate Photo-layer profile below.
 
 **The 2026-09-22 G-Pen record used a different stroke.** It recorded 105.76
 updates/s for a 2000 px G-Pen.
@@ -1928,8 +1928,15 @@ are kept separate from the 10 s comparison table below.
 | Loaded Oil (22) | Very complex | 512 px | 7.7 updates/s (7.6–8.0); input 7.7/s; completion-gap p99 157.3 ms | **Not met** |
 | Palette Knife (23) | Very complex | 512 px | 11.1 updates/s (11.0–11.2); input 11.1/s; completion-gap p99 110.1 ms | **Not met** |
 | Wet Round (11) | Very complex | 512 px | 33.1 updates/s (32.8–33.6); input 33.1/s; completion-gap p99 54.1 ms | **Not met** |
-| Natural Blender (24) | Very complex | 512 px | 21.2 updates/s (20.7–21.4); input 21.2/s; completion-gap p99 72.8 ms | **Not met** |
-| Smudge (10) | Very complex | 512 px | 54.2 updates/s (53.8–54.2); input 54.2/s; completion-gap p99 31.1 ms | **Not met** |
+| Natural Blender (24) | Very complex | 512 px | 108.8 updates/s (106.1–109.5); input 108.8/s; completion-gap p99 15.4 ms | **Not met** |
+| Smudge (10) | Very complex | 512 px | 177.0 updates/s (176.0–180.7); input 165.5/s; completion-gap p99 10.4 ms | **Met** |
+| Soft Blender (45) | Very complex | 512 px | 176.6 updates/s (173.5–179.0); input 166.2/s; completion-gap p99 10.4 ms | **Met** |
+| Blur (46) | Very complex | 512 px | 187.3 updates/s (185.7–191.5); input 173.4/s; completion-gap p99 9.7 ms | **Met** |
+| Bristle Blender (47) | Very complex | 512 px | 95.1 updates/s (94.3–95.9); input 95.1/s; completion-gap p99 17.8 ms | **Not met** |
+| Grainy Blender (48) | Very complex | 512 px | 163.1 updates/s (160.1–164.4); input 156.3/s; completion-gap p99 11.7 ms | **Met** |
+| Blending Knife (56) | Very complex | 512 px | 9.4 updates/s (9.4–9.7); input 9.4/s; completion-gap p99 132.7 ms | **Not met** |
+| Blending Stump (65) | Very complex | 512 px | 177.7 updates/s (176.4–178.1); input 167.7/s; completion-gap p99 10.4 ms | **Met** |
+| Tissue (66) | Very complex | 512 px | 171.0 updates/s (170.8–174.1); input 162.3/s; completion-gap p99 10.7 ms | **Met** |
 | Liquify Push (12) | Very complex | 512 px | 172.79 fresh updates/s (153.97–173.94); fresh completion-gap p99 ≤29.53 ms | **Gap not met** |
 | Liquify Twirl Clockwise (36) | Very complex | 512 px | 134.58 fresh updates/s (132.49–148.14); fresh completion-gap p99 ≤30.61 ms | **Gap not met** |
 | Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 143.98 fresh updates/s (132.92–154.05); fresh completion-gap p99 ≤31.46 ms | **Gap not met** |
