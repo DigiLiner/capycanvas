@@ -102,8 +102,8 @@ pub(super) enum Entries {
     /// Page kernels of a transported material for one blend code, and Wet's
     /// reservoir exchange.
     Transport(u32),
-    /// Smudge page kernels for one blender, with or without the paper contact.
-    Blend(layer_core::BlenderKind, bool),
+    /// Smudge page kernels for one blender kernel.
+    Blend(crate::destination_material::Blender),
 }
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
@@ -144,9 +144,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
-            if let Entries::Blend(kind,paper)=entries {
-                source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {paper};\nconst BLEND_TAPS: u32 = {}u;\n{}",
-                    kind as u8, if paper {11} else {12}, include_str!("material_blend.wgsl"));
+            if let Entries::Blend(blender)=entries {
+                source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {};\nconst BLEND_LIFT: bool = {};\nconst BLEND_TAPS: u32 = {}u;\n{}",
+                    blender.kind as u8, blender.paper, blender.lift, if blender.paper {11} else {12}, include_str!("material_blend.wgsl"));
             }
             if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()
@@ -842,7 +842,7 @@ mod tests {
         use crate::destination_material::{self as destination, Entry};
         for flags in [0, 128] {for operation in destination::OPERATIONS {for &entry in destination::entries(operation) {
             let what = format!("{operation:?} {entry:?} {flags:#x}");
-            let present = compiled(destination::module(operation, 0, (layer_core::BlenderKind::Soft, false)), flags, operation, entry.name());
+            let present = compiled(destination::module(operation, 0, destination::PLAIN), flags, operation, entry.name());
             for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
             assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Reservoir)), "{what} reaches {operations:?}");

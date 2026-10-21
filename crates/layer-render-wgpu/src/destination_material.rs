@@ -56,28 +56,47 @@ pub(super) fn entries(operation: MaterialOperation) -> &'static [Entry] {
     }
 }
 
-/// A blender kind and whether its kernel reads the paper.
-pub(super) type Blender = (layer_core::BlenderKind, bool);
+/// A blender kernel: its kind, whether it reads the paper and whether it
+/// lifts pigment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Blender {
+    pub kind: layer_core::BlenderKind,
+    pub paper: bool,
+    pub lift: bool,
+}
 
-/// The blenders an operation compiles a module for: for Smudge, every kind
-/// without the paper and the kinds that touch it with the paper too.
+/// The blender of operations that do not blend.
+pub(super) const PLAIN: Blender = Blender { kind: layer_core::BlenderKind::Soft, paper: false, lift: false };
+
+/// The blenders an operation compiles a module for: for Smudge, every kind,
+/// with and without the paper for kinds that touch it and with and without
+/// lifting for kinds that lift.
 pub(super) fn blenders(operation: MaterialOperation) -> Vec<Blender> {
-    if operation != MaterialOperation::Smudge { return vec![(layer_core::BlenderKind::Soft, false)]; }
-    layer_core::BlenderKind::ALL.into_iter().map(|kind| (kind, false))
-        .chain(layer_core::BlenderKind::ALL.into_iter().filter(|kind| kind.touches_paper()).map(|kind| (kind, true)))
-        .collect()
+    use layer_core::BlenderKind;
+    if operation != MaterialOperation::Smudge { return vec![PLAIN]; }
+    BlenderKind::ALL.into_iter().flat_map(|kind| {
+        let papers = if kind.touches_paper() { &[false, true][..] } else { &[false][..] };
+        let lifts = if kind.lifts() { &[false, true][..] } else { &[false][..] };
+        papers.iter().flat_map(move |&paper| lifts.iter().map(move |&lift| Blender { kind, paper, lift }))
+    }).collect()
 }
 
 /// The blender kernel a style needs: it reads the paper when the kind
-/// touches paper and the brush has Texture strength.
+/// touches paper and the brush has Texture strength, and lifts when the kind
+/// lifts and the brush sets a lift.
 pub(super) fn blender(style: &layer_render::DabStyle) -> Blender {
-    (style.blender.kind, style.blender.kind.touches_paper() && style.grain.is_some_and(|grain| grain.depth > 0.0))
+    let kind = style.blender.kind;
+    Blender {
+        kind,
+        paper: kind.touches_paper() && style.grain.is_some_and(|grain| grain.depth > 0.0),
+        lift: kind.lifts() && style.blender.lift > 0.0,
+    }
 }
 
 /// The module that provides `entry` of `operation` for one blend code and blender.
-pub(super) fn module(operation: MaterialOperation, blend: u32, (kind, paper): Blender) -> Entries {
+pub(super) fn module(operation: MaterialOperation, blend: u32, blender: Blender) -> Entries {
     match operation {
-        MaterialOperation::Smudge => Entries::Blend(kind, paper),
+        MaterialOperation::Smudge => Entries::Blend(blender),
         _ => Entries::Transport(blend),
     }
 }
@@ -99,7 +118,7 @@ pub(super) fn blended(operation: MaterialOperation) -> bool {
 
 pub(super) struct Pipelines {
     layouts: [wgpu::BindGroupLayout; 3],
-    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8, bool), Deferred<wgpu::ComputePipeline>>,
+    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8, bool, bool), Deferred<wgpu::ComputePipeline>>,
 }
 
 impl Pipelines {
@@ -118,8 +137,8 @@ impl Pipelines {
             for blender in blenders(operation) {
                 let transport = dry_material::material_shader(device, module(operation, blend, blender), flags, operation);
                 for &entry in entries(operation) {
-                    kernels.insert((operation as u32, slot, entry, blender.0 as u8, blender.1), Deferred::compute(device,
-                        format!("destination material {} operation={} contact={flags:#x} blend={blend} blender={:?} paper={}", entry.name(), operation as u32, blender.0, blender.1),
+                    kernels.insert((operation as u32, slot, entry, blender.kind as u8, blender.paper, blender.lift), Deferred::compute(device,
+                        format!("destination material {} operation={} contact={flags:#x} blend={blend} {blender:?}", entry.name(), operation as u32),
                         &pipeline_layouts[entry.outputs()], &transport, entry.name()));
                 }
             }
@@ -131,8 +150,8 @@ impl Pipelines {
         let operation = BrushPassPlan::for_style(style).material;
         let slot = if blended(operation) { dry_material::material_slot(style) }
             else { dry_material::material_contact_slot(style) * MATERIAL_BLENDS.len() };
-        let (kind, paper) = if operation == MaterialOperation::Smudge { blender(style) } else { (layer_core::BlenderKind::Soft, false) };
-        &self.kernels[&(operation as u32, slot, entry, kind as u8, paper)]
+        let blender = if operation == MaterialOperation::Smudge { blender(style) } else { PLAIN };
+        &self.kernels[&(operation as u32, slot, entry, blender.kind as u8, blender.paper, blender.lift)]
     }
 
     fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>, wetness: Option<&PageSurface>) -> wgpu::BindGroup {
@@ -299,6 +318,20 @@ mod tests {
                 assert_eq!(std::ptr::eq(transport.kernel(&normal, entry), transport.kernel(&multiply, entry)), !blended(operation),
                     "{preset:?} {entry:?} has a module per blend only when it deposits through the blend");
             }
+        }
+    }
+
+    #[test]
+    fn only_brushes_that_need_the_paper_or_lift_compile_those_kernels() {
+        for preset in layer_core::DefaultBrushPreset::ALL {
+            let brush = layer_core::default_brush(preset);
+            let style = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+            if BrushPassPlan::for_style(&style).material != MaterialOperation::Smudge { continue; }
+            let chosen = blender(&style);
+            assert!(blenders(MaterialOperation::Smudge).contains(&chosen), "{preset:?} has a kernel");
+            assert_eq!(chosen.lift, brush.blender.lift > 0.0, "{preset:?} lifts only when it sets a lift");
+            assert_eq!(chosen.paper, brush.blender.kind.touches_paper() && brush.grain.is_some_and(|grain| grain.depth > 0.0),
+                "{preset:?} reads the paper only with Texture strength");
         }
     }
 

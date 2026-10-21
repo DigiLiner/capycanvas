@@ -82,3 +82,7 @@ under 0.5/255 on average and brought the cost to about 3%. The Bristle Blender
 has no disc to shorten: its two side samples, already jittered across the tip,
 read the nearest pixel instead of interpolating four, which changed it by
 0.23/255 on average.
+
+**Lifting only where it is set.** The lift's few operations in every Soft
+kernel cost the Soft Blender 4–5% on the TCL, although the offline compiler
+counted 0.16 cycles. Soft kernels lift only for brushes that set a lift.

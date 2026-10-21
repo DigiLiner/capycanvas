@@ -209,8 +209,8 @@ the field is sampled ([decision record](../history/brushes/paper-aware-blenders.
 The variant takes eleven colour taps instead of twelve, so it issues as many
 texture reads as the paper-blind kernel; the Bristle Blender's two jittered side
 samples read the nearest pixel. Smudge kernels never multiply the
-footprint by grain. A Soft kernel lowers the result by
-`(1 − exp(−lift · exposure)) · opacity`, which only the Tissue sets.
+footprint by grain. Soft kernels compiled for a brush that sets a lift, which
+only the Tissue does, lower the result by `(1 − exp(−lift · exposure)) · opacity`.
 
 Exposure counts distance travelled, so spacing changes neither how far paint
 moves nor how much it blends. The radius grows with the square root of

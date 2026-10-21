@@ -807,6 +807,12 @@ impl BlenderKind {
     pub fn touches_paper(self) -> bool {
         matches!(self, Self::Soft | Self::Bristle | Self::Grainy | Self::Knife)
     }
+
+    /// Kinds whose tip can absorb pigment, as a tissue does, when the brush
+    /// sets a lift.
+    pub fn lifts(self) -> bool {
+        self == Self::Soft
+    }
 }
 
 /// Farthest a blender samples from a pixel's traced position, in document

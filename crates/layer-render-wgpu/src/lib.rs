@@ -5160,7 +5160,7 @@ impl StyleGpu {
         if style.execution == BrushExecution::Smudge {
             let blender = style.blender;
             result.deformation = [blender.reach, blender.rate, blender.character, blender.scale];
-            let tooth = if destination_material::blender(style).1 { grain.map_or(0., |grain| grain.depth) * relief } else { 0. };
+            let tooth = if destination_material::blender(style).paper { grain.map_or(0., |grain| grain.depth) * relief } else { 0. };
             result.transport_a = [tooth, blender.pressure_gain, blender.engagement, blender.recess];
             result.transport_b = [blender.lift, 0., 0., 0.];
         }

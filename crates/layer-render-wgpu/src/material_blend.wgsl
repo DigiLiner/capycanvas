@@ -600,6 +600,6 @@ fn smudge_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, c
         influence = stroke_increment(previous, coverage);
     }
     var kept = 1.0;
-    if BLENDER == BLEND_SOFT { kept = 1.0 - (1.0 - exp(-blender_lift() * contact.exposure)) * min(style.canvas_opacity.z, 1.0); }
+    if BLEND_LIFT { kept = 1.0 - (1.0 - exp(-blender_lift() * contact.exposure)) * min(style.canvas_opacity.z, 1.0); }
     return MaterialOutput(blended_paint(original, paint, influence) * kept, vec4<f32>(coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
 }
