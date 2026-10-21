@@ -11,8 +11,8 @@ $run=Join-Path $repo ('artifacts/windows/prediction/'+[Guid]::NewGuid().ToString
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
 function Row([string]$Title){@((Model).preferences.pages.groups.rows|Where-Object title -eq $Title)[0]}
-function Control([string]$Title,[string]$Class){$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Title))|Where-Object {$_.Current.ClassName -eq $Class}|Select-Object -First 1}
-function Switch([string]$Title){Control $Title 'ToggleSwitch'}
+function Named-Control([string]$Title,[string]$Class){$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Title))|Where-Object {$_.Current.ClassName -eq $Class}|Select-Object -First 1}
+function Switch([string]$Title){Named-Control $Title 'ToggleSwitch'}
 function Open-Preferences {
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Edit'
  Invoke-Id 'settings'
@@ -55,13 +55,13 @@ try {
  $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
  Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Prediction review did not start'
  [CapyRowPointer]::Initialize([uint32]$review.Id)
- Wait-Until {(Find 'tool-setting-size').Current.IsEnabled} 'Brush did not become editable'
- $size=Find 'tool-setting-size';$size.SetFocus();$size.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('18')
- (Find 'tool-setting-opacity').SetFocus()
  Open-Preferences
  $native=Row 'Use Windows stroke prediction'
  if(!$native.enabled -or !$native.kind.active){throw 'Native Windows predictor is not enabled by default'}
  if((Row 'Prediction amount').enabled){throw 'Manual prediction time should be disabled while Windows predicts'}
+ Close-Preferences
+ Draw 'pen'
+ Open-Preferences
  (Switch 'Use Windows stroke prediction').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
  Wait-Until {!(Row 'Use Windows stroke prediction').kind.active -and (Row 'Prediction amount').enabled} 'Native prediction switch did not select the engine fallback'
  Close-Preferences
