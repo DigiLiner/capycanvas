@@ -1,4 +1,6 @@
 // Pure brush coverage shared by artwork and scalar mask painting.
+override FOOTPRINT_GRAIN: bool = true;
+
 fn brush_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
     if !contact_feature(64u,style.contact_a.z>0.5) && bristles_enabled() { return bristle_footprint(dab, world, field.y); }
     return unbristled_footprint(dab, world, field);
@@ -22,7 +24,7 @@ fn unbristled_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
         min(dab.radii.x, dab.radii.y),
     );
     if coverage <= 0.0 { return 0.0; }
-    if style.flags.y > 0.5 {
+    if FOOTPRINT_GRAIN && style.flags.y > 0.5 {
         coverage *= mix(1.0, textureSampleLevel(grain_texture, brush_sampler, paper_uv(world), 0.0).r,
             clamp(dab.material.x * style.flags.z, 0.0, 1.0));
     }

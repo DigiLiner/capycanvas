@@ -801,6 +801,12 @@ impl BlenderKind {
     pub const ALL: [Self; 15] = [Self::Soft, Self::Blur, Self::Sharpen, Self::Bristle, Self::Grainy, Self::TextureKeeping,
         Self::Hue, Self::Knife, Self::Scatter, Self::Painterly, Self::Crystal, Self::Marbling, Self::Comb, Self::EdgeKeeping,
         Self::Dither];
+
+    /// Kinds that imitate a tool touching the sheet, so they blend only the
+    /// paper their tip reaches when the brush has Texture strength.
+    pub fn touches_paper(self) -> bool {
+        matches!(self, Self::Soft | Self::Bristle | Self::Grainy | Self::Knife)
+    }
 }
 
 /// Farthest a blender samples from a pixel's traced position, in document
@@ -824,11 +830,23 @@ pub struct BrushBlender {
     pub character: f32,
     /// Bristle, cell or texture size as a fraction of the contact diameter.
     pub scale: f32,
+    /// How far pen pressure presses the tip into the paper's tooth, as the
+    /// dry-media approach gain.
+    pub pressure_gain: f32,
+    /// Depth over which the tip goes from first touching the paper to full
+    /// contact, in the dry-media height units.
+    pub engagement: f32,
+    /// How far the tip's rim stays above the paper: 0 for a finger or blade
+    /// that conforms, larger for a rounded point.
+    pub recess: f32,
+    /// Pigment the tip absorbs per diameter travelled where it touches.
+    pub lift: f32,
 }
 
 impl Default for BrushBlender {
     fn default() -> Self {
-        Self { kind: BlenderKind::Soft, reach: 0.15, rate: 3.0, character: 0.0, scale: 0.0 }
+        Self { kind: BlenderKind::Soft, reach: 0.15, rate: 3.0, character: 0.0, scale: 0.0,
+            pressure_gain: 1.4, engagement: 0.1, recess: 0.4, lift: 0.0 }
     }
 }
 
@@ -1078,6 +1096,7 @@ impl BrushSnapshot {
             self.wet_mix.refill,
             self.blender.reach,
             self.blender.scale,
+            self.blender.recess,
             self.deform.strength,
             self.deform.pressure,
             self.deform.momentum,
@@ -1094,6 +1113,8 @@ impl BrushSnapshot {
             self.wet_mix.stretch,
             self.blender.rate,
             self.blender.character,
+            self.blender.pressure_gain,
+            self.blender.lift,
         ];
         let taper = [
             self.taper.start_size,
@@ -1154,6 +1175,7 @@ impl BrushSnapshot {
             || self.bounds.minimum_size > self.bounds.maximum_size
             || !(0.0..=self.bounds.maximum_opacity).contains(&self.bounds.minimum_opacity)
             || self.bounds.maximum_opacity > 1.0
+            || !(self.blender.engagement > 0.0 && self.blender.engagement <= 1.0)
         {
             return Err(BrushError::InvalidAdvanced);
         }

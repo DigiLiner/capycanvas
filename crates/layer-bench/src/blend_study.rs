@@ -566,6 +566,13 @@ fn signature_scene(p: &mut Painter, preset: Preset) -> Vec<(f32, f32, f32)> {
             }
             scrub(110.0, 290.0, 14.0, 66.0, 12.0)
         }
+        Preset::BlendingStump | Preset::Tissue => {
+            for row in 0..5 {
+                let y = 14.0 + row as f32 * 13.0;
+                p.texture(Preset::Charcoal, srgb(0xa0502d), 30.0, &line((12.0, y), (388.0, y + 3.0), 3.0));
+            }
+            scrub(150.0, 385.0, 14.0, 66.0, 10.0)
+        }
         _ => {
             cel_tube(p, 0xffd9b8, 0xd9826a, 0x6e2f45, 0xece4d6);
             scrub(150.0, 385.0, 14.0, 66.0, 16.0)

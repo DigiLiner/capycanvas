@@ -5158,7 +5158,11 @@ impl StyleGpu {
             style.deform.distortion,
         ];
         if style.execution == BrushExecution::Smudge {
-            result.deformation = [style.blender.reach, style.blender.rate, style.blender.character, style.blender.scale];
+            let blender = style.blender;
+            result.deformation = [blender.reach, blender.rate, blender.character, blender.scale];
+            let tooth = if destination_material::blender(style).1 { grain.map_or(0., |grain| grain.depth) * relief } else { 0. };
+            result.transport_a = [tooth, blender.pressure_gain, blender.engagement, blender.recess];
+            result.transport_b = [blender.lift, 0., 0., 0.];
         }
         if style.execution == BrushExecution::Wet {
             result.deformation = [style.wet_mix.stretch, 0., style.wet_mix.refill, style.wet_mix.average];

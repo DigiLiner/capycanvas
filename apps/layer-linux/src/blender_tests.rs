@@ -5,10 +5,10 @@ use super::super::canvas_bar_tests::{canvas_point, document};
 use super::*;
 use layer_core::DefaultBrushPreset as P;
 
-const BLENDERS: [P; 20] = [
+const BLENDERS: [P; 22] = [
     P::Smudge, P::NaturalBlender, P::SoftBlender, P::Blur, P::Sharpen, P::BristleBlender, P::GrainyBlender, P::TextureBlender, P::HueBlender,
     P::ScatterBlender, P::PainterlyBlender, P::CrystalBlender, P::Marbling, P::CombBlender,
-    P::EdgeKeepingBlender, P::DitherBlender, P::BlendingKnife, P::WetBlender, P::ColorMixer, P::MixingBrush,
+    P::EdgeKeepingBlender, P::DitherBlender, P::BlendingKnife, P::BlendingStump, P::Tissue, P::WetBlender, P::ColorMixer, P::MixingBrush,
 ];
 
 fn committed(d: &Driver) -> u64 {
@@ -90,6 +90,7 @@ fn tune(d: &mut Driver, preset: P) {
         P::Marbling => &[("swirl", "200")],
         P::EdgeKeepingBlender => &[("edge_keeping", "80")],
         P::ColorMixer => &[("persistence", "120")],
+        P::Tissue => &[("grain_depth", "60")],
         _ => &[],
     };
     for &(id, text) in edits {
@@ -103,6 +104,7 @@ fn tune(d: &mut Driver, preset: P) {
             "spread" => brush.blender.reach,
             "cell_size" => brush.blender.scale,
             "persistence" => brush.wet_mix.stretch,
+            "grain_depth" => brush.grain.map_or(0., |grain| grain.depth),
             _ => brush.blender.character,
         };
         assert!((value * 100. - text.parse::<f32>().unwrap()).abs() < 0.5, "{preset:?} {id} typed {text}: {value}");
@@ -120,7 +122,7 @@ fn native_blenders_paint() {
         pump(200);
         seed(&mut d, size);
         for (index, preset) in BLENDERS.into_iter().enumerate() {
-            if matches!(preset, P::SoftBlender | P::Marbling | P::WetBlender) {
+            if matches!(preset, P::SoftBlender | P::Marbling | P::BlendingStump | P::Tissue | P::WetBlender) {
                 choose_in_drawer(&mut d, preset);
             } else {
                 d.w.dispatch(UiAction::SelectBrush { id: preset as u32 });

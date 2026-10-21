@@ -56,15 +56,28 @@ pub(super) fn entries(operation: MaterialOperation) -> &'static [Entry] {
     }
 }
 
-/// The blenders an operation compiles a module for: every one for Smudge.
-pub(super) fn blenders(operation: MaterialOperation) -> &'static [layer_core::BlenderKind] {
-    if operation == MaterialOperation::Smudge { &layer_core::BlenderKind::ALL } else { &[layer_core::BlenderKind::Soft] }
+/// A blender kind and whether its kernel reads the paper.
+pub(super) type Blender = (layer_core::BlenderKind, bool);
+
+/// The blenders an operation compiles a module for: for Smudge, every kind
+/// without the paper and the kinds that touch it with the paper too.
+pub(super) fn blenders(operation: MaterialOperation) -> Vec<Blender> {
+    if operation != MaterialOperation::Smudge { return vec![(layer_core::BlenderKind::Soft, false)]; }
+    layer_core::BlenderKind::ALL.into_iter().map(|kind| (kind, false))
+        .chain(layer_core::BlenderKind::ALL.into_iter().filter(|kind| kind.touches_paper()).map(|kind| (kind, true)))
+        .collect()
+}
+
+/// The blender kernel a style needs: it reads the paper when the kind
+/// touches paper and the brush has Texture strength.
+pub(super) fn blender(style: &layer_render::DabStyle) -> Blender {
+    (style.blender.kind, style.blender.kind.touches_paper() && style.grain.is_some_and(|grain| grain.depth > 0.0))
 }
 
 /// The module that provides `entry` of `operation` for one blend code and blender.
-pub(super) fn module(operation: MaterialOperation, blend: u32, blender: layer_core::BlenderKind) -> Entries {
+pub(super) fn module(operation: MaterialOperation, blend: u32, (kind, paper): Blender) -> Entries {
     match operation {
-        MaterialOperation::Smudge => Entries::Blend(blender),
+        MaterialOperation::Smudge => Entries::Blend(kind, paper),
         _ => Entries::Transport(blend),
     }
 }
@@ -86,7 +99,7 @@ pub(super) fn blended(operation: MaterialOperation) -> bool {
 
 pub(super) struct Pipelines {
     layouts: [wgpu::BindGroupLayout; 3],
-    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8), Deferred<wgpu::ComputePipeline>>,
+    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8, bool), Deferred<wgpu::ComputePipeline>>,
 }
 
 impl Pipelines {
@@ -102,11 +115,11 @@ impl Pipelines {
         for (slot, operation) in (0..MATERIAL_SLOTS).flat_map(|slot| OPERATIONS.map(|operation| (slot, operation))) {
             if !blended(operation) && slot % MATERIAL_BLENDS.len() != 0 { continue; }
             let (flags, blend) = dry_material::material_entries(slot);
-            for &blender in blenders(operation) {
+            for blender in blenders(operation) {
                 let transport = dry_material::material_shader(device, module(operation, blend, blender), flags, operation);
                 for &entry in entries(operation) {
-                    kernels.insert((operation as u32, slot, entry, blender as u8), Deferred::compute(device,
-                        format!("destination material {} operation={} contact={flags:#x} blend={blend} blender={blender:?}", entry.name(), operation as u32),
+                    kernels.insert((operation as u32, slot, entry, blender.0 as u8, blender.1), Deferred::compute(device,
+                        format!("destination material {} operation={} contact={flags:#x} blend={blend} blender={:?} paper={}", entry.name(), operation as u32, blender.0, blender.1),
                         &pipeline_layouts[entry.outputs()], &transport, entry.name()));
                 }
             }
@@ -118,8 +131,8 @@ impl Pipelines {
         let operation = BrushPassPlan::for_style(style).material;
         let slot = if blended(operation) { dry_material::material_slot(style) }
             else { dry_material::material_contact_slot(style) * MATERIAL_BLENDS.len() };
-        let blender = if operation == MaterialOperation::Smudge { style.blender.kind } else { layer_core::BlenderKind::Soft };
-        &self.kernels[&(operation as u32, slot, entry, blender as u8)]
+        let (kind, paper) = if operation == MaterialOperation::Smudge { blender(style) } else { (layer_core::BlenderKind::Soft, false) };
+        &self.kernels[&(operation as u32, slot, entry, kind as u8, paper)]
     }
 
     fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>, wetness: Option<&PageSurface>) -> wgpu::BindGroup {
@@ -292,7 +305,7 @@ mod tests {
     #[test]
     fn transport_kernels_declare_the_workgroup_they_are_dispatched_with() {
         for operation in OPERATIONS {
-            for (&entry, &blender) in entries(operation).iter().flat_map(|entry| blenders(operation).iter().map(move |blender| (entry, blender))) {
+            for (&entry, blender) in entries(operation).iter().flat_map(|entry| blenders(operation).into_iter().map(move |blender| (entry, blender))) {
                 let source = dry_material::material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true),
                     module(operation, 0, blender), 0, operation);
                 let module = naga::front::wgsl::parse_str(&source).unwrap();

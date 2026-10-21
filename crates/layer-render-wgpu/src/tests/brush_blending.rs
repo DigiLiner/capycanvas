@@ -56,7 +56,7 @@ impl Canvas {
         self.styled_stroke(id,style,dabs,chunk);
     }
 
-    fn styled_stroke(&mut self,id:u64,mut style:DabStyle,dabs:&[Dab],chunk:usize) {
+    pub(super) fn styled_stroke(&mut self,id:u64,mut style:DabStyle,dabs:&[Dab],chunk:usize) {
         style.blend_space=self.space;
         for (i,contacts) in dabs.chunks(chunk).enumerate() {
             let damage=contacts.iter().fold(Rect::EMPTY,|r,d|r.union(d.bounds()));

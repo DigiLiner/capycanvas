@@ -80,10 +80,12 @@ pub enum DefaultBrushPreset {
     HueBlender = 62,
     LiquifyEdge = 63,
     LiquifyReconstruct = 64,
+    BlendingStump = 65,
+    Tissue = 66,
 }
 
 impl DefaultBrushPreset {
-    pub const ALL: [Self; 64] = [
+    pub const ALL: [Self; 66] = [
         Self::GPen, Self::Pencil, Self::Eraser, Self::Paintbrush, Self::Airbrush, Self::Chalk, Self::Marker,
         Self::Spray, Self::DualTexture, Self::Smudge, Self::WetRound, Self::LiquifyPush, Self::LiquifyTwirl,
         Self::MultiplyGlaze, Self::TexturedFlat, Self::DryScumble, Self::PastelBlock, Self::TransparentGlaze,
@@ -96,7 +98,7 @@ impl DefaultBrushPreset {
         Self::ScatterBlender, Self::PainterlyBlender, Self::CrystalBlender, Self::Marbling, Self::CombBlender,
         Self::EdgeKeepingBlender, Self::DitherBlender, Self::BlendingKnife, Self::WetBlender, Self::ColorMixer,
         Self::MixingBrush, Self::Sharpen, Self::TextureBlender, Self::HueBlender,
-        Self::LiquifyEdge, Self::LiquifyReconstruct,
+        Self::LiquifyEdge, Self::LiquifyReconstruct, Self::BlendingStump, Self::Tissue,
     ];
 }
 
@@ -218,7 +220,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             hardness: 0.42,
             flow: 0.72,
             mappings: Arc::from([BrushMapping::pressure_size()]),
-            ..blender(BlenderKind::Soft, BlenderSpec { reach: 0.05, rate: 40.0, pull: 0.95, ..BlenderSpec::BASE })
+            ..blender(BlenderKind::Soft, BlenderSpec { reach: 0.05, rate: 40.0, pull: 0.95, paper: Some(1.0), tip: Tip::FINGER, ..BlenderSpec::BASE })
         },
         DefaultBrushPreset::WetRound => BrushSnapshot {
             color_rgba_linear: [0.015, 0.18, 0.52, 1.0],
@@ -260,19 +262,23 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         DefaultBrushPreset::LiquifyCrystals => liquify(360.0, 0.4, 0.1, BrushDeform {
             mode: LiquifyMode::Crystals, strength: 0.7, distortion: 0.6, ..Default::default()
         }),
-        DefaultBrushPreset::SoftBlender => blender(BlenderKind::Soft, BlenderSpec { reach: 0.15, rate: 4.5, pull: 0.6, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::SoftBlender => blender(BlenderKind::Soft, BlenderSpec { reach: 0.15, rate: 4.5, pull: 0.6, paper: Some(0.0), ..BlenderSpec::BASE }),
         DefaultBrushPreset::Blur => blender(BlenderKind::Blur, BlenderSpec { reach: 0.2, rate: 6.0, ..BlenderSpec::BASE }),
         DefaultBrushPreset::Sharpen => blender(BlenderKind::Sharpen, BlenderSpec { reach: 0.06, rate: 3.0, character: 0.8, ..BlenderSpec::BASE }),
         DefaultBrushPreset::BristleBlender => blender(BlenderKind::Bristle,
-            BlenderSpec { reach: 0.03, rate: 30.0, pull: 0.85, character: 1.0, scale: 0.5, ..BlenderSpec::BASE }),
-        DefaultBrushPreset::GrainyBlender => BrushSnapshot { grain: Some(paper_grain(0.0)),
-            ..blender(BlenderKind::Grainy, BlenderSpec { reach: 0.2, rate: 4.0, pull: 0.3, ..BlenderSpec::BASE }) },
+            BlenderSpec { reach: 0.03, rate: 30.0, pull: 0.85, character: 1.0, scale: 0.5, paper: Some(1.0), tip: Tip::BRUSH, ..BlenderSpec::BASE }),
+        DefaultBrushPreset::GrainyBlender => blender(BlenderKind::Grainy, BlenderSpec { reach: 0.2, rate: 4.0, pull: 0.3, paper: Some(1.0), ..BlenderSpec::BASE }),
         DefaultBrushPreset::TextureBlender => blender(BlenderKind::TextureKeeping,
             BlenderSpec { reach: 0.18, rate: 4.0, pull: 0.4, character: 0.9, scale: 0.05, ..BlenderSpec::BASE }),
         DefaultBrushPreset::HueBlender => blender(BlenderKind::Hue, BlenderSpec { reach: 0.2, rate: 4.0, pull: 0.2, ..BlenderSpec::BASE }),
-        DefaultBrushPreset::BlendingKnife => BrushSnapshot { aspect: 0.25, flow: 0.95, grain: Some(paper_grain(0.0)),
+        DefaultBrushPreset::BlendingKnife => BrushSnapshot { aspect: 0.25, flow: 0.95,
             mappings: Arc::from([direction_rotation()]),
-            ..blender(BlenderKind::Knife, BlenderSpec { rate: 20.0, pull: 0.9, character: 0.5, scale: 0.15, hardness: 0.95, ..BlenderSpec::BASE }) },
+            ..blender(BlenderKind::Knife, BlenderSpec { rate: 20.0, pull: 0.9, character: 0.5, scale: 0.15, hardness: 0.95,
+                paper: Some(1.0), tip: Tip::BLADE, ..BlenderSpec::BASE }) },
+        DefaultBrushPreset::BlendingStump => BrushSnapshot { diameter: 40.0,
+            ..blender(BlenderKind::Soft, BlenderSpec { reach: 0.06, rate: 14.0, pull: 0.35, hardness: 0.7, paper: Some(1.0), tip: Tip::STUMP, ..BlenderSpec::BASE }) },
+        DefaultBrushPreset::Tissue => BrushSnapshot { diameter: 120.0,
+            ..blender(BlenderKind::Soft, BlenderSpec { reach: 0.3, rate: 3.0, pull: 0.5, hardness: 0.2, paper: Some(1.0), tip: Tip::TISSUE, lift: 0.15, ..BlenderSpec::BASE }) },
         DefaultBrushPreset::ScatterBlender => blender(BlenderKind::Scatter, BlenderSpec { reach: 0.12, rate: 3.0, pull: 0.2, character: 1.0, ..BlenderSpec::BASE }),
         DefaultBrushPreset::PainterlyBlender => blender(BlenderKind::Painterly, BlenderSpec { reach: 0.25, rate: 8.0, pull: 0.6, character: 2.0, ..BlenderSpec::BASE }),
         DefaultBrushPreset::CrystalBlender => blender(BlenderKind::Crystal, BlenderSpec { reach: 0.06, rate: 4.0, scale: 0.18, ..BlenderSpec::BASE }),
@@ -474,7 +480,8 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             wet_mix: wet_mix(0.82, 0.88, 0.025, 0.16, 0.18, 0.08),
         }),
         DefaultBrushPreset::NaturalBlender => BrushSnapshot {
-            blender: BrushBlender { kind: BlenderKind::Soft, reach: 0.12, rate: 5.5, character: 0.55, scale: 0.6 },
+            blender: BrushBlender { kind: BlenderKind::Soft, reach: 0.12, rate: 5.5, character: 0.55, scale: 0.6,
+                pressure_gain: Tip::BRUSH.pressure_gain, engagement: Tip::BRUSH.engagement, recess: Tip::BRUSH.recess, lift: 0.0 },
             ..painter_brush(PainterBrushSpec {
                 diameter: 440.0,
                 aspect: 0.64,
@@ -483,7 +490,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
                 spacing: 0.04,
                 hardness: 0.66,
                 execution: BrushExecution::Smudge,
-                grain: Some(paper_grain(0.36)),
+                grain: Some(paper_grain(1.0)),
                 rendering: BrushRendering::default(),
                 wet_mix: BrushWetMix { pull: 0.5, mix_space: ColorMixSpace::Oklab, ..BrushWetMix::default() },
             })
@@ -499,10 +506,30 @@ struct BlenderSpec {
     character: f32,
     scale: f32,
     hardness: f32,
+    paper: Option<f32>,
+    tip: Tip,
+    lift: f32,
 }
 
 impl BlenderSpec {
-    const BASE: Self = Self { reach: 0.0, rate: 0.0, pull: 0.0, character: 0.0, scale: 0.0, hardness: 0.5 };
+    const BASE: Self = Self { reach: 0.0, rate: 0.0, pull: 0.0, character: 0.0, scale: 0.0, hardness: 0.5, paper: None, tip: Tip::ROUND, lift: 0.0 };
+}
+
+/// How a blender's tip meets the paper, in the dry-media contact terms.
+#[derive(Clone, Copy)]
+struct Tip {
+    pressure_gain: f32,
+    engagement: f32,
+    recess: f32,
+}
+
+impl Tip {
+    const ROUND: Self = Self { pressure_gain: 1.4, engagement: 0.1, recess: 0.4 };
+    const FINGER: Self = Self { pressure_gain: 0.93, engagement: 0.08, recess: 0.0 };
+    const BRUSH: Self = Self { pressure_gain: 1.0, engagement: 0.1, recess: 0.4 };
+    const BLADE: Self = Self { pressure_gain: 1.2, engagement: 0.05, recess: 0.0 };
+    const STUMP: Self = Self { pressure_gain: 1.6, engagement: 0.08, recess: 0.4 };
+    const TISSUE: Self = Self { pressure_gain: 1.0, engagement: 0.2, recess: 0.0 };
 }
 
 fn blender(kind: BlenderKind, spec: BlenderSpec) -> BrushSnapshot {
@@ -521,7 +548,9 @@ fn blender(kind: BlenderKind, spec: BlenderSpec) -> BrushSnapshot {
             mix_space: ColorMixSpace::Oklab,
             ..BrushWetMix::default()
         },
-        blender: BrushBlender { kind, reach: spec.reach, rate: spec.rate, character: spec.character, scale: spec.scale },
+        grain: spec.paper.map(paper_grain),
+        blender: BrushBlender { kind, reach: spec.reach, rate: spec.rate, character: spec.character, scale: spec.scale,
+            pressure_gain: spec.tip.pressure_gain, engagement: spec.tip.engagement, recess: spec.tip.recess, lift: spec.lift },
         mappings: Arc::from([pressure_flow(0.15, 0.85)]),
         ..BrushSnapshot::default()
     }

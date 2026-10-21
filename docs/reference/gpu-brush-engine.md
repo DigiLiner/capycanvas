@@ -201,6 +201,17 @@ field         = blender_field(kind, x, trace, radius)   // in the mixing space
 canvas_new(x) = mix_in_mixing_space(canvas_old(x), field, amount)
 ```
 
+A kind that touches paper, with Texture strength above 0, compiles a paper
+variant of its kernel. It reads the paper once per pixel after the contact loop
+and evaluates the dry-media contact `C` with the chunk's peak pressure and the
+tip's gain, engagement and recess; `C` scales the exposure and the trace before
+the field is sampled ([decision record](../history/brushes/paper-aware-blenders.md)).
+The variant takes eleven colour taps instead of twelve, so it issues as many
+texture reads as the paper-blind kernel; the Bristle Blender's two jittered side
+samples read the nearest pixel. Smudge kernels never multiply the
+footprint by grain. A Soft kernel lowers the result by
+`(1 − exp(−lift · exposure)) · opacity`, which only the Tissue sets.
+
 Exposure counts distance travelled, so spacing changes neither how far paint
 moves nor how much it blends. The radius grows with the square root of
 exposure, so one pass averages as widely as the many short passes it replaces.
@@ -214,7 +225,8 @@ structure-tensor streamline for Comb, wall-stopped rays for Edge-Keeping and an
 ordered two-color dither for Dither. The 128 px trace and 112 px radius keep
 every sample inside the page's 3×3 neighbourhood, so these kernels need no
 gather, and a sample inside the page's own texture skips the neighbourhood
-switch. They do not use the wet-paint reservoir and never lower alpha.
+switch. They do not use the wet-paint reservoir, and only the Tissue's lift
+lowers alpha.
 
 Wet paint uses the separate reservoir path. Loaded oils and palette knives keep
 spatial brush-local state:

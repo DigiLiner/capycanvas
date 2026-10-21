@@ -15,7 +15,6 @@ const BLEND_EDGE: u32 = 13u;
 const BLEND_DITHER: u32 = 14u;
 const BLEND_REACH_LIMIT: f32 = 112.0;
 const SMUDGE_TRAVEL_LIMIT: f32 = 128.0;
-const BLEND_TAPS: u32 = 12u;
 
 struct BlendContact {
     exposure: f32,
@@ -40,6 +39,11 @@ fn blender_reach() -> f32 { return clamp(style.deformation.x, 0.0, 1.0); }
 fn blender_rate() -> f32 { return max(style.deformation.y, 0.0); }
 fn blender_character() -> f32 { return clamp(style.deformation.z, 0.0, 4.0); }
 fn blender_scale() -> f32 { return clamp(style.deformation.w, 0.0, 1.0); }
+fn blender_paper_strength() -> f32 { return max(style.transport_a.x, 0.0); }
+fn blender_pressure_gain() -> f32 { return max(style.transport_a.y, 0.0); }
+fn blender_engagement() -> f32 { return max(style.transport_a.z, 0.001); }
+fn blender_recess() -> f32 { return clamp(style.transport_a.w, 0.0, 1.0); }
+fn blender_lift() -> f32 { return max(style.transport_b.x, 0.0); }
 
 fn hash_u32(value: u32) -> u32 {
     var v = value * 747796405u + 2891336453u;
@@ -140,12 +144,26 @@ fn blend_contact(world: vec2<f32>, first: u32, count: u32) -> BlendContact {
             swirl += curl(result.trace / max(blender_scale() * diameter, 2.0), u32(dab.contact.w)) * moved * blender_character() * strength;
         }
     }
+    if BLEND_PAPER && result.coverage > 0.0 {
+        var pressure = result.pressure;
+        if BLENDER == BLEND_KNIFE { pressure *= exp(-max(result.travel, 0.0) * blender_scale() * 0.12); }
+        let touch = paper_contact(paper_at(world), pressure, blender_recess() * (1.0 - result.coverage));
+        result.exposure *= touch;
+        result.trace = world - (world - result.trace) * touch;
+    }
     let pulled = world - result.trace;
     result.trace = world - pulled * min(1.0, SMUDGE_TRAVEL_LIMIT / max(length(pulled), 0.000001));
     result.trace -= swirl * min(1.0, BLEND_REACH_LIMIT / max(length(swirl), 0.000001));
     let moved = length(motion);
     if moved > 0.000001 { result.direction = motion / moved; }
     return result;
+}
+
+fn paper_contact(paper: f32, pressure: f32, recess: f32) -> f32 {
+    let depth = 0.5 - clamp(0.5 + blender_paper_strength() * (paper - 0.5), 0.0, 1.0);
+    let threshold = recess + (1.0 + 0.25 * recess) * depth;
+    let x = clamp((0.5 * clamp(pressure * blender_pressure_gain(), 0.0, 1.0) - threshold) / blender_engagement(), 0.0, 1.0);
+    return x * x * (3.0 - 2.0 * x);
 }
 
 fn blend_amount(contact: BlendContact) -> f32 {
@@ -189,13 +207,13 @@ fn paper_at(point: vec2<f32>) -> f32 {
 
 fn grainy_field(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
     let radius = blend_radius(contact, BLEND_REACH_LIMIT);
-    if style.flags.y <= 0.5 { return disc(contact.trace, radius, BLEND_TAPS, chunk_rotation(contact)); }
+    if !BLEND_PAPER { return disc(contact.trace, radius, BLEND_TAPS, chunk_rotation(contact)); }
     var color = vec4<f32>(0.0);
     var paper = 0.0;
     var cross = vec4<f32>(0.0);
     var square = 0.0;
-    for (var index = 0u; index < 12u; index += 1u) {
-        let point = contact.trace + vogel(index, 12u, chunk_rotation(contact)) * radius;
+    for (var index = 0u; index < BLEND_TAPS; index += 1u) {
+        let point = contact.trace + vogel(index, BLEND_TAPS, chunk_rotation(contact)) * radius;
         let tap = blend_tap(point);
         let height = paper_at(point);
         color += tap;
@@ -203,10 +221,11 @@ fn grainy_field(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
         cross += tap * height;
         square += height * height;
     }
-    color /= 12.0;
-    paper /= 12.0;
-    let spread = max(square / 12.0 - paper * paper, 0.0);
-    let follow = (cross / 12.0 - color * paper) / max(spread, 0.002) * (spread / (spread + 0.0005));
+    let taps = f32(BLEND_TAPS);
+    color /= taps;
+    paper /= taps;
+    let spread = max(square / taps - paper * paper, 0.0);
+    let follow = (cross / taps - color * paper) / max(spread, 0.002) * (spread / (spread + 0.0005));
     let channels = select(vec4<f32>(1.0), vec4<f32>(1.0, 0.3, 0.3, 1.0), u32(style.render_mode.z) == MIX_OKLAB);
     return color + follow * channels * (paper_at(world) - paper);
 }
@@ -284,15 +303,6 @@ fn cubic_canvas_sample(position: vec2<f32>) -> vec4<f32> {
         sum += row * wy[y];
     }
     return clamp(sum, low, high);
-}
-
-fn knife_amount(world: vec2<f32>, contact: BlendContact, amount: f32) -> f32 {
-    if style.flags.y <= 0.5 { return amount; }
-    let across = vec2<f32>(-contact.direction.y, contact.direction.x);
-    let streaked = contact.direction * dot(world, contact.direction) * 0.25 + across * dot(world, across);
-    let load = exp(-max(contact.travel, 0.0) * blender_scale() * 0.12);
-    let threshold = 0.9 - 1.3 * sqrt(clamp(contact.pressure, 0.0, 1.0)) * load;
-    return amount * smoothstep(threshold - 0.04, threshold + 0.04, paper_at(streaked));
 }
 
 fn painterly_field(contact: BlendContact, world: vec2<f32>) -> vec4<f32> {
@@ -517,7 +527,7 @@ fn blended_by(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> B
         }
         case BLEND_BRISTLE: {
             let width = vec2<f32>(-contact.direction.y, contact.direction.x) * radius;
-            let field = (blend_sample(contact.trace - width * random) + blend_sample(contact.trace + width * (1.0 - random))
+            let field = (blend_tap(contact.trace - width * random) + blend_tap(contact.trace + width * (1.0 - random))
                 + blend_sample(contact.trace)) / 3.0;
             return Blended(field, amount * (1.0 - 0.6 * bristle_lane(world, contact)));
         }
@@ -531,7 +541,7 @@ fn blended_by(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> B
             return Blended(hue_paint(original, disc(contact.trace, radius, BLEND_TAPS, chunk_rotation(contact))), amount);
         }
         case BLEND_KNIFE: {
-            return Blended(mix_space_tap(cubic_canvas_sample(contact.trace)) * brush_selection_at(contact.trace), knife_amount(world, contact, amount));
+            return Blended(mix_space_tap(cubic_canvas_sample(contact.trace)) * brush_selection_at(contact.trace), amount);
         }
         case BLEND_SCATTER: {
             let angle = pixel_rotation(world, contact);
@@ -589,5 +599,7 @@ fn smudge_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, c
         coverage = previous + (1.0 - previous) * influence;
         influence = stroke_increment(previous, coverage);
     }
-    return MaterialOutput(blended_paint(original, paint, influence), vec4<f32>(coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
+    var kept = 1.0;
+    if BLENDER == BLEND_SOFT { kept = 1.0 - (1.0 - exp(-blender_lift() * contact.exposure)) * min(style.canvas_opacity.z, 1.0); }
+    return MaterialOutput(blended_paint(original, paint, influence) * kept, vec4<f32>(coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
 }

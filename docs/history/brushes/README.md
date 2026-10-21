@@ -13,6 +13,7 @@ features have shipped. Current behavior belongs in the
 | Area | Design record |
 | --- | --- |
 | Dry media: pencil, charcoal, chalk, pastel and crayon | [Analytic relief and paper contact](dry-media-contact.md) |
+| Blenders and the paper | [Paper-aware blenders](paper-aware-blenders.md) |
 | Shared stroke stabilization | [Full-horizon reference objective](stroke-stabilization.md) |
 | Curve-fit stabilization | [Implemented curve model and open tuning](curve-fit-work-in-progress.md) |
 

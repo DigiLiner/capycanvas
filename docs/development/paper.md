@@ -187,6 +187,9 @@ any other Paper bakes it into paint, as for any fill.
   moving grain, and [`builtin_masks.rs`](../../crates/layer-render-wgpu/src/builtin_masks.rs)
   has no CPU paper generators. Watercolor transport fields and mask tips are
   separate from paper. Transparent Glaze has no grain.
+- **Blenders touch the paper.** Paper-aware blenders apply the dry-media
+  contact to how much they blend, so a light pass keeps the tooth and pressure
+  fills it ([paper-aware blenders](../history/brushes/paper-aware-blenders.md)).
 - **Relief scales tooth.** Dry media use
   `S = contact paper × Texture strength × relief / 100 µm` in the
   [contact model](../history/brushes/dry-media-contact.md); the multiplicative

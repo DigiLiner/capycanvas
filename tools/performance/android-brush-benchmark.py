@@ -31,7 +31,7 @@ PRESETS = {
     49: "scatter-blender", 50: "painterly-blender", 51: "crystal-blender", 52: "marbling", 53: "comb-blender",
     54: "edge-keeping-blender", 55: "dither-blender", 56: "blending-knife", 57: "wet-blender", 58: "color-mixer",
     59: "mixing-brush", 60: "sharpen", 61: "texture-keeping-blender", 62: "hue-blender",
-    63: "liquify-edge", 64: "liquify-reconstruct",
+    63: "liquify-edge", 64: "liquify-reconstruct", 65: "blending-stump", 66: "tissue",
 }
 DRY_PRESETS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 

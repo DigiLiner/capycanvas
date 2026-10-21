@@ -1,7 +1,8 @@
 //! Smudge blenders and the wet blenders on fixed scenes: flat and faint paint
 //! stay put, a colour edge blends along its length, lines stop the
 //! edge-keeping blender, the colour mixer carries one colour, the amount is
-//! independent of spacing and the texture-keeping blenders keep fine detail.
+//! independent of spacing, the texture-keeping blenders keep fine detail, the
+//! paper decides what a pressed tip reaches and the Tissue lifts pigment.
 use super::brush_blending::Canvas;
 use super::*;
 use layer_core::color::{DocumentColor, RgbSpace, SampleDepth};
@@ -22,8 +23,12 @@ fn brush(preset: P, diameter: f32) -> BrushSnapshot {
 }
 
 fn contacts(brush: &BrushSnapshot, path: &[[f32; 2]]) -> Vec<Dab> {
+    pressed(brush, path, 1.)
+}
+
+fn pressed(brush: &BrushSnapshot, path: &[[f32; 2]], pressure: f32) -> Vec<Dab> {
     let points: Vec<_> = path.iter().enumerate().map(|(i, &[x, y])| StrokePoint {
-        position: Point { x, y }, pressure: 1., tilt: [0.; 2], twist: 0., elapsed_micros: i as u32 * 4_000,
+        position: Point { x, y }, pressure, tilt: [0.; 2], twist: 0., elapsed_micros: i as u32 * 4_000,
     }).collect();
     let stroke = Stroke::new(StrokeId(9), SourceTarget::Paint(layer_core::authored::PaintHandle::from_index(1)), StrokeTool::Brush,
         brush.clone(), points).unwrap();
@@ -52,9 +57,44 @@ fn blenders() -> impl Iterator<Item = P> {
     P::ALL.into_iter().filter(|&p| layer_core::default_brush(p).execution == BrushExecution::Smudge).chain([P::WetBlender, P::ColorMixer])
 }
 
+fn on_paper(brush: &BrushSnapshot, paper: &str) -> layer_render::DabStyle {
+    let mut style = layer_render::DabStyle::for_brush(brush, StrokeTool::Brush);
+    style.paper = Some(layer_core::paper::PaperBinding {
+        surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
+            texture: layer_core::paper::built_in_paper(paper).unwrap().texture.clone(),
+            mapping: layer_core::paper::reference([128, 128], layer_core::paper::paper_ppi(None)).mapping,
+        }),
+        target_offset: [0, 0],
+    });
+    style
+}
+
+/// The share of pixels around the edge at x = 66 that a stroke changed.
+fn changed(before: &[[f64; 4]], after: &[[f64; 4]]) -> f64 {
+    let band: Vec<_> = (24..104).flat_map(|y| (56..76).map(move |x| (x, y))).collect();
+    let moved = band.iter().filter(|&&(x, y)| {
+        let (a, b) = (pixel(before, x, y), pixel(after, x, y));
+        (0..4).any(|c| (a[c] - b[c]).abs() > 0.004)
+    }).count();
+    moved as f64 / band.len() as f64
+}
+
+fn blend_on_paper(preset: P, depth: f32, pressure: f32, passes: u64) -> (Vec<[f64; 4]>, Vec<[f64; 4]>) {
+    let mut canvas = canvas();
+    halves(&mut canvas, BLUE, RED);
+    let before = canvas.composite();
+    let mut brush = brush(preset, 40.);
+    brush.grain = Some(layer_core::BrushGrain { depth });
+    let style = on_paper(&brush, "cold_press");
+    for pass in 0..passes {
+        canvas.styled_stroke(pass + 1, style.clone(), &pressed(&brush, &line([66., 4.], [66., 124.]), pressure), 6);
+    }
+    (before, canvas.composite())
+}
+
 #[test]
 fn every_blender_leaves_flat_paint_unchanged() {
-    for preset in blenders() {
+    for preset in blenders().filter(|&p| layer_core::default_brush(p).blender.lift == 0.) {
         let mut canvas = canvas();
         canvas.fill(canvas.base, [0.4, 0.3, 0.2, 1.]);
         let before = canvas.composite();
@@ -197,3 +237,59 @@ fn texture_keeping_blenders_keep_fine_detail_that_soft_blending_removes() {
     assert!(texture > 1.5 * soft, "texture-keeping keeps {texture} of the detail, soft {soft}");
     assert!(kept(P::HueBlender) > 0.9, "hue blending keeps lightness detail");
 }
+
+#[test]
+fn zero_texture_strength_blends_as_if_there_were_no_paper() {
+    for preset in [P::Smudge, P::SoftBlender, P::GrainyBlender, P::BlendingKnife, P::BlendingStump] {
+        let mut blind = canvas();
+        halves(&mut blind, BLUE, RED);
+        let mut brush = brush(preset, 40.);
+        brush.grain = None;
+        blind.stroke(1, &brush, &pressed(&brush, &line([66., 4.], [66., 124.]), 0.6), 6, false);
+        let mut flat = canvas();
+        halves(&mut flat, BLUE, RED);
+        brush.grain = Some(layer_core::BrushGrain { depth: 0. });
+        flat.styled_stroke(1, on_paper(&brush, "cold_press"), &pressed(&brush, &line([66., 4.], [66., 124.]), 0.6), 6);
+        assert_eq!(blind.composite(), flat.composite(), "{preset:?} at 0% Texture strength ignores the paper");
+    }
+}
+
+#[test]
+fn a_light_touch_blends_only_the_paper_it_reaches() {
+    let (before, blind) = blend_on_paper(P::SoftBlender, 0., 0.15, 1);
+    let (_, light) = blend_on_paper(P::SoftBlender, 1., 0.15, 1);
+    let (_, firm) = blend_on_paper(P::SoftBlender, 1., 1., 1);
+    let [blind, light, firm] = [changed(&before, &blind), changed(&before, &light), changed(&before, &firm)];
+    assert!(blind > 0.7, "the paper-blind blender reaches most pixels: {blind}");
+    assert!(light < blind - 0.15, "a light touch leaves the valleys alone: {light} vs {blind}");
+    assert!(firm > light + 0.2, "pressure reaches deeper into the tooth: {firm} vs {light}");
+}
+
+#[test]
+fn light_passes_never_reach_what_pressure_reaches() {
+    let (before, light) = blend_on_paper(P::SoftBlender, 1., 0.15, 10);
+    let (_, firm) = blend_on_paper(P::SoftBlender, 1., 1., 1);
+    let [light, firm] = [changed(&before, &light), changed(&before, &firm)];
+    assert!(light < firm, "ten light passes reach less paper than one firm pass: {light} vs {firm}");
+}
+
+#[test]
+fn tissue_lifts_pigment_where_it_presses_without_shifting_its_colour() {
+    let lifted = |pressure| {
+        let mut canvas = canvas();
+        canvas.fill(canvas.base, [0.4, 0.3, 0.2, 1.]);
+        let brush = brush(P::Tissue, 48.);
+        canvas.stroke(1, &brush, &pressed(&brush, &line([20., 64.], [108., 64.]), pressure), 6, false);
+        let after = canvas.composite();
+        let p = pixel(&after, 64, 64);
+        for (i, a) in after.iter().enumerate() {
+            assert!(a[3] <= 1. + 1e-6, "pixel {i} never gains paint: {a:?}");
+            if a[3] > 0.01 { assert!(((a[0] / a[3]) - 0.4).abs() < 0.01, "pixel {i} keeps its colour: {a:?}"); }
+        }
+        1. - p[3]
+    };
+    let [light, firm] = [lifted(0.3), lifted(1.)];
+    assert!(light > 0.0005, "a light touch lifts a little: {light}");
+    assert!(firm > 2. * light, "pressing lifts more: {firm} vs {light}");
+}
+

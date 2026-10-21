@@ -102,8 +102,8 @@ pub(super) enum Entries {
     /// Page kernels of a transported material for one blend code, and Wet's
     /// reservoir exchange.
     Transport(u32),
-    /// Smudge page kernels for one blender.
-    Blend(layer_core::BlenderKind),
+    /// Smudge page kernels for one blender, with or without the paper contact.
+    Blend(layer_core::BlenderKind, bool),
 }
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
@@ -144,8 +144,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
-            if let Entries::Blend(kind)=entries {
-                source+=&format!("const BLENDER: u32 = {}u;\n{}", kind as u8, include_str!("material_blend.wgsl"));
+            if let Entries::Blend(kind,paper)=entries {
+                source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {paper};\nconst BLEND_TAPS: u32 = {}u;\n{}",
+                    kind as u8, if paper {11} else {12}, include_str!("material_blend.wgsl"));
             }
             if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()
@@ -153,9 +154,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
     };
     let entry=match entries {
         Entries::Kernel(..) => include_str!("material_compute.wgsl"),
-        Entries::Transport(_) | Entries::Blend(_) => include_str!("material_destination.wgsl"),
+        Entries::Transport(_) | Entries::Blend(..) => include_str!("material_destination.wgsl"),
     };
-    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Blend(_) => 0};
+    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Blend(..) => 0};
     let blend=blend_source(blend_code);
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
@@ -166,6 +167,7 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
     specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
         .replace("override CONTACT_ABSENT: u32 = 0u;",&format!("const CONTACT_ABSENT: u32 = {absent}u;"))
+        .replace("override FOOTPRINT_GRAIN: bool = true;",&format!("const FOOTPRINT_GRAIN: bool = {};",operation!=M::Smudge))
         .replace("override MATERIAL_NORMAL_BLEND: bool = false;",&format!("const MATERIAL_NORMAL_BLEND: bool = {normal};")).into()
 }
 
@@ -780,8 +782,8 @@ mod tests {
                 .flat_map(move |operation| ["compute_color", "compute_coverage"].map(|entry| (Entries::Kernel(start, blend), operation, entry))));
             let kernels = destination::OPERATIONS.into_iter()
                 .filter(|&operation| destination::blended(operation) || slot % MATERIAL_BLENDS.len() == 0)
-                .flat_map(|operation| destination::entries(operation).iter().flat_map(move |&entry| destination::blenders(operation).iter()
-                    .map(move |&blender| (destination::module(operation, blend, blender), operation, entry.name()))));
+                .flat_map(|operation| destination::entries(operation).iter().flat_map(move |&entry| destination::blenders(operation).into_iter()
+                    .map(move |blender| (destination::module(operation, blend, blender), operation, entry.name()))));
             for (entries, operation, entry) in pointwise.chain(kernels) {
                 let source = material_source(Default::default(), sampling, entries, flags, operation);
                 assert_logical_operators_grouped(&source);
@@ -840,7 +842,7 @@ mod tests {
         use crate::destination_material::{self as destination, Entry};
         for flags in [0, 128] {for operation in destination::OPERATIONS {for &entry in destination::entries(operation) {
             let what = format!("{operation:?} {entry:?} {flags:#x}");
-            let present = compiled(destination::module(operation, 0, layer_core::BlenderKind::Soft), flags, operation, entry.name());
+            let present = compiled(destination::module(operation, 0, (layer_core::BlenderKind::Soft, false)), flags, operation, entry.name());
             for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
             assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Reservoir)), "{what} reaches {operations:?}");

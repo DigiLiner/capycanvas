@@ -130,8 +130,22 @@ layer and lays no color of its own:
 - **Paint mixers**: the Wet Blender carries what each part of the tip picked
   up and runs dry; the Color Mixer carries one color averaged over the tip, as
   Clip Studio Paint's Blend mode does.
+- **Dry media**: the Blending Stump pushes pigment into the paper's tooth and
+  deepens the tone without dragging it; the Tissue spreads it softly over the
+  peaks and lifts some away.
 - **Expressive**: Bristle, Painterly, Crystal, Marbling, Comb (along the
   strands already painted), Edge-Keeping (stops at lines), Scatter and Dither.
+
+### Blenders and the paper
+
+Blenders that imitate a tool touching paper (Smudge, Natural Blender, Soft
+Blender, Bristle Blender, Blending Knife, Grainy Blender, Blending Stump and
+Tissue) blend only the paper their tip reaches. A light touch keeps the tooth;
+pressure pushes pigment into it. Texture strength sets how much they feel the
+paper, and 0% makes them ignore it; Soft Blender starts at 0%. Each tip meets the
+paper in its own way, with constants in the preset rather than in Tool Options;
+the [decision record](../history/brushes/paper-aware-blenders.md) gives them.
+The effect blenders and the wet blenders ignore the paper.
 
 Tool Options shows a **Blender** group with Spread and the one setting each
 kind uses: Streaks, Sharpness, Texture kept, Blend lightness, Grit, Stretch,

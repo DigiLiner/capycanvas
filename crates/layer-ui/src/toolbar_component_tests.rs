@@ -1388,7 +1388,7 @@ fn slider_stamp_plan_uses_completed_writing_contact_and_tool_strength() {
 fn slider_stamp_plan_accepts_every_builtin_tool_context() {
     let mut s=session(Platform::Gtk);
     let choices=brush_catalog().collect::<Vec<_>>();
-    assert_eq!(choices.len(),64);
+    assert_eq!(choices.len(),66);
     for choice in choices {
         s.dispatch(UiAction::SelectBrush{id:choice.id}).unwrap();
         assert_eq!((s.state().toolbar_context().brush,s.state().brush.tool),(choice.id,choice.group.tool()));
