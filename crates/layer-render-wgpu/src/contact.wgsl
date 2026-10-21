@@ -3,7 +3,7 @@ fn evolving_contact_prepared(
     motion: vec2<f32>, previous: vec4<f32>, sensors: vec4<f32>,
     previous_sensors: vec4<f32>, hardness: f32, field: vec2<f32>,
     metric: vec4<f32>, invariants: vec2<f32>,
-) -> f32 {
+) -> vec2<f32> {
     let distance2 = dot(motion, motion);
     let start = center - motion;
     let nib_motion = vec2<f32>(dot(motion, metric.xy), dot(motion, metric.zw));
@@ -36,7 +36,7 @@ fn evolving_contact_prepared(
     }
     let local = rotate(world - mix(start, center, progress), orientation.x, -orientation.y) / axes;
     let radius = length(local);
-    if radius > 1.45 { return 0.0; }
+    if radius > 1.45 { return vec2<f32>(0.0); }
     let input = mix(previous_sensors, sensors, progress);
     let pressure = clamp(input.x, 0.0, 1.0);
     let aa = min(1.0 / max(min(axes.x, axes.y), 0.005), 1.0);
@@ -48,10 +48,17 @@ fn evolving_contact_prepared(
     let pool = select(0.0, style.contact_b.w, contact_feature(16u, style.contact_b.w > 0.0));
     boundary += pool * 0.12 * (0.3 + 0.7 * pressure);
     let feather = max(1.0 - hardness, aa);
-    var coverage = 1.0 - smoothstep(boundary - feather, boundary + aa * 0.5, radius);
+    let start_orientation = select(rotation, previous.zw / max(length(previous.zw), 0.00001),
+        dot(previous.zw, previous.zw) > 0.00001);
+    let start_radius = length(rotate(world - start, start_orientation.x, -start_orientation.y)
+        / max(previous.xy, vec2<f32>(0.005)));
+    let radii_from = vec2<f32>(radius, start_radius);
+    var edge = 1.0 - smoothstep(vec2<f32>(boundary - feather), vec2<f32>(boundary + aa * 0.5), radii_from);
     if contact_feature(256u, style.contact_c.w > 0.5) {
-        coverage = clamp((boundary - radius) / feather, 0.0, 1.0);
+        edge = clamp((boundary - radii_from) / feather, vec2<f32>(0.0), vec2<f32>(1.0));
     }
+    var coverage = edge.x;
+    let start_coverage = select(0.0, edge.y, contact_uniform() && distance2 > 0.000001);
     if !contact_uniform() {
         var integral_motion = nib_motion;
         var integral_offset = nib_offset;
@@ -80,7 +87,8 @@ fn evolving_contact_prepared(
             coverage = 0.08 * max(1.0 - radius * radius, 0.0);
         }
     }
-    if coverage <= 0.0 { return 0.0; }
+    if coverage <= 0.0 { return vec2<f32>(0.0); }
+    let shape = coverage;
 
     if contact_feature(2u, style.contact_a.y > 0.0) {
         let tooth = field.y;
@@ -117,5 +125,5 @@ fn evolving_contact_prepared(
         coverage *= mix(1.0, supply, style.contact_b.z);
     }
     coverage *= mix(1.0, load, 0.85 * (1.0 - style.contact_b.z));
-    return clamp(coverage, 0.0, 1.0);
+    return clamp(vec2<f32>(coverage, start_coverage * coverage / shape), vec2<f32>(0.0), vec2<f32>(1.0));
 }

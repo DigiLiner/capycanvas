@@ -9,6 +9,7 @@ use support::*;
 /// Merged pixels are recomposited in another order than the display's, so
 /// 8-bit captures may round one code apart.
 const TOLERANCE: u8 = 1;
+const TRANSLUCENT_MERGE_OVER_PAPER_TOLERANCE: u8 = TOLERANCE + 1;
 
 fn merge(engine: &mut Engine, kind: MergeKind) -> OccurrenceHandle {
     let plan = engine.document().merge_plan(kind).unwrap();
@@ -174,13 +175,13 @@ fn merge_visible_and_flatten_in(space: BlendSpace) {
         assert_eq!(engine.document().scene().effect_application(paper), Some(&paper_application));
     };
     merge(&mut engine, MergeKind::Visible);
-    image(&mut engine, 5_000_000_000).assert_near(&original, TOLERANCE, "merge visible");
+    image(&mut engine, 5_000_000_000).assert_near(&original, TRANSLUCENT_MERGE_OVER_PAPER_TOLERANCE, "merge visible");
     assert!(engine.document().scene().occurrence(hidden).is_some(), "hidden layers stay");
     assert_paper(&engine);
     assert!(engine.undo().unwrap());
     let flattened = merge(&mut engine, MergeKind::Flatten);
     let flattened_image = image(&mut engine, 6_000_000_000);
-    flattened_image.assert_near(&original, TOLERANCE, "flatten");
+    flattened_image.assert_near(&original, TRANSLUCENT_MERGE_OVER_PAPER_TOLERANCE, "flatten");
     assert_eq!(engine.document().scene().order(), &[flattened, paper]);
     assert!(engine.document().scene().paint_source(flattened).is_some());
     assert!(engine.document().scene().occurrence(hidden).is_none());

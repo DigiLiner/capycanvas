@@ -1,3 +1,4 @@
 fn material_contact(dab:Dab, world:vec2<f32>, field:vec2<f32>, prior:f32, selected:f32)->MaterialContact {
-    return MaterialContact(dab.color.rgb,brush_footprint(dab,world,field)*selected,false,false);
+    let footprint=footprint_and_start(dab,world,field)*selected;
+    return MaterialContact(dab.color.rgb,footprint.x,footprint.y,false,false);
 }

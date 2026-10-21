@@ -6,13 +6,22 @@ fn brush_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
     return unbristled_footprint(dab, world, field);
 }
 
+fn footprint_and_start(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> vec2<f32> {
+    if !contact_feature(64u,style.contact_a.z>0.5) && contact_feature(1u, style.contact_a.x > 0.5) {
+        return evolving_contact(dab, world, field);
+    }
+    return vec2<f32>(unbristled_footprint(dab, world, field), 0.0);
+}
+
+fn evolving_contact(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> vec2<f32> {
+    return evolving_contact_prepared(world, dab.center, dab.radii, dab.rotation, dab.motion,
+        dab.previous, dab.contact, dab.previous_contact, dab.hardness, field,
+        dab.metric, dab.invariants.xy);
+}
+
 fn unbristled_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
     if contact_feature(64u,style.contact_a.z>0.5) { return relief_contact(dab,world,field.y); }
-    if contact_feature(1u, style.contact_a.x > 0.5) {
-        return evolving_contact_prepared(world, dab.center, dab.radii, dab.rotation, dab.motion,
-            dab.previous, dab.contact, dab.previous_contact, dab.hardness, field,
-            dab.metric, dab.invariants.xy);
-    }
+    if contact_feature(1u, style.contact_a.x > 0.5) { return evolving_contact(dab, world, field).x; }
     let delta = world - dab.center;
     let local = rotate(delta, dab.rotation.x, -dab.rotation.y) / max(dab.radii, vec2<f32>(0.005));
     var coverage = tip_coverage(

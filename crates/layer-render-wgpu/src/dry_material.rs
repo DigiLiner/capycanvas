@@ -724,6 +724,16 @@ mod tests {
         }
     }
 
+    fn assert_no_member_after_a_bool(module: &naga::Module) {
+        let boolean = |member: &naga::StructMember| matches!(module.types[member.ty].inner, naga::TypeInner::Scalar(naga::Scalar::BOOL));
+        for (_, ty) in module.types.iter() {
+            if let naga::TypeInner::Struct { members, .. } = &ty.inner {
+                let first = members.iter().position(boolean).unwrap_or(members.len());
+                assert!(members[first..].iter().all(boolean), "struct {:?} has a member after a bool", ty.name);
+            }
+        }
+    }
+
     /// Browsers reject `a || b && c`, which naga accepts.
     fn assert_logical_operators_grouped(source: &str) {
         let mut groups = vec![[false; 2]];
@@ -760,6 +770,7 @@ mod tests {
             let source = material_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),Entries::Kernel(start, 0),flags,operation);
             assert_logical_operators_grouped(&source);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
+            assert_no_member_after_a_bool(&module);
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
             assert!(!module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("MATERIAL_OPERATION")));
@@ -788,6 +799,7 @@ mod tests {
                 let source = material_source(Default::default(), sampling, entries, flags, operation);
                 assert_logical_operators_grouped(&source);
                 let mut used = naga::front::wgsl::parse_str(&source).unwrap();
+                assert_no_member_after_a_bool(&used);
                 validate(&used);
                 used.entry_points.retain(|e| e.name == entry);
                 assert_eq!(used.entry_points.len(), 1, "{entry}/{operation:?}");

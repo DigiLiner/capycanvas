@@ -120,7 +120,7 @@ fn advanced_color(input: VertexOutput, opacity: f32) -> vec4<f32> {
         } else {
             coverage=evolving_contact_prepared(input.world,input.center,input.geometry.xy,input.geometry.zw,
                 input.motion,input.previous,input.contact,input.previous_contact,input.flow_hardness.y,
-                field,input.material,input.texture_sign);
+                field,input.material,input.texture_sign).x;
         }
         if coverage <= 0.0 { discard; }
         let alpha = (1.0 - exp(-coverage * input.flow_hardness.x * input.color.a * 6.0 * opacity))

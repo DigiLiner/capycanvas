@@ -49,7 +49,7 @@ struct MaterialOutput {
     wetness: vec4<f32>,
 }
 
-struct MaterialContact { pigment:vec3<f32>, coverage:f32, repaint:bool, held:bool }
+struct MaterialContact { pigment:vec3<f32>, coverage:f32, start:f32, repaint:bool, held:bool }
 
 fn contact_coverage(dab: Dab, world: vec2<f32>) -> f32 {
     return contact_coverage_field(dab, world, contact_field(world));

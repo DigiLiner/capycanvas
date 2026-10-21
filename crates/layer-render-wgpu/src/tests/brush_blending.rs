@@ -685,7 +685,8 @@ fn engine_generated_opacity_caps_retraces_and_restarts_for_new_strokes() {
 #[test]
 fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() {
     let center=(64*EXTENT[0]+64) as usize;
-    for (name,brush) in opacity_brushes() {
+    for (name,mut brush) in opacity_brushes() {
+        brush.diameter=32.;
         let render=|b:&layer_core::BrushSnapshot,retraces| {
             let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
             let dabs=opacity_contacts(b,retraces);canvas.stroke(7,b,&dabs,dabs.len(),false);canvas.composite()
@@ -746,6 +747,47 @@ fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() 
     let dabs=opacity_contacts(&pencil,16);canvas.stroke(7,&pencil,&dabs,dabs.len(),false);let built=canvas.composite();
     assert!(built[center][3]>0.98,"Pencil: eligible contacts still build on retracing: {:?}",built[center]);
     println!("Pencil black sweep: Strength75 alpha={}, Strength100 alpha={}, retraced Strength75 alpha={}",middle[center][3],full[center][3],built[center][3]);
+}
+
+#[test]
+fn engine_generated_uniform_contacts_lay_one_even_coat_however_the_sweep_is_divided() {
+    use layer_core::{DefaultBrushPreset as P,Stroke,StrokePoint,StrokeTool,authored::PaintHandle};
+    let glaze=layer_core::default_brush(P::TransparentGlaze);
+    let mut opaque_glaze=glaze.clone();opaque_glaze.opacity=1.;
+    let mut weak_pen=layer_core::default_brush(P::GPen);weak_pen.flow=0.3;
+    for (name,mut brush) in [("Transparent Glaze",glaze),("opaque Transparent Glaze",opaque_glaze),
+        ("Marker",layer_core::default_brush(P::Marker)),("weak G-Pen",weak_pen)] {
+        brush.diameter=42.;brush.color_rgba_linear=[0.1,0.2,0.6,1.];brush.stabilization.strength=0.;
+        let contacts=|inputs:u32| {
+            let points:Vec<StrokePoint>=(0..=inputs).map(|i|StrokePoint {
+                position:Point {x:8.5+111.*i as f32/inputs as f32,y:64.5},pressure:1.,tilt:[0.;2],
+                twist:0.,elapsed_micros:i*8_000,
+            }).collect();
+            let stroke=Stroke::new(StrokeId(7),SourceTarget::Paint(PaintHandle::from_index(1)),StrokeTool::Brush,brush.clone(),points).unwrap();
+            let mut dabs=Vec::new();layer_engine::DabGenerator::generate(&stroke,RgbSpace::Srgb,&mut dabs);dabs
+        };
+        let (swept,divided)=(contacts(1),contacts(40));
+        assert!(swept.len()==2 && divided.len()>4,"{name}: {} and {} contacts",swept.len(),divided.len());
+        for space in BlendSpace::ALL {
+            let (depth,tolerance)=if space==BlendSpace::Linear {(SampleDepth::F32,2e-4)} else {(SampleDepth::U8,1.2/255.)};
+            let draw=|dabs:&[Dab]| {
+                let mut canvas=Canvas::new(DocumentColor {depth,..Default::default()},space,None);
+                canvas.stroke(7,&brush,dabs,dabs.len(),false);canvas.composite()
+            };
+            let (once,coat)=(draw(&swept),draw(&divided));
+            let centre=coat[(64*EXTENT[0]+64) as usize];
+            assert!(centre[3]>0.1,"{name}/{space:?}: the stroke paints: {centre:?}");
+            for (i,(a,b)) in once.iter().zip(&coat).enumerate() {for c in 0..4 {
+                assert!((a[c]-b[c]).abs()<tolerance,"{name}/{space:?}: pixel{i} channel{c} depends on contact spacing: {a:?} vs {b:?}");
+            }}
+            for y in 0..EXTENT[1] as usize {
+                let row=&coat[y*EXTENT[0] as usize..][..EXTENT[0] as usize];
+                for x in 40..=88 {for c in 0..4 {
+                    assert!((row[x][c]-row[64][c]).abs()<tolerance,"{name}/{space:?}: uneven coat at ({x},{y}) channel{c}: {:?} vs {:?}",row[x],row[64]);
+                }}
+            }
+        }
+    }
 }
 
 #[test]

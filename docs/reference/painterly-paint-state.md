@@ -155,7 +155,11 @@ step, document-owned paper texture, or Gaussian blur.
 
 Uniform accumulation stores raw contact coverage for the current stroke.
 Ordinary drawing contacts combine requests as `c1=c0+(1-c0)*request`; Uniform
-retouching and bristles retain their maximum-coverage response.
+retouching and bristles retain their maximum-coverage response. A swept
+contact shares its starting pose with the contact before it, which already laid
+that pose's request `r0`, so it requests only `(request-r0)/(1-r0)`. One pass
+therefore lays one even coat however the generator divides it, and paint builds
+only where the pen leaves a pixel and passes over it again.
 Uniform retouching multiplies raw coverage by
 the sampled source alpha, so repeated contacts preserve source transparency.
 For a pixel with old coverage `c0` and new target `c1`, the source-over alpha is:

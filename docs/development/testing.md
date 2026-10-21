@@ -22,7 +22,10 @@ each entry point, including called helpers. Supply only constants used by that
 entry point: Safari versions can reject unused overrides even when the module
 declares them. This catches the dry-brush recipe mismatch; browser compiler
 failures still need checks in the actual browser. Native Metal and Chrome use
-different shader compilers from Safari.
+different shader compilers from Safari. The same test rejects a struct member
+declared after a `bool`: Mali's compiler, in the Android driver and in the Mali
+Offline Compiler, crashes on such a struct, and the app closes at the first
+stroke.
 
 Renderer `reduction_samplers_live_with_records_not_page_views` validates the
 actual composed display shaders and rejects per-page sampler ownership.

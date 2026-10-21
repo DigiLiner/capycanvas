@@ -51,7 +51,11 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
         let repaint=contact.repaint;
         if aggregate {dose+=coverage*dab.flow*dab.color.a;continue;}
         if coverage <= 0.0 { continue; }
-        let requested_alpha = brush_alpha(dab,coverage/max(selected,0.000001))*selected;
+        var requested_alpha = brush_alpha(dab,coverage/max(selected,0.000001))*selected;
+        if contact_uniform() && MATERIAL_OPERATION != OP_CLONE && !bristles_enabled() && requested_alpha < 1.0 {
+            let laid = brush_alpha(dab,contact.start/max(selected,0.000001))*selected;
+            requested_alpha = clamp(working_ratio(requested_alpha-laid,1.0-laid),0.0,1.0);
+        }
         if telescoped {
             stroke_coverage = max(stroke_coverage,requested_alpha);
             continue;

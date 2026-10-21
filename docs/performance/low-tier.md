@@ -1607,6 +1607,8 @@ Multiply Glaze and the very complex material rows were measured on 2026-10-19 wi
 
 Smudge, Natural Blender, Soft, Blur, Bristle, Grainy, the Blending Knife, Blending Stump and Tissue were measured on 2026-10-20 at `68012f20a`, after [paper-aware blending](../history/brushes/paper-aware-blenders.md): six runs from two candidate sets interleaved with a control of the previous `main` (three runs for Blending Stump). Soft Blender and Tissue were measured again at `1136a47c9`, which compiles lifting only for the Tissue. Updates per second are quantized at these rates, so the comparison used each run's median queue-present time: Soft Blender's stayed 4–6% above the control's (681 → 720 ms), inside the 630–812 ms spread between runs of one build. The control completed Smudge 1.6, Natural Blender 1.1, Soft 1.6, Blur 1.9, Bristle 1.5 and Grainy 1.5 updates/s; it crashed during the second Blending Knife stroke in both control sets, before Wet Round, and completed a lone Blending Knife run without crashing. The other blenders (presets 49–55 and 57–62) are unmeasured on this tier, and the wet rows predate the blender suite. Liquify uses the separate Photo-layer profile below.
 
+Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measured on 2026-10-21 after Uniform contacts stopped counting the pose they share twice ([paint state](../reference/painterly-paint-state.md)): six strokes from two candidate sets interleaved with a control of the previous `main` (`c12ec63d2`), which completed Marker 13.96, Paintbrush 7.98, Textured Flat 9.37, Dry Scumble 0.80 and Transparent Glaze 1.60 updates/s. The control's strokes sped up after a lap or two, once the doubled coats brought the ellipse to full coverage and its pixels skipped their contacts. Each pass now lays one coat, so a pixel the ellipse crosses again costs as much as on its first pass. In the first second of a 512 px stroke, both builds completed the same number of updates.
+
 - The older fixtures fit their 520 × 299 px ellipse to 339 × 299 px in the
   TCL's 754 px work area at 16.0% zoom. The current G-Pen row uses the 240 × 120 px semiaxes documented in
   the current comparison above.
@@ -1631,14 +1633,14 @@ Smudge, Natural Blender, Soft, Blur, Bristle, Grainy, the Blending Knife, Blendi
 | Crayon (43) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 1024 px | 29.9 fresh updates/s (29.71–29.95); completion gap p99 44.67–45.06 ms | **Not met** |
 | Airbrush (5) | Simple | 1024 px | 32.7 updates/s (32.4–33.1); gap p99 55.6 ms | **Not met** |
-| Marker (7) | Complex | 1024 px | 16.5 updates/s (16.5–16.6); gap p99 100.5 ms | **Not met** |
+| Marker (7) | Complex | 1024 px | 2.05 updates/s (1.90–2.20); gap p99 706.2 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 15.1 updates/s (15.0–15.1); gap p99 105.5 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 14.3 updates/s (14.2–14.4); gap p99 178.0 ms | **Not met** |
 | Pastel Block (17) | Complex | 1024 px | 21.27–23.43 fresh updates/s; fresh gap p99 ≤59.95 ms | **Not met**; [dry media](#dry-media-contact-model) |
-| Paintbrush (4) | Complex | 1024 px | 10.75 (10.74–10.96) fresh updates/s; completion-gap p99 350.01–385.67 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
-| Textured Flat (15) | Complex | 1024 px | 18.7 updates/s (18.6–18.8); gap p99 169.3 ms | **Not met** |
-| Dry Scumble (16) | Complex | 1024 px | 8.8 updates/s (8.7–9.0); gap p99 212.7 ms | **Not met** |
-| Transparent Glaze (18) | Complex | 1024 px | 14.7 updates/s (14.6–14.8); gap p99 112.0 ms | **Not met** |
+| Paintbrush (4) | Complex | 1024 px | 0.70 updates/s (0.70–0.70); completion-gap p99 2054.0 ms | **Not met**; [layer color modes](#layer-color-modes) |
+| Textured Flat (15) | Complex | 1024 px | 0.80 updates/s (0.80–0.90); gap p99 1691.0 ms | **Not met** |
+| Dry Scumble (16) | Complex | 1024 px | 0.70 updates/s (0.70–0.70); gap p99 2431.2 ms | **Not met** |
+| Transparent Glaze (18) | Complex | 1024 px | 1.20 updates/s (1.20–1.20); gap p99 1058.0 ms | **Not met** |
 | Multiply Glaze (14) | Complex | 1024 px | 16.6 updates/s (16.3–16.6); input 16.6/s; completion-gap p99 86.0 ms | **Not met** |
 | Dual Texture (9) | Complex | 1024 px | 2.6 updates/s (2.5–2.7); gap p99 559.5 ms | **Not met** |
 | Spray (8) | Complex | 1024 px | 7.4 updates/s (7.3–7.7); gap p99 217.2 ms | **Not met** |

@@ -1883,6 +1883,8 @@ Multiply Glaze and the very complex material rows were measured on 2026-10-19 wi
 
 Smudge, Natural Blender, Soft, Blur, Bristle, Grainy, the Blending Knife, Blending Stump and Tissue were measured on 2026-10-20 at `68012f20a`, after [paper-aware blending](../history/brushes/paper-aware-blenders.md), with the 9504 × 6336 photo: six runs from two candidate sets interleaved with a control of the previous `main` (three runs for the new presets). Every run of the rows marked met completed at least 160 updates/s with a gap p99 of at most 12.7 ms. The control completed Smudge 143.4, Natural Blender 85.0, Soft 142.0, Blur 178.3, Bristle 80.6, Grainy 122.9 and Blending Knife 10.0 updates/s. The other blenders (presets 49–55 and 57–62) are unmeasured on this tier, and the wet rows predate the blender suite. Liquify uses the separate Photo-layer profile below.
 
+Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measured on 2026-10-21 after Uniform contacts stopped counting the pose they share twice ([paint state](../reference/painterly-paint-state.md)): six strokes from two candidate sets interleaved with a control of the previous `main` (`c12ec63d2`), which completed Marker 120.88, Paintbrush 113.30, Textured Flat 128.77, Dry Scumble 59.58 and Transparent Glaze 59.87 updates/s. The control's strokes sped up after a lap or two, once the doubled coats brought the ellipse to full coverage and its pixels skipped their contacts. Each pass now lays one coat, so a pixel the ellipse crosses again costs as much as on its first pass.
+
 **The 2026-09-22 G-Pen record used a different stroke.** It recorded 105.76
 updates/s for a 2000 px G-Pen.
 That run's wider work area set Fit zoom to 18.0%, so each stroke crossed about 8%
@@ -1911,14 +1913,14 @@ are kept separate from the 10 s comparison table below.
 | Crayon (43) | Simple | 2048 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 2048 px | 49.7 updates/s (49.6–49.9); gap p99 46.0 ms | **Not met** |
 | Airbrush (5) | Simple | 2048 px | 59.7 updates/s (59.5–60.6); gap p99 30.9 ms | **Not met** |
-| Marker (7) | Complex | 1024 px | 103.5 updates/s (103.1–103.7); gap p99 20.7 ms | **Not met** |
+| Marker (7) | Complex | 1024 px | 117.67 updates/s (116.85–121.35); gap p99 16.1 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 117.8 updates/s (117.1–118.4); gap p99 17.0 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 112.5 updates/s (111.8–112.7); gap p99 18.3 ms | **Not met** |
 | Pastel Block (17) | Complex | 1024 px | 173.74–175.88 fresh updates/s; fresh gap p99 ≤13.36 ms | Meets measured writing pose; [dry media](#dry-media-contact-model) |
-| Paintbrush (4) | Complex | 1024 px | 90.58 (90.07–90.78) fresh updates/s; completion-gap p99 23.52–24.55 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
-| Textured Flat (15) | Complex | 1024 px | 109.2 updates/s (108.8–110.0); gap p99 19.0 ms | **Not met** |
-| Dry Scumble (16) | Complex | 1024 px | 87.7 updates/s (87.4–88.0); gap p99 22.7 ms | **Not met** |
-| Transparent Glaze (18) | Complex | 1024 px | 99.9 updates/s (99.7–100.0); gap p99 21.6 ms | **Not met** |
+| Paintbrush (4) | Complex | 1024 px | 72.08 updates/s (71.15–72.66); completion-gap p99 26.1 ms | **Not met**; [layer color modes](#layer-color-modes) |
+| Textured Flat (15) | Complex | 1024 px | 80.99 updates/s (79.66–82.13); gap p99 22.0 ms | **Not met** |
+| Dry Scumble (16) | Complex | 1024 px | 51.74 updates/s (51.44–52.22); gap p99 31.6 ms | **Not met** |
+| Transparent Glaze (18) | Complex | 1024 px | 63.44 updates/s (62.82–63.80); gap p99 23.6 ms | **Not met** |
 | Multiply Glaze (14) | Complex | 1024 px | 86.8 updates/s (86.0–87.1); input 86.8/s; completion-gap p99 19.1 ms | **Not met** |
 | Dual Texture (9) | Complex | 1024 px | 80.0 updates/s (79.5–80.6); gap p99 21.3 ms | **Not met** |
 | Spray (8) | Complex | 1024 px | 33.8 updates/s (32.7–34.3); gap p99 113.2 ms | **Not met** |
