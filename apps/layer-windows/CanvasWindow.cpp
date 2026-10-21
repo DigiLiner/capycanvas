@@ -17,6 +17,7 @@
 #include <winrt/Microsoft.UI.Content.h>
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <algorithm>
+#include <future>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -483,6 +484,16 @@ void CanvasWindow::Send(std::string json, CanvasCommandKind kind) {
     wake.notify_one();space.notify_all();
 }
 bool CanvasWindow::SendIndependent(CanvasWork item) {
+    if(keyBalance.load()>0){if(heldWork.empty())holdTimer.Start();heldWork.push_back(std::move(item));return true;}
+    return FlushHeld()&&Enqueue(std::move(item));
+}
+bool CanvasWindow::FlushHeld() {
+    if(keyBalance.load()>0)return true;
+    if(holdTimer)holdTimer.Stop();
+    for(auto& item:std::exchange(heldWork,{}))if(!Enqueue(std::move(item)))return false;
+    return true;
+}
+bool CanvasWindow::Enqueue(CanvasWork item) {
     std::unique_lock lock(mutex);
     space.wait(lock,[&]{return closing||rendererDone.load()||transportFailed||inputStopped||work.CanPush(item);});
     if(closing||rendererDone.load()||transportFailed||inputStopped)return false;
@@ -539,7 +550,36 @@ void CanvasWindow::StartInput() {
             pointerPredictor=PointerPredictor::CreateForInputPointerSource(inputSource);
             pointerPredictor.PredictionTime(std::chrono::milliseconds(16));
         } catch(hresult_error const&) { pointerPredictor=nullptr; }
+        holdTimer=inputDispatcher.CreateTimer();holdTimer.IsRepeating(false);holdTimer.Interval(std::chrono::seconds(1));
+        holdTimer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->keyBalance.store(0);self->FlushHeld();}});
         SendIndependent(CanvasCommand{CanvasCommandKind::Prediction,pointerPredictor?"true":"false"});
+        [[maybe_unused]] static ATOM keys=[]{
+            WNDCLASSEXW type{sizeof(type)};type.hInstance=GetModuleHandleW(nullptr);type.lpszClassName=L"CapyCanvasOrderedKeys";
+            type.lpfnWndProc=[](HWND target,UINT message,WPARAM wparam,LPARAM lparam)->LRESULT{
+                auto owner=reinterpret_cast<std::weak_ptr<CanvasWindow>*>(GetWindowLongPtrW(target,GWLP_USERDATA));
+                if(owner&&message==WM_APP)if(auto self=owner->lock())self->RawKeysHeld();
+                if(owner&&message==WM_INPUT)if(auto self=owner->lock()){
+                    RAWINPUT input{};UINT size=sizeof input;
+                    if(GetRawInputData(reinterpret_cast<HRAWINPUT>(lparam),RID_INPUT,&input,&size,sizeof(RAWINPUTHEADER))!=UINT(-1)
+                        &&input.header.dwType==RIM_TYPEKEYBOARD)self->RawKey(input.data.keyboard);
+                }
+                if(message==WM_DESTROY)PostQuitMessage(0);
+                if(message==WM_NCDESTROY){SetWindowLongPtrW(target,GWLP_USERDATA,0);delete owner;}
+                return DefWindowProcW(target,message,wparam,lparam);
+            };
+            return RegisterClassExW(&type);
+        }();
+        std::promise<HWND> reader;auto target=reader.get_future();
+        std::thread([reader=std::move(reader),owner=weak_from_this()]() mutable {
+            init_apartment(apartment_type::multi_threaded);
+            HWND window=CreateWindowExW(0,L"CapyCanvasOrderedKeys",L"",0,0,0,0,0,HWND_MESSAGE,nullptr,GetModuleHandleW(nullptr),nullptr);
+            if(window)SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(new std::weak_ptr<CanvasWindow>(owner)));
+            reader.set_value(window);
+            MSG message;
+            while(window&&GetMessageW(&message,nullptr,0,0)>0)DispatchMessageW(&message);
+            uninit_apartment();
+        }).detach();
+        orderedKeys=target.get();
         pickerHold=GestureRecognizer();pickerHold.GestureSettings(GestureSettings::Hold);
         pickerHold.Holding([weak=weak_from_this()](auto&&,HoldingEventArgs const& e){
             auto self=weak.lock();
@@ -601,13 +641,17 @@ void CanvasWindow::PickerHold(Microsoft::UI::Input::PointerEventArgs const& e, u
     bool touch=point.PointerDeviceType()==PointerDeviceType::Touch;
     if(phase==1){
         bool first=contacts.empty();contacts.insert(id);
+        if(first)OrderKeys(true);
         if(first)dispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock();self&&!self->closing&&self->workspace)self->workspace->CanvasContact(true);});
         if(touch&&first){CancelPickerHold();holdContact=id;pickerHold.ProcessDownEvent(point);}
         else CancelPickerHold();
     }else if(phase==2){
         if(holdContact==id)pickerHold.ProcessMoveEvents(e.GetIntermediatePoints());
     }else if(phase==3||phase==4){
-        if(contacts.erase(id)&&contacts.empty())dispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock();self&&!self->closing&&self->workspace)self->workspace->CanvasContact(false);});
+        if(contacts.erase(id)&&contacts.empty()){
+            OrderKeys(false);
+            dispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock();self&&!self->closing&&self->workspace)self->workspace->CanvasContact(false);});
+        }
         if(holdContact==id){
             if(phase==3)pickerHold.ProcessUpEvent(point);
             CancelPickerHold();
@@ -707,9 +751,11 @@ bool CanvasWindow::CancelGesture(){
     bool closed=header&&header->CancelGesture();return (workspace&&workspace->CancelGesture())||closed;
 }
 void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
-    if(closing||closed||(pressed&&CapyUi::composingKey(e)))return;
     using VirtualKey=Windows::System::VirtualKey;
     auto key=e.Key();
+    struct Ordered{CanvasWindow& window;bool held;~Ordered(){if(held)window.ReleaseKeyHold();}} ordered{*this,pressed&&!e.KeyStatus().WasKeyDown&&
+        (key==VirtualKey::Escape||((GetKeyState(VK_CONTROL)&0x8000)&&key>=VirtualKey::A&&key<=VirtualKey::Z))};
+    if(closing||closed||(pressed&&CapyUi::composingKey(e)))return;
     if(pressed&&key==VirtualKey::Escape&&CancelGesture()){e.Handled(true);return;}
     auto focused=FocusManager::GetFocusedElement(root.XamlRoot());
 
@@ -768,6 +814,26 @@ void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
         Send(to_string(input.Stringify()),CanvasCommandKind::Input);
     });
     if(!editing)e.Handled(true);
+}
+void CanvasWindow::OrderKeys(bool contact){
+    if(!orderedKeys||orderingKeys==contact)return;
+    if(contact){keyBalance.store(0);PostMessageW(orderedKeys,WM_APP,0,0);}
+    RAWINPUTDEVICE keyboard{0x01,0x06,DWORD(contact?RIDEV_INPUTSINK:RIDEV_REMOVE),contact?orderedKeys:nullptr};
+    if(RegisterRawInputDevices(&keyboard,1,sizeof keyboard))orderingKeys=contact;
+}
+void CanvasWindow::RawKeysHeld(){
+    rawKeys.clear();
+    for(uint32_t code:{VK_CONTROL,VK_SHIFT,VK_MENU,VK_ESCAPE})if(GetAsyncKeyState(int(code))<0)rawKeys.insert(code);
+    for(uint32_t code='A';code<='Z';++code)if(GetAsyncKeyState(int(code))<0)rawKeys.insert(code);
+}
+void CanvasWindow::RawKey(RAWKEYBOARD const& raw){
+    uint32_t code=raw.VKey;
+    if(raw.Flags&RI_KEY_BREAK){rawKeys.erase(code);return;}
+    if(!rawKeys.insert(code).second||!(code==VK_ESCAPE||(rawKeys.contains(VK_CONTROL)&&code>='A'&&code<='Z')))return;
+    if(!dialogOpen.load()&&!menuOpen.load()&&GetForegroundWindow()==Handle())keyBalance.fetch_add(1);
+}
+void CanvasWindow::ReleaseKeyHold(){
+    if(keyBalance.fetch_sub(1)==1&&inputDispatcher)inputDispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock())self->FlushHeld();});
 }
 bool CanvasWindow::PenButtons(Microsoft::UI::Input::PointerPoint const& point,uint32_t phase){
     if(point.PointerDeviceType()!=Microsoft::UI::Input::PointerDeviceType::Pen)return true;
@@ -1160,6 +1226,8 @@ void CanvasWindow::Stop() {
         inputDispatcher.TryEnqueue([weak=weak_from_this()]{
             if(auto self=weak.lock()) {
                 if(self->pointerPredictor){self->pointerPredictor.Close();self->pointerPredictor=nullptr;}
+                self->OrderKeys(false);
+                if(self->orderedKeys){PostMessageW(self->orderedKeys,WM_CLOSE,0,0);self->orderedKeys=nullptr;}
                 self->inputSource=nullptr;
             }
         });

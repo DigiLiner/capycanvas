@@ -98,6 +98,7 @@ try{
     $owned=@{window=$null}
     Wait-Until {$owned.window=Owned-DrawingWindow $review;$null -ne $owned.window -and (Model).brush_ready} 'Pressure review did not start' 45
     $root=$owned.window.Root;$drawingWindow=$owned.window.Handle
+    Use-PaintWorkspace
     if(!(Model).windows_isolated_settings){throw 'Refusing to use non-isolated preferences'}
     [CapyWindowApi]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
     Status-Checkpoint 'startup'

@@ -5,6 +5,23 @@ $CapyFind='prefer-visible';$CapyWaitSeconds=20;$CapyEach={[CapyRowPointer]::Veri
 Add-Type -AssemblyName System.Drawing
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
+Add-Type -TypeDefinition @'
+using System;using System.ComponentModel;using System.Runtime.InteropServices;
+public static class CapyThreadStall{
+ [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,IntPtr process);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenThread(uint access,bool inherit,uint id);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint SuspendThread(IntPtr thread);
+ [DllImport("kernel32.dll",SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ public static IntPtr Suspend(IntPtr window){
+  var thread=OpenThread(2,false,GetWindowThreadProcessId(window,IntPtr.Zero));
+  if(thread==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());
+  if(SuspendThread(thread)==uint.MaxValue){var error=Marshal.GetLastWin32Error();CloseHandle(thread);throw new Win32Exception(error);}
+  return thread;
+ }
+ public static void Resume(IntPtr thread){try{if(ResumeThread(thread)==uint.MaxValue)throw new Win32Exception(Marshal.GetLastWin32Error());}finally{CloseHandle(thread);}}
+}
+'@
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/vector-edges/'+$Theme+'-'+[Guid]::NewGuid().ToString('N'))
@@ -63,7 +80,7 @@ function Red-Near($At){
   $red
  }finally{$graphics.Dispose();$bitmap.Dispose()}
 }
-function Drag([string]$Device,$From,$To,[int]$Steps=8,[int]$At=-1,[scriptblock]$Between=$null){
+function Drag([string]$Device,$From,$To,[int]$Steps=8,[int]$At=-1,[scriptblock]$Between=$null,[scriptblock]$Released=$null){
  $a=Screen-Point $From;$b=Screen-Point $To
  if(![CapyRowPointer]::SetForegroundWindow($drawingWindow)){throw 'The owned drawing did not accept foreground input'}
  [CapyRowPointer]::Down($Device,$a[0],$a[1])
@@ -74,7 +91,7 @@ function Drag([string]$Device,$From,$To,[int]$Steps=8,[int]$At=-1,[scriptblock]$
    if($i -eq $At -and $Between){Start-Sleep -Milliseconds 150;& $Between;Start-Sleep -Milliseconds 150}
   }
   Start-Sleep -Milliseconds 30;[CapyRowPointer]::Up()
- }finally{[CapyRowPointer]::Cancel()}
+ }finally{if($Released){& $Released};[CapyRowPointer]::Cancel()}
  Park
 }
 function Notice-Fits([string]$Place){
@@ -89,8 +106,7 @@ function Notice-Fits([string]$Place){
   $b=$parts[$id].bounds;$key="$id|$($parts[$id].name)"
   if(!$inside.Contains($b)){$findings.Add("$Place notice clips $id '$($parts[$id].name)'")}
   elseif($id -like 'canvas-notice-action-*'){
-   $button=Find $id
-   if($button -and !$button.Current.IsKeyboardFocusable){$findings.Add("$Place notice action $id takes no keyboard focus")}
+   if(!$parts[$id].focusable){$findings.Add("$Place notice action $id takes no keyboard focus")}
    if(!$actionWidths.Contains($key)){$actionWidths[$key]=$b.Width}
    elseif($b.Width -lt $actionWidths[$key]-2){$findings.Add("$Place notice squeezes $id '$($parts[$id].name)' to $($b.Width) of $($actionWidths[$key]) px")}
   }
@@ -147,7 +163,8 @@ try{
    $p=Screen-Point $empty
    if($device -eq 'pen'){[CapyRowPointer]::PenHover($p[0],$p[1]);Start-Sleep -Milliseconds 80;[CapyRowPointer]::PenHover($p[0]+3,$p[1]+2)}else{[CapyRowPointer]::Hover($p[0],$p[1]);Start-Sleep -Milliseconds 80;[CapyRowPointer]::Hover($p[0]+3,$p[1]+2)}
    Start-Sleep -Milliseconds 400
-   $seen=(Red-Near $empty) -gt 4
+   $watch=[Diagnostics.Stopwatch]::StartNew()
+   while(!($seen=(Red-Near $empty) -gt 4) -and $case.refused -and $watch.ElapsedMilliseconds -lt 3000){Start-Sleep -Milliseconds 100}
    if($seen -ne $case.refused){$findings.Add("$($case.name) by $device over a vector layer: refusal cursor $seen, expected $($case.refused)")}
    if($case.refused -and $device -eq 'pen'){Capture "edges-cursor-refused-$Theme" -WithModel -Composed}
    if($device -eq 'pen'){[CapyRowPointer]::PenLeave()}
@@ -244,9 +261,12 @@ try{
  Chord 0x5A
  Expect 'Ctrl+Z restores the path' @(800,$rows[0]) 'ink'
  $docked=[bool](Find 'layer-footer' -Visible)
- Drag 'mouse' @(800,$rows[1]) @(800,($rows[1]+100)) 8 4 {Key 0x1B}
+ $stall=@{thread=[IntPtr]::Zero}
+ $resume={if($stall.thread -ne [IntPtr]::Zero){Start-Sleep -Milliseconds 300;[CapyThreadStall]::Resume($stall.thread);$stall.thread=[IntPtr]::Zero}}
+ Drag 'mouse' @(800,$rows[1]) @(800,($rows[1]+100)) 8 4 {$stall.thread=[CapyThreadStall]::Suspend($drawingWindow);Key 0x1B} {Key 0x1B;& $resume}
  Expect 'Escape mid-drag keeps the path' @(800,$rows[1]) 'ink'
  Expect 'Escape mid-drag leaves no preview' @(800,($rows[1]+100)) 'ink' $false
+ Wait-Until {!(Enabled 'deselect')} 'A second Escape after the release did not clear the path selection'
  if($docked -and !(Find 'layer-footer' -Visible)){
   $findings.Add('Escape mid-drag also collapsed the docked Layers column')
   Invoke 'column-icon-layers';Wait-Until {Find 'layer-footer' -Visible} 'The Layers column did not reopen'
@@ -254,7 +274,7 @@ try{
  }
  $order=@(Rows|ForEach-Object id)
  Start-Sleep -Milliseconds 500
- Drag 'mouse' @(800,$rows[1]) @(800,($rows[1]+100)) 8 4 {Chord 0x5A}
+ Drag 'mouse' @(800,$rows[1]) @(800,($rows[1]+100)) 8 4 {$stall.thread=[CapyThreadStall]::Suspend($drawingWindow);Chord 0x5A} $resume
  Expect 'the drag that saw Ctrl+Z lands' @(800,($rows[1]+100)) 'ink'
  $changed=@(Rows|ForEach-Object id)
  if(($changed -join ',') -ne ($order -join ',')){$findings.Add("Ctrl+Z during a path drag undid an earlier step: layers $($order -join ',') -> $($changed -join ',')")}

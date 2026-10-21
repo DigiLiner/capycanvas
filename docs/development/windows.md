@@ -1007,7 +1007,12 @@ can replay older samples.
 For scrubs with modifier keys, ignore repeated coordinates and read
 `KeyModifiers` from the pointer event.
 The canvas has an independent input source; an ancestor XAML observer alone
-cannot guarantee delivery of an outside release.
+cannot guarantee delivery of an outside release. Escape and Control shortcuts
+pressed during a canvas contact are counted from raw keyboard input on a
+key-reader thread; the input thread holds later canvas samples until the UI
+thread has queued each such key, for at most one second, so the key keeps its
+place among the samples. `vector-edges` checks this by suspending the UI thread
+mid-drag.
 
 For switcher visibility and its context menu during title-bar customization, run
 `tools/windows-vm/windows-vm.py fixtures switcher header:options header:options-light header:options-pen header:options-touch`.

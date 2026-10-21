@@ -70,6 +70,7 @@ try {
     Write-Output "Owned enclose fill review $($review.Id): $run"
     Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Enclose fill review did not start' 90
     $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    Use-PaintWorkspace
     $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
     Start-Sleep -Milliseconds 600
     $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)

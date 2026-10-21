@@ -611,6 +611,7 @@ try {
     $owned=@{window=$null}
     Wait-Until {$owned.window=Owned-DrawingWindow $review;$null -ne $owned.window -and (Model).brush_ready} 'Review did not start' 45
     $root=$owned.window.Root;$drawingWindow=$owned.window.Handle
+    Use-PaintWorkspace
     [CapyEffectsCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
     $resized=$false
     for($attempt=0;$attempt -lt 10 -and !$resized;$attempt++){

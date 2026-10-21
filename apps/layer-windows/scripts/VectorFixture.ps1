@@ -212,11 +212,11 @@ function Notice-Parts{
   if(!$script:noticeFrame){return [ordered]@{}}
  }
  $request=[System.Windows.Automation.CacheRequest]::new()
- foreach($property in [System.Windows.Automation.AutomationElement]::AutomationIdProperty,[System.Windows.Automation.AutomationElement]::NameProperty,[System.Windows.Automation.AutomationElement]::BoundingRectangleProperty,[System.Windows.Automation.AutomationElement]::IsOffscreenProperty){$request.Add($property)}
+ foreach($property in [System.Windows.Automation.AutomationElement]::AutomationIdProperty,[System.Windows.Automation.AutomationElement]::NameProperty,[System.Windows.Automation.AutomationElement]::BoundingRectangleProperty,[System.Windows.Automation.AutomationElement]::IsOffscreenProperty,[System.Windows.Automation.AutomationElement]::IsKeyboardFocusableProperty){$request.Add($property)}
  $active=$request.Activate()
  try{$items=$script:noticeFrame.FindAll([System.Windows.Automation.TreeScope]::Subtree,[System.Windows.Automation.Condition]::TrueCondition)}finally{$active.Dispose()}
  $parts=[ordered]@{}
- foreach($item in $items){$c=$item.Cached;if($c.AutomationId -like 'canvas-notice*' -and !$c.IsOffscreen){$parts[$c.AutomationId]=[pscustomobject]@{name=$c.Name;bounds=$c.BoundingRectangle}}}
+ foreach($item in $items){$c=$item.Cached;if($c.AutomationId -like 'canvas-notice*' -and !$c.IsOffscreen){$parts[$c.AutomationId]=[pscustomobject]@{name=$c.Name;bounds=$c.BoundingRectangle;focusable=$c.IsKeyboardFocusable}}}
  $parts
 }
 function Accept-Notice([string]$Action,[string[]]$Offers,[string]$Name,[string]$Label){

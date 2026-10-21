@@ -79,6 +79,12 @@ private:
     uint64_t revision=0;
     std::unordered_map<uint32_t,std::wstring> heldKeys; // UI thread
     std::unordered_set<uint32_t> penButtons; // input thread
+    HWND orderedKeys=nullptr; // input thread
+    bool orderingKeys=false; // input thread
+    std::unordered_set<uint32_t> rawKeys; // key reader thread
+    std::atomic<int32_t> keyBalance{0};
+    std::vector<CanvasWork> heldWork; // input thread
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer holdTimer{nullptr}; // input thread
     std::unique_ptr<GamepadInput> gamepad;
     bool inputDone=false;
     CapyHost* host=nullptr;
@@ -154,6 +160,12 @@ private:
     void Key(winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const&, bool pressed);
     bool CancelGesture();
     bool SyncContactModifiers(winrt::Windows::System::VirtualKeyModifiers held);
+    void OrderKeys(bool contact);
+    void RawKeysHeld();
+    void RawKey(RAWKEYBOARD const& key);
+    void ReleaseKeyHold();
+    bool FlushHeld();
+    bool Enqueue(CanvasWork item);
     bool ClaimsDeviceKey(std::wstring const& name)const;
     bool PenButtons(winrt::Microsoft::UI::Input::PointerPoint const& point,uint32_t phase);
     bool PenButtons(uint32_t id,bool primary);

@@ -156,6 +156,7 @@ try{
  $native=@{window=$null}
  Wait-Until {$native.window=Owned-DrawingWindow $review;$m=Model;$null -ne $native.window -and $m.brush_ready -and $m.state.theme -eq $Theme} 'Isolated editing canvas did not start' 45
  $handle=$native.window.Handle;$root=$native.window.Root
+ Use-PaintWorkspace
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  Wait-Until {$c=(Model).state.camera;$b=(Control 'drawing-canvas').Current.BoundingRectangle;[Math]::Abs($c.viewport[0]-$b.Width) -lt .1 -and $b.Width -gt 1600} 'Maximized canvas did not settle'
  if(@((Model).layout.groups|Where-Object active -eq 'layers').Count){Invoke 'column-icon-layers';Wait-Until {@((Model).layout.groups|Where-Object active -eq 'layers').Count -eq 0} 'Column did not close'}

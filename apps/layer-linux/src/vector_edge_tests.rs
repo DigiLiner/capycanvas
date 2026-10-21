@@ -104,7 +104,7 @@ fn native_vector_input_kinds() {
     capture(&d, &format!("input-lines-{theme}.png"));
 
     let before = paths(&d);
-    d.w.dispatch(UiAction::SetBrushSize { value: 40. });
+    d.w.dispatch(UiAction::SetBrushSize { value: 60. });
     pump(100);
     draw(&mut d, "eraser", &line_points([900., 200.], [905., 700.], 20));
     until_paths(&d, "the pen's eraser end cuts every line", |paths| paths.len() == 2 * before.len());
