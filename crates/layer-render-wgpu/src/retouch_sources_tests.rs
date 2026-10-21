@@ -216,6 +216,18 @@ fn live_page(r: &WgpuRasterizer, page: [u32; 2]) -> Vec<[f32; 4]> {
     floats(&crate::layer_tests::page_bytes(r, &texture))
 }
 
+fn layer_page(r: &WgpuRasterizer, layer: SourceTarget, page: [u32; 2]) -> Vec<[f32; 4]> {
+    r.paint_layers
+        .iter()
+        .find(|l| l.id == layer)
+        .and_then(|l| l.pages.iter().find(|p| p.coordinate == page))
+        .map_or_else(|| vec![[0.; 4]; (PAGE_SIZE * PAGE_SIZE) as usize], |p| floats(&crate::layer_tests::page_bytes(r, &p.active().texture)))
+}
+
+fn pixel(r: &WgpuRasterizer, layer: SourceTarget, x: u32, y: u32) -> [f32; 4] {
+    layer_page(r, layer, [x / PAGE_SIZE, y / PAGE_SIZE])[((y % PAGE_SIZE) * PAGE_SIZE + x % PAGE_SIZE) as usize]
+}
+
 fn target_pages(r: &WgpuRasterizer) -> Vec<([u32; 2], Vec<[f32; 4]>)> {
     let mut pages: Vec<_> =
         r.paint_layers.iter().find(|l| l.id == TARGET).unwrap().pages.iter().map(|p| p.coordinate).collect();

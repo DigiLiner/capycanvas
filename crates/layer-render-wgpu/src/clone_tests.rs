@@ -42,18 +42,6 @@ fn source_row(r: &mut WgpuRasterizer, rows: std::ops::Range<u32>) -> impl Fn(u32
     move |x, y| pages[(y / PAGE_SIZE - first) as usize][(x / PAGE_SIZE) as usize][((y % PAGE_SIZE) * PAGE_SIZE + x % PAGE_SIZE) as usize]
 }
 
-fn layer_page(r: &WgpuRasterizer, layer: SourceTarget, page: [u32; 2]) -> Vec<[f32; 4]> {
-    r.paint_layers
-        .iter()
-        .find(|l| l.id == layer)
-        .and_then(|l| l.pages.iter().find(|p| p.coordinate == page))
-        .map_or_else(|| vec![[0.; 4]; (PAGE_SIZE * PAGE_SIZE) as usize], |p| floats(&crate::layer_tests::page_bytes(r, &p.active().texture)))
-}
-
-fn pixel(r: &WgpuRasterizer, layer: SourceTarget, x: u32, y: u32) -> [f32; 4] {
-    layer_page(r, layer, [x / PAGE_SIZE, y / PAGE_SIZE])[((y % PAGE_SIZE) * PAGE_SIZE + x % PAGE_SIZE) as usize]
-}
-
 fn source_at(engine: &mut CanvasEngine<WgpuRasterizer>, x: f32, y: f32, update: impl FnOnce(&mut CloneSource)) {
     let mut source = CloneSource::default();
     update(&mut source);

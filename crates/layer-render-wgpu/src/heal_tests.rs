@@ -327,6 +327,30 @@ fn spot_healing_replaces_a_dot_with_texture_like_its_surroundings() {
 }
 
 #[test]
+fn consecutive_spot_heals_each_remove_their_dot() {
+    let dots = [[300., 250.], [700., 250.]];
+    let dot = |x: u32, y: u32| dots.iter().any(|d| (x as f32 - d[0]).hypot(y as f32 - d[1]) < 12.);
+    let texture = |x: u32, y: u32| if dot(x, y) { 0.05 } else { 0.5 + 0.1 * noise(x, y) };
+    for (layer, source) in [(TARGET, RetouchSource::References), (PHOTO, RetouchSource::Editing)] {
+        let mut doc = photo(|x, y| grey(texture(x, y)));
+        let edit = doc.select_occurrence_edit(doc.target_owner(layer).unwrap()).unwrap();
+        doc.apply(edit).unwrap();
+        let (mut input, mut engine) = healer(doc, DefaultBrushPreset::SpotHealingBrush, 40., false);
+        engine.set_retouch(Some(source));
+        flush(&mut engine);
+        for (id, [x, y]) in dots.into_iter().enumerate() {
+            stroke(&mut engine, &mut input, id as u64 * 20 + 1, [x - 4., y], [x + 4., y]);
+        }
+        for [cx, cy] in dots {
+            let spot: Vec<f32> = (cx as u32 - 20..cx as u32 + 20).flat_map(|x| (cy as u32 - 20..cy as u32 + 20).map(move |y| (x, y)))
+                .filter(|&(x, y)| dot(x, y)).map(|(x, y)| pixel(engine.backend(), layer, x, y)[1]).collect();
+            assert!(mean(&spot) > linear(encode(0.3)), "{source:?}: the dot at {cx} is healed: {}", mean(&spot));
+        }
+        assert_eq!(counts(&engine).heals, 2, "{source:?}");
+    }
+}
+
+#[test]
 fn healing_matches_tone_on_the_documents_values() {
     let code = |encoded: f32| (encoded * 255.).round() as u8;
     let texture = |x: u32, y: u32| {
