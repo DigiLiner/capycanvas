@@ -1268,7 +1268,7 @@ fn native_startup_latency() {
     eprintln!("GTK startup document/brush/all ready: {stages:.3?}ms");
     pump(100);
     assert_eq!(strokes(), 2);
-    assert!(white_pixels(&w) > 100_000);
+    assert!(paper_pixels(&w) > 100_000);
     w.window.destroy();
     pump(20);
 }
@@ -5975,13 +5975,19 @@ fn native_floating_gestures() {
     w.window.close();
     pump(100);
 }
-fn white_pixels(w: &Workspace) -> usize {
+fn paper_pixels(w: &Workspace) -> usize {
     // Inspect the same whole-window scene as the review PNG, not a fresh
     // standalone canvas snapshot that could hide host invalidation errors.
     let texture = crate::snapshot(w);
-    canvas_white(w, &texture)
+    canvas_paper(w, &texture)
 }
-fn canvas_white(w: &Workspace, texture: &gdk::Texture) -> usize {
+fn canvas_paper(w: &Workspace, texture: &gdk::Texture) -> usize {
+    let paper = {
+        let session = ui_session(w);
+        let document = session.engine().document();
+        document.bottom_paper().and_then(|paper| document.scene().effect(paper)?.constant_color()).map_or([1.; 4], |color| color.rgba)
+    };
+    let bgr = [paper[2], paper[1], paper[0]].map(|v| v * 255.);
     let mut bytes = vec![0; texture.width() as usize * texture.height() as usize * 4];
     texture.download(&mut bytes, texture.width() as usize * 4);
     let bounds = w.area.compute_bounds(&w.window).unwrap();
@@ -5991,7 +5997,7 @@ fn canvas_white(w: &Workspace, texture: &gdk::Texture) -> usize {
             let row = &bytes[y * stride + bounds.x() as usize * 4
                 ..y * stride + (bounds.x() + bounds.width()) as usize * 4];
             row.chunks_exact(4)
-                .filter(|p| p[0] > 245 && p[1] > 245 && p[2] > 245 && p[3] > 245)
+                .filter(|p| p[3] > 245 && (0..3).all(|i| (f32::from(p[i]) - bgr[i]).abs() < 24.))
                 .count()
         })
         .sum()
@@ -12071,7 +12077,7 @@ fn native_workspace_controls_docking_and_ink() {
         0
     );
     click(&command(&w, CommandId::FitCanvas));
-    let initial = white_pixels(&w);
+    let initial = paper_pixels(&w);
     assert!(initial > 100_000, "GPU paper should be visibly presented");
     w.dispatch(UiAction::Invoke {
         command: CommandId::Pencil,
@@ -12136,7 +12142,7 @@ fn native_workspace_controls_docking_and_ink() {
         pump(15);
     }
     pump(300);
-    let after_ink = white_pixels(&w);
+    let after_ink = paper_pixels(&w);
     assert!(
         after_ink + 500 < initial,
         "ink must be visibly presented: {initial} -> {after_ink}"
@@ -12163,9 +12169,9 @@ fn native_workspace_controls_docking_and_ink() {
     assert_stroke_positions(&w, &crate::snapshot(&w), &stroke_points);
     click(&command(&w, CommandId::ResetView));
     click(&command(&w, CommandId::Undo));
-    assert!(white_pixels(&w) > after_ink + 500);
+    assert!(paper_pixels(&w) > after_ink + 500);
     click(&command(&w, CommandId::Redo));
-    assert!(white_pixels(&w) < initial - 500);
+    assert!(paper_pixels(&w) < initial - 500);
     let visibility = || {
         named::<gtk::Box>(&w.layer_panel.root.clone().upcast(), &format!("art-layer-{}", state(&w).layers[0].id))
         .first_child()
@@ -12175,10 +12181,10 @@ fn native_workspace_controls_docking_and_ink() {
     };
     visibility().emit_clicked();
     pump(100);
-    assert!(white_pixels(&w) > after_ink + 500);
+    assert!(paper_pixels(&w) > after_ink + 500);
     visibility().emit_clicked();
     pump(100);
-    assert!(white_pixels(&w) < initial - 500);
+    assert!(paper_pixels(&w) < initial - 500);
     edit_number(&w.layer_panel.opacity, "50");
     pump(100);
     assert_eq!(state(&w).layers[0].opacity, 0.5);

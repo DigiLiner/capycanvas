@@ -1045,7 +1045,7 @@ impl Driver {
         pump(120);
         let snapshot = crate::snapshot(&self.w);
         assert!(
-            canvas_white(&self.w, &snapshot) > 100_000,
+            canvas_paper(&self.w, &snapshot) > 100_000,
             "paper remains visible"
         );
         snapshot.save_to_png(self.input.dir.join(name)).unwrap();

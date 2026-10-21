@@ -45,7 +45,7 @@ fn seed(d: &mut Driver, size: [f32; 2]) {
 }
 
 fn show_tool_options(d: &Driver) {
-    let mut workspace = state(&d.w).workspace;
+    let mut workspace = WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..state(&d.w).workspace };
     workspace.layout.set_panel_visible(Panel::ToolSettings, true).unwrap();
     workspace
         .layout
