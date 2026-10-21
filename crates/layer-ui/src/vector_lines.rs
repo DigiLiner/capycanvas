@@ -37,11 +37,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             && self.selection_masks.target().is_none()).then_some(layer)
     }
     fn draws_paths(&self, id: u32) -> bool {
-        tools::group(id).tool() == Tool::Eraser || tools::preset(id).is_ok_and(|preset| self.tools.brush(preset).draws_vector_lines())
+        tools::tool(id) == Tool::Eraser || tools::preset(id).is_ok_and(|preset| self.tools.brush(preset).draws_vector_lines())
     }
     pub(super) fn vector_pen(&self) -> Option<u32> {
         self.vector_lines.pen.into_iter().chain(tools::group_presets(ToolGroup::Pen)).chain(tools::brush_ids())
-            .find(|id| tools::group(*id).tool() != Tool::Eraser && self.draws_paths(*id))
+            .find(|id| tools::tool(*id) != Tool::Eraser && self.draws_paths(*id))
     }
     pub(super) fn brush_usable(&self, action: &UiAction) -> bool {
         if self.editing_vector_layer().is_none() { return true; }
@@ -63,7 +63,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }).collect()
     }
     pub(super) fn remember_vector_pen(&mut self, id: u32) {
-        if tools::group(id).tool() != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
+        if tools::tool(id) != Tool::Eraser && self.engine.configured_brush().draws_vector_lines() { self.vector_lines.pen = Some(id); }
     }
     pub(super) fn follow_layer_brush(&mut self) -> bool {
         let vector = self.editing_vector_layer().is_some();

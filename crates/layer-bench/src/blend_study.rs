@@ -411,7 +411,7 @@ fn prepared(mut brush: BrushSnapshot, diameter: f32) -> BrushSnapshot {
 /// Every brush in the Blend set, after the scenes before blending.
 pub fn catalog() -> Vec<Blender> {
     std::iter::once(Blender { key: "before".into(), title: "Before".into(), brush: None })
-        .chain(layer_ui::brush_catalog().filter(|choice| choice.group == layer_ui::ToolGroup::Blend).map(|choice| Blender {
+        .chain(layer_ui::brush_catalog().filter(|choice| choice.group.tool() == layer_ui::Tool::Blend).map(|choice| Blender {
             key: choice.id.to_string(),
             title: choice.label.to_string(),
             brush: layer_ui::preset(choice.id).ok().map(default_brush),

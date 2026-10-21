@@ -233,7 +233,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub(super) fn binding_category(&self) -> ToolCategory {
         match self.interaction.hold_base {
-            Some((tool, preset)) => Self::tool_category(tool, tools::group(preset).tool()),
+            Some((tool, preset)) => Self::tool_category(tool, tools::tool(preset)),
             None => Self::tool_category(self.layer_interaction.tool, self.state.brush.tool),
         }
     }

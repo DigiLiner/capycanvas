@@ -1133,7 +1133,7 @@ class AndroidTitleBarTest {
                 assertTrue(header(headerId).getBoolean("has_variants")); assertFalse(header(headerId).getBoolean("selected"))
                 val rows = variantRows(anchor)
                 if (id == "drawing_brush") assertEquals(setOf("pen", "marker", "pencil", "pastel", "paint", "watercolor", "oil", "airbrush", "spray", "decoration"), rows.map(::brushGroup).toSet())
-                if (id == "sculpt") assertEquals(setOf("blend", "liquify", "clone", "heal", "spot_heal"), rows.map(::brushGroup).toSet())
+                if (id == "sculpt") assertEquals(setOf("blend", "wet_paint", "effects", "liquify", "retouch"), rows.map(::brushGroup).toSet())
                 val choices = if (id == "drawing_brush") mediaIcons.keys.map { group -> rows.firstOrNull { brushGroup(it) == group } ?: error("Sketch lacks $group: $rows") }
                     else listOf(rows.first { it.optBoolean("enabled", true) })
                 if (id == "select") assertEquals(setOf("rectangle_select", "ellipse_select", "lasso", "polygon_select", "auto_select", "color_select", "selection_brush", "tonal_select"), rows.map(::rowCommand).toSet())
@@ -1384,7 +1384,7 @@ class AndroidTitleBarTest {
         }
         tap(sculpt)
         checkColumns("sculpt_sets")
-        assertEquals(listOf("Blend", "Liquify"), state().getJSONObject("tool_panels").getJSONObject("sculpt_sets").array("groups").objects().map { it.getString("label") })
+        assertEquals(listOf("Blend", "Wet paint", "Effects", "Liquify", "Retouch"), state().getJSONObject("tool_panels").getJSONObject("sculpt_sets").array("groups").objects().map { it.getString("label") })
         for (device in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
             tool = device
             for (label in listOf("Liquify", "Blend")) {

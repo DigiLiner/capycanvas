@@ -192,7 +192,7 @@ fn brush_tool(definition: &ShortcutDefinition, l: &Localizer) -> Option<String> 
     let UiAction::SelectBrush { id } = **action else {
         return None;
     };
-    let tool = crate::tools::group(id).tool();
+    let tool = crate::tools::tool(id);
     CommandId::TOOLS.into_iter().find(|c| c.paint_tool() == Some(tool)).map(|c| c.localized_label(l).to_string())
 }
 

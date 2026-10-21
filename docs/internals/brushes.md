@@ -119,22 +119,28 @@ Each preset keeps its own choice with its other edited settings. The choice does
 not follow the document's blending, and it changes no pipeline; see
 [rendering](rendering.md#native-sdr-working-color).
 
-The Blend tools hold the blenders. Each moves or mixes paint already on the
-layer and lays no color of its own:
+The Blend tool holds the blenders. Each moves or mixes paint already on the
+layer and lays no color of its own. They come in three sets:
 
-- **Basics**: Smudge, Natural Blender, Soft Blender, Blur, Sharpen and the
-  Blending Knife, which scrapes paint along in unmixed streaks.
-- **Texture-keeping**: the Grainy Blender puts the paper tooth back, the
-  Texture-Keeping Blender keeps fine brush texture over the blended color, and
-  the Hue Blender blends hue and saturation but keeps every pixel's lightness.
-- **Paint mixers**: the Wet Blender carries what each part of the tip picked
-  up and runs dry; the Color Mixer carries one color averaged over the tip, as
-  Clip Studio Paint's Blend mode does.
-- **Dry media**: the Blending Stump pushes pigment into the paper's tooth and
-  deepens the tone without dragging it; the Tissue spreads it softly over the
-  peaks and lifts some away.
-- **Expressive**: Bristle, Painterly, Crystal, Marbling, Comb (along the
-  strands already painted), Edge-Keeping (stops at lines), Scatter and Dither.
+- **Blend**, for dry media and everyday softening: Smudge, Soft Blender, the
+  Blending Stump, which pushes pigment into the paper's tooth and deepens the
+  tone without dragging it, the Tissue, which spreads it softly over the peaks
+  and lifts some away, the Grainy Blender, which puts the paper tooth back,
+  Blur, Sharpen, the Hue Blender, which blends hue and saturation but keeps
+  every pixel's lightness, the Texture-Keeping Blender, which keeps fine brush
+  texture over the blended color, and the Edge-Keeping Blender, which stops at
+  lines.
+- **Wet paint**, which moves paint as a brush or knife does: the Natural
+  Blender, the Bristle Blender, the Blending Knife, which scrapes paint along in
+  unmixed streaks, the Wet Blender, which carries what each part of the tip
+  picked up and runs dry, and the Color Mixer, which carries one color averaged
+  over the tip, as Clip Studio Paint's Blend mode does.
+- **Effects**: Painterly, Crystal, Marbling, Comb (along the strands already
+  painted), Scatter and Dither.
+
+Sets are tool groups of the Blend tool. Sculpting presets show their tool's icon
+in Tools, on toolbar buttons and as the cursor; only the sets carry their own
+icons.
 
 ### Blenders and the paper
 

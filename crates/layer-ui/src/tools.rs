@@ -39,7 +39,7 @@ impl Tool {
         }
     }
     pub fn default_preset(self) -> u32 {
-        PRESETS.iter().find(|p| p.2.tool() == self).unwrap().0 as u32
+        PRESETS.iter().find(|p| tool(p.0 as u32) == self).unwrap().0 as u32
     }
 }
 impl CommandId {
@@ -128,14 +128,18 @@ tool_groups! {
     Spray: Airbrush, TOOL_GROUP_SPRAY, "spray";
     Decoration: Decoration, TOOL_GROUP_DECORATION, "decoration";
     Blend: Blend, TOOL_GROUP_BLEND, "blend";
+    WetPaint: Blend, TOOL_GROUP_WET_PAINT, "water";
+    Effects: Blend, TOOL_GROUP_EFFECTS, "star";
     Liquify: Liquify, TOOL_GROUP_LIQUIFY, "liquify";
-    Clone: Clone, TOOL_GROUP_CLONE, "clone";
-    Heal: Heal, TOOL_GROUP_HEAL, "heal";
-    SpotHeal: SpotHeal, TOOL_GROUP_SPOT_HEAL, "spot-heal";
+    Retouch: Clone, TOOL_GROUP_RETOUCH, "heal";
 }
 impl ToolGroup {
     fn default_preset(self) -> u32 {
         PRESETS.iter().find(|p| p.2 == self).unwrap().0 as u32
+    }
+    /// Whether this group shows presets of `tool`.
+    pub(crate) fn holds(self, tool: Tool) -> bool {
+        group_presets(self).any(|id| self::tool(id) == tool)
     }
 }
 
@@ -248,31 +252,27 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
         MessageId::BRUSH_PRESET_DUAL_TEXTURE,
         ToolGroup::Decoration,
     ),
-    (
-        DefaultBrushPreset::NaturalBlender,
-        MessageId::BRUSH_PRESET_NATURAL_BLENDER,
-        ToolGroup::Blend,
-    ),
+    (DefaultBrushPreset::NaturalBlender, MessageId::BRUSH_PRESET_NATURAL_BLENDER, ToolGroup::WetPaint),
+    (DefaultBrushPreset::BristleBlender, MessageId::BRUSH_PRESET_BRISTLE_BLENDER, ToolGroup::WetPaint),
+    (DefaultBrushPreset::BlendingKnife, MessageId::BRUSH_PRESET_BLENDING_KNIFE, ToolGroup::WetPaint),
+    (DefaultBrushPreset::WetBlender, MessageId::BRUSH_PRESET_WET_BLENDER, ToolGroup::WetPaint),
+    (DefaultBrushPreset::ColorMixer, MessageId::BRUSH_PRESET_COLOR_MIXER, ToolGroup::WetPaint),
     (DefaultBrushPreset::Smudge, MessageId::BRUSH_PRESET_SMUDGE, ToolGroup::Blend),
     (DefaultBrushPreset::SoftBlender, MessageId::BRUSH_PRESET_SOFT_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::Blur, MessageId::BRUSH_PRESET_BLUR, ToolGroup::Blend),
-    (DefaultBrushPreset::Sharpen, MessageId::BRUSH_PRESET_SHARPEN, ToolGroup::Blend),
-    (DefaultBrushPreset::BristleBlender, MessageId::BRUSH_PRESET_BRISTLE_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::GrainyBlender, MessageId::BRUSH_PRESET_GRAINY_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::TextureBlender, MessageId::BRUSH_PRESET_TEXTURE_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::HueBlender, MessageId::BRUSH_PRESET_HUE_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::ScatterBlender, MessageId::BRUSH_PRESET_SCATTER_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::PainterlyBlender, MessageId::BRUSH_PRESET_PAINTERLY_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::CrystalBlender, MessageId::BRUSH_PRESET_CRYSTAL_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::Marbling, MessageId::BRUSH_PRESET_MARBLING, ToolGroup::Blend),
-    (DefaultBrushPreset::CombBlender, MessageId::BRUSH_PRESET_COMB_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::EdgeKeepingBlender, MessageId::BRUSH_PRESET_EDGE_KEEPING_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::DitherBlender, MessageId::BRUSH_PRESET_DITHER_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::BlendingKnife, MessageId::BRUSH_PRESET_BLENDING_KNIFE, ToolGroup::Blend),
     (DefaultBrushPreset::BlendingStump, MessageId::BRUSH_PRESET_BLENDING_STUMP, ToolGroup::Blend),
     (DefaultBrushPreset::Tissue, MessageId::BRUSH_PRESET_TISSUE, ToolGroup::Blend),
-    (DefaultBrushPreset::WetBlender, MessageId::BRUSH_PRESET_WET_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::ColorMixer, MessageId::BRUSH_PRESET_COLOR_MIXER, ToolGroup::Blend),
+    (DefaultBrushPreset::GrainyBlender, MessageId::BRUSH_PRESET_GRAINY_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::Blur, MessageId::BRUSH_PRESET_BLUR, ToolGroup::Blend),
+    (DefaultBrushPreset::Sharpen, MessageId::BRUSH_PRESET_SHARPEN, ToolGroup::Blend),
+    (DefaultBrushPreset::HueBlender, MessageId::BRUSH_PRESET_HUE_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::TextureBlender, MessageId::BRUSH_PRESET_TEXTURE_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::EdgeKeepingBlender, MessageId::BRUSH_PRESET_EDGE_KEEPING_BLENDER, ToolGroup::Blend),
+    (DefaultBrushPreset::PainterlyBlender, MessageId::BRUSH_PRESET_PAINTERLY_BLENDER, ToolGroup::Effects),
+    (DefaultBrushPreset::CrystalBlender, MessageId::BRUSH_PRESET_CRYSTAL_BLENDER, ToolGroup::Effects),
+    (DefaultBrushPreset::Marbling, MessageId::BRUSH_PRESET_MARBLING, ToolGroup::Effects),
+    (DefaultBrushPreset::CombBlender, MessageId::BRUSH_PRESET_COMB_BLENDER, ToolGroup::Effects),
+    (DefaultBrushPreset::ScatterBlender, MessageId::BRUSH_PRESET_SCATTER_BLENDER, ToolGroup::Effects),
+    (DefaultBrushPreset::DitherBlender, MessageId::BRUSH_PRESET_DITHER_BLENDER, ToolGroup::Effects),
 
     (
         DefaultBrushPreset::LiquifyPush,
@@ -306,13 +306,21 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
     ),
     (DefaultBrushPreset::LiquifyEdge, MessageId::BRUSH_PRESET_LIQUIFY_EDGE, ToolGroup::Liquify),
     (DefaultBrushPreset::LiquifyReconstruct, MessageId::BRUSH_PRESET_LIQUIFY_RECONSTRUCT, ToolGroup::Liquify),
-    (DefaultBrushPreset::CloneStamp, MessageId::BRUSH_PRESET_CLONE_STAMP, ToolGroup::Clone),
-    (DefaultBrushPreset::HealingBrush, MessageId::BRUSH_PRESET_HEALING_BRUSH, ToolGroup::Heal),
-    (DefaultBrushPreset::SpotHealingBrush, MessageId::BRUSH_PRESET_SPOT_HEALING_BRUSH, ToolGroup::SpotHeal),
+    (DefaultBrushPreset::CloneStamp, MessageId::BRUSH_PRESET_CLONE_STAMP, ToolGroup::Retouch),
+    (DefaultBrushPreset::HealingBrush, MessageId::BRUSH_PRESET_HEALING_BRUSH, ToolGroup::Retouch),
+    (DefaultBrushPreset::SpotHealingBrush, MessageId::BRUSH_PRESET_SPOT_HEALING_BRUSH, ToolGroup::Retouch),
+];
+
+/// The retouching tools share the Retouch set; each of its presets keeps its
+/// own tool.
+const RETOUCHING: [(DefaultBrushPreset, Tool); 3] = [
+    (DefaultBrushPreset::CloneStamp, Tool::Clone),
+    (DefaultBrushPreset::HealingBrush, Tool::Heal),
+    (DefaultBrushPreset::SpotHealingBrush, Tool::SpotHeal),
 ];
 
 fn brush_choice(preset: DefaultBrushPreset, label: MessageId, group: ToolGroup, localizer: &Localizer) -> BrushChoice {
-    BrushChoice { id: preset as u32, label: localizer.text(label), category: group.localized_label(localizer), group, icon: group.icon() }
+    BrushChoice { id: preset as u32, label: localizer.text(label), category: group.localized_label(localizer), group, icon: icon(preset as u32) }
 }
 pub fn brush_ids() -> impl Iterator<Item = u32> {
     PRESETS.iter().map(|preset| preset.0 as u32)
@@ -357,6 +365,16 @@ pub(crate) fn group(id: u32) -> ToolGroup {
         .find(|p| p.0 as u32 == id)
         .expect("validated brush")
         .2
+}
+/// The tool a preset selects.
+pub(crate) fn tool(id: u32) -> Tool {
+    RETOUCHING.iter().find(|r| r.0 as u32 == id).map_or_else(|| group(id).tool(), |r| r.1)
+}
+/// A preset's icon: its medium for drawing tools and its tool for sculpting,
+/// whose sets mix kinds of the same tool.
+pub(crate) fn icon(id: u32) -> &'static str {
+    let tool = tool(id);
+    if is_sculpt(tool) { tool.command().icon().expect("sculpting tools have icons") } else { group(id).icon() }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -461,7 +479,7 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
     ToolSetView {
         groups: ToolGroup::ALL
             .into_iter()
-            .filter(|g| g.tool() == brush.tool)
+            .filter(|g| g.holds(brush.tool))
             .map(|g| ToolSetItem { enabled: true,
                 label: g.localized_label(localizer),
                 icon: g.icon(),
@@ -473,9 +491,9 @@ pub(crate) fn view(brush: &BrushState, canvas_tool: LayerCanvasTool, localizer: 
         subtools: PRESETS
             .iter()
             .filter(|p| p.2 == active)
-            .map(|&(preset, label, group)| ToolSetItem { enabled: true,
+            .map(|&(preset, label, _)| ToolSetItem { enabled: true,
                 label: localizer.text(label),
-                icon: group.icon(),
+                icon: icon(preset as u32),
                 action: UiAction::SelectBrush { id: preset as u32 },
                 selected: preset as u32 == brush.preset,
                 preview: Some(preset as u32),
@@ -521,11 +539,11 @@ impl ToolMemory {
         if medium.as_ref() == label { label.to_string() } else { format!("{medium} · {label}") }
     }
     pub fn remember(&mut self, id: u32) -> bool {
-        let group = group(id);
-        let mut changed = self.tools.insert(group.tool(), id) != Some(id);
-        changed |= self.groups.insert(group, id) != Some(id);
-        if is_drawing(group.tool()) { changed |= self.drawing != Some(id); self.drawing = Some(id); }
-        if is_sculpt(group.tool()) { changed |= self.sculpt != Some(id); self.sculpt = Some(id); }
+        let tool = tool(id);
+        let mut changed = self.tools.insert(tool, id) != Some(id);
+        changed |= self.groups.insert(group(id), id) != Some(id);
+        if is_drawing(tool) { changed |= self.drawing != Some(id); self.drawing = Some(id); }
+        if is_sculpt(tool) { changed |= self.sculpt != Some(id); self.sculpt = Some(id); }
         changed
     }
     pub fn set_override(&mut self, id: u32, setting: &str, value: f32, localizer: &Localizer) -> Result<(), String> {
@@ -551,12 +569,12 @@ impl ToolMemory {
         for (id, includes) in [(self.drawing, is_drawing as fn(Tool) -> bool), (self.sculpt, is_sculpt)] {
             if let Some(id) = id {
                 preset(id)?;
-                if !includes(group(id).tool()) { return Err("Invalid remembered tool class".into()); }
+                if !includes(tool(id)) { return Err("Invalid remembered tool class".into()); }
             }
         }
         for (&tool, &id) in &self.tools {
             preset(id)?;
-            if group(id).tool() != tool {
+            if self::tool(id) != tool {
                 return Err("Invalid remembered tool".into());
             }
         }
@@ -654,8 +672,7 @@ mod tests {
         for category in &catalog.brush_categories {
             assert!(crate::icon_ships(category.icon));
             for choice in &category.brushes {
-                let group = group(choice.id);
-                let brush = BrushState { preset: choice.id, tool: group.tool(), diameter: 10., opacity: 1., color: [0., 0., 0., 1.] };
+                let brush = BrushState { preset: choice.id, tool: tool(choice.id), diameter: 10., opacity: 1., color: [0., 0., 0., 1.] };
                 let view = view(&brush, LayerCanvasTool::Paint, &Localizer::shared(UiLanguage::English));
                 let selected = view.groups.iter().find(|g| g.selected).unwrap();
                 assert_eq!((&selected.label, selected.icon), (&category.label, category.icon));
@@ -695,13 +712,13 @@ mod tests {
         let mut ids = std::collections::BTreeSet::new();
         for &(preset, _, group) in PRESETS {
             assert!(ids.insert(preset as u32));
-            assert!(Tool::ALL.contains(&group.tool()));
+            assert!(group.holds(tool(preset as u32)));
         }
         for group in ToolGroup::ALL {
             assert!(ids.contains(&group.default_preset()));
         }
         for tool in Tool::ALL {
-            assert_eq!(group(tool.default_preset()).tool(), tool);
+            assert_eq!(self::tool(tool.default_preset()), tool);
         }
     }
 }

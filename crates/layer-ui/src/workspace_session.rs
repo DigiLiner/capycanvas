@@ -236,13 +236,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         state.colors.set_document_depth(self.engine.document().composition().color.depth)?;
         state.mask_colors.set_document_depth(layer_core::color::SampleDepth::U8)?;
         let mut brush = state.tools.brush_in(preset(state.preset)?, space);
-        let tool = stroke_paint(tools::group(state.preset).tool(), &state.colors, space, &mut brush)?;
+        let tool = stroke_paint(tools::tool(state.preset), &state.colors, space, &mut brush)?;
         let mut region = region_tools::RegionTools::default();
         for (id, &value) in &state.region_values { region.edit_value(id, value).map_err(|reason| reason.message(self.localization()))?; }
         region.source = state.region_sources;
         self.engine.set_brush(brush.clone()).map_err(error)?;
         self.engine.set_paint_color(state.colors.definition());
-        self.state.brush = BrushState { preset: state.preset, tool: tools::group(state.preset).tool(),
+        self.state.brush = BrushState { preset: state.preset, tool: tools::tool(state.preset),
             diameter: brush.diameter, opacity: brush.opacity, color: state.colors.preview(state.colors.definition()) };
         self.tool_origin = None;
         self.tools = state.tools;

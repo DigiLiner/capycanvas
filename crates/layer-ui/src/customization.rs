@@ -472,7 +472,7 @@ impl ToolbarControl {
             Self::Command { command } => command.icon().unwrap_or(match command {
                 CommandId::ToggleTheme => "appearance", CommandId::KeyboardShortcuts => "keyboard", CommandId::About => "info", _ => "menu",
             }),
-            Self::Brush { id } => preset(id).map(|_| crate::tools::group(id).icon()).unwrap_or("brush"),
+            Self::Brush { id } => preset(id).map(|_| crate::tools::icon(id)).unwrap_or("brush"),
             Self::Size { .. } | Self::BrushSizeSlider => "size",
             Self::Color => "colors", Self::ColorPicker => "color-picker",
             Self::Opacity | Self::BrushOpacitySlider => "opacity",

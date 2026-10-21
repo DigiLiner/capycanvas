@@ -1391,7 +1391,7 @@ fn slider_stamp_plan_accepts_every_builtin_tool_context() {
     assert_eq!(choices.len(),66);
     for choice in choices {
         s.dispatch(UiAction::SelectBrush{id:choice.id}).unwrap();
-        assert_eq!((s.state().toolbar_context().brush,s.state().brush.tool),(choice.id,choice.group.tool()));
+        assert_eq!((s.state().toolbar_context().brush,s.state().brush.tool),(choice.id,crate::tools::tool(choice.id)));
         let brush=s.engine.configured_brush();brush.validate().unwrap();
         let strength=ToolbarNumericBinding::BrushStrength.field(s.state()).unwrap().value;
         assert!(strength>0.,"{}: default Strength",choice.label);
@@ -1402,7 +1402,7 @@ fn slider_stamp_plan_accepts_every_builtin_tool_context() {
         assert!(!request.dabs.is_empty() && request.dabs.len()<=64,"{}: {} contacts",choice.label,request.dabs.len());
         assert!((0.0..=1.0).contains(&request.style.opacity));
         assert_eq!((request.style.tip,request.style.execution),(brush.tip.clone(),brush.execution_class()));
-        let shape_only=matches!(choice.group.tool(),Tool::Eraser|Tool::Blend|Tool::Liquify|Tool::Clone|Tool::Heal|Tool::SpotHeal);
+        let shape_only=matches!(crate::tools::tool(choice.id),Tool::Eraser|Tool::Blend|Tool::Liquify|Tool::Clone|Tool::Heal|Tool::SpotHeal);
         assert_eq!(request.shape_strength,shape_only.then_some(strength),"{}: tool semantics",choice.label);
         for dab in request.dabs {
             assert!(dab.radii.into_iter().all(|r|r>0.));

@@ -110,8 +110,10 @@ drawing sets (Paint, Pencil, Pastel and the other media), Tools lists the chosen
 set's tools with stroke previews, and Tool holds the settings. Brush restores
 the most recently selected drawing tool; clicking it while selected opens or
 closes its drawer, and choosing a set keeps the drawer open and restores that
-set's last tool. **Sculpt** opens **Sculpting → Tools → Tool** with Blend,
-Liquify, Clone, Heal and Spot Heal, and Eraser has a two-panel **Tools → Tool** drawer. Brush and Sculpt
+set's last tool. **Sculpt** opens **Sculpting → Tools → Tool** with the Blend,
+Wet paint, Effects, Liquify and Retouch sets; Retouch holds the Clone Stamp,
+Healing Brush and Spot Healing Brush, which stay separate tools. Eraser has a
+two-panel **Tools → Tool** drawer. Brush and Sculpt
 each remember their own selection across workspace switches and restarts.
 Brush, Sculpt, Eraser and Select use the same corner triangle and subgroup icons
 as Paint and Photo, with the same

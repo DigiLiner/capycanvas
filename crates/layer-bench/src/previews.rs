@@ -17,12 +17,12 @@ pub fn generate(directory: &Path) -> Result<(), Box<dyn Error>> {
                 continue;
             }
             let mut canvas = Canvas::configured([400, 80], [0.0; 4])?;
-            if choice.group == layer_ui::ToolGroup::Blend {
+            if choice.group.tool() == layer_ui::Tool::Blend {
                 blend_study::signature(&mut canvas, layer_ui::preset(choice.id)?)?;
             } else {
                 // Destination-reading tools need existing color to demonstrate
                 // their effect. These seeds are on the same editable paint layer.
-                let retouching = matches!(choice.group, layer_ui::ToolGroup::Clone | layer_ui::ToolGroup::Heal | layer_ui::ToolGroup::SpotHeal);
+                let retouching = choice.group == layer_ui::ToolGroup::Retouch;
                 if choice.group == layer_ui::ToolGroup::Liquify || retouching || choice.id == 3 {
                     canvas.set_brush(brush(Preset::GPen, 44.0, 0.9, [0.06, 0.3, 0.65, 1.0]))?;
                     stroke(&mut canvas, 0.0)?;

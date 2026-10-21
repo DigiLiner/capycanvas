@@ -59,7 +59,8 @@ fn choose_in_drawer(d: &mut Driver, preset: P) {
     let opener = d.header_tool(ToolbarControl::Command { command: CommandId::Sculpt });
     d.click_name(&opener);
     pump(300);
-    if let Some(set) = find_named(d.w.window.upcast_ref(), "sculpt-set-blend").filter(|w| w.is_mapped()) {
+    let group = layer_ui::brush_catalog().find(|choice| choice.id == preset as u32).unwrap().group;
+    if let Some(set) = find_named(d.w.window.upcast_ref(), &format!("sculpt-set-{}", group.icon())).filter(|w| w.is_mapped()) {
         d.click(&set);
         pump(250);
     }

@@ -195,13 +195,11 @@ tool-group-airbrush = Kuas semprot halus
 
 tool-group-blend = Baurkan
 
-tool-group-clone = Klon
-
 tool-group-decoration = Tekstur
 
-tool-group-eraser = Penghapus
+tool-group-effects = Efek
 
-tool-group-heal = Pulihkan
+tool-group-eraser = Penghapus
 
 tool-group-liquify = Cairkan
 
@@ -217,11 +215,13 @@ tool-group-pen = Pena
 
 tool-group-pencil = Pensil
 
-tool-group-spot-heal = Pulihkan noda
+tool-group-retouch = Retus
 
 tool-group-spray = Semprot
 
 tool-group-watercolor = Cat air
+
+tool-group-wet-paint = Cat basah
 
 tool-mode-crop = Pangkas
 

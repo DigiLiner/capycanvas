@@ -198,8 +198,22 @@ fn tool_group_temporary_brushes_preserve_memory_from_a_nonpainting_tool() {
 }
 
 #[test]
+fn blend_offers_its_sets_and_keeps_its_own_icon() {
+    let control = ToolbarControl::Command { command: CommandId::Blend };
+    let (mut s, panel, ids) = group_fixture(Platform::Gtk, &[control]);
+    let tile = DrawerAnchor::Tile { panel, tile: ids[0] };
+    assert_eq!(slot_menu(&s, tile).len(), 3);
+    for group in [ToolGroup::Blend, ToolGroup::WetPaint, ToolGroup::Effects] {
+        s.dispatch(slot_choice(&s, tile, ToolVariant::BrushGroup { group })).unwrap();
+        assert_eq!((tools::group(s.state().brush.preset), s.state().brush.tool), (group, Tool::Blend));
+        let tile_view = s.panel_view(panel).unwrap().tiles.into_iter().find(|item| item.id == ids[0]).unwrap();
+        assert_eq!(tile_view.choice.icon, "blend");
+    }
+}
+
+#[test]
 fn tool_group_presets_leave_pinned_brushes_as_leaf_controls() {
-    for command in [CommandId::Eraser, CommandId::Decoration, CommandId::Clone, CommandId::Heal, CommandId::SpotHeal, CommandId::Blend, CommandId::Liquify] {
+    for command in [CommandId::Eraser, CommandId::Decoration, CommandId::Clone, CommandId::Heal, CommandId::SpotHeal, CommandId::Liquify] {
         let control = ToolbarControl::Command { command };
         assert!(control.has_variants());
         let (mut s, panel, ids) = group_fixture(Platform::Gtk, &[control]);
@@ -208,7 +222,7 @@ fn tool_group_presets_leave_pinned_brushes_as_leaf_controls() {
         assert!(!menu.is_empty());
         for item in menu {
             let Some(UiAction::ChooseToolVariant { variant: ToolVariant::BrushPreset { id }, .. }) = item.action else { panic!("single-medium groups publish brush presets") };
-            assert_eq!(tools::group(id).tool().command(), command);
+            assert_eq!(tools::tool(id).command(), command);
             s.dispatch(UiAction::ChooseToolVariant { anchor, variant: ToolVariant::BrushPreset { id } }).unwrap();
             assert_eq!(s.state().brush.preset, id);
             assert_eq!(selected_slot_variant(&s, anchor), ToolVariant::BrushPreset { id });
@@ -574,10 +588,10 @@ fn grouped_slots_publish_the_same_siblings_in_menus_panels_and_drawers() {
                 for choice in &choices.subtools {
                     match choice.action {
                         UiAction::SelectBrush { id } => {
-                            assert_eq!(tools::group(id).tool(), s.state().brush.tool);
+                            assert_eq!(tools::group(id), tools::group(s.state().brush.preset));
                             if choice.selected { assert_eq!(id, s.state().brush.preset); }
                         }
-                        UiAction::SelectToolGroup { group } => assert_eq!(group.tool(), s.state().brush.tool),
+                        UiAction::SelectToolGroup { group } => assert!(group.holds(s.state().brush.tool)),
                         _ => panic!("brush subtools expose mediums and presets"),
                     }
                 }

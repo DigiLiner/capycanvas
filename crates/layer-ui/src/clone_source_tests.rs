@@ -26,7 +26,7 @@ fn near(a: Point, b: Point) -> bool {
 fn clone_joins_the_sculpting_tools_with_its_options_and_a_source_in_view() {
     let mut s = clone_session();
     assert_eq!(UiSession::<Recorder>::tool_category(s.layer_interaction.tool, s.state.brush.tool), ToolCategory::Retouching);
-    assert!(s.state.tool_panels.sculpt_sets.groups.iter().any(|g| g.label.as_ref() == "Clone" && g.selected));
+    assert!(s.state.tool_panels.sculpt_sets.groups.iter().any(|g| g.label.as_ref() == "Retouch" && g.selected));
     assert!(s.command(CommandId::Sculpt).selected && s.command(CommandId::Clone).selected);
     let actions: Vec<_> = s.state.tool_actions.iter().map(|a| a.command).collect();
     assert_eq!(actions, [
@@ -210,7 +210,7 @@ fn healing_brushes_join_the_retouching_tools_and_spot_healing_needs_no_disc() {
     }
     assert_eq!(
         s.state.tool_panels.sculpt_sets.groups.iter().map(|g| g.label.as_ref()).collect::<Vec<_>>(),
-        ["Blend", "Liquify", "Clone", "Heal", "Spot Heal"]
+        ["Blend", "Wet paint", "Effects", "Liquify", "Retouch"]
     );
 
     invoke(&mut s, CommandId::Heal);

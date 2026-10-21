@@ -59,11 +59,11 @@ impl ToolControlGroup {
             Self::Navigation => [CommandId::Hand, CommandId::RotateView].into_iter().map(command).collect(),
             Self::Selection => SelectionTool::ALL.into_iter().map(|t| command(t.command())).collect(),
             Self::Brush(tool) => {
-                let groups: Vec<_> = ToolGroup::ALL.into_iter().filter(|g| g.tool() == tool).collect();
+                let groups: Vec<_> = ToolGroup::ALL.into_iter().filter(|g| g.holds(tool)).collect();
                 if groups.len() > 1 {
                     groups.into_iter().map(|group| ToolVariant::BrushGroup { group }).collect()
                 } else {
-                    tools::brush_ids().filter(|&id| tools::group(id).tool() == tool).map(|id| ToolVariant::BrushPreset { id }).collect()
+                    tools::brush_ids().filter(|&id| tools::tool(id) == tool).map(|id| ToolVariant::BrushPreset { id }).collect()
                 }
             },
             Self::Drawing | Self::Sculpt => ToolGroup::ALL.into_iter()
@@ -77,8 +77,8 @@ impl ToolControlGroup {
             Self::Navigation => matches!(variant, ToolVariant::Command { command: CommandId::Hand | CommandId::RotateView }),
             Self::Selection => matches!(variant, ToolVariant::Command { command } if SelectionTool::ALL.iter().any(|t| t.command() == command)),
             Self::Brush(tool) => match variant {
-                ToolVariant::BrushGroup { group } => group.tool() == tool && ToolGroup::ALL.iter().filter(|g| g.tool() == tool).count() > 1,
-                ToolVariant::BrushPreset { id } => preset(id).is_ok() && tools::group(id).tool() == tool && ToolGroup::ALL.iter().filter(|g| g.tool() == tool).count() == 1,
+                ToolVariant::BrushGroup { group } => group.holds(tool) && ToolGroup::ALL.iter().filter(|g| g.holds(tool)).count() > 1,
+                ToolVariant::BrushPreset { id } => preset(id).is_ok() && tools::tool(id) == tool && ToolGroup::ALL.iter().filter(|g| g.holds(tool)).count() == 1,
                 _ => false,
             },
             Self::Drawing => matches!(variant, ToolVariant::BrushGroup { group } if tools::is_drawing(group.tool())),
@@ -228,7 +228,7 @@ impl ToolVariant {
         match self {
             Self::Command { command } => command,
             Self::BrushGroup { group } => group.tool().command(),
-            Self::BrushPreset { id } => preset(id).map(|_| tools::group(id).tool().command()).unwrap_or(CommandId::Brush),
+            Self::BrushPreset { id } => preset(id).map(|_| tools::tool(id).command()).unwrap_or(CommandId::Brush),
             Self::Figure { .. } => CommandId::Figure,
             Self::Ruler { .. } => CommandId::Ruler,
             Self::Gradient { .. } => CommandId::Gradient,
@@ -244,7 +244,7 @@ impl ToolVariant {
         match self {
             Self::Command { command } => command.icon().unwrap_or("menu"),
             Self::BrushGroup { group } => group.icon(),
-            Self::BrushPreset { id } => preset(id).map(|_| tools::group(id).icon()).unwrap_or("brush"),
+            Self::BrushPreset { id } => preset(id).map(|_| tools::icon(id)).unwrap_or("brush"),
             Self::Figure { shape } => match shape {
                 FigureShape::Line => "line",
                 FigureShape::Rectangle => "rectangle",
@@ -507,7 +507,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             },
             ToolControlGroup::Selection | ToolControlGroup::Navigation => { view.groups.clear(); view.subtools = choices; },
             ToolControlGroup::Brush(tool) => {
-                if ToolGroup::ALL.iter().filter(|g| g.tool() == tool).count() > 1 { view.groups = choices; }
+                if ToolGroup::ALL.iter().filter(|g| g.holds(tool)).count() > 1 { view.groups = choices; }
                 else { view.subtools = choices; }
             },
             ToolControlGroup::Drawing | ToolControlGroup::Sculpt => (),

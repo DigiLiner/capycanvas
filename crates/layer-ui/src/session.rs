@@ -1043,7 +1043,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let selection_brush = self.selection_brush_active();
         let icon = if self.layer_interaction.tool == LayerCanvasTool::Paint && erasing { "eraser" }
-            else if self.layer_interaction.tool == LayerCanvasTool::Paint { tools::group(self.state.brush.preset).icon() }
+            else if self.layer_interaction.tool == LayerCanvasTool::Paint { tools::icon(self.state.brush.preset) }
             else { ToolVariant::active(&self.state).map_or("eyedropper", |tool| tool.icon_in(&self.state)) };
         let dabs = if !mode.has_brush_size() { Vec::new() }
         else if selection_brush || self.selection_masks.target().is_some() { self.selection_brush_cursor(event) }
@@ -2365,7 +2365,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::Select => self.selection_tools.options.tool.command().icon(),
             CommandId::ZenMode => Some(self.state.settings.zen_icon.icon()),
             CommandId::Fullscreen if self.state.fullscreen => Some("fullscreen-exit"),
-            _ => self.tools.command_preset_in(id, &self.state.brush, self.layer_interaction.tool).map(|preset| tools::group(preset).icon()).or_else(||id.icon()),
+            _ => self.tools.command_preset_in(id, &self.state.brush, self.layer_interaction.tool).map(tools::icon).or_else(||id.icon()),
         }
     }
     /// Escape leaves layer-mask editing only when it has nothing else to close
@@ -3424,7 +3424,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::SelectToolGroup { group } => {
                 if self.layer_interaction.tool != LayerCanvasTool::Paint
-                    || group.tool() != self.state.brush.tool
+                    || !group.holds(self.state.brush.tool)
                 {
                     return Err("This group belongs to another tool".into());
                 }
@@ -5545,7 +5545,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.tool = LayerCanvasTool::Paint;
         self.state.layer_tools.tool = LayerCanvasTool::Paint;
         self.state.brush.preset = id;
-        self.state.brush.tool = tools::group(id).tool();
+        self.state.brush.tool = tools::tool(id);
         self.state.brush.diameter = brush.diameter;
         self.state.brush.opacity = brush.opacity;
         self.dismiss_other_brush_refusal(id);
@@ -9428,7 +9428,7 @@ mod tests {
             s.dispatch(UiAction::ActivateHeaderItem { id }).unwrap();
             let drawer = s.state.customization.drawer.clone().unwrap();
             assert_eq!(drawer.columns, [vec![Panel::SculptSets], vec![Panel::Tools], vec![Panel::ToolSettings]]);
-            assert_eq!(s.state.tool_panels.sculpt_sets.groups.iter().map(|s| s.label.as_ref()).collect::<Vec<_>>(), ["Blend", "Liquify", "Clone", "Heal", "Spot Heal"]);
+            assert_eq!(s.state.tool_panels.sculpt_sets.groups.iter().map(|s| s.label.as_ref()).collect::<Vec<_>>(), ["Blend", "Wet paint", "Effects", "Liquify", "Retouch"]);
             for set in s.state.tool_panels.sculpt_sets.groups.clone() {
                 s.dispatch(set.action).unwrap();
                 assert_eq!(s.state.customization.drawer.as_ref(), Some(&drawer));
@@ -15556,7 +15556,7 @@ mod tests {
                 s.cursor_input(Some(event(&s, 1, PenPhase::Hover, 0.)));
                 let cursor = s.canvas_cursor().unwrap();
                 assert_eq!(cursor.segments.len(), 1);
-                assert_eq!(cursor.segments[0].marker, layer_render::tool_cursor_marker(group.icon()).unwrap());
+                assert_eq!(cursor.segments[0].marker, layer_render::tool_cursor_marker(tools::icon(s.state.brush.preset)).unwrap());
                 s.state.settings.cursor = CursorMode::BrushSize;
                 let outline = s.canvas_cursor().unwrap().segments;
                 s.state.settings.cursor = CursorMode::ToolBrushSize;
