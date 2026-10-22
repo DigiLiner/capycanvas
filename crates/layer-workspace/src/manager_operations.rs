@@ -156,6 +156,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         Ok(layer_ui::PanelConfig {
             id: layer_ui::Panel::Toolbar,
             hide_tab: definition.hide_tab,
+            zen: false,
             tile_style: definition.tile_style,
             content: layer_ui::PanelContent::Toolbar {
                 name: Some(definition.name),

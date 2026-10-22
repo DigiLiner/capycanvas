@@ -112,7 +112,11 @@ fold it; **Fold when not in use** in the hold menu keeps it open until tapped.
 ## Zen mode
 
 Bubbles stay visible in Zen mode, like floating panels, and their drags and
-menus keep working while other chrome is hidden.
+menus keep working while other chrome is hidden. Zen changes nothing else on
+its own: **Show in Zen mode** in a toolbar's menu keeps that toolbar (off by
+default), and a one-finger swipe in from an edge peeks the toolbars docked
+there until the next contact elsewhere. Dropping a bubble on a toolbar kept or
+peeked in Zen puts it back.
 
 ## Validation
 

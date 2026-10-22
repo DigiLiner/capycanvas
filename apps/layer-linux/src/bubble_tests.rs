@@ -77,6 +77,42 @@ fn canvas_spot(d: &Driver, x: f32, y: f32) -> [f32; 2] {
     [area.x() + area.width() * x, area.y() + area.height() * y]
 }
 
+fn zen(d: &mut Driver, name: &str) {
+    let panel = state(&d.w).workspace.layout.panels.iter().find(|p| p.tiles().iter().any(|t| t.control == ToolbarControl::BrushSizeSlider)).unwrap().id;
+    let group = state(&d.w).workspace.layout.panel_group(panel).unwrap();
+    let hidden = |d: &Driver| d.w.groups.borrow().iter().find(|g| g.id == group).unwrap().root.has_css_class("zen-hidden");
+    let option = |d: &Driver| {
+        ui_session(&d.w).context_menu(ContextTarget::Ribbon { panel }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Show in Zen mode").unwrap()
+    };
+    let (item, spot) = (header_of(d, ToolbarControl::Color), canvas_spot(d, 0.6, 0.5));
+    tear(d, "mouse", &item, spot);
+    assert_eq!(option(d).selected, Some(false));
+    d.w.dispatch(option(d).action.unwrap());
+    d.w.dispatch(UiAction::Invoke { command: CommandId::ZenMode });
+    let away = canvas_spot(d, 0.5, 0.5);
+    tap(d, "touch", away);
+    pump(400);
+    assert!(state(&d.w).workspace.zen_mode);
+    assert!(!hidden(d), "{name}: a toolbar shown in Zen stays");
+    assert!(!d.w.bubbles.layer.has_css_class("zen-hidden"), "{name}: bubbles stay in Zen");
+    capture(d, &format!("{name}-zen-kept"));
+    d.w.dispatch(option(d).action.unwrap());
+    tap(d, "touch", away);
+    pump(400);
+    assert!(hidden(d), "{name}: other toolbars hide in Zen");
+    let height = d.w.window.height() as f32;
+    stroke(d, "touch", &[[3., height * 0.5], [20., height * 0.5], [80., height * 0.5]]);
+    pump(300);
+    assert!(!hidden(d), "{name}: swiping in from the left edge peeks its toolbar");
+    capture(d, &format!("{name}-zen-peek"));
+    tap(d, "touch", away);
+    pump(400);
+    assert!(hidden(d), "{name}: a contact elsewhere hides it again");
+    d.w.dispatch(UiAction::Invoke { command: CommandId::ZenMode });
+    pump(300);
+    put_back_all(d, "mouse", name);
+}
+
 #[test]
 #[ignore = "private display: workspace-motion.sh gtk --native-test=native_tool_bubbles"]
 fn native_tool_bubbles() {
@@ -231,6 +267,7 @@ fn native_tool_bubbles() {
             }
             put_back_all(&mut d, device, &name);
         }
+        zen(&mut d, &format!("{theme:?}").to_lowercase());
     }
     d.finish();
 }

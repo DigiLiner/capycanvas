@@ -37,6 +37,8 @@ mod held_actions;
 use held_actions::{ERASER_END, merge_change};
 #[path = "session_bubbles.rs"]
 mod session_bubbles;
+#[path = "zen_peek.rs"]
+mod zen_peek;
 #[path = "tool_slots.rs"]
 mod tool_slots;
 pub use tool_slots::{ToolSlotId, ToolVariant, ToolSlotMemory};
@@ -308,6 +310,7 @@ pub struct UiSession<R: CanvasRenderer> {
     floating_resize: Option<FloatingResize>,
     workspace_drag: Option<WorkspaceDrag>,
     bubble_state: session_bubbles::Bubbles,
+    zen_peek: zen_peek::ZenPeek,
     workspace_tab_drag: Option<crate::tab_drag::TabDrag>,
     workspace_drag_tabs: Vec<TabHit>,
     workspace_model_revision: u64,
@@ -535,6 +538,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             floating_resize: None,
             workspace_drag: None,
             bubble_state: Default::default(),
+            zen_peek: Default::default(),
             workspace_tab_drag: None,
             workspace_drag_tabs: Vec::new(),
             workspace_model_revision: 0,
@@ -1266,6 +1270,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled |= canvas;
                     }
                 }
+                if let ChromeEvent::Contact { position, .. } = event {
+                    self.end_zen_peek(position);
+                }
                 if let ChromeEvent::Contact { position, .. } = event
                     && !facts.popup_open
                     && self.dismiss_bubble_halo(position)
@@ -1624,7 +1631,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                             && !self.touch.is_active() && self.object_touch_hit(position)));
                 if kind == PointerKind::Touch && !transform_contact && !navigation_contact {
                     if self.interaction.pointer.is_none() && !self.state.settings_open {
-                        reply.change = self.touch(id, pen_phase(phase), position);
+                        reply.change = if self.edge_swipe(id, phase, position) {
+                            self.changed(0, false)
+                        } else {
+                            self.touch(id, pen_phase(phase), position)
+                        };
                         reply.handled = true;
                     }
                 } else {
@@ -1745,6 +1756,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn refresh_chrome(&mut self) {
         if !self.state.workspace.zen_mode {
             self.interaction.keep_chrome_until_contact = false;
+            self.zen_peek = Default::default();
         }
         let pinned = self.interaction.facts.held
             || self.interaction.facts.dragging
@@ -2194,7 +2206,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .workspace_drag
                 .map_or(self.interaction.hidden, |drag| !drag.chrome_visible);
         if docks_hidden {
-            resolved.groups.retain(|g| g.floating);
+            let layout = &self.state.workspace.layout;
+            resolved.groups.retain(|g| g.floating || layout.shows_in_zen(g.id));
             resolved.dividers.clear();
         }
         if let Some(expansion) = expansion

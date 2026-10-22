@@ -323,6 +323,8 @@ pub struct PanelConfig {
     pub hide_tab: bool,
     pub tile_style: TileStyle,
     pub content: PanelContent,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub zen: bool,
 }
 impl Panel {
     pub fn localized_label(self, localization: &Localizer) -> std::sync::Arc<str> {
@@ -390,6 +392,7 @@ impl PanelConfig {
             .map(|id| Self {
                 id,
                 hide_tab: false,
+                zen: false,
                 tile_style: TileStyle::Small,
                 content: if id == Panel::Toolbar {
                     PanelContent::Toolbar {
@@ -554,6 +557,10 @@ pub enum CustomizationAction {
     SetTileStyle {
         panel: Panel,
         style: TileStyle,
+    },
+    SetShowInZen {
+        panel: Panel,
+        shown: bool,
     },
     RenameToolbar {
         panel: Panel,
@@ -987,7 +994,17 @@ impl DockLayout {
                     CustomizationAction::DuplicateToolbar { panel },
                 ),
             ],
-            vec![self.hide_item(panel, localization)],
+            vec![
+                {
+                    let mut item = ContextMenuItem::edit(
+                        localization.text(MessageId::WORKSPACE_SHOW_IN_ZEN).to_string(),
+                        CustomizationAction::SetShowInZen { panel, shown: !p.zen },
+                    );
+                    item.selected = Some(p.zen);
+                    item
+                },
+                self.hide_item(panel, localization),
+            ],
         ])
     }
     fn tab_style_items(&self, group: u32, localization: &Localizer) -> Result<Vec<ContextMenuItem>, String> {
@@ -2106,6 +2123,13 @@ impl CustomizationState {
                 layout.set_tile_style(panel, style, viewport)?;
                 changed |= regions::LAYOUT;
             }
+            SetShowInZen { panel, shown } => {
+                if panel.kind() != PanelKind::Tiles {
+                    return Err(localization.text(MessageId::WORKSPACE_REFUSAL_CUSTOMIZATION_CHOOSE_A_TOOLBAR).to_string());
+                }
+                layout.panel_mut(panel)?.zen = shown;
+                changed |= regions::LAYOUT;
+            }
             RenameToolbar { panel } | DuplicateToolbar { panel } | DeleteToolbar { panel } => {
                 if panel.kind() != PanelKind::Tiles {
                     return Err(localization.text(MessageId::WORKSPACE_REFUSAL_CUSTOMIZATION_CHOOSE_A_TOOLBAR).to_string());
@@ -2729,7 +2753,7 @@ mod tests {
 
     #[test]
     fn toolbar_admission_preserves_numeric_size_reason_and_cold_diagnostic() {
-        let panel = PanelConfig { id: Panel::Toolbar, hide_tab: false, tile_style: Default::default(), content: PanelContent::Toolbar { name: Some("literal {name} 🖌".into()), tiles: vec![ToolbarTile { id: 1, control: ToolbarControl::Size { tenths: 0 } }] } };
+        let panel = PanelConfig { id: Panel::Toolbar, hide_tab: false, tile_style: Default::default(), zen: false, content: PanelContent::Toolbar { name: Some("literal {name} 🖌".into()), tiles: vec![ToolbarTile { id: 1, control: ToolbarControl::Size { tenths: 0 } }] } };
         let expected = crate::NumericError::Range { label: MessageId::TOOL_SETTING_SIZE.into(), min: 0.5, max: 2048.0 };
         assert_eq!(panel.validate_admission(), Err(crate::WorkspaceValidationError::Numeric(expected.clone())));
         assert_eq!(panel.validate().unwrap_err(), expected.code());

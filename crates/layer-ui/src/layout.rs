@@ -1448,6 +1448,7 @@ impl DockLayout {
             let config = PanelConfig {
                 id,
                 hide_tab: false,
+                zen: false,
                 tile_style: TileStyle::Small,
                 content: PanelContent::Toolbar {
                     name: None,
@@ -1867,6 +1868,9 @@ impl DockLayout {
             .find(|p| p.id == id)
             .ok_or_else(|| "Unknown panel".into())
     }
+    pub fn shows_in_zen(&self, group: u32) -> bool {
+        self.group_panels(group).is_ok_and(|panels| panels.iter().any(|p| self.panel(*p).is_ok_and(|c| c.zen)))
+    }
     pub fn group_panels(&self, id: u32) -> Result<&[Panel], String> {
         match self.node(id) {
             Some(DockNode::Tabs { panels, .. }) => Ok(panels),
@@ -1940,6 +1944,7 @@ impl DockLayout {
         next.panels.push(PanelConfig {
             id,
             hide_tab: false,
+            zen: false,
             tile_style: crate::TileStyle::Small,
             content: PanelContent::Toolbar {
                 name: Some(name.into()),

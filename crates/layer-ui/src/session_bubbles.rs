@@ -469,7 +469,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let hidden = self.interaction.hidden;
         let header = self.state.workspace.layout.header_presentation.height.max(HEADER_HEIGHT);
         (!hidden && point[1] < header)
-            || self.layout(viewport).groups.iter().any(|g| (!hidden || g.floating) && g.bounds.contains(point[0], point[1]))
+            || self.layout(viewport).groups.iter().any(|g| {
+                (!hidden || g.floating || self.state.workspace.layout.shows_in_zen(g.id)) && g.bounds.contains(point[0], point[1])
+            })
     }
 
     fn bubble_homing(&self, viewport: [f32; 2], point: [f32; 2], source: Option<Bounds>) -> bool {

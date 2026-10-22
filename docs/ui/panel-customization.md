@@ -146,7 +146,9 @@ picker's availability rules.
   panel preserves its current choice. Multi-tab groups always show their tabs.
 - A ribbon tile targets that tile: **Remove Tool**, **Insert Tools…**.
   Empty standalone ribbon space and its grip target the toolbar: configuration,
-  append tools, tile style, rename, duplicate, and hide.
+  append tools, tile style, rename, duplicate, **Show in Zen mode** and hide.
+  Show in Zen mode keeps that docked toolbar while Zen hides other chrome; it is
+  off for every toolbar by default and is one layout undo step.
   Configure, Rename, Duplicate and Hide include the actual toolbar
   name; generic creation/addition entries use “toolbar.” Duplicate suggests a
   unique editable name. Names are case-insensitively unique across built-in panels and

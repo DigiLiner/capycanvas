@@ -433,3 +433,66 @@ fn a_bubble_that_returns_starts_with_fresh_scrolling_and_no_open_parts() {
     assert!(fresh.pill.is_none());
     assert!(fresh.beads.iter().any(|b| b.placement.bead == Bead::Swatch { index: 0 } && b.placement.alpha == 1.));
 }
+
+#[test]
+fn toolbars_can_stay_in_zen_mode() {
+    let mut s = desk();
+    let bar = s.state.workspace.layout.panels.iter().find(|p| p.id.kind() == PanelKind::Tiles && s.state.workspace.layout.panel_group(p.id).is_some()).unwrap().id;
+    let group = s.state.workspace.layout.panel_group(bar).unwrap();
+    let item = |s: &UiSession<Recorder>| {
+        s.context_menu(ContextTarget::Ribbon { panel: bar }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Show in Zen mode").unwrap()
+    };
+    assert_eq!(item(&s).selected, Some(false), "toolbars hide in Zen by default");
+    assert!(!s.state.workspace.layout.shows_in_zen(group));
+    s.dispatch(item(&s).action.unwrap()).unwrap();
+    assert!(s.state.workspace.layout.shows_in_zen(group));
+    assert_eq!(item(&s).selected, Some(true));
+    invoke(&mut s, CommandId::ZenMode);
+    s.interaction.hidden = true;
+    let bounds = find_group(&s, VIEW, |g| g.id == group).bounds;
+    let inside = [bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.5];
+    let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
+    drag(&mut s, BubbleGrab::Bubble { id }, FAR, inside);
+    assert!(s.state.workspace.layout.bubbles.bubbles.is_empty(), "a toolbar shown in Zen takes bubbles back");
+    invoke(&mut s, CommandId::UndoWorkspace);
+    assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), 1);
+    invoke(&mut s, CommandId::UndoWorkspace);
+    assert!(s.state.workspace.layout.shows_in_zen(group));
+    invoke(&mut s, CommandId::UndoWorkspace);
+    assert!(!s.state.workspace.layout.shows_in_zen(group), "the choice is one layout step");
+}
+
+#[test]
+fn an_edge_swipe_in_zen_peeks_that_edges_toolbars_until_a_contact_elsewhere() {
+    let mut s = desk();
+    let layout = s.layout(VIEW);
+    let group = layout.groups.iter().find(|g| !g.floating && s.state.workspace.layout.group_edge(g.id).is_some()).unwrap().clone();
+    let edge = s.state.workspace.layout.group_edge(group.id).unwrap();
+    invoke(&mut s, CommandId::ZenMode);
+    chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default());
+    assert!(s.interaction.hidden && !s.zen_keeps(group.id));
+    let (start, inward) = match edge {
+        Edge::Left => ([4., 450.], [1., 0.]),
+        Edge::Right => ([VIEW[0] - 4., 450.], [-1., 0.]),
+        Edge::Top => ([600., 4.], [0., 1.]),
+        Edge::Bottom => ([600., VIEW[1] - 4.], [0., -1.]),
+    };
+    let at = |d: f32| [start[0] + inward[0] * d, start[1] + inward[1] * d];
+    let touch = |s: &mut UiSession<Recorder>, phase, position| {
+        s.input(UiInput::Pointer { id: 9, phase, kind: PointerKind::Touch, button: PointerButton::Primary, position, time_ns: 0 }).unwrap()
+    };
+    touch(&mut s, ContactPhase::Down, start);
+    touch(&mut s, ContactPhase::Move, at(20.));
+    assert!(!s.zen_keeps(group.id), "a short swipe keeps chrome hidden");
+    touch(&mut s, ContactPhase::Move, at(60.));
+    assert!(s.zen_keeps(group.id), "swiping in from the edge shows its toolbar");
+    touch(&mut s, ContactPhase::Up, at(60.));
+    let inside = [group.bounds.x + group.bounds.width * 0.5, group.bounds.y + group.bounds.height * 0.5];
+    chrome(&mut s, ChromeEvent::Contact { position: inside, canvas: false }, ChromeFacts::default());
+    assert!(s.zen_keeps(group.id), "using the peeked toolbar keeps it");
+    chrome(&mut s, ChromeEvent::Contact { position: [600., 450.], canvas: true }, ChromeFacts::default());
+    assert!(!s.zen_keeps(group.id), "a contact elsewhere hides it again");
+    touch(&mut s, ContactPhase::Down, [600., 450.]);
+    touch(&mut s, ContactPhase::Move, [700., 450.]);
+    assert!(!s.zen_keeps(group.id), "swipes away from the edges do nothing");
+}

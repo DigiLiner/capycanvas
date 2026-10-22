@@ -398,7 +398,7 @@ impl ToolbarDefinition {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ToolbarIdentitiesAreExhausted));
         }
         PanelConfig {
-            id: layer_ui::Panel::Toolbar, hide_tab: self.hide_tab, tile_style: self.tile_style,
+            id: layer_ui::Panel::Toolbar, hide_tab: self.hide_tab, tile_style: self.tile_style, zen: false,
             content: layer_ui::PanelContent::Toolbar { name: Some(self.name.clone()), tiles: self.tiles.clone() },
         }.validate_admission().map_err(StoreError::workspace)?;
         let mut ids = std::collections::BTreeSet::new();

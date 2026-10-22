@@ -250,17 +250,19 @@ manager; web observes `prefers-color-scheme`. OS changes never overwrite a user
 override. Returning to System uses the latest OS value.
 
 `ZenMode` toggles shared `UiState.workspace.zen_mode`. Zen has a single
-presentation: it hides the header and docked chrome, keeps floating panels and
-[tool bubbles](tool-bubbles.md), and
-never projects alternate toolbar strips or changes the saved layout. A minimal
-persistent UI belongs in a workspace instead. The standalone Capy button or Tab
+presentation: it hides the header and docked chrome, keeps floating panels,
+[tool bubbles](tool-bubbles.md) and toolbars marked **Show in Zen mode**, and
+never projects alternate toolbar strips or changes the saved layout. The standalone Capy button or Tab
 exits Zen; Tab toggles Zen outside settings and native text editors. Explicit
 settings dialogs remain usable.
 
 Preferences → Appearance → Zen mode has **Show Capy in Zen mode** (on by
 default) and **Button icon**. Moving or touching a screen edge keeps controls
-hidden. Floating panels remain available, and their drags can merge with other
-floating panels without exposing hidden docks.
+hidden, but a one-finger swipe that starts within 24 px of an edge and moves
+40 px inward peeks the toolbars docked on that edge until the next contact
+elsewhere. Pen and mouse never peek. `UiSession::zen_keeps(group)` tells hosts
+which hidden groups to keep. Floating panels remain available, and their drags
+can merge with other floating panels without exposing hidden docks.
 
 Zen immediately disables hidden controls. GTK and Web fade other chrome over
 180 ms; Capy switches without fading. Web respects reduced-motion preferences

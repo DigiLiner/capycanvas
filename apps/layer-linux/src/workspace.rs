@@ -2059,9 +2059,13 @@ impl Workspace {
     }
 
     fn set_chrome_hidden(&self, hidden: bool) {
+        let gpu = self.gpu.borrow();
+        let keeps = |group: u32| gpu.as_ref().is_some_and(|g| g.session.zen_keeps(group));
         for (slot, widget) in self.surface.imp().children.borrow().iter() {
             if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy | Slot::Bubbles) {
-                let hidden = hidden && !widget.has_css_class("floating-panel");
+                let hidden = hidden
+                    && !widget.has_css_class("floating-panel")
+                    && !matches!(slot, Slot::Group(id) if keeps(*id));
                 let can_target = !hidden && !widget.has_css_class("fixed-stack-divider")
                     && !matches!(slot, Slot::DrawerShadow(_) | Slot::ColumnConnection(_, _));
                 if widget.has_css_class("zen-hidden") == hidden && widget.can_target() == can_target
