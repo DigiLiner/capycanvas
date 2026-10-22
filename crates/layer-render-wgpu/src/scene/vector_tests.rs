@@ -76,7 +76,7 @@ fn pressure_peaks_and_small_eraser_gaps_survive_gpu_rendering() {
         let (editor, _) = document([280, 140], vec![Record::Path(path.clone())]);
         let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
         let pixels = native(&mut r, editor.document());
-        assert!(pixels[85 * 280 + 140][3] > 0.95, "{cap:?}: the pressure peak remains visible");
+        assert!(pixels[85 * 280 + 140][3] > 0.95, "{cap:?}: the pressure peak remains visible: {:?}", pixels[85 * 280 + 140]);
         assert!(pixels[85 * 280 + 35][3] < 0.01, "{cap:?}: the thin end remains thin");
         let pieces = path.erased(&Eraser { from: [140., 70.], to: [140., 70.], radius: 4. }, None).unwrap();
         let (cut, _) = document([280, 140], pieces.into_iter().enumerate().map(|(i, p)| Record::Path(PathItem { id: ItemId(i as u64 + 1), ..p })).collect());
@@ -1030,6 +1030,44 @@ fn appended_strokes_at_zoomed_out_levels_match_a_fresh_render() {
         eprintln!("differing {} texels in x {}..{} y {}..{} (texture width {width})", bad.len(), xs.iter().min().unwrap(), xs.iter().max().unwrap(), ys.iter().min().unwrap(), ys.iter().max().unwrap());
     }
     assert!(error < 1e-5, "appended strokes must match a full render: {error}");
+}
+
+#[test]
+fn merging_trimmed_crossings_preserves_ink_across_raster_pages() {
+    let extent = [2133, 1600];
+    let mut artwork = layer_core::authored::Artwork::new(extent).unwrap();
+    crate::test_support::add_paint(&mut artwork, "Below", extent);
+    let mut doc = layer_core::Document::from_artwork(artwork).unwrap();
+    let ink = VectorObject::from_records(vec![
+        stroke(3, &[[900.703125, 850.171875], [900.703125, 1149.859375]], 17.453125, [0., 0., 0., 1.]),
+        stroke(2, &[[500.62890625, 850.171875], [500.62890625, 1149.859375]], 17.453125, [0., 0., 0., 1.]),
+        stroke(1, &[[299.859375, 999.28125], [1100.00390625, 999.28125]], 17.453125, [0., 0., 0., 1.]),
+    ]);
+    let (layer, edit) = doc.create_vector_layer_edit("Ink", ink, None, 0).unwrap();
+    doc.apply(edit).unwrap();
+    doc.working.occurrence = Some(layer);
+    let r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let view = layer_render::ViewState { width_px: 1067, height_px: 800, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let mut engine = layer_engine::CanvasEngine::new(r, doc, layer_engine::input_queue(16).1, view, layer_engine::ViewTransform::IDENTITY).unwrap();
+    settle(&mut engine);
+    let object = engine.document().scene().vector_layer(layer).unwrap();
+    let trimmed = object.erase(&mut VectorIndex::default(), &Eraser { from: [700., 980.], to: [700., 1020.], radius: 32. }, EraseMode::ToIntersection).unwrap();
+    engine.apply_edit(engine.document().vector_object_edit(layer, trimmed).unwrap()).unwrap();
+    settle(&mut engine);
+    let document = engine.document().clone();
+    let mut reference = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
+    let shown = native(&mut reference, &document);
+    let plan = engine.document().merge_plan(layer_core::MergeKind::Down).unwrap();
+    engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+    settle(&mut engine);
+    let document = engine.document().clone();
+    let baked = native(engine.backend_mut(), &document);
+    for [x, y] in [[400, 1000], [1000, 1000], [500, 900], [900, 900]] {
+        let at = y * extent[0] as usize + x;
+        assert!(shown[at][3] > 0.99, "native capture loses ink at {x},{y}: {:?}", shown[at]);
+        assert!(baked[at][3] > 0.99, "Merge Down loses ink at {x},{y}: {:?}", baked[at]);
+    }
+    assert!(max_error(&baked, &shown) < 2. / 255.);
 }
 
 #[test]

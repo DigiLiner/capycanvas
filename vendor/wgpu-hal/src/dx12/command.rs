@@ -577,7 +577,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                         }
                     }
                 }
-            } else if barrier.usage.from == wgt::TextureUses::STORAGE_READ_WRITE {
+            } else if s0 == Direct3D12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS {
                 let raw = Direct3D12::D3D12_RESOURCE_BARRIER {
                     Type: Direct3D12::D3D12_RESOURCE_BARRIER_TYPE_UAV,
                     Flags: Direct3D12::D3D12_RESOURCE_BARRIER_FLAG_NONE,

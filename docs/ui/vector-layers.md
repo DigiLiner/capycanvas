@@ -385,7 +385,8 @@ eraser modes on 20,000 paths. `vector_layer_shortcuts_hold_in_every_keymap_prese
 `merging_a_vector_layer_down_bakes_its_paths` and
 `merge_down_keeps_paths_only_when_the_upper_vector_layer_holds_nothing_unknown` in
 [`merge_tests.rs`](../../crates/layer-core/src/merge_tests.rs) and the GPU tests
-`rasterizing_a_vector_layer_bakes_what_it_shows` and
+`rasterizing_a_vector_layer_bakes_what_it_shows`,
+`merging_trimmed_crossings_preserves_ink_across_raster_pages` and
 `baking_crowded_paths_derives_them_off_the_canvas_thread_and_keeps_the_picture` in
 [`vector_tests.rs`](../../crates/layer-render-wgpu/src/scene/vector_tests.rs)
 cover canvas edits and baking; there

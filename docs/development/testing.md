@@ -232,6 +232,11 @@ reference. Interior pressure knots shape the outline between anchors, including
 on straight segments; the numerical reference samples those widths independently
 of the renderer's geometry subdivision.
 
+`merging_trimmed_crossings_preserves_ink_across_raster_pages` compares native
+capture and Merge Down on a drawing spanning several raster pages. Its reference
+uses a separate renderer so full-resolution capture cannot warm the bake's
+geometry cache. Run it on hardware and the Windows software adapter.
+
 Spatial evaluation changes also run the renderer's `scene::scale::tests::effects::gaussian`
 references, including sigmas above editor bounds, source-edge mass, neutral
 values, HDR, native and reduced evaluation. Preserved-package tests cover future

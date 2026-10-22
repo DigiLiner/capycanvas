@@ -116,6 +116,12 @@ Registry archive SHA-256 values from the previous workspace lockfile:
 | wgpu-hal | `b6b7fb58561a792bc237628ba0792e332de418fefe145f13b5ed8201e6d52f58` |
 | wgpu-types | `99dad6f1fbdbbdb4c278a6508b059d44688f5cebddf78d005a46a31340269286` |
 
+`wgpu-dx12-storage-barriers.patch` honors tracker-requested barriers between
+texture accesses that remain in the Direct3D unordered-access state. Write-only
+storage dispatches need that barrier just as read/write dispatches do; dropping
+it lets a page clear overwrite later vector coverage. Native vector capture and
+Merge Down pixel checks cover trimmed crossings across raster pages on WARP.
+
 The Wayland patch exposes `SurfaceColorSpace::PassThrough` and its capability bit,
 maps them to `VK_COLOR_SPACE_PASS_THROUGH_EXT`, and rejects the new choice on
 backends that cannot provide it. `Auto` behavior is unchanged. The Vulkan mapping

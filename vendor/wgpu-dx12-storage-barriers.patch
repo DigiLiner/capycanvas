@@ -1,0 +1,13 @@
+diff --git a/wgpu-hal/src/dx12/command.rs b/wgpu-hal/src/dx12/command.rs
+index 9e90e2669..531233902 100644
+--- a/wgpu-hal/src/dx12/command.rs
++++ b/wgpu-hal/src/dx12/command.rs
+@@ -577,7 +577,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
+                         }
+                     }
+                 }
+-            } else if barrier.usage.from == wgt::TextureUses::STORAGE_READ_WRITE {
++            } else if s0 == Direct3D12::D3D12_RESOURCE_STATE_UNORDERED_ACCESS {
+                 let raw = Direct3D12::D3D12_RESOURCE_BARRIER {
+                     Type: Direct3D12::D3D12_RESOURCE_BARRIER_TYPE_UAV,
+                     Flags: Direct3D12::D3D12_RESOURCE_BARRIER_FLAG_NONE,
