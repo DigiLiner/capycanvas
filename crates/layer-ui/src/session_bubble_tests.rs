@@ -496,3 +496,21 @@ fn an_edge_swipe_in_zen_peeks_that_edges_toolbars_until_a_contact_elsewhere() {
     touch(&mut s, ContactPhase::Move, [700., 450.]);
     assert!(!s.zen_keeps(group.id), "swipes away from the edges do nothing");
 }
+
+#[test]
+fn pinching_the_color_ring_resizes_it_within_its_range() {
+    let mut s = desk();
+    let (panel, tile) = toolbar_tile(&mut s, ToolbarControl::Color);
+    let id = take(&mut s, BubbleGrab::Tile { panel, tile }, [500., 380.]);
+    act(&mut s, BubbleAction::Resize { id, scale: 1.25 }).unwrap();
+    assert_eq!(view(&s, id).diameter, COLOR_RING_SIZES[1] * 1.25);
+    act(&mut s, BubbleAction::Resize { id, scale: 10. }).unwrap();
+    assert_eq!(view(&s, id).diameter, COLOR_RING_SIZES[2]);
+    act(&mut s, BubbleAction::Resize { id, scale: 0.01 }).unwrap();
+    assert_eq!(view(&s, id).diameter, COLOR_RING_SIZES[0]);
+    invoke(&mut s, CommandId::UndoWorkspace);
+    assert_eq!(view(&s, id).diameter, COLOR_RING_SIZES[2]);
+    let brush = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [900., 380.]);
+    assert!(act(&mut s, BubbleAction::Resize { id: brush, scale: 2. }).is_err());
+    assert!(act(&mut s, BubbleAction::Resize { id, scale: f32::NAN }).is_err());
+}

@@ -49,8 +49,11 @@ the existing bubble.
 ## Moving and pushing
 
 Bubbles move without a hold: drag the face of a tool bubble, the center of a
-slider, the folded Layers squircle, or the space between the color ring and its
-beads. A dragged bubble pushes the bubbles it meets; they slide with friction
+slider, the folded Layers squircle, or the rim between the color ring and its
+beads. Two fingers move any bubble; while one finger is on a bubble, the second
+may land up to 90 px outside it. Pinching the color ring sets its size between
+128 and 256 px in one undo step. A finger on the hue ring or disc picks a color
+at once, so two-finger gestures on the color ring start on its rim or beads. A dragged bubble pushes the bubbles it meets; they slide with friction
 (0.86 per 60 Hz frame) and keep their new places. An open ring pushes neighbours
 only while it is open, and they return when it closes. Pushes against a window
 edge slide along it, and every bubble stays inside the window below the title

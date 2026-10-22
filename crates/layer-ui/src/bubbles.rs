@@ -124,6 +124,10 @@ pub struct ToolBubble {
     #[serde(default, skip_serializing_if = "BubbleOptions::is_default")]
     pub options: BubbleOptions,
 }
+pub fn pinched_size(size: f32, scale: f32) -> f32 {
+    (size * scale).clamp(COLOR_RING_SIZES[0], COLOR_RING_SIZES[2])
+}
+
 impl ToolBubble {
     pub fn diameter(&self) -> f32 {
         match self.source.kind() {
@@ -415,6 +419,7 @@ pub enum BubbleAction {
     Bead { id: u32, bead: Bead },
     Scroll { id: u32, strip: BeadStrip, pixels: f32 },
     Palette { id: u32, step: i32 },
+    Resize { id: u32, scale: f32 },
     SetOptions { id: u32, options: BubbleOptions },
     ToggleRingSetting { brush: u32, setting: String },
 }

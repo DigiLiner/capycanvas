@@ -112,7 +112,7 @@ pub use bubbles::{
     Bead, BeadPlacement, BeadStrip, BubbleAction, BubbleBead, BubbleGrab, BubbleKind, BubbleLayout, BubbleOptions,
     BubblePlacement, BubbleRing, BubbleSource, BubbleView, RingArc, RingSettings, ToolBubble, BUBBLE_BEAD,
     COLOR_RING_SIZES, MAX_RING_SETTINGS, RECENT_BEADS, RING_WIDTH, SLIDER_BUBBLE, TOOL_BUBBLE, bead_strip_at,
-    color_beads, color_rim, halo_arcs, palette_pill, slider_ring,
+    color_beads, color_rim, halo_arcs, palette_pill, pinched_size, slider_ring,
 };
 mod drawers;
 pub use drawers::{

@@ -791,6 +791,7 @@ mod wheel {
         pub intensity: RefCell<Option<crate::hdr_color_scale::HdrColorScale>>,
         pub hdr: Cell<bool>,
         pub bare: Cell<bool>,
+        pub bare_range: Cell<(i32, i32)>,
         // Background precedes foreground so their deliberate overlap also picks correctly.
         pub corners: RefCell<Vec<WheelButton>>,
         pub menu: RefCell<Option<gtk::Popover>>,
@@ -832,9 +833,11 @@ mod wheel {
             if self.bare.get() {
                 return if orientation == gtk::Orientation::Vertical {
                     let height = |width: i32| super::bare_stage(width as f32, self.hdr.get()).map_or(0, |(_, _, height)| height.ceil() as i32);
-                    (height(BARE_WHEEL.0), height(if for_size < 0 { BARE_WHEEL.1 } else { for_size.clamp(BARE_WHEEL.0, BARE_WHEEL.1) }), -1, -1)
+                    let (low, high) = self.bare_range.get();
+                    (height(low), height(if for_size < 0 { high } else { for_size.clamp(low, high) }), -1, -1)
                 } else {
-                    (BARE_WHEEL.0, BARE_WHEEL.1, -1, -1)
+                    let (low, high) = self.bare_range.get();
+                    (low, high, -1, -1)
                 };
             }
             if orientation == gtk::Orientation::Vertical {
@@ -985,12 +988,17 @@ impl ColorWheel {
     pub(crate) fn bare() -> Self {
         let wheel: Self = glib::Object::new();
         wheel.imp().bare.set(true);
+        wheel.imp().bare_range.set(BARE_WHEEL);
         let intensity = crate::hdr_color_scale::HdrColorScale::new();
         intensity.hide_caption();
         intensity.set_visible(false);
         intensity.set_parent(&wheel);
         *wheel.imp().intensity.borrow_mut() = Some(intensity);
         wheel
+    }
+    pub(crate) fn set_bare_range(&self, range: (i32, i32)) {
+        self.imp().bare_range.set(range);
+        self.queue_resize();
     }
     pub(crate) fn intensity(&self) -> Option<crate::hdr_color_scale::HdrColorScale> {
         self.imp().intensity.borrow().clone()
@@ -1086,7 +1094,7 @@ impl ColorWheel {
         if self.imp().bare.get() {
             let hdr = self.imp().hdr.get();
             let fits = |wheel: f32| bare_stage(wheel, hdr).is_some_and(|(_, _, height)| height <= self.height() as f32);
-            let (mut low, mut high) = (BARE_WHEEL.0 as f32, self.width() as f32);
+            let (mut low, mut high) = (self.imp().bare_range.get().0 as f32, self.width() as f32);
             if fits(high) { low = high; }
             while high - low > 0.5 {
                 let candidate = (low + high) * 0.5;

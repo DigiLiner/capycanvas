@@ -279,6 +279,17 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::Bead { id, bead } => self.bead_action(id, bead),
             BubbleAction::Scroll { id, strip, pixels } => self.scroll_beads(id, strip, pixels),
             BubbleAction::Palette { id, step } => self.cycle_palette(id, step),
+            BubbleAction::Resize { id, scale } => {
+                let bubble = self.bubble(id)?;
+                if bubble.source.kind() != BubbleKind::Color || !scale.is_finite() || scale <= 0. {
+                    return Err("Only the color ring changes size".into());
+                }
+                let (source, options) = (bubble.source, BubbleOptions { size: pinched_size(bubble.options.size, scale), ..bubble.options });
+                self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Resized, source }, |layout| {
+                    layout.bubbles.get_mut(id)?.options = options;
+                    Ok(())
+                })
+            }
             BubbleAction::PutBack { id } => {
                 let source = self.bubble(id)?.source;
                 self.set_halo(None);

@@ -110,7 +110,36 @@ fn zen(d: &mut Driver, name: &str) {
     assert!(hidden(d), "{name}: a contact elsewhere hides it again");
     d.w.dispatch(UiAction::Invoke { command: CommandId::ZenMode });
     pump(300);
+    pinch(d, name);
     put_back_all(d, "mouse", name);
+}
+
+fn pinch(d: &mut Driver, name: &str) {
+    let ring = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap();
+    let c = center(d, ring.id);
+    let [inner, outer] = color_rim(ring.diameter);
+    let radius = (inner + outer) * 0.5;
+    let rim = |degrees: f32, spread: f32, shift: f32| {
+        let a = degrees.to_radians();
+        let r = radius + spread;
+        [c[0] + r * a.cos() + shift, c[1] + r * a.sin()]
+    };
+    let touch = |phase: &str, slot: u32, point: [f32; 2]| serde_json::json!({ "touch": phase, "slot": slot, "point": point });
+    let mut events = vec![touch("down", 0, rim(200., 0., 0.)), touch("down", 1, rim(340., 0., 0.))];
+    for step in 1..=6 {
+        let s = step as f32;
+        events.push(touch("move", 0, rim(200., s * 4., s * 6.)));
+        events.push(touch("move", 1, rim(340., s * 4., s * 6.)));
+    }
+    events.push(serde_json::json!({ "touch": "up", "slot": 0 }));
+    events.push(serde_json::json!({ "touch": "up", "slot": 1 }));
+    d.input.perform(serde_json::Value::Array(events));
+    pump(600);
+    let after = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap();
+    assert!(after.diameter > ring.diameter + 10., "{name}: pinching the rim enlarges the ring ({} -> {})", ring.diameter, after.diameter);
+    let moved = center(d, ring.id);
+    assert!(moved[0] > c[0] + 15., "{name}: two fingers move the ring");
+    capture(d, &format!("{name}-pinched"));
 }
 
 #[test]

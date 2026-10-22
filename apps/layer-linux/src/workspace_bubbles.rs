@@ -13,6 +13,7 @@ use std::{
 const FACE_ICON: i32 = 24;
 const RING_ICON: f32 = 16.;
 const TRACK: f32 = 4.;
+const SECOND_FINGER: f32 = 90.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Contact {
@@ -20,6 +21,7 @@ enum Contact {
     Moving,
     Ring,
     Beads { strip: Option<BeadStrip>, last: f32, scrolled: bool },
+    Pair,
 }
 
 mod imp {
@@ -88,6 +90,8 @@ mod imp {
         pub(super) placement: Cell<Option<BubblePlacement>>,
         pub(super) colors: Cell<Option<[gdk::RGBA; 3]>>,
         pub(super) contact: Cell<Option<Contact>>,
+        pub(super) touches: Cell<u32>,
+        pub(super) pinch: Cell<Option<f32>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for Bubble {
@@ -151,7 +155,8 @@ mod imp {
             let obj = self.obj();
             let local = [x as f32 - obj.width() as f32 * 0.5, y as f32 - obj.height() as f32 * 0.5];
             let pill = palette_pill(view.diameter);
-            local[0].hypot(local[1]) <= self.obj().reach(view)
+            let second = if self.touches.get() > 0 { SECOND_FINGER } else { 0. };
+            local[0].hypot(local[1]) <= self.obj().reach(view) + second
                 || (view.pill.is_some() && pill.contains(local[0], local[1]))
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -161,7 +166,8 @@ mod imp {
             let center = [obj.width() as f32 * 0.5, obj.height() as f32 * 0.5];
             let placement = self.placement.get();
             let homing = placement.is_some_and(|p| p.homing);
-            let scale = if homing { 0.82 } else if placement.is_some_and(|p| p.lifted) { 1.04 } else { 1. };
+            let scale = self.pinch.get().unwrap_or(1.)
+                * if homing { 0.82 } else if placement.is_some_and(|p| p.lifted) { 1.04 } else { 1. };
             snapshot.save();
             snapshot.translate(&graphene::Point::new(center[0], center[1]));
             snapshot.scale(scale, scale);
@@ -330,6 +336,7 @@ impl Bubble {
         let content: gtk::Widget = match view.kind {
             BubbleKind::Color => {
                 let wheel = crate::tool_panels::ColorWheel::bare();
+                wheel.set_bare_range((COLOR_RING_SIZES[0] as i32, COLOR_RING_SIZES[2] as i32));
                 wheel.set_hexpand(true);
                 wheel.set_vexpand(true);
                 *bubble.imp().wheel.borrow_mut() = Some(wheel.clone());
@@ -586,12 +593,15 @@ impl Bubble {
                     bubble.imp().contact.set(Some(Contact::Beads { strip: Some(strip), last: x as f32, scrolled: true }));
                     w.dispatch(UiAction::Bubble { action: BubbleAction::Scroll { id, strip, pixels: x as f32 - last } });
                 }
-                Some(Contact::Beads { strip: None, .. }) | None => {}
+                Some(Contact::Beads { strip: None, .. } | Contact::Pair) | None => {}
             }
         }));
         drag.connect_drag_end(glib::clone!(#[weak] w, move |gesture, dx, dy| {
             let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
             let Some((x0, y0)) = gesture.start_point() else { return };
+            if bubble.imp().contact.get() == Some(Contact::Pair) {
+                return;
+            }
             let (x, y) = (x0 + dx, y0 + dy);
             match bubble.imp().contact.take() {
                 Some(Contact::Ring) => {
@@ -610,11 +620,14 @@ impl Bubble {
                         w.dispatch(UiAction::Bubble { action: BubbleAction::Bead { id, bead } });
                     }
                 }
-                Some(Contact::Beads { .. }) | None => {}
+                Some(Contact::Beads { .. } | Contact::Pair) | None => {}
             }
         }));
         drag.connect_cancel(glib::clone!(#[weak] w, move |gesture, _| {
             let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            if bubble.imp().contact.get() == Some(Contact::Pair) {
+                return;
+            }
             match bubble.imp().contact.take() {
                 Some(Contact::Ring) => {
                     w.dispatch(UiAction::Bubble { action: BubbleAction::Ring { id, phase: ContactPhase::Cancel, position: [0.; 2] } });
@@ -626,6 +639,84 @@ impl Bubble {
             }
         }));
         self.add_controller(drag);
+
+        let touches = gtk::EventControllerLegacy::new();
+        touches.set_propagation_phase(gtk::PropagationPhase::Capture);
+        touches.connect_event(|controller, event| {
+            if let Some(bubble) = controller.widget().and_downcast::<Bubble>() {
+                let count = &bubble.imp().touches;
+                match event.event_type() {
+                    gdk::EventType::TouchBegin => count.set(count.get() + 1),
+                    gdk::EventType::TouchEnd | gdk::EventType::TouchCancel => count.set(count.get().saturating_sub(1)),
+                    _ => {}
+                }
+            }
+            glib::Propagation::Proceed
+        });
+        self.add_controller(touches);
+
+        let pair = gtk::GestureZoom::new();
+        pair.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let center = move |w: &Workspace, gesture: &gtk::GestureZoom| {
+            let bubble = gesture.widget().and_downcast::<Bubble>()?;
+            let (x, y) = gesture.bounding_box_center()?;
+            surface_point(w, &bubble, x, y)
+        };
+        pair.connect_begin(glib::clone!(#[weak] w, move |gesture, _| {
+            let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            let Some(at) = center(&w, gesture) else { return };
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            match bubble.imp().contact.replace(Some(Contact::Pair)) {
+                Some(Contact::Ring) => w.dispatch(UiAction::Bubble { action: BubbleAction::Ring { id, phase: ContactPhase::Cancel, position: [0.; 2] } }),
+                Some(Contact::Moving) => {
+                    w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Cancel, at);
+                }
+                _ => {}
+            }
+            if !w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Down, at) {
+                bubble.imp().contact.set(None);
+            }
+        }));
+        pair.connect_scale_changed(glib::clone!(#[weak] w, move |gesture, scale| {
+            let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            if bubble.imp().contact.get() != Some(Contact::Pair) {
+                return;
+            }
+            if kind == BubbleKind::Color {
+                let size = bubble.imp().view.borrow().as_ref().map_or(1., |v| v.diameter);
+                bubble.imp().pinch.set(Some(pinched_size(size, scale as f32) / size));
+                bubble.queue_draw();
+            }
+            if let Some(at) = center(&w, gesture) {
+                w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Move, at);
+            }
+        }));
+        pair.connect_end(glib::clone!(#[weak] w, move |gesture, _| {
+            let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            if bubble.imp().contact.get() != Some(Contact::Pair) {
+                return;
+            }
+            bubble.imp().contact.set(None);
+            let at = center(&w, gesture).or_else(|| bubble.compute_point(&w.surface, &graphene::Point::new(bubble.center()[0], bubble.center()[1])).map(|p| [p.x(), p.y()]));
+            if let Some(at) = at {
+                w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Up, at);
+            }
+            if let Some(pinch) = bubble.imp().pinch.take() {
+                bubble.queue_draw();
+                if (pinch - 1.).abs() > 0.01 {
+                    w.dispatch(UiAction::Bubble { action: BubbleAction::Resize { id, scale: pinch } });
+                }
+            }
+        }));
+        pair.connect_cancel(glib::clone!(#[weak] w, move |gesture, _| {
+            let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            if bubble.imp().contact.take() == Some(Contact::Pair) {
+                w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Cancel, [0.; 2]);
+            }
+            bubble.imp().pinch.set(None);
+            bubble.queue_draw();
+        }));
+        self.add_controller(pair);
     }
 }
 
