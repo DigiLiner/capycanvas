@@ -430,12 +430,12 @@ pub fn palette_pill(size: f32) -> Bounds {
     Bounds { x: -PALETTE_PILL[0] * 0.5, y: size * 0.5 + 70., width: PALETTE_PILL[0], height: PALETTE_PILL[1] }
 }
 
-pub fn on_color_rim(size: f32, point: [f32; 2]) -> bool {
+pub fn on_color_rim(size: f32, options: BubbleOptions, point: [f32; 2]) -> bool {
     let radius = point[0].hypot(point[1]);
-    radius > size * 0.5 - RING_RIM && radius <= size * 0.5
+    radius > size * 0.5 - RING_RIM && radius <= color_reach(size, options)
 }
 
-pub(crate) fn color_reach(size: f32, options: BubbleOptions) -> f32 {
+pub fn color_reach(size: f32, options: BubbleOptions) -> f32 {
     let radius = size * 0.5;
     if options.palette {
         orbit(size, 1) + BUBBLE_BEAD * 0.5
@@ -460,7 +460,7 @@ impl RingArc {
         polar(self.radius, self.start + self.sweep * fraction.clamp(0., 1.))
     }
     pub fn icon_point(&self) -> [f32; 2] {
-        polar(self.radius, self.start - self.sweep.signum() * (9. / self.radius).to_degrees())
+        polar(self.radius, self.start - self.sweep.signum() * (13. / self.radius).to_degrees())
     }
     pub fn fraction(&self, point: [f32; 2]) -> f32 {
         let span = self.sweep.abs();

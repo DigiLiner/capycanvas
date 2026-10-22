@@ -53,8 +53,9 @@ the existing bubble.
 
 Bubbles move without a hold: drag the face of a tool bubble, the center of a
 slider, the folded Layers squircle or an open card's grab bar and edges, or the
-7 px glass rim of the color plate. Two fingers move any bubble; while one finger
-is on a bubble, the second may land up to 90 px outside it. Pinching the color
+color ring anywhere outside the wheel that isn't a bead. Two fingers move any
+bubble; while one finger is on a bubble, the second may land up to 90 px outside
+it. Pinching the color
 ring sets its size between 128 and 256 px in one undo step. A finger on the hue
 ring or disc picks a color at once.
 
@@ -62,7 +63,9 @@ A dragged bubble pushes the bubbles it meets, keeping a 6 px gap. Pushed bubbles
 take 12% of the push as speed and slide with friction (0.86 per 60 Hz frame);
 they keep their new places. Letting go glides a short way, at most 18 px per
 frame, about 130 px in all; with reduced motion there is no glide. An open halo
-or card pushes neighbours only while it is open, and they return when it closes.
+card or chooser pushes neighbours only while it is open, each part pushing where
+it is (the chooser's media and brush pills, not the empty space between them),
+and they return when it closes.
 Walls sit 8 px inside the canvas area, below the title bar and clear of docked
 toolbars; bounces off them keep a quarter of their speed. Saved places keep
 their distance to the nearest window corner, so a bubble near the bottom right
@@ -79,9 +82,10 @@ everything rests.
   opens the halo.
 - **Group dial and medium:** select, then halo, then chooser, then close. A tool
   without settings goes straight from select to the chooser.
-- **Halo:** the selected brush's settings sit on glass rings around the bubble,
-  122 px across for one to three settings and 188 px for four to six (2+2, 3+2,
-  3+3). Each arc is a 4 px track with the setting's icon just before its start;
+- **Halo:** the selected brush's settings sit on arcs around the bubble, within
+  122 px for one to three settings and 188 px for four to six (2+2, 3+2, 3+3).
+  Each arc is a 4 px track on a matte band that covers only the arc, with the
+  setting's icon on the band just before the track starts;
   side arcs grow upward and top and bottom arcs rightward. Drag along an arc to
   set the value; its name and value show below the halo while dragging. A halo
   stays open while painting and until the bubble is tapped or another tool is
@@ -103,8 +107,8 @@ everything rests.
 ## Color ring
 
 The wheel is the Color panel's bare wheel, with the same shapes, snaps and color
-management, on a glass plate whose 7 px rim moves the bubble. 24 px beads orbit
-it on up to two orbits 28 px apart:
+management, on a glass plate; its rim and the space between it and the beads move
+the bubble. 24 px beads orbit it on up to two orbits 28 px apart:
 
 - **Recent colors** along the top, newest on the left, eight at most (fewer on a
   small ring). Slide along them to reach older colors; faint beads at the ends
@@ -127,11 +131,12 @@ Small.
 Tapping the folded squircle unfolds the card in place, 244 px wide (300 in
 Full), pushing neighbours aside. A grab bar sits on top; rows show up to five
 layers, each with its eye, thumbnail and name. **Full** adds each row's details
-and the blend, opacity, alpha lock and lock header. The footer holds **New
-layer**, Delete (Full) and **Layer properties**, which slide up over the rows
-and turn the button into **All layers**. Contacts elsewhere fold the card;
-**Fold when not in use** in the hold menu keeps it open until its grab bar is
-tapped.
+and the blend, opacity, alpha lock and lock header. The footer holds the New
+layer icon (and Delete in Full) on the left and **Layer properties** with an up
+chevron on the right; the properties slide up over the rows and the button turns
+into **All layers** with a down chevron. Contacts elsewhere fold the card, which
+shrinks away before the squircle returns; **Fold when not in use** in the hold
+menu keeps it open until its grab bar is tapped.
 
 ## Painting
 
@@ -154,13 +159,14 @@ back.
   pushing, tear-off and put back, tap states, halos, the chooser and its slides,
   beads, the card, stroke fading, menus, history and workspace round trips
   without a window.
-- GTK: `bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubbles`,
+- GTK: `LAYER_NATIVE_TEST_TIMEOUT_MS=300000 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubbles`,
   with `LAYER_NATIVE_CAPTURE_DIR` for compositor screenshots. With mouse and
   touch in both themes it takes a title-bar tool, walks the taps, adjusts a halo
   arc, paints under it, chooses a medium and slides to a brush, pushes one
   bubble with another, opens the hold menu, unfolds the Layers card and its
-  properties, uses the color beads and palette pill, pinches the ring, checks
-  Zen mode and puts everything back.
+  properties, adds a layer from its footer and folds it, picks on the wheel and
+  moves the ring by its glass, uses the color beads and palette pill, pinches
+  the ring, checks Zen mode and puts everything back.
 - Motion: `LAYER_NATIVE_EVENT_MS=4 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubble_motion`
   drags one bubble through four others with 250 Hz mouse and touch input and
   reports presentation rate, frame gaps and canvas GPU time for steady motion;

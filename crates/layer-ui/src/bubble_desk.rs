@@ -11,16 +11,20 @@ const STEP_NS: u64 = 4_166_667;
 pub(crate) struct Shape {
     pub(crate) half: [f32; 2],
     pub(crate) round: bool,
+    pub(crate) offset: [f32; 2],
 }
 impl Shape {
     pub(crate) fn circle(radius: f32) -> Self {
-        Self { half: [radius; 2], round: true }
+        Self { half: [radius; 2], round: true, offset: [0.; 2] }
     }
     pub(crate) fn rect(size: [f32; 2]) -> Self {
-        Self { half: [size[0] * 0.5, size[1] * 0.5], round: false }
+        Self { half: [size[0] * 0.5, size[1] * 0.5], round: false, offset: [0.; 2] }
+    }
+    pub(crate) fn at(self, offset: [f32; 2]) -> Self {
+        Self { offset, ..self }
     }
     fn distance(self, center: [f32; 2], point: [f32; 2]) -> f32 {
-        let d = sub(point, center);
+        let d = sub(point, add(center, self.offset));
         if self.round {
             length(d) - self.half[0]
         } else {
@@ -61,6 +65,21 @@ fn rect_circle(rect: [f32; 2], shape: Shape, circle: [f32; 2], radius: f32) -> O
     Some(if edge[0] < edge[1] { ([sign(delta[0]), 0.], edge[0] + radius) } else { ([0., sign(delta[1])], edge[1] + radius) })
 }
 
+fn deepest(a: [f32; 2], sa: &[Shape], b: [f32; 2], sb: &[Shape]) -> Option<([f32; 2], f32)> {
+    sa.iter()
+        .flat_map(|pa| sb.iter().filter_map(move |pb| penetration(add(a, pa.offset), *pa, add(b, pb.offset), *pb)))
+        .max_by(|x, y| x.1.total_cmp(&y.1))
+}
+
+fn extent(parts: &[Shape]) -> [[f32; 2]; 2] {
+    parts.iter().fold([[f32::MAX; 2], [f32::MIN; 2]], |[lo, hi], p| {
+        [
+            [lo[0].min(p.offset[0] - p.half[0]), lo[1].min(p.offset[1] - p.half[1])],
+            [hi[0].max(p.offset[0] + p.half[0]), hi[1].max(p.offset[1] + p.half[1])],
+        ]
+    })
+}
+
 fn penetration(a: [f32; 2], sa: Shape, b: [f32; 2], sb: Shape) -> Option<([f32; 2], f32)> {
     let gap = WORKSPACE_SPACING;
     let delta = sub(b, a);
@@ -97,7 +116,7 @@ struct Body {
 pub(crate) struct Desk {
     bodies: Vec<Body>,
     grabbed: Option<u32>,
-    grown: Vec<(u32, Shape)>,
+    grown: Vec<(u32, Vec<Shape>)>,
     homing: bool,
     bounds: Option<Bounds>,
     clock: Option<u64>,
@@ -170,7 +189,7 @@ impl Desk {
         }
         self.moved = true;
     }
-    pub(crate) fn grow(&mut self, grown: Vec<(u32, Shape)>) {
+    pub(crate) fn grow(&mut self, grown: Vec<(u32, Vec<Shape>)>) {
         if self.grown != grown {
             self.grown = grown;
             self.moved = true;
@@ -200,7 +219,7 @@ impl Desk {
         let near: Vec<_> = self
             .bodies
             .iter()
-            .filter(|b| !self.faded.contains(&b.id) && self.shape(b).distance(b.pos, point) <= STROKE_FADE)
+            .filter(|b| !self.faded.contains(&b.id) && self.shape(b).iter().any(|s| s.distance(b.pos, point) <= STROKE_FADE))
             .map(|b| b.id)
             .collect();
         self.faded.extend_from_slice(&near);
@@ -239,8 +258,8 @@ impl Desk {
     fn body_mut(&mut self, id: u32) -> Option<&mut Body> {
         self.bodies.iter_mut().find(|b| b.id == id)
     }
-    fn shape(&self, body: &Body) -> Shape {
-        self.grown.iter().find(|(id, _)| *id == body.id).map_or(body.shape, |(_, shape)| *shape)
+    fn shape<'a>(&'a self, body: &'a Body) -> &'a [Shape] {
+        self.grown.iter().find(|(id, _)| *id == body.id).map_or(std::slice::from_ref(&body.shape), |(_, parts)| parts)
     }
     fn priority(&self, body: &Body) -> u8 {
         if self.grabbed == Some(body.id) {
@@ -282,7 +301,7 @@ impl Desk {
         for i in 0..count {
             for j in i + 1..count {
                 let (a, b) = (self.bodies[i], self.bodies[j]);
-                let Some((normal, depth)) = penetration(a.pos, self.shape(&a), b.pos, self.shape(&b)) else { continue };
+                let Some((normal, depth)) = deepest(a.pos, self.shape(&a), b.pos, self.shape(&b)) else { continue };
                 let (pa, pb) = (self.priority(&a), self.priority(&b));
                 let still = self.still;
                 let mut push = |index: usize, direction: [f32; 2], amount: f32, kick: bool| {
@@ -307,10 +326,10 @@ impl Desk {
         }
         let Some(bounds) = self.bounds else { return };
         for index in 0..count {
-            let half = self.shape(&self.bodies[index]).half;
+            let [near, far] = extent(self.shape(&self.bodies[index]));
             let body = &mut self.bodies[index];
-            let lo = [bounds.x + half[0], bounds.y + half[1]];
-            let hi = [bounds.x + bounds.width - half[0], bounds.y + bounds.height - half[1]];
+            let lo = [bounds.x - near[0], bounds.y - near[1]];
+            let hi = [bounds.x + bounds.width - far[0], bounds.y + bounds.height - far[1]];
             for axis in 0..2 {
                 let clamped = if lo[axis] > hi[axis] { (lo[axis] + hi[axis]) * 0.5 } else { body.pos[axis].clamp(lo[axis], hi[axis]) };
                 if clamped != body.pos[axis] {

@@ -153,15 +153,24 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_state.desk.grow(grown);
     }
 
-    fn bubble_growth(&self) -> Vec<(u32, Shape)> {
+    fn bubble_growth(&self) -> Vec<(u32, Vec<Shape>)> {
         let mut grown = Vec::new();
         if let Some(id) = self.halo() {
-            grown.push((id, Shape::circle(halo_disc(self.halo_settings().len()) * 0.5)));
+            grown.push((id, vec![Shape::circle(halo_disc(self.halo_settings().len()) * 0.5)]));
         }
         if let Some(id) = self.bubble_state.card
             && let Some(bubble) = self.state.workspace.layout.bubbles.get(id)
         {
-            grown.push((id, Shape::rect(layers_card(bubble.options.full, self.state.layers.len()))));
+            grown.push((id, vec![Shape::rect(layers_card(bubble.options.full, self.state.layers.len()))]));
+        }
+        if let Some(chooser) = self.bubble_state.chooser
+            && let Some(bubble) = self.state.workspace.layout.bubbles.get(chooser.id)
+        {
+            let items = self.chooser_items(bubble, chooser).0.into_iter().map(|item| {
+                let part = if item.kind == ChooserKind::Brush { Shape::rect(BRUSH_PILL) } else { Shape::circle(CHOOSER_ITEM * 0.5) };
+                part.at(item.center)
+            });
+            grown.push((chooser.id, std::iter::once(Shape::circle(TOOL_BUBBLE * 0.5)).chain(items).collect()));
         }
         grown
     }

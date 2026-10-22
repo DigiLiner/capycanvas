@@ -41,7 +41,7 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
                 assert!((arc.fraction(arc.point(f)) - f).abs() < 1e-3, "{count}/{i}: {f}");
             }
             assert_eq!(ring_at(&arcs, arc.point(0.5)), Some(i), "{count}/{i}");
-            assert!((distance(arc.icon_point(), arc.point(0.)) - 9.).abs() < 0.2, "the icon sits just before its track");
+            assert!((distance(arc.icon_point(), arc.point(0.)) - 13.).abs() < 0.3, "the icon sits just before its track");
             let [start, middle, end] = [arc.point(0.), arc.point(0.5), arc.point(1.)];
             if arc.sweep.abs() > 200. {
                 assert!(start[0] < 0. && end[0] > 0. && middle[1] < 0., "one setting is a gauge over the top");
@@ -113,8 +113,9 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     assert_eq!(bead_at(&beads, recent[2].center), Some(Bead::Recent { index: 2 }));
     assert_eq!(bead_at(&beads, [0., 0.]), None);
     assert_eq!(Bead::Swatch { index: 3 }.strip(), Some(BeadStrip::Palette));
-    assert!(on_color_rim(size, [radius - 3., 0.]));
-    assert!(!on_color_rim(size, [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, [radius + 3., 0.]));
+    assert!(on_color_rim(size, options, [radius - 3., 0.]), "the plate's rim moves the ring");
+    assert!(on_color_rim(size, options, [radius + 10., 0.]), "so does the glass between the plate and its beads");
+    assert!(!on_color_rim(size, options, [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, options, [color_reach(size, options) + 2., 0.]));
     let pill = palette_pill(size);
     assert_eq!([pill.width, pill.height], PALETTE_PILL);
     assert!(pill.y > distance(b, [0.; 2]) + BUBBLE_BEAD * 0.5, "the name sits below the rows");
@@ -279,7 +280,7 @@ fn motion_follows_elapsed_time_at_any_frame_rate() {
 #[test]
 fn growth_pushes_are_temporary_and_cards_push_as_cards() {
     let mut desk = desk(&[[300., 300.], [370., 300.]]);
-    desk.grow(vec![(1, Shape::circle(halo_disc(2) * 0.5))]);
+    desk.grow(vec![(1, vec![Shape::circle(halo_disc(2) * 0.5)])]);
     run(&mut desk, 0, 120);
     assert!(desk.center(2).unwrap()[0] >= 300. + halo_disc(2) * 0.5 + WORKSPACE_SPACING + TOOL_BUBBLE * 0.5 - 0.1);
     desk.grow(Vec::new());
@@ -287,11 +288,25 @@ fn growth_pushes_are_temporary_and_cards_push_as_cards() {
     assert_eq!(desk.center(2), Some([370., 300.]));
     let card = layers_card(false, 5);
     let mut wide = self::desk(&[[300., 300.], [300. + card[0] * 0.5, 300. + card[1] * 0.5]]);
-    wide.grow(vec![(1, Shape::rect(card))]);
+    wide.grow(vec![(1, vec![Shape::rect(card)])]);
     run(&mut wide, 0, 120);
     let pushed = wide.center(2).unwrap();
     let clear = |axis: usize| (pushed[axis] - 300.).abs() - TOOL_BUBBLE * 0.5 >= card[axis] * 0.5 + WORKSPACE_SPACING - 0.5;
     assert!(clear(0) || clear(1), "the card's corner pushes like a card: {pushed:?}");
+}
+
+#[test]
+fn grown_parts_push_only_where_they_are() {
+    let mut desk = desk(&[[300., 300.], [300., 380.], [420., 300.]]);
+    desk.grow(vec![(1, vec![Shape::circle(28.), Shape::rect(BRUSH_PILL).at([120., 0.])])]);
+    run(&mut desk, 0, 120);
+    assert_eq!(desk.center(2), Some([300., 380.]), "nothing grew toward the bubble below");
+    let pushed = desk.center(3).unwrap();
+    assert!(distance(pushed, [420., 300.]) > 20., "the pill pushed its neighbour: {pushed:?}");
+    let mut edge = self::desk(&[[AREA.x + 40., 300.]]);
+    edge.grow(vec![(1, vec![Shape::circle(28.), Shape::circle(22.).at([-60., 0.])])]);
+    run(&mut edge, 0, 60);
+    assert!(edge.center(1).unwrap()[0] >= AREA.x + 82. - 1e-3, "walls hold every part inside");
 }
 
 #[test]

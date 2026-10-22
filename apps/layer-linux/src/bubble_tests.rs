@@ -160,8 +160,17 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     d.click(&properties);
     pump(500);
     assert!(!find_id(d, layers.id).unwrap().card.unwrap().properties, "{name}: All layers goes back");
+    let count = state(&d.w).layers.len();
+    let add = d.named("bubble-new-layer");
+    tap(d, device, d.point(&add));
+    assert_eq!(state(&d.w).layers.len(), count + 1, "{name}: the footer's icon adds a layer");
     tap(d, device, canvas_spot(d, 0.85, 0.15));
     assert!(find_id(d, layers.id).unwrap().card.is_none(), "{name}: a contact elsewhere folds the card");
+    let card = d.named("bubble-card");
+    pump(500);
+    assert!(!card.is_child_visible(), "{name}: the card finishes folding away");
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(200);
 }
 
 fn color_ring(d: &mut Driver, device: &str, name: &str) {
@@ -181,10 +190,25 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     tap(d, device, back);
     let swapped = state(&d.w).colors;
     assert_eq!((swapped.foreground, swapped.background), (colors.background, colors.foreground), "{name}: the background bead swaps");
+    let c = center(d, color.id);
+    d.input.perform(serde_json::json!([contact(device, "down", [c[0] - 12., c[1]])]));
+    pump(150);
+    let first = state(&d.w).colors.foreground;
+    d.input.perform(serde_json::json!([contact(device, "move", [c[0] - 4., c[1] + 6.]), contact(device, "move", [c[0] + 16., c[1] + 14.]), contact(device, "up", [c[0] + 16., c[1] + 14.])]));
+    pump(350);
+    assert_ne!(state(&d.w).colors.foreground, first, "{name}: dragging on the wheel picks colors");
+    let radius = color.diameter * 0.5 + 10.;
+    let angle = 205f32.to_radians();
+    let gap = [c[0] + radius * angle.cos(), c[1] + radius * angle.sin()];
+    stroke(d, device, &[gap, [gap[0] - 10., gap[1] + 4.], [gap[0] - 50., gap[1] + 30.]]);
+    pump(400);
+    let moved = center(d, color.id);
+    assert!((moved[0] - c[0]).hypot(moved[1] - c[1]) > 30., "{name}: the glass around the wheel moves the ring");
     let first = bead_point(d, color.id, Bead::Swatch { index: 0 }).unwrap();
     let further = bead_point(d, color.id, Bead::Swatch { index: 4 }).unwrap();
+    let picked = state(&d.w).colors.foreground;
     stroke(d, device, &[further, [further[0] - 6., further[1] + 1.], first]);
-    assert_eq!(state(&d.w).colors.foreground, swapped.foreground, "{name}: sliding the palette picks nothing");
+    assert_eq!(state(&d.w).colors.foreground, picked, "{name}: sliding the palette picks nothing");
     let palettes = bead_point(d, color.id, Bead::Palettes).unwrap();
     tap(d, device, palettes);
     assert!(find_id(d, color.id).unwrap().pill.is_some(), "{name}: the palette bead opens its name");

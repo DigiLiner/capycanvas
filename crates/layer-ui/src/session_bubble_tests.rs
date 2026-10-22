@@ -553,6 +553,38 @@ fn an_open_card_pushes_neighbours_which_return_when_it_folds() {
 }
 
 #[test]
+fn an_open_chooser_bumps_neighbours_off_its_items_until_it_closes() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, [500., 450.]);
+    let neighbour = take(&mut s, brush(DefaultBrushPreset::Charcoal), [500., 450. - CHOOSER_RING]);
+    let settle = |s: &mut UiSession<Recorder>, from: u64| {
+        let mut now = from;
+        while s.step_bubbles(now) && now < from + 10_000_000_000 {
+            now += 16_666_667;
+        }
+        now
+    };
+    let now = settle(&mut s, 0);
+    open_ring(&mut s, id);
+    let now = settle(&mut s, now);
+    let placements = s.bubble_placements();
+    let [dial, other] = [id, neighbour].map(|n| placements.iter().find(|p| p.id == n).unwrap().center);
+    for item in view(&s, id).chooser {
+        let [w, h] = item.size();
+        let at = [dial[0] + item.center[0], dial[1] + item.center[1]];
+        let gap = if item.kind == ChooserKind::Brush {
+            [((at[0] - other[0]).abs() - w * 0.5).max(0.), ((at[1] - other[1]).abs() - h * 0.5).max(0.)]
+        } else {
+            [((at[0] - other[0]).hypot(at[1] - other[1]) - w * 0.5).max(0.), 0.]
+        };
+        assert!(gap[0].hypot(gap[1]) >= TOOL_BUBBLE * 0.5 + WORKSPACE_SPACING - 0.5, "{} at {at:?} overlaps the neighbour at {other:?} (dial {dial:?})", item.label);
+    }
+    tap(&mut s, id);
+    settle(&mut s, now);
+    assert_eq!(s.bubble_placements().into_iter().find(|p| p.id == neighbour).unwrap().center, [500., 450. - CHOOSER_RING]);
+}
+
+#[test]
 fn bubbles_pushed_during_a_long_drag_keep_their_new_place() {
     let mut s = desk();
     let mover = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [400., 450.]);
