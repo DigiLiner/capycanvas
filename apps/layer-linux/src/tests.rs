@@ -5494,7 +5494,7 @@ fn native_zen_behaviors() {
         assert_eq!(w.zen_capy.is_visible(), show, "{label}");
         assert!(!w.header.root.can_target(), "{label}");
         for (slot, widget) in w.surface.imp().children.borrow().iter() {
-            if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy) && !widget.has_css_class("floating-panel") {
+            if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy | Slot::Bubbles) && !widget.has_css_class("floating-panel") {
                 assert!(widget.has_css_class("zen-hidden") && !widget.can_target(), "{label}");
             }
         }
