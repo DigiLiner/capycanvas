@@ -174,7 +174,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn enclose_fill(&mut self, enclosure: Selection) {
         self.request_region_at(Point { x: 0., y: 0. }, Some(enclosure), None);
     }
-    fn fill_vector_layer(&mut self, layer: OccurrenceHandle, point: Point) -> Result<(), String> {
+    fn fill_vector_layer(&mut self, layer: OccurrenceHandle, point: Point, source: layer_render::RegionSource, paths: bool) -> Result<(), String> {
         use layer_core::authored::vector::{PaintEntry, Record, Style};
         let doc = self.engine.document();
         if doc.is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
@@ -185,7 +185,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let fill = if self.state.colors.transparent() { None } else {
             self.vector_figure_style(FigurePaint::Fill, layer_core::authored::vector::Cap::Butt, layer_core::authored::vector::Join::Miter)?.entries.first().cloned()
         };
-        let innermost = object.paths().filter(|(_, path)| path.pickable() && path.encloses(local, tolerance))
+        let innermost = object.paths().filter(|(_, path)| paths && path.pickable() && path.encloses(local, tolerance))
             .map(|(position, path)| (path.area_around(local, tolerance), position, path)).min_by(|a, b| a.0.total_cmp(&b.0));
         let found = innermost.map(|(_, position, path)| {
             let mut entries: Vec<PaintEntry> = path.style.entries.iter().filter(|entry| !matches!(entry, PaintEntry::Fill(_))).cloned().collect();
@@ -199,9 +199,39 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.state.colors.transparent() { return Ok(()); }
         if !self.engine.backend().region_fits(doc.composition().size) { return Err(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string()); }
         self.new_paint_layer_under()?;
-        let source = layer_render::RegionSource::Scene { snapshot: self.engine.document().snapshot(), scope: SceneScope::RawObjects(layer) };
         self.request_region_at(point, None, Some(source));
         Ok(())
+    }
+    fn region_source(&mut self, source: RegionSource, from: Option<layer_render::RegionSource>, source_target: Option<SourceTarget>) -> Option<layer_render::RegionSource> {
+        let doc = self.engine.document();
+        Some(match (from, source) {
+                (Some(from), _) => from,
+                (None, RegionSource::Visible) => layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::All},
+                (None, RegionSource::Editing) => {
+                    if let Some(target) = source_target {
+                        layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::Raw(target)}
+                    } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().holds_objects(*handle)) {
+                        layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::RawObjects(handle)}
+                    } else {
+                        let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some())) else { return None; };
+                        let mut snapshot = doc.snapshot();
+                        let occurrence = std::sync::Arc::make_mut(&mut snapshot).artwork.occurrences.get_mut(handle).unwrap();
+                        occurrence.visible = true;
+                        occurrence.opacity = 1.;
+                        occurrence.blend = layer_core::LayerBlend::Normal;
+                        occurrence.attachment = layer_core::Attachment::None;
+                        occurrence.mask = None;
+                        layer_render::RegionSource::Scene {snapshot,scope:SceneScope::Members(vec![handle].into())}
+                    }
+                }
+                (None, RegionSource::Reference) => {
+                    if doc.scene().references().is_empty() {
+                        self.notify_missing_reference();
+                        return None;
+                    }
+                    layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:doc.reference_scope()}
+                }
+            })
     }
     fn request_region_at(&mut self, point: Point, enclosure: Option<Selection>, from: Option<layer_render::RegionSource>) {
         let enclosed = enclosure.is_some();
@@ -218,19 +248,22 @@ impl<R: CanvasRenderer> UiSession<R> {
         {
             return;
         }
+        let doc = self.engine.document();
+        let mask_target = self.selection_masks.target().filter(|_| fill);
+        let source_target=if mask_target.is_some() {
+            self.selection_masks.artwork().and_then(|h|doc.scene().source_target(h))
+        } else {doc.drawing_target().or(doc.active_target())};
+        let Some(resolved) = self.region_source(source, from.clone(), source_target) else { return };
         if fill && from.is_none() && !enclosed && self.selection_masks.target().is_none() && let Some(layer) = self.editing_vector_layer() {
-            if let Err(error) = self.fill_vector_layer(layer, point) { self.notify(error); }
+            if let Err(error) = self.fill_vector_layer(layer, point, resolved, source != RegionSource::Reference) { self.notify(error); }
             return;
         }
         if !self.engine.backend().region_fits(extent) {
             self.notify(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string());
             return;
         }
+        let source = resolved;
         let doc = self.engine.document();
-        let mask_target = self.selection_masks.target().filter(|_| fill);
-        let source_target=if mask_target.is_some() {
-            self.selection_masks.artwork().and_then(|h|doc.scene().source_target(h))
-        } else {doc.drawing_target().or(doc.active_target())};
         let basis = layer_core::Affine::IDENTITY;
         if fill && mask_target.is_none() && doc.drawing_content().is_none() {
             self.notify_drawing_refusal();
@@ -246,34 +279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     source_to_document: basis, keep_canvas_edges: false,
                 })
             } else if fill { None } else { self.selection_refinement(basis) },
-            source: match (from, source) {
-                (Some(from), _) => from,
-                (None, RegionSource::Visible) => layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::All},
-                (None, RegionSource::Editing) => {
-                    if let Some(target) = source_target {
-                        layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::Raw(target)}
-                    } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().holds_objects(*handle)) {
-                        layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::RawObjects(handle)}
-                    } else {
-                        let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some())) else { return; };
-                        let mut snapshot = doc.snapshot();
-                        let occurrence = std::sync::Arc::make_mut(&mut snapshot).artwork.occurrences.get_mut(handle).unwrap();
-                        occurrence.visible = true;
-                        occurrence.opacity = 1.;
-                        occurrence.blend = layer_core::LayerBlend::Normal;
-                        occurrence.attachment = layer_core::Attachment::None;
-                        occurrence.mask = None;
-                        layer_render::RegionSource::Scene {snapshot,scope:SceneScope::Members(vec![handle].into())}
-                    }
-                }
-                (None, RegionSource::Reference) => {
-                    if doc.scene().references().is_empty() {
-                        self.notify_missing_reference();
-                        return;
-                    }
-                    layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:doc.reference_scope()}
-                }
-            },
+            source,
             position: [point.x as u32, point.y as u32],
             tolerance: self.region_tools.tolerance,
             refinement: layer_render::RegionRefinement {

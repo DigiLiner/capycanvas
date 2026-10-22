@@ -16,6 +16,24 @@ fn points(path: &PathItem) -> Vec<[f64; 2]> { path.geometry.subpaths().iter().fl
 fn near(a: [f64; 2], b: [f64; 2]) -> bool { (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4 }
 
 #[test]
+fn filled_area_does_not_cancel_at_self_crossings() {
+    let polygon = |id, points: &[[f64; 2]]| {
+        let mut p = path(id, points, true, 2., None);
+        p.geometry = Arc::new(PathGeometry::new(vec![Subpath::new(&points.iter().copied().map(Anchor::corner).collect::<Vec<_>>(), true)]).unwrap());
+        p
+    };
+    let bow = polygon(1, &[[0., 0.], [100., 100.], [0., 100.], [100., 0.]]);
+    let small = polygon(2, &[[40., 10.], [60., 10.], [60., 30.], [40., 30.]]);
+    for fill_rule in [FillRule::NonZero, FillRule::EvenOdd] {
+        let bow = PathItem { fill_rule, ..bow.clone() };
+        assert_eq!(bow.area_around([50., 20.], 0.01), 5000.);
+        assert!(small.area_around([50., 20.], 0.01) < bow.area_around([50., 20.], 0.01));
+    }
+    let concave = polygon(3, &[[0., 0.], [100., 0.], [100., 10.], [10., 10.], [10., 100.], [0., 100.]]);
+    assert_eq!(concave.area_around([5., 50.], 0.01), 1900.);
+}
+
+#[test]
 fn continuing_uses_the_chosen_end_even_when_the_new_tail_is_closer() {
     let original = path(1, &[[100., 100.], [300., 100.]], false, 4., None);
     let added = path(2, &[[305., 100.], [500., 300.], [100., 101.]], false, 4., None);

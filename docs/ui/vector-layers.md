@@ -188,13 +188,15 @@ Solid fills stay attached to cut paths; erasing does not subtract filled areas.
 
 ## Coloring line art
 
-With **Fill** on a vector layer, a click inside a filled path, or inside a path
-whose parts are all closed, fills it with the foreground color below its
-outline, in one undo step; where such paths nest or overlap, the smallest one
+With **Fill** source **Visible** or **Editing** on a vector layer, a click inside
+a filled path, or inside a path whose parts are all closed, fills it with the
+foreground color below its outline, in one undo step; where such paths nest or overlap, the smallest one
 around the click fills. Transparent paint removes the fill. A click
-anywhere else adds a paint layer directly below the vector layer, clipped to
-the same base when the vector layer is clipped, and fills it
-there from the vector layer's lines, with Fill's tolerance, gap closing,
+anywhere else, or using source **Reference**, adds a paint layer directly below
+the vector layer, clipped to the same base when the vector layer is clipped,
+and fills it there from the chosen source: all visible artwork, the edited vector layer's
+lines, or the marked reference layers. Missing references are resolved before
+adding a paint layer. Fill keeps its tolerance, gap closing,
 expansion and smoothing; the new layer and the fill are two undo steps.
 **Lasso Fill** on a vector layer adds a filled closed path, with holes where
 the outline crosses itself, and selects it. Gradient and Enclose Fill offer

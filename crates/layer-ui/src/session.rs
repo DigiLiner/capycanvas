@@ -1003,7 +1003,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
             && if painting { self.engine.document().drawing_target().is_none() && !self.vector_brush_accepts(erasing) }
-                else { self.engine.document().drawing_content().is_none() && !self.vector_tool_accepts() } };
+                else { (match self.layer_interaction.tool {
+                    LayerCanvasTool::Figure { shape, .. } if self.figure_options.needs_path(shape) => self.state.colors.transparent(),
+                    _ => false,
+                }) || self.engine.document().drawing_content().is_none() && !self.vector_tool_accepts() } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
             CursorMode::Tool

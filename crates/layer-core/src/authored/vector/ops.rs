@@ -231,14 +231,35 @@ impl PathItem {
         self.geometry.subpaths().iter().filter_map(|subpath| {
             let mut ring = vec![subpath.anchor(0).point()];
             for segment in subpath.segments() { segment.flatten(tolerance, |p, _| ring.push(p)); }
-            let (mut winding, mut twice) = (0i32, 0.);
-            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-                twice += a[0] * b[1] - b[0] * a[1];
-                if (a[1] <= point[1]) != (b[1] <= point[1]) && a[0] + (point[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) > point[0] {
-                    winding += if b[1] > a[1] { 1 } else { -1 };
+            let edges: Vec<_> = ring.iter().copied().zip(ring.iter().copied().cycle().skip(1)).filter(|(a, b)| a[1] != b[1]).collect();
+            let winding: i32 = edges.iter().filter(|(a, b)| (a[1] <= point[1]) != (b[1] <= point[1]) && a[0] + (point[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) > point[0])
+                .map(|(a, b)| if b[1] > a[1] { 1 } else { -1 }).sum();
+            let inside = |w: i32| match self.fill_rule { FillRule::NonZero => w != 0, FillRule::EvenOdd => w % 2 != 0 };
+            if !inside(winding) { return None; }
+            let mut levels: Vec<f64> = ring.iter().map(|p| p[1]).collect();
+            for (i, &(a, b)) in edges.iter().enumerate() {
+                for &(c, d) in &edges[i + 1..] {
+                    let r = [b[0] - a[0], b[1] - a[1]];
+                    let s = [d[0] - c[0], d[1] - c[1]];
+                    let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+                    let denominator = cross(r, s);
+                    if denominator.abs() < 1e-12 { continue; }
+                    let q = [c[0] - a[0], c[1] - a[1]];
+                    let (t, u) = (cross(q, s) / denominator, cross(q, r) / denominator);
+                    if t > 0. && t < 1. && u > 0. && u < 1. { levels.push(a[1] + r[1] * t); }
                 }
             }
-            (winding != 0).then_some(twice.abs() * 0.5)
+            levels.sort_by(f64::total_cmp);
+            levels.dedup();
+            Some(levels.windows(2).map(|ys| {
+                let y = (ys[0] + ys[1]) * 0.5;
+                let mut crossings: Vec<_> = edges.iter().filter(|(a, b)| (a[1] <= y) != (b[1] <= y))
+                    .map(|(a, b)| (a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]), if b[1] > a[1] { 1 } else { -1 })).collect();
+                crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let (mut winding, mut previous, mut width) = (0, 0., 0.);
+                for (x, delta) in crossings { if inside(winding) { width += x - previous; } winding += delta; previous = x; }
+                width * (ys[1] - ys[0])
+            }).sum())
         }).fold(f64::INFINITY, f64::min)
     }
     pub fn is_known(&self) -> bool {

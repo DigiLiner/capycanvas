@@ -1265,7 +1265,7 @@ fn fill_colors_paths_or_fills_a_new_paint_layer_below_from_the_lines() {
     assert_eq!(order.iter().position(|h| *h == paint), order.iter().position(|h| *h == handle).map(|i| i + 1), "elsewhere fills a new paint layer below the lines");
     assert_eq!(s.renderer_mut().region_requests.len(), requests + 1);
     let request = s.renderer_mut().region_requests.last().unwrap().clone();
-    assert!(matches!(request.source, layer_render::RegionSource::Scene { scope: SceneScope::RawObjects(layer), .. } if layer == handle), "the fill reads the lines");
+    assert!(matches!(request.source, layer_render::RegionSource::Scene { scope: SceneScope::All, .. }), "Visible fill reads the visible artwork");
 }
 
 #[test]
@@ -2385,4 +2385,54 @@ fn scrub_values_rebuild_the_preview_once_per_presentation_target() {
     s.frame(start * 2, start * 2).unwrap();
     s.dispatch(UiAction::Effect { action: number(width(120)) }).unwrap();
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &scrubbed, "the scrub commits its last value once");
+}
+
+#[test]
+fn vector_fill_honors_the_selected_source_on_every_platform() {
+    for platform in Platform::ALL {
+        for source in [crate::RegionSource::Visible, crate::RegionSource::Editing, crate::RegionSource::Reference] {
+            let (mut s, vector) = vector_session_on(platform);
+            put_paths(&mut s, vector, vec![straight(1, &[[100., 100.], [400., 100.], [400., 400.], [100., 400.]], true)]);
+            let original = s.engine.document().scene().vector_layer(vector).unwrap().clone();
+            let reference = *s.engine.document().scene().children(None).iter().find(|h| **h != vector).unwrap();
+            layer(&mut s, LayerAction::Reference { id: occurrence_token(reference) });
+            s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source } }).unwrap();
+            let p = surface_at(&s, if source == crate::RegionSource::Reference { [250., 250.] } else { [700., 600.] });
+            press(&mut s, 10, &[p, p]);
+            assert_eq!(s.engine.document().scene().vector_layer(vector).unwrap(), &original, "{platform:?}: source-based fills do not restyle the vector path");
+            let request = s.renderer_mut().region_requests.last().unwrap();
+            let layer_render::RegionSource::Scene { scope, .. } = &request.source else { panic!("a scene source is required") };
+            let expected = match source {
+                crate::RegionSource::Visible => SceneScope::All,
+                crate::RegionSource::Editing => SceneScope::RawObjects(vector),
+                crate::RegionSource::Reference => SceneScope::Members(vec![reference].into()),
+            };
+            assert_eq!(scope, &expected, "{platform:?}: {source:?}");
+        }
+        let (mut s, _) = vector_session_on(platform);
+        s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: true, source: crate::RegionSource::Reference } }).unwrap();
+        let before = s.engine.checkpoint();
+        let p = surface_at(&s, [700., 600.]);
+        press(&mut s, 10, &[p, p]);
+        assert_eq!(s.engine.checkpoint(), before, "{platform:?}: a missing reference cannot add a paint layer");
+        assert!(s.renderer_mut().region_requests.is_empty());
+        assert!(s.state.notice.is_some());
+    }
+}
+
+#[test]
+fn path_figure_cursors_match_transparent_paint_refusals_on_every_platform() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+        for shape in [FigureShape::Path, FigureShape::Polygon, FigureShape::Star, FigureShape::Rectangle, FigureShape::Ellipse, FigureShape::Line] {
+            for radius in [0., 20.] {
+                s.figure_options.edit("figure_corner_radius", radius, &s.state.localization).unwrap();
+                s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint: FigurePaint::Outline } }).unwrap();
+                s.cursor_input(Some(event(&s, 1, PenPhase::Hover, 0.)));
+                let blocked = s.canvas_cursor().unwrap().segments.iter().any(|segment| segment.marker == 6.);
+                assert_eq!(blocked, s.figure_options.needs_path(shape), "{platform:?}: {shape:?} radius {radius}");
+            }
+        }
+    }
 }
