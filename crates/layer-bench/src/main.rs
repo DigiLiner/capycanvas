@@ -141,6 +141,11 @@ const LIQUIFY_EXPAND: &[Stroke] = &[
 const LIQUIFY_CRYSTALS: &[Stroke] = &[
     Stroke(brush(Preset::LiquifyCrystals, 720.0, 1.0, [0.0; 4]), StrokePath::Lissajous(240, 980.0, 760.0, 0.2, 0.5)),
 ];
+const DITHER: &[Stroke] = &[
+    Stroke(brush(Preset::DitherBlender, 512.0, 1.0, [0.0; 4]), StrokePath::Bezier(320, [(260.0, 820.0), (1180.0, 3500.0), (2760.0, 320.0), (3840.0, 3080.0)])),
+    Stroke(brush(Preset::DitherBlender, 512.0, 1.0, [0.0; 4]), StrokePath::Bezier(300, [(320.0, 3220.0), (1320.0, 420.0), (2920.0, 3780.0), (3760.0, 860.0)])),
+    Stroke(brush(Preset::DitherBlender, 512.0, 1.0, [0.0; 4]), StrokePath::Lissajous(280, 1180.0, 860.0, 0.45, 1.2)),
+];
 const PAINTER_PATTERNS: &[(f32, f32, [f32; 4], StrokePath)] = &[
     (1.0, 1.0, [0.72, 0.018, 0.008, 1.0], StrokePath::Bezier(320, [(260.0, 820.0), (1180.0, 3500.0), (2760.0, 320.0), (3840.0, 3080.0)])),
     (0.78, 0.90, [0.006, 0.032, 0.46, 1.0], StrokePath::Bezier(300, [(320.0, 3220.0), (1320.0, 420.0), (2920.0, 3780.0), (3760.0, 860.0)])),
@@ -178,6 +183,8 @@ const SCENARIOS: &[Scenario] = &[
         group: Group::Legacy, base: DESTINATION, workload: Workload::Strokes(LIQUIFY_TWIRL) },
     Scenario { name: "layered_composite", features: "existing path",
         group: Group::Legacy, base: EMPTY, workload: Workload::Layers },
+    Scenario { name: "dither_blender", features: "512 px source-color redistribution",
+        group: Group::Painter, base: PAINTER_BASE, workload: Workload::Strokes(DITHER) },
     Scenario { name: "textured_flat_filbert", features: "advanced dry",
         group: Group::Painter, base: PAINTER_BASE, workload: Workload::Painter(Preset::TexturedFlat, 420.0, 0.88) },
     Scenario { name: "dry_scumble", features: "coverage",
@@ -645,11 +652,9 @@ fn measure_scenario(
         canvas.draw()?;
         canvas.wait_idle()?;
         let strokes = prepare_scenario(kind, &mut canvas)?;
-        // Prime this scenario's actual raster pipeline and device clocks, then
-        // restore its starting pixels before starting the timing window.
         if !strokes.is_empty() {
-            run_strokes(&mut canvas, &strokes[..1], None)?;
-            canvas.undo()?;
+            run_strokes(&mut canvas, &strokes, None)?;
+            for _ in &strokes { canvas.undo()?; }
         }
         let before = canvas.raster_metrics();
         let mut measurements = Vec::with_capacity(
@@ -901,7 +906,7 @@ fn write_report(path: &Path, results: &[BenchResult]) -> Result<(), Box<dyn Erro
         "# GPU raster benchmark — 4096×4096\n\n\
          Adapter: `{}`; backend {:?}; device type {:?}.\n\n\
          Document: {mode}.\n\n\
-         Release build with debug symbols. Each frame submits eight simulated coalesced pen samples to `CanvasEngine`, renders one frame, then waits for that submission to complete. Every scenario has at least 32 visible paint layers. Each repetition creates a fresh canvas, warms the exact scenario pipeline, undoes the warm-up stroke, and contributes every measured frame to the reported distribution. Setup, shader/pipeline creation, canvas allocation, scenario warm-up/undo, brush selection, layer creation, and PNG export are outside the timing window. Submit latency is the production non-blocking path; completed-work latency serializes each measured frame to isolate its GPU work. Concurrent system/GPU load is not controlled, so these are reproducible workload references rather than cross-machine scores.\n\n\
+         Release build with debug symbols. Each frame submits eight simulated coalesced pen samples to `CanvasEngine`, renders one frame, then waits for that submission to complete. Every scenario has at least 32 visible paint layers. Each repetition creates a fresh canvas, warms the complete scenario, undoes the warm-up strokes, and contributes every measured frame to the reported distribution. Setup, shader/pipeline creation, canvas allocation, scenario warm-up/undo, brush selection, layer creation, and PNG export are outside the timing window. Submit latency is the production non-blocking path; completed-work latency serializes each measured frame to isolate its GPU work. Concurrent system/GPU load is not controlled, so these are reproducible workload references rather than cross-machine scores.\n\n\
          | scenario | state features | repeats | frames | move completed p50 ms | move completed p95 ms | move completed p99 ms | pen-up completed p99 ms | max move ms | submit p95 ms | move/pen-up frames > 8.33 ms | dabs | conservative contact Mpx | composite visits Mpx | paint pages | coverage pages | material pages | preview pages | resident canvas MiB |\n\
          |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
         gpu.name, gpu.backend, gpu.device_type,

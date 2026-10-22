@@ -1040,7 +1040,9 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.completed_clone_start = None;
         self.completed_at = None;
         self.estimates.clear();
-        self.backend.retire_stroke_sources();
+        if self.active_stroke.is_none() && self.pending_up.is_none() {
+            self.backend.retire_stroke_sources();
+        }
     }
 
     /// Replay retouching strokes whose source the renderer could not sample
@@ -3326,6 +3328,29 @@ mod tests {
         assert!(engine.backend().retouch.last().cloned().flatten().unwrap().retouch.references.is_empty());
         engine.set_retouch(None);
         assert_eq!(engine.backend().retouch.last(), Some(&None));
+    }
+
+    #[test]
+    fn active_stroke_sources_survive_edits_and_retire_after_contact() {
+        let (mut input, mut engine) = engine("Stroke source lifetime", 64, 64);
+        engine.set_brush(default_brush(DefaultBrushPreset::DitherBlender)).unwrap();
+        engine.render_frame().unwrap();
+        input.push(event(1, PenPhase::Down, 16.)).unwrap();
+        engine.render_frame().unwrap();
+        assert!(engine.has_active_stroke());
+        let retired = engine.backend().retired_sources;
+        assert!(engine.append_operations(Vec::new(), Vec::new(), None, false).is_err());
+        assert_eq!(engine.backend().retired_sources, retired, "a rejected operation cannot retire active originals");
+        let mut occurrence = active_occurrence(engine.document()).clone();
+        occurrence.opacity = 0.8;
+        engine.apply_edit(replace_occurrence(engine.document(), occurrence)).unwrap();
+        assert_eq!(engine.backend().retired_sources, retired, "an edit cannot retire active originals");
+        input.push(event(2, PenPhase::Up, 32.)).unwrap();
+        engine.render_frame().unwrap();
+        engine.flush_pending_edits().unwrap();
+        assert!(!engine.has_active_stroke());
+        engine.end_corrections();
+        assert_eq!(engine.backend().retired_sources, retired + 1, "completed originals can be released");
     }
 
     #[test]

@@ -12,7 +12,6 @@ const BLEND_CRYSTAL: u32 = 10u;
 const BLEND_MARBLING: u32 = 11u;
 const BLEND_COMB: u32 = 12u;
 const BLEND_EDGE: u32 = 13u;
-const BLEND_DITHER: u32 = 14u;
 const BLEND_REACH_LIMIT: f32 = 112.0;
 const SMUDGE_TRAVEL_LIMIT: f32 = 128.0;
 
@@ -472,52 +471,6 @@ fn edge_field(world: vec2<f32>, center: vec4<f32>, contact: BlendContact) -> Ble
     return Blended(sum / weights, select(blend_amount(contact), 0.0, walled && distance > 0.5));
 }
 
-fn bayer(pixel: vec2<i32>) -> f32 {
-    var value = 0u;
-    var x = u32(pixel.x);
-    var y = u32(pixel.y);
-    for (var bit = 0u; bit < 3u; bit += 1u) {
-        let bx = x & 1u;
-        let by = y & 1u;
-        value = (value << 2u) | ((bx ^ by) << 1u) | by;
-        x >>= 1u;
-        y >>= 1u;
-    }
-    return (f32(value) + 0.5) / 64.0;
-}
-
-fn dither_tap(world: vec2<f32>, radius: f32, index: u32) -> vec4<f32> {
-    let offset = select(vec2<f32>(0.0), vogel(max(index, 1u) - 1u, 12u, 0.0) * radius, index > 0u);
-    return canvas_load(floor(world + offset) + 0.5);
-}
-
-fn dither_paint(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
-    let radius = max(blend_radius(contact, BLEND_REACH_LIMIT), 1.5);
-    let weights = vec4<f32>(WORKING_LUMA, 0.0);
-    var mean = vec4<f32>(0.0);
-    var darkest = vec4<f32>(0.0);
-    var lightest = vec4<f32>(0.0);
-    for (var index = 0u; index < 13u; index += 1u) {
-        let tap = dither_tap(world, radius, index);
-        mean += tap;
-        if index == 0u || dot(tap, weights) < dot(darkest, weights) { darkest = tap; }
-        if index == 0u || dot(tap, weights) > dot(lightest, weights) { lightest = tap; }
-    }
-    mean /= 13.0;
-    let axis = lightest - darkest;
-    var below = darkest;
-    var above = lightest;
-    for (var index = 0u; index < 13u; index += 1u) {
-        let tap = dither_tap(world, radius, index);
-        let along = dot(tap - mean, axis);
-        if along < 0.0 && along > dot(below - mean, axis) { below = tap; }
-        if along >= 0.0 && along < dot(above - mean, axis) { above = tap; }
-    }
-    let span = above - below;
-    let t = clamp(dot(mean - below, span) / max(dot(span, span), 0.000001), 0.0, 1.0);
-    return select(below, above, t > bayer(vec2<i32>(floor(world))));
-}
-
 fn bristle_lane(world: vec2<f32>, contact: BlendContact) -> f32 {
     let lateral = dot(world - contact.center, vec2<f32>(-contact.direction.y, contact.direction.x)) / max(contact.diameter, 0.01);
     return min(blender_character(), 1.0) * bristle_profile(lateral, max(blender_scale() * 40.0, 1.0), contact.seed ^ 0x2545f491u);
@@ -571,9 +524,6 @@ fn blended_by(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> B
         }
         case BLEND_EDGE: {
             return edge_field(world, mix_space_tap(original), contact);
-        }
-        case BLEND_DITHER: {
-            return Blended(mix_space_tap(dither_paint(world, contact)), select(0.0, 1.0, random < amount));
         }
         default: {
             return Blended(disc(contact.trace, radius, BLEND_TAPS, chunk_rotation(contact)), amount * (1.0 - bristle_lane(world, contact)));

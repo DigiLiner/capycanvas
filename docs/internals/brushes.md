@@ -137,6 +137,16 @@ layer and lays no color of its own. They come in three sets:
 - **Effects**: Painterly, Comb (along the strands already painted), Scatter,
   Sharpen, Marbling, Crystal and Dither.
 
+Dither chooses whole color-and-opacity samples from the paint present when the
+stroke starts. Soft edges, Strength and Opacity change the density of replaced
+pixels. Spread sets a sampling radius from the captured brush size; pressure
+changes contact and strength without changing that radius during the stroke.
+Transparency participates alongside paint, so blending a solid stroke into
+empty space produces painted and empty pixels. Antialiased shades already in
+the drawing remain valid samples with their local area weight; Dither cannot
+distinguish them from deliberately painted intermediate colors. Alpha lock
+keeps each destination pixel's opacity and chooses existing source hues.
+
 Each set lists its blenders from the most to the least broadly useful, and
 Smudge is the Blend tool's default. Sets are tool groups of the Blend tool.
 Sculpting presets show their tool's icon in Tools, on toolbar buttons and as

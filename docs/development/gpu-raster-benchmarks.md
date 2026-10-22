@@ -10,7 +10,7 @@ this repository. See [publication notes](publication.md#publication-checks).
 
 ## What is measured
 
-`layer-bench` submits 15 legacy, 10 painter-focused and 3 sculpt (Liquify
+`layer-bench` submits 15 legacy, 11 painter-focused and 3 sculpt (Liquify
 Pinch, Expand and Crystals) 4096×4096 workloads through `CanvasEngine`. Every
 scenario has at least 32 visible paint layers and every frame contains eight
 simulated coalesced pen samples.
@@ -59,9 +59,13 @@ samples are summarized separately.
 
 Initialization, shader/pipeline creation, target allocation, brush selection,
 layer creation, and PNG export stay outside the measurement. Each repetition
-creates a fresh canvas, runs one real stroke and undo to prime the exact
-pipeline and GPU clocks, then contributes every measured frame to the aggregate
+creates a fresh canvas, runs the complete scenario and undoes its strokes to
+prime all required pipelines and GPU clocks, then contributes every measured frame to the aggregate
 distribution. The release painter record uses three repetitions per brush.
+Warming only the first stroke can leave the native page-copy pipeline cold
+until later strokes evict and revisit paint pages. Native hosts prepare that
+pipeline before accepting input; its compilation belongs outside the measured
+painting window here too.
 
 ## Workloads
 
@@ -238,6 +242,7 @@ coral/indigo/gold/teal palette over localized color swatches:
 | Loaded Oil Mixer | spatial reservoir |
 | Palette Knife | spatial reservoir |
 | Natural Blender | ordered smudge advection |
+| Dither Blender | three 512 px strokes redistributing the same layer's RGBA samples |
 
 This gives every new state primitive an independent path: coverage-only,
 spatial reservoir, same-layer watercolor advection, and smudge
@@ -264,10 +269,15 @@ cargo run --release -p layer-bench -- \
   --report artifacts/benchmarks/gpu-4k-paint-state-regression.md
 ```
 
-The first command writes ten explicit-export PNGs and a labeled HTML gallery.
+The first command writes eleven explicit-export PNGs and a labeled HTML gallery.
 The generated contact sheet provides a compact montage. Use
 `--scenario sculpt` for the Liquify Pinch, Expand and Crystals workloads,
-`--scenario all` for all 28 workloads, or a scenario name to isolate one brush.
+`--scenario all` for all 29 workloads, or a scenario name to isolate one brush.
+
+`--scenario dither_blender` uses three pressure-varying strokes at nominal
+512 px over opaque and translucent multicolor underpaint on the same layer.
+Its PNG checks the resulting paint; completion timing includes retained
+stroke-start pages and exposure state, as well as the color-selection kernel.
 
 ### GTK native pen-up and following strokes
 

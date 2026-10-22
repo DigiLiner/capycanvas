@@ -190,6 +190,7 @@ pub enum DabMode {
 /// instance record; color and texture identity are submitted only once.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DabStyle {
+    pub diameter: f32,
     /// Maximum contribution of this stroke over its starting paint.
     pub opacity: f32,
     pub alpha_locked: bool,
@@ -216,6 +217,7 @@ pub struct DabStyle {
 impl DabStyle {
     pub fn for_brush(brush: &layer_core::BrushSnapshot, tool: layer_core::StrokeTool) -> Self {
         Self {
+            diameter: brush.diameter,
             opacity: brush.opacity.clamp(brush.bounds.minimum_opacity, brush.bounds.maximum_opacity),
             alpha_locked: false,
             selection: None,

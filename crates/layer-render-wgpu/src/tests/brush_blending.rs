@@ -845,6 +845,41 @@ fn engine_generated_smudge_strength_zero_is_noop_and_opacity_bounds_retraces() {
 }
 
 #[test]
+fn dither_prediction_forks_committed_exposure_and_preserves_prior_tiles() {
+    let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::DitherBlender);
+    brush.diameter = 48.;
+    brush.opacity = 0.4;
+    brush.blender.reach = 0.5;
+    brush.flow = 0.08;
+    let dabs = opacity_contacts(&brush, 2);
+    let split = dabs.len() / 2;
+    let send = |canvas: &mut Canvas, contacts: &[Dab], kind, start, end| {
+        let style = DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+        let damage = contacts.iter().fold(Rect::EMPTY, |r, d| r.union(d.bounds()));
+        let batch = DabBatch { stroke_id: StrokeId(100), dab_count: contacts.len() as u32,
+            kind, stroke_start: start, stroke_end: end, ..crate::test_support::dab_batch(canvas.base, style, damage) };
+        canvas.r.submit(FramePacket { dabs: contacts, dab_batches: &[batch], ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
+    };
+    let mut preview = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 128]);
+    let mut reference = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 128]);
+    for canvas in [&mut preview, &mut reference] {
+        canvas.fill(canvas.base, [0.1, 0.6, 0.3, 0.6]);
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([1066., 64.], [0.9, 0.1, 0.05, 1.], 1000., 1.));
+        send(canvas, &dabs[..split], DabBatchKind::Persistent, true, false);
+    }
+    let committed = preview.pixels();
+    send(&mut preview, &dabs[split..], DabBatchKind::Preview, false, false);
+    let predicted = preview.pixels();
+    send(&mut reference, &dabs[split..], DabBatchKind::Persistent, false, true);
+    let expected = reference.pixels();
+    assert_ne!(predicted, committed, "prediction transports actual pigment");
+    assert_eq!(predicted, expected, "prediction equals the same committed continuation");
+    assert_eq!(preview.composite(), committed, "cancel prediction restores committed paint");
+    send(&mut preview, &dabs[split..], DabBatchKind::Persistent, false, true);
+    assert_eq!(preview.pixels(), expected, "prediction leaves committed exposure untouched");
+}
+
+#[test]
 fn engine_generated_partial_opacity_prediction_forks_and_preserves_committed_budget() {
     let (_,mut brush)=opacity_brushes()[0].clone();brush.flow=0.08;
     let dabs=opacity_contacts(&brush,2);let split=2;

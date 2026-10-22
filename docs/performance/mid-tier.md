@@ -745,7 +745,7 @@ simple brushes retain unqualified rows.
 | Comb Blender (53) | Very complex | 512 px | 13.8 updates/s (13.5–14.2); input 14.0/s; completion-gap p99 91.8 ms | **Not met** |
 | Edge-Keeping Blender (54) | Very complex | 512 px | 1.3 updates/s (1.2–1.3); input 1.5/s; completion-gap p99 1156.2 ms | **Not met** |
 | Scatter Blender (49) | Very complex | 512 px | 25.5 updates/s (25.3–25.7); input 25.7/s; completion-gap p99 54.7 ms | **Not met** |
-| Dither Blender (55) | Very complex | 512 px | 1.8 updates/s (1.7–1.8); input 2.0/s; completion-gap p99 835.8 ms | **Not met** |
+| Dither Blender (55) | Very complex | 512 px | 31.31 updates/s (30.49–31.34); input 31.31/s; worst completion-gap p99 53.45 ms | **Not met**; [sample selection comparison](#dither-sample-selection) |
 | Liquify Push (12) | Very complex | 512 px | 45.89 fresh updates/s (45.47–46.07); fresh completion-gap p99 ≤44.84 ms | **Not met** |
 | Liquify Twirl Clockwise (36) | Very complex | 512 px | 31.52 fresh updates/s (31.34–31.96); fresh completion-gap p99 ≤83.66 ms | **Not met** |
 | Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 31.12 fresh updates/s (30.55–31.15); fresh completion-gap p99 ≤87.86 ms | **Not met** |
@@ -759,6 +759,54 @@ simple brushes retain unqualified rows.
 | Spot Healing Brush (42) | Very complex | 512 px | 119.7 fresh updates/s; completion gap p99 13.6 ms | **Met for drawing** |
 
 Retouching rows use the integrated-compositor measurements below, copying from the photo marked as a reference layer.
+
+### Dither sample selection
+
+Measured on 2026-10-21 on the reference Wacom MovinkPad 11 at thermal status 0,
+using optimized release benchmark APKs based on `e16049138`. Dither is 512 px
+at pressure 1, Fit zoom, default workspace and panel glass, Stats off and
+16 ms prediction. Each workload has three warmed 10 s strokes, except the
+empty-front-layer control's three 5 s strokes. The ellipse is 310 × 150 screen
+pixels; this profile differs from the older blender measurements above.
+Fresh-input throughput matches completed updates, except the baseline Photo
+run's 11.39 fresh updates/s. Gaps below are the worst p99 across the three runs.
+
+| Paint being blended, 6000 × 4000 canvas | Baseline → sample selection, completed updates/s | Completion-gap p99, baseline → sample selection |
+| --- | --- | --- |
+| Tier photo itself | 11.49 → 14.97 | 122.61 → 96.49 ms |
+| Empty paint above the tier photo | 12.80 → 31.31 | 113.30 → 53.45 ms |
+| Black 512 px G-Pen stroke against transparency | 13.64 → 27.95 | 104.66 → 52.21 ms |
+| Three solid G-Pen color bands and a thin fourth-color mark | 11.69 → 29.57 | 124.05 → 51.10 ms |
+
+The authored fixtures contain one Ink layer and hidden Paper; the photo runs
+use the benchmark's normal two-layer document. All four workloads still miss
+the 90 updates/s and 22.2 ms p99 targets. These are GPU-completed canvas updates,
+not scanout rates or physical pen latency. A second interleaved baseline Photo
+set measured 11.29 updates/s, supporting the relative improvement.
+
+A separate 30 s Photo stroke raises peak tracked GPU allocation by 116.35 MiB
+and peak process PSS by 136.30 MiB. After 10 s idle, allocated GPU memory equals
+baseline; reserved GPU memory remains 48 MiB higher and PSS 33.29 MiB higher.
+The source snapshots add active-stroke memory, even though the reference tablet
+draws faster. Mali-G57 offline compilation reports no stack spills for the
+three-scalar sorting records.
+
+Baseline APK SHA-256: `760e7023da2787601a1ef419ea38cbfc71604082983ec6619898170c8059a5b0`;
+sample-selection APK: `94a5db1d8760073e5a7977ff8fb9925cab475eaf4ebc18861ed3402f5ecbff73`.
+Raw runs, fixture recipe, source identities, screenshots and memory samples:
+`artifacts/dither-implementation.local/android/`.
+
+The matched desktop diagnostic uses the RTX PRO 6000 Blackwell Max-Q, Vulkan,
+driver 615.71.09, a 4096² canvas and 32 visible layers. Both binaries warm the
+complete scenario and undo it before measurement. Across two interleaved sets
+of three repetitions per version, moving-frame CPU p50/p95/p99 changes from
+0.524/0.946/1.063 ms to 0.627/1.390/2.266 ms; GPU-completed frame p50/p95/p99
+changes from 0.708/1.650/1.804 ms to 0.833/2.039/2.752 ms. Maximum moving
+completion is 1.906 → 3.128 ms and pen-up p99 is 4.755 → 6.772 ms. Neither
+version has a measured frame above 8.33 ms. Resident canvas memory changes
+from 590.4 to 758.4 MiB. These are serialized offscreen completion spans, not
+GTK presentation rates or a tablet-tier qualification. Raw frames and matching
+work counters: `artifacts/dither-implementation.local/local/fullwarm-*`.
 
 ### Retained-map Liquify
 

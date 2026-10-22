@@ -140,13 +140,16 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         _ => {
             let name=match operation {M::Liquify=>unreachable!("liquify reconstructs its original source"),M::Smudge=>"smudge",M::Wet=>"wet",_=>"watercolor"};
             let [width,height]=crate::destination_material::workgroup(operation);
-            let mut source=format!("{}\n\
+            let dither=matches!(entries,Entries::Blend(blender) if blender.kind==layer_core::BlenderKind::Dither);
+            let mut source=format!("const DITHER_BLENDER: bool = {dither};\n{}\n\
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
                 fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
                 include_str!("material_transport.wgsl"));
             if let Entries::Blend(blender)=entries {
-                source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {};\nconst BLEND_LIFT: bool = {};\nconst BLEND_TAPS: u32 = {}u;\n{}",
+                if dither { source+=include_str!("material_dither.wgsl"); }
+                else { source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {};\nconst BLEND_LIFT: bool = {};\nconst BLEND_TAPS: u32 = {}u;\n{}",
                     blender.kind as u8, blender.paper, blender.lift, if blender.paper {11} else {12}, include_str!("material_blend.wgsl"));
+                }
             }
             if operation==M::Wet {source+=include_str!("material_reservoir.wgsl");}
             source.into()

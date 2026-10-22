@@ -172,7 +172,7 @@ impl WgpuRasterizer {
                     if bytes <= native.color_cache_bytes {
                         return;
                     }
-                    if !destinations.contains(&(layer.id, page.coordinate)) {
+                    if page.stroke_start.is_none() && !destinations.contains(&(layer.id, page.coordinate)) {
                         let released = page.discard_inactive();
                         bytes -= released;
                         if released != 0 && let Some(coverage) = layer.coverage_pages.iter().find(|p| p.coordinate == page.coordinate) {
@@ -193,6 +193,7 @@ impl WgpuRasterizer {
                 layer.pages.retain(|page| {
                     if bytes <= native.color_cache_bytes
                         || changed.is_some_and(|c| c.contains(&page.coordinate))
+                        || page.stroke_start.is_some()
                     {
                         return true;
                     }
@@ -220,6 +221,7 @@ impl WgpuRasterizer {
 
 fn color_page_bytes(page: &LayerPage) -> u64 {
     page.primary.storage_bytes()
+        + page.stroke_start.as_ref().map_or(0, |(_, start)| start.storage_bytes())
         + page
             .secondary
             .as_ref()

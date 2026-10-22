@@ -15,7 +15,7 @@ fn material_kernel_spirv() {
     let flags = dry_material::contact_flags(brush.contact) | if uniform { 128 } else { 0 } | extra;
     let (operation, entries, entry) = if transported {
         let operation = BrushPassPlan::for_style(&style).material;
-        let entry = if style.opacity < 1. { destination_material::Entry::Coverage } else { destination_material::Entry::Color };
+        let entry = if BrushPassPlan::for_style(&style).state.coverage { destination_material::Entry::Coverage } else { destination_material::Entry::Color };
         (operation, destination_material::module(operation, 0, destination_material::blender(&style)), entry.name())
     } else {
         let start = if r.pipelines.dry_material.in_place() { dry_material::Start::Stored } else { dry_material::Start::Sampled };

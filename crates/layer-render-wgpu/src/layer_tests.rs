@@ -195,6 +195,7 @@ fn left_mask() -> CoverageSnapshot {
 pub(crate) fn preset_style(preset: layer_core::DefaultBrushPreset) -> DabStyle {
     let brush = layer_core::default_brush(preset);
     DabStyle {
+        diameter: brush.diameter,
         opacity: brush.opacity,
         alpha_locked: false,
         selection: None,

@@ -9,12 +9,17 @@ fn transport_result(id: vec2<u32>) -> MaterialOutput {
     return material_result(vec4<f32>(vec2<f32>(id) + 0.5, 0.0, 1.0));
 }
 
+fn transport_original(p: vec2<i32>) -> vec4<f32> {
+    if DITHER_BLENDER { return textureLoad(reservoir_texture, p, 0); }
+    return textureLoad(source_11, p, 0);
+}
+
 @compute @workgroup_size(TRANSPORT_WORKGROUP_X, TRANSPORT_WORKGROUP_Y)
 fn transport_color(@builtin(global_invocation_id) id: vec3<u32>) {
     if transport_dirty(id.xy) {
         store_dry_color(id.xy, transport_result(id.xy).color);
     } else {
-        store_dry_color(id.xy, textureLoad(source_11, vec2<i32>(id.xy), 0));
+        store_dry_color(id.xy, transport_original(vec2<i32>(id.xy)));
     }
 }
 
@@ -26,7 +31,7 @@ fn store_transport_coverage(id: vec2<u32>, dirty: bool) -> MaterialOutput {
         textureStore(material_coverage_output, p, result.coverage);
         return result;
     }
-    store_dry_color(id, textureLoad(source_11, p, 0));
+    store_dry_color(id, transport_original(p));
     textureStore(material_coverage_output, p, vec4<f32>(dry_coverage(p), 0.0, 0.0, 1.0));
     return MaterialOutput(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
 }

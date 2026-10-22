@@ -495,6 +495,10 @@ fn pointwise(style: &layer_render::DabStyle) -> bool {
     style.execution == BrushExecution::Dry || style.execution.retouches()
 }
 
+fn ordered_dither(style: &layer_render::DabStyle) -> bool {
+    style.execution == BrushExecution::Smudge && style.blender.kind == layer_core::BlenderKind::Dither
+}
+
 /// Pen-up passes that revisit every page the stroke painted: a wet or burnt
 /// edge, or healing.
 fn revisits_stroke(style: &layer_render::DabStyle) -> bool {
@@ -566,7 +570,8 @@ impl BrushPassPlan {
                     || matches!(style.execution, BrushExecution::Clone | BrushExecution::Heal | BrushExecution::SpotHeal)))
                 || (style.opacity < 1. && !grouped)
                 || style.rendering.edge_after_stroke
-                || style.execution == BrushExecution::Watercolor,
+                || style.execution == BrushExecution::Watercolor
+                || ordered_dither(style),
             watercolor_wetness: style.execution == BrushExecution::Watercolor,
         };
         let needs_destination = style.execution != BrushExecution::Dry
@@ -2002,7 +2007,8 @@ impl WgpuRasterizer {
         let in_place = self.in_place_dry_material(batch);
         let offsets = self.material_offsets(batch);
         self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
-        if pointwise(&batch.style) && batch.style.opacity < 1. {
+        let dither = ordered_dither(&batch.style);
+        if (pointwise(&batch.style) && batch.style.opacity < 1.) || dither {
             let committed_start = self.paint_layers.iter().find(|l| l.id == batch.target)
                 .and_then(|l| l.pages.iter().find(|p| p.coordinate == coordinate))
                 .and_then(|p| p.stroke_start.as_ref()).is_some_and(|(id, _)| *id == batch.stroke_id);
@@ -2027,6 +2033,20 @@ impl WgpuRasterizer {
             .ok_or(GpuRasterError::MissingPaintLayer(batch.target))?;
         let sources = self.source_tiles.borrow();
         let mut views = self.raw_layer_neighborhood(&sources, layer, coordinate, offsets, preview);
+        let current = views[4];
+        if dither {
+            for (index, view) in views.iter_mut().enumerate() {
+                let [x, y] = [coordinate[0] as i32 + index as i32 % 3 - 1,
+                    coordinate[1] as i32 + index as i32 / 3 - 1];
+                if x < 0 || y < 0 { continue; }
+                let at = [x as u32, y as u32];
+                let start = layer.pages.iter().find(|p| p.coordinate == at)
+                    .and_then(|p| p.stroke_start.as_ref()).filter(|(id, _)| *id == batch.stroke_id)
+                    .or_else(|| preview.then(|| self.preview_page(at)).flatten()
+                        .and_then(|p| p.stroke_start.as_ref()).filter(|(id, _)| *id == batch.stroke_id));
+                if let Some((_, start)) = start { *view = &start.view; }
+            }
+        }
         if let MaterialInputs::Retouch(pages) = inputs {
             for (slot, page) in [0, 1, 2, 3, 5, 6, 7, 8].into_iter().zip(pages) {
                 views[slot] = page;
@@ -2059,6 +2079,8 @@ impl WgpuRasterizer {
                 .expect("watercolor wetness page is prepared before binding")
                 .active()
                 .view
+        } else if dither {
+            current
         } else if pointwise(&batch.style) {
             let start = layer.pages.iter().find(|p| p.coordinate == coordinate)
                 .and_then(|p| p.stroke_start.as_ref()).filter(|(id, _)| *id == batch.stroke_id)
@@ -2492,6 +2514,7 @@ impl WgpuRasterizer {
                 record.material_b[..3].copy_from_slice(&source[0].color_rgba_linear[..3]);
             }
             record.color_mode = layer_color_parameters(packet.scene.color_mode(batch.target), self.document_color());
+            record.color_mode[3] = f32::from(ordered_dither(&batch.style));
             record.color_mode[2] = f32::from(batch.style.blend_space == layer_core::BlendSpace::Perceptual);
             let offset = index * self.style_stride as usize;
             self.style_upload[offset..offset + mem::size_of::<StyleGpu>()]
@@ -3617,6 +3640,11 @@ impl CanvasRenderer for WgpuRasterizer {
         if let Some(retouch) = &mut self.retouch {
             retouch.retire_stroke();
         }
+        for layer in &mut self.paint_layers {
+            for page in &mut layer.pages { page.clear_stroke_start(); }
+        }
+        for page in &mut self.preview_pages { page.clear_stroke_start(); }
+        self.refresh_storage_metrics();
     }
     fn set_transform_preview(
         &mut self,
@@ -5126,6 +5154,7 @@ impl StyleGpu {
         let mut style = Self::for_brush(extent, &batch.style, batch.first_dab, batch.dab_count, device, paper);
         style.canvas_opacity[3] = f32::from(batch.stroke_start);
         style.operation[2] = block;
+        if ordered_dither(&batch.style) { style.transport_b[2] = (batch.stroke_id.0 & 0xffffff) as f32; }
         style
     }
 
@@ -5225,6 +5254,7 @@ impl StyleGpu {
         // This lane is unused by dry and composite shaders and avoids growing
         // every style upload solely for one material-stage lifecycle bit.
         result.color[3] = f32::from(style.alpha_locked);
+        if ordered_dither(style) { result.transport_b[1] = style.diameter; }
         result
     }
 }
@@ -6238,6 +6268,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
 
     pub(crate) fn test_style(execution: BrushExecution) -> DabStyle {
         DabStyle {
+            diameter: 48.,
             opacity: 1.,
             alpha_locked: false,
             selection: None,

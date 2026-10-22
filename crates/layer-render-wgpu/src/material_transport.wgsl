@@ -372,7 +372,7 @@ fn wet_fragment(
 fn material_result(fragment_position:vec4<f32>)->MaterialOutput {
     let world=render_target.origin_extent.xy+fragment_position.xy;
     var result=operation_fragment(fragment_position.xy,world,style.operation.x,style.operation.y);
-    if style.color.a>0.5 {
+    if style.color.a>0.5 && !DITHER_BLENDER {
         result=material_alpha_locked(result,canvas_load(world));
     }
     result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);

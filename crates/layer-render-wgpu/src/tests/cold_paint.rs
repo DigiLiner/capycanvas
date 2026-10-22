@@ -449,6 +449,40 @@ fn cold_native_neighborhood_brushes_keep_prediction_and_terminal_backing() {
 }
 
 #[test]
+fn native_cache_keeps_dither_originals_after_publication_and_revisits() {
+    let mut a = document(DocumentColor { space: RgbSpace::ProPhoto, depth: SampleDepth::U16 });
+    let mut b = a.clone();
+    let id = target(&a);
+    let mut resident = renderer(&a, u64::MAX);
+    let mut bounded = renderer(&b, 0);
+    let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::DitherBlender);
+    brush.diameter = 128.;
+    brush.blender.reach = 0.4;
+    let style = DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+    for (phase, x) in [257., 1281., 257.].into_iter().enumerate() {
+        let mut dab = test_dab([x, 255.], [0.; 4], 1.);
+        dab.radii = [64.; 2];
+        dab.motion = [48., 0.];
+        let batch = DabBatch { stroke_id: layer_core::StrokeId(100), stroke_start: phase == 0,
+            stroke_end: phase == 2, ..crate::test_support::dab_batch(id, style.clone(), dab.bounds()) };
+        for (r, p) in [(&mut resident, &mut a), (&mut bounded, &mut b)] {
+            paint_mut(p).raster = RasterRevision::pending();
+            r.submit(FramePacket { dabs: &[dab], dab_batches: std::slice::from_ref(&batch), ..packet(p, false) }).unwrap();
+            complete(r);
+            paint(p).raster.wait_data().unwrap();
+            r.trim_native_color_cache(&[], &[]);
+            assert!(r.paint_layers.iter().flat_map(|l| &l.pages).any(|p| p.stroke_start.is_some()),
+                "published originals survive cache pressure during the same stroke");
+        }
+        close(&image(&bounded), &image(&resident));
+    }
+    bounded.retire_stroke_sources();
+    assert!(bounded.paint_layers.iter().flat_map(|l| &l.pages).all(|p| p.stroke_start.is_none()));
+    bounded.trim_native_color_cache(&[], &[]);
+    assert!(bounded.paint_layers.iter().all(|l| l.pages.is_empty()), "completed originals no longer pin the native cache");
+}
+
+#[test]
 fn native_cache_retires_blend_scratch_before_artwork_and_recreates_stroke_edges() {
     for (depth, execution) in [SampleDepth::U8, SampleDepth::U16].into_iter()
         .flat_map(|depth| [BrushExecution::Dry, BrushExecution::Wet].map(|execution| (depth, execution))) {

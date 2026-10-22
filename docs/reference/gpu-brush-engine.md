@@ -188,7 +188,7 @@ The full brush retains three kinds of state.
 - motion-derived displacement;
 - conservative damage and the source region needed by filtering.
 
-Smudge and the blenders compose one backtrace per destination pixel and
+Smudge and the blenders other than Dither compose one backtrace per destination pixel and
 contact chunk, then mix toward a field chosen by the blender kind:
 
 ```text
@@ -232,8 +232,8 @@ selected by the module constant `BLENDER`: disc averages for Soft, Blur and Hue,
 a paper-guided regression for Grainy, frequency separation for Texture-Keeping,
 a clamped Catmull-Rom backtrace for the Knife, eight-sector minimum variance for
 Painterly, Voronoi cells for Crystal, curl-noise advection for Marbling, a
-structure-tensor streamline for Comb, wall-stopped rays for Edge-Keeping and an
-ordered two-color dither for Dither. The 128 px trace and 112 px radius keep
+structure-tensor streamline for Comb and wall-stopped rays for Edge-Keeping.
+The 128 px trace and 112 px radius keep
 every sample inside the page's 3×3 neighbourhood, so these kernels need no
 gather, and a sample inside the page's own texture skips the neighbourhood
 switch. They do not use the wet-paint reservoir, and only the Tissue's lift
@@ -243,9 +243,36 @@ Grainy's paper regression bounds its gain so every sampled pigment retains a
 nonnegative weight. Its weaker Oklab chroma response reassociates chroma with
 the reconstructed alpha. Texture-Keeping divides its frequency bands by their
 actual coverage. Hue preserves extended RGB until native publication, and
-Comb and Dither use the document profile's luminance coefficients.
+Comb uses the document profile's luminance coefficients.
 Painterly compares sectors against its first candidate, without an absolute
 variance ceiling that could reject every sector on HDR paint.
+
+Dither uses [`material_dither.wgsl`](../../crates/layer-render-wgpu/src/material_dither.wgsl).
+It samples seven fixed disc offsets with exact texel loads from stroke-start
+paint, plus the destination's original RGBA tuple. Its radius is
+`min(Spread × captured Size, 112 px)` throughout the stroke. For cumulative
+contact exposure `E`, the seven neighbors share weight
+`q = Opacity × (1 − exp(−rate × E))`; the original keeps `1 − q`.
+Source selection coverage scales each neighbor's weight, with excluded or
+out-of-document weight returned to the original. A 19-comparison sorting network
+orders the eight entries by lightness, then RGBA. A stroke-stable 256×256 Bayer
+rank selects one positive-weight interval in their cumulative distribution.
+The kernel sorts lightness, weight and sample references, fetching RGBA again
+only for lightness ties and the selected result to limit register pressure.
+It never interpolates the chosen sample with the destination. Antialiased
+shades have their sampled area weight rather than priority for being near an
+average. This is a seven-neighbor estimate, not a neighborhood histogram.
+
+Dither stores exposure as saturated integer-valued ticks in R32Float, rounding
+each contact to 2⁻²⁰ units and saturating at 16. Addition stays exact through
+2²⁴ ticks, so frame partitions do not change the result. Its original pages
+survive native-cache pressure until correction and replay end; their color
+companions remain resident during that period. Alpha lock converts candidates
+to the destination alpha before ordering and replaces transparent candidates
+with the original. Layer color-mode enforcement and explicitly requested
+post-stroke edges retain their usual policies; the latter converts exposure
+ticks to normalized coverage. Ordinary Dither can choose transparency and
+therefore lower alpha.
 
 Wet paint uses the separate reservoir path. Loaded oils and palette knives keep
 spatial brush-local state:
@@ -424,8 +451,8 @@ Implemented now:
 - GPU memory/page metrics through the C ABI;
 - incremental damage composition;
 - explicit RGBA8 export readback;
-- 15 legacy plus 10 painter scenarios at 4096×4096/32 visible layers through
-  the public C ABI.
+- 15 legacy plus 11 painter scenarios at 4096×4096/32 visible layers through
+  the shared `CanvasEngine`.
 
 Reserved by this design, not implemented now:
 

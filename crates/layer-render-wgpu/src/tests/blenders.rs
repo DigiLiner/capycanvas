@@ -12,6 +12,185 @@ use layer_core::{BlendSpace, BrushExecution, BrushSnapshot, DefaultBrushPreset a
 const RED: [f32; 4] = [0.8, 0.05, 0.03, 1.];
 const BLUE: [f32; 4] = [0.03, 0.12, 0.8, 1.];
 
+fn palette(pixels: &[[f64; 4]]) -> std::collections::BTreeSet<[u64; 4]> {
+    pixels.iter().map(|p| p.map(f64::to_bits)).collect()
+}
+
+#[test]
+fn dither_preserves_source_rgba_across_colors_transparency_and_partial_controls() {
+    for (alpha, opacity) in [(1., 1.), (0.35, 1.), (0.35, 0.3)] {
+        let mut canvas = canvas();
+        halves(&mut canvas, [0.; 4], [0.8, 0.05, 0.03, alpha]);
+        let mut mark = test_dab([66., 64.], [0.03, 0.8, 0.12, 0.7], 1.);
+        mark.radii = [5., 24.];
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), mark);
+        let before = canvas.composite();
+        let colors = palette(&before);
+        let mut brush = brush(P::DitherBlender, 48.);
+        brush.opacity = opacity;
+        for pass in 1..=3 {
+            canvas.stroke(100 + pass, &brush, &contacts(&brush, &line([66., 12.], [66., 116.])), 6, false);
+            let after = canvas.composite();
+            for (i, p) in after.iter().enumerate() {
+                assert!(colors.contains(&p.map(f64::to_bits)), "alpha={alpha} opacity={opacity} pass={pass} pixel={i} invented {p:?}");
+            }
+            assert!(changed(&before, &after) > 0.01, "Dither moves pigment at alpha={alpha} opacity={opacity}");
+            assert!(after.iter().any(|p| p[1] > p[0] && p[1] > p[2]), "Dither retains the third authored color");
+        }
+    }
+}
+
+#[test]
+fn dither_does_not_expand_a_thin_intermediate_shade_into_a_blurred_band() {
+    let mut canvas = canvas();
+    halves(&mut canvas, [0., 0., 0., 1.], [1.; 4]);
+    let mut mark = test_dab([66.5, 64.], [0.5, 0.5, 0.5, 1.], 1.);
+    mark.radii = [1., 10000.];
+    mark.hardness = 1.;
+    canvas.paint(canvas.base, test_style(BrushExecution::Dry), mark);
+    let before = canvas.composite();
+    let intermediate = |pixels: &[[f64; 4]]| pixels.iter().filter(|p| p[0] > 0.01 && p[0] < 0.99).count();
+    let mut brush = brush(P::DitherBlender, 64.);
+    brush.flow = 1.;
+    let path = line([66., 4.], [66., 124.]);
+    let dabs: Vec<_> = contacts(&brush, &path).into_iter().cycle().take(1000).collect();
+    canvas.stroke(100, &brush, &dabs, 6, false);
+    let after = canvas.composite();
+    assert!(intermediate(&after) < intermediate(&before) * 2,
+        "intermediate shades keep their area weight: {} -> {}", intermediate(&before), intermediate(&after));
+    assert!(changed(&before, &after) > 0.1, "the high-exposure stroke really dithers");
+}
+
+#[test]
+fn dither_is_identical_across_contact_batches_and_weak_final_contacts() {
+    for opacity in [1., 0.3] {
+        let mut reference = None;
+        for chunk in [1, 6, usize::MAX] {
+            let mut canvas = canvas();
+            halves(&mut canvas, BLUE, RED);
+            let mut brush = brush(P::DitherBlender, 48.);
+            brush.opacity = opacity;
+            let mut dabs = contacts(&brush, &line([66., 8.], [66., 120.]));
+            let mut last = *dabs.last().unwrap();
+            last.flow = 0.0001;
+            last.radii = [2.; 2];
+            dabs.push(last);
+            canvas.stroke(100, &brush, &dabs, chunk, false);
+            let after = canvas.composite();
+            if let Some(expected) = &reference { assert_eq!(&after, expected, "opacity={opacity} chunk={chunk}"); }
+            else { reference = Some(after); }
+        }
+    }
+}
+
+#[test]
+fn dither_alpha_lock_preserves_destination_coverage_and_source_hues() {
+    let mut canvas = canvas();
+    halves(&mut canvas, [0.; 4], [0.8, 0.05, 0.03, 0.35]);
+    let mut mark = test_dab([66., 64.], [0.03, 0.8, 0.12, 1.], 1.);
+    mark.radii = [5., 20.];
+    canvas.paint(canvas.base, test_style(BrushExecution::Dry), mark);
+    let before = canvas.composite();
+    let brush = brush(P::DitherBlender, 48.);
+    let mut style = layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush);
+    style.alpha_locked = true;
+    canvas.styled_stroke(100, style, &contacts(&brush, &line([66., 8.], [66., 120.])), 6);
+    let after = canvas.composite();
+    let hues: Vec<_> = before.iter().filter(|p| p[3] > 0.).map(|p| [p[0] / p[3], p[1] / p[3], p[2] / p[3]]).collect();
+    for (i, (a, b)) in after.iter().zip(&before).enumerate() {
+        assert_eq!(a[3], b[3], "alpha lock at pixel {i}");
+        if a[3] > 0. {
+            let hue = [a[0] / a[3], a[1] / a[3], a[2] / a[3]];
+            assert!(hues.iter().any(|h| h.iter().zip(hue).all(|(a, b)| (a - b).abs() < 1e-5)), "alpha lock invented hue at {i}: {hue:?}");
+        }
+    }
+    assert!(changed(&before, &after) > 0.01, "alpha lock still blends colored paint");
+}
+
+#[test]
+fn dither_moves_black_and_transparency_as_whole_samples() {
+    let mut canvas = canvas();
+    halves(&mut canvas, [0.; 4], [0., 0., 0., 1.]);
+    let before = canvas.composite();
+    let colors = palette(&before);
+    let mut brush = brush(P::DitherBlender, 48.);
+    brush.blender.reach = 0.5;
+    let dabs: Vec<_> = contacts(&brush, &line([66., 4.], [66., 124.])).into_iter().cycle().take(1000).collect();
+    canvas.stroke(100, &brush, &dabs, 6, false);
+    let after = canvas.composite();
+    assert!(after.iter().all(|p| colors.contains(&p.map(f64::to_bits))), "black dithers without inventing coverage");
+    assert!((24..104).any(|y| pixel(&after, 62, y)[3] > 0.5), "black moves into transparency");
+    assert!((24..104).any(|y| pixel(&after, 70, y)[3] == 0.), "transparency moves into black");
+    let alpha = |pixels: &[[f64; 4]]| pixels.iter().map(|p| p[3]).sum::<f64>();
+    assert!((alpha(&after) - alpha(&before)).abs() < alpha(&before) * 0.05, "the boundary does not turn into an opaque smear");
+}
+
+#[test]
+fn dither_keeps_extended_and_perceptual_source_colors_and_zero_controls() {
+    for (depth, space, red) in [(SampleDepth::F32, BlendSpace::Linear, [2., -0.1, 0.3, 0.6]),
+        (SampleDepth::U8, BlendSpace::Perceptual, RED)] {
+        let mut canvas = Canvas::new(DocumentColor { depth, ..Default::default() }, space, None);
+        halves(&mut canvas, BLUE, red);
+        let before = canvas.composite();
+        let colors = palette(&before);
+        let mut brush = brush(P::DitherBlender, 48.);
+        for (flow, opacity) in [(0., 1.), (1., 0.), (1., 0.3)] {
+            brush.flow = flow;
+            brush.opacity = opacity;
+            canvas.stroke(100, &brush, &contacts(&brush, &line([66., 4.], [66., 124.])), 6, false);
+            let after = canvas.composite();
+            assert!(after.iter().all(|p| colors.contains(&p.map(f64::to_bits))), "{depth:?}/{space:?} preserves source tuples");
+            if flow == 0. || opacity == 0. { assert_eq!(after, before, "zero controls leave paint unchanged"); }
+            else { assert!(changed(&before, &after) > 0.01, "{depth:?}/{space:?} blends real pigment"); }
+        }
+    }
+}
+
+#[test]
+fn dither_selection_weights_samples_without_mixing_or_crossing_excluded_paint() {
+    use layer_core::{Selection, SelectionPixels};
+    for feather in [false, true] {
+        let mut canvas = canvas();
+        halves(&mut canvas, BLUE, RED);
+        let before = canvas.composite();
+        let words: Vec<u32> = (0..128).flat_map(|_| (0..16).map(|word| (0..8).fold(0u32, |v, bit| {
+            let x = word * 8 + bit;
+            let coverage = if x < 60 { 4 } else if feather && x < 70 { 2 } else { 0 };
+            v | coverage << (bit * 4)
+        }))).collect();
+        let selection = Arc::new(Selection::pixels(Arc::new(SelectionPixels::new([128, 128], [0, 0, 128, 128], words).unwrap())));
+        let mut brush = brush(P::DitherBlender, 48.);
+        brush.blender.reach = 0.5;
+        let mut style = DabStyle::for_brush(&brush, StrokeTool::Brush);
+        style.selection = Some(selection);
+        canvas.styled_stroke(100, style, &contacts(&brush, &line([62., 4.], [62., 124.])), 6);
+        let after = canvas.composite();
+        if !feather { assert_eq!(after, before, "excluded red paint cannot contaminate the selected blue area"); }
+        else {
+            let colors = palette(&before);
+            assert!(after.iter().all(|p| colors.contains(&p.map(f64::to_bits))), "feathering changes density, not colors");
+            assert!(changed(&before, &after) > 0.005, "the feathered boundary still blends");
+        }
+        for y in 0..128 { for x in 70..128 { assert_eq!(pixel(&after, x, y), pixel(&before, x, y), "excluded destination ({x}, {y})"); }}
+    }
+}
+
+#[test]
+fn dither_poststroke_edges_decode_exposure_without_darkening_the_interior() {
+    let mut canvas = canvas();
+    canvas.fill(canvas.base, [0.6, 0.5, 0.4, 1.]);
+    let before = canvas.composite();
+    let mut brush = brush(P::DitherBlender, 48.);
+    brush.rendering.edge_after_stroke = true;
+    brush.rendering.burnt_edge = 1.;
+    brush.rendering.edge_width = 4.;
+    let dabs: Vec<_> = contacts(&brush, &line([8., 64.], [120., 64.])).into_iter().cycle().take(1000).collect();
+    canvas.stroke(100, &brush, &dabs, 6, false);
+    let after = canvas.composite();
+    assert_eq!(pixel(&after, 64, 64), pixel(&before, 64, 64), "the center is not an edge");
+    assert!(after.iter().zip(&before).any(|(a, b)| a[0] < b[0] - 0.01), "the requested burnt edge is visible");
+}
+
 fn canvas() -> Canvas {
     Canvas::new(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None)
 }
