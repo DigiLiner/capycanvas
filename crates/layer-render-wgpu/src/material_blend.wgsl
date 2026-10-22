@@ -212,6 +212,8 @@ fn grainy_field(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
     var paper = 0.0;
     var cross = vec4<f32>(0.0);
     var square = 0.0;
+    var low = 1.0;
+    var high = 0.0;
     for (var index = 0u; index < BLEND_TAPS; index += 1u) {
         let point = contact.trace + vogel(index, BLEND_TAPS, chunk_rotation(contact)) * radius;
         let tap = blend_tap(point);
@@ -220,14 +222,21 @@ fn grainy_field(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
         paper += height;
         cross += tap * height;
         square += height * height;
+        low = min(low, height);
+        high = max(high, height);
     }
     let taps = f32(BLEND_TAPS);
     color /= taps;
     paper /= taps;
     let spread = max(square / taps - paper * paper, 0.0);
-    let follow = (cross / taps - color * paper) / max(spread, 0.002) * (spread / (spread + 0.0005));
-    let channels = select(vec4<f32>(1.0), vec4<f32>(1.0, 0.3, 0.3, 1.0), u32(style.render_mode.z) == MIX_OKLAB);
-    return color + follow * channels * (paper_at(world) - paper);
+    let delta = paper_at(world) - paper;
+    let extent = select(high - paper, paper - low, delta >= 0.0);
+    let gain = delta / max(max(spread, 0.002), abs(delta) * extent) * (spread / (spread + 0.0005));
+    var result = color + (cross / taps - color * paper) * gain;
+    if u32(style.render_mode.z) == MIX_OKLAB && working_has_color(color.a) {
+        result = vec4<f32>(result.r, mix(color.gb * (result.a / color.a), result.gb, 0.3), result.a);
+    }
+    return result;
 }
 
 fn texture_field(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> vec4<f32> {
@@ -243,8 +252,8 @@ fn texture_field(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -
         wide += blend_tap(world + offset * 3.0);
     }
     if !working_has_color(center.a) { return field; }
-    let near = local.rgb / max(local.a, 0.000001);
-    let shift = (wide.rgb + local.rgb) / max(wide.a + local.a, 0.000001) - near;
+    let near = local.rgb / local.a;
+    let shift = (wide.rgb + local.rgb) / (wide.a + local.a) - near;
     let steady = 0.0016 / (0.0016 + dot(shift, shift));
     return vec4<f32>(field.rgb + (center.rgb / center.a - near) * blender_character() * steady * field.a, field.a);
 }
@@ -254,7 +263,7 @@ fn hue_paint(original: vec4<f32>, field: vec4<f32>) -> vec4<f32> {
     let own = working_to_oklab(working_unassociate(original));
     let blended = working_to_oklab(from_mix_space(field.rgb / field.a));
     let lab = vec3<f32>(mix(own.x, blended.x, min(blender_character(), 1.0)), blended.yz);
-    return mix_space_tap(vec4<f32>(clamp(working_from_oklab(lab), vec3<f32>(0.0), vec3<f32>(1.0)) * original.a, original.a));
+    return mix_space_tap(vec4<f32>(working_from_oklab(lab) * original.a, original.a));
 }
 
 fn sharpen_paint(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> vec4<f32> {
@@ -312,7 +321,7 @@ fn painterly_field(contact: BlendContact, world: vec2<f32>) -> vec4<f32> {
     let v = vec2<f32>(-contact.direction.y, contact.direction.x) * radius / sqrt(stretch);
     let rotation = (gradient_noise(world) - 0.5) * 0.4;
     var best = vec4<f32>(0.0);
-    var lowest = 1e9;
+    var lowest = 0.0;
     for (var sector = 0u; sector < 8u; sector += 1u) {
         let heading = f32(sector) * 0.7853982 + rotation;
         var mean = vec4<f32>(0.0);
@@ -326,7 +335,7 @@ fn painterly_field(contact: BlendContact, world: vec2<f32>) -> vec4<f32> {
         }
         mean /= 3.0;
         let variance = (max(square / 3.0 - dot(mean, mean), 0.0) + 0.00002) * (1.0 - 0.5 * cos(heading));
-        if variance < lowest {
+        if sector == 0u || variance < lowest {
             lowest = variance;
             best = mean;
         }
@@ -365,7 +374,7 @@ struct Strand {
 
 fn luma_at(point: vec2<f32>) -> f32 {
     let paint = canvas_load(point);
-    return dot(paint.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) + (1.0 - paint.a) * 0.5;
+    return dot(paint.rgb, WORKING_LUMA) + (1.0 - paint.a) * 0.5;
 }
 
 fn strand(world: vec2<f32>, step: f32) -> Strand {
@@ -484,7 +493,7 @@ fn dither_tap(world: vec2<f32>, radius: f32, index: u32) -> vec4<f32> {
 
 fn dither_paint(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
     let radius = max(blend_radius(contact, BLEND_REACH_LIMIT), 1.5);
-    let weights = vec4<f32>(0.2126, 0.7152, 0.0722, 0.0);
+    let weights = vec4<f32>(WORKING_LUMA, 0.0);
     var mean = vec4<f32>(0.0);
     var darkest = vec4<f32>(0.0);
     var lightest = vec4<f32>(0.0);
@@ -574,11 +583,11 @@ fn blended_by(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> B
 
 fn blended_paint(original: vec4<f32>, paint: vec4<f32>, influence: f32) -> vec4<f32> {
     let painted = working_has_color(paint.a);
-    if influence <= 0.0 || (!painted && !working_has_color(original.a)) { return original; }
-    let dragged = select(vec3<f32>(0.0), paint.rgb / paint.a, painted);
+    if influence <= 0.0 || !painted { return original; }
+    let dragged = paint.rgb / paint.a;
     let own = select(dragged, to_mix_space(working_unassociate(original)), working_has_color(original.a));
     let alpha = clamp(original.a + max(paint.a - original.a, 0.0) * influence, 0.0, 1.0);
-    let color = from_mix_space(mix(own, select(own, dragged, painted), influence * min(paint.a, 1.0)));
+    let color = from_mix_space(mix(own, dragged, working_ratio(influence * min(paint.a, 1.0), alpha)));
     return vec4<f32>(color * alpha, alpha);
 }
 

@@ -129,8 +129,7 @@ fn resolve_mix_space(field: vec4<f32>) -> vec4<f32> {
 }
 
 fn paint_share(incoming: f32, kept: f32) -> f32 {
-    let total = incoming + kept;
-    return select(1.0, incoming / total, total > 0.000001);
+    return working_ratio(incoming, incoming + kept);
 }
 
 fn vogel(index: u32, count: u32, rotation: f32) -> vec2<f32> {
@@ -295,6 +294,7 @@ fn wet_fragment(
     var batch_color = vec3<f32>(0.0);
     var batch_alpha = 0.0;
     let average = wet_average();
+    let pure_blend = style.material_a.x <= 0.0 && style.deformation.z <= 0.0;
     var replaced = original;
     let field = contact_field(world);
     for (var offset = 0u; offset < count; offset += 1u) {
@@ -324,7 +324,8 @@ fn wet_fragment(
             working_has_color(pickup.a),
         );
         let carried_weight = max(carried.a * (1.0 - style.material_a.w), select(0.0, wet_average(), working_has_color(carried.a)));
-        let paint_color = mix_color(pickup_color, carried.rgb, carried_weight);
+        let pickup_weight = pickup.a * (1.0 - carried_weight);
+        let paint_color = mix_color(pickup_color, empty_color, paint_share(carried_weight, pickup_weight));
         let available_material = max(
             pickup.a,
             carried.a * (1.0 - style.material_a.w * 0.5),
@@ -342,12 +343,13 @@ fn wet_fragment(
         }
         batch_color = batch_color * (1.0 - source_alpha) + deposit_color(paint_color) * source_alpha;
         batch_alpha = source_alpha + batch_alpha * (1.0 - source_alpha);
-        if average > 0.0 && working_has_color(carried.a) {
-            let weight = clamp(coverage * dab.flow * style.material_b.x, 0.0, 1.0);
-            let laid = mix(carried.a, 1.0, clamp(style.material_a.y, 0.0, 1.0));
-            let alpha = mix(replaced.a, laid, weight);
-            let kept = select(carried.rgb, working_unassociate(replaced), working_has_color(replaced.a));
-            let color = mix_color(kept, carried.rgb, paint_share(weight * laid, (1.0 - weight) * replaced.a));
+        if (average > 0.0 || pure_blend) && working_has_color(available_material) {
+            let weight = clamp(working_ratio(source_alpha, available_material), 0.0, 1.0);
+            let laid = select(available_material, carried.a, average > 0.0);
+            let pigment = select(paint_color, carried.rgb, average > 0.0);
+            let alpha = replaced.a + max(laid - replaced.a, 0.0) * weight;
+            let kept = select(pigment, working_unassociate(replaced), working_has_color(replaced.a));
+            let color = mix_color(kept, pigment, working_ratio(weight * laid, alpha));
             replaced = vec4<f32>(color * alpha, alpha);
         }
     }
@@ -357,8 +359,8 @@ fn wet_fragment(
     } else if working_has_color(batch_alpha) {
         result = stored_paint(source_over(deposit_paint(original), batch_color / batch_alpha, batch_alpha));
     }
-    if average > 0.0 && style.operation.w == 0u {
-        result = mix(result, replaced, average);
+    if (average > 0.0 || pure_blend) && style.operation.w == 0u {
+        result = mix(result, replaced, select(average, 1.0, pure_blend));
     }
     return MaterialOutput(
         result,

@@ -313,3 +313,162 @@ fn tissue_lifts_pigment_where_it_presses_without_shifting_its_colour() {
     assert!(firm > 2. * light, "pressing lifts more: {firm} vs {light}");
 }
 
+#[test]
+fn repeated_blenders_preserve_pigment_color_at_transparent_edges() {
+    let pigment = [0.24, 0.09, 0.42, 1.];
+    let mut failures = Vec::new();
+    for preset in std::iter::once(P::GrainyBlender).chain(blenders().filter(|p| *p != P::GrainyBlender)).chain([P::MixingBrush]) {
+        for mixing in layer_core::ColorMixSpace::ALL {
+            let mut canvas = canvas();
+            let mut block = test_dab([-950., 64.], pigment, 1.);
+            block.radii = [1000.; 2];
+            canvas.paint(canvas.base, test_style(BrushExecution::Dry), block);
+            let mut brush = brush(preset, 40.);
+            brush.wet_mix.mix_space = mixing;
+            brush.color_rgba_linear = pigment;
+            let style = on_paper(&brush, "cold_press");
+            let dabs = contacts(&brush, &line([34., 64.], [112., 64.]));
+            for pass in 0..12 { canvas.styled_stroke(pass + 1, style.clone(), &dabs, 6); }
+            let mut maximum = 0f64;
+            let mut worst = (0, [0.; 4]);
+            for (i, p) in canvas.composite().into_iter().enumerate() {
+                if !p.iter().all(|v| v.is_finite()) || !(0. ..=1.).contains(&p[3]) {
+                    maximum = f64::INFINITY;
+                    worst = (i, p);
+                    break;
+                }
+                if p[3] < 1e-5 { continue; }
+                for c in 0..3 {
+                    let error = (p[c] / p[3] - f64::from(pigment[c])).abs();
+                    if error > maximum { maximum = error; worst = (i, p); }
+                }
+            }
+            eprintln!("{preset:?}/{mixing:?}: pigment error {maximum}, worst {worst:?}");
+            if maximum > 0.002 { failures.push(format!("{preset:?}/{mixing:?}: {maximum}, {worst:?}")); }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn blenders_preserve_faint_uniform_pigment_color() {
+    let mut failures = Vec::new();
+    for preset in blenders().chain([P::MixingBrush]) {
+        for mixing in layer_core::ColorMixSpace::ALL {
+            let mut canvas = canvas();
+            let pigment = [0.24, 0.09, 0.42, 1e-8];
+            canvas.fill(canvas.base, pigment);
+            let mut brush = brush(preset, 40.);
+            brush.wet_mix.mix_space = mixing;
+            brush.color_rgba_linear = [pigment[0], pigment[1], pigment[2], 1.];
+            canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [98., 64.])), 6, false);
+            let actual = pixel(&canvas.composite(), 64, 64);
+            let error = (0..3).map(|c| (actual[c] / actual[3] - f64::from(pigment[c])).abs()).fold(0f64, f64::max);
+            let alpha_error = if brush.blender.lift == 0. && brush.wet_mix.amount_of_paint == 0. && brush.wet_mix.refill == 0. {
+                (actual[3] / f64::from(pigment[3]) - 1.).abs()
+            } else { 0. };
+            if !actual.iter().all(|v| v.is_finite()) || actual[3] <= 0. || error > 0.0001 || alpha_error > 0.0001 {
+                failures.push(format!("{preset:?}/{mixing:?}: color error {error}, relative alpha error {alpha_error}, {actual:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn hue_blender_preserves_hdr_lightness() {
+    let pigment = [1.4, 1.2, 1.1, 1.];
+    let mut canvas = canvas();
+    canvas.fill(canvas.base, pigment);
+    let brush = brush(P::HueBlender, 40.);
+    canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [98., 64.])), 6, false);
+    let actual = pixel(&canvas.composite(), 64, 64);
+    for c in 0..4 {
+        assert!((actual[c] - f64::from(pigment[c])).abs() < 2e-5, "HDR hue blender: {actual:?}");
+    }
+}
+
+#[test]
+fn dither_uses_document_luminance_in_every_profile() {
+    let mut reference = Vec::new();
+    for space in RgbSpace::ALL {
+        let mut canvas = Canvas::new(DocumentColor { space, depth: SampleDepth::F32 }, BlendSpace::Linear, None);
+        let transform = RgbSpace::Srgb.linear_transform(space);
+        let colors = [[0., 0.23, 0.], [0.8, 0., 0.]].map(|c| {
+            let rgb = layer_core::color::rgb::apply(transform, c);
+            [rgb[0] as f32, rgb[1] as f32, rgb[2] as f32, 1.]
+        });
+        halves(&mut canvas, colors[0], colors[1]);
+        let mut brush = brush(P::DitherBlender, 40.);
+        brush.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
+        canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [98., 64.])), 6, false);
+        let inverse = space.linear_transform(RgbSpace::Srgb);
+        let actual: Vec<_> = canvas.composite().into_iter().map(|p| {
+            let rgb = layer_core::color::rgb::apply(inverse, [p[0], p[1], p[2]]);
+            [rgb[0], rgb[1], rgb[2], p[3]]
+        }).collect();
+        if reference.is_empty() { reference = actual; continue; }
+        let error = actual.iter().zip(&reference).flat_map(|(a, b)| a.iter().zip(b).map(|(a, b)| (a - b).abs())).fold(0f64, f64::max);
+        assert!(error < 5e-5, "{space:?}: Dither changes physical colors by {error}");
+    }
+}
+
+#[test]
+fn color_mixer_color_is_independent_of_uniform_coverage_scale() {
+    let draw = |alpha: f32, mixing| {
+        let mut canvas = canvas();
+        canvas.fill(canvas.base, [0.2, 0.3, 0.4, alpha]);
+        let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|i| {
+            let rgb = if i % PAGE_SIZE < 66 { [0.05, 0.2, 0.6] } else { [0.8, 0.05, 0.02] };
+            [rgb[0] * alpha, rgb[1] * alpha, rgb[2] * alpha, alpha].into_iter().flat_map(f32::to_le_bytes)
+        }).collect();
+        crate::test_support::upload_page(&canvas.r, &canvas.r.paint_layers[0].pages[0].active().texture, &bytes);
+        let seeded = canvas.composite();
+        assert!((pixel(&seeded, 30, 64)[2] / f64::from(alpha) - 0.6).abs() < 1e-6);
+        let mut brush = brush(P::ColorMixer, 40.);
+        brush.wet_mix.mix_space = mixing;
+        canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [98., 64.])), 3, false);
+        canvas.composite().into_iter().map(|p| {
+            assert!(p.iter().all(|v| v.is_finite()) && p[3] > 0., "{mixing:?}: invalid pigment {p:?}");
+            [p[0] / p[3], p[1] / p[3], p[2] / p[3]]
+        }).collect::<Vec<_>>()
+    };
+    for mixing in layer_core::ColorMixSpace::ALL {
+        let (dense, faint) = (draw(0.5, mixing), draw(1e-8, mixing));
+        let error = dense.iter().zip(&faint).flat_map(|(a, b)| a.iter().zip(b).map(|(a, b)| (a - b).abs())).fold(0f64, f64::max);
+        assert!(error < 0.0001, "{mixing:?}: changing coverage changes color by {error}");
+    }
+}
+
+
+#[test]
+fn painterly_blends_high_contrast_hdr_without_a_variance_ceiling() {
+    let draw = |scale: f32| {
+        let mut canvas = canvas();
+        canvas.fill(canvas.base, [0., 0., 0., 1.]);
+        let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|i| {
+            let mut hash = (i as u32).wrapping_mul(747796405).wrapping_add(2891336453);
+            hash = ((hash >> ((hash >> 28) + 4)) ^ hash).wrapping_mul(277803737);
+            hash = (hash >> 22) ^ hash;
+            let value = if hash & 1 == 0 { 0. } else { scale };
+            [value, value, value, 1.].into_iter().flat_map(f32::to_le_bytes)
+        }).collect();
+        crate::test_support::upload_page(&canvas.r, &canvas.r.paint_layers[0].pages[0].active().texture, &bytes);
+        let mut brush = brush(P::PainterlyBlender, 20.);
+        brush.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
+        let dabs = contacts(&brush, &line([30., 64.], [98., 64.]));
+        canvas.stroke(1, &brush, &dabs, dabs.len(), false);
+        canvas.composite().into_iter().map(|p| [p[0] / f64::from(scale), p[1] / f64::from(scale), p[2] / f64::from(scale), p[3]]).collect::<Vec<_>>()
+    };
+    let low = draw(1.);
+    let high = draw(65504.);
+    let mut worst = (0., 0, [0.; 4], [0.; 4]);
+    for (i, (a, b)) in low.into_iter().zip(high).enumerate() {
+        if !(48..88).contains(&(i % 128)) || !(60..68).contains(&(i / 128)) { continue; }
+        assert!(a.iter().chain(&b).all(|v| v.is_finite()), "nonfinite Painterly pigment: {a:?}, {b:?}");
+        let error = (0..4).map(|c| (a[c] - b[c]).abs()).fold(0f64, f64::max);
+        if error > worst.0 { worst = (error, i, a, b); }
+    }
+    eprintln!("Painterly HDR scale worst {worst:?}");
+    assert!(worst.0 < 0.001, "Painterly HDR scale mismatch: {worst:?}");
+}

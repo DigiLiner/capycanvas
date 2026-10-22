@@ -198,14 +198,19 @@ amount        = 1 - exp(-rate × exposure)
 trace         = x - clamp(Σ motion_i × pull × a_i × lane_i(x), 128 px)
 radius        = min(reach × diameter × sqrt(rate × exposure / amount), 112 px)
 field         = blender_field(kind, x, trace, radius)   // in the mixing space
-canvas_new(x) = mix_in_mixing_space(canvas_old(x), field, amount)
 alpha_new(x)  = alpha_old(x) + max(alpha_field - alpha_old(x), 0) × amount
+color_share   = amount × min(alpha_field, 1) / alpha_new(x)
+color_new(x)  = mix_in_mixing_space(color_old(x), color_field, color_share)
+canvas_new(x) = color_new(x) × alpha_new(x)
 ```
 
 Alpha rises toward the field's alpha at the rate the colour mixes and never
 falls, so consecutive chunks compose like one longer pass: two passes at half
 the exposure raise alpha as far as one full pass. Paint pulled into
 transparency therefore fades smoothly instead of banding at the chunk spacing.
+Colour shares account for the resulting coverage. Empty pickup leaves the
+destination unchanged; an empty destination takes the field's straight colour.
+Colour division uses the actual positive normal alpha.
 
 A kind that touches paper, with Texture strength above 0, compiles a paper
 variant of its kernel. It reads the paper once per pixel after the contact loop
@@ -234,6 +239,14 @@ gather, and a sample inside the page's own texture skips the neighbourhood
 switch. They do not use the wet-paint reservoir, and only the Tissue's lift
 lowers alpha.
 
+Grainy's paper regression bounds its gain so every sampled pigment retains a
+nonnegative weight. Its weaker Oklab chroma response reassociates chroma with
+the reconstructed alpha. Texture-Keeping divides its frequency bands by their
+actual coverage. Hue preserves extended RGB until native publication, and
+Comb and Dither use the document profile's luminance coefficients.
+Painterly compares sectors against its first candidate, without an absolute
+variance ceiling that could reject every sector on HDR paint.
+
 Wet paint uses the separate reservoir path. Loaded oils and palette knives keep
 spatial brush-local state:
 
@@ -248,6 +261,12 @@ dragged(x) = sample(canvas_old, x - smear × a(x) × motion)
 source(x) = mix(dragged(x), reservoir(local(x)), dilution, paint_amount)
 canvas_new(x) = deposit(canvas_old(x), source(x), density × attack × a(x))
 ```
+
+Reservoir exchange and deposition weight straight colours by their pigment
+coverage, including faint pickup. With no loaded paint or refill, Wet Blender
+and Color Mixer raise coverage only toward sampled coverage. Repeated contact
+does not turn uniformly faint paint opaque; density controls transfer rather
+than inventing coverage.
 
 Watercolor does not use the reservoir or a drying clock. A sparse wetness
 channel records water/material membership independently of pigment density and

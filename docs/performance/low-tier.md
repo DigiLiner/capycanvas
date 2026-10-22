@@ -1668,6 +1668,35 @@ Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measur
 | Liquify Edge (63) | Very complex | 512 px | 24.50 fresh updates/s (23.93–24.94); fresh completion-gap p99 ≤125.31 ms | **Not met** |
 | Liquify Reconstruct (64) | Very complex | 512 px | 34.84 fresh updates/s (34.66–36.60); fresh completion-gap p99 ≤65.94 ms | **Not met** |
 
+### Blenders on populated photographic paint
+
+Measured on 2026-10-21 on the TCL TAB 11 Gen 2, with the blender correctness
+changes on `e16049138`: `material_blend.wgsl` SHA-256 starts `d4aab206a8b2`,
+`material_transport.wgsl` starts `0477a69071a1`, and the optimized benchmark APK
+starts `a3025b3a7a43`. Rust 1.99.1 uses the release profile and R8 optimization.
+These measurements select the populated `Photo` paint layer itself at 100%
+opacity, with hidden Paper, rather than an empty paint layer above it. They do
+not establish the ordinary empty-layer guarantee or a comparison with older rows.
+
+The 4248 × 2832 sRGB8 Sony downscale uses Perceptual blending, Fit zoom 0.343538,
+the default Sketch workspace and glass, Stats closed, and no tracing. Each
+512 px preset keeps its default settings, including Grainy's paper strength 1,
+with 16 ms prediction and a contained 310 × 150 px ellipse at pressure 1 and
+tilt 0. Pipelines are warm and a priming stroke is undone before three 10 s
+OS-injected 200 Hz strokes. Thermal status is 0 before and after each preset.
+
+| Preset | Completed updates/s, median (range) | Fresh input updates/s, median (range) | Completion gap p99 range | Fresh input gap p99 range | 60/s and 33.3 ms limits |
+| --- | --- | --- | --- | --- | --- |
+| Grainy Blender (48) | 3.335 (3.333–3.493) | 3.335 (3.333–3.493) | 455.606–517.276 ms | 455.606–517.276 ms | **Not met** |
+| Color Mixer (58) | 1.497 (1.397–1.499) | 1.497 (1.397–1.499) | 1133.566–1146.939 ms | 1133.566–1146.939 ms | **Not met** |
+| Blending Knife (56) | 0.599 (0.599–0.699) | 0.599 (0.599–0.699) | 1732.741–1739.907 ms | 1732.741–1739.907 ms | **Not met** |
+
+Raw inputs, completion records, setup state, screenshots, source hashes and the
+measured APK are retained in `artifacts/blender-audit-current/tablets/low/` and
+its parent. These are GPU-completed canvas updates, not scanout measurements.
+The photographic paint is opaque; transparent-edge and HDR correctness are
+separate renderer fixtures.
+
 ### Retained-map Liquify
 
 Measured on 2026-10-20 on the TCL TAB 11 Gen 2, Mali-G52 MC2, with the

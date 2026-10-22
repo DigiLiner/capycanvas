@@ -1948,6 +1948,35 @@ are kept separate from the 10 s comparison table below.
 | Liquify Edge (63) | Very complex | 512 px | 155.55 fresh updates/s (146.84–159.02); fresh completion-gap p99 ≤28.42 ms | **Gap not met** |
 | Liquify Reconstruct (64) | Very complex | 512 px | 172.73 fresh updates/s (171.20–179.56); fresh completion-gap p99 ≤16.54 ms | **Completion limits met** |
 
+### Blenders on populated photographic paint
+
+Measured on 2026-10-21 on the Wacom MovinkPad Pro 14, with the blender correctness
+changes on `e16049138`: `material_blend.wgsl` SHA-256 starts `d4aab206a8b2`,
+`material_transport.wgsl` starts `0477a69071a1`, and the optimized benchmark APK
+starts `a3025b3a7a43`. Rust 1.99.1 uses the release profile and R8 optimization.
+These measurements select the populated `Photo` paint layer itself at 100%
+opacity, with hidden Paper, rather than an empty paint layer above it. They do
+not establish the ordinary empty-layer guarantee or a comparison with older rows.
+
+The 9504 × 6336 sRGB8 Sony photo uses Perceptual blending, Fit zoom 0.23828125,
+the default Sketch workspace and glass, Stats closed, and no tracing. Each
+512 px preset keeps its default settings, including Grainy's paper strength 1,
+with 16 ms prediction and a contained 310 × 150 px ellipse at pressure 1 and
+tilt 0. Pipelines are warm and a priming stroke is undone before three 10 s
+OS-injected 200 Hz strokes. Thermal status is 0 before and after each preset.
+
+| Preset | Completed updates/s, median (range) | Fresh input updates/s, median (range) | Completion gap p99 range | Fresh input gap p99 range | 120/s and 16.7 ms limits |
+| --- | --- | --- | --- | --- | --- |
+| Grainy Blender (48) | 198.090 (197.052–198.955) | 174.880 (173.316–177.770) | 10.524–11.224 ms | 13.231–13.533 ms | **Met for this workload** |
+| Color Mixer (58) | 110.450 (110.319–110.884) | 109.751 (109.320–109.985) | 17.884–19.599 ms | 17.884–20.292 ms | **Not met** |
+| Blending Knife (56) | 27.557 (27.274–27.868) | 27.557 (27.274–27.868) | 47.740–62.078 ms | 47.740–62.078 ms | **Not met** |
+
+Raw inputs, completion records, setup state, screenshots, source hashes and the
+measured APK are retained in `artifacts/blender-audit-current/tablets/top/` and
+its parent. These are GPU-completed canvas updates, not scanout measurements.
+The photographic paint is opaque; transparent-edge and HDR correctness are
+separate renderer fixtures.
+
 ### Retained-map Liquify
 
 Measured on 2026-10-20 on the Wacom MovinkPad Pro 14, Adreno 735, with the

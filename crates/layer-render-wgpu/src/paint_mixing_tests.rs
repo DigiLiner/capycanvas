@@ -127,3 +127,24 @@ fn every_mixing_space_shares_one_pass_plan() {
         assert!(plans.iter().all(|plan| *plan == plans[0]), "{preset:?}");
     }
 }
+
+#[test]
+fn wet_pickup_approaches_empty_paint_continuously() {
+    for mixing in ColorMixSpace::ALL {
+        let draw = |alpha| {
+            let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+            let document = paint_document([128; 2], "faint pickup");
+            paint(&mut r, &document, [0., 1., 0., alpha], [64.; 2], 200., true, BlendSpace::Linear);
+            let mut style = crate::tests::test_style(BrushExecution::Wet);
+            style.wet_mix = layer_core::BrushWetMix { amount_of_paint: 0.5, mix_space: mixing, ..Default::default() };
+            let mut contact = dab(RED);
+            contact.radii = [200.; 2];
+            contact.material = [0., 0., 1., 0.];
+            let wet = DabBatch { stroke_id: StrokeId(2), ..crate::test_support::dab_batch(target(&document), style, batch(target(&document)).damage) };
+            submit(&mut r, document.scene(), &[contact], &[wet], false, BlendSpace::Linear);
+            composite(&r)
+        };
+        let (empty, faint) = (draw(0.), draw(1e-7));
+        for c in 0..3 { assert!((empty[c] - faint[c]).abs() < 2e-6, "{mixing:?}: empty {empty:?}, faint {faint:?}"); }
+    }
+}
