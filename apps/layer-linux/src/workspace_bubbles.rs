@@ -578,6 +578,8 @@ impl Bubble {
                     if w.bubbles.drag(&w, grab, ContactPhase::Down, origin) {
                         bubble.imp().contact.set(Some(Contact::Moving));
                         w.bubbles.drag(&w, grab, ContactPhase::Move, at);
+                    } else {
+                        bubble.imp().contact.set(None);
                     }
                 }
                 Some(Contact::Moving) => {
@@ -748,13 +750,14 @@ impl Layer {
 pub(super) struct Bubbles {
     pub(super) layer: Layer,
     tick: RefCell<Option<gtk::TickCallbackId>>,
+    theme: Cell<Option<Theme>>,
 }
 
 impl Bubbles {
     pub(super) fn new() -> Self {
         let layer: Layer = glib::Object::new();
         layer.set_widget_name("tool-bubbles");
-        Self { layer, tick: RefCell::new(None) }
+        Self { layer, tick: RefCell::new(None), theme: Cell::new(None) }
     }
 
     pub(super) fn refresh(&self, w: &Rc<Workspace>, state: &UiState) {
@@ -765,6 +768,7 @@ impl Bubbles {
             let rgb = |c: HexColor| gdk::RGBA::new(c.0[0] as f32 / 255., c.0[1] as f32 / 255., c.0[2] as f32 / 255., 1.);
             [gdk::RGBA::new(r, g, b, a), rgb(palette.text), rgb(palette.accent)]
         });
+        let retheme = self.theme.replace(Some(state.theme)) != Some(state.theme);
         let existing = self.layer.bubbles();
         for bubble in &existing {
             let keep = views.iter().find(|v| v.id == bubble.id()).is_some_and(|v| {
@@ -780,7 +784,12 @@ impl Bubbles {
                 bubble.set_parent(&self.layer);
                 bubble
             });
-            bubble.imp().colors.set(colors);
+            if bubble.imp().colors.replace(colors) != colors {
+                bubble.queue_draw();
+            }
+            if retheme && let (Some(picture), Some(id)) = (bubble.imp().preview.borrow().as_ref(), view.preview) {
+                picture.set_paintable(Some(&crate::previews::texture(id, state.theme)));
+            }
             bubble.imp().display.set(Some((w.paint_view_color(), w.picker_headroom())));
             if bubble.imp().view.borrow().as_ref() != Some(&view) {
                 bubble.set_beads(w, &view);

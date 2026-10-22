@@ -115,7 +115,9 @@ fold it; **Fold when not in use** in the hold menu keeps it open until tapped.
 ## Zen mode
 
 Bubbles stay visible in Zen mode, like floating panels, and their drags and
-menus keep working while other chrome is hidden. Zen changes nothing else on
+menus keep working while other chrome is hidden. A chooser or Layers card
+opened from a bubble shows on its own (`UiSession::zen_keeps_drawer`) instead of
+bringing the docks back. Zen changes nothing else on
 its own: **Show in Zen mode** in a toolbar's menu keeps that toolbar (off by
 default), and a one-finger swipe in from an edge peeks the toolbars docked
 there until the next contact elsewhere. Dropping a bubble on a toolbar kept or
@@ -131,3 +133,9 @@ peeked in Zen puts it back.
   tool and a chooser row out with mouse and touch, walks the taps, adjusts a ring,
   pushes one bubble with another, opens the hold menu and puts both back, in both
   themes.
+- Motion: `LAYER_NATIVE_EVENT_MS=4 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubble_motion`
+  drags one bubble through four others with 250 Hz mouse and touch input and
+  reports presentation rate, frame gaps and canvas GPU time for steady motion;
+  it fails if steady motion refreshes any UI model. Compare it with
+  `--workspace-motion` on the same machine. Bubbles exist only on GTK, so no
+  tier row is measured yet.

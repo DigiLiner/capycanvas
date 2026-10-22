@@ -514,3 +514,21 @@ fn pinching_the_color_ring_resizes_it_within_its_range() {
     assert!(act(&mut s, BubbleAction::Resize { id: brush, scale: 2. }).is_err());
     assert!(act(&mut s, BubbleAction::Resize { id, scale: f32::NAN }).is_err());
 }
+
+#[test]
+fn a_bubble_drawer_in_zen_keeps_other_chrome_hidden() {
+    let mut s = desk();
+    let (panel, tile) = toolbar_tile(&mut s, ToolbarControl::Panel { panel: Panel::Layers });
+    let layers = take(&mut s, BubbleGrab::Tile { panel, tile }, FAR);
+    invoke(&mut s, CommandId::ZenMode);
+    chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default());
+    assert!(s.interaction.hidden);
+    tap(&mut s, layers);
+    let reply = chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default());
+    assert!(reply.chrome_hidden && s.zen_keeps_drawer(), "the Layers card opens without bringing the docks back");
+    tap(&mut s, layers);
+    assert!(!s.zen_keeps_drawer());
+    customize(&mut s, CustomizationAction::ManageToolbars);
+    let reply = chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default());
+    assert!(!reply.chrome_hidden, "other customization still shows chrome");
+}

@@ -300,3 +300,95 @@ fn native_tool_bubbles() {
     }
     d.finish();
 }
+
+#[test]
+#[ignore = "private display: LAYER_NATIVE_EVENT_MS=4 workspace-motion.sh gtk --native-test=native_tool_bubble_motion"]
+fn native_tool_bubble_motion() {
+    let mut d = Driver::new("art.capycanvas.ToolBubbleMotion");
+    d.w.dispatch(UiAction::RestoreWorkspace {
+        workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }),
+    });
+    pump(400);
+    let viewport = [d.w.surface.width() as f32, d.w.surface.height() as f32];
+    let grabs = [
+        BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::PointyPencil as u32 } },
+        BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Oil } },
+        BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::Charcoal as u32 } },
+        BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Watercolor } },
+        BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::Marker as u32 } },
+    ];
+    for (i, grab) in grabs.into_iter().enumerate() {
+        let at = canvas_spot(&d, 0.3 + i as f32 * 0.1, 0.5);
+        for phase in [ContactPhase::Down, ContactPhase::Up] {
+            d.w.dispatch(UiAction::Bubble { action: BubbleAction::Drag { grab, phase, position: at, viewport } });
+        }
+    }
+    pump(600);
+    let mover = views(&d)[0].id;
+    let mut reports = Vec::new();
+    for device in ["mouse", "touch"] {
+        let origin = center(&d, mover);
+        d.input.perform(serde_json::json!([contact(device, "down", origin), contact(device, "move", [origin[0] + 6., origin[1]]), contact(device, "move", [origin[0] + 12., origin[1]])]));
+        pump(100);
+        let refreshes = d.w.publication.refreshes.get();
+        let clock = d.w.surface.frame_clock().unwrap();
+        let timings = Rc::new(RefCell::new(Vec::new()));
+        let after = clock.connect_after_paint(glib::clone!(#[strong] timings, move |clock| {
+            if let Some(t) = clock.current_timings() {
+                timings.borrow_mut().push(t);
+            }
+        }));
+        let stats = ui_session(&d.w).engine().backend().stats.clone();
+        *stats.lock().unwrap() = Default::default();
+        let events: Vec<_> = (0..550)
+            .map(|i| {
+                let t = i as f32 * 0.004;
+                let swing = |p: f32| (p * std::f32::consts::TAU).sin();
+                contact(device, "move", [origin[0] + 12. + swing(t * 0.5) * 420., origin[1] + swing(t * 1.5) * 60.])
+            })
+            .collect();
+        d.input.perform(serde_json::Value::Array(events));
+        let steady = d.w.publication.refreshes.get();
+        let steady_end = clock.frame_time();
+        d.input.perform(serde_json::json!([contact(device, "up", [origin[0] + 12., origin[1]])]));
+        let released = std::time::Instant::now();
+        while ui_session_mut(&d.w).step_bubbles(clock.frame_time().max(0) as u64 * 1000) && released.elapsed().as_secs() < 3 {
+            pump(16);
+        }
+        let settle_ms = released.elapsed().as_secs_f64() * 1000.;
+        clock.disconnect(after);
+        assert_eq!(steady, refreshes, "{device}: steady bubble motion retains every UI model");
+        let mut presented: Vec<_> = timings
+            .borrow()
+            .iter()
+            .filter(|t| t.is_complete() && t.presentation_time() > 0 && t.frame_time() <= steady_end)
+            .map(|t| t.presentation_time())
+            .collect();
+        presented.sort_unstable();
+        presented.dedup();
+        let mut gaps: Vec<_> = presented.windows(2).map(|p| (p[1] - p[0]) as f64 / 1000.).collect();
+        gaps.sort_by(f64::total_cmp);
+        let hz = (presented.len().max(2) - 1) as f64 * 1_000_000. / (presented.last().unwrap() - presented[0]).max(1) as f64;
+        let canvas = {
+            let stats = stats.lock().unwrap();
+            let mut gpu: Vec<f64> = stats.gpu.iter().map(|v| v[1]).collect();
+            gpu.sort_by(f64::total_cmp);
+            serde_json::json!({ "backdrop_frames": stats.backdrop_frames, "frames": stats.cpu.len(), "gpu_ms": gpu.get(gpu.len() / 2), "gpu_p95_ms": gpu.get(gpu.len() * 95 / 100) })
+        };
+        let report = serde_json::json!({
+            "device": device, "presented_frames": presented.len(), "presentation_hz": hz,
+            "presentation_gap_p50_ms": gaps.get(gaps.len() / 2), "presentation_gap_p99_ms": gaps.get(gaps.len() * 99 / 100),
+            "gaps_over_12_ms": gaps.iter().filter(|g| **g > 12.).count(), "longest_gap_ms": gaps.last(),
+            "refresh_intervals_us": timings.borrow().iter().map(|t| t.refresh_interval()).collect::<std::collections::BTreeSet<_>>(),
+            "settle_ms": settle_ms, "canvas": canvas,
+        });
+        eprintln!("{report}");
+        reports.push(report);
+        let moved = views(&d).iter().filter(|v| v.id != mover).count();
+        assert_eq!(moved, 4);
+    }
+    if let Some(dir) = std::env::var_os("LAYER_TEST_ARTIFACTS") {
+        std::fs::write(std::path::Path::new(&dir).join("tool-bubble-motion.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    }
+    d.finish();
+}

@@ -585,9 +585,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => position,
         };
         self.set_halo(None);
-        if self.state.customization.drawer.as_ref().is_some_and(|d| {
+        let closes = self.state.customization.drawer.as_ref().is_some_and(|d| {
             d.anchor == DrawerAnchor::Bubble { id } || matches!(grab, BubbleGrab::Variant { .. })
-        }) {
+        });
+        if closes {
             self.state.customization.drawer = None;
         }
         self.bubble_state.drag = Some(BubbleDrag { id, offset: [center[0] - position[0], center[1] - position[1]], source: bounds });
@@ -595,7 +596,20 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_state.desk.grab(id);
         self.bubble_state.desk.drag(center);
         self.bubble_state.desk.home(self.bubble_homing(viewport, position, bounds));
-        Ok(self.changed(regions::BUBBLES | regions::CUSTOMIZATION, false))
+        Ok(self.changed(regions::BUBBLES | if closes { regions::CUSTOMIZATION } else { 0 }, false))
+    }
+
+    /// A drawer opened from a bubble stays with it in Zen without pinning other chrome.
+    pub fn zen_keeps_drawer(&self) -> bool {
+        self.state.customization.drawer.as_ref().is_some_and(|d| matches!(d.anchor, DrawerAnchor::Bubble { .. }))
+    }
+
+    pub(crate) fn only_bubble_drawer(&self) -> bool {
+        let customization = &self.state.customization;
+        self.zen_keeps_drawer()
+            && customization.expanded.is_none()
+            && customization.column_drawers.is_empty()
+            && !customization.blocks_shortcuts()
     }
 
     pub(crate) fn bubble_menu(&self, id: u32) -> Result<ContextMenu, String> {

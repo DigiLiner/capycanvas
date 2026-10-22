@@ -1764,7 +1764,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || self.interaction.keyboard_chrome
             || self.interaction.keep_chrome_until_contact
             || self.state.settings_open
-            || self.state.customization.is_open()
+            || (self.state.customization.is_open() && !self.only_bubble_drawer())
             || self.divider_drag.is_some()
             || self.floating_resize.is_some()
             || self.workspace_drag.is_some_and(|drag| drag.chrome_visible);
