@@ -1278,6 +1278,7 @@ fn hatching(extent: [f64; 2], count: u64) -> Vec<Record> {
         Record::Path(PathItem::new(ItemId(i + 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))
     }).collect()
 }
+#[cfg(target_os = "linux")]
 fn thread_cpu_ms(clock: libc::clockid_t) -> f64 {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     assert_eq!(unsafe { libc::clock_gettime(clock, &mut time) }, 0);
@@ -1347,6 +1348,7 @@ fn width_previews_on_a_display_level_that_keeps_one_layer_image_show_the_paths_a
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "crowded vector layer width scrub benchmark"]
 fn crowded_vector_layer_width_scrub_frames() {
