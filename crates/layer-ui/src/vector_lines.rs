@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 const LINE_TOLERANCE: f64 = 0.5;
 
-struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample>, continues: Option<PathItem> }
+struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample>, continues: Option<(PathItem, bool)> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
 struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, shown: VectorObject, last: [f64; 2], pending: Vec<[f64; 2]>, radius: f64, mode: layer_core::authored::vector::EraseMode }
 
@@ -178,7 +178,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let offset = self.engine.document().scene().occurrence_offset64(layer);
                 let p = self.state.camera.input_transform().map(event.surface_position);
                 let local = [f64::from(p.x) - offset[0], f64::from(p.y) - offset[1]];
-                let continues = self.selected_open_end(layer, local, 6. * self.document_per_surface_pixel()).map(|(path, _)| path);
+                let continues = self.selected_open_end(layer, local, 6. * self.document_per_surface_pixel());
                 let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset, LINE_TOLERANCE * self.document_per_surface_pixel());
                 self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), shown: Vec::new(), continues });
             }
@@ -222,7 +222,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let document = self.engine.document();
             let object = document.scene().vector_layer(line.layer).ok_or("The vector layer was removed")?;
             let (id, edit) = match &line.continues {
-                Some(original) => (original.id, self.continue_path(line.layer, original, &path(original.id, &line.paint, fitted), false)?),
+                Some((original, at_end)) => (original.id, self.continue_path(line.layer, original, &path(original.id, &line.paint, fitted), *at_end, false)?),
                 None => {
                     let id = object.allocate_id();
                     (id, document.vector_object_edit(line.layer, object.insert_front(vec![Record::Path(path(id, &line.paint, fitted))])).map_err(|e| e.to_string())?)
@@ -251,7 +251,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let object = document.scene().vector_layer(drawn.line.layer).ok_or("The vector layer was removed")?;
         let Some(position) = object.find(drawn.id) else { return Ok(()) };
         let edit = match &drawn.line.continues {
-            Some(original) => self.continue_path(drawn.line.layer, original, &path(drawn.id, &drawn.line.paint, fitted), false)?,
+            Some((original, at_end)) => self.continue_path(drawn.line.layer, original, &path(drawn.id, &drawn.line.paint, fitted), *at_end, false)?,
             None => document.vector_object_edit(drawn.line.layer, object.replace([(position, Some(Record::Path(path(drawn.id, &drawn.line.paint, fitted))))])).map_err(|e| e.to_string())?,
         };
         self.engine.amend_edit(edit).map_err(|e| e.to_string())?;

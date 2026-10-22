@@ -108,14 +108,17 @@ filled when selected, and selected anchors show their handles.
   turn the curve; a smooth anchor keeps its handles in line and a symmetric one
   mirrors them, unless Alt breaks them into a corner.
 - Drag a segment to bend it; click a segment to add an anchor without changing
-  the curve.
+  the curve. The new anchor lands at the click, including on straight segments.
 - Double-click an anchor to switch it between corner and smooth.
 - **Clear Selected** (Delete) removes the selected anchors and joins their
   neighbors; a path left with one anchor goes. Width profiles keep the widths
   at the remaining anchors.
 
-Editing an anchor turns a rectangle or ellipse into a plain path. Each drag,
-click or deletion is one undo step. The Edit Points tool options offer Split at
+Editing an anchor turns a rectangle or ellipse into a plain path. Anchor and
+handle selection belongs to the selected paths in that layer; a history change
+cannot transfer it to a different anchor. A drag that returns to the original
+geometry adds no undo step. Each other drag, click or deletion is one undo step.
+The Edit Points tool options offer Split at
 point, Join paths, Close path and Reverse direction.
 
 ## Path commands
@@ -142,7 +145,8 @@ widths, and a command that would leave the paths as they are, such as
 reversing or turning a single dot, adds no undo step.
 
 Starting G-Pen or Monoline within 6 screen pixels of an open end of a selected
-path continues that path, in the same undo step as the line; the Path tool
+path continues that end, even when the new line finishes nearer its other end,
+in the same undo step as the line; the Path tool
 does the same with its first click, and clicking the path's other end closes
 it.
 
@@ -151,7 +155,7 @@ it.
 Figure's **Path** draws a path anchor by anchor. A click adds
 a corner; a press and drag pulls out symmetric handles for a smooth anchor, and
 Alt drags only the outgoing handle. Shift keeps the new anchor at 45° steps from
-the last. The canvas bar's Remove Point (Backspace), Cancel (Escape) and Finish
+the last. Dragging a handle back to its anchor retracts it. The canvas bar's Remove Point (Backspace), Cancel (Escape) and Finish
 (Enter) work as for polygon selections; Undo also removes the last anchor, and
 with none left cancels the draft, without undoing earlier steps. Clicking the
 first anchor closes the path. The finished path uses Figure's paint mode, line width and colors, with

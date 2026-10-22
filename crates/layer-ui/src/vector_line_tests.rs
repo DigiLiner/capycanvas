@@ -10,6 +10,157 @@ fn vector_session_on(platform: Platform) -> (UiSession<Recorder>, OccurrenceHand
 fn saved_settings(s: &UiSession<Recorder>) -> Option<crate::Settings> {
     s.state.requests.iter().rev().find_map(|r| match &r.kind { HostRequestKind::SaveSettings { settings } => Some((**settings).clone()), _ => None })
 }
+fn point_edit_session(platform: Platform) -> (UiSession<Recorder>, OccurrenceHandle) {
+    use layer_core::authored::vector::*;
+    let (mut s, layer) = vector_session_on(platform);
+    let paths = [300., 700.].into_iter().enumerate().map(|(i, y)| {
+        let geometry = PathGeometry::new(vec![Subpath::new(&[
+            Anchor::new([100., y], [0.; 2], [100., -100.], AnchorKind::CORNER),
+            Anchor::new([500., y], [-100., -100.], [0.; 2], AnchorKind::CORNER),
+        ], false)]).unwrap();
+        Record::Path(PathItem::new(ItemId(i as u64 + 1), Arc::new(geometry), Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(Paint::color(layer_core::color::RgbColor::BLACK), 4.))]))))
+    }).collect();
+    let edit = s.engine.document().vector_object_edit(layer, VectorObject::from_records(paths)).unwrap();
+    s.layer_edit(edit).unwrap();
+    s.select_vector_items(layer, [ItemId(1)].into()).unwrap();
+    (s, layer)
+}
+
+#[test]
+fn vector_point_handles_belong_to_the_selected_paths_and_current_layer() {
+    use layer_core::authored::vector::ItemId;
+    for platform in Platform::ALL {
+        let (mut s, layer) = point_edit_session(platform);
+        invoke(&mut s, CommandId::EditPoints);
+        let click = surface_at(&s, [100., 300.]);
+        press(&mut s, 100, &[click, click]);
+        invoke(&mut s, CommandId::Move);
+        s.select_vector_items(layer, [ItemId(2)].into()).unwrap();
+        invoke(&mut s, CommandId::EditPoints);
+        let before = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let points = [[200., 200.], [225., 175.], [250., 150.]].map(|p| surface_at(&s, p));
+        press(&mut s, 300, &points);
+        assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &before, "{platform:?}: invisible handles cannot edit a deselected path");
+        s.dispatch(UiAction::Layer { action: LayerAction::NewVector }).unwrap();
+        let other = s.engine.document().working.occurrence.unwrap();
+        let edit = s.engine.document().vector_object_edit(other, before.clone()).unwrap();
+        s.layer_edit(edit).unwrap();
+        let points = [[200., 200.], [225., 175.], [250., 150.]].map(|p| surface_at(&s, p));
+        press(&mut s, 500, &points);
+        assert_eq!(s.engine.document().scene().vector_layer(other).unwrap(), &before, "{platform:?}: local path IDs do not carry anchor selection between layers");
+    }
+}
+
+#[test]
+fn vector_point_undo_does_not_retarget_delete_and_unchanged_drags_add_no_history() {
+    for platform in Platform::ALL {
+        let (mut s, layer) = point_edit_session(platform);
+        invoke(&mut s, CommandId::EditPoints);
+        let before = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let checkpoint = s.engine.checkpoint();
+        let points = [[100., 300.], [150., 350.], [100., 300.]].map(|p| surface_at(&s, p));
+        press(&mut s, 100, &points);
+        assert_eq!(s.engine.checkpoint(), checkpoint, "{platform:?}: returning an anchor adds no edit");
+        let on_curve = surface_at(&s, [300., 225.]);
+        press(&mut s, 200, &[on_curve, on_curve]);
+        invoke(&mut s, CommandId::Undo);
+        invoke(&mut s, CommandId::ClearSelected);
+        assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &before, "{platform:?}: Undo cannot transfer selected anchor indices to another anchor");
+    }
+}
+
+#[test]
+fn vector_point_drags_back_preserve_live_shapes_and_smooth_segments() {
+    use layer_core::authored::vector::*;
+    for shape in [ShapeKind::Rectangle { radii: [20.; 4] }, ShapeKind::Ellipse] {
+        let (mut s, layer) = point_edit_session(Platform::Gtk);
+        let object = s.engine.document().scene().vector_layer(layer).unwrap();
+        let (position, path) = object.paths().next().unwrap();
+        let path = path.with_shape(LiveShape { kind: shape, center: [300., 300.], size: [200., 160.], rotation: 0. }).unwrap();
+        let edit = s.engine.document().vector_object_edit(layer, object.replace([(position, Some(Record::Path(path)))])).unwrap();
+        s.layer_edit(edit).unwrap();
+        invoke(&mut s, CommandId::EditPoints);
+        let before = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        let subpath = &before.paths().next().unwrap().1.geometry.subpaths()[0];
+        for at in [subpath.anchor(0).point(), subpath.segment(0).point(0.5)] {
+            let checkpoint = s.engine.checkpoint();
+            let points = [at, [at[0] + 50., at[1] + 50.], at].map(|p| surface_at(&s, p));
+            press(&mut s, 100, &points);
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+            assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &before, "a returned drag preserves the live shape and anchor kinds");
+        }
+    }
+}
+
+#[test]
+fn vector_move_double_clicks_require_the_same_layer_and_location() {
+    for platform in Platform::ALL {
+        let (mut s, layer) = point_edit_session(platform);
+        invoke(&mut s, CommandId::Move);
+        let first = surface_at(&s, [200., 243.]);
+        press(&mut s, 100, &[first, first]);
+        let far = surface_at(&s, [400., 243.]);
+        press(&mut s, 120, &[far, far]);
+        assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "{platform:?}: distant clicks are not double-clicks");
+        let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        s.dispatch(UiAction::Layer { action: LayerAction::NewVector }).unwrap();
+        let other = s.engine.document().working.occurrence.unwrap();
+        let edit = s.engine.document().vector_object_edit(other, object).unwrap();
+        s.layer_edit(edit).unwrap();
+        invoke(&mut s, CommandId::Move);
+        press(&mut s, 130, &[far, far]);
+        assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "{platform:?}: clicks on different layers are separate");
+    }
+}
+
+#[test]
+fn vector_transform_handles_leave_history_alone_when_returned() {
+    let (mut s, layer) = point_edit_session(Platform::Gtk);
+    invoke(&mut s, CommandId::Move);
+    let before = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let checkpoint = s.engine.checkpoint();
+    let frame = s.vector_frame().unwrap();
+    let at = frame.unit.map([1., 1.]);
+    let points = [at, [at[0] + 50., at[1] + 50.], at].map(|p| surface_at(&s, p));
+    press(&mut s, 100, &points);
+    assert_eq!(s.engine.checkpoint(), checkpoint);
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &before);
+}
+
+#[test]
+fn rapid_vector_drags_remain_drags_on_every_platform() {
+    for platform in Platform::ALL {
+        for tool in [CommandId::Move, CommandId::EditPoints] {
+            let (mut s, layer) = point_edit_session(platform);
+            invoke(&mut s, tool);
+            let start = if tool == CommandId::Move { [300., 225.] } else { [100., 300.] };
+            for (first, delta) in [(100, 0.), (120, 40.)] {
+                let points = [[start[0] + delta, start[1] + delta], [start[0] + delta + 20., start[1] + delta + 20.], [start[0] + delta + 40., start[1] + delta + 40.]].map(|p| surface_at(&s, p));
+                press(&mut s, first, &points);
+            }
+            let object = s.engine.document().scene().vector_layer(layer).unwrap();
+            let anchor = object.paths().find(|(_, p)| p.id.0 == 1).unwrap().1.geometry.subpaths()[0].anchor(0);
+            assert_eq!(anchor.point(), [180., 380.], "{platform:?} {tool:?}: both drags move");
+            assert_eq!(anchor.out_handle(), [100., -100.], "{platform:?} {tool:?}: a drag does not retract handles");
+        }
+    }
+}
+
+#[test]
+fn vector_path_handles_follow_the_release_back_to_the_anchor() {
+    for platform in Platform::ALL {
+        let (mut s, layer) = vector_session_on(platform);
+        s.object_tool(LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline }).unwrap();
+        let points = [[100., 100.], [200., 100.], [100., 100.]].map(|p| surface_at(&s, p));
+        press(&mut s, 100, &points);
+        let end = surface_at(&s, [100., 400.]);
+        press(&mut s, 200, &[end, end]);
+        invoke(&mut s, CommandId::FinishPath);
+        let object = s.engine.document().scene().vector_layer(layer).unwrap();
+        let first = object.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0);
+        assert_eq!((first.in_handle(), first.out_handle()), ([0.; 2], [0.; 2]), "{platform:?}: release at the anchor retracts handles");
+    }
+}
 fn draw_line(s: &mut UiSession<Recorder>, first: u64, samples: u64) {
     for i in 0..samples {
         let phase = if i == 0 { PenPhase::Down } else if i + 1 == samples { PenPhase::Up } else { PenPhase::Move };

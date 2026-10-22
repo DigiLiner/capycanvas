@@ -39,7 +39,7 @@ pub(super) struct VectorMoves {
     pub(super) shown_styles: Option<PathStyles>,
     pub(super) index: VectorIndex,
     context: (bool, bool),
-    click: Option<(ItemId, u64)>,
+    click: Option<(OccurrenceHandle, ItemId, [f64; 2], u64)>,
 }
 
 impl VectorMoves {
@@ -143,7 +143,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     self.vector_moves.gesture = Some(Gesture::Marquee { layer, start: point, end: point, adding });
                     return Ok(true);
                 };
-                let double = self.vector_moves.click.replace((id, event.timestamp_ns)).is_some_and(|(last, at)| last == id && event.timestamp_ns.saturating_sub(at) <= DOUBLE_CLICK_NS);
+                let double = self.vector_moves.click.replace((layer, id, point, event.timestamp_ns)).is_some_and(|(owner, last, previous, at)| owner == layer && last == id
+                    && (point[0] - previous[0]).hypot(point[1] - previous[1]) <= HIT_SLOP * self.document_per_surface_pixel()
+                    && event.timestamp_ns.saturating_sub(at) <= DOUBLE_CLICK_NS);
                 if double && !adding {
                     self.vector_moves.click = None;
                     self.select_vector_items(layer, if selected.contains(&id) { selected } else { [id].into() })?;
@@ -165,11 +167,13 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             PenPhase::Move | PenPhase::Up => {
                 let modifiers = self.interaction.modifiers;
+                let click_reach = CLICK * self.document_per_surface_pixel();
                 let Some(gesture) = &mut self.vector_moves.gesture else { return Ok(false) };
                 let mut motion = None;
                 match gesture {
                     Gesture::Drag { layer, items, start, offset, .. } => {
                         *offset = [point[0] - start[0], point[1] - start[1]];
+                        if offset[0].hypot(offset[1]) > click_reach { self.vector_moves.click = None; }
                         motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), transform: translation(*offset) });
                     }
                     Gesture::Marquee { end, .. } => *end = point,
@@ -249,6 +253,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let [ox, oy] = self.engine.document().scene().occurrence_offset64(layer);
                 let local = translation([-ox, -oy]).compose(delta).compose(translation([ox, oy]));
                 let transformed = original.transform_paths(&paths, local, !self.state.settings.keep_outline_widths).map_err(str::to_string)?;
+                if transformed == original { return Ok(()); }
                 let edit = self.engine.document().vector_object_edit(layer, transformed).map_err(|e| e.to_string())?;
                 self.layer_edit(edit)
             })(),
@@ -278,8 +283,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             (distance <= reach).then_some((distance, path, at_end))
         }).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, path, at_end)| (path, at_end))
     }
-    pub(super) fn continue_path(&self, layer: OccurrenceHandle, original: &PathItem, added: &PathItem, close: bool) -> Result<layer_core::Edit, String> {
-        let joined = original.joined(added, HIT_SLOP * self.document_per_surface_pixel()).map_err(str::to_string)?;
+    pub(super) fn continue_path(&self, layer: OccurrenceHandle, original: &PathItem, added: &PathItem, at_end: bool, close: bool) -> Result<layer_core::Edit, String> {
+        let joined = original.joined_ends(added, at_end, false, HIT_SLOP * self.document_per_surface_pixel()).map_err(str::to_string)?;
         let joined = if close { joined.closed().map_err(str::to_string)? } else { joined };
         let document = self.engine.document();
         let object = document.scene().vector_layer(layer).ok_or("The vector layer was removed")?;

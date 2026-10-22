@@ -174,11 +174,18 @@ impl PathItem {
     pub fn joined(&self, other: &PathItem, tolerance: f64) -> Result<Self, &'static str> {
         let ([a0, a1], [b0, b1]) = (self.open_ends().ok_or("Join open paths")?, other.open_ends().ok_or("Join open paths")?);
         let distance = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]);
-        let (flip_a, flip_b, gap) = [(false, false, distance(a1, b0)), (false, true, distance(a1, b1)), (true, false, distance(a0, b0)), (true, true, distance(a0, b1))]
+        let (flip_a, flip_b, _) = [(false, false, distance(a1, b0)), (false, true, distance(a1, b1)), (true, false, distance(a0, b0)), (true, true, distance(a0, b1))]
             .into_iter().min_by(|x, y| x.2.total_cmp(&y.2)).unwrap();
+        self.joined_ends(other, !flip_a, flip_b, tolerance)
+    }
+    pub fn joined_ends(&self, other: &PathItem, at_end: bool, other_end: bool, tolerance: f64) -> Result<Self, &'static str> {
+        let (flip_a, flip_b) = (!at_end, other_end);
         let a = if flip_a { self.reversed()? } else { self.clone() };
         let b = if flip_b { other.reversed()? } else { other.clone() };
         let (first, second) = (&a.geometry.subpaths()[0], &b.geometry.subpaths()[0]);
+        let [_, a1] = a.open_ends().ok_or("Join open paths")?;
+        let [b0, _] = b.open_ends().ok_or("Join open paths")?;
+        let gap = (a1[0] - b0[0]).hypot(a1[1] - b0[1]);
         let mut anchors = first.to_vec();
         let mut rest = second.to_vec();
         let touching = gap <= tolerance;

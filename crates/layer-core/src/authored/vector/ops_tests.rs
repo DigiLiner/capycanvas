@@ -16,6 +16,15 @@ fn points(path: &PathItem) -> Vec<[f64; 2]> { path.geometry.subpaths().iter().fl
 fn near(a: [f64; 2], b: [f64; 2]) -> bool { (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4 }
 
 #[test]
+fn continuing_uses_the_chosen_end_even_when_the_new_tail_is_closer() {
+    let original = path(1, &[[100., 100.], [300., 100.]], false, 4., None);
+    let added = path(2, &[[305., 100.], [500., 300.], [100., 101.]], false, 4., None);
+    let joined = original.joined_ends(&added, true, false, 6.).unwrap();
+    assert_eq!(joined.open_ends(), Some([[100., 100.], [100., 101.]]));
+    assert_eq!(joined.id, original.id);
+}
+
+#[test]
 fn reversing_runs_anchors_handles_and_widths_backwards() {
     let line = tapered(1, &[[0., 0.], [10., 0.], [20., 5.], [30., 0.]]);
     let reversed = line.reversed().unwrap();

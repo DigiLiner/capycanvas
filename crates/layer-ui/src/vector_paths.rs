@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 const CLOSE_REACH: f64 = 6.;
 
-struct Draft { layer: OccurrenceHandle, paint: Option<SourceTarget>, origin: [f64; 2], anchors: Vec<Anchor>, dragging: bool, continues: Option<(PathItem, [f64; 2])> }
+struct Draft { layer: OccurrenceHandle, paint: Option<SourceTarget>, origin: [f64; 2], anchors: Vec<Anchor>, dragging: bool, handle_drag: bool, continues: Option<(PathItem, [f64; 2], bool)> }
 
 #[derive(Default)]
 pub(super) struct VectorPaths { draft: Option<Draft>, revision: u64 }
@@ -63,12 +63,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if self.vector_paths.draft.as_ref().is_some_and(|draft| draft.layer != layer) { self.cancel_vector_path(); }
                 let reach = CLOSE_REACH * self.document_per_surface_pixel();
                 let near = |p: [f64; 2]| (p[0] - point[0]).hypot(p[1] - point[1]) <= reach;
-                let first = self.vector_paths.draft.as_ref().filter(|draft| draft.anchors.len() >= 2).map(|draft| draft.continues.as_ref().map_or(draft.anchors[0].point(), |(_, far)| *far));
+                let first = self.vector_paths.draft.as_ref().filter(|draft| draft.anchors.len() >= 2).map(|draft| draft.continues.as_ref().map_or(draft.anchors[0].point(), |(_, far, _)| *far));
                 if first.is_some_and(near) { return self.finish_vector_path(true).map(|()| true); }
                 if self.vector_paths.draft.is_none() && paint.is_none() && let Some((original, at_end)) = self.selected_open_end(layer, point, reach) {
                     let [start, end] = original.open_ends().unwrap();
                     let (from, far) = if at_end { (end, start) } else { (start, end) };
-                    self.vector_paths.draft = Some(Draft { layer, paint, origin: [ox, oy], anchors: vec![Anchor::corner(from)], dragging: true, continues: Some((original, far)) });
+                    self.vector_paths.draft = Some(Draft { layer, paint, origin: [ox, oy], anchors: vec![Anchor::corner(from)], dragging: true, handle_drag: false, continues: Some((original, far, at_end)) });
                     self.show_vector_path_preview()?;
                     self.layer_interaction.changed = true;
                     return Ok(true);
@@ -81,9 +81,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                     None => point,
                 };
-                let draft = self.vector_paths.draft.get_or_insert(Draft { layer, paint, origin: [ox, oy], anchors: Vec::new(), dragging: false, continues: None });
+                let draft = self.vector_paths.draft.get_or_insert(Draft { layer, paint, origin: [ox, oy], anchors: Vec::new(), dragging: false, handle_drag: false, continues: None });
                 draft.anchors.push(Anchor::corner(point));
                 draft.dragging = true;
+                draft.handle_drag = false;
             }
             PenPhase::Move | PenPhase::Up => {
                 let alt = self.interaction.modifiers.alt;
@@ -93,7 +94,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let last = draft.anchors.last_mut().unwrap();
                 let at = last.point();
                 let out = [point[0] - at[0], point[1] - at[1]];
-                if out[0].hypot(out[1]) > reach * 0.5 {
+                draft.handle_drag |= out[0].hypot(out[1]) > reach * 0.5;
+                if draft.handle_drag {
                     *last = if alt { Anchor::new(at, last.in_handle(), out, AnchorKind::CORNER) } else { Anchor::new(at, [-out[0], -out[1]], out, AnchorKind::SYMMETRIC) };
                 }
             }
@@ -132,14 +134,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.cancel_vector_path();
             return Err(self.localization().text(refusal).to_string());
         }
-        let continues = self.vector_paths.draft.as_ref().and_then(|draft| draft.continues.as_ref().map(|(original, _)| original.clone()));
+        let continues = self.vector_paths.draft.as_ref().and_then(|draft| draft.continues.as_ref().map(|(original, _, at_end)| (original.clone(), *at_end)));
         let paint = self.vector_paths.draft.as_ref().and_then(|draft| draft.paint);
         let drafted = self.drafted_path(closed && continues.is_none());
         self.cancel_vector_path();
         let Some((layer, path)) = drafted? else { return Ok(()) };
         if paint.is_some() { return self.paint_path(path); }
         let (id, edit) = match continues {
-            Some(original) => (original.id, self.continue_path(layer, &original, &path, closed)?),
+            Some((original, at_end)) => (original.id, self.continue_path(layer, &original, &path, at_end, closed)?),
             None => {
                 let document = self.engine.document();
                 let object = document.scene().vector_layer(layer).ok_or("The vector layer was removed")?;

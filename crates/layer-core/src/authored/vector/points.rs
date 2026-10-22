@@ -29,7 +29,17 @@ impl PathItem {
                     let length = d[0] * d[0] + d[1] * d[1];
                     let u = if length > 0. { (((point[0] - last[0]) * d[0] + (point[1] - last[1]) * d[1]) / length).clamp(0., 1.) } else { 0. };
                     let distance = (last[0] + d[0] * u - point[0]).hypot(last[1] + d[1] * u - point[1]);
-                    if best.is_none_or(|b| distance < b.distance) { best = Some(SegmentHit { subpath: s as u32, segment: index as u32, t: last_t + (t - last_t) * u, distance }); }
+                    if best.is_none_or(|b| distance - tolerance <= b.distance) {
+                        let distance = |t| { let p = segment.point(t); (p[0] - point[0]).hypot(p[1] - point[1]) };
+                        let (mut lo, mut hi) = (last_t, t);
+                        for _ in 0..40 {
+                            let (a, b) = (lo + (hi - lo) / 3., hi - (hi - lo) / 3.);
+                            if distance(a) < distance(b) { hi = b } else { lo = a }
+                        }
+                        let at = [last_t, (lo + hi) * 0.5, t].into_iter().min_by(|a, b| distance(*a).total_cmp(&distance(*b))).unwrap();
+                        let distance = distance(at);
+                        if best.is_none_or(|b| distance < b.distance) { best = Some(SegmentHit { subpath: s as u32, segment: index as u32, t: at, distance }); }
+                    }
                     (last, last_t) = (p, t);
                 });
             }
@@ -43,7 +53,8 @@ impl PathItem {
             if at.anchor as usize >= subpath.len() { return Err("Unknown anchor"); }
             *subpath = subpath.with_anchor(at.anchor as usize, anchor);
         }
-        Ok(self.with_geometry(Arc::new(PathGeometry::new(subpaths)?)))
+        let geometry = PathGeometry::new(subpaths)?;
+        Ok(if geometry == *self.geometry { self.clone() } else { self.with_geometry(Arc::new(geometry)) })
     }
     pub fn with_anchor_inserted(&self, subpath: u32, segment: u32, t: f64) -> Result<Self, &'static str> {
         let source = self.geometry.subpaths().get(subpath as usize).ok_or("Unknown subpath")?;
@@ -122,7 +133,12 @@ impl PathItem {
         let i = at.anchor as usize;
         let anchor = *subpath.anchors().nth(i).ok_or("Unknown anchor")?;
         let flat = anchor.in_handle() == [0.; 2] && anchor.out_handle() == [0.; 2];
-        let switched = if flat {
+        let switched = if anchor.kind == AnchorKind::CORNER && !flat {
+            let (incoming, outgoing) = (anchor.in_handle(), anchor.out_handle());
+            let (a, b) = (incoming[0].hypot(incoming[1]), outgoing[0].hypot(outgoing[1]));
+            let direction = if b > 0. { [outgoing[0] / b, outgoing[1] / b] } else { [-incoming[0] / a, -incoming[1] / a] };
+            Anchor::new(anchor.point(), [-direction[0] * a, -direction[1] * a], [direction[0] * b, direction[1] * b], AnchorKind::SMOOTH)
+        } else if flat {
             let n = subpath.len();
             let neighbor = |step: isize| -> Option<[f64; 2]> {
                 let j = i as isize + step;
@@ -152,6 +168,26 @@ mod tests {
         PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])))
     }
     fn sample(path: &PathItem, steps: u32) -> Vec<[f64; 2]> { path.geometry.segments().flat_map(|s| (0..=steps).map(move |k| s.point(f64::from(k) / f64::from(steps)))).collect() }
+
+    #[test]
+    fn anchors_are_inserted_at_the_pointer_on_straight_segments() {
+        let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([100., 0.])], false)]).unwrap();
+        let path = curve().with_geometry(Arc::new(geometry)).with_style(Arc::new(Style::default()));
+        for x in [10., 25., 75., 90.] {
+            let hit = path.nearest_segment([x, 0.], 0.05).unwrap();
+            let inserted = path.with_anchor_inserted(hit.subpath, hit.segment, hit.t).unwrap();
+            assert!((inserted.geometry.subpaths()[0].anchor(1).point()[0] - x).abs() < 1. / GRID);
+        }
+    }
+
+    #[test]
+    fn a_handled_corner_becomes_smooth_without_retracting_its_handles() {
+        let original = curve();
+        let switched = original.with_anchor_kind_switched(AnchorRef { subpath: 0, anchor: 0 }).unwrap();
+        let anchor = switched.geometry.subpaths()[0].anchor(0);
+        assert_eq!(anchor.kind, AnchorKind::SMOOTH);
+        assert_eq!(anchor.out_handle(), original.geometry.subpaths()[0].anchor(0).out_handle());
+    }
 
     #[test]
     fn inserting_an_anchor_keeps_the_curve_and_its_widths() {

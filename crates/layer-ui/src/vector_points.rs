@@ -1,7 +1,7 @@
 use super::*;
-use layer_core::{Point, authored::vector::{Anchor, AnchorKind, AnchorRef, ItemId, PathItem, Position, Record, SegmentHit, VectorObject}};
+use layer_core::{Point, authored::vector::{Anchor, AnchorKind, AnchorRef, ItemId, PathGeometry, PathItem, Position, Record, SegmentHit, VectorObject}};
 use layer_render::CursorSegment;
-use std::collections::{BTreeMap, BTreeSet};
+use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 
 const REACH: f64 = 6.;
 const DOUBLE_CLICK_NS: u64 = 400_000_000;
@@ -18,7 +18,7 @@ enum Gesture {
 }
 
 #[derive(Default)]
-pub(super) struct VectorPoints { gesture: Option<Gesture>, selected: BTreeSet<PointRef>, click: Option<(PointRef, u64)> }
+pub(super) struct VectorPoints { gesture: Option<Gesture>, selected: BTreeSet<PointRef>, layer: Option<OccurrenceHandle>, geometries: BTreeMap<ItemId, Arc<PathGeometry>>, click: Option<(PointRef, [f64; 2], u64)> }
 impl VectorPoints {
     pub(super) fn gesturing(&self) -> bool { self.gesture.is_some() }
     pub(super) fn waiting(&self) -> bool { matches!(self.gesture, Some(Gesture::Drag { latest: Some(_), .. })) }
@@ -55,8 +55,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         let [ox, oy] = self.engine.document().scene().occurrence_offset64(layer);
         [f64::from(p.x) - ox, f64::from(p.y) - oy]
     }
+    fn point_selected(&self, object: &VectorObject, r: PointRef) -> bool {
+        self.vector_points.layer == self.points_layer() && self.vector_points.selected.contains(&r)
+            && self.selected_vector_items().is_some_and(|selection| selection.items.contains(&r.path))
+            && self.vector_points.geometries.get(&r.path).zip(path_of(object, r.path)).is_some_and(|(geometry, path)| Arc::ptr_eq(geometry, &path.geometry))
+    }
+    fn remember_vector_points(&mut self, layer: OccurrenceHandle) {
+        self.vector_points.layer = Some(layer);
+        self.vector_points.geometries = self.engine.document().scene().vector_layer(layer).map(|object| self.vector_points.selected.iter()
+            .filter_map(|r| path_of(object, r.path).map(|path| (r.path, path.geometry.clone()))).collect()).unwrap_or_default();
+    }
     fn point_part(&self, object: &VectorObject, point: [f64; 2], reach: f64) -> Option<Part> {
-        let handles = self.vector_points.selected.iter().filter_map(|r| anchor_of(object, *r).map(|a| (*r, a)))
+        let handles = self.vector_points.selected.iter().filter(|r| self.point_selected(object, **r)).filter_map(|r| anchor_of(object, *r).map(|a| (*r, a)))
             .flat_map(|(r, a)| [(Part::Handle(r, false), a.incoming(), a.in_handle()), (Part::Handle(r, true), a.outgoing(), a.out_handle())])
             .filter(|(_, _, offset)| *offset != [0.; 2]).map(|(part, at, _)| (part, at));
         let paths = self.edited_paths(object);
@@ -76,7 +86,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
                 let object = self.engine.document().scene().vector_layer(layer).ok_or("The vector layer was removed")?.clone();
                 let reach = REACH * self.document_per_surface_pixel();
-                self.vector_points.selected.retain(|r| anchor_of(&object, *r).is_some());
+                let selected: BTreeSet<_> = self.vector_points.selected.iter().copied().filter(|r| self.point_selected(&object, *r) && anchor_of(&object, *r).is_some()).collect();
+                if selected != self.vector_points.selected || self.vector_points.layer != Some(layer) { self.vector_points.click = None; }
+                self.vector_points.selected = selected;
                 let Some(part) = self.point_part(&object, point, reach) else {
                     if let Some(id) = self.vector_moves.index.hit(&object, point, reach) {
                         self.vector_points.selected.clear();
@@ -87,8 +99,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                     return Ok(true);
                 };
                 if let Part::Anchor(r) = part {
-                    let double = self.vector_points.click.is_some_and(|(last, at)| last == r && event.timestamp_ns.saturating_sub(at) <= DOUBLE_CLICK_NS);
-                    self.vector_points.click = Some((r, event.timestamp_ns));
+                    let double = self.vector_points.click.is_some_and(|(last, previous, at)| last == r && distance(previous, point) <= reach && event.timestamp_ns.saturating_sub(at) <= DOUBLE_CLICK_NS);
+                    self.vector_points.click = Some((r, point, event.timestamp_ns));
                     if double { return self.switch_anchor_kind(layer, &object, r).map(|()| true); }
                     if self.interaction.modifiers.shift {
                         if !self.vector_points.selected.remove(&r) { self.vector_points.selected.insert(r); }
@@ -96,6 +108,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         self.vector_points.selected = [r].into();
                     }
                 }
+                self.remember_vector_points(layer);
                 self.vector_points.gesture = Some(Gesture::Drag { layer, part, press: point, original: object, moved: false, latest: None, edited: None });
             }
             PenPhase::Move | PenPhase::Up => {
@@ -104,6 +117,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     Some(Gesture::Marquee { end, .. }) => *end = point,
                     Some(Gesture::Drag { press, moved, latest, .. }) => {
                         *moved |= distance(point, *press) >= reach * 0.5;
+                        if *moved { self.vector_points.click = None; }
                         *latest = Some((point, modifiers));
                     }
                     None => return Ok(false),
@@ -142,6 +156,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let end = FigureShape::Line.constrained_end(Point { x: 0., y: 0. }, Point { x: delta[0] as f32, y: delta[1] as f32 });
             delta = [f64::from(end.x), f64::from(end.y)];
         }
+        if delta == [0.; 2] { *edited = Some(BTreeMap::new()); return Ok(true); }
         let mut changes: BTreeMap<ItemId, Vec<(AnchorRef, Anchor)>> = BTreeMap::new();
         match *part {
             Part::Anchor(_) => for r in &selected {
@@ -191,8 +206,11 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn commit_vector_points(&mut self, layer: OccurrenceHandle, original: VectorObject, edited: BTreeMap<Position, PathItem>) -> Result<(), String> {
         self.end_path_preview();
+        if edited.iter().all(|(position, path)| original.record(*position).and_then(Record::path) == Some(path)) { return Ok(()); }
         let edit = self.engine.document().vector_object_edit(layer, original.with_paths(edited).map_err(str::to_string)?).map_err(|e| e.to_string())?;
-        self.layer_edit(edit)
+        self.layer_edit(edit)?;
+        self.remember_vector_points(layer);
+        Ok(())
     }
     fn finish_vector_points(&mut self) -> Result<(), String> {
         let Some(gesture) = self.vector_points.gesture.take() else { return Ok(()) };
@@ -204,6 +222,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let edit = self.engine.document().vector_object_edit(layer, original.replace([(position, Some(Record::Path(path)))])).map_err(|e| e.to_string())?;
                 self.layer_edit(edit)?;
                 self.vector_points.selected = [PointRef { path: id, at: AnchorRef { subpath: hit.subpath, anchor: hit.segment + 1 } }].into();
+                self.remember_vector_points(layer);
                 Ok(())
             }
             Gesture::Drag { .. } => Ok(()),
@@ -219,6 +238,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 if !adding { self.vector_points.selected.clear(); }
                 self.vector_points.selected.extend(found);
+                self.remember_vector_points(layer);
                 Ok(())
             }
         }
@@ -230,7 +250,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         if path.geometry == original.geometry { return Ok(()); }
         let position = object.find(r.path).ok_or("The path was removed")?;
         let edit = self.engine.document().vector_object_edit(layer, object.replace([(position, Some(Record::Path(path)))])).map_err(|e| e.to_string())?;
-        self.layer_edit(edit)
+        self.layer_edit(edit)?;
+        self.remember_vector_points(layer);
+        Ok(())
     }
     pub(super) fn cancel_vector_points(&mut self) -> bool {
         let Some(gesture) = self.vector_points.gesture.take() else { return false };
@@ -242,7 +264,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         let mut grouped: BTreeMap<ItemId, BTreeSet<AnchorRef>> = BTreeMap::new();
         if self.points_layer().is_none() { return grouped; }
         let edited = self.selected_vector_items().map(|selection| selection.items.clone()).unwrap_or_default();
-        for r in self.vector_points.selected.iter().filter(|r| edited.contains(&r.path)) { grouped.entry(r.path).or_default().insert(r.at); }
+        let object = self.points_layer().and_then(|layer| self.engine.document().scene().vector_layer(layer));
+        for r in self.vector_points.selected.iter().filter(|r| edited.contains(&r.path) && object.is_some_and(|object| self.point_selected(object, **r))) { grouped.entry(r.path).or_default().insert(r.at); }
         grouped
     }
     pub(super) fn vector_points_split(&self) -> bool {
@@ -256,6 +279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn delete_selected_vector_points(&mut self) -> Result<bool, String> {
         let grouped = self.selected_points();
+        if self.points_layer().is_some() && grouped.is_empty() && !self.vector_points.selected.is_empty() { self.vector_points.selected.clear(); return Ok(true); }
         let Some(layer) = self.points_layer().filter(|_| !grouped.is_empty()) else { return Ok(false) };
         let document = self.engine.document();
         let object = document.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
@@ -289,7 +313,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             for (s, subpath) in path.geometry.subpaths().iter().enumerate() {
                 for (i, anchor) in subpath.anchors().enumerate() {
                     let r = PointRef { path: id, at: AnchorRef { subpath: s as u32, anchor: i as u32 } };
-                    let selected = self.vector_points.selected.contains(&r);
+                    let selected = self.point_selected(object, r);
                     square(point(anchor.point()), half, selected);
                     if selected { handles.push(*anchor); }
                 }
