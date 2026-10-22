@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Einen zusammengesetzten Pfad zum L�
 menu-arrange = Anordnen
 command-lower-layer = Ebene absenken
 command-reset-layout = Layout zurücksetzen
+command-put-back-bubbles = Alle Blasen zurücklegen
 command-zen-mode = Zen-Modus
 command-fullscreen = Vollbild
 command-new-window = Neues Fenster

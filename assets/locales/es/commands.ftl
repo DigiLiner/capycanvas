@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Selecciona un trazado compuesto par
 menu-arrange = Organizar
 command-lower-layer = Bajar capa
 command-reset-layout = Restablecer distribución
+command-put-back-bubbles = Devolver todas las burbujas
 command-zen-mode = Modo Zen
 command-fullscreen = Pantalla completa
 command-new-window = Nueva ventana

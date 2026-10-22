@@ -108,12 +108,7 @@ pub use header::*;
 mod header_drag;
 pub use header_drag::*;
 mod bubbles;
-pub use bubbles::{
-    Bead, BeadPlacement, BeadStrip, BubbleAction, BubbleBead, BubbleGrab, BubbleKind, BubbleLayout, BubbleOptions,
-    BubblePlacement, BubbleRing, BubbleSource, BubbleView, RingArc, RingSettings, ToolBubble, BUBBLE_BEAD,
-    COLOR_RING_SIZES, MAX_RING_SETTINGS, RECENT_BEADS, RING_WIDTH, SLIDER_BUBBLE, TOOL_BUBBLE, bead_strip_at,
-    color_beads, color_rim, halo_arcs, palette_pill, pinched_size, slider_ring,
-};
+pub use bubbles::*;
 mod drawers;
 pub use drawers::{
     ColumnDrawerMeasurement, ContentDrawer, DrawerAnchor, DrawerConnection, DrawerDismissal,
@@ -322,7 +317,7 @@ pub const VIEW_MENU: MenuSpec = MenuSpec {
         &[CommandId::FlipHorizontal, CommandId::FlipVertical],
         &[CommandId::ShowRulers, CommandId::SnapRulers],
         &[CommandId::ShowCanvasActionBar, CommandId::ZenMode, CommandId::Fullscreen],
-        &[CommandId::ResetLayout],
+        &[CommandId::ResetLayout, CommandId::PutBackBubbles],
     ],
 };
 /// GTK-first until the document transport is available on the other hosts.
@@ -595,6 +590,7 @@ command_ids! {
     SendToBack,
     LowerLayer,
     ResetLayout,
+    PutBackBubbles,
     ZenMode,
     Fullscreen,
     NewWindow,
@@ -905,6 +901,7 @@ impl CommandId {
             Self::SendToBack => "send-to-back",
             Self::LowerLayer => "down",
             Self::ResetLayout => "reset-layout",
+            Self::PutBackBubbles => "toolbar",
             Self::NewWindow | Self::Drawings => "new-window",
             Self::ShowCanvasActionBar => "toolbar",
             Self::TransformFlipHorizontal => "flip-horizontal",
@@ -1193,6 +1190,7 @@ impl CommandId {
             Self::SendToBack => MessageId::COMMAND_SEND_TO_BACK,
             Self::LowerLayer => MessageId::COMMAND_LOWER_LAYER,
             Self::ResetLayout => MessageId::COMMAND_RESET_LAYOUT,
+            Self::PutBackBubbles => MessageId::COMMAND_PUT_BACK_BUBBLES,
             Self::ZenMode => MessageId::COMMAND_ZEN_MODE,
             Self::Fullscreen => MessageId::COMMAND_FULLSCREEN,
             Self::NewWindow => MessageId::COMMAND_NEW_WINDOW,

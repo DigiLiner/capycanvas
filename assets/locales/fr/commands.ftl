@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Sélectionner un tracé transparent
 menu-arrange = Disposition
 command-lower-layer = Descendre le calque
 command-reset-layout = Réinitialiser la disposition
+command-put-back-bubbles = Ranger toutes les bulles
 command-zen-mode = Mode Zen
 command-fullscreen = Plein écran
 command-new-window = Nouvelle fenêtre

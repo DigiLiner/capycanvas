@@ -10,7 +10,6 @@ pub(crate) struct ZenPeek {
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
-    /// Hidden Zen chrome a host keeps for this group: chosen toolbars and a peeked edge.
     pub fn zen_keeps(&self, group: u32) -> bool {
         let layout = &self.state.workspace.layout;
         layout.shows_in_zen(group) || self.zen_peek.edge.is_some_and(|edge| layout.group_edge(group) == Some(edge))

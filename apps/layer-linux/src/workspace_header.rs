@@ -524,6 +524,11 @@ impl Header {
                     content.set_opacity(if enabled || editing { 1. } else { 0.45 });
                 }
                 selected(button, active);
+                if projected.is_some_and(|view| view.bubble) {
+                    button.add_css_class("bubble-out");
+                } else {
+                    button.remove_css_class("bubble-out");
+                }
                 if has_variants {
                     button.update_state(&[gtk::accessible::State::Pressed(if active {
                         gtk::AccessibleTristate::True

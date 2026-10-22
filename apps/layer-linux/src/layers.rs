@@ -1153,7 +1153,7 @@ impl LayerPanel {
             for release in [false, true] {
                 let close = glib::clone!(#[weak] w, move |g: &gtk::GestureClick, _: i32, x: f64, y: f64| {
                     let Some(widget) = g.widget() else { return; };
-                    let extra: Vec<_> = w.drawers().iter().filter_map(|d| d.layers()).collect();
+                    let extra: Vec<_> = w.drawers().iter().filter_map(|d| d.layers()).chain(w.bubbles.layer_panels()).collect();
                     for panel in std::iter::once(&w.layer_panel).chain(extra.iter().map(|p| p.as_ref())) {
                         panel.close_swipes_at(&widget, [x, y], release);
                     }
@@ -1174,7 +1174,9 @@ impl LayerPanel {
                             &w.drawers()
                                 .iter()
                                 .filter_map(|d| d.layers())
+                                .chain(w.bubbles.layer_panels())
                                 .collect::<Vec<_>>(),
+                            &w.bubbles.thumbnails(),
                         );
                         glib::ControlFlow::Continue
                     }
@@ -1475,13 +1477,17 @@ impl LayerPanel {
             row.name_entry.select_region(0, -1);
         }
     }
-    fn update_previews(&self, w: &Workspace, extra: &[Rc<Self>]) {
+    pub(crate) fn preview(&self, id: u64) -> Option<gdk::Texture> {
+        self.previews.borrow().get(&(id, false)).map(|(_, texture)| texture.clone())
+    }
+    fn update_previews(&self, w: &Workspace, extra: &[Rc<Self>], thumbnails: &[(u64, gtk::Picture)]) {
         let views: Vec<&Self> = std::iter::once(self).chain(extra.iter().map(|v| v.as_ref())).filter(|v| v.root.is_mapped()).collect();
         let shown = |view: &Self, widget: &gtk::Box| widget.compute_bounds(&view.list)
             .is_some_and(|b| b.y() + b.height() > 0. && b.y() < view.list.height() as f32);
         let rows: Vec<_> = views.iter().flat_map(|view| view.rows.borrow().values()
             .filter(|r| r.bound.get() && shown(view, &r.root)).cloned().collect::<Vec<_>>()).collect();
-        if rows.is_empty() {
+        let thumbnails: Vec<_> = thumbnails.iter().filter(|(_, picture)| picture.is_mapped()).collect();
+        if rows.is_empty() && thumbnails.is_empty() {
             return;
         }
         let mut gpu = w.gpu.borrow_mut();
@@ -1529,6 +1535,10 @@ impl LayerPanel {
             }
             wanted.push((state.id, false, state.has_thumbnail.then_some(state.id), state.paint_revision, row.content_image.clone()));
             wanted.push((state.id, true, state.mask_id, state.mask_revision, row.mask_image.clone()));
+        }
+        for (id, picture) in thumbnails {
+            let Some(state) = g.session.state().layers.iter().find(|l| l.id == *id && !l.group) else { continue };
+            wanted.push((state.id, false, state.has_thumbnail.then_some(state.id), state.paint_revision, picture.clone()));
         }
         for (id, mask, target, revision, picture) in wanted {
             let Some(target) = target else { continue };
@@ -1662,8 +1672,10 @@ impl Row {
         if s.adjustment_effect { self.content.add_css_class("layer-effect"); }
         else { self.content.remove_css_class("layer-effect"); }
         crate::icons::set(&self.effect_icon, if s.group { Some(if s.collapsed { "layer-folder-symbolic" } else { "layer-folder-open-symbolic" }) } else { s.content_icon.as_deref() });
+        let simple = self.simple.get();
         self.pass_through.set_visible(s.pass_through);
-        self.load_selection.set_visible(s.selection_layer);
+        self.selection.set_visible(!simple);
+        self.load_selection.set_visible(s.selection_layer && !simple);
         caption(&self.load_selection, copy.load_selection.as_ref());
         self.load_selection.set_widget_name(&format!("selection-load-{}", s.id));
         self.name.set_text(&s.label);
@@ -1700,9 +1712,9 @@ impl Row {
             (true,true) => copy.layer.hide_selection.as_ref(), (true,false) => copy.layer.show_selection.as_ref(),
             (false,true) => copy.layer.hide.as_ref(), (false,false) => copy.layer.show.as_ref(),
         });
-        self.link.set_visible(s.has_mask);
-        self.mask.set_visible(s.has_mask);
-        self.texture.set_visible(s.paper.is_some());
+        self.link.set_visible(s.has_mask && !simple);
+        self.mask.set_visible(s.has_mask && !simple);
+        self.texture.set_visible(s.paper.is_some() && !simple);
         self.texture.set_widget_name(&format!("layer-texture-{}", s.id));
         if let Some(paper) = &s.paper {
             caption(&self.texture, copy.choose_texture.as_ref());
@@ -1714,7 +1726,7 @@ impl Row {
         caption(&self.link, if s.mask_linked { copy.layer.unlink_mask.as_ref() } else { copy.layer.link_mask_to_layer.as_ref() });
         self.mask_image
             .set_opacity(if s.mask_enabled { 1. } else { 0.4 });
-        self.grip.set_visible(s.can_drop_below);
+        self.grip.set_visible(s.can_drop_below && !simple);
         for pickup in &self.pickups { pickup.retire_if_ineligible(s); }
         if s.group {
             self.content.add_css_class("layer-folder");

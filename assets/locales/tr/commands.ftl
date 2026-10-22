@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Çözmek için bir bileşik yol se�
 menu-arrange = Sırala
 command-lower-layer = Katmanı alçalt
 command-reset-layout = Düzeni sıfırla
+command-put-back-bubbles = Tüm baloncukları yerine koy
 command-zen-mode = Zen modu
 command-fullscreen = Tam ekran
 command-new-window = Yeni pencere

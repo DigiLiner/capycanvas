@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = 解除するには、複合パス�
 menu-arrange = 重ね順
 command-lower-layer = レイヤーを下げる
 command-reset-layout = レイアウトをリセット
+command-put-back-bubbles = すべてのバブルを片付ける
 command-zen-mode = 集中モード
 command-fullscreen = 全画面表示
 command-new-window = 新規ウィンドウ

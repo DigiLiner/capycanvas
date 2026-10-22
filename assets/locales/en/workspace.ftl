@@ -632,3 +632,4 @@ workspace-bubble-full = Full
 workspace-bubble-fold = Fold when not in use
 workspace-history-put-back = Put back { $panels }
 workspace-show-in-zen = Show in Zen mode
+workspace-bubble-edit-palettes = Edit palettes…

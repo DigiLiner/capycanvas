@@ -907,7 +907,7 @@ pub struct Workspace {
     pub(crate) color_strip: crate::color_editor::Strip,
     tool_settings: crate::tool_panels::ToolSettings,
     pub(crate) canvas_bar: crate::canvas_bar::CanvasBar,
-    bubbles: bubbles::Bubbles,
+    pub(crate) bubbles: bubbles::Bubbles,
     pub(crate) pressure_calibration: Rc<crate::pressure_calibration::PressurePanel>,
     selection_refine: crate::preview_dialog::PreviewDialog,
     frequency_separation: crate::preview_dialog::PreviewDialog,
@@ -2061,13 +2061,11 @@ impl Workspace {
     fn set_chrome_hidden(&self, hidden: bool) {
         let gpu = self.gpu.borrow();
         let keeps = |group: u32| gpu.as_ref().is_some_and(|g| g.session.zen_keeps(group));
-        let drawer = gpu.as_ref().is_some_and(|g| g.session.zen_keeps_drawer());
         for (slot, widget) in self.surface.imp().children.borrow().iter() {
             if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy | Slot::Bubbles) {
                 let hidden = hidden
                     && !widget.has_css_class("floating-panel")
-                    && !matches!(slot, Slot::Group(id) if keeps(*id))
-                    && !(drawer && matches!(slot, Slot::Drawer(0) | Slot::DrawerShadow(0) | Slot::DrawerConnection(0)));
+                    && !matches!(slot, Slot::Group(id) if keeps(*id));
                 let can_target = !hidden && !widget.has_css_class("fixed-stack-divider")
                     && !matches!(slot, Slot::DrawerShadow(_) | Slot::ColumnConnection(_, _));
                 if widget.has_css_class("zen-hidden") == hidden && widget.can_target() == can_target

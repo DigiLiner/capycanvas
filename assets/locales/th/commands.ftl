@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = เลือกพาธผสม�
 menu-arrange = จัดลำดับ
 command-lower-layer = เลื่อนเลเยอร์ลง
 command-reset-layout = รีเซ็ตผัง
+command-put-back-bubbles = เก็บบับเบิลทั้งหมดกลับ
 command-zen-mode = โหมดเซน
 command-fullscreen = เต็มจอ
 command-new-window = หน้าต่างใหม่

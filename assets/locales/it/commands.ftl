@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Seleziona un tracciato composto da 
 menu-arrange = Disponi
 command-lower-layer = Abbassa livello
 command-reset-layout = Ripristina disposizione
+command-put-back-bubbles = Rimetti a posto tutte le bolle
 command-zen-mode = Modalità Zen
 command-fullscreen = Schermo intero
 command-new-window = Nuova finestra

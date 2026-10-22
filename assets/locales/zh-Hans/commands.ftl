@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = 请选择一条复合路径来释�
 menu-arrange = 排列
 command-lower-layer = 下移图层
 command-reset-layout = 重置布局
+command-put-back-bubbles = 全部放回
 command-zen-mode = 专注模式
 command-fullscreen = 全屏
 command-new-window = 新建窗口

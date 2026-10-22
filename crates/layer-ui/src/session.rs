@@ -1275,7 +1275,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 if let ChromeEvent::Contact { position, .. } = event
                     && !facts.popup_open
-                    && self.dismiss_bubble_halo(position)
+                    && self.dismiss_bubble_parts(position)
                 {
                     reply.change.regions |= regions::BUBBLES;
                 }
@@ -1764,7 +1764,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || self.interaction.keyboard_chrome
             || self.interaction.keep_chrome_until_contact
             || self.state.settings_open
-            || (self.state.customization.is_open() && !self.only_bubble_drawer())
+            || self.state.customization.is_open()
             || self.divider_drag.is_some()
             || self.floating_resize.is_some()
             || self.workspace_drag.is_some_and(|drag| drag.chrome_visible);
@@ -2477,6 +2477,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::SoftProofSetup => self.require_document_idle().is_ok() && !self.state.document_file.busy,
             CommandId::SoftProof => self.require_document_idle().is_ok() && !self.state.document_file.busy,
             CommandId::GamutWarning => document.output().proof.is_some(),
+            CommandId::PutBackBubbles => !self.state.workspace.layout.bubbles.bubbles.is_empty(),
             CommandId::ResetLayout if self.managed_workspace.is_some() => {
                 self.require_workspace_idle().is_ok()
                     && self
@@ -3418,7 +3419,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::SelectBrush { id } => {
                 self.select_brush(id)?;
-                (BRUSH | if self.close_bubble_chooser() { CUSTOMIZATION | BUBBLES } else { 0 }, false)
+                (BRUSH, false)
             }
             UiAction::CycleTool { family } => {
                 // Honor customized toolbar order, appending absent family tools
@@ -4112,6 +4113,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             changed |= DOCUMENT;
         }
         if choosing_tool { self.remember_tool_slots(); }
+        if choosing_tool && self.close_halo() { changed |= BUBBLES; }
         if changing_slot_layout && changed & (LAYOUT | CUSTOMIZATION) != 0 {
             self.refresh_tools();
             changed |= BRUSH;
@@ -4153,6 +4155,9 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Raw records retain platform timestamp/history/prediction metadata. A
     /// full queue returns the untouched record; hosts must retry after a frame.
     pub fn pen(&mut self, event: PenEvent) {
+        if !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION) {
+            self.bubble_stroke(event.phase, [event.surface_position.x, event.surface_position.y]);
+        }
         if event.phase == PenPhase::Down
             && !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
             && self.liquify_preview_active()
@@ -4629,7 +4634,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let pending_edits = self.engine.has_pending_document_edits();
         let command_activity = (self.canvas_idle(), self.engine.can_undo(), self.engine.can_redo());
         self.update_shader_idle();
-        let mut changed = self.poll_filter_installation() | self.poll_deferred_edits() | self.apply_loaded_paper();
+        let mut changed = self.poll_filter_installation() | self.poll_deferred_edits() | self.apply_loaded_paper() | self.take_bubble_changes();
         if std::mem::take(&mut self.pressure_meter_changed) { changed |= regions::PRESSURE_CALIBRATION; }
         let revision = self.engine.document().revision;
         let working_generation = self.engine.document().working.generation;
@@ -5445,6 +5450,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     Theme::Dark
                 });
                 Ok((SETTINGS, true))
+            }
+            CommandId::PutBackBubbles => {
+                let change = self.bubble_action(BubbleAction::PutBackAll)?;
+                Ok((change.regions, false))
             }
             CommandId::ResetLayout => {
                 if self.managed_workspace.is_some() {
@@ -15798,7 +15807,7 @@ mod tests {
                 ["flip_horizontal", "flip_vertical"],
                 ["show_rulers", "snap_rulers"],
                 ["show_canvas_action_bar", "zen_mode", "fullscreen"],
-                ["reset_layout"]
+                ["reset_layout", "put_back_bubbles"]
             ])
         );
     }

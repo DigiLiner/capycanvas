@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = 해제하려면 컴파운드 패스
 menu-arrange = 정렬
 command-lower-layer = 레이어 아래로 이동
 command-reset-layout = 레이아웃 재설정
+command-put-back-bubbles = 모든 버블을 제자리에 두기
 command-zen-mode = 집중 모드
 command-fullscreen = 전체 화면
 command-new-window = 새 창

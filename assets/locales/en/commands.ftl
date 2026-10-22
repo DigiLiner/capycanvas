@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Select a compound path to release
 menu-arrange = Arrange
 command-lower-layer = Lower layer
 command-reset-layout = Reset layout
+command-put-back-bubbles = Put back all bubbles
 command-zen-mode = Zen mode
 command-fullscreen = Full screen
 command-new-window = New Window

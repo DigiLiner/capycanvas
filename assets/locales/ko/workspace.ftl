@@ -655,3 +655,4 @@ workspace-bubble-full = 전체
 workspace-bubble-fold = 사용하지 않을 때 접기
 workspace-history-put-back = 제자리에 두기: { $panels }
 workspace-show-in-zen = 집중 모드에서 표시
+workspace-bubble-edit-palettes = 팔레트 편집…

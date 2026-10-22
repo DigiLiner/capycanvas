@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Выберите составной
 menu-arrange = Упорядочить
 command-lower-layer = Опустить слой
 command-reset-layout = Сбросить расположение
+command-put-back-bubbles = Убрать все пузыри на место
 command-zen-mode = Режим дзен
 command-fullscreen = Полный экран
 command-new-window = Новое окно

@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Selecione um caminho composto para 
 menu-arrange = Organizar
 command-lower-layer = Descer camada
 command-reset-layout = Redefinir layout
+command-put-back-bubbles = Guardar todas as bolhas
 command-zen-mode = Modo Zen
 command-fullscreen = Tela cheia
 command-new-window = Nova janela

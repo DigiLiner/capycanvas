@@ -94,11 +94,27 @@ window.capy-workspace:not(.light-theme) .tool-bubble { box-shadow: inset 0 1px a
 window.capy-workspace:not(.light-theme) .tool-bubble.lifted { box-shadow: inset 0 1px alpha(white, .06), inset 0 0 0 1px alpha(black, .45), 0 8px 24px alpha(black, .4); }
 .tool-bubble.selected-tool { background-image: image(var(--header-selection)); }
 window.capy-workspace.glass .tool-bubble.selected-tool { background-image: image(var(--glass-header-selection)); }
+.window-bar .header-tool.bubble-out { background-image: radial-gradient(circle 2.5px at 50% calc(100% - 3.5px), var(--accent-bg-color) 2.5px, transparent 2.6px); }
+.window-bar .header-item.in-bar .header-tool.bubble-out.selected-tool, .window-bar .header-tool.bubble-out.selected-tool { background-image: radial-gradient(circle 2.5px at 50% calc(100% - 3.5px), var(--accent-bg-color) 2.5px, transparent 2.6px), image(var(--header-selection)); }
 .tool-bubble.layers-bubble { border-radius: calc(20px * var(--corner-fit)); }
-.bubble-value, .bubble-readout { font-size: 11px; font-feature-settings: "tnum"; }
-.bubble-readout { background-color: var(--glass-chip); border-radius: 9999px; padding: 1px 6px; }
-.bubble-pill { background-color: var(--glass-chip); border-radius: 9999px; box-shadow: inset 0 0 0 1px alpha(black, .14), 0 2px 8px alpha(black, .16); }
+.tool-bubble.bubble-brush { border-radius: 9999px; }
+.bubble-brush-name { font-size: 10px; opacity: .8; }
+.bubble-glass, .bubble-pill, .bubble-card { background-color: var(--glass-chip); color: var(--window-fg-color); box-shadow: inset 0 0 0 1px alpha(black, .14), 0 2px 8px alpha(black, .16); }
+window.capy-workspace:not(.light-theme) .bubble-glass, window.capy-workspace:not(.light-theme) .bubble-pill, window.capy-workspace:not(.light-theme) .bubble-card { box-shadow: inset 0 0 0 1px alpha(black, .45), 0 2px 8px alpha(black, .16); }
+.bubble-glass, .bubble-pill { border-radius: 9999px; }
+.bubble-glass.selected-tool { background-image: image(var(--header-selection)); }
+window.capy-workspace.glass .bubble-glass.selected-tool { background-image: image(var(--glass-header-selection)); }
 .bubble-pill button { min-height: 24px; min-width: 24px; padding: 0 4px; border-radius: 9999px; }
+.bubble-value, .bubble-readout { font-size: 11px; font-feature-settings: "tnum"; }
+.bubble-readout { background-color: var(--glass-chip); border-radius: 9999px; padding: 2px 7px; }
+.bubble-tag, .bubble-count { background-color: var(--panel-bg); color: var(--window-fg-color); box-shadow: 0 0 0 1px alpha(black, .14), 0 2px 6px alpha(black, .16); }
+.bubble-tag { border-radius: 8px; padding: 3px 8px; font-size: 11.5px; }
+.bubble-count { border-radius: 9px; padding: 0 5px; font-size: 10.5px; font-weight: 600; }
+.bubble-thumbnail { border-radius: calc(13px * var(--corner-fit)); background-color: white; box-shadow: 0 0 0 1px alpha(gray, .28); }
+.bubble-card { border-radius: var(--surface-radius); padding: 4px 4px 6px; font-size: var(--ui-text-size); }
+.bubble-nub { min-width: 30px; min-height: 4px; border-radius: 2px; background-color: alpha(var(--window-fg-color), .22); margin: 4px 0 6px; }
+.bubble-card-footer { border-top: 1px solid alpha(var(--window-fg-color), .12); padding-top: 6px; margin-top: 4px; }
+.bubble-card-footer button { min-height: 30px; padding: 0 2px; font-size: 12px; font-weight: normal; }
 .status-bubble, button.flat.status-bubble { background-color: var(--glass-chip); border-radius: calc(12px * var(--corner-fit)); padding: 3px 10px; }
 button.flat.status-bubble:hover { background-image: image(alpha(var(--window-fg-color), .10)); }
 button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg-color), .16)); }

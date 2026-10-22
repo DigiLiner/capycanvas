@@ -635,3 +635,4 @@ workspace-bubble-full = Полный
 workspace-bubble-fold = Сворачивать, когда не используется
 workspace-history-put-back = Убрано на место: { $panels }
 workspace-show-in-zen = Показывать в режиме дзен
+workspace-bubble-edit-palettes = Изменить палитры…

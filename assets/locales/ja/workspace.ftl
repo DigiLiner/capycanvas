@@ -655,3 +655,4 @@ workspace-bubble-full = 詳細
 workspace-bubble-fold = 使わないときは畳む
 workspace-history-put-back = { $panels }を片付け
 workspace-show-in-zen = 集中モードで表示
+workspace-bubble-edit-palettes = パレットを編集…

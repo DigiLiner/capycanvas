@@ -247,6 +247,7 @@ menu-arrange = Atur
 command-lower-layer = Turunkan lapisan
 
 command-reset-layout = Atur ulang tata letak
+command-put-back-bubbles = Kembalikan semua gelembung
 
 command-zen-mode = Mode Zen
 

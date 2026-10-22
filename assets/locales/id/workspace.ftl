@@ -1206,3 +1206,4 @@ workspace-bubble-full = Lengkap
 workspace-bubble-fold = Lipat saat tidak dipakai
 workspace-history-put-back = Mengembalikan { $panels }
 workspace-show-in-zen = Tampilkan di Mode Zen
+workspace-bubble-edit-palettes = Edit palet…

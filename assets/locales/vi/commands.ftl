@@ -133,6 +133,7 @@ commands-select-a-compound-path-to-release = Chọn một đường phức hợp
 menu-arrange = Sắp xếp
 command-lower-layer = Hạ lớp
 command-reset-layout = Đặt lại bố cục
+command-put-back-bubbles = Cất lại mọi bong bóng
 command-zen-mode = Chế độ Zen
 command-fullscreen = Toàn màn hình
 command-new-window = Cửa sổ mới

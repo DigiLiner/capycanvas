@@ -1,4 +1,3 @@
-//! Tool bubbles through compositor-delivered mouse and touch input, in both themes.
 use super::workspace_header::Driver;
 use super::*;
 
@@ -59,17 +58,159 @@ fn find_id(d: &Driver, id: u32) -> Option<BubbleView> {
     views(d).into_iter().find(|v| v.id == id)
 }
 
+fn rim(d: &Driver, view: &BubbleView, degrees: f32) -> [f32; 2] {
+    let c = center(d, view.id);
+    let (radius, angle) = (view.diameter * 0.5 - RING_RIM * 0.5, degrees.to_radians());
+    [c[0] + radius * angle.cos(), c[1] + radius * angle.sin()]
+}
+
 fn put_back_all(d: &mut Driver, device: &str, name: &str) {
     for view in views(d) {
-        let mut from = center(d, view.id);
-        if view.kind == BubbleKind::Color {
-            let [inner, outer] = color_rim(view.diameter);
-            let (radius, angle) = ((inner + outer) * 0.5, 200f32.to_radians());
-            from = [from[0] + radius * angle.cos(), from[1] + radius * angle.sin()];
-        }
+        let from = if view.kind == BubbleKind::Color { rim(d, &view, 200.) } else { center(d, view.id) };
         stroke(d, device, &[from, [from[0], from[1] - 20.], [from[0], 10.]]);
     }
-    assert!(views(d).is_empty(), "{name}: dropping on the title bar puts bubbles back");
+    if !views(d).is_empty() {
+        capture(d, &format!("{name}-left-out"));
+    }
+    let left: Vec<_> = views(d).iter().map(|v| {
+        let widget = d.named(&format!("bubble-{}", v.id));
+        (v.kind, center(d, v.id), widget.opacity(), widget.can_target(), v.open)
+    }).collect();
+    let popovers = d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).filter(|p| p.is_visible()).count();
+    assert!(left.is_empty(), "{name}: dropping on the title bar puts bubbles back: {left:?}, {popovers} popovers open");
+}
+
+fn item_point(d: &Driver, id: u32, item: &ChooserItem) -> [f32; 2] {
+    let c = center(d, id);
+    [c[0] + item.center[0], c[1] + item.center[1]]
+}
+
+fn take(d: &mut Driver, grab: BubbleGrab, at: [f32; 2]) -> u32 {
+    let viewport = [d.w.surface.width() as f32, d.w.surface.height() as f32];
+    for phase in [ContactPhase::Down, ContactPhase::Up] {
+        d.w.dispatch(UiAction::Bubble { action: BubbleAction::Drag { grab, phase, position: at, viewport } });
+    }
+    pump(400);
+    views(d).last().unwrap().id
+}
+
+fn chooser(d: &mut Driver, device: &str, name: &str, id: u32) {
+    let open = find_id(d, id).unwrap();
+    let media: Vec<_> = open.chooser.iter().filter(|i| i.kind == ChooserKind::Medium).cloned().collect();
+    assert!(media.len() > 2 && open.rings.is_empty(), "{name}: the third tap rings the media around the dial");
+    assert_eq!(media.iter().filter(|m| m.shown).count(), 1, "{name}: the current medium shows its brushes");
+    assert!(open.chooser.iter().any(|i| i.kind == ChooserKind::Brush), "{name}: brushes curve beside the medium");
+    capture(d, &format!("{name}-chooser"));
+    let other = media.iter().find(|m| !m.shown && m.enabled).unwrap().clone();
+    tap(d, device, item_point(d, id, &other));
+    let switched = find_id(d, id).unwrap();
+    assert!(switched.chooser.iter().any(|m| m.shown && m.label == other.label), "{name}: tapping a medium fans its brushes");
+    capture(d, &format!("{name}-medium"));
+    if switched.chooser.iter().all(|i| i.kind != ChooserKind::Brush) {
+        assert!(find_id(d, id).unwrap().chooser.is_empty(), "{name}: a medium with one brush picks it");
+        return;
+    }
+    let media: Vec<_> = switched.chooser.iter().filter(|i| i.kind == ChooserKind::Medium).cloned().collect();
+    let through = media.iter().find(|m| !m.shown && m.enabled && m.label != other.label).unwrap().clone();
+    let from = item_point(d, id, &other);
+    let via = item_point(d, id, &through);
+    let mut events = vec![contact(device, "down", from)];
+    for step in 1..=6 {
+        let f = step as f32 / 6.;
+        events.push(contact(device, "move", [from[0] + (via[0] - from[0]) * f, from[1] + (via[1] - from[1]) * f]));
+    }
+    d.input.perform(serde_json::Value::Array(events));
+    pump(300);
+    let fanned = find_id(d, id).unwrap();
+    let target = fanned.chooser.iter().filter(|i| i.kind == ChooserKind::Brush).last().cloned();
+    let finish = target.as_ref().map_or(via, |t| item_point(d, id, t));
+    let mut events = Vec::new();
+    for step in 1..=6 {
+        let f = step as f32 / 6.;
+        events.push(contact(device, "move", [via[0] + (finish[0] - via[0]) * f, via[1] + (finish[1] - via[1]) * f]));
+    }
+    events.push(contact(device, "up", finish));
+    d.input.perform(serde_json::Value::Array(events));
+    pump(350);
+    if let Some(target) = target {
+        assert_eq!(Some(state(&d.w).brush.preset), target.preview, "{name}: sliding through a medium to a brush picks it");
+    }
+    assert!(find_id(d, id).unwrap().chooser.is_empty(), "{name}: picking closes the ring");
+}
+
+fn layers_card(d: &mut Driver, device: &str, name: &str) {
+    let (item, spot) = (header_of(d, ToolbarControl::Panel { panel: Panel::Layers }), canvas_spot(d, 0.3, 0.6));
+    tear(d, device, &item, spot);
+    let layers = find(d, BubbleSource::Control { control: ToolbarControl::Panel { panel: Panel::Layers } })
+        .unwrap_or_else(|| panic!("{name}: Layers comes out of the title bar"));
+    assert!(layers.layer.is_some() && layers.layers > 0, "{name}: the folded card shows the current layer and the count");
+    capture(d, &format!("{name}-layers-folded"));
+    let at = center(d, layers.id);
+    tap(d, device, at);
+    pump(400);
+    let card = find_id(d, layers.id).unwrap().card.unwrap_or_else(|| panic!("{name}: tapping unfolds the card"));
+    assert!(!card.full && !card.properties);
+    assert!(d.named("bubble-nub").is_mapped(), "{name}: the card has a grab bar");
+    capture(d, &format!("{name}-layers-card"));
+    let properties = d.named("bubble-layer-properties");
+    d.click(&properties);
+    pump(500);
+    assert!(find_id(d, layers.id).unwrap().card.unwrap().properties, "{name}: Layer properties slide up");
+    capture(d, &format!("{name}-layers-properties"));
+    d.click(&properties);
+    pump(500);
+    assert!(!find_id(d, layers.id).unwrap().card.unwrap().properties, "{name}: All layers goes back");
+    tap(d, device, canvas_spot(d, 0.85, 0.15));
+    assert!(find_id(d, layers.id).unwrap().card.is_none(), "{name}: a contact elsewhere folds the card");
+}
+
+fn color_ring(d: &mut Driver, device: &str, name: &str) {
+    let (item, spot) = (header_of(d, ToolbarControl::Color), canvas_spot(d, 0.68, 0.45));
+    tear(d, device, &item, spot);
+    let color = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap_or_else(|| panic!("{name}: Color comes out of the title bar"));
+    assert!(d.named(&format!("bubble-{}", color.id)).is_mapped());
+    let transparent = bead_point(d, color.id, Bead::Transparent).unwrap();
+    tap(d, device, transparent);
+    assert_eq!(state(&d.w).colors.slot, ColorSlot::Transparent, "{name}: the transparent bead");
+    let foreground = bead_point(d, color.id, Bead::Foreground).unwrap();
+    tap(d, device, foreground);
+    assert_eq!(state(&d.w).colors.slot, ColorSlot::Foreground, "{name}: the foreground bead");
+    let colors = state(&d.w).colors;
+    let background = bead_point(d, color.id, Bead::Background).unwrap();
+    let back = [background[0] - 4., background[1] + 4.];
+    tap(d, device, back);
+    let swapped = state(&d.w).colors;
+    assert_eq!((swapped.foreground, swapped.background), (colors.background, colors.foreground), "{name}: the background bead swaps");
+    let first = bead_point(d, color.id, Bead::Swatch { index: 0 }).unwrap();
+    let further = bead_point(d, color.id, Bead::Swatch { index: 4 }).unwrap();
+    stroke(d, device, &[further, [further[0] - 6., further[1] + 1.], first]);
+    assert_eq!(state(&d.w).colors.foreground, swapped.foreground, "{name}: sliding the palette picks nothing");
+    let palettes = bead_point(d, color.id, Bead::Palettes).unwrap();
+    tap(d, device, palettes);
+    assert!(find_id(d, color.id).unwrap().pill.is_some(), "{name}: the palette bead opens its name");
+    capture(d, &format!("{name}-color"));
+    tap(d, device, canvas_spot(d, 0.15, 0.2));
+    assert!(find_id(d, color.id).unwrap().pill.is_none(), "{name}: a contact elsewhere closes the name");
+}
+
+fn painting_fades(d: &mut Driver, name: &str, id: u32) {
+    let widget = d.named(&format!("bubble-{id}"));
+    let at = center(d, id);
+    let from = [at[0] - 140., at[1] + 50.];
+    let mut events = vec![contact("mouse", "down", from)];
+    for step in 1..=20 {
+        events.push(contact("mouse", "move", [from[0] + step as f32 * 12., from[1]]));
+    }
+    d.input.perform(serde_json::Value::Array(events));
+    pump(120);
+    assert!(widget.opacity() < 0.5, "{name}: a stroke near a bubble fades it");
+    assert!(find_id(d, id).unwrap().open, "{name}: an open halo stays while painting");
+    d.input.perform(serde_json::json!([contact("mouse", "up", [from[0] + 240., from[1]])]));
+    pump(400);
+    assert_eq!(widget.opacity(), 1., "{name}: it comes back after the stroke");
+    d.w.dispatch(UiAction::SetTheme { theme: Some(state(&d.w).theme) });
+    pump(20);
+    assert!(widget.opacity() == 1. && widget.can_target(), "{name}: later refreshes keep it back");
 }
 
 fn canvas_spot(d: &Driver, x: f32, y: f32) -> [f32; 2] {
@@ -117,8 +258,7 @@ fn zen(d: &mut Driver, name: &str) {
 fn pinch(d: &mut Driver, name: &str) {
     let ring = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap();
     let c = center(d, ring.id);
-    let [inner, outer] = color_rim(ring.diameter);
-    let radius = (inner + outer) * 0.5;
+    let radius = ring.diameter * 0.5 - RING_RIM * 0.5;
     let rim = |degrees: f32, spread: f32, shift: f32| {
         let a = degrees.to_radians();
         let r = radius + spread;
@@ -175,6 +315,7 @@ fn native_tool_bubbles() {
             assert_eq!(views(&d).len(), 1, "{name}");
             capture(&mut d, &format!("{name}-taken"));
 
+            d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::PointyPencil as u32 });
             d.w.dispatch(UiAction::Invoke { command: CommandId::Lasso });
             pump(200);
             let at = center(&d, taken.id);
@@ -195,41 +336,22 @@ fn native_tool_bubbles() {
             assert_ne!(value(&d), before, "{name}: dragging along the ring changes {}", ring.setting);
             assert!(find(&d, dial).unwrap().open, "{name}: the ring stays open while adjusting");
 
+            painting_fades(&mut d, &name, taken.id);
             tap(&mut d, device, at);
-            assert_eq!(
-                state(&d.w).customization.drawer.as_ref().map(|d| d.anchor),
-                Some(DrawerAnchor::Bubble { id: taken.id }),
-                "{name}: the third tap opens the chooser"
-            );
             pump(300);
-            capture(&mut d, &format!("{name}-chooser"));
+            chooser(&mut d, device, &name, taken.id);
 
-            let shown = state(&d.w);
-            let drawer = shown.customization.drawer.clone().unwrap();
-            assert!(!drawer.columns.iter().flatten().any(|p| *p == Panel::ToolSettings), "{name}: the ring holds the settings");
-            let row = drawer
-                .tool_set
-                .unwrap_or(shown.tool_set)
-                .subtools
-                .into_iter()
-                .find(|t| !t.selected && t.preview.is_some())
-                .and_then(|t| t.preview)
-                .expect("the chooser lists brushes");
-            let row_point = d.point(&d.named(&format!("brush-{row}")));
-            let brush_spot = canvas_spot(&d, 0.62, 0.45);
-            stroke(&mut d, device, &[row_point, [row_point[0] + 8., row_point[1]], [row_point[0] + 160., row_point[1]], brush_spot]);
-            let brush = BubbleSource::Control { control: ToolbarControl::Brush { id: row } };
-            let torn = find(&d, brush).unwrap_or_else(|| panic!("{name}: a drawer row tears off as a brush bubble"));
-            assert!(state(&d.w).customization.drawer.is_none(), "{name}: tearing closes the chooser");
-
+            let brush = BubbleSource::Control { control: ToolbarControl::Brush { id: layer_core::DefaultBrushPreset::Charcoal as u32 } };
+            let spot = canvas_spot(&d, 0.62, 0.45);
+            let torn = take(&mut d, BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: layer_core::DefaultBrushPreset::Charcoal as u32 } }, spot);
             let before = center(&d, taken.id);
-            let toward = center(&d, torn.id);
+            let toward = center(&d, torn);
             stroke(&mut d, device, &[toward, [toward[0] - 20., toward[1]], [before[0] + 40., before[1]], [before[0] + 20., before[1]]]);
             pump(800);
             let pushed = center(&d, taken.id);
             assert!((pushed[0] - before[0]).hypot(pushed[1] - before[1]) > 20., "{name}: a dragged bubble pushes its neighbour");
             capture(&mut d, &format!("{name}-pushed"));
-
+            let torn = find_id(&d, torn).unwrap();
             assert!(!find(&d, brush).unwrap().selected, "{name}: tearing a row does not choose it");
             if device == "touch" {
                 let at = center(&d, torn.id);
@@ -241,6 +363,8 @@ fn native_tool_bubbles() {
                 capture(&mut d, &format!("{name}-menu"));
                 d.input.key(0xff1b);
                 pump(200);
+                let open: Vec<_> = d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).filter(|p| p.is_visible()).map(|p| p.css_classes()).collect();
+                assert!(open.is_empty(), "{name}: Escape closes the bubble menu: {open:?}");
             }
 
             put_back_all(&mut d, device, &name);
@@ -263,37 +387,8 @@ fn native_tool_bubbles() {
             assert_ne!(state(&d.w).brush.diameter, before, "{name}: the slider ring sets the brush size");
             capture(&mut d, &format!("{name}-slider"));
 
-            if device == "mouse" {
-                let (item, spot) = (header_of(&d, ToolbarControl::Panel { panel: Panel::Layers }), canvas_spot(&d, 0.25, 0.75));
-                tear(&mut d, device, &item, spot);
-                let layers = find(&d, BubbleSource::Control { control: ToolbarControl::Panel { panel: Panel::Layers } })
-                    .unwrap_or_else(|| panic!("{name}: Layers comes out of the title bar"));
-                let at = center(&d, layers.id);
-                tap(&mut d, device, at);
-                pump(400);
-                assert_eq!(state(&d.w).customization.drawer.map(|d| d.anchor), Some(DrawerAnchor::Bubble { id: layers.id }));
-                capture(&mut d, &format!("{name}-layers"));
-                tap(&mut d, device, at);
-                assert!(state(&d.w).customization.drawer.is_none(), "{name}: tapping the card again folds it");
-
-                let (item, spot) = (header_of(&d, ToolbarControl::Color), canvas_spot(&d, 0.68, 0.45));
-                tear(&mut d, device, &item, spot);
-                let color = find(&d, BubbleSource::Control { control: ToolbarControl::Color })
-                    .unwrap_or_else(|| panic!("{name}: Color comes out of the title bar"));
-                let transparent = bead_point(&d, color.id, Bead::Transparent).unwrap();
-                tap(&mut d, device, transparent);
-                assert_eq!(state(&d.w).colors.slot, ColorSlot::Transparent, "{name}: the transparent bead");
-                let foreground = bead_point(&d, color.id, Bead::Foreground).unwrap();
-                tap(&mut d, device, foreground);
-                assert_eq!(state(&d.w).colors.slot, ColorSlot::Foreground, "{name}: the foreground bead");
-                let first = bead_point(&d, color.id, Bead::Swatch { index: 0 }).unwrap();
-                stroke(&mut d, device, &[first, [first[0] - 10., first[1]], [first[0] - 200., first[1]]]);
-                if let Some(palettes) = bead_point(&d, color.id, Bead::Palettes) {
-                    tap(&mut d, device, palettes);
-                    assert!(find_id(&d, color.id).unwrap().pill.is_some(), "{name}: the palette bead opens its name");
-                }
-                capture(&mut d, &format!("{name}-color"));
-            }
+            layers_card(&mut d, device, &name);
+            color_ring(&mut d, device, &name);
             put_back_all(&mut d, device, &name);
         }
         zen(&mut d, &format!("{theme:?}").to_lowercase());

@@ -635,3 +635,4 @@ workspace-bubble-full = Completa
 workspace-bubble-fold = Recolher quando não estiver em uso
 workspace-history-put-back = Guardado: { $panels }
 workspace-show-in-zen = Mostrar no modo Zen
+workspace-bubble-edit-palettes = Editar paletas…

@@ -18,7 +18,7 @@ descriptions do not override it.
 | Title bar, panel/tab strip, individual workspace tab, unused draggable header space | Drag without a hold | Drag without a hold | Drag without a hold |
 | Other reorderable list-row bodies | Drag without a hold | Hold, then drag | Hold, then drag |
 | Layer-row body | Drag without a hold | Scroll or swipe; use the grab handle to reorder | Scroll or swipe; use the grab handle to reorder |
-| Tool bubble face, slider center or color-ring gap | Drag without a hold | Drag without a hold | Drag without a hold |
+| Tool bubble face, slider center, color-plate rim or Layers card edge | Drag without a hold | Drag without a hold | Drag without a hold |
 
 “Without a hold” means no time delay is required: ordinary movement slop can
 distinguish a click from a drag. “Hold, then drag” requires a stationary hold to
