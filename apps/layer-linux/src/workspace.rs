@@ -14,6 +14,8 @@ use std::{
     rc::Rc,
 };
 
+#[path = "workspace_bubbles.rs"]
+mod bubbles;
 #[path = "workspace_columns.rs"]
 mod columns;
 #[path = "workspace_customization.rs"]
@@ -233,7 +235,7 @@ mod allocation {
                 }
                 let bounds = match slot {
                     // Native surface, input and cursor share full-window coordinates.
-                    Slot::Canvas => Some(Bounds {
+                    Slot::Canvas | Slot::Bubbles => Some(Bounds {
                         x: 0.0,
                         y: 0.0,
                         width: width as f32,
@@ -570,6 +572,7 @@ enum Slot {
     ColumnConnection(u32, Panel),
     CanvasBar,
     PressureCalibration,
+    Bubbles,
 }
 glib::wrapper! {
     pub struct DockSurface(ObjectSubclass<allocation::DockSurface>)
@@ -660,7 +663,7 @@ impl DockSurface {
     }
     fn raise_canvas_bar(&self) {
         let mut children = self.imp().children.borrow_mut();
-        for slot in [Slot::PressureCalibration, Slot::CanvasBar, Slot::ZenCapy] {
+        for slot in [Slot::Bubbles, Slot::PressureCalibration, Slot::CanvasBar, Slot::ZenCapy] {
             let Some(index) = children.iter().position(|(s, _)| *s == slot) else { continue; };
             let overlay = children.remove(index);
             let drawer = children.iter().position(|(s, w)| {
@@ -736,6 +739,7 @@ enum DragTarget {
     Dock(DockItem),
     Divider(u32),
     Resize(u32, ResizeEdge),
+    Tear(BubbleGrab),
 }
 impl DragTarget {
     fn action(
@@ -746,7 +750,7 @@ impl DragTarget {
         tabs: Vec<TabHit>,
     ) -> Option<UiAction> {
         Some(match self {
-            Self::Header(_) => return None,
+            Self::Header(_) | Self::Tear(_) => return None,
             Self::Dock(item) => UiAction::DragWorkspace {
                 item,
                 phase,
@@ -782,6 +786,9 @@ struct NativeWorkspaceDrag {
     source: gtk::Widget,
     parent: Option<gtk::Widget>,
     wait_for_hold: bool,
+    tear: Option<BubbleGrab>,
+    pull: bool,
+    tearing: bool,
     sequence: Option<gdk::EventSequence>,
     device: Option<gdk::Device>,
     cursor: Option<(gtk::Widget, Option<gdk::Cursor>)>,
@@ -900,6 +907,7 @@ pub struct Workspace {
     pub(crate) color_strip: crate::color_editor::Strip,
     tool_settings: crate::tool_panels::ToolSettings,
     pub(crate) canvas_bar: crate::canvas_bar::CanvasBar,
+    bubbles: bubbles::Bubbles,
     pub(crate) pressure_calibration: Rc<crate::pressure_calibration::PressurePanel>,
     selection_refine: crate::preview_dialog::PreviewDialog,
     frequency_separation: crate::preview_dialog::PreviewDialog,
@@ -1124,6 +1132,8 @@ impl Workspace {
         surface.add(Slot::Status, &status_bar);
         let canvas_bar = crate::canvas_bar::CanvasBar::new();
         surface.add(Slot::CanvasBar, &canvas_bar.root);
+        let bubbles = bubbles::Bubbles::new();
+        surface.add(Slot::Bubbles, &bubbles.layer);
         let pressure_calibration = crate::pressure_calibration::PressurePanel::new();
         surface.add(Slot::PressureCalibration, &pressure_calibration.root);
         let toolbar = TileStrip::new();
@@ -1265,6 +1275,7 @@ impl Workspace {
             tool_settings,
             pressure_calibration,
             canvas_bar,
+            bubbles,
             selection_refine: crate::preview_dialog::PreviewDialog::new("selection-refine-dialog", "selection-refine-value", |radius| {
                 UiAction::Selection { action: layer_ui::SelectionAction::ResizeRadius { radius: radius as f32 } }
             }),
@@ -2049,7 +2060,7 @@ impl Workspace {
 
     fn set_chrome_hidden(&self, hidden: bool) {
         for (slot, widget) in self.surface.imp().children.borrow().iter() {
-            if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy) {
+            if !matches!(slot, Slot::Canvas | Slot::CanvasBar | Slot::ZenCapy | Slot::Bubbles) {
                 let hidden = hidden && !widget.has_css_class("floating-panel");
                 let can_target = !hidden && !widget.has_css_class("fixed-stack-divider")
                     && !matches!(slot, Slot::DrawerShadow(_) | Slot::ColumnConnection(_, _));
@@ -2695,6 +2706,7 @@ impl Workspace {
             for drawer in self.columns.drawers.borrow().iter() {
                 drawer.refresh_color_preview(&colors, view, headroom, preview);
             }
+            self.bubbles.refresh_wheels(&colors, view, headroom, preview);
             crate::color_editor::refresh_display(self);
         }
     }
@@ -2756,6 +2768,9 @@ impl Workspace {
         };
         self.refreshing.set(true);
         self.command_bar.refresh(self, state.command_search.clone());
+        if regions & (regions::BUBBLES | regions::LAYOUT | regions::BRUSH | regions::CUSTOMIZATION | regions::DOCUMENT | regions::COMMANDS | regions::SETTINGS) != 0 {
+            self.bubbles.refresh(self, &state);
+        }
         if regions & (regions::PRESSURE_CALIBRATION | regions::SETTINGS | regions::LAYOUT | regions::CAMERA) != 0 {
             self.pressure_calibration.refresh(self, state.pressure_calibration.as_ref());
         }
@@ -3650,6 +3665,33 @@ impl Workspace {
         targets.push((widget.as_ref().downgrade(), target));
     }
 
+    pub(crate) fn register_tear(&self, widget: &impl IsA<gtk::Widget>, grab: BubbleGrab) {
+        self.register_drag(widget, DragTarget::Tear(grab));
+    }
+
+    fn tear_grab(&self, target: DragTarget) -> Option<(BubbleGrab, bool)> {
+        match target {
+            DragTarget::Tear(grab) => Some((grab, true)),
+            DragTarget::Dock(DockItem::Tile { panel, tile }) => {
+                let layout = self.surface.imp().layout.borrow();
+                let control = layout.panel(panel).ok()?.tiles().iter().find(|t| t.id == tile)?.control;
+                BubbleSource::for_control(control)
+                    .map(|_| (BubbleGrab::Tile { panel, tile }, BubbleSource::tears_without_hold(control)))
+            }
+            _ => None,
+        }
+    }
+
+    fn within_source(&self, source: &gtk::Widget, point: [f32; 2]) -> bool {
+        let surface: gtk::Widget = self.surface.clone().upcast();
+        let mut slot = source.clone();
+        while let Some(parent) = slot.parent().filter(|p| *p != surface) {
+            slot = parent;
+        }
+        slot.compute_bounds(&self.surface)
+            .is_some_and(|b| b.contains_point(&gtk::graphene::Point::new(point[0], point[1])))
+    }
+
     fn drag_target_at(&self, point: [f32; 2]) -> Option<DragTarget> {
         self.drag_source_at(point).map(|(_, target)| target)
     }
@@ -3816,6 +3858,7 @@ impl Workspace {
             if self.workspace_drag.borrow().is_none()
                 && let Some((source, target)) = self.drag_source_at(point)
             {
+                let tear = self.tear_grab(target);
                 let drag = NativeWorkspaceDrag {
                     target,
                     origin: point,
@@ -3823,7 +3866,10 @@ impl Workspace {
                     started: false,
                     held: false,
                     context: false,
-                    wait_for_hold: source.has_css_class("drag-hold"),
+                    wait_for_hold: source.has_css_class("drag-hold") || matches!(target, DragTarget::Tear(_)),
+                    tear: tear.map(|(grab, _)| grab),
+                    pull: tear.is_some_and(|(_, pull)| pull),
+                    tearing: false,
                     parent: source.parent(),
                     source,
                     sequence,
@@ -3862,7 +3908,9 @@ impl Workspace {
             }
             self.clear_tab_slide(&mut drag);
             if drag.started {
-                if matches!(drag.target, DragTarget::Header(_)) {
+                if let Some(grab) = drag.tear.filter(|_| drag.tearing) {
+                    self.bubbles.drag(self, grab, phase, point);
+                } else if matches!(drag.target, DragTarget::Header(_)) {
                     self.dragging.set(false);
                     self.header
                         .finish_drag(self, point, phase == ContactPhase::Cancel);
@@ -3876,6 +3924,12 @@ impl Workspace {
                             hint.target,
                             [self.surface.width() as f32, self.surface.height() as f32],
                         ));
+                    } else if phase == ContactPhase::Up
+                        && let Some(grab) = drag.tear
+                        && !self.within_source(&drag.source, point)
+                        && self.bubbles.drag(self, grab, ContactPhase::Down, point)
+                    {
+                        self.bubbles.drag(self, grab, ContactPhase::Up, point);
                     }
                 } else {
                     self.dispatch_drag(drag.target, phase, point);
@@ -3915,9 +3969,23 @@ impl Workspace {
                 return false;
             }
             if drag.wait_for_hold && !drag.held {
-                // Moving before the native hold wins belongs to scrolling.
-                self.workspace_drag.borrow_mut().take();
-                return false;
+                let Some(grab) = drag.tear.filter(|_| drag.pull) else {
+                    self.workspace_drag.borrow_mut().take();
+                    return false;
+                };
+                if self.within_source(&drag.source, point) {
+                    return false;
+                }
+                self.dismiss_context();
+                self.reset_drag_recognizers(&drag);
+                drag.started = true;
+                drag.tearing = true;
+                drag.point = point;
+                *self.workspace_drag.borrow_mut() = Some(drag.clone());
+                if !self.bubbles.drag(self, grab, ContactPhase::Down, point) {
+                    self.workspace_drag.borrow_mut().take();
+                }
+                return true;
             }
             self.dismiss_context();
             self.reset_drag_recognizers(&drag);
@@ -3958,6 +4026,10 @@ impl Workspace {
         }
         drag.point = point;
         *self.workspace_drag.borrow_mut() = Some(drag.clone());
+        if let Some(grab) = drag.tear.filter(|_| drag.tearing) {
+            self.bubbles.drag(self, grab, ContactPhase::Move, point);
+            return true;
+        }
         if !matches!(
             drag.target,
             DragTarget::Dock(DockItem::Tile { .. }) | DragTarget::Header(_)

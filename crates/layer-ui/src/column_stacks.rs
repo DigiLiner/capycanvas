@@ -394,6 +394,7 @@ impl DockLayout {
                             anchor,
                             direction,
                             columns: Vec::new(),
+                            detached: false,
                         }
                         .connection()
                         .map(|connection| (g.active, connection))

@@ -384,6 +384,7 @@ impl DockLayout {
                 HeaderItem::Tool { control } => Some(control),
                 _ => None,
             },
+            DrawerAnchor::Bubble { id } => self.bubbles.get(id)?.source.control(),
             _ => None,
         }
     }
@@ -584,7 +585,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             sections: vec![items],
         })
     }
-    fn group_variant(&self, group: ToolControlGroup) -> ToolVariant {
+    pub(super) fn group_variant(&self, group: ToolControlGroup) -> ToolVariant {
         let id = match group {
             ToolControlGroup::Slot(slot) => return self.state.slot_variant(slot),
             ToolControlGroup::Navigation => return ToolVariant::active(&self.state).filter(|v| group.contains(*v)).unwrap_or(command(CommandId::Hand)),
@@ -632,7 +633,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         }
                         return false;
                     }
-                    let columns = control.drawer_columns().unwrap();
+                    let columns = anchor.columns(control.drawer_columns().unwrap());
                     let drawer = self.state.customization.drawer.as_mut().unwrap();
                     if drawer.columns != columns || drawer.tool_set.is_some() {
                         drawer.columns = columns;
@@ -670,6 +671,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             };
             (columns, None)
         };
+        let columns = anchor.columns(columns);
         let drawer = self.state.customization.drawer.as_mut().unwrap();
         if drawer.columns != columns || drawer.tool_set != tool_set {
             drawer.columns = columns;
@@ -707,6 +709,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             dismissal: DrawerDismissal::OutsideContact,
             tabs: None,
             compact: false,
+            simple: false,
         });
         if self.layer_interaction.tool.selection_tool().is_some() { self.refresh_tools(); }
         self.update_slot_drawer();
@@ -769,7 +772,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         };
         if variant.is_active(&self.state) {
             self.remember_tool_slots();
-            if let Some(old) = open {
+            if let Some(old) = open
+                && !(matches!(anchor, DrawerAnchor::Bubble { .. }) && matches!(variant, ToolVariant::BrushPreset { .. }))
+            {
                 self.show_tool_slot_drawer(old, anchor);
             }
         } else if self.content_bounds.busy() {

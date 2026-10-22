@@ -250,7 +250,8 @@ manager; web observes `prefers-color-scheme`. OS changes never overwrite a user
 override. Returning to System uses the latest OS value.
 
 `ZenMode` toggles shared `UiState.workspace.zen_mode`. Zen has a single
-presentation: it hides the header and docked chrome, keeps floating panels, and
+presentation: it hides the header and docked chrome, keeps floating panels and
+[tool bubbles](tool-bubbles.md), and
 never projects alternate toolbar strips or changes the saved layout. A minimal
 persistent UI belongs in a workspace instead. The standalone Capy button or Tab
 exits Zen; Tab toggles Zen outside settings and native text editors. Explicit

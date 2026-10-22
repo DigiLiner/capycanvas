@@ -95,6 +95,9 @@ impl ToolSet {
                     if media { TOOL_ROW_HEIGHT } else { layer_ui::TILE_SIZE as i32 },
                 );
                 button.set_child(Some(&aligned_icon_label(&item.label, item.icon, if media { 0.0 } else { 1.0 })));
+                if let Some(grab) = layer_ui::BubbleGrab::for_choice(&item.action) {
+                    workspace.register_tear(&button, grab);
+                }
                 self.groups.insert(&button, -1);
                 buttons.push(button);
             }
@@ -133,6 +136,9 @@ impl ToolSet {
                         button.set_widget_name(&format!("tool-choice-{command:?}"));
                     }
                     button.set_child(Some(&tool_label(item)));
+                }
+                if let Some(grab) = layer_ui::BubbleGrab::for_choice(&item.action) {
+                    workspace.register_tear(&button, grab);
                 }
                 self.list.append(&button);
                 buttons.push((item.clone(), button, preview));

@@ -833,6 +833,10 @@ impl Header {
             root.append(&grip);
             editing_grip = Some(grip);
             w.register_drag(&root, DragTarget::Header(HeaderDragSource::Item(entry.id)));
+        } else if let HeaderItem::Tool { control } = entry.item
+            && layer_ui::BubbleSource::for_control(control).is_some()
+        {
+            w.register_tear(&root, layer_ui::BubbleGrab::Header { id: entry.id });
         }
         root.append(&content);
         self.root.add(&root);

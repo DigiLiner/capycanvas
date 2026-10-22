@@ -33,6 +33,7 @@ pub enum LayoutChange {
     Automatic, Starting, HeaderSize { size: crate::HeaderSize }, HeaderAdded { item: crate::HeaderItem }, HeaderRemoved { item: crate::HeaderItem }, HeaderRearranged, CanvasInfo, CanvasBar, Restored, RestoredEarlier,
     Panels { action: LayoutPanelAction, panels: Vec<LayoutPanelName> },
     Renamed { before: LayoutPanelName, after: LayoutPanelName },
+    Bubble { action: LayoutPanelAction, source: crate::BubbleSource },
 }
 impl LayoutChange {
     pub fn panels(action: LayoutPanelAction, panels: Vec<LayoutPanelName>) -> Self { Self::Panels { action, panels } }
@@ -45,6 +46,7 @@ impl LayoutChange {
             }
             Self::Renamed { before, after } => { before.validate()?; after.validate()?; }
             Self::HeaderAdded { item: crate::HeaderItem::Tool { control } } | Self::HeaderRemoved { item: crate::HeaderItem::Tool { control } } => control.validate()?,
+            Self::Bubble { source, .. } => source.validate()?,
             _ => {},
         }
         Ok(())
@@ -63,6 +65,9 @@ impl LayoutChange {
             Self::Restored => MessageId::WORKSPACE_HISTORY_RESTORED,
             Self::RestoredEarlier => MessageId::WORKSPACE_HISTORY_RESTORED_EARLIER,
             Self::Renamed { before, after } => { args.set("before", before.display(localization)); args.set("after", after.title(localization)); MessageId::WORKSPACE_HISTORY_RENAMED },
+            Self::Bubble { action, source } => { args.set("panels", source.label(localization)); match action {
+                A::Added => MessageId::WORKSPACE_HISTORY_ADDED, A::Moved => MessageId::WORKSPACE_HISTORY_MOVED, A::Deleted => MessageId::WORKSPACE_HISTORY_PUT_BACK, _ => MessageId::WORKSPACE_HISTORY_CUSTOMIZED,
+            } },
             Self::Panels { action, panels } => { args.set("panels", display_names(localization, panels, *action == A::Selected)); match action {
                 A::Added => MessageId::WORKSPACE_HISTORY_ADDED, A::Deleted => MessageId::WORKSPACE_HISTORY_DELETED, A::Moved => MessageId::WORKSPACE_HISTORY_MOVED, A::Resized => MessageId::WORKSPACE_HISTORY_RESIZED, A::Collapsed => MessageId::WORKSPACE_HISTORY_COLLAPSED, A::Expanded => MessageId::WORKSPACE_HISTORY_EXPANDED, A::Hidden => MessageId::WORKSPACE_HISTORY_HIDDEN, A::Shown => MessageId::WORKSPACE_HISTORY_SHOWN, A::Rearranged => MessageId::WORKSPACE_HISTORY_REARRANGED, A::TabReordered => MessageId::WORKSPACE_HISTORY_TAB_REORDERED, A::TabsChanged => MessageId::WORKSPACE_HISTORY_TABS_CHANGED, A::ToolsAdded => MessageId::WORKSPACE_HISTORY_TOOLS_ADDED, A::ToolsRemoved => MessageId::WORKSPACE_HISTORY_TOOLS_REMOVED, A::ToolsChanged => MessageId::WORKSPACE_HISTORY_TOOLS_CHANGED, A::Customized => MessageId::WORKSPACE_HISTORY_CUSTOMIZED, A::Replaced => MessageId::WORKSPACE_HISTORY_REPLACED, A::Selected => MessageId::WORKSPACE_HISTORY_SELECTED,
             } },

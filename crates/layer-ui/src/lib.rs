@@ -107,6 +107,13 @@ mod header;
 pub use header::*;
 mod header_drag;
 pub use header_drag::*;
+mod bubbles;
+pub use bubbles::{
+    Bead, BeadPlacement, BeadStrip, BubbleAction, BubbleBead, BubbleGrab, BubbleKind, BubbleLayout, BubbleOptions,
+    BubblePlacement, BubbleRing, BubbleSource, BubbleView, RingArc, RingSettings, ToolBubble, BUBBLE_BEAD,
+    COLOR_RING_SIZES, MAX_RING_SETTINGS, RECENT_BEADS, RING_WIDTH, SLIDER_BUBBLE, TOOL_BUBBLE, bead_strip_at,
+    color_beads, color_rim, halo_arcs, palette_pill, slider_ring,
+};
 mod drawers;
 pub use drawers::{
     ColumnDrawerMeasurement, ContentDrawer, DrawerAnchor, DrawerConnection, DrawerDismissal,
@@ -1611,6 +1618,9 @@ pub enum UiAction {
     SelectBrush {
         id: u32,
     },
+    Bubble {
+        action: BubbleAction,
+    },
     SelectToolGroup {
         group: ToolGroup,
     },
@@ -1822,7 +1832,8 @@ pub mod regions {
     pub const CANVAS_BAR: u32 = 1024;
     pub const HISTOGRAM: u32 = 2048;
     pub const PRESSURE_CALIBRATION: u32 = 4096;
-    pub const ALL: u32 = 8191;
+    pub const BUBBLES: u32 = 8192;
+    pub const ALL: u32 = 16383;
 }
 
 #[cfg(test)]

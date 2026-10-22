@@ -40,6 +40,9 @@ pub enum DrawerAnchor {
         group: u32,
         origin: Panel,
     },
+    Bubble {
+        id: u32,
+    },
 }
 impl DrawerAnchor {
     pub fn tile(self) -> Option<TileAnchor> {
@@ -47,6 +50,17 @@ impl DrawerAnchor {
             Self::Tile { panel, tile } => Some(TileAnchor { panel, tile }),
             _ => None,
         }
+    }
+}
+impl DrawerAnchor {
+    pub(crate) fn columns(self, mut columns: Vec<Vec<Panel>>) -> Vec<Vec<Panel>> {
+        if matches!(self, Self::Bubble { .. }) {
+            for column in &mut columns {
+                column.retain(|p| *p != Panel::ToolSettings);
+            }
+            columns.retain(|c| !c.is_empty());
+        }
+        columns
     }
 }
 impl From<TileAnchor> for DrawerAnchor {
@@ -85,6 +99,8 @@ pub struct ContentDrawer {
     pub tabs: Option<DrawerTabs>,
     /// Small tool families use their measured height beside the opening tile.
     pub compact: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub simple: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -94,6 +110,8 @@ pub struct DrawerPlacement {
     pub direction: Edge,
     /// Column bounds are local to the drawer; scroll overflow within each one.
     pub columns: Vec<Bounds>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detached: bool,
 }
 
 pub fn drawer_frame(source: &str) -> Result<serde_json::Value, String> {
@@ -194,7 +212,7 @@ impl DrawerPlacement {
         })
     }
     pub fn connection(&self) -> Option<DrawerConnection> {
-        if self.bounds.width <= 0. || self.bounds.height <= 0. { return None; }
+        if self.detached || self.bounds.width <= 0. || self.bounds.height <= 0. { return None; }
         let a = self.anchor;
         let b = self.bounds;
         let vertical = matches!(self.direction, Edge::Top | Edge::Bottom);
@@ -391,7 +409,7 @@ impl ContentDrawer {
             anchor,
             columns: control.drawer_columns().ok_or("This item has no tool drawer")?,
             dismissal: DrawerDismissal::OutsideContact,
-            tabs: None, compact: false, tool_set: None,
+            tabs: None, compact: false, tool_set: None, simple: false,
         })
     }
     pub(crate) fn for_header(layout: &DockLayout, id: u32) -> Result<Self, String> {
@@ -409,6 +427,21 @@ impl ContentDrawer {
             .ok_or("The tool no longer exists")?
             .control;
         Self::for_control(control, anchor.into())
+    }
+
+    pub(crate) fn for_bubble(layout: &DockLayout, id: u32) -> Result<Self, String> {
+        let bubble = layout.bubbles.get(id).ok_or("The bubble no longer exists")?;
+        let anchor = DrawerAnchor::Bubble { id };
+        let control = bubble.source.control().unwrap_or(ToolbarControl::Panel { panel: Panel::Brushes });
+        let mut drawer = Self::for_control(control, anchor)?;
+        drawer.columns = anchor.columns(drawer.columns);
+        if bubble.source.kind() == BubbleKind::Layers {
+            drawer.simple = !bubble.options.full;
+            if !bubble.options.fold {
+                drawer.dismissal = DrawerDismissal::Explicit;
+            }
+        }
+        Ok(drawer)
     }
 
     pub(crate) fn for_column(
@@ -435,6 +468,7 @@ impl ContentDrawer {
             tabs: Some(DrawerTabs { group, panels: panels.to_vec(), active }),
             compact: false,
             tool_set: None,
+            simple: false,
             dismissal: if layout.column_stack(column).auto_hide {
                 DrawerDismissal::OutsideContact
             } else {
@@ -505,7 +539,12 @@ impl ContentDrawer {
             return None;
         }
         let resolved = layout.resolved(viewport);
-        let (mut anchor, edge, axis) = if let DrawerAnchor::Header { id } = self.anchor {
+        let (mut anchor, edge, axis) = if let DrawerAnchor::Bubble { id } = self.anchor {
+            let bubble = layout.bubbles.get(id)?;
+            let radius = bubble.diameter() * 0.5;
+            let anchor = Bounds { x: bubble.center[0] - radius, y: bubble.center[1] - radius, width: radius * 2., height: radius * 2. };
+            (anchor, None, Axis::Vertical)
+        } else if let DrawerAnchor::Header { id } = self.anchor {
             layout.header.entry(id).ok()?;
             let anchor = layout
                 .header_presentation
@@ -581,13 +620,7 @@ impl ContentDrawer {
                 anchor.height = height;
             }
         }
-        let top = layout.header_presentation.height.max(HEADER_HEIGHT);
-        let available = Bounds {
-            x: WORKSPACE_SPACING,
-            y: top,
-            width: viewport[0] - WORKSPACE_SPACING * 2.0,
-            height: (layout.workspace_height(viewport[1]) - top - WORKSPACE_SPACING).max(1.0),
-        };
+        let available = layout.free_area(viewport);
         let direction = match edge {
             Some(Edge::Top) => Edge::Bottom,
             Some(Edge::Bottom) => Edge::Top,
@@ -623,7 +656,8 @@ impl ContentDrawer {
         width = width.min(room.max(1.0));
         let height = heights.iter().copied().fold(TILE_SIZE, f32::max);
         let height = if self.layer_properties.is_some() { height.min(viewport[1] * crate::LayerDrawerSizing::MAX_HEIGHT_FRACTION) } else { height };
-        let fits_content = self.compact || self.layer_properties.is_some();
+        let centered = matches!(self.anchor, DrawerAnchor::Bubble { .. });
+        let fits_content = self.compact || self.layer_properties.is_some() || centered;
         let horizontal_x = if options.is_some() { anchor.x + anchor.width - width } else { anchor.x };
         let (x, y, height) = match direction {
             Edge::Bottom => {
@@ -638,7 +672,14 @@ impl ContentDrawer {
                 (horizontal_x, bottom - height, height)
             }
             Edge::Left | Edge::Right => {
-                let y = (if fits_content { anchor.y + anchor.height - height } else { anchor.y - 500.0 }).max(available.y);
+                let y = if centered {
+                    (anchor.y + (anchor.height - height) * 0.5).min(available.y + available.height - height)
+                } else if fits_content {
+                    anchor.y + anchor.height - height
+                } else {
+                    anchor.y - 500.0
+                }
+                .max(available.y);
                 let height = height
                     .max(anchor.y + anchor.height - y)
                     .min(available.y + available.height - y);
@@ -679,6 +720,7 @@ impl ContentDrawer {
             anchor,
             direction,
             columns,
+            detached: centered,
         })
     }
 }
@@ -1010,6 +1052,7 @@ mod tests {
                     anchor,
                     direction,
                     columns: vec![],
+                    detached: false,
                 };
                 let facing = match direction {
                     Edge::Top => [true, true, false, false],

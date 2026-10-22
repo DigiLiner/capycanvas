@@ -60,12 +60,14 @@ pub struct LayerPanel {
     previews: Previews,
     requested: RefCell<HashMap<(u64, bool), u64>>,
     pending: RefCell<HashMap<u64, (u64, bool, u64)>>,
+    simple: Rc<Cell<bool>>,
     next_preview: Cell<u64>,
     renderer: Cell<u64>,
 }
 type Previews = Rc<RefCell<HashMap<(u64, bool), (u64, gdk::Texture)>>>;
 #[derive(Clone)]
 struct Row {
+    simple: Rc<Cell<bool>>,
     copy: Rc<RefCell<LayerCopy>>,
     owner: Rc<RefCell<Weak<Workspace>>>,
     previews: Previews,
@@ -483,10 +485,13 @@ impl LayerPanel {
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         let rows: Rc<RefCell<HashMap<usize, Row>>> = Rc::default();
+        let simple: Rc<Cell<bool>> = Rc::default();
         let connections = connections::Connections::new(rows.clone());
         factory.connect_setup(glib::clone!(
             #[weak]
             connections,
+            #[strong]
+            simple,
             #[strong]
             previews,
             #[strong]
@@ -923,6 +928,7 @@ impl LayerPanel {
                 rows.borrow_mut().insert(
                     item.as_ptr() as usize,
                     Row {
+                        simple: simple.clone(),
                         copy: copy.clone(),
                         owner: owner.clone(),
                         previews: previews.clone(),
@@ -1076,6 +1082,7 @@ impl LayerPanel {
             previews,
             requested: Default::default(),
             pending: Default::default(),
+            simple,
             next_preview: Cell::new(1),
             renderer: Cell::new(0),
         }
@@ -1389,6 +1396,15 @@ impl LayerPanel {
                 for row in self.rows.borrow().values().filter(|row| row.id.get() == state.id) { row.refresh(&state); }
 
             }
+        }
+    }
+    pub fn set_simple(&self, simple: bool) {
+        if self.simple.replace(simple) == simple {
+            return;
+        }
+        self.header.set_visible(!simple);
+        for row in self.rows.borrow().values() {
+            row.meta.set_visible(!simple && !row.meta.text().is_empty());
         }
     }
     pub fn refresh(&self, state: &UiState) {
@@ -1720,7 +1736,7 @@ impl Row {
         self.lock.update_state(&[gtk::accessible::State::Hidden(!s.locked && !s.alpha_locked)]);
         caption(&self.lock, if s.locked { copy.layer.locked.as_ref() } else { copy.layer.alpha_locked.as_ref() });
         self.meta.set_text(&s.description);
-        self.meta.set_visible(!s.description.is_empty());
+        self.meta.set_visible(!self.simple.get() && !s.description.is_empty());
     }
 }
 

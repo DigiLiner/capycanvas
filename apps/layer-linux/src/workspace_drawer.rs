@@ -154,6 +154,7 @@ impl LayerInspector {
             self.target.set(target);
         }
         self.rows.set(state.layers.len());
+        self.layers.set_simple(state.customization.drawer.as_ref().is_some_and(|d| d.simple));
         let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
         let previous = self.properties.replace(open);
         if previous != open {
@@ -371,6 +372,7 @@ impl View {
             DrawerAnchor::Header { .. } => "tool-drawer".into(),
             DrawerAnchor::Tile { .. } => "tool-drawer".into(),
             DrawerAnchor::Column { column, .. } => format!("column-drawer-{column}"),
+            DrawerAnchor::Bubble { id } => format!("bubble-drawer-{id}"),
         });
         root.add_css_class("dock-panel");
         root.add_css_class("content-drawer");
@@ -780,6 +782,7 @@ impl Drawer {
             }
             .or_else(|| w.customization.drawer_button(TileAnchor { panel, tile })),
             DrawerAnchor::Column { column, origin, .. } => w.columns.button(column, origin),
+            DrawerAnchor::Bubble { .. } => None,
         }
     }
     pub fn source_container(&self, w: &Workspace) -> Option<gtk::Widget> {

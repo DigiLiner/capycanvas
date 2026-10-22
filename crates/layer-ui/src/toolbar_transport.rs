@@ -144,7 +144,7 @@ pub fn toolbar_ui(request: ToolbarUiRequest, localizer: &Localizer) -> Result<se
             json!(TabStyle::automatic_names(available, &widths))
         }
         ToolbarUiRequest::DrawerSourceCorners { anchor, direction, container } => json!(
-            DrawerPlacement { bounds: anchor, anchor, direction, columns: Vec::new() }.source_corners(container)
+            DrawerPlacement { bounds: anchor, anchor, direction, columns: Vec::new(), detached: false }.source_corners(container)
         ),
     })
 }

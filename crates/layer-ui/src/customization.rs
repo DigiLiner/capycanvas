@@ -524,6 +524,8 @@ pub enum ContextTarget {
     Group { group: u32 },
     Tile { panel: Panel, tile: u32 },
     Ribbon { panel: Panel },
+    Bubble { id: u32 },
+    BubblePalettes { id: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -585,6 +587,9 @@ pub enum CustomizationAction {
     },
     ToggleToolDrawer {
         anchor: TileAnchor,
+    },
+    ToggleBubbleDrawer {
+        id: u32,
     },
     SetColumnCollapsed {
         group: u32,
@@ -735,7 +740,9 @@ impl DockLayout {
     pub(crate) fn context_menu_localized_on(&self, target: ContextTarget, platform: Platform, localization: &Localizer) -> Result<ContextMenu, String> {
         let entry = ContextMenuItem::edit;
         let (title, sections) = match target {
-            ContextTarget::ToolVariants { .. } => return Err("Tool variations require session state".into()),
+            ContextTarget::ToolVariants { .. } | ContextTarget::Bubble { .. } | ContextTarget::BubblePalettes { .. } => {
+                return Err("Tool variations require session state".into());
+            }
             ContextTarget::Header { id } => {
                 return self.header.projected_for(platform).context_menu_localized(id, false, localization);
             }
@@ -2192,10 +2199,11 @@ impl CustomizationState {
                 self.drawer = None;
                 changed |= regions::LAYOUT;
             }
-            ToggleToolDrawer { .. } | ToggleHeaderDrawer { .. } => {
+            ToggleToolDrawer { .. } | ToggleHeaderDrawer { .. } | ToggleBubbleDrawer { .. } => {
                 let mut drawer = match action {
                     ToggleToolDrawer { anchor } => ContentDrawer::for_tile(layout, anchor)?,
                     ToggleHeaderDrawer { id } => ContentDrawer::for_header(layout, id)?,
+                    ToggleBubbleDrawer { id } => ContentDrawer::for_bubble(layout, id)?,
                     _ => unreachable!(),
                 };
                 drawer.configure_picker(layout);

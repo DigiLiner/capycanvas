@@ -35,6 +35,8 @@ mod navigation;
 #[path = "held_actions.rs"]
 mod held_actions;
 use held_actions::{ERASER_END, merge_change};
+#[path = "session_bubbles.rs"]
+mod session_bubbles;
 #[path = "tool_slots.rs"]
 mod tool_slots;
 pub use tool_slots::{ToolSlotId, ToolVariant, ToolSlotMemory};
@@ -305,6 +307,7 @@ pub struct UiSession<R: CanvasRenderer> {
     divider_drag: Option<(u32, ResizeDrag)>,
     floating_resize: Option<FloatingResize>,
     workspace_drag: Option<WorkspaceDrag>,
+    bubble_state: session_bubbles::Bubbles,
     workspace_tab_drag: Option<crate::tab_drag::TabDrag>,
     workspace_drag_tabs: Vec<TabHit>,
     workspace_model_revision: u64,
@@ -531,6 +534,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             divider_drag: None,
             floating_resize: None,
             workspace_drag: None,
+            bubble_state: Default::default(),
             workspace_tab_drag: None,
             workspace_drag_tabs: Vec::new(),
             workspace_model_revision: 0,
@@ -711,6 +715,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn context_menu(&self, target: ContextTarget) -> Result<ContextMenu, String> {
         let mut menu = match target {
             ContextTarget::ToolVariants { anchor } => self.tool_variants_menu(anchor),
+            ContextTarget::Bubble { id } => self.bubble_menu(id),
+            ContextTarget::BubblePalettes { id } => self.bubble_palette_menu(id),
             ContextTarget::ZenMode => self.state.workspace.layout.header.capy_context_menu(self.state.workspace.zen_mode, self.localization()),
             ContextTarget::Header { id } => self
                 .state
@@ -1259,6 +1265,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.change.canvas_wake |= change.canvas_wake;
                         reply.handled |= canvas;
                     }
+                }
+                if let ChromeEvent::Contact { position, .. } = event
+                    && !facts.popup_open
+                    && self.dismiss_bubble_halo(position)
+                {
+                    reply.change.regions |= regions::BUBBLES;
                 }
                 if let ChromeEvent::Contact { position, canvas } = event
                     && let Some(drawer) = &self.state.customization.drawer
@@ -3336,6 +3348,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (changed, false)
             }
             UiAction::ChooseToolVariant { anchor, variant } => return self.choose_tool_variant(anchor,variant),
+            UiAction::Bubble { action } => return self.bubble_action(action),
             UiAction::DoubleClickTool { control } => {
                 let control = self.state.resolve_group(control).map_or(control, |(_, _, _, resolved)| resolved);
                 let Some(command) = control.double_click_command() else { return Ok(UiChange::default()); };
@@ -3392,7 +3405,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::SelectBrush { id } => {
                 self.select_brush(id)?;
-                (BRUSH, false)
+                (BRUSH | if self.close_bubble_chooser() { CUSTOMIZATION | BUBBLES } else { 0 }, false)
             }
             UiAction::CycleTool { family } => {
                 // Honor customized toolbar order, appending absent family tools
@@ -6306,6 +6319,10 @@ pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "pressure_calibration_tests.rs"]
 mod pressure_calibration_tests;
+
+#[cfg(test)]
+#[path = "session_bubble_tests.rs"]
+mod session_bubble_tests;
 
 #[cfg(test)]
 #[path = "image_object_edit_tests.rs"]

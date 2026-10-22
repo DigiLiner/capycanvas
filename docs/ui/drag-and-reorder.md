@@ -18,6 +18,7 @@ descriptions do not override it.
 | Title bar, panel/tab strip, individual workspace tab, unused draggable header space | Drag without a hold | Drag without a hold | Drag without a hold |
 | Other reorderable list-row bodies | Drag without a hold | Hold, then drag | Hold, then drag |
 | Layer-row body | Drag without a hold | Scroll or swipe; use the grab handle to reorder | Scroll or swipe; use the grab handle to reorder |
+| Tool bubble face, slider center or color-ring gap | Drag without a hold | Drag without a hold | Drag without a hold |
 
 “Without a hold” means no time delay is required: ordinary movement slop can
 distinguish a click from a drag. “Hold, then drag” requires a stationary hold to
@@ -99,6 +100,13 @@ selects a tab immediately; retain its native button and ancestors through that
 selection so the same contact can become a drag. Capture preview geometry at
 pickup from that retained source. Keep its selected appearance current when
 selection publication arrives after pickup.
+
+Dragging a title-bar button, a brush or medium row, or a toolbar tool (other
+than slider and Tool Options tiles) out of its bar, panel or drawer takes a
+[tool bubble](tool-bubbles.md) without a hold. Until the contact leaves that
+container it keeps its ordinary scrolling and click behavior, so this does not
+add a pickup delay or steal list scrolling. A held tile drag still reorders; when
+it is released on the canvas past the 80-pixel line it takes a bubble too.
 
 ## Scrolling, menus, and cancellation
 

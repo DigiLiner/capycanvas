@@ -1012,10 +1012,10 @@ fn assert_shared_icons(widget: &gtk::Widget) {
     }
 }
 
-struct Driver {
-    w: Rc<Workspace>,
+pub(super) struct Driver {
+    pub(super) w: Rc<Workspace>,
     _app: NativeTestApp,
-    input: RemoteInput,
+    pub(super) input: RemoteInput,
 }
 impl Driver {
     fn managed(name: &str) -> Self {
@@ -1079,7 +1079,7 @@ impl Driver {
         }
         self.input.key(0xff0d);
     }
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let app = native_test_app(name);
         let w = fixture_workspace(&app);
         w.window.maximize();
@@ -1094,14 +1094,14 @@ impl Driver {
         pump(500);
         Self::start(w, app)
     }
-    fn point(&self, widget: &gtk::Widget) -> [f32; 2] {
+    pub(super) fn point(&self, widget: &gtk::Widget) -> [f32; 2] {
         assert!(widget.is_mapped(), "{} is not mapped", widget.widget_name());
         screen_point(widget, &self.w.window, [0.5, 0.5])
     }
-    fn named(&self, name: &str) -> gtk::Widget {
+    pub(super) fn named(&self, name: &str) -> gtk::Widget {
         find_named(self.w.window.upcast_ref(), name).unwrap_or_else(|| panic!("missing {name}"))
     }
-    fn click(&mut self, widget: &gtk::Widget) {
+    pub(super) fn click(&mut self, widget: &gtk::Widget) {
         let p = self.point(widget);
         self.input.click(p);
     }
@@ -1188,7 +1188,7 @@ impl Driver {
             touch,
         );
     }
-    fn finish(self) {
+    pub(super) fn finish(self) {
         self.input.finish();
         self.w.window.close();
         pump(200);

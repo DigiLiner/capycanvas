@@ -41,6 +41,8 @@ while file dialogs, focus and accessibility follow the platform.
   [compact toolbar edges](compact-toolbar-edges.md) and
   [stacked columns](stacked-columns.md).
 - [Drag and reorder](drag-and-reorder.md): the required pickup rules.
+- [Tool bubbles](tool-bubbles.md): tools, brushes, sliders, the color ring and
+  Layers kept on the canvas.
 - [Canvas action bar](canvas-action-bar.md), [image commands](image-commands.md),
   [command search](command-search.md),
   [selections](selections.md) with the [selection tools](selection-tools.md) and

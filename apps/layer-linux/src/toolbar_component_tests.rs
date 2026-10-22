@@ -37,7 +37,7 @@ fn anchor_widget(d: &Driver, anchor: DrawerAnchor) -> gtk::Widget {
     d.named(&match anchor {
         DrawerAnchor::Tile { tile, .. } => format!("tile-{tile}"),
         DrawerAnchor::Header { id } => format!("header-item-{id}"),
-        DrawerAnchor::Column { .. } => unreachable!(),
+        DrawerAnchor::Column { .. } | DrawerAnchor::Bubble { .. } => unreachable!(),
     })
 }
 fn assert_group_marker(widget: &gtk::Widget, expected: bool) {

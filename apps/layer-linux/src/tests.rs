@@ -108,6 +108,8 @@ mod tooltip;
 mod workspace_drawer_style;
 #[path = "workspace_header_tests.rs"]
 mod workspace_header;
+#[path = "bubble_tests.rs"]
+mod bubble_journeys;
 #[path = "workspace_drag_edge_tests.rs"]
 mod workspace_drag_edge;
 #[path = "workspace_drop_size_tests.rs"]

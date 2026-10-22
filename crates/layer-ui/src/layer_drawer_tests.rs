@@ -5,6 +5,7 @@ fn layer_drawer_frames_resize_retained_pages_and_bridge_together() {
         anchor: Bounds {x:800., y:12., width:36., height:36.},
         direction: Edge::Bottom,
         columns: vec![Bounds {x:0., y:0., width:280., height:300.}],
+        detached: false,
     };
     let to = DrawerPlacement {
         bounds: Bounds {height:700., ..from.bounds},

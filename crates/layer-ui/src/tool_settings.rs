@@ -213,6 +213,23 @@ fn primary(brush: &BrushSnapshot) -> &'static [&'static str] {
     }
 }
 
+const BLENDER_RING: &[&str] = &[
+    "streaks", "spread", "sharpness", "texture_kept", "blend_lightness", "grit", "stretch", "cell_size",
+    "swirl", "edge_keeping", "persistence", "pull", "momentum", "distortion",
+];
+
+pub(crate) fn defined(id: &str) -> bool {
+    DEFINITIONS.iter().any(|d| d.id == id)
+}
+
+pub(crate) fn ring_defaults(brush: &BrushSnapshot, controls: &[ToolSetting]) -> Vec<&'static str> {
+    let shown = |id: &&str| controls.iter().any(|c| c.id == *id);
+    match brush.execution {
+        BrushExecution::Smudge | BrushExecution::Liquify => BLENDER_RING.iter().copied().find(|id| shown(id)).into_iter().collect(),
+        _ => primary(brush).iter().copied().filter(shown).collect(),
+    }
+}
+
 const GROUP_ORDER: &[MessageId] = &[
     MessageId::TOOL_SETTING_GROUP_SMOOTHING,
     MessageId::TOOL_SETTING_GROUP_TIP,

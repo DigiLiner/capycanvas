@@ -2,7 +2,7 @@
 //! belonging to the raster document. Earlier bands own shared corners.
 
 use crate::{
-    PanelConfig, PanelContent, TilePresentation, TileStyle, ToolbarControl, ToolbarTile,
+    BubbleLayout, PanelConfig, PanelContent, TilePresentation, TileStyle, ToolbarControl, ToolbarTile,
     WORKSPACE_SPACING,
 };
 use serde::{Deserialize, Serialize};
@@ -1042,6 +1042,8 @@ pub struct DockLayout {
     /// Runtime native window-control clearance; the canvas viewport stays full size.
     #[serde(skip)]
     pub bottom_inset: f32,
+    #[serde(default, skip_serializing_if = "BubbleLayout::is_empty")]
+    pub bubbles: BubbleLayout,
     next_tile_id: u32,
     next_id: u32,
 }
@@ -1689,6 +1691,7 @@ impl Default for DockLayout {
             measurements: Vec::new(),
             titlebar_insets: [0.0; 3],
             bottom_inset: 0.0,
+            bubbles: BubbleLayout::default(),
             next_tile_id: initial_tile_id(),
             bands: vec![
                 DockBand {
@@ -1845,6 +1848,7 @@ impl DockLayout {
         if tile_ids.last().is_some_and(|id| self.next_tile_id <= *id) {
             return Err("Invalid toolbar tile ID allocator".into());
         }
+        self.bubbles.validate(&mut ids)?;
         if ids.last().is_some_and(|id| self.next_id <= *id) {
             return Err("Invalid workspace ID allocator".into());
         }
@@ -2306,6 +2310,7 @@ impl DockLayout {
         let defaults = Self::for_platform(platform);
         next.bands = defaults.bands;
         next.floating.clear();
+        next.bubbles.bubbles.clear();
         next.collapsed.clear();
         next.column_stacks.clear();
         next.column_scroll.clear();
@@ -2374,7 +2379,16 @@ impl DockLayout {
             ],
         )
     }
-    fn allocate(&mut self) -> Result<u32, String> {
+    pub(crate) fn free_area(&self, viewport: [f32; 2]) -> Bounds {
+        let top = self.header_presentation.height.max(crate::HEADER_HEIGHT);
+        Bounds {
+            x: WORKSPACE_SPACING,
+            y: top,
+            width: viewport[0] - WORKSPACE_SPACING * 2.0,
+            height: (self.workspace_height(viewport[1]) - top - WORKSPACE_SPACING).max(1.0),
+        }
+    }
+    pub(crate) fn allocate(&mut self) -> Result<u32, String> {
         let id = self.next_id;
         self.next_id = id.checked_add(1).ok_or("Workspace ID space exhausted")?;
         Ok(id)
@@ -2982,7 +2996,7 @@ impl DockLayout {
             }
             out
         }
-        self.floating == other.floating && order(self) == order(other)
+        self.floating == other.floating && self.bubbles == other.bubbles && order(self) == order(other)
     }
 
     /// A single multi-column section determines a sidebar's natural width;

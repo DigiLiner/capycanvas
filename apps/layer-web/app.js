@@ -300,7 +300,7 @@ function applyChange(change) {
           // the workspace behind it. Keep its controls and geometry intact.
           refreshPreferences(app.preferences_cached());
           updateZen();
-        } else update(languageChanged ? 8191 : change.regions | (moving ? 1 : 0));
+        } else update(languageChanged ? 16383 : change.regions | (moving ? 1 : 0));
         if (reopeningCanvas) {
           deferOptionalCompiler();
           wake();
