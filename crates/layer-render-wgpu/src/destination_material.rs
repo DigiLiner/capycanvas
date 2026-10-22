@@ -116,9 +116,11 @@ pub(super) fn blended(operation: MaterialOperation) -> bool {
     matches!(operation, MaterialOperation::Wet | MaterialOperation::Watercolor)
 }
 
+type KernelKey = (u32, usize, Entry, u8, bool, bool);
+
 pub(super) struct Pipelines {
     layouts: [wgpu::BindGroupLayout; 3],
-    kernels: std::collections::BTreeMap<(u32, usize, Entry, u8, bool, bool), Deferred<wgpu::ComputePipeline>>,
+    kernels: std::collections::BTreeMap<KernelKey, Deferred<wgpu::ComputePipeline>>,
 }
 
 impl Pipelines {

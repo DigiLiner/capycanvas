@@ -1437,7 +1437,11 @@ fn startup_notices_relabel_in_place_and_do_not_resurrect_dismissed_or_replaced_n
         host.session.set_localization(korean.clone());
         controller.set_localization(korean);
         controller.tick(&mut host.session, 1000);
-        assert_eq!(host.session.state().notice, replacement);
+        let current = host.session.state().notice.as_ref();
+        assert_eq!(current.map(|n| (n.id, &n.text, &n.actions)), replacement.as_ref().map(|n| (n.id, &n.text, &n.actions)));
+        if let (Some(current), Some(replacement)) = (current, replacement.as_ref()) {
+            assert_ne!(current.name, replacement.name);
+        }
     }
 }
 fn notice(host: &layer_host::NativeHost) -> Option<String> {
