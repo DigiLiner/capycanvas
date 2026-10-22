@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkVectorMilestone({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/vector-milestone/web';
@@ -86,6 +87,9 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     assert.ok(seen?.green>0,`${name}: the filled layer's thumbnail shows no fill ${JSON.stringify(seen)}`);
   });
   const [pencil,gpen]=[await brush('Pencil'),await brush('G-Pen')];
+  await invoke('new_document');
+  await evaluate(createDrawing({width:2000,height:1400}));
+  await until('the vector drawing is ready','!layerApp.documents.busy()&&!s.document_file.busy&&layerApp.app.brush_ready()',60000);
   for(const theme of ['light','dark']){
     await send({type:'set_theme',theme});
     await send({type:'layer',action:{op:'new',group:false,clipped:false}});

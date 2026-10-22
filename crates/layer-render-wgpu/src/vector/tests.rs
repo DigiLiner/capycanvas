@@ -45,6 +45,8 @@ fn scenes() -> Vec<(&'static str, PathItem)> {
             vec![round_stroke(0.4, None)], FillRule::NonZero)),
         ("tapered ink", path(vec![smooth(&[[30., 40.], [90., 200.], [170., 60.], [230., 220.]], false)],
             vec![round_stroke(14., Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 0.), WidthKnot::new(1, 0.5, 1., 1.), WidthKnot::new(2, 1., 0.05, 0.05)]).unwrap()))], FillRule::NonZero)),
+        ("straight pressure peak", path(vec![corners(&[[30., 128.], [220., 128.]], false)],
+            vec![round_stroke(40., Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.1), WidthKnot::new(0, 0.5, 1., 1.), WidthKnot::new(0, 1., 0.1, 0.1)]).unwrap()))], FillRule::NonZero)),
         ("thick round stroke over fill", path(vec![blob], vec![fill([0.9, 0.9, 0.2, 1.]), round_stroke(40., None)], FillRule::NonZero)),
         ("miter outline", path(vec![corners(&[[30., 200.], [128., 40.], [226., 200.]], false)], vec![PaintEntry::Stroke(Stroke::new(paint([0., 0., 0., 1.]), 12.))], FillRule::NonZero)),
         ("bevel zigzag with square caps", path(vec![corners(&[[20., 60.], [80., 200.], [140., 40.], [200., 210.], [240., 90.]], false)], vec![stroke(14., Cap::Square, Join::Bevel, None)], FillRule::NonZero)),
@@ -135,7 +137,16 @@ fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<(Vec<([f64; 2],
         let mut ring = vec![map(subpath.anchor(0).point())];
         let mut line = vec![(map(subpath.anchor(0).point()), width(base, 0.))];
         for (i, segment) in subpath.segments().enumerate() {
-            segment.map(map).flatten(0.002, |p, t| { ring.push(p); line.push((p, width(base + i as u32, t))); });
+            let mapped = segment.map(map);
+            let mut parameters = Vec::new();
+            mapped.flatten(0.002, |p, t| { ring.push(p); parameters.push(t); });
+            if let Some(profile) = stroke.and_then(|s| s.profile.as_ref()) {
+                parameters.extend(profile.segment_knots(base + i as u32).iter().map(WidthKnot::t));
+                parameters.extend((1..64).map(|k| f64::from(k) / 64.));
+                parameters.sort_by(f64::total_cmp);
+                parameters.dedup();
+            }
+            for t in parameters { line.push((mapped.point(t), width(base + i as u32, t))); }
         }
         base += subpath.segment_count() as u32;
         rings.push(ring);
@@ -228,25 +239,33 @@ fn stroke_pieces(line: &[([f64; 2], [f64; 2])], closed: bool, stroke: &Stroke) -
     }
     pieces
 }
-fn inside_stroke(lines: &[(Vec<([f64; 2], [f64; 2])>, bool)], p: [f64; 2]) -> bool {
-    lines.iter().any(|(line, _)| line.len() == 1 && (p[0] - line[0].0[0]).hypot(p[1] - line[0].0[1]) <= line[0].1[0] || line.windows(2).any(|w| {
+fn inside_stroke(segments: &[[([f64; 2], [f64; 2]); 2]], p: [f64; 2]) -> bool {
+    segments.iter().any(|w| {
         let (a, b) = (w[0].0, w[1].0);
         let d = [b[0] - a[0], b[1] - a[1]];
         let l2 = d[0] * d[0] + d[1] * d[1];
         let t = if l2 > 0. { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0., 1.) } else { 0. };
         let q = [a[0] + d[0] * t - p[0], a[1] + d[1] * t - p[1]];
         (q[0] * q[0] + q[1] * q[1]).sqrt() <= w[0].1[0] + (w[1].1[0] - w[0].1[0]) * t
-    }))
+    })
 }
 fn reference(item: &PathItem, level: u32) -> Vec<[f64; 4]> {
     let (rings, lines) = fine(item, level);
     let colors = colors(item);
     let pieces: Vec<(Piece, [f64; 4])> = item.style.strokes().next().filter(|s| s.join != Join::Round || s.cap != Cap::Round)
         .map(|s| lines.iter().flat_map(|(line, closed)| stroke_pieces(line, *closed, s)).map(|piece| { let b = piece.bounds(); (piece, b) }).collect()).unwrap_or_default();
+    let segments: Vec<_> = lines.iter().flat_map(|(line, _)| {
+        if line.len() == 1 { vec![[line[0], line[0]]] } else { line.windows(2).map(|w| [w[0], w[1]]).collect() }
+    }).collect();
     let n = 8;
     (0..SIZE * SIZE).map(|i| {
         let (x, y) = (f64::from(i % SIZE), f64::from(i / SIZE));
         let near: Vec<&Piece> = pieces.iter().filter(|(_, b)| b[0] <= x + 1. && b[2] >= x && b[1] <= y + 1. && b[3] >= y).map(|(piece, _)| piece).collect();
+        let near_strokes: Vec<_> = segments.iter().copied().filter(|w| {
+            let r = w[0].1[0].max(w[1].1[0]);
+            w[0].0[0].min(w[1].0[0]) - r <= x + 1. && w[0].0[0].max(w[1].0[0]) + r >= x
+                && w[0].0[1].min(w[1].0[1]) - r <= y + 1. && w[0].0[1].max(w[1].0[1]) + r >= y
+        }).collect();
         let mut color = [0f64; 4];
         for (entry, paint) in item.style.entries.iter().enumerate() {
             let mut hits = 0;
@@ -254,7 +273,7 @@ fn reference(item: &PathItem, level: u32) -> Vec<[f64; 4]> {
                 let p = [x + (sx as f64 + 0.5) / n as f64, y + (sy as f64 + 0.5) / n as f64];
                 let inside = match paint {
                     PaintEntry::Fill(_) => { let w = winding(&rings, p); if item.fill_rule == FillRule::EvenOdd { w % 2 != 0 } else { w != 0 } }
-                    _ if pieces.is_empty() => inside_stroke(&lines, p),
+                    _ if pieces.is_empty() => inside_stroke(&near_strokes, p),
                     _ => near.iter().any(|piece| piece.contains(p)),
                 };
                 hits += usize::from(inside);

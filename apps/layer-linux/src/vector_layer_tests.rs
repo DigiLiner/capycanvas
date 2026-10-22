@@ -89,8 +89,8 @@ fn native_vector_tools() {
     d.capture_canvas("vector-figure.png");
 
     tool(&d, LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline });
-    for at in [[1000., 400.], [1150., 650.], [1300., 420.]] { pen_points(&mut d, &[at, at]); pump(80); }
-    pen_points(&mut d, &[[1450., 640.], [1520., 700.]]);
+    for at in [[900., 400.], [1000., 650.], [1100., 420.]] { pen_points(&mut d, &[at, at]); pump(80); }
+    pen_points(&mut d, &[[1200., 640.], [1250., 700.]]);
     pump(200);
     d.capture_canvas("vector-path-drafting.png");
     d.input.key(0xff0d);
@@ -114,23 +114,25 @@ fn native_vector_tools() {
 
     d.w.dispatch(UiAction::Invoke { command: CommandId::Move });
     pump(200);
-    let [x0, y0, x1, y1] = rectangle.bounds().map(|v| v as f32);
+    let [x0, y0, x1, y1] = rectangle.visual_bounds().map(|v| v as f32);
     canvas_drag(&mut d, [x0 - 30., y0 - 30.], [x1 + 30., y1 + 30.], true);
     pump(300);
     d.capture_canvas("vector-frame.png");
     canvas_drag(&mut d, [x1, y1], [x1 + 120., y1 + 80.], true);
-    until_paths(&d, "scaling with the frame", |paths| paths.iter().any(|p| p.id == rectangle.id && p.bounds()[2] > f64::from(x1) + 100.));
+    until_paths(&d, "scaling with the frame", |paths| paths.iter().any(|p| p.id == rectangle.id && p.visual_bounds()[2] > f64::from(x1) + 100.));
     d.capture_canvas("vector-scaled.png");
 
     d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
     pump(200);
     pen_points(&mut d, &(0..40).map(|i| [300. + i as f32 * 25., 900. + (i as f32 * 0.3).sin() * 40.]).collect::<Vec<_>>());
     let inked = until_paths(&d, "an inked line", |paths| paths.len() == 3);
+    wait_for("the line crosses the eraser's center", || marked(presented(&d, [805., 890.])));
     d.w.dispatch(UiAction::Invoke { command: CommandId::Eraser });
-    d.w.dispatch(UiAction::SetBrushSize { value: 24. });
+    d.w.dispatch(UiAction::SetBrushSize { value: 8. });
     pump(200);
     pen_points(&mut d, &[[800., 820.], [805., 900.], [810., 980.]]);
     until_paths(&d, "erasing across the line", |paths| paths.len() == 4 && paths.iter().any(|p| p.id == inked[0].id));
+    wait_for("the eraser clears its center and keeps both sides", || !marked(presented(&d, [805., 890.])) && marked(presented(&d, [700., 860.])) && marked(presented(&d, [1000., 930.])));
     d.capture_canvas("vector-erased.png");
     d.finish();
 }
@@ -162,16 +164,23 @@ pub(super) fn active_vector(d: &Driver) -> bool {
     let doc = session.engine().document();
     doc.working.occurrence.is_some_and(|h| doc.scene().vector_layer(h).is_some())
 }
+pub(super) fn tool_opener(d: &Driver, control: ToolbarControl) -> String {
+    let workspace = state(&d.w).workspace;
+    let header = workspace.layout.header.entries().filter(|entry| entry.item == HeaderItem::Tool { control }).map(|entry| format!("header-item-{}", entry.id));
+    let tiles = workspace.layout.panels.iter().flat_map(|panel| panel.tiles()).filter(|tile| tile.control == control).map(|tile| format!("tile-{}", tile.id));
+    let names: Vec<_> = header.chain(tiles).collect();
+    names.iter().find(|name| find_named(d.w.window.upcast_ref(), name).is_some_and(|widget| widget.is_mapped())).cloned().or_else(|| names.into_iter().next()).expect("a tool opener in the workspace")
+}
 pub(super) fn add_vector_layer(d: &mut Driver) {
-    let opener = d.header_tool(ToolbarControl::Panel { panel: Panel::Layers });
-    if state(&d.w).customization.drawer.is_none() { d.click_name(&opener); }
-    pump(150);
+    let shown = |d: &Driver| widgets(d.w.window.upcast_ref()).any(|widget| widget.widget_name() == "layer-add-vector-layer-symbolic" && widget.is_mapped());
+    let opener = (!shown(d)).then(|| tool_opener(d, ToolbarControl::Panel { panel: Panel::Layers }));
+    if let Some(opener) = &opener { d.click_name(opener); pump(150); }
     if state(&d.w).customization.drawer.as_ref().is_some_and(|drawer| drawer.layer_properties == Some(true)) { d.click_name("layer-properties-disclosure"); pump(150); }
-    let page = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap().child_by_name("layers").unwrap();
-    d.click(&find_named(&page, "layer-add-vector-layer-symbolic").expect("the footer offers New vector layer"));
+    let footer = widgets(d.w.window.upcast_ref()).find(|widget| widget.widget_name() == "layer-add-vector-layer-symbolic" && widget.is_mapped()).expect("the visible New vector layer footer button");
+    d.click(&footer);
     wait_for("a vector layer from the footer button", || active_vector(d));
     d.capture_canvas("footer-new-vector-layer.png");
-    if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
+    if let Some(opener) = opener { if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); } }
     pump(150);
 }
 pub(super) fn press_notice(d: &mut Driver, action: layer_ui::NoticeActionId) {
@@ -274,16 +283,13 @@ fn native_vector_select_erase_mask_and_merge() {
     d.input.key(0xff1b);
     wait_for("Escape clears the paths", || ui_session(&d.w).engine().document().working.vector_items.is_none());
 
-    let opener = d.header_tool(ToolbarControl::Command { command: CommandId::Eraser });
-    d.click_name(&opener);
-    if state(&d.w).customization.drawer.is_none() { d.click_name(&opener); }
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Eraser });
     pump(200);
     d.w.dispatch(UiAction::SetBrushSize { value: 12. });
     let label = CommandId::EraseToIntersection.localized_label(ui_session(&d.w).localization()).to_string();
     d.click_label(&label);
     wait_for("Erase up to intersection", || state(&d.w).settings.vector_eraser == layer_ui::VectorEraser::ToIntersection);
     capture(&d, "erase-modes.png");
-    if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
     pump(150);
     pen_points(&mut d, &stroke([700., 380.], [700., 420.]));
     until_paths(&d, "erasing up to the crossings", |paths| paths.len() == 4);

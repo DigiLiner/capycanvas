@@ -133,7 +133,7 @@ fn rapid_vector_drags_remain_drags_on_every_platform() {
         for tool in [CommandId::Move, CommandId::EditPoints] {
             let (mut s, layer) = point_edit_session(platform);
             invoke(&mut s, tool);
-            let start = if tool == CommandId::Move { [300., 225.] } else { [100., 300.] };
+            let start = if tool == CommandId::Move { [190.625, 243.75] } else { [100., 300.] };
             for (first, delta) in [(100, 0.), (120, 40.)] {
                 let points = [[start[0] + delta, start[1] + delta], [start[0] + delta + 20., start[1] + delta + 20.], [start[0] + delta + 40., start[1] + delta + 40.]].map(|p| surface_at(&s, p));
                 press(&mut s, first, &points);
@@ -581,7 +581,7 @@ fn move_frame_scales_and_rotates_selected_paths_in_one_undo_step() {
     let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
     let drawn = object(&s);
     let id = drawn.paths().next().unwrap().1.id;
-    let bounds = |s: &UiSession<Recorder>| object(s).items_bounds(&[id].into()).unwrap();
+    let bounds = |s: &UiSession<Recorder>| object(s).paths().find(|(_, p)| p.id == id).unwrap().1.visual_bounds();
     invoke(&mut s, CommandId::Move);
     let at = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
     press(&mut s, 50, &[at, at]);
@@ -1007,12 +1007,12 @@ fn select_all_transform_flip_escape_and_delete_act_on_paths() {
         assert!(s.state.tool_actions.iter().any(|action| action.command == command), "{command:?} is a Move option for paths");
     }
     assert!(s.command(CommandId::ScaleOutlineWidths).selected, "outline widths scale by default");
-    let [x0, _, x1, _] = drawn.items_bounds(&all).unwrap();
+    let [x0, _, x1, _] = drawn.paths().map(|(_, path)| path.visual_bounds()).fold(None, |bounds, path| Some(layer_core::authored::vector::union(bounds, path))).unwrap();
     invoke(&mut s, CommandId::TransformFlipHorizontal);
     let flipped = object(&s);
     for ((_, before), (_, after)) in drawn.paths().zip(flipped.paths()) {
         let [a, b] = [before.geometry.subpaths()[0].anchor(0).point(), after.geometry.subpaths()[0].anchor(0).point()];
-        assert!((b[0] - (x0 + x1 - a[0])).abs() < 1e-6 && (b[1] - a[1]).abs() < 1e-6, "{a:?} mirrors to {b:?}");
+        assert!((b[0] - (x0 + x1 - a[0])).abs() <= 1. / 256. && (b[1] - a[1]).abs() < 1e-6, "{a:?} mirrors to {b:?}");
     }
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
     s.frame(5_000_000_000, 5_000_000_000).unwrap();
@@ -1025,7 +1025,7 @@ fn select_all_transform_flip_escape_and_delete_act_on_paths() {
     assert!(s.command(CommandId::Deselect).enabled);
     invoke(&mut s, CommandId::Deselect);
     assert!(s.engine.document().working.vector_items.is_none());
-    let start = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
+    let start = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].segment(0).point(0.3));
     press(&mut s, 300, &[start, start]);
     key(&mut s, "enter", true, false, false);
     key(&mut s, "enter", false, false, false);
@@ -1034,6 +1034,11 @@ fn select_all_transform_flip_escape_and_delete_act_on_paths() {
     key(&mut s, "escape", false, false, false);
     assert_eq!(s.layer_interaction.tool, LayerCanvasTool::Move, "Escape leaves Edit Points");
     assert!(s.engine.document().working.vector_items.is_some());
+    let frame = s.vector_frame().unwrap();
+    let body = drawn.paths().next().unwrap().1.geometry.subpaths()[0].segments()
+        .flat_map(|segment| (1..10).map(move |i| segment.point(f64::from(i) / 10.)))
+        .find(|point| !matches!(frame.hit(*point, f64::from(s.ruler_reach())), Some(super::transform_frame::FrameHandle::Scale(_) | super::transform_frame::FrameHandle::Rotate))).unwrap();
+    let start = surface_at(&s, body);
     press(&mut s, 400, &[start, start]);
     press(&mut s, 402, &[start, start]);
     assert_eq!(s.layer_interaction.tool, LayerCanvasTool::EditPoints, "a double-click edits the path's points");
@@ -1226,7 +1231,7 @@ fn erasing_up_to_intersection_stops_at_crossing_lines() {
     s.dispatch(UiAction::SetBrushSize { value: 6. }).unwrap();
     line(&mut s, 300, [400., 290.], [400., 310.]);
     let object = s.engine.document().scene().vector_layer(handle).unwrap().clone();
-    let spans: Vec<[f64; 4]> = object.paths().map(|(_, p)| p.geometry.hull()).filter(|h| (h[1] - h[3]).abs() < 5.).collect();
+    let spans: Vec<[f64; 4]> = object.paths().filter(|(_, p)| { let h = p.geometry.hull(); (h[1] - h[3]).abs() < 5. }).map(|(_, p)| p.visual_bounds()).collect();
     assert_eq!(spans.len(), 2, "{spans:?}");
     assert!(spans.iter().any(|h| (h[2] - 300.).abs() < 2.) && spans.iter().any(|h| (h[0] - 500.).abs() < 2.), "the line loses only the span between the crossings: {spans:?}");
 }

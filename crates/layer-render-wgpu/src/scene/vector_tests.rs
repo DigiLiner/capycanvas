@@ -66,6 +66,42 @@ fn settle(engine: &mut layer_engine::CanvasEngine<WgpuRasterizer>) {
 }
 
 #[test]
+fn pressure_peaks_and_small_eraser_gaps_survive_gpu_rendering() {
+    for cap in [Cap::Round, Cap::Butt, Cap::Square] {
+        let Record::Path(mut path) = stroke(1, &[[30., 70.], [250., 70.]], 40., [0., 0., 0., 1.]) else { unreachable!() };
+        if let PaintEntry::Stroke(stroke) = &mut Arc::make_mut(&mut path.style).entries[0] {
+            stroke.cap = cap;
+            stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.1), WidthKnot::new(0, 0.5, 1., 1.), WidthKnot::new(0, 1., 0.1, 0.1)]).unwrap()));
+        }
+        let (editor, _) = document([280, 140], vec![Record::Path(path.clone())]);
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        let pixels = native(&mut r, editor.document());
+        assert!(pixels[85 * 280 + 140][3] > 0.95, "{cap:?}: the pressure peak remains visible");
+        assert!(pixels[85 * 280 + 35][3] < 0.01, "{cap:?}: the thin end remains thin");
+        let pieces = path.erased(&Eraser { from: [140., 70.], to: [140., 70.], radius: 4. }, None).unwrap();
+        let (cut, _) = document([280, 140], pieces.into_iter().enumerate().map(|(i, p)| Record::Path(PathItem { id: ItemId(i as u64 + 1), ..p })).collect());
+        let pixels = native(&mut r, cut.document());
+        assert!(pixels[70 * 280 + 140][3] < 0.01, "{cap:?}: a small eraser clears visible ink");
+        assert!(pixels[70 * 280 + 70][3] > 0.95 && pixels[70 * 280 + 210][3] > 0.95);
+        submit_ready(&mut r, packet(cut.document().scene(), [280, 140]));
+        assert!(max_error(&pixels, &display(&r)) < 1e-5);
+        if let PaintEntry::Stroke(stroke) = &mut Arc::make_mut(&mut path.style).entries[0] { stroke.profile = None; }
+        let pieces = path.erased(&Eraser { from: [140., 85.], to: [140., 85.], radius: 4. }, None).unwrap();
+        let (cut, _) = document([280, 140], pieces.into_iter().enumerate().map(|(i, p)| Record::Path(PathItem { id: ItemId(i as u64 + 1), ..p })).collect());
+        let pixels = native(&mut r, cut.document());
+        assert!(pixels[85 * 280 + 140][3] < 0.01, "{cap:?}: erasing near the edge clears the rendered cap");
+        for x in [132, 148] { assert!(pixels[85 * 280 + x][3] > 0.95, "{cap:?}: nearby ink at {x} remains"); }
+    }
+    let Record::Path(mut taper) = stroke(1, &[[140., 70.], [150., 70.]], 100., [0., 0., 0., 1.]) else { unreachable!() };
+    if let PaintEntry::Stroke(stroke) = &mut Arc::make_mut(&mut taper.style).entries[0] {
+        stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 0.), WidthKnot::new(0, 1., 1., 1.)]).unwrap()));
+    }
+    let (editor, _) = document([280, 140], vec![Record::Path(taper)]);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    assert!(native(&mut r, editor.document())[70 * 280 + 115][3] > 0.95);
+}
+
+#[test]
 fn vector_layers_render_the_same_through_display_and_native_paths() {
     let (editor, _) = document([300, 200], records());
     let doc = editor.document();

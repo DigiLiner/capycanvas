@@ -79,6 +79,7 @@ class AndroidVectorLayerTest {
     @Test fun gPenLinesDrawMoveAndUndoOnVectorLayers() {
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.1, .7, .2, 1.0))))
             action(obj("type" to "layer", "action" to obj("op" to "new_vector")))
             action(obj("type" to "select_brush", "id" to 1))
             action(obj("type" to "set_brush_size", "value" to 24))

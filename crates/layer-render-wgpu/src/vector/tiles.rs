@@ -228,7 +228,7 @@ fn centerline(subpath: &Subpath, segment_base: u32, stroke: &Stroke, half: f64, 
     points.push((frame.map(subpath.anchor(0).point()), width(segment_base, 0.)));
     for (index, segment) in subpath.segments().enumerate() {
         let global = segment_base + index as u32;
-        segment.map(|p| frame.map(p)).flatten(TOLERANCE, |p, t| points.push((p, width(global, t))));
+        stroke.flatten_segment(&segment.map(|p| frame.map(p)), global, TOLERANCE, frame.scale, |p, t| points.push((p, width(global, t))));
     }
 }
 
@@ -270,7 +270,9 @@ pub(crate) fn capsule_distance(p: [f64; 2], c: &[f64; 8]) -> f64 {
     let d = [p[0] - a[0], p[1] - a[1]];
     let x = d[0] * u[0] + d[1] * u[1];
     let y = (d[0] * u[1] - d[1] * u[0]).abs();
-    if length <= 0. { return (x * x + y * y).sqrt() - ra; }
+    if length <= (ra - rb).abs() {
+        return if ra >= rb { x.hypot(y) - ra } else { (x - length).hypot(y) - rb };
+    }
     let s = (ra - rb) / length;
     let cos = (1. - s * s).max(0.).sqrt();
     let k = x * cos - y * s;

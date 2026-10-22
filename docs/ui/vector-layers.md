@@ -168,17 +168,23 @@ The Eraser, transparent paint and the pen's eraser end erase paths on a vector
 layer. On a vector layer the Tools list starts with the eraser's modes, above
 the eraser brushes:
 
-- **Erase touched part**, the default, cuts paths where the eraser covers their
-  centerline: the part under the eraser goes, the rest keeps its exact curve
-  and widths, and a cut closed path becomes open.
+- **Erase touched part**, the default, cuts paths where the eraser touches
+  visible ink. The cut leaves a gap even when the eraser is narrower than the
+  outline; the rest keeps its exact curve and widths, and a cut closed path
+  becomes open.
 - **Erase whole paths** removes every path the eraser touches.
 - **Erase up to intersection** removes the touched part of a path out to the
   nearest crossings with other paths, or with itself, on either side; a path
-  that crosses nothing goes entirely.
+  that crosses nothing goes entirely. Crossing positions do not depend on
+  eraser size, and new caps end at the crossing.
 
 The chosen mode is saved with the preferences. The first piece keeps the path's
 identity and the others get new ones. The eraser's width is the brush size, and
 one stroke is one undo step.
+Picking and selection frames follow the visible caps, joins and pressure
+widths. Whole-path erasing uses the width at the contact, including along a
+fast sweep between input points.
+Solid fills stay attached to cut paths; erasing does not subtract filled areas.
 
 ## Coloring line art
 

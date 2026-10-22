@@ -3,7 +3,7 @@
 //! keys during drags, notices, long German labels, layer rows and saving.
 use super::*;
 use super::selection_tools::canvas_point;
-use super::vector_layers::{active_vector, add_vector_layer, capture, paths, press_notice, start, tool, until_paths, wait_for};
+use super::vector_layers::{active_vector, add_vector_layer, capture, paths, press_notice, start, tool, tool_opener, until_paths, wait_for};
 use layer_core::{DefaultBrushPreset, FigurePaint, FigureShape};
 use layer_ui::{NoticeActionId, RegionSource};
 
@@ -477,10 +477,11 @@ fn set_german(d: &Driver) {
     wait_for("German", || d.w.localization().language() == layer_ui::UiLanguage::German);
     pump(300);
 }
-fn open_drawer(d: &mut Driver, control: ToolbarControl, shown: impl Fn(&Driver) -> bool) -> String {
-    let opener = d.header_tool(control);
+fn open_drawer(d: &mut Driver, control: ToolbarControl, shown: impl Fn(&Driver) -> bool) -> Option<String> {
+    if shown(d) { return None; }
+    let opener = tool_opener(d, control);
     for _ in 0..3 {
-        if shown(d) { return opener; }
+        if shown(d) { return Some(opener); }
         if d.named(&opener).is_mapped() { d.click_name(&opener); } else { overflow_item(d, &opener); }
         let deadline = Instant::now() + Duration::from_millis(1500);
         while !shown(d) && Instant::now() < deadline {
@@ -488,7 +489,7 @@ fn open_drawer(d: &mut Driver, control: ToolbarControl, shown: impl Fn(&Driver) 
             pump(50);
         }
     }
-    if shown(d) { return opener; }
+    if shown(d) { return Some(opener); }
     capture(d, "drawer-failure.png");
     panic!("{opener} did not show its drawer");
 }
@@ -515,10 +516,10 @@ fn modes_shown(d: &Driver) -> bool {
     let text = CommandId::EraseWholePaths.localized_label(d.w.localization().as_ref()).to_string();
     widgets(d.w.window.upcast_ref()).any(|w| w.is_mapped() && w.width() > 0 && w.downcast_ref::<gtk::Label>().is_some_and(|l| l.text() == text))
 }
-fn open_layers(d: &mut Driver) -> String { open_drawer(d, ToolbarControl::Panel { panel: Panel::Layers }, footer_shown) }
-fn close_drawer(d: &mut Driver, opener: &str) {
+fn open_layers(d: &mut Driver) -> Option<String> { open_drawer(d, ToolbarControl::Panel { panel: Panel::Layers }, footer_shown) }
+fn close_drawer(d: &mut Driver, opener: &Option<String>) {
     if state(&d.w).customization.drawer.is_some() {
-        if d.named(opener).is_mapped() { d.click_name(opener); } else { d.input.key(0xff1b); }
+        if let Some(opener) = opener.as_ref().filter(|name| d.named(name).is_mapped()) { d.click_name(opener); } else { d.input.key(0xff1b); }
     }
     pump(250);
 }

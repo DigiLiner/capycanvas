@@ -672,7 +672,7 @@ fn samples(path: &PathItem) -> Vec<([f64; 2], [f64; 2])> {
 }
 
 #[test]
-fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
+fn erasing_cuts_visible_ink_into_pieces_that_keep_their_shape_and_widths() {
     let curve = vec![
         Anchor::new([0., 0.], [0.; 2], [30., -40.], AnchorKind::CORNER),
         Anchor::new([100., 0.], [-30., -30.], [30., 30.], AnchorKind::SYMMETRIC),
@@ -702,7 +702,8 @@ fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
     let subpath = &opened[0].geometry.subpaths()[0];
     assert!(!subpath.closed);
     assert_eq!(subpath.len(), 6, "the open piece runs from the cut through every corner back to the cut");
-    assert!((subpath.anchor(0).point()[0] - 28.).abs() < 1e-3 && (subpath.anchor(5).point()[0] - 22.).abs() < 1e-3);
+    assert!((subpath.anchor(0).point()[0] - 32.).abs() < 1e-3 && (subpath.anchor(5).point()[0] - 18.).abs() < 1e-3);
+    assert!(!opened[0].hit([25., 0.], 0.), "round caps leave the erased area clear");
 
     let compound = PathItem::new(ItemId(3), Arc::new(PathGeometry::new(vec![
         Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([100., 0.])], false),

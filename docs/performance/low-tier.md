@@ -2260,3 +2260,49 @@ summaries and symbolized profiles are in `artifacts/vector-tablets-20261020/`.
 | Open the document | 3 s | Parsed 571–625 ms, first frame 876–931 ms, settled 1.21–1.26 s | **Met** |
 | Paint-layer thumbnail after filling the whole Base layer | No limit | 4.04–4.10 s, polling every 120 ms like the Layers panel | Unqualified |
 | Pan / G-Pen stroke while that thumbnail is pending | 60 | 43.1–43.5 / 60.0/s; 43.3–43.5 / 60.0/s without polling | No extra drops |
+
+### V1 geometry correction measurements (2026-10-22)
+
+Re-measured the affected rows on the reference TCL, at 4248 × 2832 with 10,000
+paths, using the same authored crowded fixture for all builds. Baseline source
+is `3ac660dc`. Edit Points and ink use `47c53335` plus the geometry snapshot
+with manifest SHA-256 `bb5bd518…` (benchmark APK `cc27a4b8…`); erasing uses the
+measured cap-aware eraser snapshot `dbe23b92…` (APK `b05e9fbc…`). The earlier
+point and ink measurements retain their own source provenance. The final
+projection pruning for Butt and Square caps (`erase.rs` SHA-256 `09703e62…`) is
+outside the measured Round branch. All builds use the same optimized benchmark
+profile, private app ID, Fit view, Sketch workspace, closed Stats and
+Navigator, and default 60 Hz panel setting. Each row has a priming gesture and
+three 5 s gestures, each undone; thermal status stayed 0. The edited hatches
+have authored pressure profiles and Round caps and joins. These measurements
+supersede the corresponding older rows above.
+
+| Row | Baseline presents/s | Corrected presents/s | Corrected worst run p99, ms | 60 fps target |
+| --- | --- | --- | --- | --- |
+| Edit Points, 1 path | 60.0–60.0 | 59.8–60.0 | 16.86 | **Met** |
+| Edit Points, 100 paths | 59.8–60.0 | 59.8–60.0 | 16.73 | **Met** |
+| Eraser, touched part | 59.6–59.6 | 59.8–59.8 | 16.88 | **Met** |
+| Eraser, whole paths | 59.8–60.0 | 60.0–60.0 | 16.85 | **Met** |
+| Eraser, up to intersection | 59.6–60.0 | 59.4–59.4 | 33.30 | **Met** |
+
+Intersection erasing starts its first moving presentation in 94.5–100.9 ms,
+compared with 90.1–104.5 ms in the baseline. One of three current runs exceeds
+the separate 100 ms response limit (one of three in the baseline); that
+response target remains **not met**. The motion-rate qualification above does
+not include start latency.
+
+The ink runs below count completed canvas activity. Both builds report zero
+input-attributed updates/s because vector samples do not advance the recorded
+consumed-paint timestamp. These rates therefore do not establish fresh ink
+throughput, and the current inking target remains unqualified.
+
+| Row | Baseline canvas updates/s | Corrected canvas updates/s | Corrected worst run p99, ms | Result |
+| --- | --- | --- | --- | --- |
+| G-Pen 24 px, constant pressure | 110.8–119.5 | 114.9–119.2 | 16.81 | **Unqualified** |
+| G-Pen 24 px, variable pressure | 116.7–119.9 | 113.1–118.9 | 16.23 | **Unqualified** |
+
+Build manifests, source diffs, fixed fixtures, per-run reports and presentation
+traces are retained under `artifacts/vector-v1-fixes-20261022/performance/`, in
+`baseline/low/`, `candidate-batch2-fast/low/` and
+`candidate-batch2-cap-aware/low/`. The middle tier was reserved by another
+session and was not measured.

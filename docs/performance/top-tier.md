@@ -4195,3 +4195,48 @@ summaries and symbolized profiles are in `artifacts/vector-tablets-20261020/`.
 | Open the document | 6 s | Parsed 757–806 ms, first frame 1.08–1.14 s, settled 1.78–1.85 s | **Met** |
 | Paint-layer thumbnail after filling the whole Base layer | No limit | 6.40–6.44 s, polling every 120 ms like the Layers panel | Unqualified |
 | Pan / G-Pen stroke while that thumbnail is pending | 120 | 38.8–40.7 / 119.8–120.0/s; 38.7–40.5 / 119.8/s without polling | No extra drops |
+
+### V1 geometry correction measurements (2026-10-22)
+
+Re-measured the affected rows on the MovinkPad Pro 14, at 9504 × 6336 with
+50,000 paths, using the same authored crowded fixture for all builds. Baseline
+source is `3ac660dc`. Edit Points and ink use `47c53335` plus the geometry
+snapshot with manifest SHA-256 `bb5bd518…` (benchmark APK `cc27a4b8…`); erasing
+uses the measured cap-aware eraser snapshot `dbe23b92…` (APK `b05e9fbc…`). The
+earlier point and ink measurements retain their own source provenance. The
+final projection pruning for Butt and Square caps (`erase.rs` SHA-256
+`09703e62…`) is outside the measured Round branch. All builds use the same
+optimized benchmark profile, private app ID, Fit view, Sketch workspace, closed
+Stats and Navigator, and default 120 Hz panel setting. Each row has a priming
+gesture and three 5 s gestures, each undone; thermal status stayed 0. The
+edited hatches have authored pressure profiles and Round caps and joins. These
+measurements supersede the corresponding older rows above.
+
+| Row | Baseline presents/s | Corrected presents/s | Corrected worst run p99, ms | 120 fps target |
+| --- | --- | --- | --- | --- |
+| Edit Points, 1 path | 120.0–120.0 | 119.6–120.0 | 8.33 | **Met** |
+| Edit Points, 100 paths | 120.0–120.0 | 120.0–120.0 | 8.33 | **Met** |
+| Eraser, touched part | 118.6–120.0 | 119.8–120.0 | 8.40 | **Met** |
+| Eraser, whole paths | 119.0–119.4 | 119.4–119.6 | 8.52 | **Met** |
+| Eraser, up to intersection | 119.0–120.0 | 119.8–120.0 | 8.33 | **Met** |
+
+Intersection erasing starts its first moving presentation in 53.4–67.9 ms,
+compared with 67.6–81.8 ms in the baseline. All three current runs meet the
+separate 100 ms response limit (no baseline runs exceeded it). The motion-rate
+qualification above does not include start latency.
+
+The ink runs below count completed canvas activity. Both builds report zero
+input-attributed updates/s because vector samples do not advance the recorded
+consumed-paint timestamp. These rates therefore do not establish fresh ink
+throughput, and the current inking target remains unqualified.
+
+| Row | Baseline canvas updates/s | Corrected canvas updates/s | Corrected worst run p99, ms | Result |
+| --- | --- | --- | --- | --- |
+| G-Pen 24 px, constant pressure | 251.3–253.4 | 249.2–251.3 | 12.37 | **Unqualified** |
+| G-Pen 24 px, variable pressure | 252.9–259.3 | 245.3–251.5 | 12.43 | **Unqualified** |
+
+Build manifests, source diffs, fixed fixtures, per-run reports and presentation
+traces are retained under `artifacts/vector-v1-fixes-20261022/performance/`, in
+`baseline/top/`, `candidate-batch2-fast/top/` and
+`candidate-batch2-cap-aware/top/`. The middle tier was reserved by another
+session and was not measured.

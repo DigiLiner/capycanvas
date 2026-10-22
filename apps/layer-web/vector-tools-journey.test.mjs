@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkVectorTools({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/vector-tools/web';
@@ -30,6 +31,10 @@ export async function checkVectorTools({call,evaluate,settle}) {
   };
   const capture=async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const selectedLayer=()=>evaluate('Number(layerApp.state().layers.find(l=>l.selected).id)');
+  await invoke('new_document');
+  await evaluate(createDrawing({width:2000,height:1400}));
+  await evaluate('new Promise((resolve,reject)=>{const end=performance.now()+60000;function check(){if(!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready())resolve();else if(performance.now()>end)reject(Error("Vector drawing did not become ready"));else setTimeout(check,30);}check();})');
+  await settle();
   for(const theme of ['light','dark']){
     await send({type:'set_theme',theme});
     await send({type:'layer',action:{op:'new_vector'}});
@@ -75,10 +80,11 @@ export async function checkVectorTools({call,evaluate,settle}) {
     await stroke(line([300,1100],[1700,1100],40));
     await expect(`${theme} inked`,[1000,1100],true,green);
     await invoke('eraser');
-    await send({type:'set_brush_size',value:40});
+    await send({type:'set_brush_size',value:8});
     await stroke(line([1000,1000],[1000,1200]));
     await expect(`${theme} erased`,[1000,1100],false,green);
     await expect(`${theme} kept`,[700,1100],true,green);
+    await expect(`${theme} kept beyond the eraser`,[1300,1100],true,green);
     await capture(`vector-${theme}-erased`);
     await send({type:'layer',action:{op:'delete_selected'}});
     await invoke('pen');

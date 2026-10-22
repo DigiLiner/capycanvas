@@ -19,7 +19,7 @@ pub(super) struct SelectedPaths { bounds: Option<[f64; 4]>, count: usize, closab
 impl SelectedPaths {
     fn of(paths: &[(Position, &PathItem)]) -> Self {
         let facts = paths.iter().fold(Self::default(), |facts, (_, path)| Self {
-            bounds: Some(layer_core::authored::vector::union(facts.bounds, path.bounds())),
+            bounds: Some(layer_core::authored::vector::union(facts.bounds, path.visual_bounds())),
             count: facts.count + 1,
             closable: facts.closable || path.can_close(),
             joinable: facts.joinable + usize::from(path.joinable()),

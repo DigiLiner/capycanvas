@@ -228,7 +228,9 @@ at 256×192 against a linear RGBA F32
 captured on the same GPU, within a maximum error of 0.002 and RMS of 0.0002, under
 the same rules. The coverage kernel's `vector::tests` compare every fill rule,
 stroke join and cap, width profile and level against an exact supersampled
-reference.
+reference. Interior pressure knots shape the outline between anchors, including
+on straight segments; the numerical reference samples those widths independently
+of the renderer's geometry subdivision.
 
 Spatial evaluation changes also run the renderer's `scene::scale::tests::effects::gaussian`
 references, including sigmas above editor bounds, source-edge mass, neutral

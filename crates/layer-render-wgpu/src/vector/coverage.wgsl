@@ -73,7 +73,12 @@ fn stroke(command: Command, count: u32, first: vec2<f32>, coverage: vec4<f32>) -
         let near = x - select(vec4<f32>(0.0), vec4<f32>(span_length), far);
         let round = sqrt(near * near + y * y) - select(vec4<f32>(ra), vec4<f32>(rb), far);
         let side = (along >= vec4<f32>(0.0)) & !far;
-        let distance = select(round, x * s + y * c - ra, side);
+        var distance = select(round, x * s + y * c - ra, side);
+        if span_length <= abs(ra - rb) {
+            let center = select(vec4<f32>(0.0), vec4<f32>(span_length), rb > ra);
+            let local = x - center;
+            distance = sqrt(local * local + y * y) - max(ra, rb);
+        }
         result = max(result, clamp(0.5 - distance, vec4<f32>(0.0), vec4<f32>(1.0)) * thin);
         a = b;
     }

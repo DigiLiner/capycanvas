@@ -58,7 +58,15 @@ impl VectorIndex {
     fn candidates(&self, area: [f64; 4]) -> Vec<(u32, u32)> {
         let s = span(area);
         let mut found: Vec<(u32, u32)> = Vec::new();
-        let mut take = |entries: &[Entry]| found.extend(entries.iter().filter(|entry| meets(entry.bounds, area)).filter_map(|entry| Some((*self.order.get(&entry.chunk)?, entry.index))));
+        let mut take = |entries: &[Entry]| {
+            let mut chunk = None;
+            for entry in entries {
+                if chunk.is_none_or(|(key, _)| key != entry.chunk) { chunk = Some((entry.chunk, self.order.get(&entry.chunk).copied())); }
+                if let Some((_, Some(order))) = chunk {
+                    if meets(entry.bounds, area) { found.push((order, entry.index)); }
+                }
+            }
+        };
         if spread(s) > self.cells.len() as i64 {
             for (cell, entries) in &self.cells { if (s[0]..=s[2]).contains(&cell[0]) && (s[1]..=s[3]).contains(&cell[1]) { take(entries); } }
         } else {
@@ -84,7 +92,7 @@ impl VectorIndex {
     pub fn within(&mut self, object: &VectorObject, area: [f64; 4]) -> BTreeSet<ItemId> {
         self.update(object);
         let inside = |b: [f64; 4]| b[0] >= area[0] && b[1] >= area[1] && b[2] <= area[2] && b[3] <= area[3];
-        self.candidates(area).into_iter().filter_map(|at| self.path(at)).filter(|path| path.pickable() && inside(path.bounds())).map(|path| path.id).collect()
+        self.candidates(area).into_iter().filter_map(|at| self.path(at)).filter(|path| path.pickable() && inside(path.visual_bounds())).map(|path| path.id).collect()
     }
 }
 

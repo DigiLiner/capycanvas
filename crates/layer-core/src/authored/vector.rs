@@ -5,6 +5,7 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, hash::{BuildHasherDefault,
 mod erase;
 mod index;
 mod ops;
+mod outline;
 #[cfg(test)]
 mod ops_tests;
 mod points;
@@ -212,6 +213,9 @@ impl WidthKnot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WidthProfile { knots: Box<[WidthKnot]> }
 impl WidthProfile {
+    pub fn segment_knots(&self, segment: u32) -> &[WidthKnot] {
+        &self.knots[self.knots.partition_point(|k| k.segment() < segment)..self.knots.partition_point(|k| k.segment() <= segment)]
+    }
     pub fn new(knots: Vec<WidthKnot>) -> Result<Self, &'static str> {
         if knots.is_empty() { return Err("A width profile requires a knot"); }
         for knot in &knots {
@@ -276,6 +280,36 @@ pub struct Stroke {
     pub unknown: Unknown,
 }
 impl Stroke {
+    pub fn flatten_segment(&self, segment: &Segment, index: u32, tolerance: f64, scale: f64, mut emit: impl FnMut([f64; 2], f64)) {
+        let Some(profile) = &self.profile else { segment.flatten(tolerance, emit); return };
+        let knots = profile.segment_knots(index);
+        let first = profile.at(index, 0.);
+        if profile.at(index, 1.) == first && knots.iter().all(|k| [k.left(), k.right()] == first) { segment.flatten(tolerance, emit); return; }
+        let width = |t| profile.at(index, t).map(|f| f * self.width * 0.5 * scale);
+        fn flatten(segment: &Segment, width: &impl Fn(f64) -> [f64; 2], knots: &[WidthKnot], a: f64, b: f64, tolerance: f64, depth: u32, emit: &mut impl FnMut([f64; 2], f64)) {
+            let knots = &knots[knots.partition_point(|k| k.t() <= a)..knots.partition_point(|k| k.t() < b)];
+            let (from, to, wa, wb) = (segment.point(a), segment.point(b), width(a), width(b));
+            let d = [to[0] - from[0], to[1] - from[1]];
+            let length = d[0] * d[0] + d[1] * d[1];
+            let accurate = [0.25, 0.5, 0.75].into_iter().map(|s| a + (b - a) * s)
+                .chain(knots.iter().map(WidthKnot::t)).all(|t| {
+                let s = (t - a) / (b - a);
+                let (p, w) = (segment.point(t), width(t));
+                let u = if length > 0. { (((p[0] - from[0]) * d[0] + (p[1] - from[1]) * d[1]) / length).clamp(0., 1.) } else { s };
+                (0..2).map(|i| (w[i] - wa[i] - (wb[i] - wa[i]) * u).abs()).fold(0., f64::max) <= tolerance
+            });
+            if accurate || depth == 24 { emit(to, b); } else {
+                let middle = (a + b) * 0.5;
+                flatten(segment, width, knots, a, middle, tolerance, depth + 1, emit);
+                flatten(segment, width, knots, middle, b, tolerance, depth + 1, emit);
+            }
+        }
+        let mut from = 0.;
+        segment.flatten(tolerance, |_, to| {
+            flatten(segment, &width, knots, from, to, tolerance, 0, &mut emit);
+            from = to;
+        });
+    }
     pub const DEFAULT_WIDTH: f64 = 1.;
     pub const DEFAULT_MITER_LIMIT: f64 = 4.;
     pub fn new(paint: Paint, width: f64) -> Self {
@@ -443,33 +477,53 @@ impl PathItem {
         }
         match self.fill_rule { FillRule::NonZero => winding != 0, FillRule::EvenOdd => winding % 2 != 0 }
     }
-    fn touches(&self, point: [f64; 2], stroke: &Stroke, slop: f64, tolerance: f64) -> bool {
-        let half = stroke.width * 0.5;
-        let radius = |segment: u32, t: f64| stroke.profile.as_ref().map_or(half, |p| { let [l, r] = p.at(segment, t); l.max(r) * half });
-        let near = |a: [f64; 2], b: [f64; 2], reach: f64| {
-            let d = [b[0] - a[0], b[1] - a[1]];
-            let length = d[0] * d[0] + d[1] * d[1];
-            let t = if length > 0. { (((point[0] - a[0]) * d[0] + (point[1] - a[1]) * d[1]) / length).clamp(0., 1.) } else { 0. };
-            let q = [a[0] + d[0] * t - point[0], a[1] + d[1] * t - point[1]];
-            q[0] * q[0] + q[1] * q[1] <= reach * reach
-        };
-        let mut base = 0u32;
-        for subpath in self.geometry.subpaths() {
-            let mut last = (subpath.anchor(0).point(), radius(base, 0.));
-            if subpath.segment_count() == 0 && near(last.0, last.0, last.1 + slop) { return true; }
-            let mut found = false;
-            for (index, segment) in subpath.segments().enumerate() {
-                let global = base + index as u32;
-                segment.flatten(tolerance, |p, t| {
-                    let r = radius(global, t);
-                    found |= near(last.0, p, last.1.max(r) + slop);
-                    last = (p, r);
-                });
-                if found { return true; }
+    pub fn stroke_outline(&self, stroke: &Stroke, tolerance: f64) -> Vec<Vec<[f64; 2]>> {
+        outline::outline(self, stroke, tolerance)
+    }
+    pub fn visual_bounds(&self) -> [f64; 4] {
+        let mut bounds: Option<[f64; 4]> = None;
+        let mut include = |p: [f64; 2]| bounds = Some(union(bounds, [p[0], p[1], p[0], p[1]]));
+        for entry in self.style.entries.iter() {
+            match entry {
+                PaintEntry::Fill(_) => for subpath in self.geometry.subpaths() {
+                    include(subpath.anchor(0).point());
+                    for segment in subpath.segments() { segment.flatten(0.01, |p, _| include(p)); }
+                },
+                PaintEntry::Stroke(stroke) if stroke.width > 0. => {
+                    if stroke.cap == Cap::Round && stroke.join == Join::Round {
+                        outline::capsules(self, stroke, 0.01, |a, b| {
+                            for disk in [a, b] {
+                                include([disk.p[0] - disk.r, disk.p[1] - disk.r]);
+                                include([disk.p[0] + disk.r, disk.p[1] + disk.r]);
+                            }
+                            false
+                        });
+                    } else { for p in self.stroke_outline(stroke, 0.01).into_iter().flatten() { include(p); } }
+                },
+                _ => {},
             }
-            base += subpath.segment_count() as u32;
         }
-        false
+        bounds.unwrap_or_else(|| self.geometry.hull())
+    }
+    fn touches(&self, point: [f64; 2], stroke: &Stroke, slop: f64, tolerance: f64) -> bool {
+        if stroke.cap == Cap::Round && stroke.join == Join::Round {
+            return outline::capsules(self, stroke, tolerance.min(0.05), |a, b| outline::capsule_distance(point, a, b) <= slop);
+        }
+        let rings = self.stroke_outline(stroke, tolerance.min(0.05));
+        let mut winding = 0i32;
+        for ring in rings {
+            for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+                let d = [b[0] - a[0], b[1] - a[1]];
+                let length = d[0] * d[0] + d[1] * d[1];
+                let t = if length > 0. { (((point[0] - a[0]) * d[0] + (point[1] - a[1]) * d[1]) / length).clamp(0., 1.) } else { 0. };
+                if (a[0] + d[0] * t - point[0]).hypot(a[1] + d[1] * t - point[1]) <= slop { return true; }
+                if (a[1] <= point[1]) != (b[1] <= point[1]) {
+                    let side = d[0] * (point[1] - a[1]) - (point[0] - a[0]) * d[1];
+                    if (side > 0.) == (b[1] > a[1]) { winding += if b[1] > a[1] { 1 } else { -1 }; }
+                }
+            }
+        }
+        winding != 0
     }
     pub fn transformed(&self, affine: Affine64, scale_widths: bool) -> Result<Self, &'static str> {
         let geometry = Arc::new(self.geometry.transformed(|p| affine.map(p))?);
