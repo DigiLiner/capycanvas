@@ -17,6 +17,99 @@ fn palette(pixels: &[[f64; 4]]) -> std::collections::BTreeSet<[u64; 4]> {
 }
 
 #[test]
+fn dither_only_picks_up_texels_inside_the_actual_contact() {
+    for (radii, rotation, hardness, center, reach) in [([12., 12.], 0f32, 1., [64., 64.], 0.5),
+        ([24., 3.], 0.7, 1., [64., 64.], 0.5), ([18., 9.], -0.4, 0.2, [64.3, 63.7], 0.5),
+        ([0.8, 0.8], 0., 1., [64.2, 64.2], 0.01), ([32., 32.], 0., 1., [64., 64.], 0.08),
+        ([40., 10.], 0.7, 0.9, [64.3, 63.7], 0.08)] {
+        let mut brush = brush(P::DitherBlender, 64.);
+        brush.blender.reach = reach;
+        let mut dab = test_dab(center, [1.; 4], 1.);
+        dab.radii = radii;
+        dab.rotation = [rotation.cos(), rotation.sin()];
+        dab.hardness = hardness;
+        dab.motion = [radii[0] * 2., 0.];
+        let mut mask = canvas();
+        mask.paint(mask.base, test_style(BrushExecution::Dry), dab);
+        let covered = mask.composite();
+        let expected: Vec<_> = covered.iter().map(|p| if p[3] > 0. { BLUE.map(f64::from) } else { RED.map(f64::from) }).collect();
+        let bytes: Vec<_> = (0..PAGE_SIZE).flat_map(|y| {
+            let expected = &expected;
+            (0..PAGE_SIZE).flat_map(move |x| {
+                let color = if x < 128 && y < 128 { expected[(y * 128 + x) as usize].map(|c| c as f32) } else { RED };
+                color.into_iter().flat_map(f32::to_le_bytes)
+            })
+        }).collect();
+        let mut canvas = canvas();
+        canvas.fill(canvas.base, BLUE);
+        let page = canvas.r.paint_layers.iter().find(|l| l.id == canvas.base).unwrap().pages.first().unwrap();
+        crate::test_support::upload_page(&canvas.r, &page.active().texture, &bytes);
+        canvas.stroke(100, &brush, &vec![dab; 24], 6, false);
+        for (i, (actual, expected)) in canvas.composite().iter().zip(&expected).enumerate() {
+            assert_eq!(actual, expected, "outside paint entered pixel={i} radii={radii:?} rotation={rotation} hardness={hardness} center={center:?}");
+        }
+    }
+}
+
+#[test]
+fn dither_reclassifies_uniform_pages_after_new_paint() {
+    let mut canvas = canvas();
+    canvas.fill(canvas.base, BLUE);
+    let brush = brush(P::DitherBlender, 48.);
+    let dabs = contacts(&brush, &line([64., 8.], [64., 120.]));
+    let uniform = canvas.composite();
+    canvas.stroke(100, &brush, &dabs, 6, false);
+    assert!(canvas.composite().iter().zip(&uniform).all(|(a, b)| a == b), "uniform paint stays uniform");
+    let mut mark = test_dab([64., 64.], RED, 1.);
+    mark.radii = [3., 30.];
+    canvas.paint(canvas.base, test_style(BrushExecution::Dry), mark);
+    let before = canvas.composite();
+    canvas.stroke(101, &brush, &dabs, 6, false);
+    let after = canvas.composite();
+    assert!(changed(&before, &after) > 0.005, "a new stroke must pick up newly authored paint on a previously uniform page");
+    let colors = palette(&before);
+    assert!(after.iter().all(|p| colors.contains(&p.map(f64::to_bits))), "reclassification preserves authored tuples");
+}
+
+#[test]
+fn dither_new_sources_only_receive_their_own_contact_exposure() {
+    let mut reference = None;
+    for chunk in [1, 6, usize::MAX] {
+        let mut canvas = canvas();
+        halves(&mut canvas, BLUE, RED);
+        let before = canvas.composite();
+        let mut brush = brush(P::DitherBlender, 64.);
+        brush.blender.reach = 0.5;
+        let mut narrow = test_dab([45., 64.], [1.; 4], 1.);
+        narrow.radii = [10.; 2];
+        narrow.motion = [20., 0.];
+        narrow.hardness = 1.;
+        let mut wide = narrow;
+        wide.radii = [36.; 2];
+        wide.motion = [72., 0.];
+        wide.flow = 0.0000001;
+        let mut dabs = vec![narrow; 12];
+        dabs.push(wide);
+        canvas.stroke(100, &brush, &dabs, chunk, false);
+        let after = canvas.composite();
+        for (i, (actual, expected)) in after.iter().zip(&before).enumerate() {
+            assert_eq!(actual, expected, "a weak expanding contact cannot unlock past exposure, pixel={i} chunk={chunk}");
+        }
+        if let Some(expected) = &reference { assert_eq!(&after, expected); } else { reference = Some(after); }
+    }
+    let mut canvas = canvas();
+    halves(&mut canvas, BLUE, RED);
+    let before = canvas.composite();
+    let mut brush = brush(P::DitherBlender, 64.);
+    brush.blender.reach = 0.5;
+    let mut wide = test_dab([45., 64.], [1.; 4], 1.);
+    wide.radii = [36.; 2];
+    wide.motion = [72., 0.];
+    canvas.stroke(100, &brush, &[wide; 12], 6, false);
+    assert!(changed(&before, &canvas.composite()) > 0.01, "an expanding contact with real exposure can pick up new paint");
+}
+
+#[test]
 fn dither_preserves_source_rgba_across_colors_transparency_and_partial_controls() {
     for (alpha, opacity) in [(1., 1.), (0.35, 1.), (0.35, 0.3)] {
         let mut canvas = canvas();
@@ -71,6 +164,12 @@ fn dither_is_identical_across_contact_batches_and_weak_final_contacts() {
             let mut brush = brush(P::DitherBlender, 48.);
             brush.opacity = opacity;
             let mut dabs = contacts(&brush, &line([66., 8.], [66., 120.]));
+            for (i, dab) in dabs.iter_mut().enumerate() {
+                let scale = [1., 0.2, 1.3, 0.5][i % 4];
+                dab.radii = [dab.radii[0] * scale, dab.radii[1] * scale * 0.4];
+                let angle = i as f32 * 0.17;
+                dab.rotation = [angle.cos(), angle.sin()];
+            }
             let mut last = *dabs.last().unwrap();
             last.flow = 0.0001;
             last.radii = [2.; 2];

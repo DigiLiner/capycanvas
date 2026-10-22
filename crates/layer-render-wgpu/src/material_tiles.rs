@@ -56,7 +56,7 @@ impl WgpuRasterizer {
             let coverage_index = (!from_persistent && plan.state.coverage).then(|| {
                 coverage_pages
                     .iter()
-                    .position(|p| p.coordinate == coordinate)
+                    .position(|p| p.matches(coordinate, &batch.style))
                     .expect("material coverage prepared before encoding")
             });
             let coverage = coverage_index.map(|i| &coverage_pages[i]);

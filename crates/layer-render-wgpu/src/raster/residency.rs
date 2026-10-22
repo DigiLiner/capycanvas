@@ -175,8 +175,8 @@ impl WgpuRasterizer {
                     if page.stroke_start.is_none() && !destinations.contains(&(layer.id, page.coordinate)) {
                         let released = page.discard_inactive();
                         bytes -= released;
-                        if released != 0 && let Some(coverage) = layer.coverage_pages.iter().find(|p| p.coordinate == page.coordinate) {
-                            coverage.release_color_bindings();
+                        if released != 0 {
+                            for coverage in layer.coverage_pages.iter().filter(|p| p.coordinate == page.coordinate) { coverage.release_color_bindings(); }
                         }
                     }
                 }
@@ -207,7 +207,7 @@ impl WgpuRasterizer {
                     if ready {
                         // Stroke coverage outlives disposable color residency;
                         // its reusable bindings must not pin retired textures.
-                        if let Some(coverage) = layer.coverage_pages.iter().find(|p| p.coordinate == page.coordinate) {
+                        for coverage in layer.coverage_pages.iter().filter(|p| p.coordinate == page.coordinate) {
                             coverage.release_color_bindings();
                         }
                         bytes -= color_page_bytes(page);

@@ -476,8 +476,11 @@ fn native_cache_keeps_dither_originals_after_publication_and_revisits() {
         }
         close(&image(&bounded), &image(&resident));
     }
+    let state_bytes = bounded.metrics.paint_state_storage_bytes;
     bounded.retire_stroke_sources();
     assert!(bounded.paint_layers.iter().flat_map(|l| &l.pages).all(|p| p.stroke_start.is_none()));
+    assert!(bounded.paint_layers.iter().all(|l| l.coverage_pages.is_empty()), "completed Dither exposure no longer occupies stroke scratch");
+    assert!(bounded.metrics.paint_state_storage_bytes < state_bytes, "retirement updates scratch accounting");
     bounded.trim_native_color_cache(&[], &[]);
     assert!(bounded.paint_layers.iter().all(|l| l.pages.is_empty()), "completed originals no longer pin the native cache");
 }

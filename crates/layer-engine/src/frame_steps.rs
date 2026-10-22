@@ -75,11 +75,14 @@ pub(super) fn material_page_jobs(batches: &[DabBatch]) -> u32 {
         .iter()
         .filter(|batch| batch.kind == DabBatchKind::Persistent && batch.style.execution != BrushExecution::Dry
             && !batch.style.execution.retouches())
-        .map(|batch| covered_tiles(batch.damage))
+        .map(|batch| covered_tiles(batch.damage).saturating_mul(if batch.style.execution == BrushExecution::Smudge
+            && batch.style.blender.kind == layer_core::BlenderKind::Dither {
+                batch.dab_count.div_ceil(super::MAX_SMUDGE_DABS_PER_BATCH as u32)
+            } else { 1 }))
         .sum()
 }
 
-fn covered_tiles(rect: Rect) -> u32 {
+pub(super) fn covered_tiles(rect: Rect) -> u32 {
     if rect.is_empty() {
         return 0;
     }

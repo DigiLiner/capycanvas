@@ -143,8 +143,11 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
             let dither=matches!(entries,Entries::Blend(blender) if blender.kind==layer_core::BlenderKind::Dither);
             let mut source=format!("const DITHER_BLENDER: bool = {dither};\n{}\n\
                 const TRANSPORT_WORKGROUP_X: u32 = {width}u;\nconst TRANSPORT_WORKGROUP_Y: u32 = {height}u;\n\
-                fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
-                include_str!("material_transport.wgsl"));
+                fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n\
+                fn operation_color(w:vec2<f32>,r:MaterialOutput)->vec4<f32> {{return {color};}}\n",
+                include_str!("material_transport.wgsl"), color=if dither {
+                    "working_clamp(layer_color(dither_color(w,r),WORKING_LUMA,style.color_mode.x,style.color_mode.y))"
+                } else { "r.color" });
             if let Entries::Blend(blender)=entries {
                 if dither { source+=include_str!("material_dither.wgsl"); }
                 else { source+=&format!("const BLENDER: u32 = {}u;\nconst BLEND_PAPER: bool = {};\nconst BLEND_LIFT: bool = {};\nconst BLEND_TAPS: u32 = {}u;\n{}",
@@ -165,6 +168,9 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
         include_str!("material_common.wgsl"),&operation_source,leaf,entry,&coverage_source(flags),
         if flags!=u32::MAX && flags&AGGREGATE!=0 {include_str!("selection_absent.wgsl")} else {include_str!("selection_clip.wgsl")}]);
+    let dither=matches!(entries,Entries::Blend(blender) if blender.kind==layer_core::BlenderKind::Dither);
+    let source=if dither {source.replace("var material_coverage_output: texture_storage_2d<r32float, write>",
+        "var material_coverage_output: texture_storage_2d<rgba32float, write>").into()} else {source};
     let absent=if kernel {0} else {64};
     let normal=blend_code==0;
     specialize_contact(source,flags)
@@ -330,6 +336,12 @@ pub(super) fn output_layouts<const N: usize>(device: &PipelineDevice, in_place: 
         }
         crate::bindings::layout(device, "destination material outputs", &entries)
     })
+}
+
+pub(super) fn dither_output_layout(device: &PipelineDevice) -> wgpu::BindGroupLayout {
+    crate::bindings::layout(device, "dither material outputs", &[style_entry(),
+        storage_entry(1, wgpu::TextureFormat::Rgba32Float, false),
+        storage_entry(2, wgpu::TextureFormat::Rgba32Float, false)])
 }
 
 /// A page output binding, retained by the coverage page when there is one.

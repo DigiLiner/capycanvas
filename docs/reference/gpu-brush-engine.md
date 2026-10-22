@@ -250,29 +250,71 @@ variance ceiling that could reject every sector on HDR paint.
 Dither uses [`material_dither.wgsl`](../../crates/layer-render-wgpu/src/material_dither.wgsl).
 It samples seven fixed disc offsets with exact texel loads from stroke-start
 paint, plus the destination's original RGBA tuple. Its radius is
-`min(Spread × captured Size, 112 px)` throughout the stroke. For cumulative
-contact exposure `E`, the seven neighbors share weight
-`q = Opacity × (1 − exp(−rate × E))`; the original keeps `1 − q`.
+`min(Spread × captured Size, 112 px)` throughout the stroke. Candidates are
+snapped to the loaded texel's center before testing their footprint and selection.
+Each neighbor accumulates its own exposure `Eᵢ`: destination contact dose
+(coverage, flow, motion, Strength and selection) times the source's actual tip
+coverage at that contact. Its weight is `Opacity × (1 − exp(−Eᵢ)) / 7`.
+The original keeps all remaining weight. A candidate outside the contact cannot
+gain influence, and a newly reached candidate receives only its own exposure.
+Earlier valid influence survives later movement, shrinking or rotating contacts.
 Source selection coverage scales each neighbor's weight, with excluded or
 out-of-document weight returned to the original. A 19-comparison sorting network
-orders the eight entries by lightness, then RGBA. A stroke-stable 256×256 Bayer
-rank selects one positive-weight interval in their cumulative distribution.
-The kernel sorts lightness, weight and sample references, fetching RGBA again
-only for lightness ties and the selected result to limit register pressure.
+orders the eight immutable colors by lightness, then RGBA, on first contact.
+One integer-valued float caches the eight three-bit sample indices. The
+permutation is nonzero and below 2²⁴, so its representation is exact. Later
+updates use this fixed order and load only the chosen color. Zero-weight entries do not affect the cumulative distribution.
+A stroke-stable 256×256 Bayer rank selects one positive-weight interval.
 It never interpolates the chosen sample with the destination. Antialiased
 shades have their sampled area weight rather than priority for being near an
 average. This is a seven-neighbor estimate, not a neighborhood histogram.
 
-Dither stores exposure as saturated integer-valued ticks in R32Float, rounding
-each contact to 2⁻²⁰ units and saturating at 16. Addition stays exact through
-2²⁴ ticks, so frame partitions do not change the result. Its original pages
-survive native-cache pressure until correction and replay end; their color
-companions remain resident during that period. Alpha lock converts candidates
-to the destination alpha before ordering and replaces transparent candidates
-with the original. Layer color-mode enforcement and explicitly requested
-post-stroke edges retain their usual policies; the latter converts exposure
-ticks to normalized coverage. Ordinary Dither can choose transparency and
-therefore lower alpha.
+Dither stores seven source-pair exposures and the cached palette permutation in
+two 256×256 slabs of one RGBA32Float texture. The top slab's red channel holds
+zero before classification, the positive permutation, or `−1` for a uniform
+palette. The other seven channels hold saturated integer exposure ticks,
+rounding each contact to 2⁻²⁰ units and saturating at 16. Addition stays exact
+through 2²⁴ ticks, so frame partitions do not change the result. Prediction copies
+the full state, and each pass preserves required state outside its dirty rectangle.
+
+Explicit post-stroke edges add a third slab holding total destination exposure
+in its red channel. Uniform pixels still accumulate this total, and the edge
+pass converts its ticks to normalized coverage. Ordinary Dither needs no total
+exposure: zero donor weights already select the original. State pages match by
+coordinate and exact slab count, including prediction and queued brush changes.
+
+Original pages survive native-cache pressure until correction and replay end;
+their color companions remain resident during that period. Alpha lock converts
+candidates to the destination alpha before ordering and replaces transparent
+candidates with the original. The final donor load repeats that conversion.
+Layer color-mode enforcement and explicitly requested post-stroke edges retain
+their usual policies. Ordinary Dither can choose transparency and therefore
+lower alpha.
+
+Dither state pages retire with the stroke originals after correction and replay
+end. Their two ping-pong surfaces require 4 MiB per touched 256×256 page, or
+6 MiB with post-stroke edges. A narrow tip or large Spread can leave no eligible
+neighbor among the seven fixed candidates; those pixels retain original paint.
+
+The engine merges consecutive Dither contacts into batches of at most 64,
+retaining Smudge's damage bound and charging the frame budget for equivalent
+six-contact groups. Sparse page plans pass only intersecting contacts in their
+original order. Fixed sources and exact exposure sums make this grouping
+independent of the resulting paint, while avoiding a full-page state transfer
+after every six contacts.
+
+Analytic ellipse tips skip source footprint evaluation only where every candidate
+is provably inside the solid core: the normalized destination distance plus
+`(sampling radius + 1 px) / minimum tip radius` must fit inside that core.
+The extra pixel bounds source-texel rounding. Other pixels and tip types use the
+shared footprint evaluator.
+
+The first positive destination dose classifies the fixed palette. If every
+eligible donor equals the original after alpha lock, the permutation channel
+stores `−1` as a uniform-palette marker. Such pixels skip donor accumulation;
+only explicit post-stroke edges need their total destination dose. This
+classification uses static bounds and selection, including donors not yet
+reached by the tip. A new stroke resets it through the usual stroke owner check.
 
 Wet paint uses the separate reservoir path. Loaded oils and palette knives keep
 spatial brush-local state:

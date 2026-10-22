@@ -141,6 +141,10 @@ Dither chooses whole color-and-opacity samples from the paint present when the
 stroke starts. Soft edges, Strength and Opacity change the density of replaced
 pixels. Spread sets a sampling radius from the captured brush size; pressure
 changes contact and strength without changing that radius during the stroke.
+Each source gains influence only while the same brush contact covers both it
+and the destination. Pickup follows the actual tip, including its soft edges,
+pressure and rotation. A later smaller contact keeps earlier valid influence;
+a larger contact adds newly reached paint in proportion to its own exposure.
 Transparency participates alongside paint, so blending a solid stroke into
 empty space produces painted and empty pixels. Antialiased shades already in
 the drawing remain valid samples with their local area weight; Dither cannot
@@ -359,7 +363,8 @@ starting paint, a pen-up edge or healing ends it. Dry, clone and healing
 batches keep one pass each: sharing a pass across them added about 0.8 ms of
 GPU time per update on the MovinkPad 11. A frame's commands and bindings stay allocated until the GPU finishes it.
 A frame therefore consumes input only until its committed contacts reach 512
-page jobs; a slower device keeps the rest of the input queued
+page jobs; Dither charges its larger batches as equivalent six-contact groups.
+A slower device keeps the rest of the input queued
 for the next frame instead of building one frame from its whole backlog. Watercolor
 transport runs once per frame, so a device that falls behind now runs it as often
 as one that keeps up. A replay that repaints a whole stroke, after a late sensor

@@ -119,7 +119,7 @@ pub(super) fn blended(operation: MaterialOperation) -> bool {
 type KernelKey = (u32, usize, Entry, u8, bool, bool);
 
 pub(super) struct Pipelines {
-    layouts: [wgpu::BindGroupLayout; 3],
+    layouts: [wgpu::BindGroupLayout; 4],
     kernels: std::collections::BTreeMap<KernelKey, Deferred<wgpu::ComputePipeline>>,
 }
 
@@ -127,7 +127,9 @@ impl Pipelines {
     /// `shared` holds the target, material source and texture layouts;
     /// `layouts` the write-only color, color-with-coverage and watercolor outputs.
     pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], layouts: [wgpu::BindGroupLayout; 3]) -> Self {
-        let pipeline_layouts: [_; 3] = std::array::from_fn(|outputs| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let [color, coverage, wetness] = layouts;
+        let layouts = [color, coverage, wetness, dry_material::dither_output_layout(device)];
+        let pipeline_layouts: [_; 4] = std::array::from_fn(|outputs| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("destination material pages"),
             bind_group_layouts: &[Some(&layouts[outputs]), Some(shared[0]), Some(shared[1]), Some(shared[2])],
             immediate_size: 0,
@@ -139,9 +141,10 @@ impl Pipelines {
             for blender in blenders(operation) {
                 let transport = dry_material::material_shader(device, module(operation, blend, blender), flags, operation);
                 for &entry in entries(operation) {
+                    let outputs = if blender.kind == layer_core::BlenderKind::Dither && entry == Entry::Coverage { 3 } else { entry.outputs() };
                     kernels.insert((operation as u32, slot, entry, blender.kind as u8, blender.paper, blender.lift), Deferred::compute(device,
                         format!("destination material {} operation={} contact={flags:#x} blend={blend} {blender:?}", entry.name(), operation as u32),
-                        &pipeline_layouts[entry.outputs()], &transport, entry.name()));
+                        &pipeline_layouts[outputs], &transport, entry.name()));
                 }
             }
         }
@@ -157,7 +160,9 @@ impl Pipelines {
     }
 
     fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>, wetness: Option<&PageSurface>) -> wgpu::BindGroup {
-        let layout = &self.layouts[usize::from(coverage.is_some()) + usize::from(wetness.is_some())];
+        let outputs = if coverage.is_some_and(|p| p.texture.format() == wgpu::TextureFormat::Rgba32Float) { 3 }
+            else { usize::from(coverage.is_some()) + usize::from(wetness.is_some()) };
+        let layout = &self.layouts[outputs];
         dry_material::output_binding(r, layout, color, coverage, wetness, None)
     }
 }
@@ -191,7 +196,7 @@ impl WgpuRasterizer {
         self.watercolor_written.extend(jobs.iter().zip(&seeds).filter(|(_, seed)| **seed).map(|(job, _)| job.coordinate));
         self.metrics.material_cpu_ms[0] += elapsed(started);
         let mut first_record = self.prepare_records(jobs.iter().zip(&seeds).map(|(job, &seed)| {
-            record([0, 0, 0, u32::from(seed)], [rect_words(job.local)])
+            record([job.dabs.start, job.dabs.end - job.dabs.start, 0, u32::from(seed)], [rect_words(job.local)])
         }).chain(exchange.map(|(first, _)| {
             let color = first.color_rgba_linear;
             record([0; 4], [[color[0], color[1], color[2], batch.style.wet_mix.amount_of_paint * first.material[2]].map(f32::to_bits)])

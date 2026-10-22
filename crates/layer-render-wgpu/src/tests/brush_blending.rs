@@ -845,13 +845,98 @@ fn engine_generated_smudge_strength_zero_is_noop_and_opacity_bounds_retraces() {
 }
 
 #[test]
+fn dither_sparse_contact_pages_match_rectangular_evaluation() {
+    for bristles in [false, true] {
+        let mut reference = None;
+        for rectangular in [false, true] {
+            let mut canvas = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 512]);
+            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([256.; 2], [0.1, 0.6, 0.3, 1.], 10000., 1.));
+            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([1256., 256.], [0.9, 0.1, 0.05, 1.], 1000., 1.));
+            let before = canvas.composite();
+            let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::DitherBlender);
+            brush.diameter = 128.;
+            brush.blender.reach = if bristles { 0.06 } else { 0.25 };
+            brush.contact = Some(layer_core::BrushContact { edge_roughness: 0.9, pooling: 1.,
+                bristles: bristles.then(Default::default), ..Default::default() });
+            brush.rendering.edge_after_stroke = rectangular;
+            brush.validate().unwrap();
+            let dabs: Vec<_> = [[260., 258.], [90., 160.], [252., 264.]].into_iter().enumerate().map(|(i, center)| {
+                let mut dab = soft(center, [1.; 4], 90., 0.7);
+                let angle = 0.8 + i as f32 * 0.2;
+                dab.radii = [90., 8.];
+                dab.rotation = [angle.cos(), angle.sin()];
+                dab.previous = [76., 10.2, (-0.6f32).cos(), (-0.6f32).sin()];
+                dab.motion = if bristles { [300., -100.] } else { [150., -100.] };
+                if bristles { dab.center.x += 160.; }
+                dab.contact = [0.73, 0.2, 0.4, 17.];
+                dab.previous_contact = [0.41, 0.7, 0.1, 17.];
+                dab
+            }).collect();
+            canvas.stroke(100, &brush, &dabs, dabs.len(), false);
+            let actual = canvas.composite();
+            assert!(actual.iter().zip(&before).any(|(a, b)| a != b), "the evolving/bristle fixture must move paint, bristles={bristles}");
+            if let Some(expected) = &reference { assert_eq!(&actual, expected, "sparse bounds must include every evolving/bristle contact, bristles={bristles}"); }
+            else { reference = Some(actual); }
+        }
+    }
+}
+
+#[test]
+fn dither_and_uniform_brushes_can_share_a_queued_frame() {
+    let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::DitherBlender);
+    brush.diameter = 96.;
+    brush.opacity = 0.4;
+    brush.blender.reach = 0.5;
+    let dither = DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+    let mut uniform = test_style(BrushExecution::Dry);
+    uniform.rendering.accumulation = BrushAccumulation::Uniform;
+    let mut edged = dither.clone();
+    edged.rendering.edge_after_stroke = true;
+    edged.rendering.wet_edge = 0.;
+    edged.rendering.burnt_edge = 0.;
+    let styles = [uniform.clone(), dither.clone(), edged.clone(), uniform, dither, edged];
+    let dabs: Vec<_> = (0..styles.len()).map(|i| {
+        let mut dab = soft([244. + i as f32 * 6., 64.], [0.1, 0.2, 0.9, 0.4], 48., 0.7);
+        dab.motion = [96., 0.];
+        dab
+    }).collect();
+    let mut reference = None;
+    for queued in [false, true] {
+        let mut canvas = Canvas::at(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None, [512, 128]);
+        canvas.fill(canvas.base, [0.1, 0.6, 0.3, 0.6]);
+        canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([1066., 64.], [0.9, 0.1, 0.05, 1.], 1000., 1.));
+        if queued {
+            let batches: Vec<_> = styles.iter().zip(&dabs).enumerate().map(|(i, (style, dab))| DabBatch {
+                stroke_id: StrokeId(100 + i as u64), first_dab: i as u32,
+                ..crate::test_support::dab_batch(canvas.base, style.clone(), dab.bounds())
+            }).collect();
+            canvas.r.submit(FramePacket { dabs: &dabs, dab_batches: &batches, ..packet(canvas.document.scene(), canvas.extent) }).unwrap();
+        } else {
+            for (i, (style, dab)) in styles.iter().zip(&dabs).enumerate() {
+                canvas.styled_stroke(100 + i as u64, style.clone(), &[*dab], 1);
+            }
+        }
+        let actual = canvas.composite();
+        if let Some(expected) = &reference { assert_eq!(&actual, expected, "queued brush changes must match separate frames"); }
+        else { reference = Some(actual); }
+    }
+}
+
+#[test]
 fn dither_prediction_forks_committed_exposure_and_preserves_prior_tiles() {
     let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::DitherBlender);
     brush.diameter = 48.;
     brush.opacity = 0.4;
     brush.blender.reach = 0.5;
     brush.flow = 0.08;
-    let dabs = opacity_contacts(&brush, 2);
+    let mut dabs = opacity_contacts(&brush, 2);
+    for (i, dab) in dabs.iter_mut().enumerate() {
+        let scale = [1., 0.3, 1.4, 0.6][i % 4];
+        dab.radii = [dab.radii[0] * scale, dab.radii[1] * scale * 0.5];
+        let angle = i as f32 * 0.13;
+        dab.rotation = [angle.cos(), angle.sin()];
+        if i % 7 == 3 { dab.center.x = 300.; }
+    }
     let split = dabs.len() / 2;
     let send = |canvas: &mut Canvas, contacts: &[Dab], kind, start, end| {
         let style = DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
@@ -865,8 +950,15 @@ fn dither_prediction_forks_committed_exposure_and_preserves_prior_tiles() {
     for canvas in [&mut preview, &mut reference] {
         canvas.fill(canvas.base, [0.1, 0.6, 0.3, 0.6]);
         canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([1066., 64.], [0.9, 0.1, 0.05, 1.], 1000., 1.));
-        send(canvas, &dabs[..split], DabBatchKind::Persistent, true, false);
     }
+    let untouched = preview.composite();
+    send(&mut preview, &dabs[..split], DabBatchKind::Preview, true, false);
+    let predicted_initial = preview.pixels();
+    assert_ne!(predicted_initial, untouched, "first-touch prediction transports actual pigment");
+    assert_eq!(preview.composite(), untouched, "cancel first-touch prediction restores untouched paint");
+    send(&mut reference, &dabs[..split], DabBatchKind::Persistent, true, false);
+    assert_eq!(predicted_initial, reference.pixels(), "first-touch prediction equals the same committed segment");
+    send(&mut preview, &dabs[..split], DabBatchKind::Persistent, true, false);
     let committed = preview.pixels();
     send(&mut preview, &dabs[split..], DabBatchKind::Preview, false, false);
     let predicted = preview.pixels();

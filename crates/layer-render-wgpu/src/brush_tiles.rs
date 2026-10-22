@@ -349,7 +349,7 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
     if dabs.is_empty() || damage.is_empty() {
         return Vec::new();
     }
-    if !pointwise(&batch.style) || batch.style.rendering.edge_after_stroke {
+    if (!pointwise(&batch.style) && !ordered_dither(&batch.style)) || batch.style.rendering.edge_after_stroke {
         // Nonlocal materials retain their complete dependency sequence/region.
         return page_coordinates(damage)
             .map(|coordinate| BrushTile {
@@ -366,7 +366,7 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
     let fan = contact.is_some_and(|c| c.bristles.is_some());
     let mut tiles = std::collections::BTreeMap::<_, BrushTile>::new();
     for (index, original) in dabs.iter().enumerate() {
-        let shape=if batch.style.rendering.accumulation==BrushAccumulation::Flow
+        let shape=if pointwise(&batch.style) && batch.style.rendering.accumulation==BrushAccumulation::Flow
             && contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.)) {midpoint_contact(*original)} else {*original};
         let dab=&shape;
         let radius = contact.filter(|_| !fan).map_or(0., |contact| contact_radius(*dab, contact));

@@ -51,6 +51,7 @@ const MAX_WET_DABS_PER_BATCH: u32 = 3;
 // input retains an incomplete chunk as replaceable GPU preview work, so these
 // boundaries depend on the stroke rather than display-frame packet cadence.
 const MAX_SMUDGE_DABS_PER_BATCH: usize = 6;
+const MAX_DITHER_DABS_PER_BATCH: usize = 64;
 const MAX_SMUDGE_TRAVEL_DIAMETERS: f32 = 0.24;
 const MAX_SMUDGE_DAMAGE_DIAMETERS_SQUARED: f32 = 4.0;
 
@@ -2230,7 +2231,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let mut consumed = 0;
         loop {
             let pending = &self.pending_chunk_dabs[consumed..];
-            let chunk_len = if liquify { pending.len().min(layer_core::liquify::CHUNK_DABS) } else { next_smudge_chunk_len(pending, DabBatchKind::Persistent) };
+            let chunk_len = if liquify { pending.len().min(layer_core::liquify::CHUNK_DABS) } else { next_smudge_chunk_len(pending, DabBatchKind::Persistent, false) };
             if chunk_len == 0 {
                 break;
             }
@@ -2653,6 +2654,7 @@ fn push_mergeable_batch(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBat
                     &dabs[last.first_dab as usize
                         ..batch.first_dab.saturating_add(batch.dab_count) as usize],
                     batch.kind,
+                    batch.style.blender.kind == layer_core::BlenderKind::Dither,
                 )))
         && last.stroke_id == batch.stroke_id
         && last.material_update == batch.material_update
@@ -2661,6 +2663,9 @@ fn push_mergeable_batch(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBat
         && !last.stroke_end
         && last.first_dab.saturating_add(last.dab_count) == batch.first_dab
         && last.style == batch.style
+        && (batch.style.blender.kind != layer_core::BlenderKind::Dither || batch.style.execution != BrushExecution::Smudge
+            || frame_steps::covered_tiles(last.damage.union(batch.damage)).saturating_mul(
+                last.dab_count.saturating_add(batch.dab_count).div_ceil(MAX_SMUDGE_DABS_PER_BATCH as u32)) <= frame_steps::MATERIAL_PAGE_JOBS_PER_FRAME)
     {
         last.dab_count = batch
             .first_dab
@@ -2675,8 +2680,9 @@ fn push_mergeable_batch(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBat
 
 /// Committed chunks keep a fixed size so replays split a stroke the same way;
 /// the disposable prediction tail takes as few passes as the travel limit allows.
-fn next_smudge_chunk_len(dabs: &[Dab], kind: DabBatchKind) -> usize {
-    let (most, diameters) = if kind == DabBatchKind::Preview { (usize::MAX, f32::INFINITY) }
+fn next_smudge_chunk_len(dabs: &[Dab], kind: DabBatchKind, dither: bool) -> usize {
+    let (most, diameters) = if dither { (MAX_DITHER_DABS_PER_BATCH, f32::INFINITY) }
+        else if kind == DabBatchKind::Preview { (usize::MAX, f32::INFINITY) }
         else { (MAX_SMUDGE_DABS_PER_BATCH, MAX_SMUDGE_TRAVEL_DIAMETERS) };
     let mut damage = Rect::EMPTY;
     let mut travel = 0.0;
@@ -2686,7 +2692,7 @@ fn next_smudge_chunk_len(dabs: &[Dab], kind: DabBatchKind) -> usize {
         let candidate_travel = travel + dab.motion[0].hypot(dab.motion[1]);
         let candidate_diameter = maximum_diameter.max(dab.radii[0].max(dab.radii[1]) * 2.0);
         if index > 0
-            && (candidate_travel > (candidate_diameter.max(0.01) * diameters).min(layer_core::SMUDGE_CHUNK_TRAVEL_LIMIT)
+            && ((!dither && candidate_travel > (candidate_diameter.max(0.01) * diameters).min(layer_core::SMUDGE_CHUNK_TRAVEL_LIMIT))
                 || rect_area(candidate_damage)
                     > candidate_diameter.max(0.01).powi(2) * MAX_SMUDGE_DAMAGE_DIAMETERS_SQUARED)
         {
@@ -2699,8 +2705,8 @@ fn next_smudge_chunk_len(dabs: &[Dab], kind: DabBatchKind) -> usize {
     dabs.len().min(most)
 }
 
-fn smudge_batch_fits(dabs: &[Dab], kind: DabBatchKind) -> bool {
-    !dabs.is_empty() && next_smudge_chunk_len(dabs, kind) == dabs.len()
+fn smudge_batch_fits(dabs: &[Dab], kind: DabBatchKind, dither: bool) -> bool {
+    !dabs.is_empty() && next_smudge_chunk_len(dabs, kind, dither) == dabs.len()
 }
 
 fn rect_area(rect: Rect) -> f32 {
@@ -6702,7 +6708,7 @@ mod tests {
 
     #[test]
     fn material_input_backlog_is_consumed_in_bounded_frames() {
-        for preset in [DefaultBrushPreset::OpaqueGouache, DefaultBrushPreset::NaturalBlender, DefaultBrushPreset::WatercolorWash, DefaultBrushPreset::LiquifyPush] {
+        for preset in [DefaultBrushPreset::OpaqueGouache, DefaultBrushPreset::NaturalBlender, DefaultBrushPreset::DitherBlender, DefaultBrushPreset::WatercolorWash, DefaultBrushPreset::LiquifyPush] {
             let (mut producer, mut engine) = material_stroke(preset, 0.);
             let count = MATERIAL_STROKE_SAMPLES;
             queue_material_samples(&mut producer, 0..count);
@@ -6893,6 +6899,25 @@ mod tests {
         let blade: Vec<_> = smudge_dabs.iter().map(|dab| Dab { radii: [2.0, 10.0], ..*dab }).collect();
         assert_eq!(counts(&blade, DabBatchKind::Persistent), vec![MAX_SMUDGE_DABS_PER_BATCH as u32, 1],
             "a broadside blade is chunked by its length");
+
+        for kind in [DabBatchKind::Persistent, DabBatchKind::Preview] {
+            let mut dither = make_batch(BrushExecution::Smudge, 0, smudge_dabs.len() as u32);
+            dither.style.blender.kind = layer_core::BlenderKind::Dither;
+            dither.kind = kind;
+            let mut batches = Vec::new();
+            push_batches(&mut batches, &smudge_dabs, dither);
+            assert_eq!(batches.len(), 1, "Dither exposure can accumulate without repeated color selection");
+            assert_eq!(batches[0].dab_count as usize, smudge_dabs.len());
+        }
+        let large: Vec<_> = smudge_dabs.iter().copied().cycle().take(192).map(|d| Dab {
+            center: Point { x: 4096., y: 4096. }, radii: [2048.; 2], ..d
+        }).collect();
+        let mut dither = make_batch(BrushExecution::Smudge, 0, large.len() as u32);
+        dither.style.blender.kind = layer_core::BlenderKind::Dither;
+        let mut batches = Vec::new();
+        push_batches(&mut batches, &large, dither);
+        assert!(batches.iter().all(|batch| frame_steps::material_page_jobs(std::slice::from_ref(batch)) <= frame_steps::MATERIAL_PAGE_JOBS_PER_FRAME),
+            "large Dither contacts cannot merge beyond the per-frame work budget");
 
         let mut liquify = Vec::new();
         push_batches(

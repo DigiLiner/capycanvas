@@ -371,11 +371,15 @@ fn wet_fragment(
 
 fn material_result(fragment_position:vec4<f32>)->MaterialOutput {
     let world=render_target.origin_extent.xy+fragment_position.xy;
-    var result=operation_fragment(fragment_position.xy,world,style.operation.x,style.operation.y);
+    let first=select(style.operation.x,material_sources.header.x,DITHER_BLENDER);
+    let count=select(style.operation.y,material_sources.header.y,DITHER_BLENDER);
+    var result=operation_fragment(fragment_position.xy,world,first,count);
     if style.color.a>0.5 && !DITHER_BLENDER {
         result=material_alpha_locked(result,canvas_load(world));
     }
-    result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
-    result.color=working_clamp(result.color);
+    if !DITHER_BLENDER {
+        result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
+        result.color=working_clamp(result.color);
+    }
     return result;
 }
