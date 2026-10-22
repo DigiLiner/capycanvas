@@ -55,6 +55,10 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
     func atRest(owner: UUID, layer: UInt64) -> Bool {
         returning[Row(owner: owner, layer: layer)] == nil && (self.owner != owner || self.layer != layer || offset == 0)
     }
+    func progress(owner: UUID, layer: UInt64, revealWidth: CGFloat) -> CGFloat {
+        guard self.owner == owner, self.layer == layer else { return 0 }
+        return min(1, abs(offset) / (offset > 0 ? max(1, revealWidth) : 72))
+    }
     func close() {
         let row = owner.flatMap { owner in layer.map { Row(owner: owner, layer: $0) } }
         let token = UUID()

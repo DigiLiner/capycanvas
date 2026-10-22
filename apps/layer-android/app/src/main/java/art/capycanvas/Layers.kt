@@ -571,7 +571,11 @@ internal class LayerSwipe {
             if(meta.isNotEmpty())Text(meta,color=colors.secondary,fontSize=LocalTextStyle.current.fontSize*.83333f,lineHeight=LocalTextStyle.current.lineHeight*.83333f,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
         SharedIcon(if(layer.getBoolean("locked"))"lock" else "alpha-lock",null,Modifier.size(12.dp).alpha(if(layer.getBoolean("locked") || layer.getBoolean("alpha_locked"))1f else 0f))
-        if(layer.getBoolean("can_drop_below") && atRest) Box(Modifier.size(16.dp,32.dp).testTag("layer-grip-$id")
+        if(layer.getBoolean("can_drop_below")) Box(Modifier.size(16.dp,32.dp).testTag("layer-grip-$id")
+            .graphicsLayer {
+                val maximum=if(shift>0f) (swipeActions.size*72*density).coerceAtMost(rowBounds.width).coerceAtLeast(1f) else 72*density
+                alpha=1f-(kotlin.math.abs(shift)/maximum).coerceIn(0f,1f)
+            }
             .onGloballyPositioned { gripBounds=it.boundsInRoot() },contentAlignment=Alignment.Center) {
             SharedIcon("grip",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("move_layer"),Modifier.size(16.dp).alpha(.6f))
         }

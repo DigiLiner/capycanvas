@@ -73,6 +73,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             {L"grip",B(grip)},{L"mask",B(mask)},{L"captured",B(owns(surface))},{L"ignore_click",B(ignoreClick)},
             {L"pickup",B(pickup)},{L"initial_swipe",N(initialSwipe)},
             {L"source_swipe",sourceRow?N(sourceRow->swipeOffset):JsonValue::CreateNullValue()},
+            {L"source_grip_opacity",sourceRow?N(sourceRow->grip.Opacity()):JsonValue::CreateNullValue()},
             {L"origin_x",N(origin.X)},{L"origin_y",N(origin.Y)},{L"pointer_x",N(position.X)},{L"pointer_y",N(position.Y)},
             {L"scroll_claimed",B(scrollInput.has_value())},{L"menu_open",B(owner&&owner->menuOwner.Open())},
             {L"pointer_id",pointer?N(pointer.PointerId()):JsonValue::CreateNullValue()},

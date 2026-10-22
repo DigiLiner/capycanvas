@@ -119,8 +119,14 @@ selection publication arrives after pickup.
   on a closed paint-layer row toggles alpha lock. Locked layers cannot toggle alpha
   lock. Release commits one undo step; a short or cancelled swipe changes nothing.
   Swiping right to close Delete does not also toggle alpha lock.
-  A displaced layer row hides its grab handle and cannot start a reorder until
-  it has returned to its resting position, including the closing animation.
+  A displaced layer row cannot start a reorder until it has returned to its
+  resting position, including the closing animation. Each host fades the grab handle
+  with swipe distance, reaching zero opacity at full reveal and returning to full
+  opacity at rest. Keep the handle in the layout and animate opacity with the row's
+  existing swipe transform, using native animation or compositor transitions.
+  Web matches its opacity and transform transitions; Compose reads the animated
+  shift in `graphicsLayer`; SwiftUI uses the offset's animation transaction.
+  GTK and WinUI update native opacity beside their existing swipe transform.
 - Group rows use the same right swipe to toggle Pass Through, whether the
   folder is expanded or collapsed. Returning to isolation makes the group Normal.
   Locked groups and groups needed by clipping or attached effects

@@ -182,7 +182,7 @@ import SwiftUI
             try require(store.layerSwipe.offset == extent && store.layerSwipe.layer == original && model.drag == nil && model.menu.isNull,
                 "A pen row swipe reveals every shared action without reordering or opening a menu")
             try require(order(store) == initial, "Revealing swipe actions does not edit the document")
-            try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "A displaced row hides its grip")
+            try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "A displaced row disables pickup")
             let grip = model.frames[original]!.grip
             if grip != .zero, let target = model.source(at: CGPoint(x: grip.midX, y: grip.midY)) {
                 try require(target.surface != .handle && !target.canDrag, "A displaced grip cannot admit reorder")
@@ -206,13 +206,19 @@ import SwiftUI
         let returnEnd = CGPoint(x: start.x - 90, y: start.y)
         try event(.leftMouseDown, at: start, marker: marker, number: 1019, tablet: true); try await drain(0.02)
         try event(.leftMouseDragged, at: returnEnd, marker: marker, number: 1020, tablet: true); try await drain(0.04)
+        let revealWidth = min(CGFloat(store.state["layers"].array.first { $0["id"].uint == original }!["swipe_actions"].array.count) * 72, model.frames[original]!.root.width)
+        let progress = store.layerSwipe.progress(owner: model.swipeOwner, layer: original, revealWidth: revealWidth)
+        try require(progress > 0 && progress < 1 && model.frames[original]!.grip.width > 0,
+            "A partial swipe fades its retained grip with distance")
         try event(.leftMouseUp, at: returnEnd, marker: marker, number: 1021, tablet: true); try await drain()
+        try require(store.layerSwipe.progress(owner: model.swipeOwner, layer: original, revealWidth: revealWidth) == 1,
+            "A fully revealed row fades its grip completely")
         let visibleRow = model.frames[original]!.row.intersection(model.viewport)
         let returnPoint = CGPoint(x: visibleRow.midX, y: visibleRow.midY)
         guard !visibleRow.isEmpty, let displaced = model.source(at: returnPoint) else { throw HostFailure(message: "Displaced row contact missing") }
         model.contact.prepare(displaced, device: .mouse, origin: returnPoint)
         store.layerSwipe.close()
-        try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "The grip stays hidden through swipe return")
+        try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "Pickup stays disabled through swipe return")
         try await wait("The returned row did not restore its grip") { store.layerSwipe.atRest(owner: model.swipeOwner, layer: original) }
         try require(!model.contact.move(to: body(added)) && model.drag == nil,
             "A contact admitted on a displaced row cannot gain pickup when its swipe returns")

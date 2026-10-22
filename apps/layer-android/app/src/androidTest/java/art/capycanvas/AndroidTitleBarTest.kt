@@ -1459,7 +1459,7 @@ class AndroidTitleBarTest {
                 down("layer-row-$id");val start=point
                 for(i in 1..4)event(MotionEvent.ACTION_MOVE,start+Offset(-80*density*i/4,0f))
                 event(MotionEvent.ACTION_UP);idle()
-                assertNull("Revealed row hides grip",node("layer-grip-$id"))
+                assertNotNull("Revealed row retains its grip for fading",node("layer-grip-$id"))
                 assertNotNull(node("layer-delete-$id"))
                 tool=MotionEvent.TOOL_TYPE_MOUSE
                 down("layer-row-$id");event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))
@@ -1785,7 +1785,7 @@ class AndroidTitleBarTest {
             action(obj("type" to "set_theme","theme" to theme));tool=pointer
             swipe(isolated,12f);assertFalse(row(isolated).getBoolean("pass_through"))
             swipe(isolated,60f,true);assertFalse(row(isolated).getBoolean("pass_through"))
-            swipe(isolated,-60f);assertNotNull(node("layer-delete-$isolated"));assertNull("Swiped row hides its grip",node("layer-grip-$isolated"))
+            swipe(isolated,-60f);assertNotNull(node("layer-delete-$isolated"));assertNotNull("Swiped row retains its grip for fading",node("layer-grip-$isolated"))
             val swipedOrder=order()
             tool=MotionEvent.TOOL_TYPE_MOUSE
             down("layer-row-$isolated");event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))

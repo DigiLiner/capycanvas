@@ -194,6 +194,7 @@ try {
         $owner -eq $review.Id
     } 'Owned layer review did not receive foreground input'
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    Use-PaintWorkspace
     # Current Paint defaults retain Layers in an open collapsed-column stack.
     # Begin with a fully expanded column before the fixture tests collapse/expand.
     if(Find 'column-icon-layers'){
@@ -239,9 +240,16 @@ try {
         $before=Rows
         $at=Point "layer-$created-name"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
-        Move-To @{x=$at.x-90;y=$at.y};[CapyRowPointer]::Up()
+        Move-To @{x=$at.x-90;y=$at.y}
+        Wait-Until {(Gesture).source_swipe -gt 0} 'Partial swipe did not reach the native row'
+        $partial=Gesture;[CapyRowPointer]::Up()
+        if($partial.source_swipe -le 0 -or $partial.source_grip_opacity -le 0 -or $partial.source_grip_opacity -ge .6){throw 'Partial swipe did not fade the retained grip'}
         Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Left swipe did not reveal Delete'
-        if(Find "layer-$created-drag" -Visible){throw 'Displaced layer row retained its reorder handle'}
+        $at=Point "layer-row-$created"
+        [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
+        Move-To @{x=$at.x;y=$at.y+24};$displaced=Gesture;[CapyRowPointer]::Up()
+        Wait-Until {(Gesture).phase -eq 'idle'} 'Displaced row retained its contact'
+        if($displaced.phase -eq 'dragging' -or (Rows) -ne $before){throw 'Displaced row admitted a reorder'}
         $at=Point "layer-row-$created"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x+110;y=$at.y};[CapyRowPointer]::Up()

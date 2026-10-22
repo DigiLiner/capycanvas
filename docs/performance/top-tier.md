@@ -126,7 +126,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 120 | | |
 | Layer opacity scrub | 120 | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Layer reorder drag | 120 | **Met.** Native UI 117.20–119.41 fps; moving-frame gap p99 8.38–16.67 ms | [Layer reorder and retained photo translation](#layer-reorder-and-retained-photo-translation), 2026-10-04 |
-| Layer row swipe | 120 | **Unqualified.** GTK desktop Lock/Duplicate/Delete reveal: 119.60–120.03 presents/s, p99 up to 8.694 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
+| Layer row swipe | 120 | **Unqualified for full reveal.** Android partial left fade: 116.57–120.00 moving window frames/s, p99 ≤16.667 ms; GTK desktop: 119.20–120.07 presents/s, p99 ≤8.952 ms | [Layer handle fade](#layer-handle-fade), 2026-10-21–22 |
 | Layer thumbnail selection animation | 120 | **Not met.** Repeated content/mask selection 77.08–79.86 window frames/s; worst moving-frame gap p99 33.33 ms | [Layer thumbnail selection](#layer-thumbnail-selection), 2026-10-05 |
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
@@ -305,6 +305,51 @@ floating and drawer layers, mouse scrollbar dragging, first touch at an overlapp
 scrollbar/handle, native reorder Undo/Redo and cancellation, displaced-row pickup
 refusal, pen hover, pen handle capture and touch/pen body scrolling. Pen events
 are injected; physical pen pickup and reference-tablet motion remain unverified.
+
+## Layer handle fade
+
+GTK measured 2026-10-21 at `3ac660dcc` plus the handle fade, using a release
+build, system GTK 4.22.5, Mutter 50.5 and NVIDIA RTX PRO 6000 Blackwell Max-Q
+Workstation Edition/Vulkan 615.71.09. The private monitor is 1600 × 1000 at
+120 Hz; the drawing is the default 1333 × 1000 sheet. Native touch events use
+4 ms intervals. These desktop results do not qualify a reference tablet.
+
+Each theme has three motion windows of 5.7–6.5 seconds. The first open/close pair
+per theme primes the animation and is excluded. Rates pool unique completed
+presentations while row geometry changes, preserving each contact's intervals
+without joining gaps between contacts. Interval p99 uses nearest rank.
+
+| Theme | Presents/s, three runs | Maximum interval p99 |
+| --- | --- | --- |
+| Light | 120.07 / 119.96 / 119.62 | 8.952 ms |
+| Dark | 119.95 / 119.20 / 119.98 | 8.708 ms |
+
+Raw timestamps are in `artifacts/gtk-grip-fade/motion/swipe-animation.json`;
+`motion-summary.json` retains excluded priming contacts and source/binary hashes.
+The partial-opacity, reversal, cancellation and pickup journeys pass in both
+themes. Physical pen input remains unverified.
+
+Android measured 2026-10-22 at the same source revision plus the cross-platform
+fade, on Wacom MovinkPad Pro 14 with the release-profile benchmark build and the
+9504 × 6336 reference photo. Each case primes for one second, then measures three
+five-second gestures. The existing benchmark oscillates 24–64 dp from rest;
+these measurements cover partial opacity changes rather than full reveal and
+return. Left-swipe runs have thermal status 0 before and after; the right-swipe
+run has no pre-run thermal reading.
+
+| Direction / theme | Moving window frames/s, three runs | Maximum vsync interval p99 |
+| --- | --- | --- |
+| Left / light | 119.80 / 120.00 / 117.38 | 16.667 ms |
+| Left / dark | 116.57 / 120.00 / 120.00 | 16.667 ms |
+| Right / dark | 119.80 / 117.58 / 118.59 | 16.667 ms |
+
+FrameMetrics samples count only changed row geometry. Total-duration p95 is
+19.2–19.4 ms; that pipelined frame duration differs from the vsync cadence.
+All nine runs report zero dropped metric callbacks. Raw arrays, thermal readings,
+captures and `frame-summary.json` are in `artifacts/gtk-grip-fade/android/`.
+There is no matched baseline or SurfaceFlinger scanout capture. Full-swipe
+qualification, current Web frame timing, native Apple validation and Windows
+hardware performance remain unverified.
 
 ## GTK panel slider diagnostic
 

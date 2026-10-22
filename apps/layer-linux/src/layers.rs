@@ -916,7 +916,7 @@ impl LayerPanel {
                             }
                         }
                     }, glib::clone!(#[weak] connections, #[weak] grip, move |row| {
-                        grip.set_child_visible(row.is_at_rest());
+                        grip.set_opacity(1. - row.swipe_progress());
                         connections.queue_draw();
                     }));
                 item.set_child(Some(&swipe));

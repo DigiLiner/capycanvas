@@ -266,18 +266,35 @@ fn native_layer_hold_input() {
     let grip = source.last_child().unwrap();
     let controllers = grip.observe_controllers();
     let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+    let start = screen_point(&source, &w.surface, [0.5, 0.5]);
+    input.perform(serde_json::json!([{"touch":"down", "point":start}]));
+    let mut opacity = 1.;
+    for (distance, fading_out) in [(36., true), (72., true), (36., false)] {
+        input.perform(serde_json::json!([{"touch":"move", "point":[start[0] - distance, start[1]]}]));
+        let next = grip.opacity();
+        assert!(grip.is_child_visible() && next > 0. && next < 1., "{theme:?}: partial swipe keeps a translucent grip");
+        assert_eq!(next < opacity, fading_out, "{theme:?}: grip fades with swipe distance in either direction");
+        opacity = next;
+        if distance == 72. && std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").is_some() {
+            input.perform(serde_json::json!([{"capture":format!("swipe-grip-{}",format!("{theme:?}").to_lowercase())}]));
+        }
+    }
+    input.perform(serde_json::json!([{"touch":"move", "point":start}, {"touch":"up"}]));
+    pump(180);
+    assert_eq!(grip.opacity(), 1., "{theme:?}: reverse swipe restores full grip opacity");
     swipe.reveal(true);
     pump(180);
     assert!(!swipe.is_at_rest());
-    assert!(!grip.is_child_visible(), "{theme:?}: swipe hides grip");
+    assert_eq!(grip.opacity(), 0., "{theme:?}: open swipe fades grip completely");
     assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&8f64, &8f64]).is_none(),
         "{theme:?}: displaced row refuses native drag preparation");
     swipe.reveal(false);
     assert!(!swipe.is_at_rest(), "closing animation retains displaced state");
-    assert!(!grip.is_child_visible(), "closing animation keeps grip hidden");
+    pump(50);
+    assert!(grip.opacity() > 0. && grip.opacity() < 1., "{theme:?}: closing animation fades grip back in");
     pump(180);
     assert!(swipe.is_at_rest());
-    assert!(grip.is_child_visible(), "{theme:?}: restored row exposes grip");
+    assert_eq!(grip.opacity(), 1., "{theme:?}: restored row exposes grip");
     let start = screen_point(&grip, &w.surface, [0.5, 0.5]);
     input.perform(serde_json::json!([{"touch":"down", "point":start}]));
     assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&8f64, &8f64]).is_some(),
@@ -287,7 +304,7 @@ fn native_layer_hold_input() {
     pump(180);
     swipe.reset();
     pump(30);
-    assert!(swipe.is_at_rest() && grip.is_child_visible(), "{theme:?}: cancelled swipe restores grip");
+    assert!(swipe.is_at_rest() && grip.opacity() == 1., "{theme:?}: cancelled swipe restores grip");
     }
     let layer = |action| { w.dispatch(UiAction::Layer { action }); pump(150); };
     let checked = || state(&w).layers.iter().filter(|r| r.selected).map(|r| r.id).collect::<Vec<_>>();

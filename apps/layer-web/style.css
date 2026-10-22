@@ -1358,6 +1358,7 @@ button.new-drawing-preset.disabled { opacity:.4; }
 .layer-swipe { position: relative; overflow: hidden; flex: none; --swipe: 0px; }
 .layer-swipe > .layer-row { transform: translateX(calc(-1 * var(--swipe))); touch-action: pan-y; }
 .layer-swipe.swipe-animating > .layer-row { transition: transform 150ms ease-out; }
+.layer-swipe.swipe-animating > .layer-row > .layer-grip { transition: opacity 150ms ease-out; }
 .layer-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; clip-path:inset(0 0 0 calc(100% - var(--swipe))); }
 .layer-swipe-actions[hidden] { display:none; }
 .panel .layer-swipe-actions button { flex:1 1 auto; min-width:0; height:100%; padding:0 4px; border:0; border-radius:0; background:color-mix(in srgb,var(--bg),var(--fg) 16%); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -229,7 +229,11 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     let offset = 0, drag, suppressClick, settling = false;
     const atRest = () => offset === 0 && !settling;
     const pickup = (handle, device) => handle ? get().drag_from_handle : get().drag_from_body.includes(device);
-    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); grip.ariaDisabled = String(!get().drag_from_handle); };
+    record.refreshGrip = (maximum = offset > 0 ? revealWidth() : 72) => {
+      grip.hidden = !get().can_drop_below;
+      grip.style.opacity = String(.6 * (1 - Math.min(1, Math.abs(offset) / Math.max(1, maximum))));
+      grip.ariaDisabled = String(!get().drag_from_handle);
+    };
     const settled = e => {
       if (e.target !== row || e.propertyName !== "transform" || row.getAnimations().some(animation =>
         animation.transitionProperty === "transform" && !["finished", "idle"].includes(animation.playState))) return;
@@ -237,12 +241,13 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     };
     for (const type of ["transitionend", "transitioncancel"]) row.addEventListener(type, settled);
     const position = (value, animate = false) => {
+      const maximum = value > 0 ? revealWidth() : 72;
       settling = animate && (offset !== value || settling);
       offset = value; root.classList.toggle("swipe-animating", animate);
       root.style.setProperty("--swipe", `${offset}px`);
       actions.hidden = offset <= 0; actions.inert = offset <= 0;
       if (animate) connectionAnimationUntil = performance.now() + 180;
-      record.refreshGrip();
+      record.refreshGrip(maximum);
       scheduleConnections();
     };
     record.closeSwipe = () => position(0, true);

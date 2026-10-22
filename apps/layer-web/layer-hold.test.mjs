@@ -37,6 +37,7 @@ export async function checkLayerHolding({call, evaluate, settle}) {
   };
   try {
     await send({type:"invoke",command:"reset_layout"});
+    await send({type:"customize",action:{type:"set_panel_visible",panel:"layers",visible:true}});
     for(let i=0;i<2;i++)await send({type:"layer",action:{op:"new",group:false,clipped:false}});
     const before=await order(),source=`#layer-rows .layer-row[data-layer="${before[0]}"]`;
     await send({type:"layer",action:{op:"add_mask",id:Number(before[0]),replace:false}});
@@ -344,17 +345,24 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
   const revealed=()=>evaluate(`parseFloat(document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]').parentElement.style.getPropertyValue('--swipe'))>0`);
   const swipe=async(device,dx,{cancel=false,returnToStart=false}={})=>{
     const start=await rect();
+    const wasRevealed=await revealed();
     const input=async(type,x)=>{
       if(device==='touch')await call('Input.dispatchTouchEvent',{type,touchPoints:['touchEnd','touchCancel'].includes(type)?[]:[{id:1,x,y:start.y}]});
       else await call('Input.dispatchMouseEvent',{type:{touchStart:'mousePressed',touchMove:'mouseMoved',touchEnd:'mouseReleased'}[type],x,y:start.y,button:'left',buttons:type==='touchEnd'?0:1,clickCount:1,pointerType:device});
     };
     await input('touchStart',start.x);
     await input('touchMove',start.x+dx/3);await input('touchMove',start.x+dx);
+    if(device!=='mouse' && dx<0 && !wasRevealed) {
+      const grip=await evaluate(`(()=>{const n=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"] .layer-grip');return{hidden:n.hidden,opacity:Number(getComputedStyle(n).opacity)}})()`);
+      assert.equal(grip.hidden,false,'partial swipe retains grip layout');
+      assert.ok(grip.opacity>0 && grip.opacity<.6,'grip fades with swipe distance');
+    }
     if(returnToStart)await input('touchMove',start.x);
     if(cancel && device!=='touch')await evaluate("window.dispatchEvent(new Event('blur'))");
     await input(cancel && device==='touch'?'touchCancel':'touchEnd',start.x+(returnToStart?0:dx));await wait();
   };
   await send({type:'invoke',command:'reset_layout'});
+  await send({type:'customize',action:{type:'set_panel_visible',panel:'layers',visible:true}});
   await send({type:'layer',action:{op:'alpha_lock',id:1,value:false}});
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
@@ -408,7 +416,7 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
     await send({type:'set_theme',theme});
     await swipe('touch',-60);
     assert.equal(await revealed(),true,'displaced row exposes Delete');
-    assert.equal(await evaluate(`document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"] .layer-grip').hidden`),true,'displaced row hides grip');
+    assert.equal(await evaluate(`Number(getComputedStyle(document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"] .layer-grip')).opacity)`),0,'fully revealed row fades grip completely');
     const p=await rect();
     await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});
     await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y+65,button:'left',buttons:1});
@@ -424,16 +432,18 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
     assert.equal(await revealed(),true,'swipe is open before panel lifecycle change');
     const outside=await evaluate("(()=>{const r=document.querySelector('#document-title').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()");
     await call('Input.dispatchMouseEvent',{type:'mousePressed',...outside,button:'left',buttons:1,clickCount:1});
-    const closing=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');const result={transform:getComputedStyle(row).transform,animations:row.getAnimations().map(a=>a.transitionProperty)};layerApp.dispatch({type:'customize',action:{type:'set_column_collapsed',group:${column},collapsed:true}});return result;})()`);
+    const closing=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');const result={transform:getComputedStyle(row).transform,animations:row.getAnimations().map(a=>a.transitionProperty),gripAnimations:row.querySelector('.layer-grip').getAnimations().map(a=>a.transitionProperty)};layerApp.dispatch({type:'customize',action:{type:'set_column_collapsed',group:${column},collapsed:true}});return result;})()`);
     assert.ok(closing.animations.includes('transform'),'panel collapses while swipe return transition is active');
+    assert.ok(closing.gripAnimations.includes('opacity'),'grip opacity returns with a compositor transition');
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',...outside,button:'left',buttons:0,clickCount:1});
     await wait();
     await send({type:'customize',action:{type:'set_column_collapsed',group:column,collapsed:false}});
-    const reopened=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');return{transform:new DOMMatrixReadOnly(getComputedStyle(row).transform).m41,gripHidden:row.querySelector('.layer-grip').hidden,width:row.getBoundingClientRect().width};})()`);
+    const reopened=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');return{transform:new DOMMatrixReadOnly(getComputedStyle(row).transform).m41,gripHidden:row.querySelector('.layer-grip').hidden,gripOpacity:Number(getComputedStyle(row.querySelector('.layer-grip')).opacity),width:row.getBoundingClientRect().width};})()`);
     console.log('Swipe panel lifecycle',theme,{closing,reopened});
     assert.ok(reopened.width>0,'reopened swipe row is visible');
     assert.equal(reopened.transform,0,'reopened swipe row is visually at rest');
     assert.equal(reopened.gripHidden,false,`${theme}: cancelled closing transition restores grip on reopen`);
+    assert.equal(reopened.gripOpacity,.6,`${theme}: cancelled closing transition restores grip opacity on reopen`);
     for(const pointer of ['mouse','touch']) {
       const points=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]'),source=row.querySelector('${pointer==='mouse'?'.layer-name':'.layer-grip'}').getBoundingClientRect(),target=document.querySelector('#layer-rows .layer-row[data-layer="1"]').getBoundingClientRect();return{source:{x:source.x+source.width/2,y:source.y+source.height/2},target:{x:target.x+target.width/2,y:target.bottom-2}};})()`);
       if(pointer==='touch') {

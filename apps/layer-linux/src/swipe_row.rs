@@ -178,6 +178,10 @@ impl SwipeRow {
     }
     pub fn is_open(&self) -> bool { self.imp().offset.get() > 0. }
     pub fn is_at_rest(&self) -> bool { self.imp().offset.get() == 0. }
+    pub fn swipe_progress(&self) -> f64 {
+        let offset = self.imp().offset.get();
+        (offset.abs() / if offset > 0. { self.reveal_width() } else { REVEAL }).clamp(0., 1.)
+    }
     pub fn delete_button(&self) -> &gtk::Button { self.imp().delete.get().unwrap() }
     pub fn lock_button(&self) -> &gtk::Button { self.imp().lock.get().unwrap() }
     pub fn duplicate_button(&self) -> &gtk::Button { self.imp().duplicate.get().unwrap() }

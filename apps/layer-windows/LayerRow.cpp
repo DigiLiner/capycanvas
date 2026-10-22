@@ -232,8 +232,8 @@ double LayerRow::revealWidth()const{return std::min(std::max(1.,root.ActualWidth
 bool LayerRow::canSwipe()const{for(auto value:array(model(),L"swipe_actions"))if(flag(value.GetObject(),L"enabled"))return true;return false;}
 void LayerRow::swipe(double offset){
     swipeOffset=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,revealWidth());swipeTransform.X(-swipeOffset);
-    grip.Visibility(swipeOffset==0&&flag(model(),L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
     auto width=revealWidth();swipeActions.Width(width);
+    grip.Opacity(.6*(1-std::clamp(std::abs(swipeOffset)/(swipeOffset>0?std::max(1.,width):72.),0.,1.)));
     RectangleGeometry clip;clip.Rect({float(width-std::max(0.,swipeOffset)),0,float(std::max(0.,swipeOffset)),float(root.ActualHeight())});swipeActions.Clip(clip);
     swipeActions.Visibility(swipeOffset>0?Visibility::Visible:Visibility::Collapsed);
     if(auto view=owner.lock())view->connections();
@@ -333,8 +333,8 @@ void LayerRow::refresh(){
     AutomationProperties::SetAccessibilityView(lockImage,flag(layer,L"locked")||flag(layer,L"alpha_locked")?Automation::Peers::AccessibilityView::Content:Automation::Peers::AccessibilityView::Raw);
     body.ColumnDefinitions().GetAt(11).Width({flag(layer,L"can_drop_below")?14.:12.,GridUnitType::Pixel});
     body.ColumnDefinitions().GetAt(12).Width({flag(layer,L"can_drop_below")?16.:0.,GridUnitType::Pixel});
-    grip.Visibility(swipeOffset==0&&flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
-    grip.Opacity(flag(layer,L"can_drop_below")?.6:0);grip.IsEnabled(flag(layer,L"drag_from_handle"));
+    grip.Visibility(flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
+    grip.IsEnabled(flag(layer,L"drag_from_handle"));
     hstring details=str(layer,L"description");
     meta.Text(details);meta.Visibility(details.empty()?Visibility::Collapsed:Visibility::Visible);
     bool editing=renameTarget(data)==id;

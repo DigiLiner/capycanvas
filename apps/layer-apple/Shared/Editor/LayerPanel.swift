@@ -345,6 +345,11 @@ private struct LayerRow: View {
     var interaction: LayerRowInteraction?
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var id: UInt64 { layer["id"].uint }
+    private var gripOpacity: Double {
+        guard !preview, let interaction else { return 0.6 }
+        let width = min(CGFloat(layer["swipe_actions"].array.count) * 72, interaction.frames[id]?.root.width ?? 216)
+        return 0.6 * Double(1 - swipe.progress(owner: interaction.swipeOwner, layer: id, revealWidth: width))
+    }
     var body: some View {
         HStack(spacing: 2) {
             LayerButton(icon: layer["visible"].bool && !layer["visibility_blocked"].bool ? "eye" : "eye-hidden", label: visibilityLabel, height: 36) {
@@ -381,8 +386,8 @@ private struct LayerRow: View {
                 }
             SharedIcon(name: layer["locked"].bool ? "lock" : "alpha-lock", size: 12)
                 .opacity(layer["locked"].bool || layer["alpha_locked"].bool ? 1 : 0)
-            if layer["can_drop_below"].bool && (preview || interaction.map { swipe.atRest(owner: $0.swipeOwner, layer: id) } == true) {
-                SharedIcon(name: "grip").opacity(0.6).frame(width: 16, height: 36)
+            if layer["can_drop_below"].bool {
+                SharedIcon(name: "grip").opacity(gripOpacity).frame(width: 16, height: 36)
                     .contentShape(Rectangle())
                     .modifier(LayerRowMeasurement(id: id, part: \.grip, enabled: !preview))
                     .accessibilityLabel(store.catalog["native_copy"]["layers"]["move_layer"].string).accessibilityIdentifier("layer-grip-\(id)")
