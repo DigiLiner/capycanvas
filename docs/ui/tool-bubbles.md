@@ -24,7 +24,7 @@ center. GTK presents bubbles; Web and the native clients follow after review.
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
 | The color picker | Brush controls, 136 px | A 56 px circle with the color picker icon, Size on a left arc and Strength on a right arc, both always shown |
-| Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; a side is dimmed when there is nothing to undo or redo |
+| Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; each half's hover and pressed highlight fills the half it answers for, and a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail with the layer count |
 
@@ -100,8 +100,10 @@ everything rests.
   The choice belongs to the brush and is part of the workspace.
 - **Chooser:** a dial rings its media (or, for tools like Select, its tools) in
   44 px circles 84 px out, from the top clockwise. The current medium is
-  highlighted with its name, and its brushes curve beside it as pills with their
-  strokes. Tapping a medium fans its brushes; a press can slide through a medium
+  highlighted with its name, set radially outward beside its icon (at most
+  96 px, ellipsized) so it never covers a neighbour, and its brushes curve
+  beside it as pills with their strokes, past the name; when that side lacks
+  room they open on the other side without the name's offset. Tapping a medium fans its brushes; a press can slide through a medium
   onto one of its brushes. Picking a brush or tool closes the chooser; letting go
   on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
@@ -153,16 +155,23 @@ and size for the next time it is taken.
 ## Layers card
 
 Tapping the folded squircle unfolds the card in place, pushing neighbours aside.
-The card is the Layers drawer itself: the same layer list, header, rows and
-properties page, at the drawer's width and height (`LayerDrawerSizing`, from the
-heights GTK measures and reports with `BubbleAction::MeasureCard`). **Full**
-is the drawer exactly, with its layer actions and Layer properties footer;
-**Simple** replaces those bottom rows with one row holding the New layer icon on
-the left and **Properties** with an up chevron on the right. The properties slide up over the rows as in the drawer. There is no grab
-bar: dragging anywhere on the open card moves it, except on the layer list,
-whose rows keep their own drag. Contacts elsewhere fold the card, which shrinks
-away before the squircle returns; **Fold when not in use** in the hold menu
-keeps it open until it is tapped again.
+The card shares the Layers drawer's code and styles: it hosts the drawer's
+`LayerInspector` (layer list, rows and properties page) in the drawer's
+`dock-panel content-drawer` container, at the drawer's width and height
+(`LayerDrawerSizing`, from the heights GTK measures and reports with
+`BubbleAction::MeasureCard`), with the drawer's shadow. **Full** is the drawer
+exactly: blend, opacity and lock header, full rows, layer actions and the Layer
+properties footer. **Simple** keeps the approved design with the same widgets:
+rows show only each layer's eye, thumbnail and name, and one bottom row in the
+drawer footer's style holds the New layer icon on the left and **Properties**
+with an up chevron on the right. The properties slide up over the rows as in the
+drawer. There is no grab bar: dragging anywhere on the open card moves it,
+except on the layer list, whose rows keep their own drag. Contacts elsewhere
+fold the card, which shrinks away before the squircle returns; **Fold when not
+in use** in the hold menu keeps it open until it is tapped again. The folded
+squircle shows the current layer's thumbnail with the layer count in a badge
+centered on its upper right corner: a 22 px circle that widens into a pill for
+more digits.
 
 ## Look
 
@@ -198,7 +207,7 @@ back.
   pushing, tear-off and put back, tap states, halos, the chooser and its slides,
   beads, the card, stroke fading, menus, history and workspace round trips
   without a window.
-- GTK: `LAYER_NATIVE_TEST_TIMEOUT_MS=300000 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubbles`,
+- GTK: `LAYER_NATIVE_TEST_TIMEOUT_MS=420000 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubbles`,
   with `LAYER_NATIVE_CAPTURE_DIR` for compositor screenshots. With mouse and
   touch in both themes it takes a title-bar tool, walks the taps, adjusts a halo
   arc, paints under it, chooses a medium and slides to a brush, pushes one

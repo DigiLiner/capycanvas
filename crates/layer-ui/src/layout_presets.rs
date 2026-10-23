@@ -111,7 +111,7 @@ impl WorkspacePreset {
     fn painter_layout(platform: crate::Platform) -> DockLayout {
         use crate::CommandId::*;
         use ToolbarControl::{
-            BrushSizeSlider, BrushStrengthSlider, Color, ColorPicker, Divider, Opacity,
+            BrushSizeSlider, BrushStrengthSlider, Color, ColorPicker, Divider,
         };
         let command = |command| ToolbarControl::Command { command };
         let drawer = |panel| ToolbarControl::Panel { panel };
@@ -132,7 +132,6 @@ impl WorkspacePreset {
                     command(Eyedropper),
                     Color,
                     drawer(Panel::Sizes),
-                    Opacity,
                 ][..],
             ),
             (

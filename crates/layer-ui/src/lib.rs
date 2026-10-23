@@ -270,7 +270,6 @@ pub enum ToolbarControl {
     Size { tenths: u16 },
     Color,
     ColorPicker,
-    Opacity,
     BrushSizeSlider,
     BrushStrengthSlider,
     ToolOptions { #[serde(default)] style: ToolOptionsStyle },
@@ -297,7 +296,6 @@ pub const TOOLBAR_CONTROLS: &[ToolbarControl] = &[
         command: CommandId::Redo,
     },
     ToolbarControl::Color,
-    ToolbarControl::Opacity,
 ];
 
 #[derive(Clone, Copy, Debug)]

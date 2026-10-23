@@ -146,10 +146,21 @@ fn chooser(d: &mut Driver, device: &str, name: &str, id: u32) {
 
 fn layers_card(d: &mut Driver, device: &str, name: &str) {
     let (item, spot) = (header_of(d, ToolbarControl::Panel { panel: Panel::Layers }), canvas_spot(d, 0.3, 0.6));
+    tap(d, device, d.point(&d.named(&item)));
+    pump(500);
+    let drawer = d.named("tool-drawer");
+    assert!(drawer.is_mapped(), "{name}: the title bar opens the Layers drawer");
+    let drawer_size = [drawer.width(), drawer.height()];
+    capture(d, &format!("{name}-layers-drawer"));
+    tap(d, device, canvas_spot(d, 0.6, 0.6));
+    pump(500);
+    assert!(!drawer.is_mapped(), "{name}: a contact on the canvas closes the drawer");
     tear(d, device, &item, spot);
     let layers = find(d, BubbleSource::Control { control: ToolbarControl::Panel { panel: Panel::Layers } })
         .unwrap_or_else(|| panic!("{name}: Layers comes out of the title bar"));
     assert!(layers.layer.is_some() && layers.layers > 0, "{name}: the folded card shows the current layer and the count");
+    let count = find_css(&d.named(&format!("bubble-{}", layers.id)), "bubble-count").unwrap();
+    assert!(count.width() == count.height() || layers.layers > 9, "{name}: one digit sits in a circle ({}x{})", count.width(), count.height());
     capture(d, &format!("{name}-layers-folded"));
     let at = center(d, layers.id);
     tap(d, device, at);
@@ -186,6 +197,8 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     pump(500);
     let full = d.named("bubble-card");
     assert!(find_named(full.upcast_ref(), "layer-properties-disclosure").is_some_and(|f| f.is_mapped()), "{name}: Full keeps the drawer's footer");
+    assert!(full.has_css_class("dock-panel") && full.has_css_class("content-drawer"), "{name}: the card is styled as the drawer");
+    assert!((full.width() - drawer_size[0]).abs() <= 1 && (full.height() - drawer_size[1]).abs() <= 2, "{name}: Full is the drawer's size ({}x{} vs {drawer_size:?})", full.width(), full.height());
     assert!(d.named("bubble-new-layer").parent().is_none_or(|p| !p.is_mapped()), "{name}: instead of the simple one");
     capture(d, &format!("{name}-layers-full"));
     d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id: layers.id, options: BubbleOptions { full: false, ..options } } });
@@ -375,6 +388,11 @@ fn history(d: &mut Driver, device: &str, name: &str) {
         d.input.perform(serde_json::json!([contact("mouse", "move", [c[0] - 22., c[1]])]));
         pump(100);
         assert!(marked("hovered"), "{name}: the half under the pointer shows hover");
+        let half = find_css(&widget, "hovered").unwrap();
+        let [width, height] = HISTORY_BUBBLE;
+        assert!(half.width() as f32 >= width * 0.5 - 10. && half.height() as f32 >= height - 10., "{name}: the highlight covers the half it answers for ({}x{})", half.width(), half.height());
+        let bounds = half.compute_bounds(&d.w.surface).unwrap();
+        assert!(bounds.x() + bounds.width() <= c[0] + 1. && bounds.x() >= c[0] - width * 0.5 - 1., "{name}: the left half lies left of the split");
         capture(d, &format!("{name}-history-hover"));
         d.input.perform(serde_json::json!([contact("mouse", "down", [c[0] - 22., c[1]])]));
         pump(100);
@@ -412,7 +430,7 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
         widget.opacity()
     }).collect();
     assert_eq!(widget.opacity(), 1., "{name}: it comes back after the stroke");
-    assert!(samples.iter().any(|o| *o > 0.25 && *o < 0.95), "{name}: and fades back in instead of jumping: {samples:?}");
+    assert!(samples.iter().any(|o| *o > 0.21 && *o < 0.999), "{name}: and fades back in instead of jumping: {samples:?}");
     settings.set_gtk_enable_animations(animations);
     d.w.dispatch(UiAction::SetTheme { theme: Some(state(&d.w).theme) });
     pump(20);

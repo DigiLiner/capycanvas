@@ -456,7 +456,6 @@ fn bubble_layout_validation_rejects_duplicates_and_bad_values() {
 #[test]
 fn sources_normalize_toolbar_controls() {
     use ToolbarControl as C;
-    assert_eq!(BubbleSource::for_control(C::Opacity), None);
     assert_eq!(BubbleSource::for_control(C::BrushSizeSlider), None, "sliders stay in their toolbars");
     assert_eq!(BubbleSource::for_control(C::Divider), None);
     let undo = BubbleSource::for_control(C::Command { command: CommandId::Undo });
@@ -471,3 +470,24 @@ fn sources_normalize_toolbar_controls() {
     assert!(!BubbleSource::tears_without_hold(C::BrushSizeSlider), "plain drags keep editing sliders");
     assert!(BubbleSource::tears_without_hold(C::ColorPicker) && BubbleSource::tears_without_hold(C::Command { command: CommandId::Redo }));
 }
+
+#[test]
+fn medium_labels_sit_outward_clear_of_the_ring_and_their_brushes() {
+    let overlap = |a: Bounds, b: Bounds| a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    let around = |c: [f32; 2], [w, h]: [f32; 2]| Bounds { x: c[0] - w * 0.5, y: c[1] - h * 0.5, width: w, height: h };
+    for count in [3, 6, 8, 10] {
+        let ring = chooser_ring(count, [800., 500.], AREA);
+        let reach = ring.iter().map(|p| p[0].hypot(p[1])).fold(0., f32::max);
+        for (i, medium) in ring.iter().enumerate() {
+            let tag = tag_bounds(*medium);
+            for (j, other) in ring.iter().enumerate().filter(|(j, _)| *j != i) {
+                assert!(!overlap(tag, around(*other, [CHOOSER_ITEM; 2])), "{count}/{i}: the label clears medium {j}");
+            }
+            assert!(!overlap(tag, around(*medium, [CHOOSER_ITEM; 2])), "{count}/{i}: the label sits beside its icon");
+            for pill in chooser_column(4, [800., 500.], Some((*medium, reach)), AREA) {
+                assert!(!overlap(tag, around(pill, BRUSH_PILL)), "{count}/{i}: the label clears its brushes at {pill:?}");
+            }
+        }
+    }
+}
+

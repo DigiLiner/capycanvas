@@ -1462,7 +1462,7 @@ fn compact_edge_gestures(d: &mut Driver, devices: &[&str]) {
             .add_toolbar(
                 None,
                 "Companion",
-                &[ToolbarControl::Color, ToolbarControl::Opacity],
+                &[ToolbarControl::Color, ToolbarControl::Panel { panel: Panel::Sizes }],
             )
             .unwrap();
         layout

@@ -6895,7 +6895,7 @@ mod tests {
                 .action(),
             )
             .unwrap();
-            for control in [ToolbarControl::Opacity, ToolbarControl::Color] {
+            for control in [ToolbarControl::Panel { panel: Panel::Sizes }, ToolbarControl::Color] {
                 customize(&mut s, CustomizationAction::PickerSelect { control, selected: true });
                 customize(&mut s, CustomizationAction::PickerSearch {
                     query: "not a matching tool".into(),
@@ -6923,7 +6923,7 @@ mod tests {
                 .action(),
             )
             .unwrap();
-            for control in [ToolbarControl::Opacity, ToolbarControl::Color] {
+            for control in [ToolbarControl::Panel { panel: Panel::Sizes }, ToolbarControl::Color] {
                 customize(&mut s, CustomizationAction::PickerSelect { control, selected: true });
             }
             customize(&mut s, CustomizationAction::ConfirmTools);
@@ -6933,7 +6933,7 @@ mod tests {
             assert_eq!(
                 s.state.workspace.layout.header.zones[2][0].item,
                 HeaderItem::Tool {
-                    control: ToolbarControl::Opacity
+                    control: ToolbarControl::Panel { panel: Panel::Sizes }
                 }
             );
             assert_eq!(
@@ -7040,7 +7040,7 @@ mod tests {
             .action(),
         )
         .unwrap();
-        for control in [ToolbarControl::Color, ToolbarControl::Opacity] {
+        for control in [ToolbarControl::Color, ToolbarControl::Panel { panel: Panel::Sizes }] {
             customize(&mut s, CustomizationAction::PickerSelect { control, selected: true });
         }
         let view = s
@@ -7058,7 +7058,7 @@ mod tests {
             "Multi-add is atomic at the capacity limit"
         );
         customize(&mut s, CustomizationAction::PickerSelect {
-            control: ToolbarControl::Opacity,
+            control: ToolbarControl::Panel { panel: Panel::Sizes },
             selected: false,
         });
         customize(&mut s, CustomizationAction::ConfirmTools);
@@ -16613,9 +16613,10 @@ mod tests {
                 .unwrap()
                 .id
         };
+        app.state.workspace.layout.insert_tools(Panel::Toolbar, None, &[ToolbarControl::Panel { panel: Panel::Sizes }]).unwrap();
         let color = tile(&app, ToolbarControl::Color);
-        let opacity = tile(&app, ToolbarControl::Opacity);
-        for id in [color, opacity] {
+        let sizes = tile(&app, ToolbarControl::Panel { panel: Panel::Sizes });
+        for id in [color, sizes] {
             for open in [true, false] {
                 app.dispatch(UiAction::ActivateTile {
                     panel: Panel::Toolbar,
@@ -16637,7 +16638,7 @@ mod tests {
         }
         app.dispatch(UiAction::ActivateTile {
             panel: Panel::Toolbar,
-            tile: opacity,
+            tile: sizes,
         })
         .unwrap();
         assert!(app.state.customization.control.is_none());

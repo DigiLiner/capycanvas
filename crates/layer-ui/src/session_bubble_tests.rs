@@ -257,7 +257,7 @@ fn dial_taps_select_then_show_the_halo_then_the_media_ring() {
 #[test]
 fn the_media_ring_shows_a_mediums_brushes_and_a_choice_closes_it() {
     let mut s = desk();
-    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, FAR);
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, [480., 520.]);
     open_ring(&mut s, id);
     let open = view(&s, id);
     let other = items(&open, ChooserKind::Medium).into_iter().find(|m| !m.shown && m.enabled && several_brushes(&s, m)).unwrap();

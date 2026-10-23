@@ -769,9 +769,7 @@ workspace-tool-color-picker = Pemilih Warna
 
 workspace-tool-color-picker-description = Pilih warna kanvas dengan cincin pembesar
 
-workspace-tool-opacity = Opasitas kuas
 
-workspace-tool-opacity-description = Batasi opasitas setiap goresan
 
 workspace-tool-size-slider = Penggeser ukuran kuas
 

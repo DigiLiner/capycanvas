@@ -24,6 +24,8 @@ pub const RING_ICON: f32 = 21.;
 pub const CHOOSER_ITEM: f32 = 44.;
 pub const CHOOSER_RING: f32 = 84.;
 pub const BRUSH_PILL: [f32; 2] = [128., 48.];
+pub const CHOOSER_TAG: [f32; 2] = [96., 26.];
+const TAG_GAP: f32 = 4.;
 pub const PALETTE_PILL: [f32; 2] = [184., 30.];
 pub const STROKE_FADE: f32 = 48.;
 const BRUSH_COLUMN: f32 = 170.;
@@ -700,13 +702,15 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
     let n = count as f32;
     let (radius, side, middle) = match medium {
         Some((item, reach)) => {
-            let radius = (n * PILL_PITCH * 0.5 + 20.).max(BRUSH_COLUMN).max(reach + CHOOSER_ITEM * 0.5 + BRUSH_PILL[0] * 0.5 + 8.);
-            let room = |side: f32| {
+            let tag = tag_bounds(item);
+            let label = (tag.x.abs().max((tag.x + tag.width).abs()) - item[0].abs()).max(CHOOSER_ITEM * 0.5);
+            let radius = |beside: f32| (n * PILL_PITCH * 0.5 + 20.).max(BRUSH_COLUMN).max(reach + beside + BRUSH_PILL[0] * 0.5 + 8.);
+            let room = |side: f32, radius: f32| {
                 if side > 0. { bounds.x + bounds.width - (center[0] + radius + BRUSH_PILL[0] * 0.5) } else { center[0] - radius - BRUSH_PILL[0] * 0.5 - bounds.x }
             };
             let side = if item[0] > -1. { 1. } else { -1. };
-            let side = if room(side) < 0. && room(-side) > room(side) { -side } else { side };
-            (radius, side, item[1])
+            let (near, far) = (radius(label), radius(CHOOSER_ITEM * 0.5));
+            if room(side, near) < 0. && room(-side, far) > room(side, near) { (far, -side, item[1]) } else { (near, side, item[1]) }
         }
         None => {
             let radius = (n * PILL_PITCH * 0.5 + 18.).max(BRUSH_FAN);
@@ -738,6 +742,14 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
             [side * x, y]
         })
         .collect()
+}
+
+pub fn tag_bounds(item: [f32; 2]) -> Bounds {
+    let length = item[0].hypot(item[1]);
+    let d = if length > 1e-3 { [item[0] / length, item[1] / length] } else { [0., -1.] };
+    let [w, h] = CHOOSER_TAG;
+    let out = CHOOSER_ITEM * 0.5 + TAG_GAP + d[0].abs() * w * 0.5 + d[1].abs() * h * 0.5;
+    Bounds { x: item[0] + d[0] * out - w * 0.5, y: item[1] + d[1] * out - h * 0.5, width: w, height: h }
 }
 
 pub fn layers_card(viewport: [f32; 2], layers: usize, measured: Option<[f32; 2]>, properties: bool) -> [f32; 2] {

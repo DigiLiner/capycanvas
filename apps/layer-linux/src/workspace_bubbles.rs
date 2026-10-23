@@ -225,7 +225,7 @@ mod imp {
                 let (_, natural, _, _) = count.measure(gtk::Orientation::Horizontal, -1);
                 let (_, tall, _, _) = count.measure(gtk::Orientation::Vertical, natural);
                 let size = [(natural as f32).max(tall as f32), tall as f32];
-                place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 + 2. - size[0] * 0.5, -TOOL_BUBBLE * 0.5 + size[1] * 0.5 - 2.], size);
+                place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 - 4., -TOOL_BUBBLE * 0.5 + 4.], size);
             }
             for (icon, ring) in self.icons.borrow().iter().zip(self.rings_shown.borrow().iter()) {
                 place(icon.upcast_ref(), ring.arc.icon_point(), [16.; 2]);
@@ -254,11 +254,13 @@ mod imp {
                 place(item.root.upcast_ref(), chooser.center, chooser.size());
                 if item.tag.is_visible() {
                     let (_, natural, _, _) = item.tag.measure(gtk::Orientation::Horizontal, -1);
-                    let (_, tall, _, _) = item.tag.measure(gtk::Orientation::Vertical, natural);
+                    let width = (natural as f32).min(CHOOSER_TAG[0]);
+                    let (_, tall, _, _) = item.tag.measure(gtk::Orientation::Vertical, width as i32);
+                    let tag = tag_bounds(chooser.center);
                     let [x, y] = chooser.center;
-                    let above = if y <= 0. || x.abs() > y { -1. } else { 1. };
-                    let at = [x, y + above * (CHOOSER_ITEM * 0.5 + 4. + tall as f32 * 0.5)];
-                    place(item.tag.upcast_ref(), at, [natural as f32, tall as f32]);
+                    let length = x.hypot(y).max(1e-3);
+                    let anchor = [tag.x + tag.width * 0.5 - x / length * (tag.width - width) * 0.5, tag.y + tag.height * 0.5];
+                    place(item.tag.upcast_ref(), anchor, [width, tall as f32]);
                 }
             }
             for (item, chooser, _) in self.leaving.borrow().iter() {
@@ -320,6 +322,9 @@ mod imp {
             let (card_shown, face_shown) = obj.fold_progress(view.card.is_some());
             if let (Some(card), Some(progress)) = (self.card.borrow().as_ref().filter(|c| c.root.is_child_visible()), card_shown) {
                 grow(c, 0.6 + 0.4 * progress, progress);
+                if let Some(bounds) = card.root.compute_bounds(&*obj) {
+                    super::shadow(snapshot, &bounds, layer_ui::SURFACE_RADIUS, 24., 8., 0.2);
+                }
                 obj.snapshot_child(&card.root, snapshot);
                 done();
             }
@@ -515,52 +520,55 @@ fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, th
     snapshot.append_stroke(&thumb, &gsk::Stroke::new(1.), &rgba(ink, 0.6));
 }
 
-fn rounded(bounds: &graphene::Rect, grow: f32) -> gsk::RoundedRect {
-    let rect = graphene::Rect::new(bounds.x() - grow, bounds.y() - grow, bounds.width() + grow * 2., bounds.height() + grow * 2.);
-    gsk::RoundedRect::from_rect(rect, bounds.width().min(bounds.height()) * 0.5 + grow)
-}
-
 fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, strength: f32, lift: f32) {
-    shadow(snapshot, bounds, 8. * (1. + lift * 0.5), 1.5 + lift * 2.5, 0.14 * strength);
+    shadow(snapshot, bounds, f32::MAX, 8. * (1. + lift * 0.5), 1.5 + lift * 2.5, 0.14 * strength);
 }
 
 fn bead_shadow(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead) {
     let [x, y] = bead.placement.center;
     let half = bead.placement.size * 0.5;
     let bounds = graphene::Rect::new(c[0] + x - half, c[1] + y - half, half * 2., half * 2.);
-    shadow(snapshot, &bounds, 3., 1., 0.13 * bead.placement.alpha);
+    shadow(snapshot, &bounds, f32::MAX, 3., 1., 0.13 * bead.placement.alpha);
 }
 
-fn shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, spread: f32, drop: f32, alpha: f32) {
+fn shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, spread: f32, drop: f32, alpha: f32) {
     let stops = |edge: f32, end: f32| {
         [0., 0.25, 0.5, 0.75, 1.].map(|t| gsk::ColorStop::new(edge + (end - edge) * t, gdk::RGBA::new(0., 0., 0., alpha * (1. - t) * (1. - t)))).to_vec()
     };
     let (x, y, w, h) = (bounds.x(), bounds.y() + drop, bounds.width(), bounds.height());
-    let radius = w.min(h) * 0.5;
+    let radius = radius.min(w * 0.5).min(h * 0.5);
     let reach = radius + spread;
+    let shape = |rect: graphene::Rect, r: f32| gsk::RoundedRect::from_rect(rect, r);
     let path = gsk::PathBuilder::new();
-    let mut outer = rounded(bounds, spread);
-    outer.offset(0., drop);
-    path.add_rounded_rect(&outer);
-    path.add_rounded_rect(&rounded(bounds, 0.));
+    path.add_rounded_rect(&shape(graphene::Rect::new(x - spread, y - spread, w + spread * 2., h + spread * 2.), reach));
+    path.add_rounded_rect(&shape(*bounds, radius));
     snapshot.push_fill(&path.to_path(), gsk::FillRule::EvenOdd);
-    let cap = |cx: f32, clip: graphene::Rect| {
+    let [left, right, top, bottom] = [x + radius, x + w - radius, y + radius, y + h - radius];
+    for (cx, cy, clip) in [
+        (left, top, graphene::Rect::new(left - reach, top - reach, reach, reach)),
+        (right, top, graphene::Rect::new(right, top - reach, reach, reach)),
+        (left, bottom, graphene::Rect::new(left - reach, bottom, reach, reach)),
+        (right, bottom, graphene::Rect::new(right, bottom, reach, reach)),
+    ] {
         snapshot.push_clip(&clip);
-        let center = graphene::Point::new(cx, y + h * 0.5);
-        let area = graphene::Rect::new(cx - reach, y + h * 0.5 - reach, reach * 2., reach * 2.);
-        snapshot.append_radial_gradient(&area, &center, reach, reach, 0., 1., &stops(radius / reach, 1.));
+        let area = graphene::Rect::new(cx - reach, cy - reach, reach * 2., reach * 2.);
+        snapshot.append_radial_gradient(&area, &graphene::Point::new(cx, cy), reach, reach, 0., 1., &stops(radius / reach, 1.));
         snapshot.pop();
-    };
-    let [left, right] = [x + radius, x + w - radius];
-    cap(left, graphene::Rect::new(left - reach, y - spread, reach, h + spread * 2.));
-    cap(right, graphene::Rect::new(right, y - spread, reach, h + spread * 2.));
-    if right > left {
-        let band = graphene::Rect::new(left, y - spread, right - left, h + spread * 2.);
-        let side = spread / (h + spread * 2.);
+    }
+    let band = |length: f32| {
+        let side = spread / (length + spread * 2.);
         let mut gradient = stops(side, 0.);
         gradient.reverse();
         gradient.extend(stops(1. - side, 1.));
-        snapshot.append_linear_gradient(&band, &graphene::Point::new(left, y - spread), &graphene::Point::new(left, y + h + spread), &gradient);
+        gradient
+    };
+    if right > left {
+        let area = graphene::Rect::new(left, y - spread, right - left, h + spread * 2.);
+        snapshot.append_linear_gradient(&area, &graphene::Point::new(left, y - spread), &graphene::Point::new(left, y + h + spread), &band(h));
+    }
+    if bottom > top {
+        let area = graphene::Rect::new(x - spread, top, w + spread * 2., bottom - top);
+        snapshot.append_linear_gradient(&area, &graphene::Point::new(x - spread, top), &graphene::Point::new(x + w + spread, top), &band(w));
     }
     snapshot.pop();
 }
@@ -622,6 +630,7 @@ impl Item {
         root.set_parent(bubble);
         let tag = gtk::Label::new(None);
         tag.add_css_class("bubble-tag");
+        tag.set_ellipsize(gtk::pango::EllipsizeMode::End);
         tag.set_can_target(false);
         tag.set_parent(bubble);
         Self { root, icon, preview: RefCell::new(None), name, tag }
@@ -649,48 +658,52 @@ impl Item {
 impl Card {
     fn new(w: &Rc<Workspace>, bubble: &Bubble, id: u32, full: bool) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.add_css_class("bubble-card");
+        root.add_css_class("dock-panel");
+        root.add_css_class("content-drawer");
         root.set_widget_name("bubble-card");
         root.set_overflow(gtk::Overflow::Hidden);
         let inspector = super::drawers::LayerInspector::new(w, UiAction::Bubble { action: BubbleAction::Properties { id } });
+        inspector.root.add_css_class("panel-body");
         inspector.root.set_vexpand(true);
         inspector.layers.root.add_css_class("customizable-target");
         inspector.effects.properties.add_css_class("customizable-target");
-        inspector.footer.set_visible(full);
+        inspector.layers.set_simple(!full);
         inspector.layers.footer.set_visible(full);
+        inspector.footer.set_visible(full);
         root.append(&inspector.root);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        footer.add_css_class("bubble-card-footer");
-        footer.set_height_request(layer_ui::LayerDrawerSizing::FOOTER_HEIGHT as i32);
+        let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        footer.add_css_class("layer-properties-footer");
+        footer.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         footer.set_visible(!full);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_GROUP_SPACING as i32);
+        row.set_height_request(layer_ui::PropertyDisclosure::HEIGHT as i32);
         let add = crate::icons::button("layer-add-layer-symbolic");
         add.add_css_class("flat");
+        add.add_css_class("layer-properties-disclosure");
         add.add_css_class("customizable-target");
         add.set_widget_name("bubble-new-layer");
-        add.set_valign(gtk::Align::Center);
         let action = UiAction::Layer { action: LayerAction::New { group: false, clipped: false } };
         w.bind_action_tooltip(&add, action.clone());
         add.connect_clicked(glib::clone!(#[weak] w, move |_| w.dispatch(action.clone())));
-        footer.append(&add);
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_hexpand(true);
-        footer.append(&spacer);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let disclosure_label = gtk::Label::new(None);
-        disclosure_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        disclosure_label.set_width_chars(1);
+        row.append(&add);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_GROUP_SPACING as i32);
+        content.set_halign(gtk::Align::End);
+        let disclosure_label = gtk::Label::builder().xalign(1.).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).build();
+        disclosure_label.set_hexpand(true);
         let chevron = crate::icons::image("layer-chevron-down-symbolic");
         chevron.add_css_class("layer-properties-chevron");
         content.append(&disclosure_label);
         content.append(&chevron);
         let disclosure = gtk::Button::new();
         disclosure.add_css_class("flat");
+        disclosure.add_css_class("layer-properties-disclosure");
         disclosure.add_css_class("customizable-target");
-        disclosure.set_valign(gtk::Align::Center);
+        disclosure.set_hexpand(true);
         disclosure.set_child(Some(&content));
         disclosure.set_widget_name("bubble-layer-properties");
         disclosure.connect_clicked(glib::clone!(#[weak] w, move |_| w.dispatch(UiAction::Bubble { action: BubbleAction::Properties { id } })));
-        footer.append(&disclosure);
+        row.append(&disclosure);
+        footer.append(&row);
         root.append(&footer);
         root.set_parent(bubble);
         Self { root, full, inspector, add, disclosure, disclosure_label, measured: Cell::new(None) }
@@ -871,11 +884,13 @@ impl Bubble {
                         column.set_orientation(gtk::Orientation::Horizontal);
                         column.set_homogeneous(true);
                         column.set_halign(gtk::Align::Fill);
+                        column.set_valign(gtk::Align::Fill);
                         column.set_hexpand(true);
                         column.remove(&icon);
                         for button in &view.buttons {
                             let half = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                             half.add_css_class("bubble-half");
+                            half.set_vexpand(true);
                             let image = crate::icons::image(&format!("layer-{}-symbolic", button.icon));
                             image.set_pixel_size(20);
                             image.set_hexpand(true);

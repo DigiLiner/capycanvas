@@ -1301,11 +1301,11 @@ fn native_header_managed_input() {
     d.named("tool-search")
         .downcast::<gtk::SearchEntry>()
         .unwrap()
-        .set_text("Brush opacity");
+        .set_text("Brush size");
     pump(300);
     d.click_name(&format!(
         "tool-choice-{}",
-        serde_json::to_string(&ToolbarControl::Opacity).unwrap()
+        serde_json::to_string(&ToolbarControl::Panel { panel: Panel::Sizes }).unwrap()
     ));
     d.click_name("confirm-tools");
     assert!(state(&d.w).customization.header_editing);
@@ -1755,11 +1755,11 @@ fn native_header_catalog_preview_input() {
     d.named("tool-search")
         .downcast::<gtk::SearchEntry>()
         .unwrap()
-        .set_text("Brush opacity");
+        .set_text("Brush size");
     pump(250);
     d.click_name(&format!(
         "tool-choice-{}",
-        serde_json::to_string(&ToolbarControl::Opacity).unwrap()
+        serde_json::to_string(&ToolbarControl::Panel { panel: Panel::Sizes }).unwrap()
     ));
     d.click_name("confirm-tools");
     assert!(state(&d.w).customization.header_editing);
@@ -1787,7 +1787,7 @@ fn native_header_picker_journey() {
     let original = state(&d.w).workspace.layout.header;
     let opacity = format!(
         "tool-choice-{}",
-        serde_json::to_string(&ToolbarControl::Opacity).unwrap()
+        serde_json::to_string(&ToolbarControl::Panel { panel: Panel::Sizes }).unwrap()
     );
     let color = format!(
         "tool-choice-{}",
@@ -1831,7 +1831,7 @@ fn native_header_picker_journey() {
         assert!(d.w.window.visible_dialog().is_some());
         assert!(!d.named("toolbar-name").is_mapped());
         assert!(!d.named("confirm-tools").is_sensitive());
-        search(&d, "Brush opacity");
+        search(&d, "Brush size");
         choose(&mut d, &opacity);
         search(&d, "Color");
         choose(&mut d, &color);
@@ -1879,7 +1879,7 @@ fn native_header_picker_journey() {
             ""
         );
         assert!(!d.named("confirm-tools").is_sensitive());
-        search(&d, "Brush opacity");
+        search(&d, "Brush size");
         choose(&mut d, &opacity);
         search(&d, "Color");
         choose(&mut d, &color);
@@ -1896,7 +1896,7 @@ fn native_header_picker_journey() {
         assert_eq!(
             added.zones[2][0].item,
             HeaderItem::Tool {
-                control: ToolbarControl::Opacity
+                control: ToolbarControl::Panel { panel: Panel::Sizes }
             }
         );
         assert_eq!(
@@ -2884,7 +2884,6 @@ fn native_header_drawer_controls_input() {
         .filter(|p| p.kind() == PanelKind::Content)
         .map(|panel| ToolbarControl::Panel { panel })
         .chain([
-            ToolbarControl::Opacity,
             ToolbarControl::Brush {
                 id: layer_core::DefaultBrushPreset::GPen as u32,
             },
@@ -3063,14 +3062,14 @@ fn native_header_editor_controls_input() {
     d.named("tool-search")
         .downcast::<gtk::SearchEntry>()
         .unwrap()
-        .set_text("Brush opacity");
+        .set_text("Brush size");
     pump(250);
     d.click_name(&format!(
         "tool-choice-{}",
-        serde_json::to_string(&ToolbarControl::Opacity).unwrap()
+        serde_json::to_string(&ToolbarControl::Panel { panel: Panel::Sizes }).unwrap()
     ));
     d.click_name("confirm-tools");
-    for label in ["Brush opacity", "Clock", "Menu Labels"] {
+    for label in ["Brush size", "Clock", "Menu Labels"] {
         assert!(
             state(&d.w)
                 .workspace
@@ -3844,11 +3843,11 @@ fn native_header_tools_drop_input() {
         d.named("tool-search")
             .downcast::<gtk::SearchEntry>()
             .unwrap()
-            .set_text("Brush opacity");
+            .set_text("Brush size");
         pump(300);
         d.click_name(&format!(
             "tool-choice-{}",
-            serde_json::to_string(&ToolbarControl::Opacity).unwrap()
+            serde_json::to_string(&ToolbarControl::Panel { panel: Panel::Sizes }).unwrap()
         ));
         d.click_name("confirm-tools");
         let model = state(&d.w).workspace.layout.header;
@@ -3857,7 +3856,7 @@ fn native_header_tools_drop_input() {
             .find(|e| {
                 e.item
                     == HeaderItem::Tool {
-                        control: ToolbarControl::Opacity,
+                        control: ToolbarControl::Panel { panel: Panel::Sizes },
                     }
             })
             .unwrap();
