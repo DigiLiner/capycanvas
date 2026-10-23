@@ -108,17 +108,34 @@ fn concave_coverage(p: vec2<f32>, corner: vec2<f32>, radius: f32, n: f32) -> f32
     return clamp(.5 + (superellipse((p - corner) / r, n) - 1.) * r, 0., 1.);
 }
 
+fn arc_coverage(p: vec2<f32>, arc: vec4<f32>, shape: vec4<f32>) -> f32 {
+    let v = p - arc.xy;
+    let turn = 6.2831853;
+    let offset = atan2(v.y, v.x) - shape.z;
+    var distance = abs(length(v) - arc.z);
+    if offset - floor(offset / turn) * turn > shape.w {
+        let ends = vec4<f32>(cos(shape.z), sin(shape.z), cos(shape.z + shape.w), sin(shape.z + shape.w)) * arc.z;
+        distance = min(length(v - ends.xy), length(v - ends.zw));
+    }
+    return clamp(.5 - distance + arc.w, 0., 1.);
+}
+
 @fragment
 fn region_fragment(in: Region) -> @location(0) vec4<f32> {
     let p = in.position.xy;
     let b = in.bounds;
     let n = in.shape.x;
-    var coverage = convex_coverage(p, b, in.radii, n);
-    coverage *= concave_coverage(p, b.xy, in.radii.x, n);
-    coverage *= concave_coverage(p, b.xy + vec2<f32>(b.z, 0.), in.radii.y, n);
-    coverage *= concave_coverage(p, b.xy + b.zw, in.radii.z, n);
-    coverage *= concave_coverage(p, b.xy + vec2<f32>(0., b.w), in.radii.w, n);
+    var coverage: f32;
+    if n == 0. {
+        coverage = arc_coverage(p, in.radii, in.shape);
+    } else {
+        coverage = convex_coverage(p, b, in.radii, n);
+        coverage *= concave_coverage(p, b.xy, in.radii.x, n);
+        coverage *= concave_coverage(p, b.xy + vec2<f32>(b.z, 0.), in.radii.y, n);
+        coverage *= concave_coverage(p, b.xy + b.zw, in.radii.z, n);
+        coverage *= concave_coverage(p, b.xy + vec2<f32>(0., b.w), in.radii.w, n);
+    }
     let blurred = tap(pass_data.reprojection * vec3<f32>(p, 1.) * pass_data.surface_uv);
     let color = blurred.rgb / max(blurred.a, 1e-4);
-    return vec4<f32>(color, 1.) * coverage;
+    return vec4<f32>(color, 1.) * coverage * in.shape.y;
 }

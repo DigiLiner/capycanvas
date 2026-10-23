@@ -28,7 +28,7 @@ follow after review.
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
 | The color picker | Brush controls, 134 px | A 56 px circle with the color picker icon, Strength on a left arc and Size on a right arc, both always shown; **Swap sliders** in its hold menu swaps them |
-| Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; each half's hover and pressed highlight fills the half it answers for, and a side is dimmed when there is nothing to undo or redo |
+| Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; each is a full 56 px circle out to the capsule's end, which answers taps and shows its hover and pressed highlight, and a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, opened or folded to a 56 px squircle | The current layer's thumbnail with the layer count |
 
@@ -62,7 +62,8 @@ Only the drawn parts of a bubble take a pen, finger or mouse; everything else,
 such as the gaps between halo arcs, the space between the color plate and its
 beads, and the corners around round parts, belongs to the canvas. Each halo arc
 answers on its band, from the round cap behind its icon to the round cap past
-its end; the undo and redo capsule answers inside its rounded ends.
+its end; undo and redo answer inside their circles, and the rest of the
+capsule moves it.
 
 Bubbles move without a hold: drag the face of a tool bubble or Brush controls,
 the undo and redo capsule, the folded Layers squircle, an open card anywhere but
@@ -118,10 +119,10 @@ everything rests.
   belongs to the brush and is part of the workspace.
 - **Chooser:** a dial rings its media (or, for tools like Select, its tools) in
   44 px circles 84 px out, from the top clockwise. The current medium is
-  highlighted with its name, set radially outward beside its icon (sized to
-  the name, at most 96 px, ellipsized) so it never covers a neighbour, and its
+  highlighted with its name, set radially outward beside its icon (as wide as
+  the name, ellipsized only past 96 px) so it never covers a neighbour, and its
   brushes curve beside it as pills with their strokes, just past the name; when that side lacks
-  room they open on the other side without the name's offset. Tapping a medium fans its brushes; a press can slide through a medium
+  room they open on the other side without the name's offset. Tapping a medium fans its brushes, even a single one; a press can slide through a medium
   onto one of its brushes. Picking a brush or tool closes the chooser; letting go
   on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
@@ -212,7 +213,8 @@ more digits.
 Bubbles look like the toolbars: faces, glass beads, pills, the readout, tags and
 the count badge take the panel color (the panel glass in glass mode) with no
 border, a selected part layers the toolbars' selection over it exactly as a
-selected toolbar tile does, and halo bands use the panel glass too. Round parts cast the toolbars' 2 px, 8 px shadow, and beads a smaller one, each
+selected toolbar tile does, and halo bands are panel glass too, blurring the
+canvas under their arc. Round parts cast the toolbars' 2 px, 8 px shadow, and beads a smaller one, each
 drawn as one smooth gradient around its own shape and clipped outside it, so it never
 bands, never darkens the glass and never renders offscreen when scaling or
 pinching. Faces, the undo and redo halves and chooser items show hover and
@@ -224,7 +226,8 @@ its pointer.
 ## Painting
 
 A stroke that comes within 48 px of a bubble fades it to 20% over 140 ms and
-passes under it; it fades back 180 ms after the pen lifts. Painting closes the chooser, the
+passes under it, its glass blur fading with it so the artwork shows through;
+it fades back 180 ms after the pen lifts. Painting closes the chooser, the
 palette name and folding cards; a halo stays and fades with its bubble.
 
 ## Zen mode

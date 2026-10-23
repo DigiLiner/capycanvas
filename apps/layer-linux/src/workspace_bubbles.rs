@@ -213,6 +213,9 @@ mod imp {
             if let Some(face) = self.face.borrow().as_ref() {
                 place(face.upcast_ref(), [0.; 2], view.face);
             }
+            for (i, half) in self.halves.borrow().iter().enumerate() {
+                place(half.upcast_ref(), history_center(i), [HISTORY_BUBBLE[1]; 2]);
+            }
             if let Some(count) = self.count.borrow().as_ref() {
                 let (_, natural, _, _) = count.measure(gtk::Orientation::Horizontal, -1);
                 let (_, tall, _, _) = count.measure(gtk::Orientation::Vertical, natural);
@@ -246,7 +249,7 @@ mod imp {
                 place(item.root.upcast_ref(), chooser.center, chooser.size());
                 if item.tag.is_visible() {
                     let (_, natural, _, _) = item.tag.measure(gtk::Orientation::Horizontal, -1);
-                    let width = (natural as f32).min(chooser.tag.width);
+                    let width = (natural as f32).min(CHOOSER_TAG[0]);
                     let (_, tall, _, _) = item.tag.measure(gtk::Orientation::Vertical, width as i32);
                     place(item.tag.upcast_ref(), chooser.tag_center(width), [width, tall as f32]);
                 }
@@ -323,6 +326,9 @@ mod imp {
                     } else {
                         round(face.upcast_ref());
                     }
+                }
+                for half in self.halves.borrow().iter() {
+                    obj.snapshot_child(half, snapshot);
                 }
                 if let Some(texture) = self.preview.borrow().as_ref() {
                     snapshot.push_opacity(0.78);
@@ -489,7 +495,11 @@ fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, th
     let start = y.atan2(x).to_degrees();
     let lead = (start - arc.start + 540.).rem_euclid(360.) - 180.;
     let banded = RingArc { start, sweep: arc.sweep - lead, ..arc };
-    snapshot.append_stroke(&arc_path(c, &banded, 1.), &stroke(arc.band), &chip);
+    let band = gtk::Snapshot::new();
+    band.append_stroke(&arc_path(c, &banded, 1.), &stroke(arc.band), &chip);
+    if let Some(node) = band.to_node() {
+        snapshot.append_node(crate::glass::arc(node, c, arc.radius, arc.band, [banded.start, banded.sweep]));
+    }
     snapshot.append_stroke(&arc_path(c, &arc, 1.), &stroke(RING_TRACK), &rgba(ink, 0.18));
     if ring.fill > 0.004 {
         snapshot.append_stroke(&arc_path(c, &arc, ring.fill), &stroke(RING_TRACK), &rgba(ink, 0.5));
@@ -818,21 +828,16 @@ impl Bubble {
                 match view.kind {
                     BubbleKind::Medium => icon.set_margin_bottom(8),
                     BubbleKind::History => {
-                        column.set_orientation(gtk::Orientation::Horizontal);
-                        column.set_homogeneous(true);
-                        column.set_halign(gtk::Align::Fill);
-                        column.set_valign(gtk::Align::Fill);
-                        column.set_hexpand(true);
                         column.remove(&icon);
                         for button in &view.buttons {
                             let half = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                             half.add_css_class("bubble-half");
-                            half.set_vexpand(true);
+                            half.set_can_target(false);
                             let image = crate::icons::image(&format!("layer-{}-symbolic", button.icon));
                             image.set_pixel_size(20);
                             image.set_hexpand(true);
                             half.append(&image);
-                            column.append(&half);
+                            half.set_parent(&bubble);
                             imp.buttons.borrow_mut().push(image);
                             imp.halves.borrow_mut().push(half);
                         }
@@ -1434,7 +1439,7 @@ impl Bubble {
         let view = view.as_ref()?;
         view.hit(p).filter(|hit| match hit {
             BubbleHit::Item(_) | BubbleHit::Half(_) => true,
-            BubbleHit::Face => view.kind != BubbleKind::Color,
+            BubbleHit::Face => !matches!(view.kind, BubbleKind::Color | BubbleKind::History),
             _ => false,
         })
     }

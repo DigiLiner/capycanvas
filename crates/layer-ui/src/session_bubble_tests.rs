@@ -285,6 +285,19 @@ fn the_media_ring_shows_a_mediums_brushes_and_a_choice_closes_it() {
 }
 
 #[test]
+fn a_medium_with_one_brush_still_fans_it() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, [480., 520.]);
+    open_ring(&mut s, id);
+    let single = items(&view(&s, id), ChooserKind::Medium).into_iter().find(|m| m.enabled && !several_brushes(&s, m)).expect("a medium with one brush");
+    choose(&mut s, id, ContactPhase::Down, single.center);
+    choose(&mut s, id, ContactPhase::Up, single.center);
+    let open = view(&s, id);
+    assert!(items(&open, ChooserKind::Medium).iter().any(|m| m.shown && m.label == single.label));
+    assert_eq!(items(&open, ChooserKind::Brush).len(), 1, "its one brush shows beside it instead of being picked");
+}
+
+#[test]
 fn a_press_can_slide_through_a_medium_to_its_brush() {
     let mut s = desk();
     let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, FAR);
@@ -457,6 +470,7 @@ fn only_the_drawn_parts_of_a_bubble_take_input() {
     let [w, h] = HISTORY_BUBBLE;
     assert_eq!(history.hit([-w * 0.5 + 2., -h * 0.5 + 2.]), None, "the capsule's corners are canvas");
     assert_eq!((history.hit([-20., 0.]), history.hit([20., 0.])), (Some(BubbleHit::Half(0)), Some(BubbleHit::Half(1))));
+    assert_eq!(history.hit([0., h * 0.5 - 2.]), Some(BubbleHit::Face), "between the two button circles the capsule still moves the bubble");
     let id = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [600., 600.]);
     let layers = view(&s, id);
     let card = layers.card.as_ref().unwrap().size;

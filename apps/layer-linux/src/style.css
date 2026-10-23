@@ -94,7 +94,7 @@ window, label, text { font-size: var(--ui-text-size); }
 .tool-bubble.squircle-bubble { border-radius: calc(20px * var(--corner-fit)); }
 .tool-bubble.hovered, .bubble-half.hovered { background-image: linear-gradient(alpha(var(--window-fg-color), .07), alpha(var(--window-fg-color), .07)); }
 .tool-bubble.pressed, .bubble-half.pressed { background-image: linear-gradient(alpha(var(--window-fg-color), .14), alpha(var(--window-fg-color), .14)); }
-.bubble-half { margin: 4px; border-radius: 9999px; }
+.bubble-half { border-radius: 9999px; }
 .tool-bubble.bubble-brush { border-radius: 9999px; }
 .bubble-brush-name { font-size: var(--ui-text-size); opacity: .8; }
 .bubble-glass, .bubble-pill { border-radius: 9999px; }

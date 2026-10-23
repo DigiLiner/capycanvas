@@ -112,6 +112,8 @@ fn controls_ring_size_left_and_strength_right_around_their_center_and_history_sp
     let [w, h] = HISTORY_BUBBLE;
     assert_eq!(history_button([-w * 0.5 + 2., -h * 0.5 + 2.]), None, "the capsule's rounded corners are canvas");
     assert_eq!(history_button([-w * 0.5 + 2., 0.]), Some(0));
+    assert_eq!(history_button([0., h * 0.5 - 2.]), None, "each button is a full circle out to the capsule's ends");
+    assert_eq!([history_center(0), history_center(1)], [[-(w - h) * 0.5, 0.], [(w - h) * 0.5, 0.]]);
 }
 
 fn pair() -> PairBeads {
@@ -534,6 +536,22 @@ fn a_short_medium_name_brings_its_brushes_closer() {
     let column = |label: &str| chooser_column(3, [600., 450.], Some((medium, CHOOSER_RING, tag_width(label))), AREA)[1][0];
     assert!(column("Ink") < column("Watercolor brushes") - 30., "{} vs {}", column("Ink"), column("Watercolor brushes"));
     assert_eq!(tag_width("A very long medium name indeed"), CHOOSER_TAG[0], "names past the cap ellipsize");
+    let item = ChooserItem {
+        kind: ChooserKind::Medium,
+        center: medium,
+        label: "Pen".into(),
+        icon: "pen",
+        preview: None,
+        selected: true,
+        shown: true,
+        enabled: true,
+        tag: tag_bounds(medium, tag_width("Pen")),
+    };
+    for width in [30., tag_width("Pen") + 12., 200.] {
+        let [x, _] = item.tag_center(width);
+        let shown = width.min(CHOOSER_TAG[0]);
+        assert_eq!(x - shown * 0.5, medium[0] + CHOOSER_ITEM * 0.5 + TAG_GAP, "a {width} px name starts beside its icon, never clipped below the cap");
+    }
 }
 
 

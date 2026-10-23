@@ -13,8 +13,28 @@ pub struct BackdropRegion {
 }
 
 impl BackdropRegion {
-    pub const CIRCULAR: [f32; 4] = [2., 0., 0., 0.];
-    pub const SQUIRCLE: [f32; 4] = [4., 0., 0., 0.];
+    pub const CIRCULAR: [f32; 4] = [2., 1., 0., 0.];
+    pub const SQUIRCLE: [f32; 4] = [4., 1., 0., 0.];
+
+    pub fn arc(center: [f32; 2], radius: f32, band: f32, start: f32, sweep: f32) -> Self {
+        let (start, sweep) = if sweep < 0. { (start + sweep, -sweep) } else { (start, sweep) };
+        let point = |a: f32| [center[0] + radius * a.cos(), center[1] + radius * a.sin()];
+        let quarters = (0..8).map(|k| k as f32 * std::f32::consts::FRAC_PI_2).filter(|a| (a - start).rem_euclid(std::f32::consts::TAU) <= sweep);
+        let points: Vec<_> = [start, start + sweep].into_iter().chain(quarters).map(point).collect();
+        let half = band * 0.5;
+        let [x0, y0] = [0, 1].map(|i| points.iter().map(|p| p[i]).fold(f32::MAX, f32::min) - half);
+        let [x1, y1] = [0, 1].map(|i| points.iter().map(|p| p[i]).fold(f32::MIN, f32::max) + half);
+        Self { bounds: [x0, y0, x1 - x0, y1 - y0], radii: [center[0], center[1], radius, half], shape: [0., 1., start, sweep] }
+    }
+
+    pub fn with_strength(self, strength: f32) -> Self {
+        let [kind, _, a, b] = self.shape;
+        Self { shape: [kind, strength.clamp(0., 1.), a, b], ..self }
+    }
+
+    fn is_arc(&self) -> bool {
+        self.shape[0] == 0.
+    }
 
     pub fn rounded(bounds: [f32; 4], radii: [f32; 4], shape: [f32; 4]) -> Self {
         let [_, _, w, h] = bounds;
@@ -34,6 +54,17 @@ impl BackdropRegion {
             3 => [y, width - x - w, h, w],
             _ => self.bounds,
         };
+        if self.is_arc() {
+            let [cx, cy, radius, half] = self.radii;
+            let [x, y] = match turns {
+                1 => [height - cy, cx],
+                2 => [width - cx, height - cy],
+                3 => [cy, width - cx],
+                _ => [cx, cy],
+            };
+            let [kind, strength, start, sweep] = self.shape;
+            return Self { bounds, radii: [x, y, radius, half], shape: [kind, strength, start + turns as f32 * std::f32::consts::FRAC_PI_2, sweep] };
+        }
         let radii = std::array::from_fn(|i| self.radii[(i + 4 - turns as usize) % 4]);
         Self { bounds, radii, ..self }
     }
@@ -388,7 +419,7 @@ impl BackdropBlur {
                     (start + size - 2.).floor(), start + size + 1.].map(clamp)
             };
             let [xs, ys] = [lines(x, w, extent[0]), lines(y, h, extent[1])];
-            if region.radii.iter().any(|r| *r < 0.) || xs.windows(2).chain(ys.windows(2)).any(|p| p[0] > p[1]) {
+            if region.is_arc() || region.shape[1] < 1. || region.radii.iter().any(|r| *r < 0.) || xs.windows(2).chain(ys.windows(2)).any(|p| p[0] > p[1]) {
                 edges.push(Edge { region: *region, area: [xs[0], ys[0], xs[5] - xs[0], ys[5] - ys[0]] });
                 continue;
             }

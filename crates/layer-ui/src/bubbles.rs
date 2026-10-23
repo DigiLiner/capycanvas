@@ -620,10 +620,19 @@ pub fn bubble_face(kind: BubbleKind, diameter: f32) -> [f32; 2] {
     }
 }
 
-pub fn history_button(point: [f32; 2]) -> Option<usize> {
+pub fn history_center(index: usize) -> [f32; 2] {
     let [width, height] = HISTORY_BUBBLE;
-    let reach = (point[0].abs() - (width - height) * 0.5).max(0.);
-    (reach.hypot(point[1]) <= height * 0.5).then_some(usize::from(point[0] >= 0.))
+    [(width - height) * if index == 0 { -0.5 } else { 0.5 }, 0.]
+}
+
+pub fn history_button(point: [f32; 2]) -> Option<usize> {
+    let index = usize::from(point[0] >= 0.);
+    let [x, y] = history_center(index);
+    ((point[0] - x).hypot(point[1] - y) <= HISTORY_BUBBLE[1] * 0.5).then_some(index)
+}
+
+fn on_capsule(point: [f32; 2], [width, height]: [f32; 2]) -> bool {
+    (point[0].abs() - (width - height) * 0.5).max(0.).hypot(point[1]) <= height * 0.5
 }
 
 fn halo_ring(count: usize, ring: usize) -> Vec<RingArc> {
@@ -770,7 +779,7 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
 }
 
 pub fn tag_width(label: &str) -> f32 {
-    (label.chars().count() as f32 * 8. + 20.).min(CHOOSER_TAG[0])
+    (label.chars().count() as f32 * 8. + 24.).min(CHOOSER_TAG[0])
 }
 
 pub fn tag_bounds(item: [f32; 2], w: f32) -> Bounds {
@@ -914,10 +923,8 @@ impl ChooserItem {
         d[0] <= w * 0.5 && d[1] <= h * 0.5 && corner[0].hypot(corner[1]) <= h * 0.5
     }
     pub fn tag_center(&self, width: f32) -> [f32; 2] {
-        let [x, y] = self.center;
-        let tag = self.tag;
-        let inward = (tag.width - width.min(tag.width)) * 0.5 / x.hypot(y).max(1e-3);
-        [tag.x + tag.width * 0.5 - x * inward, tag.y + tag.height * 0.5]
+        let tag = tag_bounds(self.center, width.min(CHOOSER_TAG[0]));
+        [tag.x + tag.width * 0.5, tag.y + tag.height * 0.5]
     }
 }
 
@@ -1013,7 +1020,7 @@ impl BubbleView {
         match self.kind {
             BubbleKind::Color if radius <= self.diameter * 0.5 - RING_RIM => Some(BubbleHit::Wheel),
             BubbleKind::Color => (radius <= self.diameter * 0.5).then_some(BubbleHit::Face),
-            BubbleKind::History => history_button(point).map(BubbleHit::Half),
+            BubbleKind::History => history_button(point).map(BubbleHit::Half).or_else(|| on_capsule(point, self.face).then_some(BubbleHit::Face)),
             BubbleKind::Layers => within(self.face).then_some(BubbleHit::Face),
             _ => (radius <= self.face[0] * 0.5).then_some(BubbleHit::Face),
         }

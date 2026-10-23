@@ -413,9 +413,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     })
                     .collect();
                 let anchor = pairs.iter().find(|(_, variant)| shown.is_some_and(|group| *variant == Some(ToolVariant::BrushGroup { group })));
-                if let (Some(group), Some((item, _))) = (shown, anchor)
-                    && tools::group_presets(group).nth(1).is_some()
-                {
+                if let (Some(group), Some((item, _))) = (shown, anchor) {
                     let reach = pairs.iter().map(|(item, _)| item.center[0].hypot(item.center[1])).fold(0., f32::max);
                     let at = item.center;
                     pairs.extend(column(group, Some((at, reach, item.tag.width))));
@@ -735,7 +733,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 Ok(UiChange::default())
             }
             ContactPhase::Up => match hit.and_then(|i| variants[i]) {
-                Some(ToolVariant::BrushGroup { group }) if tools::group_presets(group).nth(1).is_some() => {
+                Some(ToolVariant::BrushGroup { group }) => {
                     self.bubble_state.chooser = Some(Chooser { id, medium: Some(group) });
                     Ok(self.changed(regions::BUBBLES, false))
                 }

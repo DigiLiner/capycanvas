@@ -48,7 +48,11 @@ radii. The shared `ViewportPresenter` blurs its own artwork beneath them:
   (`GlassPalette::surfaces`). Each match becomes a region: its bounds clipped
   by enclosing clip nodes, and the corner radii of its enclosing rounded clip.
   Radii use the same superellipse conversion as the
-  [squircle](squircle-corners.md) converter. Nodes inside a found surface are
+  [squircle](squircle-corners.md) converter. A region drawn under opacity
+  blurs only as strongly as it is drawn (`BackdropRegion::with_strength`), so
+  fading glass fades its blur too. A glass stroke marked with
+  `glass::arc`, such as a tool bubble's slider band, becomes an arc region
+  with round caps (`BackdropRegion::arc`). Nodes inside a found surface are
   skipped, so panel content is not visited. The command bar is a native popup
   on its own surface, outside that scan. The workspace adds its body, with
   circular corners, from the popup's position relative to the window. The

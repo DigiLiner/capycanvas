@@ -123,9 +123,11 @@ fn chooser(d: &mut Driver, device: &str, name: &str, id: u32) {
     let switched = find_id(d, id).unwrap();
     assert!(switched.chooser.iter().any(|m| m.shown && m.label == other.label), "{name}: tapping a medium fans its brushes");
     capture(d, &format!("{name}-medium"));
-    if switched.chooser.iter().all(|i| i.kind != ChooserKind::Brush) {
-        assert!(find_id(d, id).unwrap().chooser.is_empty(), "{name}: a medium with one brush picks it");
-        return;
+    assert!(switched.chooser.iter().any(|i| i.kind == ChooserKind::Brush), "{name}: a medium fans its brushes, even a single one");
+    for tag in widgets(d.named(&format!("bubble-{id}")).upcast_ref()).filter(|w| w.has_css_class("bubble-tag") && w.is_mapped()) {
+        let label = tag.downcast::<gtk::Label>().unwrap();
+        let (_, natural, _, _) = label.measure(gtk::Orientation::Horizontal, -1);
+        assert!(natural as f32 > CHOOSER_TAG[0] || !label.layout().is_ellipsized(), "{name}: the name {} is not clipped", label.text());
     }
     let media: Vec<_> = switched.chooser.iter().filter(|i| i.kind == ChooserKind::Medium).cloned().collect();
     let through = media.iter().find(|m| !m.shown && m.enabled && m.label != other.label).unwrap().clone();
@@ -459,9 +461,9 @@ fn history(d: &mut Driver, device: &str, name: &str) {
         assert!(marked("hovered"), "{name}: the half under the pointer shows hover");
         let half = find_css(&widget, "hovered").unwrap();
         let [width, height] = HISTORY_BUBBLE;
-        assert!(half.width() as f32 >= width * 0.5 - 10. && half.height() as f32 >= height - 10., "{name}: the highlight covers the half it answers for ({}x{})", half.width(), half.height());
-        let bounds = half.compute_bounds(&d.w.surface).unwrap();
-        assert!(bounds.x() + bounds.width() <= c[0] + 1. && bounds.x() >= c[0] - width * 0.5 - 1., "{name}: the left half lies left of the split");
+        assert_eq!([half.width(), half.height()], [height as i32; 2], "{name}: the highlight is a full circle as tall as the capsule");
+        let bounds = half.compute_bounds(&d.w.window).unwrap();
+        assert!((bounds.x() - (c[0] - width * 0.5)).abs() <= 1., "{name}: reaching the capsule's left end ({} vs {})", bounds.x(), c[0] - width * 0.5);
         capture(d, &format!("{name}-history-hover"));
         d.input.perform(serde_json::json!([contact("mouse", "down", [c[0] - 22., c[1]])]));
         pump(100);
@@ -483,6 +485,8 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
     let animations = settings.is_gtk_enable_animations();
     settings.set_gtk_enable_animations(true);
     let widget = d.named(&format!("bubble-{id}"));
+    let faint = |d: &Driver| d.w.glass.borrow().iter().filter(|r| r.shape[1] < 0.5).count();
+    let resting = faint(d);
     let at = center(d, id);
     let from = [at[0] - 140., at[1] + 50.];
     let mut events = vec![contact("mouse", "down", from)];
@@ -492,6 +496,7 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
     d.input.perform(serde_json::Value::Array(events));
     pump(250);
     assert!(widget.opacity() < 0.25, "{name}: a stroke near a bubble fades it");
+    assert!(faint(d) > resting, "{name}: and its glass blur fades with it");
     assert!(find_id(d, id).unwrap().open, "{name}: an open halo stays while painting");
     d.input.perform(serde_json::json!([contact("mouse", "up", [from[0] + 240., from[1]])]));
     let samples: Vec<f64> = (0..30).map(|_| {
@@ -499,6 +504,7 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
         widget.opacity()
     }).collect();
     assert_eq!(widget.opacity(), 1., "{name}: it comes back after the stroke");
+    assert_eq!(faint(d), resting, "{name}: with its full blur");
     assert!(samples.iter().any(|o| *o > 0.21 && *o < 0.999), "{name}: and fades back in instead of jumping: {samples:?}");
     settings.set_gtk_enable_animations(animations);
     d.w.dispatch(UiAction::SetTheme { theme: Some(state(&d.w).theme) });
@@ -641,6 +647,9 @@ fn native_tool_bubbles() {
             let open = find(&d, dial).unwrap();
             assert!(open.open && !open.rings.is_empty(), "{name}: the second tap shows settings");
             capture(&mut d, &format!("{name}-settings"));
+            pump(300);
+            let arcs = d.w.glass.borrow().iter().filter(|r| r.shape[0] == 0.).count();
+            assert!(arcs >= open.rings.len(), "{name}: every setting's band is glass ({arcs} arcs)");
 
             let ring = open.rings[0].clone();
             let value = |d: &Driver| state(&d.w).tool_settings.iter().find(|s| s.id == ring.setting).map(|s| s.value);

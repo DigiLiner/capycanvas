@@ -63,6 +63,34 @@ fn glass_blurs_only_inside_rounded_regions() {
 }
 
 #[test]
+fn faded_glass_blends_its_blur_and_arcs_blur_only_their_band() {
+    let size = [256, 128];
+    let r = document(size);
+    let surface = texture(&r, size);
+    let mut presenter = ViewportPresenter::for_renderer(&r, FORMAT);
+    let at = |bytes: &[u8], x: u32, y: u32| bytes[((y * 256 + x) * 4) as usize] as f32;
+    let raw = present(&r, &mut presenter, &surface, 0.);
+    let area = region([64., 32., 128., 64.], [16.; 4]);
+    presenter.set_backdrop(&r, &[area], Default::default(), false);
+    let full = present(&r, &mut presenter, &surface, 0.);
+    presenter.set_backdrop(&r, &[area.with_strength(0.25)], Default::default(), false);
+    let faded = present(&r, &mut presenter, &surface, 0.);
+    let (raw_edge, full_edge) = (at(&raw, 125, 64), at(&full, 125, 64));
+    assert!((raw_edge - full_edge).abs() > 20., "the edge blurs: {raw_edge} vs {full_edge}");
+    let mixed = raw_edge + (full_edge - raw_edge) * 0.25;
+    assert!((at(&faded, 125, 64) - mixed).abs() <= 2., "a quarter-strength region is a quarter blurred: {} vs {mixed}", at(&faded, 125, 64));
+    let half = std::f32::consts::FRAC_PI_2;
+    presenter.set_backdrop(&r, &[BackdropRegion::arc([128., 64.], 24., 12., -half, 2. * half)], Default::default(), false);
+    let arc = present(&r, &mut presenter, &surface, 0.);
+    for (x, y) in [(128, 40), (124, 40), (152, 64)] {
+        assert!((at(&arc, x, y) - at(&full, x, y)).abs() <= 2. && (at(&arc, x, y) - at(&raw, x, y)).abs() > 8., "{x},{y} is on the band or its round cap");
+    }
+    for (x, y) in [(118, 40), (104, 64), (128, 64), (118, 88)] {
+        assert_eq!(at(&arc, x, y), at(&raw, x, y), "{x},{y} is outside the band");
+    }
+}
+
+#[test]
 fn cached_blur_is_reused_until_a_long_move() {
     let size = [512, 256];
     let r = document(size);

@@ -1,4 +1,4 @@
-use gtk::gsk;
+use gtk::{gsk, prelude::*};
 use layer_render_wgpu::BackdropRegion;
 use layer_ui::GlassColor;
 
@@ -59,6 +59,20 @@ impl Clip {
             shape: self.shape,
         })
     }
+}
+
+const GLASS_ARC: &str = "glass-arc";
+
+pub fn arc(node: gsk::RenderNode, center: [f32; 2], radius: f32, band: f32, degrees: [f32; 2]) -> gsk::RenderNode {
+    let [start, sweep] = degrees.map(f32::to_radians);
+    gsk::DebugNode::new(node, format!("{GLASS_ARC} {} {} {radius} {band} {start} {sweep}", center[0], center[1]).into()).upcast()
+}
+
+fn glass_stroke(node: &gsk::RenderNode, surfaces: &[GlassColor]) -> bool {
+    node.downcast_ref::<gsk::StrokeNode>().and_then(|s| s.child().downcast::<gsk::ColorNode>().ok()).is_some_and(|c| {
+        let color = c.color();
+        surfaces.iter().any(|s| s.matches([color.red(), color.green(), color.blue(), color.alpha()]))
+    })
 }
 
 pub fn collect(node: &gsk::RenderNode, surfaces: &[GlassColor], out: &mut Vec<BackdropRegion>) {
@@ -147,8 +161,19 @@ fn visit(
             Some(c) => c.region(rect),
             None => Some(BackdropRegion { bounds: rect, radii: [0.; 4], shape: BackdropRegion::SQUIRCLE }),
         };
-        out.extend(region);
+        out.extend(region.map(|r| r.with_strength(at.opacity)));
         Some(n.bounds())
+    } else if let Some(n) = node.downcast_ref::<gsk::DebugNode>()
+        && let Some(arc) = n.message().strip_prefix(GLASS_ARC)
+    {
+        let values: Vec<f32> = arc.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+        if let [x, y, radius, band, start, sweep] = values[..] && glass_stroke(&n.child(), surfaces) {
+            let Place { scale, offset } = at.place;
+            let center = [x * scale[0] + offset[0], y * scale[1] + offset[1]];
+            let scale = scale[0].min(scale[1]);
+            out.push(BackdropRegion::arc(center, radius * scale, band * scale, start, sweep).with_strength(at.opacity));
+        }
+        None
     } else if let Some(n) = node.downcast_ref::<gsk::DebugNode>() {
         let round = at.round || n.message() == crate::squircle::KEEP_ROUND;
         visit(&n.child(), Context { round, ..at }, surfaces, out)
@@ -203,7 +228,26 @@ impl Chrome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk::prelude::*;
+
+    #[test]
+    fn faded_glass_and_glass_arcs_become_matching_backdrops() {
+        let glass = GlassColor([0.9, 0.9, 0.9, 0.6]);
+        let tint = gtk::gdk::RGBA::new(0.9, 0.9, 0.9, 0.6);
+        let square = gtk::graphene::Rect::new(10., 10., 40., 40.);
+        let fill = gsk::ColorNode::new(&tint, &square);
+        let faded = gsk::OpacityNode::new(gsk::RoundedClipNode::new(fill, &gsk::RoundedRect::from_rect(square, 20.)), 0.25);
+        let path = gsk::PathBuilder::new();
+        path.add_circle(&gtk::graphene::Point::new(100., 100.), 50.);
+        let band = gsk::StrokeNode::new(gsk::ColorNode::new(&tint, &gtk::graphene::Rect::new(36., 36., 128., 128.)), &path.to_path(), &gsk::Stroke::new(28.));
+        let moved = gsk::TransformNode::new(arc(band.upcast(), [100., 100.], 50., 28., [-90., 180.]), Some(&gsk::Transform::new().translate(&gtk::graphene::Point::new(5., 0.))));
+        let root = gsk::ContainerNode::new(&[faded.upcast(), moved.upcast()]);
+        let mut out = Vec::new();
+        collect(&root.upcast(), &[glass], &mut out);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].shape[1], 0.25, "a faded glass fill blurs as faintly as it is drawn");
+        let expected = BackdropRegion::arc([105., 100.], 50., 28., -std::f32::consts::FRAC_PI_2, std::f32::consts::PI);
+        assert_eq!(out[1], expected, "a glass arc keeps its own shape");
+    }
 
     #[test]
     fn chrome_shows_the_committed_revision_until_the_canvas_reports_or_the_hold_expires() {
