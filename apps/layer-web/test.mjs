@@ -1,3 +1,4 @@
+import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkGradientDefinitions} from './gradient.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
 import {checkScopes,checkScopesSmoke} from './scopes.test.mjs';
@@ -127,6 +128,7 @@ const cdp = await launchChrome(
     // retaining hardware rendering. Other hosts use their native GPU backend.
     ...(process.platform === "linux" ? ["--use-angle=vulkan",
       "--enable-features=Vulkan", "--disable-vulkan-surface"] : []),
+    ...((process.env.LAYER_WEB_CANVAS_2D ?? (process.platform === "linux" ? "software" : "accelerated")) === "software" ? ["--disable-accelerated-2d-canvas"] : []),
     "--window-size=1440,1000",
   ],
   {
@@ -207,6 +209,7 @@ try {
     `window.__overflowEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{const value={type,id:e.pointerId,pointer:e.pointerType,target:e.target.tagName,source:e.target.closest('details')?.id};__overflowEvents.push(value);setTimeout(()=>{value.prevented=e.defaultPrevented},0);},true)`});
   if(process.argv.some(flag=>['--pipeline-readiness','--drawing-tabs-recovery','--staged-startup'].includes(flag)))await call('Page.addScriptToEvaluateOnNewDocument',{source:'Error.stackTraceLimit=100'});
   const pageUrl = packageHost?.url || process.env.LAYER_WEB_URL || "http://127.0.0.1:4173";
+  if(process.argv.includes('--tool-bubbles')&&process.env.LAYER_BUBBLE_INPUT_TRACE==='1')await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installBubbleInputTrace})()`});
   await call("Page.navigate", { url: pageUrl });
   await evaluate(
     `new Promise((resolve, reject) => { const started = performance.now(); function check() { if (window.layerApp && document.body.dataset.gpu === 'ready' && layerApp.app.brush_ready()) resolve(true); else if (performance.now() - started > 25000) reject(new Error(document.querySelector('#gpu-notice')?.textContent || document.querySelector('#status')?.textContent)); else setTimeout(check, 100); } check(); })`,
@@ -402,6 +405,7 @@ try {
       await checkSmoothing({call, evaluate, settle});
       await checkPrediction({call, evaluate, settle});
     }, checkErrors],
+    [process.argv.includes("--tool-bubbles"), () => checkToolBubbles({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--smoothing"), () => checkSmoothing({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--prediction"), () => checkPrediction({call, evaluate, settle}), checkErrors],
     [packageHost && !process.argv.includes("--preferences") && !process.argv.includes("--parity") && !process.argv.includes("--smoke"), () => checkPwa({ call, evaluate, settle, canvasPixels, host: packageHost, storageOnly: process.argv.includes("--package-offline") }), checkErrors],

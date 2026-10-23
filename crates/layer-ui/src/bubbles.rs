@@ -967,7 +967,8 @@ pub struct BubbleView {
     pub options: BubbleOptions,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BubbleHit {
     Card,
     Item(usize),
@@ -984,6 +985,11 @@ pub fn count_badge(text: [f32; 2]) -> ([f32; 2], [f32; 2]) {
 }
 
 impl BubbleView {
+    pub fn dot_centers(&self) -> Vec<[f32; 2]> {
+        let count = self.dots.len().min(9);
+        if count < 2 { return Vec::new(); }
+        (0..count).map(|i| polar(19., 90. + ((count - 1) as f32 * 0.5 - i as f32) * 12.)).collect()
+    }
     pub fn readout_center(&self) -> [f32; 2] {
         [0., self.halo.unwrap_or(self.diameter) * 0.5 + 16.]
     }
@@ -1033,6 +1039,34 @@ pub struct BubblePlacement {
     pub center: [f32; 2],
     pub lifted: bool,
     pub homing: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BubbleRingGeometry {
+    pub start: [f32; 2],
+    pub end: [f32; 2],
+    pub thumb: [f32; 2],
+    pub icon: [f32; 2],
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BubblePresentation {
+    pub view: BubbleView,
+    pub reach: f32,
+    pub readout: [f32; 2],
+    pub pill: Bounds,
+    pub history: [[f32; 2]; 2],
+    pub dots: Vec<[f32; 2]>,
+    pub bead_colors: Vec<Option<[f32; 4]>>,
+    pub stamp_color: Option<[f32; 4]>,
+    pub rings: Vec<BubbleRingGeometry>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BubbleMotion {
+    pub moving: bool,
+    pub placements: Vec<BubblePlacement>,
+    pub fade: (bool, Vec<u32>),
 }
 
 #[cfg(test)]

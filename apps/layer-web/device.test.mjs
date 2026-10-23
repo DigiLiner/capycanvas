@@ -1,3 +1,4 @@
+import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkCurves} from "./effects.test.mjs";
 import {checkPointwiseEffects,checkLookupTransport} from './pointwise-effects.test.mjs';
 import {runJourney} from "./journeys.mjs";
@@ -86,6 +87,7 @@ try {
   // A previous automation-only drawing may not have sticky user activation.
   // Allow its ordinary beforeunload confirmation, which this harness accepts.
   await call("Runtime.evaluate",{expression:"void 0",userGesture:true});
+  if(process.argv.includes('--tool-bubbles')&&process.env.LAYER_BUBBLE_INPUT_TRACE==='1')await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installBubbleInputTrace})()`});
   await reload();
   await evaluate(`new Promise((resolve,reject)=>{const start=performance.now();function check(){if(window.layerApp?.startupTimes.complete!=null)resolve(true);else if(performance.now()-start>${process.argv.some(x=>['--drawing-tabs','--drawing-tabs-recovery','--workspace-options','--compact-workspaces'].includes(x))?240000:55000})reject(Error(document.querySelector("#gpu-notice").textContent));else setTimeout(check,100);}check();})`);
   await workspaceIdle();
@@ -122,6 +124,7 @@ try {
       await checkPenRendering({call,evaluate,settle});
       await checkPrediction({call,evaluate,settle});
     }, checkErrors],
+    [process.argv.includes("--tool-bubbles"), () => checkToolBubbles({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--smoothing"), () => checkSmoothing({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--liquify-amount-bench"), () => checkLiquify({call,evaluate,settle},{benchmark:true}), checkErrors],
     [process.argv.includes("--liquify-journey"), () => checkLiquify({call,evaluate,settle}), checkErrors],

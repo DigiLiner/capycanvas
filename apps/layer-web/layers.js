@@ -108,7 +108,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const width = footerWidth();
     for (const slot of state().layer_tools.footer ?? []) {
       const node = footerButtons.get(slot.button);
-      if (node) node.style.display = width + 0.5 < slot.min_width ? "none" : "";
+      if (node?.parentNode===footer) node.style.display = width + 0.5 < slot.min_width ? "none" : "";
     }
   };
   const footerResize = new ResizeObserver(fitFooter); footerResize.observe(footer);
@@ -383,7 +383,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   window.addEventListener("keydown", cancelOnEscape);
   function refresh() {
     const epoch=String(state().document_file.epoch);
-    if(epoch!==documentEpoch){cancelDrags();documentEpoch=epoch;revisions.clear();for(const id of owned)pending.delete(id);owned.clear();
+    if(epoch!==documentEpoch){cancelDrags();documentEpoch=epoch;thumbnails.dispose();
       for(const r of records.values())for(const c of [r.content.image,r.mask.image])if(c)c.width=c.width;
     }
     const view = state().layer_tools, current = view.editing_layer, controls = view.controls;
@@ -408,7 +408,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const ids = new Set(state().layers.map(l => String(l.id)));
     for (const [id, record] of records) if (!ids.has(id)) {
       record.cancelDrag();
-      record.root.remove(); records.delete(id); revisions.delete(`${id}:false`); revisions.delete(`${id}:true`);
+      record.root.remove(); records.delete(id); thumbnails.forget(`${id}:false`); thumbnails.forget(`${id}:true`);
     }
     let position = 0;
     const place = root => { if (rows.children[position] !== root) rows.insertBefore(root, rows.children[position] || null); position++; };
@@ -482,38 +482,52 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     if (next !== measurementKey) { measurementKey=next; contentChanged("layers"); }
     scheduleConnections();
   }
-  const pending = thumbnailPending, revisions = new Map();
-  const owned = new Set();
+  const thumbnails = createLayerThumbnails(app, wake);
   const thumbnailTimer = setInterval(() => {
     // A modal Settings session cannot edit layers. Defer thumbnail geometry
     // and uploads until it closes instead of forcing layout behind the modal.
     if (state().settings_open) return;
     if (!panel.isConnected || !panel.clientHeight) return;
     try {
-      for (let image; (image = app.take_layer_thumbnail());) {
-        const [id, width, height, bytes] = image, target = pending.get(id); pending.delete(id);target?.owned.delete(id);
-        if (target && target.revision === target.revisions.get(target.key)) {
-          target.canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(bytes),width,height),0,0);
-          target.canvas.dataset.previewRevision = target.revision;
-          target.loaded?.();
-        }
-      }
+      thumbnails.poll();
       const viewport = rows.getBoundingClientRect();
       for (const [id, r] of records) {
         const rect = r.row.getBoundingClientRect(); if (rect.bottom < Math.max(0,viewport.top) || rect.top > innerHeight || rect.height === 0) continue;
         for (const mask of [false,true]) {
           if (mask ? !r.layer.has_mask : !r.layer.has_thumbnail) continue;
           const key = `${id}:${mask}`, revision = documentEpoch + ":" + String(mask ? r.layer.mask_revision : r.layer.paint_revision);
-          if (revisions.get(key) === revision || pending.size >= 8) continue;
-          const token = ++thumbnailRequest;
-          if (app.request_layer_thumbnail(token, mask ? r.layer.mask_id : r.layer.id)) {
-            owned.add(token);revisions.set(key,revision); pending.set(token,{key,revision,revisions,owned,canvas: (mask ? r.mask : r.content).image});
-          }
-          if (app.canvas_work_pending() || app.shader_work_pending(true)) wake();
+          if (!thumbnails.request(key, revision, mask ? r.layer.mask_id : r.layer.id, (mask ? r.mask : r.content).image)) continue;
           return;
         }
       }
     } catch (error) { message(error); }
   }, 120);
-  return { refresh, dispose(){cancelDrags();cancelAnimationFrame(connectionFrame);connectionResize.disconnect();footerResize.disconnect();document.removeEventListener("pointerdown",closeSwipes,true);document.removeEventListener("click",closeOnClick);window.removeEventListener("blur",cancelDrags);window.removeEventListener("keydown",cancelOnEscape);clearInterval(thumbnailTimer); for(const id of owned)pending.delete(id);} };
+  return { refresh, dispose(){cancelDrags();cancelAnimationFrame(connectionFrame);connectionResize.disconnect();footerResize.disconnect();document.removeEventListener("pointerdown",closeSwipes,true);document.removeEventListener("click",closeOnClick);window.removeEventListener("blur",cancelDrags);window.removeEventListener("keydown",cancelOnEscape);clearInterval(thumbnailTimer); thumbnails.dispose();} };
+}
+
+export function createLayerThumbnails(app, wake) {
+  const revisions=new Map(),owned=new Set(),pending=thumbnailPending;
+  return {
+    poll() {
+      for(let image;(image=app.take_layer_thumbnail());) {
+        const [id,width,height,bytes]=image,target=pending.get(id);pending.delete(id);target?.owned.delete(id);
+        if(target&&target.revision===target.revisions.get(target.key)) {
+          target.canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(bytes),width,height),0,0);
+          target.canvas.dataset.previewRevision=target.revision;
+          target.loaded?.();
+        }
+      }
+    },
+    request(key,revision,id,canvas,loaded) {
+      if(revisions.get(key)===revision||pending.size>=8)return false;
+      const token=++thumbnailRequest;
+      if(app.request_layer_thumbnail(token,id)) {
+        owned.add(token);revisions.set(key,revision);pending.set(token,{key,revision,revisions,owned,canvas,loaded});
+      }
+      if(app.canvas_work_pending()||app.shader_work_pending(true))wake();
+      return true;
+    },
+    forget(key){revisions.delete(key);for(const token of owned)if(pending.get(token)?.key===key){pending.delete(token);owned.delete(token);}},
+    dispose(){for(const id of owned)pending.delete(id);owned.clear();revisions.clear();},
+  };
 }

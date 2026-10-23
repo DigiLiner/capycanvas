@@ -77,6 +77,25 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.workspace.layout.bubbles.bubbles.iter().map(|bubble| self.bubble_view(bubble)).collect()
     }
 
+    pub fn bubble_presentations(&self) -> Vec<BubblePresentation> {
+        let colors = self.state.display_colors();
+        let map = |color| colors.mapped_swatch(color, self.effective_sdr_rendition());
+        self.bubbles().into_iter().map(|view| BubblePresentation {
+            reach: view.reach(),
+            readout: view.readout_center(),
+            pill: palette_pill(view.diameter),
+            history: [history_center(0), history_center(1)],
+            dots: view.dot_centers(),
+            bead_colors: view.beads.iter().map(|bead| bead.color.map(map)).collect(),
+            stamp_color: view.stamp.map(|stamp| map(stamp.color)),
+            rings: view.rings.iter().map(|ring| BubbleRingGeometry {
+                start: ring.arc.point(0.), end: ring.arc.point(1.),
+                thumb: ring.arc.point(ring.fill), icon: ring.arc.icon_point(),
+            }).collect(),
+            view,
+        }).collect()
+    }
+
     pub fn bubble_placements(&mut self) -> Vec<BubblePlacement> {
         self.sync_bubbles();
         self.bubble_state.desk.placements()
@@ -93,6 +112,23 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub fn bubble_fade(&self) -> (bool, Vec<u32>) {
         (self.bubble_state.stroke, self.bubble_state.desk.faded().to_vec())
+    }
+
+    pub fn bubble_grab(&self, grab: BubbleGrab, held: bool) -> Option<BubbleGrab> {
+        let anchor = match grab {
+            BubbleGrab::Header { id } => DrawerAnchor::Header { id },
+            BubbleGrab::Tile { panel, tile } => DrawerAnchor::Tile { panel, tile },
+            BubbleGrab::Variant { variant } => return BubbleSource::for_variant(variant).map(|_| grab),
+            BubbleGrab::Bubble { id } | BubbleGrab::Rim { id } => return self.state.workspace.layout.bubbles.get(id).map(|_| grab),
+        };
+        self.state.workspace.layout.anchor_control(anchor)
+            .filter(|control| if held { BubbleSource::for_control(*control).is_some() } else { BubbleSource::tears_without_hold(*control) })
+            .map(|_| grab)
+    }
+
+    pub fn can_take_bubble(&mut self, grab: BubbleGrab, position: [f32; 2], viewport: [f32; 2]) -> bool {
+        valid_viewport(viewport).is_ok() && position.into_iter().all(f32::is_finite)
+            && self.grab_source(grab, viewport).is_ok_and(|(_, bounds)| !self.bubble_homing(viewport, position, bounds))
     }
 
     fn bubble_viewport(&self) -> [f32; 2] {

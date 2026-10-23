@@ -411,6 +411,9 @@ timestamps, pressure, tilt, twist, prediction flags, and camera revision. The
 bounded queue returns a record on overflow; adapters must preserve and retry
 it after draining a frame. Never drop an up/cancel event silently. Per-frame
 command refresh updates existing entries without allocating new command lists.
+It runs when editor state, pending edits or command availability change; idle
+canvas frames and bubble motion retain it. An interrupted frame leaves a refresh
+pending so failed asynchronous edits restore their available commands.
 Ordinary pen motion does not produce UI snapshots.
 
 The host calls `frame(now_ns, presentation_ns)` at display time and presents the

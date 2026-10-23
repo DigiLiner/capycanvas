@@ -62,11 +62,16 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
       if (!section.length) return;
       if (index) container.append(element("hr"));
       for (const [itemIndex,item] of section.entries()) {
+        if (item.is_heading) { container.append(element("div", "menu-heading", item.label)); continue; }
         const submenu = item.sections?.some(section => section.length);
         const row = button("", () => {
           const item=row.menuItem, {model,close,parents,path}=container.menuView;
           if (item.sections?.some(section => section.length)) renderMenu(container, { title: item.label, sections: item.sections }, close, [...parents, model], [...path,[index,itemIndex]]);
-          else { close(); if (item.action) dispatch(item.action); else if (item.command) menuCommand?.(item.command, item); }
+          else {
+            if (!item.keep_open) close();
+            if (item.action) dispatch(item.action); else if (item.command) menuCommand?.(item.command, item);
+            if (item.keep_open) refreshContextMenu();
+          }
         });
         row.menuItem=item;
         row.disabled = !item.enabled;
@@ -94,7 +99,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
       parents.push(model);model={title:item.label,sections:item.sections};
     }
     const path=container.menuPath?.slice(0,parents.length)??[];
-    const rows=[...container.querySelectorAll(':scope > button:not(.submenu-back)')], items=model.sections.flat();
+    const rows=[...container.querySelectorAll(':scope > button:not(.submenu-back)')], items=model.sections.flat().filter(item=>!item.is_heading);
     if(container.menuStructureKey===menuStructure(model,parents.length) && rows.length===items.length) {
       container.menuView={model,close,parents,path};container.menuModelKey=rootKey;container.menuPath=path;
       for(const [index,item] of items.entries()) {

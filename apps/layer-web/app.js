@@ -22,6 +22,7 @@ import { screenInfo } from "./new-drawing.js";
 import { createEditorPanels } from "./editor-panels.js";
 import { createWorkspaceChrome, tabHover } from "./workspace-chrome.js";
 import { createGlass } from "./glass.js";
+import { createBubbles } from "./bubbles.js";
 import { createDocuments } from "./documents.js";
 import { createSystemStatus } from "./system-status.js";
 import { createHeader } from "./header.js";
@@ -75,6 +76,37 @@ let app,
   shownHostError = null;
 let pressureCalibration, refreshPreferences, customization, layerPanel, effectPanels, palettes, editor, selectionUi, frequencySeparationUi, canvasSizeUi, imageSizeUi, workspaceChrome, glass, documents, systemStatus, header, canvasBar, notice, zoomReadout, screenStatus;
 let commandBar, paintPairView;
+let bubbles;
+const compilerContacts = new Set();
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'keydown', 'wheel']) {
+  window.addEventListener(type, event => {
+    if (event.isTrusted && type === 'pointerdown') compilerContacts.add(event.pointerId);
+    if (event.isTrusted && (type === 'pointerup' || type === 'pointercancel')) compilerContacts.delete(event.pointerId);
+    deferOptionalCompiler();
+  }, { capture: true, passive: true });
+}
+for (const type of ["pointerdown", "pointermove"]) window.addEventListener(type, pointerStyle, true);
+window.addEventListener(
+  "pointercancel",
+  e => {
+    heldPointers.delete(e.pointerId);
+    updateZen();
+  },
+  { capture: true },
+);
+for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
+  name,
+  e => {
+    const owner=heldPointers.get(e.pointerId);if(!owner)return;
+    setTimeout(()=>{
+      if(heldPointers.get(e.pointerId)!==owner)return;
+      heldPointers.delete(e.pointerId);updateZen();
+    },0);
+  },
+  { capture: true },
+);
+for (const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture','contextmenu','click','dblclick'])
+  window.addEventListener(type,e=>bubbles?.handle(e),{capture:true,passive:false});
 const fullscreenRequests = new Set();
 let gpuStarting = false;
 let gpuReady = false;
@@ -268,6 +300,7 @@ function publishLanguage(patch) {
   return true;
 }
 function applyChange(change) {
+  if (change.regions & (1 | 2 | 4 | 8 | 16 | 128 | 256 | 8192)) bubbles?.refresh();
   if (app.language_pending()) queueLanguage();
   canvasBar?.hold(app.canvas_bar_hold());
   if (change.regions & 512) {
@@ -375,6 +408,7 @@ function frame(frameTime) {
   if (state.settings_open && startupTimes.complete === null) return;
   try {
     flushWorkspacePresentation();
+    if (bubbles?.tick(frameTime)) wake();
     glass?.flush();
     while (pending.length) {
       const batch = pending[0],
@@ -418,7 +452,6 @@ function refreshStartup() {
 }
 // Host timing and contacts govern admission; Rust also checks queued input,
 // strokes, gestures and unfinished edits. Required jobs always retain priority.
-const compilerContacts = new Set();
 function deferOptionalCompiler() {
   app.shader_input();
   compilerResumeTimer ??= setTimeout(resumeOptionalCompiler, Math.ceil(app.shader_wait_ms()));
@@ -432,13 +465,6 @@ function optionalCompilerReady() {
   return !compilerContacts.size && !pending.length
     && !documents?.busy()
     && !document.querySelector('dialog[open],#header details[open],:popover-open:not(.hover-tooltip)');
-}
-for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'keydown', 'wheel']) {
-  window.addEventListener(type, event => {
-    if (type === 'pointerdown') compilerContacts.add(event.pointerId);
-    if (type === 'pointerup' || type === 'pointercancel') compilerContacts.delete(event.pointerId);
-    deferOptionalCompiler();
-  }, { capture: true, passive: true });
 }
 window.addEventListener('blur', () => { compilerContacts.clear(); deferOptionalCompiler(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) deferOptionalCompiler(); });
@@ -1135,7 +1161,8 @@ function endWorkspaceGesture(e, cancel = false) {
   workspaceGestureSourceObserver.disconnect();
   if (drag.started) {
     if (drag.tile) {
-      if (!cancel) dropItem(drag.action.item, dropHint(e || drag.last, drag.action.item));
+      const point=e||drag.last;
+      if (!cancel && !bubbles?.takeTile(drag.action.item,[point.clientX,point.clientY])) dropItem(drag.action.item, dropHint(point, drag.action.item));
       dragItem = null; drag.node.classList.remove("drag-source");
     } else workspaceGestureEvent(cancel ? "cancel" : "up", e || drag.last);
   }
@@ -1332,7 +1359,6 @@ function pointerStyle(e) {
   root.toggleAttribute("data-mouse", e.pointerType === "mouse");
   if (root.hasAttribute("data-touch") !== touch) root.toggleAttribute("data-touch", touch);
 }
-for (const type of ["pointerdown", "pointermove"]) window.addEventListener(type, pointerStyle, true);
 window.addEventListener(
   "pointermove",
   (e) => {
@@ -1376,25 +1402,6 @@ window.addEventListener(
       e.stopImmediatePropagation();
     }
     closeMenusOutside(e.target);
-  },
-  { capture: true },
-);
-window.addEventListener(
-  "pointercancel",
-  e => {
-    heldPointers.delete(e.pointerId);
-    updateZen();
-  },
-  { capture: true },
-);
-for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
-  name,
-  e => {
-    const owner=heldPointers.get(e.pointerId);if(!owner)return;
-    setTimeout(()=>{
-      if(heldPointers.get(e.pointerId)!==owner)return;
-      heldPointers.delete(e.pointerId);updateZen();
-    },0);
   },
   { capture: true },
 );
@@ -1832,7 +1839,8 @@ try {
     element, button, icon, numberField, panelFrame,
     dispatch, draggable, grip, place, updateZen, editor });
   workspaceChrome = createWorkspaceChrome({app,state:()=>state,workspace,element,button,icon,place,dispatch,customization,editor,panelFrame,panels,draggable,grip,contentPanel,tabLabel,automaticTabs,releaseTabs});
-  glass = createGlass({app,canvas,workspace,connections:()=>workspaceChrome.connections(),enabled:()=>state.palette?.glass.transparency!=="off",wake});
+  bubbles = createBubbles({app,workspace,element,button,icon,state:()=>state,dispatch,wake,glassChanged:()=>glass?.queueBubbles(),customization,contentPanel,rasterWorker,asset,cancelWorkspace:()=>endWorkspaceGesture(null,true),viewport:()=>workspaceViewport,leaveCanvas:()=>cursorInput(null)});
+  glass = createGlass({app,canvas,workspace,connections:()=>workspaceChrome.connections(),bubbles:()=>bubbles.glass(),enabled:()=>state.palette?.glass.transparency!=="off",wake});
   documents = createDocuments({app,bootstrap,delivery,state:()=>state,canvas,canvasReady:()=>gpuReady,dispatch,applyChange,wake,element,button,icon,numberField,message,gpuOperation,rasterWorker,resumeCanvas:resumeDocumentCanvas,contentChanged:panelContentChanged,refreshInputContext:()=>chromeInput({kind:"refresh"})});
   documents.mountProof(panels.get("proof"));
   const capy = button("",()=>dispatch({type:"invoke",command:"zen_mode"}),"tile-button");

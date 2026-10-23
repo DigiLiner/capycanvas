@@ -48,6 +48,8 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
           for (const [index,item] of items.entries()) {
             const read=()=>(readView?.()||state().tool_panels[panel]||state().tool_set)[kind][index];
             const node = button("", () => dispatch(item.action), "tool-choice-button");
+            node.bubbleChoice = item.action;
+            if(app.bubble_grab({type:'choice',action:item.action}))node.dataset.bubbleSource='';
             let image;
             if (item.preview != null) {
               image = element("img", "brush-preview"); image.alt = ""; image.draggable = false;

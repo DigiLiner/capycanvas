@@ -1,3 +1,4 @@
+import {createLayerInspector} from "./layer-inspector.js";
 // Shared dock projections. The browser supplies widgets and measured body sizes.
 function squircleCorner([cx,cy],[sx,sy],[ex,ey]) {
   return Array.from({length:24},(_,i)=>{
@@ -141,58 +142,6 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
     }
     for(const[id,node]of connections)if(!live.has(id)){node.remove();connections.delete(id);}
   }
-  function layerInspector() {
-    const root=element("div","layer-inspector"),stage=element("div","layer-properties-pages");
-    const layers=contentPanel("layers"),properties=contentPanel("properties"),label=element("span","layer-properties-label"),summary=element("span","layer-properties-summary");
-    const text=element("span","layer-properties-text");text.append(label,summary);
-    const footer=button("",()=>send({type:"toggle_layer_drawer_properties"}),"layer-properties-disclosure");
-    const slot=glyph=>{const node=element("span","layer-properties-icon-slot");node.append(icon(glyph));return node;};
-    const chevron=slot("chevron-down");footer.append(slot("properties"),text,chevron);
-    footer.dataset.layerProperties="";stage.append(layers,properties);root.append(stage,footer);
-    let open=false,position=0,from=0,started=0,anchor,target;
-    const rows=layers.querySelector(".layer-rows");
-    const observer=new ResizeObserver(()=>{if(!animating){animating=true;requestAnimationFrame(animate);}});
-    for(const child of [layers.querySelector(".layer-header"),layers.querySelector(".layer-footer"),properties.firstElementChild])if(child)observer.observe(child);
-    root.refreshPanel=()=>{layers.refreshPanel();properties.refreshPanel();};
-    root.disposePanel=()=>{observer.disconnect();layers.disposePanel?.();properties.disposePanel?.();};
-    return {root,refresh(next) {
-      const view=state().layer_properties,editing=`${state().document_file.epoch}:${view.layer}`;
-      if(target!==editing){target=editing;anchor=null;}
-      if(open!==next) {
-        if(next) {
-          const bounds=rows.getBoundingClientRect(),row=[...rows.children].find(row=>row.getBoundingClientRect().bottom>bounds.top);
-          anchor=row?{id:row.querySelector(".layer-row")?.dataset.layer,offset:row.getBoundingClientRect().top-bounds.top}:null;
-        }
-        from=position;started=performance.now();open=next;
-      }
-      label.textContent=open?view.disclosure.return_label:view.disclosure.label;
-      summary.textContent=open?"":view.disclosure.summary;summary.hidden=!summary.textContent;
-      footer.title=[label.textContent,summary.textContent].filter(Boolean).join("\n");footer.setAttribute("aria-label",footer.title);
-      footer.disabled=!open&&view.layer==null;footer.classList.toggle("open",open);
-      layers.inert=open;properties.inert=!open;
-    },measure(now) {
-      const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-started)/200);
-      position=from+((open?1:0)-from)*(1-(1-progress)**3);
-      const unit=rows.firstElementChild?.offsetHeight||40;
-      const fixed=layers.querySelector(".layer-header").offsetHeight+layers.querySelector(".layer-footer").offsetHeight;
-      const contents=properties.firstElementChild,style=getComputedStyle(contents);
-      const size=app.layer_drawer_sizing({measurement:{fixed_height:fixed,unit_height:unit},properties_height:contents.scrollHeight+parseFloat(style.marginTop)+parseFloat(style.marginBottom),viewport_height:workspace.clientHeight});
-      footer.style.height=`${size.footer_height}px`;
-      return {height:size.heights[0]*(1-position)+size.heights[1]*position,running:progress<1};
-    },layout() {
-      const height=stage.clientHeight;
-      layers.style.transform=`translateY(${-position*height}px)`;properties.style.transform=`translateY(${(1-position)*height}px)`;
-      if(position===0&&anchor) {
-        const row=rows.querySelector(`.layer-row[data-layer="${anchor.id}"]`)?.parentElement;
-        if(row)rows.scrollTop+=row.getBoundingClientRect().top-rows.getBoundingClientRect().top-anchor.offset;
-        anchor=null;
-      }
-      if(position===0) {
-        const row=rows.querySelector(`.layer-row[data-layer="${state().layer_tools.editing_layer?.id}"]`);
-        if(row&&target!==root.dataset.revealed){const delta=row.getBoundingClientRect().top-rows.getBoundingClientRect().top;if(delta<0)rows.scrollTop+=delta;else if(delta+row.offsetHeight>rows.clientHeight)rows.scrollTop+=delta+row.offsetHeight-rows.clientHeight;root.dataset.revealed=target;}
-      }
-    }};
-  }
   function dispose(record) {releaseTabs(record.root);customization.discardFields(record.root);for(const body of record.bodies)for(const child of body.children)child.disposePanel?.();record.bridge?.remove();record.shadow.remove();record.root.remove();}
   function refresh() {
     if(!resolved)return;
@@ -221,7 +170,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
           for(const panel of ids) {
             const view=customization.view(panel),toolbarPanel=state().workspace.layout.panels.find(p=>p.id===panel)?.content.kind==="toolbar";
             let child;
-            if(panel==="layers"&&layer_properties!=null){inspector=layerInspector();child=inspector.root;body.classList.add("layer-inspector-column");}
+            if(panel==="layers"&&layer_properties!=null){inspector=createLayerInspector({app,state,workspace,element,button,icon,contentPanel,toggle:()=>send({type:"toggle_layer_drawer_properties"}),invalidate:()=>{if(!animating){animating=true;requestAnimationFrame(animate);}}});child=inspector.root;body.classList.add("layer-inspector-column");}
             else if(toolbarPanel){child=toolbar(panel);child.dataset.drawerToolbar=panel;}
             else child=contentPanel(panel,drawer.columns.flat().includes("filter_types"),panel==="brushes"&&tool_set?()=>state().customization.drawer?.tool_set:null);
             body.append(child);

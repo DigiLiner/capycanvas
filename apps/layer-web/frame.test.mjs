@@ -6,8 +6,9 @@ import {presentCapy} from './header.js';
 import {colorDialogDom} from './color-dialog-fixture.mjs';
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
-function harness() {
+function harness(moving = false) {
   const calls = [];
+  const events = [];
   let current = 0;
   const context = {
     scheduled: false,
@@ -17,11 +18,12 @@ function harness() {
     performance: { now: () => current },
     app: { frame(...args) { calls.push(args); return {}; } },
     flushWorkspacePresentation() {},
-    glass: { flush() {} },
+    bubbles: { tick(time) { events.push(['bubble',time]); return moving; } },
+    glass: { flush() { events.push(['glass']); } },
     applyChange() {},
     refreshStartup() {},
     scheduleCompiler() {},
-    wake() {},
+    wake() { events.push(['wake']); },
     stopGpu(error) { throw error; },
   };
   runInNewContext(source.slice(
@@ -29,6 +31,7 @@ function harness() {
     source.indexOf("function refreshStartup()"),
   ), context);
   return {
+    events,
     tick(time, now = time + 2) {
       current = now;
       context.frame(time);
@@ -36,6 +39,17 @@ function harness() {
     },
   };
 }
+
+test('bubble motion precedes glass publication and continues only while moving', () => {
+  const moving = harness(true);
+  moving.tick(16);
+  assert.deepEqual(moving.events,[['bubble',16],['wake'],['glass']]);
+  moving.tick(32);
+  assert.deepEqual(moving.events.slice(3),[['bubble',32],['wake'],['glass']]);
+  const settled = harness();
+  settled.tick(48);
+  assert.deepEqual(settled.events,[['bubble',48],['glass']]);
+});
 
 test("prediction uses current input time and follows a 90 Hz display despite missed frames", () => {
   const h = harness(), interval = 1000 / 90;

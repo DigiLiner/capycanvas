@@ -651,9 +651,8 @@ pub enum CustomizationAction {
     CancelTools,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ContextMenuItem {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<std::sync::Arc<str>>,
     pub label: String,
     /// None is an ordinary command; a value is a checked menu item.
@@ -663,6 +662,23 @@ pub struct ContextMenuItem {
     pub hint: String,
     pub bindings: Vec<NativeKeyBinding>,
     pub sections: Vec<Vec<ContextMenuItem>>,
+}
+impl Serialize for ContextMenuItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut fields = serializer.serialize_struct("ContextMenuItem", 9 + usize::from(self.icon.is_some()))?;
+        if let Some(icon) = &self.icon { fields.serialize_field("icon", icon)?; }
+        fields.serialize_field("label", &self.label)?;
+        fields.serialize_field("selected", &self.selected)?;
+        fields.serialize_field("action", &self.action)?;
+        fields.serialize_field("enabled", &self.enabled)?;
+        fields.serialize_field("hint", &self.hint)?;
+        fields.serialize_field("bindings", &self.bindings)?;
+        fields.serialize_field("sections", &self.sections)?;
+        fields.serialize_field("is_heading", &self.is_heading())?;
+        fields.serialize_field("keep_open", &matches!(self.action, Some(UiAction::Bubble { action: BubbleAction::Option { .. } | BubbleAction::ToggleRingSetting { .. } })))?;
+        fields.end()
+    }
 }
 impl ContextMenuItem {
     pub fn command(label: impl Into<String>, action: UiAction) -> Self {

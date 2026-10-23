@@ -4,11 +4,12 @@ export function installPenScrolling() {
   let contact, suppressClick = false;
   document.addEventListener("pointerdown", e => {
     contact = null; suppressClick = false;
-    if ((e.pointerType !== "pen" && !(e.pointerType === "touch" && e.scrollbarContact)) || e.button || !e.isPrimary ||
+    const bubble=e.target.closest('[data-bubble-source]');
+    if ((e.pointerType !== "pen" && !(e.pointerType === "touch" && (e.scrollbarContact||bubble))) || e.button || !e.isPrimary ||
         e.target.closest("input,textarea,select,[contenteditable=true]")) return;
     for (let node = e.target; node && node !== document.body; node = node.parentElement) {
       const style = getComputedStyle(node);
-      if (style.touchAction === "none" || style.touchAction === "pan-x") return;
+      if ((style.touchAction === "none" && node!==bubble) || style.touchAction === "pan-x") return;
       if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(style.overflowY)) {
         contact = { id: e.pointerId, kind: e.pointerType, target: e.target, scrollbar: e.scrollbarContact, node, x: e.clientX, y: e.clientY, top: node.scrollTop, panning: false };
         break;
@@ -24,7 +25,8 @@ export function installPenScrolling() {
       if (e.defaultPrevented || Math.abs(dx) >= Math.abs(dy)) { contact = null; return; }
       // Retire pending row/menu holds just as native touch scrolling does.
       contact = null;
-      current.target.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: e.pointerId, pointerType: current.kind }));
+      const cancelled=new PointerEvent("pointercancel", { bubbles: true, pointerId: e.pointerId, pointerType: current.kind });
+      cancelled.bubbleScroll=true;current.target.dispatchEvent(cancelled);
       current.panning = true; contact = current; suppressClick = true;
       current.node.setPointerCapture(e.pointerId);
     }

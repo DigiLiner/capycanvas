@@ -15,6 +15,7 @@ mod hdr;
 mod screen;
 mod output;
 mod editor;
+mod bubbles;
 mod header;
 mod artwork_transfer;
 mod raster_worker;
@@ -52,6 +53,7 @@ pub struct WebApp {
     sequence: u64,
     startup: StartupProgress,
     overviews: std::collections::BTreeMap<u32, editor::NavigatorSurface>,
+    bubble_views: Vec<layer_ui::BubbleView>,
     header_drag: Option<layer_ui::HeaderDrag>,
     glass: Vec<layer_render_wgpu::BackdropRegion>,
     screen_presented_ms: f64,
@@ -372,6 +374,7 @@ impl WebApp {
             state_cache: Default::default(),
             preferences_cache: None,
             overviews: Default::default(),
+            bubble_views: Vec::new(),
             header_drag: None,
             glass: Vec::new(),
             screen_presented_ms: 0.,

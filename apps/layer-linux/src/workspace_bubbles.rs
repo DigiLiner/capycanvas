@@ -571,13 +571,8 @@ fn shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, spread
 }
 
 fn dots(snapshot: &gtk::Snapshot, c: [f32; 2], view: &BubbleView, ink: gdk::RGBA) {
-    let count = view.dots.len().min(9);
-    if count < 2 {
-        return;
-    }
-    for (i, current) in view.dots.iter().take(count).enumerate() {
-        let angle = (90. + ((count - 1) as f32 * 0.5 - i as f32) * 12.).to_radians();
-        let at = [c[0] + 19. * angle.cos(), c[1] + 19. * angle.sin()];
+    for (current, [x, y]) in view.dots.iter().zip(view.dot_centers()) {
+        let at = [c[0] + x, c[1] + y];
         snapshot.append_fill(&circle(at, 1.75), gsk::FillRule::Winding, &rgba(ink, if *current { 0.9 } else { 0.3 }));
     }
 }

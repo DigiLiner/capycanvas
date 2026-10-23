@@ -180,10 +180,18 @@ shared actions and the existing canvas pointer path.
 
 ## Tests
 
+Tool bubbles use the shared Rust presentations and hit testing. The host retains
+the wheel, swatches, layer thumbnails and the Layers inspector used by drawers.
+Bubble motion updates glass regions without measuring stationary toolbars again.
+Run `bash tools/performance/workspace-motion.sh web --tool-bubbles` for the
+light/dark mouse, touch and pen journeys; `device.test.mjs --tool-bubbles` runs
+the same contacts in tablet Chrome. See the [host contract](../ui/tool-bubbles.md#host-contract)
+for presentation and input requirements.
+
 Pure unit tests need no browser or GPU:
 
 ```bash
-node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization}.test.mjs
+node --test apps/layer-web/{run,package,frame,bubbles,glass,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization}.test.mjs
 node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
@@ -259,7 +267,10 @@ node apps/layer-web/test.mjs --headless --editor
 selects the executable (default `google-chrome`); on macOS, for example,
 `CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'`.
 `LAYER_WEB_URL` changes the target (default `http://127.0.0.1:4173`). On Linux it
-selects offscreen Vulkan; other hosts keep their native GPU backend. Without
+selects offscreen Vulkan and disables accelerated Canvas2D widget drawing to
+avoid transparent widget surfaces in that configuration. WebGPU painting and
+composition still require a hardware adapter. `LAYER_WEB_CANVAS_2D=accelerated`
+selects the accelerated widget path; other hosts keep their native GPU backend. Without
 `--headless` Chrome opens on the current Wayland display. `LAYER_TEST_VERBOSE=1`
 prints browser diagnostics, `LAYER_TEST_THEME=light` or `dark` selects the initial
 theme, and journeys that save captures write them to `LAYER_TEST_ARTIFACTS`.
@@ -316,6 +327,7 @@ reloading its corrupted workspace and preference fixtures.
 | New drawing | `--new-drawing` walks the dialog: sizes, presets, paper, Texture visibility, paper color, the Import… tile and Create. Other journeys create drawings with `createDrawing` from `new-drawing-fixture.mjs`, on flat paper unless they pass `relief`. |
 | Photo files, packages and export | `--portable-photo`, `--package-view`, `--image-object-fixture`, `--export-metadata`, `--document-errors` |
 | Title bar | `--title-bar`, `--title-bar-state`, `--title-bar-feedback`, `--title-bar-overflow`, `--menu-labels`, `--compact-workspaces`, `--header-controls` |
+| Tool bubbles | `--tool-bubbles` |
 | Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--workspace-constraints`, `--drawer-drag`, `--drawer-style` |
 | Workspaces | `--workspace-manager`, `--workspace-switcher`, `--workspace-options`, `--workspace-options-refresh`, `--workspace-focus`, `--workspace-windows`, `--workspace-store` |
 | Settings and retained copy | `--preferences`, `--settings-audit`, `--pressure-calibration`, `--language-switching`, `--live-language-color`, `--live-language-proof`, `--live-language-delivery`, `--live-language-surfaces`, `--live-language-toolbar`, `--live-language-effects` |
@@ -345,6 +357,18 @@ menus and secondary menus, retained icons and sibling choices in active-tool
 drawers, Paint's command categories and remembered media icons, Sketch's header
 groups, separate manual and automatic selection menus and Tool Set rows,
 and mouse/touch/pen hold-to-reorder with one layout undo/redo in both themes.
+
+`--tool-bubbles` runs in both browser runners with mouse, touch and pen in both
+themes. It checks title-bar and brush-row tear-out, native list scrolling,
+selection/halo/chooser taps, arc adjustment/reset/cancellation, presented dabs
+and bounded readouts, persistent option menus, wheel picks and drag-out,
+two-finger movement and pinching, Layers cards and Properties, Undo/Redo,
+Zen, return home, layout history and viewport walls. Each case starts with an
+empty bubble desk and restores the saved workspace afterward. Touch emulation
+is configured for each input type and the original touch capability is restored
+afterward.
+`LAYER_BUBBLE_THEMES` and `LAYER_BUBBLE_DEVICES` accept comma-separated focused
+cases; `LAYER_BUBBLE_INPUT_TRACE=1` records native event cancellation on failure.
 
 Drawer sizing uses each column's final allocated width and its children's natural
 height. Width changes schedule another measurement even with reduced motion;

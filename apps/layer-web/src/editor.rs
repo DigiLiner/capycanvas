@@ -155,7 +155,7 @@ impl WebApp {
     pub fn reflow_navigators(&mut self) -> Result<bool, JsValue> {
         self.present_navigators()
     }
-    pub fn set_glass(&mut self, boxes: &[f32], connections: JsValue) -> Result<(), JsValue> {
+    pub fn set_glass(&mut self, boxes: &[f32], connections: JsValue, bubbles: JsValue) -> Result<(), JsValue> {
         let connections: Vec<layer_ui::DrawerConnection> = serde_wasm_bindgen::from_value(connections).map_err(js)?;
         let scale = self.viewport_scale;
         use layer_render_wgpu::BackdropRegion;
@@ -172,6 +172,19 @@ impl WebApp {
                 shape: BackdropRegion::SQUIRCLE,
             }))
             .collect();
+        if !bubbles.is_null() && !bubbles.is_undefined() {
+            #[derive(Deserialize)]
+            struct Regions { boxes: Vec<[f32; 10]>, arcs: Vec<[f32; 7]> }
+            let regions: Regions = serde_wasm_bindgen::from_value(bubbles).map_err(js)?;
+            self.glass.extend(regions.boxes.into_iter().map(|b| BackdropRegion::rounded(
+                [b[0], b[1], b[2], b[3]].map(|v| v * scale),
+                [b[4], b[5], b[6], b[7]].map(|v| v * scale),
+                if b[8] != 0. { BackdropRegion::SQUIRCLE } else { BackdropRegion::CIRCULAR },
+            ).with_strength(b[9])));
+            self.glass.extend(regions.arcs.into_iter().map(|a| BackdropRegion::arc(
+                [a[0] * scale, a[1] * scale], a[2] * scale, a[3] * scale, a[4], a[5],
+            ).with_strength(a[6])));
+        }
         Ok(())
     }
     pub fn drawer(&self, query: JsValue) -> Result<JsValue, JsValue> {

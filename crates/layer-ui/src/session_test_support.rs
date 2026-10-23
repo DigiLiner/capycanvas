@@ -3,6 +3,10 @@ use layer_core::{AssetId, Point, OccurrenceHandle, SourceTarget, RasterOperation
 use layer_engine::{SampleFlags, ToolKind};
 use layer_render::{BackendError, FilterPreviewImage, FilterPreviewRequest, FramePacket, HostImage};
 
+thread_local! {
+    pub(super) static COMMAND_REFRESHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Protocol recorder only: no canvas storage or software rasterization.
 #[derive(Default)]
 pub(crate) struct Recorder {

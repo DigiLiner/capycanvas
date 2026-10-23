@@ -17,8 +17,8 @@ bubbles push each other, and `session_bubbles.rs` holds taps, choices, beads,
 strokes, menus, history and UI text. The workspace keeps each bubble's place and
 options and each brush's ring settings (`BubbleLayout`). Hosts draw the parts
 at the offsets in `BubbleView`, run the frame clock and forward contacts
-relative to the bubble center. GTK presents bubbles; Web and the native clients
-follow after review.
+relative to the bubble center. GTK is the reference presenter; Web uses the same
+views, hit testing and actions.
 
 ## What becomes a bubble
 
@@ -260,10 +260,13 @@ a host only presents it and captures native input. GTK
   `beads`, `hints`, the palette `pill`, the Layers `card`), the dab `stamp`,
   undo and redo `buttons`, the layer thumbnail id and count, and options.
   `bubble_placements()` gives each center and whether it is lifted or homing.
+  `bubble_presentations()` adds derived ring points, dot centers, history and
+  readout positions, the palette pill and display-mapped bead and stamp colors
+  for hosts crossing a serialization boundary.
 - **Motion:** call `step_bubbles(now_ns)` from the frame clock while it returns
   true; `reduce_bubble_motion` follows the platform's reduced-motion setting.
 - **Geometry:** `BubbleView::hit` (which part a point lands on), `reach`
-  (how far the widget must extend), `readout_center`, `count_badge`,
+  (how far the widget must extend), `readout_center`, `count_badge`, `dot_centers`,
   `ChooserItem::{contains, size, tag_center}`, `history_center`,
   `palette_pill`, `RingArc::{point, fraction, icon_point, covers}` and the
   constants (`TOOL_BUBBLE`, `HISTORY_BUBBLE`, `HALO_BANDS`, `RING_ICON`,
@@ -275,12 +278,20 @@ a host only presents it and captures native input. GTK
   `Close`, `MeasureCard`, `Option`, `SetOptions`, `ToggleRingSetting`,
   `PutBack` and `PutBackAll`, all with positions relative to the bubble center.
 - **Menus:** `context_menu(ContextTarget::Bubble { id })`; the first item of a
-  section may be a heading (`ContextMenuItem::is_heading`).
+  section may be a heading (`ContextMenuItem::is_heading`). Serialized items
+  expose `is_heading` and `keep_open` for the same presentation across hosts.
+- **Sources:** `bubble_grab` resolves eligible toolbar and header sources;
+  `can_take_bubble` checks a held toolbar drop against the shared home regions.
 - **Painting:** `bubble_fade()` reports whether a stroke is down and which
   bubbles it faded. **Dab:** `toolbar_stamp` returns the alpha mask of the
   current brush for `BubbleView::stamp`.
 
 ### Input
+
+Web captures pointer events before canvas input and retains DOM widgets for the
+wheel, swatches and Layers inspector. Mouse resets use the browser's native
+double-click event. Browsers expose no system hold or double-tap thresholds;
+Web uses a 500 ms hold (1000 ms on the wheel) and a 400 ms, 8 px double tap.
 
 - **Targets:** a point belongs to a bubble only when `hit` returns a part;
   everything else goes to the canvas. While a contact or finger is down on a
@@ -382,5 +393,12 @@ a host only presents it and captures native input. GTK
   drags one bubble through four others with 250 Hz mouse and touch input and
   reports presentation rate, frame gaps and canvas GPU time for steady motion;
   it fails if steady motion refreshes any UI model. Compare it with
-  `--workspace-motion` on the same machine. Bubbles exist only on GTK, so no
-  tier row is measured yet.
+  `--workspace-motion` on the same machine.
+- Web: `bash tools/performance/workspace-motion.sh web --tool-bubbles` runs
+  mouse, touch and pen journeys in both themes. The same flag in
+  `apps/layer-web/device.test.mjs` exercises tablet Chrome. The journey covers
+  shared hit regions, source scrolling and tear-out, cancellation, ring reset,
+  chooser selection, color, two-finger motion, Layers, glass fade, Zen, layout
+  history and window edges. `tools/performance/web-bubbles.mjs` drives three
+  six-second touch drags through four neighbours on a prepared tier photo;
+  pair its changing DOM positions with native presentation measurements.

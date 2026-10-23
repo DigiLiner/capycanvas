@@ -111,6 +111,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 16 visible paint layers | 90 | | |
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
+| Web tool bubble drag through four neighbours | 90 | **Not met.** 56.85–58.86 presented fps, p99 33.51 ms, default glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
 | Drawer open and close | 90 | **Not met.** Layers/Properties completed native motion: 59.70–59.71 moving window frames/s, interval p99 up to 16.86 ms, 24 MP photo, thermal 0, active display mode 60 Hz | [Combined layer drawer](#combined-layer-drawer), 2026-10-10 |
@@ -122,6 +123,32 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK layer input diagnostic](top-tier.md#gtk-layer-input-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
+
+## Web tool bubbles
+
+Wacom MovinkPad 11, Chrome, optimized `web-release`, base `82486a4c4` plus the
+Web bubble port; Wasm SHA-256 `dac74688fb204e59aeb9b162210a9aa330362aab59d6193c74e2a45221b8e7d6`.
+The prescribed 6000 × 4000 photo sits below an empty paint layer at Fit.
+`tools/performance/web-bubbles.mjs` moves one bubble through four others for
+three warmed six-second contacts, verifying that every neighbour moves.
+
+SurfaceFlinger actual-present histories report **58.86, 56.85 and 57.46 fps**,
+with p99 gaps **33.51 ms** in all three contacts. The 90 Hz rate and 22.2 ms gap
+targets remain unmet. Thermal status is 0 before and after. Chrome's adaptive
+refresh entry was enabled for this diagnostic, allowing the selected 90 Hz
+display mode; its original disabled setting was restored afterward.
+
+The histories were polled every 500 ms with overlapping entries and deduplicated
+within the contact windows. FrameTimeline's incomplete Chrome child-surface
+events are excluded; its clock snapshots only align the windows. These are
+presentation measurements, not animation-frame callbacks.
+
+Before retaining command availability during unchanged frames, the same
+fixture measured 57.19, 53.06 and 55.46 fps. A separate profile attributed about
+2.2 ms per frame to repeated command probes. Bubble motion now retains those
+commands and stationary toolbar glass measurements. Glass and presentation
+costs remain: an opaque diagnostic reached 71.46 fps and still missed the gap
+limit. The raw captures and comparison are in `artifacts/bubbles/mid/`.
 
 ## Web Navigator resize diagnostic
 

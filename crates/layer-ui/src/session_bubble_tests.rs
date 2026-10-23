@@ -33,6 +33,43 @@ fn brush(id: DefaultBrushPreset) -> BubbleGrab {
     BubbleGrab::Variant { variant: ToolVariant::BrushPreset { id: id as u32 } }
 }
 
+#[test]
+fn bubble_pickup_queries_use_shared_sources_and_drop_clearance() {
+    let mut s = desk();
+    for (control, plain, held) in [
+        (ToolbarControl::Color, true, true),
+        (ToolbarControl::ColorPicker, true, true),
+        (ToolbarControl::BrushSizeSlider, false, false),
+        (ToolbarControl::Command { command: CommandId::Undo }, true, true),
+    ] {
+        let (panel, tile) = toolbar_tile(&mut s, control);
+        let grab = BubbleGrab::Tile { panel, tile };
+        assert_eq!(s.bubble_grab(grab, false).is_some(), plain);
+        assert_eq!(s.bubble_grab(grab, true).is_some(), held);
+        let bounds = s.layout(VIEW).groups.iter().find(|g| g.panels.contains(&panel)).unwrap().bounds;
+        assert!(!s.can_take_bubble(grab, [bounds.x + 2., bounds.y + 2.], VIEW));
+        assert_eq!(s.can_take_bubble(grab, FAR, VIEW), held);
+        assert!(!s.can_take_bubble(grab, [f32::NAN, FAR[1]], VIEW));
+        assert!(!s.can_take_bubble(grab, FAR, [0., 900.]));
+    }
+    assert!(s.bubble_grab(BubbleGrab::Bubble { id: u32::MAX }, false).is_none());
+}
+
+#[test]
+fn bubble_menu_publication_marks_headings_and_persistent_options() {
+    let mut s = desk();
+    let id = take_ring(&mut s, FAR);
+    let menu = s.context_menu(ContextTarget::Bubble { id }).unwrap();
+    let json = serde_json::to_value(&menu).unwrap();
+    assert_eq!(json["sections"][0][0]["is_heading"], true);
+    assert_eq!(json["sections"][0][0]["keep_open"], false);
+    for (section, serialized) in menu.sections.iter().zip(json["sections"].as_array().unwrap()) {
+        for (item, serialized) in section.iter().zip(serialized.as_array().unwrap()) {
+            assert_eq!(serialized["keep_open"], matches!(item.action, Some(UiAction::Bubble { action: BubbleAction::Option { .. } })));
+        }
+    }
+}
+
 fn toolbar_tile(s: &mut UiSession<Recorder>, control: ToolbarControl) -> (Panel, u32) {
     let panel = s.layout(VIEW).groups.iter().flat_map(|g| g.panels.clone()).find(|p| p.kind() == PanelKind::Tiles).unwrap();
     let layout = &mut s.state.workspace.layout;
@@ -1162,6 +1199,26 @@ fn an_open_layers_card_moves_without_folding() {
     let grip = [at[0], at[1] + card.size[1] * 0.5 - 20.];
     drag(&mut s, BubbleGrab::Bubble { id: layers }, grip, [grip[0] - 60., grip[1] - 30.]);
     assert!(view(&s, layers).card.is_some(), "dragging the open card keeps it open");
+}
+
+#[test]
+fn bubble_motion_retains_commands_until_editor_state_changes() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::Undo }, FAR);
+    let grab = BubbleGrab::Bubble { id };
+    contact(&mut s, grab, ContactPhase::Down, FAR).unwrap();
+    s.frame(0, 0).unwrap();
+    let before = COMMAND_REFRESHES.with(|count| count.get());
+    for frame in 1..=60 {
+        contact(&mut s, grab, ContactPhase::Move, [FAR[0] + frame as f32, FAR[1]]).unwrap();
+        s.step_bubbles(frame * 16_000_000);
+        s.frame(frame * 16_000_000, frame * 16_000_000).unwrap();
+    }
+    assert_eq!(COMMAND_REFRESHES.with(|count| count.get()), before);
+    contact(&mut s, grab, ContactPhase::Up, [FAR[0] + 60., FAR[1]]).unwrap();
+    invoke(&mut s, CommandId::AddLayer);
+    assert!(COMMAND_REFRESHES.with(|count| count.get()) > before);
+    for command in &s.state.commands { assert_eq!(*command, s.command(command.id)); }
 }
 
 #[test]

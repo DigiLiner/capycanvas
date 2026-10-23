@@ -69,7 +69,9 @@ radii. The shared `ViewportPresenter` blurs its own artwork beneath them:
   carries its corner shape: workspace surfaces are squircles where the browser
   supports `corner-shape`, while the command bar dialog is circular. Layout,
   theme and Zen changes, and the command bar opening, resizing or closing,
-  queue a new measurement for the next canvas frame.
+  queue a new measurement for the next canvas frame. Tool bubbles publish
+  rounded boxes and arc bands with their current fade strength; their animation
+  keeps the stationary toolbar measurements and updates only bubble regions.
 - Android: `Modifier.glass(shape, color)` draws the fill and registers its
   surface-pixel bounds and radii. `CanvasHost` sends all regions once per layout
   pass through `Native.glassRegions`.

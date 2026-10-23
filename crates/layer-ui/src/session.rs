@@ -255,6 +255,7 @@ pub struct UiSession<R: CanvasRenderer> {
     engine: CanvasEngine<R>,
     state: UiState,
     last_toolbar_context: Option<ToolbarContext>,
+    frame_commands_pending: bool,
     pub(crate) brush_stamps: crate::toolbar_preview::StampRequests,
     canvas_bar: canvas_bar::CanvasBarState,
     notices: notices::Notices,
@@ -616,6 +617,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             },
             effect_catalog,
             last_toolbar_context: None,
+            frame_commands_pending: false,
             brush_stamps: Default::default(),
             canvas_bar: Default::default(),
             notices: Default::default(),
@@ -4631,6 +4633,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || self.notices.publishing()
     }
     pub fn frame(&mut self, now_ns: u64, presentation_ns: u64) -> Result<UiChange, String> {
+        let commands_pending = std::mem::replace(&mut self.frame_commands_pending, true);
         let pending_edits = self.engine.has_pending_document_edits();
         let command_activity = (self.canvas_idle(), self.engine.can_undo(), self.engine.can_redo());
         self.update_shader_idle();
@@ -4738,11 +4741,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         changed |= self.poll_histogram(now_ns);
         let analyses_changed = self.poll_effect_analyses(now_ns)?;
         changed |= analyses_changed;
-        let commands_changed = changed != 0 || !pending_edits || !self.engine.has_pending_document_edits()
+        let commands_changed = commands_pending || changed != 0 || pending_edits != self.engine.has_pending_document_edits()
             || command_activity != (self.canvas_idle(), self.engine.can_undo(), self.engine.can_redo());
         if commands_changed && self.refresh_commands() {
             changed |= regions::COMMANDS;
         }
+        self.frame_commands_pending = false;
         Ok(self.changed(
             changed,
             analyses_changed != 0 || tonal_changed || self.engine.document().working.generation != working_generation
@@ -5977,6 +5981,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
     fn refresh_commands(&mut self) -> bool {
+        #[cfg(test)]
+        test_support::COMMAND_REFRESHES.with(|count| count.set(count.get() + 1));
         let canvas_idle = self.canvas_idle();
         let mut changed = false;
         for (index, id) in CommandId::ALL.into_iter().enumerate() {
