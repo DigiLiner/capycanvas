@@ -167,9 +167,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let Some(chooser) = self.bubble_state.chooser
             && let Some(bubble) = self.state.workspace.layout.bubbles.get(chooser.id)
         {
-            let items = self.chooser_items(bubble, chooser).0.into_iter().map(|item| {
+            let items = self.chooser_items(bubble, chooser).0.into_iter().flat_map(|item| {
                 let part = if item.kind == ChooserKind::Brush { Shape::rect(BRUSH_PILL) } else { Shape::circle(CHOOSER_ITEM * 0.5) };
-                part.at(item.center)
+                let tag = (item.shown && item.kind != ChooserKind::Brush).then(|| {
+                    Shape::rect([item.tag.width, item.tag.height]).at([item.tag.x + item.tag.width * 0.5, item.tag.y + item.tag.height * 0.5])
+                });
+                std::iter::once(part.at(item.center)).chain(tag)
             });
             grown.push((chooser.id, std::iter::once(Shape::circle(TOOL_BUBBLE * 0.5)).chain(items).collect()));
         }

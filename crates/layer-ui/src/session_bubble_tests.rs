@@ -696,6 +696,88 @@ fn an_open_chooser_bumps_neighbours_off_its_items_until_it_closes() {
     assert_eq!(s.bubble_placements().into_iter().find(|p| p.id == neighbour).unwrap().center, [500., 450. - CHOOSER_RING]);
 }
 
+fn overlaps(s: &mut UiSession<Recorder>) -> Vec<(BubbleKind, BubbleKind, [f32; 2])> {
+    let views = s.bubbles();
+    let placements = s.bubble_placements();
+    let placed: Vec<_> = views.iter().map(|v| (v, placements.iter().find(|p| p.id == v.id).unwrap().center)).collect();
+    let mut found = Vec::new();
+    for (i, (a, ca)) in placed.iter().enumerate() {
+        for (b, cb) in &placed[i + 1..] {
+            let point = (0..VIEW[1] as u32 / 3).flat_map(|y| (0..VIEW[0] as u32 / 3).map(move |x| [x as f32 * 3., y as f32 * 3.])).find(|p| {
+                a.hit([p[0] - ca[0], p[1] - ca[1]]).is_some() && b.hit([p[0] - cb[0], p[1] - cb[1]]).is_some()
+            });
+            found.extend(point.map(|p| (a.kind, b.kind, p)));
+        }
+    }
+    found
+}
+
+fn settle(s: &mut UiSession<Recorder>, from: u64) -> u64 {
+    let mut now = from;
+    while s.step_bubbles(now) && now < from + 10_000_000_000 {
+        now += 16_666_667;
+    }
+    now
+}
+
+#[test]
+fn open_rings_halos_and_cards_push_every_kind_of_bubble_clear() {
+    let mut s = desk();
+    let center = [600., 450.];
+    let dial = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, center);
+    let spots = [[600., 450. - CHOOSER_RING], [600. + CHOOSER_RING, 450.], [600., 450. + CHOOSER_RING], [600. - CHOOSER_RING, 450.]];
+    take_control(&mut s, ToolbarControl::Command { command: CommandId::Undo }, spots[0]);
+    take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, spots[1]);
+    let layers = s.bubbles().iter().find(|v| v.kind == BubbleKind::Layers).unwrap().id;
+    act(&mut s, BubbleAction::Close { id: layers }).unwrap();
+    take(&mut s, brush(DefaultBrushPreset::Charcoal), spots[2]);
+    take_control(&mut s, ToolbarControl::ColorPicker, spots[3]);
+    s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+    let mut now = settle(&mut s, 0);
+    assert_eq!(overlaps(&mut s), [], "closed bubbles rest apart");
+    tap(&mut s, dial);
+    now = settle(&mut s, now);
+    assert!(view(&s, dial).halo.is_some());
+    assert_eq!(overlaps(&mut s), [], "the dial's halo pushes its neighbours");
+    tap(&mut s, dial);
+    now = settle(&mut s, now);
+    assert!(!view(&s, dial).chooser.is_empty());
+    assert_eq!(overlaps(&mut s), [], "the dial's ring pushes its neighbours");
+    tap(&mut s, dial);
+    settle(&mut s, now);
+    assert_eq!(overlaps(&mut s), [], "and they rest apart again once it closes");
+}
+
+#[test]
+fn an_open_ring_near_a_wall_still_clears_its_neighbours() {
+    let work = desk().layout(VIEW).work_area;
+    for (corner, offsets) in [
+        ([work.x + 60., work.y + work.height - 60.], [[CHOOSER_RING, 0.], [0., -CHOOSER_RING], [CHOOSER_RING * 0.7, -CHOOSER_RING * 0.7]]),
+        ([work.x + work.width * 0.5, work.y + work.height - 60.], [[CHOOSER_RING, 0.], [-CHOOSER_RING, 0.], [0., -CHOOSER_RING]]),
+    ] {
+        let neighbours = [
+            ToolbarControl::Command { command: CommandId::Undo },
+            ToolbarControl::Panel { panel: Panel::Layers },
+            ToolbarControl::ColorPicker,
+            ToolbarControl::Brush { id: DefaultBrushPreset::Charcoal as u32 },
+            ToolbarControl::Color,
+        ];
+        for (offset, control) in offsets.into_iter().flat_map(|o| neighbours.map(|c| (o, c))) {
+            let mut s = desk();
+            let dial = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, corner);
+            let other = take_control(&mut s, control, [corner[0] + offset[0], (corner[1] + offset[1]).min(work.y + work.height - 36.)]);
+            act(&mut s, BubbleAction::Close { id: other }).unwrap();
+            s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+            let mut now = settle(&mut s, 0);
+            for open in ["halo", "ring"] {
+                tap(&mut s, dial);
+                now = settle(&mut s, now);
+                assert_eq!(overlaps(&mut s), [], "{open} at {corner:?} with {control:?} at {offset:?}");
+            }
+        }
+    }
+}
+
 #[test]
 fn bubbles_pushed_during_a_long_drag_keep_their_new_place() {
     let mut s = desk();

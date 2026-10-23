@@ -79,10 +79,14 @@ nearest point of its rim, easing to it instead of jumping.
 A dragged bubble pushes the bubbles it meets, keeping a 6 px gap. Pushed bubbles
 take 12% of the push as speed and slide with friction (0.86 per 60 Hz frame);
 they keep their new places. Letting go glides a short way, at most 18 px per
-frame, about 130 px in all; with reduced motion there is no glide. An open halo
+frame, about 130 px in all; with reduced motion there is no glide. An open halo,
 card or chooser pushes neighbours only while it is open, each part pushing where
-it is (the chooser's media and brush pills, not the empty space between them),
-and they return when it closes.
+it is (the chooser's media, the shown medium's name tag and the brush pills, not
+the empty space between them), and they return when it closes. A neighbour
+caught among a chooser's parts is pushed outward from the dial, never into the
+ring, and a neighbour pinned against a wall makes the open bubble give way
+instead, so open parts and other bubbles never overlap; every bubble kind is
+checked against an open halo and ring in open space and against walls.
 Walls sit 8 px inside the canvas area, below the title bar and clear of docked
 toolbars; bounces off them keep a quarter of their speed. Saved places keep
 their distance to the nearest window corner, so a bubble near the bottom right
@@ -225,10 +229,13 @@ its pointer.
 
 ## Painting
 
-A stroke that comes within 48 px of a bubble fades it to 20% over 140 ms and
-passes under it, its glass blur fading with it so the artwork shows through;
-it fades back 180 ms after the pen lifts. Painting closes the chooser, the
-palette name and folding cards; a halo stays and fades with its bubble.
+A stroke that comes within 48 px of a bubble fades it to 20% (`FADED_BUBBLE`)
+over 140 ms and passes under it, its glass blur fading with it so the artwork
+shows through; 180 ms after the pen lifts it fades back over 140 ms. Both fades
+are one smoothstep ramp timed from the first frame they draw, and the tint, the
+blur and the slider bands move together: glass changes that only fade never
+wait for the canvas to confirm them. Painting closes the chooser, the palette
+name and folding cards; a halo stays and fades with its bubble.
 
 ## Zen mode
 
@@ -238,6 +245,114 @@ mode** in a toolbar's menu keeps that toolbar (off by default), and a
 one-finger swipe in from an edge peeks the toolbars docked there until the next
 contact elsewhere. Dropping a bubble on a toolbar kept or peeked in Zen puts it
 back.
+
+## Host contract
+
+Everything a port needs from shared Rust is on `UiSession` and in `bubbles.rs`;
+a host only presents it and captures native input. GTK
+(`apps/layer-linux/src/workspace_bubbles.rs`) is the reference.
+
+### Shared API
+
+- **Views:** `bubbles()` returns a `BubbleView` per bubble: kind, face size,
+  icon and label, preview brush, dots, selected and enabled, open parts (halo
+  disc, `rings` with arcs, values and readout, `chooser` items with tags,
+  `beads`, `hints`, the palette `pill`, the Layers `card`), the dab `stamp`,
+  undo and redo `buttons`, the layer thumbnail id and count, and options.
+  `bubble_placements()` gives each center and whether it is lifted or homing.
+- **Motion:** call `step_bubbles(now_ns)` from the frame clock while it returns
+  true; `reduce_bubble_motion` follows the platform's reduced-motion setting.
+- **Geometry:** `BubbleView::hit` (which part a point lands on), `reach`
+  (how far the widget must extend), `readout_center`, `count_badge`,
+  `ChooserItem::{contains, size, tag_center}`, `history_center`,
+  `palette_pill`, `RingArc::{point, fraction, icon_point, covers}` and the
+  constants (`TOOL_BUBBLE`, `HISTORY_BUBBLE`, `HALO_BANDS`, `RING_ICON`,
+  `RING_TRACK`, `RING_RIM`, `CHOOSER_ITEM`, `CHOOSER_TAG`, `BRUSH_PILL`,
+  `PALETTE_PILL`, `FADED_BUBBLE`, `SECOND_FINGER_REACH`, `STROKE_FADE`).
+- **Actions:** `UiAction::Bubble` with `BubbleAction::Drag` (grabs `Bubble`,
+  `Rim`, `Tile`, `Header`, `Variant`; phases Down, Move, Up, Cancel), `Tap`,
+  `Ring`, `ResetRing`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
+  `Close`, `MeasureCard`, `Option`, `SetOptions`, `ToggleRingSetting`,
+  `PutBack` and `PutBackAll`, all with positions relative to the bubble center.
+- **Menus:** `context_menu(ContextTarget::Bubble { id })`; the first item of a
+  section may be a heading (`ContextMenuItem::is_heading`).
+- **Painting:** `bubble_fade()` reports whether a stroke is down and which
+  bubbles it faded. **Dab:** `toolbar_stamp` returns the alpha mask of the
+  current brush for `BubbleView::stamp`.
+
+### Input
+
+- **Targets:** a point belongs to a bubble only when `hit` returns a part;
+  everything else goes to the canvas. While a contact or finger is down on a
+  bubble, the bubble also takes points within `reach() +
+  SECOND_FINGER_REACH` so a second finger can land.
+- **Press and hold:** track the first contact (mouse button, pen or finger) in
+  a capture phase. A hold needs a hit, not a layer row or card control, and
+  the platform's long-press delay, doubled on the wheel's ring and disc. Moving
+  more than 8 px first cancels the hold. A hold restores any color or setting
+  the press changed (`Ring` Cancel) and opens the bubble's menu; moving after
+  the hold closes the menu and continues as a drag from the pressed part.
+- **Contacts:** on drag start map the hit: `Ring` sends `Ring` Down, Move, Up
+  (or `ResetRing` when it is the second press within the platform's
+  double-click time and distance, at least 8 px); `Item` sends `Choose` and
+  enlarges the item under the contact; `Bead` sends `Beads`; `Face`, `Half`
+  and handled `Card` points wait: a release without moving is `Tap`, moving is
+  `Drag` with the `Bubble` grab. `Wheel` and `Pill` go to their own widgets; a
+  wheel pick dragged past `color_drag_out` restores the color and becomes a
+  `Rim` drag. In the open card, the layer list and controls that drag
+  (sliders, number fields, curves, text) keep their contacts.
+- **Two fingers:** the second finger cancels the first contact (restoring its
+  color or value) and drags the bubble by the midpoint; on a color ring the
+  finger spread pinches its size (`Resize` on release).
+- **Pointer:** a pen hides the system pointer over bubbles, as over the canvas,
+  and the pointer hides while the dab shows.
+- **Hover and pressed:** the part under the pointer or first contact is
+  `Item`, `Half` or `Face` (not on the color ring or undo and redo capsule);
+  draw it with the states below.
+
+### Presentation
+
+- **Surfaces:** faces, undo and redo, chooser items, tags, pills, the readout
+  and the count badge use the toolbar panel color (the panel glass in glass
+  mode) with no border; selected parts add the toolbar selection; hovered adds
+  7% and pressed 14% of the text color. Text uses the standard UI size; icons
+  are 20 px on faces and 16 px on arcs.
+- **Shadows:** round parts cast one smooth gradient, 8 px spread, 2 px drop,
+  8% black at the edge, fading quadratically and clipped outside the part; a
+  lifted bubble grows it to 12 px, 4.5 px and 16%. Beads use 3 px, 1 px and
+  13%. The Layers card and drawers use the toolbars' 2 px, 8 px, 16% shadow.
+- **Halo arcs:** a band `arc.band` wide from `icon_point` to the end with round
+  caps in the panel glass, a 4 px track at 18% text color, the set part at
+  50%, a 14 px thumb (15 px while dragged) in the toolbar thumb color with a
+  1 px border at 60%, and the setting's 16 px icon at `icon_point`; an
+  unavailable arc draws at 40%. The name and value show at `readout_center`.
+- **Dab:** draw the stamp mask in the stamp color, `stamp.diameter` times the
+  stamp's extent, centered at `stamp.center`, behind every bubble.
+- **Chooser:** 44 px media circles and 152 × 48 px brush pills with the brush
+  stroke (68% of the pill wide, 14 px tall, 6 px from the top) over its name;
+  a shown medium's name at `tag_center` of its measured width, at most 96 px.
+  Items arrive scaled from 60% and fading in over 180 ms, 14 ms apart (brushes
+  16 ms), and leave over 120 ms; the item under a contact grows 12% (brushes
+  6%).
+- **Halo:** grows from 85% and fades in over 160 ms, and out over 120 ms.
+- **Beads:** the Color panel's swatch widget and styles, tweening 220 ms
+  between layouts; hints are `HINT_DOT` dots at 35% text color.
+- **Layers card:** host the Layers drawer's own inspector in the drawer's
+  container and styles; report measured page heights with `MeasureCard`.
+  Unfold over 200 ms from 60%; fold over 150 ms, then the squircle returns over
+  180 ms.
+- **Undo and redo:** each button is a circle as tall as the capsule centered at
+  `history_center`, and its highlight fills that circle.
+- **Lift and home:** a lifted bubble draws at 104%; one about to be put back at
+  82% and 55% opacity.
+- **Fade:** follow `bubble_fade` as in [Painting](#painting): fade listed
+  bubbles to `FADED_BUBBLE` and make them ignore input while the stroke is
+  down; 180 ms after it ends, fade every bubble back. Use one smoothstep over
+  140 ms, timed from the first frame drawn.
+- **Glass:** with transparency on, every glass part blurs the canvas beneath it
+  as strongly as it is drawn (`BackdropRegion::with_strength`), halo bands as
+  `BackdropRegion::arc`, and a change that only fades glass must not hold the
+  frame while the canvas catches up.
 
 ## Validation
 

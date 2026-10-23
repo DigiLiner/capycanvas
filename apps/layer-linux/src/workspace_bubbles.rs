@@ -164,7 +164,7 @@ mod imp {
         pub(super) items: RefCell<Vec<super::Item>>,
         pub(super) card: RefCell<Option<super::Card>>,
         pub(super) fold: Cell<Option<(i64, bool)>>,
-        pub(super) fade: Cell<Option<(i64, f64, f64)>>,
+        pub(super) fade: Cell<Option<(Option<i64>, f64, f64)>>,
         pub(super) card_size: Cell<[f32; 2]>,
         pub(super) display: Cell<Option<(crate::display_color::ViewColor, f32)>>,
         pub(super) placement: Cell<Option<BubblePlacement>>,
@@ -430,6 +430,11 @@ glib::wrapper! {
 
 fn ease(elapsed: i64, span: i64) -> f32 {
     1. - (1. - (elapsed as f32 / span as f32).clamp(0., 1.)).powi(3)
+}
+
+fn smooth(elapsed: i64, span: i64) -> f32 {
+    let t = (elapsed as f32 / span as f32).clamp(0., 1.);
+    t * t * (3. - 2. * t)
 }
 
 fn motion() -> bool {
@@ -999,7 +1004,9 @@ impl Bubble {
         let imp = self.imp();
         let now = self.now();
         if let Some((start, from, to)) = imp.fade.get() {
-            let t = ease(now - start, FADE_US) as f64;
+            let start = start.unwrap_or(now);
+            imp.fade.set(Some((Some(start), from, to)));
+            let t = smooth(now - start, FADE_US) as f64;
             self.set_opacity(from + (to - from) * t);
             if t >= 1. {
                 imp.fade.set(None);
@@ -1041,7 +1048,7 @@ impl Bubble {
             self.set_opacity(opacity);
             return;
         }
-        imp.fade.set(Some((self.now(), self.opacity(), opacity)));
+        imp.fade.set(Some((None, self.opacity(), opacity)));
         self.ensure_ticking();
     }
 

@@ -386,6 +386,7 @@ mod allocation {
             }
             let mut connectors = Vec::new();
             let mut chrome_changed = false;
+            let mut fading = false;
             if let Some(owner) = &owner {
                 let mut regions = Vec::new();
                 if let Some(glass) = owner.palette.get().map(|p| p.glass).filter(|g| g.transparency.enabled()) {
@@ -399,10 +400,15 @@ mod allocation {
                     regions.extend_from_slice(&connectors);
                 }
                 if *owner.glass.borrow() != regions {
+                    let shape = |r: &layer_render_wgpu::BackdropRegion| r.with_strength(1.);
+                    fading = owner.glass.borrow().iter().map(shape).eq(regions.iter().map(shape));
                     *owner.glass.borrow_mut() = regions;
                     chrome_changed = true;
                 }
-                chrome_changed |= owner.navigator_overviews.commit(projections);
+                if owner.navigator_overviews.commit(projections) {
+                    chrome_changed = true;
+                    fading = false;
+                }
             }
             for (order, (slot, node)) in nodes.iter().enumerate() {
                 let Some(node) = node else {
@@ -450,7 +456,7 @@ mod allocation {
             let composed = composed.to_node();
             let snapshot = target;
             match &owner {
-                Some(owner) => owner.present_chrome(snapshot, composed, chrome_changed),
+                Some(owner) => owner.present_chrome(snapshot, composed, chrome_changed, fading),
                 None => if let Some(node) = composed { snapshot.append_node(&node); },
             }
             if let Some(owner) = &owner
@@ -2961,10 +2967,10 @@ impl Workspace {
         self.update_backdrop();
     }
 
-    fn present_chrome(self: &Rc<Self>, snapshot: &gtk::Snapshot, node: Option<gtk::gsk::RenderNode>, changed: bool) {
+    fn present_chrome(self: &Rc<Self>, snapshot: &gtk::Snapshot, node: Option<gtk::gsk::RenderNode>, changed: bool, fading: bool) {
         let Some(node) = node else { return };
         let previous = self.chrome_moving.replace(changed);
-        let moving = changed && (previous || self.workspace_drag.borrow().is_some());
+        let moving = changed && (previous || fading || self.workspace_drag.borrow().is_some());
         if changed {
             self.chrome_hold.set(!moving);
         }

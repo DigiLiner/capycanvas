@@ -46,6 +46,9 @@ fn scale(a: [f32; 2], s: f32) -> [f32; 2] {
 fn length(a: [f32; 2]) -> f32 {
     a[0].hypot(a[1])
 }
+fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
 fn sign(v: f32) -> f32 {
     if v < 0. { -1. } else { 1. }
 }
@@ -317,6 +320,13 @@ impl Desk {
             self.separate();
         }
     }
+    fn walled(&self, body: &Body, direction: [f32; 2]) -> bool {
+        let Some(bounds) = self.bounds else { return false };
+        let [near, far] = extent(self.shape(body));
+        let lo = [bounds.x - near[0], bounds.y - near[1]];
+        let hi = [bounds.x + bounds.width - far[0], bounds.y + bounds.height - far[1]];
+        (0..2).any(|axis| (direction[axis] > 0.5 && body.pos[axis] >= hi[axis] - 0.5) || (direction[axis] < -0.5 && body.pos[axis] <= lo[axis] + 0.5))
+    }
     fn separate(&mut self) {
         let count = self.bodies.len();
         for i in 0..count {
@@ -324,7 +334,11 @@ impl Desk {
                 let (a, b) = (self.bodies[i], self.bodies[j]);
                 let Some((normal, depth)) = deepest(a.pos, self.shape(&a), b.pos, self.shape(&b)) else { continue };
                 let (pa, pb) = (self.priority(&a), self.priority(&b));
+                let away = sub(b.pos, a.pos);
+                let inward = self.shape(if pa == 2 { &a } else { &b }).len() > 1 && (pa == 2) != (pb == 2) && dot(normal, away) < 0.;
+                let normal = if inward { scale(away, 1. / length(away).max(1e-3)) } else { normal };
                 let still = self.still;
+                let walls = [self.walled(&b, normal), self.walled(&a, scale(normal, -1.))];
                 let mut push = |index: usize, direction: [f32; 2], amount: f32, kick: bool| {
                     let body = &mut self.bodies[index];
                     body.pos = add(body.pos, scale(direction, amount));
@@ -335,7 +349,11 @@ impl Desk {
                         body.vel = capped(add(body.vel, scale(direction, amount * PUSH_SPEED)));
                     }
                 };
-                if pa > pb {
+                if pa == 2 && pb < 2 && walls[0] {
+                    push(i, scale(normal, -1.), depth, false);
+                } else if pb == 2 && pa < 2 && walls[1] {
+                    push(j, normal, depth, false);
+                } else if pa > pb {
                     push(j, normal, depth, pa != 2);
                 } else if pb > pa {
                     push(i, scale(normal, -1.), depth, pb != 2);

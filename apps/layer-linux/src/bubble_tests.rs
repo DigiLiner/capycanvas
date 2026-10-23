@@ -498,14 +498,23 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
     assert!(widget.opacity() < 0.25, "{name}: a stroke near a bubble fades it");
     assert!(faint(d) > resting, "{name}: and its glass blur fades with it");
     assert!(find_id(d, id).unwrap().open, "{name}: an open halo stays while painting");
+    let frames = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let w = d.w.clone();
+    let tick = widget.add_tick_callback(glib::clone!(#[strong] frames, move |widget, _| {
+        let weakest = |regions: &[layer_render_wgpu::BackdropRegion]| regions.iter().map(|r| r.shape[1]).fold(1f32, f32::min);
+        let canvas = w.gpu.borrow_mut().as_mut().map_or(1., |g| weakest(&g.session.renderer_mut().backdrops));
+        frames.borrow_mut().push((widget.opacity(), weakest(&w.glass.borrow()), canvas));
+        glib::ControlFlow::Continue
+    }));
     d.input.perform(serde_json::json!([contact("mouse", "up", [from[0] + 240., from[1]])]));
-    let samples: Vec<f64> = (0..30).map(|_| {
-        pump(20);
-        widget.opacity()
-    }).collect();
+    pump(600);
+    tick.remove();
     assert_eq!(widget.opacity(), 1., "{name}: it comes back after the stroke");
     assert_eq!(faint(d), resting, "{name}: with its full blur");
-    assert!(samples.iter().any(|o| *o > 0.21 && *o < 0.999), "{name}: and fades back in instead of jumping: {samples:?}");
+    let frames = frames.borrow();
+    assert!(frames.iter().any(|f| f.0 > 0.21 && f.0 < 0.999), "{name}: and fades back in: {frames:?}");
+    assert!(frames.windows(2).all(|f| (f[1].0 - f[0].0).abs() <= 0.12), "{name}: in one smooth ramp: {frames:?}");
+    assert!(frames.windows(2).all(|f| f[1].2 == f[1].1 || f[1].2 == f[0].1), "{name}: its blur keeping pace on the canvas: {frames:?}");
     settings.set_gtk_enable_animations(animations);
     d.w.dispatch(UiAction::SetTheme { theme: Some(state(&d.w).theme) });
     pump(20);
