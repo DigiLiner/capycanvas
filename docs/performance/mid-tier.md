@@ -743,7 +743,6 @@ simple brushes retain unqualified rows.
 | Crystal Blender (51) | Very complex | 512 px | 8.4 updates/s (8.3–8.5); input 8.6/s; completion-gap p99 146.9 ms | **Not met** |
 | Marbling (52) | Very complex | 512 px | 3.3 updates/s (3.2–3.4); input 3.5/s; completion-gap p99 405.4 ms | **Not met** |
 | Comb Blender (53) | Very complex | 512 px | 13.8 updates/s (13.5–14.2); input 14.0/s; completion-gap p99 91.8 ms | **Not met** |
-| Edge-Keeping Blender (54) | Very complex | 512 px | 1.3 updates/s (1.2–1.3); input 1.5/s; completion-gap p99 1156.2 ms | **Not met** |
 | Scatter Blender (49) | Very complex | 512 px | 25.5 updates/s (25.3–25.7); input 25.7/s; completion-gap p99 54.7 ms | **Not met** |
 | Dither Blender (55) | Very complex | 512 px | 81.33 updates/s (79.98–82.14); fresh input 81.33/s; worst completion-gap p99 30.76 ms | **Not met**; [brush contact comparison](#dither-pickup-within-the-brush) |
 | Liquify Push (12) | Very complex | 512 px | 45.89 fresh updates/s (45.47–46.07); fresh completion-gap p99 ≤44.84 ms | **Not met** |

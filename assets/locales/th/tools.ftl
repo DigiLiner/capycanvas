@@ -208,7 +208,6 @@ brush-preset-painterly-blender = เกลี่ยสีแบบภาพว�
 brush-preset-crystal-blender = เกลี่ยสีผลึก
 brush-preset-marbling = ลายหินอ่อน
 brush-preset-comb-blender = เกลี่ยสีแบบหวี
-brush-preset-edge-keeping-blender = เกลี่ยสีรักษาขอบ
 brush-preset-dither-blender = เกลี่ยสีแบบดิเทอร์
 brush-preset-blending-knife = เกรียงเกลี่ยสี
 brush-preset-blending-stump = แท่งเกลี่ยสี

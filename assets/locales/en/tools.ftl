@@ -209,7 +209,6 @@ brush-preset-painterly-blender = Painterly Blender
 brush-preset-crystal-blender = Crystal Blender
 brush-preset-marbling = Marbling
 brush-preset-comb-blender = Comb Blender
-brush-preset-edge-keeping-blender = Edge-Keeping Blender
 brush-preset-dither-blender = Dither Blender
 brush-preset-blending-knife = Blending Knife
 brush-preset-blending-stump = Blending Stump

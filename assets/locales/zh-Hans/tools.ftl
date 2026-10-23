@@ -209,7 +209,6 @@ brush-preset-painterly-blender = 绘画混色
 brush-preset-crystal-blender = 晶体混色
 brush-preset-marbling = 大理石纹
 brush-preset-comb-blender = 梳理混色
-brush-preset-edge-keeping-blender = 保边混色
 brush-preset-dither-blender = 抖动混色
 brush-preset-blending-knife = 混色刀
 brush-preset-blending-stump = 纸擦笔

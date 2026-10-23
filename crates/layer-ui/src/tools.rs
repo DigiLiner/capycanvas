@@ -258,7 +258,6 @@ const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
     (DefaultBrushPreset::BlendingStump, MessageId::BRUSH_PRESET_BLENDING_STUMP, ToolGroup::Blend),
     (DefaultBrushPreset::Tissue, MessageId::BRUSH_PRESET_TISSUE, ToolGroup::Blend),
     (DefaultBrushPreset::GrainyBlender, MessageId::BRUSH_PRESET_GRAINY_BLENDER, ToolGroup::Blend),
-    (DefaultBrushPreset::EdgeKeepingBlender, MessageId::BRUSH_PRESET_EDGE_KEEPING_BLENDER, ToolGroup::Blend),
     (DefaultBrushPreset::TextureBlender, MessageId::BRUSH_PRESET_TEXTURE_BLENDER, ToolGroup::Blend),
     (DefaultBrushPreset::HueBlender, MessageId::BRUSH_PRESET_HUE_BLENDER, ToolGroup::Blend),
     (DefaultBrushPreset::NaturalBlender, MessageId::BRUSH_PRESET_NATURAL_BLENDER, ToolGroup::WetPaint),
@@ -708,7 +707,7 @@ mod tests {
 
     #[test]
     fn every_brush_has_one_tool_and_group_and_every_group_is_populated() {
-        assert_eq!(PRESETS.len(), 66);
+        assert_eq!(PRESETS.len(), 65);
         let mut ids = std::collections::BTreeSet::new();
         for &(preset, _, group) in PRESETS {
             assert!(ids.insert(preset as u32));

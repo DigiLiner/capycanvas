@@ -371,7 +371,6 @@ brush-preset-painterly-blender = Pembaur Lukis
 brush-preset-crystal-blender = Pembaur Kristal
 brush-preset-marbling = Marmer
 brush-preset-comb-blender = Pembaur Sisir
-brush-preset-edge-keeping-blender = Pembaur Penjaga Tepi
 brush-preset-dither-blender = Pembaur Dither
 brush-preset-blending-knife = Pisau Pembaur
 brush-preset-blending-stump = Stik pembaur kertas

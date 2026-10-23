@@ -488,7 +488,7 @@ const DEFINITIONS: &[Definition] = &[
         label: MessageId::TOOL_SETTING_EDGE_KEEPING,
         group: Some(MessageId::TOOL_SETTING_GROUP_BLENDER),
         numeric: NumericControl::percent,
-        field: |b| blender(b, |kind| matches!(kind, BlenderKind::EdgeKeeping | BlenderKind::Comb)).then_some(&mut b.blender.character),
+        field: |b| blender(b, |kind| kind == BlenderKind::Comb).then_some(&mut b.blender.character),
     },
     Definition {
         id: "detail_size",
@@ -760,7 +760,7 @@ mod tests {
             (DefaultBrushPreset::Smudge, &["pull", "spread", "streaks"][..], &["swirl", "average_pickup"][..]),
             (DefaultBrushPreset::CrystalBlender, &["spread", "stretch", "cell_size"], &["streaks", "swirl_size"]),
             (DefaultBrushPreset::Marbling, &["swirl", "swirl_size"], &["spread", "cell_size"]),
-            (DefaultBrushPreset::EdgeKeepingBlender, &["spread", "edge_keeping"], &["streaks"]),
+            (DefaultBrushPreset::CombBlender, &["spread", "edge_keeping"], &["streaks"]),
             (DefaultBrushPreset::TextureBlender, &["texture_kept", "detail_size"], &["stretch"]),
             (DefaultBrushPreset::ColorMixer, &["pull", "average_pickup", "persistence", "pressure_refill"], &["spread"]),
             (DefaultBrushPreset::WetBlender, &["average_pickup", "pressure_refill"], &["persistence", "spread"]),

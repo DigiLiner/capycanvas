@@ -209,7 +209,6 @@ brush-preset-painterly-blender = 絵画風混色
 brush-preset-crystal-blender = 結晶混色
 brush-preset-marbling = マーブリング
 brush-preset-comb-blender = くし混色
-brush-preset-edge-keeping-blender = 輪郭を保つ混色
 brush-preset-dither-blender = ディザ混色
 brush-preset-blending-knife = 混色ナイフ
 brush-preset-blending-stump = 擦筆

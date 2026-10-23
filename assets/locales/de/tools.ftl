@@ -208,7 +208,6 @@ brush-preset-painterly-blender = Malerischer Mischpinsel
 brush-preset-crystal-blender = Kristall-Mischpinsel
 brush-preset-marbling = Marmorieren
 brush-preset-comb-blender = Kamm-Mischpinsel
-brush-preset-edge-keeping-blender = Kantenschonender Mischpinsel
 brush-preset-dither-blender = Dither-Mischpinsel
 brush-preset-blending-knife = Mischmesser
 brush-preset-blending-stump = Papierwischer

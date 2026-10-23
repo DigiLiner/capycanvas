@@ -69,7 +69,6 @@ pub enum DefaultBrushPreset {
     CrystalBlender = 51,
     Marbling = 52,
     CombBlender = 53,
-    EdgeKeepingBlender = 54,
     DitherBlender = 55,
     BlendingKnife = 56,
     WetBlender = 57,
@@ -85,7 +84,7 @@ pub enum DefaultBrushPreset {
 }
 
 impl DefaultBrushPreset {
-    pub const ALL: [Self; 66] = [
+    pub const ALL: [Self; 65] = [
         Self::GPen, Self::Pencil, Self::Eraser, Self::Paintbrush, Self::Airbrush, Self::Chalk, Self::Marker,
         Self::Spray, Self::DualTexture, Self::Smudge, Self::WetRound, Self::LiquifyPush, Self::LiquifyTwirl,
         Self::MultiplyGlaze, Self::TexturedFlat, Self::DryScumble, Self::PastelBlock, Self::TransparentGlaze,
@@ -96,7 +95,7 @@ impl DefaultBrushPreset {
         Self::LiquifyCrystals, Self::CloneStamp, Self::HealingBrush, Self::SpotHealingBrush, Self::Crayon,
         Self::Monoline, Self::SoftBlender, Self::Blur, Self::BristleBlender, Self::GrainyBlender,
         Self::ScatterBlender, Self::PainterlyBlender, Self::CrystalBlender, Self::Marbling, Self::CombBlender,
-        Self::EdgeKeepingBlender, Self::DitherBlender, Self::BlendingKnife, Self::WetBlender, Self::ColorMixer,
+        Self::DitherBlender, Self::BlendingKnife, Self::WetBlender, Self::ColorMixer,
         Self::MixingBrush, Self::Sharpen, Self::TextureBlender, Self::HueBlender,
         Self::LiquifyEdge, Self::LiquifyReconstruct, Self::BlendingStump, Self::Tissue,
     ];
@@ -284,7 +283,6 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         DefaultBrushPreset::CrystalBlender => blender(BlenderKind::Crystal, BlenderSpec { reach: 0.06, rate: 4.0, scale: 0.18, ..BlenderSpec::BASE }),
         DefaultBrushPreset::Marbling => blender(BlenderKind::Marbling, BlenderSpec { rate: 30.0, pull: 0.4, character: 1.0, scale: 0.45, ..BlenderSpec::BASE }),
         DefaultBrushPreset::CombBlender => blender(BlenderKind::Comb, BlenderSpec { reach: 0.35, rate: 14.0, ..BlenderSpec::BASE }),
-        DefaultBrushPreset::EdgeKeepingBlender => blender(BlenderKind::EdgeKeeping, BlenderSpec { reach: 0.25, rate: 10.0, character: 0.5, ..BlenderSpec::BASE }),
         DefaultBrushPreset::DitherBlender => blender(BlenderKind::Dither, BlenderSpec { reach: 0.08, rate: 6.0, hardness: 0.9, ..BlenderSpec::BASE }),
         DefaultBrushPreset::WetBlender => wet_blender(0.55, 0.0, 0.3),
         DefaultBrushPreset::ColorMixer => {

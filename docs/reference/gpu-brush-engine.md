@@ -232,7 +232,7 @@ selected by the module constant `BLENDER`: disc averages for Soft, Blur and Hue,
 a paper-guided regression for Grainy, frequency separation for Texture-Keeping,
 a clamped Catmull-Rom backtrace for the Knife, eight-sector minimum variance for
 Painterly, Voronoi cells for Crystal, curl-noise advection for Marbling, a
-structure-tensor streamline for Comb and wall-stopped rays for Edge-Keeping.
+structure-tensor streamline for Comb.
 The 128 px trace and 112 px radius keep
 every sample inside the page's 3×3 neighbourhood, so these kernels need no
 gather, and a sample inside the page's own texture skips the neighbourhood

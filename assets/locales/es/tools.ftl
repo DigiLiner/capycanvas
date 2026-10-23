@@ -208,7 +208,6 @@ brush-preset-painterly-blender = Mezclador pictórico
 brush-preset-crystal-blender = Mezclador de cristal
 brush-preset-marbling = Marmolado
 brush-preset-comb-blender = Mezclador peine
-brush-preset-edge-keeping-blender = Mezclador que conserva bordes
 brush-preset-dither-blender = Mezclador de tramado
 brush-preset-blending-knife = Espátula de mezcla
 brush-preset-blending-stump = Difumino

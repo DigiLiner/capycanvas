@@ -209,7 +209,6 @@ brush-preset-painterly-blender = 회화풍 혼색
 brush-preset-crystal-blender = 결정 혼색
 brush-preset-marbling = 마블링
 brush-preset-comb-blender = 빗질 혼색
-brush-preset-edge-keeping-blender = 경계 유지 혼색
 brush-preset-dither-blender = 디더 혼색
 brush-preset-blending-knife = 혼색 나이프
 brush-preset-blending-stump = 찰필

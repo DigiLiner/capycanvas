@@ -11,7 +11,6 @@ const BLEND_PAINTERLY: u32 = 9u;
 const BLEND_CRYSTAL: u32 = 10u;
 const BLEND_MARBLING: u32 = 11u;
 const BLEND_COMB: u32 = 12u;
-const BLEND_EDGE: u32 = 13u;
 const BLEND_REACH_LIMIT: f32 = 112.0;
 const SMUDGE_TRAVEL_LIMIT: f32 = 128.0;
 
@@ -429,48 +428,6 @@ fn comb_field(world: vec2<f32>, contact: BlendContact) -> vec4<f32> {
     return mix(origin, sum / weights, fade);
 }
 
-fn edge_wall() -> f32 {
-    return mix(0.45, 0.12, min(blender_character(), 1.0));
-}
-
-fn edge_field(world: vec2<f32>, center: vec4<f32>, contact: BlendContact) -> Blended {
-    let step = clamp(blend_radius(contact, BLEND_REACH_LIMIT) / 5.0, 1.0, 2.0);
-    let wall = edge_wall();
-    let rotation = chunk_rotation(contact);
-    let toward = contact.center - world;
-    let distance = length(toward);
-    var facing = -2.0;
-    var walled = false;
-    var sum = center;
-    var weights = 1.0;
-    for (var ray = 0u; ray < 8u; ray += 1u) {
-        let angle = rotation + f32(ray) * 0.7853982;
-        let heading = vec2<f32>(cos(angle), sin(angle));
-        var previous = center;
-        var path = 0.0;
-        var reached = 5.0 * step;
-        for (var index = 1u; index <= 5u; index += 1u) {
-            let sample = blend_tap(world + heading * step * f32(index));
-            let jump = length(sample - previous);
-            if jump > wall * 0.6 || length(sample - center) > wall {
-                reached = step * f32(index);
-                break;
-            }
-            path += jump;
-            let weight = exp(-path * path / (wall * wall * 4.0)) * (1.0 - f32(index) / 6.0);
-            sum += sample * weight;
-            weights += weight;
-            previous = sample;
-        }
-        let alignment = dot(heading, toward) / max(distance, 0.000001);
-        if alignment > facing {
-            facing = alignment;
-            walled = reached < min(distance, 5.0 * step);
-        }
-    }
-    return Blended(sum / weights, select(blend_amount(contact), 0.0, walled && distance > 0.5));
-}
-
 fn bristle_lane(world: vec2<f32>, contact: BlendContact) -> f32 {
     let lateral = dot(world - contact.center, vec2<f32>(-contact.direction.y, contact.direction.x)) / max(contact.diameter, 0.01);
     return min(blender_character(), 1.0) * bristle_profile(lateral, max(blender_scale() * 40.0, 1.0), contact.seed ^ 0x2545f491u);
@@ -521,9 +478,6 @@ fn blended_by(world: vec2<f32>, original: vec4<f32>, contact: BlendContact) -> B
         }
         case BLEND_COMB: {
             return Blended(comb_field(world, contact), amount);
-        }
-        case BLEND_EDGE: {
-            return edge_field(world, mix_space_tap(original), contact);
         }
         default: {
             return Blended(disc(contact.trace, radius, BLEND_TAPS, chunk_rotation(contact)), amount * (1.0 - bristle_lane(world, contact)));

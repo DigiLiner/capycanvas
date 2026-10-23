@@ -208,7 +208,6 @@ brush-preset-painterly-blender = Sfumino pittorico
 brush-preset-crystal-blender = Sfumino cristallino
 brush-preset-marbling = Marmorizzazione
 brush-preset-comb-blender = Sfumino a pettine
-brush-preset-edge-keeping-blender = Sfumino che preserva i bordi
 brush-preset-dither-blender = Sfumino a retino
 brush-preset-blending-knife = Spatola per sfumare
 brush-preset-blending-stump = Sfumino di carta

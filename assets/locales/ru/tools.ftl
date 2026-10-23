@@ -209,7 +209,6 @@ brush-preset-painterly-blender = Живописное смешивание
 brush-preset-crystal-blender = Кристаллическое смешивание
 brush-preset-marbling = Мраморирование
 brush-preset-comb-blender = Смешивание гребнем
-brush-preset-edge-keeping-blender = Смешивание с сохранением краёв
 brush-preset-dither-blender = Смешивание растром
 brush-preset-blending-knife = Смешивающий мастихин
 brush-preset-blending-stump = Бумажная растушёвка

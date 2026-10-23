@@ -29,7 +29,7 @@ PRESETS = {
     38: "liquify-expand", 39: "liquify-crystals", 40: "clone-stamp", 41: "healing-brush",
     42: "spot-healing-brush", 45: "soft-blender", 46: "blur", 47: "bristle-blender", 48: "grainy-blender",
     49: "scatter-blender", 50: "painterly-blender", 51: "crystal-blender", 52: "marbling", 53: "comb-blender",
-    54: "edge-keeping-blender", 55: "dither-blender", 56: "blending-knife", 57: "wet-blender", 58: "color-mixer",
+    55: "dither-blender", 56: "blending-knife", 57: "wet-blender", 58: "color-mixer",
     59: "mixing-brush", 60: "sharpen", 61: "texture-keeping-blender", 62: "hue-blender",
     63: "liquify-edge", 64: "liquify-reconstruct", 65: "blending-stump", 66: "tissue",
 }

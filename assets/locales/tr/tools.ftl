@@ -208,7 +208,6 @@ brush-preset-painterly-blender = Ressamca karıştırıcı
 brush-preset-crystal-blender = Kristal karıştırıcı
 brush-preset-marbling = Ebru
 brush-preset-comb-blender = Tarak karıştırıcı
-brush-preset-edge-keeping-blender = Kenar koruyan karıştırıcı
 brush-preset-dither-blender = Dither karıştırıcı
 brush-preset-blending-knife = Karıştırma bıçağı
 brush-preset-blending-stump = Kâğıt karıştırma kalemi

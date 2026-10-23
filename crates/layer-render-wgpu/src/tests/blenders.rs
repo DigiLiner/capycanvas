@@ -1,9 +1,8 @@
 //! Smudge blenders and the wet blenders on fixed scenes: flat and faint paint
-//! stay put, a colour edge blends along its length, lines stop the
-//! edge-keeping blender, the colour mixer carries one colour, the amount is
-//! independent of spacing, paint pulled into transparency fades without
-//! stripes, the texture-keeping blenders keep fine detail, the paper decides
-//! what a pressed tip reaches and the Tissue lifts pigment.
+//! stay put, a colour edge blends along its length, the colour mixer carries
+//! one colour, the amount is independent of spacing, paint pulled into
+//! transparency fades without stripes, the texture-keeping blenders keep fine
+//! detail, the paper decides what a pressed tip reaches and the Tissue lifts pigment.
 use super::brush_blending::Canvas;
 use super::*;
 use layer_core::color::{DocumentColor, RgbSpace, SampleDepth};
@@ -402,26 +401,6 @@ fn blenders_mix_an_edge_they_stroke_along() {
         }
         assert_eq!(pixel(&after, 20, 64), pixel(&before, 20, 64), "{preset:?} leaves paint beyond its reach");
     }
-}
-
-#[test]
-fn edge_keeping_stops_at_a_thin_line_that_soft_blending_crosses() {
-    let line_change = |preset| {
-        let mut canvas = canvas();
-        canvas.fill(canvas.base, [0.8, 0.55, 0.45, 1.]);
-        for y in 0..128 {
-            let mut dab = test_dab([64., y as f32 + 0.5], [0.01, 0.01, 0.01, 1.], 1.);
-            dab.radii = [1.2; 2];
-            dab.hardness = 1.;
-            canvas.paint(canvas.base, test_style(BrushExecution::Dry), dab);
-        }
-        let before = pixel(&canvas.composite(), 64, 64)[0];
-        let brush = brush(preset, 40.);
-        canvas.stroke(1, &brush, &contacts(&brush, &line([30., 64.], [98., 64.])), 6, false);
-        (pixel(&canvas.composite(), 64, 64)[0] - before).abs()
-    };
-    assert!(line_change(P::EdgeKeepingBlender) < 0.01, "the line survives edge-keeping blending");
-    assert!(line_change(P::SoftBlender) > 0.1, "soft blending crosses the line");
 }
 
 #[test]

@@ -147,17 +147,6 @@ fn blender(canvas: &mut Canvas, preset: Preset, tones: &Tones) -> Result<(), Str
                 lens(canvas, Preset::Charcoal, charcoal, 26.0, rise, 14.0, 386.0)?;
             }
         }
-        Preset::EdgeKeepingBlender => {
-            lens(canvas, Preset::GPen, shades.light, 62.0, 0.0, 14.0, 386.0)?;
-            for cx in [70.0, 200.0, 330.0] {
-                let cy = centre(cx);
-                for (color, diameter, dx, dy) in [(shades.dark, 54.0, 0.0, 0.0), (shades.mid, 42.0, -4.0, -4.0), (shades.light, 20.0, -9.0, -9.0)] {
-                    paint(canvas, Preset::GPen, color, diameter, &[(cx + dx, cy + dy, 1.0), (cx + dx + 0.01, cy + dy, 1.0)])?;
-                }
-                let ring: Vec<_> = (0..=64).map(|i| { let a = i as f32 / 64.0 * TAU; (cx + 27.0 * a.cos(), cy + 27.0 * a.sin(), 1.0) }).collect();
-                paint(canvas, Preset::GPen, tones.strong, 3.0, &ring)?;
-            }
-        }
         Preset::BlendingKnife => {
             let blocks = if tones.strong[0] > 0.5 { [0x9a9a9a, 0xe4e4e4, 0x6a6a6a, 0xbdbdbd] } else { [0xb0b0b0, 0x353535, 0x7a7a7a, 0x505050] };
             for (k, color) in blocks.map(srgb).into_iter().enumerate() {

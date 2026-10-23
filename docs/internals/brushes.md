@@ -126,9 +126,9 @@ layer and lays no color of its own. They come in three sets:
   the Blending Stump, which pushes pigment into the paper's tooth and deepens
   the tone without dragging it, the Tissue, which spreads it softly over the
   peaks and lifts some away, the Grainy Blender, which puts the paper tooth
-  back, the Edge-Keeping Blender, which stops at lines, the Texture-Keeping
-  Blender, which keeps fine brush texture over the blended color, and the Hue
-  Blender, which blends hue and saturation but keeps every pixel's lightness.
+  back, the Texture-Keeping Blender, which keeps fine brush texture over the
+  blended color, and the Hue Blender, which blends hue and saturation but keeps
+  every pixel's lightness.
 - **Wet paint**, which moves paint as a brush or knife does: the Natural
   Blender, the Wet Blender, which carries what each part of the tip picked up
   and runs dry, the Color Mixer, which carries one color averaged over the tip,

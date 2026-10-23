@@ -791,15 +791,13 @@ pub enum BlenderKind {
     Marbling,
     /// Smooths along the strands already painted, like combing hair.
     Comb,
-    /// Mixes only what a pixel reaches without crossing an edge.
-    EdgeKeeping,
     /// Dithers between colors already present without adding new ones.
     Dither,
 }
 
 impl BlenderKind {
-    pub const ALL: [Self; 15] = [Self::Soft, Self::Blur, Self::Sharpen, Self::Bristle, Self::Grainy, Self::TextureKeeping,
-        Self::Hue, Self::Knife, Self::Scatter, Self::Painterly, Self::Crystal, Self::Marbling, Self::Comb, Self::EdgeKeeping,
+    pub const ALL: [Self; 14] = [Self::Soft, Self::Blur, Self::Sharpen, Self::Bristle, Self::Grainy, Self::TextureKeeping,
+        Self::Hue, Self::Knife, Self::Scatter, Self::Painterly, Self::Crystal, Self::Marbling, Self::Comb,
         Self::Dither];
 
     /// Kinds that imitate a tool touching the sheet, so they blend only the

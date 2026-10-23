@@ -209,7 +209,6 @@ brush-preset-painterly-blender = Hòa màu kiểu tranh
 brush-preset-crystal-blender = Hòa màu tinh thể
 brush-preset-marbling = Vân cẩm thạch
 brush-preset-comb-blender = Hòa màu chải
-brush-preset-edge-keeping-blender = Hòa màu giữ cạnh
 brush-preset-dither-blender = Hòa màu điểm ảnh
 brush-preset-blending-knife = Dao hòa màu
 brush-preset-blending-stump = Bút di chì
