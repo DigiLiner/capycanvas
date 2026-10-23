@@ -57,7 +57,7 @@ fn view(s: &UiSession<Recorder>, id: u32) -> BubbleView {
 }
 
 fn tap(s: &mut UiSession<Recorder>, id: u32) {
-    act(s, BubbleAction::Tap { id }).unwrap();
+    act(s, BubbleAction::Tap { id, position: [0.; 2] }).unwrap();
 }
 
 fn open_ring(s: &mut UiSession<Recorder>, id: u32) {
@@ -377,21 +377,69 @@ fn halo_contacts_set_values_along_their_arc() {
 }
 
 #[test]
-fn slider_bubbles_set_their_value_from_the_ring() {
+fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     let mut s = desk();
-    let id = take_control(&mut s, ToolbarControl::Opacity, FAR);
+    let id = take_control(&mut s, ToolbarControl::ColorPicker, FAR);
     let bubble = view(&s, id);
-    assert_eq!(bubble.source, BubbleSource::Control { control: ToolbarControl::BrushOpacitySlider });
-    assert_eq!(bubble.diameter, SLIDER_BUBBLE);
+    assert_eq!((bubble.kind, bubble.face), (BubbleKind::Controls, [TOOL_BUBBLE; 2]));
+    assert_eq!(bubble.rings.len(), 2, "both sliders are open without a tap");
+    assert_eq!(bubble.rings[0].setting, "size");
+    let size = |s: &UiSession<Recorder>| ToolbarNumericBinding::BrushSize.field(&s.state).unwrap().value;
+    let before = size(&s);
     let ring = bubble.rings[0].clone();
-    assert_eq!(ring.arc, slider_ring());
-    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.5) }).unwrap();
-    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: ring.arc.point(0.5) }).unwrap();
-    let opacity = s.state.tool_settings.iter().find(|c| c.id == "opacity").unwrap().value;
-    assert!((opacity - 0.5).abs() < 0.011, "{opacity}");
-    assert!((view(&s, id).rings[0].fill - 0.5).abs() < 0.011);
-    tap(&mut s, id);
-    assert!(!view(&s, id).open, "taps on sliders change nothing");
+    let pencil = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [300., 300.]);
+    tap(&mut s, pencil);
+    tap(&mut s, pencil);
+    act(&mut s, BubbleAction::ToggleRingSetting { brush: DefaultBrushPreset::PointyPencil as u32, setting: "size".into() }).unwrap();
+    assert!(view(&s, pencil).rings.iter().any(|r| r.setting == "size"), "a brush halo shows Size too");
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.8) }).unwrap();
+    assert_ne!(size(&s), before);
+    let halo = view(&s, pencil);
+    assert!(halo.readout.is_none() && halo.rings.iter().all(|r| !r.active), "only the bubble being dragged shows its value");
+    let stamp = view(&s, id).stamp.expect("a dab in the current color follows the contact");
+    assert_eq!(stamp.center, ring.arc.point(0.8));
+    assert_eq!(stamp.color, s.state.colors.definition());
+    assert!((stamp.diameter - size(&s) * s.state.camera.zoom).abs() < 1e-3, "{stamp:?}");
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Move, position: ring.arc.point(0.6) }).unwrap();
+    assert_eq!(view(&s, id).stamp.unwrap().center, ring.arc.point(0.6));
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: ring.arc.point(0.6) }).unwrap();
+    assert!(view(&s, id).stamp.is_none(), "the dab goes with the contact");
+    assert_eq!(view(&s, id).rings.len(), 2, "the sliders stay open");
+    let strength = bubble.rings[1].clone();
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: strength.arc.point(0.25) }).unwrap();
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: strength.arc.point(0.25) }).unwrap();
+    let value = ToolbarNumericBinding::BrushStrength.field(&s.state).unwrap().value;
+    assert!((value - 0.25).abs() < 0.011, "{value}");
+    act(&mut s, BubbleAction::Tap { id, position: [0., TOOL_BUBBLE] }).unwrap();
+    assert!(!view(&s, id).selected, "taps beside the center change nothing");
+    act(&mut s, BubbleAction::Tap { id, position: [0., 0.] }).unwrap();
+    assert!(view(&s, id).selected, "the center starts the color picker");
+    let picking = view(&s, id).rings;
+    assert_eq!(picking.iter().map(|r| (r.setting, r.enabled)).collect::<Vec<_>>(), [("size", false), ("flow", false)], "the sliders stay, unavailable while picking");
+    assert!(act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.5) }).is_err());
+    act(&mut s, BubbleAction::Tap { id, position: [4., -4.] }).unwrap();
+    assert!(!view(&s, id).selected, "and stops it");
+}
+
+#[test]
+fn undo_and_redo_share_one_bubble() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::Redo }, FAR);
+    let bubble = view(&s, id);
+    assert_eq!((bubble.kind, bubble.face), (BubbleKind::History, HISTORY_BUBBLE));
+    assert_eq!(bubble.buttons.iter().map(|b| b.enabled).collect::<Vec<_>>(), [false, false]);
+    let again = take_control(&mut s, ToolbarControl::Command { command: CommandId::Undo }, [300., 300.]);
+    assert_eq!((again, s.bubbles().len()), (id, 1), "taking undo moves the same bubble");
+    let layers = s.state.layers.len();
+    s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
+    assert_eq!(view(&s, id).buttons.iter().map(|b| b.enabled).collect::<Vec<_>>(), [true, false]);
+    act(&mut s, BubbleAction::Tap { id, position: [12., 0.] }).unwrap();
+    assert_eq!(s.state.layers.len(), layers + 1, "a disabled redo does nothing");
+    act(&mut s, BubbleAction::Tap { id, position: [-12., 0.] }).unwrap();
+    assert_eq!(s.state.layers.len(), layers, "the left half undoes");
+    assert_eq!(view(&s, id).buttons.iter().map(|b| b.enabled).collect::<Vec<_>>(), [false, true]);
+    act(&mut s, BubbleAction::Tap { id, position: [12., 0.] }).unwrap();
+    assert_eq!(s.state.layers.len(), layers + 1, "the right half redoes");
 }
 
 #[test]
@@ -615,7 +663,7 @@ fn putting_back_an_open_bubble_closes_its_halo_and_chooser() {
     assert!(!view(&s, id).chooser.is_empty());
     act(&mut s, BubbleAction::PutBack { id }).unwrap();
     assert!(s.bubbles().is_empty() && s.bubble_placements().is_empty());
-    assert!(act(&mut s, BubbleAction::Tap { id }).is_err());
+    assert!(act(&mut s, BubbleAction::Tap { id, position: [0.; 2] }).is_err());
     assert!(act(&mut s, BubbleAction::Choose { id, phase: ContactPhase::Up, position: [0., 0.] }).unwrap().regions == 0);
 }
 

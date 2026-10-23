@@ -6,21 +6,21 @@ mod desk;
 pub(crate) use desk::{Desk, Shape};
 
 pub const TOOL_BUBBLE: f32 = 56.;
-pub const SLIDER_BUBBLE: f32 = 96.;
-pub const SLIDER_CENTER: f32 = 54.;
+pub const HISTORY_BUBBLE: [f32; 2] = [104., 56.];
+pub const CONTROL_RINGS: [ToolbarNumericBinding; 2] = [ToolbarNumericBinding::BrushSize, ToolbarNumericBinding::BrushStrength];
+pub const HISTORY_COMMANDS: [CommandId; 2] = [CommandId::Undo, CommandId::Redo];
 pub const COLOR_RING_SIZES: [f32; 3] = [136., 216., 344.];
 pub const COLOR_RING_RANGE: [f32; 2] = [128., 352.];
 pub const RING_RIM: f32 = 7.;
 pub const BUBBLE_BEAD: f32 = 24.;
-pub const FOREGROUND_BEAD: f32 = 30.;
-pub const BACKGROUND_BEAD: f32 = 24.;
 pub const PALETTE_BEAD: f32 = 26.;
 pub const BEAD_STEP: f32 = 28.;
 pub const RECENT_BEADS: usize = 8;
 pub const MAX_RING_SETTINGS: usize = 6;
 pub const RING_TRACK: f32 = 4.;
-pub const HALO_RINGS: [f32; 2] = [47.5, 80.];
-pub const HALO_BANDS: [f32; 2] = [27., 28.];
+pub const HALO_RINGS: [f32; 2] = [53., 88.];
+pub const HALO_BANDS: [f32; 2] = [30., 30.];
+pub const RING_ICON: f32 = 21.;
 pub const CHOOSER_ITEM: f32 = 44.;
 pub const CHOOSER_RING: f32 = 84.;
 pub const BRUSH_PILL: [f32; 2] = [112., 40.];
@@ -30,7 +30,6 @@ pub const CARD_ROWS: [f32; 2] = [40., 48.];
 pub const CARD_HEADER: f32 = 38.;
 pub const CARD_VISIBLE_ROWS: usize = 5;
 pub const STROKE_FADE: f32 = 48.;
-const SLIDER_RING: f32 = 38.;
 const BRUSH_COLUMN: f32 = 170.;
 const BRUSH_FAN: f32 = 96.;
 const CARD_PROPERTIES: f32 = 124.;
@@ -48,7 +47,8 @@ pub enum BubbleKind {
     Dial,
     Brush,
     Medium,
-    Slider,
+    Controls,
+    History,
     Color,
     Layers,
 }
@@ -56,12 +56,11 @@ pub enum BubbleKind {
 impl BubbleSource {
     pub fn for_control(control: ToolbarControl) -> Option<Self> {
         let control = match control {
-            ToolbarControl::Opacity => ToolbarControl::BrushOpacitySlider,
-            ToolbarControl::Color
+            ToolbarControl::Command { command: CommandId::Redo } => ToolbarControl::Command { command: CommandId::Undo },
+            ToolbarControl::Command { command: CommandId::Undo }
+            | ToolbarControl::Color
+            | ToolbarControl::ColorPicker
             | ToolbarControl::Brush { .. }
-            | ToolbarControl::BrushSizeSlider
-            | ToolbarControl::BrushOpacitySlider
-            | ToolbarControl::BrushStrengthSlider
             | ToolbarControl::Panel { panel: Panel::Layers } => control,
             control if control.has_variants() => control,
             _ => return None,
@@ -84,7 +83,8 @@ impl BubbleSource {
             Self::Control { control: ToolbarControl::Brush { .. } } => BubbleKind::Brush,
             Self::Control { control: ToolbarControl::Color } => BubbleKind::Color,
             Self::Control { control: ToolbarControl::Panel { .. } } => BubbleKind::Layers,
-            Self::Control { control } if control.slider().is_some() => BubbleKind::Slider,
+            Self::Control { control: ToolbarControl::ColorPicker } => BubbleKind::Controls,
+            Self::Control { control: ToolbarControl::Command { command: CommandId::Undo } } => BubbleKind::History,
             Self::Control { .. } => BubbleKind::Dial,
         }
     }
@@ -192,16 +192,18 @@ impl ToolBubble {
     }
     pub fn diameter(&self, narrow: bool) -> f32 {
         match self.source.kind() {
-            BubbleKind::Slider => SLIDER_BUBBLE,
+            BubbleKind::Controls => halo_disc(CONTROL_RINGS.len()),
+            BubbleKind::History => HISTORY_BUBBLE[0],
             BubbleKind::Color if narrow => self.options.size.min(COLOR_RING_SIZES[0]),
             BubbleKind::Color => self.options.size,
             _ => TOOL_BUBBLE,
         }
     }
-    pub(crate) fn shape(&self, narrow: bool) -> Shape {
+    pub(crate) fn shape(&self, narrow: bool, pair: PairBeads) -> Shape {
         match self.source.kind() {
-            BubbleKind::Color => Shape::circle(color_reach(self.diameter(narrow), self.options)),
+            BubbleKind::Color => Shape::circle(color_reach(self.diameter(narrow), self.options, pair)),
             BubbleKind::Layers => Shape::rect([TOOL_BUBBLE; 2]),
+            BubbleKind::History => Shape::rect(HISTORY_BUBBLE),
             _ => Shape::circle(self.diameter(narrow) * 0.5),
         }
     }
@@ -433,23 +435,47 @@ fn clear(center: [f32; 2], radius: f32, obstacles: &[([f32; 2], f32)]) -> bool {
     obstacles.iter().all(|(at, r)| (center[0] - at[0]).hypot(center[1] - at[1]) >= radius + r + BEAD_CLEARANCE)
 }
 
-fn pair_offset() -> [f32; 2] {
-    let (fg, bg) = (FOREGROUND_BEAD, BACKGROUND_BEAD);
-    [0.04 * fg + 0.5 * bg, 0.5 * fg - 0.24 * bg]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PairBeads {
+    pub foreground: f32,
+    pub background: f32,
+    pub gap: f32,
 }
 
-fn pair_at(size: f32, angle: f32) -> [[f32; 2]; 2] {
-    let radius = size * 0.5 + 4.;
-    let offset = pair_offset();
+impl PairBeads {
+    const SMALLEST: Self = Self { foreground: 30., background: 24., gap: 10. };
+
+    pub fn for_window(width: f32) -> Self {
+        let stage = Panel::Color.default_width(width) - 2. * PANEL_CONTENT_INSET;
+        let Some((layout, wheel)) = ColorPanelLayout::new(stage).and_then(|l| Some((l, ColorWheelGeometry::new(l.wheel[2])?))) else {
+            return Self::SMALLEST;
+        };
+        let center = [layout.wheel[0] + layout.wheel[2] * 0.5, layout.wheel[1] + layout.wheel[3] * 0.5];
+        let gap = [layout.foreground, layout.background, layout.transparent]
+            .map(|[x, y, w, _]| (x + w * 0.5 - center[0]).hypot(y + w * 0.5 - center[1]) - wheel.outer - w * 0.5)
+            .into_iter()
+            .fold(f32::MAX, f32::min);
+        Self { foreground: layout.foreground[2], background: layout.background[2], gap }
+    }
+
+    fn offset(self) -> [f32; 2] {
+        let (fg, bg) = (self.foreground, self.background);
+        [0.04 * fg + 0.5 * bg, 0.5 * fg - 0.24 * bg]
+    }
+}
+
+fn pair_at(size: f32, angle: f32, pair: PairBeads) -> [[f32; 2]; 2] {
+    let radius = size * 0.5 + pair.gap;
+    let offset = pair.offset();
     let u = polar(1., angle);
     let along = offset[0] * u[0] + offset[1] * u[1];
-    let reach = (radius + BACKGROUND_BEAD * 0.5).powi(2) - (offset[0] * offset[0] + offset[1] * offset[1]) + along * along;
-    let distance = (radius + FOREGROUND_BEAD * 0.5).max(reach.max(0.).sqrt() - along);
+    let reach = (radius + pair.background * 0.5).powi(2) - (offset[0] * offset[0] + offset[1] * offset[1]) + along * along;
+    let distance = (radius + pair.foreground * 0.5).max(reach.max(0.).sqrt() - along);
     let foreground = polar(distance, angle);
     [foreground, [foreground[0] + offset[0], foreground[1] + offset[1]]]
 }
 
-pub fn color_beads(size: f32, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2], front: Bead) -> Vec<BeadPlacement> {
+pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: usize, swatches: usize, scroll: [f32; 2], front: Bead) -> Vec<BeadPlacement> {
     let step = bead_degrees(size);
     let mut beads = Vec::new();
     let mut obstacles = Vec::new();
@@ -473,20 +499,20 @@ pub fn color_beads(size: f32, options: BubbleOptions, recent: usize, swatches: u
     if options.pair {
         let last = strip_last(BeadStrip::Palette, size, swatches);
         let start = if options.palette { strip_angle(BeadStrip::Palette, size, -FADE_COLUMNS, last) } else { 140. };
-        let place = |angle: f32| pair_at(size, angle);
-        let fits = |[f, b]: [[f32; 2]; 2]| clear(f, FOREGROUND_BEAD * 0.5, &obstacles) && clear(b, BACKGROUND_BEAD * 0.5, &obstacles);
+        let place = |angle: f32| pair_at(size, angle, pair);
+        let fits = |[f, b]: [[f32; 2]; 2]| clear(f, pair.foreground * 0.5, &obstacles) && clear(b, pair.background * 0.5, &obstacles);
         let angle = (0..90).map(|i| start + i as f32).find(|a| fits(place(*a))).unwrap_or(start);
         let [foreground, background] = place(angle);
-        let pair = [(Bead::Background, background, BACKGROUND_BEAD), (Bead::Foreground, foreground, FOREGROUND_BEAD)];
-        let order = if front == Bead::Background { [pair[1], pair[0]] } else { pair };
+        let beads_in_order = [(Bead::Background, background, pair.background), (Bead::Foreground, foreground, pair.foreground)];
+        let order = if front == Bead::Background { [beads_in_order[1], beads_in_order[0]] } else { beads_in_order };
         for (bead, center, size) in order {
             beads.push(BeadPlacement { bead, center, size, alpha: 1. });
             obstacles.push((center, size * 0.5));
         }
-        let radius = size * 0.5 + 4. + BUBBLE_BEAD * 0.5;
+        let radius = size * 0.5 + pair.gap + pair.background * 0.5;
         let start = palette.map_or(45., |p| degrees(p.center) - 10.);
-        let angle = (0..90).map(|i| start - i as f32).find(|a| clear(polar(radius, *a), BUBBLE_BEAD * 0.5, &obstacles)).unwrap_or(start);
-        beads.push(BeadPlacement { bead: Bead::Transparent, center: polar(radius, angle), size: BUBBLE_BEAD, alpha: 1. });
+        let angle = (0..90).map(|i| start - i as f32).find(|a| clear(polar(radius, *a), pair.background * 0.5, &obstacles)).unwrap_or(start);
+        beads.push(BeadPlacement { bead: Bead::Transparent, center: polar(radius, angle), size: pair.background, alpha: 1. });
     }
     beads.extend(palette);
     beads
@@ -509,22 +535,22 @@ pub fn color_drag_out(size: f32, point: [f32; 2]) -> bool {
     point[0].hypot(point[1]) > size
 }
 
-pub fn on_color_rim(size: f32, options: BubbleOptions, point: [f32; 2]) -> bool {
+pub fn on_color_rim(size: f32, options: BubbleOptions, pair: PairBeads, point: [f32; 2]) -> bool {
     let radius = point[0].hypot(point[1]);
-    radius > size * 0.5 - RING_RIM && radius <= color_reach(size, options)
+    radius > size * 0.5 - RING_RIM && radius <= color_reach(size, options, pair)
 }
 
-pub fn color_reach(size: f32, options: BubbleOptions) -> f32 {
-    let radius = size * 0.5;
-    if options.palette {
-        orbit(size, 1) + BUBBLE_BEAD * 0.5
-    } else if options.pair {
-        radius + 4. + FOREGROUND_BEAD + BACKGROUND_BEAD * 0.5
-    } else if options.recent {
-        orbit(size, 0) + BUBBLE_BEAD * 0.5
-    } else {
-        radius
-    }
+pub fn color_reach(size: f32, options: BubbleOptions, pair: PairBeads) -> f32 {
+    let [x, y] = pair.offset();
+    [
+        (true, size * 0.5),
+        (options.recent, orbit(size, 0) + BUBBLE_BEAD * 0.5),
+        (options.palette, orbit(size, 1) + BUBBLE_BEAD * 0.5),
+        (options.pair, size * 0.5 + pair.gap + (pair.foreground + pair.background) * 0.5 + x.hypot(y)),
+    ]
+    .into_iter()
+    .filter(|(shown, _)| *shown)
+    .fold(0., |reach, (_, r)| f32::max(reach, r))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -539,7 +565,7 @@ impl RingArc {
         polar(self.radius, self.start + self.sweep * fraction.clamp(0., 1.))
     }
     pub fn icon_point(&self) -> [f32; 2] {
-        polar(self.radius, self.start - self.sweep.signum() * (13. / self.radius).to_degrees())
+        polar(self.radius, self.start - self.sweep.signum() * (RING_ICON / self.radius).to_degrees())
     }
     pub fn fraction(&self, point: [f32; 2]) -> f32 {
         let span = self.sweep.abs();
@@ -566,8 +592,17 @@ pub fn ring_at(arcs: &[RingArc], point: [f32; 2]) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
-pub fn slider_ring() -> RingArc {
-    RingArc { radius: SLIDER_RING, start: 120., sweep: 300., band: SLIDER_BUBBLE * 0.5 - SLIDER_RING + 11. }
+pub fn bubble_face(kind: BubbleKind, diameter: f32) -> [f32; 2] {
+    match kind {
+        BubbleKind::Controls => [TOOL_BUBBLE; 2],
+        BubbleKind::History => HISTORY_BUBBLE,
+        _ => [diameter; 2],
+    }
+}
+
+pub fn history_button(point: [f32; 2]) -> Option<usize> {
+    let [width, height] = HISTORY_BUBBLE;
+    (point[0].abs() <= width * 0.5 && point[1].abs() <= height * 0.5).then_some(usize::from(point[0] >= 0.))
 }
 
 fn halo_ring(count: usize, ring: usize) -> Vec<RingArc> {
@@ -577,7 +612,7 @@ fn halo_ring(count: usize, ring: usize) -> Vec<RingArc> {
         (_, 0) => &[(270., 96.), (30., 96.), (150., 96.)],
         _ => &[(90., 96.), (210., 96.), (330., 96.)],
     };
-    let icon = if ring == 0 { 17. } else { 11. };
+    let icon = ((RING_ICON + 10.) / HALO_RINGS[ring]).to_degrees();
     slots
         .iter()
         .map(|&(middle, span)| {
@@ -741,7 +776,7 @@ impl BubbleGrab {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BubbleAction {
     Drag { grab: BubbleGrab, phase: ContactPhase, position: [f32; 2], viewport: [f32; 2] },
-    Tap { id: u32 },
+    Tap { id: u32, position: [f32; 2] },
     Ring { id: u32, phase: ContactPhase, position: [f32; 2] },
     Beads { id: u32, phase: ContactPhase, position: [f32; 2] },
     Choose { id: u32, phase: ContactPhase, position: [f32; 2] },
@@ -755,6 +790,20 @@ pub enum BubbleAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct BubbleButton {
+    pub label: String,
+    pub icon: &'static str,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct BubbleStamp {
+    pub center: [f32; 2],
+    pub diameter: f32,
+    pub color: layer_core::color::RgbColor,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BubbleRing {
     pub arc: RingArc,
     pub setting: &'static str,
@@ -763,6 +812,7 @@ pub struct BubbleRing {
     pub fill: f32,
     pub text: String,
     pub active: bool,
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -810,6 +860,8 @@ pub struct BubbleView {
     pub source: BubbleSource,
     pub kind: BubbleKind,
     pub diameter: f32,
+    pub face: [f32; 2],
+    pub pair: PairBeads,
     pub label: String,
     pub icon: &'static str,
     pub preview: Option<u32>,
@@ -821,6 +873,8 @@ pub struct BubbleView {
     pub halo: Option<f32>,
     pub rings: Vec<BubbleRing>,
     pub readout: Option<String>,
+    pub stamp: Option<BubbleStamp>,
+    pub buttons: Vec<BubbleButton>,
     pub beads: Vec<BubbleBead>,
     pub pill: Option<String>,
     pub chooser: Vec<ChooserItem>,

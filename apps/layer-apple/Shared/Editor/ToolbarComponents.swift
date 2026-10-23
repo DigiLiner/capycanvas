@@ -59,7 +59,7 @@ private struct BrushSliderComponent: View {
     private var value: Double { field.isNull ? spec["min"].number : field["value"].number }
     private var label: String { field.isNull ? tile["label"].string : field["label"].string }
     private var setting: String {
-        field.isNull ? (tile["control"]["kind"].string == "brush_size_slider" ? "size" : tile["control"]["kind"].string == "brush_opacity_slider" ? "opacity" : "strength") : field["id"].string
+        field.isNull ? (tile["control"]["kind"].string == "brush_size_slider" ? "size" : "strength") : field["id"].string
     }
     var body: some View {
         let item = toolbarItem(panel, tile)

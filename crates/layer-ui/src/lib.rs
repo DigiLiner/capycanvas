@@ -272,7 +272,6 @@ pub enum ToolbarControl {
     ColorPicker,
     Opacity,
     BrushSizeSlider,
-    BrushOpacitySlider,
     BrushStrengthSlider,
     ToolOptions { #[serde(default)] style: ToolOptionsStyle },
     Panel { panel: Panel },

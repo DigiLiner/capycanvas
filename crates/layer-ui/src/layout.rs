@@ -96,7 +96,7 @@ fn toolbar_item_span(
     let tiles = |count: f32| count * (along + gap) - gap;
     let length = match tile.control {
         ToolbarControl::Divider => TOOLBAR_DIVIDER_SIZE,
-        ToolbarControl::BrushSizeSlider | ToolbarControl::BrushOpacitySlider | ToolbarControl::BrushStrengthSlider => tiles(4.0),
+        ToolbarControl::BrushSizeSlider | ToolbarControl::BrushStrengthSlider => tiles(4.0),
         ToolbarControl::ToolOptions { .. } => tiles(if axis == Axis::Vertical { 8.0 } else { 16.0 }),
         _ => along,
     }

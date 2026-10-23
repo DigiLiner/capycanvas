@@ -33,8 +33,14 @@ fn capture(d: &mut Driver, name: &str) {
 
 fn tile_of(d: &Driver, control: ToolbarControl) -> String {
     let layout = state(&d.w).workspace.layout;
-    let id = layout.panels.iter().flat_map(|p| p.tiles().to_vec()).find(|t| t.control == control).unwrap().id;
-    format!("tile-{id}")
+    layout
+        .panels
+        .iter()
+        .flat_map(|p| p.tiles().to_vec())
+        .filter(|t| t.control == control)
+        .map(|t| format!("tile-{}", t.id))
+        .find(|name| find_named(d.w.window.upcast_ref(), name).is_some_and(|w| w.is_mapped()))
+        .unwrap_or_else(|| panic!("no shown tile for {control:?}"))
 }
 
 fn header_of(d: &Driver, control: ToolbarControl) -> String {
@@ -236,6 +242,15 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     assert_eq!((chosen.foreground, chosen.background), (colors.foreground, colors.background), "{name}: nothing swaps");
     tap(d, device, foreground);
     let c = center(d, color.id);
+    if device == "mouse" && std::env::var("WAYLAND_DISPLAY").is_ok_and(|display| display.ends_with("-tablet")) {
+        let widget = d.named(&format!("bubble-{}", color.id));
+        d.input.perform(serde_json::json!([contact("pen", "down", [c[0] + 30., c[1]]), contact("pen", "up", [c[0] + 30., c[1]])]));
+        pump(200);
+        assert_eq!(widget.cursor().and_then(|c| c.name()).as_deref(), Some("none"), "{name}: a pen on the ring shows no pointer");
+        d.input.perform(serde_json::json!([{ "pen": "leave" }, contact("mouse", "move", [c[0] + 30., c[1] + 4.])]));
+        pump(200);
+        assert!(widget.cursor().is_none(), "{name}: the mouse gets its pointer back");
+    }
     d.input.perform(serde_json::json!([contact(device, "down", [c[0] - 12., c[1]])]));
     pump(150);
     let first = state(&d.w).colors.foreground;
@@ -281,6 +296,64 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     capture(d, &format!("{name}-color"));
     tap(d, device, canvas_spot(d, 0.15, 0.2));
     assert!(find_id(d, color.id).unwrap().pill.is_none(), "{name}: a contact elsewhere closes the name");
+}
+
+fn take_tile(d: &mut Driver, device: &str, control: ToolbarControl, to: [f32; 2]) {
+    let from = d.point(&d.named(&tile_of(d, control)));
+    stroke(d, device, &[from, [from[0] + 8., from[1]], [from[0] + 90., from[1]], [to[0] - 30., to[1]], to]);
+}
+
+fn brush_controls(d: &mut Driver, device: &str, name: &str) {
+    take_tile(d, device, ToolbarControl::ColorPicker, canvas_spot(d, 0.3, 0.3));
+    let controls = find(d, BubbleSource::Control { control: ToolbarControl::ColorPicker })
+        .unwrap_or_else(|| panic!("{name}: dragging the color picker out of its bar takes a bubble"));
+    assert_eq!(controls.rings.len(), 2, "{name}: size and strength are open at once");
+    let at = center(d, controls.id);
+    let ring = controls.rings[0].arc;
+    let arc = |f: f32| [at[0] + ring.point(f)[0], at[1] + ring.point(f)[1]];
+    d.w.dispatch(ToolbarNumericBinding::BrushSize.action(3.));
+    let before = state(&d.w).brush.diameter;
+    d.input.perform(serde_json::json!([contact(device, "down", arc(0.3)), contact(device, "move", arc(0.5)), contact(device, "move", arc(0.75))]));
+    pump(300);
+    assert_ne!(state(&d.w).brush.diameter, before, "{name}: the left arc sets the brush size");
+    let stamp = find_id(d, controls.id).unwrap().stamp.unwrap_or_else(|| panic!("{name}: a dab follows the contact"));
+    let under = arc(0.75);
+    assert!((at[0] + stamp.center[0] - under[0]).hypot(at[1] + stamp.center[1] - under[1]) < 0.5, "{name}: the dab sits under the contact");
+    capture(d, &format!("{name}-brush-controls"));
+    d.input.perform(serde_json::json!([contact(device, "up", arc(0.75))]));
+    pump(300);
+    assert!(find_id(d, controls.id).unwrap().stamp.is_none(), "{name}: the dab goes with the contact");
+    let strength = controls.rings[1].arc;
+    d.w.dispatch(ToolbarNumericBinding::BrushStrength.action(0.95));
+    let before = state(&d.w).tool_settings.iter().find(|f| f.id == controls.rings[1].setting).unwrap().value;
+    stroke(d, device, &[[at[0] + strength.point(0.2)[0], at[1] + strength.point(0.2)[1]], [at[0] + strength.point(0.6)[0], at[1] + strength.point(0.6)[1]]]);
+    let after = state(&d.w).tool_settings.iter().find(|f| f.id == controls.rings[1].setting).unwrap().value;
+    assert_ne!(after, before, "{name}: the right arc sets the strength");
+    tap(d, device, at);
+    let picking = find_id(d, controls.id).unwrap();
+    assert!(picking.selected, "{name}: the center starts the color picker");
+    assert!(picking.rings.len() == 2 && picking.rings.iter().all(|r| !r.enabled), "{name}: its sliders stay, unavailable while picking");
+    capture(d, &format!("{name}-brush-controls-picking"));
+    tap(d, device, at);
+    assert!(!find_id(d, controls.id).unwrap().selected, "{name}: and stops it");
+}
+
+fn history(d: &mut Driver, device: &str, name: &str) {
+    take_tile(d, device, ToolbarControl::Command { command: CommandId::Redo }, canvas_spot(d, 0.3, 0.75));
+    let source = BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::Undo } };
+    let bubble = find(d, source).unwrap_or_else(|| panic!("{name}: dragging redo out takes the undo and redo bubble"));
+    take_tile(d, device, ToolbarControl::Command { command: CommandId::Undo }, canvas_spot(d, 0.45, 0.8));
+    assert_eq!(views(d).iter().filter(|v| v.source == source).count(), 1, "{name}: undo moves the same bubble");
+    let from = canvas_spot(d, 0.7, 0.2);
+    stroke(d, device, &[from, [from[0] + 60., from[1] + 10.], [from[0] + 120., from[1]]]);
+    let enabled = |d: &Driver| find_id(d, bubble.id).unwrap().buttons.iter().map(|b| b.enabled).collect::<Vec<_>>();
+    assert_eq!(enabled(d), [true, false], "{name}: a stroke can be undone");
+    let c = center(d, bubble.id);
+    tap(d, device, [c[0] - 22., c[1]]);
+    assert!(enabled(d)[1], "{name}: the left half undoes");
+    tap(d, device, [c[0] + 22., c[1]]);
+    assert!(!enabled(d)[1], "{name}: the right half redoes");
+    capture(d, &format!("{name}-history"));
 }
 
 fn painting_fades(d: &mut Driver, name: &str, id: u32) {
@@ -339,6 +412,27 @@ fn zen(d: &mut Driver, name: &str) {
     tap(d, "touch", away);
     pump(400);
     assert!(hidden(d), "{name}: a contact elsewhere hides it again");
+    for device in ["mouse", "touch"] {
+        let ring = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap();
+        let from = rim(d, &ring, 200.);
+        let to = [from[0] + 60., from[1] + 10.];
+        d.input.perform(serde_json::json!([contact(device, "down", from), contact(device, "move", [from[0] + 20., from[1]]), contact(device, "move", to)]));
+        pump(250);
+        assert!(hidden(d), "{name}-{device}: moving a bubble in Zen keeps the toolbars hidden");
+        d.input.perform(serde_json::json!([contact(device, "up", to)]));
+        pump(300);
+        assert!(hidden(d), "{name}-{device}: and after it lands");
+        let c = center(d, ring.id);
+        let hold = [c[0] + 8., c[1] - 6.];
+        d.input.perform(serde_json::json!([contact(device, "down", hold), { "wait_ms": 1300 }, contact(device, "up", hold)]));
+        pump(300);
+        assert!(menu_open(d), "{name}-{device}: a hold opens the bubble's menu in Zen");
+        assert!(hidden(d), "{name}-{device}: its menu keeps the toolbars hidden");
+        d.input.key(0xff1b);
+        pump(200);
+        tap(d, device, [c[0] - 10., c[1] + 4.]);
+        assert!(hidden(d) && state(&d.w).workspace.zen_mode, "{name}-{device}: picking on a bubble stays in Zen");
+    }
     d.w.dispatch(UiAction::Invoke { command: CommandId::ZenMode });
     pump(300);
     pinch(d, name);
@@ -474,23 +568,8 @@ fn native_tool_bubbles() {
 
             put_back_all(&mut d, device, &name);
 
-            let size = BubbleSource::Control { control: ToolbarControl::BrushSizeSlider };
-            let from = d.point(&d.named(&tile_of(&d, ToolbarControl::BrushSizeSlider)));
-            let to = canvas_spot(&d, 0.3, 0.3);
-            d.input.perform(serde_json::json!([
-                contact(device, "down", from), { "wait_ms": 900 },
-                contact(device, "move", [from[0] + 30., from[1]]), contact(device, "move", [to[0] - 40., to[1]]),
-                contact(device, "move", to), contact(device, "up", to)
-            ]));
-            pump(400);
-            let slider = find(&d, size).unwrap_or_else(|| panic!("{name}: holding then dragging a slider out of its bar takes a bubble"));
-            let before = state(&d.w).brush.diameter;
-            let at = center(&d, slider.id);
-            let ring = slider.rings[0].arc;
-            let arc = |f: f32| [at[0] + ring.point(f)[0], at[1] + ring.point(f)[1]];
-            stroke(&mut d, device, &[arc(0.2), arc(0.5), arc(if device == "mouse" { 0.7 } else { 0.4 })]);
-            assert_ne!(state(&d.w).brush.diameter, before, "{name}: the slider ring sets the brush size");
-            capture(&mut d, &format!("{name}-slider"));
+            brush_controls(&mut d, device, &name);
+            history(&mut d, device, &name);
 
             layers_card(&mut d, device, &name);
             color_ring(&mut d, device, &name);

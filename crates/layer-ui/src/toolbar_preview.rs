@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[serde(default, deny_unknown_fields)]
 pub struct SliderBookmarks {
     size: Vec<f32>,
-    opacity: Vec<f32>,
     strength: Vec<f32>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -21,14 +20,12 @@ impl SliderBookmarks {
     fn values(&self, binding: &ToolbarNumericBinding) -> &[f32] {
         match binding {
             ToolbarNumericBinding::BrushSize => &self.size,
-            ToolbarNumericBinding::BrushOpacity => &self.opacity,
             ToolbarNumericBinding::BrushStrength => &self.strength,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), WorkspaceValidationError> {
         for binding in [
             ToolbarNumericBinding::BrushSize,
-            ToolbarNumericBinding::BrushOpacity,
             ToolbarNumericBinding::BrushStrength,
         ] {
             let values = self.values(&binding);
@@ -61,7 +58,6 @@ impl SliderBookmarks {
             .value as f32;
         let values = match binding {
             ToolbarNumericBinding::BrushSize => &mut self.size,
-            ToolbarNumericBinding::BrushOpacity => &mut self.opacity,
             ToolbarNumericBinding::BrushStrength => &mut self.strength,
         };
         if let Some(i) = values.iter().position(|&v| v == value) {

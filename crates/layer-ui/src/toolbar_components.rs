@@ -39,13 +39,12 @@ impl ToolbarControl {
     pub fn is_component(self) -> bool {
         matches!(
             self,
-            Self::BrushSizeSlider | Self::BrushOpacitySlider | Self::BrushStrengthSlider | Self::ToolOptions { .. }
+            Self::BrushSizeSlider | Self::BrushStrengthSlider | Self::ToolOptions { .. }
         )
     }
     pub fn slider(self) -> Option<ToolbarNumericBinding> {
         match self {
             Self::BrushSizeSlider => Some(ToolbarNumericBinding::BrushSize),
-            Self::BrushOpacitySlider => Some(ToolbarNumericBinding::BrushOpacity),
             Self::BrushStrengthSlider => Some(ToolbarNumericBinding::BrushStrength),
             _ => None,
         }
@@ -73,24 +72,22 @@ pub struct ToolbarComponentView {
     pub bookmarks: Vec<SliderBookmark>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ToolbarNumericBinding {
     BrushSize,
-    BrushOpacity,
     BrushStrength,
 }
 impl ToolbarNumericBinding {
     pub fn label(&self) -> MessageId {
         match self {
             Self::BrushSize => MessageId::TOOL_SETTING_SIZE,
-            Self::BrushOpacity => MessageId::TOOL_SETTING_OPACITY,
             Self::BrushStrength => MessageId::TOOL_SETTING_STRENGTH,
         }
     }
     pub fn numeric(&self) -> NumericControl {
         match self {
             Self::BrushSize => NumericControl::brush_size(),
-            Self::BrushOpacity | Self::BrushStrength => NumericControl {
+            Self::BrushStrength => NumericControl {
                 digits: 0,
                 resolution: 0.01,
                 ..NumericControl::percent()
@@ -103,17 +100,18 @@ impl ToolbarNumericBinding {
                 id: "size".into(),
                 value,
             },
-            Self::BrushOpacity => UiAction::SetToolSetting {
-                id: "opacity".into(),
-                value,
-            },
             Self::BrushStrength => UiAction::SetBrushStrength { value },
+        }
+    }
+    pub fn setting(&self) -> &'static str {
+        match self {
+            Self::BrushSize => "size",
+            Self::BrushStrength => "flow",
         }
     }
     pub fn field(&self, state: &UiState) -> Option<ToolSetting> {
         let id = match self {
             Self::BrushSize => "size",
-            Self::BrushOpacity => "opacity",
             Self::BrushStrength => state.tool_settings.iter().find(|f| f.id == "flow" || f.id == "strength")?.id,
         };
         state

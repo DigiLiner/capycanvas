@@ -33,15 +33,16 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
     for count in 1..=MAX_RING_SETTINGS {
         let arcs = halo_arcs(count);
         assert_eq!(arcs.len(), count);
-        assert_eq!(halo_disc(count), if count > 3 { 188. } else { 122. });
+        assert_eq!(halo_disc(count), if count > 3 { 206. } else { 136. });
         for (i, arc) in arcs.iter().enumerate() {
             assert!(arc.radius + arc.band * 0.5 <= halo_disc(count) * 0.5 + 1e-3, "{count}/{i} fits the glass");
-            assert!(arc.radius - arc.band * 0.5 > TOOL_BUBBLE * 0.5, "{count}/{i} clears the face");
+            assert!(arc.radius - arc.band * 0.5 >= TOOL_BUBBLE * 0.5 + 8., "{count}/{i} clears the face with room to spare");
             for f in [0., 0.25, 0.5, 0.75, 1.] {
                 assert!((arc.fraction(arc.point(f)) - f).abs() < 1e-3, "{count}/{i}: {f}");
             }
             assert_eq!(ring_at(&arcs, arc.point(0.5)), Some(i), "{count}/{i}");
-            assert!((distance(arc.icon_point(), arc.point(0.)) - 13.).abs() < 0.3, "the icon sits just before its track");
+            assert!((distance(arc.icon_point(), arc.point(0.)) - RING_ICON).abs() < 0.5, "the icon sits before its track");
+            assert!(RING_ICON - 8. - 7.5 >= 5., "a 16 px icon and the thumb at zero keep a gap");
             let [start, middle, end] = [arc.point(0.), arc.point(0.5), arc.point(1.)];
             if arc.sweep.abs() > 200. {
                 assert!(start[0] < 0. && end[0] > 0. && middle[1] < 0., "one setting is a gauge over the top");
@@ -57,22 +58,44 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
     }
     assert_eq!(halo_arcs(4)[..2], halo_arcs(2)[..], "four settings are the pair twice");
     assert_eq!(halo_arcs(6)[..3], halo_arcs(3)[..]);
-    assert_eq!(ring_at(&halo_arcs(4), [0., -63.5]), None, "between the rings is glass");
+    assert_eq!(ring_at(&halo_arcs(4), [0., -70.5]), None, "between the rings is glass");
     assert_eq!(ring_at(&halo_arcs(2), [0., 0.]), None);
 }
 
 #[test]
-fn slider_ring_runs_from_lower_left_over_the_top_around_a_moving_center() {
-    let ring = slider_ring();
-    let [start, top, end] = [ring.point(0.), ring.point(0.5), ring.point(1.)];
-    assert!(start[0] < 0. && start[1] > 0.);
-    assert!(top[0].abs() < 1e-3 && top[1] < 0.);
-    assert!(end[0] > 0. && end[1] > 0.);
-    assert_eq!(ring.fraction([-5., 40.]), 0.);
-    assert_eq!(ring.fraction([5., 40.]), 1.);
-    assert_eq!(ring_at(&[ring], [0., -ring.radius]), Some(0));
-    assert_eq!(ring_at(&[ring], [0., -SLIDER_CENTER * 0.5 + 1.]), None, "the center moves the bubble");
-    assert!(ring.radius + RING_TRACK <= SLIDER_BUBBLE * 0.5);
+fn controls_ring_size_left_and_strength_right_around_their_center_and_history_splits_its_capsule() {
+    assert_eq!(bubble_face(BubbleKind::Controls, halo_disc(CONTROL_RINGS.len())), [TOOL_BUBBLE; 2]);
+    let arcs = halo_arcs(CONTROL_RINGS.len());
+    assert!(arcs[0].point(0.5)[0] < 0. && arcs[1].point(0.5)[0] > 0., "size on the left, strength on the right");
+    assert!(arcs.iter().all(|arc| arc.point(1.)[1] < arc.point(0.)[1]), "both grow upward");
+    assert!(arcs.iter().all(|arc| arc.radius - HALO_BANDS[0] * 0.5 >= TOOL_BUBBLE * 0.5 + 4.), "the arcs clear the center");
+    assert_eq!(bubble_face(BubbleKind::History, HISTORY_BUBBLE[0]), HISTORY_BUBBLE);
+    assert_eq!(history_button([-20., 0.]), Some(0));
+    assert_eq!(history_button([20., 4.]), Some(1));
+    assert_eq!(history_button([0., HISTORY_BUBBLE[1]]), None);
+}
+
+fn pair() -> PairBeads {
+    PairBeads::for_window(1600.)
+}
+
+#[test]
+fn the_pair_and_transparent_beads_match_the_color_drawer_and_keep_its_gap_from_the_rim() {
+    for width in [1600., 1000.] {
+        let pair = PairBeads::for_window(width);
+        let stage = Panel::Color.default_width(width) - 2. * PANEL_CONTENT_INSET;
+        let drawer = ColorPanelLayout::new(stage).unwrap();
+        assert_eq!((pair.foreground, pair.background), (drawer.foreground[2], drawer.background[2]), "{width}");
+        assert_eq!(drawer.transparent[2], pair.background);
+        assert!((8. ..14.).contains(&pair.gap), "{width}: {}", pair.gap);
+        for size in COLOR_RING_SIZES {
+            let beads = color_beads(size, BubbleOptions { pair: true, ..BubbleOptions::default() }, pair, 0, 0, [0.; 2], Bead::Foreground);
+            let gap = |bead: Bead| beads.iter().find(|b| b.bead == bead).map(|b| distance(b.center, [0.; 2]) - b.size * 0.5 - size * 0.5).unwrap();
+            assert!((gap(Bead::Transparent) - pair.gap).abs() < 0.01, "{width}/{size}: transparent sits the drawer's gap off the grey rim");
+            assert!(gap(Bead::Foreground) >= pair.gap - 0.01 && gap(Bead::Background) >= pair.gap - 0.01);
+            assert!(gap(Bead::Foreground).min(gap(Bead::Background)) < pair.gap + 0.5, "{width}/{size}: the pair hugs the same gap");
+        }
+    }
 }
 
 fn everything(size: f32) -> BubbleOptions {
@@ -84,7 +107,7 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     let size = COLOR_RING_SIZES[1];
     let options = everything(size);
     let radius = size * 0.5;
-    let beads = color_beads(size, options, 20, 30, [0.; 2], Bead::Foreground);
+    let beads = color_beads(size, options, pair(), 20, 30, [0.; 2], Bead::Foreground);
     let of = |beads: &[BeadPlacement], bead: Bead| beads.iter().find(|b| b.bead == bead).map(|b| b.center).unwrap();
     for bead in &beads {
         assert!(distance(bead.center, [0.; 2]) - bead.size * 0.5 >= radius + 3., "{:?} stays off the plate", bead.bead);
@@ -112,24 +135,24 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     let [foreground, background] = [of(&beads, Bead::Foreground), of(&beads, Bead::Background)];
     let offset = [background[0] - foreground[0], background[1] - foreground[1]];
     assert!(offset[0] > 0. && offset[1] > 0., "the background sits lower right, as in the Color panel");
-    assert!(distance(foreground, background) < (FOREGROUND_BEAD + BACKGROUND_BEAD) * 0.5, "the pair overlaps");
+    assert!(distance(foreground, background) < (pair().foreground + pair().background) * 0.5, "the pair overlaps");
     let overlap = [foreground[0] + offset[0] * 0.5, foreground[1] + offset[1] * 0.5];
     assert_eq!(bead_at(&beads, overlap), Some(Bead::Foreground), "the chosen slot lies on top");
-    let behind = color_beads(size, options, 20, 30, [0.; 2], Bead::Background);
+    let behind = color_beads(size, options, pair(), 20, 30, [0.; 2], Bead::Background);
     assert_eq!(bead_at(&behind, overlap), Some(Bead::Background));
-    let plain = color_beads(size, BubbleOptions { palette: false, ..options }, 20, 30, [0.; 2], Bead::Foreground);
+    let plain = color_beads(size, BubbleOptions { palette: false, ..options }, pair(), 20, 30, [0.; 2], Bead::Foreground);
     assert!(of(&plain, Bead::Foreground)[0] < 0. && of(&plain, Bead::Transparent)[0] > 0.);
     assert!(!plain.iter().any(|b| matches!(b.bead, Bead::Palettes | Bead::Swatch { .. })));
-    let turned = color_beads(size, options, 20, 30, [0., 2.], Bead::Foreground);
+    let turned = color_beads(size, options, pair(), 20, 30, [0., 2.], Bead::Foreground);
     assert!(distance(of(&turned, Bead::Swatch { index: 4 }), a) < 1e-3, "turning two columns brings column two to the start");
     assert_eq!(of(&turned, Bead::Palettes), palette, "the palette bead stays put");
-    let half = color_beads(size, options, 20, 30, [0.5, 0.5], Bead::Foreground);
+    let half = color_beads(size, options, pair(), 20, 30, [0.5, 0.5], Bead::Foreground);
     assert!(half.iter().any(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha < 1.), "partly turned ends fade");
     assert_eq!(bead_at(&beads, palette), Some(Bead::Palettes));
     assert_eq!(Bead::Swatch { index: 3 }.strip(), Some(BeadStrip::Palette));
-    assert!(on_color_rim(size, options, [radius - 3., 0.]), "the plate's rim moves the ring");
-    assert!(on_color_rim(size, options, [radius + 10., 0.]), "so does the space out to the beads");
-    assert!(!on_color_rim(size, options, [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, options, [color_reach(size, options) + 2., 0.]));
+    assert!(on_color_rim(size, options, pair(), [radius - 3., 0.]), "the plate's rim moves the ring");
+    assert!(on_color_rim(size, options, pair(), [radius + 10., 0.]), "so does the space out to the beads");
+    assert!(!on_color_rim(size, options, pair(), [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, options, pair(), [color_reach(size, options, pair()) + 2., 0.]));
     assert!(!color_drag_out(size, [size * 0.9, 0.]) && color_drag_out(size, [0., size * 1.05]), "two radii out is a drag");
     let pill = palette_pill(size);
     assert_eq!([pill.width, pill.height], PALETTE_PILL);
@@ -139,12 +162,12 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
 #[test]
 fn color_beads_never_overlap_at_any_size_or_turn() {
     let combos = [(true, true, true), (true, false, true), (false, true, true), (true, true, false), (false, false, true)];
-    for size in [128., 136., 216., 280., 344., 352.] {
+    for (size, fit) in [128., 136., 216., 280., 344., 352.].into_iter().flat_map(|s| [1600., 1000.].map(|w| (s, PairBeads::for_window(w)))) {
         for (recent, palette, pair) in combos {
             let options = BubbleOptions { size, recent, palette, pair, ..BubbleOptions::default() };
             for scroll in [[0., 0.], [0.3, 0.6], [2.5, 1.5], [3., 4.2]] {
                 for front in [Bead::Foreground, Bead::Background] {
-                    let beads = color_beads(size, options, 64, 48, scroll, front);
+                    let beads = color_beads(size, options, fit, 64, 48, scroll, front);
                     for (i, a) in beads.iter().enumerate() {
                         for b in &beads[i + 1..] {
                             if matches!((a.bead, b.bead), (Bead::Background, Bead::Foreground) | (Bead::Foreground, Bead::Background)) {
@@ -158,7 +181,7 @@ fn color_beads_never_overlap_at_any_size_or_turn() {
                             );
                         }
                     }
-                    assert!(beads.iter().all(|b| distance(b.center, [0.; 2]) + b.size * 0.5 <= color_reach(size, options) + 1e-3));
+                    assert!(beads.iter().all(|b| distance(b.center, [0.; 2]) + b.size * 0.5 <= color_reach(size, options, fit) + 1e-3));
                 }
             }
         }
@@ -169,7 +192,7 @@ fn color_beads_never_overlap_at_any_size_or_turn() {
 fn turning_beads_moves_and_fades_them_continuously() {
     let size = COLOR_RING_SIZES[1];
     let options = everything(size);
-    let at = |scroll: f32| color_beads(size, options, 40, 48, [scroll, scroll], Bead::Foreground);
+    let at = |scroll: f32| color_beads(size, options, pair(), 40, 48, [scroll, scroll], Bead::Foreground);
     let mut previous = at(0.);
     for step in 1..=400 {
         let next = at(step as f32 * 0.01);
@@ -410,8 +433,8 @@ fn bubble_layout_validation_rejects_duplicates_and_bad_values() {
     point.bubbles[0].offset = [f32::NAN, 2.];
     assert!(point.validate(&mut Default::default()).is_err());
     point.bubbles[0].offset = [1., 2.];
-    point.bubbles[0].source = BubbleSource::Control { control: ToolbarControl::Opacity };
-    assert!(point.validate(&mut Default::default()).is_err(), "Opacity is stored as the opacity slider");
+    point.bubbles[0].source = BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::Redo } };
+    assert!(point.validate(&mut Default::default()).is_err(), "Redo is stored as the undo and redo bubble");
     let mut rings = BubbleLayout::default();
     rings.set_ring(DefaultBrushPreset::GPen as u32, vec!["hardness".into(), "hardness".into()]);
     assert!(rings.validate(&mut Default::default()).is_err());
@@ -431,14 +454,18 @@ fn bubble_layout_validation_rejects_duplicates_and_bad_values() {
 #[test]
 fn sources_normalize_toolbar_controls() {
     use ToolbarControl as C;
-    assert_eq!(BubbleSource::for_control(C::Opacity), Some(BubbleSource::Control { control: C::BrushOpacitySlider }));
+    assert_eq!(BubbleSource::for_control(C::Opacity), None);
+    assert_eq!(BubbleSource::for_control(C::BrushSizeSlider), None, "sliders stay in their toolbars");
     assert_eq!(BubbleSource::for_control(C::Divider), None);
-    assert_eq!(BubbleSource::for_control(C::Command { command: CommandId::Undo }), None);
+    let undo = BubbleSource::for_control(C::Command { command: CommandId::Undo });
+    assert_eq!(BubbleSource::for_control(C::Command { command: CommandId::Redo }), undo, "one bubble for undo and redo");
+    assert_eq!(undo.map(BubbleSource::kind), Some(BubbleKind::History));
+    assert_eq!(BubbleSource::for_control(C::ColorPicker).map(BubbleSource::kind), Some(BubbleKind::Controls));
     assert_eq!(BubbleSource::for_control(C::Panel { panel: Panel::Color }), None);
     assert_eq!(BubbleSource::for_control(C::ToolSlot { slot: ToolSlotId::Drawing }).map(BubbleSource::kind), Some(BubbleKind::Dial));
     assert_eq!(BubbleSource::for_control(C::Panel { panel: Panel::Layers }).map(BubbleSource::kind), Some(BubbleKind::Layers));
     assert_eq!(BubbleSource::for_variant(ToolVariant::BrushGroup { group: ToolGroup::Oil }).map(BubbleSource::kind), Some(BubbleKind::Medium));
     assert_eq!(BubbleSource::for_variant(ToolVariant::Command { command: CommandId::Lasso }), None);
     assert!(!BubbleSource::tears_without_hold(C::BrushSizeSlider), "plain drags keep editing sliders");
-    assert!(BubbleSource::tears_without_hold(C::Opacity));
+    assert!(BubbleSource::tears_without_hold(C::ColorPicker) && BubbleSource::tears_without_hold(C::Command { command: CommandId::Redo }));
 }

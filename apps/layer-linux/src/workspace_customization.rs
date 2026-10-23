@@ -327,6 +327,7 @@ pub(super) struct Customization {
     color_patches: RefCell<Vec<glib::WeakRef<crate::display_color::ColorPair>>>,
     palette_colors: Cell<Option<([layer_core::color::RgbColor; 2], layer_ui::ColorSlot, crate::display_color::ViewColor, f32)>>,
     context: gtk::PopoverMenu,
+    context_bubble: Cell<bool>,
     context_focus: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     popup: gtk::Popover,
     popup_control: Cell<Option<PanelControl>>,
@@ -370,6 +371,7 @@ impl Customization {
             color_patches: RefCell::new(Vec::new()),
             palette_colors: Cell::new(None),
             context: gtk::PopoverMenu::from_model(None::<&gtk::gio::Menu>),
+            context_bubble: Cell::new(false),
             context_focus: RefCell::new(None),
             popup: gtk::Popover::new(),
             popup_control: Cell::new(None),
@@ -1649,12 +1651,11 @@ impl Workspace {
             return;
         };
         self.customization.anchor.set([point.x(), point.y()]);
+        self.customization.context_bubble.set(matches!(target, ContextTarget::Bubble { .. }));
         let popover = &self.customization.context;
         // A native popup grab diverts the original contact. Keep mouse, touch,
         // and pen with the source until it becomes a drag or is released.
-        if held_drag || held {
-            popover.set_autohide(false);
-        }
+        popover.set_autohide(!(held_drag || held));
         self.populate_workspace_menu(popover, menu);
         // Unlike MenuButton popovers, this shared surface-owned context menu
         // has no native invoker to restore keyboard focus to on dismissal.
@@ -1678,6 +1679,11 @@ impl Workspace {
         popover.present();
     }
 
+    pub(super) fn floats_with_bubbles(&self, popover: &gtk::Popover) -> bool {
+        (self.customization.context_bubble.get() && popover == self.customization.context.upcast_ref::<gtk::Popover>())
+            || popover.parent().is_some_and(|anchor| anchor.is_ancestor(&self.bubbles.layer))
+    }
+
     pub(super) fn dismiss_context(&self) {
         self.customization.context.popdown();
         self.customization.context.set_autohide(true);
@@ -1690,6 +1696,17 @@ impl Workspace {
             popover.set_autohide(true);
             popover.popup();
         }
+    }
+
+    pub(super) fn dismiss_held_context(&self, event: &gdk::Event) -> bool {
+        let popover = &self.customization.context;
+        let press = matches!(event.event_type(), gdk::EventType::ButtonPress | gdk::EventType::TouchBegin);
+        let escape = event.downcast_ref::<gdk::KeyEvent>().is_some_and(|k| event.event_type() == gdk::EventType::KeyPress && k.keyval() == gdk::Key::Escape);
+        if !(press || escape) || !self.customization.context_bubble.get() || !popover.is_visible() || popover.is_autohide() {
+            return false;
+        }
+        self.dismiss_context();
+        true
     }
 
     pub(crate) fn populate_workspace_menu(

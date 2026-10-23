@@ -3,8 +3,7 @@
 [Workspace and UI](README.md) · [Panel contract](panel-customization.md) ·
 [Numeric controls](numeric-controls.md) · [Drag convention](drag-and-reorder.md)
 
-Toolbars support **Brush size slider**, **Strength slider**, **Brush opacity slider**, and
-**Tool Options**. Add them through Add Tools like ordinary tiles. Each has a
+Toolbars support **Brush size slider**, **Strength slider** and **Tool Options**. Add them through Add Tools like ordinary tiles. Each has a
 stable tile identity; the entire component moves, copies, removes, docks, and
 participates in workspace undo/redo as a single item.
 Toolbars can also use [compact edge regions](compact-toolbar-edges.md).
@@ -20,7 +19,7 @@ Paint uses neither. See [default workspaces](default-workspaces.md#arrangements)
 
 Sliders occupy one lane and prefer four tiles of length, including tile gaps.
 They work horizontally or vertically; vertical values increase upward. They
-follow the active tool’s Size, Strength or Opacity setting and disable when unavailable.
+follow the active tool’s Size or Strength setting and disable when unavailable.
 Multiple instances and existing panels share the same state and preset memory.
 Size tracks widen toward larger values; percentage tracks use a gradient over
 a checkerboard. Both orientations use equal end padding. Every host draws
@@ -37,7 +36,7 @@ and units are vertically centered beside it. The header fade scales with the
 tile (65px on medium tiles) from 50% panel color to transparent. Size uses
 the current tip at its document-pixel diameter, filling the popup to its rounded
 edges for oversized tips. A background fade keeps the header legible;
-Opacity and Strength use a fitted contact patch rendered by the canonical GPU
+Strength uses a fitted contact patch rendered by the canonical GPU
 coverage evaluator at full physical pen pressure and the writing tilt pose. The
 configured brush supplies shape, relief, paper texture, Strength and Opacity.
 Dry Strength changes the material pressure, so fewer paper contacts appear at
@@ -62,8 +61,8 @@ track, placed inside the wider handle when selected. Tapping near a mark
 recalls its exact value; dragging retains the full range without magnetic
 snapping. Bookmarks persist in application settings and appear in every copy
 of that slider. Size uses the shared logarithmic mapping and snaps to whole
-pixels above 32. Strength and Opacity use whole percentages and separate bookmark
-collections. Changes to brush values or
+pixels above 32. Strength uses whole percentages and its own bookmark
+collection. Changes to brush values or
 bookmarks do not create workspace-layout history entries.
 
 ## Contextual options
@@ -233,7 +232,7 @@ private Mutter display with `--native-test=` and one of these tests from
   `native_toolbar_components_pen_input` variant adds `--tablet`; its synthetic
   serials cannot authorize popup grabs, so popups are covered by mouse and touch.
 - `native_toolbar_added_sliders_input`: Add Tools in Paint, then tap and drag
-  the added Size and custom Opacity sliders with mouse and touch in both themes.
+  the added Size and Strength sliders with mouse and touch in both themes.
 - `native_toolbar_components_narrow_input` with `LAYER_MOTION_VIEWPORT=680x500`:
   overflow and full options at small widths.
 - `native_toolbar_components_drawer_input`, `native_toolbar_options_presentation_input`,

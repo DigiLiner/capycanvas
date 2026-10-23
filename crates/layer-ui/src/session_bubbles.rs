@@ -32,7 +32,7 @@ pub(crate) struct Bubbles {
     bounds: Option<((u64, [f32; 2], bool), Bounds)>,
     drag: Option<BubbleDrag>,
     halo: Option<(u32, u32)>,
-    ring: Option<(u32, &'static str, f32)>,
+    ring: Option<RingContact>,
     beads: Option<BeadContact>,
     scroll: Vec<(u32, [f32; 2])>,
     pill: Option<u32>,
@@ -43,13 +43,20 @@ pub(crate) struct Bubbles {
     dirty: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RingContact {
+    id: u32,
+    setting: &'static str,
+    before: f32,
+    at: [f32; 2],
+}
+
 fn control_face(state: &UiState, control: ToolbarControl) -> (String, &'static str, bool, bool) {
     if let Some((choice, enabled, _, _)) = state.resolve_group(control) {
         return (choice.label, choice.icon, choice.selected, enabled);
     }
     let choice = customization::tool_choice_localized(control, &state.localization);
     let (enabled, selected) = tool_state(state, control);
-    let enabled = enabled && control.slider().is_none_or(|binding| binding.field(state).is_some());
     (choice.label, tool_icon(state, control), selected, enabled)
 }
 
@@ -94,6 +101,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_viewport()[0] < 600.
     }
 
+    fn pair_beads(&self) -> PairBeads {
+        PairBeads::for_window(self.bubble_viewport()[0])
+    }
+
     fn bubble_bounds(&mut self) -> Bounds {
         let viewport = self.bubble_viewport();
         let key = (self.workspace_model_revision, viewport, self.interaction.hidden);
@@ -116,6 +127,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let bounds = self.bubble_bounds();
         let viewport = self.bubble_viewport();
         let narrow = self.narrow();
+        let pair = self.pair_beads();
         let layout = &self.state.workspace.layout.bubbles;
         let state = &mut self.bubble_state;
         for open in [&mut state.pill, &mut state.card] {
@@ -130,7 +142,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             state.chooser = None;
         }
         state.scroll.retain(|(id, _)| layout.get(*id).is_some());
-        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), b.shape(narrow))).collect();
+        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), b.shape(narrow, pair))).collect();
         if !state.desk.matches(&items, bounds) {
             state.desk.sync(&items, bounds);
         }
@@ -164,7 +176,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         let state = &self.state;
         let kind = bubble.source.kind();
         let narrow = self.narrow();
+        let buttons: Vec<_> = match kind {
+            BubbleKind::History => HISTORY_COMMANDS
+                .map(|command| {
+                    let (label, icon, _, enabled) = control_face(state, ToolbarControl::Command { command });
+                    BubbleButton { label, icon, enabled }
+                })
+                .into(),
+            _ => Vec::new(),
+        };
         let (label, icon, selected, enabled) = match bubble.source {
+            _ if !buttons.is_empty() => {
+                (buttons.iter().map(|b| b.label.as_str()).collect::<Vec<_>>().join(" · "), buttons[0].icon, false, true)
+            }
             BubbleSource::Medium { group } => (
                 group.localized_label(self.localization()).to_string(),
                 group.icon(),
@@ -174,22 +198,40 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleSource::Control { control } => control_face(state, control),
         };
         let halo = self.halo() == Some(bubble.id);
-        let rings: Vec<_> = match bubble.source {
-            BubbleSource::Control { control } if kind == BubbleKind::Slider => {
-                let binding = control.slider().unwrap();
-                binding.field(state).map(|field| vec![self.ring_view(slider_ring(), &field, binding.numeric())]).unwrap_or_default()
-            }
+        let rings: Vec<_> = match kind {
+            BubbleKind::Controls => halo_arcs(CONTROL_RINGS.len())
+                .into_iter()
+                .zip(CONTROL_RINGS)
+                .map(|(arc, binding)| match binding.field(state) {
+                    Some(field) => self.ring_view(bubble.id, arc, &field, binding.numeric()),
+                    None => BubbleRing {
+                        arc,
+                        setting: binding.setting(),
+                        label: self.localization().text(binding.label()).into(),
+                        icon: tool_setting_icon(binding.setting()),
+                        fill: 0.,
+                        text: String::new(),
+                        active: false,
+                        enabled: false,
+                    },
+                })
+                .collect(),
             _ if halo => {
                 let settings = self.halo_settings();
                 halo_arcs(settings.len())
                     .into_iter()
                     .zip(settings)
-                    .map(|(arc, setting)| self.ring_view(arc, setting, setting.numeric.clone()))
+                    .map(|(arc, setting)| self.ring_view(bubble.id, arc, setting, setting.numeric.clone()))
                     .collect()
             }
             _ => Vec::new(),
         };
         let readout = rings.iter().find(|r| r.active).map(|r| format!("{} · {}", r.label, r.text));
+        let stamp = self.bubble_state.ring.filter(|r| r.id == bubble.id && kind == BubbleKind::Controls).and_then(|r| {
+            let size = ToolbarNumericBinding::BrushSize.field(state)?.value;
+            let scale = self.logical_viewport.map_or(1., |v| (state.camera.viewport[0] as f32 / v[0]).max(f32::EPSILON));
+            Some(BubbleStamp { center: r.at, diameter: size * state.camera.zoom / scale, color: state.colors.definition() })
+        });
         let chooser = self.bubble_state.chooser.filter(|c| c.id == bubble.id).map(|c| self.chooser_items(bubble, c).0).unwrap_or_default();
         let card = (self.bubble_state.card == Some(bubble.id)).then(|| BubbleCard {
             size: layers_card(bubble.options.full, state.layers.len()),
@@ -205,6 +247,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             source: bubble.source,
             kind,
             diameter: bubble.diameter(narrow),
+            face: bubble_face(kind, bubble.diameter(narrow)),
+            pair: self.pair_beads(),
             label,
             icon,
             preview: match bubble.source {
@@ -222,6 +266,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             halo: halo.then(|| halo_disc(rings.len())),
             rings,
             readout,
+            stamp,
+            buttons,
             beads: if kind == BubbleKind::Color { self.bubble_beads(bubble, narrow) } else { Vec::new() },
             pill: (kind == BubbleKind::Color && self.bubble_state.pill == Some(bubble.id) && bubble.options.palette)
                 .then(|| state.color_library.active_palette().name.clone()),
@@ -233,7 +279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
 
-    fn ring_view(&self, arc: RingArc, setting: &ToolSetting, numeric: NumericControl) -> BubbleRing {
+    fn ring_view(&self, id: u32, arc: RingArc, setting: &ToolSetting, numeric: NumericControl) -> BubbleRing {
         let resolved = numeric.resolve(setting.value as f64, NumericOperation::Format).ok();
         BubbleRing {
             arc,
@@ -242,7 +288,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             icon: tool_setting_icon(setting.id),
             fill: resolved.as_ref().map_or(0., |r| r.fill as f32),
             text: resolved.map(|r| r.text).unwrap_or_default(),
-            active: self.bubble_state.ring.is_some_and(|(_, id, _)| id == setting.id),
+            active: self.bubble_state.ring.is_some_and(|r| r.id == id && r.setting == setting.id),
+            enabled: true,
         }
     }
 
@@ -272,7 +319,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let swatches = &library.active_palette().swatches;
         let text = |id: MessageId| self.localization().text(id).to_string();
         let front = if state.colors.slot == ColorSlot::Background { Bead::Background } else { Bead::Foreground };
-        color_beads(bubble.diameter(narrow), bubble.options, library.history.len(), swatches.len(), self.bead_scroll(bubble.id), front)
+        color_beads(bubble.diameter(narrow), bubble.options, self.pair_beads(), library.history.len(), swatches.len(), self.bead_scroll(bubble.id), front)
             .into_iter()
             .map(|placement| {
                 let (color, label, selected) = match placement.bead {
@@ -472,7 +519,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(crate) fn bubble_action(&mut self, action: BubbleAction) -> Result<UiChange, String> {
         match action {
             BubbleAction::Drag { grab, phase, position, viewport } => self.drag_bubble(grab, phase, position, viewport),
-            BubbleAction::Tap { id } => self.tap_bubble(id),
+            BubbleAction::Tap { id, position } => self.tap_bubble(id, position),
             BubbleAction::Ring { id, phase, position } => self.bubble_ring(id, phase, position),
             BubbleAction::Beads { id, phase, position } => self.bead_contact(id, phase, position),
             BubbleAction::Choose { id, phase, position } => self.choose(id, phase, position),
@@ -572,7 +619,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(change)
     }
 
-    fn tap_bubble(&mut self, id: u32) -> Result<UiChange, String> {
+    fn tap_bubble(&mut self, id: u32, position: [f32; 2]) -> Result<UiChange, String> {
         let bubble = self.bubble(id)?.clone();
         let view = self.bubble_view(&bubble);
         let opened = |s: &mut Self| {
@@ -580,7 +627,21 @@ impl<R: CanvasRenderer> UiSession<R> {
             Ok(s.changed(regions::BUBBLES, false))
         };
         match view.kind {
-            BubbleKind::Slider | BubbleKind::Color => return Ok(UiChange::default()),
+            BubbleKind::Color => return Ok(UiChange::default()),
+            BubbleKind::Controls | BubbleKind::History => {
+                let action = match view.kind {
+                    BubbleKind::Controls if position.into_iter().all(|v| v.abs() <= TOOL_BUBBLE * 0.5) => ToolbarControl::ColorPicker.action(),
+                    BubbleKind::History => history_button(position)
+                        .filter(|&i| view.buttons[i].enabled)
+                        .map(|i| UiAction::Invoke { command: HISTORY_COMMANDS[i] }),
+                    _ => None,
+                };
+                let Some(action) = action else { return Ok(UiChange::default()) };
+                self.close_bubble_parts(None);
+                let mut change = self.dispatch(action)?;
+                change.regions |= regions::BUBBLES;
+                return Ok(change);
+            }
             BubbleKind::Layers => {
                 self.close_bubble_parts(None);
                 if self.bubble_state.card == Some(id) {
@@ -662,11 +723,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Err("Invalid ring position".into());
         }
         if phase == ContactPhase::Cancel {
-            let Some((ring_id, setting, before)) = self.bubble_state.ring.take() else {
+            let Some(ring) = self.bubble_state.ring.take() else {
                 return Ok(self.changed(regions::BUBBLES, false));
             };
-            let binding = self.bubble(ring_id)?.source.control().and_then(ToolbarControl::slider);
-            let mut change = self.set_ring(binding, setting, before)?;
+            let binding = self.ring_binding(&self.bubble(ring.id)?.clone(), ring.setting);
+            let mut change = self.set_ring(binding, ring.setting, ring.before)?;
             change.regions |= regions::BUBBLES;
             return Ok(change);
         }
@@ -674,35 +735,41 @@ impl<R: CanvasRenderer> UiSession<R> {
         let view = self.bubble_view(&bubble);
         let setting = match phase {
             ContactPhase::Down => {
-                let arcs: Vec<_> = view.rings.iter().map(|r| r.arc).collect();
-                view.rings[ring_at(&arcs, position).ok_or("No setting under the contact")?].setting
+                let rings: Vec<_> = view.rings.iter().filter(|r| r.enabled).collect();
+                let arcs: Vec<_> = rings.iter().map(|r| r.arc).collect();
+                rings[ring_at(&arcs, position).ok_or("No setting under the contact")?].setting
             }
             _ => match self.bubble_state.ring {
-                Some((ring_id, setting, _)) if ring_id == id => setting,
+                Some(ring) if ring.id == id => ring.setting,
                 _ => return Ok(UiChange::default()),
             },
         };
         let ring = view.rings.iter().find(|r| r.setting == setting).ok_or("This setting is not used by the selected tool")?;
         let fraction = ring.arc.fraction(position) as f64;
-        let binding = bubble.source.control().and_then(ToolbarControl::slider);
-        let field = match &binding {
+        let binding = self.ring_binding(&bubble, setting);
+        let field = match binding {
             Some(binding) => binding.field(&self.state).ok_or("This slider is unavailable")?,
             None => self.state.tool_settings.iter().find(|s| s.id == setting).ok_or("This setting is not used by the selected tool")?.clone(),
         };
-        let numeric = binding.as_ref().map_or_else(|| field.numeric.clone(), ToolbarNumericBinding::numeric);
-        if phase == ContactPhase::Down {
-            self.bubble_state.ring = Some((id, setting, field.value));
-        }
-        let value = numeric
+        let before = match self.bubble_state.ring {
+            Some(ring) if phase != ContactPhase::Down => ring.before,
+            _ => field.value,
+        };
+        self.bubble_state.ring = (phase != ContactPhase::Up).then_some(RingContact { id, setting, before, at: position });
+        let value = field
+            .numeric
             .resolve(field.value as f64, NumericOperation::Position { position: fraction })
             .map_err(|reason| reason.message(&self.state.localization))?
             .value as f32;
         let mut change = self.set_ring(binding, setting, value)?;
-        if phase == ContactPhase::Up {
-            self.bubble_state.ring = None;
-        }
         change.regions |= regions::BUBBLES;
         Ok(change)
+    }
+
+    fn ring_binding(&self, bubble: &ToolBubble, setting: &str) -> Option<ToolbarNumericBinding> {
+        (bubble.source.kind() == BubbleKind::Controls)
+            .then(|| CONTROL_RINGS.into_iter().find(|b| b.field(&self.state).is_some_and(|f| f.id == setting)))
+            .flatten()
     }
 
     fn set_ring(&mut self, binding: Option<ToolbarNumericBinding>, setting: &'static str, value: f32) -> Result<UiChange, String> {
@@ -991,7 +1058,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 ]);
                 sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_FOLD, o.fold, BubbleOptions { fold: !o.fold, ..o })]);
             }
-            BubbleSource::Control { .. } | BubbleSource::Medium { .. } if view.kind != BubbleKind::Slider && view.selected => {
+            BubbleSource::Control { .. } | BubbleSource::Medium { .. }
+                if matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium) && view.selected =>
+            {
                 sections.extend(current.and_then(|brush| self.ring_menu(brush)));
             }
             _ => {}

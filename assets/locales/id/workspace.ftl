@@ -777,9 +777,7 @@ workspace-tool-size-slider = Penggeser ukuran kuas
 
 workspace-tool-size-slider-description = Sesuaikan ukuran kuas langsung di bilah alat
 
-workspace-tool-opacity-slider = Penggeser opasitas kuas
 
-workspace-tool-opacity-slider-description = Batasi opasitas setiap goresan
 
 workspace-tool-options = Opsi Alat
 
@@ -1200,7 +1198,7 @@ workspace-bubble-ring-settings = Pengaturan di cincin
 workspace-bubble-ring-full = Cincin memuat hingga enam pengaturan
 workspace-bubble-recent-colors = Warna terbaru
 workspace-bubble-palette = Palet
-workspace-bubble-color-pair = Latar depan dan belakang
+workspace-bubble-color-pair = Primer dan sekunder
 workspace-bubble-simple = Sederhana
 workspace-bubble-full = Lengkap
 workspace-bubble-fold = Lipat saat tidak dipakai

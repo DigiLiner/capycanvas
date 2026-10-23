@@ -376,7 +376,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     const value = next.component;
     copyChanged = copyKey !== copy.more_options; copyKey = copy.more_options;
     const nextSchema = key([value.context, value.numeric && { ...fieldSemantic(value.numeric), value: 0 }, value.options.map(o => o.Gradient ? {Gradient:o.Gradient.gradient.destination} : o.Range ? {Range:{...semantic(o.Range),bounds:o.Range.bounds.map(f=>({...fieldSemantic(f),value:0}))}} : o.Numeric ? { Numeric: { ...fieldSemantic(o.Numeric), value: 0 } } : o.Choice ? { Choice: { ...semantic(o.Choice), items: o.Choice.items.map(i => ({ ...semantic(i), selected: false })) } } : { Action: { ...o.Action, state: { ...semantic(o.Action.state), selected: false, enabled: true } } })]);
-    const sliderField = () => value.numeric || { id: tile.control.kind === 'brush_size_slider' ? 'size' : tile.control.kind === 'brush_opacity_slider' ? 'opacity' : 'strength', label: next.label, numeric: app.toolbar_ui({ type: 'slider_spec', control: tile.control }), value: 0.5 };
+    const sliderField = () => value.numeric || { id: tile.control.kind === 'brush_size_slider' ? 'size' : 'strength', label: next.label, numeric: app.toolbar_ui({ type: 'slider_spec', control: tile.control }), value: 0.5 };
     model = value;
     if (nextSchema !== schema) {
       closePopup(); fields.forEach(f => { f.dispose?.(); f.row.remove(); }); fields = []; schema = nextSchema;

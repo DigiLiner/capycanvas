@@ -11,7 +11,7 @@ use std::{
 const SECOND_FINGER: f32 = 90.;
 const HOLD_SLOP: f32 = 8.;
 const FADED: f64 = 0.2;
-const HALO_BAND: f32 = 22.;
+const HALO_BAND: f32 = 28.;
 const FADE_RETURN_MS: u64 = 180;
 const UNFOLD_US: i64 = 200_000;
 const ITEM_IN_US: i64 = 180_000;
@@ -150,7 +150,10 @@ mod imp {
         pub(super) coins: RefCell<Vec<gtk::Box>>,
         pub(super) icon: RefCell<Option<gtk::Image>>,
         pub(super) preview: RefCell<Option<gdk::Texture>>,
-        pub(super) value: RefCell<Option<gtk::Label>>,
+        pub(super) buttons: RefCell<Vec<gtk::Image>>,
+        pub(super) stamp: RefCell<Option<(u64, f32, gdk::Texture)>>,
+        pub(super) stamp_patch: RefCell<Option<crate::display_color::ColorPatch>>,
+        pub(super) stamp_tick: RefCell<Option<gtk::TickCallbackId>>,
         pub(super) wheel: RefCell<Option<crate::tool_panels::ColorWheel>>,
         pub(super) thumbnail: RefCell<Option<gtk::Picture>>,
         pub(super) count: RefCell<Option<gtk::Label>>,
@@ -209,7 +212,7 @@ mod imp {
                 allocate_at(widget, Bounds { x: c[0] + at[0] - size[0] * 0.5, y: c[1] + at[1] - size[1] * 0.5, width: size[0], height: size[1] });
             };
             if let Some(face) = self.face.borrow().as_ref() {
-                place(face.upcast_ref(), [0.; 2], [view.diameter; 2]);
+                place(face.upcast_ref(), [0.; 2], view.face);
             }
             for (i, coin) in self.coins.borrow().iter().enumerate() {
                 let scale = if i == 0 { 0.84 } else { 0.92 };
@@ -222,6 +225,9 @@ mod imp {
             }
             for (icon, ring) in self.icons.borrow().iter().zip(self.rings_shown.borrow().iter()) {
                 place(icon.upcast_ref(), ring.arc.icon_point(), [16.; 2]);
+            }
+            if let (Some(patch), Some(stamp), Some((_, extent, _))) = (self.stamp_patch.borrow().as_ref(), view.stamp, self.stamp.borrow().as_ref()) {
+                place(patch.upcast_ref(), stamp.center, [stamp.diameter * extent; 2]);
             }
             if let Some(readout) = self.readout.borrow().as_ref().filter(|r| r.is_visible()) {
                 let (_, natural, _, _) = readout.measure(gtk::Orientation::Horizontal, -1);
@@ -339,12 +345,14 @@ mod imp {
                 if view.kind == BubbleKind::Medium {
                     super::dots(snapshot, c, view, colors[1]);
                 }
-                let alpha = if view.kind == BubbleKind::Slider { 1. } else { obj.halo_alpha() };
+                let alpha = obj.halo_alpha();
                 let rings = self.rings_shown.borrow();
                 if alpha > 0. && !rings.is_empty() {
                     grow(c, 0.85 + 0.15 * alpha, alpha);
                     for ring in rings.iter() {
-                        super::ring(snapshot, c, ring, colors, view.kind != BubbleKind::Slider);
+                        snapshot.push_opacity(if ring.enabled { 1. } else { 0.4 });
+                        super::ring(snapshot, c, ring, colors);
+                        snapshot.pop();
                     }
                     for icon in self.icons.borrow().iter().take(rings.len()) {
                         obj.snapshot_child(icon, snapshot);
@@ -401,6 +409,13 @@ mod imp {
             }
             if let Some(readout) = self.readout.borrow().as_ref().filter(|r| r.is_visible()) {
                 round(readout.upcast_ref());
+            }
+            if let (Some(patch), Some((_, _, texture))) = (self.stamp_patch.borrow().as_ref(), self.stamp.borrow().as_ref()) {
+                snapshot.push_mask(gsk::MaskMode::Alpha);
+                snapshot.append_texture(texture, &patch.compute_bounds(&*obj).unwrap_or_else(|| graphene::Rect::zero()));
+                snapshot.pop();
+                obj.snapshot_child(patch, snapshot);
+                snapshot.pop();
             }
             if homing {
                 snapshot.pop();
@@ -475,30 +490,28 @@ fn arc_path(c: [f32; 2], arc: &RingArc, to: f32) -> gsk::Path {
     builder.to_path()
 }
 
-fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, accent]: [gdk::RGBA; 3], band: bool) {
+fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, thumb_color]: [gdk::RGBA; 3]) {
     let stroke = |width: f32| {
         let stroke = gsk::Stroke::new(width);
         stroke.set_line_cap(gsk::LineCap::Round);
         stroke
     };
     let arc = ring.arc;
-    if band {
-        let [x, y] = arc.icon_point();
-        let start = y.atan2(x).to_degrees();
-        let lead = (start - arc.start + 540.).rem_euclid(360.) - 180.;
-        let banded = RingArc { start, sweep: arc.sweep - lead, ..arc };
-        snapshot.append_stroke(&arc_path(c, &banded, 1.), &stroke(HALO_BAND), &chip);
-    }
+    let [x, y] = arc.icon_point();
+    let start = y.atan2(x).to_degrees();
+    let lead = (start - arc.start + 540.).rem_euclid(360.) - 180.;
+    let banded = RingArc { start, sweep: arc.sweep - lead, ..arc };
+    snapshot.append_stroke(&arc_path(c, &banded, 1.), &stroke(HALO_BAND), &chip);
     snapshot.append_stroke(&arc_path(c, &arc, 1.), &stroke(RING_TRACK), &rgba(ink, 0.18));
     if ring.fill > 0.004 {
-        snapshot.append_stroke(&arc_path(c, &arc, ring.fill), &stroke(RING_TRACK), &accent);
+        snapshot.append_stroke(&arc_path(c, &arc, ring.fill), &stroke(RING_TRACK), &rgba(ink, 0.5));
     }
     let thumb = circle({
         let [x, y] = arc.point(ring.fill);
         [c[0] + x, c[1] + y]
-    }, if ring.active { 6. } else { 5. });
-    snapshot.append_fill(&thumb, gsk::FillRule::Winding, &accent);
-    snapshot.append_stroke(&thumb, &gsk::Stroke::new(1.5), &chip);
+    }, if ring.active { 7.5 } else { 7. });
+    snapshot.append_fill(&thumb, gsk::FillRule::Winding, &thumb_color);
+    snapshot.append_stroke(&thumb, &gsk::Stroke::new(1.), &rgba(ink, 0.6));
 }
 
 fn rounded(bounds: &graphene::Rect, grow: f32) -> gsk::RoundedRect {
@@ -765,7 +778,7 @@ impl Bubble {
         if view.chooser.iter().any(|item| item.contains(p)) {
             return Region::Choose;
         }
-        let arcs: Vec<_> = view.rings.iter().map(|r| r.arc).collect();
+        let arcs: Vec<_> = view.rings.iter().filter(|r| r.enabled).map(|r| r.arc).collect();
         if ring_at(&arcs, p).is_some() {
             return Region::Ring;
         }
@@ -775,11 +788,11 @@ impl Bubble {
         }
         let r = p[0].hypot(p[1]);
         match view.kind {
-            BubbleKind::Color if on_color_rim(view.diameter, view.options, p) => Region::Handle,
+            BubbleKind::Color if on_color_rim(view.diameter, view.options, view.pair, p) => Region::Handle,
             BubbleKind::Color => Region::Pass,
             BubbleKind::Layers if view.card.is_none() && p[0].abs() <= TOOL_BUBBLE * 0.5 && p[1].abs() <= TOOL_BUBBLE * 0.5 => Region::Handle,
-            BubbleKind::Slider if r <= SLIDER_CENTER * 0.5 => Region::Handle,
-            BubbleKind::Slider | BubbleKind::Layers => Region::Pass,
+            BubbleKind::History if history_button(p).is_some() => Region::Handle,
+            BubbleKind::History | BubbleKind::Layers => Region::Pass,
             _ if r <= view.diameter * 0.5 => Region::Handle,
             _ => Region::Pass,
         }
@@ -797,7 +810,7 @@ impl Bubble {
         if view.kind == BubbleKind::Layers {
             for _ in 0..2 {
                 let coin = glass("tool-bubble");
-                coin.add_css_class("layers-bubble");
+                coin.add_css_class("squircle-bubble");
                 coin.set_opacity(0.85);
                 coin.set_parent(&bubble);
                 imp.coins.borrow_mut().push(coin);
@@ -822,7 +835,7 @@ impl Bubble {
                 *imp.wheel.borrow_mut() = Some(wheel);
             }
             BubbleKind::Layers => {
-                face.add_css_class("layers-bubble");
+                face.add_css_class("squircle-bubble");
                 let thumbnail = gtk::Picture::new();
                 thumbnail.add_css_class("bubble-thumbnail");
                 thumbnail.set_content_fit(gtk::ContentFit::Cover);
@@ -847,21 +860,23 @@ impl Bubble {
                 column.set_valign(gtk::Align::Center);
                 column.set_halign(gtk::Align::Center);
                 let icon = crate::icons::image(&format!("layer-{}-symbolic", view.icon));
-                icon.set_pixel_size(match view.kind {
-                    BubbleKind::Slider => 16,
-                    _ => 20,
-                });
+                icon.set_pixel_size(20);
                 column.append(&icon);
                 match view.kind {
-                    BubbleKind::Slider => {
-                        icon.set_opacity(0.75);
-                        let value = gtk::Label::new(None);
-                        value.add_css_class("bubble-value");
-                        value.set_margin_top(2);
-                        column.append(&value);
-                        *imp.value.borrow_mut() = Some(value);
-                    }
                     BubbleKind::Medium => icon.set_margin_bottom(8),
+                    BubbleKind::History => {
+                        column.set_orientation(gtk::Orientation::Horizontal);
+                        column.set_homogeneous(true);
+                        column.set_halign(gtk::Align::Fill);
+                        column.set_hexpand(true);
+                        column.remove(&icon);
+                        for button in &view.buttons {
+                            let image = crate::icons::image(&format!("layer-{}-symbolic", button.icon));
+                            image.set_pixel_size(20);
+                            column.append(&image);
+                            imp.buttons.borrow_mut().push(image);
+                        }
+                    }
                     _ => {}
                 }
                 if let Some(id) = view.preview {
@@ -899,7 +914,7 @@ impl Bubble {
             return;
         }
         let turning = imp.contact.get() == Some(Contact::Beads(true));
-        let changed = imp.view.borrow().as_ref().is_some_and(|old| old.beads != view.beads);
+        let changed = imp.view.borrow().as_ref().is_some_and(|old| old.beads != view.beads && old.diameter == view.diameter);
         let tween = (changed && !turning && motion()).then(|| Tween { from: self.shown_beads(), to: view.beads.clone(), start: self.now() });
         let shown = tween.as_ref().map_or_else(|| view.beads.clone(), |t| tweened(&t.from, &t.to, 0.));
         *imp.tween.borrow_mut() = tween;
@@ -1042,7 +1057,7 @@ impl Bubble {
     fn sync_ring_icons(&self) {
         let imp = self.imp();
         let rings = imp.rings_shown.borrow();
-        let count = imp.view.borrow().as_ref().is_some_and(|v| v.kind != BubbleKind::Slider).then_some(rings.len()).unwrap_or(0);
+        let count = rings.len();
         let mut icons = imp.icons.borrow_mut();
         while icons.len() < count {
             let icon = crate::icons::image("layer-settings-symbolic");
@@ -1056,16 +1071,13 @@ impl Bubble {
             if let Some(ring) = rings.get(i) {
                 crate::icons::set(icon, Some(&format!("layer-{}-symbolic", ring.icon)));
                 icon.set_tooltip_text(Some(&ring.label));
+                icon.set_opacity(if ring.enabled { 1. } else { 0.4 });
             }
         }
     }
 
     fn set_rings(&self, view: &BubbleView) {
         let imp = self.imp();
-        if view.kind == BubbleKind::Slider {
-            *imp.rings_shown.borrow_mut() = view.rings.clone();
-            return;
-        }
         let showing = !imp.rings_shown.borrow().is_empty() && !matches!(imp.halo_fade.get(), Some((_, false)));
         if !view.rings.is_empty() {
             *imp.rings_shown.borrow_mut() = view.rings.clone();
@@ -1158,7 +1170,7 @@ impl Bubble {
             crate::icons::set(icon, Some(&format!("layer-{}-symbolic", view.icon)));
         }
         if let Some(face) = imp.face.borrow().as_ref() {
-            set_class(face, "selected-tool", view.selected && matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium));
+            set_class(face, "selected-tool", view.selected && matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium | BubbleKind::Controls));
             face.set_opacity(if view.enabled { 1. } else { 0.45 });
             face.set_child_visible(view.card.is_none());
         }
@@ -1169,12 +1181,13 @@ impl Bubble {
             count.set_label(&view.layers.to_string());
             count.set_child_visible(view.card.is_none());
         }
-        if let Some(value) = imp.value.borrow().as_ref() {
-            value.set_label(view.rings.first().map_or("", |r| r.text.as_str()));
+        for (image, button) in imp.buttons.borrow().iter().zip(&view.buttons) {
+            image.set_opacity(if button.enabled { 1. } else { 0.35 });
+            image.set_tooltip_text(Some(&button.label));
         }
         self.set_rings(&view);
         if let Some(readout) = imp.readout.borrow().as_ref() {
-            readout.set_visible(view.readout.is_some() && view.kind != BubbleKind::Slider);
+            readout.set_visible(view.readout.is_some());
             readout.set_label(view.readout.as_deref().unwrap_or_default());
         }
         self.update_property(&[gtk::accessible::Property::Label(&view.label)]);
@@ -1182,6 +1195,57 @@ impl Bubble {
         self.sync_ring_icons();
         self.queue_allocate();
         self.queue_draw();
+    }
+
+    fn set_stamp(&self, w: &Rc<Workspace>, view: &BubbleView) {
+        let imp = self.imp();
+        let Some(stamp) = view.stamp else {
+            if let Some(patch) = imp.stamp_patch.take() {
+                patch.unparent();
+                imp.stamp.take();
+                self.queue_draw();
+            }
+            return;
+        };
+        let (display, headroom) = imp.display.get().unwrap_or_default();
+        imp.stamp_patch
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                let patch = crate::display_color::ColorPatch::new(false);
+                patch.set_parent(self);
+                patch
+            })
+            .set_display_color(stamp.color, display, headroom);
+        if imp.stamp_tick.borrow().is_none() {
+            let tick = self.add_tick_callback(glib::clone!(#[weak] w, #[upgrade_or] glib::ControlFlow::Break, move |bubble, _| {
+                if bubble.poll_stamp(&w) {
+                    return glib::ControlFlow::Continue;
+                }
+                bubble.imp().stamp_tick.take();
+                glib::ControlFlow::Break
+            }));
+            *imp.stamp_tick.borrow_mut() = Some(tick);
+        }
+    }
+
+    fn poll_stamp(&self, w: &Rc<Workspace>) -> bool {
+        let imp = self.imp();
+        if imp.stamp_patch.borrow().is_none() {
+            return false;
+        }
+        let known = imp.stamp.borrow().as_ref().map(|(id, _, _)| *id);
+        let stamp = w.gpu.borrow_mut().as_mut().and_then(|g| {
+            let context = g.session.state().toolbar_context();
+            g.session.toolbar_stamp(context, known).ok().flatten()
+        });
+        if let Some(stamp) = stamp.filter(|s| !s.alpha.is_empty()) {
+            let size = stamp.size as i32;
+            let texture = gdk::MemoryTexture::new(size, size, gdk::MemoryFormat::A8, &glib::Bytes::from_owned(stamp.alpha), stamp.size as usize);
+            imp.stamp.replace(Some((stamp.request_id, stamp.extent, texture.upcast())));
+            self.queue_allocate();
+            self.queue_draw();
+        }
+        true
     }
 
     fn hot_item(&self, p: [f32; 2]) {
@@ -1280,7 +1344,7 @@ impl Bubble {
                         w.bubbles.drag(&w, BubbleGrab::Bubble { id }, ContactPhase::Up, at);
                     }
                 }
-                Some(Contact::Pending(_)) => send(&w, BubbleAction::Tap { id }),
+                Some(Contact::Pending(_)) => send(&w, BubbleAction::Tap { id, position }),
                 Some(Contact::Pair) | None => {}
             }
         }));
@@ -1296,6 +1360,12 @@ impl Bubble {
         fingers.set_propagation_phase(gtk::PropagationPhase::Capture);
         fingers.connect_event(glib::clone!(#[weak] w, #[upgrade_or] glib::Propagation::Proceed, move |controller, event| {
             let Some(bubble) = controller.widget().and_downcast::<Bubble>() else { return glib::Propagation::Proceed };
+            if matches!(event.event_type(), gdk::EventType::EnterNotify | gdk::EventType::MotionNotify | gdk::EventType::ButtonPress | gdk::EventType::ProximityIn) {
+                let pen = event.device_tool().is_some() || event.device().is_some_and(|d| d.source() == gdk::InputSource::Pen);
+                if bubble.cursor().is_some() != pen {
+                    bubble.set_cursor_from_name(pen.then_some("none"));
+                }
+            }
             let Some(at) = w.event_point(controller) else { return glib::Propagation::Proceed };
             let sequence = || event.event_sequence().as_ptr() as usize;
             let stop = match event.event_type() {
@@ -1465,8 +1535,8 @@ impl Bubble {
     fn press_up(&self, w: &Rc<Workspace>, id: u32, sequence: Option<usize>, at: [f32; 2], cancel: bool) {
         let Some(mut press) = self.imp().press.borrow_mut().take_if(|c| c.sequence == sequence) else { return };
         press.forget();
-        if press.held {
-            if cancel { w.dismiss_context() } else { w.finish_context_hold() }
+        if press.held && cancel {
+            w.dismiss_context();
         }
         if press.moving {
             w.bubbles.drag(w, BubbleGrab::Rim { id }, if cancel { ContactPhase::Cancel } else { ContactPhase::Up }, at);
@@ -1623,12 +1693,12 @@ impl Bubbles {
         let colors = w.palette.get().map(|palette| {
             let [r, g, b, a] = palette.glass.chip.0;
             let rgb = |c: HexColor| gdk::RGBA::new(c.0[0] as f32 / 255., c.0[1] as f32 / 255., c.0[2] as f32 / 255., 1.);
-            [gdk::RGBA::new(r, g, b, a), rgb(palette.text), rgb(palette.accent)]
+            [gdk::RGBA::new(r, g, b, a), rgb(palette.text), rgb(palette.thumb)]
         });
         let retheme = self.theme.replace(Some(state.theme)) != Some(state.theme);
         for bubble in self.layer.bubbles() {
             let keep = views.iter().find(|v| v.id == bubble.id()).is_some_and(|v| {
-                bubble.imp().view.borrow().as_ref().is_some_and(|old| old.source == v.source && old.diameter == v.diameter)
+                bubble.imp().view.borrow().as_ref().is_some_and(|old| old.source == v.source)
             });
             if !keep {
                 bubble.unparent();
@@ -1652,6 +1722,7 @@ impl Bubbles {
                 thumbnail.set_paintable(w.layer_panel.preview(layer).as_ref());
             }
             bubble.set_card(w, state, &view);
+            bubble.set_stamp(w, &view);
             if bubble.imp().view.borrow().as_ref() != Some(&view) || retheme {
                 bubble.set_beads(w, &view);
                 bubble.set_items(&view, state.theme);
@@ -1721,7 +1792,6 @@ impl Bubbles {
             Some(Ok(change)) => w.changed(Ok(change)),
             _ => {}
         }
-        w.dragging.set(matches!(phase, ContactPhase::Down | ContactPhase::Move) && accepted);
         self.animate(w);
         accepted
     }

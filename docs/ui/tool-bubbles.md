@@ -23,14 +23,15 @@ center. GTK presents bubbles; Web and the native clients follow after review.
 | A tool group in the title bar or a toolbar (Brush, Eraser, Sculpt, a tool slot…) | Group dial, 56 px | The tool's current icon and the title bar's drawer mark |
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
-| Brush size, Brush opacity (or the Opacity tile) and Strength sliders | Slider, 96 px | The setting icon and value inside a 300° ring; the center moves it |
+| The color picker | Brush controls, 136 px | A 56 px circle with the color picker icon, Size on a left arc and Strength on a right arc, both always shown |
+| Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail on a small stack, with the layer count |
 
-Commands, other panels, Tool Options, size chips and dividers stay in their
-toolbars. `BubbleSource::for_control` decides; the Opacity tile is stored as the
-Brush opacity slider. There is one bubble per source: taking a tool again moves
-the existing bubble.
+Other commands, panels, sliders, Tool Options, size chips and dividers stay in
+their toolbars. `BubbleSource::for_control` decides; Redo is stored as Undo, so
+both make the same bubble. There is one bubble per source: taking a tool again
+moves the existing bubble.
 
 ## Taking and putting back
 
@@ -38,10 +39,9 @@ the existing bubble.
   its list or toolbar until it leaves the bar, drawer or panel; from then on the
   bubble follows it. Releasing within 80 px (`WORKSPACE_PROXIMITY`) of where it
   came from takes nothing.
-- **Toolbar tiles:** a plain drag takes a bubble the same way, except for slider
-  and Tool Options tiles, whose plain drags keep editing their value. Hold, then
-  drag still rearranges toolbars; releasing such a drag on the canvas past the
-  80 px line takes a bubble.
+- **Toolbar tiles:** a plain drag takes a bubble the same way. Hold, then drag
+  still rearranges toolbars; releasing such a drag on the canvas past the 80 px
+  line takes a bubble.
 - **Putting back:** drop a bubble on a toolbar, a panel or the title bar, or choose
   **Put back** in its hold menu. While the contact is over a place it would go
   back to, the bubble shrinks and fades. `BubbleAction::PutBackAll` empties the
@@ -51,8 +51,9 @@ the existing bubble.
 
 ## Moving and pushing
 
-Bubbles move without a hold: drag the face of a tool bubble, the center of a
-slider, the folded Layers squircle or an open card's grab bar and edges, or the
+Bubbles move without a hold: drag the face of a tool bubble, the space between
+the Brush controls arcs, the undo and redo capsule, the folded
+Layers squircle or an open card's grab bar and edges, or the
 color ring anywhere outside the wheel that isn't a bead. Two fingers move any
 bubble from anywhere on it, the wheel included; while one finger is on a bubble,
 the second may land up to 90 px outside it. Pinching the color ring sets its
@@ -85,9 +86,11 @@ everything rests.
 - **Group dial and medium:** select, then halo, then chooser, then close. A tool
   without settings goes straight from select to the chooser.
 - **Halo:** the selected brush's settings sit on arcs around the bubble, within
-  122 px for one to three settings and 188 px for four to six (2+2, 3+2, 3+3).
-  Each arc is a 4 px track on a matte band that covers only the arc, with the
-  setting's icon on the band just before the track starts;
+  136 px for one to three settings and 206 px for four to six (2+2, 3+2, 3+3).
+  Each arc is a 4 px track on a 28 px matte band that covers only the arc, with
+  the setting's icon on the band 21 px before the track starts, clear of the
+  thumb. The set part of the track is grey like the panels' sliders and the
+  thumb is a 14 px circle in the toolbars' thumb color with a thin border;
   side arcs grow upward and top and bottom arcs rightward. Drag along an arc to
   set the value; its name and value show below the halo while dragging. A halo
   stays open while painting and until the bubble is tapped or another tool is
@@ -102,10 +105,18 @@ everything rests.
   onto one of its brushes. Picking a brush or tool closes the chooser; letting go
   on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
-- **Slider:** drag the ring or tap a point on it; the center moves the bubble.
+- **Brush controls:** drag along the left arc for Size and the right arc for
+  Strength, or tap a point on them. While a contact is on an arc, a dab of the
+  current brush in the current color sits under the finger or pen at the
+  canvas's zoom and follows each change, and its name and value show below.
+  Tapping its center starts or stops the color picker, like its tile.
+- **Undo and redo:** tapping either half undoes or redoes; dragging anywhere on
+  it moves it.
 - **Hold** always opens the bubble's menu: **Settings in the ring**, the
   bubble's options and **Put back**. On the color ring a hold anywhere opens it,
-  after twice the usual delay, so a slow pick on the wheel stays a pick.
+  after twice the usual delay, so a slow pick on the wheel stays a pick. A hold
+  restores the color or setting its press changed; the menu stays open when the
+  contact lifts, and dragging instead closes it and carries on the drag.
 - **Showing and hiding:** halo arcs grow and fade in, chooser items arrive in a
   short stagger and fade out when it closes, and beads slide to new places; with
   reduced motion they appear at once.
@@ -119,9 +130,10 @@ the bubble. 24 px beads orbit it on up to two orbits 28 px apart:
 - **Recent colors** along the top, newest on the left, eight at most (fewer on a
   small ring). Slide along them to reach older colors; beads shrink and fade as
   they turn past either end, so the strip never ends in a jump.
-- **Foreground, background and transparent.** The foreground and background
-  beads overlap like the Color panel's pair, the chosen one in front. Tapping
-  the background chooses it and brings it to the front; nothing swaps. They sit
+- **Primary, secondary and transparent.** These beads have the Color drawer's
+  sizes and sit its gap (about 10 px) off the grey rim, and the primary and
+  secondary overlap like the drawer's pair, the chosen one in front. Tapping
+  the secondary chooses it and brings it to the front; nothing swaps. They sit
   lower left, and move up the side when the palette is shown.
 - **Palette** in two orbits wrapping the lower half, filled column by column;
   sliding either orbit turns both, and they settle on whole columns. Columns
@@ -132,8 +144,8 @@ the bubble. 24 px beads orbit it on up to two orbits 28 px apart:
   palettes…**. Picking a color or a contact elsewhere closes it. No bead
   overlaps another at any size or turn.
 
-A new ring is the Medium circle alone. The hold menu turns Recent colors,
-Palette and Foreground and background on or off and chooses Small (136 px),
+A new ring is the Medium circle alone. The hold menu turns **Recent colors**,
+**Palette** and **Primary and secondary** on or off and chooses Small (136 px),
 Medium (216 px) or Large (344 px). Putting the ring back remembers its options
 and size for the next time it is taken.
 
@@ -154,7 +166,9 @@ menu keeps it open until its grab bar is tapped.
 Bubbles use the toolbars' glass: the selected tool is the title bar's selection
 color as one glass surface, as translucent as the unselected ones, and borders
 are a thin inner line. Round parts cast a soft shadow drawn as rings of the
-bubble's own shape, so scaling and pinching never render a shadow offscreen.
+bubble's own shape, so scaling and pinching never render a shadow offscreen. A
+pen shows no system pointer over bubbles, as over the canvas; the mouse keeps
+its pointer.
 
 ## Painting
 
@@ -165,7 +179,7 @@ palette name and folding cards; a halo stays and fades with its bubble.
 ## Zen mode
 
 Bubbles stay visible in Zen mode, like floating panels, and their drags, halos,
-choosers and cards keep working while other chrome is hidden. **Show in Zen
+choosers, cards and menus keep working while other chrome stays hidden. **Show in Zen
 mode** in a toolbar's menu keeps that toolbar (off by default), and a
 one-finger swipe in from an edge peeks the toolbars docked there until the next
 contact elsewhere. Dropping a bubble on a toolbar kept or peeked in Zen puts it
@@ -181,7 +195,9 @@ back.
   with `LAYER_NATIVE_CAPTURE_DIR` for compositor screenshots. With mouse and
   touch in both themes it takes a title-bar tool, walks the taps, adjusts a halo
   arc, paints under it, chooses a medium and slides to a brush, pushes one
-  bubble with another, opens the hold menu, unfolds the Layers card and its
+  bubble with another, opens the hold menu, drags the color picker out and sets
+  Size and Strength on its arcs with the dab under the contact, undoes and
+  redoes from the bubble taken from Redo and then Undo, unfolds the Layers card and its
   properties, adds a layer from its footer and folds it, picks on the wheel and
   moves the ring by its glass, holds it for its menu, uses the color beads and
   palette pill, drags out of the wheel, pinches the ring with fingers starting

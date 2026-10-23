@@ -1649,6 +1649,9 @@ impl Workspace {
             #[upgrade_or]
             glib::Propagation::Proceed,
             move |controller, event| {
+                if this.dismiss_held_context(event) {
+                    return glib::Propagation::Stop;
+                }
                 let point = this.event_point(controller);
                 let kind = event.event_type();
                 let down = matches!(kind, gdk::EventType::ButtonPress | gdk::EventType::TouchBegin);
@@ -1886,7 +1889,7 @@ impl Workspace {
                 .borrow()
                 .iter()
                 .filter_map(|p| p.upgrade())
-                .any(|p| p.is_visible()),
+                .any(|p| p.is_visible() && !self.floats_with_bubbles(&p)),
         };
         let reply = self
             .gpu

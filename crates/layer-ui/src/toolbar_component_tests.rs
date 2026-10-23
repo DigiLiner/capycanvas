@@ -82,7 +82,7 @@ fn toolbar_resets_use_tool_defaults_and_reject_stale_context() {
     s.dispatch(UiAction::ResetToolSetting { id: "tolerance".into() }).unwrap();
     assert_eq!(s.state().tool_settings.iter().find(|f| f.id == "tolerance").unwrap().value, default);
     assert!(s.dispatch(UiAction::ResetToolSetting { id: "size".into() }).is_err());
-    let opacity = ToolbarNumericBinding::BrushOpacity.numeric();
+    let opacity = ToolbarNumericBinding::BrushStrength.numeric();
     let value = opacity.resolve(0., NumericOperation::Position { position: 0.427 }).unwrap();
     assert!((value.value - 0.43).abs() < 1e-6);
     assert_eq!(value.text, "43 %");
@@ -461,7 +461,7 @@ fn toolbar_components_have_atomic_bounds_and_fill_remaining_width() {
         ToolbarControl::Color,
         ToolbarControl::BrushSizeSlider,
         ToolbarControl::Divider,
-        ToolbarControl::BrushOpacitySlider,
+        ToolbarControl::BrushStrengthSlider,
         ToolbarControl::TOOL_OPTIONS,
     ]
     .into_iter()
@@ -566,7 +566,7 @@ fn toolbar_components_customize_and_restore_as_atomic_items() {
     let before = s.state().workspace.layout.clone();
     let controls = [
         ToolbarControl::BrushSizeSlider,
-        ToolbarControl::BrushOpacitySlider,
+        ToolbarControl::BrushStrengthSlider,
         ToolbarControl::TOOL_OPTIONS,
     ];
     customize(&mut s, CustomizationAction::InsertTools { panel: Panel::Commands, before: None });
@@ -666,7 +666,7 @@ fn toolbar_drawer_measurement_contains_all_components_across_styles_and_widths()
     let controls = [
         ToolbarControl::Color,
         ToolbarControl::BrushSizeSlider,
-        ToolbarControl::BrushOpacitySlider,
+        ToolbarControl::BrushStrengthSlider,
         ToolbarControl::Divider,
         ToolbarControl::TOOL_OPTIONS,
     ];
@@ -1128,12 +1128,12 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
     assert_eq!(view.bookmarks.len(), 1);
     assert_eq!(view.bookmarks[0].value, 64.);
     assert!(view.bookmarks[0].selected);
-    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37)] {
         s.dispatch(control.slider().unwrap().action(value)).unwrap();
         s.dispatch(UiAction::ToolbarEdit {context,
             action:Box::new(UiAction::ToggleSliderBookmark {control})}).unwrap();
     }
-    for (control,value) in [(control,64.),(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+    for (control,value) in [(control,64.),(ToolbarControl::BrushStrengthSlider,0.37)] {
         let bookmarks=s.state().toolbar_component(control).unwrap().bookmarks;
         assert_eq!(bookmarks.len(),1);assert_eq!(bookmarks[0].value,value);
         assert!(bookmarks[0].selected);
@@ -1179,11 +1179,11 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
             .bookmarks
             .is_empty()
     );
-    for control in [ToolbarControl::BrushStrengthSlider,ToolbarControl::BrushOpacitySlider] {
+    for control in [ToolbarControl::BrushStrengthSlider] {
         assert!(s.state().toolbar_component(control).unwrap().bookmarks.is_empty());
     }
     s.dispatch(UiAction::SelectBrush {id:context.brush}).unwrap();
-    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37)] {
         assert_eq!(s.state().toolbar_component(control).unwrap().bookmarks[0].value,value);
     }
 }
@@ -1192,7 +1192,6 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
 fn slider_bookmark_taps_are_nearby_bounded_and_choose_the_closest_mark() {
     for (control, value, neighbor) in [
         (ToolbarControl::BrushSizeSlider, 64., 80.),
-        (ToolbarControl::BrushOpacitySlider, 0.5, 0.54),
         (ToolbarControl::BrushStrengthSlider, 0.5, 0.54),
     ] {
         let numeric = control.slider().unwrap().numeric();
@@ -1271,19 +1270,19 @@ fn slider_preview_geometry_and_embedded_opacity_are_shared() {
     assert_eq!(size.opacity, 1.);
     assert_eq!(size.text, "Size: 64 px");
     let opacity = slider_preview_layout(
-        ToolbarControl::BrushOpacitySlider,
+        ToolbarControl::BrushStrengthSlider,
         TileStyle::Small,
         0.42,
         180.,
         1.,
      &Localizer::shared(UiLanguage::English))
     .unwrap();
-    assert_eq!(opacity.text, "Opacity: 42 %");
+    assert_eq!(opacity.text, "Strength: 42 %");
     assert_eq!(opacity.opacity, 1.);
     assert_eq!(
         opacity.stamp,
         slider_preview_layout(
-            ToolbarControl::BrushOpacitySlider,
+            ToolbarControl::BrushStrengthSlider,
             TileStyle::Small,
             1.,
             180.,
@@ -1300,7 +1299,7 @@ fn slider_preview_geometry_and_embedded_opacity_are_shared() {
     ] {
         let tile = style.size()[1];
         let layout =
-            slider_preview_layout(ToolbarControl::BrushOpacitySlider, style, 1., 0., 1., &Localizer::shared(UiLanguage::English)).unwrap();
+            slider_preview_layout(ToolbarControl::BrushStrengthSlider, style, 1., 0., 1., &Localizer::shared(UiLanguage::English)).unwrap();
         assert_eq!(layout.radius, style.corner_radius());
         assert_eq!(
             layout.bookmark,
@@ -1334,7 +1333,7 @@ fn slider_preview_geometry_and_embedded_opacity_are_shared() {
         , &Localizer::shared(UiLanguage::English))
         .is_err()
     );
-    let invalid = r#"{"size":[64,32],"opacity":[]}"#;
+    let invalid = r#"{"size":[64,32],"strength":[]}"#;
     assert!(
         serde_json::from_str::<SliderBookmarks>(invalid)
             .unwrap()

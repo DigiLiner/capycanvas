@@ -770,7 +770,7 @@ fn native_toolbar_added_sliders_input() {
         pump(250);
         d.named("tool-search").downcast::<gtk::SearchEntry>().unwrap().set_text("slider");
         pump(300);
-        for control in [ToolbarControl::BrushSizeSlider, ToolbarControl::BrushOpacitySlider] {
+        for control in [ToolbarControl::BrushSizeSlider, ToolbarControl::BrushStrengthSlider] {
             d.click_name(&format!("tool-choice-{}", serde_json::to_string(&control).unwrap()));
         }
         d.click_name("confirm-tools");
@@ -779,7 +779,7 @@ fn native_toolbar_added_sliders_input() {
         let panels = state(&d.w).workspace.layout.panels;
         let generation = ui_session_mut(&d.w).capture_workspace().unwrap().history.generation;
         for device in ["mouse", "touch"] {
-            for control in [ToolbarControl::BrushSizeSlider, ToolbarControl::BrushOpacitySlider] {
+            for control in [ToolbarControl::BrushSizeSlider, ToolbarControl::BrushStrengthSlider] {
                 let binding = control.slider().unwrap();
                 d.w.dispatch(binding.action(if control == ToolbarControl::BrushSizeSlider { 5. } else { 0.1 }));
                 pump(50);
