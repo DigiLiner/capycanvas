@@ -88,6 +88,7 @@ pub struct GlassPalette {
     pub source: GlassColor,
     pub open_tile: GlassColor,
     pub chip: GlassColor,
+    pub chip_selection: GlassColor,
     pub switcher: GlassColor,
     pub selection: GlassColor,
     pub header_selection: GlassColor,
@@ -168,6 +169,7 @@ impl GlassPalette {
             source: GlassColor::over(source, bg, strip),
             open_tile: GlassColor::over(panel, source, joined),
             chip,
+            chip_selection: GlassColor::over(header_selection, bg, floating),
             switcher: glass_switcher,
             selection: distinct(selection, panel, glass_panel, bg, inner),
             header_selection: distinct(header_selection, bg, chip, bg, inner),
@@ -175,8 +177,8 @@ impl GlassPalette {
             document_tab: distinct(panel, bg, chip, bg, inner),
         }
     }
-    pub fn surfaces(&self) -> [GlassColor; 5] {
-        [self.panel, self.strip, self.source, self.chip, self.switcher]
+    pub fn surfaces(&self) -> [GlassColor; 6] {
+        [self.panel, self.strip, self.source, self.chip, self.chip_selection, self.switcher]
     }
 }
 

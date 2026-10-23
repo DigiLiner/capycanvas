@@ -173,11 +173,53 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     pump(200);
 }
 
+fn menu_open(d: &Driver) -> bool {
+    d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).any(|p| p.is_visible() && p.has_css_class("panel-context-menu"))
+}
+
+fn touches(d: &mut Driver, a: [f32; 2], b: [f32; 2], step: [f32; 2], spread: f32) {
+    let touch = |phase: &str, slot: u32, point: [f32; 2]| serde_json::json!({ "touch": phase, "slot": slot, "point": point });
+    let mut events = vec![touch("down", 0, a), touch("down", 1, b)];
+    for i in 1..=8 {
+        let f = i as f32 / 8.;
+        events.push(touch("move", 0, [a[0] + step[0] * f - spread * f, a[1] + step[1] * f]));
+        events.push(touch("move", 1, [b[0] + step[0] * f + spread * f, b[1] + step[1] * f]));
+    }
+    events.push(serde_json::json!({ "touch": "up", "slot": 0 }));
+    events.push(serde_json::json!({ "touch": "up", "slot": 1 }));
+    d.input.perform(serde_json::Value::Array(events));
+    pump(600);
+}
+
 fn color_ring(d: &mut Driver, device: &str, name: &str) {
     let (item, spot) = (header_of(d, ToolbarControl::Color), canvas_spot(d, 0.68, 0.45));
     tear(d, device, &item, spot);
     let color = find(d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap_or_else(|| panic!("{name}: Color comes out of the title bar"));
     assert!(d.named(&format!("bubble-{}", color.id)).is_mapped());
+    if color.beads.is_empty() {
+        assert_eq!(color.diameter, COLOR_RING_SIZES[1], "{name}: a new ring is the medium circle");
+    }
+    let c = center(d, color.id);
+    let before = state(&d.w).colors.foreground;
+    let hold = [c[0] + 8., c[1] - 6.];
+    d.input.perform(serde_json::json!([contact(device, "down", hold), { "wait_ms": 1300 }, contact(device, "up", hold)]));
+    pump(300);
+    assert!(menu_open(d), "{name}: holding the wheel opens the ring's menu");
+    assert_eq!(state(&d.w).colors.foreground, before, "{name}: a hold keeps the color");
+    capture(d, &format!("{name}-color-menu"));
+    d.input.key(0xff1b);
+    pump(200);
+    let then = [hold[0] - 30., hold[1] + 24.];
+    d.input.perform(serde_json::json!([contact(device, "down", hold), { "wait_ms": 1300 }, contact(device, "move", [hold[0] - 12., hold[1] + 10.]), contact(device, "move", then), { "wait_ms": 100 }]));
+    pump(200);
+    assert!(!menu_open(d), "{name}: dragging after a hold closes the menu");
+    assert_ne!(state(&d.w).colors.foreground, before, "{name}: and goes on picking");
+    d.input.perform(serde_json::json!([contact(device, "up", then)]));
+    pump(200);
+    assert!(!menu_open(d), "{name}: letting go after that keeps the menu closed");
+    let options = BubbleOptions { recent: true, palette: true, pair: true, ..color.options };
+    d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id: color.id, options } });
+    pump(500);
     let transparent = bead_point(d, color.id, Bead::Transparent).unwrap();
     tap(d, device, transparent);
     assert_eq!(state(&d.w).colors.slot, ColorSlot::Transparent, "{name}: the transparent bead");
@@ -186,10 +228,13 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     assert_eq!(state(&d.w).colors.slot, ColorSlot::Foreground, "{name}: the foreground bead");
     let colors = state(&d.w).colors;
     let background = bead_point(d, color.id, Bead::Background).unwrap();
-    let back = [background[0] - 4., background[1] + 4.];
-    tap(d, device, back);
-    let swapped = state(&d.w).colors;
-    assert_eq!((swapped.foreground, swapped.background), (colors.background, colors.foreground), "{name}: the background bead swaps");
+    let away = [background[0] - foreground[0], background[1] - foreground[1]];
+    let length = away[0].hypot(away[1]);
+    tap(d, device, [background[0] + away[0] / length * 8., background[1] + away[1] / length * 8.]);
+    let chosen = state(&d.w).colors;
+    assert_eq!(chosen.slot, ColorSlot::Background, "{name}: tapping the background chooses it");
+    assert_eq!((chosen.foreground, chosen.background), (colors.foreground, colors.background), "{name}: nothing swaps");
+    tap(d, device, foreground);
     let c = center(d, color.id);
     d.input.perform(serde_json::json!([contact(device, "down", [c[0] - 12., c[1]])]));
     pump(150);
@@ -197,13 +242,34 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     d.input.perform(serde_json::json!([contact(device, "move", [c[0] - 4., c[1] + 6.]), contact(device, "move", [c[0] + 16., c[1] + 14.]), contact(device, "up", [c[0] + 16., c[1] + 14.])]));
     pump(350);
     assert_ne!(state(&d.w).colors.foreground, first, "{name}: dragging on the wheel picks colors");
-    let radius = color.diameter * 0.5 + 10.;
+    let picked = state(&d.w).colors.foreground;
+    let size = find_id(d, color.id).unwrap().diameter;
+    let out: Vec<_> = (0..=12).map(|i| [c[0] - 4. - size * 1.3 * i as f32 / 12., c[1] + 4.]).collect();
+    stroke(d, device, &out);
+    pump(400);
+    let dragged = center(d, color.id);
+    assert!(c[0] - dragged[0] > size * 0.25, "{name}: dragging out past two radii moves the ring ({c:?} -> {dragged:?})");
+    assert_eq!(state(&d.w).colors.foreground, picked, "{name}: and keeps the color it had");
+    let c = dragged;
+    let radius = size * 0.5 + 10.;
     let angle = 205f32.to_radians();
     let gap = [c[0] + radius * angle.cos(), c[1] + radius * angle.sin()];
-    stroke(d, device, &[gap, [gap[0] - 10., gap[1] + 4.], [gap[0] - 50., gap[1] + 30.]]);
+    stroke(d, device, &[gap, [gap[0] + 10., gap[1] - 4.], [gap[0] + 60., gap[1] - 20.]]);
     pump(400);
     let moved = center(d, color.id);
-    assert!((moved[0] - c[0]).hypot(moved[1] - c[1]) > 30., "{name}: the glass around the wheel moves the ring");
+    assert!((moved[0] - c[0]).hypot(moved[1] - c[1]) > 30., "{name}: the space around the wheel moves the ring");
+    if device == "touch" {
+        let c = moved;
+        let held = state(&d.w).colors.foreground;
+        touches(d, c, [c[0] + 70., c[1]], [40., 20.], 30.);
+        let after = find_id(d, color.id).unwrap();
+        assert!(after.diameter > size + 10., "{name}: two fingers starting on the wheel pinch the ring ({size} -> {})", after.diameter);
+        let shifted = center(d, color.id);
+        assert!((shifted[0] - c[0]).hypot(shifted[1] - c[1]) > 20., "{name}: and move it");
+        assert_eq!(state(&d.w).colors.foreground, held, "{name}: without picking a color");
+        d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id: color.id, options: BubbleOptions { size, ..after.options } } });
+        pump(500);
+    }
     let first = bead_point(d, color.id, Bead::Swatch { index: 0 }).unwrap();
     let further = bead_point(d, color.id, Bead::Swatch { index: 4 }).unwrap();
     let picked = state(&d.w).colors.foreground;
@@ -378,6 +444,12 @@ fn native_tool_bubbles() {
             let torn = find_id(&d, torn).unwrap();
             assert!(!find(&d, brush).unwrap().selected, "{name}: tearing a row does not choose it");
             if device == "touch" {
+                let at = center(&d, taken.id);
+                touches(&mut d, at, [at[0] + 20., at[1] + 4.], [-60., 50.], 0.);
+                let shifted = center(&d, taken.id);
+                assert!((shifted[0] - at[0]).hypot(shifted[1] - at[1]) > 40., "{name}: two fingers on a face move the bubble");
+            }
+            if device == "touch" {
                 let at = center(&d, torn.id);
                 d.input.perform(serde_json::json!([contact(device, "down", at), { "wait_ms": 900 }, contact(device, "up", at)]));
                 pump(300);
@@ -387,6 +459,15 @@ fn native_tool_bubbles() {
                 capture(&mut d, &format!("{name}-menu"));
                 d.input.key(0xff1b);
                 pump(200);
+                let at = center(&d, torn.id);
+                let to = [at[0] + 50., at[1] + 60.];
+                d.input.perform(serde_json::json!([contact(device, "down", at), { "wait_ms": 900 }, contact(device, "move", [at[0] + 20., at[1] + 20.]), contact(device, "move", to), contact(device, "up", to)]));
+                pump(400);
+                let moved = center(&d, torn.id);
+                assert!((moved[0] - at[0]).hypot(moved[1] - at[1]) > 40., "{name}: dragging after a hold moves the bubble");
+                let open: Vec<_> = d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).filter(|p| p.is_visible()).map(|p| p.css_classes()).collect();
+                assert!(open.is_empty(), "{name}: and closes its menu: {open:?}");
+                assert!(!find(&d, brush).unwrap().selected, "{name}: without choosing it");
                 let open: Vec<_> = d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).filter(|p| p.is_visible()).map(|p| p.css_classes()).collect();
                 assert!(open.is_empty(), "{name}: Escape closes the bubble menu: {open:?}");
             }
@@ -508,6 +589,90 @@ fn native_tool_bubble_motion() {
     }
     if let Some(dir) = std::env::var_os("LAYER_TEST_ARTIFACTS") {
         std::fs::write(std::path::Path::new(&dir).join("tool-bubble-motion.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    }
+    d.finish();
+}
+
+fn dark_outside_rings(directory: &std::path::Path) -> Vec<(usize, usize)> {
+    let frames: Vec<serde_json::Value> = serde_json::from_slice(&std::fs::read(directory.join("frames.json")).unwrap()).unwrap();
+    let mut found = Vec::new();
+    for (index, frame) in frames.iter().enumerate() {
+        let [width, height, stride] = ["width", "height", "stride"].map(|k| frame[k].as_u64().unwrap() as usize);
+        let bytes = std::fs::read(directory.join(format!("{index:04}.rgb"))).unwrap();
+        let px = |x: usize, y: usize| &bytes[y * stride + x * 3..][..3];
+        let [x0, y0, x1, y1] = [width / 5, height / 6, width * 4 / 5, height * 9 / 10];
+        let mut ring = Vec::new();
+        for y in (y0..y1).step_by(2) {
+            for x in (x0..x1).step_by(2) {
+                let p = px(x, y);
+                if p.iter().max().unwrap() - p.iter().min().unwrap() > 120 {
+                    ring.push([x as f32, y as f32]);
+                }
+            }
+        }
+        if ring.len() < 20 {
+            continue;
+        }
+        let center = ring.iter().fold([0.; 2], |a, p| [a[0] + p[0], a[1] + p[1]]).map(|v| v / ring.len() as f32);
+        let reach = ring.iter().map(|p| (p[0] - center[0]).hypot(p[1] - center[1])).fold(0., f32::max) + 12.;
+        let dark = (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+            .filter(|&(x, y)| *px(x, y).iter().max().unwrap() < 24 && (x as f32 - center[0]).hypot(y as f32 - center[1]) > reach)
+            .count();
+        if dark > 12 {
+            found.push((index, dark));
+        }
+    }
+    found
+}
+
+#[test]
+#[ignore = "private display: LAYER_NATIVE_CAPTURE_DIR=... workspace-motion.sh gtk --native-test=native_tool_bubble_frames"]
+fn native_tool_bubble_frames() {
+    let mut d = Driver::new("art.capycanvas.ToolBubbleFrames");
+    let captures = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(std::path::PathBuf::from);
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        d.w.dispatch(UiAction::RestoreWorkspace {
+            workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }),
+        });
+        pump(500);
+        let name = format!("{theme:?}").to_lowercase();
+        let from = d.point(&d.named(&header_of(&d, ToolbarControl::Color)));
+        let spot = canvas_spot(&d, 0.5, 0.55);
+        let mut events = vec![serde_json::json!({ "record_start": format!("{name}-tear") })];
+        events.extend([from, [from[0], from[1] + 8.], [from[0], from[1] + 70.], [spot[0], spot[1] - 30.], spot].iter().enumerate().map(|(i, p)| contact("mouse", if i == 0 { "down" } else { "move" }, *p)));
+        events.extend([contact("mouse", "up", spot), serde_json::json!({ "wait_ms": 500 }), serde_json::json!({ "record_stop": true })]);
+        d.input.perform(serde_json::Value::Array(events));
+        pump(300);
+        let ring = find(&d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap();
+        let c = center(&d, ring.id);
+        let radius = ring.diameter * 0.5 - RING_RIM * 0.5;
+        let touch = |phase: &str, slot: u32, point: [f32; 2]| serde_json::json!({ "touch": phase, "slot": slot, "point": point });
+        let mut events = vec![serde_json::json!({ "record_start": format!("{name}-pinch") }), touch("down", 0, [c[0] - radius, c[1]]), touch("down", 1, [c[0] + radius, c[1]])];
+        for i in 1..=10 {
+            let s = i as f32 * 5.;
+            events.push(touch("move", 0, [c[0] - radius - s, c[1]]));
+            events.push(touch("move", 1, [c[0] + radius + s, c[1]]));
+        }
+        events.extend([serde_json::json!({ "touch": "up", "slot": 0 }), serde_json::json!({ "touch": "up", "slot": 1 }), serde_json::json!({ "wait_ms": 600 }), serde_json::json!({ "record_stop": true })]);
+        d.input.perform(serde_json::Value::Array(events));
+        pump(300);
+        assert!(find_id(&d, ring.id).unwrap().diameter > ring.diameter, "{name}: the pinch resized the ring");
+        let ring = find_id(&d, ring.id).unwrap();
+        let from = rim(&d, &ring, 200.);
+        let mut events = vec![serde_json::json!({ "record_start": format!("{name}-putback") }), contact("mouse", "down", from)];
+        events.extend([[from[0], from[1] - 20.], [from[0], 10.]].map(|p| contact("mouse", "move", p)));
+        events.extend([contact("mouse", "up", [from[0], 10.]), serde_json::json!({ "wait_ms": 500 }), serde_json::json!({ "record_stop": true })]);
+        d.input.perform(serde_json::Value::Array(events));
+        pump(300);
+        assert!(views(&d).is_empty(), "{name}: the ring went back");
+        if let Some(dir) = &captures {
+            for part in ["tear", "pinch", "putback"] {
+                let dark = dark_outside_rings(&dir.join(format!("{name}-{part}")));
+                assert!(dark.is_empty(), "{name}-{part}: dark pixels outside the ring in frames {dark:?}");
+            }
+        }
     }
     d.finish();
 }

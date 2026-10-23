@@ -8,11 +8,12 @@ pub(crate) use desk::{Desk, Shape};
 pub const TOOL_BUBBLE: f32 = 56.;
 pub const SLIDER_BUBBLE: f32 = 96.;
 pub const SLIDER_CENTER: f32 = 54.;
-pub const COLOR_RING_SIZES: [f32; 3] = [136., 176., 216.];
-pub const COLOR_RING_RANGE: [f32; 2] = [128., 256.];
+pub const COLOR_RING_SIZES: [f32; 3] = [136., 216., 344.];
+pub const COLOR_RING_RANGE: [f32; 2] = [128., 352.];
 pub const RING_RIM: f32 = 7.;
 pub const BUBBLE_BEAD: f32 = 24.;
 pub const FOREGROUND_BEAD: f32 = 30.;
+pub const BACKGROUND_BEAD: f32 = 24.;
 pub const PALETTE_BEAD: f32 = 26.;
 pub const BEAD_STEP: f32 = 28.;
 pub const RECENT_BEADS: usize = 8;
@@ -124,7 +125,7 @@ pub struct BubbleOptions {
 }
 impl Default for BubbleOptions {
     fn default() -> Self {
-        Self { size: COLOR_RING_SIZES[1], recent: true, palette: true, pair: true, full: false, fold: true }
+        Self { size: COLOR_RING_SIZES[1], recent: false, palette: false, pair: false, full: false, fold: true }
     }
 }
 impl BubbleOptions {
@@ -213,15 +214,36 @@ pub struct RingSettings {
     pub settings: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeptOptions {
+    pub source: BubbleSource,
+    pub options: BubbleOptions,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BubbleLayout {
     pub bubbles: Vec<ToolBubble>,
     pub rings: Vec<RingSettings>,
+    pub kept: Vec<KeptOptions>,
 }
 impl BubbleLayout {
     pub fn is_empty(&self) -> bool {
-        self.bubbles.is_empty() && self.rings.is_empty()
+        self.bubbles.is_empty() && self.rings.is_empty() && self.kept.is_empty()
+    }
+    pub(crate) fn put_back(&mut self, gone: impl Fn(&ToolBubble) -> bool) {
+        let (removed, staying): (Vec<_>, Vec<_>) = std::mem::take(&mut self.bubbles).into_iter().partition(|b| gone(b));
+        self.bubbles = staying;
+        for bubble in removed {
+            self.kept.retain(|k| k.source != bubble.source);
+            if bubble.options != BubbleOptions::default() {
+                self.kept.push(KeptOptions { source: bubble.source, options: bubble.options });
+            }
+        }
+    }
+    pub(crate) fn options_for(&self, source: BubbleSource) -> BubbleOptions {
+        self.kept.iter().find(|k| k.source == source).map_or_else(BubbleOptions::default, |k| k.options)
     }
     pub fn get(&self, id: u32) -> Option<&ToolBubble> {
         self.bubbles.iter().find(|b| b.id == id)
@@ -251,6 +273,14 @@ impl BubbleLayout {
                 return Err("Invalid tool bubble".into());
             }
             sources.push(bubble.source);
+        }
+        let mut kept = Vec::new();
+        for k in &self.kept {
+            k.source.validate()?;
+            if kept.contains(&k.source) || !(COLOR_RING_RANGE[0]..=COLOR_RING_RANGE[1]).contains(&k.options.size) {
+                return Err("Invalid kept bubble options".into());
+            }
+            kept.push(k.source);
         }
         let mut brushes = Vec::new();
         for ring in &self.rings {
@@ -360,60 +390,105 @@ pub(crate) fn bead_travel(strip: BeadStrip, size: f32, from: [f32; 2], to: [f32;
     }
 }
 
+const FADE_COLUMNS: f32 = 0.8;
+const PALETTE_GAP: f32 = 1.35;
+const BEAD_CLEARANCE: f32 = 3.;
+
+fn strip_last(strip: BeadStrip, size: f32, count: usize) -> f32 {
+    strip_columns(strip, size).min(count.div_ceil(strip_rows(strip))) as f32 - 1.
+}
+
+fn faded(column: f32, last: f32) -> f32 {
+    let excess = (-column).max(column - last).max(0.);
+    (1. - excess / FADE_COLUMNS).clamp(0., 1.)
+}
+
 fn strip_beads(beads: &mut Vec<BeadPlacement>, strip: BeadStrip, size: f32, count: usize, scroll: f32) {
     let rows = strip_rows(strip);
-    let columns = count.div_ceil(rows);
-    let shown = strip_columns(strip, size);
-    let last = shown.min(columns) as f32 - 1.;
-    let palette = strip == BeadStrip::Palette;
-    let peek = (palette && columns > shown).then(|| scroll.round() as usize + shown);
+    let last = strip_last(strip, size, count);
     for index in 0..count {
-        let column = index / rows;
-        let u = column as f32 - scroll;
-        let (alpha, angle) = if peek == Some(column) {
-            (0.3, strip_angle(strip, size, last + 1., last) - 1.5)
-        } else {
-            let alpha = if u < -1. || u > last + 1. {
-                0.
-            } else if u < 0. {
-                0.3 + 0.7 * (u + 1.)
-            } else if u <= last {
-                1.
-            } else if palette {
-                if u > last + 0.4 { 0. } else { 1. - (u - last) / 0.6 }
-            } else {
-                0.3 + 0.7 * (last + 1. - u)
-            };
-            (alpha, strip_angle(strip, size, u.clamp(-1.4, last + 1.4), last))
-        };
+        let column = (index / rows) as f32 - scroll;
+        let alpha = faded(column, last);
         if alpha > 0. {
-            let bead = if palette { Bead::Swatch { index } } else { Bead::Recent { index } };
-            let scale = if alpha < 0.6 { 0.7 + 0.3 * alpha } else { 1. };
-            beads.push(BeadPlacement { bead, center: polar(orbit(size, index % rows), angle), size: BUBBLE_BEAD * scale, alpha });
+            let bead = if strip == BeadStrip::Palette { Bead::Swatch { index } } else { Bead::Recent { index } };
+            let center = polar(orbit(size, index % rows), strip_angle(strip, size, column, last));
+            beads.push(BeadPlacement { bead, center, size: BUBBLE_BEAD * (0.6 + 0.4 * alpha), alpha });
         }
     }
 }
 
-pub fn color_beads(size: f32, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2]) -> Vec<BeadPlacement> {
-    let radius = size * 0.5;
-    let columns = strip_columns(BeadStrip::Palette, size).min(swatches.div_ceil(2));
-    let palette = 90. - ((columns as f32 - 1.) * 0.5 + 1.) * bead_degrees(size) + 3.;
+fn strip_edges(strip: BeadStrip, size: f32, count: usize) -> Vec<([f32; 2], f32)> {
+    let last = strip_last(strip, size, count);
+    let columns = (0..=8).flat_map(|i| [-(i as f32) * 0.1, last + i as f32 * 0.1]);
+    columns
+        .flat_map(|column| (0..strip_rows(strip)).map(move |row| (column, row)))
+        .map(|(column, row)| {
+            let radius = BUBBLE_BEAD * 0.5 * (0.6 + 0.4 * faded(column, last));
+            (polar(orbit(size, row), strip_angle(strip, size, column, last)), radius)
+        })
+        .collect()
+}
+
+fn clear(center: [f32; 2], radius: f32, obstacles: &[([f32; 2], f32)]) -> bool {
+    obstacles.iter().all(|(at, r)| (center[0] - at[0]).hypot(center[1] - at[1]) >= radius + r + BEAD_CLEARANCE)
+}
+
+fn pair_offset() -> [f32; 2] {
+    let (fg, bg) = (FOREGROUND_BEAD, BACKGROUND_BEAD);
+    [0.04 * fg + 0.5 * bg, 0.5 * fg - 0.24 * bg]
+}
+
+fn pair_at(size: f32, angle: f32) -> [[f32; 2]; 2] {
+    let radius = size * 0.5 + 4.;
+    let offset = pair_offset();
+    let u = polar(1., angle);
+    let along = offset[0] * u[0] + offset[1] * u[1];
+    let reach = (radius + BACKGROUND_BEAD * 0.5).powi(2) - (offset[0] * offset[0] + offset[1] * offset[1]) + along * along;
+    let distance = (radius + FOREGROUND_BEAD * 0.5).max(reach.max(0.).sqrt() - along);
+    let foreground = polar(distance, angle);
+    [foreground, [foreground[0] + offset[0], foreground[1] + offset[1]]]
+}
+
+pub fn color_beads(size: f32, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2], front: Bead) -> Vec<BeadPlacement> {
+    let step = bead_degrees(size);
     let mut beads = Vec::new();
+    let mut obstacles = Vec::new();
     if options.recent {
         strip_beads(&mut beads, BeadStrip::Recent, size, recent, scroll[0]);
+        obstacles.extend(strip_edges(BeadStrip::Recent, size, recent));
     }
-    if options.pair {
-        let (foreground, transparent) = if options.palette { (174., palette - 15.5) } else { (140., 45.) };
-        let mut bead = |bead, center, size| beads.push(BeadPlacement { bead, center, size, alpha: 1. });
-        bead(Bead::Background, polar(radius + 26., foreground - 12.), BUBBLE_BEAD);
-        bead(Bead::Foreground, polar(radius + 20., foreground), FOREGROUND_BEAD);
-        bead(Bead::Transparent, polar(radius + 24., transparent), BUBBLE_BEAD);
-    }
+    let mut palette = None;
     if options.palette {
         strip_beads(&mut beads, BeadStrip::Palette, size, swatches, scroll[1]);
-        let center = polar((orbit(size, 0) + orbit(size, 1)) * 0.5, palette);
-        beads.push(BeadPlacement { bead: Bead::Palettes, center, size: PALETTE_BEAD, alpha: 1. });
+        obstacles.extend(strip_edges(BeadStrip::Palette, size, swatches));
+        let last = strip_last(BeadStrip::Palette, size, swatches);
+        let angle = strip_angle(BeadStrip::Palette, size, last + PALETTE_GAP, last);
+        let middle = (orbit(size, 0) + orbit(size, 1)) * 0.5;
+        let center = polar(middle / (PALETTE_GAP * step).to_radians().cos(), angle);
+        palette = Some(BeadPlacement { bead: Bead::Palettes, center, size: PALETTE_BEAD, alpha: 1. });
     }
+    if let Some(bead) = palette {
+        obstacles.push((bead.center, bead.size * 0.5));
+    }
+    if options.pair {
+        let last = strip_last(BeadStrip::Palette, size, swatches);
+        let start = if options.palette { strip_angle(BeadStrip::Palette, size, -FADE_COLUMNS, last) } else { 140. };
+        let place = |angle: f32| pair_at(size, angle);
+        let fits = |[f, b]: [[f32; 2]; 2]| clear(f, FOREGROUND_BEAD * 0.5, &obstacles) && clear(b, BACKGROUND_BEAD * 0.5, &obstacles);
+        let angle = (0..90).map(|i| start + i as f32).find(|a| fits(place(*a))).unwrap_or(start);
+        let [foreground, background] = place(angle);
+        let pair = [(Bead::Background, background, BACKGROUND_BEAD), (Bead::Foreground, foreground, FOREGROUND_BEAD)];
+        let order = if front == Bead::Background { [pair[1], pair[0]] } else { pair };
+        for (bead, center, size) in order {
+            beads.push(BeadPlacement { bead, center, size, alpha: 1. });
+            obstacles.push((center, size * 0.5));
+        }
+        let radius = size * 0.5 + 4. + BUBBLE_BEAD * 0.5;
+        let start = palette.map_or(45., |p| degrees(p.center) - 10.);
+        let angle = (0..90).map(|i| start - i as f32).find(|a| clear(polar(radius, *a), BUBBLE_BEAD * 0.5, &obstacles)).unwrap_or(start);
+        beads.push(BeadPlacement { bead: Bead::Transparent, center: polar(radius, angle), size: BUBBLE_BEAD, alpha: 1. });
+    }
+    beads.extend(palette);
     beads
 }
 
@@ -430,6 +505,10 @@ pub fn palette_pill(size: f32) -> Bounds {
     Bounds { x: -PALETTE_PILL[0] * 0.5, y: size * 0.5 + 70., width: PALETTE_PILL[0], height: PALETTE_PILL[1] }
 }
 
+pub fn color_drag_out(size: f32, point: [f32; 2]) -> bool {
+    point[0].hypot(point[1]) > size
+}
+
 pub fn on_color_rim(size: f32, options: BubbleOptions, point: [f32; 2]) -> bool {
     let radius = point[0].hypot(point[1]);
     radius > size * 0.5 - RING_RIM && radius <= color_reach(size, options)
@@ -440,7 +519,7 @@ pub fn color_reach(size: f32, options: BubbleOptions) -> f32 {
     if options.palette {
         orbit(size, 1) + BUBBLE_BEAD * 0.5
     } else if options.pair {
-        radius + 26. + BUBBLE_BEAD * 0.5
+        radius + 4. + FOREGROUND_BEAD + BACKGROUND_BEAD * 0.5
     } else if options.recent {
         orbit(size, 0) + BUBBLE_BEAD * 0.5
     } else {
@@ -640,6 +719,7 @@ pub fn layers_card(full: bool, layers: usize) -> [f32; 2] {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BubbleGrab {
     Bubble { id: u32 },
+    Rim { id: u32 },
     Tile { panel: Panel, tile: u32 },
     Header { id: u32 },
     Variant { variant: ToolVariant },
@@ -716,11 +796,12 @@ impl ChooserItem {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BubbleCard {
     pub size: [f32; 2],
     pub full: bool,
     pub properties: bool,
+    pub disclosure: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

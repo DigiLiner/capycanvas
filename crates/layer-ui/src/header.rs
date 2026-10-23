@@ -632,7 +632,6 @@ pub struct HeaderItemView {
     pub enabled: bool,
     pub selected: bool,
     pub icon: &'static str,
-    pub bubble: bool,
 }
 #[derive(Serialize)]
 pub struct HeaderSizeView {
@@ -692,7 +691,6 @@ impl<R: layer_render::CanvasRenderer> UiSession<R> {
                     enabled,
                     selected,
                     icon,
-                    bubble: matches!(entry.item, HeaderItem::Tool { control } if self.bubble_out(control)),
                 }
             })
             .collect();

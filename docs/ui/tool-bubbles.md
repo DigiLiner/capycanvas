@@ -24,7 +24,7 @@ center. GTK presents bubbles; Web and the native clients follow after review.
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
 | Brush size, Brush opacity (or the Opacity tile) and Strength sliders | Slider, 96 px | The setting icon and value inside a 300° ring; the center moves it |
-| Color | Color ring, 136, 176 or 216 px (pinch: 128–256) | The Color panel's wheel on a glass plate, with beads around it |
+| Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail on a small stack, with the layer count |
 
 Commands, other panels, Tool Options, size chips and dividers stay in their
@@ -54,10 +54,12 @@ the existing bubble.
 Bubbles move without a hold: drag the face of a tool bubble, the center of a
 slider, the folded Layers squircle or an open card's grab bar and edges, or the
 color ring anywhere outside the wheel that isn't a bead. Two fingers move any
-bubble; while one finger is on a bubble, the second may land up to 90 px outside
-it. Pinching the color
-ring sets its size between 128 and 256 px in one undo step. A finger on the hue
-ring or disc picks a color at once.
+bubble from anywhere on it, the wheel included; while one finger is on a bubble,
+the second may land up to 90 px outside it. Pinching the color ring sets its
+size between 128 and 352 px in one undo step. A finger on the hue ring or disc
+picks a color at once; once it moves more than a radius outside the wheel, the
+ring lets go of the pick, restores the color and follows the finger by the
+nearest point of its rim, easing to it instead of jumping.
 
 A dragged bubble pushes the bubbles it meets, keeping a 6 px gap. Pushed bubbles
 take 12% of the push as speed and slide with friction (0.86 per 60 Hz frame);
@@ -102,7 +104,11 @@ everything rests.
   the media gather on the open side, in a second arc when one doesn't hold them.
 - **Slider:** drag the ring or tap a point on it; the center moves the bubble.
 - **Hold** always opens the bubble's menu: **Settings in the ring**, the
-  bubble's options and **Put back**.
+  bubble's options and **Put back**. On the color ring a hold anywhere opens it,
+  after twice the usual delay, so a slow pick on the wheel stays a pick.
+- **Showing and hiding:** halo arcs grow and fade in, chooser items arrive in a
+  short stagger and fade out when it closes, and beads slide to new places; with
+  reduced motion they appear at once.
 
 ## Color ring
 
@@ -111,20 +117,25 @@ management, on a glass plate; its rim and the space between it and the beads mov
 the bubble. 24 px beads orbit it on up to two orbits 28 px apart:
 
 - **Recent colors** along the top, newest on the left, eight at most (fewer on a
-  small ring). Slide along them to reach older colors; faint beads at the ends
-  show there are more.
-- **Foreground, background and transparent.** The 30 px foreground bead lies
-  over the background bead; tapping the background swaps them. They sit lower
-  left, and move up the side when the palette is shown.
+  small ring). Slide along them to reach older colors; beads shrink and fade as
+  they turn past either end, so the strip never ends in a jump.
+- **Foreground, background and transparent.** The foreground and background
+  beads overlap like the Color panel's pair, the chosen one in front. Tapping
+  the background chooses it and brings it to the front; nothing swaps. They sit
+  lower left, and move up the side when the palette is shown.
 - **Palette** in two orbits wrapping the lower half, filled column by column;
-  sliding either orbit turns both, and they settle on whole columns. The glass
-  palette bead ends the orbits on the right. Tapping it opens a fixed-width
-  ‹ name › pill below; the arrows switch palettes and the name lists them with
-  **Edit palettes…**. Picking a color or a contact elsewhere closes it.
+  sliding either orbit turns both, and they settle on whole columns. Columns
+  past the ends shrink and fade continuously instead of waiting behind other
+  beads. The glass palette bead ends the orbits on the right, as far from the
+  wheel as from the outer orbit. Tapping it opens a fixed-width ‹ name › pill
+  below; the arrows switch palettes and the name lists them with **Edit
+  palettes…**. Picking a color or a contact elsewhere closes it. No bead
+  overlaps another at any size or turn.
 
-The hold menu turns Recent colors, Palette and Foreground and background on or
-off and chooses Small, Medium or Large. Windows under 600 px wide show rings at
-Small.
+A new ring is the Medium circle alone. The hold menu turns Recent colors,
+Palette and Foreground and background on or off and chooses Small (136 px),
+Medium (216 px) or Large (344 px). Putting the ring back remembers its options
+and size for the next time it is taken.
 
 ## Layers card
 
@@ -132,11 +143,18 @@ Tapping the folded squircle unfolds the card in place, 244 px wide (300 in
 Full), pushing neighbours aside. A grab bar sits on top; rows show up to five
 layers, each with its eye, thumbnail and name. **Full** adds each row's details
 and the blend, opacity, alpha lock and lock header. The footer holds the New
-layer icon (and Delete in Full) on the left and **Layer properties** with an up
+layer icon (and Delete in Full) on the left and **Properties** with an up
 chevron on the right; the properties slide up over the rows and the button turns
 into **All layers** with a down chevron. Contacts elsewhere fold the card, which
 shrinks away before the squircle returns; **Fold when not in use** in the hold
 menu keeps it open until its grab bar is tapped.
+
+## Look
+
+Bubbles use the toolbars' glass: the selected tool is the title bar's selection
+color as one glass surface, as translucent as the unselected ones, and borders
+are a thin inner line. Round parts cast a soft shadow drawn as rings of the
+bubble's own shape, so scaling and pinching never render a shadow offscreen.
 
 ## Painting
 
@@ -165,8 +183,13 @@ back.
   arc, paints under it, chooses a medium and slides to a brush, pushes one
   bubble with another, opens the hold menu, unfolds the Layers card and its
   properties, adds a layer from its footer and folds it, picks on the wheel and
-  moves the ring by its glass, uses the color beads and palette pill, pinches
-  the ring, checks Zen mode and puts everything back.
+  moves the ring by its glass, holds it for its menu, uses the color beads and
+  palette pill, drags out of the wheel, pinches the ring with fingers starting
+  on the wheel, moves a dial with two fingers, checks Zen mode and puts
+  everything back.
+- Frames: `LAYER_NATIVE_CAPTURE_DIR=... bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubble_frames`
+  records tearing out, pinching and putting back the ring in both themes and
+  fails on dark pixels outside the ring in any frame.
 - Motion: `LAYER_NATIVE_EVENT_MS=4 bash tools/performance/workspace-motion.sh gtk --native-test=native_tool_bubble_motion`
   drags one bubble through four others with 250 Hz mouse and touch input and
   reports presentation rate, frame gaps and canvas GPU time for steady motion;

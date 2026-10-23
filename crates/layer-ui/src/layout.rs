@@ -2315,7 +2315,7 @@ impl DockLayout {
         let defaults = Self::for_platform(platform);
         next.bands = defaults.bands;
         next.floating.clear();
-        next.bubbles.bubbles.clear();
+        next.bubbles.put_back(|_| true);
         next.collapsed.clear();
         next.column_stacks.clear();
         next.column_scroll.clear();

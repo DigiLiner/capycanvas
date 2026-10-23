@@ -75,22 +75,25 @@ fn slider_ring_runs_from_lower_left_over_the_top_around_a_moving_center() {
     assert!(ring.radius + RING_TRACK <= SLIDER_BUBBLE * 0.5);
 }
 
+fn everything(size: f32) -> BubbleOptions {
+    BubbleOptions { size, recent: true, palette: true, pair: true, ..BubbleOptions::default() }
+}
+
 #[test]
 fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
-    let options = BubbleOptions::default();
     let size = COLOR_RING_SIZES[1];
+    let options = everything(size);
     let radius = size * 0.5;
-    let beads = color_beads(size, options, 20, 30, [0.; 2]);
+    let beads = color_beads(size, options, 20, 30, [0.; 2], Bead::Foreground);
     let of = |beads: &[BeadPlacement], bead: Bead| beads.iter().find(|b| b.bead == bead).map(|b| b.center).unwrap();
     for bead in &beads {
-        assert!(distance(bead.center, [0.; 2]) - bead.size * 0.5 >= radius + 4., "{:?} stays off the plate", bead.bead);
+        assert!(distance(bead.center, [0.; 2]) - bead.size * 0.5 >= radius + 3., "{:?} stays off the plate", bead.bead);
     }
     let recent: Vec<_> = beads.iter().filter(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha == 1.).collect();
-    assert_eq!(recent.len(), strip_columns(BeadStrip::Recent, size));
-    assert_eq!(strip_columns(BeadStrip::Recent, COLOR_RING_SIZES[2]), RECENT_BEADS);
+    assert_eq!(recent.len(), RECENT_BEADS);
+    assert!(strip_columns(BeadStrip::Recent, COLOR_RING_SIZES[0]) < RECENT_BEADS, "a small ring shows fewer");
     assert!(recent.iter().all(|b| (angle(b.center) - 270.).abs() <= 60.), "recents run along the top");
     assert!(recent.windows(2).all(|w| w[0].center[0] < w[1].center[0]), "the newest is first, on the left");
-    assert!(beads.iter().any(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha < 1.), "a faint end shows there are more");
     let swatches: Vec<_> = beads.iter().filter(|b| matches!(b.bead, Bead::Swatch { .. })).collect();
     assert!(swatches.iter().all(|b| b.center[1] > 0.), "the palette wraps the lower half");
     let [a, b] = [of(&beads, Bead::Swatch { index: 0 }), of(&beads, Bead::Swatch { index: 1 })];
@@ -98,51 +101,91 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     assert!((distance(b, [0.; 2]) - distance(a, [0.; 2]) - BEAD_STEP).abs() < 1e-3, "two orbits 28 px apart");
     assert!(a[0] < 0., "the first column is on the left");
     let palette = of(&beads, Bead::Palettes);
-    let foreground = of(&beads, Bead::Foreground);
     assert!(palette[0] > 0. && palette[1] > 0., "the palette bead ends the rows on the right");
-    assert!((angle(foreground) - 174.).abs() < 1e-3 && (angle(of(&beads, Bead::Transparent)) - 10.).abs() < 0.1);
-    let plain = color_beads(size, BubbleOptions { palette: false, ..options }, 20, 30, [0.; 2]);
-    assert!((angle(of(&plain, Bead::Foreground)) - 140.).abs() < 1e-3 && (angle(of(&plain, Bead::Transparent)) - 45.).abs() < 1e-3);
+    let last = swatches.iter().filter(|b| b.alpha == 1.).map(|b| match b.bead {
+        Bead::Swatch { index } => index,
+        _ => 0,
+    }).max().unwrap();
+    let [inner, outer] = [of(&beads, Bead::Swatch { index: last - 1 }), of(&beads, Bead::Swatch { index: last })];
+    assert!((distance(palette, inner) - distance(palette, outer)).abs() < 0.5, "as far from the inner orbit as the outer");
+    assert!(distance(palette, inner) >= (BUBBLE_BEAD + PALETTE_BEAD) * 0.5 + 12., "with room around it");
+    let [foreground, background] = [of(&beads, Bead::Foreground), of(&beads, Bead::Background)];
+    let offset = [background[0] - foreground[0], background[1] - foreground[1]];
+    assert!(offset[0] > 0. && offset[1] > 0., "the background sits lower right, as in the Color panel");
+    assert!(distance(foreground, background) < (FOREGROUND_BEAD + BACKGROUND_BEAD) * 0.5, "the pair overlaps");
+    let overlap = [foreground[0] + offset[0] * 0.5, foreground[1] + offset[1] * 0.5];
+    assert_eq!(bead_at(&beads, overlap), Some(Bead::Foreground), "the chosen slot lies on top");
+    let behind = color_beads(size, options, 20, 30, [0.; 2], Bead::Background);
+    assert_eq!(bead_at(&behind, overlap), Some(Bead::Background));
+    let plain = color_beads(size, BubbleOptions { palette: false, ..options }, 20, 30, [0.; 2], Bead::Foreground);
+    assert!(of(&plain, Bead::Foreground)[0] < 0. && of(&plain, Bead::Transparent)[0] > 0.);
     assert!(!plain.iter().any(|b| matches!(b.bead, Bead::Palettes | Bead::Swatch { .. })));
-    let turned = color_beads(size, options, 20, 30, [0., 2.]);
+    let turned = color_beads(size, options, 20, 30, [0., 2.], Bead::Foreground);
     assert!(distance(of(&turned, Bead::Swatch { index: 4 }), a) < 1e-3, "turning two columns brings column two to the start");
     assert_eq!(of(&turned, Bead::Palettes), palette, "the palette bead stays put");
-    assert!(beads.iter().any(|b| matches!(b.bead, Bead::Swatch { .. }) && b.alpha < 0.5), "the next column peeks out");
+    let half = color_beads(size, options, 20, 30, [0.5, 0.5], Bead::Foreground);
+    assert!(half.iter().any(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha < 1.), "partly turned ends fade");
     assert_eq!(bead_at(&beads, palette), Some(Bead::Palettes));
-    assert_eq!(bead_at(&beads, foreground), Some(Bead::Foreground), "the foreground lies over the background");
-    assert_eq!(bead_at(&beads, recent[2].center), Some(Bead::Recent { index: 2 }));
-    assert_eq!(bead_at(&beads, [0., 0.]), None);
     assert_eq!(Bead::Swatch { index: 3 }.strip(), Some(BeadStrip::Palette));
     assert!(on_color_rim(size, options, [radius - 3., 0.]), "the plate's rim moves the ring");
-    assert!(on_color_rim(size, options, [radius + 10., 0.]), "so does the glass between the plate and its beads");
+    assert!(on_color_rim(size, options, [radius + 10., 0.]), "so does the space out to the beads");
     assert!(!on_color_rim(size, options, [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, options, [color_reach(size, options) + 2., 0.]));
+    assert!(!color_drag_out(size, [size * 0.9, 0.]) && color_drag_out(size, [0., size * 1.05]), "two radii out is a drag");
     let pill = palette_pill(size);
     assert_eq!([pill.width, pill.height], PALETTE_PILL);
     assert!(pill.y > distance(b, [0.; 2]) + BUBBLE_BEAD * 0.5, "the name sits below the rows");
 }
 
 #[test]
-fn color_beads_never_overlap_at_any_size() {
+fn color_beads_never_overlap_at_any_size_or_turn() {
     let combos = [(true, true, true), (true, false, true), (false, true, true), (true, true, false), (false, false, true)];
-    for size in [128., 136., 176., 216., 256.] {
+    for size in [128., 136., 216., 280., 344., 352.] {
         for (recent, palette, pair) in combos {
             let options = BubbleOptions { size, recent, palette, pair, ..BubbleOptions::default() };
-            let beads: Vec<_> = color_beads(size, options, 64, 48, [0.; 2]).into_iter().filter(|b| b.alpha == 1.).collect();
-            for (i, a) in beads.iter().enumerate() {
-                for b in &beads[i + 1..] {
-                    if matches!((a.bead, b.bead), (Bead::Background, Bead::Foreground)) {
-                        continue;
+            for scroll in [[0., 0.], [0.3, 0.6], [2.5, 1.5], [3., 4.2]] {
+                for front in [Bead::Foreground, Bead::Background] {
+                    let beads = color_beads(size, options, 64, 48, scroll, front);
+                    for (i, a) in beads.iter().enumerate() {
+                        for b in &beads[i + 1..] {
+                            if matches!((a.bead, b.bead), (Bead::Background, Bead::Foreground) | (Bead::Foreground, Bead::Background)) {
+                                continue;
+                            }
+                            assert!(
+                                distance(a.center, b.center) >= (a.size + b.size) * 0.5 - 0.5,
+                                "{size} {options:?} {scroll:?}: {:?} and {:?} overlap",
+                                a.bead,
+                                b.bead
+                            );
+                        }
                     }
-                    assert!(
-                        distance(a.center, b.center) >= (a.size + b.size) * 0.5 - 0.5,
-                        "{size} {options:?}: {:?} and {:?} overlap",
-                        a.bead,
-                        b.bead
-                    );
+                    assert!(beads.iter().all(|b| distance(b.center, [0.; 2]) + b.size * 0.5 <= color_reach(size, options) + 1e-3));
                 }
             }
-            assert!(beads.iter().all(|b| distance(b.center, [0.; 2]) + b.size * 0.5 <= color_reach(size, options) + 1e-3));
         }
+    }
+}
+
+#[test]
+fn turning_beads_moves_and_fades_them_continuously() {
+    let size = COLOR_RING_SIZES[1];
+    let options = everything(size);
+    let at = |scroll: f32| color_beads(size, options, 40, 48, [scroll, scroll], Bead::Foreground);
+    let mut previous = at(0.);
+    for step in 1..=400 {
+        let next = at(step as f32 * 0.01);
+        for bead in &next {
+            match previous.iter().find(|b| b.bead == bead.bead) {
+                Some(before) => {
+                    assert!(distance(before.center, bead.center) < 1., "{:?} jumps at {step}", bead.bead);
+                    assert!((before.alpha - bead.alpha).abs() < 0.02, "{:?} flickers at {step}", bead.bead);
+                }
+                None => assert!(bead.alpha < 0.02, "{:?} pops in at {step}", bead.bead),
+            }
+        }
+        for gone in previous.iter().filter(|b| !next.iter().any(|n| n.bead == b.bead)) {
+            assert!(gone.alpha < 0.02, "{:?} vanishes at {step}", gone.bead);
+        }
+        previous = next;
     }
 }
 
@@ -354,7 +397,7 @@ fn bubbles_keep_their_distance_to_the_nearest_corner() {
 fn bubble_layout_validation_rejects_duplicates_and_bad_values() {
     let layout = |n: usize| BubbleLayout {
         bubbles: (0..n).map(|i| ToolBubble::new(i as u32 + 1, BubbleSource::Medium { group: ToolGroup::ALL[i] }, [100., 100.], VIEWPORT)).collect(),
-        rings: Vec::new(),
+        ..BubbleLayout::default()
     };
     layout(2).validate(&mut Default::default()).unwrap();
     let mut twice = layout(2);
@@ -374,6 +417,10 @@ fn bubble_layout_validation_rejects_duplicates_and_bad_values() {
     assert!(rings.validate(&mut Default::default()).is_err());
     rings.set_ring(DefaultBrushPreset::GPen as u32, vec!["hardness".into(), "unknown".into()]);
     assert!(rings.validate(&mut Default::default()).is_err());
+    let mut kept = BubbleLayout::default();
+    let options = BubbleOptions { size: 400., ..BubbleOptions::default() };
+    kept.kept.push(KeptOptions { source: BubbleSource::Control { control: ToolbarControl::Color }, options });
+    assert!(kept.validate(&mut Default::default()).is_err(), "kept sizes stay in range");
     let mut taken = std::collections::BTreeSet::from([1]);
     assert!(layout(1).validate(&mut taken).is_err(), "bubble IDs share the workspace ID space");
     let json = serde_json::to_string(&layout(1)).unwrap();

@@ -32,7 +32,7 @@ pub(crate) struct Bubbles {
     bounds: Option<((u64, [f32; 2], bool), Bounds)>,
     drag: Option<BubbleDrag>,
     halo: Option<(u32, u32)>,
-    ring: Option<(u32, &'static str)>,
+    ring: Option<(u32, &'static str, f32)>,
     beads: Option<BeadContact>,
     scroll: Vec<(u32, [f32; 2])>,
     pill: Option<u32>,
@@ -84,21 +84,6 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub fn bubble_fade(&self) -> (bool, Vec<u32>) {
         (self.bubble_state.stroke, self.bubble_state.desk.faded().to_vec())
-    }
-
-    pub fn bubble_out(&self, control: ToolbarControl) -> bool {
-        let own = BubbleSource::for_control(control);
-        let group = control.tool_group();
-        self.state.workspace.layout.bubbles.bubbles.iter().any(|bubble| {
-            Some(bubble.source) == own
-                || group.is_some_and(|group| match bubble.source {
-                    BubbleSource::Medium { group: medium } => group.contains(ToolVariant::BrushGroup { group: medium }),
-                    BubbleSource::Control { control: ToolbarControl::Brush { id } } => {
-                        group.contains(ToolVariant::BrushPreset { id }) || group.contains(ToolVariant::BrushGroup { group: tools::group(id) })
-                    }
-                    BubbleSource::Control { .. } => false,
-                })
-        })
     }
 
     fn bubble_viewport(&self) -> [f32; 2] {
@@ -204,12 +189,16 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             _ => Vec::new(),
         };
-        let readout = rings.iter().find(|r| r.active).map(|r| format!("{}  {}", r.label, r.text));
+        let readout = rings.iter().find(|r| r.active).map(|r| format!("{} · {}", r.label, r.text));
         let chooser = self.bubble_state.chooser.filter(|c| c.id == bubble.id).map(|c| self.chooser_items(bubble, c).0).unwrap_or_default();
         let card = (self.bubble_state.card == Some(bubble.id)).then(|| BubbleCard {
             size: layers_card(bubble.options.full, state.layers.len()),
             full: bubble.options.full,
             properties: self.bubble_state.properties,
+            disclosure: match self.bubble_state.properties {
+                true => state.layer_properties.disclosure.return_label.clone(),
+                false => self.localization().text(MessageId::WORKSPACE_PANEL_PROPERTIES).to_string(),
+            },
         });
         BubbleView {
             id: bubble.id,
@@ -253,7 +242,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             icon: tool_setting_icon(setting.id),
             fill: resolved.as_ref().map_or(0., |r| r.fill as f32),
             text: resolved.map(|r| r.text).unwrap_or_default(),
-            active: self.bubble_state.ring.is_some_and(|(_, id)| id == setting.id),
+            active: self.bubble_state.ring.is_some_and(|(_, id, _)| id == setting.id),
         }
     }
 
@@ -282,7 +271,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         let library = &state.color_library;
         let swatches = &library.active_palette().swatches;
         let text = |id: MessageId| self.localization().text(id).to_string();
-        color_beads(bubble.diameter(narrow), bubble.options, library.history.len(), swatches.len(), self.bead_scroll(bubble.id))
+        let front = if state.colors.slot == ColorSlot::Background { Bead::Background } else { Bead::Foreground };
+        color_beads(bubble.diameter(narrow), bubble.options, library.history.len(), swatches.len(), self.bead_scroll(bubble.id), front)
             .into_iter()
             .map(|placement| {
                 let (color, label, selected) = match placement.bead {
@@ -292,7 +282,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         (swatch.map(|s| s.color), swatch.map(|s| s.name.clone()).unwrap_or_default(), false)
                     }
                     Bead::Foreground => (Some(state.colors.foreground), text(MessageId::COMMANDS_FOREGROUND_COLOR), state.colors.slot == ColorSlot::Foreground),
-                    Bead::Background => (Some(state.colors.background), text(MessageId::COMMANDS_BACKGROUND_COLOR), false),
+                    Bead::Background => (Some(state.colors.background), text(MessageId::COMMANDS_BACKGROUND_COLOR), state.colors.slot == ColorSlot::Background),
                     Bead::Transparent => (
                         Some(layer_core::color::RgbColor { linear_rgb: None, space: state.colors.rgb_space(), rgba: [0.; 4] }),
                         text(MessageId::COMMANDS_TRANSPARENT_PAINT),
@@ -497,14 +487,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::PutBack { id } => {
                 let source = self.bubble(id)?.source;
                 self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Deleted, source }, |layout| {
-                    layout.bubbles.bubbles.retain(|b| b.id != id);
+                    layout.bubbles.put_back(|b| b.id == id);
                     Ok(())
                 })
             }
             BubbleAction::PutBackAll => {
                 let source = self.state.workspace.layout.bubbles.bubbles.first().ok_or("No bubbles are out")?.source;
                 self.edit_bubbles(LayoutChange::Bubble { action: LayoutPanelAction::Deleted, source }, |layout| {
-                    layout.bubbles.bubbles.clear();
+                    layout.bubbles.put_back(|_| true);
                     Ok(())
                 })
             }
@@ -671,48 +661,55 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !position.into_iter().all(f32::is_finite) {
             return Err("Invalid ring position".into());
         }
+        if phase == ContactPhase::Cancel {
+            let Some((ring_id, setting, before)) = self.bubble_state.ring.take() else {
+                return Ok(self.changed(regions::BUBBLES, false));
+            };
+            let binding = self.bubble(ring_id)?.source.control().and_then(ToolbarControl::slider);
+            let mut change = self.set_ring(binding, setting, before)?;
+            change.regions |= regions::BUBBLES;
+            return Ok(change);
+        }
         let bubble = self.bubble(id)?.clone();
         let view = self.bubble_view(&bubble);
         let setting = match phase {
             ContactPhase::Down => {
                 let arcs: Vec<_> = view.rings.iter().map(|r| r.arc).collect();
-                let ring = &view.rings[ring_at(&arcs, position).ok_or("No setting under the contact")?];
-                self.bubble_state.ring = Some((id, ring.setting));
-                ring.setting
+                view.rings[ring_at(&arcs, position).ok_or("No setting under the contact")?].setting
             }
-            ContactPhase::Cancel => {
-                self.bubble_state.ring = None;
-                return Ok(self.changed(regions::BUBBLES, false));
-            }
-            ContactPhase::Move | ContactPhase::Up => match self.bubble_state.ring {
-                Some((ring_id, setting)) if ring_id == id => setting,
+            _ => match self.bubble_state.ring {
+                Some((ring_id, setting, _)) if ring_id == id => setting,
                 _ => return Ok(UiChange::default()),
             },
         };
         let ring = view.rings.iter().find(|r| r.setting == setting).ok_or("This setting is not used by the selected tool")?;
         let fraction = ring.arc.fraction(position) as f64;
         let binding = bubble.source.control().and_then(ToolbarControl::slider);
-        let (field, numeric) = match &binding {
-            Some(binding) => (binding.field(&self.state).ok_or("This slider is unavailable")?, binding.numeric()),
-            None => {
-                let field = self.state.tool_settings.iter().find(|s| s.id == setting).ok_or("This setting is not used by the selected tool")?.clone();
-                let numeric = field.numeric.clone();
-                (field, numeric)
-            }
+        let field = match &binding {
+            Some(binding) => binding.field(&self.state).ok_or("This slider is unavailable")?,
+            None => self.state.tool_settings.iter().find(|s| s.id == setting).ok_or("This setting is not used by the selected tool")?.clone(),
         };
+        let numeric = binding.as_ref().map_or_else(|| field.numeric.clone(), ToolbarNumericBinding::numeric);
+        if phase == ContactPhase::Down {
+            self.bubble_state.ring = Some((id, setting, field.value));
+        }
         let value = numeric
             .resolve(field.value as f64, NumericOperation::Position { position: fraction })
             .map_err(|reason| reason.message(&self.state.localization))?
             .value as f32;
-        let mut change = self.dispatch(match binding {
-            Some(binding) => binding.action(value),
-            None => UiAction::SetToolSetting { id: setting.into(), value },
-        })?;
+        let mut change = self.set_ring(binding, setting, value)?;
         if phase == ContactPhase::Up {
             self.bubble_state.ring = None;
         }
         change.regions |= regions::BUBBLES;
         Ok(change)
+    }
+
+    fn set_ring(&mut self, binding: Option<ToolbarNumericBinding>, setting: &'static str, value: f32) -> Result<UiChange, String> {
+        self.dispatch(match binding {
+            Some(binding) => binding.action(value),
+            None => UiAction::SetToolSetting { id: setting.into(), value },
+        })
     }
 
     fn bead_contact(&mut self, id: u32, phase: ContactPhase, position: [f32; 2]) -> Result<UiChange, String> {
@@ -769,7 +766,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 action: ColorLibraryAction::Use { id: library.active_palette().swatches.get(index).ok_or("The color is no longer in the palette")?.id },
             },
             Bead::Foreground => ColorAction::Select { slot: ColorSlot::Foreground },
-            Bead::Background => ColorAction::Swap,
+            Bead::Background => ColorAction::Select { slot: ColorSlot::Background },
             Bead::Transparent => ColorAction::Select { slot: ColorSlot::Transparent },
             Bead::Palettes => {
                 self.bubble_state.pill = (self.bubble_state.pill != Some(id)).then_some(id);
@@ -836,7 +833,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let unavailable = || self.localization().text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET).to_string();
         let control = |anchor| layout.anchor_control(anchor).and_then(BubbleSource::for_control).ok_or_else(unavailable);
         Ok(match grab {
-            BubbleGrab::Bubble { id } => (self.bubble(id)?.source, None),
+            BubbleGrab::Bubble { id } | BubbleGrab::Rim { id } => (self.bubble(id)?.source, None),
             BubbleGrab::Tile { panel, tile } => (
                 control(DrawerAnchor::Tile { panel, tile })?,
                 self.layout(viewport).groups.iter().find(|g| g.panels.contains(&panel)).map(|g| g.bounds),
@@ -876,7 +873,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     self.workspace_history.cancel(&mut self.state.workspace);
                     self.bubble_state.desk.release();
                     if let Some(before) = before {
-                        self.state.workspace.layout.bubbles.bubbles.retain(|b| b.id != drag.id);
+                        self.state.workspace.layout.bubbles.put_back(|b| b.id == drag.id);
                         self.workspace_history.record_named(before, &self.state.workspace, LayoutChange::Bubble { action: LayoutPanelAction::Deleted, source });
                     }
                 } else {
@@ -908,7 +905,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let (source, bounds) = self.grab_source(grab, viewport)?;
         let existing = match grab {
-            BubbleGrab::Bubble { id } => Some(id),
+            BubbleGrab::Bubble { id } | BubbleGrab::Rim { id } => Some(id),
             _ => self.state.workspace.layout.bubbles.find(source).map(|b| b.id),
         };
         self.workspace_history.begin_named(
@@ -919,13 +916,22 @@ impl<R: CanvasRenderer> UiSession<R> {
             Some(id) => id,
             None => {
                 let id = self.state.workspace.layout.allocate()?;
-                let bubble = ToolBubble::new(id, source, position, self.bubble_viewport());
+                let viewport = self.bubble_viewport();
+                let mut bubble = ToolBubble::new(id, source, position, viewport);
+                bubble.options = self.state.workspace.layout.bubbles.options_for(source);
                 self.state.workspace.layout.bubbles.bubbles.push(bubble);
                 id
             }
         };
         let center = match grab {
             BubbleGrab::Bubble { .. } => self.bubble_state.desk.center(id).unwrap_or(position),
+            BubbleGrab::Rim { .. } => {
+                let center = self.bubble_state.desk.center(id).unwrap_or(position);
+                let radius = self.bubble(id)?.diameter(self.narrow()) * 0.5;
+                let away = [position[0] - center[0], position[1] - center[1]];
+                let length = away[0].hypot(away[1]).max(1e-3);
+                [position[0] - away[0] / length * radius, position[1] - away[1] / length * radius]
+            }
             _ => position,
         };
         let closes = matches!(grab, BubbleGrab::Variant { .. }) && self.state.customization.drawer.is_some();
@@ -939,6 +945,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_state.drag = Some(BubbleDrag { id, offset: [center[0] - position[0], center[1] - position[1]], source: bounds });
         self.sync_bubbles();
         self.bubble_state.desk.grab(id);
+        if matches!(grab, BubbleGrab::Rim { .. }) {
+            self.bubble_state.desk.catch_up();
+        }
         self.bubble_state.desk.drag(center);
         let homing = self.bubble_homing(viewport, position, bounds);
         self.bubble_state.desk.home(homing);

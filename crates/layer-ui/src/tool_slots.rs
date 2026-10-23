@@ -71,7 +71,7 @@ impl ToolControlGroup {
                 .map(|group| ToolVariant::BrushGroup { group }).collect(),
         }
     }
-    pub(crate) fn contains(self, variant: ToolVariant) -> bool {
+    fn contains(self, variant: ToolVariant) -> bool {
         match self {
             Self::Slot(slot) => slot.variants().contains(&variant),
             Self::Navigation => matches!(variant, ToolVariant::Command { command: CommandId::Hand | CommandId::RotateView }),

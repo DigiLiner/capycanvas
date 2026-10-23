@@ -45,6 +45,13 @@ fn take_control(s: &mut UiSession<Recorder>, control: ToolbarControl, at: [f32; 
     take(s, BubbleGrab::Tile { panel, tile }, at)
 }
 
+fn take_ring(s: &mut UiSession<Recorder>, at: [f32; 2]) -> u32 {
+    let id = take_control(s, ToolbarControl::Color, at);
+    let options = BubbleOptions { recent: true, palette: true, pair: true, ..view(s, id).options };
+    act(s, BubbleAction::SetOptions { id, options }).unwrap();
+    id
+}
+
 fn view(s: &UiSession<Recorder>, id: u32) -> BubbleView {
     s.bubbles().into_iter().find(|b| b.id == id).unwrap()
 }
@@ -130,14 +137,13 @@ fn dragging_a_tool_past_the_line_takes_one_bubble_in_one_undo_step() {
     assert_eq!(bubble.source, BubbleSource::Control { control });
     assert_eq!(saved(&s, id), FAR);
     assert!(s.state.workspace.layout.panel(panel).unwrap().tiles().iter().any(|t| t.id == tile), "the tile stays");
-    assert!(s.bubble_out(control), "the toolbar shows its tool is out");
     drag(&mut s, grab, [300., 300.], [300., 300.]);
     assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), 1, "one bubble per source");
     assert_eq!(saved(&s, id), [300., 300.]);
     invoke(&mut s, CommandId::UndoWorkspace);
     assert_eq!(saved(&s, id), FAR);
     invoke(&mut s, CommandId::UndoWorkspace);
-    assert!(s.state.workspace.layout.bubbles.bubbles.is_empty() && !s.bubble_out(control));
+    assert!(s.state.workspace.layout.bubbles.bubbles.is_empty());
     invoke(&mut s, CommandId::RedoWorkspace);
     assert_eq!(s.state.workspace.layout.bubbles.get(id), Some(&bubble));
     s.state.workspace.layout.validate().unwrap();
@@ -169,7 +175,7 @@ fn put_back_all_empties_the_desk_in_one_step() {
     assert!(act(&mut s, BubbleAction::PutBackAll).is_err(), "nothing is out");
     assert!(!s.command(CommandId::PutBackBubbles).enabled);
     take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
-    let color = take_control(&mut s, ToolbarControl::Color, [300., 500.]);
+    let color = take_ring(&mut s, [300., 500.]);
     tap_bead(&mut s, color, Bead::Palettes);
     assert!(s.command(CommandId::PutBackBubbles).enabled);
     invoke(&mut s, CommandId::PutBackBubbles);
@@ -178,28 +184,6 @@ fn put_back_all_empties_the_desk_in_one_step() {
     assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), 2);
     assert!(view(&s, color).pill.is_none(), "put back closes open parts");
     assert!(VIEW_MENU.sections.iter().any(|section| section.contains(&CommandId::PutBackBubbles)));
-}
-
-#[test]
-fn title_bar_tools_show_when_their_bubbles_are_out() {
-    let mut s = desk();
-    let drawing = ToolbarControl::Command { command: CommandId::DrawingBrush };
-    let header = |s: &UiSession<Recorder>, control: ToolbarControl| {
-        let entry = s.state.workspace.layout.header.entries().find(|e| e.item == HeaderItem::Tool { control }).map(|e| e.id);
-        entry.and_then(|id| s.header_view_with(false).items.into_iter().find(|i| i.id == id)).map(|i| i.bubble)
-    };
-    assert!(!s.bubble_out(drawing));
-    let pastel = take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }, FAR);
-    assert!(s.bubble_out(drawing), "a medium is out of the Brush dial");
-    if let Some(shown) = header(&s, drawing) {
-        assert!(shown);
-    }
-    act(&mut s, BubbleAction::PutBack { id: pastel }).unwrap();
-    take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
-    assert!(s.bubble_out(drawing), "so is a brush of one of its media");
-    assert!(!s.bubble_out(ToolbarControl::Color));
-    take_control(&mut s, ToolbarControl::Color, [300., 500.]);
-    assert!(s.bubble_out(ToolbarControl::Color));
 }
 
 #[test]
@@ -385,6 +369,11 @@ fn halo_contacts_set_values_along_their_arc() {
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: ring.arc.point(0.9) }).unwrap();
     assert!(!view(&s, id).rings[0].active && view(&s, id).readout.is_none());
     assert!(act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: [0., 0.] }).is_err());
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.3) }).unwrap();
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Move, position: ring.arc.point(0.5) }).unwrap();
+    act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Cancel, position: [0., 0.] }).unwrap();
+    assert!((value(&s) - at(0.9)).abs() < 1e-3, "a cancelled contact, such as a second finger or a hold, puts the value back");
+    assert!(!view(&s, id).rings[0].active);
 }
 
 #[test]
@@ -498,9 +487,10 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     assert_eq!(folded.layer, s.state.layers.iter().find(|l| l.selected).map(|l| l.id), "the folded card shows the current layer");
     tap(&mut s, layers);
     let card = view(&s, layers).card.unwrap();
-    assert_eq!(card, BubbleCard { size: layers_card(false, s.state.layers.len()), full: false, properties: false });
+    assert_eq!(card, BubbleCard { size: layers_card(false, s.state.layers.len()), full: false, properties: false, disclosure: "Properties".into() });
     act(&mut s, BubbleAction::Properties { id: layers }).unwrap();
     assert!(view(&s, layers).card.unwrap().properties);
+    assert_ne!(view(&s, layers).card.unwrap().disclosure, "Properties", "the footer then goes back to all layers");
     act(&mut s, BubbleAction::Properties { id: layers }).unwrap();
     assert!(!view(&s, layers).card.unwrap().properties, "All layers goes back");
     chrome(&mut s, ChromeEvent::Contact { position: [800., 500. + card.size[1] * 0.5 - 10.], canvas: false }, ChromeFacts::default());
@@ -519,7 +509,7 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     tap(&mut s, layers);
     assert!(view(&s, layers).card.is_none());
     let menu = s.context_menu(ContextTarget::Bubble { id: color }).unwrap();
-    assert_eq!(menu.sections[0].iter().map(|i| i.selected).collect::<Vec<_>>(), [Some(true); 3]);
+    assert_eq!(menu.sections[0].iter().map(|i| i.selected).collect::<Vec<_>>(), [Some(false); 3], "a new ring is the circle alone");
     s.dispatch(menu.sections[1][2].action.clone().unwrap()).unwrap();
     assert_eq!(view(&s, color).diameter, COLOR_RING_SIZES[2]);
     invoke(&mut s, CommandId::UndoWorkspace);
@@ -677,9 +667,9 @@ fn bubbles_round_trip_with_the_workspace() {
 }
 
 #[test]
-fn color_beads_pick_swap_and_switch_palettes() {
+fn color_beads_pick_select_and_switch_palettes() {
     let mut s = desk();
-    let id = take_control(&mut s, ToolbarControl::Color, [500., 380.]);
+    let id = take_ring(&mut s, [500., 380.]);
     record_colors(&mut s, 20);
     let open = view(&s, id);
     for kind in [Bead::Foreground, Bead::Background, Bead::Transparent, Bead::Swatch { index: 0 }, Bead::Recent { index: 0 }, Bead::Palettes] {
@@ -689,8 +679,24 @@ fn color_beads_pick_swap_and_switch_palettes() {
     tap_bead(&mut s, id, Bead::Recent { index: 2 });
     assert_eq!(s.state.colors.definition(), target);
     let (foreground, background) = (s.state.colors.foreground, s.state.colors.background);
-    tap_bead(&mut s, id, Bead::Background);
-    assert_eq!((s.state.colors.foreground, s.state.colors.background), (background, foreground), "the background bead swaps");
+    let overlap = |s: &UiSession<Recorder>| {
+        let [f, b] = [bead(&view(s, id), Bead::Foreground), bead(&view(s, id), Bead::Background)];
+        [(f[0] + b[0]) * 0.5, (f[1] + b[1]) * 0.5]
+    };
+    let beads_of = |s: &UiSession<Recorder>| view(s, id).beads.iter().map(|b| b.placement).collect::<Vec<_>>();
+    assert_eq!(bead_at(&beads_of(&s), overlap(&s)), Some(Bead::Foreground));
+    let exposed = {
+        let [f, b] = [bead(&view(&s, id), Bead::Foreground), bead(&view(&s, id), Bead::Background)];
+        let away = [b[0] - f[0], b[1] - f[1]];
+        let length = away[0].hypot(away[1]);
+        [b[0] + away[0] / length * 8., b[1] + away[1] / length * 8.]
+    };
+    beads(&mut s, id, ContactPhase::Down, exposed);
+    beads(&mut s, id, ContactPhase::Up, exposed);
+    assert_eq!((s.state.colors.foreground, s.state.colors.background), (foreground, background), "nothing swaps");
+    assert_eq!(s.state.colors.slot, ColorSlot::Background, "the background is chosen");
+    assert_eq!(bead_at(&beads_of(&s), overlap(&s)), Some(Bead::Background), "and comes to the front");
+    assert!(view(&s, id).beads.iter().any(|b| b.placement.bead == Bead::Background && b.selected));
     tap_bead(&mut s, id, Bead::Transparent);
     assert_eq!(s.state.colors.slot, ColorSlot::Transparent);
     tap_bead(&mut s, id, Bead::Foreground);
@@ -727,7 +733,7 @@ fn color_beads_pick_swap_and_switch_palettes() {
 #[test]
 fn sliding_along_beads_turns_them_and_settles_on_whole_columns() {
     let mut s = desk();
-    let id = take_control(&mut s, ToolbarControl::Color, [500., 420.]);
+    let id = take_ring(&mut s, [500., 420.]);
     record_colors(&mut s, 20);
     big_palette(&mut s);
     let before = s.state.colors.definition();
@@ -776,7 +782,12 @@ fn a_bubble_that_returns_starts_with_fresh_scrolling_and_no_open_parts() {
     let (panel, tile) = toolbar_tile(&mut s, ToolbarControl::Color);
     let before = s.state.workspace.clone();
     big_palette(&mut s);
+    let everything = |s: &mut UiSession<Recorder>, id: u32| {
+        let options = BubbleOptions { recent: true, palette: true, pair: true, ..view(s, id).options };
+        act(s, BubbleAction::SetOptions { id, options }).unwrap();
+    };
     let id = take(&mut s, BubbleGrab::Tile { panel, tile }, [500., 380.]);
+    everything(&mut s, id);
     let start = view(&s, id);
     let [from, to] = [bead(&start, Bead::Swatch { index: 4 }), bead(&start, Bead::Swatch { index: 0 })];
     beads(&mut s, id, ContactPhase::Down, from);
@@ -788,9 +799,63 @@ fn a_bubble_that_returns_starts_with_fresh_scrolling_and_no_open_parts() {
     s.bubble_placements();
     let again = take(&mut s, BubbleGrab::Tile { panel, tile }, [500., 380.]);
     assert_eq!(again, id, "a restored layout reuses the identity");
+    everything(&mut s, again);
     let fresh = view(&s, again);
     assert!(fresh.pill.is_none());
     assert_eq!(bead(&fresh, Bead::Swatch { index: 0 }), bead(&start, Bead::Swatch { index: 0 }));
+}
+
+#[test]
+fn a_color_ring_starts_as_the_medium_circle_and_comes_back_as_it_was_left() {
+    let mut s = desk();
+    let (panel, tile) = toolbar_tile(&mut s, ToolbarControl::Color);
+    let id = take(&mut s, BubbleGrab::Tile { panel, tile }, [500., 380.]);
+    let first = view(&s, id);
+    assert_eq!(first.diameter, COLOR_RING_SIZES[1]);
+    assert!(first.beads.is_empty(), "the circle alone");
+    let options = BubbleOptions { size: COLOR_RING_SIZES[2], palette: true, ..first.options };
+    act(&mut s, BubbleAction::SetOptions { id, options }).unwrap();
+    act(&mut s, BubbleAction::PutBack { id }).unwrap();
+    s.set_viewport([1400., 1000.], [1400, 1000]).unwrap();
+    let again = take(&mut s, BubbleGrab::Tile { panel, tile }, [500., 380.]);
+    assert_eq!(view(&s, again).options, options, "its items and size are remembered");
+    act(&mut s, BubbleAction::PutBackAll).unwrap();
+    let json = serde_json::to_string(&s.state.workspace).unwrap();
+    let restored: WorkspaceState = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.layout.bubbles.kept, s.state.workspace.layout.bubbles.kept, "and saved with the workspace");
+    let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [800., 500.]);
+    assert_eq!(view(&s, layers).options, BubbleOptions::default());
+}
+
+#[test]
+fn a_drag_out_of_the_wheel_grabs_the_nearest_rim_and_catches_up_smoothly() {
+    let mut s = desk();
+    let id = take_control(&mut s, ToolbarControl::Color, [500., 400.]);
+    let radius = view(&s, id).diameter * 0.5;
+    let mut now = 0;
+    while s.step_bubbles(now) && now < 2_000_000_000 {
+        now += 16_666_667;
+    }
+    let grab = BubbleGrab::Rim { id };
+    let finger = [500. + radius * 2. + 1., 400.];
+    contact(&mut s, grab, ContactPhase::Down, finger).unwrap();
+    let place = |s: &mut UiSession<Recorder>| s.bubble_placements().into_iter().find(|p| p.id == id).unwrap().center;
+    assert_eq!(place(&mut s), [500., 400.], "nothing jumps when the drag starts");
+    let mut path = Vec::new();
+    for _ in 0..30 {
+        now += 8_333_333;
+        s.step_bubbles(now);
+        path.push(place(&mut s)[0]);
+    }
+    assert!(path.windows(2).all(|w| w[1] >= w[0] && w[1] - w[0] < 20.), "it glides toward the finger: {path:?}");
+    let caught = place(&mut s);
+    assert!((caught[0] + radius - finger[0]).abs() < 1., "the nearest rim point ends under the finger: {caught:?}");
+    contact(&mut s, grab, ContactPhase::Move, [finger[0] + 40., 400.]).unwrap();
+    now += 8_333_333;
+    s.step_bubbles(now);
+    assert!((place(&mut s)[0] - (caught[0] + 40.)).abs() < 1., "then it follows directly");
+    contact(&mut s, grab, ContactPhase::Up, [finger[0] + 40., 400.]).unwrap();
+    assert!(saved(&s, id)[0] >= caught[0] + 39., "and keeps the place it was let go, gliding on");
 }
 
 #[test]

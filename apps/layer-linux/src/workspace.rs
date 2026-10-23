@@ -2938,6 +2938,7 @@ impl Workspace {
             ("source", glass.source),
             ("open-tile", glass.open_tile),
             ("chip", glass.chip),
+            ("chip-selection", glass.chip_selection),
             ("switcher", glass.switcher),
             ("selection", glass.selection),
             ("header-selection", glass.header_selection),

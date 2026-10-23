@@ -1468,28 +1468,7 @@ impl Workspace {
         widget: &impl IsA<gtk::Widget>,
         target: ContextTarget,
     ) {
-        widget.add_css_class("customizable-target");
-        let click = gtk::GestureClick::new();
-        click.set_name(Some("workspace-context-click"));
-        click.set_button(0);
-        click.set_propagation_phase(gtk::PropagationPhase::Capture);
-        click.connect_pressed(glib::clone!(
-            #[weak(rename_to = w)]
-            self,
-            move |gesture, _, x, y| {
-                let Some(widget) = gesture.widget() else {
-                    return;
-                };
-                if !owns_context(&widget, x, y) {
-                    return;
-                }
-                if gesture.current_button() == 3 {
-                    gesture.set_state(gtk::EventSequenceState::Claimed);
-                    w.show_context(&widget, target, x, y);
-                }
-            }
-        ));
-        widget.add_controller(click);
+        self.install_menu(widget, target);
         let hold = gtk::GestureLongPress::new();
         hold.set_name(Some("workspace-context-hold"));
         hold.set_touch_only(false);
@@ -1537,6 +1516,35 @@ impl Workspace {
                 }));
             widget.add_controller(release);
         }
+    }
+
+    pub(super) fn install_menu(
+        self: &Rc<Self>,
+        widget: &impl IsA<gtk::Widget>,
+        target: ContextTarget,
+    ) {
+        widget.add_css_class("customizable-target");
+        let click = gtk::GestureClick::new();
+        click.set_name(Some("workspace-context-click"));
+        click.set_button(0);
+        click.set_propagation_phase(gtk::PropagationPhase::Capture);
+        click.connect_pressed(glib::clone!(
+            #[weak(rename_to = w)]
+            self,
+            move |gesture, _, x, y| {
+                let Some(widget) = gesture.widget() else {
+                    return;
+                };
+                if !owns_context(&widget, x, y) {
+                    return;
+                }
+                if gesture.current_button() == 3 {
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                    w.show_context(&widget, target, x, y);
+                }
+            }
+        ));
+        widget.add_controller(click);
         let target_widget = widget.as_ref().clone();
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1578,6 +1586,27 @@ impl Workspace {
         target: ContextTarget,
         x: f64,
         y: f64,
+    ) {
+        self.open_context(widget, target, x, y, false);
+    }
+
+    pub(super) fn show_held_context(
+        self: &Rc<Self>,
+        widget: &gtk::Widget,
+        target: ContextTarget,
+        x: f64,
+        y: f64,
+    ) {
+        self.open_context(widget, target, x, y, true);
+    }
+
+    fn open_context(
+        self: &Rc<Self>,
+        widget: &gtk::Widget,
+        target: ContextTarget,
+        x: f64,
+        y: f64,
+        held: bool,
     ) {
         if let ContextTarget::Header { id: Some(id) } = target
             && self.header.switcher_context_at(id, widget, x, y) {
@@ -1623,7 +1652,7 @@ impl Workspace {
         let popover = &self.customization.context;
         // A native popup grab diverts the original contact. Keep mouse, touch,
         // and pen with the source until it becomes a drag or is released.
-        if held_drag {
+        if held_drag || held {
             popover.set_autohide(false);
         }
         self.populate_workspace_menu(popover, menu);
@@ -1777,7 +1806,7 @@ impl Workspace {
 
 // Capture-phase recognition must yield to a more specific target or native
 // text editor. This also prevents the enclosing panel from stealing a tile hold.
-fn owns_context(widget: &gtk::Widget, x: f64, y: f64) -> bool {
+pub(super) fn owns_context(widget: &gtk::Widget, x: f64, y: f64) -> bool {
     let mut child = widget.pick(x, y, gtk::PickFlags::DEFAULT);
     while let Some(current) = child {
         if &current == widget {

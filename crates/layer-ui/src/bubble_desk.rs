@@ -6,6 +6,7 @@ const PUSH_SPEED: f32 = 0.12;
 const MAX_SPEED: f32 = 4.5;
 const REBOUND: f32 = 0.25;
 const STEP_NS: u64 = 4_166_667;
+const CATCH_UP: f32 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Shape {
@@ -123,6 +124,7 @@ pub(crate) struct Desk {
     moved: bool,
     still: bool,
     faded: Vec<u32>,
+    target: Option<[f32; 2]>,
 }
 
 impl Desk {
@@ -160,6 +162,7 @@ impl Desk {
         }
     }
     pub(crate) fn grab(&mut self, id: u32) {
+        self.target = None;
         self.grabbed = self.bodies.iter().any(|b| b.id == id).then_some(id);
         if let Some(body) = self.body_mut(id) {
             body.kicked = false;
@@ -167,8 +170,16 @@ impl Desk {
             body.last = body.pos;
         }
     }
+    pub(crate) fn catch_up(&mut self) {
+        self.target = self.grabbed.and_then(|id| self.center(id));
+    }
     pub(crate) fn drag(&mut self, center: [f32; 2]) {
         let Some(id) = self.grabbed else { return };
+        if self.target.is_some() && !self.still {
+            self.target = Some(center);
+            self.moved = true;
+            return;
+        }
         if let Some(body) = self.body_mut(id) {
             body.pos = center;
             body.rest = center;
@@ -180,10 +191,11 @@ impl Desk {
     }
     pub(crate) fn release(&mut self) {
         let still = self.still;
+        let target = self.target.take();
         if let Some(id) = self.grabbed.take()
             && let Some(body) = self.body_mut(id)
         {
-            body.rest = body.pos;
+            body.rest = target.unwrap_or(body.pos);
             body.vel = if still { [0.; 2] } else { capped(body.vel) };
             body.kicked = length(body.vel) > 0.05;
         }
@@ -226,7 +238,7 @@ impl Desk {
         !near.is_empty()
     }
     pub(crate) fn moving(&self) -> bool {
-        self.moved || self.grabbed.is_some() || self.bodies.iter().any(|b| b.kicked)
+        self.moved || self.grabbed.is_some() || self.target.is_some() || self.bodies.iter().any(|b| b.kicked)
     }
     pub(crate) fn advance(&mut self, now_ns: u64) -> bool {
         let last = *self.clock.get_or_insert(now_ns.saturating_sub(STEP_NS));
@@ -272,6 +284,15 @@ impl Desk {
     }
     fn step(&mut self) {
         let (grabbed, still) = (self.grabbed, self.still);
+        if let (Some(id), Some(target)) = (grabbed, self.target) {
+            let body = self.body_mut(id).unwrap();
+            let towards = sub(target, body.pos);
+            body.pos = if length(towards) < 0.5 { target } else { add(body.pos, scale(towards, CATCH_UP)) };
+            body.rest = body.pos;
+            if body.pos == target {
+                self.target = None;
+            }
+        }
         for body in &mut self.bodies {
             if grabbed == Some(body.id) {
                 body.vel = scale(add(body.vel, sub(body.pos, body.last)), 0.5);
