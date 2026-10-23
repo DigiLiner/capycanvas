@@ -266,7 +266,7 @@ impl ToolVariant {
             state.commands.iter().find(|c| c.id == command).and_then(|c| c.icon).unwrap_or(self.icon())
         } else { self.icon() }
     }
-    fn label(self, localization: &Localizer) -> String {
+    pub(crate) fn label(self, localization: &Localizer) -> String {
         let id = match self {
             Self::Command { command } => return command.localized_label(localization).to_string(),
             Self::BrushGroup { group } => return group.localized_label(localization).to_string(),

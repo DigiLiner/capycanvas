@@ -9,6 +9,7 @@ struct BubbleDrag {
     id: u32,
     offset: [f32; 2],
     source: Option<Bounds>,
+    pulled: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -204,7 +205,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let rings: Vec<_> = match kind {
             BubbleKind::Controls => halo_arcs(CONTROL_RINGS.len())
                 .into_iter()
-                .zip(if bubble.options.size_left { CONTROL_RINGS } else { [CONTROL_RINGS[1], CONTROL_RINGS[0]] })
+                .zip(if bubble.options.swap { CONTROL_RINGS } else { [CONTROL_RINGS[1], CONTROL_RINGS[0]] })
                 .map(|(arc, binding)| match binding.field(state) {
                     Some(field) => self.ring_view(bubble.id, arc, &field, binding.numeric()),
                     None => BubbleRing {
@@ -465,13 +466,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some(bubble) = self.state.workspace.layout.bubbles.get(id) else { return false };
         let view = self.bubble_view(bubble);
         let center = self.bubble_center(bubble);
-        let local = [point[0] - center[0], point[1] - center[1]];
-        let radius = view.halo.unwrap_or(view.diameter).max(view.diameter) * 0.5;
-        local[0].hypot(local[1]) <= radius
-            || view.chooser.iter().any(|item| item.contains(local))
-            || view.card.is_some_and(|card| local[0].abs() <= card.size[0] * 0.5 && local[1].abs() <= card.size[1] * 0.5)
-            || view.beads.iter().any(|b| bead_at(&[b.placement], local).is_some())
-            || (view.pill.is_some() && palette_pill(view.diameter).contains(local[0], local[1]))
+        view.hit([point[0] - center[0], point[1] - center[1]]).is_some()
     }
 
     pub(crate) fn dismiss_bubble_parts(&mut self, position: [f32; 2]) -> bool {
@@ -533,6 +528,13 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::Drag { grab, phase, position, viewport } => self.drag_bubble(grab, phase, position, viewport),
             BubbleAction::Tap { id, position } => self.tap_bubble(id, position),
             BubbleAction::Ring { id, phase, position } => self.bubble_ring(id, phase, position),
+            BubbleAction::ResetRing { id, position } => {
+                let view = self.bubble_view(&self.bubble(id)?.clone());
+                let ring = view.rings.iter().find(|r| r.enabled && r.arc.covers(position)).ok_or("No setting under the contact")?;
+                let mut change = self.dispatch(UiAction::ResetToolSetting { id: ring.setting.into() })?;
+                change.regions |= regions::BUBBLES;
+                Ok(change)
+            }
             BubbleAction::Beads { id, phase, position } => self.bead_contact(id, phase, position),
             BubbleAction::Choose { id, phase, position } => self.choose(id, phase, position),
             BubbleAction::Palette { id, step } => self.cycle_palette(id, step),
@@ -551,6 +553,15 @@ impl<R: CanvasRenderer> UiSession<R> {
                     return Err("Open the Layers card first".into());
                 }
                 self.bubble_state.properties = !self.bubble_state.properties;
+                Ok(self.changed(regions::BUBBLES, false))
+            }
+            BubbleAction::Close { id } => {
+                if self.bubble_state.card != Some(id) {
+                    return Ok(UiChange::default());
+                }
+                self.bubble_state.card = None;
+                self.bubble_state.properties = false;
+                self.sync_bubbles();
                 Ok(self.changed(regions::BUBBLES, false))
             }
             BubbleAction::PutBack { id } => {
@@ -668,13 +679,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 change.regions |= regions::BUBBLES;
                 return Ok(change);
             }
+            BubbleKind::Layers if self.bubble_state.card == Some(id) => return Ok(UiChange::default()),
             BubbleKind::Layers => {
                 self.close_bubble_parts(None);
-                if self.bubble_state.card == Some(id) {
-                    self.bubble_state.card = None;
-                } else {
-                    self.bubble_state.card = Some(id);
-                }
+                self.bubble_state.card = Some(id);
                 self.bubble_state.properties = false;
                 return opened(self);
             }
@@ -950,6 +958,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some(drag) = self.bubble_state.drag else { return Ok(UiChange::default()) };
         let center = [position[0] + drag.offset[0], position[1] + drag.offset[1]];
         let present = self.state.workspace.layout.bubbles.get(drag.id).is_some();
+        let mut change = UiChange::default();
         match phase {
             ContactPhase::Move if present => {
                 self.bubble_state.desk.drag(center);
@@ -979,6 +988,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                     self.bubble_state.desk.release();
                     self.workspace_history.finish(&self.state.workspace);
+                    if drag.pulled {
+                        change = self.open_pulled(drag.id)?;
+                    }
                 }
             }
             _ => {
@@ -989,7 +1001,22 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
         }
         self.sync_bubbles();
-        Ok(self.changed(regions::BUBBLES | regions::COMMANDS, false))
+        Ok(merge_change(change, self.changed(regions::BUBBLES | regions::COMMANDS, false)))
+    }
+
+    fn open_pulled(&mut self, id: u32) -> Result<UiChange, String> {
+        let bubble = self.bubble(id)?.clone();
+        match bubble.source.kind() {
+            BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium => {
+                self.close_bubble_parts(None);
+                let change = if self.bubble_view(&bubble).selected { UiChange::default() } else { self.select_bubble(&bubble)? };
+                if !self.halo_settings().is_empty() && self.bubble_view(&bubble).selected {
+                    self.set_halo(Some(id));
+                }
+                Ok(change)
+            }
+            _ => Ok(UiChange::default()),
+        }
     }
 
     fn lift_bubble(&mut self, grab: BubbleGrab, position: [f32; 2], viewport: [f32; 2]) -> Result<UiChange, String> {
@@ -1032,7 +1059,12 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.state.customization.drawer = None;
         }
         self.close_bubble_parts(None);
-        self.bubble_state.drag = Some(BubbleDrag { id, offset: [center[0] - position[0], center[1] - position[1]], source: bounds });
+        let pulled = !matches!(grab, BubbleGrab::Bubble { .. } | BubbleGrab::Rim { .. });
+        if pulled && source.kind() == BubbleKind::Layers {
+            self.bubble_state.card = Some(id);
+            self.bubble_state.properties = false;
+        }
+        self.bubble_state.drag = Some(BubbleDrag { id, offset: [center[0] - position[0], center[1] - position[1]], source: bounds, pulled });
         self.sync_bubbles();
         self.bubble_state.desk.grab(id);
         if matches!(grab, BubbleGrab::Rim { .. }) {
@@ -1075,7 +1107,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 );
             }
             BubbleSource::Control { control: ToolbarControl::ColorPicker } => {
-                sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_SIZE_LEFT, o.size_left, BubbleOption::SizeLeft)]);
+                sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_SWAP_SLIDERS, o.swap, BubbleOption::Swap)]);
             }
             BubbleSource::Control { control: ToolbarControl::Panel { .. } } => {
                 sections.push(vec![
@@ -1083,6 +1115,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     options(MessageId::WORKSPACE_BUBBLE_FULL, o.full, BubbleOption::Full { full: true }),
                 ]);
                 sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_FOLD, o.fold, BubbleOption::Fold)]);
+                if self.bubble_state.card == Some(id) {
+                    sections.push(vec![ContextMenuItem::command(text(MessageId::COMMON_CLOSE), action(BubbleAction::Close { id }))]);
+                }
             }
             BubbleSource::Control { .. } | BubbleSource::Medium { .. }
                 if matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium) && view.selected =>
@@ -1092,7 +1127,22 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => {}
         }
         sections.push(vec![ContextMenuItem::command(text(MessageId::WORKSPACE_BUBBLE_PUT_BACK), action(BubbleAction::PutBack { id }))]);
-        Ok(ContextMenu { title: view.label, sections })
+        let title = self.tool_name(bubble, &view).unwrap_or(view.label);
+        sections[0].insert(0, ContextMenuItem::heading(&title));
+        Ok(ContextMenu { title, sections })
+    }
+
+    fn tool_name(&self, bubble: &ToolBubble, view: &BubbleView) -> Option<String> {
+        let brush = |id: u32| tools::brush_label_localized(id, self.localization()).map(|label| label.to_string());
+        match (view.kind, bubble.source) {
+            (BubbleKind::Medium, BubbleSource::Medium { group }) => brush(self.tools.group(group)),
+            (BubbleKind::Dial, BubbleSource::Control { control }) => match self.group_variant(control.tool_group()?) {
+                ToolVariant::BrushGroup { group } => brush(self.tools.group(group)),
+                ToolVariant::BrushPreset { id } => brush(id),
+                variant => Some(variant.label(self.localization())),
+            },
+            _ => None,
+        }
     }
 
     fn ring_menu(&self, brush: u32) -> Option<Vec<ContextMenuItem>> {
@@ -1113,6 +1163,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 item
             })
             .collect();
-        Some(vec![ContextMenuItem::submenu(&self.localization().text(MessageId::WORKSPACE_BUBBLE_RING_SETTINGS), vec![rows])])
+        Some(rows)
     }
 }

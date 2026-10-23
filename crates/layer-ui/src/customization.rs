@@ -680,6 +680,12 @@ impl ContextMenuItem {
     pub(crate) fn edit(label: impl Into<String>, action: CustomizationAction) -> Self {
         Self::command(label, UiAction::Customize { action })
     }
+    pub(crate) fn heading(label: &str) -> Self {
+        Self { enabled: true, ..Self::submenu(label, Vec::new()) }
+    }
+    pub fn is_heading(&self) -> bool {
+        self.action.is_none() && self.enabled && self.sections.is_empty()
+    }
     pub(crate) fn submenu(label: &str, sections: Vec<Vec<Self>>) -> Self {
         let sections: Vec<_> = sections.into_iter().filter(|s| !s.is_empty()).collect();
         Self {

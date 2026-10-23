@@ -8,10 +8,7 @@ use std::{
     rc::Rc,
 };
 
-const SECOND_FINGER: f32 = 90.;
 const HOLD_SLOP: f32 = 8.;
-const FADED: f64 = 0.2;
-const HALO_BAND: f32 = 28.;
 const FADE_RETURN_MS: u64 = 180;
 const FADE_US: i64 = 140_000;
 const UNFOLD_US: i64 = 200_000;
@@ -33,21 +30,6 @@ enum Contact {
     Pair,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Part {
-    Face,
-    Half(usize),
-    Item(usize),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Region {
-    Handle,
-    Ring,
-    Beads,
-    Choose,
-    Pass,
-}
 
 struct Item {
     root: gtk::Box,
@@ -72,7 +54,7 @@ struct Pair {
 
 struct Press {
     sequence: Option<usize>,
-    region: Region,
+    hit: Option<BubbleHit>,
     color: Option<layer_core::color::RgbColor>,
     start: [f32; 2],
     moving: bool,
@@ -165,8 +147,9 @@ mod imp {
         pub(super) preview: RefCell<Option<gdk::Texture>>,
         pub(super) buttons: RefCell<Vec<gtk::Image>>,
         pub(super) halves: RefCell<Vec<gtk::Box>>,
-        pub(super) hovered: Cell<Option<super::Part>>,
-        pub(super) pressed: Cell<Option<super::Part>>,
+        pub(super) hovered: Cell<Option<BubbleHit>>,
+        pub(super) last_ring: Cell<Option<(u32, [f32; 2])>>,
+        pub(super) pressed: Cell<Option<BubbleHit>>,
         pub(super) stamp: RefCell<Option<(u64, f32, gdk::Texture)>>,
         pub(super) stamp_patch: RefCell<Option<crate::display_color::ColorPatch>>,
         pub(super) stamp_tick: RefCell<Option<gtk::TickCallbackId>>,
@@ -175,7 +158,7 @@ mod imp {
         pub(super) count: RefCell<Option<gtk::Label>>,
         pub(super) icons: RefCell<Vec<gtk::Image>>,
         pub(super) readout: RefCell<Option<gtk::Label>>,
-        pub(super) beads: RefCell<Vec<crate::display_color::ColorPatch>>,
+        pub(super) beads: RefCell<Vec<(crate::tool_panels::WheelButton, crate::display_color::ColorPatch)>>,
         pub(super) palettes: RefCell<Option<gtk::Box>>,
         pub(super) pill: RefCell<Option<(gtk::Box, gtk::Label)>>,
         pub(super) items: RefCell<Vec<super::Item>>,
@@ -233,8 +216,8 @@ mod imp {
             if let Some(count) = self.count.borrow().as_ref() {
                 let (_, natural, _, _) = count.measure(gtk::Orientation::Horizontal, -1);
                 let (_, tall, _, _) = count.measure(gtk::Orientation::Vertical, natural);
-                let size = [(natural as f32 + 10.).max(tall as f32), tall as f32];
-                place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 - 4., -TOOL_BUBBLE * 0.5 + 4.], size);
+                let (at, size) = count_badge([natural as f32, tall as f32]);
+                place(count.upcast_ref(), at, size);
             }
             for (icon, ring) in self.icons.borrow().iter().zip(self.rings_shown.borrow().iter()) {
                 place(icon.upcast_ref(), ring.arc.icon_point(), [16.; 2]);
@@ -245,12 +228,12 @@ mod imp {
             if let Some(readout) = self.readout.borrow().as_ref().filter(|r| r.is_visible()) {
                 let (_, natural, _, _) = readout.measure(gtk::Orientation::Horizontal, -1);
                 let (_, tall, _, _) = readout.measure(gtk::Orientation::Vertical, natural);
-                place(readout.upcast_ref(), [0., view.halo.unwrap_or(view.diameter) * 0.5 + 16.], [natural as f32, tall as f32]);
+                place(readout.upcast_ref(), view.readout_center(), [natural as f32, tall as f32]);
             }
             let shown = obj.shown_beads();
             let colors = shown.iter().filter(|b| b.placement.bead != Bead::Palettes);
-            for (patch, bead) in self.beads.borrow().iter().zip(colors) {
-                place(patch.upcast_ref(), bead.placement.center, [bead.placement.size; 2]);
+            for ((swatch, _), bead) in self.beads.borrow().iter().zip(colors) {
+                place(swatch.upcast_ref(), bead.placement.center, [bead.placement.size; 2]);
             }
             if let (Some(palettes), Some(bead)) = (self.palettes.borrow().as_ref(), shown.iter().find(|b| b.placement.bead == Bead::Palettes)) {
                 place(palettes.upcast_ref(), bead.placement.center, [bead.placement.size; 2]);
@@ -263,13 +246,9 @@ mod imp {
                 place(item.root.upcast_ref(), chooser.center, chooser.size());
                 if item.tag.is_visible() {
                     let (_, natural, _, _) = item.tag.measure(gtk::Orientation::Horizontal, -1);
-                    let tag = chooser.tag;
-                    let width = (natural as f32).min(tag.width);
+                    let width = (natural as f32).min(chooser.tag.width);
                     let (_, tall, _, _) = item.tag.measure(gtk::Orientation::Vertical, width as i32);
-                    let [x, y] = chooser.center;
-                    let length = x.hypot(y).max(1e-3);
-                    let anchor = [tag.x + tag.width * 0.5 - x / length * (tag.width - width) * 0.5, tag.y + tag.height * 0.5];
-                    place(item.tag.upcast_ref(), anchor, [width, tall as f32]);
+                    place(item.tag.upcast_ref(), chooser.tag_center(width), [width, tall as f32]);
                 }
             }
             for (item, chooser, _) in self.leaving.borrow().iter() {
@@ -285,10 +264,10 @@ mod imp {
             let obj = self.obj();
             let p = [x as f32 - obj.width() as f32 * 0.5, y as f32 - obj.height() as f32 * 0.5];
             if self.contact.get().is_some() || !self.fingers.borrow().is_empty() {
-                let reach = obj.reach(view) + SECOND_FINGER;
+                let reach = view.reach() + SECOND_FINGER_REACH;
                 return p[0].abs() <= reach && p[1].abs() <= reach;
             }
-            obj.region(view, p, None) != Region::Pass || obj.passes(view, p)
+            view.hit(p).is_some()
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
@@ -309,7 +288,7 @@ mod imp {
             let lift = if placement.is_some_and(|p| p.lifted) { 1. } else { 0. };
             let round = |widget: &gtk::Widget| {
                 if let Some(bounds) = widget.compute_bounds(&*obj) {
-                    super::soft_shadow(snapshot, &bounds, lift);
+                    super::soft_shadow(snapshot, &bounds, f32::MAX, lift);
                 }
                 let part = gtk::Snapshot::new();
                 obj.snapshot_child(widget, &part);
@@ -331,7 +310,7 @@ mod imp {
             if let (Some(card), Some(progress)) = (self.card.borrow().as_ref().filter(|c| c.root.is_child_visible()), card_shown) {
                 grow(c, 0.6 + 0.4 * progress, progress);
                 if let Some(bounds) = card.root.compute_bounds(&*obj) {
-                    super::shadow(snapshot, &bounds, layer_ui::SURFACE_RADIUS, 24., 8., 0.2);
+                    super::soft_shadow(snapshot, &bounds, layer_ui::SURFACE_RADIUS, lift);
                 }
                 obj.snapshot_child(&card.root, snapshot);
                 done();
@@ -381,16 +360,13 @@ mod imp {
                 }
             }
             let colored = shown.iter().filter(|b| b.placement.bead != Bead::Palettes);
-            for (patch, bead) in self.beads.borrow().iter().zip(colored) {
+            for ((swatch, _), bead) in self.beads.borrow().iter().zip(colored) {
                 super::bead_shadow(snapshot, c, bead);
                 let part = gtk::Snapshot::new();
                 part.push_opacity(bead.placement.alpha as f64);
-                obj.snapshot_child(patch, &part);
+                obj.snapshot_child(swatch, &part);
                 part.pop();
                 crate::squircle::append_round(snapshot, part);
-                if let Some(colors) = colors {
-                    super::bead_rim(snapshot, c, bead, colors[1]);
-                }
             }
             if let Some(palettes) = self.palettes.borrow().as_ref().filter(|p| p.is_visible()) {
                 round(palettes.upcast_ref());
@@ -513,7 +489,7 @@ fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, th
     let start = y.atan2(x).to_degrees();
     let lead = (start - arc.start + 540.).rem_euclid(360.) - 180.;
     let banded = RingArc { start, sweep: arc.sweep - lead, ..arc };
-    snapshot.append_stroke(&arc_path(c, &banded, 1.), &stroke(HALO_BAND), &chip);
+    snapshot.append_stroke(&arc_path(c, &banded, 1.), &stroke(arc.band), &chip);
     snapshot.append_stroke(&arc_path(c, &arc, 1.), &stroke(RING_TRACK), &rgba(ink, 0.18));
     if ring.fill > 0.004 {
         snapshot.append_stroke(&arc_path(c, &arc, ring.fill), &stroke(RING_TRACK), &rgba(ink, 0.5));
@@ -526,8 +502,8 @@ fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, th
     snapshot.append_stroke(&thumb, &gsk::Stroke::new(1.), &rgba(ink, 0.6));
 }
 
-fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, lift: f32) {
-    shadow(snapshot, bounds, f32::MAX, 8. * (1. + lift * 0.5), 2. + lift * 2.5, 0.08 * (1. + lift));
+fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, lift: f32) {
+    shadow(snapshot, bounds, radius, 8. * (1. + lift * 0.5), 2. + lift * 2.5, 0.08 * (1. + lift));
 }
 
 fn bead_shadow(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead) {
@@ -577,16 +553,6 @@ fn shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, spread
         snapshot.append_linear_gradient(&area, &graphene::Point::new(x - spread, top), &graphene::Point::new(x + w + spread, top), &band(w));
     }
     snapshot.pop();
-}
-
-fn bead_rim(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead, ink: gdk::RGBA) {
-    let [x, y] = bead.placement.center;
-    let at = [c[0] + x, c[1] + y];
-    let radius = bead.placement.size * 0.5;
-    snapshot.append_stroke(&circle(at, radius - 0.5), &gsk::Stroke::new(1.), &gdk::RGBA::new(0.5, 0.5, 0.5, 0.4 * bead.placement.alpha));
-    if bead.selected {
-        snapshot.append_stroke(&circle(at, radius + 1.), &gsk::Stroke::new(2.), &ink);
-    }
 }
 
 fn dots(snapshot: &gtk::Snapshot, c: [f32; 2], view: &BubbleView, ink: gdk::RGBA) {
@@ -661,6 +627,10 @@ impl Item {
     }
 }
 
+fn drags(w: &gtk::Widget) -> bool {
+    w.is::<gtk::Range>() || w.is::<gtk::Editable>() || w.is::<gtk::DrawingArea>() || w.is::<crate::number_control::NumberControl>()
+}
+
 impl Card {
     fn new(w: &Rc<Workspace>, bubble: &Bubble, id: u32, full: bool) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -671,8 +641,6 @@ impl Card {
         let inspector = super::drawers::LayerInspector::new(w, UiAction::Bubble { action: BubbleAction::Properties { id } });
         inspector.root.add_css_class("panel-body");
         inspector.root.set_vexpand(true);
-        inspector.layers.root.add_css_class("customizable-target");
-        inspector.effects.properties.add_css_class("customizable-target");
         inspector.layers.set_simple(!full);
         inspector.layers.footer.set_visible(full);
         inspector.footer.set_visible(full);
@@ -727,9 +695,15 @@ impl Card {
             glib::idle_add_local_once(move || w.dispatch(UiAction::Bubble { action: BubbleAction::MeasureCard { id, heights } }));
         }
     }
+    fn within(&self, picked: Option<&gtk::Widget>, matches: impl Fn(&gtk::Widget) -> bool) -> bool {
+        std::iter::successors(picked.cloned(), |w| w.parent()).take_while(|w| w != self.root.upcast_ref::<gtk::Widget>()).any(|w| matches(&w))
+    }
+    fn input(&self, picked: Option<&gtk::Widget>) -> bool {
+        self.within(picked, |w| drags(w) || w.is::<gtk::Button>() || w.is::<gtk::DropDown>() || w.is::<gtk::Switch>() || w.is::<gtk::CheckButton>())
+    }
     fn handles(&self, picked: Option<&gtk::Widget>) -> bool {
         let list = self.inspector.layers.list.upcast_ref::<gtk::Widget>();
-        picked.is_none_or(|p| p != list && !p.is_ancestor(list))
+        !self.within(picked, |w| w == list || drags(w))
     }
 }
 
@@ -737,20 +711,8 @@ impl Bubble {
     pub fn id(&self) -> u32 {
         self.imp().view.borrow().as_ref().map_or(0, |v| v.id)
     }
-    fn reach(&self, view: &BubbleView) -> f32 {
-        let corner = |at: [f32; 2], size: [f32; 2]| (at[0].abs() + size[0] * 0.5).max(at[1].abs() + size[1] * 0.5);
-        let beads = view.beads.iter().map(|b| corner(b.placement.center, [b.placement.size; 2]));
-        let items = view.chooser.iter().map(|i| corner(i.center, i.size()) + if i.kind == ChooserKind::Brush { 0. } else { 60. });
-        let pill = view.pill.as_ref().map(|_| {
-            let b = palette_pill(view.diameter);
-            corner([0., b.y + b.height * 0.5], [b.width, b.height])
-        });
-        let card = view.card.as_ref().map(|c| corner([0.; 2], c.size));
-        let halo = view.halo.map(|size| size * 0.5 + 40.);
-        beads.chain(items).chain(pill).chain(card).chain(halo).fold(view.diameter * 0.5, f32::max)
-    }
     fn extent(&self) -> f32 {
-        self.imp().view.borrow().as_ref().map_or(0., |view| (self.reach(view) * 2. + 24.).ceil())
+        self.imp().view.borrow().as_ref().map_or(0., |view| (view.reach() * 2. + 24.).ceil())
     }
     fn set_placement(&self, placement: BubblePlacement) {
         let previous = self.imp().placement.replace(Some(placement));
@@ -799,39 +761,8 @@ impl Bubble {
         }
         self.queue_draw();
     }
-    fn region(&self, view: &BubbleView, p: [f32; 2], picked: Option<&gtk::Widget>) -> Region {
-        if let Some(card) = view.card.as_ref() {
-            if p[0].abs() <= card.size[0] * 0.5 && p[1].abs() <= card.size[1] * 0.5 {
-                let handles = self.imp().card.borrow().as_ref().is_none_or(|c| c.handles(picked));
-                return if handles { Region::Handle } else { Region::Pass };
-            }
-        }
-        if view.chooser.iter().any(|item| item.contains(p)) {
-            return Region::Choose;
-        }
-        let arcs: Vec<_> = view.rings.iter().filter(|r| r.enabled).map(|r| r.arc).collect();
-        if ring_at(&arcs, p).is_some() {
-            return Region::Ring;
-        }
-        let beads: Vec<_> = view.beads.iter().map(|b| b.placement).collect();
-        if bead_at(&beads, p).is_some() {
-            return Region::Beads;
-        }
-        let r = p[0].hypot(p[1]);
-        match view.kind {
-            BubbleKind::Color if on_color_rim(view.diameter, view.options, view.pair, p) => Region::Handle,
-            BubbleKind::Color => Region::Pass,
-            BubbleKind::Layers if view.card.is_none() && p[0].abs() <= TOOL_BUBBLE * 0.5 && p[1].abs() <= TOOL_BUBBLE * 0.5 => Region::Handle,
-            BubbleKind::History if history_button(p).is_some() => Region::Handle,
-            BubbleKind::History | BubbleKind::Layers => Region::Pass,
-            _ if r <= view.diameter * 0.5 => Region::Handle,
-            _ => Region::Pass,
-        }
-    }
-    fn passes(&self, view: &BubbleView, p: [f32; 2]) -> bool {
-        let pill = view.pill.is_some() && palette_pill(view.diameter).contains(p[0], p[1]);
-        let card = view.card.as_ref().is_some_and(|c| p[0].abs() <= c.size[0] * 0.5 && p[1].abs() <= c.size[1] * 0.5);
-        pill || card || (view.kind == BubbleKind::Color && p[0].hypot(p[1]) <= view.diameter * 0.5)
+    fn hit(&self, view: &BubbleView, p: [f32; 2], picked: Option<&gtk::Widget>) -> Option<BubbleHit> {
+        view.hit(p).filter(|hit| *hit != BubbleHit::Card || self.imp().card.borrow().as_ref().is_none_or(|c| c.handles(picked)))
     }
 
     fn new(w: &Rc<Workspace>, view: &BubbleView, theme: Theme) -> Self {
@@ -1004,15 +935,19 @@ impl Bubble {
         let colors: Vec<_> = shown.iter().filter(|b| b.placement.bead != Bead::Palettes).collect();
         let mut beads = imp.beads.borrow_mut();
         while beads.len() < colors.len() {
-            let patch = crate::display_color::ColorPatch::new(true);
-            patch.set_parent(self);
-            beads.push(patch);
+            let (swatch, patch) = crate::tool_panels::WheelButton::swatch();
+            swatch.add_css_class("bubble-bead");
+            swatch.set_can_target(false);
+            swatch.set_parent(self);
+            beads.push((swatch, patch));
         }
         while beads.len() > colors.len() {
-            beads.pop().unwrap().unparent();
+            beads.pop().unwrap().0.unparent();
         }
         let (display, headroom) = imp.display.get().unwrap_or_default();
-        for (patch, bead) in beads.iter().zip(&colors) {
+        for ((swatch, patch), bead) in beads.iter().zip(&colors) {
+            swatch.set_selected(bead.selected);
+            set_class(swatch, "foreground", bead.placement.bead == Bead::Foreground);
             if let Some(color) = bead.color {
                 patch.set_display_color(color, display, headroom);
             }
@@ -1349,7 +1284,13 @@ impl Bubble {
             let Some(view) = bubble.imp().view.borrow().clone() else { return };
             let picked = bubble.pick(x, y, gtk::PickFlags::DEFAULT);
             let Some(at) = surface_point(&w, &bubble, x, y) else { return };
-            let state = match bubble.begin_contact(&w, id, bubble.region(&view, position, picked.as_ref()), position, at) {
+            let hit = bubble.hit(&view, position, picked.as_ref());
+            if hit == Some(BubbleHit::Ring) && bubble.repeated(gesture.current_event_time(), position) {
+                send(&w, BubbleAction::ResetRing { id, position });
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                return;
+            }
+            let state = match bubble.begin_contact(&w, id, hit, position, at) {
                 None => gtk::EventSequenceState::Denied,
                 Some(Contact::Ring | Contact::Choose) => gtk::EventSequenceState::Claimed,
                 Some(_) => return,
@@ -1488,32 +1429,27 @@ impl Bubble {
         self.add_controller(hover);
     }
 
-    fn part_at(&self, p: [f32; 2]) -> Option<Part> {
+    fn part_at(&self, p: [f32; 2]) -> Option<BubbleHit> {
         let view = self.imp().view.borrow();
         let view = view.as_ref()?;
-        if let Some(i) = view.chooser.iter().position(|item| item.contains(p)) {
-            return Some(Part::Item(i));
-        }
-        let [w, h] = view.face;
-        match view.kind {
-            BubbleKind::Color => None,
-            _ if view.card.is_some() => None,
-            BubbleKind::History => history_button(p).map(Part::Half),
-            BubbleKind::Layers => (p[0].abs() <= w * 0.5 && p[1].abs() <= h * 0.5).then_some(Part::Face),
-            _ => (p[0].hypot(p[1]) <= w * 0.5).then_some(Part::Face),
-        }
+        view.hit(p).filter(|hit| match hit {
+            BubbleHit::Item(_) | BubbleHit::Half(_) => true,
+            BubbleHit::Face => view.kind != BubbleKind::Color,
+            _ => false,
+        })
     }
 
-    fn part_widget(&self, part: Part) -> Option<gtk::Widget> {
+    fn part_widget(&self, part: BubbleHit) -> Option<gtk::Widget> {
         let imp = self.imp();
         match part {
-            Part::Face => imp.face.borrow().as_ref().map(|f| f.clone().upcast()),
-            Part::Half(i) => imp.halves.borrow().get(i).map(|h| h.clone().upcast()),
-            Part::Item(i) => imp.items.borrow().get(i).map(|item| item.root.clone().upcast()),
+            BubbleHit::Face => imp.face.borrow().as_ref().map(|f| f.clone().upcast()),
+            BubbleHit::Half(i) => imp.halves.borrow().get(i).map(|h| h.clone().upcast()),
+            BubbleHit::Item(i) => imp.items.borrow().get(i).map(|item| item.root.clone().upcast()),
+            _ => None,
         }
     }
 
-    fn mark(&self, class: &str, pressed: bool, part: Option<Part>) {
+    fn mark(&self, class: &str, pressed: bool, part: Option<BubbleHit>) {
         let cell = if pressed { &self.imp().pressed } else { &self.imp().hovered };
         let old = cell.replace(part);
         if old == part {
@@ -1543,27 +1479,37 @@ impl Bubble {
         }
     }
 
+    fn repeated(&self, time: u32, at: [f32; 2]) -> bool {
+        let (interval, distance) = gtk::Settings::default().map_or((400, 5), |s| (s.gtk_double_click_time(), s.gtk_double_click_distance()));
+        let last = self.imp().last_ring.replace(Some((time, at)));
+        let repeated = last.is_some_and(|(t, p)| time.wrapping_sub(t) <= interval as u32 && (at[0] - p[0]).hypot(at[1] - p[1]) <= (distance as f32).max(HOLD_SLOP));
+        if repeated {
+            self.imp().last_ring.set(None);
+        }
+        repeated
+    }
+
     fn local(&self, at: [f32; 2]) -> [f32; 2] {
         let center = self.imp().placement.get().map_or([0.; 2], |p| p.center);
         [at[0] - center[0], at[1] - center[1]]
     }
 
-    fn begin_contact(&self, w: &Rc<Workspace>, id: u32, region: Region, position: [f32; 2], at: [f32; 2]) -> Option<Contact> {
+    fn begin_contact(&self, w: &Rc<Workspace>, id: u32, hit: Option<BubbleHit>, position: [f32; 2], at: [f32; 2]) -> Option<Contact> {
         let send = |action: BubbleAction| w.dispatch(UiAction::Bubble { action });
         let phase = ContactPhase::Down;
-        let contact = match region {
-            Region::Pass => return None,
-            Region::Handle => Contact::Pending(at),
-            Region::Ring => {
+        let contact = match hit? {
+            BubbleHit::Pill | BubbleHit::Wheel => return None,
+            BubbleHit::Card | BubbleHit::Face | BubbleHit::Half(_) => Contact::Pending(at),
+            BubbleHit::Ring => {
                 send(BubbleAction::Ring { id, phase, position });
                 Contact::Ring
             }
-            Region::Choose => {
+            BubbleHit::Item(_) => {
                 self.hot_item(position);
                 send(BubbleAction::Choose { id, phase, position });
                 Contact::Choose
             }
-            Region::Beads => {
+            BubbleHit::Bead => {
                 send(BubbleAction::Beads { id, phase, position });
                 Contact::Beads(false)
             }
@@ -1611,11 +1557,14 @@ impl Bubble {
         let Some(point) = w.surface.compute_point(self, &graphene::Point::new(at[0], at[1])) else { return };
         let (x, y) = (point.x() as f64, point.y() as f64);
         let p = self.local(at);
-        let region = self.region(&view, p, self.pick(x, y, gtk::PickFlags::DEFAULT).as_ref());
-        let wheel = view.kind == BubbleKind::Color && region == Region::Pass && p[0].hypot(p[1]) <= view.diameter * 0.5;
-        if !wheel && !super::customization::owns_context(self.upcast_ref(), x, y) {
+        let picked = self.pick(x, y, gtk::PickFlags::DEFAULT);
+        let shown = view.hit(p);
+        let wheel = shown == Some(BubbleHit::Wheel);
+        let input = shown == Some(BubbleHit::Card) && self.imp().card.borrow().as_ref().is_some_and(|c| c.input(picked.as_ref()));
+        if shown.is_none() || input || !wheel && !super::customization::owns_context(self.upcast_ref(), x, y) {
             return;
         }
+        let hit = self.hit(&view, p, picked.as_ref());
         let color = w.gpu.borrow().as_ref().map(|g| g.session.state().colors.definition()).filter(|_| wheel);
         let picking = wheel
             && self.imp().wheel.borrow().as_ref().is_some_and(|w| self.compute_point(w, &point).is_some_and(|p| w.hits(p.x(), p.y())));
@@ -1625,7 +1574,7 @@ impl Bubble {
             std::time::Duration::from_millis(delay),
             glib::clone!(#[weak(rename_to = bubble)] self, #[weak] w, move || bubble.press_held(&w, id)),
         );
-        *self.imp().press.borrow_mut() = Some(Press { sequence, region, color, start: at, moving: false, held: false, hold: Some(hold) });
+        *self.imp().press.borrow_mut() = Some(Press { sequence, hit, color, start: at, moving: false, held: false, hold: Some(hold) });
     }
 
     fn press_held(&self, w: &Rc<Workspace>, id: u32) {
@@ -1650,7 +1599,7 @@ impl Bubble {
 
     fn press_moved(&self, w: &Rc<Workspace>, id: u32, sequence: Option<usize>, at: [f32; 2]) -> bool {
         let imp = self.imp();
-        let (held, moving, color, region) = match imp.press.borrow_mut().as_mut().filter(|c| c.sequence == sequence) {
+        let (held, moving, color, hit) = match imp.press.borrow_mut().as_mut().filter(|c| c.sequence == sequence) {
             Some(press) => {
                 let far = (at[0] - press.start[0]).hypot(at[1] - press.start[1]) > HOLD_SLOP;
                 if press.held && !far {
@@ -1660,14 +1609,14 @@ impl Bubble {
                     press.forget();
                 }
                 let held = std::mem::take(&mut press.held);
-                (held, press.moving, press.color, press.region)
+                (held, press.moving, press.color, press.hit)
             }
             None => return false,
         };
         if held {
             w.dismiss_context();
             if color.is_none() {
-                self.begin_contact(w, id, region, self.local(at), at);
+                self.begin_contact(w, id, hit, self.local(at), at);
             }
             return false;
         }
@@ -1889,7 +1838,7 @@ impl Bubbles {
 
     fn fade(&self, stroke: bool, faded: &[u32]) {
         let show = |bubble: &Bubble, faded: bool| {
-            bubble.fade_to(if faded { FADED } else { 1. });
+            bubble.fade_to(if faded { FADED_BUBBLE as f64 } else { 1. });
             bubble.set_can_target(!faded);
         };
         if stroke {

@@ -1813,11 +1813,12 @@ impl Workspace {
         ) -> gtk::gio::Menu {
             let root = gtk::gio::Menu::new();
             for (s, items) in sections.into_iter().enumerate() {
-                if items.is_empty() {
+                let heading = items.first().filter(|item| item.is_heading()).map(|item| item.label.clone());
+                if items.len() == usize::from(heading.is_some()) {
                     continue;
                 }
                 let section = gtk::gio::Menu::new();
-                for (i, item) in items.into_iter().enumerate() {
+                for (i, item) in items.into_iter().enumerate().skip(usize::from(heading.is_some())) {
                     let id = format!("{prefix}-{s}-{i}");
                     let entry = gtk::gio::MenuItem::new(Some(&item.label), None);
                     if let Some(icon) = item.icon {
@@ -1879,7 +1880,7 @@ impl Workspace {
                     actions.add_action(&action);
                     section.append_item(&entry);
                 }
-                root.append_section(None, &section);
+                root.append_section(heading.as_deref(), &section);
             }
             root
         }

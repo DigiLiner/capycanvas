@@ -137,9 +137,9 @@ fn dragging_a_tool_past_the_line_takes_one_bubble_in_one_undo_step() {
     assert_eq!(bubble.source, BubbleSource::Control { control });
     assert_eq!(saved(&s, id), FAR);
     assert!(s.state.workspace.layout.panel(panel).unwrap().tiles().iter().any(|t| t.id == tile), "the tile stays");
-    drag(&mut s, grab, [300., 300.], [300., 300.]);
+    drag(&mut s, grab, [500., 400.], [500., 400.]);
     assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), 1, "one bubble per source");
-    assert_eq!(saved(&s, id), [300., 300.]);
+    assert_eq!(saved(&s, id), [500., 400.]);
     invoke(&mut s, CommandId::UndoWorkspace);
     assert_eq!(saved(&s, id), FAR);
     invoke(&mut s, CommandId::UndoWorkspace);
@@ -200,11 +200,17 @@ fn cancelled_and_competing_drags_leave_the_layout_unchanged() {
 }
 
 #[test]
-fn brush_bubble_taps_select_then_open_and_close_its_halo() {
+fn brush_bubbles_come_out_selected_with_their_halo_and_taps_select_then_open_and_close_it() {
     let mut s = desk();
     let pencil = DefaultBrushPreset::PointyPencil as u32;
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
-    assert!(!view(&s, id).selected);
+    assert_eq!(s.state.brush.preset, pencil, "a brush comes out selected");
+    assert!(view(&s, id).open && !view(&s, id).rings.is_empty(), "with its settings around it");
+    tap(&mut s, id);
+    assert!(!view(&s, id).open);
+    drag(&mut s, BubbleGrab::Bubble { id }, FAR, [500., 400.]);
+    assert!(!view(&s, id).open, "moving a bubble on the desk leaves it as it was");
+    s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
     tap(&mut s, id);
     assert_eq!(s.state.brush.preset, pencil);
     assert!(!view(&s, id).open && view(&s, id).rings.is_empty(), "the first tap only selects");
@@ -300,8 +306,7 @@ fn a_press_can_slide_through_a_medium_to_its_brush() {
 fn a_selection_dial_rings_its_tools_directly() {
     let mut s = desk();
     let id = take_control(&mut s, ToolbarControl::ToolSlot { slot: ToolSlotId::Marquee }, FAR);
-    tap(&mut s, id);
-    assert!(view(&s, id).selected);
+    assert!(view(&s, id).selected && !view(&s, id).open, "a tool without settings comes out selected and closed");
     tap(&mut s, id);
     let open = view(&s, id);
     let tools = items(&open, ChooserKind::Tool);
@@ -334,10 +339,9 @@ fn medium_bubbles_select_their_brushes_and_fan_only_them() {
     let id = take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }, FAR);
     let brushes = tools::group_presets(ToolGroup::Pastel).count();
     assert_eq!(view(&s, id).dots.len(), brushes);
-    tap(&mut s, id);
-    assert_eq!(tools::group(s.state.brush.preset), ToolGroup::Pastel);
+    assert_eq!(tools::group(s.state.brush.preset), ToolGroup::Pastel, "a medium comes out selected");
     assert_eq!(view(&s, id).dots.iter().filter(|d| **d).count(), 1);
-    tap(&mut s, id);
+    assert!(!view(&s, id).rings.is_empty());
     tap(&mut s, id);
     let fan = view(&s, id).chooser;
     assert_eq!(fan.len(), brushes);
@@ -353,8 +357,6 @@ fn medium_bubbles_select_their_brushes_and_fan_only_them() {
 fn halo_contacts_set_values_along_their_arc() {
     let mut s = desk();
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
-    tap(&mut s, id);
-    tap(&mut s, id);
     let ring = view(&s, id).rings[0].clone();
     let value = |s: &UiSession<Recorder>| s.state.tool_settings.iter().find(|c| c.id == ring.setting).unwrap().value;
     let numeric = s.state.tool_settings.iter().find(|c| c.id == ring.setting).unwrap().numeric.clone();
@@ -374,6 +376,12 @@ fn halo_contacts_set_values_along_their_arc() {
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Cancel, position: [0., 0.] }).unwrap();
     assert!((value(&s) - at(0.9)).abs() < 1e-3, "a cancelled contact, such as a second finger or a hold, puts the value back");
     assert!(!view(&s, id).rings[0].active);
+    act(&mut s, BubbleAction::ResetRing { id, position: ring.arc.point(0.5) }).unwrap();
+    let reset = value(&s);
+    assert!((reset - at(0.9)).abs() > 1e-3, "a double click on an arc resets its setting");
+    s.dispatch(UiAction::ResetToolSetting { id: ring.setting.into() }).unwrap();
+    assert_eq!(value(&s), reset, "to its default");
+    assert!(act(&mut s, BubbleAction::ResetRing { id, position: [0., 0.] }).is_err());
 }
 
 #[test]
@@ -389,8 +397,6 @@ fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     let before = size(&s);
     let ring = bubble.rings[1].clone();
     let pencil = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [300., 300.]);
-    tap(&mut s, pencil);
-    tap(&mut s, pencil);
     act(&mut s, BubbleAction::ToggleRingSetting { brush: DefaultBrushPreset::PointyPencil as u32, setting: "size".into() }).unwrap();
     assert!(view(&s, pencil).rings.iter().any(|r| r.setting == "size"), "a brush halo shows Size too");
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.8) }).unwrap();
@@ -418,12 +424,44 @@ fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     let picking = view(&s, id).rings;
     assert_eq!(picking.iter().map(|r| (r.setting, r.enabled)).collect::<Vec<_>>(), [("flow", false), ("size", false)], "the sliders stay, unavailable while picking");
     assert!(act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.5) }).is_err());
-    let toggle = s.context_menu(ContextTarget::Bubble { id }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Size on the left").unwrap();
+    let toggle = s.context_menu(ContextTarget::Bubble { id }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Swap sliders").unwrap();
     assert_eq!(toggle.selected, Some(false));
     s.dispatch(toggle.action.unwrap()).unwrap();
-    assert_eq!(view(&s, id).rings[0].setting, "size", "the menu moves Size to the left");
+    assert_eq!(view(&s, id).rings[0].setting, "size", "the menu swaps the sliders");
     act(&mut s, BubbleAction::Tap { id, position: [4., -4.] }).unwrap();
     assert!(!view(&s, id).selected, "and stops it");
+}
+
+#[test]
+fn only_the_drawn_parts_of_a_bubble_take_input() {
+    let mut s = desk();
+    let around = |radius: f32| (0..360).map(move |a| (a as f32).to_radians()).map(move |a| [radius * a.cos(), radius * a.sin()]);
+    let id = take_ring(&mut s, [400., 450.]);
+    let ring = view(&s, id);
+    let radius = ring.diameter * 0.5;
+    assert_eq!(ring.hit([0.; 2]), Some(BubbleHit::Wheel));
+    assert!(around(radius - 2.).all(|p| ring.hit(p) == Some(BubbleHit::Face)), "the plate's rim moves the ring");
+    assert_eq!(ring.hit([radius * 0.75, radius * 0.75]), None, "the corners around the plate are canvas");
+    let shown: Vec<_> = ring.beads.iter().filter(|b| b.placement.alpha > 0.6).collect();
+    assert!(!shown.is_empty() && shown.iter().all(|b| ring.hit(b.placement.center) == Some(BubbleHit::Bead)));
+    let clear = |p: [f32; 2]| shown.iter().all(|b| (p[0] - b.placement.center[0]).hypot(p[1] - b.placement.center[1]) > b.placement.size * 0.5 + 2.);
+    assert!(around(radius + 3.).filter(|p| clear(*p)).all(|p| ring.hit(p).is_none()), "between the plate and its beads is canvas");
+    let id = take_control(&mut s, ToolbarControl::ColorPicker, [900., 450.]);
+    let controls = view(&s, id);
+    assert_eq!(controls.hit([0.; 2]), Some(BubbleHit::Face));
+    assert_eq!(controls.hit([TOOL_BUBBLE * 0.5 + 4., 0.]), None, "between the center and the sliders is canvas");
+    assert_eq!(controls.hit([0., -HALO_RINGS[0]]), None, "so is the gap between the sliders");
+    assert!(controls.rings.iter().all(|r| controls.hit(r.arc.point(0.5)) == Some(BubbleHit::Ring) && controls.hit(r.arc.icon_point()) == Some(BubbleHit::Ring)));
+    let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::Undo }, [600., 200.]);
+    let history = view(&s, id);
+    let [w, h] = HISTORY_BUBBLE;
+    assert_eq!(history.hit([-w * 0.5 + 2., -h * 0.5 + 2.]), None, "the capsule's corners are canvas");
+    assert_eq!((history.hit([-20., 0.]), history.hit([20., 0.])), (Some(BubbleHit::Half(0)), Some(BubbleHit::Half(1))));
+    let id = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [600., 600.]);
+    let layers = view(&s, id);
+    let card = layers.card.as_ref().unwrap().size;
+    assert_eq!(layers.hit([card[0] * 0.5 - 2., card[1] * 0.5 - 2.]), Some(BubbleHit::Card));
+    assert_eq!(layers.hit([card[0] * 0.5 + 2., 0.]), None);
 }
 
 #[test]
@@ -453,8 +491,9 @@ fn the_hold_menu_chooses_ring_settings_up_to_six_with_undo() {
     let pencil = DefaultBrushPreset::PointyPencil as u32;
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
     let menu = s.context_menu(ContextTarget::Bubble { id }).unwrap();
-    let rows = |menu: &ContextMenu| menu.sections[0][0].sections[0].clone();
-    assert_eq!(menu.sections[0][0].label, "Settings in the ring");
+    let rows = |menu: &ContextMenu| menu.sections[0][1..].to_vec();
+    assert!(menu.sections[0][0].is_heading() && menu.sections[0][0].label == "Pointy Pencil", "the brush's name heads its menu");
+    assert!(rows(&menu).iter().all(|r| r.selected.is_some() && r.sections.is_empty()), "its ring settings are right in the menu");
     assert_eq!(menu.sections.last().unwrap()[0].label, "Put back");
     let all = rows(&menu);
     assert!(all.len() > MAX_RING_SETTINGS);
@@ -471,14 +510,17 @@ fn the_hold_menu_chooses_ring_settings_up_to_six_with_undo() {
         }
     }
     assert_eq!(s.state.workspace.layout.bubbles.ring(pencil).unwrap().len(), MAX_RING_SETTINGS);
-    s.dispatch(UiAction::SelectBrush { id: pencil }).unwrap();
-    tap(&mut s, id);
     assert_eq!(view(&s, id).rings.len(), MAX_RING_SETTINGS);
     assert_eq!(view(&s, id).halo, Some(halo_disc(MAX_RING_SETTINGS)));
     for _ in shown..MAX_RING_SETTINGS {
         invoke(&mut s, CommandId::UndoWorkspace);
     }
     assert_eq!(s.state.workspace.layout.bubbles.ring(pencil), None);
+    let pastel = take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }, [300., 300.]);
+    let dial = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, [500., 650.]);
+    let heading = |s: &UiSession<Recorder>, id: u32| s.context_menu(ContextTarget::Bubble { id }).unwrap().sections[0][0].label.clone();
+    let current = tools::brush_label_localized(s.state.brush.preset, s.localization()).unwrap().to_string();
+    assert_eq!((heading(&s, pastel), heading(&s, dial)), (current.clone(), current), "a medium or dial names its current tool, not itself");
 }
 
 #[test]
@@ -533,9 +575,19 @@ fn painting_fades_nearby_bubbles_and_closes_choosers_but_not_the_halo() {
 fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     let mut s = desk();
     let color = take_control(&mut s, ToolbarControl::Color, [300., 500.]);
-    let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [800., 500.]);
+    let (panel, tile) = toolbar_tile(&mut s, ToolbarControl::Panel { panel: Panel::Layers });
+    contact(&mut s, BubbleGrab::Tile { panel, tile }, ContactPhase::Down, [800., 500.]).unwrap();
+    let layers = s.state.workspace.layout.bubbles.bubbles.last().unwrap().id;
+    assert!(view(&s, layers).card.is_some(), "Layers opens as soon as it leaves its toolbar");
+    contact(&mut s, BubbleGrab::Tile { panel, tile }, ContactPhase::Up, [800., 500.]).unwrap();
+    let menu = |s: &UiSession<Recorder>| s.context_menu(ContextTarget::Bubble { id: layers }).unwrap();
+    let item = |s: &UiSession<Recorder>, label: &str| menu(s).sections.into_iter().flatten().find(|i| i.label == label).and_then(|i| i.action);
+    assert!(view(&s, layers).card.is_some(), "Layers comes out open");
+    act(&mut s, BubbleAction::Tap { id: layers, position: [0., 40.] }).unwrap();
+    assert!(view(&s, layers).card.is_some(), "a tap inside the open card keeps it");
+    s.dispatch(item(&s, "Close").unwrap()).unwrap();
     let folded = view(&s, layers);
-    assert!(folded.card.is_none());
+    assert!(folded.card.is_none() && item(&s, "Close").is_none(), "Close folds it");
     assert_eq!(folded.layers, s.state.layers.len());
     assert_eq!(folded.layer, s.state.layers.iter().find(|l| l.selected).map(|l| l.id), "the folded card shows the current layer");
     tap(&mut s, layers);
@@ -551,9 +603,8 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     chrome(&mut s, ChromeEvent::Contact { position: [100., 120.], canvas: true }, ChromeFacts::default());
     assert!(view(&s, layers).card.is_none(), "a contact elsewhere folds it");
     assert!(act(&mut s, BubbleAction::Properties { id: layers }).is_err());
-    let menu = |s: &UiSession<Recorder>| s.context_menu(ContextTarget::Bubble { id: layers }).unwrap();
-    s.dispatch(menu(&s).sections[0][1].action.clone().unwrap()).unwrap();
-    s.dispatch(menu(&s).sections[1][0].action.clone().unwrap()).unwrap();
+    s.dispatch(item(&s, "Full").unwrap()).unwrap();
+    s.dispatch(item(&s, "Fold when not in use").unwrap()).unwrap();
     assert!(view(&s, layers).options.full && !view(&s, layers).options.fold);
     tap(&mut s, layers);
     assert_eq!(view(&s, layers).card.unwrap().size, layers_card(VIEW, s.state.layers.len(), None, false), "Full keeps the drawer's size");
@@ -562,10 +613,11 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     assert!(act(&mut s, BubbleAction::MeasureCard { id: layers, heights: [f32::NAN, 1.] }).is_err());
     chrome(&mut s, ChromeEvent::Contact { position: [100., 120.], canvas: true }, ChromeFacts::default());
     assert!(view(&s, layers).card.is_some(), "a card that doesn't fold stays open");
-    tap(&mut s, layers);
+    s.dispatch(item(&s, "Close").unwrap()).unwrap();
     assert!(view(&s, layers).card.is_none());
     let menu = s.context_menu(ContextTarget::Bubble { id: color }).unwrap();
-    assert_eq!(menu.sections[0].iter().map(|i| i.selected).collect::<Vec<_>>(), [Some(false); 3], "a new ring is the circle alone");
+    assert!(menu.sections[0][0].is_heading());
+    assert_eq!(menu.sections[0][1..].iter().map(|i| i.selected).collect::<Vec<_>>(), [Some(false); 3], "a new ring is the circle alone");
     s.dispatch(menu.sections[1][2].action.clone().unwrap()).unwrap();
     assert_eq!(view(&s, color).diameter, COLOR_RING_SIZES[2]);
     invoke(&mut s, CommandId::UndoWorkspace);
@@ -666,8 +718,6 @@ fn putting_back_an_open_bubble_closes_its_halo_and_chooser() {
     let mut s = desk();
     let id = take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }, FAR);
     tap(&mut s, id);
-    tap(&mut s, id);
-    tap(&mut s, id);
     assert!(!view(&s, id).chooser.is_empty());
     act(&mut s, BubbleAction::PutBack { id }).unwrap();
     assert!(s.bubbles().is_empty() && s.bubble_placements().is_empty());
@@ -682,6 +732,7 @@ fn a_smaller_window_keeps_bubbles_inside_and_corner_bubbles_follow_their_corner(
     let corner = [work.x + work.width - 40., work.y + work.height - 40.];
     let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), corner);
     let middle = take(&mut s, brush(DefaultBrushPreset::Charcoal), [560., 420.]);
+    tap(&mut s, middle);
     let saved_before = s.state.workspace.layout.bubbles.clone();
     s.set_viewport([700., 560.], [700, 560]).unwrap();
     let mut now = 0;

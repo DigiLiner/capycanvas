@@ -60,6 +60,17 @@ fn bead_point(d: &Driver, id: u32, bead: Bead) -> Option<[f32; 2]> {
     Some([c[0] + b.placement.center[0], c[1] + b.placement.center[1]])
 }
 
+fn canvas_at(d: &Driver, id: u32, at: [f32; 2]) -> bool {
+    let bubble = d.named(&format!("bubble-{id}"));
+    d.w.window.pick(at[0] as f64, at[1] as f64, gtk::PickFlags::DEFAULT).is_none_or(|w| w != bubble && !w.is_ancestor(&bubble))
+}
+
+fn menu_heading(d: &Driver, label: &str) -> bool {
+    d.w.popovers.borrow().iter().filter_map(|p| p.upgrade()).filter(|p| p.is_visible()).any(|p| {
+        widgets(p.upcast_ref()).any(|w| w.downcast_ref::<gtk::Label>().is_some_and(|l| l.text() == label && l.is_mapped()))
+    })
+}
+
 fn find_id(d: &Driver, id: u32) -> Option<BubbleView> {
     views(d).into_iter().find(|v| v.id == id)
 }
@@ -155,26 +166,45 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     tap(d, device, canvas_spot(d, 0.6, 0.6));
     pump(500);
     assert!(!drawer.is_mapped(), "{name}: a contact on the canvas closes the drawer");
-    tear(d, device, &item, spot);
+    let from = d.point(&d.named(&item));
+    let path = [from, [from[0], from[1] + 8.], [from[0], from[1] + 70.], [spot[0], spot[1] - 30.], spot];
+    let mut events = vec![contact(device, "down", path[0])];
+    events.extend(path[1..].iter().map(|&p| contact(device, "move", p)));
+    d.input.perform(serde_json::Value::Array(events));
+    pump(300);
     let layers = find(d, BubbleSource::Control { control: ToolbarControl::Panel { panel: Panel::Layers } })
         .unwrap_or_else(|| panic!("{name}: Layers comes out of the title bar"));
-    assert!(layers.layer.is_some() && layers.layers > 0, "{name}: the folded card shows the current layer and the count");
-    let count = find_css(&d.named(&format!("bubble-{}", layers.id)), "bubble-count").unwrap();
-    let bounds = count.compute_bounds(&count).unwrap();
-    assert!(bounds.width() == bounds.height() || layers.layers > 9, "{name}: one digit sits in a circle ({}x{})", bounds.width(), bounds.height());
-    capture(d, &format!("{name}-layers-folded"));
-    let at = center(d, layers.id);
-    tap(d, device, at);
-    pump(400);
-    let card = find_id(d, layers.id).unwrap().card.unwrap_or_else(|| panic!("{name}: tapping unfolds the card"));
+    assert!(layers.card.is_some() && d.named("bubble-card").is_child_visible(), "{name}: Layers opens while it is dragged out");
+    d.input.perform(serde_json::json!([contact(device, "up", spot)]));
+    pump(350);
+    let layers = find_id(d, layers.id).unwrap();
+    let card = layers.card.clone().unwrap_or_else(|| panic!("{name}: Layers comes out open"));
     assert!(!card.full && !card.properties);
+    pump(300);
     let body = d.named("bubble-card");
+    let bounds = body.compute_bounds(&d.w.window).unwrap();
+    let inside = [bounds.x() + 3., bounds.y() + bounds.height() * 0.5];
+    tap(d, device, inside);
+    assert!(find_id(d, layers.id).unwrap().card.is_some(), "{name}: a tap inside the open card keeps it");
+    d.input.perform(serde_json::json!([contact(device, "down", inside), { "wait_ms": 900 }, contact(device, "up", inside)]));
+    pump(300);
+    assert!(menu_open(d) && menu_heading(d, &layers.label), "{name}: a hold inside the card opens the bubble's menu under its name");
+    capture(d, &format!("{name}-layers-menu"));
+    d.input.key(0xff1b);
+    pump(200);
+    let (new_layer, layers_before) = (d.point(&d.named("bubble-new-layer")), state(&d.w).layers.len());
+    d.input.perform(serde_json::json!([contact(device, "down", new_layer), { "wait_ms": 900 }, contact(device, "up", new_layer)]));
+    pump(300);
+    assert!(!menu_open(d), "{name}: a hold on a button is not the bubble's");
+    assert_eq!(state(&d.w).layers.len(), layers_before + 1, "{name}: it stays the button's press");
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(200);
     let card = find_id(d, layers.id).unwrap().card.unwrap();
     assert_eq!(card.size[0], Panel::Layers.default_width(d.w.surface.width() as f32), "{name}: the card is the drawer's width");
     assert!((body.height() as f32 - card.size[1]).abs() <= 1., "{name}: and the measured drawer height ({} vs {})", body.height(), card.size[1]);
     capture(d, &format!("{name}-layers-card"));
     let before = center(d, layers.id);
-    let bounds = body.compute_bounds(&d.w.surface).unwrap();
+    let bounds = body.compute_bounds(&d.w.window).unwrap();
     let grip = [bounds.x() + bounds.width() * 0.5, bounds.y() + bounds.height() - 20.];
     stroke(d, device, &[grip, [grip[0] - 10., grip[1]], [grip[0] - 70., grip[1] - 30.]]);
     pump(500);
@@ -209,6 +239,19 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     let card = d.named("bubble-card");
     pump(500);
     assert!(!card.is_child_visible(), "{name}: the card finishes folding away");
+    let layers = find_id(d, layers.id).unwrap();
+    assert!(layers.layer.is_some() && layers.layers > 0, "{name}: the folded card shows the current layer and the count");
+    let count = find_css(&d.named(&format!("bubble-{}", layers.id)), "bubble-count").unwrap();
+    let bounds = count.compute_bounds(&count).unwrap();
+    assert!(bounds.width() == bounds.height() || layers.layers > 9, "{name}: one digit sits in a circle ({}x{})", bounds.width(), bounds.height());
+    capture(d, &format!("{name}-layers-folded"));
+    tap(d, device, center(d, layers.id));
+    pump(400);
+    assert!(find_id(d, layers.id).unwrap().card.is_some(), "{name}: tapping unfolds the card");
+    let close = ui_session(&d.w).context_menu(ContextTarget::Bubble { id: layers.id }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Close").unwrap();
+    d.w.dispatch(close.action.unwrap());
+    pump(500);
+    assert!(find_id(d, layers.id).unwrap().card.is_none(), "{name}: Close folds it");
     d.w.dispatch(UiAction::Invoke { command: CommandId::Undo });
     pump(200);
 }
@@ -300,13 +343,14 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     assert!(c[0] - dragged[0] > size * 0.25, "{name}: dragging out past two radii moves the ring ({c:?} -> {dragged:?})");
     assert_eq!(state(&d.w).colors.foreground, picked, "{name}: and keeps the color it had");
     let c = dragged;
-    let radius = size * 0.5 + 10.;
-    let angle = 205f32.to_radians();
-    let gap = [c[0] + radius * angle.cos(), c[1] + radius * angle.sin()];
-    stroke(d, device, &[gap, [gap[0] + 10., gap[1] - 4.], [gap[0] + 60., gap[1] - 20.]]);
+    let at = |radius: f32| [c[0] + radius * 205f32.to_radians().cos(), c[1] + radius * 205f32.to_radians().sin()];
+    assert!(canvas_at(d, color.id, at(size * 0.5 + 4.)), "{name}: the space between the plate and its beads is canvas");
+    assert!(canvas_at(d, color.id, [c[0] + size * 0.46, c[1] + size * 0.46]), "{name}: so are the corners around the plate");
+    let rim = at(size * 0.5 - 3.);
+    stroke(d, device, &[rim, [rim[0] + 10., rim[1] - 4.], [rim[0] + 60., rim[1] - 20.]]);
     pump(400);
     let moved = center(d, color.id);
-    assert!((moved[0] - c[0]).hypot(moved[1] - c[1]) > 30., "{name}: the space around the wheel moves the ring");
+    assert!((moved[0] - c[0]).hypot(moved[1] - c[1]) > 30., "{name}: the plate's rim moves the ring");
     if device == "touch" {
         let c = moved;
         let held = state(&d.w).colors.foreground;
@@ -346,6 +390,10 @@ fn brush_controls(d: &mut Driver, device: &str, name: &str) {
     let size_ring = controls.rings.iter().find(|r| r.setting == "size").unwrap().clone();
     let strength_ring = controls.rings.iter().find(|r| r.setting != "size").unwrap().clone();
     assert!(size_ring.arc.point(0.5)[0] > 0., "{name}: Size is on the right");
+    for gap in [[0., -HALO_RINGS[0]], [0., HALO_RINGS[0]], [TOOL_BUBBLE * 0.5 + 5., 0.]] {
+        assert!(canvas_at(d, controls.id, [at[0] + gap[0], at[1] + gap[1]]), "{name}: the space around the sliders at {gap:?} is canvas");
+    }
+    assert!(!canvas_at(d, controls.id, [at[0] + size_ring.arc.icon_point()[0], at[1] + size_ring.arc.icon_point()[1]]), "{name}: a slider's icon end is the slider");
     let ring = size_ring.arc;
     let arc = |f: f32| [at[0] + ring.point(f)[0], at[1] + ring.point(f)[1]];
     d.w.dispatch(ToolbarNumericBinding::BrushSize.action(3.));
@@ -373,6 +421,16 @@ fn brush_controls(d: &mut Driver, device: &str, name: &str) {
     stroke(d, device, &[[at[0] + strength.point(0.2)[0], at[1] + strength.point(0.2)[1]], [at[0] + strength.point(0.6)[0], at[1] + strength.point(0.6)[1]]]);
     let after = state(&d.w).tool_settings.iter().find(|f| f.id == strength_ring.setting).unwrap().value;
     assert_ne!(after, before, "{name}: the Strength arc sets the strength");
+    let tip = [at[0] + size_ring.arc.point(0.9)[0], at[1] + size_ring.arc.point(0.9)[1]];
+    tap(d, device, tip);
+    pump(400);
+    let set = state(&d.w).brush.diameter;
+    d.input.perform(serde_json::json!([contact(device, "down", tip), contact(device, "up", tip), contact(device, "down", tip), contact(device, "up", tip)]));
+    pump(300);
+    let reset = state(&d.w).brush.diameter;
+    assert_ne!(reset, set, "{name}: a double click on the Size arc resets it");
+    d.w.dispatch(UiAction::ResetToolSetting { id: "size".into() });
+    assert_eq!(state(&d.w).brush.diameter, reset, "{name}: to its default");
     tap(d, device, at);
     let picking = find_id(d, controls.id).unwrap();
     assert!(picking.selected, "{name}: the center starts the color picker");
@@ -569,6 +627,7 @@ fn native_tool_bubbles() {
             stroke(&mut d, device, &[start, [start[0], start[1] + 8.], [start[0], start[1] + 60.], [spot[0], spot[1] - 40.], spot]);
             let taken = find(&d, dial).unwrap_or_else(|| panic!("{name}: dragging a title-bar tool out takes a bubble"));
             assert_eq!(views(&d).len(), 1, "{name}");
+            assert!(taken.selected && taken.open && !taken.rings.is_empty(), "{name}: a tool comes out selected with its settings around it");
             capture(&mut d, &format!("{name}-taken"));
 
             d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::PointyPencil as u32 });
@@ -608,7 +667,9 @@ fn native_tool_bubbles() {
             assert!((pushed[0] - before[0]).hypot(pushed[1] - before[1]) > 20., "{name}: a dragged bubble pushes its neighbour");
             capture(&mut d, &format!("{name}-pushed"));
             let torn = find_id(&d, torn).unwrap();
-            assert!(!find(&d, brush).unwrap().selected, "{name}: tearing a row does not choose it");
+            assert_eq!(state(&d.w).brush.preset, layer_core::DefaultBrushPreset::Charcoal as u32, "{name}: a torn brush comes out chosen");
+            d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::PointyPencil as u32 });
+            pump(200);
             if device == "touch" {
                 let at = center(&d, taken.id);
                 touches(&mut d, at, [at[0] + 20., at[1] + 4.], [-60., 50.], 0.);

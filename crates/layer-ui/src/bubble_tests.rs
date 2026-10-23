@@ -33,7 +33,7 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
     for count in 1..=MAX_RING_SETTINGS {
         let arcs = halo_arcs(count);
         assert_eq!(arcs.len(), count);
-        assert_eq!(halo_disc(count), if count > 3 { 206. } else { 136. });
+        assert_eq!(halo_disc(count), if count > 3 { 204. } else { 134. });
         for (i, arc) in arcs.iter().enumerate() {
             assert!(arc.radius + arc.band * 0.5 <= halo_disc(count) * 0.5 + 1e-3, "{count}/{i} fits the glass");
             assert!(arc.radius - arc.band * 0.5 >= TOOL_BUBBLE * 0.5 + 8., "{count}/{i} clears the face with room to spare");
@@ -63,6 +63,42 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
 }
 
 #[test]
+fn halo_bands_are_symmetric_apart_and_only_take_input_where_drawn() {
+    for count in 1..=MAX_RING_SETTINGS {
+        let arcs = halo_arcs(count);
+        let covered = |p: [f32; 2]| arcs.iter().filter(|arc| arc.covers(p)).count();
+        for x in -60..=60 {
+            for y in -60..=60 {
+                let p = [x as f32 * 1.75, y as f32 * 1.75];
+                assert!(covered(p) <= 1, "{count}: bands overlap at {p:?}");
+                assert_eq!(covered(p), covered([-p[0], p[1]]), "{count}: left and right mirror at {p:?}");
+                if count % 2 == 0 && count < 6 {
+                    assert_eq!(covered(p), covered([p[0], -p[1]]), "{count}: top and bottom mirror at {p:?}");
+                }
+            }
+        }
+        for (i, arc) in arcs.iter().enumerate() {
+            let direction = arc.sweep.signum();
+            let cap = (arc.band * 0.5 / arc.radius).to_degrees();
+            let from = angle(arc.icon_point()) - direction * cap;
+            let span = (direction * (angle(arc.point(1.)) + direction * cap - from)).rem_euclid(360.);
+            let middle = (from + direction * span * 0.5).rem_euclid(360.);
+            let nearest = [0., 30., 90., 150., 180., 210., 270., 330., 360.].into_iter().map(|m: f32| (m - middle).abs()).fold(f32::MAX, f32::min);
+            assert!(nearest < 0.01, "{count}/{i}: the band from its icon's cap to its end cap centers on its slot, not {middle}");
+            assert!(arc.covers(polar(arc.radius, from + direction * 0.5)) && !arc.covers(polar(arc.radius, from - direction * 0.5)));
+            let to = from + direction * span;
+            assert!(arc.covers(polar(arc.radius, to - direction * 0.5)) && !arc.covers(polar(arc.radius, to + direction * 0.5)));
+            assert!(!arc.covers(polar(arc.radius + arc.band * 0.5 + 0.5, angle(arc.point(0.5)))), "{count}/{i}: outside the band is canvas");
+        }
+    }
+    for (count, gaps) in [(1, vec![90.]), (2, vec![90., 270.]), (3, vec![90., 210., 330.])] {
+        for gap in gaps {
+            assert_eq!(ring_at(&halo_arcs(count), polar(HALO_RINGS[0], gap)), None, "{count}: the gap at {gap} degrees is canvas");
+        }
+    }
+}
+
+#[test]
 fn controls_ring_size_left_and_strength_right_around_their_center_and_history_splits_its_capsule() {
     assert_eq!(bubble_face(BubbleKind::Controls, halo_disc(CONTROL_RINGS.len())), [TOOL_BUBBLE; 2]);
     let arcs = halo_arcs(CONTROL_RINGS.len());
@@ -73,6 +109,9 @@ fn controls_ring_size_left_and_strength_right_around_their_center_and_history_sp
     assert_eq!(history_button([-20., 0.]), Some(0));
     assert_eq!(history_button([20., 4.]), Some(1));
     assert_eq!(history_button([0., HISTORY_BUBBLE[1]]), None);
+    let [w, h] = HISTORY_BUBBLE;
+    assert_eq!(history_button([-w * 0.5 + 2., -h * 0.5 + 2.]), None, "the capsule's rounded corners are canvas");
+    assert_eq!(history_button([-w * 0.5 + 2., 0.]), Some(0));
 }
 
 fn pair() -> PairBeads {
@@ -150,9 +189,6 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     assert!(half.iter().any(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha < 1.), "partly turned ends fade");
     assert_eq!(bead_at(&beads, palette), Some(Bead::Palettes));
     assert_eq!(Bead::Swatch { index: 3 }.strip(), Some(BeadStrip::Palette));
-    assert!(on_color_rim(size, options, pair(), [radius - 3., 0.]), "the plate's rim moves the ring");
-    assert!(on_color_rim(size, options, pair(), [radius + 10., 0.]), "so does the space out to the beads");
-    assert!(!on_color_rim(size, options, pair(), [radius - RING_RIM - 2., 0.]) && !on_color_rim(size, options, pair(), [color_reach(size, options, pair()) + 2., 0.]));
     assert!(!color_drag_out(size, [size * 0.9, 0.]) && color_drag_out(size, [0., size * 1.05]), "two radii out is a drag");
     let pill = palette_pill(size);
     assert_eq!([pill.width, pill.height], PALETTE_PILL);

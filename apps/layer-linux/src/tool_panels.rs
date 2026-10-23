@@ -768,7 +768,16 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Actionable;
 }
 impl WheelButton {
-    fn set_selected(&self, active: bool) {
+    pub(crate) fn swatch() -> (Self, ColorPatch) {
+        let button: Self = glib::Object::new();
+        button.add_css_class("flat");
+        button.add_css_class("color-swatch");
+        let sample = ColorPatch::new(true);
+        sample.set_size_request(16, 16);
+        button.set_child(Some(&sample));
+        (button, sample)
+    }
+    pub(crate) fn set_selected(&self, active: bool) {
         if self.has_css_class("selected-tool") != active {
             selected(self, active);
             self.queue_draw();
@@ -826,6 +835,14 @@ mod wheel {
         }
     }
     impl WidgetImpl for Wheel {
+        fn contains(&self, x: f64, y: f64) -> bool {
+            if !self.bare.get() {
+                return self.parent_contains(x, y);
+            }
+            let (size, [left, top]) = self.obj().drawing_bounds();
+            let radius = size * 0.5;
+            (x as f32 - left - radius).hypot(y as f32 - top - radius) <= radius
+        }
         fn request_mode(&self) -> gtk::SizeRequestMode {
             gtk::SizeRequestMode::HeightForWidth
         }
@@ -1194,15 +1211,10 @@ impl ColorPanel {
             (ColorSlot::Foreground, localization.text(layer_ui::MessageId::COMMANDS_FOREGROUND_COLOR)),
             (ColorSlot::Transparent, localization.text(layer_ui::MessageId::COMMANDS_TRANSPARENT_PAINT)),
         ] {
-            let button: WheelButton = glib::Object::new();
-            button.add_css_class("flat");
-            button.add_css_class("color-swatch");
+            let (button, sample) = WheelButton::swatch();
             button.set_tooltip_text(Some(&label));
             button.update_property(&[gtk::accessible::Property::Label(&label)]);
             button.set_widget_name(&format!("color-{slot:?}"));
-            let sample = ColorPatch::new(true);
-            sample.set_size_request(16, 16);
-            button.set_child(Some(&sample));
             button.set_parent(&wheel);
             wheel.imp().corners.borrow_mut().push(button.clone());
             swatches.push((slot, button, sample));
