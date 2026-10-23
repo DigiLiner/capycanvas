@@ -259,16 +259,16 @@ fn brushes_curve_beside_their_medium_and_stay_on_screen() {
             gap[0].hypot(gap[1]) >= reach + CHOOSER_ITEM * 0.5
         })
     };
-    let column = chooser_column(9, middle, Some(([CHOOSER_RING, 0.], CHOOSER_RING)), AREA);
+    let column = chooser_column(9, middle, Some(([CHOOSER_RING, 0.], CHOOSER_RING, CHOOSER_TAG[0])), AREA);
     assert!(clear(&column, CHOOSER_RING), "brushes clear the media ring");
-    assert!(clear(&chooser_column(4, middle, Some(([CHOOSER_RING, 0.], 134.)), AREA), 134.), "and a second arc of media");
+    assert!(clear(&chooser_column(4, middle, Some(([CHOOSER_RING, 0.], 134., CHOOSER_TAG[0])), AREA), 134.), "and a second arc of media");
     assert!(column.windows(2).all(|w| w[1][1] - w[0][1] >= BRUSH_PILL[1]), "pills stack without overlapping");
     assert!(column[0][0] < column[4][0] && column[8][0] < column[4][0], "the column curves around the dial");
     assert!((column[4][1]).abs() < 1e-3, "the column centers on its medium");
-    let left = chooser_column(4, middle, Some(([-60., -60.], CHOOSER_RING)), AREA);
+    let left = chooser_column(4, middle, Some(([-60., -60.], CHOOSER_RING, CHOOSER_TAG[0])), AREA);
     assert!(left.iter().all(|p| p[0] <= -72.), "a medium on the left opens its brushes on the left");
     let low = [600., AREA.y + AREA.height - 40.];
-    let clamped = chooser_column(9, low, Some(([CHOOSER_RING, 0.], CHOOSER_RING)), AREA);
+    let clamped = chooser_column(9, low, Some(([CHOOSER_RING, 0.], CHOOSER_RING, CHOOSER_TAG[0])), AREA);
     assert!(clamped.iter().all(|p| low[1] + p[1] + BRUSH_PILL[1] * 0.5 <= AREA.y + AREA.height), "the column stays above the bottom edge");
     let fan = chooser_column(5, [AREA.x + AREA.width - 60., 450.], None, AREA);
     assert!(fan.iter().all(|p| p[0] < 0.), "a medium bubble near the right edge fans to the left");
@@ -478,16 +478,56 @@ fn medium_labels_sit_outward_clear_of_the_ring_and_their_brushes() {
     for count in [3, 6, 8, 10] {
         let ring = chooser_ring(count, [800., 500.], AREA);
         let reach = ring.iter().map(|p| p[0].hypot(p[1])).fold(0., f32::max);
-        for (i, medium) in ring.iter().enumerate() {
-            let tag = tag_bounds(*medium);
+        for (i, medium) in ring.iter().enumerate().flat_map(|(i, m)| [CHOOSER_TAG[0], tag_width("Ink")].map(move |w| (i, (m, w)))) {
+            let (medium, width) = medium;
+            let tag = tag_bounds(*medium, width);
             for (j, other) in ring.iter().enumerate().filter(|(j, _)| *j != i) {
                 assert!(!overlap(tag, around(*other, [CHOOSER_ITEM; 2])), "{count}/{i}: the label clears medium {j}");
             }
             assert!(!overlap(tag, around(*medium, [CHOOSER_ITEM; 2])), "{count}/{i}: the label sits beside its icon");
-            for pill in chooser_column(4, [800., 500.], Some((*medium, reach)), AREA) {
+            for pill in chooser_column(4, [800., 500.], Some((*medium, reach, width)), AREA) {
                 assert!(!overlap(tag, around(pill, BRUSH_PILL)), "{count}/{i}: the label clears its brushes at {pill:?}");
             }
         }
     }
 }
 
+#[test]
+fn a_short_medium_name_brings_its_brushes_closer() {
+    let medium = [CHOOSER_RING, 0.];
+    let column = |label: &str| chooser_column(3, [600., 450.], Some((medium, CHOOSER_RING, tag_width(label))), AREA)[1][0];
+    assert!(column("Ink") < column("Watercolor brushes") - 30., "{} vs {}", column("Ink"), column("Watercolor brushes"));
+    assert_eq!(tag_width("A very long medium name indeed"), CHOOSER_TAG[0], "names past the cap ellipsize");
+}
+
+
+#[test]
+fn faint_dots_show_where_hidden_colors_will_emerge() {
+    let size = COLOR_RING_SIZES[1];
+    let options = BubbleOptions { palette: true, ..BubbleOptions::default() };
+    let limit = bead_scroll_limit(BeadStrip::Palette, size, 48);
+    assert!(limit >= 2.);
+    let ends = |scroll: f32| {
+        let hints = bead_hints(size, options, 0, 48, [0., scroll]);
+        let beads = color_beads(size, options, pair(), 0, 48, [0., scroll], Bead::Foreground);
+        for (hint, _) in &hints {
+            assert!(beads.iter().all(|b| distance(*hint, b.center) >= b.size * 0.5 + HINT_DOT * 0.5), "{scroll}: a hint clears every bead");
+        }
+        hints.len()
+    };
+    assert_eq!(ends(0.), 2, "only the far end hides colors, one dot per orbit");
+    assert_eq!(ends(1.), 4, "both ends hide colors");
+    assert_eq!(ends(limit), 2, "at the end only the start hides colors");
+    assert!(bead_hints(size, options, 0, 4, [0., 0.]).is_empty(), "a palette that fits shows no dots");
+}
+
+#[test]
+fn the_transparent_bead_keeps_room_from_the_palette_bead() {
+    for size in [128., 136., 216., 280., 344., 352.] {
+        let beads = color_beads(size, everything(size), pair(), 20, 30, [0.; 2], Bead::Foreground);
+        let at = |bead: Bead| beads.iter().find(|b| b.bead == bead).unwrap();
+        let (transparent, palette) = (at(Bead::Transparent), at(Bead::Palettes));
+        let gap = distance(transparent.center, palette.center) - (transparent.size + palette.size) * 0.5;
+        assert!(gap >= 9. - 0.5, "{size}: {gap}");
+    }
+}

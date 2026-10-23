@@ -1553,3 +1553,32 @@ fn toolbar_brush_metadata_updates_while_raster_backing_is_pending() {
         }
     }
 }
+
+#[test]
+fn dab_settings_change_the_brush_stamp_wherever_a_brush_has_them() {
+    let same = |a: &layer_render::BrushStampRequest, b: &layer_render::BrushStampRequest| a.style == b.style && a.dabs == b.dabs && a.shape_strength == b.shape_strength;
+    let mut s = session(Platform::Gtk);
+    let mut seen = std::collections::BTreeSet::new();
+    for choice in brush_catalog().collect::<Vec<_>>() {
+        s.dispatch(UiAction::SelectBrush { id: choice.id }).unwrap();
+        let (before, _) = s.stamp_request().unwrap();
+        for control in s.state().tool_settings.clone() {
+            let n = &control.numeric;
+            let other = if (control.value as f64) < (n.min + n.max) * 0.5 { n.max } else { n.min } as f32;
+            s.dispatch(UiAction::SetToolSetting { id: control.id.into(), value: other }).unwrap();
+            let changed = !same(&before, &s.stamp_request().unwrap().0);
+            s.dispatch(UiAction::SetToolSetting { id: control.id.into(), value: control.value }).unwrap();
+            if crate::tool_settings::shapes_dab(control.id) && control.id != "angle" {
+                assert!(changed, "{} changes the stamp of brush {}", control.id, choice.id);
+            }
+            if crate::tool_settings::shapes_dab(control.id) && changed {
+                seen.insert(control.id);
+            }
+            if matches!(control.id, "spacing" | "smoothing_strength") {
+                assert!(!changed, "{} leaves a single dab alone", control.id);
+            }
+        }
+    }
+    assert!(["size", "flow", "strength", "opacity", "hardness", "angle", "grain_depth", "material_hardness", "bristle_scale", "bristle_load"].iter().all(|id| seen.contains(id)), "{seen:?}");
+}
+

@@ -23,7 +23,7 @@ pub const HALO_BANDS: [f32; 2] = [30., 30.];
 pub const RING_ICON: f32 = 21.;
 pub const CHOOSER_ITEM: f32 = 44.;
 pub const CHOOSER_RING: f32 = 84.;
-pub const BRUSH_PILL: [f32; 2] = [128., 48.];
+pub const BRUSH_PILL: [f32; 2] = [152., 48.];
 pub const CHOOSER_TAG: [f32; 2] = [96., 26.];
 const TAG_GAP: f32 = 4.;
 pub const PALETTE_PILL: [f32; 2] = [184., 30.];
@@ -120,10 +120,11 @@ pub struct BubbleOptions {
     pub pair: bool,
     pub full: bool,
     pub fold: bool,
+    pub size_left: bool,
 }
 impl Default for BubbleOptions {
     fn default() -> Self {
-        Self { size: COLOR_RING_SIZES[1], recent: false, palette: false, pair: false, full: false, fold: true }
+        Self { size: COLOR_RING_SIZES[1], recent: false, palette: false, pair: false, full: false, fold: true, size_left: false }
     }
 }
 impl BubbleOptions {
@@ -391,6 +392,9 @@ pub(crate) fn bead_travel(strip: BeadStrip, size: f32, from: [f32; 2], to: [f32;
 }
 
 const FADE_COLUMNS: f32 = 0.8;
+const HINT_COLUMN: f32 = 0.65;
+pub const HINT_DOT: f32 = 5.;
+const PALETTE_ROOM: f32 = 6.;
 const PALETTE_GAP: f32 = 1.35;
 const BEAD_CLEARANCE: f32 = 3.;
 
@@ -492,7 +496,7 @@ pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: u
         palette = Some(BeadPlacement { bead: Bead::Palettes, center, size: PALETTE_BEAD, alpha: 1. });
     }
     if let Some(bead) = palette {
-        obstacles.push((bead.center, bead.size * 0.5));
+        obstacles.push((bead.center, bead.size * 0.5 + PALETTE_ROOM));
     }
     if options.pair {
         let last = strip_last(BeadStrip::Palette, size, swatches);
@@ -514,6 +518,24 @@ pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: u
     }
     beads.extend(palette);
     beads
+}
+
+pub fn bead_hints(size: f32, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2]) -> Vec<([f32; 2], f32)> {
+    let mut hints = Vec::new();
+    for (shown, strip, count, scroll) in [(options.recent, BeadStrip::Recent, recent, scroll[0]), (options.palette, BeadStrip::Palette, swatches, scroll[1])] {
+        if !shown {
+            continue;
+        }
+        let (rows, last) = (strip_rows(strip), strip_last(strip, size, count));
+        let beyond = count.div_ceil(rows) as f32 - 1. - last - scroll;
+        let fade = |hidden: f32| ((hidden - FADE_COLUMNS) / (1. - FADE_COLUMNS)).clamp(0., 1.);
+        for (column, alpha) in [(-HINT_COLUMN, fade(scroll)), (last + HINT_COLUMN, fade(beyond))] {
+            if alpha > 0. {
+                hints.extend((0..rows).map(|row| (polar(orbit(size, row), strip_angle(strip, size, column, last)), alpha)));
+            }
+        }
+    }
+    hints
 }
 
 pub fn bead_at(beads: &[BeadPlacement], point: [f32; 2]) -> Option<Bead> {
@@ -698,11 +720,11 @@ pub fn chooser_ring(count: usize, center: [f32; 2], bounds: Bounds) -> Vec<[f32;
     items
 }
 
-pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], f32)>, bounds: Bounds) -> Vec<[f32; 2]> {
+pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], f32, f32)>, bounds: Bounds) -> Vec<[f32; 2]> {
     let n = count as f32;
     let (radius, side, middle) = match medium {
-        Some((item, reach)) => {
-            let tag = tag_bounds(item);
+        Some((item, reach, tag)) => {
+            let tag = tag_bounds(item, tag);
             let label = (tag.x.abs().max((tag.x + tag.width).abs()) - item[0].abs()).max(CHOOSER_ITEM * 0.5);
             let radius = |beside: f32| (n * PILL_PITCH * 0.5 + 20.).max(BRUSH_COLUMN).max(reach + beside + BRUSH_PILL[0] * 0.5 + 8.);
             let room = |side: f32, radius: f32| {
@@ -744,10 +766,14 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
         .collect()
 }
 
-pub fn tag_bounds(item: [f32; 2]) -> Bounds {
+pub fn tag_width(label: &str) -> f32 {
+    (label.chars().count() as f32 * 8. + 20.).min(CHOOSER_TAG[0])
+}
+
+pub fn tag_bounds(item: [f32; 2], w: f32) -> Bounds {
     let length = item[0].hypot(item[1]);
     let d = if length > 1e-3 { [item[0] / length, item[1] / length] } else { [0., -1.] };
-    let [w, h] = CHOOSER_TAG;
+    let h = CHOOSER_TAG[1];
     let out = CHOOSER_ITEM * 0.5 + TAG_GAP + d[0].abs() * w * 0.5 + d[1].abs() * h * 0.5;
     Bounds { x: item[0] + d[0] * out - w * 0.5, y: item[1] + d[1] * out - h * 0.5, width: w, height: h }
 }
@@ -791,11 +817,39 @@ pub enum BubbleAction {
     PutBack { id: u32 },
     PutBackAll,
     SetOptions { id: u32, options: BubbleOptions },
+    Option { id: u32, option: BubbleOption },
     ToggleRingSetting { brush: u32, setting: String },
     Palette { id: u32, step: i32 },
     Resize { id: u32, scale: f32 },
     Properties { id: u32 },
     MeasureCard { id: u32, heights: [f32; 2] },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BubbleOption {
+    Recent,
+    Palette,
+    Pair,
+    SizeLeft,
+    Fold,
+    Full { full: bool },
+    Size { size: f32 },
+}
+
+impl BubbleOption {
+    pub(crate) fn apply(self, mut options: BubbleOptions) -> BubbleOptions {
+        match self {
+            Self::Recent => options.recent = !options.recent,
+            Self::Palette => options.palette = !options.palette,
+            Self::Pair => options.pair = !options.pair,
+            Self::SizeLeft => options.size_left = !options.size_left,
+            Self::Fold => options.fold = !options.fold,
+            Self::Full { full } => options.full = full,
+            Self::Size { size } => options.size = size,
+        }
+        options
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -842,6 +896,7 @@ pub struct ChooserItem {
     pub selected: bool,
     pub shown: bool,
     pub enabled: bool,
+    pub tag: Bounds,
 }
 impl ChooserItem {
     pub fn size(&self) -> [f32; 2] {
@@ -884,6 +939,7 @@ pub struct BubbleView {
     pub readout: Option<String>,
     pub stamp: Option<BubbleStamp>,
     pub buttons: Vec<BubbleButton>,
+    pub hints: Vec<([f32; 2], f32)>,
     pub beads: Vec<BubbleBead>,
     pub pill: Option<String>,
     pub chooser: Vec<ChooserItem>,

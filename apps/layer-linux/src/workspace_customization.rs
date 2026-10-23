@@ -328,6 +328,9 @@ pub(super) struct Customization {
     palette_colors: Cell<Option<([layer_core::color::RgbColor; 2], layer_ui::ColorSlot, crate::display_color::ViewColor, f32)>>,
     context: gtk::PopoverMenu,
     context_bubble: Cell<bool>,
+    context_target: Cell<Option<ContextTarget>>,
+    context_checks: RefCell<Vec<(String, gtk::CheckButton)>>,
+    refreshing_checks: Cell<bool>,
     context_focus: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
     popup: gtk::Popover,
     popup_control: Cell<Option<PanelControl>>,
@@ -372,6 +375,9 @@ impl Customization {
             palette_colors: Cell::new(None),
             context: gtk::PopoverMenu::from_model(None::<&gtk::gio::Menu>),
             context_bubble: Cell::new(false),
+            context_target: Cell::new(None),
+            context_checks: RefCell::new(Vec::new()),
+            refreshing_checks: Cell::new(false),
             context_focus: RefCell::new(None),
             popup: gtk::Popover::new(),
             popup_control: Cell::new(None),
@@ -1656,7 +1662,12 @@ impl Workspace {
         // A native popup grab diverts the original contact. Keep mouse, touch,
         // and pen with the source until it becomes a drag or is released.
         popover.set_autohide(!(held_drag || held));
-        self.populate_workspace_menu(popover, menu);
+        if matches!(target, ContextTarget::Bubble { .. }) {
+            self.customization.context_target.set(Some(target));
+            self.fill_menu(popover, menu, true);
+        } else {
+            self.populate_workspace_menu(popover, menu);
+        }
         // Unlike MenuButton popovers, this shared surface-owned context menu
         // has no native invoker to restore keyboard focus to on dismissal.
         *self.customization.context_focus.borrow_mut() = gtk::prelude::GtkWindowExt::focus(&self.window)
@@ -1714,8 +1725,19 @@ impl Workspace {
         popover: &gtk::PopoverMenu,
         menu: layer_ui::ContextMenu,
     ) {
-        let root = self.workspace_menu_model(popover, menu);
+        self.fill_menu(popover, menu, false);
+    }
+
+    fn fill_menu(self: &Rc<Self>, popover: &gtk::PopoverMenu, menu: layer_ui::ContextMenu, keep_toggles: bool) {
+        let checks = RefCell::new(Vec::new());
+        let root = self.menu_model(popover, menu, keep_toggles.then_some(&checks));
         popover.set_menu_model(Some(&root));
+        for (id, check) in checks.borrow().iter() {
+            popover.add_child(check, id);
+        }
+        if keep_toggles {
+            *self.customization.context_checks.borrow_mut() = checks.into_inner();
+        }
         fn icons(widget: &gtk::Widget) {
             if let Some(image) = widget.downcast_ref::<gtk::Image>()
                 && let Some(icon) = image.gicon().and_downcast::<gtk::gio::ThemedIcon>()
@@ -1745,6 +1767,41 @@ impl Workspace {
         popover: &gtk::PopoverMenu,
         menu: layer_ui::ContextMenu,
     ) -> gtk::gio::Menu {
+        self.menu_model(popover, menu, None)
+    }
+
+    fn refresh_context_checks(self: &Rc<Self>) {
+        let Some(target) = self.customization.context_target.get() else { return };
+        let Some(menu) = self.gpu.borrow().as_ref().and_then(|g| g.session.context_menu(target).ok()) else { return };
+        fn states(sections: &[Vec<layer_ui::ContextMenuItem>], prefix: &str, out: &mut std::collections::HashMap<String, (bool, bool)>) {
+            for (s, items) in sections.iter().enumerate() {
+                for (i, item) in items.iter().enumerate() {
+                    let id = format!("{prefix}-{s}-{i}");
+                    if let Some(selected) = item.selected {
+                        out.insert(id.clone(), (selected, item.enabled));
+                    }
+                    states(&item.sections, &id, out);
+                }
+            }
+        }
+        let mut current = std::collections::HashMap::new();
+        states(&menu.sections, "item", &mut current);
+        self.customization.refreshing_checks.set(true);
+        for (id, check) in self.customization.context_checks.borrow().iter() {
+            if let Some(&(active, enabled)) = current.get(id) {
+                check.set_active(active);
+                check.set_sensitive(enabled);
+            }
+        }
+        self.customization.refreshing_checks.set(false);
+    }
+
+    fn menu_model(
+        self: &Rc<Self>,
+        popover: &gtk::PopoverMenu,
+        menu: layer_ui::ContextMenu,
+        checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
+    ) -> gtk::gio::Menu {
         popover.set_flags(gtk::PopoverMenuFlags::NESTED);
         fn model(
             w: &Rc<Workspace>,
@@ -1752,6 +1809,7 @@ impl Workspace {
             sections: Vec<Vec<layer_ui::ContextMenuItem>>,
             prefix: &str,
             actions: &gtk::gio::SimpleActionGroup,
+            checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
         ) -> gtk::gio::Menu {
             let root = gtk::gio::Menu::new();
             for (s, items) in sections.into_iter().enumerate() {
@@ -1766,9 +1824,26 @@ impl Workspace {
                         entry.set_icon(&gtk::gio::ThemedIcon::new(&format!("layer-{icon}-symbolic")));
                     }
                     if item.action.is_none() && item.enabled {
-                        let submenu = model(w, popup, item.sections, &id, actions);
+                        let submenu = model(w, popup, item.sections, &id, actions, checks);
                         entry.set_submenu(Some(&submenu));
                         section.append_item(&entry);
+                        continue;
+                    }
+                    if let (Some(checks), Some(selected), Some(dispatch)) = (checks, item.selected, item.action.clone()) {
+                        let check = gtk::CheckButton::with_label(&item.label);
+                        check.add_css_class("context-check");
+                        check.set_active(selected);
+                        check.set_sensitive(item.enabled);
+                        check.connect_toggled(glib::clone!(#[weak] w, move |_| {
+                            if !w.customization.refreshing_checks.get() {
+                                w.dispatch(dispatch.clone());
+                                w.refresh_context_checks();
+                            }
+                        }));
+                        let custom = gtk::gio::MenuItem::new(None, None);
+                        custom.set_attribute_value("custom", Some(&id.to_variant()));
+                        section.append_item(&custom);
+                        checks.borrow_mut().push((id, check));
                         continue;
                     }
                     let action = if let Some(selected) = item.selected {
@@ -1815,6 +1890,7 @@ impl Workspace {
             menu.sections,
             "item",
             &actions,
+            checks,
         );
         popover.insert_action_group("context", Some(&actions));
         root

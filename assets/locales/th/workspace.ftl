@@ -611,6 +611,7 @@ workspace-bubble-color-pair = สีหลักและสีรอง
 workspace-bubble-simple = แบบง่าย
 workspace-bubble-full = แบบเต็ม
 workspace-bubble-fold = พับเมื่อไม่ใช้งาน
+workspace-bubble-size-left = ขนาดอยู่ทางซ้าย
 workspace-history-put-back = เก็บ { $panels } กลับ
 workspace-show-in-zen = แสดงในโหมดเซน
 workspace-bubble-edit-palettes = แก้ไขจานสี…

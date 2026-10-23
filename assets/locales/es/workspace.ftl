@@ -626,6 +626,7 @@ workspace-bubble-color-pair = Principal y secundario
 workspace-bubble-simple = Sencilla
 workspace-bubble-full = Completa
 workspace-bubble-fold = Plegar cuando no se use
+workspace-bubble-size-left = Tamaño a la izquierda
 workspace-history-put-back = Se devolvió { $panels }
 workspace-show-in-zen = Mostrar en modo Zen
 workspace-bubble-edit-palettes = Editar paletas…

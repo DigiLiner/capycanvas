@@ -620,6 +620,7 @@ workspace-bubble-color-pair = Màu chính và màu phụ
 workspace-bubble-simple = Đơn giản
 workspace-bubble-full = Đầy đủ
 workspace-bubble-fold = Gập lại khi không dùng
+workspace-bubble-size-left = Kích thước bên trái
 workspace-history-put-back = Đã cất lại { $panels }
 workspace-show-in-zen = Hiện trong chế độ Zen
 workspace-bubble-edit-palettes = Sửa bảng màu…

@@ -383,10 +383,11 @@ fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     let bubble = view(&s, id);
     assert_eq!((bubble.kind, bubble.face), (BubbleKind::Controls, [TOOL_BUBBLE; 2]));
     assert_eq!(bubble.rings.len(), 2, "both sliders are open without a tap");
-    assert_eq!(bubble.rings[0].setting, "size");
+    assert_eq!(bubble.rings[1].setting, "size", "Size is on the right");
+    assert!(bubble.rings[1].arc.point(0.5)[0] > 0.);
     let size = |s: &UiSession<Recorder>| ToolbarNumericBinding::BrushSize.field(&s.state).unwrap().value;
     let before = size(&s);
-    let ring = bubble.rings[0].clone();
+    let ring = bubble.rings[1].clone();
     let pencil = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [300., 300.]);
     tap(&mut s, pencil);
     tap(&mut s, pencil);
@@ -405,7 +406,7 @@ fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: ring.arc.point(0.6) }).unwrap();
     assert!(view(&s, id).stamp.is_none(), "the dab goes with the contact");
     assert_eq!(view(&s, id).rings.len(), 2, "the sliders stay open");
-    let strength = bubble.rings[1].clone();
+    let strength = bubble.rings[0].clone();
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: strength.arc.point(0.25) }).unwrap();
     act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: strength.arc.point(0.25) }).unwrap();
     let value = ToolbarNumericBinding::BrushStrength.field(&s.state).unwrap().value;
@@ -415,8 +416,12 @@ fn the_color_picker_comes_out_with_size_and_strength_always_open() {
     act(&mut s, BubbleAction::Tap { id, position: [0., 0.] }).unwrap();
     assert!(view(&s, id).selected, "the center starts the color picker");
     let picking = view(&s, id).rings;
-    assert_eq!(picking.iter().map(|r| (r.setting, r.enabled)).collect::<Vec<_>>(), [("size", false), ("flow", false)], "the sliders stay, unavailable while picking");
+    assert_eq!(picking.iter().map(|r| (r.setting, r.enabled)).collect::<Vec<_>>(), [("flow", false), ("size", false)], "the sliders stay, unavailable while picking");
     assert!(act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.5) }).is_err());
+    let toggle = s.context_menu(ContextTarget::Bubble { id }).unwrap().sections.into_iter().flatten().find(|i| i.label == "Size on the left").unwrap();
+    assert_eq!(toggle.selected, Some(false));
+    s.dispatch(toggle.action.unwrap()).unwrap();
+    assert_eq!(view(&s, id).rings[0].setting, "size", "the menu moves Size to the left");
     act(&mut s, BubbleAction::Tap { id, position: [4., -4.] }).unwrap();
     assert!(!view(&s, id).selected, "and stops it");
 }
@@ -1010,4 +1015,24 @@ fn an_open_layers_card_moves_without_folding() {
     let grip = [at[0], at[1] + card.size[1] * 0.5 - 20.];
     drag(&mut s, BubbleGrab::Bubble { id: layers }, grip, [grip[0] - 60., grip[1] - 30.]);
     assert!(view(&s, layers).card.is_some(), "dragging the open card keeps it open");
+}
+
+#[test]
+fn halo_arcs_that_shape_the_dab_show_it_under_the_contact() {
+    let mut s = desk();
+    let id = take(&mut s, brush(DefaultBrushPreset::Paintbrush), FAR);
+    tap(&mut s, id);
+    tap(&mut s, id);
+    for setting in ["hardness", "spacing"] {
+        if !view(&s, id).rings.iter().any(|r| r.setting == setting) {
+            act(&mut s, BubbleAction::ToggleRingSetting { brush: DefaultBrushPreset::Paintbrush as u32, setting: setting.into() }).unwrap();
+        }
+    }
+    for (setting, shows) in [("hardness", true), ("spacing", false)] {
+        let ring = view(&s, id).rings.into_iter().find(|r| r.setting == setting).unwrap();
+        act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Down, position: ring.arc.point(0.4) }).unwrap();
+        assert_eq!(view(&s, id).stamp.is_some(), shows, "{setting}");
+        act(&mut s, BubbleAction::Ring { id, phase: ContactPhase::Up, position: ring.arc.point(0.4) }).unwrap();
+        assert!(view(&s, id).stamp.is_none());
+    }
 }

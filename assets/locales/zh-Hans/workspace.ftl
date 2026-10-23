@@ -649,6 +649,7 @@ workspace-bubble-color-pair = 主色和副色
 workspace-bubble-simple = 简洁
 workspace-bubble-full = 完整
 workspace-bubble-fold = 不用时折叠
+workspace-bubble-size-left = 大小在左侧
 workspace-history-put-back = 放回{ $panels }
 workspace-show-in-zen = 在专注模式中显示
 workspace-bubble-edit-palettes = 编辑调色板…

@@ -204,7 +204,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let rings: Vec<_> = match kind {
             BubbleKind::Controls => halo_arcs(CONTROL_RINGS.len())
                 .into_iter()
-                .zip(CONTROL_RINGS)
+                .zip(if bubble.options.size_left { CONTROL_RINGS } else { [CONTROL_RINGS[1], CONTROL_RINGS[0]] })
                 .map(|(arc, binding)| match binding.field(state) {
                     Some(field) => self.ring_view(bubble.id, arc, &field, binding.numeric()),
                     None => BubbleRing {
@@ -230,7 +230,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => Vec::new(),
         };
         let readout = rings.iter().find(|r| r.active).map(|r| format!("{} · {}", r.label, r.text));
-        let stamp = self.bubble_state.ring.filter(|r| r.id == bubble.id && kind == BubbleKind::Controls).and_then(|r| {
+        let stamp = self.bubble_state.ring.filter(|r| r.id == bubble.id && tool_settings::shapes_dab(r.setting)).and_then(|r| {
             let size = ToolbarNumericBinding::BrushSize.field(state)?.value;
             let scale = self.logical_viewport.map_or(1., |v| (state.camera.viewport[0] as f32 / v[0]).max(f32::EPSILON));
             Some(BubbleStamp { center: r.at, diameter: size * state.camera.zoom / scale, color: state.colors.definition() })
@@ -271,6 +271,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             readout,
             stamp,
             buttons,
+            hints: if kind == BubbleKind::Color { self.bubble_hints(bubble, narrow) } else { Vec::new() },
             beads: if kind == BubbleKind::Color { self.bubble_beads(bubble, narrow) } else { Vec::new() },
             pill: (kind == BubbleKind::Color && self.bubble_state.pill == Some(bubble.id) && bubble.options.palette)
                 .then(|| state.color_library.active_palette().name.clone()),
@@ -316,6 +317,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_state.scroll.iter().find(|(bubble, _)| *bubble == id).map_or([0.; 2], |(_, scroll)| *scroll)
     }
 
+    fn bubble_hints(&self, bubble: &ToolBubble, narrow: bool) -> Vec<([f32; 2], f32)> {
+        let library = &self.state.color_library;
+        let swatches = library.active_palette().swatches.len();
+        bead_hints(bubble.diameter(narrow), bubble.options, library.history.len(), swatches, self.bead_scroll(bubble.id))
+    }
+
     fn bubble_beads(&self, bubble: &ToolBubble, narrow: bool) -> Vec<BubbleBead> {
         let state = &self.state;
         let library = &state.color_library;
@@ -358,8 +365,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             selected: state.layer_tools.tool == LayerCanvasTool::Paint && state.brush.preset == id,
             shown: false,
             enabled: true,
+            tag: tag_bounds(at, 0.),
         };
-        let column = |group: ToolGroup, medium: Option<([f32; 2], f32)>| {
+        let column = |group: ToolGroup, medium: Option<([f32; 2], f32, f32)>| {
             let ids: Vec<_> = tools::group_presets(group).collect();
             chooser_column(ids.len(), center, medium, bounds)
                 .into_iter()
@@ -397,6 +405,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                                 selected: item.selected,
                                 shown: medium.is_some() && medium == shown,
                                 enabled: item.enabled,
+                                tag: tag_bounds(at, tag_width(&item.label)),
                             },
                             Some(variant),
                         )
@@ -408,7 +417,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 {
                     let reach = pairs.iter().map(|(item, _)| item.center[0].hypot(item.center[1])).fold(0., f32::max);
                     let at = item.center;
-                    pairs.extend(column(group, Some((at, reach))));
+                    pairs.extend(column(group, Some((at, reach, item.tag.width))));
                 }
                 pairs
             }
@@ -557,6 +566,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                     layout.bubbles.put_back(|_| true);
                     Ok(())
                 })
+            }
+            BubbleAction::Option { id, option } => {
+                let options = option.apply(self.bubble(id)?.options);
+                self.bubble_action(BubbleAction::SetOptions { id, options })
             }
             BubbleAction::SetOptions { id, options } => {
                 let source = self.bubble(id)?.source;
@@ -1036,8 +1049,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         let localization = self.localization();
         let text = |id: MessageId| localization.text(id).to_string();
         let action = |action| UiAction::Bubble { action };
-        let options = |label: MessageId, checked: bool, options: BubbleOptions| {
-            let mut item = ContextMenuItem::command(text(label), action(BubbleAction::SetOptions { id, options }));
+        let options = |label: MessageId, checked: bool, option: BubbleOption| {
+            let mut item = ContextMenuItem::command(text(label), action(BubbleAction::Option { id, option }));
             item.selected = Some(checked);
             item
         };
@@ -1049,24 +1062,27 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleSource::Control { control: ToolbarControl::Brush { id: brush } } => sections.extend(self.ring_menu(brush)),
             BubbleSource::Control { control: ToolbarControl::Color } => {
                 sections.push(vec![
-                    options(MessageId::WORKSPACE_BUBBLE_RECENT_COLORS, o.recent, BubbleOptions { recent: !o.recent, ..o }),
-                    options(MessageId::WORKSPACE_BUBBLE_PALETTE, o.palette, BubbleOptions { palette: !o.palette, ..o }),
-                    options(MessageId::WORKSPACE_BUBBLE_COLOR_PAIR, o.pair, BubbleOptions { pair: !o.pair, ..o }),
+                    options(MessageId::WORKSPACE_BUBBLE_RECENT_COLORS, o.recent, BubbleOption::Recent),
+                    options(MessageId::WORKSPACE_BUBBLE_PALETTE, o.palette, BubbleOption::Palette),
+                    options(MessageId::WORKSPACE_BUBBLE_COLOR_PAIR, o.pair, BubbleOption::Pair),
                 ]);
                 sections.push(
                     [MessageId::WORKSPACE_SIZE_SMALL, MessageId::WORKSPACE_SIZE_MEDIUM, MessageId::WORKSPACE_SIZE_LARGE]
                         .into_iter()
                         .zip(COLOR_RING_SIZES)
-                        .map(|(label, size)| options(label, o.size == size, BubbleOptions { size, ..o }))
+                        .map(|(label, size)| options(label, o.size == size, BubbleOption::Size { size }))
                         .collect(),
                 );
             }
+            BubbleSource::Control { control: ToolbarControl::ColorPicker } => {
+                sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_SIZE_LEFT, o.size_left, BubbleOption::SizeLeft)]);
+            }
             BubbleSource::Control { control: ToolbarControl::Panel { .. } } => {
                 sections.push(vec![
-                    options(MessageId::WORKSPACE_BUBBLE_SIMPLE, !o.full, BubbleOptions { full: false, ..o }),
-                    options(MessageId::WORKSPACE_BUBBLE_FULL, o.full, BubbleOptions { full: true, ..o }),
+                    options(MessageId::WORKSPACE_BUBBLE_SIMPLE, !o.full, BubbleOption::Full { full: false }),
+                    options(MessageId::WORKSPACE_BUBBLE_FULL, o.full, BubbleOption::Full { full: true }),
                 ]);
-                sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_FOLD, o.fold, BubbleOptions { fold: !o.fold, ..o })]);
+                sections.push(vec![options(MessageId::WORKSPACE_BUBBLE_FOLD, o.fold, BubbleOption::Fold)]);
             }
             BubbleSource::Control { .. } | BubbleSource::Medium { .. }
                 if matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium) && view.selected =>

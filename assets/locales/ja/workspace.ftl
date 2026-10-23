@@ -649,6 +649,7 @@ workspace-bubble-color-pair = メインとサブ
 workspace-bubble-simple = シンプル
 workspace-bubble-full = 詳細
 workspace-bubble-fold = 使わないときは畳む
+workspace-bubble-size-left = サイズを左に
 workspace-history-put-back = { $panels }を片付け
 workspace-show-in-zen = 集中モードで表示
 workspace-bubble-edit-palettes = パレットを編集…

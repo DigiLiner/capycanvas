@@ -145,6 +145,16 @@ mod imp {
         fn contains(&self, _: f64, _: f64) -> bool {
             false
         }
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let obj = self.obj();
+            let bubbles = obj.bubbles();
+            for bubble in &bubbles {
+                bubble.snapshot_stamp(obj.upcast_ref(), snapshot);
+            }
+            for bubble in &bubbles {
+                obj.snapshot_child(bubble, snapshot);
+            }
+        }
     }
 
     #[derive(Default)]
@@ -179,7 +189,6 @@ mod imp {
         pub(super) contact: Cell<Option<Contact>>,
         pub(super) hot: Cell<Option<usize>>,
         pub(super) pinch: Cell<Option<f32>>,
-        pub(super) shadow: Cell<f32>,
         pub(super) rings_shown: RefCell<Vec<BubbleRing>>,
         pub(super) halo_fade: Cell<Option<(i64, bool)>>,
         pub(super) born: RefCell<Vec<i64>>,
@@ -224,7 +233,7 @@ mod imp {
             if let Some(count) = self.count.borrow().as_ref() {
                 let (_, natural, _, _) = count.measure(gtk::Orientation::Horizontal, -1);
                 let (_, tall, _, _) = count.measure(gtk::Orientation::Vertical, natural);
-                let size = [(natural as f32).max(tall as f32), tall as f32];
+                let size = [(natural as f32 + 10.).max(tall as f32), tall as f32];
                 place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 - 4., -TOOL_BUBBLE * 0.5 + 4.], size);
             }
             for (icon, ring) in self.icons.borrow().iter().zip(self.rings_shown.borrow().iter()) {
@@ -254,9 +263,9 @@ mod imp {
                 place(item.root.upcast_ref(), chooser.center, chooser.size());
                 if item.tag.is_visible() {
                     let (_, natural, _, _) = item.tag.measure(gtk::Orientation::Horizontal, -1);
-                    let width = (natural as f32).min(CHOOSER_TAG[0]);
+                    let tag = chooser.tag;
+                    let width = (natural as f32).min(tag.width);
                     let (_, tall, _, _) = item.tag.measure(gtk::Orientation::Vertical, width as i32);
-                    let tag = tag_bounds(chooser.center);
                     let [x, y] = chooser.center;
                     let length = x.hypot(y).max(1e-3);
                     let anchor = [tag.x + tag.width * 0.5 - x / length * (tag.width - width) * 0.5, tag.y + tag.height * 0.5];
@@ -297,11 +306,10 @@ mod imp {
             if homing {
                 snapshot.push_opacity(0.55);
             }
-            let shadow = self.shadow.get() * if placement.is_some_and(|p| p.lifted) { 1.5 } else { 1. };
             let lift = if placement.is_some_and(|p| p.lifted) { 1. } else { 0. };
             let round = |widget: &gtk::Widget| {
                 if let Some(bounds) = widget.compute_bounds(&*obj) {
-                    super::soft_shadow(snapshot, &bounds, shadow, lift);
+                    super::soft_shadow(snapshot, &bounds, lift);
                 }
                 let part = gtk::Snapshot::new();
                 obj.snapshot_child(widget, &part);
@@ -367,6 +375,11 @@ mod imp {
                 }
             }
             let shown = obj.shown_beads();
+            if let Some([_, ink, _]) = colors {
+                for ([x, y], alpha) in &view.hints {
+                    snapshot.append_fill(&circle([c[0] + x, c[1] + y], HINT_DOT * 0.5), gsk::FillRule::Winding, &rgba(ink, 0.35 * alpha));
+                }
+            }
             let colored = shown.iter().filter(|b| b.placement.bead != Bead::Palettes);
             for (patch, bead) in self.beads.borrow().iter().zip(colored) {
                 super::bead_shadow(snapshot, c, bead);
@@ -415,13 +428,6 @@ mod imp {
             }
             if let Some(readout) = self.readout.borrow().as_ref().filter(|r| r.is_visible()) {
                 round(readout.upcast_ref());
-            }
-            if let (Some(patch), Some((_, _, texture))) = (self.stamp_patch.borrow().as_ref(), self.stamp.borrow().as_ref()) {
-                snapshot.push_mask(gsk::MaskMode::Alpha);
-                snapshot.append_texture(texture, &patch.compute_bounds(&*obj).unwrap_or_else(|| graphene::Rect::zero()));
-                snapshot.pop();
-                obj.snapshot_child(patch, snapshot);
-                snapshot.pop();
             }
             if homing {
                 snapshot.pop();
@@ -520,8 +526,8 @@ fn ring(snapshot: &gtk::Snapshot, c: [f32; 2], ring: &BubbleRing, [chip, ink, th
     snapshot.append_stroke(&thumb, &gsk::Stroke::new(1.), &rgba(ink, 0.6));
 }
 
-fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, strength: f32, lift: f32) {
-    shadow(snapshot, bounds, f32::MAX, 8. * (1. + lift * 0.5), 1.5 + lift * 2.5, 0.14 * strength);
+fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, lift: f32) {
+    shadow(snapshot, bounds, f32::MAX, 8. * (1. + lift * 0.5), 2. + lift * 2.5, 0.08 * (1. + lift));
 }
 
 fn bead_shadow(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead) {
@@ -619,7 +625,7 @@ impl Item {
         let name = gtk::Label::new(None);
         name.add_css_class("bubble-brush-name");
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        name.set_max_width_chars(14);
+        name.set_max_width_chars(18);
         name.set_margin_start(8);
         name.set_margin_end(8);
         name.set_margin_bottom(5);
@@ -1245,10 +1251,14 @@ impl Bubble {
             if let Some(patch) = imp.stamp_patch.take() {
                 patch.unparent();
                 imp.stamp.take();
-                self.queue_draw();
+                self.set_cursor(None::<&gdk::Cursor>);
+                self.layer_redraw();
             }
             return;
         };
+        if self.cursor().is_none_or(|c| c.name().as_deref() != Some("none")) {
+            self.set_cursor_from_name(Some("none"));
+        }
         let (display, headroom) = imp.display.get().unwrap_or_default();
         imp.stamp_patch
             .borrow_mut()
@@ -1270,6 +1280,26 @@ impl Bubble {
         }
     }
 
+    fn snapshot_stamp(&self, layer: &gtk::Widget, snapshot: &gtk::Snapshot) {
+        let imp = self.imp();
+        let (Some(patch), Some((_, _, texture))) = (imp.stamp_patch.borrow().clone(), imp.stamp.borrow().clone()) else { return };
+        let (Some(origin), Some(bounds)) = (self.compute_point(layer, &graphene::Point::zero()), patch.compute_bounds(self)) else { return };
+        snapshot.save();
+        snapshot.translate(&origin);
+        snapshot.push_mask(gsk::MaskMode::Alpha);
+        snapshot.append_texture(&texture, &bounds);
+        snapshot.pop();
+        self.snapshot_child(&patch, snapshot);
+        snapshot.pop();
+        snapshot.restore();
+    }
+
+    fn layer_redraw(&self) {
+        if let Some(layer) = self.parent() {
+            layer.queue_draw();
+        }
+    }
+
     fn poll_stamp(&self, w: &Rc<Workspace>) -> bool {
         let imp = self.imp();
         if imp.stamp_patch.borrow().is_none() {
@@ -1285,7 +1315,7 @@ impl Bubble {
             let texture = gdk::MemoryTexture::new(size, size, gdk::MemoryFormat::A8, &glib::Bytes::from_owned(stamp.alpha), stamp.size as usize);
             imp.stamp.replace(Some((stamp.request_id, stamp.extent, texture.upcast())));
             self.queue_allocate();
-            self.queue_draw();
+            self.layer_redraw();
         }
         true
     }
@@ -1403,9 +1433,11 @@ impl Bubble {
         fingers.connect_event(glib::clone!(#[weak] w, #[upgrade_or] glib::Propagation::Proceed, move |controller, event| {
             let Some(bubble) = controller.widget().and_downcast::<Bubble>() else { return glib::Propagation::Proceed };
             if matches!(event.event_type(), gdk::EventType::EnterNotify | gdk::EventType::MotionNotify | gdk::EventType::ButtonPress | gdk::EventType::ProximityIn) {
-                let pen = event.device_tool().is_some() || event.device().is_some_and(|d| d.source() == gdk::InputSource::Pen);
-                if bubble.cursor().is_some() != pen {
-                    bubble.set_cursor_from_name(pen.then_some("none"));
+                let hide = event.device_tool().is_some()
+                    || event.device().is_some_and(|d| d.source() == gdk::InputSource::Pen)
+                    || bubble.imp().stamp_patch.borrow().is_some();
+                if bubble.cursor().is_some() != hide {
+                    bubble.set_cursor_from_name(hide.then_some("none"));
                 }
             }
             let Some(at) = w.event_point(controller) else { return glib::Propagation::Proceed };
@@ -1813,7 +1845,7 @@ impl Bubbles {
         };
         w.surface.imp().layout.borrow_mut().bubbles = state.workspace.layout.bubbles.clone();
         let colors = w.palette.get().map(|palette| {
-            let [r, g, b, a] = palette.glass.chip.0;
+            let [r, g, b, a] = palette.glass.panel.0;
             let rgb = |c: HexColor| gdk::RGBA::new(c.0[0] as f32 / 255., c.0[1] as f32 / 255., c.0[2] as f32 / 255., 1.);
             [gdk::RGBA::new(r, g, b, a), rgb(palette.text), rgb(palette.thumb)]
         });
@@ -1832,7 +1864,6 @@ impl Bubbles {
                 bubble.set_parent(&self.layer);
                 bubble
             });
-            bubble.imp().shadow.set(if adw::StyleManager::default().is_dark() { 1.4 } else { 1. });
             if bubble.imp().colors.replace(colors) != colors {
                 bubble.queue_draw();
             }

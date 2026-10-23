@@ -623,6 +623,7 @@ workspace-bubble-color-pair = Birincil ve ikincil
 workspace-bubble-simple = Basit
 workspace-bubble-full = Tam
 workspace-bubble-fold = Kullanılmadığında katla
+workspace-bubble-size-left = Boyut solda
 workspace-history-put-back = Yerine kondu: { $panels }
 workspace-show-in-zen = Zen modunda göster
 workspace-bubble-edit-palettes = Paletleri düzenle…

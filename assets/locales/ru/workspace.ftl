@@ -629,6 +629,7 @@ workspace-bubble-color-pair = Основной и дополнительный
 workspace-bubble-simple = Простой
 workspace-bubble-full = Полный
 workspace-bubble-fold = Сворачивать, когда не используется
+workspace-bubble-size-left = Размер слева
 workspace-history-put-back = Убрано на место: { $panels }
 workspace-show-in-zen = Показывать в режиме дзен
 workspace-bubble-edit-palettes = Изменить палитры…

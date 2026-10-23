@@ -649,6 +649,7 @@ workspace-bubble-color-pair = 주 색상과 보조 색상
 workspace-bubble-simple = 간단히
 workspace-bubble-full = 전체
 workspace-bubble-fold = 사용하지 않을 때 접기
+workspace-bubble-size-left = 크기를 왼쪽에
 workspace-history-put-back = 제자리에 두기: { $panels }
 workspace-show-in-zen = 집중 모드에서 표시
 workspace-bubble-edit-palettes = 팔레트 편집…

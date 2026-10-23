@@ -609,6 +609,10 @@ fn four_times() -> NumericControl {
     NumericControl { max: 4., soft_max: 4., ..NumericControl::percent() }
 }
 
+pub fn shapes_dab(id: &str) -> bool {
+    matches!(id, "size" | "flow" | "strength" | "opacity" | "hardness" | "angle" | "grain_depth" | "material_hardness" | "bristle_scale" | "bristle_load")
+}
+
 pub(crate) fn controls(brush: &BrushSnapshot, localizer: &Localizer) -> Vec<ToolSetting> {
     let primary = primary(brush);
     let mut brush = brush.clone();

@@ -1200,6 +1200,7 @@ workspace-bubble-color-pair = Primer dan sekunder
 workspace-bubble-simple = Sederhana
 workspace-bubble-full = Lengkap
 workspace-bubble-fold = Lipat saat tidak dipakai
+workspace-bubble-size-left = Ukuran di kiri
 workspace-history-put-back = Mengembalikan { $panels }
 workspace-show-in-zen = Tampilkan di Mode Zen
 workspace-bubble-edit-palettes = Edit palet…

@@ -23,7 +23,7 @@ center. GTK presents bubbles; Web and the native clients follow after review.
 | A tool group in the title bar or a toolbar (Brush, Eraser, Sculpt, a tool slot…) | Group dial, 56 px | The tool's current icon and the title bar's drawer mark |
 | A brush row in Brushes or a tool drawer | Brush, 56 px | The brush icon over its own stroke |
 | A medium (Pencil, Oil…) in Brushes or a drawer | Medium, 56 px | The medium icon and one dot per brush along the lower edge; the current brush's dot is darker |
-| The color picker | Brush controls, 136 px | A 56 px circle with the color picker icon, Size on a left arc and Strength on a right arc, both always shown |
+| The color picker | Brush controls, 136 px | A 56 px circle with the color picker icon, Strength on a left arc and Size on a right arc, both always shown; **Size on the left** in its hold menu swaps them |
 | Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; each half's hover and pressed highlight fills the half it answers for, and a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
 | Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail with the layer count |
@@ -100,22 +100,28 @@ everything rests.
   The choice belongs to the brush and is part of the workspace.
 - **Chooser:** a dial rings its media (or, for tools like Select, its tools) in
   44 px circles 84 px out, from the top clockwise. The current medium is
-  highlighted with its name, set radially outward beside its icon (at most
-  96 px, ellipsized) so it never covers a neighbour, and its brushes curve
-  beside it as pills with their strokes, past the name; when that side lacks
+  highlighted with its name, set radially outward beside its icon (sized to
+  the name, at most 96 px, ellipsized) so it never covers a neighbour, and its
+  brushes curve beside it as pills with their strokes, just past the name; when that side lacks
   room they open on the other side without the name's offset. Tapping a medium fans its brushes; a press can slide through a medium
   onto one of its brushes. Picking a brush or tool closes the chooser; letting go
   on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
-- **Brush controls:** drag along the left arc for Size and the right arc for
-  Strength, or tap a point on them. While a contact is on an arc, a dab of the
+- **Brush controls:** drag along the Size and Strength arcs, or tap a point on
+  them. While a contact is on an arc, a dab of the
   current brush in the current color sits under the finger or pen at the
-  canvas's zoom and follows each change, and its name and value show below.
+  canvas's zoom, behind every bubble, and follows each change; the pointer
+  hides while it shows, and the setting's name and value show below. Halo arcs
+  for the other settings that shape a single dab (opacity, hardness, angle,
+  grain depth, material hardness, bristle scale and load;
+  `tool_settings::shapes_dab`) show the same dab.
   Tapping its center starts or stops the color picker, like its tile.
 - **Undo and redo:** tapping either half undoes or redoes; dragging anywhere on
   it moves it.
 - **Hold** always opens the bubble's menu: **Settings in the ring**, the
-  bubble's options and **Put back**. On the color ring a hold anywhere opens it;
+  bubble's options and **Put back**. Checking or unchecking an option keeps the
+  menu open; each item changes only its own option (`BubbleAction::Option`), so
+  several changes in one visit never undo each other. On the color ring a hold anywhere opens it;
   on the wheel's ring and disc it takes twice the usual delay, so a slow pick
   stays a pick. A hold
   restores the color or setting its press changed; the menu stays open when the
@@ -142,7 +148,9 @@ the bubble. 24 px beads orbit it on up to two orbits 28 px apart:
   sliding either orbit turns both, and they settle on whole columns. Columns
   past the ends shrink and fade continuously instead of waiting behind other
   beads. The glass palette bead ends the orbits on the right, as far from the
-  wheel as from the outer orbit. Tapping it opens a fixed-width ‹ name › pill
+  wheel as from the outer orbit, and the transparent bead keeps at least 9 px
+  from it. While a whole column of colors is hidden past either end of a strip,
+  one faint dot per orbit marks where they will emerge. Tapping it opens a fixed-width ‹ name › pill
   below; the arrows switch palettes and the name lists them with **Edit
   palettes…**. Picking a color or a contact elsewhere closes it. No bead
   overlaps another at any size or turn.
@@ -175,14 +183,15 @@ more digits.
 
 ## Look
 
-Bubbles use the toolbars' glass: the selected tool is the title bar's selection
-color as one glass surface, as translucent as the unselected ones, and borders
-are a thin inner line. Round parts and beads cast a soft shadow drawn as one
-smooth gradient around their own shape and clipped outside it, so it never
+Bubbles look like the toolbars: faces, glass beads, pills, the readout, tags and
+the count badge take the panel color (the panel glass in glass mode) with no
+border, a selected part layers the toolbars' selection over it exactly as a
+selected toolbar tile does, and halo bands use the panel glass too. Round parts cast the toolbars' 2 px, 8 px shadow, and beads a smaller one, each
+drawn as one smooth gradient around its own shape and clipped outside it, so it never
 bands, never darkens the glass and never renders offscreen when scaling or
 pinching. Faces, the undo and redo halves and chooser items show hover and
 pressed states. Bubble, readout, tag, count and chooser text uses the standard
-UI text size; brush pills are 128 x 48 px to fit it. A
+UI text size; brush pills are 152 x 48 px to fit it. A
 pen shows no system pointer over bubbles, as over the canvas; the mouse keeps
 its pointer.
 
