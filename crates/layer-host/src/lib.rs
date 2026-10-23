@@ -1,5 +1,6 @@
 //! Shared transport facade for native hosts. No UI toolkit or surface ownership.
 //! Call from one engine/render owner; platform callbacks enqueue owned batches.
+pub mod bubbles;
 pub mod clipboard;
 pub mod export;
 pub mod gpu;
@@ -697,6 +698,13 @@ impl NativeHost {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case")]
         enum Query {
+            Bubbles,
+            BubbleMotion { #[serde(default)] now_ns: u64, #[serde(default)] reduced: bool },
+            BubbleHit { id: u32, x: f32, y: f32 },
+            BubbleGrab { grab: layer_ui::BubbleGrab, held: bool },
+            CanTakeBubble { grab: layer_ui::BubbleGrab, position: [f32; 2], viewport: [f32; 2] },
+            BubbleStamp { #[serde(default)] known_request: Option<u64> },
+            BubbleWheelColor,
             ToolbarStamp { context: layer_ui::ToolbarContext, #[serde(default)] known_request: Option<u64> },
             ImageLayerDrop { target: u64, fraction: f32 },
             DocumentColor,
@@ -870,6 +878,17 @@ impl NativeHost {
             },
             Query::ExportProfileCaptionsCopy { captions } => json!(captions.iter().map(|caption| caption.message(self.session.localization())).collect::<Vec<_>>()),
             Query::ExportMetadataCopy { format, keep } => json!(layer_ui::ExportMetadataView::localized_for(format, keep, self.session.localization())),
+            Query::Bubbles => json!(self.session.bubble_presentations()),
+            Query::BubbleMotion { now_ns, reduced } => {
+                self.session.reduce_bubble_motion(reduced);
+                let moving = self.session.step_bubbles(now_ns);
+                json!(layer_ui::BubbleMotion { moving, placements: self.session.bubble_placements(), fade: self.session.bubble_fade() })
+            }
+            Query::BubbleHit { id, x, y } => json!(self.session.bubbles().iter().find(|view| view.id == id).and_then(|view| view.hit([x, y]))),
+            Query::BubbleGrab { grab, held } => json!(self.session.bubble_grab(grab, held)),
+            Query::CanTakeBubble { grab, position, viewport } => json!(self.session.can_take_bubble(grab, position, viewport)),
+            Query::BubbleStamp { known_request } => json!(self.session.toolbar_stamp(self.session.state().toolbar_context(), known_request)?),
+            Query::BubbleWheelColor => json!(self.session.state().colors.definition()),
             Query::ToolbarStamp { context, known_request } => json!(self.session.toolbar_stamp(context, known_request)?),
             Query::ApplicationMenu { menu } => json!(self.session.application_menu(menu)),
             Query::ApplicationMenuHover { open, hovered } => json!(layer_ui::ApplicationMenu::switches_on_hover(open, hovered)),

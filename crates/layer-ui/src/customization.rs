@@ -1551,6 +1551,7 @@ pub struct PanelControlView {
 pub struct TileView {
     pub double_click: bool,
     pub has_variants: bool,
+    pub tears_bubble: bool,
     pub resolved_control: ToolbarControl,
     pub id: u32,
     #[serde(flatten)]
@@ -1663,6 +1664,7 @@ pub(crate) fn panel_view(state: &UiState, panel: Panel, copy: &PanelCopy) -> Res
             };
             Ok(TileView {
                 double_click: resolved_control.double_click_command().is_some(),
+                tears_bubble: crate::BubbleSource::tears_without_hold(tile.control),
                 has_variants: tile.control.has_variants(),
                 resolved_control,
                 id: tile.id,

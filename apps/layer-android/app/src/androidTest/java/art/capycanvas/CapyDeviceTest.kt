@@ -365,9 +365,13 @@ internal fun CanvasHost.writeDrawingCopy(file: File, compose: ComposeTestRule? =
     DocumentController.nativeFileJobsForTest = true
     var task = 0L; var request = 0
     try {
+        withNative { Native.dispatch(it,obj("type" to "invoke","command" to "save_document_as").toString()) }
+        documentChanged()
+        awaitMain("Save As requests a document", 30_000) {
+            snapshot?.objectOrNull("state")?.array("requests")?.objects()?.any { it.getJSONObject("kind").optString("type") == "document" } == true
+        }
+        val state = checkNotNull(snapshot).getJSONObject("state")
         withNative { handle ->
-            Native.dispatch(handle,obj("type" to "invoke","command" to "save_document_as").toString())
-            val state = JSONObject(Native.snapshot(handle)!!).getJSONObject("state")
             request = state.array("requests").objects().first {it.getJSONObject("kind").optString("type") == "document"}.getInt("id")
             val owner = state.getJSONObject("document_file")
             task = Native.projectTask(handle,request,obj("uri" to android.net.Uri.fromFile(file).toString(),"name" to file.name).toString(),owner.getLong("epoch"),owner.getLong("revision"))

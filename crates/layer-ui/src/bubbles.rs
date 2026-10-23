@@ -41,7 +41,7 @@ pub enum BubbleSource {
     Medium { group: ToolGroup },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BubbleKind {
     Dial,
@@ -342,7 +342,7 @@ impl Bead {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BeadPlacement {
     pub bead: Bead,
     pub center: [f32; 2],
@@ -570,7 +570,7 @@ pub fn color_reach(size: f32, options: BubbleOptions, pair: PairBeads) -> f32 {
     .fold(0., |reach, (_, r)| f32::max(reach, r))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RingArc {
     pub radius: f32,
     pub start: f32,
@@ -678,7 +678,7 @@ pub fn halo_disc(count: usize) -> f32 {
     (HALO_RINGS[ring] + HALO_BANDS[ring] * 0.5) * 2.
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChooserKind {
     Medium,
@@ -912,18 +912,19 @@ pub struct ChooserItem {
     pub enabled: bool,
     pub tag: Bounds,
 }
+pub fn chooser_tag(center: [f32; 2], width: f32) -> Bounds {
+    tag_bounds(center, width.min(CHOOSER_TAG[0]))
+}
+
 impl ChooserItem {
     pub fn size(&self) -> [f32; 2] {
         if self.kind == ChooserKind::Brush { BRUSH_PILL } else { [CHOOSER_ITEM; 2] }
     }
     pub fn contains(&self, point: [f32; 2]) -> bool {
-        let [w, h] = self.size();
-        let d = [(point[0] - self.center[0]).abs(), (point[1] - self.center[1]).abs()];
-        let corner = [(d[0] - w * 0.5 + h * 0.5).max(0.), (d[1]).max(0.)];
-        d[0] <= w * 0.5 && d[1] <= h * 0.5 && corner[0].hypot(corner[1]) <= h * 0.5
+        on_capsule([point[0] - self.center[0], point[1] - self.center[1]], self.size())
     }
     pub fn tag_center(&self, width: f32) -> [f32; 2] {
-        let tag = tag_bounds(self.center, width.min(CHOOSER_TAG[0]));
+        let tag = chooser_tag(self.center, width);
         [tag.x + tag.width * 0.5, tag.y + tag.height * 0.5]
     }
 }
@@ -1006,30 +1007,60 @@ impl BubbleView {
         beads.chain(items).chain(pill).chain(card).chain(halo).fold(self.diameter * 0.5, f32::max)
     }
     pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
-        let within = |[w, h]: [f32; 2]| point[0].abs() <= w * 0.5 && point[1].abs() <= h * 0.5;
-        if self.card.as_ref().is_some_and(|card| within(card.size)) {
-            return Some(BubbleHit::Card);
-        }
-        if let Some(index) = self.chooser.iter().position(|item| item.contains(point)) {
-            return Some(BubbleHit::Item(index));
-        }
-        if self.rings.iter().any(|ring| ring.enabled && ring.arc.covers(point)) {
-            return Some(BubbleHit::Ring);
-        }
-        if self.beads.iter().any(|bead| bead_at(&[bead.placement], point).is_some()) {
-            return Some(BubbleHit::Bead);
-        }
-        if self.pill.is_some() && palette_pill(self.diameter).contains(point[0], point[1]) {
-            return Some(BubbleHit::Pill);
-        }
-        let radius = point[0].hypot(point[1]);
-        match self.kind {
-            BubbleKind::Color if radius <= self.diameter * 0.5 - RING_RIM => Some(BubbleHit::Wheel),
-            BubbleKind::Color => (radius <= self.diameter * 0.5).then_some(BubbleHit::Face),
-            BubbleKind::History => history_button(point).map(BubbleHit::Half).or_else(|| on_capsule(point, self.face).then_some(BubbleHit::Face)),
-            BubbleKind::Layers => within(self.face).then_some(BubbleHit::Face),
-            _ => (radius <= self.face[0] * 0.5).then_some(BubbleHit::Face),
-        }
+        hit_geometry(self.kind, self.diameter, self.face, self.card.as_ref().map(|card| card.size),
+            self.chooser.iter().map(|item| (item.center, item.size())),
+            self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
+            self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
+    }
+}
+
+#[derive(Deserialize)]
+pub struct BubbleHitGeometry {
+    kind: BubbleKind,
+    diameter: f32,
+    face: [f32; 2],
+    card: Option<HitCard>,
+    chooser: Vec<HitItem>,
+    rings: Vec<HitRing>,
+    beads: Vec<HitBead>,
+    pill: Option<String>,
+}
+#[derive(Deserialize)]
+struct HitCard { size: [f32; 2] }
+#[derive(Deserialize)]
+struct HitItem { center: [f32; 2], kind: ChooserKind }
+#[derive(Deserialize)]
+struct HitRing { arc: RingArc, enabled: bool }
+#[derive(Deserialize)]
+struct HitBead { placement: BeadPlacement }
+
+impl BubbleHitGeometry {
+    pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
+        hit_geometry(self.kind, self.diameter, self.face, self.card.as_ref().map(|card| card.size),
+            self.chooser.iter().map(|item| (item.center, if item.kind == ChooserKind::Brush { BRUSH_PILL } else { [CHOOSER_ITEM; 2] })),
+            self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
+            self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
+    }
+}
+
+fn hit_geometry(kind: BubbleKind, diameter: f32, face: [f32; 2], card: Option<[f32; 2]>,
+    mut items: impl Iterator<Item = ([f32; 2], [f32; 2])>, mut rings: impl Iterator<Item = RingArc>,
+    mut beads: impl Iterator<Item = BeadPlacement>, pill: bool, point: [f32; 2]) -> Option<BubbleHit> {
+    let within = |[w, h]: [f32; 2]| point[0].abs() <= w * 0.5 && point[1].abs() <= h * 0.5;
+    if card.is_some_and(within) { return Some(BubbleHit::Card); }
+    if let Some(index) = items.position(|(center, size)| on_capsule([point[0] - center[0], point[1] - center[1]], size)) {
+        return Some(BubbleHit::Item(index));
+    }
+    if rings.any(|arc| arc.covers(point)) { return Some(BubbleHit::Ring); }
+    if beads.any(|bead| bead_at(&[bead], point).is_some()) { return Some(BubbleHit::Bead); }
+    if pill && palette_pill(diameter).contains(point[0], point[1]) { return Some(BubbleHit::Pill); }
+    let radius = point[0].hypot(point[1]);
+    match kind {
+        BubbleKind::Color if radius <= diameter * 0.5 - RING_RIM => Some(BubbleHit::Wheel),
+        BubbleKind::Color => (radius <= diameter * 0.5).then_some(BubbleHit::Face),
+        BubbleKind::History => history_button(point).map(BubbleHit::Half).or_else(|| on_capsule(point, face).then_some(BubbleHit::Face)),
+        BubbleKind::Layers => within(face).then_some(BubbleHit::Face),
+        _ => (radius <= face[0] * 0.5).then_some(BubbleHit::Face),
     }
 }
 

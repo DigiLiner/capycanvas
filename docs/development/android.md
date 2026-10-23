@@ -250,6 +250,15 @@ touch, mouse and stylus graph input, drag-out removal, the live marker, painting
 and Apply/Cancel persistence. Pair it with the numeric settings fixtures after
 changing the shared curve widget or Preferences row presentations.
 
+`AndroidToolBubblesTest#nativeBubblesAcrossThemesAndDevices` checks tool bubbles
+with native mouse, touch and stylus events in both themes. It covers source
+scrolling and tear-out, painting through halo gaps, arc edits, chooser selection,
+held menus, independent options, two-finger movement and resizing, retained
+Layers/Properties cards and workspace undo/redo. Escape must dismiss a held
+menu before the next canvas contact. Replacing the workspace during a captured
+ring contact must leave no stale action or notice on release. Run it on both reference
+tablets after changing the presenter or capture path.
+
 Without a device, build both APKs and run lint:
 
 ```bash
@@ -512,6 +521,10 @@ makes it the build type of the test APK. Make performance decisions with it,
 never with a debug build. Reinstall the debug APK afterwards for ordinary
 development.
 
+On the MovinkPad 11, installing, force-stopping or starting instrumentation clears
+the test app's Display › Adaptive switch. The bubble benchmark's ready/go barrier
+lets its `--adaptive-script` helper enable 90 Hz after private fixture setup.
+
 ```bash
 (cd apps/layer-android && ./gradlew :app:assembleBenchmark :app:assembleBenchmarkAndroidTest "-PcapyAbi=$CAPY_TEST_ABI" -PcapyBenchmark)
 adb -s "$CAPY_ANDROID_SERIAL" install -r apps/layer-android/app/build/outputs/apk/benchmark/app-benchmark.apk
@@ -523,6 +536,17 @@ self-instrumenting runners in `app/src/benchmark` (`BrushBenchmarkInstrumentatio
 and `UiStartupInstrumentation`). R8 can remove methods that only a separate test
 APK calls, so test-APK benchmarks use the unminified build.
 
+- **Tool bubbles.** `AndroidBubbleBenchmarkTest#fiveBubbleMotion` primes a
+  five-bubble contact and records three six-second native drags through the
+  other four bubbles on the tier photo at Fit. It checks that every neighbor
+  moves. Run `tools/performance/android-bubbles.py OUTPUT --photo DEVICE_PHOTO
+  --width WIDTH --height HEIGHT` through `devices.py run` after installing the
+  benchmark and test APKs under the worktree's application ID. The collector
+  samples the app window's actual SurfaceFlinger presents; canvas surface
+  submissions, `FrameMetrics` and observed widget positions are attribution.
+  `--report-only` rebuilds a report from captured data. The result labels each
+  `FrameMetrics` column, including input, animation, layout, draw, synchronization,
+  command issue, swap and GPU durations; these do not replace actual presents.
 - **Workspace motion.** `AndroidWorkspacePerformanceTest` runs with
   `-e workspaceBenchmark true`. `#colorPanelOverlapFrameTiming`,
   `#colorWheelFrameTiming`, `#editColorWheelFrameTiming` (the Edit Color
@@ -898,6 +922,19 @@ Where to look:
 - Workspaces: `crates/layer-workspace` stores them. Android takes the
   workspace liveness lock with Bionic `flock`, because `std::fs::File::try_lock`
   is unsupported on this target.
+- Tool bubbles: [`WorkspaceBubbles.kt`](../../apps/layer-android/app/src/main/java/art/capycanvas/WorkspaceBubbles.kt)
+  retains the shared presentations and animates native layers;
+  [`BubbleInput.kt`](../../apps/layer-android/app/src/main/java/art/capycanvas/BubbleInput.kt)
+  captures contacts at the workspace and calls the stateless Rust hit test.
+  The wheel, swatches, brush previews, Layers inspector and thumbnail queue are
+  shared with ordinary panels. Placement frames read only `bubble_motion`;
+  source eligibility, values, options, collisions and history remain in Rust.
+  Captures and menus retain their source identity, and two-finger pickup
+  cancels native child gestures. A closing card keeps a native display list
+  for its fade after retiring its controls and accessibility nodes.
+  Motion replies belong to the set of bubbles that requested them. Older
+  replies cannot place replacement owners or consume newer input wakes.
+  See the [host contract](../ui/tool-bubbles.md#host-contract).
 - Layers: `Layers.kt` draws shared clipping rails and FX connections over measured
   content thumbnails, using the relationship palette role for clipping and native
   text ink for the canonical FX glyph. Connector geometry cancels the row face
@@ -905,6 +942,9 @@ Where to look:
   Selection uses the ordinary button helper with a 16 dp icon in a 30 dp slot.
   Group badges, contextual attachment, inherited visibility and optional
   right-swipe actions come from shared state.
+  `LayerThumbnails` owns one request queue per canvas host, shared by visible
+  lists and bubble faces. Requests carry the document epoch and paint revision;
+  replies for retired owners are ignored and pixels are decoded off the UI thread.
   Thumbnail press and hover feedback clips to the squircle. The animated
   selection border is a sibling outside that clip so it can expand beyond the
   thumbnail without cutting off its corners.

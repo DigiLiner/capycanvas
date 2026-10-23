@@ -194,16 +194,23 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     }
     private val glassBoxes = linkedMapOf<Any, FloatArray>()
     internal val glassBoxesForTest get() = glassBoxes.values.toList()
-    private val glassConnections = linkedMapOf<Any, JSONObject>()
+    private val glassConnections = linkedMapOf<Any, String>()
+    private var bubbleGlassBoxes = emptyList<FloatArray>()
+    private var bubbleGlassArcs = emptyList<FloatArray>()
+    internal fun bubbleGlass(boxes: List<FloatArray>, arcs: List<FloatArray>) {
+        fun same(a: List<FloatArray>, b: List<FloatArray>) = a.size == b.size && a.indices.all { a[it].contentEquals(b[it]) }
+        if (same(bubbleGlassBoxes, boxes) && same(bubbleGlassArcs, arcs)) return
+        bubbleGlassBoxes = boxes; bubbleGlassArcs = arcs; queueGlass()
+    }
     private var glassQueued = false
     internal fun glassBox(key: Any, box: FloatArray?) {
         if (glassBoxes[key]?.contentEquals(box) == true || box == null && key !in glassBoxes) return
-        if (box == null) glassBoxes.remove(key) else glassBoxes[key] = box
+        if (box == null) glassBoxes.remove(key) else glassBoxes[key] = box.copyOf()
         queueGlass()
     }
     internal fun glassConnection(key: Any, connection: JSONObject?, scale: Float) {
-        val entry = connection?.let { obj("connection" to it, "scale" to scale) }
-        if (glassConnections[key]?.toString() == entry?.toString()) return
+        val entry = connection?.let { obj("connection" to it, "scale" to scale).toString() }
+        if (glassConnections[key] == entry) return
         if (entry == null) glassConnections.remove(key) else glassConnections[key] = entry
         queueGlass()
     }
@@ -212,9 +219,14 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         glassQueued = true
         main.post {
             glassQueued = false
-            val payload = obj("boxes" to JSONArray(glassBoxes.values.map { JSONArray(it.toList()) }),
-                "connections" to JSONArray(glassConnections.values.toList())).toString()
-            post { Native.glassRegions(handle, payload); wake() }
+            val boxes = glassBoxes.values.toList(); val connections = glassConnections.values.toList()
+            val bubbleBoxes = bubbleGlassBoxes; val bubbleArcs = bubbleGlassArcs
+            post {
+                fun rows(values: List<FloatArray>) = JSONArray(values.map { JSONArray(it.toList()) })
+                val payload = obj("boxes" to rows(boxes), "connections" to JSONArray(connections.map(::JSONObject)),
+                    "bubble_boxes" to rows(bubbleBoxes), "bubble_arcs" to rows(bubbleArcs)).toString()
+                Native.glassRegions(handle, payload); wake()
+            }
         }
     }
     var catalog by mutableStateOf(JSONObject())
@@ -266,6 +278,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private val saved = application.getSharedPreferences(preferencesName, 0)
     private var handle = 0L
     internal val filterPreviewCache = FilterPreviewCache(this)
+    internal val layerThumbnails = LayerThumbnails(this)
     internal val brushPreviews = object : android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: String, value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
     }
@@ -459,6 +472,24 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             workspacePresentation = null
             presentWorkspace(presentation)
         }
+    }
+    internal class BubbleColorContact { var original: String? = null; var epoch = 0L }
+    internal fun beginBubbleColor(action: JSONObject): BubbleColorContact {
+        val contact = BubbleColorContact()
+        post {
+            contact.epoch = documentEpoch
+            contact.original = Native.query(handle, obj("type" to "bubble_wheel_color").toString())
+            Native.dispatch(handle, obj("type" to "color", "action" to action).toString())
+            publish(true); wake()
+        }
+        return contact
+    }
+    internal fun finishBubbleColor(contact: BubbleColorContact, restore: Boolean) = post {
+        if (restore && contact.epoch == documentEpoch) contact.original?.let { color ->
+            Native.dispatch(handle, obj("type" to "color", "action" to obj("op" to "definition", "color" to JSONObject(color))).toString())
+            publish(true); wake()
+        }
+        contact.original = null
     }
     fun invoke(command: String) = dispatch(obj("type" to "invoke", "command" to command))
     fun customize(action: JSONObject) = dispatch(obj("type" to "customize", "action" to action))
@@ -957,6 +988,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             (camera.number("rotation") * 180 / Math.PI).roundToInt())
     }
     override fun onCleared() {
+        layerThumbnails.close()
         proof.pause()
         hdr.pause()
         documents.images.cancel()

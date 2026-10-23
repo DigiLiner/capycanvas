@@ -319,8 +319,9 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     }
 }
 
-@Composable private fun LayerInspector(host: CanvasHost, state: JSONObject, open: Boolean, position: Float,
-    height: Float, footerHeight: Float, sizingContext: String, onSizes: (JSONObject) -> Unit) {
+@Composable internal fun LayerInspector(host: CanvasHost, state: JSONObject, open: Boolean, position: Float,
+    height: Float, footerHeight: Float, sizingContext: String, full: Boolean = true, labelOverride: String? = null,
+    bubbleId: Int? = null, toggle: () -> Unit = { host.customize(obj("type" to "toggle_layer_drawer_properties")) }, onSizes: (JSONObject) -> Unit) {
     val density=androidx.compose.ui.platform.LocalDensity.current.density
     val view=state.getJSONObject("layer_properties")
     val disclosure=view.getJSONObject("disclosure")
@@ -345,24 +346,30 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         val pageHeight=(height-footerHeight).coerceAtLeast(0f)
         Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("layer-properties-pages")) {
             LayerPanel(host,state,Modifier.fillMaxWidth().requiredHeight(pageHeight.coerceAtLeast((measurement.fixedHeight ?: 0f)+measurement.unitHeight).dp)
-                .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) },listState=list) { measurement=it }
+                .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) },listState=list, full=full) { measurement=it }
             Column(Modifier.fillMaxWidth().height(pageHeight.dp).offset { IntOffset(0,((1f-position)*pageHeight*density).roundToInt()) }
                 .panelScroll(rememberScrollState())) {
                 Box(Modifier.fillMaxWidth().padding(8.dp).onSizeChanged { propertiesHeight=it.height/density+16f }) { LayerPropertiesPanel(host,state) }
             }
         }
         HorizontalDivider(thickness=1.dp,color=LocalPalette.current.text.copy(alpha=.16f))
-        val label=disclosure.getString(if(open)"return_label" else "label")
-        val summary=if(open)"" else disclosure.getString("summary")
-        Row(Modifier.fillMaxWidth().height((footerHeight-1f).dp).testTag("layer-properties-disclosure")
-            .clickable(enabled=open || !view.isNull("layer")) { host.customize(obj("type" to "toggle_layer_drawer_properties")) }
+        val label=labelOverride ?: disclosure.getString(if(open)"return_label" else "label")
+        val summary=if(open || !full)"" else disclosure.getString("summary")
+        Row(Modifier.fillMaxWidth().height((footerHeight-1f).dp), verticalAlignment=Alignment.CenterVertically) {
+        if (!full) Box(Modifier.size(36.dp).testTag("bubble-new-layer-$bubbleId")
+            .graphicsLayer { alpha=if(open)0f else 1f }.clickable(enabled=!open) { host.layer(obj("op" to "new", "group" to false, "clipped" to false)) }, contentAlignment=Alignment.Center) {
+            SharedIcon("add-layer", host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"), Modifier.size(20.dp))
+        }
+        Row(Modifier.weight(1f).fillMaxHeight().testTag("layer-properties-disclosure")
+            .clickable(enabled=open || !view.isNull("layer")) { toggle() }
             .padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(24.dp).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
+            if (full) Box(Modifier.size(24.dp).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(1.dp)) {
-                Text(label,Modifier.testTag("layer-properties-disclosure-label"),maxLines=1,overflow=TextOverflow.Ellipsis)
+                Text(label,Modifier.fillMaxWidth().testTag("layer-properties-disclosure-label"),textAlign=if(full)androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.End,maxLines=1,overflow=TextOverflow.Ellipsis)
                 if(summary.isNotEmpty())Text(summary,Modifier.testTag("layer-properties-disclosure-summary"),color=LocalPalette.current.secondary,fontSize=LocalTextStyle.current.fontSize*.9f,maxLines=1,overflow=TextOverflow.Ellipsis)
             }
             Box(Modifier.size(24.dp).testTag("layer-properties-chevron-slot"),contentAlignment=Alignment.Center) { SharedIcon("chevron-down",null,Modifier.size(16.dp).graphicsLayer { rotationZ=if(open)0f else 180f }) }
+        }
         }
     }
 }

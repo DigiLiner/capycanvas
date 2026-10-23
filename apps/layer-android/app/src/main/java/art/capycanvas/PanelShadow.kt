@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
@@ -79,15 +80,17 @@ internal val LocalPanelOpening = staticCompositionLocalOf<PanelOpening?> { null 
     }
 }
 
+@Composable internal fun Modifier.surfaceLayer(outset: Dp, properties: GraphicsLayerScope.() -> Unit = {}): Modifier {
+    val margin = with(LocalDensity.current) { outset.roundToPx() }
+    return layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints.offset(2 * margin, 2 * margin))
+        layout(placeable.width - 2 * margin, placeable.height - 2 * margin) { placeable.place(-margin, -margin) }
+    }.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen; properties() }.padding(outset)
+}
+
 @Composable internal fun Modifier.panelSurface(elevation: Dp, shape: Shape, cut: Rect? = null, opening: PanelOpening? = null): Modifier {
-    val reach = elevation * PanelShadowReach
-    val margin = with(LocalDensity.current) { reach.roundToPx() }
     return (if (opening == null) this else onPlaced { opening.coordinates = it }.drawWithContent {
         drawContent()
         opening.bounds?.let { drawRect(Color.Transparent, it.topLeft, it.size, blendMode = BlendMode.Clear) }
-    }).layout { measurable, constraints ->
-        val placeable = measurable.measure(constraints.offset(2 * margin, 2 * margin))
-        layout(placeable.width - 2 * margin, placeable.height - 2 * margin) { placeable.place(-margin, -margin) }
-    }.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .padding(reach).panelShadow(elevation, shape, cut, isolated = true).clip(shape)
+    }).surfaceLayer(elevation * PanelShadowReach).panelShadow(elevation, shape, cut, isolated = true).clip(shape)
 }

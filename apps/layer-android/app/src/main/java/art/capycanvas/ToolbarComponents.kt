@@ -56,7 +56,28 @@ internal fun toolbarUi(language: String, request: JSONObject) = JSONObject(Nativ
 private fun formatted(language: String, control: JSONObject, value: Float, units: Boolean = true) = toolbarUi(language, obj("type" to "number",
     "request" to obj("control" to control, "value" to value, "operation" to obj("type" to "format")), "compact" to true, "units" to units))
 
-/** Native contacts use the same normalized scale as the Rust numeric control. */
+@Composable internal fun rememberToolbarStamp(host: CanvasHost, query: JSONObject, active: Boolean): Pair<JSONObject, ImageBitmap>? {
+    var result by remember { mutableStateOf<Pair<JSONObject, ImageBitmap>?>(null) }
+    LaunchedEffect(host, query.toString(), active) {
+        result = null
+        if (!active) return@LaunchedEffect
+        while (isActive) {
+            val next = host.awaitQuery(query.copy().put("known_request", result?.first?.optLong("request_id")))
+            if (next?.optJSONArray("alpha")?.length()?.let { it > 0 } == true) {
+                val image = withContext(Dispatchers.Default) {
+                    val alpha = next.getJSONArray("alpha"); val size = next.getInt("size")
+                    android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8).apply {
+                        copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(ByteArray(alpha.length()) { alpha.getInt(it).toByte() }))
+                    }.asImageBitmap()
+                }
+                result = next to image
+            }
+            delay(16)
+        }
+    }
+    return result.takeIf { active }
+}
+
 @Composable internal fun Modifier.toolbarNumberScrub(control: JSONObject, fill: Float, enabled: Boolean,
     position: (Float) -> Unit, step: (Int) -> Unit, phase: ((String) -> Unit)? = null): Modifier {
     val current by rememberUpdatedState(fill)
@@ -122,29 +143,9 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
             val geometry = remember(width, height, vertical) { JSONArray(Native.toolbarUi(obj("type" to "slider_layout", "width" to width,
                 "height" to height, "axis" to if (vertical) "vertical" else "horizontal").toString(), host.languageTag)) }
             var preview by remember { mutableStateOf(false) }
-            var stamp by remember { mutableStateOf<JSONObject?>(null) }
-            var stampImage by remember { mutableStateOf<ImageBitmap?>(null) }
-            LaunchedEffect(preview) {
-                if (!preview) { stamp = null; stampImage = null; return@LaunchedEffect }
-                while (isActive) {
-                    val next = suspendCancellableCoroutine<JSONObject?> { continuation ->
-                        host.query(obj("type" to "toolbar_stamp", "context" to context,
-                            "known_request" to stamp?.optLong("request_id"))) { reply ->
-                            if (continuation.isActive) continuation.resume(reply as? JSONObject)
-                        }
-                    }
-                    if (next?.optJSONArray("alpha")?.length()?.let { it > 0 } == true) {
-                        val image = withContext(Dispatchers.Default) {
-                            val alpha = next.getJSONArray("alpha"); val size = next.getInt("size")
-                            android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8).apply {
-                                copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(ByteArray(alpha.length()) { alpha.getInt(it).toByte() }))
-                            }.asImageBitmap()
-                        }
-                        stampImage = image; stamp = next
-                    }
-                    delay(16)
-                }
-            }
+            val sample = rememberToolbarStamp(host, obj("type" to "toolbar_stamp", "context" to context), preview)
+            val stamp = sample?.first
+            val stampImage = sample?.second
             Box(modifier) {
                 Box(Modifier.placed(geometry.getJSONObject(0), density).dragSource(dock, item, holdToDrag = true)
                     .clickable(enabled = field != null) { preview = true }.testTag("slider-cap-$id"))

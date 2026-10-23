@@ -498,6 +498,20 @@ Preserve user names and document contents across language changes. Follow the
 
 ## UI and input
 
+- **Tool bubbles.** GTK `native_tool_bubbles`, Web `--tool-bubbles`, and Android
+  `AndroidToolBubblesTest#nativeBubblesAcrossThemesAndDevices` exercise native
+  contacts in both themes. Include painting through gaps and waiting for the
+  specified fade return before editing an arc; a restored model alone does not
+  establish that the native presenter accepts input again. Shared
+  `serialized_bubble_hit_geometry_preserves_native_contact_regions` compares
+  the native serialized hit view with the reference hit test across cards,
+  chooser capsules, arcs, beads, wheel, history and empty gaps.
+  `restoring_workspace_cancels_bubble_contacts_before_reusing_their_ids`
+  requires ring rollback and rejects inherited contact state after replacement.
+  The native host's
+  `outside_bubble_contact_publishes_retained_model_without_painting` requires
+  an outside touch to publish the closed card without a paint or camera frame,
+  including when the same contact also dismisses a drawer.
 - **Layer thumbnails.** GTK `native_layer_thumbnail_squircles`, Web `--layer-hold`,
   Android `AndroidTitleBarTest#layerRelationships` and Windows `layers` fixtures
   check full squircle clipping, accent borders, preview pixels inside the border

@@ -278,6 +278,10 @@ fn saturated_color_mode() -> bool {
 struct Glass {
     boxes: Vec<[f32; 8]>,
     connections: Vec<GlassConnection>,
+    #[serde(default)]
+    bubble_boxes: Vec<[f32; 10]>,
+    #[serde(default)]
+    bubble_arcs: Vec<[f32; 7]>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1365,6 +1369,9 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
             .boxes
             .iter()
             .map(|b| layer_render_wgpu::BackdropRegion::rounded([b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], squircle))
+            .chain(glass.bubble_boxes.iter().map(|b| layer_render_wgpu::BackdropRegion::rounded(
+                [b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], if b[8] > 0. { squircle } else { layer_render_wgpu::BackdropRegion::CIRCULAR }).with_strength(b[9])))
+            .chain(glass.bubble_arcs.iter().map(|a| layer_render_wgpu::BackdropRegion::arc([a[0], a[1]], a[2], a[3], a[4], a[5]).with_strength(a[6])))
             .chain(glass.connections.iter().flat_map(|c| {
                 c.connection.glass().into_iter().map(|(bounds, radii)| layer_render_wgpu::BackdropRegion {
                     bounds: bounds.map(|v| v * c.scale),
@@ -1520,6 +1527,17 @@ pub extern "system" fn Java_art_capycanvas_Native_automaticTabNames(
             serde_json::to_string(&layer_ui::TabStyle::automatic_names(r.available, &r.widths))
                 .map_err(error)
         });
+    string(&mut env, result)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_art_capycanvas_Native_bubbleUi(mut env: JNIEnv, _: JClass, request: JString) -> jstring {
+    crate::jni_entry!(env, {
+    let result = read(&mut env, &request)
+        .and_then(|text| serde_json::from_str(&text).map_err(error))
+        .and_then(layer_host::bubbles::query)
+        .and_then(|value| serde_json::to_string(&value).map_err(error));
     string(&mut env, result)
     })
 }

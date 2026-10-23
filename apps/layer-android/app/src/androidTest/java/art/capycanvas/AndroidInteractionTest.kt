@@ -310,10 +310,13 @@ class AndroidInteractionTest {
             for (theme in listOf("light", "dark")) {
                 action(obj("type" to "set_theme", "theme" to theme))
                 layerAction(obj("op" to "select", "id" to paper, "mask" to false))
+                waitFor("Paper owns the controls") { state().getJSONObject("layer_properties").optLong("layer") == paper }
+                for ((key, value) in listOf("relief" to 0, "light" to 225, "through_paint" to 100))
+                    action(obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper, "key" to key, "value" to obj("kind" to "number", "value" to value))))
                 group("properties").let { if (it.optString("active") != "properties") action(obj("type" to "select_panel_tab", "group" to it.getInt("id"), "panel" to "properties")) }
                 customize(obj("type" to "close_expanded"))
                 waitFor("Properties shows the paper's relief") { shown("number-slider-Texture visibility") && state().getJSONObject("customization").isNull("expanded") }
-                assertTrue("A flat paper has no light to turn or hide", disabled("light") && disabled("through_paint"))
+                waitFor("A flat paper has no light to turn or hide") { value("relief") == 0.0 && disabled("light") && disabled("through_paint") }
                 screenshot("validation/paper/lighting-flat-$theme.png")
                 val relief = bounds("number-slider-Texture visibility")
                 tap(Offset(relief.left + relief.width * .5f, relief.center.y))
@@ -324,6 +327,24 @@ class AndroidInteractionTest {
                 assertEquals("The dial sits centered in a slider-height row", bounds("number-value-light").bottom - 18 * density, dial.center.y, 1.5f)
                 tap(Offset(dial.left + dial.width * .08f, dial.center.y))
                 waitFor("A press on the dial's left edge lights from the left") { value("light") == 180.0 }
+                event(MotionEvent.ACTION_DOWN, Offset(dial.left + dial.width * .08f, dial.center.y))
+                SystemClock.sleep(40)
+                event(MotionEvent.ACTION_MOVE, Offset(dial.center.x, dial.top + dial.height * .08f))
+                SystemClock.sleep(40)
+                event(MotionEvent.ACTION_UP)
+                waitFor("Dragging the Light dial changes its angle") { value("light") != 180.0 }
+                command("undo")
+                waitFor("The Light drag has one undo") { value("light") == 180.0 }
+                SystemClock.sleep(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                repeat(2) {
+                    event(MotionEvent.ACTION_DOWN, Offset(dial.left + dial.width * .08f, dial.center.y))
+                    SystemClock.sleep(40)
+                    event(MotionEvent.ACTION_UP)
+                    SystemClock.sleep(40)
+                }
+                waitFor("Double tapping the Light dial restores its default") { value("light") == 225.0 }
+                command("undo")
+                waitFor("The Light reset has one undo") { value("light") == 180.0 }
                 reveal("number-slider-Shows through paint")
                 screenshot("validation/paper/lighting-lit-$theme.png")
                 val through = bounds("number-slider-Shows through paint")

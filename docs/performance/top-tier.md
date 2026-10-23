@@ -132,6 +132,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
+| Android tool bubble drag through four neighbours | 120 | **Met.** 115.34–116.72 actual app-window presents/s; p99 ≤16.6673 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 120 | **Web diagnostic:** Navigator column 30.00–30.64 Chrome surface presents/s; p99 50.00–58.34 ms. Tier qualification remains unset | [Web Navigator layout](#web-navigator-layout), 2026-10-19; [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
@@ -142,6 +143,33 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
 | List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: touch at scale 1 gives 97.24–109.99 presents/s, p99 up to 25.016 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
+
+## Native tool bubbles
+
+Measured 2026-10-23 on the MovinkPad Pro 14 with the prescribed 9504 × 6336 photo
+at Fit, default glass, 120 Hz display and thermal status 0 throughout. Benchmark
+APK SHA-256 `5c2e4751ef908941013c5428a4e60fedba484423d515f53ecb5eb62d94dbee64`
+uses release Rust and unminified, nondebuggable Android code; white-box test APK
+is `d6d185ad72095f5d687653ba6cda1c9eb6296a817b92638b94ec4c8ead785c45`.
+
+`AndroidBubbleBenchmarkTest#fiveBubbleMotion` warms a six-second native touch
+contact, then performs three six-second drags through four settled neighbors.
+Every neighbor visibly moves. Canonical position resets and settling are outside
+timed motion. The collector polls actual app-window SurfaceFlinger timestamps;
+warmup and 100 ms at each contact edge are excluded. No tablet setting changed.
+
+| Contact | Actual presents/s | p99 interval, ms |
+| --- | --- | --- |
+| 1 | 116.720 | 16.667188 |
+| 2 | 115.858 | 16.667239 |
+| 3 | 115.341 | 16.667292 |
+
+All contacts meet the 114 presents/s floor and 16.7 ms p99 limit. JUnit passed
+with clean ActivityScenario teardown. FrameMetrics and renderer timings remain
+attribution proxies. Evidence, build hashes and raw presentation samples are in
+`artifacts/bubbles/android-top-transport-presents/`. Android 16 wraps `--list`
+layer names in `RequestedLayerState`; the collector normalizes those names before
+sampling the exact app-window layer.
 
 ## Layer thumbnail selection
 

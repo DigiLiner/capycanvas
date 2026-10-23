@@ -15,8 +15,10 @@ canvas is 6000 × 4000.
   and setting `peak_refresh_rate` or turning off `setting.adaptive_refresh.enabled`
   does not lift it. With the test app switched on, the panel runs at 90 Hz.
   Switch on your own application ID there before measuring a 90 Hz row, and
-  switch it off afterwards. Installing the app again switches it off, so check
-  the panel mode after every install.
+  switch it off afterwards. Installing the app again or running
+  `adb shell am force-stop` switches it off; instrumentation startup also resets
+  it. Enable Adaptive after benchmark setup at its ready/go barrier, and check
+  the panel mode before measuring.
 - **Until it presents at 90 Hz, no display-paced row can pass.** Renderer rates
   above 90 show that the rendering has headroom.
 - **Huion Kamvas Pad 12 proxy rows.** Rows marked "Huion" come from the Huion
@@ -111,6 +113,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 16 visible paint layers | 90 | | |
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
+| Android tool bubble drag through four neighbours | 90 | **Not met.** 86.30–89.06 actual app-window presents/s; p99 up to 22.331 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
 | Web tool bubble drag through four neighbours | 90 | **Not met.** 56.85–58.86 presented fps, p99 33.51 ms, default glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
@@ -123,6 +126,37 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK layer input diagnostic](top-tier.md#gtk-layer-input-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
+
+## Native tool bubbles
+
+Measured 2026-10-23 on the MovinkPad 11, 6000 × 4000 prescribed photo at Fit,
+default glass, 90 Hz app policy and thermal status 0 throughout. Benchmark APK
+SHA-256 `5c2e4751ef908941013c5428a4e60fedba484423d515f53ecb5eb62d94dbee64`
+uses release Rust and unminified, nondebuggable Android code. The separate white-box
+test APK is `d6d185ad72095f5d687653ba6cda1c9eb6296a817b92638b94ec4c8ead785c45`.
+
+`AndroidBubbleBenchmarkTest#fiveBubbleMotion` warms one six-second contact, then
+moves one bubble through four settled neighbors in three six-second native touch
+contacts. All four neighbors visibly move each time; canonical resets and settling
+occur outside measured windows. `tools/performance/android-bubbles.py` polls the
+app window's actual SurfaceFlinger presentation timestamps, excluding warmup and
+100 ms at each contact edge. The ready/go gate enables the exact app Adaptive row
+after instrumentation starts and resumes the same private Activity. The original
+OFF setting was restored after capture.
+
+| Build | Actual presents/s, three contacts | p99 interval, ms | Result |
+| --- | --- | --- | --- |
+| Before primitive glass transport, APK `f589c1fa` | 86.642 / 89.238 / 86.475 | 22.336615 / 11.310384 / 22.333308 | Not met |
+| Primitive glass transport, APK `5c2e4751` | 89.063 / 86.296 / 87.166 | 11.289538 / 22.330692 / 22.330384 | Not met |
+
+Both meet the 85.5 presents/s floor but exceed the fixed 22.2 ms p99 limit in two
+contacts. The comparison does not establish a performance improvement. In the
+later capture, FrameMetrics animation p99 is 3.12–3.68 ms, layout ≤0.542 ms and
+draw ≤0.560 ms; command issue is 9.12–12.70 ms and GPU duration 12.61–18.54 ms.
+These are attribution proxies, not actual presents. Raw evidence is in
+`artifacts/bubbles/android-mid-final-reference/` and
+`artifacts/bubbles/android-mid-transport-reference/`; each includes a build manifest,
+contact windows, thermal/display records, JUnit result and raw presentation samples.
 
 ## Web tool bubbles
 

@@ -626,6 +626,7 @@ pub struct HeaderView {
 pub struct HeaderItemView {
     pub double_click: bool,
     pub has_variants: bool,
+    pub tears_bubble: bool,
     pub resolved_control: Option<ToolbarControl>,
     pub id: u32,
     pub label: String,
@@ -685,6 +686,7 @@ impl<R: layer_render::CanvasRenderer> UiSession<R> {
                 };
                 HeaderItemView {
                     double_click: resolved_control.and_then(ToolbarControl::double_click_command).is_some(),
+                    tears_bubble: matches!(entry.item, HeaderItem::Tool { control } if crate::BubbleSource::tears_without_hold(control)),
                     has_variants,resolved_control,
                     id: entry.id,
                     label,

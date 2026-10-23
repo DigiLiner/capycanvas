@@ -154,6 +154,7 @@ private suspend fun AwaitPointerEventScope.holdMenu(input: HeaderInteraction, do
         if (!focused) { input.finish(true); return@pointerInput }
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (down.isConsumed) return@awaitEachGesture
             val press = down.position / input.dock.density
             val source = input.sources.values.filter { it.bounds.contains(press) }.maxByOrNull { it.priority }
             if (source == null || !input.enabled) return@awaitEachGesture

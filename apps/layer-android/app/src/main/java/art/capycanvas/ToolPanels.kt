@@ -57,30 +57,31 @@ import kotlinx.coroutines.withContext
     }
 }
 
+@Composable internal fun BrushPreview(host: CanvasHost, id: Int, modifier: Modifier) {
+    val context = LocalContext.current
+    val name = "$id-${if (LocalPalette.current.dark) "dark" else "light"}.png"
+    var image by remember(host, name) { mutableStateOf(host.brushPreviews.get(name)) }
+    LaunchedEffect(host, name) {
+        if (image == null) image = withContext(Dispatchers.IO) {
+            host.brushPreviews.get(name) ?: context.assets.open(name).use { BitmapFactory.decodeStream(it).asImageBitmap() }
+                .also { host.brushPreviews.put(name, it) }
+        }
+    }
+    Box(modifier) { image?.let { Image(it, null, Modifier.fillMaxSize().testTag("brush-preview-$id"), contentScale = ContentScale.FillBounds) } }
+}
+
 @Composable private fun ToolChoice(host: CanvasHost, item: JSONObject, kind: String, modifier: Modifier, compact: Boolean = false) {
     val colors = LocalPalette.current
-    val context = LocalContext.current
     val label = item.getString("label")
     val action = item.getJSONObject("action")
     val enabled = item.optBoolean("enabled", true)
     val preview = item.opt("preview").takeIf { it is Number } as? Number
-    ActionTip(host, label, action, modifier) {
+    ActionTip(host, label, action, modifier.bubbleChoice(action)) {
         Column(Modifier.fillMaxWidth().clip(ControlShape).alpha(if (enabled) 1f else .4f)
             .background(if (item.optBoolean("selected")) colors.active else Color.Transparent)
             .clickable(enabled = enabled) { host.dispatch(action) }.padding(horizontal = 6.dp, vertical = 3.dp)) {
             if (preview != null) {
-                val id = preview.toInt()
-                val name = "$id-${if (colors.dark) "dark" else "light"}.png"
-                var swatch by remember(host, name) { mutableStateOf(host.brushPreviews.get(name)) }
-                LaunchedEffect(host, name) {
-                    if (swatch == null) swatch = withContext(Dispatchers.IO) {
-                        host.brushPreviews.get(name) ?: context.assets.open(name).use { BitmapFactory.decodeStream(it).asImageBitmap() }
-                            .also { host.brushPreviews.put(name, it) }
-                    }
-                }
-                Box(Modifier.fillMaxWidth().height(40.dp)) {
-                    swatch?.let { Image(it, null, Modifier.fillMaxSize().testTag("brush-preview-$id"), contentScale = ContentScale.FillBounds) }
-                }
+                BrushPreview(host, preview.toInt(), Modifier.fillMaxWidth().height(40.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     SharedIcon(item.getString("icon"), null, Modifier.testTag("tool-$kind-icon-$label"))
                     Text(label, Modifier.weight(1f), textAlign = TextAlign.End, fontWeight = FontWeight.Bold)

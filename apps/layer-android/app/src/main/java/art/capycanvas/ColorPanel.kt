@@ -58,7 +58,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import kotlin.math.*
 
-private fun JSONArray.color() = Color(getDouble(0).toFloat(), getDouble(1).toFloat(), getDouble(2).toFloat(), optDouble(3, 1.0).toFloat())
+internal fun JSONArray.color() = Color(getDouble(0).toFloat(), getDouble(1).toFloat(), getDouble(2).toFloat(), optDouble(3, 1.0).toFloat())
 private fun JSONArray.point(scale: Float) = Offset(getDouble(0).toFloat() * scale, getDouble(1).toFloat() * scale)
 private fun Modifier.place(rect: JSONArray) = offset(rect.getDouble(0).toFloat().dp, rect.getDouble(1).toFloat().dp)
     .size(rect.getDouble(2).toFloat().dp, rect.getDouble(3).toFloat().dp)
@@ -116,7 +116,7 @@ private fun Modifier.place(rect: JSONArray) = offset(rect.getDouble(0).toFloat()
                 if(hdr)ColorIntensityArc(view,layout,Modifier.matchParentSize(),::color)
                 val preview = host.colorPreview
                 ColorWheel(host, view, if (view.optBoolean("hdr")) (preview?.objectOrNull("colors") ?: host.snapshot!!.getJSONObject("state").displayColors()).toString() else "",
-                    preview?.objectOrNull("picker")?.objectOrNull("preview") != null, Modifier.place(layout.array("wheel")), ::color)
+                    preview?.objectOrNull("picker")?.objectOrNull("preview") != null, Modifier.place(layout.array("wheel")), color = ::color)
                 for (slot in listOf("background", "foreground", "transparent")) {
                     val swatch = view.array("swatches").objects().first { it.getString("slot") == slot }
                     ColorSwatch(host, swatch, Modifier.place(layout.array(slot)).zIndex(if (slot == view.getString("front_swatch")) 1f else 0f), ::color)
@@ -183,6 +183,25 @@ private class ReadoutCorner(private val radius: Float) : Shape {
     }
 }
 
+@Composable internal fun ColorSwatchFace(rgba: Color, slot: String, selected: Boolean, hovered: Boolean, modifier: Modifier) {
+    val colors = LocalPalette.current
+    Canvas(modifier) {
+            val radius = size.minDimension / 2
+            val padding = (if (slot == "foreground") 3.dp else 1.dp).toPx()
+            drawCircle(colors.panel)
+            val field = Path().apply { addOval(Rect(center - Offset(radius - padding, radius - padding), Size((radius - padding) * 2, (radius - padding) * 2))) }
+            clipPath(field) {
+                val tile = 5.dp.toPx()
+                for (y in 0..ceil(size.height / tile).toInt()) for (x in 0..ceil(size.width / tile).toInt()) {
+                    drawRect(if ((x + y) % 2 == 0) colors.checkerLight else colors.checkerDark, Offset(padding + x * tile, padding + y * tile), Size(tile, tile))
+                }
+                drawRect(rgba)
+            }
+            val stroke = (if (selected || hovered) 2.dp else 1.dp).toPx()
+            drawCircle(colors.text.copy(alpha = if (selected || hovered) 1f else .25f), radius - stroke / 2, style = Stroke(stroke))
+        }
+ }
+
 @Composable private fun ColorSwatch(host: CanvasHost, swatch: JSONObject, modifier: Modifier, color: (JSONObject) -> Unit) {
     val colors = LocalPalette.current
     val slot = swatch.getString("slot")
@@ -242,21 +261,7 @@ private class ReadoutCorner(private val radius: Float) : Shape {
                     }
                 }
             }), onClick = { select() }) { _, hovered ->
-        Canvas(Modifier.fillMaxSize()) {
-            val radius = size.minDimension / 2
-            val padding = (if (slot == "foreground") 3.dp else 1.dp).toPx()
-            drawCircle(colors.panel)
-            val field = Path().apply { addOval(Rect(center - Offset(radius - padding, radius - padding), Size((radius - padding) * 2, (radius - padding) * 2))) }
-            clipPath(field) {
-                val tile = 5.dp.toPx()
-                for (y in 0..ceil(size.height / tile).toInt()) for (x in 0..ceil(size.width / tile).toInt()) {
-                    drawRect(if ((x + y) % 2 == 0) colors.checkerLight else colors.checkerDark, Offset(padding + x * tile, padding + y * tile), Size(tile, tile))
-                }
-                drawRect(swatch.array("rgba").color())
-            }
-            val stroke = (if (selected || hovered) 2.dp else 1.dp).toPx()
-            drawCircle(colors.text.copy(alpha = if (selected || hovered) 1f else .25f), radius - stroke / 2, style = Stroke(stroke))
-        }
+        ColorSwatchFace(swatch.array("rgba").color(), slot, selected, hovered, Modifier.fillMaxSize())
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("edit_menu")) }, onClick = { menu = false;color(obj("op" to "select","slot" to slot)); editSlot(host, if (slot == "background") "background" else "foreground", windowed) })
             DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("palettes")) }, modifier = Modifier.testTag("color-library-menu"),
@@ -273,7 +278,7 @@ private data class ColorFieldRequest(val shape:String,val hue:Float,val pixels:I
         hdr==other.hdr && rendition==other.rendition && preview==other.preview && (preview || this==other)
 }
 
-@Composable internal fun ColorWheel(host:CanvasHost,view: JSONObject, fieldColors: String, previewing: Boolean, modifier: Modifier, color: (JSONObject) -> Unit) {
+@Composable internal fun ColorWheel(host:CanvasHost,view: JSONObject, fieldColors: String, previewing: Boolean, modifier: Modifier, interactive: Boolean = true, color: (JSONObject) -> Unit) {
     val shape = view.getString("shape")
     val rgbSpace = view.getString("rgb_space")
     val hue = view.array("wheel_components").getDouble(0).toFloat()
@@ -309,8 +314,8 @@ private data class ColorFieldRequest(val shape:String,val hue:Float,val pixels:I
         LaunchedEffect(request) { requests.send(request) }
         DisposableEffect(requests) { onDispose { requests.close() } }
         Canvas(Modifier.fillMaxSize().testTag("color-wheel").semantics { contentDescription = host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("wheel") }
-            .pointerInput(shape, focused) {
-                if (!focused) return@pointerInput
+            .pointerInput(shape, focused, interactive) {
+                if (!focused || !interactive) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     if (down.isConsumed || currentEvent.buttons.isSecondaryPressed ||

@@ -294,6 +294,7 @@ impl NativeHost {
         map.serialize_entry("state", state)?;
         map.serialize_entry("layout", &layout)?;
         map.serialize_entry("panels", &panels)?;
+        map.serialize_entry("bubbles", &self.session.bubble_presentations())?;
         map.serialize_entry(
             "filter_preview_revision",
             &self.session.filter_preview_revision(),

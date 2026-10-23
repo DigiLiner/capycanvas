@@ -67,7 +67,8 @@ internal suspend fun CanvasHost.menuCopy(request: JSONObject): JSONObject? = sus
     copy: (suspend () -> JSONObject?)? = null, showTitle: Boolean = true, maxHeight: Dp = Dp.Unspecified, dismiss: () -> Unit) {
     var projected by remember(menu) { mutableStateOf(menu) }
     val currentCopy by rememberUpdatedState(copy)
-    LaunchedEffect(host, host.languageTag, menu) {
+    var refresh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(host, host.languageTag, menu, refresh) {
         val tag = host.languageTag
         val epoch = host.menuEpoch()
         currentCopy?.invoke()?.let { if (host.languageTag == tag && host.menuEpoch() == epoch) projected = it }
@@ -84,13 +85,19 @@ internal suspend fun CanvasHost.menuCopy(request: JSONObject): JSONObject? = sus
         shape = RoundedCornerShape(10.dp), containerColor = LocalPalette.current.panel) {
         if (!focusable) {
             val view = LocalView.current
+            val currentDismiss by rememberUpdatedState(dismiss)
             DisposableEffect(host, view) {
-                val keys: (KeyEvent) -> Boolean = view::dispatchKeyEvent
+                val keys: (KeyEvent) -> Boolean = { key ->
+                    if (key.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                        if (key.action == KeyEvent.ACTION_DOWN) currentDismiss()
+                        true
+                    } else view.dispatchKeyEvent(key)
+                }
                 host.menuKeyHandler = keys
                 onDispose { if (host.menuKeyHandler === keys) host.menuKeyHandler = null }
             }
         }
-        WorkspaceMenuItems(host, current.array("sections"), dismiss, if (showTitle && current.has("title")) current.getString("title") else null, command)
+        WorkspaceMenuItems(host, current.array("sections"), dismiss, if (showTitle && current.has("title")) current.getString("title") else null, command, refresh = { refresh++ })
     }
 }
 
@@ -132,7 +139,7 @@ internal fun Modifier.opensWindowlessMenu(button: WindowlessMenuButton, label: S
 @Composable internal fun ToolGroupIndicator(modifier: Modifier = Modifier) = SharedIcon("tool-group", null, modifier)
 
 @Composable internal fun WorkspaceMenuItems(host: CanvasHost, sections: JSONArray,
-    dismiss: () -> Unit = {}, title: String? = null, command: ((JSONObject) -> Unit)? = null) {
+    dismiss: () -> Unit = {}, title: String? = null, command: ((JSONObject) -> Unit)? = null, refresh: () -> Unit = {}) {
     val colors = LocalPalette.current
     var pages by remember { mutableStateOf<List<Pair<Int, Int>>>(emptyList()) }
     var page: JSONObject? = null
@@ -159,19 +166,24 @@ internal fun Modifier.opensWindowlessMenu(button: WindowlessMenuButton, label: S
         .filter { it.second.length() > 0 }.forEachIndexed { index, (sectionIndex, section) ->
         if (index > 0) HorizontalDivider(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), color = colors.divider)
         section.objects().forEachIndexed { itemIndex, item ->
-            val enabled = item.optBoolean("enabled", true)
+            val heading = item.optBoolean("is_heading")
+            val enabled = item.optBoolean("enabled", true) && !heading
             val checkbox = item.objectOrNull("action")?.objectOrNull("command")?.optString("type") == "show_in_switcher"
             Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).padding(horizontal = 6.dp)
                 .then(if (checkbox) Modifier.semantics {
                     role = Role.Checkbox
                     toggleableState = ToggleableState(item.optBoolean("selected"))
                 } else Modifier)
-                .clip(RoundedCornerShape(6.dp)).alpha(if (enabled) 1f else .4f)
+                .clip(RoundedCornerShape(6.dp)).alpha(if (enabled || heading) 1f else .4f)
                 .then(if (checkbox || item.isNull("selected")) Modifier else Modifier.semantics { selected = item.getBoolean("selected") })
                 .clickable(enabled = enabled) {
                     if (item.array("sections").length() > 0) pages = pages + (sectionIndex to itemIndex)
                     else item.objectOrNull("command")?.takeIf { command != null }?.let { dismiss(); command!!(it) }
-                        ?: item.objectOrNull("action")?.let { action -> dismiss(); host.dispatch(action) }
+                        ?: item.objectOrNull("action")?.let { action ->
+                            if (!item.optBoolean("keep_open")) dismiss()
+                            host.dispatch(action)
+                            if (item.optBoolean("keep_open")) refresh()
+                        }
                 }.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 item.optString("icon").takeIf { it.isNotEmpty() && it != "null" }?.let { SharedIcon(it, null) }

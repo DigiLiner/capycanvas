@@ -1069,6 +1069,7 @@ class AndroidHostTest {
         action(obj("type" to "effect", "action" to obj("op" to "insert", "effect" to "curves")))
         for (panel in listOf("navigator", "proof", "layers")) action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to panel, "visible" to false)))
         fun properties() = state().getJSONObject("layer_properties")
+        fun picker() = host.colorPreview?.objectOrNull("picker") ?: state().getJSONObject("color_picker")
         fun control() = properties().array("controls").objects().first { !it.isNull("curve") }
         fun points() = control().getJSONObject("value").getJSONArray("value").toString()
         fun graph() = compose.onNodeWithTag("effect-curve").performScrollTo()
@@ -1427,7 +1428,7 @@ class AndroidHostTest {
             val beforePoints = points()
             val beforePickRevision = state().getJSONObject("document_file").getLong("revision")
             propertyAction("calibrate", "gray")
-            waitState { it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { picker().getBoolean("calibrating") }
             canvasEvent(MotionEvent.ACTION_DOWN, listOf(white), MotionEvent.TOOL_TYPE_STYLUS)
             assertEquals("Stylus Down does not change the curve", beforePoints, points())
             assertEquals(beforePickRevision, state().getJSONObject("document_file").getLong("revision"))
@@ -1435,7 +1436,7 @@ class AndroidHostTest {
             assertEquals(beforePoints, points())
             assertEquals(beforePickRevision, state().getJSONObject("document_file").getLong("revision"))
             canvasEvent(MotionEvent.ACTION_UP, listOf(white), MotionEvent.TOOL_TYPE_STYLUS)
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") && points() != beforePoints }
+            waitState { !picker().getBoolean("calibrating") && points() != beforePoints }
             val calibrated = JSONArray(points())
             assertEquals("Gray calibration uses the original white input endpoint", 2, calibrated.length())
             assertEquals(1.0, calibrated.getJSONArray(1).getDouble(0), 0.0)
@@ -1445,20 +1446,21 @@ class AndroidHostTest {
             invoke("redo"); assertEquals(savedEffect(picked), savedEffect(archive("gray-redo")))
             invoke("undo")
             propertyAction("calibrate", "gray")
+            waitState { picker().getBoolean("calibrating") }
             canvasEvent(MotionEvent.ACTION_DOWN, listOf(white))
             SystemClock.sleep(550)
-            waitState { !it.getJSONObject("color_picker").isNull("preview") }
-            val preview = state().getJSONObject("color_picker").getJSONObject("preview").getJSONArray("rgba")
+            compose.waitUntil(10_000) { host.colorPreview?.objectOrNull("picker")?.objectOrNull("preview") != null }
+            val preview = host.colorPreview!!.getJSONObject("picker").getJSONObject("preview").getJSONArray("rgba")
             for (component in 0..2) assertEquals("Held touch previews the original white input", 1.0, preview.getDouble(component), 1e-5)
             assertEquals("A held preview does not edit the curve", beforePoints, points())
             canvasEvent(MotionEvent.ACTION_CANCEL, listOf(white))
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { !picker().getBoolean("calibrating") }
             canvasEvent(MotionEvent.ACTION_UP, listOf(white))
             settle()
             assertEquals("A canceled loupe and its late Up do not edit", savedEffect(beforePick), savedEffect(archive("gray-touch-cancel")))
             val targetBefore = archive("target-before")
             propertyAction("target_curve")
-            waitState { it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { picker().getBoolean("calibrating") }
             canvasEvent(MotionEvent.ACTION_DOWN, listOf(white))
             SystemClock.sleep(550)
             val moved = white + androidx.compose.ui.geometry.Offset(0f, .04f)
@@ -1467,9 +1469,9 @@ class AndroidHostTest {
             assertEquals("The targeted source is the white input endpoint", 2, JSONArray(points()).length())
             canvasEvent(MotionEvent.ACTION_UP, listOf(moved))
             settle()
-            assertTrue("Targeted mode stays armed after Up", state().getJSONObject("color_picker").getBoolean("calibrating"))
+            assertTrue("Targeted mode stays armed after Up", picker().getBoolean("calibrating"))
             propertyAction("target_curve")
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { !picker().getBoolean("calibrating") }
             val targeted = archive("target-release")
             assertEquals(sourceBacking, backing(targeted))
             invoke("undo"); assertEquals("A held targeted contact has one Undo", savedEffect(targetBefore), savedEffect(archive("target-undo")))
@@ -1484,9 +1486,9 @@ class AndroidHostTest {
             waitState { points() == beforePoints }
             canvasEvent(MotionEvent.ACTION_UP, listOf(moved))
             settle(); assertEquals("A late Up after cancellation cannot edit", beforePoints, points())
-            assertTrue("Contact cancellation retains the armed targeted tool", state().getJSONObject("color_picker").getBoolean("calibrating"))
+            assertTrue("Contact cancellation retains the armed targeted tool", picker().getBoolean("calibrating"))
             propertyAction("target_curve")
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { !picker().getBoolean("calibrating") }
             val cancelled = archive("target-cancel")
             assertEquals(savedEffect(targetBefore), savedEffect(cancelled)); assertEquals(sourceBacking, backing(cancelled))
             val retainedHost = host
@@ -1498,7 +1500,7 @@ class AndroidHostTest {
             compose.activityRule.scenario.recreate()
             assertSame("Recreation retains the authoritative drawing owner", retainedHost, host)
             compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") && points() == beforePoints }
+            waitState { !picker().getBoolean("calibrating") && points() == beforePoints }
             canvasEvent(MotionEvent.ACTION_UP, listOf(moved))
             settle()
             val recreated = archive("target-recreated")
@@ -1525,13 +1527,13 @@ class AndroidHostTest {
             val beforeBalance = archive("balance-before")
             val balanceRevision = state().getJSONObject("document_file").getLong("revision")
             propertyAction("calibrate")
-            waitState { it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { picker().getBoolean("calibrating") }
             val balancePoint = samplePoint()
             canvasEvent(MotionEvent.ACTION_DOWN, listOf(balancePoint), MotionEvent.TOOL_TYPE_STYLUS)
             canvasEvent(MotionEvent.ACTION_MOVE, listOf(balancePoint), MotionEvent.TOOL_TYPE_STYLUS)
             assertEquals(balanceRevision, state().getJSONObject("document_file").getLong("revision"))
             canvasEvent(MotionEvent.ACTION_UP, listOf(balancePoint), MotionEvent.TOOL_TYPE_STYLUS)
-            waitState { !it.getJSONObject("color_picker").getBoolean("calibrating") }
+            waitState { !picker().getBoolean("calibrating") }
             for (name in listOf("temperature", "tint")) {
                 val value = properties().array("controls").objects().first { it.getString("key") == name }.getJSONObject("value").getDouble("value")
                 assertEquals("Original white input neutralizes $name before the nonneutral White Balance", 0.0, value, 1e-5)

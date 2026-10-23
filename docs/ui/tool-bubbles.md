@@ -17,8 +17,8 @@ bubbles push each other, and `session_bubbles.rs` holds taps, choices, beads,
 strokes, menus, history and UI text. The workspace keeps each bubble's place and
 options and each brush's ring settings (`BubbleLayout`). Hosts draw the parts
 at the offsets in `BubbleView`, run the frame clock and forward contacts
-relative to the bubble center. GTK is the reference presenter; Web uses the same
-views, hit testing and actions.
+relative to the bubble center. GTK is the reference presenter; Web and Android
+use the same views, hit testing and actions.
 
 ## What becomes a bubble
 
@@ -262,12 +262,15 @@ a host only presents it and captures native input. GTK
   `bubble_placements()` gives each center and whether it is lifted or homing.
   `bubble_presentations()` adds derived ring points, dot centers, history and
   readout positions, the palette pill and display-mapped bead and stamp colors
-  for hosts crossing a serialization boundary.
+  for hosts crossing a serialization boundary. Native model snapshots include
+  these presentations under `bubbles`; the `bubble_motion` query carries only
+  placements and stroke fade state. `BubbleHitGeometry` reads a serialized view
+  and uses the same hit test without accessing the render-owned session.
 - **Motion:** call `step_bubbles(now_ns)` from the frame clock while it returns
   true; `reduce_bubble_motion` follows the platform's reduced-motion setting.
 - **Geometry:** `BubbleView::hit` (which part a point lands on), `reach`
   (how far the widget must extend), `readout_center`, `count_badge`, `dot_centers`,
-  `ChooserItem::{contains, size, tag_center}`, `history_center`,
+  `ChooserItem::{contains, size, tag_center}`, `chooser_tag`, `history_center`,
   `palette_pill`, `RingArc::{point, fraction, icon_point, covers}` and the
   constants (`TOOL_BUBBLE`, `HISTORY_BUBBLE`, `HALO_BANDS`, `RING_ICON`,
   `RING_TRACK`, `RING_RIM`, `CHOOSER_ITEM`, `CHOOSER_TAG`, `BRUSH_PILL`,
@@ -281,7 +284,9 @@ a host only presents it and captures native input. GTK
   section may be a heading (`ContextMenuItem::is_heading`). Serialized items
   expose `is_heading` and `keep_open` for the same presentation across hosts.
 - **Sources:** `bubble_grab` resolves eligible toolbar and header sources;
-  `can_take_bubble` checks a held toolbar drop against the shared home regions.
+  their native projections expose `tears_bubble` for immediate capture without
+  a render-owner round trip. `can_take_bubble` checks a held toolbar drop against
+  the shared home regions.
 - **Painting:** `bubble_fade()` reports whether a stroke is down and which
   bubbles it faded. **Dab:** `toolbar_stamp` returns the alpha mask of the
   current brush for `BubbleView::stamp`.
@@ -292,6 +297,18 @@ Web captures pointer events before canvas input and retains DOM widgets for the
 wheel, swatches and Layers inspector. Mouse resets use the browser's native
 double-click event. Browsers expose no system hold or double-tap thresholds;
 Web uses a 500 ms hold (1000 ms on the wheel) and a 400 ms, 8 px double tap.
+Android uses its native hold and double-tap timing and distance, captures at the workspace,
+and lets the card's native controls retain their contacts. Its wheel's captured
+color and restoration run in order on the render owner; the UI never waits for
+that owner. Canvas contacts wake the bubble frame clock even when the retained
+view is unchanged, so stroke fade and its delayed return continue to run.
+Native contact delivery checks the latest published bubble identities before
+forwarding an event or hold timeout. Removed or replaced sources retire their
+native contacts without forwarding cancellation to the replacement.
+Shared workspace restoration cancels the ring edit and clears transient bubble
+state before adopting the replacement, including when it reuses bubble IDs.
+An outside contact advances the model revision when it dismisses an open part,
+even when the contact does not paint or move the camera.
 
 - **Targets:** a point belongs to a bubble only when `hit` returns a part;
   everything else goes to the canvas. While a contact or finger is down on a

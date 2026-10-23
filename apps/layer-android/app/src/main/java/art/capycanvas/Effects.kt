@@ -390,6 +390,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
                                 try {
                                     while (true) {
                                         val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                        if (change.isConsumed) break
                                         if (!change.pressed) {
                                             released = true
                                             val tapped = (change.position + origin - down.position - start).getDistance() < viewConfiguration.touchSlop

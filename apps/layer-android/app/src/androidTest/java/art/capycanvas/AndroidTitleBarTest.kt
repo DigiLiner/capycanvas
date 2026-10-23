@@ -1722,6 +1722,7 @@ class AndroidTitleBarTest {
         if(!row(through).getBoolean("pass_through"))layer(obj("op" to "toggle_pass_through","id" to through))
         action(obj("type" to "invoke","command" to "select_all"))
         action(obj("type" to "invoke","command" to "save_selection_layer"))
+        waitFor("selection becomes a layer") { state().array("layers").objects().any { it.getBoolean("selection_layer") } }
         val saved=state().array("layers").objects().first { it.getBoolean("selection_layer") }.getLong("id")
         rename(saved,"Saved selection")
         layer(obj("op" to "drop","id" to saved,"target" to owner,"fraction" to 0,"surface" to "row"))
@@ -1795,8 +1796,11 @@ class AndroidTitleBarTest {
             swipe(isolated,90f);assertNull(node("layer-delete-$isolated"));assertFalse(row(isolated).getBoolean("pass_through"))
             swipe(isolated,60f);assertTrue(row(isolated).getBoolean("pass_through"));assertFalse(row(isolated).getBoolean("alpha_locked"))
             swipe(isolated,60f);assertFalse(row(isolated).getBoolean("pass_through"));assertEquals("Normal",row(isolated).getString("blend_label"))
-            undo();assertTrue(row(isolated).getBoolean("pass_through"));undo();assertFalse(row(isolated).getBoolean("pass_through"))
-            swipe(base,60f);assertTrue(row(base).getBoolean("alpha_locked"));undo();assertFalse(row(base).getBoolean("alpha_locked"))
+            undo();waitFor("Undo restores Pass Through") { row(isolated).getBoolean("pass_through") }
+            undo();waitFor("Undo restores Normal blending") { !row(isolated).getBoolean("pass_through") }
+            assertEquals("toggle_alpha_lock", row(owner).getJSONObject("right_swipe").getString("op"))
+            swipe(owner,60f);waitFor("Swiping locks the paint layer alpha") { row(owner).getBoolean("alpha_locked") }
+            undo();waitFor("Undo restores unlocked alpha") { !row(owner).getBoolean("alpha_locked") }
         }
         for((pointer,thumbnail) in listOf(MotionEvent.TOOL_TYPE_MOUSE to true,MotionEvent.TOOL_TYPE_FINGER to false,MotionEvent.TOOL_TYPE_STYLUS to true)) {
             action(obj("type" to "set_theme","theme" to if(pointer==MotionEvent.TOOL_TYPE_MOUSE) "light" else "dark"))

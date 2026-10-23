@@ -468,7 +468,7 @@ private fun copyText(context: android.content.Context, text: String) {
         Triple(inset, bottom - inset, layout)
     }
     Box(Modifier.size(width.dp, height.dp).testTag("color-editor-wheel")) {
-        ColorWheel(host, panel, editor.getJSONObject("picker").toString(), false, Modifier.size(width.dp), pick)
+        ColorWheel(host, panel, editor.getJSONObject("picker").toString(), false, Modifier.size(width.dp), color = pick)
         if (hdr) Box(Modifier.offset((-inset).dp, (-inset).dp).size(stage.dp, (height + inset).dp).hdrIntensityInput(panel, pick)) {
             ColorIntensityArc(panel, layout, Modifier.matchParentSize(), pick, caption = false)
         }

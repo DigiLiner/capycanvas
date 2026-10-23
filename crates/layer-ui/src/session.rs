@@ -1279,7 +1279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     && !facts.popup_open
                     && self.dismiss_bubble_parts(position)
                 {
-                    reply.change.regions |= regions::BUBBLES;
+                    reply.change = merge_change(reply.change, self.changed(regions::BUBBLES, false));
                 }
                 if let ChromeEvent::Contact { position, canvas } = event
                     && let Some(drawer) = &self.state.customization.drawer
@@ -1322,9 +1322,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     if !switches_header
                         && !tile.is_some_and(|anchor| self.switches_toolbar_drawer(anchor))
                     {
-                        reply.change = self.dispatch(UiAction::Customize {
+                        reply.change = merge_change(reply.change, self.dispatch(UiAction::Customize {
                             action: CustomizationAction::CloseExpanded,
-                        })?;
+                        })?);
                         // Canvas contact only dismisses; native chrome must keep
                         // its click/drag (menus, title-bar grabs, toolbar grips).
                         reply.handled |= canvas;
@@ -1340,9 +1340,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         e.contains(position) && (!e.header_contains(position) || tab)
                     })
                 {
-                    reply.change = self.dispatch(UiAction::Customize {
+                    reply.change = merge_change(reply.change, self.dispatch(UiAction::Customize {
                         action: CustomizationAction::CloseExpanded,
-                    })?;
+                    })?);
                     reply.handled = true;
                 }
                 if matches!(event, ChromeEvent::Motion | ChromeEvent::Contact { .. }) {
@@ -3402,6 +3402,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 workspace.validate()?;
                 workspace.layout.open_default_columns(self.state.platform);
                 workspace.layout.adopt_runtime(&self.state.workspace.layout);
+                let bubbles = self.reset_bubbles()?;
                 self.state.workspace = *workspace;
                 self.tool_origin = None;
                 self.workspace_history = workspace::WorkspaceHistory::default();
@@ -3410,7 +3411,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.workspace_drag = None;
                 self.workspace_tab_drag = None;
                 self.state.customization = CustomizationState::default();
-                (LAYOUT | CUSTOMIZATION, false)
+                (LAYOUT | CUSTOMIZATION | BUBBLES | bubbles.regions, bubbles.canvas_wake)
             }
             UiAction::Invoke { command } => {
                 if let Some(reason) = self.command_disabled_reason(command) { return Err(reason); }

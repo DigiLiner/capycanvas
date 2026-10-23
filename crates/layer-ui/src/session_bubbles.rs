@@ -114,6 +114,14 @@ impl<R: CanvasRenderer> UiSession<R> {
         (self.bubble_state.stroke, self.bubble_state.desk.faded().to_vec())
     }
 
+    pub(crate) fn reset_bubbles(&mut self) -> Result<UiChange, String> {
+        let change = if let Some(ring) = self.bubble_state.ring {
+            self.bubble_ring(ring.id, ContactPhase::Cancel, [0.; 2])?
+        } else { UiChange::default() };
+        self.bubble_state = Bubbles { stroke: self.bubble_state.stroke, ..Bubbles::default() };
+        Ok(change)
+    }
+
     pub fn bubble_grab(&self, grab: BubbleGrab, held: bool) -> Option<BubbleGrab> {
         let anchor = match grab {
             BubbleGrab::Header { id } => DrawerAnchor::Header { id },

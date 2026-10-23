@@ -228,24 +228,27 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
     val colors = LocalPalette.current
     val density = LocalDensity.current.density
     val header = remember(host, dock) { HeaderInteraction(host, dock) }
+    val bubbleScope = rememberCoroutineScope()
+    val bubbles = remember(host, dock, header) { BubbleInteraction(host, dock, header, bubbleScope) }
+    dock.bubbles = bubbles
     SideEffect {
         header.editing = snapshot?.objectOrNull("header")?.optBoolean("editing") == true
         header.enabled = snapshot != null && !snapshot.optBoolean("chrome_hidden") && snapshot.objectOrNull("preferences") == null && snapshot.objectOrNull("picker") == null && snapshot.objectOrNull("toolbar_prompt") == null && snapshot.objectOrNull("toolbar_manager") == null
     }
     DisposableEffect(host, header) {
-        host.headerKeyHandler = header::key
-        onDispose { header.finish(true); host.headerKeyHandler = null }
+        host.headerKeyHandler = { bubbles.key(it) || header.key(it) }
+        onDispose { bubbles.cancel(); header.finish(true); host.headerKeyHandler = null }
     }
     val activity = LocalActivity.current
-    val requestingDragFrames = dock.dragging
-    DisposableEffect(requestingDragFrames, activity) {
+    val requestingMotionFrames = dock.dragging || bubbles.active
+    DisposableEffect(requestingMotionFrames, activity) {
         val window = activity?.window
         val previous = window?.attributes?.preferredRefreshRate ?: 0f
-        if (requestingDragFrames && window != null) {
+        if (requestingMotionFrames && window != null) {
             val rate = window.decorView.display?.supportedModes?.maxOfOrNull { it.refreshRate }?.coerceAtMost(120f) ?: 60f
             window.attributes = window.attributes.apply { preferredRefreshRate = rate }
         }
-        onDispose { if (requestingDragFrames && window != null) window.attributes = window.attributes.apply { preferredRefreshRate = previous } }
+        onDispose { if (requestingMotionFrames && window != null) window.attributes = window.attributes.apply { preferredRefreshRate = previous } }
     }
     dock.density = density
     dock.enabled = snapshot?.objectOrNull("preferences") == null && snapshot?.objectOrNull("picker") == null && snapshot?.objectOrNull("toolbar_prompt") == null && snapshot?.objectOrNull("toolbar_manager") == null
@@ -274,7 +277,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
         else snapshotFlow { host.snapshot?.optJSONObject("layout")?.toString() to dock.configurationHeight }.collect { place(1f) }
     }
     BackHandler(expanded != null) { host.customize(obj("type" to "close_expanded")) }
-    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().testTag("workspace").headerGestures(header).workspaceGestures(dock)
+    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds().testTag("workspace").bubbleGestures(bubbles).headerGestures(header).workspaceGestures(dock)
         .imageCanvasDropTarget(host) { point ->
             dock.chromeRegions.values.any { it.bounds.contains(point) } || dock.regions.values.any { it.bounds.contains(point) }
         }
@@ -322,6 +325,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                     if (shown) child.place(0, 0)
                 }
             }
+            ToolBubbles(bubbles)
             val layout = snapshot.getJSONObject("layout")
             if (!hidden) CollapsedColumns(host, snapshot, panels, dock)
             ContentDrawers(host, snapshot, panels, dock)

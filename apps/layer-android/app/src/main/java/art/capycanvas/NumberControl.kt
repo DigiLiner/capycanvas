@@ -226,14 +226,15 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     val contact = if (onEditPhase == null || !enabled) Modifier else Modifier.pointerInput(enabled) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (down.isConsumed) return@awaitEachGesture
             focus.clearFocus(); beginEdit(); var released = false
             try {
                 while (true) {
                     val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                    if (change.isConsumed) break
                     if (!change.pressed) {
-                        val cancelled = change.isConsumed
-                        if (!cancelled) awaitPointerEvent(PointerEventPass.Final)
-                        released = true; endEdit(cancel = cancelled); break
+                        awaitPointerEvent(PointerEventPass.Final)
+                        released = true; endEdit(); break
                     }
                 }
             } finally { if (!released) endEdit(cancel = true) }
@@ -299,6 +300,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     }
     if (panel) {
         val reset = {
+            endEdit(cancel = true)
             finish(cancel = true)
             if (onReset != null) onReset() else if (!control.isNull("default_value")) apply(obj("type" to "expression", "text" to ""))
         }
@@ -365,13 +367,15 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         .pointerInput(enabled) {
             if (!enabled) return@pointerInput
             awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                if (down.isConsumed) return@awaitEachGesture
                 val center = Offset(size.width / 2f, size.height / 2f)
                 val radius = minOf(size.width, size.height) / 2f
                 point(down.position - center, radius)
+                awaitPointerEvent(PointerEventPass.Main)
                 while (true) {
                     val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) break
+                    if (change.isConsumed || !change.pressed) break
                     change.consume()
                     point(change.position - center, radius)
                 }

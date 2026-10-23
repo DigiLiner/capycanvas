@@ -126,6 +126,56 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
 
+    #[test]
+    fn outside_bubble_contact_publishes_retained_model_without_painting() {
+        use layer_ui::{BubbleAction, BubbleGrab, ChromeEvent, ChromeFacts, ContactPhase,
+            CustomizationAction, Platform, UiAction, UiInput};
+        for drawer in [false, true] {
+            let mut host = NativeHost::new(Platform::Android).unwrap();
+            host.resize(1600, 1000, 1.).unwrap();
+            let mut workspace = host.session.state().workspace.clone();
+            workspace.layout.header = serde_json::from_value(json!({
+                "size":"medium", "next_id":4, "zones":[[{"id":1,"item":{"kind":"capy"}}], [
+                    {"id":2,"item":{"kind":"tool","control":{"kind":"panel","panel":"layers"}}},
+                    {"id":3,"item":{"kind":"tool","control":{"kind":"command","command":"drawing_brush"}}}
+                ], []]
+            })).unwrap();
+            let layers_header = 2;
+            let tools_header = 3;
+            host.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) }).unwrap();
+            host.dispatch(UiAction::MeasureHeader { height: 40., items: vec![layer_ui::HeaderItemBounds {
+                id: tools_header, bounds: layer_ui::Bounds { x: 800., y: 0., width: 40., height: 40. },
+            }] }).unwrap();
+            for phase in [ContactPhase::Down, ContactPhase::Move, ContactPhase::Up] {
+                host.dispatch(UiAction::Bubble { action: BubbleAction::Drag {
+                    grab: BubbleGrab::Header { id: layers_header }, phase, position: [640., 520.], viewport: [1600., 1000.],
+                }}).unwrap();
+            }
+            if drawer {
+                host.dispatch(UiAction::Customize { action: CustomizationAction::ToggleHeaderDrawer { id: tools_header } }).unwrap();
+                assert!(host.session.state().customization.drawer.is_some());
+            }
+            let mut retained = read(&mut host);
+            assert!(retained["bubbles"][0]["view"]["card"].is_object(), "{retained}");
+            let layers_before = retained["state"]["layers"].clone();
+            assert!(host.take_model_update_bytes().unwrap().is_none());
+            let revision = host.session.state().revision;
+            let reply = host.input(UiInput::Chrome {
+                event: ChromeEvent::Contact { position: [1500., 950.], canvas: true },
+                facts: ChromeFacts::default(), viewport: [1600., 1000.],
+            }).unwrap();
+            assert!(reply.change.revision > revision, "outside contact must advance the published revision; drawer={drawer}");
+            assert_ne!(reply.change.regions & layer_ui::regions::BUBBLES, 0);
+            assert!(host.session.bubbles()[0].card.is_none());
+            let update = host.take_model_update_bytes().unwrap().expect("touch-only dismissal publishes a model update");
+            apply(&mut retained, serde_json::from_slice(&update).unwrap());
+            assert!(retained["bubbles"][0]["view"]["card"].is_null());
+            assert_eq!(retained["state"]["layers"], layers_before, "Chrome contact does not paint or edit layers");
+            if drawer { assert!(retained["state"]["customization"]["drawer"].is_null()); }
+            assert!(host.take_model_update_bytes().unwrap().is_none());
+        }
+    }
+
     fn read(host: &mut NativeHost) -> Value {
         serde_json::from_slice(&host.take_model_update_bytes().unwrap().unwrap()).unwrap()
     }

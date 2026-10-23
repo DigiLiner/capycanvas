@@ -1240,3 +1240,144 @@ fn halo_arcs_that_shape_the_dab_show_it_under_the_contact() {
         assert!(view(&s, id).stamp.is_none());
     }
 }
+
+#[test]
+fn serialized_bubble_hit_geometry_preserves_native_contact_regions() {
+    let mut s = desk();
+    let dial = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, FAR);
+    let halo = view(&s, dial);
+    let ring_point = halo.rings[0].arc.point(0.5);
+    assert_eq!(halo.hit(ring_point), Some(BubbleHit::Ring));
+    let gap = (0..360).map(|degrees| {
+        let angle = (degrees as f32).to_radians();
+        [angle.cos() * 55., angle.sin() * 55.]
+    }).find(|&point| halo.hit(point).is_none()).expect("the halo leaves canvas gaps");
+    open_ring(&mut s, dial);
+    let chooser = view(&s, dial);
+    let brush_index = chooser.chooser.iter().position(|item| item.kind == ChooserKind::Brush).unwrap();
+    assert_eq!(chooser.hit(chooser.chooser[brush_index].center), Some(BubbleHit::Item(brush_index)));
+    let color = take_ring(&mut s, [350., 500.]);
+    tap_bead(&mut s, color, Bead::Palettes);
+    let wheel = view(&s, color);
+    assert_eq!(wheel.hit([0.; 2]), Some(BubbleHit::Wheel));
+    let history = take_control(&mut s, ToolbarControl::Command { command: CommandId::Undo }, [600., 200.]);
+    let history = view(&s, history);
+    assert_eq!(history.hit([-20., 0.]), Some(BubbleHit::Half(0)));
+    assert_eq!(history.hit([20., 0.]), Some(BubbleHit::Half(1)));
+    let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, [900., 600.]);
+    let card = view(&s, layers);
+    assert_eq!(card.hit([0.; 2]), Some(BubbleHit::Card));
+    let mut disabled = halo.clone();
+    disabled.rings.iter_mut().for_each(|ring| ring.enabled = false);
+    assert_eq!(disabled.hit(ring_point), None);
+    let controls = take_control(&mut s, ToolbarControl::ColorPicker, [500., 350.]);
+    let brush = take(&mut s, brush(DefaultBrushPreset::Charcoal), [750., 350.]);
+    let mut regions = Vec::new();
+    for value in [halo, chooser, wheel, history, card, disabled, view(&s, controls), view(&s, brush)] {
+        let encoded = serde_json::to_vec(&value).unwrap();
+        let geometry: BubbleHitGeometry = serde_json::from_slice(&encoded).unwrap();
+        let mut points = vec![[0.; 2], gap, ring_point, [-20., 0.], [20., 0.]];
+        points.extend(value.chooser.iter().flat_map(|item| {
+            let size = item.size();
+            [[item.center[0], item.center[1]],
+                [item.center[0] + size[0] * 0.5 - 0.01, item.center[1]],
+                [item.center[0] + size[0] * 0.5 + 0.01, item.center[1]],
+                [item.center[0] + size[0] * 0.5 - 0.01, item.center[1] + size[1] * 0.5 - 0.01]]
+        }));
+        if let Some(card) = &value.card {
+            points.extend([[card.size[0] * 0.5 - 0.01, card.size[1] * 0.5 - 0.01], [card.size[0] * 0.5 + 0.01, 0.]]);
+        }
+        points.extend((-400..=400).step_by(8).flat_map(|x| (-400..=400).step_by(8).map(move |y| [x as f32, y as f32])));
+        for point in points {
+            let expected = value.hit(point);
+            assert_eq!(geometry.hit(point), expected, "{:?} {} at {point:?}", value.kind, value.label);
+            if !regions.contains(&expected) { regions.push(expected); }
+        }
+    }
+    for expected in [None, Some(BubbleHit::Face), Some(BubbleHit::Ring), Some(BubbleHit::Bead), Some(BubbleHit::Pill),
+        Some(BubbleHit::Wheel), Some(BubbleHit::Card), Some(BubbleHit::Half(0)), Some(BubbleHit::Half(1))] {
+        assert!(regions.contains(&expected), "sampled region {expected:?}");
+    }
+    assert!(regions.iter().any(|hit| matches!(hit, Some(BubbleHit::Item(_)))));
+}
+
+#[test]
+fn restoring_workspace_cancels_bubble_contacts_before_reusing_their_ids() {
+    let mut s = desk();
+    let empty = s.state.workspace.clone();
+    let controls = take_control(&mut s, ToolbarControl::ColorPicker, FAR);
+    let size = |s: &UiSession<Recorder>| ToolbarNumericBinding::BrushSize.field(&s.state).unwrap().value;
+    let before = size(&s);
+    let ring = view(&s, controls).rings.into_iter().find(|ring| ring.setting == "size").unwrap();
+    act(&mut s, BubbleAction::Ring { id: controls, phase: ContactPhase::Down, position: ring.arc.point(0.8) }).unwrap();
+    assert_ne!(size(&s), before);
+    assert!(view(&s, controls).stamp.is_some());
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(empty.clone()) }).unwrap();
+    assert_eq!(size(&s), before, "replacing the workspace cancels the numeric gesture");
+    let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, FAR);
+    assert_eq!(layers, controls, "the replacement workspace reuses its first free ID");
+    let card = view(&s, layers);
+    assert!(card.stamp.is_none() && card.readout.is_none() && card.rings.iter().all(|ring| !ring.active));
+    let placed = s.state.workspace.clone();
+    let original_center = saved(&s, layers);
+    contact(&mut s, BubbleGrab::Bubble { id: layers }, ContactPhase::Down, FAR).unwrap();
+    contact(&mut s, BubbleGrab::Bubble { id: layers }, ContactPhase::Move, [700., 500.]).unwrap();
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(placed) }).unwrap();
+    contact(&mut s, BubbleGrab::Bubble { id: layers }, ContactPhase::Up, [700., 500.]).unwrap();
+    assert_eq!(saved(&s, layers), original_center, "a late release cannot move the restored layout");
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(empty) }).unwrap();
+    let color = take_ring(&mut s, FAR);
+    let placed = s.state.workspace.clone();
+    let palette = bead(&view(&s, color), Bead::Palettes);
+    beads(&mut s, color, ContactPhase::Down, palette);
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(placed) }).unwrap();
+    beads(&mut s, color, ContactPhase::Up, palette);
+    assert!(view(&s, color).pill.is_none(), "a replaced bead contact cannot open the restored palette pill");
+}
+
+#[test]
+fn restoring_workspace_preserves_the_canvas_stroke_that_controls_bubble_fading() {
+    let mut s = desk();
+    let id = take(&mut s, brush(DefaultBrushPreset::PointyPencil), FAR);
+    let workspace = s.state.workspace.clone();
+    let near = [FAR[0], FAR[1] + 60.];
+    stroke(&mut s, 1, PenPhase::Down, near);
+    assert!(s.bubble_fade().0);
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) }).unwrap();
+    assert!(s.bubble_fade().0, "restoring UI does not release the ongoing canvas contact");
+    s.bubble_placements();
+    stroke(&mut s, 1, PenPhase::Move, near);
+    assert!(s.bubble_fade().1.contains(&id), "the ongoing stroke fades the restored bubble");
+    stroke(&mut s, 1, PenPhase::Up, near);
+    assert!(!s.bubble_fade().0);
+}
+
+#[test]
+fn native_source_pickup_flags_match_the_original_header_and_tile_controls() {
+    let mut plain = 0;
+    let mut blocked = 0;
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        s.set_viewport(VIEW, [1200, 900]).unwrap();
+        for command in [CommandId::DrawingBrush, CommandId::Lasso, CommandId::Eraser, CommandId::Liquify] {
+            invoke(&mut s, command);
+            for item in s.header_view().items {
+                let grab = BubbleGrab::Header { id: item.id };
+                let expected = s.bubble_grab(grab, false).is_some();
+                assert_eq!(item.tears_bubble, expected, "{platform:?}/{command:?}/header {}", item.id);
+                plain += usize::from(expected);
+                blocked += usize::from(!expected);
+            }
+            for panel in &s.state.workspace.layout.panels {
+                for tile in s.panel_view(panel.id).unwrap().tiles {
+                    let grab = BubbleGrab::Tile { panel: panel.id, tile: tile.id };
+                    let expected = s.bubble_grab(grab, false).is_some();
+                    assert_eq!(tile.tears_bubble, expected, "{platform:?}/{command:?}/{:?}/tile {}", panel.id, tile.id);
+                    plain += usize::from(expected);
+                    blocked += usize::from(!expected);
+                }
+            }
+        }
+    }
+    assert!(plain > 0 && blocked > 0, "both direct sources and controls that cannot tear are projected");
+}

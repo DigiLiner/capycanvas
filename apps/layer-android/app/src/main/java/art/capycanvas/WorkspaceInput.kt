@@ -65,6 +65,8 @@ internal class DockInteraction(val host: CanvasHost) {
     data class Region(val token: Any, val action: JSONObject, val bounds: Rect, val z: Int, val priority: Int,
         val context: JSONObject?, val cursor: Int, val holdToDrag: Boolean)
     val regions = mutableMapOf<Any, Region>()
+    var bubbles: BubbleInteraction? = null
+    var bubbleCaptured = false
     data class ChromeRegion(val bounds: Rect, val z: Int, val header: Boolean)
     val chromeRegions = mutableMapOf<Any, ChromeRegion>()
     var drawer: JSONObject? = null
@@ -259,16 +261,20 @@ internal class DockInteraction(val host: CanvasHost) {
         if (!dragging) return
         val action = active!!
         val request = ++generation
-        fun end() { active = null; hint = null; dragging = false; dragCursor = null; frozenTabs = emptyList(); frozenTabGroup = null; frozenTabClip = null; frozenPanel = null; refresh() }
+        fun end() {
+            if (request != generation) return
+            active = null; hint = null; dragging = false; dragCursor = null; frozenTabs = emptyList(); frozenTabGroup = null; frozenTabClip = null; frozenPanel = null; refresh()
+        }
         if (action.getString("type") == "tile_drag" && !cancel) {
             host.query(query()) { result ->
                 if (request == generation) {
-                    (result as? JSONObject)?.optJSONObject("target")?.let { target ->
-                        val item = action.getJSONObject("item")
+                    val target = (result as? JSONObject)?.optJSONObject("target")
+                    val item = action.getJSONObject("item")
+                    if (target != null) {
                         host.dispatch(obj("type" to "move_tile", "panel" to item.getString("panel"),
                             "tile" to item.getInt("tile"), "target" to target, "viewport" to viewport))
-                    }
-                    end()
+                        end()
+                    } else bubbles?.takeTile(item, position, { request == generation }, ::end) ?: end()
                 }
             }
         } else { send(if (cancel) "cancel" else "up"); end() }
@@ -328,6 +334,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
     var chromeTap: Triple<String, Long, Offset>? = null
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (dock.bubbleCaptured || down.isConsumed) return@awaitEachGesture
         dock.contactType = down.type
         try {
             val previousTap = chromeTap
@@ -394,7 +401,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
                         eventTime = change.uptimeMillis
                         // Compose represents ACTION_CANCEL as an already-consumed
                         // release. Preserve the shared transaction before consuming it.
-                        if (!change.pressed && change.isConsumed) break
+                        if (dock.bubbleCaptured || !change.pressed && change.isConsumed) break
                         if (held) change.consume()
                         if (dock.popupOpen || !dock.enabled) break
                         if (!started && !retired && !sourceExists()) retire()
