@@ -277,13 +277,15 @@ fn brushes_curve_beside_their_medium_and_stay_on_screen() {
 }
 
 #[test]
-fn the_layers_card_grows_to_its_rows_and_mode() {
-    assert_eq!(layers_card(false, 3)[0], 244.);
-    assert_eq!(layers_card(true, 3)[0], 300.);
-    assert_eq!(layers_card(false, 1), layers_card(false, 3), "room for the properties sheet");
-    assert!(layers_card(false, 4)[1] < layers_card(false, 5)[1]);
-    assert_eq!(layers_card(false, 5), layers_card(false, 20), "more than five rows scroll");
-    assert_eq!(layers_card(true, 5)[1] - layers_card(false, 5)[1], CARD_HEADER + 5. * (CARD_ROWS[1] - CARD_ROWS[0]));
+fn the_layers_card_takes_the_layers_drawer_size() {
+    let viewport = [1600., 1000.];
+    assert_eq!(layers_card(viewport, 3, None, false)[0], Panel::Layers.default_width(1600.));
+    assert_eq!(layers_card([1200., 1000.], 3, None, false)[0], Panel::Layers.default_width(1200.));
+    assert_eq!(layers_card(viewport, 1, None, false), layers_card(viewport, 6, None, false), "room for six rows like the drawer");
+    assert!(layers_card(viewport, 7, None, false)[1] > layers_card(viewport, 6, None, false)[1]);
+    assert!(layers_card(viewport, 200, None, false)[1] <= viewport[1] * LayerDrawerSizing::MAX_HEIGHT_FRACTION, "long lists scroll");
+    assert_eq!(layers_card(viewport, 3, Some([300., 420.]), false)[1], 300., "the host's measured pages win");
+    assert_eq!(layers_card(viewport, 3, Some([300., 420.]), true)[1], 420.);
 }
 
 #[test]
@@ -352,7 +354,7 @@ fn growth_pushes_are_temporary_and_cards_push_as_cards() {
     desk.grow(Vec::new());
     run(&mut desk, 2_000_000_000, 240);
     assert_eq!(desk.center(2), Some([370., 300.]));
-    let card = layers_card(false, 5);
+    let card = layers_card([1600., 1000.], 5, None, false);
     let mut wide = self::desk(&[[300., 300.], [300. + card[0] * 0.5, 300. + card[1] * 0.5]]);
     wide.grow(vec![(1, vec![Shape::rect(card)])]);
     run(&mut wide, 0, 120);

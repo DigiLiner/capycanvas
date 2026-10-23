@@ -26,7 +26,7 @@ center. GTK presents bubbles; Web and the native clients follow after review.
 | The color picker | Brush controls, 136 px | A 56 px circle with the color picker icon, Size on a left arc and Strength on a right arc, both always shown |
 | Undo or Redo | Undo and redo, 104 × 56 px | A capsule with Undo on the left and Redo on the right; a side is dimmed when there is nothing to undo or redo |
 | Color | Color ring, 136, 216 or 344 px (pinch: 128–352) | The Color panel's wheel on a glass plate, with beads around it |
-| Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail on a small stack, with the layer count |
+| Layers | Layers card, folded to a 56 px squircle | The current layer's thumbnail with the layer count |
 
 Other commands, panels, sliders, Tool Options, size chips and dividers stay in
 their toolbars. `BubbleSource::for_control` decides; Redo is stored as Undo, so
@@ -113,8 +113,9 @@ everything rests.
 - **Undo and redo:** tapping either half undoes or redoes; dragging anywhere on
   it moves it.
 - **Hold** always opens the bubble's menu: **Settings in the ring**, the
-  bubble's options and **Put back**. On the color ring a hold anywhere opens it,
-  after twice the usual delay, so a slow pick on the wheel stays a pick. A hold
+  bubble's options and **Put back**. On the color ring a hold anywhere opens it;
+  on the wheel's ring and disc it takes twice the usual delay, so a slow pick
+  stays a pick. A hold
   restores the color or setting its press changed; the menu stays open when the
   contact lifts, and dragging instead closes it and carries on the drag.
 - **Showing and hiding:** halo arcs grow and fade in, chooser items arrive in a
@@ -151,29 +152,35 @@ and size for the next time it is taken.
 
 ## Layers card
 
-Tapping the folded squircle unfolds the card in place, 244 px wide (300 in
-Full), pushing neighbours aside. A grab bar sits on top; rows show up to five
-layers, each with its eye, thumbnail and name. **Full** adds each row's details
-and the blend, opacity, alpha lock and lock header. The footer holds the New
-layer icon (and Delete in Full) on the left and **Properties** with an up
-chevron on the right; the properties slide up over the rows and the button turns
-into **All layers** with a down chevron. Contacts elsewhere fold the card, which
-shrinks away before the squircle returns; **Fold when not in use** in the hold
-menu keeps it open until its grab bar is tapped.
+Tapping the folded squircle unfolds the card in place, pushing neighbours aside.
+The card is the Layers drawer itself: the same layer list, header, rows and
+properties page, at the drawer's width and height (`LayerDrawerSizing`, from the
+heights GTK measures and reports with `BubbleAction::MeasureCard`). **Full**
+is the drawer exactly, with its layer actions and Layer properties footer;
+**Simple** replaces those bottom rows with one row holding the New layer icon on
+the left and **Properties** with an up chevron on the right. The properties slide up over the rows as in the drawer. There is no grab
+bar: dragging anywhere on the open card moves it, except on the layer list,
+whose rows keep their own drag. Contacts elsewhere fold the card, which shrinks
+away before the squircle returns; **Fold when not in use** in the hold menu
+keeps it open until it is tapped again.
 
 ## Look
 
 Bubbles use the toolbars' glass: the selected tool is the title bar's selection
 color as one glass surface, as translucent as the unselected ones, and borders
-are a thin inner line. Round parts cast a soft shadow drawn as rings of the
-bubble's own shape, so scaling and pinching never render a shadow offscreen. A
+are a thin inner line. Round parts and beads cast a soft shadow drawn as one
+smooth gradient around their own shape and clipped outside it, so it never
+bands, never darkens the glass and never renders offscreen when scaling or
+pinching. Faces, the undo and redo halves and chooser items show hover and
+pressed states. Bubble, readout, tag, count and chooser text uses the standard
+UI text size; brush pills are 128 x 48 px to fit it. A
 pen shows no system pointer over bubbles, as over the canvas; the mouse keeps
 its pointer.
 
 ## Painting
 
-A stroke that comes within 48 px of a bubble fades it to 20% and passes under
-it; it comes back 180 ms after the pen lifts. Painting closes the chooser, the
+A stroke that comes within 48 px of a bubble fades it to 20% over 140 ms and
+passes under it; it fades back 180 ms after the pen lifts. Painting closes the chooser, the
 palette name and folding cards; a halo stays and fades with its bubble.
 
 ## Zen mode

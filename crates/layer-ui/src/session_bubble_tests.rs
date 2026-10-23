@@ -535,7 +535,7 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     assert_eq!(folded.layer, s.state.layers.iter().find(|l| l.selected).map(|l| l.id), "the folded card shows the current layer");
     tap(&mut s, layers);
     let card = view(&s, layers).card.unwrap();
-    assert_eq!(card, BubbleCard { size: layers_card(false, s.state.layers.len()), full: false, properties: false, disclosure: "Properties".into() });
+    assert_eq!(card, BubbleCard { size: layers_card(VIEW, s.state.layers.len(), None, false), full: false, properties: false, disclosure: "Properties".into() });
     act(&mut s, BubbleAction::Properties { id: layers }).unwrap();
     assert!(view(&s, layers).card.unwrap().properties);
     assert_ne!(view(&s, layers).card.unwrap().disclosure, "Properties", "the footer then goes back to all layers");
@@ -551,7 +551,10 @@ fn the_layers_card_unfolds_flips_to_properties_and_folds() {
     s.dispatch(menu(&s).sections[1][0].action.clone().unwrap()).unwrap();
     assert!(view(&s, layers).options.full && !view(&s, layers).options.fold);
     tap(&mut s, layers);
-    assert_eq!(view(&s, layers).card.unwrap().size, layers_card(true, s.state.layers.len()));
+    assert_eq!(view(&s, layers).card.unwrap().size, layers_card(VIEW, s.state.layers.len(), None, false), "Full keeps the drawer's size");
+    act(&mut s, BubbleAction::MeasureCard { id: layers, heights: [333., 444.] }).unwrap();
+    assert_eq!(view(&s, layers).card.unwrap().size[1], 333., "the host's measurement sizes the card");
+    assert!(act(&mut s, BubbleAction::MeasureCard { id: layers, heights: [f32::NAN, 1.] }).is_err());
     chrome(&mut s, ChromeEvent::Contact { position: [100., 120.], canvas: true }, ChromeFacts::default());
     assert!(view(&s, layers).card.is_some(), "a card that doesn't fold stays open");
     tap(&mut s, layers);
@@ -579,7 +582,7 @@ fn an_open_card_pushes_neighbours_which_return_when_it_folds() {
     let now = settle(&mut s, 0);
     tap(&mut s, layers);
     let now = settle(&mut s, now);
-    let card = layers_card(false, s.state.layers.len());
+    let card = layers_card(VIEW, s.state.layers.len(), None, false);
     let place = |s: &mut UiSession<Recorder>, id: u32| s.bubble_placements().into_iter().find(|p| p.id == id).unwrap().center;
     let pushed = place(&mut s, pencil);
     let card_center = place(&mut s, layers);
@@ -995,4 +998,16 @@ fn pinching_the_color_ring_resizes_it_within_its_range() {
     let brush = take(&mut s, brush(DefaultBrushPreset::PointyPencil), [900., 380.]);
     assert!(act(&mut s, BubbleAction::Resize { id: brush, scale: 2. }).is_err());
     assert!(act(&mut s, BubbleAction::Resize { id, scale: f32::NAN }).is_err());
+}
+
+#[test]
+fn an_open_layers_card_moves_without_folding() {
+    let mut s = desk();
+    let layers = take_control(&mut s, ToolbarControl::Panel { panel: Panel::Layers }, FAR);
+    tap(&mut s, layers);
+    let card = view(&s, layers).card.expect("the card unfolds");
+    let at = s.bubble_placements().into_iter().find(|p| p.id == layers).unwrap().center;
+    let grip = [at[0], at[1] + card.size[1] * 0.5 - 20.];
+    drag(&mut s, BubbleGrab::Bubble { id: layers }, grip, [grip[0] - 60., grip[1] - 30.]);
+    assert!(view(&s, layers).card.is_some(), "dragging the open card keeps it open");
 }

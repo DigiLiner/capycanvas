@@ -23,16 +23,12 @@ pub const HALO_BANDS: [f32; 2] = [30., 30.];
 pub const RING_ICON: f32 = 21.;
 pub const CHOOSER_ITEM: f32 = 44.;
 pub const CHOOSER_RING: f32 = 84.;
-pub const BRUSH_PILL: [f32; 2] = [112., 40.];
+pub const BRUSH_PILL: [f32; 2] = [128., 48.];
 pub const PALETTE_PILL: [f32; 2] = [184., 30.];
-pub const CARD_WIDTHS: [f32; 2] = [244., 300.];
-pub const CARD_ROWS: [f32; 2] = [40., 48.];
-pub const CARD_HEADER: f32 = 38.;
-pub const CARD_VISIBLE_ROWS: usize = 5;
 pub const STROKE_FADE: f32 = 48.;
 const BRUSH_COLUMN: f32 = 170.;
 const BRUSH_FAN: f32 = 96.;
-const CARD_PROPERTIES: f32 = 124.;
+const PILL_PITCH: f32 = BRUSH_PILL[1] + 4.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -704,18 +700,18 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
     let n = count as f32;
     let (radius, side, middle) = match medium {
         Some((item, reach)) => {
-            let radius = (n * 22. + 20.).max(BRUSH_COLUMN).max(reach + CHOOSER_ITEM * 0.5 + 64.);
+            let radius = (n * PILL_PITCH * 0.5 + 20.).max(BRUSH_COLUMN).max(reach + CHOOSER_ITEM * 0.5 + BRUSH_PILL[0] * 0.5 + 8.);
             let room = |side: f32| {
-                if side > 0. { bounds.x + bounds.width - (center[0] + radius + 56.) } else { center[0] - radius - 56. - bounds.x }
+                if side > 0. { bounds.x + bounds.width - (center[0] + radius + BRUSH_PILL[0] * 0.5) } else { center[0] - radius - BRUSH_PILL[0] * 0.5 - bounds.x }
             };
             let side = if item[0] > -1. { 1. } else { -1. };
             let side = if room(side) < 0. && room(-side) > room(side) { -side } else { side };
             (radius, side, item[1])
         }
         None => {
-            let radius = (n * 22. + 18.).max(BRUSH_FAN);
+            let radius = (n * PILL_PITCH * 0.5 + 18.).max(BRUSH_FAN);
             let room = |right: bool| {
-                if right { bounds.x + bounds.width - (center[0] + radius + 56.) } else { center[0] - radius - 56. - bounds.x }
+                if right { bounds.x + bounds.width - (center[0] + radius + BRUSH_PILL[0] * 0.5) } else { center[0] - radius - BRUSH_PILL[0] * 0.5 - bounds.x }
             };
             let right = if room(true) >= 0. && (center[0] <= bounds.x + bounds.width * 0.5 || room(false) < 0.) {
                 true
@@ -727,27 +723,27 @@ pub fn chooser_column(count: usize, center: [f32; 2], medium: Option<([f32; 2], 
             (radius, if right { 1. } else { -1. }, 0.)
         }
     };
-    let half = n.max(1.) * CHOOSER_ITEM * 0.5 - CHOOSER_ITEM * 0.5;
-    let top = bounds.y + 22. - center[1];
-    let bottom = bounds.y + bounds.height - 22. - center[1];
+    let half = n.max(1.) * PILL_PITCH * 0.5 - PILL_PITCH * 0.5;
+    let top = bounds.y + BRUSH_PILL[1] * 0.5 - center[1];
+    let bottom = bounds.y + bounds.height - BRUSH_PILL[1] * 0.5 - center[1];
     let mut first = (middle - half).max(top);
     if first + 2. * half > bottom {
         first = (bottom - 2. * half).max(top);
     }
     (0..count)
         .map(|i| {
-            let y = first + i as f32 * CHOOSER_ITEM;
+            let y = first + i as f32 * PILL_PITCH;
             let dy = y - middle;
-            let x = (radius * radius - dy * dy).max(0.).sqrt().max(72.);
+            let x = (radius * radius - dy * dy).max(0.).sqrt().max(BRUSH_PILL[0] * 0.5 + 16.);
             [side * x, y]
         })
         .collect()
 }
 
-pub fn layers_card(full: bool, layers: usize) -> [f32; 2] {
-    let mode = usize::from(full);
-    let body = (layers.clamp(1, CARD_VISIBLE_ROWS) as f32 * CARD_ROWS[mode]).max(CARD_PROPERTIES);
-    [CARD_WIDTHS[mode], 65. + body + if full { CARD_HEADER } else { 0. }]
+pub fn layers_card(viewport: [f32; 2], layers: usize, measured: Option<[f32; 2]>, properties: bool) -> [f32; 2] {
+    let guess = PanelScrollMeasurement { fixed_height: 92., unit_height: 40. };
+    let heights = measured.unwrap_or_else(|| LayerDrawerSizing::pages(guess, layers, viewport[1], 160.));
+    [Panel::Layers.default_width(viewport[0]), heights[usize::from(properties)]]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -787,6 +783,7 @@ pub enum BubbleAction {
     Palette { id: u32, step: i32 },
     Resize { id: u32, scale: f32 },
     Properties { id: u32 },
+    MeasureCard { id: u32, heights: [f32; 2] },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

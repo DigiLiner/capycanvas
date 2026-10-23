@@ -38,6 +38,7 @@ pub(crate) struct Bubbles {
     pill: Option<u32>,
     chooser: Option<Chooser>,
     card: Option<u32>,
+    card_heights: Option<[f32; 2]>,
     properties: bool,
     stroke: bool,
     dirty: bool,
@@ -101,6 +102,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_viewport()[0] < 600.
     }
 
+    fn card_size(&self) -> [f32; 2] {
+        layers_card(self.bubble_viewport(), self.state.layers.len(), self.bubble_state.card_heights, self.bubble_state.properties)
+    }
+
     fn pair_beads(&self) -> PairBeads {
         PairBeads::for_window(self.bubble_viewport()[0])
     }
@@ -155,10 +160,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let Some(id) = self.halo() {
             grown.push((id, vec![Shape::circle(halo_disc(self.halo_settings().len()) * 0.5)]));
         }
-        if let Some(id) = self.bubble_state.card
-            && let Some(bubble) = self.state.workspace.layout.bubbles.get(id)
-        {
-            grown.push((id, vec![Shape::rect(layers_card(bubble.options.full, self.state.layers.len()))]));
+        if let Some(id) = self.bubble_state.card.filter(|id| self.state.workspace.layout.bubbles.get(*id).is_some()) {
+            grown.push((id, vec![Shape::rect(self.card_size())]));
         }
         if let Some(chooser) = self.bubble_state.chooser
             && let Some(bubble) = self.state.workspace.layout.bubbles.get(chooser.id)
@@ -234,7 +237,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         });
         let chooser = self.bubble_state.chooser.filter(|c| c.id == bubble.id).map(|c| self.chooser_items(bubble, c).0).unwrap_or_default();
         let card = (self.bubble_state.card == Some(bubble.id)).then(|| BubbleCard {
-            size: layers_card(bubble.options.full, state.layers.len()),
+            size: self.card_size(),
             full: bubble.options.full,
             properties: self.bubble_state.properties,
             disclosure: match self.bubble_state.properties {
@@ -524,6 +527,16 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::Beads { id, phase, position } => self.bead_contact(id, phase, position),
             BubbleAction::Choose { id, phase, position } => self.choose(id, phase, position),
             BubbleAction::Palette { id, step } => self.cycle_palette(id, step),
+            BubbleAction::MeasureCard { id, heights } => {
+                if self.bubble_state.card != Some(id) || !heights.into_iter().all(|h| h.is_finite() && h > 0.) {
+                    return Err("Invalid card measurement".into());
+                }
+                if self.bubble_state.card_heights.replace(heights) == Some(heights) {
+                    return Ok(UiChange::default());
+                }
+                self.sync_bubbles();
+                Ok(self.changed(regions::BUBBLES, false))
+            }
             BubbleAction::Properties { id } => {
                 if self.bubble_state.card != Some(id) {
                     return Err("Open the Layers card first".into());
@@ -1006,9 +1019,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.state.customization.drawer = None;
         }
         self.close_bubble_parts(None);
-        if self.bubble_state.card == Some(id) {
-            self.bubble_state.card = None;
-        }
         self.bubble_state.drag = Some(BubbleDrag { id, offset: [center[0] - position[0], center[1] - position[1]], source: bounds });
         self.sync_bubbles();
         self.bubble_state.desk.grab(id);

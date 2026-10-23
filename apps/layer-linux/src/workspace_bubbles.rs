@@ -13,6 +13,7 @@ const HOLD_SLOP: f32 = 8.;
 const FADED: f64 = 0.2;
 const HALO_BAND: f32 = 28.;
 const FADE_RETURN_MS: u64 = 180;
+const FADE_US: i64 = 140_000;
 const UNFOLD_US: i64 = 200_000;
 const ITEM_IN_US: i64 = 180_000;
 const ITEM_OUT_US: i64 = 120_000;
@@ -30,6 +31,13 @@ enum Contact {
     Beads(bool),
     Choose,
     Pair,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Part {
+    Face,
+    Half(usize),
+    Item(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,16 +90,12 @@ impl Press {
 
 struct Card {
     root: gtk::Box,
-    nub: gtk::Box,
-    footer: gtk::Box,
     full: bool,
-    layers: Rc<LayerPanel>,
-    effects: Rc<crate::effects::EffectPanels>,
-    stack: gtk::Stack,
+    inspector: super::drawers::LayerInspector,
     add: gtk::Button,
-    delete: gtk::Button,
     disclosure: gtk::Button,
     disclosure_label: gtk::Label,
+    measured: Cell<Option<[f32; 2]>>,
 }
 
 mod imp {
@@ -147,10 +151,12 @@ mod imp {
     pub struct Bubble {
         pub(super) view: RefCell<Option<BubbleView>>,
         pub(super) face: RefCell<Option<gtk::Box>>,
-        pub(super) coins: RefCell<Vec<gtk::Box>>,
         pub(super) icon: RefCell<Option<gtk::Image>>,
         pub(super) preview: RefCell<Option<gdk::Texture>>,
         pub(super) buttons: RefCell<Vec<gtk::Image>>,
+        pub(super) halves: RefCell<Vec<gtk::Box>>,
+        pub(super) hovered: Cell<Option<super::Part>>,
+        pub(super) pressed: Cell<Option<super::Part>>,
         pub(super) stamp: RefCell<Option<(u64, f32, gdk::Texture)>>,
         pub(super) stamp_patch: RefCell<Option<crate::display_color::ColorPatch>>,
         pub(super) stamp_tick: RefCell<Option<gtk::TickCallbackId>>,
@@ -165,6 +171,7 @@ mod imp {
         pub(super) items: RefCell<Vec<super::Item>>,
         pub(super) card: RefCell<Option<super::Card>>,
         pub(super) fold: Cell<Option<(i64, bool)>>,
+        pub(super) fade: Cell<Option<(i64, f64, f64)>>,
         pub(super) card_size: Cell<[f32; 2]>,
         pub(super) display: Cell<Option<(crate::display_color::ViewColor, f32)>>,
         pub(super) placement: Cell<Option<BubblePlacement>>,
@@ -214,14 +221,11 @@ mod imp {
             if let Some(face) = self.face.borrow().as_ref() {
                 place(face.upcast_ref(), [0.; 2], view.face);
             }
-            for (i, coin) in self.coins.borrow().iter().enumerate() {
-                let scale = if i == 0 { 0.84 } else { 0.92 };
-                place(coin.upcast_ref(), [0., if i == 0 { -7. } else { -4. }], [TOOL_BUBBLE * scale; 2]);
-            }
             if let Some(count) = self.count.borrow().as_ref() {
                 let (_, natural, _, _) = count.measure(gtk::Orientation::Horizontal, -1);
-                let width = (natural as f32).max(18.);
-                place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 + 2. - width * 0.5, -TOOL_BUBBLE * 0.5 + 7.], [width, 18.]);
+                let (_, tall, _, _) = count.measure(gtk::Orientation::Vertical, natural);
+                let size = [(natural as f32).max(tall as f32), tall as f32];
+                place(count.upcast_ref(), [TOOL_BUBBLE * 0.5 + 2. - size[0] * 0.5, -TOOL_BUBBLE * 0.5 + size[1] * 0.5 - 2.], size);
             }
             for (icon, ring) in self.icons.borrow().iter().zip(self.rings_shown.borrow().iter()) {
                 place(icon.upcast_ref(), ring.arc.icon_point(), [16.; 2]);
@@ -321,9 +325,6 @@ mod imp {
             }
             if let Some(progress) = face_shown {
                 grow(c, 0.6 + 0.4 * progress, progress);
-                for coin in self.coins.borrow().iter() {
-                    obj.snapshot_child(coin, snapshot);
-                }
                 if let Some(face) = self.face.borrow().as_ref() {
                     if view.kind == BubbleKind::Layers {
                         obj.snapshot_child(face, snapshot);
@@ -387,7 +388,7 @@ mod imp {
                 round(item.root.upcast_ref());
                 if let Some(texture) = item.preview.borrow().as_ref().filter(|_| chooser.kind == ChooserKind::Brush) {
                     let [w, h] = BRUSH_PILL;
-                    snapshot.append_texture(texture, &graphene::Rect::new(at[0] - w * 0.34, at[1] - h * 0.5 + 5., w * 0.68, 14.));
+                    snapshot.append_texture(texture, &graphene::Rect::new(at[0] - w * 0.34, at[1] - h * 0.5 + 6., w * 0.68, 14.));
                 }
                 done();
             };
@@ -520,24 +521,48 @@ fn rounded(bounds: &graphene::Rect, grow: f32) -> gsk::RoundedRect {
 }
 
 fn soft_shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, strength: f32, lift: f32) {
-    let inner = rounded(bounds, 0.);
-    for (grow, alpha) in [(1.5, 0.05), (3., 0.04), (5., 0.03), (8., 0.02)] {
-        let path = gsk::PathBuilder::new();
-        let mut outer = rounded(bounds, grow * (1. + lift * 0.5));
-        outer.offset(0., 1.5 + lift * 2.5);
-        path.add_rounded_rect(&outer);
-        path.add_rounded_rect(&inner);
-        snapshot.append_fill(&path.to_path(), gsk::FillRule::EvenOdd, &gdk::RGBA::new(0., 0., 0., alpha * strength));
-    }
+    shadow(snapshot, bounds, 8. * (1. + lift * 0.5), 1.5 + lift * 2.5, 0.14 * strength);
 }
 
 fn bead_shadow(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead) {
     let [x, y] = bead.placement.center;
-    let radius = bead.placement.size * 0.5;
-    for (grow, alpha) in [(2., 0.05), (1., 0.08)] {
-        let shadow = circle([c[0] + x, c[1] + y + 1.], radius + grow);
-        snapshot.append_fill(&shadow, gsk::FillRule::Winding, &gdk::RGBA::new(0., 0., 0., alpha * bead.placement.alpha));
+    let half = bead.placement.size * 0.5;
+    let bounds = graphene::Rect::new(c[0] + x - half, c[1] + y - half, half * 2., half * 2.);
+    shadow(snapshot, &bounds, 3., 1., 0.13 * bead.placement.alpha);
+}
+
+fn shadow(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, spread: f32, drop: f32, alpha: f32) {
+    let stops = |edge: f32, end: f32| {
+        [0., 0.25, 0.5, 0.75, 1.].map(|t| gsk::ColorStop::new(edge + (end - edge) * t, gdk::RGBA::new(0., 0., 0., alpha * (1. - t) * (1. - t)))).to_vec()
+    };
+    let (x, y, w, h) = (bounds.x(), bounds.y() + drop, bounds.width(), bounds.height());
+    let radius = w.min(h) * 0.5;
+    let reach = radius + spread;
+    let path = gsk::PathBuilder::new();
+    let mut outer = rounded(bounds, spread);
+    outer.offset(0., drop);
+    path.add_rounded_rect(&outer);
+    path.add_rounded_rect(&rounded(bounds, 0.));
+    snapshot.push_fill(&path.to_path(), gsk::FillRule::EvenOdd);
+    let cap = |cx: f32, clip: graphene::Rect| {
+        snapshot.push_clip(&clip);
+        let center = graphene::Point::new(cx, y + h * 0.5);
+        let area = graphene::Rect::new(cx - reach, y + h * 0.5 - reach, reach * 2., reach * 2.);
+        snapshot.append_radial_gradient(&area, &center, reach, reach, 0., 1., &stops(radius / reach, 1.));
+        snapshot.pop();
+    };
+    let [left, right] = [x + radius, x + w - radius];
+    cap(left, graphene::Rect::new(left - reach, y - spread, reach, h + spread * 2.));
+    cap(right, graphene::Rect::new(right, y - spread, reach, h + spread * 2.));
+    if right > left {
+        let band = graphene::Rect::new(left, y - spread, right - left, h + spread * 2.);
+        let side = spread / (h + spread * 2.);
+        let mut gradient = stops(side, 0.);
+        gradient.reverse();
+        gradient.extend(stops(1. - side, 1.));
+        snapshot.append_linear_gradient(&band, &graphene::Point::new(left, y - spread), &graphene::Point::new(left, y + h + spread), &gradient);
     }
+    snapshot.pop();
 }
 
 fn bead_rim(snapshot: &gtk::Snapshot, c: [f32; 2], bead: &BubbleBead, ink: gdk::RGBA) {
@@ -627,39 +652,26 @@ impl Card {
         root.add_css_class("bubble-card");
         root.set_widget_name("bubble-card");
         root.set_overflow(gtk::Overflow::Hidden);
-        let nub = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        nub.add_css_class("bubble-nub");
-        nub.set_widget_name("bubble-nub");
-        nub.set_halign(gtk::Align::Center);
-        root.append(&nub);
-        let layers = Rc::new(w.layer_panel.sharing(w.localization()));
-        layers.set_simple(!full);
-        layers.bind(w);
-        layers.footer.set_visible(false);
-        layers.root.add_css_class("customizable-target");
-        let effects = Rc::new(crate::effects::EffectPanels::with_filter_types(false));
-        effects.properties.add_css_class("customizable-target");
-        let properties = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&effects.properties).build();
-        let stack = gtk::Stack::builder().vhomogeneous(false).transition_duration(260).build();
-        stack.set_vexpand(true);
-        stack.add_named(&layers.root, Some("layers"));
-        stack.add_named(&properties, Some("properties"));
-        root.append(&stack);
+        let inspector = super::drawers::LayerInspector::new(w, UiAction::Bubble { action: BubbleAction::Properties { id } });
+        inspector.root.set_vexpand(true);
+        inspector.layers.root.add_css_class("customizable-target");
+        inspector.effects.properties.add_css_class("customizable-target");
+        inspector.footer.set_visible(full);
+        inspector.layers.footer.set_visible(full);
+        root.append(&inspector.root);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         footer.add_css_class("bubble-card-footer");
-        let icon_button = |icon: &str, action: UiAction| {
-            let button = crate::icons::button(icon);
-            button.add_css_class("flat");
-            button.add_css_class("customizable-target");
-            w.bind_action_tooltip(&button, action.clone());
-            button.connect_clicked(glib::clone!(#[weak] w, move |_| w.dispatch(action.clone())));
-            footer.append(&button);
-            button
-        };
-        let add = icon_button("layer-add-layer-symbolic", UiAction::Layer { action: LayerAction::New { group: false, clipped: false } });
+        footer.set_height_request(layer_ui::LayerDrawerSizing::FOOTER_HEIGHT as i32);
+        footer.set_visible(!full);
+        let add = crate::icons::button("layer-add-layer-symbolic");
+        add.add_css_class("flat");
+        add.add_css_class("customizable-target");
         add.set_widget_name("bubble-new-layer");
-        let delete = icon_button("layer-delete-symbolic", UiAction::Layer { action: LayerAction::DeleteSelected });
-        delete.set_visible(full);
+        add.set_valign(gtk::Align::Center);
+        let action = UiAction::Layer { action: LayerAction::New { group: false, clipped: false } };
+        w.bind_action_tooltip(&add, action.clone());
+        add.connect_clicked(glib::clone!(#[weak] w, move |_| w.dispatch(action.clone())));
+        footer.append(&add);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_hexpand(true);
         footer.append(&spacer);
@@ -674,31 +686,31 @@ impl Card {
         let disclosure = gtk::Button::new();
         disclosure.add_css_class("flat");
         disclosure.add_css_class("customizable-target");
+        disclosure.set_valign(gtk::Align::Center);
         disclosure.set_child(Some(&content));
         disclosure.set_widget_name("bubble-layer-properties");
         disclosure.connect_clicked(glib::clone!(#[weak] w, move |_| w.dispatch(UiAction::Bubble { action: BubbleAction::Properties { id } })));
         footer.append(&disclosure);
         root.append(&footer);
         root.set_parent(bubble);
-        Self { root, nub, footer, full, layers, effects, stack, add, delete, disclosure, disclosure_label }
+        Self { root, full, inspector, add, disclosure, disclosure_label, measured: Cell::new(None) }
     }
-    fn refresh(&self, w: &Rc<Workspace>, state: &UiState, card: &BubbleCard) {
-        self.layers.refresh(state);
-        self.effects.refresh(w, state);
-        let page = if card.properties { "properties" } else { "layers" };
-        if self.stack.visible_child_name().as_deref() != Some(page) {
-            let transition = if card.properties { gtk::StackTransitionType::SlideUp } else { gtk::StackTransitionType::SlideDown };
-            self.stack.set_visible_child_full(page, transition);
-        }
+    fn refresh(&self, w: &Rc<Workspace>, state: &UiState, card: &BubbleCard, id: u32) {
+        self.inspector.refresh(w, state, regions::ALL, card.properties);
         self.disclosure_label.set_label(&card.disclosure);
         set_class(&self.disclosure, "open", card.properties);
         self.disclosure.set_sensitive(state.layer_properties.drawer_toggle_enabled(card.properties));
-        self.delete.set_visible(self.full && !card.properties);
         self.add.set_opacity(if card.properties { 0. } else { 1. });
         self.add.set_can_target(!card.properties);
+        let heights = self.inspector.measure(card.size[0] as i32, w.surface.height() as f32);
+        if self.measured.replace(Some(heights)) != Some(heights) {
+            let w = w.clone();
+            glib::idle_add_local_once(move || w.dispatch(UiAction::Bubble { action: BubbleAction::MeasureCard { id, heights } }));
+        }
     }
     fn handles(&self, picked: Option<&gtk::Widget>) -> bool {
-        picked.is_none_or(|p| p == self.root.upcast_ref::<gtk::Widget>() || p == self.nub.upcast_ref::<gtk::Widget>() || p == self.footer.upcast_ref::<gtk::Widget>())
+        let list = self.inspector.layers.list.upcast_ref::<gtk::Widget>();
+        picked.is_none_or(|p| p != list && !p.is_ancestor(list))
     }
 }
 
@@ -807,15 +819,6 @@ impl Bubble {
         let bubble: Self = glib::Object::new();
         bubble.set_widget_name(&format!("bubble-{}", view.id));
         let imp = bubble.imp();
-        if view.kind == BubbleKind::Layers {
-            for _ in 0..2 {
-                let coin = glass("tool-bubble");
-                coin.add_css_class("squircle-bubble");
-                coin.set_opacity(0.85);
-                coin.set_parent(&bubble);
-                imp.coins.borrow_mut().push(coin);
-            }
-        }
         let face = glass("tool-bubble");
         face.set_parent(&bubble);
         match view.kind {
@@ -871,10 +874,15 @@ impl Bubble {
                         column.set_hexpand(true);
                         column.remove(&icon);
                         for button in &view.buttons {
+                            let half = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                            half.add_css_class("bubble-half");
                             let image = crate::icons::image(&format!("layer-{}-symbolic", button.icon));
                             image.set_pixel_size(20);
-                            column.append(&image);
+                            image.set_hexpand(true);
+                            half.append(&image);
+                            column.append(&half);
                             imp.buttons.borrow_mut().push(image);
+                            imp.halves.borrow_mut().push(half);
                         }
                     }
                     _ => {}
@@ -1029,6 +1037,13 @@ impl Bubble {
     fn settle(&self) -> bool {
         let imp = self.imp();
         let now = self.now();
+        if let Some((start, from, to)) = imp.fade.get() {
+            let t = ease(now - start, FADE_US) as f64;
+            self.set_opacity(from + (to - from) * t);
+            if t >= 1. {
+                imp.fade.set(None);
+            }
+        }
         if let Some((start, showing)) = imp.halo_fade.get()
             && now - start >= if showing { HALO_IN_US } else { HALO_OUT_US }
         {
@@ -1052,6 +1067,21 @@ impl Bubble {
             || !imp.leaving.borrow().is_empty()
             || imp.tween.borrow().is_some()
             || imp.born.borrow().iter().any(|born| now - born < ITEM_IN_US)
+            || imp.fade.get().is_some()
+    }
+
+    fn fade_to(&self, opacity: f64) {
+        let imp = self.imp();
+        if imp.fade.get().map_or(self.opacity(), |(_, _, to)| to) == opacity {
+            return;
+        }
+        if !motion() {
+            imp.fade.set(None);
+            self.set_opacity(opacity);
+            return;
+        }
+        imp.fade.set(Some((self.now(), self.opacity(), opacity)));
+        self.ensure_ticking();
     }
 
     fn sync_ring_icons(&self) {
@@ -1157,7 +1187,7 @@ impl Bubble {
         let opening = !imp.card.borrow().as_ref().is_some_and(|c| c.root.is_child_visible()) || folding;
         if let Some(body) = imp.card.borrow().as_ref() {
             body.root.set_child_visible(true);
-            body.refresh(w, state, card);
+            body.refresh(w, state, card, view.id);
         }
         if opening {
             self.animate_fold(true);
@@ -1173,9 +1203,6 @@ impl Bubble {
             set_class(face, "selected-tool", view.selected && matches!(view.kind, BubbleKind::Dial | BubbleKind::Brush | BubbleKind::Medium | BubbleKind::Controls));
             face.set_opacity(if view.enabled { 1. } else { 0.45 });
             face.set_child_visible(view.card.is_none());
-        }
-        for coin in imp.coins.borrow().iter() {
-            coin.set_child_visible(view.card.is_none() && view.layers > 1);
         }
         if let Some(count) = imp.count.borrow().as_ref() {
             count.set_label(&view.layers.to_string());
@@ -1367,6 +1394,7 @@ impl Bubble {
                 }
             }
             let Some(at) = w.event_point(controller) else { return glib::Propagation::Proceed };
+            bubble.mark_parts(event, at);
             let sequence = || event.event_sequence().as_ptr() as usize;
             let stop = match event.event_type() {
                 gdk::EventType::TouchBegin => bubble.finger_down(&w, id, sequence(), at),
@@ -1389,6 +1417,83 @@ impl Bubble {
             if stop { glib::Propagation::Stop } else { glib::Propagation::Proceed }
         }));
         self.add_controller(fingers);
+
+        let hover = gtk::EventControllerMotion::new();
+        let hovered = |bubble: &Bubble, x: f64, y: f64| {
+            let [cx, cy] = bubble.center();
+            bubble.mark("hovered", false, bubble.part_at([x as f32 - cx, y as f32 - cy]));
+        };
+        hover.connect_enter(move |controller, x, y| {
+            if let Some(bubble) = controller.widget().and_downcast::<Bubble>() {
+                hovered(&bubble, x, y);
+            }
+        });
+        hover.connect_motion(move |controller, x, y| {
+            if let Some(bubble) = controller.widget().and_downcast::<Bubble>() {
+                hovered(&bubble, x, y);
+            }
+        });
+        hover.connect_leave(|controller| {
+            if let Some(bubble) = controller.widget().and_downcast::<Bubble>() {
+                bubble.mark("hovered", false, None);
+            }
+        });
+        self.add_controller(hover);
+    }
+
+    fn part_at(&self, p: [f32; 2]) -> Option<Part> {
+        let view = self.imp().view.borrow();
+        let view = view.as_ref()?;
+        if let Some(i) = view.chooser.iter().position(|item| item.contains(p)) {
+            return Some(Part::Item(i));
+        }
+        let [w, h] = view.face;
+        match view.kind {
+            BubbleKind::Color => None,
+            _ if view.card.is_some() => None,
+            BubbleKind::History => history_button(p).map(Part::Half),
+            BubbleKind::Layers => (p[0].abs() <= w * 0.5 && p[1].abs() <= h * 0.5).then_some(Part::Face),
+            _ => (p[0].hypot(p[1]) <= w * 0.5).then_some(Part::Face),
+        }
+    }
+
+    fn part_widget(&self, part: Part) -> Option<gtk::Widget> {
+        let imp = self.imp();
+        match part {
+            Part::Face => imp.face.borrow().as_ref().map(|f| f.clone().upcast()),
+            Part::Half(i) => imp.halves.borrow().get(i).map(|h| h.clone().upcast()),
+            Part::Item(i) => imp.items.borrow().get(i).map(|item| item.root.clone().upcast()),
+        }
+    }
+
+    fn mark(&self, class: &str, pressed: bool, part: Option<Part>) {
+        let cell = if pressed { &self.imp().pressed } else { &self.imp().hovered };
+        let old = cell.replace(part);
+        if old == part {
+            return;
+        }
+        if let Some(widget) = old.and_then(|p| self.part_widget(p)) {
+            widget.remove_css_class(class);
+        }
+        if let Some(widget) = part.and_then(|p| self.part_widget(p)) {
+            widget.add_css_class(class);
+        }
+    }
+
+    fn mark_parts(&self, event: &gdk::Event, at: [f32; 2]) {
+        let p = self.local(at);
+        let first = self.imp().fingers.borrow().is_empty();
+        match event.event_type() {
+            gdk::EventType::ButtonPress | gdk::EventType::TouchBegin if first => self.mark("pressed", true, self.part_at(p)),
+            gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel => self.mark("pressed", true, None),
+            gdk::EventType::MotionNotify | gdk::EventType::TouchUpdate
+                if self.imp().pressed.get().is_some()
+                    && self.imp().press.borrow().as_ref().is_none_or(|press| (at[0] - press.start[0]).hypot(at[1] - press.start[1]) > HOLD_SLOP) =>
+            {
+                self.mark("pressed", true, None)
+            }
+            _ => {}
+        }
     }
 
     fn local(&self, at: [f32; 2]) -> [f32; 2] {
@@ -1465,8 +1570,10 @@ impl Bubble {
             return;
         }
         let color = w.gpu.borrow().as_ref().map(|g| g.session.state().colors.definition()).filter(|_| wheel);
+        let picking = wheel
+            && self.imp().wheel.borrow().as_ref().is_some_and(|w| self.compute_point(w, &point).is_some_and(|p| w.hits(p.x(), p.y())));
         let long = gtk::Settings::default().map_or(500, |s| s.gtk_long_press_time()) as u64;
-        let delay = if view.kind == BubbleKind::Color { long * 2 } else { long };
+        let delay = if picking { long * 2 } else { long };
         let hold = glib::timeout_add_local_once(
             std::time::Duration::from_millis(delay),
             glib::clone!(#[weak(rename_to = bubble)] self, #[weak] w, move || bubble.press_held(&w, id)),
@@ -1736,7 +1843,7 @@ impl Bubbles {
 
     fn fade(&self, stroke: bool, faded: &[u32]) {
         let show = |bubble: &Bubble, faded: bool| {
-            bubble.set_opacity(if faded { FADED } else { 1. });
+            bubble.fade_to(if faded { FADED } else { 1. });
             bubble.set_can_target(!faded);
         };
         if stroke {
@@ -1763,7 +1870,7 @@ impl Bubbles {
     }
 
     pub(crate) fn layer_panels(&self) -> Vec<Rc<LayerPanel>> {
-        self.layer.bubbles().iter().filter_map(|b| b.imp().card.borrow().as_ref().filter(|c| c.root.is_child_visible()).map(|c| c.layers.clone())).collect()
+        self.layer.bubbles().iter().filter_map(|b| b.imp().card.borrow().as_ref().filter(|c| c.root.is_child_visible()).map(|c| c.inspector.layers.clone())).collect()
     }
 
     pub(crate) fn thumbnails(&self) -> Vec<(u64, gtk::Picture)> {

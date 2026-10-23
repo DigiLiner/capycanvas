@@ -63,8 +63,8 @@ glib::wrapper! {
     pub struct Columns(ObjectSubclass<allocation::Columns>)
         @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
-struct LayerInspector {
-    root: gtk::Box,
+pub(super) struct LayerInspector {
+    pub(super) root: gtk::Box,
     pages: [Columns; 2],
     row_height: Cell<f32>,
     target: Cell<Option<(u64, Option<u64>)>>,
@@ -72,15 +72,16 @@ struct LayerInspector {
     restore: Rc<RefCell<Option<(gdk::FrameClock, glib::SignalHandlerId)>>>,
     rows: Cell<usize>,
     properties: Cell<bool>,
-    layers: Rc<LayerPanel>,
-    effects: Rc<EffectPanels>,
+    pub(super) layers: Rc<LayerPanel>,
+    pub(super) effects: Rc<EffectPanels>,
     stack: gtk::Stack,
+    pub(super) footer: gtk::Box,
     button: gtk::Button,
     label: gtk::Label,
     summary: gtk::Label,
 }
 impl LayerInspector {
-    fn new(w: &Rc<Workspace>) -> Self {
+    pub(super) fn new(w: &Rc<Workspace>, toggle: UiAction) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_overflow(gtk::Overflow::Hidden);
         let layers = Rc::new(w.layer_panel.sharing(w.localization().clone()));
@@ -113,7 +114,7 @@ impl LayerInspector {
         let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         footer.add_css_class("layer-properties-footer");
         footer.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        let button = w.action_button("", UiAction::Customize {action:CustomizationAction::ToggleLayerDrawerProperties});
+        let button = w.action_button("", toggle);
         button.set_widget_name("layer-properties-disclosure");
         button.add_css_class("flat");
         button.add_css_class("layer-properties-disclosure");
@@ -141,9 +142,9 @@ impl LayerInspector {
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
         Self {root, pages, row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
-            properties:Cell::new(false), layers, effects, stack, button, label, summary}
+            properties:Cell::new(false), layers, effects, stack, footer, button, label, summary}
     }
-    fn refresh(&self, w: &Rc<Workspace>, state: &UiState, regions: u32) {
+    pub(super) fn refresh(&self, w: &Rc<Workspace>, state: &UiState, regions: u32, open: bool) {
         if regions & (regions::DOCUMENT | regions::SETTINGS) != 0 {
             let target = Some((state.document_file.epoch, state.layer_tools.editing_layer.as_ref().map(|layer| layer.id)));
             if self.target.get() != target { self.anchor.set(None); }
@@ -154,7 +155,6 @@ impl LayerInspector {
             self.target.set(target);
         }
         self.rows.set(state.layers.len());
-        let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
         let previous = self.properties.replace(open);
         if previous != open {
             if let Some((clock, callback)) = self.restore.borrow_mut().take() { clock.disconnect(callback); }
@@ -175,7 +175,7 @@ impl LayerInspector {
         self.button.update_property(&[gtk::accessible::Property::Label(label), gtk::accessible::Property::Description(if open {""} else {&disclosure.summary})]);
         if open { self.button.add_css_class("open"); } else { self.button.remove_css_class("open"); }
     }
-    fn measure(&self, width: i32, viewport_height: f32) {
+    pub(super) fn measure(&self, width: i32, viewport_height: f32) -> [f32; 2] {
         let mut measurement = self.layers.scroll_measurement(width);
         if measurement.unit_height > 0. { self.row_height.set(measurement.unit_height); }
         else { measurement.unit_height = self.row_height.get(); }
@@ -187,6 +187,7 @@ impl LayerInspector {
             let mut geometry = page.imp().geometry.borrow_mut();
             if geometry[0].width != width as f32 { geometry[0].width = width as f32; page.queue_allocate(); }
         }
+        heights
     }
     fn restore_anchor(&self, w: &Rc<Workspace>) {
         let Some(clock) = self.root.frame_clock() else { self.anchor.set(None); return; };
@@ -320,7 +321,7 @@ impl Body {
             Self::Palettes(v) => v.refresh(state, w.paint_view_color(), w.picker_headroom()),
             Self::Sizes(v) => v.refresh(w, state),
             Self::Layers(v) => v.refresh(state),
-            Self::LayerInspector(v) => v.refresh(w, state, regions),
+            Self::LayerInspector(v) => v.refresh(w, state, regions, state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true))),
             Self::Navigator(v) => v.refresh(state),
             Self::Proof(v) => v.refresh(w, state),
             Self::Histogram(v) => v.refresh(w, state),
@@ -422,7 +423,7 @@ impl View {
                         v.bind(w);
                         Body::Navigator(v)
                     }
-                    Panel::Layers if drawer.layer_properties.is_some() => Body::LayerInspector(LayerInspector::new(w)),
+                    Panel::Layers if drawer.layer_properties.is_some() => Body::LayerInspector(LayerInspector::new(w, UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties })),
                     Panel::Layers => {
                         let v = Rc::new(w.layer_panel.sharing(w.localization().clone()));
                         margins(&v.root, PANEL_CONTENT_INSET as i32);

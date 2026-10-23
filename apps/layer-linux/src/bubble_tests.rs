@@ -156,8 +156,19 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     pump(400);
     let card = find_id(d, layers.id).unwrap().card.unwrap_or_else(|| panic!("{name}: tapping unfolds the card"));
     assert!(!card.full && !card.properties);
-    assert!(d.named("bubble-nub").is_mapped(), "{name}: the card has a grab bar");
+    let body = d.named("bubble-card");
+    let card = find_id(d, layers.id).unwrap().card.unwrap();
+    assert_eq!(card.size[0], Panel::Layers.default_width(d.w.surface.width() as f32), "{name}: the card is the drawer's width");
+    assert!((body.height() as f32 - card.size[1]).abs() <= 1., "{name}: and the measured drawer height ({} vs {})", body.height(), card.size[1]);
     capture(d, &format!("{name}-layers-card"));
+    let before = center(d, layers.id);
+    let bounds = body.compute_bounds(&d.w.surface).unwrap();
+    let grip = [bounds.x() + bounds.width() * 0.5, bounds.y() + bounds.height() - 20.];
+    stroke(d, device, &[grip, [grip[0] - 10., grip[1]], [grip[0] - 70., grip[1] - 30.]]);
+    pump(500);
+    let moved = center(d, layers.id);
+    assert!((moved[0] - before[0]).hypot(moved[1] - before[1]) > 30., "{name}: dragging the open card's empty space moves it");
+    assert!(find_id(d, layers.id).unwrap().card.is_some(), "{name}: without folding it");
     let properties = d.named("bubble-layer-properties");
     d.click(&properties);
     pump(500);
@@ -170,6 +181,15 @@ fn layers_card(d: &mut Driver, device: &str, name: &str) {
     let add = d.named("bubble-new-layer");
     tap(d, device, d.point(&add));
     assert_eq!(state(&d.w).layers.len(), count + 1, "{name}: the footer's icon adds a layer");
+    let options = BubbleOptions { full: true, ..find_id(d, layers.id).unwrap().options };
+    d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id: layers.id, options } });
+    pump(500);
+    let full = d.named("bubble-card");
+    assert!(find_named(full.upcast_ref(), "layer-properties-disclosure").is_some_and(|f| f.is_mapped()), "{name}: Full keeps the drawer's footer");
+    assert!(d.named("bubble-new-layer").parent().is_none_or(|p| !p.is_mapped()), "{name}: instead of the simple one");
+    capture(d, &format!("{name}-layers-full"));
+    d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id: layers.id, options: BubbleOptions { full: false, ..options } } });
+    pump(400);
     tap(d, device, canvas_spot(d, 0.85, 0.15));
     assert!(find_id(d, layers.id).unwrap().card.is_none(), "{name}: a contact elsewhere folds the card");
     let card = d.named("bubble-card");
@@ -349,7 +369,22 @@ fn history(d: &mut Driver, device: &str, name: &str) {
     let enabled = |d: &Driver| find_id(d, bubble.id).unwrap().buttons.iter().map(|b| b.enabled).collect::<Vec<_>>();
     assert_eq!(enabled(d), [true, false], "{name}: a stroke can be undone");
     let c = center(d, bubble.id);
-    tap(d, device, [c[0] - 22., c[1]]);
+    if device == "mouse" {
+        let widget = d.named(&format!("bubble-{}", bubble.id));
+        let marked = |class: &str| find_css(&widget, class).is_some_and(|w| w.has_css_class("bubble-half"));
+        d.input.perform(serde_json::json!([contact("mouse", "move", [c[0] - 22., c[1]])]));
+        pump(100);
+        assert!(marked("hovered"), "{name}: the half under the pointer shows hover");
+        capture(d, &format!("{name}-history-hover"));
+        d.input.perform(serde_json::json!([contact("mouse", "down", [c[0] - 22., c[1]])]));
+        pump(100);
+        assert!(marked("pressed"), "{name}: and a pressed state while held");
+        d.input.perform(serde_json::json!([contact("mouse", "up", [c[0] - 22., c[1]])]));
+        pump(300);
+        assert!(!marked("pressed"), "{name}: the press clears on release");
+    } else {
+        tap(d, device, [c[0] - 22., c[1]]);
+    }
     assert!(enabled(d)[1], "{name}: the left half undoes");
     tap(d, device, [c[0] + 22., c[1]]);
     assert!(!enabled(d)[1], "{name}: the right half redoes");
@@ -357,6 +392,9 @@ fn history(d: &mut Driver, device: &str, name: &str) {
 }
 
 fn painting_fades(d: &mut Driver, name: &str, id: u32) {
+    let settings = gtk::Settings::default().unwrap();
+    let animations = settings.is_gtk_enable_animations();
+    settings.set_gtk_enable_animations(true);
     let widget = d.named(&format!("bubble-{id}"));
     let at = center(d, id);
     let from = [at[0] - 140., at[1] + 50.];
@@ -365,12 +403,17 @@ fn painting_fades(d: &mut Driver, name: &str, id: u32) {
         events.push(contact("mouse", "move", [from[0] + step as f32 * 12., from[1]]));
     }
     d.input.perform(serde_json::Value::Array(events));
-    pump(120);
-    assert!(widget.opacity() < 0.5, "{name}: a stroke near a bubble fades it");
+    pump(250);
+    assert!(widget.opacity() < 0.25, "{name}: a stroke near a bubble fades it");
     assert!(find_id(d, id).unwrap().open, "{name}: an open halo stays while painting");
     d.input.perform(serde_json::json!([contact("mouse", "up", [from[0] + 240., from[1]])]));
-    pump(400);
+    let samples: Vec<f64> = (0..30).map(|_| {
+        pump(20);
+        widget.opacity()
+    }).collect();
     assert_eq!(widget.opacity(), 1., "{name}: it comes back after the stroke");
+    assert!(samples.iter().any(|o| *o > 0.25 && *o < 0.95), "{name}: and fades back in instead of jumping: {samples:?}");
+    settings.set_gtk_enable_animations(animations);
     d.w.dispatch(UiAction::SetTheme { theme: Some(state(&d.w).theme) });
     pump(20);
     assert!(widget.opacity() == 1. && widget.can_target(), "{name}: later refreshes keep it back");
