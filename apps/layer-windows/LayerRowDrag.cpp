@@ -20,7 +20,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     weak_ref<UIElement> inputSurface;
     std::pair<event_token,event_token> inputKey{};
     PointerEventHandler inputMove{nullptr},inputUp{nullptr},inputCancel{nullptr};
-    ScrollViewer list{nullptr};
+    ScrollView list{nullptr};
     std::weak_ptr<LayerRow> source;
     Input::Pointer pointer{nullptr};
     std::optional<uint32_t> rejected;
@@ -28,7 +28,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<weak_ref<UIElement>> path;
-    struct ScrollClaim {ManipulationModes input;ScrollMode horizontal,vertical;};
+    struct ScrollClaim {ManipulationModes input;ScrollingScrollMode horizontal,vertical;};
     std::optional<ScrollClaim> scrollInput;
     struct Hit {double id;int zone;bool thumbnail;bool operator==(Hit const&)const=default;};
     std::optional<Hit> hit,answered;
@@ -134,7 +134,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         releasing=true;
         auto content=list.Content().as<UIElement>();scrollInput=ScrollClaim{content.ManipulationMode(),list.HorizontalScrollMode(),list.VerticalScrollMode()};
         content.ManipulationMode(ManipulationModes::None);
-        list.HorizontalScrollMode(ScrollMode::Disabled);list.VerticalScrollMode(ScrollMode::Disabled);
+        list.HorizontalScrollMode(ScrollingScrollMode::Disabled);list.VerticalScrollMode(ScrollingScrollMode::Disabled);
         for(auto const& weak:path)if(auto node=weak.get();node&&owns(node))node.ReleasePointerCapture(pointer);
         bool captured=surface.CapturePointer(pointer);releasing=false;
         if(!captured)cancel(L"capture_failed");
@@ -160,7 +160,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         auto point=e.GetCurrentPoint(surface);
         if(!PointerGesture::PrimaryContact(point))return;
         for(auto const& [element,row]:owner->rows)if(inside(original,row->root)){
-            if(row->renaming||inside(original,row->rename)||inside(original,row->swipeActions)||!row->current())return;
+            if(row->renaming||inside(original,row->rename)||!row->current())return;
             source=row;id=row->id;epoch=row->epoch;pointer=e.Pointer();device=point.PointerDeviceType();
             owner->data->pointerCancels.Observe(pointer.PointerId(),this,[weak=weak_from_this()]{if(auto self=weak.lock())self->cancel(L"capture_handoff");});
             grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;
@@ -281,7 +281,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             auto at=surface.TransformToVisual(list).TransformPoint(position);auto height=list.ActualHeight();
             double speed=at.Y<32?-std::clamp((32-at.Y)/32.,0.,1.):at.Y>height-32?std::clamp((at.Y-height+32)/32.,0.,1.):0;
             if(speed&&at.X>=0&&at.X<=list.ActualWidth()){
-                list.ChangeView(nullptr,box_value(list.VerticalOffset()+speed*480*elapsed).as<Windows::Foundation::IReference<double>>(),nullptr,true);
+                scrollVertical(list,list.VerticalOffset()+speed*480*elapsed);
             }
             target();
         }else if(finishing)query();

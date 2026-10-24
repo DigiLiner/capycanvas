@@ -4,8 +4,9 @@
 
 - **Windows tool bubbles need hardware measurements.** The retained native
   presenter shares ordinary panel components and stops its frame clock at rest.
-  VM software-adapter journeys cannot qualify moving-frame rates, physical pen
-  latency or display timing on any reference tier.
+  Software-adapter and Surface Pro functional journeys do not qualify moving-frame
+  rates, physical pen latency or display timing on any reference tier. Hardware
+  measurements require access to PresentMon's ETW presentation records.
 
 - **Wet, watercolor, Smudge and blending brushes fall behind the pen at 512 px.**
   - A frame consumes input only until its material contacts reach 512 page

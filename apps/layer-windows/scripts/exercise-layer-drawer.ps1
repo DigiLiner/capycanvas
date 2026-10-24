@@ -276,7 +276,7 @@ try {
  @{window=$window;native=$box;shared=(Drawer);viewport=(Model).layout.viewport;rows=@((Model).state.layers).Count}|ConvertTo-Json -Depth 14|Set-Content (Join-Path $run 'overflow-geometry.json')
  if($box.Height/$scale -gt (Model).layout.viewport[1]*.85+1){throw 'Layer drawer exceeds the shared 85-percent viewport cap'}
  if($box.Bottom -gt $window.Bottom+1 -or $box.Top -lt $window.Top-1){throw 'Layer drawer exceeds the visible window'}
- $scroll=Control 'layer-list';$pattern=$scroll.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+ $scroll=Control 'layer-list';$pattern=Scroll-Pattern $scroll
  if(!$pattern.Current.VerticallyScrollable){throw 'Capped layer drawer cannot scroll its overflow'}
  Capture ('drawer-overflow-'+$Theme) -Composed -WithModel
  $color=@((Model).header.model.zones|ForEach-Object {$_}|Where-Object {$_.item.control.kind -eq 'color'})[0]

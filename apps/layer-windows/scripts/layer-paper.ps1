@@ -465,7 +465,7 @@ function Test-LayerPaper([switch]$Light) {
         $realized=@($rows|Where-Object {$_.Current.AutomationId -match '^layer-row-[0-9]+$'}).Count
         if($realized -ge 40){throw 'Add paper list wrapper disabled layer virtualization'}
         $realized|Set-Content (Join-Path $run "paper-realized-$((Model).state.theme).txt")
-        $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $scroll=Scroll-Pattern (Control 'layer-list')
         Wait-Until {$scroll.Current.VerticallyScrollable} 'Additional layers did not make the list scrollable'
         $scroll.SetScrollPercent(-1,0)
         Wait-Until {!(Find 'layer-add-paper' -Visible)} 'Add paper did not scroll away with the layers'
@@ -482,12 +482,12 @@ function Test-LayerPaper([switch]$Light) {
         $first=$inserted[-1];$last=$inserted[0]
         Relationship-Layers
         $list=Control 'layer-list' -Arranged
-        $scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $scroll=Scroll-Pattern $list
         $scroll.SetScrollPercent(-1,0)
         $null=Control "layer-$first-name" -Within $list -Arranged;Invoke "layer-$first-name"
         Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $first} 'Cleanup range anchor did not select'
         $list=Control 'layer-list' -Arranged
-        $scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $scroll=Scroll-Pattern $list
         $scroll.SetScrollPercent(-1,100)
         $endpoint=Control "layer-$last-name" -Within $list -Arranged
         $viewport=$list.Current.BoundingRectangle

@@ -301,7 +301,7 @@ try {
     $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     $realized=@($all|Where-Object {$_.Current.AutomationId -match '^layer-[0-9]+-name$'})
     if($realized.Count -ge 40){throw 'Layers were not virtualized'}
-    $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $scroll=Scroll-Pattern (Control 'layer-list')
     $scroll.SetScrollPercent(-1,100)
     Wait-Until {$null -ne (Find "layer-$paint-name")} 'Scroll did not realize old layer'
     Wait-Until {(Find "layer-$paint-thumbnail").Current.ItemStatus -eq 'Ready'} 'Recycled row thumbnail not restored' 15

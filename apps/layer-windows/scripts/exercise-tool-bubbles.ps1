@@ -1,11 +1,13 @@
 param([Parameter(Mandatory)][string]$Executable,
-    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly)
+    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
+. (Join-Path $PSScriptRoot 'BubbleVisualChecks.ps1')
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
 if(!('CapyCanvasTouch' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'CanvasTouchDriver.cs')}
 if(!('CapyBubbleFixtureNative' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'BubbleFixtureNative.cs')}
-if(($RapidOnly -or $ObserverOnly) -and !('CapyBubbleFoldObserver' -as [type])){
+if(($RapidOnly -or $ObserverOnly -or $BeadTransitionsOnly) -and !('CapyBubbleFoldObserver' -as [type])){
+    Add-Type -AssemblyName WindowsBase
     $foldReferences=if($PSVersionTable.PSEdition -eq 'Core'){(Get-ChildItem (Join-Path $PSHOME 'ref/*.dll')).FullName}else{@('System.dll','System.Core.dll','System.Runtime.Serialization.dll','System.Xml.dll')}
     $foldReferences+=@([System.Windows.Automation.AutomationElement].Assembly.Location,[System.Windows.Automation.AutomationIdentifier].Assembly.Location,[System.Windows.Point].Assembly.Location)
     Add-Type -Path (Join-Path $PSScriptRoot 'BubbleFoldObserver.cs') -ReferencedAssemblies ($foldReferences|Select-Object -Unique)
@@ -73,14 +75,16 @@ function Inspect-InactiveProperties([long]$Id){
     $card=Card $Id;$properties=Find 'layer-properties' -Within $card
     if(!$properties){throw 'Retained native Properties page is missing'}
     $controls=@($properties.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|Where-Object {$_.Current.IsKeyboardFocusable}|ForEach-Object {@{id=$_.Current.AutomationId;name=$_.Current.Name;offscreen=$_.Current.IsOffscreen;bounds=$_.Current.BoundingRectangle.ToString()}})
-    $footer=Control "bubble-properties-$Id" -Within $card;$footer.SetFocus();$beforeZen=(Model).state.workspace.zen_mode;$focus=@();$inactiveFocus=$false
+    $footer=Control "bubble-properties-$Id" -Within $card;$footer.SetFocus();Wait-Until {$footer.Current.HasKeyboardFocus} 'Inactive-page probe footer did not receive focus'
+    $beforeZen=(Model).state.workspace.zen_mode;$focus=@();$inactiveFocus=$false
     foreach($i in 1..12){
-        [CapyRowPointer]::Key([uint32]$review.Id,0x09);Start-Sleep -Milliseconds 25
+        $previous=[System.Windows.Automation.AutomationElement]::FocusedElement
+        if($previous.Current.AutomationId -eq 'drawing-canvas'){break}
+        $previousId=$previous.GetRuntimeId() -join ':';[CapyRowPointer]::Key([uint32]$review.Id,0x09)
+        Wait-Until {([System.Windows.Automation.AutomationElement]::FocusedElement.GetRuntimeId() -join ':') -ne $previousId} 'Inactive-page probe Tab did not move focus'
         $element=[System.Windows.Automation.AutomationElement]::FocusedElement;$focus+=@{id=$element.Current.AutomationId;name=$element.Current.Name}
         for($node=$element;$node;$node=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($node)){if(($node.GetRuntimeId() -join ':') -eq ($properties.GetRuntimeId() -join ':')){$inactiveFocus=$true;break};if(($node.GetRuntimeId() -join ':') -eq ($root.GetRuntimeId() -join ':')){break}}
-        if((Model).state.workspace.zen_mode -ne $beforeZen){(Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09);Wait-Until {(Model).state.workspace.zen_mode -eq $beforeZen} 'Focus probe did not restore original Zen state';break}
     }
-    if((Model).state.workspace.zen_mode -ne $beforeZen){(Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09)}
     Wait-Until {(Model).state.workspace.zen_mode -eq $beforeZen} 'Focus probe left a changed Zen state'
     @{controls=$controls;tab_focus=$focus;inactive_page_focused=$inactiveFocus;before_zen=$beforeZen;after_zen=(Model).state.workspace.zen_mode}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'inactive-properties-accessibility.json')
     if($inactiveFocus){throw 'Keyboard Tab reached an inactive Properties page control'}
@@ -305,12 +309,23 @@ function Layer-ListContacts([long]$Id){
     $editing=(Model).state.layer_tools.editing_layer.id;$row=Control "layer-row-$editing" -Within $card -Arranged;$rowHeight=$row.Current.BoundingRectangle.Height/$scale
     if($rowHeight -le 0){throw 'Native row height is unavailable for overflow setup'}
     $limit=[int][Math]::Ceiling((Model).layout.work_area.height/$rowHeight)+8
-    $list=Control 'layer-list' -Within $card -Arranged;$scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $list=Control 'layer-list' -Within $card -Arranged;$scroll=Scroll-Pattern $list
     for($i=0;$i -lt $limit;$i++){$count=@((Model).state.layers).Count;Invoke 'layer-new' -Within $card;Wait-Until {@((Model).state.layers).Count -eq $count+1} 'Overflow layer was not created';Start-Sleep -Milliseconds 150}
     Settle-Bubbles
     @{row_height=$rowHeight;add_limit=$limit;count=@((Model).state.layers).Count;list_bounds=$list.Current.BoundingRectangle.ToString();shared_card=(View $Id).card}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'list-overflow-setup.json')
     if(!$scroll.Current.VerticallyScrollable){throw 'Native bubble layer list did not overflow'}
     if($ScrollEpochOnly){Native-ScrollEpoch $Id;return}
+    Settle-LayerScroll $scroll;$scroll.SetScrollPercent(-1,0);Settle-LayerScroll $scroll
+    $beforeInputs=Settled-LayerState;$viewport=$list.Current.BoundingRectangle
+    [CapyRowPointer]::Wheel([int]($viewport.X+$viewport.Width*.5),[int]($viewport.Y+$viewport.Height*.5),-120)
+    Wait-Until {$scroll.Current.VerticalScrollPercent -gt .5} 'Native mouse wheel did not scroll the layer list'
+    Settle-LayerScroll $scroll;$wheelPercent=$scroll.Current.VerticalScrollPercent
+    $null=Scroll-Pattern $list -Focus;[CapyRowPointer]::Key([uint32]$review.Id,0x22)
+    Wait-Until {$scroll.Current.VerticalScrollPercent -gt $wheelPercent+.5} 'Native Page Down did not scroll the layer list'
+    Settle-LayerScroll $scroll;$keyboardPercent=$scroll.Current.VerticalScrollPercent;$afterInputs=Settled-LayerState
+    @{wheel_percent=$wheelPercent;page_down_percent=$keyboardPercent;before_revision=$beforeInputs.state.document_file.revision;after_revision=$afterInputs.state.document_file.revision}|ConvertTo-Json|Set-Content (Join-Path $run 'layer-scroll-inputs.json')
+    if($afterInputs.state.document_file.revision -ne $beforeInputs.state.document_file.revision -or $afterInputs.state.layer_tools.editing_layer.id -ne $beforeInputs.state.layer_tools.editing_layer.id -or (@($afterInputs.state.layers.id)-join ',') -ne (@($beforeInputs.state.layers.id)-join ',')){throw 'Native wheel or keyboard scrolling changed artwork, selection or layer order'}
+    $checks.Add('native-layer-list-wheel-keyboard-and-scroll-automation')
     $records=@();$pairMovementFailure=$false
     foreach($phase in @('single-before','pair-from-scrolling-list','single-after')){
         Settle-LayerScroll $scroll;Settle-Bubbles
@@ -379,7 +394,7 @@ function Native-ScrollEpoch([long]$Id){
     $second=(Model).windows_tabs.selected;$epoch=(Model).state.document_file.epoch;Next-Drawing
     Wait-Until {$m=Model;$m.windows_tabs.selected -eq $originalId -and $m.state.document_file.epoch -gt $epoch -and $m.state.document_file.revision -eq $file.revision -and $m.brush_ready -and $m.canvas_ready} 'Scroll epoch original drawing did not resume'
     if(!(View $Id).card){Tap (At "tool-bubble-$Id")};Wait-Until {$null -ne (View $Id).card} 'Scroll epoch Layers card did not open';Settle-Bubbles
-    $card=Card $Id;$list=Control 'layer-list' -Within $card -Arranged;$scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $card=Card $Id;$list=Control 'layer-list' -Within $card -Arranged;$scroll=Scroll-Pattern $list
     $scroll.SetScrollPercent(-1,0);Settle-LayerScroll $scroll;$box=$list.Current.BoundingRectangle;$at=@{x=[int]($box.X+$box.Width*.5);y=[int]($box.Y+$box.Height*.65)}
     $epoch=(Model).state.document_file.epoch;[CapyCanvasTouch]::Initialize([uint32]$review.Id)
     try{[CapyCanvasTouch]::Down(1,$at.x,$at.y);foreach($dy in @(25,55,90)){Start-Sleep -Milliseconds 35;[CapyCanvasTouch]::Move(1,$at.x,($at.y-$dy))};Wait-Until {$scroll.Current.VerticalScrollPercent -gt .5} 'Scroll epoch first contact did not actually pan';$beforeSwitch=$scroll.Current.VerticalScrollPercent;Next-Drawing
@@ -389,7 +404,7 @@ function Native-ScrollEpoch([long]$Id){
     $epoch=$secondState.state.document_file.epoch;Next-Drawing
     Wait-Until {$m=Model;$m.windows_tabs.selected -eq $originalId -and $m.state.document_file.epoch -gt $epoch -and $m.state.document_file.revision -eq $file.revision -and $m.brush_ready -and $m.canvas_ready} 'Scroll epoch original drawing did not return'
     if(!(View $Id).card){Tap (At "tool-bubble-$Id")};Wait-Until {$null -ne (View $Id).card} 'Scroll epoch returned card did not open';Settle-Bubbles
-    $list=Control 'layer-list' -Within (Card $Id) -Arranged;$scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern);Settle-LayerScroll $scroll;$scroll.SetScrollPercent(-1,0);Settle-LayerScroll $scroll
+    $list=Control 'layer-list' -Within (Card $Id) -Arranged;$scroll=Scroll-Pattern $list;Settle-LayerScroll $scroll;$scroll.SetScrollPercent(-1,0);Settle-LayerScroll $scroll
     $box=$list.Current.BoundingRectangle;$at=@{x=[int]($box.X+$box.Width*.5);y=[int]($box.Y+$box.Height*.65)}
     [CapyCanvasTouch]::Initialize([uint32]$review.Id)
     try{[CapyCanvasTouch]::Down(1,$at.x,$at.y);foreach($dy in @(25,55,90)){Start-Sleep -Milliseconds 35;[CapyCanvasTouch]::Move(1,$at.x,($at.y-$dy))};Wait-Until {$scroll.Current.VerticalScrollPercent -gt .5} 'Fresh native scroll did not resume after drawing switch';$fresh=$scroll.Current.VerticalScrollPercent;[CapyCanvasTouch]::Up(1)}finally{[CapyCanvasTouch]::Dispose()}
@@ -405,16 +420,40 @@ function History-CornerPaint([long]$Id){
 }
 function Native-HistoryActions([long]$Id,$Paper,[string]$Before,[string]$Painted){
     $assertButtons={
-        $specs=@((View $Id).buttons);if($specs.Count -ne 2){throw 'Shared history capsule does not expose two actions'}
-        foreach($i in 0..1){$button=Control "bubble-history-$Id-$i" -Arranged;if($button.Current.Name -ne $specs[$i].label -or $button.Current.IsEnabled -ne $specs[$i].enabled){throw 'Native history action label or enabled state differs from shared projection'};$expected=Relative $Id (Packet $Id).history[$i];$side=(View $Id).face[1]*$scale;$bounds=$button.Current.BoundingRectangle;if([Math]::Abs($bounds.X+$bounds.Width*.5-$expected.x) -gt 2 -or [Math]::Abs($bounds.Y+$bounds.Height*.5-$expected.y) -gt 2 -or [Math]::Abs($bounds.Width-$side) -gt 2 -or [Math]::Abs($bounds.Height-$side) -gt 2){throw 'Native history action bounds differ from shared half geometry'}}
+        param([string]$Stage)
+        $attempts=[Collections.Generic.List[object]]::new()
+        try{
+            Wait-Until {
+                $packet=Packet $Id;$specs=@($packet.view.buttons);$aligned=$specs.Count -eq 2
+                $attempt=[ordered]@{utc=[DateTime]::UtcNow.ToString('o');shared_count=$specs.Count;buttons=@();aligned=$false}
+                try{
+                    if($aligned){foreach($i in 0..1){
+                        $expected=Relative $Id $packet.history[$i];$side=$packet.view.face[1]*$scale
+                        $record=[ordered]@{id="bubble-history-$Id-$i";expected=@{label=$specs[$i].label;enabled=$specs[$i].enabled;center=$expected;width=$side;height=$side};native=$null;aligned=$false}
+                        $attempt.buttons+=,$record
+                        $button=Find $record.id -Visible
+                        if($button){
+                            $current=$button.Current;$bounds=$current.BoundingRectangle
+                            $record.native=@{label=$current.Name;enabled=$current.IsEnabled;bounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
+                            $record.aligned=$record.native.label -eq $specs[$i].label -and $record.native.enabled -eq $specs[$i].enabled -and !$bounds.IsEmpty -and
+                                [Math]::Abs($bounds.X+$bounds.Width*.5-$expected.x) -le 2 -and [Math]::Abs($bounds.Y+$bounds.Height*.5-$expected.y) -le 2 -and
+                                [Math]::Abs($bounds.Width-$side) -le 2 -and [Math]::Abs($bounds.Height-$side) -le 2
+                        }
+                        $aligned=$aligned -and $record.aligned
+                    }}
+                    $attempt.aligned=$aligned
+                    return $aligned
+                }finally{$attempts.Add($attempt)}
+            } "Native history $Stage label, enabled state or half geometry did not converge with shared projection"
+        }finally{@{stage=$Stage;attempts=@($attempts.ToArray())}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run "native-history-actions-$Stage.json")}
     }
-    & $assertButtons
-    Invoke "bubble-history-$Id-0";Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Before} 'Accessible history Undo did not restore exact pixels';& $assertButtons
-    Invoke "bubble-history-$Id-1";Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Painted} 'Accessible history Redo did not restore exact pixels';& $assertButtons
+    & $assertButtons 'initial'
+    Invoke "bubble-history-$Id-0";Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Before} 'Accessible history Undo did not restore exact pixels';& $assertButtons 'accessibility-undo'
+    Invoke "bubble-history-$Id-1";Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Painted} 'Accessible history Redo did not restore exact pixels';& $assertButtons 'accessibility-redo'
     $undo=Control "bubble-history-$Id-0";Focus-Keyboard $undo -Backward;[CapyRowPointer]::Key([uint32]$review.Id,0x0D)
-    Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Before} 'Keyboard Enter history Undo did not restore exact pixels';& $assertButtons
+    Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Before} 'Keyboard Enter history Undo did not restore exact pixels';& $assertButtons 'keyboard-undo'
     $redo=Control "bubble-history-$Id-1";Focus-Keyboard $redo -Backward;[CapyRowPointer]::Key([uint32]$review.Id,0x20)
-    Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Painted} 'Keyboard Space history Redo did not restore exact pixels';& $assertButtons
+    Wait-Until {(Screen-Pixels $Paper.x $Paper.y) -eq $Painted} 'Keyboard Space history Redo did not restore exact pixels';& $assertButtons 'keyboard-redo'
     $redo=Control "bubble-history-$Id-1";if($redo.Current.IsEnabled -or @((View $Id).buttons)[1].enabled){throw 'Native history Redo was not disabled at history tip'}
     $origin=Settled-LayerState;$disabled=$false
     try{$redo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}catch [System.Windows.Automation.ElementNotEnabledException]{$disabled=$true}
@@ -434,7 +473,8 @@ function Native-InertiaInterruption([long]$Id,$List,$Scroll){
         Wait-Until {$value=$Scroll.Current.VerticalScrollPercent;if($value -gt $moving.prior+.05){$moving.before=$moving.prior;$moving.after=$value;return $true};$moving.prior=$value;return $false} 'Interrupt fixture did not observe live native inertia'
         [CapyCanvasTouch]::Down(1,$point.x,$point.y)
         foreach($dy in @(25,55,90)){Start-Sleep -Milliseconds 35;[CapyCanvasTouch]::Move(1,$point.x,($point.y+$dy))}
-        Wait-Until {$Scroll.Current.VerticalScrollPercent -lt $moving.after-.5} 'Fresh opposite native pan did not interrupt live inertia'
+        try{Wait-Until {$Scroll.Current.VerticalScrollPercent -lt $moving.after-.5} 'Fresh opposite native pan did not interrupt live inertia'}
+        finally{@{inertia_before=$moving.before;inertia_after=$moving.after;opposite_pan=$Scroll.Current.VerticalScrollPercent}|ConvertTo-Json|Set-Content (Join-Path $run 'layer-scroll-interruption-attempt.json')}
         $interrupted=$Scroll.Current.VerticalScrollPercent;[CapyCanvasTouch]::Up(1)
     }finally{[CapyCanvasTouch]::Dispose()}
     Settle-LayerScroll $Scroll;$Scroll.SetScrollPercent(-1,0);Settle-LayerScroll $Scroll
@@ -570,7 +610,9 @@ function Invoke-RetiredMenu($Pattern,[string]$Evidence){
     return $retired
 }
 function Next-Drawing{
-    $frame=Control ('header-item-'+(Header-Source 'command' 'next_drawing').id)
+    $source=@{entry=$null}
+    Wait-Until {$source.entry=Header-Source 'command' 'next_drawing';$null -ne $source.entry} 'Next drawing header source did not become visible'
+    $frame=Control ('header-item-'+$source.entry.id)
     foreach($button in $frame.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button))){
         if($button.Current.IsOffscreen -or !$button.Current.IsEnabled){continue};$pattern=$null
         if($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){$pattern.Invoke();return}
@@ -673,6 +715,16 @@ try{
     [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
     Wait-Until {(Model).layout.viewport[0] -gt 1000} 'Owned fixture did not maximize'
     Ensure-Sources
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'View'
+    Invoke 'fit_canvas'
+    Wait-Until {
+        $m=Model;$camera=$m.state.camera;$document=@($m.state.tabs|Where-Object active)[0];$area=$camera.work_area
+        $extent=@(($document.width*$camera.zoom),($document.height*$camera.zoom))
+        !(Find 'fit_canvas' -Visible) -and $m.canvas_ready -and
+            [Math]::Max($extent[0]/$area[2],$extent[1]/$area[3]) -gt .5 -and
+            $camera.translation[0] -ge $area[0] -and $camera.translation[1] -ge $area[1] -and
+            $camera.translation[0]+$extent[0] -le $area[0]+$area[2]+1 -and $camera.translation[1]+$extent[1] -le $area[1]+$area[3]+1
+    } 'Fixture drawing did not fit the maximized work area'
     $w=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$width=(Model).layout.viewport[0];$height=(Model).layout.viewport[1]
     $revision=Revision
     $initial=Model;$camera=$initial.state.camera;$document=@($initial.state.tabs|Where-Object active)[0]
@@ -680,9 +732,11 @@ try{
     Check-Artwork 'tear-out' $revision
     if($MenuOnly){Document-SwitchMenu $dial;@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved|Out-Null;return}
     Wait-Until {@((View $dial).rings).Count -gt 0} 'Selected brush did not tear out with halo'
+    Assert-BubbleVisualStates $dial
     Tap (Center $dial);Wait-Until {@((View $dial).chooser).Count -gt 0} 'Dial did not open chooser'
     Check-Artwork 'open-chooser' $revision
     Settled-Capture 'chooser'
+    Assert-BubbleVisualChooserTags $dial
     $medium=@((View $dial).chooser|Where-Object kind -ne 'brush')[0]
     Tap (Relative $dial $medium.center);Wait-Until {@((View $dial).chooser|Where-Object kind -eq 'brush').Count -gt 0} 'Medium did not fan brushes'
     Check-Artwork 'choose-medium' $revision
@@ -789,7 +843,7 @@ try{
     Start-Sleep -Milliseconds 450
     $pill=(Packet $color).pill;$name=(View $color).pill;$center=Center $color;$area=(Model).layout.work_area
     $left=$center.x+$pill.x*$scale;$top=$center.y+$pill.y*$scale;$right=$left+$pill.width*$scale;$bottom=$top+$pill.height*$scale
-    if([Math]::Abs($pill.height-30) -gt .05 -or $left -lt $w.X+$area.x*$scale-1 -or $top -lt $w.Y+$area.y*$scale-1 -or $right -gt $w.X+($area.x+$area.width)*$scale+1 -or $bottom -gt $w.Y+($area.y+$area.height)*$scale+1){throw 'Published palette pill does not fit the work area at 30 px height'}
+    if([Math]::Abs($pill.width-184) -gt .05 -or [Math]::Abs($pill.height-30) -gt .05 -or $left -lt $w.X+$area.x*$scale-1 -or $top -lt $w.Y+$area.y*$scale-1 -or $right -gt $w.X+($area.x+$area.width)*$scale+1 -or $bottom -gt $w.Y+($area.y+$area.height)*$scale+1){throw 'Published palette pill does not fit the work area at 184 x 30 px'}
     $orbit=@()
     foreach($bead in @((View $color).beads)){
         $placement=$bead.placement;if($placement.alpha -le 0){continue};$at=Relative $color $placement.center;$radius=$placement.size*$scale*.5
@@ -798,33 +852,39 @@ try{
     }
     $orbit|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'color-orbit-bounds.json')
     $buttons=@()
-    foreach($x in @(15,($pill.width*.5),($pill.width-15))){
-        $at=Relative $color @(($pill.x+$x),($pill.y+15))
+    foreach($expected in @(@{x=0;width=32},@{x=34;width=116},@{x=152;width=32})){
+        $at=Relative $color @(($pill.x+$expected.x+$expected.width*.5),($pill.y+15))
         $candidates=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button))|Where-Object {$b=$_.Current.BoundingRectangle;!$_.Current.IsOffscreen -and $b.Contains([Windows.Point]::new($at.x,$at.y))}|Sort-Object {$b=$_.Current.BoundingRectangle;$b.Width*$b.Height})
         if(!$candidates.Count){@{point=$at;published=$pill;center=$center}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'palette-native-miss.json');throw 'Palette pill lacks its native button'}
         $element=$candidates[0]
-        $bounds=$element.Current.BoundingRectangle;$buttons+=@{name=$element.Current.Name;bounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
+        $bounds=$element.Current.BoundingRectangle;$buttons+=@{name=$element.Current.Name;bounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height);expected=$expected}
         if([Math]::Abs($bounds.Height-30*$scale) -gt 2 -or $bounds.X -lt $left-2 -or $bounds.Right -gt $right+2 -or $bounds.Y -lt $top-2 -or $bounds.Bottom -gt $bottom+2){throw 'Native palette button exceeds its 30 px pill'}
+        if([Math]::Abs($bounds.Width-$expected.width*$scale) -gt 1.5 -or [Math]::Abs($bounds.X-($left+$expected.x*$scale)) -gt 1.5){throw "Native palette button differs from GTK width $($expected.width) px at x $($expected.x) px"}
     }
-    @{published=$pill;native_buttons=$buttons}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'palette-pill-bounds.json')
+    $gaps=@(0,1|ForEach-Object {($buttons[$_+1].bounds[0]-$buttons[$_].bounds[0]-$buttons[$_].bounds[2])/$scale})
+    @{published=$pill;native_buttons=$buttons;gaps=$gaps}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'palette-pill-bounds.json')
+    foreach($gap in $gaps){if([Math]::Abs(($gap-2)*$scale) -gt 1.5){throw 'Native palette buttons do not have GTK 2 px gaps'}}
     $palettes=@((Model).state.color_library.palettes);$index=[Array]::IndexOf(@($palettes.name),$name)
     if($index -lt 0 -or $palettes.Count -lt 3){throw 'Palette fixture cannot distinguish exactly one step'}
-    $nextName=$palettes[($index+1)%$palettes.Count].name;$next=Relative $color @(($pill.x+$pill.width-15),($pill.y+15))
+    $nextName=$palettes[($index+1)%$palettes.Count].name;$next=Relative $color @(($pill.x+$pill.width-16),($pill.y+15))
     Tap $next;Wait-Until {(View $color).pill -eq $nextName} 'One native Next tap did not advance exactly one palette'
     Start-Sleep -Milliseconds 400;if((View $color).pill -ne $nextName){throw 'Next palette changed more than once'}
-    $pill=(Packet $color).pill;$previous=Relative $color @(($pill.x+15),($pill.y+15))
+    $pill=(Packet $color).pill;$previous=Relative $color @(($pill.x+16),($pill.y+15))
     Tap $previous;Wait-Until {(View $color).pill -eq $name} 'One native Previous tap did not restore exactly one palette'
     Start-Sleep -Milliseconds 400;if((View $color).pill -ne $name){throw 'Previous palette changed more than once'}
     Settled-Capture 'palette-pill'
     $checks.Add('persistent-options-beads-palette-pill')
+    if($BeadTransitionsOnly){Assert-BubbleVisualBeadTransitions $color}
     Settled-Capture 'color-ring'
     $checks.Add('wheel-pick')
+    if($VisualOnly -and !$BeadTransitionsOnly){Assert-BubbleVisualEdges $dial $color}
     $canvas=Control 'drawing-canvas';$canvas.SetFocus();Wait-Until {$canvas.Current.HasKeyboardFocus} 'Canvas did not receive native focus for Zen'
     [CapyRowPointer]::Key([uint32]$review.Id,0x09)
     Wait-Until {(Model).state.workspace.zen_mode} 'Tab did not enter Zen'
     foreach($id in @($dial,$controls,$history,$color)){if(!(Find "tool-bubble-$id" -Visible)){throw "Zen hid bubble $id"}}
     Settled-Capture 'zen';[CapyRowPointer]::Key([uint32]$review.Id,0x09);Wait-Until {!(Model).state.workspace.zen_mode} 'Tab did not leave Zen'
     $checks.Add('zen-retains-bubbles')
+    if($VisualOnly -or $BeadTransitionsOnly){@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved|Out-Null;return}
     Document-SwitchMenu $dial
     Retained-Menu $color
     foreach($packet in @(Packets)){
@@ -838,7 +898,7 @@ try{
     Settled-Capture 'put-back'
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
-    [pscustomobject]@{variant=$Variant;checks=@($checks);scope='WARP/native OS-injected input; physical input, hardware performance and final visual acceptance unverified'}|ConvertTo-Json -Depth 12|Tee-Object -FilePath (Join-Path $run 'results.json')
+    [pscustomobject]@{variant=$Variant;checks=@($checks);scope='OS-injected input with native pixel and geometry checks; physical input, matched GTK captures and presentation performance unverified'}|ConvertTo-Json -Depth 12|Tee-Object -FilePath (Join-Path $run 'results.json')
 }catch{
     $CapyEach=$null
     if($review -and !$review.HasExited){

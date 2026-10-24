@@ -1239,18 +1239,59 @@ image-authoring and conversion journeys.
 
 `exercise-tool-bubbles.ps1` follows the GTK bubble journeys with native mouse,
 pen and touch contacts in light and dark themes. Run the six `tool-bubbles`
-variants through the VM fixture runner. It authors its header through the native
-picker and uses shared presentation geometry for contact points. Checks include
+variants through the VM fixture runner or the private-desktop runner on hardware.
+It authors its header through the native picker, fits the drawing after maximizing
+the window, and uses shared presentation geometry for contact points. The fit
+must place the paper inside the work area at a usable scale before pixel checks.
+Checks include
 fast tear-off, canvas gaps, cancellation, persistent options, wheel drag-out,
 two-finger movement and pinch, Layers pages, dab previews and exact artwork
 Undo/Redo. The retained presenter shares the ordinary wheel, swatches, brush
 previews, thumbnail cache, numeric controls and Layers inspector.
+The fixture checks selected-face hover and pressed pixels against the theme's
+text-color overlays and requires the ordinary face to keep its size. Moving past
+the drag threshold and returning must retain hover shading; pressing starts a
+new pressed state. Hover follows the current rendered placement while a held
+pointer stays still. Escape must restore the lifted face's original bounds before
+pointer release. Hidden chooser tags appear during a choice, not passive hover,
+and cancelling the check restores the original chooser and artwork state. Run
+`-VisualOnly` in both themes for minimum, intermediate and maximum wheel sizes
+at all four corners, crowded choosers, and every transparency setting. The
+captures and geometry records include native wheel bounds and palette buttons:
+the 184 by 30 DIP pill has 32, 116 and 32 DIP buttons separated by 2 DIP gaps.
+GTK remains the visual authority for shadows, labels, previews, disabled opacity
+and transitions; Web is a secondary reference.
+Run `-BeadTransitionsOnly` in both themes for held orbit movement past and back
+inside drag slop, and native bead retirement and revival within 220 ms. It records
+intermediate native bounds and captures, checks restored geometry and unchanged
+artwork, and does not compare the per-frame alpha curve with a reference capture.
 The history capsule exposes separate native Undo and Redo buttons for keyboard
 and accessibility input, with labels and availability from Rust. Run
 `tool-bubbles:HistoryOnly` and `tool-bubbles:HistoryLightOnly` to check their
 actions against exact artwork pixels in both themes.
-The [hardware handoff](tool-bubbles-windows-handoff.md) lists the remaining
-physical-input, display and performance qualification work.
+Use `NumericOnly`, `CurveOnly`, `NativeControlsOnly`, `ScrollEpochOnly`,
+`HistoryOnly`, `HistoryLightOnly`, `MenuOnly` and `RapidOnly` to isolate the
+corresponding journeys on a private desktop with a disposable profile.
+
+Hardware qualification uses a normal optimized build and actual mouse, fingers
+and a pressure pen. Repeat tear-out and return, chooser and halo changes, wheel
+cancel, numeric rollback before two-finger takeover, active scrolling and inertia,
+and row recycling and reorder in cards, drawers and docked panels. Check native
+menus followed immediately by card controls, drawing replacement, focus loss,
+minimize/restore, resize, Zen, reduced motion and return from stroke fade.
+Move between displays with different scale factors during a contact and verify
+that coordinates retain their original view revision. Synthetic input cannot
+qualify physical digitizer behavior or eraser-end flags that the OS omits.
+
+Compare composed captures with GTK at matched size, scale and theme, including
+rounded glass, arcs, disabled opacity, labels, shadows and native card content.
+Check HDR output and wheel colors on a compatible display. Measure moving
+bubbles, collisions, chooser/halo expansion, wheel pinch, scrolling, folding,
+reopening and stroke fade using actual presentation records and separate CPU/GPU
+attribution under the [measurement rules](../performance/measuring.md). Frame
+callbacks and submission counts do not qualify frame-rate targets. Retain source
+and binary identities, captures and failures locally; record current measurements
+in the tier tables.
 
 Halo tracks, fills and thumbs retain their native elements during motion. Bead
 content changes independently of placement. Dab requests stop after completion
@@ -1274,14 +1315,20 @@ changes. Layers opacity uses the shared effect gesture transaction for rollback
 and a single Undo step.
 
 Panel scrolling shares `PanelScroll.h`: native pan and inertia events update a
-ScrollViewer, with explicit cancellation before two-finger bubble takeover.
-The [hardware handoff](tool-bubbles-windows-handoff.md#required-validation-and-measurement)
-records the VM's remaining routed-away failure during active scrolling.
-The ScrollViewer keeps keyboard, wheel, scrollbar and accessibility handling,
-and provides the ItemsRepeater's virtualized viewport. Numeric, curve, row and
+ScrollView, with explicit cancellation before two-finger bubble takeover.
+Its built-in manipulation ignores touch and pen, which belong to the custom
+pan handler, so a compositor gesture cannot take those contacts after handoff.
+The ScrollView keeps keyboard, wheel, scrollbar and accessibility handling,
+and provides the ItemsRepeater's virtualized viewport. Its background and the
+inner presenter's background stay null so empty space belongs to the containing
+card; the content keeps its own pan surface. A second touch in that empty space
+must cancel the first control's edit and move the bubble, with a fresh control
+gesture and exact Undo still working afterward. Fixture `Scroll-Pattern`
+resolves its native inner presenter; the outer named container retains row
+gesture evidence and geometry. Numeric, curve, row and
 scroll controls offer a second contact to the bubble before starting an edit.
 A row pan suppresses the row's click until release, including when pointer
-motion arrives before the ScrollViewer's offset notification.
+motion arrives before the ScrollView's offset notification.
 Row gestures and revealed swipe actions join the workspace's existing transient
 registry. Escape dismisses them before the shared action can close their drawer
 or card; destroying a list removes its registration.
@@ -1289,6 +1336,8 @@ A handoff cancels every native owner of both contacts, including both row and
 scroll handling, and requires successful capture before starting the bubble drag.
 The current native manipulation completes before root capture transfers.
 Unloading or changing drawings retires the scroll contact.
+Native controls checks exercise wheel, Page Down and scroll automation alongside
+touch scrolling, inertia interruption, recycling, reorder and exact Undo.
 `tool-bubbles:ScrollEpochOnly` switches drawings during an active native pan,
 returns to the original drawing and checks fresh scrolling and unchanged history.
 The extra touch surface sits behind the bubbles while a first touch is active,
@@ -1309,8 +1358,10 @@ Hollow native paths can route a canvas contact through XAML instead of the
 independent input source. `CanvasWindow` admits unhandled events targeted at its
 `SwapChainPanel`, copies native samples on the event's owning thread, and sends
 the values to the existing input worker. Both sources share sample conversion,
-ordering, modifiers and contact tracking. Each source runs its hold recognizer
-on its own thread; the worker validates the active contact before a hold acts.
+ordering, modifiers and contact tracking. Missing or empty intermediate history
+uses the current point, including during resize and pointer rerouting. Each
+source runs its hold recognizer on its own thread; the worker validates the
+active contact before a hold acts.
 Native caption passthrough regions cover only intersections with caption areas.
 
 The VM establishes software-adapter behavior. Moving-frame performance and

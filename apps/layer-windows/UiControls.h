@@ -140,6 +140,9 @@ inline void mouseScrollbars(ScrollViewer const& scroll){
     }};
     mode.entries.push_back({make_weak(scroll.as<DependencyObject>()),show});show(mode.mouse);
 }
+inline void scrollVertical(ScrollView const& scroll,double offset){
+    static thread_local ScrollingScrollOptions options{ScrollingAnimationMode::Disabled,ScrollingSnapPointsMode::Ignore};scroll.ScrollTo(scroll.HorizontalOffset(),offset,options);
+}
 inline void dragCursor(UIElement const& element,bool touch,bool dragging,bool held=false){
     using namespace Microsoft::UI::Input;
     auto target=element.as<IUIElementProtected>();

@@ -7,6 +7,7 @@
 #include <numbers>
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
+#include <winrt/Microsoft.UI.Xaml.Documents.h>
 #include <winrt/Microsoft.UI.Xaml.Markup.h>
 
 using namespace CapyBubbles;
@@ -40,14 +41,26 @@ void retire(Part& part){
     part.art.Children().Clear();ElementCompositionPreview::SetElementChildVisual(part.art,snapshot);
 }
 void shadow(Record const& record,Part& part){
-    bool bead=prefix(part.key,L"bead:");auto reach=bead?3.:record.lifted?12.:8.;auto drop=bead?1.:record.lifted?4.5:2.;auto opacity=bead?.13:record.lifted||part.key==L"card"?.16:.08;
+    if(part.key==L"face"&&str(record.view,L"kind")==L"layers"){part.shadow.Children().Clear();return;}
+    bool bead=prefix(part.key,L"bead:")&&!part.glass;auto reach=bead?3.:record.lifted?12.:8.;auto drop=bead?1.:record.lifted?4.5:2.;auto opacity=bead?.13:record.lifted?.16:.08;
     auto key=to_hstring(part.size.Width)+L":"+to_hstring(part.size.Height)+L":"+to_hstring(part.radius)+L":"+to_hstring(reach);
     if(part.shadowKey==key)return;part.shadowKey=key;part.shadow.Children().Clear();
-    ClipOutside(part.shadow,part.size.Width,part.size.Height,{float(part.radius),float(part.radius),float(part.radius),float(part.radius)},part.squircle);
-    auto steps=int(std::ceil(reach*2));double previous=0;
-    for(int i=steps;i>=1;--i){auto distance=i*reach/steps,strength=opacity*std::pow(1-distance/reach,2);
-        auto path=shape(outline({part.size.Width+float(2*distance),part.size.Height+float(2*distance)},part.radius+distance,false),fill({uint8_t(std::round(255*(strength-previous)/(1-previous))),0,0,0}));
-        Canvas::SetLeft(path,-distance);Canvas::SetTop(path,drop-distance);part.shadow.Children().Append(path);previous=strength;}
+    auto width=double(part.size.Width),height=double(part.size.Height),radius=std::min(width,height)/2;
+    if(part.key==L"card")radius=std::min(radius,part.radius);
+    ClipOutside(part.shadow,part.size.Width,part.size.Height,{float(radius),float(radius),float(radius),float(radius)},false);
+    auto stops=[&](auto const& brush,double edge,double end,bool reverse=false){
+        for(int i=0;i<=4;++i){auto t=(reverse?4-i:i)*.25;GradientStop stop;stop.Offset(edge+(end-edge)*t);stop.Color({uint8_t(std::round(255*opacity*(1-t)*(1-t))),0,0,0});brush.GradientStops().Append(stop);}
+    };
+    auto patch=[&](Brush const& brush,double x,double y,double width,double height){
+        Shapes::Rectangle area;area.Fill(brush);area.IsHitTestVisible(false);area.Width(width);area.Height(height);Canvas::SetLeft(area,x);Canvas::SetTop(area,y);part.shadow.Children().Append(area);
+    };
+    auto extent=radius+reach;
+    for(auto right:{false,true})for(auto bottom:{false,true}){
+        RadialGradientBrush gradient;Point center{right?0.f:1.f,bottom?0.f:1.f};gradient.Center(center);gradient.GradientOrigin(center);gradient.RadiusX(1);gradient.RadiusY(1);stops(gradient,radius/extent,1);
+        patch(gradient,right?width-radius:-reach,(bottom?height-radius:-reach)+drop,extent,extent);
+    }
+    if(width>2*radius){LinearGradientBrush gradient;gradient.StartPoint({0,0});gradient.EndPoint({0,1});auto edge=reach/(height+2*reach);stops(gradient,edge,0,true);stops(gradient,1-edge,1);patch(gradient,radius,drop-reach,width-2*radius,height+2*reach);}
+    if(height>2*radius){LinearGradientBrush gradient;gradient.StartPoint({0,0});gradient.EndPoint({1,0});auto edge=reach/(width+2*reach);stops(gradient,edge,0,true);stops(gradient,1-edge,1);patch(gradient,-reach,radius+drop,width+2*reach,height-2*radius);}
 }
 ControlTemplate bubbleTemplate(){
     static auto value=Markup::XamlReader::Load(L"<ControlTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='Button'><ContentPresenter Content='{TemplateBinding Content}'/></ControlTemplate>").as<ControlTemplate>();return value;
@@ -55,14 +68,14 @@ ControlTemplate bubbleTemplate(){
 Button bubbleButton(){
     Button button;button.Template(bubbleTemplate());button.Padding({0});button.BorderThickness({0});button.Background(nullptr);button.MinWidth(0);button.MinHeight(0);button.UseSystemFocusVisuals(true);return button;
 }
-double textWidth(std::shared_ptr<WorkspaceData> const& data,hstring const& text){auto metrics=label(data,text);metrics.Measure({INFINITY,INFINITY});return metrics.DesiredSize().Width;}
+Size textSize(std::shared_ptr<WorkspaceData> const& data,hstring const& text,bool count=false,bool tabular=false){auto metrics=label(data,text,false,false);if(count)metrics.FontWeight(Windows::UI::Text::FontWeights::SemiBold());if(tabular)Documents::Typography::SetNumeralAlignment(metrics,FontNumeralAlignment::Tabular);metrics.Measure({INFINITY,INFINITY});return metrics.DesiredSize();}
 }
 void Record::place(){
     Canvas::SetLeft(hints,reach);Canvas::SetTop(hints,reach);
     root.Width(reach*2);root.Height(reach*2);transform.TranslateX(center.X-reach);transform.TranslateY(center.Y-reach);transform.CenterX(reach);transform.CenterY(reach);transform.ScaleX(scale());transform.ScaleY(scale());root.Opacity(alpha());
 }
 void Part::place(Point at,Size extent,double alpha,bool animate){
-    if(at==toCenter&&extent==toSize&&alpha==toStrength)return;
+    if(at==toCenter&&extent==toSize&&alpha==toStrength){if(!animate){layout.snap(1);center=at;size=extent;strength=alpha;}return;}
     fromCenter=center;toCenter=at;fromSize=size;toSize=extent;fromStrength=strength;toStrength=alpha;
     layout.snap(animate&&size.Width>0?0:1);layout.to(1,220);
     if(layout.value==1){center=at;size=extent;strength=alpha;}
@@ -130,6 +143,7 @@ void WorkspaceBubbles::Impl::step(J const& motion,double now,bool reduced,uint64
     if(restoreAt>=0){if(now>=restoreAt){restoreAt=-1;for(auto const& [id,r]:records){r->faded=false;r->fade.to(1,140);}}else active=true;}
     for(auto value:array(motion,L"placements")){auto p=value.GetObject();auto found=records.find(uint32_t(num(p,L"id")));if(found==records.end())continue;auto& r=*found->second;
         r.center=point(array(p,L"center"));r.lifted=flag(p,L"lifted");r.homing=flag(p,L"homing");r.root.Visibility(Visibility::Visible);}
+    if(contact&&!contact->paired)contact->record->hovered=hit(*contact->record,contact->last);
     for(auto const& [id,r]:records){active=r->fade.step(now,reduced)||active;
         for(auto it=r->parts.begin();it!=r->parts.end();){auto& p=*it->second;active=p.step(now,reduced)||active;
             if(p.appearance.value==0&&p.appearance.target==0){remove(r->root,p.root);it=r->parts.erase(it);continue;}
@@ -142,54 +156,74 @@ void WorkspaceBubbles::Impl::step(J const& motion,double now,bool reduced,uint64
 void WorkspaceBubbles::Impl::update(std::shared_ptr<Record> const& r,J const& packet){
     if(r->packet.Size()&&r->packet.Stringify()==packet.Stringify())return;
     auto prior=r->view;bool sameDiameter=prior.Size()&&num(prior,L"diameter")==num(object(packet,L"view"),L"diameter");r->packet=packet;r->view=object(packet,L"view");r->reach=num(packet,L"reach")+16;r->place();auto v=r->view;std::set<hstring> live;int order=0;
+    bool tweenBeads=sameDiameter&&!(contact&&contact->record==r&&contact->mode==L"beads"&&contact->moved);
     auto part=[&](hstring const& key,J const& value,Point at,Size size,double radius,bool squircle=false,bool glass=true,double strength=1,double from=.6,double duration=180,double delay=0){
         live.insert(key);auto& p=r->parts[key];if(!p){p=std::make_shared<Part>(key,(key==L"face"||key==L"badge")&&!r->parts.contains(L"card")?1:0);
-            p->root.RenderTransform(p->transform);p->shadow.IsHitTestVisible(false);p->selection.IsHitTestVisible(false);p->art.IsHitTestVisible(key==L"card"||key==L"pill");p->root.Children().Append(p->shadow);p->root.Children().Append(p->background);p->root.Children().Append(p->selection);p->root.Children().Append(p->art);r->root.Children().Append(p->root);
+            p->root.RenderTransform(p->transform);p->shadow.IsHitTestVisible(false);p->selection.IsHitTestVisible(false);p->hover.IsHitTestVisible(false);p->decorations.IsHitTestVisible(false);p->art.IsHitTestVisible(key==L"card"||key==L"pill");p->root.Children().Append(p->shadow);p->root.Children().Append(p->ink);p->root.Children().Append(p->decorations);p->ink.Children().Append(p->background);p->ink.Children().Append(p->selection);p->ink.Children().Append(p->hover);p->ink.Children().Append(p->art);r->root.Children().Append(p->root);
         }
-        if(p->retired){ElementCompositionPreview::SetElementChildVisual(p->art,nullptr);p->art.Children().Append(p->cardHost);p->retired=false;p->contentDirty=true;}
+        if(p->retired){ElementCompositionPreview::SetElementChildVisual(p->art,nullptr);p->art.Children().Append(p->cardHost);p->retired=false;p->contentDirty=true;p->appearance.snap(0);}
+        if(key==L"halo"&&p->appearance.target==0)p->appearance.snap(0);
         p->contentDirty=p->contentDirty||p->data.Stringify()!=value.Stringify();p->order=++order;p->data=value;p->radius=radius;p->squircle=squircle;p->glass=glass;p->fromScale=from;
-        bool tween=sameDiameter&&prefix(key,L"bead:")&&!(contact&&contact->record==r&&contact->mode==L"beads"&&distance(contact->start,contact->last)>8);
+        bool tween=tweenBeads&&prefix(key,L"bead:");
+        if(tween&&!glass&&(p->appearance.value!=1||p->appearance.target==0)){
+            auto initial=p->size.Width==0;p->place(initial?at:p->center,initial?size:p->size,p->strength*p->appearance.value,false);p->appearance.snap(1);
+        }
         p->place(at,size,strength,tween);p->appearance.to(1,duration,delay);return p;
     };
     auto face=point(array(v,L"face"));bool card=object(v,L"card").Size();
     J faceData;for(auto name:{L"kind",L"icon",L"label",L"preview",L"variants",L"dots",L"buttons",L"selected"})faceData.Insert(name,v.GetNamedValue(name,JsonValue::CreateNullValue()));
     if(!card)part(L"face",faceData,{},Size{face.X,face.Y},str(v,L"kind")==L"layers"?20:face.Y/2,str(v,L"kind")==L"layers",true,flag(v,L"enabled")?1:.45,.6,180,r->parts.contains(L"card")?150:0);
-    if(!card&&str(v,L"kind")==L"layers"){auto text=to_hstring(uint32_t(num(v,L"layers")));auto bounds=ui(data,O({{L"type",S(L"count_badge")},{L"text",point({float(textWidth(data,text)),22})}})).GetArray();auto size=point(bounds.GetArrayAt(1));part(L"badge",O({{L"text",S(text)}}),point(bounds.GetArrayAt(0)),{size.X,size.Y},11,false,true,1,.6,180,r->parts.contains(L"card")?150:0);}
+    if(!card&&str(v,L"kind")==L"layers"){auto text=to_hstring(uint32_t(num(v,L"layers")));auto metrics=textSize(data,text,true);auto bounds=ui(data,O({{L"type",S(L"count_badge")},{L"text",point({metrics.Width,std::max(22.f,metrics.Height)})}})).GetArray();auto size=point(bounds.GetArrayAt(1));part(L"badge",O({{L"text",S(text)}}),point(bounds.GetArrayAt(0)),{size.X,size.Y},size.Y/2,false,true,1,.6,180,r->parts.contains(L"card")?150:0);}
     if(array(v,L"rings").Size()){auto rings=O({{L"rings",array(v,L"rings")},{L"_geometry",array(packet,L"rings")}});auto reach=num(v,L"halo",num(v,L"diameter"))/2+40;part(L"halo",rings,{},Size{float(reach*2),float(reach*2)},0,false,false,1,.85,160);}
-    if(!str(v,L"readout").empty())part(L"readout",O({{L"text",S(str(v,L"readout"))}}),point(array(packet,L"readout")),{float(std::max(80.,textWidth(data,str(v,L"readout"))+16)),28},14,false,true,1,1,0);
+    if(!str(v,L"readout").empty()){auto metrics=textSize(data,str(v,L"readout"),false,true);part(L"readout",O({{L"text",S(str(v,L"readout"))}}),point(array(packet,L"readout")),{metrics.Width+14,metrics.Height+4},(metrics.Height+4)/2,false,true,1,1,0);}
     uint32_t fresh=0;auto chooser=array(v,L"chooser");for(uint32_t i=0;i<chooser.Size();++i){auto item=chooser.GetObjectAt(i);bool brush=str(item,L"kind")==L"brush";auto key=(brush?L"brush:":L"item:")+to_hstring(i);auto found=r->parts.find(key);
-        if(found!=r->parts.end()&&(str(found->second->data,L"label")!=str(item,L"label")||num(found->second->data,L"preview",-1)!=num(item,L"preview",-1))){auto old=found->second;r->parts.erase(found);old->appearance.to(0,120);r->parts[L"retired:"+key+L":"+to_hstring(milliseconds())]=old;}
+        if(found!=r->parts.end()&&found->second->appearance.target==0){auto old=found->second;r->parts.erase(found);old->order+=1000;r->parts[L"leaving:"+key+L":"+to_hstring(milliseconds())]=old;}
+        else if(found!=r->parts.end()&&(str(found->second->data,L"kind")!=str(item,L"kind")||str(found->second->data,L"label")!=str(item,L"label"))){remove(r->root,found->second->root);r->parts.erase(found);}
         auto wait=r->parts.contains(key)?0:fresh++*(brush?16:14);part(key,item,point(array(item,L"center")),brush?Size{152,48}:Size{44,44},brush?24:22,false,true,flag(item,L"enabled")?1:.45,.6,180,wait);
-        if(!brush){auto tag=rectangle(ui(data,O({{L"type",S(L"chooser_tag")},{L"center",array(item,L"center")},{L"width",N(std::min(96.,textWidth(data,str(item,L"label"))+18))}})).GetObject());part(L"tag:"+to_hstring(i),item,{tag.X+tag.Width/2,tag.Y+tag.Height/2},{tag.Width,tag.Height},9,false,true,1,1,0);}}
+        if(!brush){auto metrics=textSize(data,str(item,L"label"));auto tag=rectangle(ui(data,O({{L"type",S(L"chooser_tag")},{L"center",array(item,L"center")},{L"width",N(std::min(96.,double(metrics.Width)+18))}})).GetObject());part(L"tag:"+to_hstring(i),item,{tag.X+tag.Width/2,tag.Y+tag.Height/2},{tag.Width,metrics.Height+6},9,false,true,1,1,0);}}
     auto beads=array(v,L"beads"),colors=array(packet,L"bead_colors");for(uint32_t i=0;i<beads.Size();++i){auto bead=beads.GetObjectAt(i),placement=object(bead,L"placement");auto size=float(num(placement,L"size"));auto color=colors.GetAt(i);
         auto content=O({{L"kind",S(str(object(placement,L"bead"),L"kind"))},{L"label",S(str(bead,L"label"))},{L"selected",B(flag(bead,L"selected"))},{L"rgba",color}});
-        part(L"bead:"+object(placement,L"bead").Stringify(),content,point(array(placement,L"center")),{size,size},size/2,false,color.ValueType()==JsonValueType::Null,num(placement,L"alpha"),1,220);}
-    if(!str(v,L"pill").empty()){auto pill=rectangle(object(packet,L"pill"));part(L"pill",O({{L"text",S(str(v,L"pill"))}}),{pill.X+pill.Width/2,pill.Y+pill.Height/2},{184,30},15,false,true,1,1,0);}
+        bool palette=color.ValueType()==JsonValueType::Null;
+        auto p=part(L"bead:"+object(placement,L"bead").Stringify(),content,point(array(placement,L"center")),{size,size},size/2,false,palette,palette?1:num(placement,L"alpha"),1,220);
+        if(palette||!tweenBeads)p->appearance.snap(1);}
+    if(!str(v,L"pill").empty()){auto pill=rectangle(object(packet,L"pill"));part(L"pill",O({{L"text",S(str(v,L"pill"))}}),{pill.X+pill.Width/2,pill.Y+pill.Height/2},{pill.Width,pill.Height},pill.Height/2,false,true,1,1,0);}
     if(card){auto spec=object(v,L"card");auto size=point(array(spec,L"size"));part(L"card",spec,{},Size{size.X,size.Y},18,true,true,1,.6,200);}
     r->hints.Children().Clear();r->hints.IsHitTestVisible(false);Canvas::SetZIndex(r->hints,order+1);
     uint32_t index;if(!r->root.Children().IndexOf(r->hints,index))r->root.Children().Append(r->hints);
     for(auto value:array(v,L"hints")){auto hint=value.GetArray();dot(r->hints,point(hint.GetArrayAt(0)),2.5,data->tint(L"text",uint8_t(std::round(255*.35*hint.GetNumberAt(1)))));}
-    for(auto const& [key,p]:r->parts)if(!live.contains(key)){p->appearance.to(0,key==L"card"?150:120);p->background.IsHitTestVisible(false);if(p->accessible)p->accessible.IsHitTestVisible(false);if(key==L"card")retire(*p);}
+    for(auto it=r->parts.begin();it!=r->parts.end();){auto const& [key,p]=*it;
+        if(!live.contains(key)){
+            bool bead=prefix(key,L"bead:");
+            bool immediate=card&&(key==L"face"||key==L"badge")||key==L"pill"||key==L"readout"||prefix(key,L"tag:")||bead&&(p->glass||!tweenBeads)||chooser.Size()&&(prefix(key,L"item:")||prefix(key,L"brush:"));
+            if(immediate){remove(r->root,p->root);it=r->parts.erase(it);continue;}
+            if(p->appearance.target>0){if(bead)p->place(p->center,p->size,p->strength,false);else p->appearance.snap(1);}
+            p->appearance.to(0,bead?220:key==L"card"?150:120);p->background.IsHitTestVisible(false);if(p->accessible)p->accessible.IsHitTestVisible(false);if(key==L"card")retire(*p);
+        }++it;
+    }
 }
 void WorkspaceBubbles::Impl::draw(std::shared_ptr<Record> const& r,std::shared_ptr<Part> const& p){
     if(p->theme!=data->theme()){p->theme=data->theme();p->contentDirty=true;p->wheelKey=L"";p->surfaceKey=L"";}
-    p->root.Width(p->size.Width);p->root.Height(p->size.Height);p->art.Width(p->size.Width);p->art.Height(p->size.Height);
+    p->root.Width(p->size.Width);p->root.Height(p->size.Height);p->ink.Width(p->size.Width);p->ink.Height(p->size.Height);p->art.Width(p->size.Width);p->art.Height(p->size.Height);
     p->transform.CenterX(p->size.Width/2);p->transform.CenterY(p->size.Height/2);p->transform.TranslateX(r->reach+p->center.X-p->size.Width/2);p->transform.TranslateY(r->reach+p->center.Y-p->size.Height/2);
-    bool item=prefix(p->key,L"item:")||prefix(p->key,L"brush:");bool hovered=kind(r->hovered)==L"face"&&p->key==L"face"&&str(r->view,L"kind")!=L"color"&&str(r->view,L"kind")!=L"history";
-    if(item&&r->hovered&&r->hovered.ValueType()==JsonValueType::Object)hovered=num(r->hovered.GetObject(),L"item",-1)==std::stod(to_string(p->key).substr(to_string(p->key).find(':')+1));
-    p->hot=hovered&&r->pressed;p->transform.ScaleX(p->scale());p->transform.ScaleY(p->scale());p->root.Opacity(p->appearance.value*p->strength);Canvas::SetZIndex(p->root,p->order);
+    bool item=prefix(p->key,L"item:")||prefix(p->key,L"brush:");auto index=item?std::stod(to_string(p->key).substr(to_string(p->key).find(':')+1)):-1;
+    auto marked=[&](V const& hit){return item?hit&&hit.ValueType()==JsonValueType::Object&&num(hit.GetObject(),L"item",-1)==index:kind(hit)==L"face"&&p->key==L"face"&&str(r->view,L"kind")!=L"color"&&str(r->view,L"kind")!=L"history";};
+    bool hovered=marked(r->hovered),pressed=r->pressed&&contact&&contact->record==r;
+    p->hot=item&&hovered&&contact&&contact->record==r&&contact->mode==L"choose"&&p->appearance.target>0;p->transform.ScaleX(p->scale());p->transform.ScaleY(p->scale());p->root.Opacity(p->appearance.value);Canvas::SetZIndex(p->root,p->order);
+    p->ink.Opacity(p->strength);
+    p->shadow.Opacity(prefix(p->key,L"bead:")&&!p->glass?p->strength:1);
     p->root.IsHitTestVisible(p->appearance.target>0&&!r->faded);if(p->accessible)p->accessible.Visibility(p->appearance.target>0?Visibility::Visible:Visibility::Collapsed);bool selected=flag(p->data,L"selected")&&(p->key==L"face"||item||prefix(p->key,L"bead:")&&p->glass);
-    p->selection.Fill(selected?CapyUi::selected(data):data->tint(L"text",hovered?(r->pressed?36:18):0));
+    p->selection.Fill(selected?CapyUi::selected(data):clear());if(!item||p->appearance.target>0)p->hover.Fill(data->tint(L"text",pressed&&marked(contact->hit)?36:hovered?18:0));
     if(p->key==L"face"&&str(r->view,L"kind")==L"history")for(uint32_t i=0;i<2;++i){
         bool over=r->hovered&&r->hovered.ValueType()==JsonValueType::Object&&num(r->hovered.GetObject(),L"half",-1)==i;
-        p->halves[i].Fill(data->tint(L"text",over?(r->pressed?36:18):0));
+        bool down=pressed&&contact->hit&&contact->hit.ValueType()==JsonValueType::Object&&num(contact->hit.GetObject(),L"half",-1)==i;
+        p->halves[i].Fill(data->tint(L"text",down?36:over?18:0));
     }
-    bool tag=prefix(p->key,L"tag:");if(tag){auto suffix=std::wstring(p->key).substr(4);auto found=r->parts.find(L"item:"+hstring(suffix));auto index=std::stoul(suffix);
-        bool shown=found!=r->parts.end()&&found->second->appearance.value==1&&(flag(p->data,L"shown")||r->hovered&&r->hovered.ValueType()==JsonValueType::Object&&num(r->hovered.GetObject(),L"item",-1)==index);
+    bool tag=prefix(p->key,L"tag:");if(tag){auto suffix=std::wstring(p->key).substr(4);auto found=r->parts.find(L"item:"+hstring(suffix));
+        bool shown=found!=r->parts.end()&&found->second->appearance.value==1&&(flag(p->data,L"shown")||found->second->hot);
         p->root.Visibility(shown?Visibility::Visible:Visibility::Collapsed);}
     auto geometryKey=to_hstring(p->size.Width)+L":"+to_hstring(p->size.Height)+L":"+to_hstring(p->radius)+L":"+to_hstring(p->squircle);
     geometryKey=geometryKey+(p->glass?L":glass":L":clear");
-    if(p->key!=L"halo"&&p->surfaceKey!=geometryKey){p->surfaceKey=geometryKey;p->background.Data(outline(p->size,p->radius,p->squircle));p->selection.Data(outline(p->size,p->radius,p->squircle));
+    if(p->key!=L"halo"&&p->surfaceKey!=geometryKey){p->surfaceKey=geometryKey;for(auto path:{p->background,p->selection,p->hover})path.Data(outline(p->size,p->radius,p->squircle));
         p->background.Fill(p->glass?data->glass(L"panel"):clear());p->background.IsHitTestVisible(false);p->selection.IsHitTestVisible(false);p->contentDirty=true;
         if(p->key==L"card")ClipSurface(p->art,p->size.Width,p->size.Height,{18,18,18,18},true);
         if(p->accessible){auto hit=p->accessible.Content().as<Shapes::Path>();hit.Data(outline(p->size,p->key==L"face"&&str(r->view,L"kind")==L"layers"?0:p->radius,p->squircle));p->accessible.Width(p->size.Width);p->accessible.Height(p->size.Height);}
@@ -243,7 +277,7 @@ void WorkspaceBubbles::Impl::content(std::shared_ptr<Record> const& r,std::share
             auto arcAt=[&](double start,double sweep){auto path=arc(radius,start,sweep);TranslateTransform shift;shift.X(center.X);shift.Y(center.Y);path.Transform(shift);return path;};
             auto key=shape.Stringify()+L":"+to_hstring(size.Width)+L":"+to_hstring(size.Height);bool geometryChanged=art.geometryKey!=key;
             if(geometryChanged){art.geometryKey=key;art.body.Data(arcAt(start-span,sweep+span));art.track.Data(arcAt(start,sweep));}
-            auto fill=num(ring,L"fill");if(geometryChanged||art.fill!=fill){art.fill=fill;art.value.Data(arcAt(start,sweep*fill));}
+            auto fill=num(ring,L"fill");if(geometryChanged||art.fill!=fill){art.fill=fill;art.value.Data(arcAt(start,sweep*fill));}art.value.Visibility(fill>.004?Visibility::Visible:Visibility::Collapsed);
             art.body.Stroke(data->glass(L"panel"));art.body.StrokeThickness(num(shape,L"band"));art.body.IsHitTestVisible(flag(ring,L"enabled"));
             art.track.Stroke(data->tint(L"text",46));art.track.StrokeThickness(4);art.value.Stroke(data->tint(L"text",128));art.value.StrokeThickness(4);
             auto places=geometry.GetObjectAt(i);auto thumb=point(array(places,L"thumb")),mark=point(array(places,L"icon"));auto diameter=flag(ring,L"active")?15.f:14.f;
@@ -252,7 +286,7 @@ void WorkspaceBubbles::Impl::content(std::shared_ptr<Record> const& r,std::share
         }p->art.IsHitTestVisible(true);return;
     }
     bool history=p->key==L"face"&&str(v,L"kind")==L"history";
-    if(!history||!p->historyHost)p->art.Children().Clear();
+    if(!history||!p->historyHost)p->art.Children().Clear();p->decorations.Children().Clear();
     if(p->key==L"face"){
         auto type=str(v,L"kind");
         if(type==L"color"){
@@ -272,25 +306,27 @@ void WorkspaceBubbles::Impl::content(std::shared_ptr<Record> const& r,std::share
                 auto glyph=button.Content().as<Canvas>().Children().GetAt(1).as<Image>();setIcon(glyph,str(spec,L"icon"),data->theme(),20);glyph.Opacity(flag(spec,L"enabled")?1:.35);
             }
         }else if(type==L"layers"){
-            iconAt(p->art,data,str(v,L"icon"),center,20);p->thumbnailBrush.Stretch(Stretch::Fill);p->thumbnailFace=shape(squircleRectangle(46,46,{13,13,13,13}),p->thumbnailBrush);place(p->thumbnailFace,center,{46,46});p->art.Children().Append(p->thumbnailFace);
+            auto edge=shape(squircleRectangle(48,48,{14,14,14,14}),fill({71,128,128,128}));place(edge,center,{48,48});p->art.Children().Append(edge);
+            auto back=shape(squircleRectangle(46,46,{13,13,13,13}),fill({255,255,255,255}));place(back,center,{46,46});p->art.Children().Append(back);
+            p->thumbnailBrush.Stretch(Stretch::UniformToFill);p->thumbnailFace=shape(squircleRectangle(46,46,{13,13,13,13}),p->thumbnailBrush);place(p->thumbnailFace,center,{46,46});p->art.Children().Append(p->thumbnailFace);
         }else{
             bool brush=v.GetNamedValue(L"preview",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number;
-            if(brush)previewAt(p->art,data,int(num(v,L"preview")),{center.X,center.Y+11},{32,8},.78);
+            if(brush)previewAt(p->decorations,data,int(num(v,L"preview")),{center.X,center.Y+11},{32,8},.78);
             iconAt(p->art,data,str(v,L"icon"),{center.X,center.Y+(brush?-6:type==L"medium"?-4:0)},20);
-            if(flag(v,L"variants")){auto mark=shape(polygon({{0,9},{9,0},{9,9}}),data->brush(L"text"));Canvas::SetLeft(mark,size.Width-18);Canvas::SetTop(mark,size.Height-18);p->art.Children().Append(mark);}
-            auto dots=array(r->packet,L"dots"),chosenDots=array(v,L"dots");for(uint32_t i=0;i<dots.Size();++i){auto at=point(dots.GetArrayAt(i));dot(p->art,{center.X+at.X,center.Y+at.Y},1.75,chosenDots.GetBooleanAt(i)?data->brush(L"text"):data->tint(L"text",89));}
+            if(flag(v,L"variants"))iconAt(p->art,data,L"tool-group",{size.Width-17,size.Height-17},16);
+            auto dots=array(r->packet,L"dots"),chosenDots=array(v,L"dots");for(uint32_t i=0;i<dots.Size();++i){auto at=point(dots.GetArrayAt(i));dot(p->decorations,{center.X+at.X,center.Y+at.Y},1.75,data->tint(L"text",chosenDots.GetBooleanAt(i)?230:77));}
         }
     }else if(p->key==L"pill"){
-        p->art.IsHitTestVisible(true);for(auto direction:{-1,1}){auto button=CapyUi::button(data,L"",[weak,owner,direction]{if(auto self=weak.lock())if(auto r=owner.lock())self->send(O({{L"type",S(L"palette")},{L"id",N(r->id)},{L"step",N(direction)}}));});button.Padding({0});button.BorderThickness({0});button.Background(clear());auto glyph=icon(L"chevron-down",data->theme());RotateTransform rotation;rotation.Angle(direction<0?90:-90);glyph.RenderTransformOrigin({.5,.5});glyph.RenderTransform(rotation);button.Content(glyph);place(button,{direction<0?15.f:size.Width-15,15},{30,30});p->art.Children().Append(button);}
-        auto button=CapyUi::button(data,str(p->data,L"text"),[weak,owner,part]{if(auto self=weak.lock())if(auto r=owner.lock())if(auto p=part.lock())self->showMenu(r,{r->center.X+p->center.X,r->center.Y+p->center.Y},true);});button.Padding({0});button.BorderThickness({0});button.Background(clear());place(button,center,{size.Width-60,30});p->art.Children().Append(button);return;
+        p->art.IsHitTestVisible(true);for(auto direction:{-1,1}){auto button=CapyUi::button(data,L"",[weak,owner,direction]{if(auto self=weak.lock())if(auto r=owner.lock())self->send(O({{L"type",S(L"palette")},{L"id",N(r->id)},{L"step",N(direction)}}));});CapyUi::buttonColors(data,button,18);button.Padding({4,0,4,0});button.BorderThickness({0});button.CornerRadius({15,15,15,15});button.Background(clear());button.Content(icon(direction<0?L"go-previous":L"go-next",data->theme()));place(button,{direction<0?16.f:size.Width-16,15},{32,30});p->art.Children().Append(button);}
+        auto button=CapyUi::button(data,str(p->data,L"text"),[weak,owner,part]{if(auto self=weak.lock())if(auto r=owner.lock())if(auto p=part.lock())self->showMenu(r,{r->center.X+p->center.X,r->center.Y+p->center.Y},true);});CapyUi::buttonColors(data,button,18);button.Padding({4,0,4,0});button.BorderThickness({0});button.CornerRadius({15,15,15,15});button.Background(clear());auto text=label(data,str(p->data,L"text"));text.FontWeight(Windows::UI::Text::FontWeights::Bold());text.TextAlignment(TextAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);text.MaxLines(1);button.Content(text);place(button,center,{size.Width-68,30});p->art.Children().Append(button);return;
     }else if(p->key==L"badge"||p->key==L"readout"||prefix(p->key,L"tag:")){
-        auto text=label(data,str(p->data,prefix(p->key,L"tag:")?L"label":L"text"));text.TextAlignment(TextAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);text.MaxLines(1);text.IsHitTestVisible(false);auto padding=p->key==L"badge"?5:prefix(p->key,L"tag:")?9:8;place(text,center,{size.Width-float(padding*2),float(data->textSize()+4)});p->art.Children().Append(text);return;
+        auto text=label(data,str(p->data,prefix(p->key,L"tag:")?L"label":L"text"));if(p->key==L"badge")text.FontWeight(Windows::UI::Text::FontWeights::SemiBold());if(p->key==L"readout")Documents::Typography::SetNumeralAlignment(text,FontNumeralAlignment::Tabular);text.TextAlignment(TextAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);text.MaxLines(1);text.IsHitTestVisible(false);text.Measure({INFINITY,INFINITY});auto padding=p->key==L"badge"?5:prefix(p->key,L"tag:")?9:7;place(text,center,{size.Width-float(padding*2),text.DesiredSize().Height});p->art.Children().Append(text);return;
     }else if(prefix(p->key,L"bead:")){
-        if(p->glass)iconAt(p->art,data,L"palette",center,16);
+        if(p->glass)iconAt(p->art,data,L"palette",center,13);
         else{SwatchFace swatch;swatch.Update(data,array(p->data,L"rgba"),size.Width,workspace.XamlRoot()?workspace.XamlRoot().RasterizationScale():1,flag(p->data,L"selected"),str(p->data,L"kind")==L"foreground",false);p->art.Children().Append(swatch.root);}
     }else{
-        if(p->data.GetNamedValue(L"preview",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number){previewAt(p->art,data,int(num(p->data,L"preview")),{center.X,13},{103.36f,14});auto text=label(data,str(p->data,L"label"));text.TextAlignment(TextAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);text.MaxLines(1);text.Opacity(.8);text.IsHitTestVisible(false);place(text,{center.X,size.Height-15},{size.Width-10,20});p->art.Children().Append(text);}
-        else iconAt(p->art,data,str(p->data,L"icon"),center,20);
+        if(p->data.GetNamedValue(L"preview",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number){previewAt(p->decorations,data,int(num(p->data,L"preview")),{center.X,13},{size.Width*.68f,14});auto text=label(data,str(p->data,L"label"));text.TextAlignment(TextAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);text.MaxLines(1);text.Opacity(.8);text.IsHitTestVisible(false);text.Measure({INFINITY,INFINITY});auto height=text.DesiredSize().Height;place(text,{center.X,size.Height-5-height/2},{size.Width-16,height});p->art.Children().Append(text);}
+        else iconAt(p->art,data,str(p->data,L"icon"),center,18);
     }
     bool interactive=p->key==L"face"||prefix(p->key,L"bead:")||prefix(p->key,L"item:")||prefix(p->key,L"brush:");
     if(interactive&&!p->accessible){p->accessible=bubbleButton();auto region=shape(outline(size,p->radius,p->squircle),clear());region.IsHitTestVisible(true);p->accessible.Content(region);p->root.Children().Append(p->accessible);
@@ -311,7 +347,7 @@ void WorkspaceBubbles::Impl::refresh(std::shared_ptr<Record> const& r){
 void WorkspaceBubbles::Impl::thumbnails(){
     if(!workspace.IsLoaded()||!workspace.XamlRoot()||!workspace.XamlRoot().IsHostVisible()){ForgetLayerThumbnails(data->thumbnails,this);return;}
     auto documentEpoch=CapyLayers::epochOf(data);std::vector<LayerThumbnail> wanted;
-    for(auto const& [id,r]:records){auto found=r->parts.find(L"face");if(str(r->view,L"kind")!=L"layers"||found==r->parts.end())continue;auto p=found->second;auto row=CapyLayers::panelRow(data->state,num(r->view,L"layer",-1));if(!flag(row,L"has_thumbnail"))continue;
+    for(auto const& [id,r]:records){auto found=r->parts.find(L"face");if(str(r->view,L"kind")!=L"layers"||found==r->parts.end())continue;auto p=found->second;auto row=CapyLayers::panelRow(data->state,num(r->view,L"layer",-1));if(!flag(row,L"has_thumbnail")){p->thumbnailBrush.ImageSource(nullptr);continue;}
         LayerThumbnail target{to_hstring(uint64_t(num(row,L"id"))),to_hstring(uint64_t(num(row,L"id"))),to_hstring(uint64_t(num(row,L"paint_revision"))),false};wanted.push_back(target);p->thumbnailBrush.ImageSource(LayerThumbnailSource(data->thumbnails,documentEpoch,target));}
     if(wanted.empty()){ForgetLayerThumbnails(data->thumbnails,this);thumbnailTimer.Stop();}
     else{auto interval=RefreshLayerThumbnails(data->thumbnails,this,documentEpoch,wanted);if(thumbnailTimer.Interval()!=interval)thumbnailTimer.Interval(interval);if(!thumbnailTimer.IsRunning())thumbnailTimer.Start();}

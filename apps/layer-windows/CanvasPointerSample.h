@@ -7,6 +7,11 @@ inline uint32_t CanvasPointerPhase(uint32_t phase, bool canceled) {
     return canceled?4:phase;
 }
 
+template<typename Points>
+uint32_t CanvasPointerHistoryCount(Points const& points,uint32_t phase) {
+    return (phase==0||phase==2)&&points?points.Size():0;
+}
+
 // Native pen contact/eraser identity owns drawing. Barrel button properties
 // can also report right/middle pressed, but only a mouse uses those for pan.
 inline uint32_t CanvasPointerButton(uint32_t tool, bool middle, bool right, bool extra=false) {

@@ -130,7 +130,7 @@ public static class CapyRowPointer {
    bool accepted;
    if(kind==2)accepted=InjectTouchInput(1,new[]{new TouchInfo{pointer=info,mask=7,
     contact=new Rect{left=point.x-2,top=point.y-2,right=point.x+2,bottom=point.y+2},orientation=90,pressure=512}});
-   else accepted=InjectSyntheticPointerInput(pen,new[]{new TypeInfo{type=3,pen=new PenInfo{pointer=info,flags=penButtons,mask=1,pressure=512}}},1);
+   else accepted=InjectSyntheticPointerInput(pen,new[]{new TypeInfo{type=3,pen=new PenInfo{pointer=info,flags=penButtons|(eraserEnd?6u:0u),mask=1,pressure=512}}},1);
    if(accepted){
     long now=System.Diagnostics.Stopwatch.GetTimestamp();
     if(active)MaxGapMilliseconds=Math.Max(MaxGapMilliseconds,(now-lastInjection)*1000.0/System.Diagnostics.Stopwatch.Frequency);
@@ -258,8 +258,9 @@ public static class CapyRowPointer {
    if(SendInput(1,new[]{new Input{mouse=new Mouse{data=unchecked((uint)delta),flags=horizontal?0x1000u:0x0800u}}},40)!=1)throw new Win32Exception(Marshal.GetLastWin32Error());
   }
  }
- public static long RapidReopenDownTicks;
+ public static long RapidReopenDownTicks,RapidReopenUpTicks;
  public static double RapidReopen(string device,int ax,int ay,int bx,int by,WaitHandle nativeFold) {
+  RapidReopenDownTicks=RapidReopenUpTicks=0;
   if(device=="mouse") {
    lock(gate){
     Check();if(active)throw new InvalidOperationException("Retire the previous contact first.");EndHover();
@@ -268,10 +269,10 @@ public static class CapyRowPointer {
      var inputs=new[]{new Input{mouse=movement},new Input{mouse=new Mouse{flags=2}},new Input{mouse=new Mouse{flags=4}}};
      if(SendInput(3,inputs,40)!=3)throw new Win32Exception(Marshal.GetLastWin32Error());last=point;
     };
-    var clock=System.Diagnostics.Stopwatch.StartNew();tap(new Point{x=ax,y=ay});if(!nativeFold.WaitOne(2000))throw new Exception("Native card did not retire before rapid reopen.");RapidReopenDownTicks=System.Diagnostics.Stopwatch.GetTimestamp();tap(new Point{x=bx,y=by});return clock.Elapsed.TotalMilliseconds;
+    var clock=System.Diagnostics.Stopwatch.StartNew();tap(new Point{x=ax,y=ay});if(!nativeFold.WaitOne(2000))throw new Exception("Native card did not retire before rapid reopen.");RapidReopenDownTicks=System.Diagnostics.Stopwatch.GetTimestamp();tap(new Point{x=bx,y=by});RapidReopenUpTicks=System.Diagnostics.Stopwatch.GetTimestamp();return clock.Elapsed.TotalMilliseconds;
    }
   }
-  try {Down(device,ax,ay);var clock=System.Diagnostics.Stopwatch.StartNew();Thread.Sleep(10);Up();if(!nativeFold.WaitOne(2000))throw new Exception("Native card did not retire before rapid reopen.");RapidReopenDownTicks=System.Diagnostics.Stopwatch.GetTimestamp();Down(device,bx,by);double elapsed=clock.Elapsed.TotalMilliseconds;Up();return elapsed;}
+  try {Down(device,ax,ay);var clock=System.Diagnostics.Stopwatch.StartNew();Thread.Sleep(10);Up();if(!nativeFold.WaitOne(2000))throw new Exception("Native card did not retire before rapid reopen.");RapidReopenDownTicks=System.Diagnostics.Stopwatch.GetTimestamp();Down(device,bx,by);double elapsed=clock.Elapsed.TotalMilliseconds;Up();RapidReopenUpTicks=System.Diagnostics.Stopwatch.GetTimestamp();return elapsed;}
   finally{if(active)Cancel();}
  }
  public static void RightClick(int x,int y) {

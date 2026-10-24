@@ -113,8 +113,8 @@ void LayersView::init(){
     addPaper.MinHeight(LayerRowHeight);addPaper.Padding(LayerRowPadding);addPaper.CornerRadius({0});
     addPaper.FontWeight(Windows::UI::Text::FontWeights::Normal());addPaper.HorizontalAlignment(HorizontalAlignment::Stretch);
     AutomationProperties::SetAutomationId(addPaper,L"layer-add-paper");
-    list.Content(repeater);list.HorizontalScrollMode(ScrollMode::Disabled);
-    list.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);list.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(list);panelScrolling(list,repeater,data);
+    list.Content(repeater);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
+    list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);panelScrolling(list,repeater,data);
     AutomationProperties::SetAutomationId(list,L"layer-list");copyName(data,list,data->copyCaption(L"layers",L"title"));listFrame.Children().Append(list);
     connectionOverlay.IsHitTestVisible(false);AutomationProperties::SetAccessibilityView(connectionOverlay,Automation::Peers::AccessibilityView::Raw);
     listFrame.Children().Append(connectionOverlay);Grid::SetRow(listFrame,1);root.Children().Append(listFrame);
@@ -414,7 +414,7 @@ bool LayersView::restoreAnchor(J const& anchor){
         auto before=list.VerticalOffset();
         auto target=std::clamp(before+delta,0.,std::max(0.,list.ExtentHeight()-list.ActualHeight()));
         if(std::abs(target-before)<.5)return true;
-        list.ChangeView(nullptr,box_value(target).as<Windows::Foundation::IReference<double>>(),nullptr,true);
+        scrollVertical(list,target);
         return false;
     }
     auto layers=array(data->state,L"layers");

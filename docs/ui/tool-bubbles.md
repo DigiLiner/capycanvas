@@ -398,19 +398,24 @@ panels are absent from the dock.
 - **Chooser:** 44 px media circles and 152 × 48 px brush pills with the brush
   stroke (68% of the pill wide, 14 px tall, 6 px from the top) over its name;
   18 px icons on media and tool choices; brush names at 80% opacity, 8 px from
-  the sides and 5 px from the bottom. A shown or hovered medium's name uses `tag_center`
-  with its measured text width plus 18 px, at most 96 px, a 9 px corner radius
+  the sides and 5 px from the bottom. A shown medium or the choice under an active
+  contact shows its name at `tag_center`; passive hover does not reveal hidden names.
+  The tag fits its measured text width plus 18 px, at most 96 px, a 9 px corner radius
   and 3 px vertical padding.
   Items arrive scaled from 60% and fading in over 180 ms, 14 ms apart (brushes
   16 ms), and leave over 120 ms; the item under a contact grows 12% (brushes
   6%).
-  Each item grows about its own center; leaving items remain until their fade
-  completes, including replacements with the same number of choices.
+  Each item grows about its own center. Closing items remain until their fade
+  completes, including when the chooser reopens. Changing an item's kind or label
+  restarts its entry; changing its preview alone does not.
 - **Halo:** grows from 85% and fades in over 160 ms, and out over 120 ms.
 - **Beads:** the Color panel's swatch widget and styles, tweening 220 ms
-  between layouts; hints are `HINT_DOT` dots at 35% text color. The palette bead
-  has a 13 px icon. Its 184 × 30 px pill has 24 px Previous and Next buttons,
-  2 px gaps, the shared `go-previous`/`go-next` icons and a centered bold name.
+  between layouts from their current positions, sizes and rendered alpha.
+  Crossing drag slop suppresses tweening until that contact ends, including
+  after returning near its origin. Hints are `HINT_DOT` dots at 35% text color.
+  The palette bead has a 13 px icon. Its 184 × 30 px pill has 32 px Previous and
+  Next buttons (24 px content plus 4 px padding on each side), 2 px gaps, the shared
+  `go-previous`/`go-next` icons and a centered bold name in the remaining 116 px.
 - **Layers card:** host the Layers drawer's own inspector in the drawer's
   container and styles; report measured page heights with `MeasureCard`.
   Unfold over 200 ms from 60%; fold over 150 ms, then the squircle returns over

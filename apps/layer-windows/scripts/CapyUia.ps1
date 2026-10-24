@@ -174,6 +174,29 @@ function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=
     } "Missing control: $Value" $Seconds
     $hit.item
 }
+function Scroll-Pattern($Control,[switch]$Focus){
+    $provider=$Control;$pattern=$null
+    if(!$provider.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern)){
+        $condition=[System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'PART_ScrollPresenter'),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::IsScrollPatternAvailableProperty,$true))
+        $providers=@($Control.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition))
+        if($providers.Count -ne 1){throw 'Native scroll container must have exactly one scroll provider'}
+        $provider=$providers[0];$pattern=$provider.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    }
+    if($Focus){
+        $focusTarget=if($Control.Current.IsKeyboardFocusable){$Control}else{$provider}
+        if(!$focusTarget.Current.IsKeyboardFocusable){
+            $condition=[System.Windows.Automation.AndCondition]::new(
+                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::IsKeyboardFocusableProperty,$true),
+                [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::IsOffscreenProperty,$false))
+            $focusTarget=$provider.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+        }
+        if(!$focusTarget){throw 'Native scroll container has no keyboard focus target'}
+        $focusTarget.SetFocus();Wait-Until {$focusTarget.Current.HasKeyboardFocus} 'Native scroll container did not receive keyboard focus'
+    }
+    $pattern
+}
 function Focus-Keyboard($Element,[switch]$Backward){
     $Element.SetFocus()
     Wait-Until {$Element.Current.HasKeyboardFocus} 'Native control did not receive focus'

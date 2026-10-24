@@ -45,7 +45,7 @@ function Relationship-Attach([double]$Id,[string]$Kind,[double]$Target){
 function Relationship-Reveal([string]$Id){
     if($Id -notmatch '^layer-(?:row-)?([0-9]+)(?:-|$)'){return}
     $ids=[int64[]]@((Model).state.layers.id);$index=[Array]::IndexOf($ids,[int64]$Matches[1])
-    $list=Control 'layer-list';$scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $list=Control 'layer-list';$scroll=Scroll-Pattern $list
     if($index -lt 0 -or !$scroll.Current.VerticallyScrollable){return}
     for($attempt=0;$attempt -lt 12;$attempt++){
         $viewport=$list.Current.BoundingRectangle;$item=Find $Id -Visible
@@ -217,7 +217,7 @@ function Test-LayerRelationships{
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1780 -Height 1480
         Relationship-Layers
         foreach($i in 1..48){$null=Relationship-New}
-        $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $scroll=Scroll-Pattern (Control 'layer-list')
         $scroll.SetScrollPercent(-1,100)
         Wait-Until {$null -ne (Find "layer-$base-name" -Visible)} 'Scroll did not realize the relationship base'
         Capture 'relationships-scrolled' -Composed -WithModel

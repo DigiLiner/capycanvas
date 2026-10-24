@@ -214,9 +214,9 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             else if(scope||str(panel,L"id")==L"proof"){StackPanel natural;natural.Children().Append(content);root=natural;}
             else{
                 scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
-                ScrollViewer scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollMode::Disabled);
-                scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
-                scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(scroll);panelScrolling(scroll,content,data);
+                ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
+                scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
+                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);panelScrolling(scroll,content,data);
                 scroll.ViewChanged([changed=std::move(layoutChanged)](auto&&,auto&&){if(changed)changed();});
                 AutomationProperties::SetAutomationId(scroll,L"panel-scroll-"+str(panel,L"id"));
                 root=scroll;

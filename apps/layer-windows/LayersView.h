@@ -93,7 +93,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     UIElement outsideSurface{nullptr};
     PointerEventHandler outsidePress{nullptr};
     StackPanel header,tools,footer;
-    ScrollViewer list;
+    ScrollView list;
     ItemsRepeater repeater;
     Button blend{nullptr},addPaper{nullptr};
     hstring paperKey;

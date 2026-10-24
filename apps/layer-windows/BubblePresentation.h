@@ -29,11 +29,12 @@ inline V ui(std::shared_ptr<WorkspaceData> const& data,J const& request){
 inline hstring kind(V const& value){return value&&value.ValueType()==JsonValueType::String?value.GetString():L"";}
 struct Tween {
     double value=0,target=0,from=0,start=-1,duration=0,delay=0;
-    explicit Tween(double initial=0):value(initial),target(initial),from(initial){}
+    bool smooth=false;
+    explicit Tween(double initial=0,bool smooth=false):value(initial),target(initial),from(initial),smooth(smooth){}
     void snap(double next){value=target=from=next;start=-1;}
     void to(double next,double ms,double wait=0){if(target==next)return;from=value;target=next;duration=ms;delay=wait;start=-1;}
     bool step(double now,bool reduced){if(value==target)return false;if(start<0)start=now;
-        auto t=reduced||duration==0?1.:std::clamp((now-start-delay)/duration,0.,1.);value=from+(target-from)*t*t*(3-2*t);return t<1.;}
+        auto t=reduced||duration==0?1.:std::clamp((now-start-delay)/duration,0.,1.);value=from+(target-from)*(smooth?t*t*(3-2*t):1-std::pow(1-t,3));return t<1.;}
 };
 struct RingArt {
     Canvas root;
@@ -46,8 +47,8 @@ struct RingArt {
 struct Part {
     hstring key,shadowKey,surfaceKey,theme;
     J data;
-    Canvas root,art,shadow;
-    Shapes::Path background,selection;
+    Canvas root,ink,art,decorations,shadow;
+    Shapes::Path background,selection,hover;
     Button accessible{nullptr};
     CompositeTransform transform;
     Point center{},fromCenter{},toCenter{};
@@ -83,7 +84,7 @@ struct Record {
     CompositeTransform transform;
     std::map<hstring,std::shared_ptr<Part>> parts;
     Point center{};
-    Tween fade{1};
+    Tween fade{1,true};
     bool lifted=false,homing=false,faded=false,pressed=false;
     double pinch=1,reach=0;
     V hovered{nullptr};
@@ -107,7 +108,7 @@ struct Contact {
     J grab;
     uint32_t wheel=0;
     double started=0,spread=1,scale=1;
-    bool held=false,paired=false,pairEnded=false,colorStarted=false;
+    bool held=false,paired=false,pairEnded=false,colorStarted=false,moved=false;
     bool recognizing=false;
     bool nativeDrags=false;
     double holdAt=-1;

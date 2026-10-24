@@ -225,6 +225,17 @@ int main() {
         assert(CanvasPointerPhase(phase,true)==4);
     }
     std::cout<<"Canvas canceled samples retain cancellation across every native event phase\n";
+    struct History {
+        bool present;uint32_t count;
+        explicit operator bool()const{return present;}
+        uint32_t Size()const{assert(present);return count;}
+    };
+    for(uint32_t phase=0;phase<=4;++phase){
+        assert(CanvasPointerHistoryCount(History{false,3},phase)==0);
+        assert(CanvasPointerHistoryCount(History{true,0},phase)==0);
+        assert(CanvasPointerHistoryCount(History{true,3},phase)==((phase==0||phase==2)?3u:0u));
+    }
+    std::cout<<"Missing native pointer history uses the current point in every event phase\n";
     for(uint32_t tool:{0u,2u}) {
         for(bool middle:{false,true})for(bool right:{false,true})
             assert(CanvasPointerButton(tool,middle,right)==0);

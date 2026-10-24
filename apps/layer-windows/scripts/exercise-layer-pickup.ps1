@@ -44,7 +44,7 @@ function Undo-Redo([string]$Before,[string]$After) {
 function Reveal([string]$Id) {
     $item=Find $Id
     if($Id -notlike 'layer-*' -or !$item -or !$item.Current.IsOffscreen){return}
-    $scroll=(Find 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $scroll=Scroll-Pattern (Find 'layer-list')
     if(!$scroll.Current.VerticallyScrollable){return}
     foreach($percent in @(0,100)){
         $scroll.SetScrollPercent(-1,$percent);Start-Sleep -Milliseconds 150
@@ -500,7 +500,7 @@ try {
         $count=(Model).state.layers.Count;Invoke 'layer-new'
         Wait-Until {(Model).state.layers.Count -eq $count+1} 'Overflow layer did not appear'
     }
-    $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $scroll=Scroll-Pattern (Control 'layer-list')
     if(!$scroll.Current.VerticallyScrollable){throw 'Layer fixture did not overflow its native list'}
     $scroll.SetScrollPercent(-1,0)
     Wait-Until {$scroll.Current.VerticalScrollPercent -lt .1} 'Native list did not return to its top'
@@ -574,7 +574,7 @@ try {
     # Finish pointer arbitration before text input: the system touch keyboard
     # legitimately changes the HWND and viewport while opening or closing.
     $null=Point 'layer-list'
-    $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    $scroll=Scroll-Pattern (Control 'layer-list')
     $scroll.SetScrollPercent(-1,100)
     Wait-Until {$scroll.Current.VerticalScrollPercent -gt 99.9} 'Native list did not reveal its original rows'
     $script:case='rename-ownership'

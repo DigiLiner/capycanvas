@@ -687,7 +687,7 @@ void CanvasWindow::PickerHold(PickerGesture& gesture,Microsoft::UI::Input::Point
         bool first=gesture.contacts.empty();gesture.contacts.insert(id);CancelPickerHold(gesture);
         if(touch&&first){gesture.contact=id;gesture.recognizer.ProcessDownEvent(point);}
     }else if(phase==2){
-        if(gesture.contact==id)gesture.recognizer.ProcessMoveEvents(points);
+        if(gesture.contact==id)gesture.recognizer.ProcessMoveEvents(CanvasPointerHistoryCount(points,phase)?points:single_threaded_vector<Microsoft::UI::Input::PointerPoint>({point}));
     }else if(phase==3||phase==4){
         gesture.contacts.erase(id);
         if(gesture.contact==id){if(phase==3)gesture.recognizer.ProcessUpEvent(point);CancelPickerHold(gesture);}
@@ -726,7 +726,7 @@ std::vector<CapyPointer> CanvasWindow::PointerSamples(Microsoft::UI::Input::Poin
         if(GetPointerInfo(current.PointerId(),&info)&&GetPointerDevice(info.sourceDevice,&device)&&device.pointerDeviceType==POINTER_DEVICE_TYPE_EXTERNAL_PEN)deviceFlags=0x40;
         POINTER_PEN_INFO pen{};if(GetPointerPenInfo(current.PointerId(),&pen)&&(pen.penMask&PEN_MASK_ROTATION))deviceFlags|=0x80;
     }
-    uint32_t count=(phase==0||phase==2)?points.Size():1;
+    auto count=CanvasPointerHistoryCount(points,phase);
     std::vector<CapyPointer> samples;samples.reserve(std::max(1u,count));
     auto capture=[&](Microsoft::UI::Input::PointerPoint const& point,bool predicted){
         auto props=point.Properties();auto type=point.PointerDeviceType();auto pos=point.Position();
@@ -739,9 +739,9 @@ std::vector<CapyPointer> CanvasWindow::PointerSamples(Microsoft::UI::Input::Poin
         p.flags=deviceFlags|(predicted?1:0)|(props.IsPrimary()?2:0);
         if(PrepareCanvasPrediction(p))samples.push_back(p);
     };
-    bool newestFirst=points.Size()>1&&points.GetAt(0).Timestamp()>points.GetAt(points.Size()-1).Timestamp();
+    bool newestFirst=count>1&&points.GetAt(0).Timestamp()>points.GetAt(count-1).Timestamp();
     if(!count)capture(current,false);
-    for(uint32_t i=0;i<count;++i)capture((phase==0||phase==2)?points.GetAt(newestFirst?count-1-i:i):current,false);
+    for(uint32_t i=0;i<count;++i)capture(points.GetAt(newestFirst?count-1-i:i),false);
     if(predict&&pointerPredictor&&phase==2){
         try{
             auto predicted=pointerPredictor.GetPredictedPoints(current);

@@ -179,14 +179,14 @@ void WorkspaceBubbles::Impl::move(PointerRoutedEventArgs const& e){
         for(auto const& [id,r]:records){auto next=selected==r?hit(*r,at):JsonValue::CreateNullValue();if(!r->hovered||r->hovered.Stringify()!=next.Stringify()){r->hovered=next;wake();}}
         return;
     }
-    auto c=contact;if(!c->fingers.contains(p.PointerId()))return;c->last=at;c->fingers[p.PointerId()]=at;
+    auto c=contact;if(!c->fingers.contains(p.PointerId()))return;c->last=at;c->fingers[p.PointerId()]=at;c->moved=c->moved||distance(at,c->start)>8;bool moved=c->moved;if(moved)c->record->pressed=false;
     if(c->paired){
         if(!c->pairEnded&&c->fingers.size()==2){auto a=c->fingers.begin()->second,b=std::next(c->fingers.begin())->second;c->midpoint={(a.X+b.X)/2,(a.Y+b.Y)/2};
             if(str(c->record->view,L"kind")==L"color"){auto size=num(c->record->view,L"diameter");c->scale=ui(data,O({{L"type",S(L"pinched_size")},{L"size",N(size)},{L"scale",N(distance(a,b)/c->spread)}})).GetNumber()/size;c->record->pinch=c->scale;}
             drag(c->grab,L"move",c->midpoint);
         }e.Handled(true);return;
     }
-    bool moved=distance(at,c->start)>8;if(moved)stop(c);else if(c->recognizing)c->recognizer.Move(workspace,e);
+    if(moved)stop(c);else if(c->recognizing)c->recognizer.Move(workspace,e);
     if(c->mode==L"native"){
         if(c->nativeDrags||!moved||e.Handled())return;
         if(!capture(c->pointer,c->path)){cancel();return;}c->mode=L"pending";
@@ -199,14 +199,14 @@ void WorkspaceBubbles::Impl::move(PointerRoutedEventArgs const& e){
     }else if(c->mode==L"pending"&&moved){c->grab=grab(c->record->id);drag(c->grab,L"down",c->start);c->mode=L"moving";}
     if(c->mode==L"moving")drag(c->grab,L"move",at);
     else if(c->mode==L"ring"||c->mode==L"beads"||c->mode==L"choose")send(O({{L"type",S(c->mode)},{L"id",N(c->record->id)},{L"phase",S(L"move")},{L"position",point(relative(at,c->record->center))}}));
-    c->record->hovered=hit(*c->record,at);e.Handled(true);wake();
+    e.Handled(true);wake();
 }
 void WorkspaceBubbles::Impl::up(PointerRoutedEventArgs const& e,bool cancelled){
     auto p=e.GetCurrentPoint(workspace);cancelled=cancelled||p.Properties().IsCanceled();
     if(candidate&&candidate->pointer.PointerId()==p.PointerId()){
         if(candidate->moving){drag(candidate->grab,cancelled?L"cancel":L"up",candidate->last);e.Handled(true);}candidate.reset();
     }
-    auto c=contact;if(!c||!c->fingers.contains(p.PointerId()))return;stop(c);c->last=p.Position();
+    auto c=contact;if(!c||!c->fingers.contains(p.PointerId()))return;stop(c);c->last=p.Position();c->record->pressed=false;
     if(c->paired){if(!c->pairEnded){c->pairEnded=true;c->record->pinch=1;drag(c->grab,cancelled?L"cancel":L"up",c->midpoint);
         if(!cancelled&&str(c->record->view,L"kind")==L"color"&&std::abs(c->scale-1)>.01)send(O({{L"type",S(L"resize")},{L"id",N(c->record->id)},{L"scale",N(c->scale)}}));}}
     else if(cancelled){data->pointerCancels.Cancel(c->pointer.PointerId());restore(c);if(c->held)dismiss();}
@@ -216,7 +216,7 @@ void WorkspaceBubbles::Impl::up(PointerRoutedEventArgs const& e,bool cancelled){
         else if(c->mode==L"pending")send(O({{L"type",S(L"tap")},{L"id",N(c->record->id)},{L"position",point(relative(c->last,c->record->center))}}));
     }
     finishColor(c,false);if(c->mode!=L"native")e.Handled(true);c->fingers.erase(p.PointerId());
-    if(c->fingers.empty()){contact.reset();c->record->hovered=nullptr;c->record->pressed=false;}
+    if(c->fingers.empty()){contact.reset();c->record->hovered=nullptr;}
     releasing=true;inputRoot.ReleasePointerCapture(e.Pointer());releasing=false;contactSurface();wake();
 }
 bool WorkspaceBubbles::Impl::cancel(bool abandon){

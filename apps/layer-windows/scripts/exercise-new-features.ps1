@@ -47,9 +47,11 @@ function Drawer([string[]]$Panels) {
 function Swipe([int]$Id,[int]$Dx,[string]$Device) {
     $row=(Control "layer-row-$Id" -Arranged).Current.BoundingRectangle
     $at=if($Dx -lt 0){At "layer-$Id-name"}else{@{x=[int]($row.Left+12);y=[int]($row.Top+$row.Height/2)}}
+    $before=@((Model).state.layers|Where-Object id -eq $Id)[0]
     [CapyRowPointer]::Down($Device,$at.x,$at.y)
     for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move([int][Math]::Min([Math]::Max(($at.x+[int]($Dx*$i/8)),$row.Left+4),$row.Right-4),$at.y);Start-Sleep -Milliseconds 20}
     [CapyRowPointer]::Up();Start-Sleep -Milliseconds 200
+    @{id=$Id;dx=$Dx;device=$Device;point=$at;row=$row.ToString();before=$before;after=@((Model).state.layers|Where-Object id -eq $Id)[0];gesture=(Control 'layer-list').Current.ItemStatus}|ConvertTo-Json -Depth 12 -Compress|Add-Content (Join-Path $run 'swipe-input.jsonl')
 }
 function Preference([string]$Title){@((Model).preferences.pages.groups.rows|Where-Object title -eq $Title)[0]}
 function Preference-Switch([string]$Title){Control $Title -Name -Type ([System.Windows.Automation.ControlType]::Button)}
@@ -180,8 +182,12 @@ try {
         foreach($device in @('pen','touch')){
             $id=@((Model).state.layers)[0].id;Swipe $id -90 $device
             Wait-Until {$button=Find "layer-$id-swipe-delete";$button -and !$button.Current.IsOffscreen -and $button.Current.BoundingRectangle.Width -gt 60} 'Swipe did not reveal Delete'
-            Capture ('swipe-'+$device) -WithModel;Swipe $id 90 $device
+            Capture ('swipe-'+$device) -WithModel
+            $reverseModel=Model;$reverseRevision=$reverseModel.state.document_file.revision;$reverseLayer=@($reverseModel.state.layers|Where-Object id -eq $id)[0]
+            Swipe $id 90 $device
             Wait-Until {$button=Find "layer-$id-swipe-delete";!$button -or $button.Current.IsOffscreen} 'Reverse swipe did not close'
+            $reversed=Model;$reversedLayer=@($reversed.state.layers|Where-Object id -eq $id)[0]
+            if($reversed.state.document_file.revision -ne $reverseRevision -or $reversedLayer.locked -ne $reverseLayer.locked -or $reversedLayer.alpha_locked -ne $reverseLayer.alpha_locked){throw 'Reverse swipe changed the drawing or layer lock state'}
             Swipe $id -90 $device;$escapeRevision=(Model).state.document_file.revision;[CapyRowPointer]::Key(0x1b)
             Wait-Until {$button=Find "layer-$id-swipe-delete";$m=Model;$drawer=$m.state.customization.drawer;(!$button -or $button.Current.IsOffscreen) -and $drawer -and (@($drawer.columns|ForEach-Object {$_}) -join ',') -eq 'layers' -and $m.state.document_file.revision -eq $escapeRevision} 'Escape did not close only the swipe while preserving the Layers drawer and drawing'
             Swipe $id -90 $device;Tap 'layer-actions' $device
