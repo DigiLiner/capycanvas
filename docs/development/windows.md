@@ -1329,6 +1329,9 @@ and a single Undo step.
 
 Panel scrolling shares `PanelScroll.h`: native pan and inertia events update a
 ScrollView, with explicit cancellation before two-finger bubble takeover.
+Pointer release and cancellation are observed at the XAML root so another
+control's capture cannot retain a stale panel contact. Inertia stops at a
+scroll boundary; a finger still touching the panel can reverse direction there.
 Its built-in manipulation ignores touch and pen, which belong to the custom
 pan handler, so a compositor gesture cannot take those contacts after handoff.
 The ScrollView keeps keyboard, wheel, scrollbar and accessibility handling,
@@ -1352,7 +1355,8 @@ scroll handling, and requires successful capture before starting the bubble drag
 The current native manipulation completes before root capture transfers.
 Unloading or changing drawings retires the scroll contact.
 Native controls checks exercise wheel, Page Down and scroll automation alongside
-touch scrolling, inertia interruption, recycling, reorder and exact Undo.
+touch scrolling, inertia interruption, held-contact reversal at both scroll
+boundaries, recycling, reorder and exact Undo.
 `tool-bubbles:ScrollEpochOnly` switches drawings during an active native pan,
 returns to the original drawing and checks fresh scrolling and unchanged history.
 The extra touch surface sits behind the bubbles while a first touch is active,

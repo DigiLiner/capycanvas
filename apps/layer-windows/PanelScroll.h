@@ -24,16 +24,28 @@ inline void panelScrolling(ScrollView const& scroll,UIElement const& content,std
     content.ManipulationDelta([weak,context,state,cancel](auto&&,ManipulationDeltaRoutedEventArgs const& e){
         state->complete=[e]{e.Complete();};auto data=context.lock();auto scroll=weak.get();
         if(!scroll||!data||!state->running||state->canceled||scroll.VerticalScrollMode()==ScrollingScrollMode::Disabled||state->epoch!=uint64_t(num(object(data->state,L"document_file"),L"epoch"))){cancel();return;}
-        state->offset=std::clamp(state->offset-e.Delta().Translation.Y,0.,scroll.ScrollableHeight());
-        scrollVertical(scroll,state->offset);e.Handled(true);
+        auto delta=e.Delta().Translation.Y;auto next=std::clamp(state->offset-delta,0.,scroll.ScrollableHeight());
+        if(e.IsInertial()&&next==state->offset&&delta!=0){cancel();return;}
+        if(next!=state->offset){state->offset=next;scrollVertical(scroll,next);}e.Handled(true);
     });
     content.ManipulationCompleted([state](auto&&,auto&&){state->complete=nullptr;state->running=false;});
-    content.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([state,forget,cancel](auto&&,PointerRoutedEventArgs const& e){
+    auto released=PointerEventHandler([state,forget,cancel](auto&&,PointerRoutedEventArgs const& e){
         if(state->pointer==e.Pointer().PointerId()){if(e.GetCurrentPoint(nullptr).Properties().IsCanceled())cancel();else forget();}
-    })),true);
-    content.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([state,cancel](auto&&,PointerRoutedEventArgs const& e){
+    });
+    auto canceled=PointerEventHandler([state,cancel](auto&&,PointerRoutedEventArgs const& e){
         if(state->pointer==e.Pointer().PointerId())cancel();
-    })),true);
-    content.as<FrameworkElement>().Unloaded([cancel](auto&&,auto&&){cancel();});
+    });
+    auto input=std::make_shared<weak_ref<UIElement>>();
+    auto detach=[input,released,canceled]{if(auto root=input->get()){
+        root.RemoveHandler(UIElement::PointerReleasedEvent(),box_value(released));
+        root.RemoveHandler(UIElement::PointerCanceledEvent(),box_value(canceled));
+    }*input={};};
+    auto attach=[surface,input,detach,released,canceled]{detach();if(auto content=surface.get();content&&content.XamlRoot())if(auto root=content.XamlRoot().Content()){
+        *input=make_weak(root);root.AddHandler(UIElement::PointerReleasedEvent(),box_value(released),true);
+        root.AddHandler(UIElement::PointerCanceledEvent(),box_value(canceled),true);
+    }};
+    content.as<FrameworkElement>().Loaded([attach](auto&&,auto&&){attach();});
+    content.as<FrameworkElement>().Unloaded([detach,cancel](auto&&,auto&&){detach();cancel();});
+    if(content.as<FrameworkElement>().IsLoaded())attach();
 }
 }

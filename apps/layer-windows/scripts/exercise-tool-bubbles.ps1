@@ -372,6 +372,7 @@ function Layer-ListContacts([long]$Id){
     if(@($tail|Where-Object {$_.percent -gt $released+.1}).Count -eq 0){throw 'Native list fling did not continue scrolling after contact release'}
     if((Revision) -ne $revision){throw 'Native list inertia changed artwork history'}
     Native-InertiaInterruption $Id $list $scroll
+    Native-BoundaryReversal $Id $list $scroll
     Settle-LayerScroll $scroll
     $scroll.SetScrollPercent(-1,0);Wait-Until {$scroll.Current.VerticalScrollPercent -lt .1} 'Restored layer list did not return to top'
     $viewport=$list.Current.BoundingRectangle;$selected=$null;$label=$null
@@ -486,6 +487,43 @@ function Native-InertiaInterruption([long]$Id,$List,$Scroll){
     $evidence|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'layer-scroll-interrupt-inertia.json')
     if(!$evidence.order_unchanged -or $evidence.before_revision -ne $evidence.after_revision -or $evidence.before_editing -ne $evidence.after_editing -or $checkpoint -ne $afterCheckpoint){throw 'Native inertia interruption changed artwork, selection, layer order or checkpoint'}
     $checks.Add('native-live-inertia-interruption-and-fresh-pan')
+}
+function Native-BoundaryReversal([long]$Id,$List,$Scroll){
+    $stateKey={param($model)
+        [ordered]@{document=$model.state.document_file;checkpoint=@($model.windows_tabs.session_stamps|Where-Object id -eq $model.windows_tabs.selected)[0].stamp.checkpoint;editing=$model.state.layer_tools.editing_layer;rows=@($model.state.layers|Select-Object id,depth,visible,locked,mask_linked,alpha_locked,pass_through,relationship,selected,editing)}|ConvertTo-Json -Depth 30 -Compress
+    }
+    Settle-LayerScroll $Scroll;Settle-Bubbles
+    $origin=Settled-LayerState;$before=& $stateKey $origin;$center=Center $Id;$records=[Collections.Generic.List[object]]::new()
+    try{
+        foreach($boundary in @(0,100)){
+            $Scroll.SetScrollPercent(-1,$boundary)
+            Wait-Until {[Math]::Abs($Scroll.Current.VerticalScrollPercent-$boundary) -lt .1} 'Boundary reversal did not reach its starting edge'
+            Settle-LayerScroll $Scroll;$card=Card $Id;$box=$List.Current.BoundingRectangle;$rows=@(Visible-NativeLayerRows $card $List)
+            if(!$rows.Count){throw 'Boundary reversal lacks an interior native row'}
+            $row=$rows[[int][Math]::Floor($rows.Count/2)];$bounds=(Control "layer-$($row.id)-name" -Within $card -Arranged).Current.BoundingRectangle
+            $point=@{x=[int]($bounds.X+$bounds.Width*.5);y=[int]($bounds.Y+$bounds.Height*.5)}
+            $distance=[int][Math]::Min(45*$scale,[Math]::Min($point.y-$box.Y,$box.Bottom-$point.y)-8*$scale)
+            if($distance -lt 16*$scale){throw 'Boundary reversal lacks native movement clearance'}
+            $direction=if($boundary -eq 0){1}else{-1}
+            $record=@{boundary=$boundary;from=$point;distance=$distance;viewport=$box.ToString();before_gesture=($List.Current.ItemStatus|ConvertFrom-Json);before_state=$before};$records.Add($record)
+            [CapyCanvasTouch]::Initialize([uint32]$review.Id)
+            try{
+                [CapyCanvasTouch]::Down(1,$point.x,$point.y)
+                foreach($step in 1..3){Start-Sleep -Milliseconds 35;[CapyCanvasTouch]::Move(1,$point.x,[int]($point.y+$direction*$distance*$step/3))}
+                Settle-LayerScroll $Scroll;$record.outward_percent=$Scroll.Current.VerticalScrollPercent;$record.outward_gesture=$List.Current.ItemStatus|ConvertFrom-Json
+                if([Math]::Abs($record.outward_percent-$boundary) -ge .1){throw 'Outward native pan escaped its scroll boundary'}
+                if($record.outward_gesture.last_cancel.reason -ne 'native_scroll' -or $record.outward_gesture.last_cancel.generation -le $record.before_gesture.generation){throw 'Boundary contact did not enter native vertical pan admission'}
+                foreach($step in 1..3){Start-Sleep -Milliseconds 35;[CapyCanvasTouch]::Move(1,$point.x,[int]($point.y+$direction*$distance*(1-2*$step/3)))}
+                Wait-Until {if($boundary -eq 0){$Scroll.Current.VerticalScrollPercent -gt .5}else{$Scroll.Current.VerticalScrollPercent -lt 99.5}} 'Held native contact did not reverse away from its scroll boundary'
+                $record.reverse_percent=$Scroll.Current.VerticalScrollPercent;$record.reverse_gesture=$List.Current.ItemStatus|ConvertFrom-Json
+                [CapyCanvasTouch]::Up(1)
+            }finally{[CapyCanvasTouch]::Dispose()}
+            Settle-LayerScroll $Scroll;Settle-Bubbles;$after=Settled-LayerState
+            $record.after_state=& $stateKey $after;$record.after_gesture=$List.Current.ItemStatus|ConvertFrom-Json;$record.after_center=Center $Id
+            if($record.after_state -ne $before -or $record.after_center.x -ne $center.x -or $record.after_center.y -ne $center.y -or $record.after_gesture.phase -ne 'idle' -or $record.after_gesture.captured -or $record.after_gesture.menu_open){throw 'Boundary reversal changed document state, bubble position or retained a row contact'}
+        }
+    }finally{$records|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'layer-scroll-boundary-reversal.json')}
+    $checks.Add('native-held-contact-boundary-reversal-both-ends')
 }
 function Native-OpacityUndo([double]$Expected,$Checkpoint){
     (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,@(0x11),0x5A)
