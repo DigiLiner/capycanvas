@@ -1478,6 +1478,41 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
+### Physical tilt response
+
+Measured 2026-10-24 on the reference TCL with `9bb23c036`, benchmark APK and
+Rust `release` profile. APK SHA-256 is
+`c1e238a0199732e8bf88db89af5a1a33b6b5cfbb305c57bdd91b089adeb9a5a2`.
+Each row has three warmed six-second native stylus curves over the 4248 × 2832
+Sony photo and one empty paint layer. Input is 200 Hz at pressure 1, with
+default prediction, 60 × 10 surface-pixel radii and Fit zoom 0.343538.
+Stats is closed; the default workspace has five glass regions and Navigator
+is absent. Ink uses SharedDemandRefresh. All shaders are ready before motion,
+and thermal status is zero before and after every row and after the series.
+
+Writing uses physical tilt 40° and Size 1024. Geometric contacts are
+1024 × 665.6 document pixels for Pencil, Charcoal and Pastel Block;
+1024 × 568.9 for Pointy Pencil; 1024 × 563.2 for Shading Pencil;
+1024 × 819.2 for Chalk; and 1024 × 716.8 for Crayon. The side rows use 60°
+and Size 512: Pencil's geometric contact is 2457.6 × 614.4 document pixels;
+Charcoal's is 1024 × 409.6. All remain inside the photo throughout these curves.
+
+| Brush | Tilt / Size | Completed updates/s | Fresh input updates/s | Completion-gap p99 | Fresh-input gap p99 | Result |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Pencil | 40° / 1024 | 66.83–67.50 | 66.83–67.50 | 32.14–34.13 ms | 32.14–34.13 ms | Not met |
+| Pointy Pencil | 40° / 1024 | 67.06–68.48 | 67.06–68.48 | 50.66–52.11 ms | 50.66–52.11 ms | Not met |
+| Shading Pencil | 40° / 1024 | 71.27–71.94 | 71.27–71.94 | 34.90–35.33 ms | 34.90–35.33 ms | Not met |
+| Charcoal | 40° / 1024 | 65.58–66.71 | 65.58–66.71 | 33.79–35.12 ms | 33.79–35.12 ms | Not met |
+| Chalk | 40° / 1024 | 30.40–30.76 | 30.40–30.76 | 211.77–213.87 ms | 211.77–213.87 ms | Not met |
+| Pastel Block | 40° / 1024 | 34.95–35.59 | 34.95–35.59 | 104.43–107.44 ms | 104.43–107.44 ms | Not met |
+| Crayon | 40° / 1024 | 63.87–65.41 | 63.87–65.25 | 34.33–35.63 ms | 34.33–35.63 ms | Not met |
+| Pencil | 60° / 512 | 29.71–30.07 | 29.71–30.07 | 73.83–75.77 ms | 73.83–75.77 ms | Not met |
+| Charcoal | 60° / 512 | 77.65–79.47 | 77.48–79.47 | 29.79–31.61 ms | 29.79–31.91 ms | Met at this pose and size |
+
+Raw records, screenshots, environment data, source hashes and the measured APK
+are in `artifacts/tilt-conversion/android/performance/`. These measurements
+qualify only the listed motions on the low-tier reference device.
+
 ### Dry-media endpoint and turn completion, 2026-10-24
 
 Matched control `6a7d3b1042d0821ee5823ddd7c96acba8188abf7` against localized
@@ -1728,18 +1763,18 @@ Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measur
 | Antique Pen (30) | Simple | 1024 px | 37.5 updates/s (37.1–38.0); gap p99 79.9 ms | **Not met** |
 | Realistic Pen (31) | Simple | 1024 px | 28.3 updates/s (28.2–28.3); gap p99 63.4 ms | **Not met** |
 | Wet Ink (32) | Simple | 1024 px | 23.0 updates/s (22.9–23.1); gap p99 73.7 ms | **Not met** |
-| Pencil (2) | Simple | 1024 px | 68.17–68.72 updates/s on the contained curve, fresh gap ≤33.08 ms; compact zigzag gap ≤35.94 ms | **Not fully met**; [endpoint completion](#dry-media-endpoint-and-turn-completion-2026-10-24) |
-| Pointy Pencil (25) | Simple | 1024 px | 39.91–40.41 fresh updates/s; fresh gap p99 ≤33.05 ms | **Not met**; [dry media](#dry-media-contact-model) |
-| Shading Pencil (26) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
-| Charcoal (27) | Simple | 1024 px | 65.61–67.67 updates/s on the contained curve, fresh gap ≤35.45 ms | **Not met**; [endpoint completion](#dry-media-endpoint-and-turn-completion-2026-10-24) |
-| Chalk (6) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
-| Crayon (43) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Pencil (2) | Simple | 1024 px | 40° writing pose: 66.83–67.50 fresh updates/s; fresh gap p99 ≤34.13 ms | **Not met**; [physical tilt](#physical-tilt-response) |
+| Pointy Pencil (25) | Simple | 1024 px | 40° writing pose: 67.06–68.48 fresh updates/s; fresh gap p99 ≤52.11 ms | **Not met**; [physical tilt](#physical-tilt-response) |
+| Shading Pencil (26) | Simple | 1024 px | 40° writing pose: 71.27–71.94 fresh updates/s; fresh gap p99 ≤35.33 ms | **Not met**; [physical tilt](#physical-tilt-response) |
+| Charcoal (27) | Simple | 1024 px | 40° writing pose: 65.58–66.71 fresh updates/s; fresh gap p99 ≤35.12 ms | **Not met**; [physical tilt](#physical-tilt-response) |
+| Chalk (6) | Simple | 1024 px | 40° writing pose: 30.40–30.76 fresh updates/s; fresh gap p99 ≤213.87 ms | **Not met**; [physical tilt](#physical-tilt-response) |
+| Crayon (43) | Simple | 1024 px | 40° writing pose: 63.87–65.25 fresh updates/s; fresh gap p99 ≤35.63 ms | **Not met**; [physical tilt](#physical-tilt-response) |
 | Eraser (3) | Simple | 1024 px | 29.9 fresh updates/s (29.71–29.95); completion gap p99 44.67–45.06 ms | **Not met** |
 | Airbrush (5) | Simple | 1024 px | 32.7 updates/s (32.4–33.1); gap p99 55.6 ms | **Not met** |
 | Marker (7) | Complex | 1024 px | 2.05 updates/s (1.90–2.20); gap p99 706.2 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 15.1 updates/s (15.0–15.1); gap p99 105.5 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 14.3 updates/s (14.2–14.4); gap p99 178.0 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 21.27–23.43 fresh updates/s; fresh gap p99 ≤59.95 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Pastel Block (17) | Complex | 1024 px | 40° writing pose: 34.95–35.59 fresh updates/s; fresh gap p99 ≤107.44 ms | **Not met**; [physical tilt](#physical-tilt-response) |
 | Paintbrush (4) | Complex | 1024 px | 0.70 updates/s (0.70–0.70); completion-gap p99 2054.0 ms | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 0.80 updates/s (0.80–0.90); gap p99 1691.0 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 0.70 updates/s (0.70–0.70); gap p99 2431.2 ms | **Not met** |
