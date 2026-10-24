@@ -307,7 +307,11 @@ mod tests {
                 stroke.push(pen, &mut live);
                 let replay = stroke.finished_replay().unwrap();
                 if drag {
-                    assert!(live.iter().chain(&replay).all(|dab| dab.motion != [0., 0.]), "{preset:?}");
+                    for dabs in [&live,&replay] {
+                        assert!(dabs.iter().any(|dab|!dab.is_completion()),"{preset:?}: drag retains its moving body");
+                        assert!(dabs.iter().filter(|dab|!dab.is_completion()).all(|dab|dab.motion!=[0.,0.]),"{preset:?}");
+                        assert_eq!(dabs.iter().filter(|dab|dab.is_completion()).count(),2,"{preset:?}: both ends complete in live and replay");
+                    }
                 } else {
                     assert_eq!(live.len(), 1, "{preset:?}");
                     assert_eq!(replay.len(), 1, "{preset:?}");

@@ -792,13 +792,20 @@ another JPEG under `/data/local/tmp`, such as a
 size. Then
 `python3 tools/performance/android-brush-benchmark.py OUT --serial "$CAPY_ANDROID_SERIAL" --presets 1 --size 1000`
 passes `-e preset`, `-e brushSize` and `-e mode` (`constant`, `pressure`, `tilt`,
-`stationary`, `lifts`, `pauses`, `settle`, `visual` or `pinch`); `--trace` and `--profile` add
+`straight`, `zigzag`, `stationary`, `lifts`, `pauses`, `settle`, `visual` or `pinch`); `--trace` and `--profile` add
 Perfetto and simpleperf captures. Strokes must present in the display status's
 `ink_present_mode`: `SharedDemandRefresh`, or `Fifo` on drivers without shared
 presentation. The default preset list is the dry brushes;
 the default workspace keeps Stats closed. `--stats` opens Stats and enables GPU
 timing; use `--trace --stats` for GPU phase diagnostics. Report these runs
 separately because Stats changes the workspace and adds measurement work.
+
+`straight` traverses the horizontal diameter once per contact. `zigzag` moves
+back and forth horizontally at one cycle per second while progressing vertically;
+both use the existing radius controls. Instrumentation arguments
+`-e visualBackground true -e theme light|dark` show Paper, hide the photo and cursor,
+and select the theme for matching brush captures. Keep the photo visible for
+ordinary performance comparisons.
 
 To ink on a crowded vector layer, generate a fixture with
 `cargo run --release -p layer-core --example crowded_vector_fixture -- OUT.capy 4248 2832 10000`

@@ -114,8 +114,11 @@ fn dry_drag_flushes_without_a_tap_and_replays_at_either_frame_cadence() {
             if per_sample { dry_tap_frame(&mut engine, pen.timestamp_ns); }
         }
         dry_tap_finish(&mut input, &mut engine, pen);
-        assert!(engine.backend().persistent.len() > 1, "{preset:?}");
-        assert!(engine.backend().persistent.iter().all(|dab| dab.motion != [0., 0.]), "{preset:?}");
-        assert_eq!(engine.backend().persistent[0].previous_contact[0], engine.settings.pressure.map(0.2)*engine.settings.brush.contact.unwrap().pressure_gain);
+        let dabs=&engine.backend().persistent;
+        let ordinary=dabs.iter().filter(|dab|!dab.is_completion()).collect::<Vec<_>>();
+        assert!(ordinary.len()>1,"{preset:?}");
+        assert!(ordinary.iter().all(|dab|dab.motion!=[0.,0.]),"{preset:?}");
+        assert_eq!(dabs.iter().filter(|dab|dab.is_completion()).count(),2,"{preset:?}: one completion at each end");
+        assert_eq!(ordinary[0].previous_contact[0], engine.settings.pressure.map(0.2)*engine.settings.brush.contact.unwrap().pressure_gain);
     }}}
 }

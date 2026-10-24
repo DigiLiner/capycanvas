@@ -66,6 +66,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val memoryIdleMs = arguments.getString("memoryIdleMs", "0")!!.toLong()
             check(memoryIdleMs in 0L..120000L && (memoryIdleMs == 0L || memorySnapshots))
             val mode = arguments.getString("mode", "constant")!!
+            val visualBackground = mode == "visual" || arguments.getString("visualBackground") == "true"
             val prediction = arguments.getString("prediction", "true") == "true"
             val statsPanel = arguments.getString("statsPanel", "false") == "true"
             val colorMode = arguments.getString("colorMode", "full_color")!!
@@ -80,7 +81,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val blending = arguments.getString("blending")
             check(blending == null || blending in listOf("linear", "perceptual"))
             check(duration in 1000..60000 && repeats in 1..100)
-            check(mode in listOf("constant", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine", "vector", "coverage"))
+            check(mode in listOf("constant", "straight", "zigzag", "pressure", "tilt", "stationary", "lifts", "pauses", "visual", "pinch", "settle", "object-affine", "vector", "coverage"))
             val coverageMinAvailableMiB = arguments.getString("coverageMinAvailableMiB", "1024")!!.toInt()
             val coverageMaxStripes = arguments.getString("coverageMaxStripes", "32")!!.toInt()
             check(coverageMinAvailableMiB in 512..8192 && coverageMaxStripes in 1..32)
@@ -266,8 +267,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 action(obj("type" to "select_panel_tab", "group" to group, "panel" to "stats"))
             }
             for (layer in state().array("layers").objects().filter { it.optString("label") == "Paper" })
-                action(obj("type" to "set_layer_visibility", "id" to layer.getLong("id"), "visible" to (mode == "visual")))
-            if (mode == "visual") for (layer in state().array("layers").objects().filter { it.optString("label") == "Photo" })
+                action(obj("type" to "set_layer_visibility", "id" to layer.getLong("id"), "visible" to visualBackground))
+            if (visualBackground) for (layer in state().array("layers").objects().filter { it.optString("label") == "Photo" })
                 action(obj("type" to "set_layer_visibility", "id" to layer.getLong("id"), "visible" to false))
             val photoLayers = arguments.getString("photoLayers", "1")!!.toInt()
             check(photoLayers in 1..32)
@@ -444,6 +445,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val settings = state().getJSONObject("settings")
                 .put("feedback", prediction).put("platform_prediction", false)
                 .put("prediction_ms", arguments.getString("horizon")?.toInt() ?: 16)
+            arguments.getString("theme")?.let { check(it in listOf("light", "dark")); settings.put("theme", it) }
+            if (visualBackground) settings.put("cursor", "none")
             action(obj("type" to "restore_settings", "settings" to settings))
             SystemClock.sleep(1500)
             waitFor { host.snapshot?.optBoolean("brush_ready") == true }
@@ -546,6 +549,14 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                     if (phase == MotionEvent.ACTION_DOWN) down = SystemClock.uptimeMillis()
                     coords[0].x = (cx + (if (kind == "stationary") 0.0 else rx * cos(angle))).toFloat() + host.surfaceOrigin.x
                     coords[0].y = (cy + (if (kind == "stationary") 0.0 else ry * sin(angle))).toFloat() + host.surfaceOrigin.y
+                    if (kind == "straight") {
+                        coords[0].x = (cx + rx * (2 * progress - 1)).toFloat() + host.surfaceOrigin.x
+                        coords[0].y = cy.toFloat() + host.surfaceOrigin.y
+                    }
+                    if (kind == "zigzag") {
+                        coords[0].x = (cx + rx * (1 - 4 * kotlin.math.abs(t * speed % 1 - .5))).toFloat() + host.surfaceOrigin.x
+                        coords[0].y = (cy + ry * (2 * progress - 1)).toFloat() + host.surfaceOrigin.y
+                    }
                     if (kind == "coverage") {
                         val translation = camera.getJSONArray("translation")
                         val start = size / 2
@@ -624,6 +635,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 "brush_ready_ns" to brushReadyNs, "brush_ready_ms" to (brushReadyNs - brushSelectedNs) / 1e6,
                 "brush_preparation" to selection, "size_preparation" to sizePreparation, "size_idle_ms" to sizeIdleMs,
                 "brush_size" to size, "mode" to mode, "prediction" to prediction, "speed" to speed,
+                "visual_background" to visualBackground,
                 "strength" to strength, "opacity" to opacity, "tilt" to tilt, "smoothing" to smoothing,
                 "orientation" to if (tilt != null) -PI/2 else if (mode == "tilt") .5 else 0.0,
                 "memory_snapshots" to memorySnapshots,

@@ -86,7 +86,7 @@ imprint. Until real movement exceeds one captured screen pixel from touchdown,
 the live preview shows only a conservative sweep from the opening contact to
 the latest endpoint. Preview clones share the pending history, then exclude it
 from their evaluation. Crossing the tolerance commits the exact retained prefix
-and continues a stroke without an opening imprint. Pen-up inside the tolerance
+and includes the drag's start completion. Pen-up inside the tolerance
 discards the prefix and deposits one imprint at the strongest real pressure's
 pose. Prediction cannot commit either choice; real-input preview remains
 available with prediction off. Wet stamps, bristle contact and time-based
@@ -96,6 +96,40 @@ Selection-mask painting flushes swept endpoints after each real sample and
 resolves taps only on pen-up, using the same captured screen tolerance. Its
 completed replay makes the same distinction. Endpoint flushing does not end a
 stroke or turn pending contact into an imprint.
+
+Flow dry media complete the missing passage at drag endpoints and selected turns.
+For incident lines with full-chord exposures F and outgoing half-line exposures e,
+completion adds `g*C*max(0,max(F)-sum(e))`. C is the real vertex contact and g is
+one at endpoints. Turns measure angle and chord-to-travel ratio over one minor
+contact radius on each side; smooth ramps span 10–30 degrees and ratios 0.3–0.6.
+The generator coalesces pending positions within 5% of the minor radius, at least
+0.25 document pixels. It resolves corners of that correction path with
+Douglas–Peucker subdivision at 2.5% of its anchor's minor radius, at least 0.01
+document pixels. Pending history is bounded to 256 vertices. Ordinary retained
+segments remain intact. Turns wait for their outgoing window; pen-up resolves
+pending turns and the terminal cap. No moving-head cap is deposited.
+
+Completion uses the same relief, loading, and optical transfer as segments.
+Its contact window leaves weakly engaged grains softer than fully engaged paper.
+Same-pigment batches containing completion use a completion-capable shader
+variant in the existing paint pass. Other batches keep their segment variant.
+The completion helpers are absent from ordinary specialized shaders. Broad
+completion variants also omit fine-contact filtering. Centered elliptical
+contacts share their symmetric full-chord integral and reject the inner half of
+a turn, where its incident half-lines already supply the target exposure.
+The tile planner omits wholly interior turn tiles with a conservative pixel
+margin; endpoint, shifted-relief, beveled, and fine-contact tiles retain their
+full support.
+The 128-byte shared and 160-byte renderer contact records retain their sizes,
+and completion adds no persistent pixel state.
+
+Small elliptical completions average joint body-plus-completion alpha over
+clipped pixel support, then subtract the canonical incident body's existing
+filtered optical dose. The correction is confined to the vertex contact's
+conservative pixel bounds. Filtering applies fully below a four-pixel minor
+radius and blends out by eight pixels. This preserves the segment filter and avoids
+compositing two independently averaged alpha edges. Small beveled contacts
+retain point-sampled body exposure and area-filtered completion.
 
 For each pixel, the dry evaluator integrates `contact*loading` over the current
 segment and divides by the full geometric contact chord. Subdividing a fixed-pose
@@ -122,6 +156,8 @@ Liquify and Clone passes compile without it. Fully engaged intervals return thei
 full chord by intersecting four pairs of parallel planes, then split only the
 portion traversed by the current segment. Segments wholly inside the flat face
 use its constant contact directly.
+Beveled support rejects intersections below the local float32 geometric precision
+before chord normalization, so a zero-length tangency cannot become a full dose.
 The CPU rotates whitened ellipse coordinates so motion follows one axis, preserving
 their squared radius, and caches motion/rim constants in the GPU contact record.
 Each piece computes its closest approach once and reuses it for the geometric,

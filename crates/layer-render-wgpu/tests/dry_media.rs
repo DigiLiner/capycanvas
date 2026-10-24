@@ -128,7 +128,7 @@ fn material_response(pressure:f64, brush:&BrushSnapshot)->(f64,f64) {
     (pressure,softness+(1.-softness)*pressure*pressure)
 }
 
-fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
+fn reference_exposure(y: usize, pressure: f64, brush: &BrushSnapshot) -> f64 {
     let contact = brush.contact.unwrap();
     let dry = contact.dry.unwrap();
     let profile = dry.poses[0].relief.map(f64::from);
@@ -150,8 +150,13 @@ fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
         let x = ((0.5*contact_pressure - recess - (1. + 0.25*recess)*d) / f64::from(dry.softness)).clamp(0., 1.);
         deposition += x*x*(3.-2.*x) * loading;
     }
-    if chord == 0. { return 0; }
-    ((1. - (-6.*f64::from(brush.opacity*brush.color_rgba_linear[3])*deposition/chord).exp())*255.).round() as u8
+    if chord == 0. { return 0.; }
+    deposition/chord
+}
+
+fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
+    (255.*(1.-(-6.*f64::from(brush.opacity*brush.color_rgba_linear[3])
+        *reference_exposure(y,pressure,brush)).exp())).round() as u8
 }
 
 #[test]
@@ -596,7 +601,7 @@ fn dry_taps_leave_one_peak_pressure_imprint_only_on_release() {
 }
 
 #[test]
-fn dry_drag_caps_have_equal_exposure_without_an_opening_imprint() {
+fn dry_drag_caps_complete_the_body_exposure() {
     let mut brush = analytic(0., 0.);
     brush.stabilization.strength = 0.;
     brush.color_rgba_linear[3] = 0.1;
@@ -605,12 +610,223 @@ fn dry_drag_caps_have_equal_exposure_without_an_opening_imprint() {
     }
     let image = line(brush.clone(), 0.55, 0., Run::default());
     let alpha = |x: usize, y: usize| image.rgba[(y*256+x)*4+3];
-    assert!(alpha(128, 128) > alpha(32, 128) + 10,
-        "distance-integrated end caps receive less exposure than the body");
+    assert!(alpha(128, 128).abs_diff(alpha(32, 128)) <= 2,
+        "completed caps match the body: body={} cap={}",alpha(128,128),alpha(32,128));
     for y in 100..157 {
         assert!(alpha(32, y).abs_diff(alpha(224, y)) <= 2,
             "start and end caps must match at y={y}: {} vs {}", alpha(32, y), alpha(224, y));
     }
     let predicted = line(brush, 0.55, 0., Run { feedback: true, cadence: 1, ..Default::default() });
     predicted.assert_near(&image, 2, "prediction preserves committed dry drag caps");
+}
+
+fn polyline(brush: BrushSnapshot, vertices: &[[f32;2]], subdivisions: u64, cadence: u64) -> support::Image {
+    let count=vertices.len()-1;
+    paint(brush,Run {samples:count as u64*subdivisions,cadence,..Default::default()},|t| {
+        let position=t*count as f32;
+        let i=(position as usize).min(count-1);
+        let fraction=(position-i as f32).clamp(0.,1.);
+        ([vertices[i][0]+fraction*(vertices[i+1][0]-vertices[i][0]),
+            vertices[i][1]+fraction*(vertices[i+1][1]-vertices[i][1])],1.,[0.;2])
+    })
+}
+
+#[test]
+fn sampled_dry_hairpins_and_squiggles_preserve_nonflat_pressure_tilt_and_opacity() {
+    for (preset,diameter) in [(DefaultBrushPreset::Pencil,4.),(DefaultBrushPreset::Pencil,36.),
+        (DefaultBrushPreset::PastelBlock,36.)] {
+        let mut brush=default_brush(preset);
+        brush.diameter=diameter;brush.opacity=0.35;brush.color_rgba_linear=[0.,0.,0.,0.6];
+        brush.stabilization.strength=0.;brush.mappings=Arc::from([]);
+        for hairpin in [true,false] {
+            let pose=|t:f32| {
+                let angle=t*std::f32::consts::PI;
+                let position=if hairpin {[128.5+56.*angle.sin(),128.5+56.*angle.cos()]}
+                    else {[32.5+192.*t,128.5+40.*(angle*4.).sin()]};
+                (position,0.3+0.6*angle.sin(),[0.6*angle.sin(),0.35*angle.cos()])
+            };
+            let reference=paint(brush.clone(),Run {samples:128,cadence:1,..Default::default()},pose);
+            assert!(reference.rgba.chunks_exact(4).filter(|p|p[3]>0).count()>256,
+                "{preset:?} diameter={diameter} hairpin={hairpin}: nonflat curve must leave visible paint");
+            for feedback in [false,true] {
+                let batched=paint(brush.clone(),Run {samples:128,cadence:7,feedback,..Default::default()},pose);
+                batched.assert_near(&reference,2,&format!("{preset:?} diameter={diameter} hairpin={hairpin} feedback={feedback}: curved contact cadence"));
+            }
+        }
+    }
+}
+
+#[test]
+fn tiny_completed_caps_match_independent_pixel_area() {
+    let mut failures=Vec::new();
+    for (opacity,direction) in [(0.35,0_f32),(1.,0.),(0.35,0.7),(1.,0.7)] {
+    let (sin,cos)=direction.sin_cos();
+    for diameter in [1.,2.,4.] {
+        let mut brush=analytic(0.,0.);
+        brush.diameter=diameter;brush.flow=1.;brush.opacity=opacity;brush.color_rgba_linear[3]=0.6;
+        brush.stabilization.strength=0.;
+        for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {pose.relief=[0.;3];}
+        let image=paint(brush.clone(),Run {samples:32,cadence:4,..Default::default()},
+            |t|([32.75+192.*t*cos,128.625+192.*t*sin],1.,[0.;2]));
+        let radius=f64::from(diameter)*0.5;
+        let full=f64::from(brush.opacity)*(1.-(-6.*f64::from(brush.color_rgba_linear[3])).exp());
+        for y in 125..132 {for x in 29..36 {
+            let mut covered=0u32;
+            for sy in 0..256 {for sx in 0..256 {
+                let px=x as f64+(sx as f64+0.5)/256.;
+                let py=y as f64+(sy as f64+0.5)/256.;
+                let delta=[px-32.75,py-128.625];
+                let along=(delta[0]*f64::from(cos)+delta[1]*f64::from(sin)).max(0.);
+                let dx=delta[0]-along*f64::from(cos);let dy=delta[1]-along*f64::from(sin);
+                covered+=u32::from(dx*dx+dy*dy<radius*radius);
+            }}
+            let expected=(255.*full*f64::from(covered)/65536.).round() as u8;
+            let actual=image.rgba[(y*256+x)*4+3];
+            if actual.abs_diff(expected)>3 {failures.push(format!(
+                "diameter={diameter} opacity={opacity} direction={direction} cap pixel=({x},{y}): GPU{actual} independent area{expected}"));}
+        }}
+    }
+    }
+    assert!(failures.is_empty(),"{}",failures.join("\n"));
+}
+
+#[test]
+fn nonflat_pencil_and_charcoal_caps_match_independent_chord_integration() {
+    for preset in [DefaultBrushPreset::Pencil,DefaultBrushPreset::Charcoal] {
+        let mut brush=default_brush(preset);
+        brush.diameter=80.;brush.mappings=Arc::from([]);brush.stabilization.strength=0.;
+        brush.color_rgba_linear=[0.,0.,0.,0.3];brush.contact.as_mut().unwrap().paper=0.;
+        let dry=brush.contact.unwrap().dry.unwrap();
+        for pressure in [0.4,0.8] {
+            let image=line(brush.clone(),pressure,0.,Run::default());
+            let p=material_pressure(f64::from(pressure),&brush);
+            for y in 106..151 {
+                let q=relief_q([0.,y as f64-128.],&brush);
+                let profile=dry.poses[0].relief.map(f64::from);
+                let recess=profile[0]+q*(profile[1]+q*profile[2]);
+                let t=((0.5*p-recess)/f64::from(dry.softness)).clamp(0.,1.);
+                let window=t*t*(3.-2.*t);
+                let exposure=reference_exposure(y,f64::from(pressure),&brush)*0.5*(1.+window);
+                let expected=(255.*f64::from(brush.opacity)*(1.-(-6.*f64::from(brush.color_rgba_linear[3])*exposure).exp())).round() as u8;
+                for x in [32,224] {
+                    let actual=image.rgba[(y*256+x)*4+3];
+                    assert!(actual.abs_diff(expected)<=2,
+                        "{preset:?} pressure={pressure} cap=({x},{y}): GPU{actual} independent chord{expected}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn nonflat_turn_completion_matches_independent_incident_chords() {
+    let mut brush=analytic(0.,0.);
+    brush.flow=1.;brush.color_rgba_linear[3]=0.2;brush.stabilization.strength=0.;
+    let dry=brush.contact.unwrap().dry.unwrap();
+    let transfer=|q:f64| {
+        let profile=dry.poses[0].relief.map(f64::from);
+        let t=((0.5-profile[0]-q*(profile[1]+q*profile[2]))/f64::from(dry.softness)).clamp(0.,1.);
+        t*t*(3.-2.*t)
+    };
+    let incident=|transverse:f64,limit:f64,positive:bool| {
+        let half=(1600.-transverse*transverse).sqrt();
+        let mut full=0.;let mut passed=0.;
+        for i in 0..8192 {
+            let along=half*((i as f64+0.5)/4096.-1.);
+            let contact=transfer((transverse*transverse+along*along)/1600.);
+            full+=contact;
+            if (positive && along>=limit) || (!positive && along<=limit) {passed+=contact;}
+        }
+        [passed/8192.,full/8192.]
+    };
+    let image=polyline(brush,&[[32.5,128.5],[128.5,128.5],[128.5,224.5]],1,1);
+    for dy in [-27,-18,-9,0,9,18,27] {for dx in [-27,-18,-9,0,9,18,27] {
+        let a=incident(f64::from(dy),f64::from(dx),true);
+        let b=incident(f64::from(dx),f64::from(dy),false);
+        let window=transfer(f64::from(dx*dx+dy*dy)/1600.);
+        let exposure=a[0]+b[0]+window*(a[1].max(b[1])-a[0]-b[0]).max(0.);
+        let expected=(255.*(1.-(-1.2*exposure).exp())).round() as u8;
+        let x=(128+dx) as usize;let y=(128+dy) as usize;
+        let actual=image.rgba[(y*256+x)*4+3];
+        assert!(actual.abs_diff(expected)<=2,
+            "nonflat turn pixel=({x},{y}): GPU{actual} independent incident chords{expected}");
+    }}
+}
+
+#[test]
+fn broad_completion_preserves_independent_chord_exposure_across_tiles() {
+    let size=[1024;2];
+    let mut document=Document::new(PortableId::random(),size[0],size[1],
+        DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
+    let paper=support::named_occurrence(&document,"Paper");
+    document.artwork.occurrences.get_mut(paper).unwrap().visible=false;
+    let (mut engine,mut input)=support::engine(document);
+    engine.set_view(ViewState {width_px:size[0],height_px:size[1],
+        document_to_surface:[1.,0.,0.,1.,0.,0.]},ViewTransform::IDENTITY);
+    let mut brush=analytic(0.,0.);
+    brush.diameter=640.;brush.flow=1.;brush.color_rgba_linear[3]=0.2;brush.stabilization.strength=0.;
+    for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {pose.relief=[0.;3];}
+    engine.set_brush(brush).unwrap();
+    let vertices=[[64.5,512.5],[512.5,512.5],[512.5,960.5]];
+    let mut time=1_000_000_000;
+    for (i,position) in vertices.into_iter().enumerate() {
+        time+=4_000_000;
+        let mut event=support::pen_sample(i as u64,2,time,Point {x:position[0],y:position[1]});
+        event.pressure=1.;event.tilt_radians=[0.;2];
+        input.push(event).unwrap();support::drain_input(&mut engine,time,true);
+    }
+    let image=support::image(&mut engine,time);
+    let radius=320_f64;
+    let chord=|offset:f64,position:f64,lo:f64,hi:f64| {
+        if offset.abs()>=radius {return 0.;}
+        let half=(radius*radius-offset*offset).sqrt();
+        ((position+half).min(hi)-(position-half).max(lo)).max(0.)/(2.*half)
+    };
+    let mut inner=0;let mut outer=0;
+    for y in (128..897).step_by(32) {for x in (128..897).step_by(32) {
+        let px=x as f64+0.5;let py=y as f64+0.5;
+        let dx=px-512.5;let dy=py-512.5;
+        let squared=dx*dx+dy*dy;
+        if (squared-radius*radius).abs()<2.*radius {continue;}
+        if (px-64.5).hypot(dy)<=radius+1. || dx.hypot(py-960.5)<=radius+1. {continue;}
+        let mut exposure=chord(dy,px,64.5,512.5)+chord(dx,py,512.5,960.5);
+        if squared<radius*radius {
+            if dx>dy {outer+=1;} else {inner+=1;}
+            exposure=exposure.max(1.);
+        }
+        let expected=(255.*(1.-(-1.2*exposure).exp())).round() as u8;
+        let actual=image.rgba[(y*1024+x)*4+3];
+        assert!(actual.abs_diff(expected)<=2,
+            "cross-tile cap pixel=({x},{y}): GPU{actual} independent chord{expected}");
+    }}
+    assert!(inner>10 && outer>10,"both retained outer and omitted inner tiles are sampled");
+}
+
+#[test]
+fn dry_completion_fills_turns_and_preserves_subdivision_and_retracing() {
+    for corner in [0.,0.35] {
+        let mut brush=analytic(corner,0.);
+        brush.stabilization.strength=0.;brush.flow=1.;brush.color_rgba_linear[3]=0.2;
+        for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {pose.relief=[0.;3];}
+        let straight=polyline(brush.clone(),&[[32.5,128.5],[224.5,128.5]],32,4);
+        let body=straight.rgba[(128*256+128)*4+3];
+        for (vertices,probes) in [
+            (vec![[32.5,128.5],[160.5,128.5],[32.5,128.5]],vec![[176,128],[184,128]]),
+            (vec![[32.5,128.5],[128.5,128.5],[128.5,224.5]],vec![[144,112],[148,108]]),
+            (vec![[32.5,192.5],[96.5,64.5],[160.5,192.5],[224.5,64.5]],vec![[96,48],[160,208]]),
+        ] {
+            let reference=polyline(brush.clone(),&vertices,1,1);
+            for [x,y] in probes {
+                let actual=reference.rgba[(y*256+x)*4+3];
+                assert!(actual.saturating_add(2)>=body,"corner={corner}, path={vertices:?}, point=({x},{y}), alpha={actual}, full passage={body}");
+            }
+            let refined=polyline(brush.clone(),&vertices,32,7);
+            refined.assert_near(&reference,3,&format!("completion subdivision corner={corner}, path={vertices:?}"));
+        }
+        let reference=polyline(brush.clone(),&[[32.5,128.5],[160.5,128.5],[32.5,128.5]],1,1);
+        let jitter=polyline(brush,&[[32.5,128.5],[160.6,128.5],[160.4,128.5],[160.55,128.5],[160.45,128.5],[160.5,128.5],[32.5,128.5]],1,1);
+        jitter.crop([168,112],[24,32]).assert_near(&reference.crop([168,112],[24,32]),3,
+            &format!("shrinking reversal completion corner={corner}"));
+        assert!(reference.rgba[(128*256+96)*4+3]>body+10,"retracing keeps ordinary buildup");
+    }
 }

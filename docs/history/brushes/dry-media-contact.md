@@ -565,6 +565,17 @@ when paper loses contact, so sparse grain remains a smaller dose rather than
 being normalized back to solid coverage. Feed and world-travel scaling remain
 part of the existing stroke-engine calibration.
 
+**Ends and turns.** Flow deposition supplements this integral with localized
+completion: `delta=g*C*max(0,max(F)-sum(e))`, where F is each incident line's full
+passage and e its incident half-line passage. Endpoints use g=1. The shared
+generator selects and coalesces turn candidates using contact-scale geometry.
+Ordinary segments retain their original exposure and repeated-pass buildup.
+The [contact engine](../../internals/contact-brush-engine.md#swept-deposition)
+defines the gate, scheduling, and shader specialization. This is a geometric
+boundary rule; the material literature does not establish it as a physical law.
+At a symmetric endpoint, exposure becomes `F*(1+C)/2`, reaching F at full
+engagement while preserving softer completion on weak paper contact.
+
 **Alternatives.** Normalizing each fragment by its own length lets splitting
 increase pigment and is rejected. Normalizing by only engaged contacts restores
 dose lost through grain and defeats the paper response. An unnormalized length

@@ -111,7 +111,8 @@ pub struct Dab {
     pub hardness: f32,
     /// Pre-resolved horizontal and vertical tip flips, each `-1` or `1`. A
     /// bristle fan carries its recent travel direction at the start and end
-    /// poses instead, as angles from the fan's normal.
+    /// poses instead, as angles from the fan's normal. Dry completion contacts
+    /// carry `[2, weight]` and two outward directions in `previous_contact`.
     pub texture_sign: [f32; 2],
     /// Resolved grain depth, pull, deposit, and deformation strength. A bristle
     /// fan sets grain depth to 2 for the lift that ends its stroke, and pull and
@@ -125,11 +126,21 @@ pub struct Dab {
     /// Analytic dry media carry Strength-scaled material pressure and relief.
     /// A bristle fan carries the height of its rolled edge in place of tilt.
     pub contact: [f32; 4],
-    /// The preceding contact's sensor values, for interpolation on the GPU.
+    /// The preceding contact's sensor values, or dry completion's two directions.
     pub previous_contact: [f32; 4],
 }
 
 impl Dab {
+    pub fn is_completion(self) -> bool { self.texture_sign[0] == 2. }
+
+    pub fn completion(mut self, incoming: [f32; 2], outgoing: [f32; 2], weight: f32) -> Self {
+        self.motion = [0.; 2];
+        self.previous = [self.radii[0], self.radii[1], self.rotation[0], self.rotation[1]];
+        self.previous_contact = [incoming[0], incoming[1], outgoing[0], outgoing[1]];
+        self.texture_sign = [2., weight];
+        self
+    }
+
     /// Conservative footprint, including the swept previous pose and all
     /// bounded GPU edge expansion. Shared by allocation and raster scissoring.
     pub fn bounds(self) -> layer_core::Rect {

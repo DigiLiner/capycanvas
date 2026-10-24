@@ -1478,6 +1478,93 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
+### Dry-media endpoint and turn completion, 2026-10-24
+
+Matched control `6a7d3b1042d0821ee5823ddd7c96acba8188abf7` against localized
+completion, with shared radial integrals, separate broad/fine variants and
+zero-deficit tile rejection. The measured APK SHA-256 is
+`1ca3ab54f3fbb7950222b0955519e41e381f739b706e167d3dd3465cc2027a53`;
+its shader generation is `bfcf62144bad4e57`. The control's native library was
+frozen while adding the same benchmark paths and capture controls.
+The deployed build refreshes the 14 dry-brush preview assets with a byte-identical
+native library and the same shader generation; its APK SHA-256 is
+`5b1ae164f95c43851e0782afd5ff1ee46acfdba6f4c8781d716fa300792ab44d`.
+
+TCL TAB 11 Gen 2, Mali-G52, 4248 × 2832 photo with an empty paint layer,
+SharedDemandRefresh, Stats closed, pressure 1, tilt 45°, thermal status 0.
+Each row has three six-second contacts after readiness and priming. Broad
+contacts use nominal Size 1024 at Fit 0.343538. Both presets' geometric contacts
+are 1024 × 665.6 document pixels at this pose, about 351.8 × 228.7 surface pixels;
+material engagement can occupy less. Continuous and compact zigzag paths have
+60 × 10 surface-pixel radii; the wide zigzag uses radius 180 in X.
+The fine Pencil uses Size 9 at zoom 1, with a 9 × 5.85-pixel geometric contact.
+Physical viewport is 1200 × 1920 with
+three quarter-turns, logical viewport 1920 × 1200. These matched measurements
+do not replace earlier profiles at different Fit scales.
+
+Rates below count completed nonempty canvas updates, not panel presents. Gaps
+are the worst per-contact p99 between fresh-input completions. Raw data also
+records fresh-input rates, latency and settings. Values under 60/s or gaps over
+33.3 ms do not qualify, including cases where the control already missed.
+
+| Workload | Brush | Control updates/s | Completion updates/s | Median change | Fresh gap, control → completion | Completion verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| Continuous curve | Pencil | 72.33–73.28 | 68.17–68.72 | −6.36% | 25.44 → 33.08 ms | Meets measured profile |
+| Continuous curve | Charcoal | 69.35–70.67 | 65.61–67.67 | −4.67% | 25.70 → 35.45 ms | **New gap miss** |
+| Straight | Pencil | 87.50–90.61 | 89.59–89.93 | +0.11% | 17.80 → 16.20 ms | Meets |
+| Straight | Charcoal | 87.68–88.52 | 87.61–88.99 | −0.03% | 15.27 → 16.13 ms | Meets |
+| Compact zigzag | Pencil | 72.12–72.54 | 70.79–71.37 | −2.00% | 27.78 → 35.94 ms | **New gap miss** |
+| Compact zigzag | Charcoal | 71.25–72.62 | 69.41–70.87 | −2.21% | 28.21 → 37.89 ms | **New gap miss** |
+| Frequent lifts | Pencil | 49.80–52.39 | 46.71–48.65 | −6.30% | 102.83 → 105.72 ms | **Both builds miss** |
+| Frequent lifts | Charcoal | 48.82–49.86 | 43.01–44.57 | −13.16% | 105.81 → 115.69 ms | **Both builds miss** |
+| Wide zigzag | Pencil | 54.46–55.39 | 53.31–53.66 | −2.69% | 42.11 → 50.62 ms | **Both builds miss** |
+| Fine zigzag | Pencil | 186.62–190.50 | 190.46–192.00 | +0.37% | 9.97 → 8.68 ms | Meets |
+
+| Workload | Brush | Fresh input updates/s, control → completion | Input-to-GPU p99, control → completion |
+| --- | --- | --- | --- |
+| Continuous curve | Pencil | 72.16–73.28 → 68.17–68.72 | 55.55–58.80 → 58.90–61.54 ms |
+| Continuous curve | Charcoal | 69.35–70.67 → 65.44–67.67 | 55.58–59.50 → 64.15–66.87 ms |
+| Straight | Pencil | 87.16–90.61 → 89.59–89.93 | 41.11–55.74 → 44.32–56.25 ms |
+| Straight | Charcoal | 87.68–88.52 → 87.61–88.99 | 45.00–50.40 → 43.58–52.12 ms |
+| Compact zigzag | Pencil | 71.95–72.54 → 70.62–71.37 | 59.42–61.08 → 68.51–69.58 ms |
+| Compact zigzag | Charcoal | 71.08–72.62 → 69.41–70.87 | 60.90–63.98 → 68.92–70.61 ms |
+| Frequent lifts | Pencil | 35.69–39.08 → 33.37–34.53 | 99.91–104.20 → 104.76–107.29 ms |
+| Frequent lifts | Charcoal | 33.88–35.91 → 29.55–33.09 | 103.04–106.88 → 113.62–120.34 ms |
+| Wide zigzag | Pencil | 54.46–55.39 → 53.31–53.66 | 85.68–87.01 → 93.42–94.99 ms |
+| Fine zigzag | Pencil | 185.13–188.17 → 188.14–190.17 | 16.81–23.22 → 16.96–21.08 ms |
+
+Completion keeps straight/fine throughput near control, but is **not fully
+performance-qualified**. Broad Charcoal curves and compact zigzags introduce
+gap misses; frequent Charcoal lifts have the largest measured throughput cost.
+Other dry presets, mid/top tiers and physical pen-to-scanout latency remain
+unqualified by this comparison. This is the fastest tested implementation that
+passed the pixel requirements, not evidence of zero overhead.
+
+The selected-brush readiness test passes for all seven dry presets. The measured
+build's first observed selections were 241.69 ms for Pencil and 273.11 ms for
+Charcoal. After final packaging, Pointy Pencil takes 13.35 s and Chalk 4.50 s on
+first observed selection, despite retaining app data; repeat selections range
+from 222 to 273 ms. Cache coverage therefore varies, and these are not
+cold-driver compilation costs or a controlled compile-time comparison. The
+debug host test separately requires all pressure/tilt/size variants to be
+prepared before painting. Ordinary shader modules omit completion, and broad
+completion modules omit fine filtering.
+
+A controlled application-cold comparison remains unmeasured. Android's
+`pm clear --cache-only` did not return within the bounded attempt. Full app-data
+clearing was rejected before execution by automatic approval review to preserve
+settings/documents; the safer shader-cache-only fallback failed because the
+benchmark package is not debuggable by `run-as`. The final APK was restored.
+These tooling failures provide no evidence about the relative compilation cost.
+
+Eight cursor-free TCL captures cover straight/zigzag paths, Size 9/1024, and
+light/dark themes. They show firmer endpoints and outside turns with retained
+grain. Independent GPU tests check tiny pixel-area coverage, nonflat chord
+exposure, cross-tile turns, retracing, shrinking excursions, batching and replay.
+Evidence: `artifacts/dry-media-completion/` and
+`/mnt/localssd/capycanvas3-dry-completion-20261024/candidate5/`, including
+`final-comparison.{md,json}` and the per-contact records.
+
 ### Dry-media contact model
 
 Measured on 2026-10-17 UTC with dry kernels specialized to normal blending and
@@ -1641,10 +1728,10 @@ Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measur
 | Antique Pen (30) | Simple | 1024 px | 37.5 updates/s (37.1–38.0); gap p99 79.9 ms | **Not met** |
 | Realistic Pen (31) | Simple | 1024 px | 28.3 updates/s (28.2–28.3); gap p99 63.4 ms | **Not met** |
 | Wet Ink (32) | Simple | 1024 px | 23.0 updates/s (22.9–23.1); gap p99 73.7 ms | **Not met** |
-| Pencil (2) | Simple | 1024 px | 30.46–30.94 fresh updates/s; fresh gap p99 ≤43.26 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Pencil (2) | Simple | 1024 px | 68.17–68.72 updates/s on the contained curve, fresh gap ≤33.08 ms; compact zigzag gap ≤35.94 ms | **Not fully met**; [endpoint completion](#dry-media-endpoint-and-turn-completion-2026-10-24) |
 | Pointy Pencil (25) | Simple | 1024 px | 39.91–40.41 fresh updates/s; fresh gap p99 ≤33.05 ms | **Not met**; [dry media](#dry-media-contact-model) |
 | Shading Pencil (26) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
-| Charcoal (27) | Simple | 1024 px | 28.92–29.12 fresh updates/s; fresh gap p99 ≤45.10 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 1024 px | 65.61–67.67 updates/s on the contained curve, fresh gap ≤35.45 ms | **Not met**; [endpoint completion](#dry-media-endpoint-and-turn-completion-2026-10-24) |
 | Chalk (6) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Crayon (43) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 1024 px | 29.9 fresh updates/s (29.71–29.95); completion gap p99 44.67–45.06 ms | **Not met** |

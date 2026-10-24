@@ -13,6 +13,7 @@ use layer_render::Dab;
 use std::sync::{Arc, LazyLock};
 
 mod smoothing;
+mod completion;
 pub(crate) use smoothing::{CurveModel, PositionField, CurvePreview, pen_up_settlement_micros};
 
 const SPEED_FILTER_SECONDS: f32 = 0.015;
@@ -88,6 +89,7 @@ pub struct DabGenerator {
     fan_deepest: f32,
     fan_pressed: f32,
     pending_contacts: Arc<Vec<Dab>>,
+    dry_completion: completion::Path,
     tap_peak: Option<DynamicPoint>,
     distance_until_next: f32,
     filtered_speed: f32,
@@ -120,6 +122,7 @@ impl Default for DabGenerator {
             fan_deepest: 0.,
             fan_pressed: 0.,
             pending_contacts: EMPTY_CONTACTS.clone(),
+            dry_completion: Default::default(),
             tap_peak: None,
             distance_until_next: 0.0,
             filtered_speed: 0.0,
@@ -187,6 +190,7 @@ impl DabGenerator {
         if preview.tap_peak.take().is_some() {
             preview.last_contact = self.pending_contacts.first().copied();
             preview.pending_contacts = EMPTY_CONTACTS.clone();
+            preview.dry_completion = Default::default();
         }
         preview
     }
@@ -479,12 +483,17 @@ impl DabGenerator {
         }
         if let Some(peak) = self.tap_peak.take() {
             Arc::make_mut(&mut self.pending_contacts).clear();
+            self.dry_completion = Default::default();
             self.last_contact = None;
             let evaluated = self.evaluate(peak, brush);
             self.emit_contacts(evaluated, brush, output, &mut damage);
             return damage;
         }
-        damage.union(self.flush_contact(brush, output))
+        damage = damage.union(self.flush_contact(brush, output));
+        if brush.contact.is_some_and(|c| c.dry.is_some()) && brush.rendering.accumulation == layer_core::BrushAccumulation::Flow {
+            for dab in self.dry_completion.finish() { include_dab(&mut damage, dab); output.push(dab); }
+        }
+        damage
     }
 
     pub(crate) fn flush_contact(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
@@ -862,6 +871,13 @@ impl DabGenerator {
             self.connect_contact(&mut dab);
             self.last_contact = Some(dab);
             if opening || dab.motion != [0.;2] {
+                let completion = if brush.rendering.accumulation == layer_core::BrushAccumulation::Flow {
+                    self.dry_completion.append(dab)
+                } else { Vec::new() };
+                for added in completion {
+                    if self.tap_peak.is_some() { Arc::make_mut(&mut self.pending_contacts).push(added); }
+                    else { include_dab(damage, added); output.push(added); }
+                }
                 if self.tap_peak.is_some() { Arc::make_mut(&mut self.pending_contacts).push(dab); }
                 else { include_dab(damage,dab); output.push(dab); }
             }
@@ -1623,6 +1639,31 @@ mod tests {
         }
         generator.finish(&brush, &mut dabs);
         assert!(dabs.len() <= 12, "a broad arc keeps vertices at 1% of its radius: {}", dabs.len());
+    }
+
+    #[test]
+    fn dry_completion_keeps_segments_and_bounds_work_on_squiggles() {
+        let mut brush=layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        brush.diameter=1024.;brush.stabilization.strength=0.;
+        let mut strokes=Vec::new();
+        for accumulation in [layer_core::BrushAccumulation::Uniform,layer_core::BrushAccumulation::Flow] {
+            brush.rendering.accumulation=accumulation;
+            let mut generator=DabGenerator::default();
+            let mut dabs=Vec::new();
+            for i in 0..=2000 {
+                let angle=i as f32*0.01;
+                let mut sample=crate::test_support::point(175.*angle.cos(),30.*angle.sin(),1.,i*4_000);
+                sample.tilt=[std::f32::consts::FRAC_PI_4,0.];
+                generator.append(sample,&brush,&mut dabs);
+            }
+            generator.finish(&brush,&mut dabs);
+            strokes.push(dabs);
+        }
+        let completions=strokes[1].iter().filter(|d|d.is_completion()).count();
+        assert!(completions>2 && completions<=24,
+            "{completions} corrections for {} ordinary segments",strokes[0].len());
+        let ordinary:Vec<_>=strokes[1].iter().copied().filter(|d|!d.is_completion()).collect();
+        assert_eq!(ordinary,strokes[0]);
     }
 
     #[test]

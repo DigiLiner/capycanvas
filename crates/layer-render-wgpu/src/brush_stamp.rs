@@ -36,11 +36,13 @@ impl BrushStamps {
             || [request.bounds.min.x,request.bounds.min.y,request.bounds.max.x,request.bounds.max.y]
                 .iter().any(|v|!v.is_finite())
             || request.shape_strength.is_some_and(|v|!(0.0..=1.0).contains(&v)) {return Err(GpuRasterError::InvalidImage);}
-        let fine=request.style.contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.))
+        let completion=request.style.contact.is_some_and(|c|c.dry.is_some()) && request.dabs.iter().any(|d|d.is_completion());
+        let fine=(request.style.contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.)) || completion)
             && request.dabs.iter().any(|d|(0..2).any(|i|0.5*(d.radii[i]+d.previous[i])<8.));
         let flags=dry_material::contact_flags(request.style.contact)
             | if request.style.rendering.accumulation==BrushAccumulation::Uniform {128} else {0}
-            | if fine {16384} else {0};
+            | if fine {16384} else {0}
+            | if completion {dry_material::COMPLETION} else {0};
         let pipeline=if let Some(index)=self.pipelines.iter().position(|(key,_)|*key==flags) {
             self.pipelines.remove(index).1
         } else {

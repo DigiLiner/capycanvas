@@ -31,6 +31,22 @@ fn contact_radius(dab: Dab, contact: &layer_core::BrushContact) -> f32 {
     maximum * expansion + 1.0
 }
 
+fn completion_plane(dab:Dab,contact:Option<&layer_core::BrushContact>)->Option<[f32;2]> {
+    let dry=contact?.dry?;
+    if !dab.is_completion() || dry.corner!=0. || dry.relief_offset!=0.
+        || dab.radii[0].min(dab.radii[1])<8.
+        || dab.previous_contact[..2]==[0.;2] || dab.previous_contact[2..]==[0.;2] {return None;}
+    let [c,s]=dab.rotation;
+    let m=[c/dab.radii[0],s/dab.radii[0],-s/dab.radii[1],c/dab.radii[1]];
+    let mut normal=[0.;2];
+    for direction in dab.previous_contact.chunks_exact(2) {
+        let v=[-(m[0]*direction[0]+m[1]*direction[1]),-(m[2]*direction[0]+m[3]*direction[1])];
+        let length=v[0].hypot(v[1]).max(1e-12);
+        normal[0]+=v[0]/length;normal[1]+=v[1]/length;
+    }
+    Some([m[0]*normal[0]+m[2]*normal[1],m[1]*normal[0]+m[3]*normal[1]])
+}
+
 /// Everything a fan span paints lies in the convex hull of its contact
 /// rectangles at the start and end poses, widened by the bulge of a roll and
 /// antialiasing. Each hull edge is a constraint `normal · p <= limit`.
@@ -369,6 +385,7 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
         let shape=if pointwise(&batch.style) && batch.style.rendering.accumulation==BrushAccumulation::Flow
             && contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.)) {midpoint_contact(*original)} else {*original};
         let dab=&shape;
+        let plane=completion_plane(*dab,contact);
         let radius = contact.filter(|_| !fan).map_or(0., |contact| contact_radius(*dab, contact));
         let hull = (contact.is_some() && !fan && dab.previous[0] > 0.)
             .then(|| ContactHull::new(*dab, radius));
@@ -386,6 +403,13 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
         }
         let index = batch.first_dab + index as u32;
         for coordinate in page_coordinates(bounds) {
+            if let Some(normal)=plane {
+                let tile=page_rect(coordinate).intersect(bounds);
+                let far=[if normal[0]>0. {tile.max_x()} else {tile.min_x()},
+                    if normal[1]>0. {tile.max_y()} else {tile.min_y()}];
+                if normal[0]*(far[0] as f32-dab.center.x)+normal[1]*(far[1] as f32-dab.center.y)
+                    +normal[0].abs()+normal[1].abs()<=0. {continue;}
+            }
             let mut clipped = bounds;
             if let Some(region) = &region {
                 let tile = page_rect(coordinate);
@@ -470,6 +494,31 @@ pub(super) fn document_damage(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_tiles_omit_the_inner_turn_without_clipping_the_outer_contact() {
+        let mut style=crate::layer_tests::preset_style(layer_core::DefaultBrushPreset::Pencil);
+        style.contact.as_mut().unwrap().dry.as_mut().unwrap().relief_offset=0.;
+        let ordinary=Dab {
+            center:layer_core::Point {x:512.5,y:512.5},radii:[400.;2],rotation:[1.,0.],
+            color_rgba_linear:[1.;4],flow:1.,hardness:0.5,texture_sign:[1.;2],
+            material:[0.;4],motion:[0.;2],previous:[400.,400.,1.,0.],
+            contact:[1.,0.,0.,0.],previous_contact:[1.,0.,0.,0.],
+        };
+        let mut batch=crate::test_support::dab_batch(SourceTarget::Paint(layer_core::PaintHandle::from_index(1)),style,ordinary.bounds());
+        batch.dab_count=1;
+        let full=plan(&batch,&[ordinary],[1024;2]);
+        let completed=ordinary.completion([-1.,0.],[0.,1.],1.);
+        let tiles=plan(&batch,&[completed],[1024;2]);
+        assert!(tiles.len()<full.len());
+        for y in (0..1024).step_by(8) {for x in (0..1024).step_by(8) {
+            let offset=[x as f32-512.,y as f32-512.];
+            if offset[0].hypot(offset[1])>=400. || offset[0]<=offset[1] {continue;}
+            assert!(tiles.iter().any(|t|t.coordinate==[x/256,y/256]),"missing outer contact at {x},{y}");
+        }}
+        let cap=ordinary.completion([-1.,0.],[0.;2],1.);
+        assert_eq!(plan(&batch,&[cap],[1024;2]).len(),full.len());
+    }
 
     #[test]
     fn revisited_tiles_keep_only_the_contacts_that_touch_them() {

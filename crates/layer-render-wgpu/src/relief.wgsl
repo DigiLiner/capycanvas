@@ -126,7 +126,8 @@ fn relief_beveled_range(o:vec2<f32>,v:vec2<f32>,rim:vec2<f32>,inverse:vec4<f32>)
     let minus=relief_slab(oo.x-oo.y,vv.x-vv.y,inverse.w,diagonal);
     let lo=max(max(ax.x,ay.x),max(plus.x,minus.x));
     let hi=min(min(ax.y,ay.y),min(plus.y,minus.y));
-    return vec2<f32>(lo,max(lo,hi));
+    let tolerance=0.0000005*max(1.0,max(abs(o.x),abs(o.y)));
+    return vec2<f32>(lo,select(lo,max(lo,hi),(hi-lo)*length(v)>tolerance));
 }
 
 fn relief_origin(dab:Dab,origin:vec2<f32>)->vec2<f32> {

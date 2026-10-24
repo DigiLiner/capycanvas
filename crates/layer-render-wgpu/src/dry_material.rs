@@ -29,6 +29,7 @@ pub(super) const FINE_TIP_RADIUS: f32 = 8.;
 pub(super) const DISPLAY_INPUT_SETS: usize = 8;
 pub(super) const AGGREGATE: u32 = 8192;
 pub(super) const FINE_TIP: u32 = 16384;
+pub(super) const COMPLETION: u32 = 65536;
 /// Contact flags that destination-material modules are specialized for; any
 /// other contact evaluates the flags each dab carries.
 pub(super) const MATERIAL_CONTACTS: [u32; 3] = [0, 128, u32::MAX];
@@ -108,7 +109,12 @@ pub(super) enum Entries {
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
     let has=|bit:u32| flags==u32::MAX || flags&bit!=0;
-    let relief_contact=if flags==u32::MAX || flags&FINE_TIP!=0 {include_str!("relief_fine.wgsl")} else {include_str!("relief_coarse.wgsl")};
+    let fine=flags==u32::MAX || flags&FINE_TIP!=0;
+    let contact=if fine {include_str!("relief_fine.wgsl")} else {include_str!("relief_coarse.wgsl")};
+    let completed=flags==u32::MAX || flags&COMPLETION!=0;
+    let completion=if completed {format!("{}\n{}\n{}",contact.replace("fn relief_contact(","fn relief_segment_contact("),include_str!("relief_completion.wgsl"),
+        if fine {include_str!("relief_completion_fine.wgsl")} else {"fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {\n    if dab.texture_sign.x!=2.0 {return relief_segment_contact(dab,world,paper);}\n    return completion_exposure(dab,world,paper);\n}"})} else {String::new()};
+    let relief_contact=if completed {completion.as_str()} else {contact};
     if flags!=u32::MAX && flags&64!=0 {
         compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("contact_field.wgsl"),
             include_str!("relief.wgsl"),relief_contact,include_str!("bristle_absent.wgsl"),include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
@@ -257,6 +263,21 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
     let Some(dry)=style.contact.and_then(|c|c.dry) else {return};
     for d in dabs {
         let m=d.metric;
+        if d.dab.is_completion() {
+            let directions=d.dab.previous_contact;
+            for i in 0..2 {
+                let v=[-(directions[2*i]*m[0]+directions[2*i+1]*m[1]),-(directions[2*i]*m[2]+directions[2*i+1]*m[3])];
+                let length=v[0].hypot(v[1]).max(1e-12);
+                d.invariants[2*i]=v[0]/length;d.invariants[2*i+1]=v[1]/length;
+            }
+            if dry.corner==0. {
+                d.dab.material[1]=dry.relief_offset*d.dab.material[3];d.dab.material[2]=0.;
+            } else {
+                let rim=dry.corner*d.dab.radii[0].min(d.dab.radii[1]);
+                d.dab.material[1]=rim/d.dab.radii[0].max(0.005);d.dab.material[2]=rim/d.dab.radii[1].max(0.005);
+            }
+            continue;
+        }
         let v=[d.dab.motion[0]*m[0]+d.dab.motion[1]*m[1],d.dab.motion[0]*m[2]+d.dab.motion[1]*m[3]];
         if dry.corner==0. {
             let offset = dry.relief_offset * d.dab.material[3] / (m[0]*m[0]+m[1]*m[1]);
@@ -412,7 +433,8 @@ impl Pipelines {
         flags.insert(0);
         flags.extend(flags.clone().into_iter().map(|flags| flags | 128));
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|AGGREGATE));
-        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|FINE_TIP));
+        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|COMPLETION));
+        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && (f&4096==0 || f&COMPLETION!=0)).map(|f|f|FINE_TIP));
         let variants = flags.into_iter().map(|f| (f, make_kernels(f, 0))).collect();
         let blended = (0..MATERIAL_SLOTS).filter(|slot| slot % MATERIAL_BLENDS.len() != 0).map(|slot| {
             let (flags, blend) = material_entries(slot);
@@ -548,10 +570,12 @@ impl WgpuRasterizer {
         let marker=batch_index*self.style_stride as usize+mem::offset_of!(StyleGpu,material_a)+12;
         let aggregate=f32::from_ne_bytes(self.style_upload[marker..marker+4].try_into().unwrap())>0.5
             && aggregate_kernel(&batch.style);
-        let fine=fine_tip_capable(&batch.style)
+        let completion=dry_flow(&batch.style)
+            && self.dab_upload[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize].iter().any(|d|d.dab.is_completion());
+        let fine=(fine_tip_capable(&batch.style) || completion)
             && self.dab_upload[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize]
                 .iter().any(|d|(0..2).any(|i|0.5*(d.dab.radii[i]+d.dab.previous[i])<FINE_TIP_RADIUS));
-        let extra=if aggregate {AGGREGATE} else {0} | if fine {FINE_TIP} else {0};
+        let extra=if aggregate {AGGREGATE} else {0} | if fine {FINE_TIP} else {0} | if completion {COMPLETION} else {0};
         for job in jobs {
             pass.set_bind_group(0, &job.output, &[style_offset]);
             pass.set_bind_group(
@@ -621,7 +645,9 @@ impl Reach {
             (!aggregate || (style.mode == DabMode::Paint && self.varying_color)).then_some(0)];
         let fine = fine_tip_capable(style);
         let tips = [fine.then_some(FINE_TIP), (!fine || self.coarse_tip).then_some(0)];
-        pigments.into_iter().flatten().flat_map(move |pigment| tips.into_iter().flatten().map(move |tip| pigment | tip))
+        let completion=[dry_flow(style).then_some(COMPLETION|FINE_TIP),
+            (dry_flow(style) && self.coarse_tip).then_some(COMPLETION)];
+        pigments.into_iter().flatten().flat_map(move |pigment| tips.into_iter().chain(completion).flatten().map(move |tip| pigment | tip))
     }
 }
 
@@ -779,6 +805,8 @@ mod tests {
         for preset in layer_core::CONTACT_BRUSH_PRESETS {
             let flags=contact_flags(layer_core::default_brush(preset).contact);
             families.extend([flags,flags|128,flags|8192,flags|16384,flags|8192|16384]);
+            if flags&64!=0 {families.extend([flags|COMPLETION,flags|COMPLETION|AGGREGATE,
+                flags|COMPLETION|FINE_TIP,flags|COMPLETION|FINE_TIP|AGGREGATE]);}
         }
         for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
             for start in [Start::Stored, Start::Sampled] {
@@ -841,6 +869,8 @@ mod tests {
                 .chain(module.global_variables.iter().filter_map(|(_, v)| v.name.clone())).collect::<BTreeSet<_>>()
         };
         let relief = names(&[include_str!("relief.wgsl"), include_str!("relief_fine.wgsl")], &["relief_contact"]);
+        let completion = names(&[include_str!("relief_completion.wgsl")], &["relief_contact"]);
+        let fine_completion = names(&[include_str!("relief_completion_fine.wgsl")], &["relief_contact"]);
         let bristle = names(&[include_str!("bristle.wgsl")], &["bristles_enabled", "bristle_footprint"]);
         let clone = names(&[include_str!("retouch_sample.wgsl"), include_str!("material_clone.wgsl")], &["clone_source_at"]);
         let blend = names(&[include_str!("blend_modes.wgsl")], &["blend"]);
@@ -860,10 +890,16 @@ mod tests {
                 let present = compiled(Entries::Kernel(Start::Stored, 0), flags | extra, operation, "compute_color");
                 let what = format!("{preset:?} kernel {:#x}", flags | extra);
                 if flags & 64 == 0 { absent(&present, &relief, &what); }
+                absent(&present, &completion, &what);
+                absent(&present, &fine_completion, &what);
                 if flags & 512 == 0 { absent(&present, &bristle, &what); }
                 if operation != MaterialOperation::Clone { absent(&present, &clone, &what); }
                 if extra == AGGREGATE { absent(&present, &BTreeSet::from(["brush_selection".to_string()]), &what); }
                 absent(&present, &blend, &what);
+            }
+            if flags&64!=0 && !uniform {
+                let present=compiled(Entries::Kernel(Start::Stored,0),flags|COMPLETION,operation,"compute_color");
+                absent(&present,&fine_completion,&format!("{preset:?} broad completion"));
             }
         }
         use crate::destination_material::{self as destination, Entry};
