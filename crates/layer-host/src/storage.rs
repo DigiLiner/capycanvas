@@ -79,9 +79,6 @@ impl StorageRoots {
     pub fn file_dialogs(&self) -> PathBuf {
         self.state.join("file-dialogs")
     }
-    pub fn shaders(&self) -> PathBuf {
-        self.cache.join("shaders")
-    }
     /// The latest copied image other apps read; it outlives the process that copied it.
     pub fn clipboard(&self) -> PathBuf {
         self.cache.join("clipboard")
@@ -104,7 +101,6 @@ mod tests {
             roots.papers(),
             roots.sessions(),
             roots.file_dialogs(),
-            roots.shaders(),
             roots.clipboard(),
             roots.temp.clone(),
         ];

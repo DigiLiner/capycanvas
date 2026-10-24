@@ -379,10 +379,8 @@ impl App {
         &mut self,
         env: &JNIEnv,
         surface: JObject,
-        cache_directory: &str,
     ) -> Result<(), String> {
         self.surface = None;
-        self.cache_directory = cache_directory.into();
         let window = NonNull::new(unsafe {
             ndk_sys::ANativeWindow_fromSurface(
                 env.get_native_interface().cast(),
@@ -429,7 +427,7 @@ impl App {
                 pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Android"),
                     required_features: layer_render_wgpu::rendering_features(&adapter) | adapter.features()
-                        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE),
+                        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
                     required_limits: limits,
                     memory_hints: layer_render_wgpu::memory_hints(),
                     ..Default::default()
@@ -444,7 +442,7 @@ impl App {
             self.gpu_watch = watch;
             let renderer = layer_host::GpuContext { adapter, device, queue }.rasterizer(
                 self.host.session.engine().document().composition().color,
-                &self.host.renderer_options(Some(cache_directory.into())),
+                &self.host.renderer_options(),
                 false,
             )?;
             self.host.replace_renderer(layer_host::Renderer(Some(renderer)))?;
@@ -862,7 +860,6 @@ pub extern "system" fn Java_art_capycanvas_Native_storage(
         serde_json::to_string(&serde_json::json!({
             "workspaces": roots.workspaces(),
             "sessions": roots.sessions(),
-            "shaders": roots.shaders(),
             "clipboard": roots.clipboard(),
             "color_profiles": roots.color_profiles(),
             "export_presets": roots.export_presets(),
@@ -956,12 +953,10 @@ pub extern "system" fn Java_art_capycanvas_Native_attach(
     _: JClass,
     handle: jlong,
     surface: JObject,
-    cache_directory: JString,
 ) {
     crate::jni_entry!(env, handle, {
     let app = unsafe { app(handle) };
-    let result = read(&mut env, &cache_directory)
-        .and_then(|directory| app.attach(&env, surface, &directory));
+    let result = app.attach(&env, surface);
     if let Err(e) = &result {
         app.host.error = Some(e.clone());
     }
@@ -969,14 +964,14 @@ pub extern "system" fn Java_art_capycanvas_Native_attach(
     })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_finishStartupCache(
+pub extern "system" fn Java_art_capycanvas_Native_finishStartupCatalog(
     mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) {
     crate::jni_entry!(env, handle, {
     if let Some(gpu) = &mut unsafe { app(handle) }.host.session.renderer_mut().0 {
-        gpu.finish_startup_cache();
+        gpu.finish_startup_catalog();
     }
     })
 }

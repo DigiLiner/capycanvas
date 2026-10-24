@@ -162,7 +162,7 @@ pub unsafe extern "C" fn capy_apple_project_task(
     app.perform(|app| {
         if opening != 3 && !placement.is_null() { return Err("Only image placement accepts a drop target".into()); }
         let admission = app.window.documents.admission(&app.host.session.retained_document_tiles());
-        let options = app.host.renderer_options(app.metal.cache.clone());
+        let options = app.host.renderer_options();
         let session = &mut app.host.session;
         let epoch = session.state().document_file.epoch;
         let mut save_request = None;

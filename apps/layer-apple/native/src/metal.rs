@@ -31,7 +31,6 @@ pub struct MetalHost {
     pub(crate) navigators: Navigators,
     pub(crate) glass: Glass,
     watch: layer_host::DeviceWatch,
-    pub(crate) cache: Option<std::path::PathBuf>,
     screen_presented: Option<Instant>,
 }
 
@@ -165,10 +164,8 @@ impl MetalHost {
         &mut self,
         host: &mut NativeHost,
         layer: *mut c_void,
-        cache: Option<std::path::PathBuf>,
     ) -> Result<(), String> {
         self.detach();
-        self.cache = cache;
         // Keep the device when replacing a layer: document textures remain live.
         let instance = self.instance.get_or_insert_with(|| {
             let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
@@ -194,13 +191,13 @@ impl MetalHost {
                 pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Apple"),
                     required_features: layer_render_wgpu::rendering_features(&adapter)
-                        | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::PIPELINE_CACHE),
+                        | adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
                     required_limits: limits,
                     ..Default::default()
                 }))
                 .map_err(|e| format!("Metal device request ({:?}): {e}", adapter.get_info()))?;
             let context = layer_host::GpuContext { adapter, device, queue };
-            let (color, options) = (host.session.engine().document().composition().color, host.renderer_options(self.cache.clone()));
+            let (color, options) = (host.session.engine().document().composition().color, host.renderer_options());
             let renderer = std::thread::scope(|scope| -> Result<Box<WgpuRasterizer>, String> {
                 std::thread::Builder::new()
                     .name("capy-renderer".into())
@@ -255,7 +252,6 @@ impl MetalHost {
         &mut self,
         _: &mut NativeHost,
         _: *mut c_void,
-        _: Option<std::path::PathBuf>,
     ) -> Result<(), String> {
         Err("Metal presentation requires an Apple target".into())
     }

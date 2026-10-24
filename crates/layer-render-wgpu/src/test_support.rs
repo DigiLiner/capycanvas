@@ -268,7 +268,7 @@ pub(crate) fn max_error_bytes(a: &[u8], b: &[u8]) -> f32 {
 pub(crate) fn staged_renderer(reference: &WgpuRasterizer, color: layer_core::color::DocumentColor) -> WgpuRasterizer {
     let mut renderer = WgpuRasterizer::from_wgpu_native_staged(
         reference.adapter.clone(), reference.device().clone(), reference.queue.clone(), color).unwrap();
-    renderer.finish_startup_cache();
+    renderer.finish_startup_catalog();
     renderer
 }
 

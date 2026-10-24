@@ -1,6 +1,4 @@
-//! Keep the optional startup cache attached to every pipeline recipe, including
-//! recipes sent to the compiler. Ordinary GPU resource creation dereferences to
-//! wgpu unchanged. Other hosts use an uncached device.
+//! Shared device resources and working color choices retained by pipeline recipes.
 #[cfg(target_os = "windows")]
 struct CompileTrace<'a>(Option<(std::time::Instant, Option<&'a str>)>);
 #[cfg(target_os = "windows")]
@@ -40,8 +38,6 @@ pub(crate) struct PipelineDevice {
     pub effect_resources: std::sync::Arc<std::sync::Mutex<super::effects::resources::Cache>>,
     pub native_publication: std::sync::Arc<std::sync::Mutex<Vec<std::sync::Arc<super::raster::native_edit::Recipes>>>>,
     pub native_transfers: std::sync::Arc<std::sync::Mutex<super::native_tiles::transfer::Tables>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    cache: Option<std::sync::Arc<super::shader_cache::Cache>>,
 }
 impl From<wgpu::Device> for PipelineDevice {
     fn from(device: wgpu::Device) -> Self {
@@ -63,8 +59,6 @@ impl From<wgpu::Device> for PipelineDevice {
             source_samples: std::sync::Arc::new(layer_core::raster::DecodedTileCache::new(
                 512 * 1024 * 1024,
             )),
-            #[cfg(not(target_arch = "wasm32"))]
-            cache: None,
         }
     }
 }
@@ -76,9 +70,7 @@ impl std::ops::Deref for PipelineDevice {
 }
 impl PipelineDevice {
     pub fn for_recipe(&self) -> Self {
-        Self { working_space: self.working_space, depth: self.depth,
-            #[cfg(not(target_arch = "wasm32"))]
-            cache: self.cache.clone(), ..Self::from(self.device.clone()) }
+        Self { working_space: self.working_space, depth: self.depth, ..Self::from(self.device.clone()) }
     }
     /// A working attachment choice, independent of native integer backing and
     /// document primaries. All deferred recipes retain this same choice.
@@ -111,17 +103,6 @@ impl PipelineDevice {
     pub fn float_sampling_wgsl(&self) -> &'static str {
         float_sampling_wgsl(self.float32_filterable())
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn cached(
-        device: wgpu::Device,
-        adapter: &wgpu::Adapter,
-        directory: Option<&std::path::Path>,
-    ) -> Self {
-        let cache = directory
-            .and_then(|directory| super::shader_cache::Cache::open(&device, &adapter.get_info(), directory))
-            .map(std::sync::Arc::new);
-        Self { cache, ..Self::from(device) }
-    }
     pub fn create_texture(&self, descriptor: &wgpu::TextureDescriptor<'_>) -> wgpu::Texture {
         let _trace = crate::performance_trace::Span::new(c"capy.allocate_texture");
         self.device.create_texture(descriptor)
@@ -141,15 +122,6 @@ impl PipelineDevice {
     ) -> wgpu::RenderPipeline {
         #[cfg(target_os = "windows")]
         let _trace = CompileTrace::new(descriptor.label);
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(cache) = self.cache.as_ref().and_then(|c| c.pipeline()) {
-            return self
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    cache: Some(&cache),
-                    ..descriptor.clone()
-                });
-        }
         self.device.create_render_pipeline(descriptor)
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -159,26 +131,7 @@ impl PipelineDevice {
     ) -> wgpu::ComputePipeline {
         #[cfg(target_os = "windows")]
         let _trace = CompileTrace::new(descriptor.label);
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Some(cache) = self.cache.as_ref().and_then(|c| c.pipeline()) {
-            return self
-                .device
-                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                    cache: Some(&cache),
-                    ..descriptor.clone()
-                });
-        }
         self.device.create_compute_pipeline(descriptor)
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn save_cache(&self) {
-        if let Some(cache) = &self.cache {
-            cache.save();
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn cache_unsaved(&self) -> bool {
-        self.cache.as_ref().is_some_and(|cache| cache.take_unsaved())
     }
 }
 pub(crate) fn float_sampling_wgsl(filterable: bool) -> &'static str {

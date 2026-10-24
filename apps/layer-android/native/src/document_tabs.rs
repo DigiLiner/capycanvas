@@ -56,7 +56,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
         let a = unsafe { app(handle) };
         let options = a
             .host
-            .renderer_options(Some(a.cache_directory.clone().into()));
+            .renderer_options();
         let Some((activation, _)) =
             a.window
                 .switch(&mut a.host, id as u64, close != 0, options, |_| {})?
@@ -76,7 +76,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentPrepareClose(mut env: 
     crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe {app(handle)};
-        let options = a.host.renderer_options(Some(a.cache_directory.clone().into()));
+        let options = a.host.renderer_options();
         a.window.prepare_close(&mut a.host, options).map(|job|Box::into_raw(Box::new(crate::document_close::CloseJob(Some(job)))) as jlong)
     })();
     or_throw(&mut env,result,0)

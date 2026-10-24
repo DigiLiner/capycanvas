@@ -520,7 +520,7 @@ impl DocumentService {
         self.open_clipboard(host, id, Source::Clip(Box::new(clip)))
     }
     fn open_clipboard(&mut self, host: &NativeHost, id: u32, source: Source) -> Result<(), String> {
-        let environment = OpenEnvironment::capture(&host.session, self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options(None))?;
+        let environment = OpenEnvironment::capture(&host.session, self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options())?;
         let cancelled = Arc::new(AtomicBool::new(false));
         self.active = Some(Active { id, epoch: host.session.state().document_file.epoch, revision: host.session.engine().document().revision, location: None, cancelled: Some(cancelled.clone()) });
         self.worker.submit(Job::Prepare { environment: Box::new(environment), source, cancelled })?;
@@ -808,7 +808,7 @@ impl DocumentService {
                     if matches!(request, DocumentRequest::New) => {
                     Self::matches(host, epoch, revision)?;
                     let environment = OpenEnvironment::capture(&host.session,
-                        self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options(None))?;
+                        self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options())?;
                     (Job::Prepare { environment: Box::new(environment), source: Source::Create, cancelled: Arc::new(AtomicBool::new(false)) }, None)
                 }
                 DocumentAction::Open {
@@ -820,7 +820,7 @@ impl DocumentService {
                     Self::matches(host, epoch, revision)?;
                     let selected = location(&path)?;
                     let environment = OpenEnvironment::capture(&host.session,
-                        self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options(None))?;
+                        self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options())?;
                     (
                         Job::Prepare {
                             environment: Box::new(environment),

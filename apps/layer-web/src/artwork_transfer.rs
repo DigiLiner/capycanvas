@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use wasm_bindgen_futures::JsFuture;
 
 const BLOCK:usize=4*1024*1024;
-fn limits(dimension:u32)->ProjectLimits {ProjectLimits {dimension,asset_bytes:256*1024*1024,raster_bytes:512*1024*1024,tiles:8192,..Default::default()}}
+pub(super) fn limits(dimension:u32)->ProjectLimits {ProjectLimits {dimension,asset_bytes:256*1024*1024,raster_bytes:512*1024*1024,tiles:8192,..Default::default()}}
 
 #[derive(Serialize,Deserialize)]
 struct Envelope {transfer:TransferDescriptor,chunks:Vec<usize>}

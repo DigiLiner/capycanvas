@@ -435,6 +435,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     progress.append(element('span','',()=>bootstrap.preparing_document),button(()=>common.cancel,()=>{cancelled=true;rasterWorker({operation:'cancel-read',metadata:'',buffers:[]}).catch(()=>{});}));document.body.append(progress);
     try{
       const original=file?.file??(bytes instanceof Blob?bytes:new Blob([bytes]));
+      app.admit_document_input(BigInt(original.size),new Uint8Array(await original.slice(0,4).arrayBuffer()));
       if(file)bytes=new Uint8Array(await file.file.arrayBuffer());
       else if(bytes instanceof Blob)bytes=new Uint8Array(await bytes.arrayBuffer());
       candidate=await gpuOperation(()=>app.prepare_document(id,bytes,fileState.epoch,fileState.revision,target?.name,()=>chooseSourceProfile({app,dialog,element,button}),()=>cancelled));

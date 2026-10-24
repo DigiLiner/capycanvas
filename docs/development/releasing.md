@@ -411,7 +411,7 @@ checks select individual CPU tests from modules that also contain GPU tests.
 Windows runs the existing native host and document suites on WARP: the system
 runtime on native x64 and the pinned development-only runtime on ARM64. Neither
 runtime enters distribution packages. Renderer
-pixel/reference suites, GPU telemetry and timing, pipeline-cache qualification,
+pixel/reference suites, GPU telemetry and timing, staged-startup qualification,
 native canvas journeys, physical pen/touch, HDR, device loss and performance still
 need the [checks for your change](testing.md) on appropriate hardware. WARP results do not
 qualify hardware rendering or performance.

@@ -237,9 +237,8 @@ impl NativeHost {
     pub fn take_service_changes(&mut self) -> u32 {
         std::mem::take(&mut self.service_changes)
     }
-    pub fn renderer_options(&self, cache: Option<std::path::PathBuf>) -> RendererOptions {
+    pub fn renderer_options(&self) -> RendererOptions {
         RendererOptions {
-            cache,
             ui_color: self.ui_color,
         }
     }
@@ -2606,8 +2605,10 @@ mod tests {
     }
 
     #[test]
-    fn a_stroke_once_painting_is_reported_ready_paints_while_background_shaders_compile() {
-        let (_reference, mut host) = gpu_host(layer_ui::Platform::Windows, [256, 192]);
+    fn a_stroke_once_painting_is_reported_ready_paints_before_catalog_admission() {
+        let (reference, mut host) = gpu_host(layer_ui::Platform::Windows, [256, 192]);
+        let renderer = GpuContext::of(&reference).rasterizer(Default::default(), &RendererOptions::default(), false).unwrap();
+        host.replace_renderer(Renderer(Some(renderer))).unwrap();
         host.session.set_workspace_read_only(true);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         let clock = std::cell::Cell::new(0);
@@ -2630,14 +2631,15 @@ mod tests {
                 host.session.set_workspace_read_only(false);
             }
         }
-        assert!(!published(&mut host).1, "background compiles are still pending");
+        assert!(!published(&mut host).1, "the host catalog is still pending");
         stroke(&mut host, clock.get()).unwrap();
         for _ in 0..8 {
             frame(&mut host, true);
         }
-        assert!(!published(&mut host).1, "the stroke waits for no background compilation");
+        assert!(!published(&mut host).1, "painting does not admit the host catalog");
         assert_eq!(host.session.engine().metrics().committed_strokes, 1, "the stroke paints");
         assert!(host.session.state().document_file.modified);
+        host.session.renderer_mut().0.as_mut().unwrap().finish_startup_catalog();
         while !published(&mut host).1 {
             frame(&mut host, false);
         }

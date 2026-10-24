@@ -323,20 +323,11 @@ impl WgpuRasterizer {
             .as_ref()
             .is_some_and(|s| s.compiler.has_work(allow_optional))
     }
-    /// Call after the host has submitted its initial filter catalog. Saving runs
-    /// on the compiler, never on the canvas/input thread.
+    /// Complete the host's initial filter-catalog admission.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn finish_startup_cache(&mut self) {
+    pub fn finish_startup_catalog(&mut self) {
         if let Some(startup) = &mut self.startup {
-            if !startup.host_catalog_pending {
-                return;
-            }
             startup.host_catalog_pending = false;
-            let device = self.device.clone();
-            startup.compiler.enqueue(BACKGROUND, move || {
-                device.save_cache();
-                Ok(())
-            });
         }
     }
     pub fn startup_needs_update(
@@ -583,14 +574,6 @@ impl WgpuRasterizer {
                 let preparation = startup.preparation.clone();
                 startup.compiler.background(&pipeline, BACKGROUND, move || preparation.load(std::sync::atomic::Ordering::Relaxed) == generation);
             }
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if startup.finished && self.device.cache_unsaved() {
-            let device = self.device.clone();
-            startup.compiler.enqueue_untracked(OTHER, false, move || {
-                device.save_cache();
-                Ok(())
-            });
         }
         let progress = StartupProgress {
             canvas_ready,

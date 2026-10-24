@@ -58,6 +58,14 @@ export async function checkPackageView({evaluate,settle}) {
       }}};
     };`);
   try {
+    const beforeOversized=await snapshot();
+    for(const [name,prefix,reason] of [['oversized.capy',[80,75,3,4],/admission limit/],['oversized.png',[137,80,78,71],/codec budget/]]) {
+      const result=await evaluate(`(async()=>{const file=new File([Uint8Array.from(${JSON.stringify(prefix)})],${JSON.stringify(name)});Object.defineProperty(file,'size',{value:2**40});let read=false;file.arrayBuffer=async()=>{read=true;throw Error('Oversized input must not be read')};try{await layerApp.documents.openFiles([{file}]);return {read,accepted:true}}catch(error){return {read,error:String(error)}}})()`);
+      assert.equal(result.read,false,'Oversized files are rejected before full acquisition');
+      assert.match(result.error,reason);
+      assert.deepEqual(await snapshot(),beforeOversized,'Input refusal preserves the incumbent');
+      await ready();
+    }
     await invoke('save_document_as');await ready();
     const source=await evaluate('Array.from([...packageViewTest.files.values()].at(-1))');
     const sourceManifest=await packageManifest(Uint8Array.from(source));
@@ -116,7 +124,7 @@ export async function checkPackageView({evaluate,settle}) {
       assert.deepEqual(await snapshot(),retained,'Cancelled and stale preparation cannot replace the incumbent');
       if(!cancelled){await invoke('undo');await settle();await ready();const undone=await snapshot();assert.deepEqual(undone.layers,incumbent.layers,'The incumbent retains its own undo after a stale open');assert.equal(undone.file.epoch,incumbent.file.epoch);assert.equal(undone.file.modified,true);assert.deepEqual(undone.tabs,incumbent.tabs);}
     }
-    console.log('PASS package view: both themes, verified preview and output inventory, exact original/PNG copy, source-only open, cancellation, failed write/retry, overwrite refusal, stale open and incumbent history');
+    console.log('PASS package view: oversized input refusal before acquisition, both themes, verified preview and output inventory, exact original/PNG copy, source-only open, cancellation, failed write/retry, overwrite refusal, stale open and incumbent history');
   } finally {
     await evaluate(`layerApp.app.package_view=packageViewTest.view;layerApp.app.prepare_document=packageViewTest.prepare;window.showOpenFilePicker=packageViewTest.openPicker;window.showSaveFilePicker=packageViewTest.savePicker;packageViewTest.release?.();document.querySelector('dialog[open].document-dialog')?.close();layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}});`);
   }

@@ -295,7 +295,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private var snapshotAt = 0L
     private val publicationInterval = 33L
     private var lastCanvasReady = false
-    private var startupCacheFinished = false
+    private var startupCatalogFinished = false
     private var lastStartupStage = -1
     private val startupTimes = LongArray(4)
     private var documentEpoch = 0L
@@ -573,7 +573,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             publish(true)
             if (BuildConfig.DEBUG) beforeGpuAttachForTest?.invoke()
             Log.i("CapyStartup", "gpu_attach boot_ns=${SystemClock.elapsedRealtimeNanos()}")
-            Native.attach(handle, surface, storage.shaders.absolutePath)
+            Native.attach(handle, surface)
             attached = true
             awaitingSurfaceFrame = true
             main.post { failure = null }
@@ -587,8 +587,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         post(canvas = true) {
             Native.resetGpu(handle)
             check(surface.isValid) { "The canvas surface is unavailable" }
-            Native.attach(handle, surface, storage.shaders.absolutePath)
-            attached = true; awaitingSurfaceFrame = true; startupCacheFinished = false
+            Native.attach(handle, surface)
+            attached = true; awaitingSurfaceFrame = true; startupCatalogFinished = false
             main.post { failure = null }
             publish(true); wake()
         }
@@ -730,9 +730,9 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
                 // Shader warmup needs polling, not hundreds of empty presents/s.
                 if (again || awaitingSurfaceFrame) wake(if (lastStartupStage < 2) (frameInterval / 1_000_000).coerceAtLeast(1L) else 1L)
                 if (SystemClock.uptimeMillis() - motionAt >= publicationInterval) publish(!again)
-                if (!startupCacheFinished && lastCanvasReady) {
-                    Native.finishStartupCache(handle)
-                    startupCacheFinished = true
+                if (!startupCatalogFinished && lastCanvasReady) {
+                    Native.finishStartupCatalog(handle)
+                    startupCatalogFinished = true
                     wake()
                 }
                 if (measuredFrames != null && frameCount < 8192) {

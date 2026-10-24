@@ -113,7 +113,7 @@ fn native_late_shader_failure_after_startup() {
         let document = layer_ui::new_drawing(32, 24, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English))?;
         let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         worker.renderer.prepare_startup(&document, &brush, false).map_err(error)?;
-        worker.renderer.finish_startup_cache();
+        worker.renderer.finish_startup_catalog();
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         while !worker.renderer.poll_startup().map_err(error)?.complete {
             if std::time::Instant::now() >= deadline { return Err("Renderer startup did not complete".into()); }
@@ -133,7 +133,7 @@ fn native_late_shader_failure_after_startup() {
     };
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while startup_complete && !worker.is_finished() && std::time::Instant::now() < deadline {
-        let _ = commands.send(Command::FinishStartupCache);
+        let _ = commands.send(Command::FinishStartupCatalog);
         pump_worker_window();
     }
     let failed_before_stop = worker.is_finished();

@@ -81,7 +81,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
     let result = (|| {
         let a = unsafe { app(handle) };
         let admission = a.window.documents.admission(&a.host.session.retained_document_tiles());
-        let options = a.host.renderer_options(Some(a.cache_directory.clone().into()));
+        let options = a.host.renderer_options();
         let session = &mut a.host.session;
         let request = session.document_request(id as u32)
             .map_err(|_| "The document request is no longer active")?.clone();

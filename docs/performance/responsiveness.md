@@ -25,6 +25,9 @@ otherwise.
 Startup prepares the document, selected brush and physical eraser. Other brushes,
 transform and warp prepare on first use and retain their shader handles. The
 reference-tier startup and first-use rows remain unqualified for this policy.
+The historical measurements below predate removal of the app's opaque driver
+pipeline-cache persistence. Cold and repeated-process startup need fresh
+reference-tier measurements; driver-owned caches remain outside app control.
 An Apple preparation probe uses fresh renderer recipes without an application
 pipeline cache, on an M2 Pro with existing OS driver caches. It measures shader
 readiness, not presented motion or physical input latency. Retouch source capture

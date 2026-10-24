@@ -59,6 +59,19 @@ pub enum ImportSource {
     Photo,
 }
 impl ImportSource {
+    pub fn input_bytes_limit(self, project: ProjectLimits, photo: layer_color::photo::DecodeLimits) -> u64 {
+        match self {
+            Self::Master => project.metadata_bytes.saturating_add(project.asset_bytes).saturating_add(project.raster_bytes),
+            Self::Photo => photo.codec_bytes as u64,
+        }
+    }
+    pub fn admit_input_bytes(self, length: u64, project: ProjectLimits, photo: layer_color::photo::DecodeLimits) -> Result<(), String> {
+        if length <= self.input_bytes_limit(project, photo) { return Ok(()); }
+        Err(match self {
+            Self::Master => "Package stream exceeds admission limit",
+            Self::Photo => "The encoded image exceeds the codec budget",
+        }.into())
+    }
     pub fn identify(prefix: &[u8], intent: ImportIntent) -> Result<Self, String> {
         let source = if prefix.starts_with(b"PK\x03\x04") {
             Self::Master
@@ -193,7 +206,7 @@ pub fn read_import(
     let mut native = None;
     let project = match source {
         ImportSource::Master => {
-            let limit = project_limits.metadata_bytes.saturating_add(project_limits.asset_bytes).saturating_add(project_limits.raster_bytes);
+            let limit = source.input_bytes_limit(project_limits, photo_limits);
             let backing = package_backing(&mut reader, limit, cancelled)?;
             let outcome = layer_core::package::codec::open(backing, project_limits, cancelled)?;
             match outcome {
@@ -382,6 +395,17 @@ impl ImageImportBatch {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn encoded_input_admission_uses_each_sources_budget_without_overflow() {
+        let project = ProjectLimits { metadata_bytes: 7, asset_bytes: 11, raster_bytes: 13, ..Default::default() };
+        let photo = layer_color::photo::DecodeLimits { codec_bytes: 17, ..Default::default() };
+        for (source, limit) in [(ImportSource::Master, 31), (ImportSource::Photo, 17)] {
+            assert!(source.admit_input_bytes(limit, project, photo).is_ok());
+            assert!(source.admit_input_bytes(limit + 1, project, photo).is_err());
+        }
+        let project = ProjectLimits { metadata_bytes: u64::MAX, ..project };
+        assert!(ImportSource::Master.admit_input_bytes(u64::MAX, project, photo).is_ok());
+    }
     use super::*;
     use crate::session::test_support::{package_bytes, package_roundtrip};
     #[test]

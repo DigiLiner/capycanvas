@@ -127,7 +127,6 @@ final class NativeOwner: @unchecked Sendable {
     private var gpuSamples = [CapyGpuFrameSample](repeating: CapyGpuFrameSample(), count: 8)
     private var lastTraceState: UInt64?
     private let persistence: EditorPersistence
-    private let shaderCache: URL?
     private let managedWorkspaces: Bool
     private let observerID = UUID()
     private var settingsRequests = Set<UInt64>()
@@ -161,7 +160,7 @@ final class NativeOwner: @unchecked Sendable {
         let preferredLanguages = Locale.preferredLanguages
         self.queue = queue; self.receive = receive
         self.persistence = persistence; self.managedWorkspaces = managedWorkspaces
-        self.platform = platform; shaderCache = persistence.locations?.shaders
+        self.platform = platform
         launchSessionPending = persistence.locations != nil
         #if DEBUG
         initialActions = fixtureActions
@@ -776,13 +775,7 @@ final class NativeOwner: @unchecked Sendable {
         guard handle != nil else { throw HostFailure(message: launchFailure ?? "Native session is unavailable") }
         guard let layer, let size = surfaceSize else { throw HostFailure(message: "The canvas has no presentation surface") }
         let surface = Unmanaged.passUnretained(layer).toOpaque()
-        if let shaderCache {
-            try shaderCache.path.withCString {
-                try check(capy_apple_attach(handle, surface, size.width, size.height, size.scale, $0))
-            }
-        } else {
-            try check(capy_apple_attach(handle, surface, size.width, size.height, size.scale, nil))
-        }
+        try check(capy_apple_attach(handle, surface, size.width, size.height, size.scale))
     }
     private func startGpuHealthChecks() {
         guard gpuHealth == nil else { return }
@@ -1016,7 +1009,7 @@ final class NativeOwner: @unchecked Sendable {
                     if initialActions.isEmpty { try publish() }
                 }
                 #endif
-                if canvasReady && !shadersReady { try check(capy_apple_finish_startup_cache(handle)) }
+                if canvasReady && !shadersReady { try check(capy_apple_finish_startup_catalog(handle)) }
                 if let observation {
                     let state: UInt64 = (canvasReady ? 1 : 0) | (catalogLoaded ? 2 : 0) | (result == 1 ? 4 : 0) | (shadersReady ? 8 : 0)
                     if state != lastTraceState {

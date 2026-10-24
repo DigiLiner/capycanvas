@@ -9,7 +9,6 @@ import java.io.File
 internal class AppStorage private constructor(stores: JSONObject) {
     val workspaces = File(stores.getString("workspaces"))
     val sessions = File(stores.getString("sessions"))
-    val shaders = File(stores.getString("shaders"))
     val clipboard = File(stores.getString("clipboard"))
     val colorProfiles = File(stores.getString("color_profiles"))
     val exportPresets = File(stores.getString("export_presets"))

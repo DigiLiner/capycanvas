@@ -269,7 +269,6 @@ fn storage_names_every_store_within_the_folders_it_is_given() {
     assert_eq!(installation["workspaces"], json!(roots.workspaces()));
     assert_eq!(installation["papers"], json!(roots.papers()));
     assert_eq!(installation["sessions"], json!(roots.sessions()));
-    assert_eq!(installation["shaders"], json!(roots.shaders()));
     assert_eq!(layer_core::temp_files::directory().unwrap(), roots.temp);
     let private = stateless(capy_apple_storage, r#"{"directory":"/private/capy"}"#);
     assert_eq!(private["color_profiles"], "/private/capy/data/color-profiles");

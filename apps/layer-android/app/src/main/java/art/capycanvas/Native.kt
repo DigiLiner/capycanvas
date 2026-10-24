@@ -16,13 +16,13 @@ internal object Native {
     @JvmStatic external fun freeLanguage(context: Long)
     @JvmStatic external fun create(saved: String, locales: Array<String>, screen: String, profiling: Boolean): Long
     @JvmStatic external fun destroy(handle: Long)
-    @JvmStatic external fun attach(handle: Long, surface: Surface, cacheDirectory: String)
+    @JvmStatic external fun attach(handle: Long, surface: Surface)
     @JvmStatic external fun displayStatus(handle: Long): String
     @JvmStatic external fun renderingPending(handle: Long): Boolean
     @JvmStatic external fun rendererMemory(handle: Long): String
     @JvmStatic external fun displayInfo(handle: Long, available: Boolean)
     @JvmStatic external fun screenInfo(handle: Long, name: String, wide: Boolean, panelWide: Boolean, hdr: Boolean, peak: Float)
-    @JvmStatic external fun finishStartupCache(handle: Long)
+    @JvmStatic external fun finishStartupCatalog(handle: Long)
     @JvmStatic external fun resetGpu(handle: Long)
     external fun surfacePixelsForTest(handle: Long): ByteArray
     external fun destroyGpuForTest(handle: Long)

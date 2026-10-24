@@ -38,7 +38,7 @@ fn hdr_renderer(
         let state = layer_host::DeviceWatch::observe(&device);
         let mut gpu =
             WgpuRasterizer::from_wgpu_native_staged(adapter, device, queue, color).unwrap();
-        gpu.finish_startup_cache();
+        gpu.finish_startup_catalog();
         return (Renderer(Some(gpu.into())), state);
     }
 }

@@ -85,10 +85,9 @@ Generic recipes, effect preparation, validation and optional pipelines run alone
 ordered jobs retain queue order. Optional work waits for required jobs to finish.
 Required canvas/brush dependencies and explicit package validation retain
 priority and progress while input arrives. Visible optional previews wait for
-200 ms without input; pipeline-cache finalization waits for one second and no
-continuous canvas work. Host reports, such as layout measurements and system
-theme changes, are not input; a panel that remeasures while it updates must not
-keep the cache unsaved and startup incomplete. Required compilation renews the
+200 ms without input and no continuous canvas work. Host reports, such as layout
+measurements and system theme changes, are not input; a panel that remeasures
+while it updates must not postpone optional preparation. Required compilation renews the
 quiet interval on completion. Strokes, held gestures, queued input, pending
 edits and settings keep optional work parked. Native workers sleep on their
 existing condition variable; browsers use a host timer. An in-flight driver call
@@ -102,7 +101,7 @@ does not compile pipelines on the render owner or block the current canvas.
 The browser admits one optional pipeline per task; required pipeline batches
 remain bounded to four. Requested brush masks publish
 when their generation jobs finish. Brush readiness includes their upload. Startup
-completion describes current dependencies and cache finalization, not the entire
+completion describes current dependencies and host catalog admission, not the entire
 tool catalog.
 Retouch shader handles survive tool changes; unused source pixels and healing
 buffers are still released.
@@ -173,11 +172,7 @@ Android and GTK no longer reload their already embedded filter package during
 startup. Android also stops packaging that redundant asset copy. GTK still
 accepts explicit `CAPY_FILTERS_DIR` / `CAPY_FILTERS_MODE` overrides; runtime
 package installation and atomic validation remain available. Identical library
-refreshes are no-ops on all three hosts. Existing native pipeline caches remain;
-there is no additional platform cache. The native pipeline cache stays attached
-after startup: once a later preparation completes, a compiler worker saves any new
-pipelines after 200 ms without input, without delaying startup completion. A
-renderer created while another still holds the cache, such as a restored or opened
-document's or the canvas adopted after a display color change, starts from the
-saved data and takes over saving once the holder closes; only the holder cleans or
-replaces it. Data beyond the 64 MiB budget detaches the cache.
+refreshes are no-ops on all three hosts. Prepared pipeline recipes remain in
+process for reuse. The app does not persist opaque driver pipeline-cache data
+or submit stored bytes to the driver. Native startup completes after required
+dependencies and host catalog admission, without a disk-cache finalization job.

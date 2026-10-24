@@ -51,9 +51,9 @@ private enum Checks {
                         if result < 0 { throw Failure(message: capy_apple_error(app).map(String.init(cString:)) ?? "Metal operation failed") }
                     }
                     let pointer = Unmanaged.passUnretained(layer).toOpaque()
-                    try check(capy_apple_attach(app, pointer, 256, 256, 1, nil))
+                    try check(capy_apple_attach(app, pointer, 256, 256, 1))
                     try check(capy_apple_detach(app))
-                    try check(capy_apple_attach(app, pointer, 320, 240, 1, nil))
+                    try check(capy_apple_attach(app, pointer, 320, 240, 1))
                     done.resume()
                 } catch { done.resume(throwing: error) }
             }

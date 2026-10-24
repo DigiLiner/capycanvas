@@ -43,6 +43,11 @@ pub struct WebLookup { request:u32, resource:std::sync::Arc<layer_core::Lut3d> }
 
 #[wasm_bindgen]
 impl WebApp {
+    pub fn admit_document_input(&self, length: u64, prefix: js_sys::Uint8Array) -> Result<(), JsValue> {
+        let source = layer_ui::ImportSource::identify(&prefix.subarray(0, 4).to_vec(), layer_ui::ImportIntent::Open).map_err(js)?;
+        source.admit_input_bytes(length, artwork_transfer::limits(ProjectLimits::default().dimension),
+            layer_color::photo::DecodeLimits::from_memory_budget(artwork_transfer::photo_memory_budget())).map_err(js)
+    }
     pub fn prepare_clipboard_document(&self, id: u32, images: image_import::WebPreparedImages, cancelled: js_sys::Function) -> Result<js_sys::Promise, JsValue> {
         if !matches!(self.session.document_request(id).map_err(js)?, DocumentRequest::Paste { mode: layer_ui::PasteMode::NewImage }) {
             return Err(js("The paste request is no longer active"));
@@ -198,6 +203,9 @@ impl WebApp {
         cancelled: Option<js_sys::Function>,
     ) -> Result<js_sys::Promise, JsValue> {
         self.session.require_document_idle().map_err(js)?;
+        if let Some(bytes) = &bytes {
+            self.admit_document_input(bytes.length() as u64, bytes.subarray(0, 4))?;
+        }
         if self.session.state().document_file.epoch != epoch
             || self.session.engine().document().revision != revision
         {

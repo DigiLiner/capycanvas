@@ -263,32 +263,26 @@ impl WgpuRasterizer {
         }
     }
 
-    /// Surface-compatible native SDR renderer. Configure the working format
-    /// before creating any pipeline recipes, including deferred startup jobs.
-    /// Construction belongs to the host's GPU owner, outside the input thread.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn from_wgpu_native_staged_cached(
-        adapter: wgpu::Adapter,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        directory: Option<&std::path::Path>,
-        color: DocumentColor,
-    ) -> Result<Box<Self>, GpuRasterError> {
-        let device = PipelineDevice::cached(device, &adapter, directory);
-        Self::native_staged_on_device(adapter, device, queue, color)
-    }
-
     /// A private candidate shares immutable source samples with the current
     /// canvas and its workers, so preview/adoption cannot double that cache.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn color_candidate_staged_cached(
+    pub fn color_candidate_staged(
         &self,
-        directory: Option<&std::path::Path>,
         color: DocumentColor,
     ) -> Result<Self, GpuRasterError> {
-        let mut device = PipelineDevice::cached(self.device().clone(), &self.adapter, directory);
+        let mut device = PipelineDevice::from(self.device().clone());
         device.source_samples = self.device.source_samples.clone();
         Self::native_staged_on_device(self.adapter.clone(), device, self.queue.clone(), color).map(|renderer| *renderer)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_wgpu_native_staged_boxed(
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        color: DocumentColor,
+    ) -> Result<Box<Self>, GpuRasterError> {
+        Self::native_staged_on_device(adapter, device.into(), queue, color)
     }
 
     /// Portable native integer SDR backing with Float32 working pixels.

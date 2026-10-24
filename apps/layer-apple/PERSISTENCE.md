@@ -21,12 +21,12 @@ iPad without multiple-window support reports that limitation.
   | --- | --- |
   | `Application Support/<bundle id>` | `settings.json`, `export-presets`, `color-profiles/`, `workspaces/workspaces.sqlite3` |
   | `Application Support/<bundle id>/State` | `sessions/<scene UUID>/` drawing checkpoints; excluded from backups |
-  | `Caches/<bundle id>` | `shaders/` pipeline cache |
   | The app's temporary folder | Anonymous copies of opened `.capy` files and parked drawing tabs |
 
   On macOS these folders are inside the app's sandbox container.
   `CAPY_STORAGE_DIR` replaces all of them with one private folder; a relative
   name is a folder inside the app's temporary folder.
+  The app does not persist or load opaque driver pipeline caches.
 - `EditorPersistence` uses one background I/O queue per process. Neither the UI
   thread nor the render owner reads or writes files. The render owner reserves
   its first operation for restoration; queued input, fixtures and surface

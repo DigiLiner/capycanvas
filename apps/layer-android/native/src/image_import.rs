@@ -105,7 +105,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
         let open = if a.host.session.pasting_new_image() {
             Some(NewImage {
                 environment: layer_host::open::OpenEnvironment::capture(&a.host.session,
-                    a.window.documents.admission(&a.host.session.retained_document_tiles()), a.host.renderer_options(Some(a.cache_directory.clone().into())))?,
+                    a.window.documents.admission(&a.host.session.retained_document_tiles()), a.host.renderer_options())?,
                 candidate: None, retired: None,
             })
         } else { None };

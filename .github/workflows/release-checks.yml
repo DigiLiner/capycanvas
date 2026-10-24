@@ -75,7 +75,7 @@ jobs:
             paint_transform::sampling::tests:: paint_transform::snapshot::tests:: \
             paint_transform::mesh::tests:: scene::metadata::tests:: scene::object_spatial::tests:: \
             scene::resample::program_tests:: scene::scale::graph::object_reuse_tests:: \
-            startup::admission::tests:: startup::platform::tests:: shader_cache::tests:: \
+            startup::admission::tests:: startup::platform::tests:: \
             object_sampling::reference::tests:: retouch_sources::heal::tests:: \
             startup::tests::shader_document_ \
             startup::tests::brush_shader_key_ignores_color_and_size_but_tracks_pipeline_changes \

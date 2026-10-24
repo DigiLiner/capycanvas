@@ -14,7 +14,7 @@ feature allows and approximate only where an exact result costs too much.
 - **Decide once, in shared Rust.** `PipelineDevice` reports what the device can
   do, from the features the device was created with. Layouts, shader assembly and
   pass planning read that report. Hosts request rendering features through
-  `rendering_features` and add only timestamp and pipeline-cache bits their
+  `rendering_features` and add only timestamp bits their
   adapter has.
 - **Capable GPUs compile today's shaders.** A fallback replaces a small shared
   WGSL helper or a pass, chosen when the shader source is assembled, rather than
@@ -37,7 +37,7 @@ feature allows and approximate only where an exact result costs too much.
 | Android shared presentation (`SharedDemandRefresh`) | Android 13 and probably 10–12: the platform loader adds `VK_EXT_swapchain_maintenance1` and `VK_EXT_surface_maintenance1` only from Android 14. A Galaxy Tab S7 (Adreno 650, Android 13) has `VK_KHR_shared_presentable_image` but neither maintenance extension. `minSdk` is 29 | FIFO ink presentation; see [Android presentation](#android-presentation) |
 | Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | `rendering_features` requests it only when both storage formats allow read-write access; otherwise dry media use separate candidates |
 | Wayland mailbox presentation | Unknown | The GTK host refuses to start |
-| Timestamp queries, pipeline cache | Many mobile GPUs, Metal, Web | Already optional |
+| Timestamp queries | Many mobile GPUs, Metal, Web | Already optional |
 | Large textures (`max_texture_dimension_2d`) | 8192 on Web and some PowerVR | Already adaptive: the canvas size is capped |
 
 Device data comes from Apple's

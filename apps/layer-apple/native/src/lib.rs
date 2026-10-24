@@ -616,7 +616,6 @@ pub unsafe extern "C" fn capy_apple_attach(
     width: u32,
     height: u32,
     scale: f32,
-    cache_directory: *const c_char,
 ) -> i32 {
     let Some(app) = (unsafe { app.as_mut() }) else {
         return -1;
@@ -625,24 +624,21 @@ pub unsafe extern "C" fn capy_apple_attach(
         if layer.is_null() {
             return Err("Missing Metal layer".into());
         }
-        let cache = (!cache_directory.is_null())
-            .then(|| unsafe { project::read_title(cache_directory) }.map(std::path::PathBuf::from))
-            .transpose()?;
         a.host.resize(width, height, scale)?;
-        a.gpu_operation(|a| unsafe { a.metal.attach(&mut a.host, layer, cache) })
+        a.gpu_operation(|a| unsafe { a.metal.attach(&mut a.host, layer) })
     })
     .map_or(-1, |_| 0)
 }
 /// # Safety
 /// Valid exclusively owned handle. Call once the canvas is ready.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_finish_startup_cache(app: *mut CapyApple) -> i32 {
+pub unsafe extern "C" fn capy_apple_finish_startup_catalog(app: *mut CapyApple) -> i32 {
     let Some(app) = (unsafe { app.as_mut() }) else {
         return -1;
     };
     app.perform(|a| {
         if let Some(gpu) = a.host.session.renderer_mut().0.as_mut() {
-            gpu.finish_startup_cache();
+            gpu.finish_startup_catalog();
         }
         Ok(())
     })

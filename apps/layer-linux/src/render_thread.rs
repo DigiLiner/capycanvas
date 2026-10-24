@@ -155,7 +155,7 @@ enum Command {
         StartupMode,
         Box<(layer_core::Document, layer_core::BrushSnapshot, bool)>,
     ),
-    FinishStartupCache,
+    FinishStartupCatalog,
     Selection(Option<layer_core::Selection>),
     SelectionPaint(u64, layer_render::SelectionPaint),
     CancelSelectionPaint(u64),
@@ -563,8 +563,8 @@ impl RenderWorker {
             .send(command)
             .map_err(|_| BackendError("GPU worker stopped"))
     }
-    pub(super) fn finish_startup_cache(&self) -> Result<(), String> {
-        self.send(Command::FinishStartupCache).map_err(error)
+    pub(super) fn finish_startup_catalog(&self) -> Result<(), String> {
+        self.send(Command::FinishStartupCatalog).map_err(error)
     }
     pub(super) fn startup_needs_update(
         &self,
@@ -1530,7 +1530,7 @@ impl Worker {
                     startup_input = Some((generation, document, brush, transform, mode));
                     startup_progress = Default::default();
                 }
-                Command::FinishStartupCache => self.renderer.finish_startup_cache(),
+                Command::FinishStartupCatalog => self.renderer.finish_startup_catalog(),
                 Command::SelectionPaint(generation, update) => {
                     if generation != selection_generation { continue; }
                     let result = self.renderer.paint_selection(&update).map_err(error);
@@ -1772,7 +1772,7 @@ impl Worker {
         let (device, queue, watch) = pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
             label: Some("Wayland canvas GPU"),
             required_features: layer_render_wgpu::rendering_features(&adapter) | adapter.features()
-                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE),
+                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
             required_limits: limits,
             memory_hints: layer_render_wgpu::memory_hints(),
             ..Default::default()
@@ -1784,9 +1784,8 @@ impl Worker {
             config.present_mode,
             config.format
         );
-        let cache = crate::storage::roots().map(layer_host::StorageRoots::shaders);
-        let mut renderer = *WgpuRasterizer::from_wgpu_native_staged_cached(
-            adapter, device, queue, cache.as_deref(), color,
+        let mut renderer = *WgpuRasterizer::from_wgpu_native_staged_boxed(
+            adapter, device, queue, color,
         ).map_err(error)?;
         renderer.configure_ui_previews(view_color.space()).map_err(error)?;
         eprintln!("Wayland canvas color: {:?}; available: {:?}", config.color_space, caps.format_capabilities);

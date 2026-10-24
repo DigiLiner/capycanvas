@@ -8,7 +8,6 @@ struct StorageLocations: Sendable {
     let colorProfiles: URL
     let workspaces: URL
     let sessions: URL
-    let shaders: URL
     let state: URL
 
     /// Application Support and Caches for this bundle, unless `CAPY_STORAGE_DIR`
@@ -50,6 +49,6 @@ struct StorageLocations: Sendable {
         }
         return StorageLocations(settings: location("settings", .notDirectory), exportPresets: location("export_presets", .notDirectory),
             papers: location("papers"), colorProfiles: location("color_profiles"), workspaces: location("workspaces"),
-            sessions: location("sessions"), shaders: location("shaders"), state: location("state"))
+            sessions: location("sessions"), state: location("state"))
     }
 }

@@ -89,7 +89,7 @@ pub unsafe extern "C" fn capy_apple_document_switch(
         return std::ptr::null_mut();
     };
     a.perform(|a| {
-        let options = a.host.renderer_options(a.metal.cache.clone());
+        let options = a.host.renderer_options();
         if closing {
             let close = a.window.prepare_close(&mut a.host, options)?;
             let task = a.document_job(None);

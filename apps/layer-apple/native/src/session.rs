@@ -318,7 +318,7 @@ pub unsafe extern "C" fn capy_apple_session_open(app: *mut CapyApple, sessions: 
         let open = SessionOpen { sessions: PathBuf::from(unsafe { project::read_title(sessions) }?),
             scene: unsafe { project::read_title(scene) }?.to_owned(), adopt };
         let environment = OpenEnvironment::capture(&a.host.session,
-            a.window.documents.admission(&a.host.session.retained_document_tiles()), a.host.renderer_options(a.metal.cache.clone()))?;
+            a.window.documents.admission(&a.host.session.retained_document_tiles()), a.host.renderer_options())?;
         Ok(Box::into_raw(Box::new(CapySessionTask(Mutex::new(SessionJob {
             open: Some(open), disk: if retry { a.session_disk.clone() } else { None }, environment: Some(environment), captures: None,
             candidates: Vec::new(), active: 0, clean_exit: false, retry, stamp: a.host.session.session_stamp(), retired: Vec::new(), error: None, restored: false, adopted: false, sequence: 0, exclusion: 0, committed: false,

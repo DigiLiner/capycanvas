@@ -135,7 +135,7 @@ mod test_support {
         let mut gpu =
             WgpuRasterizer::from_wgpu_native_staged(adapter, device, queue, Default::default())
                 .unwrap();
-        gpu.finish_startup_cache();
+        gpu.finish_startup_catalog();
         gpu
     }
 

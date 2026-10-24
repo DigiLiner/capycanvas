@@ -95,6 +95,11 @@ preview export retains the verified original PNG and refuses the original file h
 manual-save worker retains its output job and storage lock until publication
 finishes and the host closes the job.
 
+Before a selected document is read into an ArrayBuffer, the host reads its four-byte
+prefix and asks shared Rust to admit its size against the package or photo input
+budget. Admitted files are still acquired in full; range-based Blob transport
+and a budget across concurrent jobs remain separate work.
+
 Clipboard output carries the full-depth source transfer and a separate PNG for
 other applications. The receiver separates the declared PNG trailer before
 validating and adopting the source transfer.

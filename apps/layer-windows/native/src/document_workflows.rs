@@ -1033,7 +1033,7 @@ mod tests {
         let mut gpu =
             WgpuRasterizer::from_wgpu_native_staged(adapter, device, queue, Default::default())
                 .unwrap();
-        gpu.finish_startup_cache();
+        gpu.finish_startup_catalog();
         assert_eq!(gpu.adapter().get_info().backend, wgpu::Backend::Dx12);
         assert_ne!(gpu.adapter().get_info().device_type, wgpu::DeviceType::Cpu);
         let project = layer_ui::new_drawing(24, 18, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();

@@ -191,9 +191,8 @@ int32_t capy_apple_navigator_placements(CapyApple *app, const char *json);
 /* Stateless [Camera, documentExtent, viewport] -> shared geometry JSON. */
 char *capy_apple_navigator_geometry(const char *json);
 int32_t capy_apple_attach(CapyApple *app, void *metal_layer,
-                         uint32_t width, uint32_t height, float scale,
-                         const char *cache_directory); /* NULL disables the pipeline cache */
-int32_t capy_apple_finish_startup_cache(CapyApple *app);
+                         uint32_t width, uint32_t height, float scale);
+int32_t capy_apple_finish_startup_catalog(CapyApple *app);
 int32_t capy_apple_resize(CapyApple *app, uint32_t width, uint32_t height, float scale);
 int32_t capy_apple_redraw(CapyApple *app);
 int32_t capy_apple_detach(CapyApple *app);

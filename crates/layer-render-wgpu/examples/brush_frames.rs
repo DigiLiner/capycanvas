@@ -246,7 +246,7 @@ fn main() -> Result<()> {
             Default::default(),
         )?;
         gpu.prepare_startup(&document, &brush, false)?;
-        gpu.finish_startup_cache();
+        gpu.finish_startup_catalog();
         let startup = Instant::now();
         while !gpu.poll_startup()?.complete {
             if startup.elapsed() > Duration::from_secs(180) {

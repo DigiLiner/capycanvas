@@ -162,9 +162,7 @@ impl Worker {
         };
         check()?;
         request.project.validate(Default::default())?;
-        let cache = crate::storage::roots().map(layer_host::StorageRoots::shaders);
-        let mut renderer = self.renderer.color_candidate_staged_cached(
-            cache.as_deref(),
+        let mut renderer = self.renderer.color_candidate_staged(
             request.project.composition().color,
         )
         .map_err(error)?;
@@ -175,7 +173,7 @@ impl Worker {
         renderer
             .prepare_startup(&request.project, &request.brush, false)
             .map_err(error)?;
-        renderer.finish_startup_cache();
+        renderer.finish_startup_catalog();
         while !renderer.poll_startup().map_err(error)?.brush_ready {
             check()?;
             renderer

@@ -840,9 +840,9 @@ in `-info.json`; repeat with `--warmup-idle-ms 30000` for idle preparation.
 Each probe, the selected preset and the following `--size` change record
 `ready_ms`, the largest gaps between UI-thread frame callbacks and the slowest
 render-owner round trip while preparation runs. `--size-idle-ms` waits that long
-after the selection before changing the size. Clear the application data before
-a run to measure a cold shader cache; a later launch reuses the pipelines saved by
-the previous one.
+after the selection before changing the size. The app does not persist driver
+pipeline caches. A new process may still reuse the driver's own caches; clearing
+only the benchmark application's data does not establish a shader-cold run.
 These diagnostic runs also retain the first unprimed stroke in `-prime.json`.
 For a matched fully warm control, use `--wait-for-warmup`: it adopts the photo
 after current-brush readiness, then waits for the catalogue once in that context.

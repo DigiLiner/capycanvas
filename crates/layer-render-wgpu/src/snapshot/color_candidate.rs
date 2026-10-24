@@ -55,7 +55,7 @@ impl SnapshotGpu {
         }
         renderer.prepare_startup(&document, brush, false)?;
         #[cfg(not(target_arch = "wasm32"))]
-        renderer.finish_startup_cache();
+        renderer.finish_startup_catalog();
         Ok(ColorCanvas {
             renderer: Some(*renderer),
             context,

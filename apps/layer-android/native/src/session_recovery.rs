@@ -139,7 +139,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionRestoreTask(mut env: JN
         session.require_document_idle()?;
         let environment = OpenEnvironment::capture(session,
             a.window.documents.admission(&session.retained_document_tiles()),
-            a.host.renderer_options(Some(a.cache_directory.clone().into())))?;
+            a.host.renderer_options())?;
         Ok(Box::into_raw(Box::new(Task {
             generation: a.gpu_generation,
             work: Work::Restore { environment, candidates: Vec::new(), stamp: stamp.unwrap_or_else(||session.session_stamp()), pending: None },

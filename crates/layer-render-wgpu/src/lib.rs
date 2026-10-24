@@ -84,8 +84,8 @@ use builtin_masks::builtin_masks;
 use deferred::{Compilation, CompileMode, Deferred};
 mod pipeline_device;
 use pipeline_device::PipelineDevice;
-#[cfg(not(target_arch = "wasm32"))]
-mod shader_cache;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod startup_pixels_tests;
 mod startup;
 pub use startup::{StartupProgress, ShaderDocument};
 #[cfg(not(target_arch = "wasm32"))]

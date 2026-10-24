@@ -16,7 +16,6 @@ fn locations(roots: StorageRoots) -> Result<Value, String> {
         "papers": text(roots.papers())?,
         "workspaces": text(roots.workspaces())?,
         "sessions": text(roots.sessions())?,
-        "shaders": text(roots.shaders())?,
         "state": text(roots.state)?,
     }))
 }

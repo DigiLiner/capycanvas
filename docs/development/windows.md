@@ -601,11 +601,6 @@ Their parser structure and byte hashes must stay identical across hosts.
 Original dependency notices in `tools/build/licenses/*.txt` preserve their exact
 bytes without checkout conversion.
 
-When shader cache-key inputs change, run
-`python tools/build/test_shader_generation.py`. Dependency assertions compare
-file identity, including Windows canonical paths, before checking generation
-invalidation and reuse.
-
 `exercise-artwork-recovery.ps1 -Executable <path> -Theme dark` checks automatic
 crash and orderly restarts, tab membership, the active drawing, Undo/Redo,
 cancelled and discarded drawing closes, missing or changed saved originals,
