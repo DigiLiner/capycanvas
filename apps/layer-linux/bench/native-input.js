@@ -107,6 +107,11 @@ const colorPanel = ARGV.includes('--color-panel') || ARGV.includes('--web-color-
 const workspaceDropSizes = ARGV.includes('--workspace-drop-sizes');
 const workspaceEdges = ARGV.includes('--workspace-edges');
 const workspaceMotion = workspaceDropSizes || workspaceEdges || colorPanel || columnStacks || ARGV.includes('--workspace-motion') || workspaceWeb || workspaceResize;
+const motionCadence = workspaceMotion || [
+    'native_workspace_motion_input', 'native_workspace_tab_motion_input',
+    'native_workspace_drop_sizes', 'native_workspace_drag_edges',
+    'native_color_panel_input', 'native_column_stack_input', 'native_workspace_resize_input',
+].includes(nativeTest);
 const nativeTestTimeout = Number(GLib.getenv('LAYER_NATIVE_TEST_TIMEOUT_MS') ?? 180000);
 if (!Number.isFinite(nativeTestTimeout) || nativeTestTimeout <= 0) throw new Error('LAYER_NATIVE_TEST_TIMEOUT_MS must be positive and finite');
 // A captured executable lets correctness runs identify their exact build and
@@ -215,7 +220,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
     }
     if (nativeTest || workspaceClicks || workspaceCursor || workspaceDrawer || drawerStyle || tooltips || workspaceWindow || workspaceColumns || workspaceTabs || workspaceHold || workspaceMotion || workspaceMenus) {
         let step = 0, events = null, index = 0, previous = [0, 0], trace = [], resumeAt = 0, pen = 0;
-        const interval = Number(GLib.getenv('LAYER_NATIVE_EVENT_MS') || (workspaceMotion ? 4 : 60));
+        const interval = Number(GLib.getenv('LAYER_NATIVE_EVENT_MS') || (motionCadence ? 4 : 60));
         if (!Number.isInteger(interval) || interval < 1 || interval > 1000)
             throw Error('LAYER_NATIVE_EVENT_MS must be an integer from 1 to 1000');
         const tracing = GLib.getenv('LAYER_NATIVE_INPUT_TRACE') === '1';

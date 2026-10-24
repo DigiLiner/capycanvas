@@ -315,6 +315,10 @@ private-compositor runner:
 bash tools/performance/workspace-motion.sh gtk --native-test=native_canvas_bar_modes
 ```
 
+Standalone workspace motion tests use the same 4 ms input cadence as their
+dedicated runner flags. `LAYER_NATIVE_EVENT_MS` overrides it when measuring a
+different input rate.
+
 `native_startup_latency` observes asynchronous session creation before sending
 contacts and records readiness from window construction. The bounded SDR canvas
 check compares its live color sample with an authored snapshot, including the
@@ -336,6 +340,11 @@ paste and retained save/history in the requested fixture theme.
 `native_tiff_open_import_and_paste` uses `LAYER_RASTER_FIXTURES` containing the
 independent libtiff reference set. It covers CMYK/RGB edge tiles, straight RGBA
 and gray alpha strips, and WhiteIsZero through the same native journeys.
+
+`native_heif_avif_open_import_and_paste` embeds the committed synthetic HEIC,
+P3 AVIF and ICC AVIF fixtures. It needs no `LAYER_RASTER_FIXTURES` directory and
+checks those same Open, Import, clipboard and history paths in the requested
+`CAPY_NATIVE_TEST_THEME`.
 
 Accessibility assertions need GTK's test backend at process startup. Run
 `native_layers_control_copy`, `native_zoom_settings_and_canvas_preferences` and

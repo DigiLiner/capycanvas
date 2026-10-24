@@ -92,33 +92,46 @@ pub(super) fn wait_layer_thumbnail(w: &Rc<Workspace>, id: u64) -> gtk::gdk::Text
 #[ignore = "private Wayland display, hardware GPU and LAYER_RASTER_FIXTURES"]
 #[allow(deprecated)]
 fn native_common_raster_open_import_and_paste() {
-    native_raster_open_import_and_paste(&[("Profiled.bmp", "image/bmp"), ("Animation.gif", "image/gif"), ("Profiled.webp", "image/webp")]);
+    native_raster_open_import_and_paste(&external_raster_fixtures(), &[("Profiled.bmp", "image/bmp"), ("Animation.gif", "image/gif"), ("Profiled.webp", "image/webp")]);
 }
 
 #[test]
 #[ignore = "private Wayland display, hardware GPU and LAYER_RASTER_FIXTURES"]
 fn native_jpeg_open_import_and_paste() {
-    native_raster_open_import_and_paste(&[("cmyk.jpg", "image/jpeg"), ("ycck.jpg", "image/jpeg"),
+    native_raster_open_import_and_paste(&external_raster_fixtures(), &[("cmyk.jpg", "image/jpeg"), ("ycck.jpg", "image/jpeg"),
         ("progressive.jpg", "image/jpeg"), ("progressive-gray.jpg", "image/jpeg"), ("oriented.jpg", "image/jpeg")]);
 }
 
 #[test]
 #[ignore = "private Wayland display, hardware GPU and LAYER_RASTER_FIXTURES"]
 fn native_tiff_open_import_and_paste() {
-    native_raster_open_import_and_paste(&[("libtiff-cmyk-tiles-tables3.tiff", "image/tiff"),
+    native_raster_open_import_and_paste(&external_raster_fixtures(), &[("libtiff-cmyk-tiles-tables3.tiff", "image/tiff"),
         ("libtiff-rgb-tiles-tables0.tiff", "image/tiff"), ("libtiff-rgba-strips-tables3.tiff", "image/tiff"),
         ("libtiff-la-strips-tables0.tiff", "image/tiff"), ("libtiff-l-white-tiles-tables3.tiff", "image/tiff")]);
 }
 
 #[test]
-#[ignore = "private Wayland display, GPU and LAYER_RASTER_FIXTURES"]
+#[ignore = "private Wayland display and hardware GPU"]
 fn native_heif_avif_open_import_and_paste() {
-    native_raster_open_import_and_paste(&[("Photo.heic", "image/heic"), ("P3.avif", "image/avif"), ("ICC.avif", "image/avif")]);
+    let directory = std::path::PathBuf::from(std::env::var_os("CAPY_STORAGE_DIR").expect("private test storage")).join("codec-fixtures");
+    std::fs::create_dir(&directory).unwrap();
+    let fixtures: &[(&str, &str, &[u8])] = &[
+        ("p3-gray-10bit.heic", "image/heic", include_bytes!("../../../crates/layer-color/tests/fixtures/heif/p3-gray-10bit.heic")),
+        ("p3-12bit.avif", "image/avif", include_bytes!("../../../crates/layer-color/tests/fixtures/avif/p3-12bit.avif")),
+        ("p3-12bit-icc.avif", "image/avif", include_bytes!("../../../crates/layer-color/tests/fixtures/avif/p3-12bit-icc.avif")),
+    ];
+    for &(name, _, bytes) in fixtures { std::fs::write(directory.join(name), bytes).unwrap(); }
+    let cases: Vec<_> = fixtures.iter().map(|&(name, mime, _)| (name, mime)).collect();
+    native_raster_open_import_and_paste(&directory, &cases);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+fn external_raster_fixtures() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("LAYER_RASTER_FIXTURES").expect("codec fixtures"))
 }
 
 #[allow(deprecated)]
-fn native_raster_open_import_and_paste(cases: &[(&str, &str)]) {
-    let directory = std::path::PathBuf::from(std::env::var_os("LAYER_RASTER_FIXTURES").expect("codec fixtures"));
+fn native_raster_open_import_and_paste(directory: &std::path::Path, cases: &[(&str, &str)]) {
     glib::set_prgname(Some("capy-canvas-test"));
     let app = native_test_app("art.capycanvas.CommonRaster");
     let w = Workspace::with_project(&app, Some((new_drawing(256, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));

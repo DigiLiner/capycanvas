@@ -145,7 +145,8 @@ fn workspace_motion_input(scenarios: &[&str]) {
                     .borrow()
                     .as_ref()
                     .is_some_and(|d| d.started),
-                "{scenario}: native recognizer started"
+                "{device}/{scenario}: native recognizer started; theme={:?}",
+                std::env::var("CAPY_NATIVE_TEST_THEME").unwrap_or_else(|_| "default".into())
             );
             let model = w.publication.model_revision.get();
             let refreshes = w.publication.refreshes.get();

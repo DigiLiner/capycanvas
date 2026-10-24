@@ -8,7 +8,7 @@ const RED: &[u8] = include_bytes!("../../../tests/fixtures/heif/flat-red-8bit.he
 // Codestreams were encoded losslessly by x265, not by the decoder under test.
 #[allow(dead_code)]
 #[path = "../../../../../vendor/heif-test-support/test_builder.rs"]
-mod tb;
+pub(super) mod tb;
 
 fn item(id: u32, name: &str) -> tb::TestItem {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

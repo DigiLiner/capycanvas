@@ -5,6 +5,46 @@ use std::io::Cursor;
 const SDR: &[u8] = include_bytes!("../../../tests/fixtures/avif/p3-12bit.avif");
 const HDR: &[u8] = include_bytes!("../../../tests/fixtures/avif/hdr-rgb.avif");
 
+fn icc_fixture() -> Vec<u8> {
+    use super::hevc_tests::tb;
+    let parsed = Container::parse(SDR, 1024 * 1024, &AtomicBool::new(false)).unwrap();
+    let primary = parsed.primary.unwrap();
+    let mut props: Vec<_> = parsed.links(primary).iter().map(|&link| {
+        let property = parsed.property(link).unwrap();
+        (link.essential, tb::plain_box(&property.kind, property.data))
+    }).collect();
+    let mut profile = b"prof".to_vec();
+    profile.extend(crate::profile_bytes(&ColorProfile::Builtin(RgbSpace::DisplayP3)).unwrap());
+    props.push((false, tb::plain_box(b"colr", &profile)));
+    let image = tb::TestItem { id: 1, item_type: *b"av01", payload: parsed.payload(primary, SDR.len()).unwrap().into_owned(), props };
+    tb::make_heic_with_brand(&[image], 1, &[], b"avif")
+}
+
+#[test]
+#[ignore = "regenerate the committed ICC fixture at LAYER_AVIF_ICC_FIXTURE_OUTPUT"]
+fn rust_avif_write_icc_fixture() {
+    std::fs::write(std::env::var_os("LAYER_AVIF_ICC_FIXTURE_OUTPUT").unwrap(), icc_fixture()).unwrap();
+}
+
+#[test]
+fn rust_avif_embedded_icc_preserves_primary_samples() {
+    use crate::photo::test_support::rows;
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/avif/p3-12bit-icc.avif")).unwrap();
+    assert_eq!(bytes, icc_fixture());
+    let original = read_photo_detailed(Cursor::new(SDR), Default::default()).unwrap().source;
+    let actual = read_photo_detailed(Cursor::new(bytes), Default::default()).unwrap().source;
+    assert_eq!(actual.extent, original.extent);
+    assert_eq!(actual.interpretation.depth, SampleDepth::U16);
+    assert_eq!(actual.interpretation.profile, ColorProfile::Icc(crate::profile_bytes(&ColorProfile::Builtin(RgbSpace::DisplayP3)).unwrap().into()));
+    assert!(!actual.interpretation.profile_assumed);
+    for (actual, original) in rows(&actual).into_iter().zip(rows(&original)) {
+        for (actual, original) in actual.chunks_exact(8).zip(original.chunks_exact(8)) {
+            assert_eq!(&actual[..6], &original[..6]);
+            assert_eq!(&actual[6..], &[255, 255]);
+        }
+    }
+}
+
 #[test]
 fn rust_avif_dispatch_and_failure_recovery_without_native_features() {
     assert!(formats().any(|f| f.name == "AVIF"));
