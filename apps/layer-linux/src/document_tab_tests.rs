@@ -230,6 +230,10 @@ fn native_document_tabs_history_storage_and_close() {
     new_photo::ready(&w);
     apply_fixture_theme(&w);
     new_photo::ready(&w);
+    let mut workspace = state(&w).workspace;
+    workspace.layout.header = layer_ui::HeaderLayout::default();
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
+    new_photo::ready(&w);
     let plain_title = named::<gtk::Label>(w.window.upcast_ref(), "single-document-title");
     assert_eq!(
         w.documents.root.visible_child_name().as_deref(),

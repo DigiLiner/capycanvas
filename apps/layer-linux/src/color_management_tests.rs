@@ -458,6 +458,7 @@ fn native_sdr_bounded_canvas_startup_and_paint() {
     let w = Workspace::with_project(&app, Some((project, None)));
     w.window.present();
     sdr_ready(&w);
+    apply_fixture_theme(&w);
     w.dispatch(UiAction::SetColor {
         rgba: [0., 0., 0., 1.],
     });
@@ -468,6 +469,14 @@ fn native_sdr_bounded_canvas_startup_and_paint() {
         &[[1990., 512.], [2030., 512.], [2070., 512.], [2100., 512.]],
     );
     sdr_ready(&w);
+    let gpu = ui_session(&w).engine().backend().snapshot_gpu().unwrap();
+    let document = ui_session(&w).engine().document().clone();
+    let context = document.output().context.clone();
+    let capture = layer_core::Editor::new(document).capture(0, context).unwrap();
+    let expected = glib::MainContext::default().block_on(gtk::gio::spawn_blocking(move || {
+        gpu.capture(capture, Default::default()).unwrap().read_region([2048, 512, 1, 1]).unwrap()[0]
+    })).unwrap();
+    assert!(expected[..3].iter().all(|v| *v < 0.1), "the reference must contain the painted stroke: {expected:?}");
     assert!(
         ui_session_mut(&w)
             .renderer_mut()
@@ -495,9 +504,8 @@ fn native_sdr_bounded_canvas_startup_and_paint() {
     };
     assert_eq!(sample.request_id, 9700);
     assert!(
-        sample.rgba[..3].iter().all(|v| v.abs() < 0.0001),
-        "{:?}",
-        sample.rgba
+        sample.rgba.iter().zip(&expected).all(|(actual, expected)| (actual - expected).abs() < 0.0001),
+        "live sample {:?}, reference {expected:?}", sample.rgba
     );
     assert_eq!(sample.rgba[3], 1.);
     w.window.destroy();

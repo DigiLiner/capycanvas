@@ -286,7 +286,7 @@ impl Stroke {
         let first = profile.at(index, 0.);
         if profile.at(index, 1.) == first && knots.iter().all(|k| [k.left(), k.right()] == first) { segment.flatten(tolerance, emit); return; }
         let width = |t| profile.at(index, t).map(|f| f * self.width * 0.5 * scale);
-        fn flatten(segment: &Segment, width: &impl Fn(f64) -> [f64; 2], knots: &[WidthKnot], a: f64, b: f64, tolerance: f64, depth: u32, emit: &mut impl FnMut([f64; 2], f64)) {
+        fn flatten(segment: &Segment, width: &impl Fn(f64) -> [f64; 2], knots: &[WidthKnot], [a, b]: [f64; 2], tolerance: f64, depth: u32, emit: &mut impl FnMut([f64; 2], f64)) {
             let knots = &knots[knots.partition_point(|k| k.t() <= a)..knots.partition_point(|k| k.t() < b)];
             let (from, to, wa, wb) = (segment.point(a), segment.point(b), width(a), width(b));
             let d = [to[0] - from[0], to[1] - from[1]];
@@ -300,13 +300,13 @@ impl Stroke {
             });
             if accurate || depth == 24 { emit(to, b); } else {
                 let middle = (a + b) * 0.5;
-                flatten(segment, width, knots, a, middle, tolerance, depth + 1, emit);
-                flatten(segment, width, knots, middle, b, tolerance, depth + 1, emit);
+                flatten(segment, width, knots, [a, middle], tolerance, depth + 1, emit);
+                flatten(segment, width, knots, [middle, b], tolerance, depth + 1, emit);
             }
         }
         let mut from = 0.;
         segment.flatten(tolerance, |_, to| {
-            flatten(segment, &width, knots, from, to, tolerance, 0, &mut emit);
+            flatten(segment, &width, knots, [from, to], tolerance, 0, &mut emit);
             from = to;
         });
     }

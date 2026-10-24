@@ -1212,16 +1212,16 @@ fn native_startup_latency() {
             .metrics()
             .committed_strokes
     };
-    send(PenPhase::Down, 400.);
-    w.dispatch(UiAction::SetBrushSize { value: 24. });
     let mut stages = [None; 3];
     let mut first_canvas = None;
+    let mut contact_started = false;
     let mut painted = false;
     let mut max_pump_ms = 0f64;
-    while stages[2].is_none() || first_canvas.is_none() {
+    while stages[2].is_none() || first_canvas.is_none() || !painted {
         let tick = Instant::now();
         pump(1);
         max_pump_ms = max_pump_ms.max(tick.elapsed().as_secs_f64() * 1000.);
+        assert!(started.elapsed() < Duration::from_secs(30), "startup never completed");
         if first_canvas.is_none()
             && w.gpu.borrow().as_ref().is_some_and(|g| {
                 !g.session
@@ -1236,10 +1236,13 @@ fn native_startup_latency() {
         {
             first_canvas = Some(started.elapsed().as_secs_f64() * 1000.);
         }
-        let progress = ui_session(&w)
-            .engine()
-            .backend()
-            .startup;
+        let Some(progress) = w.gpu.borrow().as_ref().map(|g| g.session.engine().backend().startup) else { continue; };
+        if !contact_started && w.workspaces.accepts_input(&w) {
+            apply_fixture_theme(&w);
+            send(PenPhase::Down, 400.);
+            w.dispatch(UiAction::SetBrushSize { value: 24. });
+            contact_started = true;
+        }
         for (slot, ready) in stages.iter_mut().zip([
             progress.canvas_ready,
             progress.brush_ready,
@@ -1249,20 +1252,14 @@ fn native_startup_latency() {
                 *slot = Some(started.elapsed().as_secs_f64() * 1000.);
             }
         }
-        if progress.brush_ready && !painted {
-            // A contact that began before readiness replays as one whole stroke.
+        if progress.brush_ready && contact_started && !painted {
             send(PenPhase::Move, 450.);
             send(PenPhase::Up, 500.);
-            // A new contact works without waiting for the unused catalog.
             send(PenPhase::Down, 400.);
             send(PenPhase::Move, 450.);
             send(PenPhase::Up, 500.);
             painted = true;
         }
-        assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "startup never completed"
-        );
     }
     eprintln!(
         "GTK startup: UI built {built:.3}ms, present returned {presented:.3}ms, first canvas feedback {first_canvas:.3?}ms, max event-loop slice {max_pump_ms:.3}ms"
@@ -12628,8 +12625,8 @@ fn find_button(root: &gtk::Widget, label: &str) -> Option<gtk::Button> {
 }
 
 fn named<T: IsA<gtk::Widget>>(root: &gtk::Widget, name: &str) -> T {
-    find_named(root, name).and_then(|widget| widget.downcast().ok())
-        .unwrap_or_else(|| panic!("{name}: expected {}", std::any::type_name::<T>()))
+    find_named(root, name).unwrap_or_else(|| panic!("{name}: missing widget"))
+        .downcast().unwrap_or_else(|widget| panic!("{name}: expected {}, got {}", std::any::type_name::<T>(), widget.type_()))
 }
 
 pub(crate) fn find_named(root: &gtk::Widget, name: &str) -> Option<gtk::Widget> {

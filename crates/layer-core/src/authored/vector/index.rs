@@ -62,9 +62,8 @@ impl VectorIndex {
             let mut chunk = None;
             for entry in entries {
                 if chunk.is_none_or(|(key, _)| key != entry.chunk) { chunk = Some((entry.chunk, self.order.get(&entry.chunk).copied())); }
-                if let Some((_, Some(order))) = chunk {
-                    if meets(entry.bounds, area) { found.push((order, entry.index)); }
-                }
+                if let Some((_, Some(order))) = chunk
+                    && meets(entry.bounds, area) { found.push((order, entry.index)); }
             }
         };
         if spread(s) > self.cells.len() as i64 {

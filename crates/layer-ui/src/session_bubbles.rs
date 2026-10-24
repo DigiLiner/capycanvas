@@ -43,11 +43,12 @@ struct ColorBubbleParts {
     hints: Vec<([f32; 2], f32)>,
     collisions: Vec<Shape>,
 }
+type BoundsKey = (u64, [f32; 2], bool);
 
 #[derive(Debug, Default)]
 pub(crate) struct Bubbles {
     desk: Desk,
-    bounds: Option<((u64, [f32; 2], bool), Bounds)>,
+    bounds: Option<(BoundsKey, Bounds)>,
     drag: Option<BubbleDrag>,
     halo: Option<(u32, u32)>,
     ring: Option<RingContact>,
@@ -335,7 +336,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     None => BubbleRing {
                         arc,
                         setting: binding.setting(),
-                        label: self.localization().text(binding.label()).into(),
+                        label: self.localization().text(binding.label()),
                         icon: tool_setting_icon(binding.setting()),
                         fill: 0.,
                         text: String::new(),

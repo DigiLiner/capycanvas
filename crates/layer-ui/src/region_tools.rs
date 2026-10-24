@@ -213,7 +213,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().holds_objects(*handle)) {
                         layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::RawObjects(handle)}
                     } else {
-                        let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some())) else { return None; };
+                        let handle = doc.working.occurrence.filter(|handle| doc.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some()))?;
                         let mut snapshot = doc.snapshot();
                         let occurrence = std::sync::Arc::make_mut(&mut snapshot).artwork.occurrences.get_mut(handle).unwrap();
                         occurrence.visible = true;

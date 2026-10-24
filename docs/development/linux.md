@@ -315,6 +315,12 @@ private-compositor runner:
 bash tools/performance/workspace-motion.sh gtk --native-test=native_canvas_bar_modes
 ```
 
+`native_startup_latency` observes asynchronous session creation before sending
+contacts and records readiness from window construction. The bounded SDR canvas
+check compares its live color sample with an authored snapshot, including the
+selected brush's material response. Tab lifecycle fixtures supply their header
+layout explicitly so shipped workspace changes do not remove the controls under test.
+
 Accessibility assertions need GTK's test backend at process startup. Run
 `native_layers_control_copy`, `native_zoom_settings_and_canvas_preferences` and
 `native_live_language_switching` with `GTK_A11Y=test` before the runner command.

@@ -1066,10 +1066,10 @@ impl BubbleView {
         beads.chain(items).chain(pill).chain(card).chain(halo).fold(self.color.map_or(self.diameter * 0.5, |c| c.bounds().height - c.diameter * 0.5), f32::max)
     }
     pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
-        hit_geometry(self.kind, self.diameter, self.face, self.color, self.card.as_ref().map(|card| card.size),
+        hit_geometry((self.kind, self.diameter, self.face), self.color, (self.card.as_ref().map(|card| card.size), self.pill.is_some()),
             self.chooser.iter().map(|item| (item.center, item.size())),
             self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
-            self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
+            self.beads.iter().map(|bead| bead.placement), point)
     }
 }
 
@@ -1097,16 +1097,16 @@ struct HitBead { placement: BeadPlacement }
 
 impl BubbleHitGeometry {
     pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
-        hit_geometry(self.kind, self.diameter, self.face, self.color, self.card.as_ref().map(|card| card.size),
+        hit_geometry((self.kind, self.diameter, self.face), self.color, (self.card.as_ref().map(|card| card.size), self.pill.is_some()),
             self.chooser.iter().map(|item| (item.center, if item.kind == ChooserKind::Brush { BRUSH_PILL } else { [CHOOSER_ITEM; 2] })),
             self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
-            self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
+            self.beads.iter().map(|bead| bead.placement), point)
     }
 }
 
-fn hit_geometry(kind: BubbleKind, diameter: f32, face: [f32; 2], color: Option<ColorBubbleLayout>, card: Option<[f32; 2]>,
+fn hit_geometry((kind, diameter, face): (BubbleKind, f32, [f32; 2]), color: Option<ColorBubbleLayout>, (card, pill): (Option<[f32; 2]>, bool),
     mut items: impl Iterator<Item = ([f32; 2], [f32; 2])>, mut rings: impl Iterator<Item = RingArc>,
-    mut beads: impl Iterator<Item = BeadPlacement>, pill: bool, point: [f32; 2]) -> Option<BubbleHit> {
+    mut beads: impl Iterator<Item = BeadPlacement>, point: [f32; 2]) -> Option<BubbleHit> {
     let within = |[w, h]: [f32; 2]| point[0].abs() <= w * 0.5 && point[1].abs() <= h * 0.5;
     if card.is_some_and(within) { return Some(BubbleHit::Card); }
     if let Some(index) = items.position(|(center, size)| on_capsule([point[0] - center[0], point[1] - center[1]], size)) {

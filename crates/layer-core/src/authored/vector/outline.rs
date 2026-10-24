@@ -22,7 +22,7 @@ pub(super) fn capsules(path: &PathItem, stroke: &Stroke, tolerance: f64, mut emi
             let after = points[(i + 1).min(points.len() - 1)].0;
             let normal = unit(sub(after, before)).map_or([0.; 2], left_of);
             let disk = Disk { p: add(p, normal, (left - right) * 0.5), r: (left + right) * 0.5 };
-            if let Some(a) = previous { if emit(a, disk) { return true; } }
+            if let Some(a) = previous && emit(a, disk) { return true; }
             if points.len() == 1 && emit(disk, disk) { return true; }
             previous = Some(disk);
         }

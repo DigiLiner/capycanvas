@@ -39,7 +39,7 @@ fn completion_plane(dab:Dab,contact:Option<&layer_core::BrushContact>)->Option<[
     let [c,s]=dab.rotation;
     let m=[c/dab.radii[0],s/dab.radii[0],-s/dab.radii[1],c/dab.radii[1]];
     let mut normal=[0.;2];
-    for direction in dab.previous_contact.chunks_exact(2) {
+    for direction in dab.previous_contact.as_chunks::<2>().0 {
         let v=[-(m[0]*direction[0]+m[1]*direction[1]),-(m[2]*direction[0]+m[3]*direction[1])];
         let length=v[0].hypot(v[1]).max(1e-12);
         normal[0]+=v[0]/length;normal[1]+=v[1]/length;

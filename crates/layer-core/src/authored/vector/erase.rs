@@ -42,7 +42,7 @@ impl Eraser {
         fn append(out: &mut Vec<(f64, f64)>, from: f64, to: f64) {
             match out.last_mut() { Some(last) if from <= last.1 + 1e-12 => last.1 = to, _ => out.push((from, to)) }
         }
-        fn visit(eraser: &Eraser, segment: Segment, widths: [[f64; 2]; 2], cap: Cap, flat: bool, from: f64, to: f64, depth: u32, out: &mut Vec<(f64, f64)>) {
+        fn visit(eraser: &Eraser, (segment, widths): (Segment, [[f64; 2]; 2]), cap: Cap, flat: bool, [from, to]: [f64; 2], depth: u32, out: &mut Vec<(f64, f64)>) {
             let points = [segment.from, segment.control[0], segment.control[1], segment.to];
             let radii = widths.map(|[l, r]| (l + r) * 0.5);
             let shifts = widths.map(|[l, r]| (l - r) * 0.5);
@@ -101,8 +101,8 @@ impl Eraser {
                 let (left, right) = segment.split(0.5);
                 let middle = (from + to) * 0.5;
                 let width = std::array::from_fn(|i| (widths[0][i] + widths[1][i]) * 0.5);
-                visit(eraser, left, [widths[0], width], cap, flat, from, middle, depth + 1, out);
-                visit(eraser, right, [width, widths[1]], cap, flat, middle, to, depth + 1, out);
+                visit(eraser, (left, [widths[0], width]), cap, flat, [from, middle], depth + 1, out);
+                visit(eraser, (right, [width, widths[1]]), cap, flat, [middle, to], depth + 1, out);
             }
         }
         let d = [segment.to[0] - segment.from[0], segment.to[1] - segment.from[1]];
@@ -112,7 +112,7 @@ impl Eraser {
             let projection = q[0] * d[0] + q[1] * d[1];
             projection >= 0. && projection <= length && (q[0] * d[1] - q[1] * d[0]).abs() <= 1e-8 * length.sqrt()
         });
-        visit(self, segment, widths, cap, flat, from, to, 0, out);
+        visit(self, (segment, widths), cap, flat, [from, to], 0, out);
     }
 
 }
@@ -326,9 +326,8 @@ impl PathItem {
                     let m = other.index;
                     let adjacent = m + 1 >= k && m <= k + 1 || closed && (k == 0 && m == last || m == 0 && k == last);
                     if other.subpath == i && adjacent { return; }
-                    if let (Some(t), Some(u)) = (crossing(edge.a, edge.b, other.a, other.b), crossing(other.a, other.b, edge.a, edge.b)) {
-                        if let Some(place) = refined_crossing(edge, other, t, u) { stops.push(place); }
-                    }
+                    if let (Some(t), Some(u)) = (crossing(edge.a, edge.b, other.a, other.b), crossing(other.a, other.b, edge.a, edge.b))
+                        && let Some(place) = refined_crossing(edge, other, t, u) { stops.push(place); }
                 });
             }
             stops.sort_by(f64::total_cmp);
