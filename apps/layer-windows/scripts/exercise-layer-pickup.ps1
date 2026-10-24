@@ -144,17 +144,21 @@ function Press([string]$Id,[double]$Layer,[switch]$Grip) {
     $nativeInput=Input-Trace $at.x $at.y
     $script:press=@{case=$script:case;source=$Id;point=$at;intended_bounds=(Control $Id).Current.BoundingRectangle;foreground=$nativeInput.foreground;owned_window=$nativeInput.owned_window;hit=$nativeInput.hit}
     $pressContacts.Add($script:press)
+    $admission=@{state=$null}
     [CapyRowPointer]::Down($Device,$at.x,$at.y)
-    Wait-Until {$g=Gesture;$g.source -eq $Layer -and $g.phase -in @('pressed','held')} 'Layer row did not receive the contact'
-    $g=Gesture
+    Wait-Until {$admission.state=Gesture;$g=$admission.state;$g.source -eq $Layer -and $g.phase -in @('pressed','held')} 'Layer row did not receive the contact'
+    $g=$admission.state;$script:press.admitted_snapshot=$g
+    $script:press.expected_classification=@{device=$Device;grip=[bool]$Grip;mask=($Id -eq "layer-$Layer-mask")}
     if($g.device -ne $Device -or $g.grip -ne [bool]$Grip -or $g.mask -ne ($Id -eq "layer-$Layer-mask")){throw 'Layer source or pointer device was misclassified'}
     if(!$Grip -and $g.phase -eq 'pressed' -and $g.scroll_claimed){throw 'Pending row hold stole scrolling'}
 }
 function Pick-Up([string]$Id,[double]$Layer,[switch]$Grip) {
     Press $Id $Layer -Grip:$Grip
     if($Device -ne 'mouse' -and !$Grip){
-        Wait-Until {(Gesture).phase -eq 'held' -and (Gesture).menu_open} 'Native pen/touch row hold did not open its menu' 4
-        if(!(Gesture).captured){throw 'Held row did not retain contact capture'}
+        $hold=@{state=$null}
+        Wait-Until {$hold.state=Gesture;$g=$hold.state;$g.phase -eq 'held' -and $g.menu_open} 'Native pen/touch row hold did not open its menu' 4
+        $script:press.held_snapshot=$hold.state
+        if(!$hold.state.captured){throw 'Held row did not retain contact capture'}
     }
 }
 function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[switch]$Cancel,[double]$Fraction=.6) {
@@ -166,8 +170,9 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
         Start-Sleep -Milliseconds 150
         if((Gesture).phase -eq 'dragging' -or (Rows) -ne $before){throw 'Held pen/touch row movement reordered without its handle'}
         [CapyRowPointer]::Up()
-        Wait-Until {(Gesture).phase -eq 'idle'} 'Held row movement retained a contact'
-        if((Gesture).menu_open){Dismiss}
+        $finished=@{state=$null}
+        Wait-Until {$finished.state=Gesture;$finished.state.phase -eq 'idle'} 'Held row movement retained a contact'
+        if($finished.state.menu_open){Dismiss}
         $Id="layer-$Layer-drag";$Grip=[switch]::new($true)
         $to=Destination $Target $Fraction
     }
@@ -187,11 +192,12 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
     }
     $layers=@((Model).state.layers);$index=[Array]::IndexOf([int64[]]$layers.id,[int64]$Target)
     $next=if($index -ge 0 -and $index+1 -lt $layers.Count -and $layers[$index+1].depth -eq $layers[$index].depth){$layers[$index+1].id}
+    $drop=@{state=$null}
     Wait-Until {
-        $g=Gesture
+        $drop.state=Gesture;$g=$drop.state
         $g.phase -eq 'dragging' -and $g.can_drop -and ($g.target -eq $Target -or ($Fraction -gt .5 -and $null -ne $next -and $g.target -eq $next -and $g.position -eq 'above'))
     } 'Layer move did not reach a validated drop target'
-    $admitted=Gesture
+    $admitted=$drop.state;$script:contact.admitted_snapshot=$admitted
     if($admitted.source -ne $Layer -or $admitted.device -ne $Device -or $admitted.grip -ne [bool]$Grip){throw 'The admitted drag used another source or device'}
     if($admitted.menu_open){throw 'Dragging retained the held context menu'}
     $editing=(Model).state.layer_tools.editing_layer
@@ -199,20 +205,19 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
     if($Cancel){
         if($Device -eq 'mouse'){[CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()}else{[CapyRowPointer]::Cancel()}
     }else{[CapyRowPointer]::Up()}
-    Wait-Until {
-        (Gesture).phase -eq 'idle'
-    } 'Layer contact did not finish'
+    $finished=@{state=$null}
+    Wait-Until {$finished.state=Gesture;$finished.state.phase -eq 'idle'} 'Layer contact did not finish'
     # Ordinary drawers retain their row surface during the closing animation.
     if($Cancel){
         if((Rows) -ne $before){throw 'Cancelled row move changed layers'}
-        if((Gesture).menu_open){throw 'Cancelled row move retained its menu'}
+        if($finished.state.menu_open){throw 'Cancelled row move retained its menu'}
     }else{
         Wait-Until {(Rows) -ne $before} 'Completed layer move did not change order'
         $after=Rows
         $current=(Model).state.layer_tools.editing_layer
         if($current.id -ne $editing.id -or $current.mask_selected -ne $editing.mask_selected -or
             @((Model).state.layers|Where-Object id -eq $Layer)[0].selected -ne $selected){throw 'Drop activated a child control or changed the drawing target'}
-        if(!(Gesture).last_release.commit){throw 'Released layer move was not accepted'}
+        if(!$finished.state.last_release.commit){throw 'Released layer move was not accepted'}
         Undo-Redo $before $after
     }
 }
@@ -261,13 +266,15 @@ try {
     Press "layer-$created-visibility" $created
     if($Device -eq 'mouse'){
         Start-Sleep -Milliseconds 800
-        if((Gesture).menu_open -or (Gesture).phase -eq 'held'){throw 'Stationary mouse row hold opened a menu'}
+        $g=Gesture
+        if($g.menu_open -or $g.phase -eq 'held'){throw 'Stationary mouse row hold opened a menu'}
         [CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()
     }else{
-        Wait-Until {(Gesture).phase -eq 'held' -and (Gesture).menu_open} 'Row hold did not show its context menu'
+        Wait-Until {$g=Gesture;$g.phase -eq 'held' -and $g.menu_open} 'Row hold did not show its context menu'
         [CapyRowPointer]::Up()
-        Wait-Until {(Gesture).phase -eq 'idle'} 'Held release retained a pointer'
-        if(!(Gesture).menu_open){throw 'Held release dismissed its menu'}
+        $finished=@{state=$null}
+        Wait-Until {$finished.state=Gesture;$finished.state.phase -eq 'idle'} 'Held release retained a pointer'
+        if(!$finished.state.menu_open){throw 'Held release dismissed its menu'}
         Dismiss
     }
     if((Rows) -ne $before){throw 'Held/cancelled release activated visibility'}
@@ -287,8 +294,10 @@ try {
         $at=Point "layer-$created-name"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x-90;y=$at.y}
-        Wait-Until {(Gesture).source_swipe -gt 0} 'Partial swipe did not reach the native row'
-        $partial=Gesture;[CapyRowPointer]::Up()
+        $swipe=@{state=$null}
+        Wait-Until {$swipe.state=Gesture;$swipe.state.source_swipe -gt 0} 'Partial swipe did not reach the native row'
+        $partial=$swipe.state;[CapyRowPointer]::Up()
+        $swipeStages.Add(@{stage='partial';gesture=$partial})
         if($partial.source_swipe -le 0 -or $partial.source_grip_opacity -le 0 -or $partial.source_grip_opacity -ge .6){throw 'Partial swipe did not fade the retained grip'}
         Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Left swipe did not reveal Delete'
         Record-Swipe 'delete-opened'
@@ -494,7 +503,7 @@ try {
             [CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()
         }else{
             [CapyRowPointer]::Up()
-            Wait-Until {(Gesture).phase -eq 'idle' -and (Gesture).menu_open} 'Held presentation release did not retain its menu'
+            Wait-Until {$g=Gesture;$g.phase -eq 'idle' -and $g.menu_open} 'Held presentation release did not retain its menu'
             Dismiss
         }
         if((Rows) -ne $before){throw 'Held presentation release activated visibility'}
@@ -537,7 +546,7 @@ try {
         $at=Point "layer-$group-content";$to=Point 'drawing-canvas'
         [CapyRowPointer]::Down('mouse',$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To $to
-        Wait-Until {(Gesture).phase -eq 'dragging' -and (Gesture).source -eq $group -and (Gesture).captured} 'Fast mouse exit from the group row lost its pickup'
+        Wait-Until {$g=Gesture;$g.phase -eq 'dragging' -and $g.source -eq $group -and $g.captured} 'Fast mouse exit from the group row lost its pickup'
         [CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()
         Wait-Until {(Gesture).phase -eq 'idle'} 'Fast mouse exit cancellation retained its contact'
         if((Rows) -ne $before -or @((Model).state.layers|Where-Object id -eq $group)[0].collapsed){throw 'Fast mouse exit activated the group or changed layer order'}
@@ -589,8 +598,9 @@ try {
         Start-Sleep -Milliseconds 35
         [CapyRowPointer]::Up()
         Wait-Until {$scroll.Current.VerticalScrollPercent -gt .5} 'Early pen/touch row movement did not scroll the native list'
-        Wait-Until {(Gesture).phase -eq 'idle'} 'Native scrolling retained a reorder contact'
-        if((Rows) -ne $before -or (Gesture).menu_open){throw 'Native scrolling changed the document or opened a menu'}
+        $finished=@{state=$null}
+        Wait-Until {$finished.state=Gesture;$finished.state.phase -eq 'idle'} 'Native scrolling retained a reorder contact'
+        if((Rows) -ne $before -or $finished.state.menu_open){throw 'Native scrolling changed the document or opened a menu'}
     }
     $script:case='mouse-scrollbar-transition'
     $viewport=Layer-Viewport
@@ -612,8 +622,9 @@ try {
     [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
     Move-To @{x=[int]($viewport.X+$viewport.Width*.5);y=[int]($viewport.Bottom-4)}
     if($Device -ne 'mouse'){Wait-Until {@(Layer-Scrollbars).Count -eq 0} 'First direct handle contact retained the mouse scrollbar'}
-    Wait-Until {(Gesture).phase -eq 'dragging' -and $scroll.Current.VerticalScrollPercent -gt 60} 'Accepted drag did not keep scrolling after its source left the viewport'
-    if((Gesture).source -ne $latest -or !(Gesture).captured){throw 'Auto-scroll lost the original source or capture'}
+    $edge=@{state=$null}
+    Wait-Until {$scrolled=$scroll.Current.VerticalScrollPercent -gt 60;$edge.state=Gesture;$edge.state.phase -eq 'dragging' -and $scrolled} 'Accepted drag did not keep scrolling after its source left the viewport'
+    if($edge.state.source -ne $latest -or !$edge.state.captured){throw 'Auto-scroll lost the original source or capture'}
     if($Device -eq 'mouse'){[CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()}else{[CapyRowPointer]::Cancel()}
     Wait-Until {(Gesture).phase -eq 'idle'} 'Edge-scroll cancellation retained a contact'
     if((Rows) -ne $before){throw 'Canceled edge-scroll changed layer order'}

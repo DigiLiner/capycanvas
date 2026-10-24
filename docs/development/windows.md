@@ -1167,6 +1167,8 @@ the focused header journeys also check placement cancellation and keyboard input
   scope. Expected values must not share names with the helper's parameters.
 - **One snapshot per assertion.** Read related fields from one state file; check
   its `process_id`, `window_id` and freshness.
+  Retain successful native gesture readiness snapshots for immediate source,
+  device, grip, capture and release assertions; do not reread between them.
 - **Own the test processes.** A fixture run directly can leave its app running
   for inspection after failure; close it before rebuilding. The private-desktop
   and VM runners preserve evidence and close the processes they own.
