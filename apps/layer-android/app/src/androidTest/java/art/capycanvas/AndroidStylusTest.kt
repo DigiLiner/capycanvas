@@ -71,4 +71,28 @@ class AndroidStylusTest {
             assertEquals(4.0, samples[8], 0.0)
         } finally { event.recycle() }
     }
+
+    @Test fun diagonalInclinationBecomesProjectedAnglesForEveryStylusSource() {
+        for (source in listOf(InputDevice.SOURCE_STYLUS,
+            InputDevice.SOURCE_TOUCHSCREEN or InputDevice.SOURCE_MOUSE or InputDevice.SOURCE_STYLUS)) {
+            val properties = arrayOf(MotionEvent.PointerProperties().apply {
+                id = 7; toolType = MotionEvent.TOOL_TYPE_STYLUS
+            })
+            fun pose(azimuth: Float) = coordinates(azimuth).apply {
+                setAxisValue(MotionEvent.AXIS_TILT, (PI / 3).toFloat())
+            }
+            val event = MotionEvent.obtain(100, 100, MotionEvent.ACTION_MOVE, 1, properties,
+                arrayOf(pose((-PI / 4).toFloat())), 0, 0, 1f, 1f, 0, 0, source, 0)
+            try {
+                event.addBatch(105, arrayOf(pose((-PI / 3).toFloat())), 0)
+                val samples = DoubleArray(18)
+                packPointerSamples(event, 0, 2, event.historySize, false, false, samples)
+                val diagonal = kotlin.math.atan2(kotlin.math.sqrt(3.0 / 8.0), .5)
+                assertEquals(diagonal, samples[3], .000001)
+                assertEquals(diagonal, samples[4], .000001)
+                assertEquals(kotlin.math.atan2(.75, .5), samples[12], .000001)
+                assertEquals(kotlin.math.atan2(kotlin.math.sqrt(3.0) / 4, .5), samples[13], .000001)
+            } finally { event.recycle() }
+        }
+    }
 }

@@ -275,7 +275,7 @@ pub struct StrokePoint {
     pub position: Point,
     /// Normalized device pressure in the inclusive range `0..=1`.
     pub pressure: f32,
-    /// Normalized pen tilt vector. Zero when unavailable.
+    /// Barrel direction in document axes, with length equal to inclination in radians.
     pub tilt: [f32; 2],
     /// Barrel rotation in radians. Zero when unavailable.
     pub twist: f32,

@@ -16,6 +16,7 @@ import android.view.ViewConfiguration
 import android.view.SurfaceView
 import androidx.core.util.size
 import org.json.JSONArray
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -292,6 +293,8 @@ internal fun packPointerSamples(event: MotionEvent, index: Int, phase: Int, hist
         fun axis(axis: Int): Float = if (historical) event.getHistoricalAxisValue(axis, index, h) else event.getAxisValue(axis, index)
         val tilt = axis(MotionEvent.AXIS_TILT)
         val orientation = axis(MotionEvent.AXIS_ORIENTATION)
+        val lean = sin(tilt)
+        val upright = cos(tilt).coerceAtLeast(0f)
         val time = if (Build.VERSION.SDK_INT >= 34) {
             if (historical) event.getHistoricalEventTimeNanos(h) else event.eventTimeNanos
         } else if (historical) event.getHistoricalEventTime(h) * 1_000_000L else event.eventTime * 1_000_000L
@@ -300,8 +303,8 @@ internal fun packPointerSamples(event: MotionEvent, index: Int, phase: Int, hist
         samples[offset + 1] = (if (historical) event.getHistoricalY(index, h) else event.getY(index)).toDouble()
         samples[offset + 2] = if (mouse) 1.0 else (if (historical) event.getHistoricalPressure(index, h) else event.getPressure(index)).toDouble()
         // Android azimuth points toward the tip; shared tilt points toward the barrel.
-        samples[offset + 3] = (-sin(orientation) * tilt).toDouble()
-        samples[offset + 4] = (cos(orientation) * tilt).toDouble()
+        samples[offset + 3] = atan2(-sin(orientation) * lean, upright).toDouble()
+        samples[offset + 4] = atan2(cos(orientation) * lean, upright).toDouble()
         samples[offset + 5] = if (barrelTwist) axis(MotionEvent.AXIS_RZ).toDouble() else 0.0
         samples[offset + 6] = axis(MotionEvent.AXIS_DISTANCE).toDouble()
         samples[offset + 7] = time.toDouble()

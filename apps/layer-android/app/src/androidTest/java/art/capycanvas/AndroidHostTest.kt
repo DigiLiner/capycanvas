@@ -2706,6 +2706,124 @@ class AndroidHostTest {
         assertNull(host.actionError)
     }
 
+    @Test fun physicalTiltControlsDryBrushCursorAndPigment() {
+        fun <T> native(block: (Long) -> T): T = runBlocking { host.withNative(block) }
+        fun invoke(command: String) = action(obj("type" to "invoke", "command" to command))
+        fun recording(action: String) = native { Native.query(it, obj("type" to "stroke_recording", "action" to action).toString()) }
+        val directory = File(compose.activity.getExternalFilesDir(null), "validation/physical-tilt").apply { mkdirs() }
+        val report = JSONArray()
+        val inputs = JSONArray()
+        var inclination = 0.0
+        var azimuth = 0.0
+        fun send(phase: Int) = instrumentation.runOnMainSync {
+            val canvas = findCanvas(compose.activity.window.decorView)!!
+            val properties = MotionEvent.PointerProperties().apply { id = 7; toolType = MotionEvent.TOOL_TYPE_STYLUS }
+            val coords = MotionEvent.PointerCoords().apply {
+                x = canvas.width * .5f; y = canvas.height * .5f; pressure = .9f
+                orientation = kotlin.math.atan2(-kotlin.math.cos(azimuth), kotlin.math.sin(azimuth)).toFloat()
+                setAxisValue(MotionEvent.AXIS_TILT, inclination.toFloat())
+            }
+            val now = SystemClock.uptimeMillis()
+            val event = MotionEvent.obtain(now - 20, now, phase, 1, arrayOf(properties), arrayOf(coords),
+                0, 0, 1f, 1f, 1, 0, InputDevice.SOURCE_TOUCHSCREEN or InputDevice.SOURCE_STYLUS, 0)
+            inputs.put(obj("time_ms" to now, "phase" to phase, "tilt" to inclination, "orientation" to coords.orientation,
+                "expected_projected" to JSONArray(listOf(kotlin.math.atan2(kotlin.math.sin(inclination) * kotlin.math.cos(azimuth), kotlin.math.cos(inclination)),
+                    kotlin.math.atan2(kotlin.math.sin(inclination) * kotlin.math.sin(azimuth), kotlin.math.cos(inclination))))))
+            try { assertTrue(if (phase == MotionEvent.ACTION_HOVER_MOVE) canvas.dispatchGenericMotionEvent(event) else canvas.dispatchTouchEvent(event)) }
+            finally { event.recycle() }
+        }
+        fun cursor(mode: String) = action(obj("type" to "restore_settings", "settings" to
+            JSONObject(state().getJSONObject("settings").toString()).put("cursor", mode).put("feedback", false).put("platform_prediction", false)))
+        fun screen(name: String): IntArray {
+            settle()
+            val image = instrumentation.uiAutomation.takeScreenshot()
+            val origin = IntArray(2)
+            var left = 0; var top = 0
+            instrumentation.runOnMainSync {
+                val canvas = findCanvas(compose.activity.window.decorView)!!
+                canvas.getLocationOnScreen(origin)
+                left = origin[0] + canvas.width / 2 - 128; top = origin[1] + canvas.height / 2 - 128
+            }
+            val crop = Bitmap.createBitmap(image, left, top, 256, 256)
+            File(directory, "$name.png").outputStream().use { crop.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            return IntArray(256 * 256).also { crop.getPixels(it, 0, 256, 0, 0, 256, 256); crop.recycle(); image.recycle() }
+        }
+        fun moments(width: Int, height: Int, weight: (Int) -> Double): JSONObject {
+            var mass = 0.0; var x = 0.0; var y = 0.0; var xx = 0.0; var xy = 0.0; var yy = 0.0
+            for (row in 0 until height) for (column in 0 until width) {
+                val w = weight(row * width + column)
+                mass += w; x += column * w; y += row * w
+                xx += column * column * w; xy += column * row * w; yy += row * row * w
+            }
+            assertTrue("The measured image contains the cursor or pigment", mass > 100)
+            val a = xx / mass - x * x / (mass * mass); val b = xy / mass - x * y / (mass * mass); val d = yy / mass - y * y / (mass * mass)
+            val spread = kotlin.math.hypot(a - d, 2 * b)
+            return obj("aspect" to kotlin.math.sqrt((a + d + spread) / (a + d - spread)), "angle" to (.5 * kotlin.math.atan2(2 * b, a - d)))
+        }
+        fun axisError(actual: Double) = kotlin.math.abs(kotlin.math.atan2(kotlin.math.sin(2 * (actual - azimuth)), kotlin.math.cos(2 * (actual - azimuth)))) / 2
+        host.createDrawing(1024, 1024)
+        compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
+        invoke("fit_canvas")
+        val brushes = host.catalog.array("brush_categories").objects().flatMap { it.array("brushes").objects() }
+        action(obj("type" to "set_color", "rgba" to JSONArray(listOf(0, 0, 0, 1))))
+        recording("start")
+        try {
+            for (theme in listOf("light", "dark")) for (brushName in listOf("Pencil", "Charcoal")) {
+                action(obj("type" to "set_theme", "theme" to theme))
+                action(obj("type" to "select_brush", "id" to brushes.first { it.getString("label") == brushName }.getInt("id")))
+                action(obj("type" to "set_brush_size", "value" to 64))
+                compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
+                var writingCursor = 0.0; var writingInk = 0.0
+                for ((degrees, axis) in listOf(0 to -45, 40 to -45, 60 to -45, 40 to 45, 60 to 45)) {
+                    invoke("clear_layer"); inclination = Math.toRadians(degrees.toDouble()); azimuth = Math.toRadians(axis.toDouble())
+                    val name = "$theme-$brushName-$degrees-$axis"
+                    cursor("none"); send(MotionEvent.ACTION_HOVER_MOVE)
+                    val emptyScreen = screen("$name-empty")
+                    cursor("brush_size"); send(MotionEvent.ACTION_HOVER_MOVE)
+                    val shown = screen("$name-cursor")
+                    val cursorShape = moments(256, 256) { index -> (0..2).sumOf { channel ->
+                        kotlin.math.abs(((emptyScreen[index] shr (channel * 8)) and 255) - ((shown[index] shr (channel * 8)) and 255)).toDouble()
+                    }.let { if (it > 24) it else 0.0 } }
+                    cursor("none"); settle()
+                    val empty = gradientOutput()
+                    send(MotionEvent.ACTION_DOWN); send(MotionEvent.ACTION_MOVE); send(MotionEvent.ACTION_UP); settle()
+                    val painted = gradientOutput()
+                    File(directory, "$name.rgba").writeBytes(painted)
+                    val extent = java.nio.ByteBuffer.wrap(painted).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    val ink = moments(extent.int, extent.int) { index -> (0..3).sumOf { channel ->
+                        kotlin.math.abs((painted[8 + index * 4 + channel].toInt() and 255) - (empty[8 + index * 4 + channel].toInt() and 255)).toDouble()
+                    } }
+                    val row = obj("theme" to theme, "brush" to brushName, "inclination_degrees" to degrees, "azimuth_degrees" to axis, "cursor" to cursorShape, "ink" to ink)
+                    report.put(row); File(directory, "geometry.json").writeText(report.toString(2))
+                    if (degrees == 0) {
+                        assertTrue("Upright cursor is round: $row", cursorShape.getDouble("aspect") < 1.2)
+                    } else {
+                        assertTrue("Cursor follows physical barrel direction: $row", axisError(cursorShape.getDouble("angle")) < .16)
+                        assertTrue("Pigment follows physical barrel direction: $row", axisError(ink.getDouble("angle")) < .16)
+                        if (degrees == 40) {
+                            writingCursor = cursorShape.getDouble("aspect"); writingInk = ink.getDouble("aspect")
+                            assertTrue("Writing pigment has the narrow contact: $row", writingInk in 1.25..1.85)
+                        } else {
+                            assertTrue("Side cursor is wider than writing: $row", cursorShape.getDouble("aspect") > writingCursor * 1.25)
+                            assertTrue("Side pigment is wider than writing: $row", ink.getDouble("aspect") > writingInk * 1.25)
+                            assertTrue("Physical 60-degree tilt reaches the side pose: $row", ink.getDouble("aspect") > if (brushName == "Pencil") 3.4 else 2.125)
+                        }
+                    }
+                }
+            }
+        } finally {
+            File(directory, "api-inputs.json").writeText(inputs.toString(2))
+            val raw = native { handle ->
+                Native.query(handle, obj("type" to "stroke_recording", "action" to "stop").toString())
+                Native.strokeRecordingData(handle).also { Native.query(handle, obj("type" to "stroke_recording", "action" to "saved").toString()) }
+            }
+            File(directory, "tilt.capystrokes").outputStream().use { output ->
+                output.write("CAPYPEN4".toByteArray(Charsets.US_ASCII)); java.util.zip.GZIPOutputStream(output).use { it.write(raw) }
+            }
+        }
+        assertNull(host.failure); assertNull(host.actionError)
+    }
+
     @Test fun cursorHidesWhileDrawingAndReturnsOnRelease() {
         val saved = JSONObject(state().getJSONObject("settings").toString())
         val brush = JSONObject(state().getJSONObject("brush").toString())

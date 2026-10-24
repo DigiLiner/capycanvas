@@ -74,7 +74,7 @@ try {
   for (const theme of ['light', 'dark']) {
     process.env.LAYER_TEST_ARTIFACTS = `${directory}/${theme}`;
     await evaluate(`layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}})`);
-    await checkContactBrushes({call, evaluate, settle});
+    await checkContactBrushes({call, evaluate, settle, penTilt: false});
     assert.deepEqual(await evaluate('safariGpuErrors'), []);
     console.log(`Safari ${theme}: startup, visible strokes and Undo/Redo passed`);
   }

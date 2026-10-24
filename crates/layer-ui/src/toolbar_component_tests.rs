@@ -406,7 +406,7 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         assert_eq!((brush.flow,dry.loading,brush.contact.unwrap().pressure_gain),(1.,loading,gain),"{preset:?}: authored defaults");
         assert_eq!(material.value,loading);
         assert_eq!(dry.softness,0.05);
-        assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 45° long axis");
+        assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 40° long axis");
         let extent=if preset==P::PastelBlock {1.95} else {poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max)};
         for (pose,expected) in dry.poses.iter().zip(poses) {for axis in 0..2 {
             assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected[axis]/extent).abs()<2e-5,
@@ -416,10 +416,10 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         assert_eq!(support_brush.angle_radians,0.);
         assert_eq!(support_brush.shape,layer_core::BrushShape::default());
         assert_eq!(support_brush.path,layer_core::BrushPath::default());
-        for tilt in [0.,0.5,0.85] {for pressures in [[0.;4],[0.15;4],[0.45;4],[1.;4],[0.,0.15,0.45,1.]] {
+        for tilt in [0f32,40.,60.] {for pressures in [[0.;4],[0.15;4],[0.45;4],[1.;4],[0.,0.15,0.45,1.]] {
             let points:Vec<_>=(0..5).map(|i|layer_core::StrokePoint {
                 position:layer_core::Point{x:24.+i.min(3) as f32*80./3.,y:64.},pressure:pressures[i.min(3)],
-                tilt:[tilt*std::f32::consts::FRAC_PI_2,0.],twist:0.,elapsed_micros:i as u32*4000,
+                tilt:[tilt.to_radians(),0.],twist:0.,elapsed_micros:i as u32*4000,
             }).collect();
             let stroke=layer_core::Stroke::new(layer_core::StrokeId(1),s.engine.document().working.target.unwrap(),
                 layer_core::StrokeTool::Brush,support_brush.clone(),points).unwrap();

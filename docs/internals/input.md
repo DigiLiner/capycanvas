@@ -15,6 +15,17 @@ converts its native units into that contract and preserves chronological order.
 History delivered with an event is often called *coalesced input*; it is measured
 input that should not be confused with prediction.
 
+`PenEvent.tilt_radians` contains signed barrel angles projected onto the surface
+XZ and YZ planes, as in [Pointer Events](https://www.w3.org/TR/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle).
+Android converts its scalar inclination and tip orientation into those projected
+angles; UIKit derives them from altitude and azimuth. Shared `to_stroke_point`
+converts the projections into a barrel-direction vector whose length is the
+physical inclination from the surface normal, in radians. Camera rotation and
+reflection act on that vector without changing its length. Painting, hover,
+prediction and estimate corrections share this conversion. Authored `StrokePoint`
+tilt retains that vector, so replay does not convert it again. At exactly flat
+dual-axis projections, the otherwise ambiguous direction is the signed diagonal.
+
 Input also identifies the camera transform used when it was collected. Queued
 samples must not move to a different document position merely because the camera
 changed before they were processed. The shared engine converts surface positions

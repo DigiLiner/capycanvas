@@ -45,7 +45,7 @@ pub struct PointerBatch<'a> {
     pub id: u64,
     pub tool: u8,
     pub button: u8,
-    /// Records: x/y, pressure, tilt x/y, twist, distance, monotonic ns, phase.
+    /// Records: x/y, pressure, projected XZ/YZ tilt radians, twist, distance, monotonic ns, phase.
     /// Phase 0 hover, 1 down, 2 move, 3 up, 4 cancel. Tool 0 pen, 1 mouse,
     /// 2 eraser, 3 touch. Pointer routing is decided by the shared core.
     pub records: &'a [f64],

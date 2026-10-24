@@ -30,9 +30,10 @@ real endpoint. The cursor tracks real input, so predicted ink can run ahead of i
   AppKit shows a blank cursor there and the open hand while panning; leaving the
   canvas restores the arrow unless a contact is captured. iPadOS hides the
   pointer the same way and shows the system pointer while panning.
-- **Tilt.** UIKit tilt comes from the Pencil's altitude and azimuth and points
-  toward the barrel. `NSEvent.tilt` has its y axis pointing up, so AppKit negates
-  it, as GTK's macOS backend and Qt do.
+- **Tilt.** UIKit derives projected XZ/YZ barrel angles from the Pencil's altitude
+  and azimuth. `NSEvent.tilt` has its y axis pointing up, so AppKit negates it.
+  Shared Rust converts projected angles into a physical inclination and barrel
+  direction before camera transforms, brush evaluation and cursor geometry.
 - **Hover.** Pencil hover ends on recognizer exit and on cancellation; both send
   the shared cancel phase to clear the cursor. An active Pencil contact
   suppresses hover updates.

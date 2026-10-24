@@ -24,6 +24,9 @@ pub struct BrushDryMedia {
 }
 
 impl BrushDryMedia {
+    pub const WRITING_TILT_RADIANS: f32 = std::f32::consts::PI * (2. / 9.);
+    pub const SIDE_TILT_RADIANS: f32 = std::f32::consts::PI / 3.;
+
     pub fn extent(self) -> f32 {
         self.poses.iter().map(|p| if self.corner > 0. { p.radii[0].hypot(p.radii[1]) }
             else { p.radii[0].max(p.radii[1]) }).fold(0., f32::max)
@@ -34,8 +37,13 @@ impl BrushDryMedia {
             .min(pair[0].radii[1].max(pair[1].radii[1]) / aspect)).fold(0., f32::max)
     }
 
-    pub fn pose(self, tilt: f32) -> BrushDryPose {
-        let (i, t) = if tilt < 0.5 { (0, tilt * 2.) } else { (1, (tilt - 0.5) / 0.35) };
+    pub fn pose(self, inclination_radians: f32) -> BrushDryPose {
+        let (i, t) = if inclination_radians < Self::WRITING_TILT_RADIANS {
+            (0, inclination_radians / Self::WRITING_TILT_RADIANS)
+        } else {
+            (1, (inclination_radians - Self::WRITING_TILT_RADIANS)
+                / (Self::SIDE_TILT_RADIANS - Self::WRITING_TILT_RADIANS))
+        };
         let t = t.clamp(0., 1.);
         let w = t * t * (3. - 2. * t);
         let a = self.poses[i];

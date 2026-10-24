@@ -7,7 +7,9 @@ use layer_render::CanvasRenderer;
 #[ignore = "requires a private Wayland display and GPU"]
 fn native_contact_brushes() {
     let app = native_test_app("art.capycanvas.ContactBrushes");
-    let w = fixture_workspace(&app);
+    let project = new_drawing(2048, 1536, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
+    let w = Workspace::with_project(&app, Some((project, None)));
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::default() });
     w.window.present();
     pump(1600);
     until(
@@ -91,23 +93,47 @@ fn native_contact_brushes() {
         pump(100);
         let dry = ui_session(&w).engine().configured_brush().contact
             .as_ref().is_some_and(|contact| contact.dry.is_some());
-        let tilts: &[u32] = if dry { &[0, 45, 77] } else { &[0] };
-        for &tilt in tilts {
+        let mut poses = vec![("0", [0., 0.])];
+        if dry { poses.extend([("40", [0., 40.]), ("60", [0., 60.])]); }
+        if matches!(preset, layer_core::DefaultBrushPreset::Pencil | layer_core::DefaultBrushPreset::Charcoal) {
+            poses.push(("60-diagonal", [50.76848, 50.76848]));
+        }
+        for (tilt, angles) in poses {
             let camera = state(&w).camera;
-            let column = if matches!(preset, layer_core::DefaultBrushPreset::Eraser | layer_core::DefaultBrushPreset::Spray) { 0 } else { row / 13 };
+            let column = if tilt == "60-diagonal" { 1 } else if matches!(preset, layer_core::DefaultBrushPreset::Eraser | layer_core::DefaultBrushPreset::Spray) { 0 } else { row / 13 };
             let base_y = if preset == layer_core::DefaultBrushPreset::Spray { 1450. } else { 150. + (row % 13) as f32 * 100. };
-            let region = [180 + column as u32 * 900, (base_y - 65.) as u32, 740, 130];
+            let region = if tilt == "60-diagonal" { [390 + column as u32 * 900, (base_y - 120.) as u32, 320, 240] }
+                else { [180 + column as u32 * 900, (base_y - 65.) as u32, 740, 130] };
             let before = contact_pixels(&w, region);
+            if tilt == "60-diagonal" {
+                w.dispatch(UiAction::Preferences { action: PreferenceAction::Edit {
+                    id: PreferenceId::Cursor, value: PreferenceValue::Choice(7),
+                } });
+                let now = glib::monotonic_time() as u64 * 1000;
+                w.cursor_input(Some(PenEvent { pressure: 0., tilt_radians: angles.map(f32::to_radians),
+                    ..pen_event(&camera, [550. + column as f32 * 900., base_y], PenPhase::Hover, now) }));
+                pump(100);
+                let cursor = ui_session_mut(&w).canvas_cursor().unwrap();
+                let [mut xx, mut xy, mut yy] = [0.; 3];
+                for segment in cursor.segments.iter().filter(|s| s.marker <= 1.) {
+                    let [x, y] = [segment.from[0] - cursor.center[0], segment.from[1] - cursor.center[1]];
+                    xx += x * x; xy += x * y; yy += y * y;
+                }
+                assert!(xy / (xx + yy) > 0.2 && (xx - yy).abs() / (xx + yy) < 0.05,
+                    "{preset:?}: the 60-degree diagonal cursor follows the physical pen: {xx}/{xy}/{yy}");
+                capture_reference(&w, &format!("{output}/{id:02}-{preset:?}-tilt{tilt}-cursor.png"), 1.);
+                w.cursor_input(None);
+            }
             for i in 0..=64 {
                 let t = i as f32 / 64.;
-                let x = 200. + column as f32 * 900. + 700. * t;
-                let y = base_y + (t * std::f32::consts::TAU).sin() * 16.;
+                let x = if tilt == "60-diagonal" { 550. + column as f32 * 900. } else { 200. + column as f32 * 900. + 700. * t };
+                let y = if tilt == "60-diagonal" { base_y } else { base_y + (t * std::f32::consts::TAU).sin() * 16. };
                 let now = glib::monotonic_time() as u64 * 1000;
                 let phase = match i { 0 => PenPhase::Down, 64 => PenPhase::Up, _ => PenPhase::Move };
                 w.input.send(&w, PenEvent {
                     device_id: 94, timestamp_ns: now,
                     pressure: 0.15 + 0.85 * (t * std::f32::consts::PI).sin().max(0.).powf(0.65),
-                    tilt_radians: [0., (tilt as f32).to_radians()],
+                    tilt_radians: angles.map(f32::to_radians),
                     ..pen_event(&camera, [x, y], phase, now)
                 });
                 pump(5);
@@ -116,6 +142,17 @@ fn native_contact_brushes() {
             committed += 1;
             let painted = contact_pixels(&w, region);
             assert_ne!(before, painted, "{preset:?} tilt{tilt}: visible stroke");
+            if tilt == "60-diagonal" {
+                let [mut xx, mut xy, mut yy] = [0.; 3];
+                for (index, (before, after)) in before.iter().zip(&painted).enumerate() {
+                    let weight = before.iter().zip(after).take(3).map(|(a, b)| (a - b).abs()).sum::<f32>();
+                    let x = (index as u32 % region[2]) as f32 - 160.;
+                    let y = (index as u32 / region[2]) as f32 - 120.;
+                    xx += weight * x * x; xy += weight * x * y; yy += weight * y * y;
+                }
+                assert!(xy / (xx + yy) > 0.1 && (xx - yy).abs() / (xx + yy) < 0.2,
+                    "{preset:?}: diagonal pigment follows the cursor: {xx}/{xy}/{yy}");
+            }
             assert!(!w.status.is_visible(), "{preset:?}: {}", w.status.text());
             assert_eq!(ui_session(&w).engine().metrics().committed_strokes, committed,
                 "{preset:?}: GTK must commit exactly one stroke");

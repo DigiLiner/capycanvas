@@ -722,7 +722,7 @@ impl DabGenerator {
                 );
             } else if let Some(dry) = contact.dry {
                 contact_tilt = (point.point.tilt[0].hypot(point.point.tilt[1]) / std::f32::consts::FRAC_PI_2).clamp(0., 1.);
-                let pose = dry.pose(contact_tilt);
+                let pose = dry.pose(point.point.tilt[0].hypot(point.point.tilt[1]));
                 radii[0] *= pose.radii[0];
                 radii[1] *= pose.radii[1];
                 dry_relief = Some(pose.relief);
@@ -782,7 +782,8 @@ impl DabGenerator {
                     values.pull.clamp(0.0, 1.0),
                     (values.deposit * charge).clamp(0.0, 1.0),
                     dry_relief.map_or(values.deform_strength.clamp(0., 1.), |_| {
-                        let t = (contact_tilt * 2.).clamp(0., 1.);
+                        let t = (contact_tilt * std::f32::consts::FRAC_PI_2
+                            / layer_core::BrushDryMedia::WRITING_TILT_RADIANS).clamp(0., 1.);
                         t*t*(3.-2.*t)
                     }),
                 ],
@@ -2163,6 +2164,43 @@ mod tests {
         generator.append(point(0.0, 1.0, 0), &brush, &mut dabs);
         generator.append(point(220.0, 1.0, 20_000), &brush, &mut dabs);
         assert!(dabs.last().unwrap().material[2] < dabs.first().unwrap().material[2] * 0.2);
+    }
+
+    #[test]
+    fn dry_pose_keys_use_physical_inclination_independent_of_azimuth() {
+        use layer_core::DefaultBrushPreset as P;
+        use crate::input::{to_stroke_point, PressureCurve, ViewTransform};
+        for preset in [P::Pencil, P::PointyPencil, P::ShadingPencil, P::Charcoal,
+            P::Chalk, P::PastelBlock, P::Crayon] {
+            let brush = layer_core::default_brush(preset);
+            let dry = brush.contact.unwrap().dry.unwrap();
+            for (key, degrees) in [0f32, 40., 60.].into_iter().enumerate() {
+                let inclination = degrees.to_radians();
+                for azimuth in [-135f32, -45., 0., 30., 45., 90.] {
+                    let (sin, cos) = azimuth.to_radians().sin_cos();
+                    let mut event = crate::test_support::event(1, crate::PenPhase::Hover, 20.);
+                    event.pressure = 1.;
+                    event.tilt_radians = [(inclination.sin()*cos).atan2(inclination.cos()),
+                        (inclination.sin()*sin).atan2(inclination.cos())];
+                    let point = to_stroke_point(event, ViewTransform::IDENTITY, PressureCurve::default(), 0);
+                    let mut generator = DabGenerator::default();
+                    let pose = generator.characterize(point);
+                    let dab = generator.evaluate(pose, &brush).dab;
+                    for (actual, expected) in dab.radii.into_iter().zip(dry.poses[key].radii) {
+                        assert!((actual - expected*brush.diameter*0.5).abs() < 1e-5,
+                            "{preset:?}: {degrees}° at azimuth {azimuth} uses pose {key}: {dab:?}");
+                    }
+                    for (actual, expected) in dab.contact[1..].iter().zip(dry.poses[key].relief) {
+                        assert!((actual - expected).abs() < 1e-6, "{preset:?}: pose relief");
+                    }
+                    if key > 0 {
+                        assert!((dab.rotation[0]-cos).abs() < 1e-6 && (dab.rotation[1]-sin).abs() < 1e-6,
+                            "{preset:?}: pose azimuth {azimuth}");
+                        assert_eq!(dab.material[3], 1.);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

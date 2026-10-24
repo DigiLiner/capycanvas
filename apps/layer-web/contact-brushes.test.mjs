@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 
 // Exercise real browser pen input, presentation and history on the device GPU.
-export async function checkContactBrushes({call, evaluate, settle}, photoUrl) {
+export async function checkContactBrushes({call, evaluate, settle, penTilt=true}, photoUrl) {
   const wait = condition => evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+120000;function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,30)}poll()})`);
   const action = async value => { await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`); await settle(); };
   const invoke = command => action({type:'invoke',command});
@@ -32,14 +32,22 @@ export async function checkContactBrushes({call, evaluate, settle}, photoUrl) {
     await invoke('fit_canvas');
     await action({type:'set_color',rgba:[0.08,0.015,0.25,1]});
     const region = await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1],width:Math.min(500,a[2]*r.width/c.viewport[0]*.7),height:Math.min(280,a[3]*r.height/c.viewport[1]*.55)}})()`);
+    const theme=await evaluate('layerApp.state().theme');
+    await evaluate(`window.contactTiltInput=null;layerApp.canvas.addEventListener('pointermove',event=>{window.contactTiltInput={kind:event.pointerType,x:event.tiltX,y:event.tiltY}},{once:true})`);
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',pointerType:'pen',x:region.x,y:region.y,buttons:0,tiltX:50.76848,tiltY:50.76848});
+    const deliveredTilt=await evaluate("contactTiltInput?.kind==='pen' && contactTiltInput.x>0 && contactTiltInput.y>0");
+    await evaluate('delete window.contactTiltInput');
+    if(penTilt)assert.ok(deliveredTilt,'The pen adapter must deliver native DOM pen tilt');
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',pointerType:'pen',x:1,y:1,buttons:0});
+    console.log(`Contact fixture: ${theme}, ${penTilt?'pen pressure and tilt':'mouse input'}`);
     const shot = async () => {
       await wait('!layerApp.app.canvas_work_pending()');
       await settle();
       await evaluate('layerApp.canvas.getContext("webgpu").getConfiguration().device.queue.onSubmittedWorkDone()');
       await settle();
       const {data}=await call('Page.captureScreenshot',{format:'png',clip:{x:region.x-region.width/2,y:region.y-region.height/2,width:region.width,height:region.height,scale:1}});
-      const pixels=await evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${data}';await image.decode();const c=new OffscreenCanvas(image.width,image.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(image,0,0);return [...x.getImageData(0,0,c.width,c.height).data]})()`);
-      return {data,pixels};
+      const image=await evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${data}';await image.decode();const c=new OffscreenCanvas(image.width,image.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(image,0,0);return {pixels:[...x.getImageData(0,0,c.width,c.height).data],width:image.width,height:image.height}})()`);
+      return {data,...image};
     };
     const delta=(a,b)=>a.reduce((n,v,i)=>n+(v!==b[i]),0);
     const expectPixels = async (expected, label) => {
@@ -53,10 +61,10 @@ export async function checkContactBrushes({call, evaluate, settle}, photoUrl) {
       await writeFile(`${directory}/${label.replace(/[^a-z0-9]+/gi,'-')}.png`,Buffer.from(actual.data,'base64'));
       historyFailures.push({label,changed});console.error(`${label}: ${changed} channels differ exactly`);
     };
-    const stroke = async (id, tilt=0) => {
+    const stroke = async (id, angles=[0,0], stationary=false) => {
       for(let i=0;i<=48;i++) {
         const t=i/48,down=i<48;
-        await call('Input.dispatchMouseEvent',{type:i===0?'mousePressed':down?'mouseMoved':'mouseReleased',pointerType:'pen',button:'left',buttons:down?1:0,clickCount:1,x:region.x+(t-.5)*region.width*.72,y:region.y+Math.sin(t*Math.PI*2)*region.height*.24,force:down?.2+.7*Math.sin(t*Math.PI):0,tiltX:0,tiltY:tilt});
+        await call('Input.dispatchMouseEvent',{type:i===0?'mousePressed':down?'mouseMoved':'mouseReleased',pointerType:'pen',button:'left',buttons:down?1:0,clickCount:1,x:region.x+(stationary?0:(t-.5)*region.width*.72),y:region.y+(stationary?0:Math.sin(t*Math.PI*2)*region.height*.24),force:down?.2+.7*Math.sin(t*Math.PI):0,tiltX:angles[0],tiltY:angles[1]});
         await settle();
       }
       await call('Input.dispatchMouseEvent',{type:'mouseMoved',pointerType:'pen',x:1,y:1,buttons:0});
@@ -74,17 +82,42 @@ export async function checkContactBrushes({call, evaluate, settle}, photoUrl) {
       await action({type:'set_brush_size',value:photoUrl?1000:70});
       await wait('layerApp.app.brush_ready()');
       assert.equal(await evaluate('layerApp.state().brush.preset'),id);
-      const tilts=[2,25,26,27,43,6,17].includes(id)?[0,45,77]:[0];
-      for(const tilt of tilts){
-        const label=`Brush ${id} tilt${tilt}`;
+      const poses=[['0',[0,0]]];
+      if(penTilt&&[2,25,26,27,43,6,17].includes(id))poses.push(['40',[0,40]],['60',[0,60]]);
+      if(penTilt&&[2,27].includes(id))poses.push(['60-diagonal',[50.76848,50.76848]]);
+      for(const [tilt,angles] of poses){
+        const label=`${theme} Brush ${id} tilt${tilt}`;
         const before=await shot();
-        await stroke(id,tilt);
+        if(tilt==='60-diagonal'){
+          await action({type:'preferences',action:{type:'edit',id:'cursor',value:7}});
+          await call('Input.dispatchMouseEvent',{type:'mouseMoved',pointerType:'pen',x:region.x,y:region.y,buttons:0,tiltX:angles[0],tiltY:angles[1]});
+          const cursor=await shot();
+          let xx=0,xy=0,yy=0,count=0;
+          for(let i=0;i<cursor.pixels.length;i+=4)if(cursor.pixels.slice(i,i+3).some((v,c)=>Math.abs(v-before.pixels[i+c])>16)){
+            const x=(i/4)%cursor.width-cursor.width/2,y=Math.floor(i/4/cursor.width)-cursor.height/2;
+            xx+=x*x;xy+=x*y;yy+=y*y;count++;
+          }
+          assert.ok(count>20&&xy/(xx+yy)>.2&&Math.abs(xx-yy)/(xx+yy)<.12,`${label}: the GPU cursor follows the physical pen (${count}, ${xx}/${xy}/${yy})`);
+          await writeFile(`${directory}/${theme}-${String(id).padStart(2,'0')}-tilt${tilt}-cursor.png`,Buffer.from(cursor.data,'base64'));
+          await action({type:'preferences',action:{type:'edit',id:'cursor',value:0}});
+          await call('Input.dispatchMouseEvent',{type:'mouseMoved',pointerType:'pen',x:1,y:1,buttons:0});
+        }
+        await stroke(id,angles,tilt==='60-diagonal');
         await wait(`layerApp.state().commands.find(c=>c.id==='undo')?.enabled`);
         // Wait for the committed native capture, not just an available Undo.
         await wait('layerApp.app.document_park_ready()');
         const painted=await shot();
         assert.ok(delta(before.pixels,painted.pixels)>100,`${label} leaves a visible stroke`);
-        await writeFile(`${directory}/${String(id).padStart(2,'0')}-tilt${tilt}.png`,Buffer.from(painted.data,'base64'));
+        if(tilt==='60-diagonal'){
+          let xx=0,xy=0,yy=0;
+          for(let i=0;i<painted.pixels.length;i+=4){
+            const weight=painted.pixels.slice(i,i+3).reduce((sum,v,c)=>sum+Math.abs(v-before.pixels[i+c]),0);
+            const x=(i/4)%painted.width-painted.width/2,y=Math.floor(i/4/painted.width)-painted.height/2;
+            xx+=weight*x*x;xy+=weight*x*y;yy+=weight*y*y;
+          }
+          assert.ok(xy/(xx+yy)>.1&&Math.abs(xx-yy)/(xx+yy)<.2,`${label}: diagonal pigment follows the cursor (${xx}/${xy}/${yy})`);
+        }
+        await writeFile(`${directory}/${theme}-${String(id).padStart(2,'0')}-tilt${tilt}.png`,Buffer.from(painted.data,'base64'));
         await invoke('undo');
         await expectPixels(before.pixels,`${label}: undo restores pixels`);
         await invoke('redo');

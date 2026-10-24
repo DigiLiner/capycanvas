@@ -66,6 +66,13 @@ GTK's `native_dry_brush_preparation` selects dry presets through the toolbar,
 reports each preparation time and the slowest main-loop iteration, then paints.
 Run it with `__GL_SHADER_DISK_CACHE=0` on NVIDIA to measure a cold driver.
 
+Tilt changes also run the engine's `projected_tilt` and
+`dry_pose_keys_use_physical_inclination_independent_of_azimuth` tests, Android's
+`AndroidStylusTest` and `AndroidHostTest#physicalTiltControlsDryBrushCursorAndPigment`,
+GTK's `native_contact_brushes`, and Web's `--contact-brushes` journey. The host
+journeys check physical writing and side poses, diagonal cursor and pigment
+geometry, and exact Undo/Redo where the journey supports history.
+
 Native compiler tests require two independent pipeline recipes to enter before
 either completes, keep data and optional work serial, hold cache finalization
 until required work finishes, and retire both workers without blocking teardown.

@@ -764,8 +764,8 @@ mod tests {
         assert_eq!(decoded, brush);
         let model = brush.contact.unwrap().dry.unwrap();
         assert_eq!(model.pose(0.), model.poses[0]);
-        assert_eq!(model.pose(0.5), model.poses[1]);
-        assert_eq!(model.pose(1.), model.poses[2]);
+        assert_eq!(model.pose(40f32.to_radians()), model.poses[1]);
+        assert_eq!(model.pose(60f32.to_radians()), model.poses[2]);
         for (softness, relief) in [(0., 0.), (f32::NAN, 0.), (0.07, -0.01), (0.07, f32::INFINITY)] {
             let dry = brush.contact.as_mut().unwrap().dry.as_mut().unwrap();
             dry.softness = softness;

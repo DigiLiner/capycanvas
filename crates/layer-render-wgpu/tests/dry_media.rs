@@ -237,9 +237,9 @@ fn pointy_tip_contrast_tracks_stylus_pose_when_motion_reverses() {
     brush.contact.as_mut().unwrap().paper = 0.;
     for (tilt, vertical, distance) in [
         ([0., 0.], true, 3),
-        ([0.5*std::f32::consts::FRAC_PI_2, 0.], true, 8),
-        ([0.85*std::f32::consts::FRAC_PI_2, 0.], true, 43),
-        ([0., 0.85*std::f32::consts::FRAC_PI_2], false, 43),
+        ([40f32.to_radians(), 0.], true, 8),
+        ([60f32.to_radians(), 0.], true, 43),
+        ([0., 60f32.to_radians()], false, 43),
     ] {
         let mut tip_and_back = Vec::new();
         for reverse in [false, true] {
@@ -284,7 +284,7 @@ fn pointy_tip_contrast_tracks_stylus_pose_when_motion_reverses() {
     let (sin, cos) = brush.angle_radians.sin_cos();
     let rotated = paint(brush, Run::default(), |t| {
         let travel = 160.*t-80.;
-        ([128.5-travel*sin, 128.5+travel*cos], 0.65, [std::f32::consts::FRAC_PI_4,0.])
+        ([128.5-travel*sin, 128.5+travel*cos], 0.65, [40f32.to_radians(),0.])
     });
     let alpha = |x: usize, y: usize| rotated.rgba[(y*256+x)*4+3];
     let (dx, dy) = ((8.*cos).round() as usize, (8.*sin).round() as usize);
@@ -445,7 +445,7 @@ fn dry_pose_keys_have_continuous_visible_contact() {
     for preset in PRESETS {
         let mut brush = default_brush(preset);
         brush.diameter = 90.;
-        for key in [0.5, 0.85] {
+        for key in [40. / 90., 60. / 90.] {
             let before = line(brush.clone(), 0.7, key-0.0001, Run::default());
             let after = line(brush.clone(), 0.7, key+0.0001, Run::default());
             after.assert_near(&before, 1, &format!("{preset:?} tilt key {key}"));

@@ -5452,14 +5452,16 @@ mod tests {
             correction.flags = SampleFlags(SampleFlags::CORRECTION.0 | SampleFlags::ESTIMATED.0);
             correction.surface_position.x = 12.;
             correction.pressure = 0.9;
-            correction.tilt_radians = [0.2, -0.3];
+            correction.tilt_radians = [std::f32::consts::FRAC_PI_4, -std::f32::consts::FRAC_PI_4];
             correction.twist_radians = 1.7;
             input.push(correction).unwrap();
             engine.render_frame().unwrap();
             let corrected = engine.builder.real_points()[0];
             assert_eq!(corrected.position, Point { x: 12., y: 16. });
             assert_eq!(corrected.pressure, 0.9);
-            assert_eq!(corrected.tilt, [0.2, -0.3]);
+            let axis = 2f32.sqrt().atan() / 2f32.sqrt();
+            assert!((corrected.tilt[0] - axis).abs() < 1e-6);
+            assert!((corrected.tilt[1] + axis).abs() < 1e-6);
             assert_eq!(corrected.twist, 1.7);
             let mut up = event(3, PenPhase::Up, -480.);
             up.surface_position.y = -284.;

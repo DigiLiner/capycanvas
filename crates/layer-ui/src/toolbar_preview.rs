@@ -256,8 +256,11 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(crate) fn stamp_request(&self) -> Result<(BrushStampRequest, f32), String> {
         let (brush, paper) = self.preview_key();
+        let tilt = if brush.contact.is_some_and(|c| c.dry.is_some()) {
+            layer_core::BrushDryMedia::WRITING_TILT_RADIANS
+        } else { std::f32::consts::FRAC_PI_4 };
         let point = StrokePoint { position: Point {x:0.,y:0.}, pressure: 1.,
-            tilt: [std::f32::consts::FRAC_PI_4, 0.], twist: 0., elapsed_micros: 0 };
+            tilt: [tilt, 0.], twist: 0., elapsed_micros: 0 };
         let target = self.engine().document().working.target.unwrap_or(layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::INVALID));
         let resolve = |brush: BrushSnapshot| -> Result<Vec<layer_render::Dab>, String> {
             if brush.execution == layer_core::BrushExecution::Liquify {

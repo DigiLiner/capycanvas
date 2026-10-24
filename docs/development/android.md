@@ -350,6 +350,12 @@ manual save checkpoints and undo/redo after an actual process death.
   `gradientToolPanelAndToolbarUseNativeGeometryContacts` exercises the tool
   panel, toolbar popup and canvas shapes. Run both in narrow and wide layouts;
   each covers light and dark themes.
+- `AndroidStylusTest` checks projected tilt packing for current and historical
+  samples, including combined stylus sources.
+  `AndroidHostTest#physicalTiltControlsDryBrushCursorAndPigment` drives physical
+  0°/40°/60° poses through `MotionEvent`, JNI and the GPU in both themes. It checks
+  Pencil and Charcoal cursor and pigment axes, writing-to-side contact growth,
+  and records native samples for comparison with the supplied API poses.
 - `AndroidLanguageTest`: every shipped language through Preferences in both
   themes, retained popup routes, typed numeric refusals, raw color and export
   drafts, profile metadata and prepared comparisons, saved Unicode drawings,

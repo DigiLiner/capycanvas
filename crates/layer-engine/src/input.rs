@@ -73,6 +73,7 @@ pub struct PenEvent {
     /// Position in physical surface pixels, never logical UI points.
     pub surface_position: Point,
     pub pressure: f32,
+    /// Signed barrel angles projected onto the surface XZ and YZ planes.
     pub tilt_radians: [f32; 2],
     pub twist_radians: f32,
     pub distance: f32,
@@ -156,7 +157,7 @@ pub fn to_stroke_point(
     StrokePoint {
         position: transform.map(event.surface_position),
         pressure: curve.map(event.pressure),
-        tilt: map_direction(event.tilt_radians),
+        tilt: map_direction(radial_tilt(event.tilt_radians)),
         twist: twist_axis[1]
             .atan2(twist_axis[0])
             .rem_euclid(std::f32::consts::TAU),
@@ -166,6 +167,22 @@ pub fn to_stroke_point(
             .saturating_div(1_000)
             .min(u32::MAX as u64) as u32,
     }
+}
+
+fn radial_tilt(angles: [f32; 2]) -> [f32; 2] {
+    let [(sx, cx), (sy, cy)] = angles.map(|angle| {
+        let (sin, cos) = angle.clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2).sin_cos();
+        (sin, cos.max(0.))
+    });
+    let mut direction = [sx * cy, sy * cx];
+    let mut length = direction[0].hypot(direction[1]);
+    if length == 0. && cx == 0. && cy == 0. {
+        direction = [sx, sy];
+        length = direction[0].hypot(direction[1]);
+    }
+    let inclination = length.atan2(cx * cy);
+    let scale = inclination / length.max(f32::MIN_POSITIVE);
+    direction.map(|axis| axis * scale)
 }
 
 /// The input-adapter half of a bounded, allocation-free SPSC queue.
@@ -360,9 +377,51 @@ mod tests {
     }
 
     #[test]
+    fn projected_tilt_angles_resolve_to_the_physical_pen_pose() {
+        let mut pen = event(1, false);
+        pen.tilt_radians = [0.75f32.atan2(0.5), (3f32.sqrt() / 4.).atan2(0.5)];
+        let point = to_stroke_point(pen, ViewTransform::IDENTITY, PressureCurve::default(), 0);
+        let inclination = point.tilt[0].hypot(point.tilt[1]);
+        let azimuth = point.tilt[1].atan2(point.tilt[0]);
+        assert!((inclination - std::f32::consts::PI / 3.).abs() < 1e-6,
+            "60° physical inclination became {}°", inclination.to_degrees());
+        assert!((azimuth - std::f32::consts::PI / 6.).abs() < 1e-6,
+            "30° physical azimuth became {}°", azimuth.to_degrees());
+    }
+
+    #[test]
+    fn projected_tilt_preserves_inclination_and_azimuth_through_every_quadrant() {
+        for degrees in [0f32, 10., 40., 60., 89.9] {
+            let inclination = degrees.to_radians();
+            for azimuth in [-170f32, -135., -90., -30., 0., 30., 45., 90., 150.] {
+                let (sin, cos) = azimuth.to_radians().sin_cos();
+                let mut pen = event(1, false);
+                pen.tilt_radians = [(inclination.sin() * cos).atan2(inclination.cos()),
+                    (inclination.sin() * sin).atan2(inclination.cos())];
+                let point = to_stroke_point(pen, ViewTransform::IDENTITY, PressureCurve::default(), 0);
+                for (actual, expected) in point.tilt.into_iter().zip([inclination * cos, inclination * sin]) {
+                    assert!((actual - expected).abs() < 5e-5,
+                        "inclination={degrees} azimuth={azimuth}: {} != {}", actual, expected);
+                }
+            }
+        }
+        let right_angle = std::f32::consts::FRAC_PI_2;
+        for (angles, expected) in [([0., 0.], [0., 0.]),
+            ([right_angle, 0.], [right_angle, 0.]), ([0., -right_angle], [0., -right_angle]),
+            ([right_angle, -right_angle], [right_angle / 2f32.sqrt(), -right_angle / 2f32.sqrt()])] {
+            let mut pen = event(1, false);
+            pen.tilt_radians = angles;
+            let point = to_stroke_point(pen, ViewTransform::IDENTITY, PressureCurve::default(), 0);
+            for (actual, expected) in point.tilt.into_iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-6, "{angles:?}: {actual} != {expected}");
+            }
+        }
+    }
+
+    #[test]
     fn stylus_pose_rotates_and_reflects_with_the_document_without_zooming_tilt() {
         let mut pen = event(1, false);
-        pen.tilt_radians = [0.6, 0.8];
+        pen.tilt_radians = [(1f32.tan() * 0.6).atan(), (1f32.tan() * 0.8).atan()];
         pen.twist_radians = 0.;
         let rotated = to_stroke_point(
             pen,

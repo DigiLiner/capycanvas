@@ -15,13 +15,16 @@ Their edge taper comes from missing paper contacts, with a narrow transition in
 pigment transfer. Contact geometry does not multiply the result by a broad opacity
 feather. Ink, paint, scumble and bristles retain their own material response.
 
-Each dry brush has three built-in poses: upright, writing at 45°, and side contact
-at 76.5°. Cubic Hermite interpolation resolves the dimensions and relief coefficients
-between keys; endpoint poses clamp outside their range. Tilt azimuth rotates the
+Each dry brush has three built-in poses: upright, writing at 40°, and side contact
+at 60° from the surface normal. Cubic Hermite interpolation resolves the dimensions
+and relief coefficients between keys; endpoint poses clamp outside their range. Tilt azimuth rotates the
 contact. Pressure changes its size through the existing size mapping. Displayed
 size is the long axis of the writing pose at full pressure. Other poses scale
 relative to that axis. The largest pose supplies a separate reference diameter
 for stroke retention and taper distances.
+The keys use physical inclination after the shared projected-angle input
+conversion, independently of tilt azimuth. Pointy Pencil's tip offset reaches its
+full writing-pose weight at the same 40° key. Brush-size previews use that key too.
 
 The accepted design defines the [analytic relief](../history/brushes/dry-media-contact.md#analytic-relief)
 and [contact and loading equations](../history/brushes/dry-media-contact.md#contact-and-loading).
