@@ -5865,7 +5865,7 @@ impl<'a> Decoder<'a> {
                     })
             })
             .collect::<Result<Vec<_>>>()?;
-        let (component_planes, _warnings) = if self.metadata.is_arithmetic && frame.is_progressive {
+        let (component_planes, warnings) = if self.metadata.is_arithmetic && frame.is_progressive {
             self.decode_arithmetic_progressive_planes(
                 frame,
                 &quant_tables,
@@ -5907,6 +5907,9 @@ impl<'a> Decoder<'a> {
                 &comp_block_sizes,
             )?
         };
+        if self.stop_on_warning && !warnings.is_empty() {
+            return Err(JpegError::CorruptData("JPEG raw decode warning".into()));
+        }
         let mut plane_widths: Vec<usize> = try_with_capacity(num_components, "decode scratch buffer")?;
         let mut plane_heights: Vec<usize> = try_with_capacity(num_components, "decode scratch buffer")?;
         for (ci, comp) in frame.components.iter().enumerate() {

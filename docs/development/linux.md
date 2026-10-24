@@ -326,6 +326,10 @@ layout explicitly so shipped workspace changes do not remove the controls under 
 CMYK/YCCK, progressive RGB/gray and orientation through Open, Import, clipboard
 paste and retained save/history in the requested fixture theme.
 
+`native_tiff_open_import_and_paste` uses `LAYER_RASTER_FIXTURES` containing the
+independent libtiff reference set. It covers CMYK/RGB edge tiles, straight RGBA
+and gray alpha strips, and WhiteIsZero through the same native journeys.
+
 Accessibility assertions need GTK's test backend at process startup. Run
 `native_layers_control_copy`, `native_zoom_settings_and_canvas_preferences` and
 `native_live_language_switching` with `GTK_A11Y=test` before the runner command.

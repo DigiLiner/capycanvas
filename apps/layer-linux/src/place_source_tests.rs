@@ -103,6 +103,14 @@ fn native_jpeg_open_import_and_paste() {
 }
 
 #[test]
+#[ignore = "private Wayland display, hardware GPU and LAYER_RASTER_FIXTURES"]
+fn native_tiff_open_import_and_paste() {
+    native_raster_open_import_and_paste(&[("libtiff-cmyk-tiles-tables3.tiff", "image/tiff"),
+        ("libtiff-rgb-tiles-tables0.tiff", "image/tiff"), ("libtiff-rgba-strips-tables3.tiff", "image/tiff"),
+        ("libtiff-la-strips-tables0.tiff", "image/tiff"), ("libtiff-l-white-tiles-tables3.tiff", "image/tiff")]);
+}
+
+#[test]
 #[ignore = "private Wayland display, GPU and LAYER_RASTER_FIXTURES"]
 fn native_heif_avif_open_import_and_paste() {
     native_raster_open_import_and_paste(&[("Photo.heic", "image/heic"), ("P3.avif", "image/avif"), ("ICC.avif", "image/avif")]);

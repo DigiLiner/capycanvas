@@ -152,3 +152,46 @@ fn unsupported_tiff_layouts_and_classic_output_overflow_fail_explicitly() {
     assert!(error.contains("4 GiB"));
     assert!(output.into_inner().is_empty());
 }
+
+#[test]
+#[ignore = "requires independent libtiff JPEG fixtures"]
+fn external_jpeg_tiff_matches_reference_samples() {
+    let dir = std::path::PathBuf::from(std::env::var("LAYER_TEST_TIFF_FIXTURES").expect("fixture directory"));
+    for mode in ["rgb", "gray"] {
+        for prefix in ["magick-", "pillow-"] {
+            for suffix in if prefix == "pillow-" { &[""][..] } else { &["-tables0", "-tables3"][..] } {
+                let name = format!("{prefix}{mode}{suffix}");
+                let source = read_photo(std::io::BufReader::new(std::fs::File::open(dir.join(format!("{name}.tiff"))).unwrap()), DecodeLimits::default()).unwrap();
+                let expected = std::fs::read(dir.join(format!("{name}.pillow.raw"))).unwrap();
+                let actual = rows(&source).concat();
+                assert_eq!(source.extent, [31, 19], "{name}");
+                assert_eq!(source.interpretation.channels, if mode == "rgb" { SourceChannels::Rgb } else { SourceChannels::Gray });
+                assert_eq!(actual.len(), expected.len(), "{name}");
+                assert!(actual.iter().zip(&expected).all(|(a,b)| a.abs_diff(*b) <= 1), "{name}: samples changed");
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires independent libtiff tile, alpha and ink fixtures"]
+fn external_jpeg_tiff_tiles_alpha_and_polarity_match_reference_samples() {
+    let dir = std::path::PathBuf::from(std::env::var("LAYER_TEST_TIFF_FIXTURES").expect("fixture directory"));
+    let reference: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("reference-extended.json")).unwrap()).unwrap();
+    for fixture in reference["fixtures"].as_array().unwrap() {
+        let file = fixture["file"].as_str().unwrap();
+        let name = file.strip_suffix(".tiff").unwrap();
+        let source = read_photo(std::io::BufReader::new(std::fs::File::open(dir.join(file)).unwrap()), DecodeLimits::default()).unwrap_or_else(|error| panic!("{name}: {error}"));
+        let expected = std::fs::read(dir.join(format!("{name}.pillow.raw"))).unwrap();
+        let actual = rows(&source).concat();
+        let channels = match fixture["mode"].as_str().unwrap() {
+            "RGB" => SourceChannels::Rgb, "L" => SourceChannels::Gray,
+            "RGBA" => SourceChannels::Rgba, "LA" => SourceChannels::GrayAlpha,
+            "CMYK" => SourceChannels::Cmyk, mode => panic!("Unknown fixture mode {mode}"),
+        };
+        assert_eq!(source.extent, [31, 19], "{name}");
+        assert_eq!(source.interpretation.channels, channels, "{name}");
+        assert_eq!(actual.len(), expected.len(), "{name}");
+        assert!(actual.iter().zip(&expected).all(|(a,b)| a.abs_diff(*b) <= 1), "{name}: samples changed");
+    }
+}

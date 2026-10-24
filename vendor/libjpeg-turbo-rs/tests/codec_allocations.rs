@@ -126,3 +126,31 @@ fn metadata_limit_counts_utf8_replacement_bytes() {
     let result = Decoder::new_with_limits(&bytes, libjpeg_turbo_rs::DecodeLimits { max_memory: Some(3), ..Default::default() });
     assert!(matches!(result, Err(JpegError::LimitExceeded { what: "JPEG metadata allocation", actual: 9, limit: 3 })));
 }
+
+#[test]
+fn raw_component_allocation_refusal_is_an_error() {
+    let bytes = jpeg(false, None);
+    let decoder = Decoder::new(&bytes).unwrap();
+    refusal(64*64, || decoder.decode_raw().map(|_| ()));
+}
+#[test]
+fn raw_progressive_coefficient_allocation_refusal_is_an_error() {
+    let bytes = jpeg(true, None);
+    let decoder = Decoder::new(&bytes).unwrap();
+    refusal(8*8*128, || decoder.decode_raw().map(|_| ()));
+}
+
+#[test]
+fn raw_stop_on_warning_rejects_recovered_entropy() {
+    let original = jpeg(false, None);
+    let sos = original.windows(2).position(|bytes| bytes == [0xff, 0xda]).unwrap();
+    let entropy = sos + 2 + usize::from(u16::from_be_bytes([original[sos + 2], original[sos + 3]]));
+    let truncated = original[..entropy + 1].to_vec();
+    let mut decoder = Decoder::new(&truncated).unwrap();
+    decoder.set_lenient(true);
+    assert!(decoder.decode_raw().is_ok());
+    let mut decoder = Decoder::new(&truncated).unwrap();
+    decoder.set_lenient(true);
+    decoder.set_stop_on_warning(true);
+    assert!(matches!(decoder.decode_raw(), Err(JpegError::CorruptData(_))));
+}

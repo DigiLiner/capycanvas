@@ -2543,18 +2543,30 @@
                  warnings: warnings.clone(),
              })
          } else if num_components == 4 {
-@@ -5865,8 +5907,8 @@
+@@ -5823,7 +5865,7 @@
+                     })
+             })
+             .collect::<Result<Vec<_>>>()?;
+-        let (component_planes, _warnings) = if self.metadata.is_arithmetic && frame.is_progressive {
++        let (component_planes, warnings) = if self.metadata.is_arithmetic && frame.is_progressive {
+             self.decode_arithmetic_progressive_planes(
+                 frame,
+                 &quant_tables,
+@@ -5865,8 +5907,11 @@
                  &comp_block_sizes,
              )?
          };
 -        let mut plane_widths: Vec<usize> = Vec::with_capacity(num_components);
 -        let mut plane_heights: Vec<usize> = Vec::with_capacity(num_components);
++        if self.stop_on_warning && !warnings.is_empty() {
++            return Err(JpegError::CorruptData("JPEG raw decode warning".into()));
++        }
 +        let mut plane_widths: Vec<usize> = try_with_capacity(num_components, "decode scratch buffer")?;
 +        let mut plane_heights: Vec<usize> = try_with_capacity(num_components, "decode scratch buffer")?;
          for (ci, comp) in frame.components.iter().enumerate() {
              plane_widths.push(mcus_x * comp.horizontal_sampling as usize * comp_block_sizes[ci]);
              plane_heights.push(mcus_y * comp.vertical_sampling as usize * comp_block_sizes[ci]);
-@@ -5964,8 +6006,10 @@
+@@ -5964,8 +6009,10 @@
              p2_stride = comp1_w;
          } else {
              let alloc_size = full_width * full_height;
@@ -2567,7 +2579,7 @@
  
              // Honor TJPARAM_FASTUPSAMPLE: when set, use the box-filter
              // (nearest-neighbor) upsample instead of the fancy triangle
-@@ -6106,7 +6150,7 @@
+@@ -6106,7 +6153,7 @@
  
          let bpp = out_format.bytes_per_pixel();
          let data_size = width * height * bpp;
@@ -2576,7 +2588,7 @@
  
          for y in 0..height {
              let p0 = &plane0[y * p0_stride..];
-@@ -6139,7 +6183,7 @@
+@@ -6139,7 +6186,7 @@
                  }
                  // YCCK → RGB: convert YCCK→CMYK first (into temp), then CMYK→RGB
                  (ColorSpace::Ycck, PixelFormat::Rgb) => {
@@ -2585,7 +2597,7 @@
                      color::ycck_to_cmyk_row(p0, p1, p2, p3, &mut cmyk_buf, width);
                      for x in 0..width {
                          let kv = cmyk_buf[x * 4 + 3] as u16;
-@@ -6149,7 +6193,7 @@
+@@ -6149,7 +6196,7 @@
                      }
                  }
                  (ColorSpace::Ycck, PixelFormat::Rgba) => {
@@ -2594,7 +2606,7 @@
                      color::ycck_to_cmyk_row(p0, p1, p2, p3, &mut cmyk_buf, width);
                      for x in 0..width {
                          let kv = cmyk_buf[x * 4 + 3] as u16;
-@@ -6160,7 +6204,7 @@
+@@ -6160,7 +6207,7 @@
                      }
                  }
                  (ColorSpace::Ycck, PixelFormat::Bgr) => {
@@ -2603,7 +2615,7 @@
                      color::ycck_to_cmyk_row(p0, p1, p2, p3, &mut cmyk_buf, width);
                      for x in 0..width {
                          let kv = cmyk_buf[x * 4 + 3] as u16;
-@@ -6173,7 +6217,7 @@
+@@ -6173,7 +6220,7 @@
                      }
                  }
                  (ColorSpace::Ycck, PixelFormat::Bgra) => {
@@ -2612,7 +2624,7 @@
                      color::ycck_to_cmyk_row(p0, p1, p2, p3, &mut cmyk_buf, width);
                      for x in 0..width {
                          let kv = cmyk_buf[x * 4 + 3] as u16;
-@@ -6226,7 +6270,7 @@
+@@ -6226,7 +6273,7 @@
                      let g_off: usize = out_format.green_offset().unwrap();
                      let b_off: usize = out_format.blue_offset().unwrap();
                      let pad_off: usize = 6 - r_off - g_off - b_off;
@@ -2621,7 +2633,7 @@
                      color::ycck_to_cmyk_row(p0, p1, p2, p3, &mut cmyk_buf, width);
                      for x in 0..width {
                          let kv = cmyk_buf[x * 4 + 3] as u16;
-@@ -6249,8 +6293,8 @@
+@@ -6249,8 +6296,8 @@
          }
  
          Ok(Image {
@@ -2632,7 +2644,7 @@
              width,
              height,
              pixel_format: out_format,
-@@ -6258,9 +6302,9 @@
+@@ -6258,9 +6305,9 @@
              data,
              icc_profile,
              exif_data,
@@ -2644,7 +2656,7 @@
              warnings,
          })
      }
-@@ -6365,9 +6409,14 @@
+@@ -6365,9 +6412,14 @@
              .map(|(ci, comp)| {
                  let comp_w = mcus_x * comp.horizontal_sampling as usize * comp_block_sizes[ci];
                  let comp_h = mcus_y * comp.vertical_sampling as usize * comp_block_sizes[ci];
@@ -3095,7 +3107,7 @@
      stride: usize,
 --- /dev/null
 +++ b/tests/codec_allocations.rs
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,156 @@
 +use libjpeg_turbo_rs::{Decoder, Encoder, JpegError, PixelFormat, Subsampling};
 +use std::{alloc::{GlobalAlloc, Layout, System}, cell::Cell, ptr};
 +
@@ -3223,4 +3235,32 @@
 +    bytes.extend_from_slice(&original[2..]);
 +    let result = Decoder::new_with_limits(&bytes, libjpeg_turbo_rs::DecodeLimits { max_memory: Some(3), ..Default::default() });
 +    assert!(matches!(result, Err(JpegError::LimitExceeded { what: "JPEG metadata allocation", actual: 9, limit: 3 })));
++}
++
++#[test]
++fn raw_component_allocation_refusal_is_an_error() {
++    let bytes = jpeg(false, None);
++    let decoder = Decoder::new(&bytes).unwrap();
++    refusal(64*64, || decoder.decode_raw().map(|_| ()));
++}
++#[test]
++fn raw_progressive_coefficient_allocation_refusal_is_an_error() {
++    let bytes = jpeg(true, None);
++    let decoder = Decoder::new(&bytes).unwrap();
++    refusal(8*8*128, || decoder.decode_raw().map(|_| ()));
++}
++
++#[test]
++fn raw_stop_on_warning_rejects_recovered_entropy() {
++    let original = jpeg(false, None);
++    let sos = original.windows(2).position(|bytes| bytes == [0xff, 0xda]).unwrap();
++    let entropy = sos + 2 + usize::from(u16::from_be_bytes([original[sos + 2], original[sos + 3]]));
++    let truncated = original[..entropy + 1].to_vec();
++    let mut decoder = Decoder::new(&truncated).unwrap();
++    decoder.set_lenient(true);
++    assert!(decoder.decode_raw().is_ok());
++    let mut decoder = Decoder::new(&truncated).unwrap();
++    decoder.set_lenient(true);
++    decoder.set_stop_on_warning(true);
++    assert!(matches!(decoder.decode_raw(), Err(JpegError::CorruptData(_))));
 +}

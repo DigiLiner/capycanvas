@@ -13,6 +13,12 @@ The project-owned capybara mark is a separate exception under [BRANDING.md](BRAN
 allocation/ownership correction and exact registry provenance are recorded in
 [the vendor guide](vendor/README.md#jpeg-allocation-ownership-and-refusal).
 
+## TIFF codec — MIT
+
+`tiff` 0.11.3 retains its original [MIT license](vendor/tiff/LICENSE).
+The directory and nested JPEG admission changes are recorded in
+[the vendor guide](vendor/README.md#tiff-directory-and-nested-jpeg-admission).
+
 ## Rust AV1 decoding — BSD-2-Clause
 
 `rav1d` 1.1.0 supplies AVIF decoding. The portability patch and upstream

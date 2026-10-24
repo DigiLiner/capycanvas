@@ -20,7 +20,7 @@ members = [
     "apps/layer-windows/native/link",
 ]
 resolver = "2"
-exclude = ["vendor/wgpu-core", "vendor/wgpu", "vendor/wgpu-hal", "vendor/wgpu-types", "vendor/image-webp", "vendor/rav1d", "vendor/rust_h265", "vendor/libjpeg-turbo-rs"]
+exclude = ["vendor/wgpu-core", "vendor/wgpu", "vendor/wgpu-hal", "vendor/wgpu-types", "vendor/image-webp", "vendor/rav1d", "vendor/rust_h265", "vendor/libjpeg-turbo-rs", "vendor/tiff"]
 
 # Explicit Wayland SDR image descriptions need Vulkan pass-through support.
 # See vendor/README.md for the narrowly scoped patch and upstream provenance.
@@ -33,6 +33,7 @@ image-webp = { path = "vendor/image-webp" }
 rav1d = { path = "vendor/rav1d" }
 rust_h265 = { path = "vendor/rust_h265" }
 libjpeg-turbo-rs = { path = "vendor/libjpeg-turbo-rs" }
+tiff = { path = "vendor/tiff" }
 
 [workspace.package]
 version = "1.0.14"

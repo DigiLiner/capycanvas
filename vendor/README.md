@@ -36,6 +36,41 @@ cargo test --locked -p libjpeg-turbo-rs --lib
 cargo test --locked -p libjpeg-turbo-rs --test codec_allocations
 ```
 
+## TIFF directory and nested JPEG admission
+
+`tiff` 0.11.3 is the MIT crate from image-rs, revision
+`e41159ce058bf193718b017599e2d7d53e9ccc92`, registry archive SHA-256
+`b63feaf3343d35b6ca4d50483f94843803b0f51634937cc2ec519fc32232bc52`.
+The original license, manifest, library sources and provenance are retained.
+Unused upstream integration fixtures and development dependencies are omitted;
+the tag-reader unit test generates its own TIFF instead.
+
+`tiff-input-admission.patch` adds `Decoder::new_with_limits`, applies the
+previously unused IFD value limit to both value readers, and bounds directory
+entry work before reading entries. Repeated tags fail admission. Capy supplies
+its limits before the first directory is parsed.
+
+JPEG-compressed chunks use the same bounded JPEG decoder as ordinary photos,
+replacing zune-jpeg. Tables and image streams require complete SOI/EOI markers;
+SOF dimensions and sample counts must match the TIFF strip or tile. Native
+4:4:4 component planes are interleaved without JPEG color conversion, preserving
+TIFF photometric interpretation, channel order and polarity. Padded plane and
+coefficient storage, packed output, retained input and parser scratch are admitted
+before decoding. JPEG assembly, plane and packed-output allocation refusal
+returns an error. TIFF output, source-builder
+and application band storage still need aggregate admission across concurrent jobs.
+
+The JPEG patch also makes `decode_raw` honor `stop_on_warning`. Its raw plane
+paths share the existing baseline/progressive decode implementation. The focused
+raw allocation and TIFF boundary regressions run under scalar Miri; native ASan
+covers the vendor unit suites and boundary tests. These checks cover executed
+paths, not every unsafe codec branch or a hard allocator quota.
+
+```sh
+cargo test --locked -p tiff --lib --test input_limits
+cargo test --locked -p libjpeg-turbo-rs --test codec_allocations raw_
+```
+
 ## Portable HEIF/HEVC decoding
 
 `rust_h265` 0.1.0 is the published MIT OR Apache-2.0 crate. Its decoder sources,
