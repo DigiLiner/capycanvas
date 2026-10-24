@@ -138,7 +138,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Apple tool bubble drag through four neighbours | 120 | **Unqualified.** M4 iPad input and presentation timing remain unmeasured; the M2 Pro Mac canvas diagnostic cannot qualify the whole native overlay | [Apple native measurements](#apple-native-measurements), 2026-10-24 |
-| HDR color bubble drag and intensity scrub | 120 | Unqualified on reference hardware; GTK workstation diagnostic below uses a small HDR drawing | [GTK HDR color bubble](#gtk-hdr-color-bubble), 2026-10-24 |
+| HDR color bubble drag and intensity scrub | 120 | **Not met.** Android drag 111.38–119.30 actual app-window presents/s; intensity 54.29–55.42/s, p99 up to 41.668 ms, 61 MP F16 photo at Fit | [Web and Android HDR color bubbles](#web-and-android-hdr-color-bubbles), 2026-10-24 |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
@@ -147,6 +147,48 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
 | List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: touch at scale 1 gives 97.24–109.99 presents/s, p99 up to 25.016 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
+
+## Web and Android HDR color bubbles
+
+Measured 2026-10-24 on the HDR bubble port published as `712b4a18a`. Android uses
+an optimized release-Rust benchmark APK, the tier photo in an F16 drawing with
+an empty paint layer at Fit, default Low glass, a 216 dp HDR color bubble and
+four neighboring bubbles. Each condition has a priming contact followed by
+three six-second contacts. Intensity follows a constant-speed triangular path.
+SurfaceFlinger actual-present timestamps cover the active app-window motion;
+release and settling frames are excluded.
+
+On Wacom MovinkPad Pro 14, the photo is 9504 × 6336, the display runs at 120 Hz
+and thermal status is 0. The rates below count window presentations, not fresh
+intensity values: the intensity runs publish 180–181 full models per contact
+and visit 166–180 distinct values. Android's moving bubble action uses the
+existing 33 ms publication interval. A window presentation does not establish
+that its intensity marker reflects a new input.
+
+| Motion | Actual app-window presents/s, three trials | Worst presentation gap p99 |
+| --- | --- | --- |
+| Drag through four neighbors | 118.272 / 111.376 / 119.305 | 16.668 ms |
+| Intensity | 54.732 / 54.292 / 55.423 | 41.668 ms |
+
+The second drag contact misses the 114 fps floor; all intensity contacts miss
+both the throughput and gap criteria. These measurements do not qualify the
+120 fps target. The [mid-tier result](mid-tier.md#hdr-color-bubbles) records its
+separate display-setting limits.
+
+The Web diagnostic uses a hardware-accelerated workstation browser at 120 Hz
+with a 2048 × 1536 F16 drawing. In light/dark themes, three six-second mouse
+contacts per condition produce 110.63–120.05 changing DOM positions/s while
+dragging and 65.32–77.42 changing intensity values/s. These are observations at
+animation callbacks, not actual presentations. Browser presentation, reference
+tier rates and physical HDR output remain unqualified.
+
+Exact source and binary hashes, raw trials, native logs and review captures are
+under `artifacts/hdr-color-bubble-ports/`. The Android benchmark was built at
+`bcfc0a978`; subsequent rebases leave its bubble and Android production paths
+unchanged. Its APK SHA-256 is
+`6a63c3c919fa8ec4e717938626fa439e5bc4443a2ee821a2c7c1ee94e8f02e9d`.
+The Web Wasm SHA-256 is
+`e78a56053dd39f14e02744c773cb69a7e6b1bd065753d1af03479609d6ce9bf2`.
 
 ## GTK HDR color bubble
 

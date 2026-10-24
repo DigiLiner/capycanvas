@@ -120,7 +120,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
 | Windows tool bubble drag through four neighbours | 90 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Apple tool bubble drag through four neighbours | 90 | **Unqualified.** Reference hardware remains unmeasured; the M2 Pro Mac diagnostic uses the 61 MP canvas and does not measure the whole native overlay | [Apple native measurements](top-tier.md#apple-native-measurements), 2026-10-24 |
-| HDR color bubble drag and intensity scrub | 90 | Unmeasured on reference hardware; GTK workstation measurements do not qualify this tier | [GTK HDR color bubble](top-tier.md#gtk-hdr-color-bubble), 2026-10-24 |
+| HDR color bubble drag and intensity scrub | 90 | **Not met; diagnostic display settings.** Android drag 58.39–86.64 actual app-window presents/s; intensity 45.57–50.75/s, p99 up to 55.825 ms, 24 MP F16 photo at Fit | [HDR color bubbles](#hdr-color-bubbles), 2026-10-24 |
 | Drawer open and close | 90 | **Not met.** Layers/Properties completed native motion: 59.70–59.71 moving window frames/s, interval p99 up to 16.86 ms, 24 MP photo, thermal 0, active display mode 60 Hz | [Combined layer drawer](#combined-layer-drawer), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 90 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 90 | Huion: frame CPU p50 4.6–5.1 ms, p95 under 9.6 ms; XP-Pen swatch comparison below is diagnostic only. Huion wheel drags (FrameMetrics, release benchmark, one 5 s mouse and one touch drag each, 90 Hz panel): Edit Color dialog 79.4 / 87.4 fps presented, panel wheel 77.1 / 79.2 fps; not met | [Colour picker](../ui/color-picker.md); [swatch comparison](#selected-swatch-comparison), 2026-10-03; `AndroidWorkspacePerformanceTest#editColorWheelFrameTiming`, 2026-10-04 |
@@ -130,6 +130,30 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK layer input diagnostic](top-tier.md#gtk-layer-input-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
+
+## HDR color bubbles
+
+The 2026-10-24 Wacom MovinkPad 11 diagnostic uses the HDR bubble port published
+as `712b4a18a`, the 6000 × 4000 reference photo in an F16 drawing at Fit with an
+empty paint layer, and default Low glass. The bubble size, neighboring bubbles,
+warmup and three six-second contacts follow the
+[top-tier protocol](top-tier.md#web-and-android-hdr-color-bubbles).
+
+The active display reports 90 Hz and thermal status stays at 0. The device's
+preexisting density override of 280 is preserved. Adaptive refresh is enabled
+only for the private test app, then restored to its previous value. These
+settings limit the measurements to a diagnostic; they do not establish the
+default-display qualification required by the tier.
+
+| Motion | Actual app-window presents/s, three trials | Worst presentation gap p99 |
+| --- | --- | --- |
+| Drag through four neighbors | 58.393 / 86.642 / 85.604 | 55.825 ms |
+| Intensity | 50.746 / 49.114 / 45.570 | 55.820 ms |
+
+The first drag contact misses the 85.5 fps floor, and all three miss the 22.2 ms
+gap limit. All intensity contacts miss both criteria and visit only 154–167
+distinct values per contact. No tier target is marked met. Evidence, exact
+source/APK hashes and setting-restoration records are in `artifacts/hdr-color-bubble-ports/android/`.
 
 ## Native palette opening
 
