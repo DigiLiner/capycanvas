@@ -307,10 +307,16 @@ function Assert-BubbleHdrPainting([long]$Id,[string]$Stage){
     Wait-BubbleVisualLayout
     $before=Bubble-HdrState;$at=Document-Point .2 .2;$center=Center $Id
     Paint-Gap $Id @((($at.x-$center.x)/$scale),(($at.y-$center.y)/$scale)) $Stage -NoHalo
-    $after=Bubble-HdrState
-    foreach($field in @('document','checkpoint','modified','paint')){if($after.$field -ne $before.$field){throw "$Stage Undo did not restore $field"}}
-    if(Find 'canvas-status' -Visible){throw 'Painting after drawing activation left a native failure message'}
-    $hdrEvidence.Add(@{stage=$Stage;before=$before;after=$after;canvas_status_visible=$false;painting_and_exact_pixel_undo=$true})
+    $first=Bubble-HdrState
+    $evidence=@{stage=$Stage;before=$before;first_after=$first;after=$first;canvas_status_visible=$null;painting_and_exact_pixel_undo=$true}
+    $hdrEvidence.Add($evidence)
+    Wait-Until {
+        $evidence.after=Bubble-HdrState
+        foreach($field in @('document','checkpoint','modified','paint')){if($evidence.after.$field -ne $before.$field){return $false}}
+        $true
+    } "$Stage Undo did not publish its restored document, checkpoint, dirty state and paint"
+    $evidence.canvas_status_visible=[bool](Find 'canvas-status' -Visible)
+    if($evidence.canvas_status_visible){throw 'Painting after drawing activation left a native failure message'}
 }
 function Invoke-BubbleHdrRetirement([long]$Id){
     foreach($context in @(@{name='slot';device='mouse'},@{name='mask';device='pen'},@{name='document';device='touch'})){

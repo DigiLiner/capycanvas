@@ -1290,7 +1290,7 @@ their shared shape in both the docked Color panel and the bubble.
 Use `-HdrRetirementOnly` with either depth and theme for the focused slot, mask
 and drawing-switch checks. Drawing activation must clear the native status;
 both the SDR destination and returning HDR drawing must paint and undo to their
-exact previous pixels and checkpoint.
+exact previous pixels and published checkpoint.
 The fixture checks selected-face hover and pressed pixels against the theme's
 text-color overlays and requires the ordinary face to keep its size. Moving past
 the drag threshold and returning must retain hover shading; pressing starts a
