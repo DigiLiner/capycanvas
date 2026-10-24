@@ -127,6 +127,25 @@ fn unknown_parents_are_atomic_and_may_span_chunks() {
 }
 
 #[test]
+fn extreme_geometry_integers_are_refused_without_overflow() {
+    for value in [i64::MIN, i64::MAX, -(1 << 31), 1 << 31] {
+        for header in [0, 1, 2, 3] {
+            let mut geometry = vec![1, 1, 0, header];
+            put_zigzag(&mut geometry, value);
+            put_zigzag(&mut geometry, 0);
+            geometry.extend([0; 4]);
+            assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 1, &[(GEOMETRY, geometry)]), 1, &mut Reading::default())));
+        }
+    }
+    for value in [i64::MIN, i64::MAX] {
+        let mut geometry = vec![1, 1, 0, 1, 0, 0];
+        put_zigzag(&mut geometry, value);
+        put_zigzag(&mut geometry, 0);
+        assert!(is_unsupported(decode_chunk(&record_bytes(PATH, 1, &[(GEOMETRY, geometry)]), 1, &mut Reading::default())));
+    }
+}
+
+#[test]
 fn malformed_framing_is_invalid() {
     let good = encode_chunk(&chunk(vec![line(1, &[[0., 0.], [3., 1.]], 2.)]));
     for cut in 1..good.len() { assert!(decode_chunk(&good[..cut], 1, &mut Reading::default()).is_err(), "truncated at {cut}"); }

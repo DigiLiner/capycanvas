@@ -34,7 +34,7 @@ pub struct WebProject {
     placed: Option<std::sync::Arc<layer_core::color::source::SourceImage>>,
     source_name: String,
     target: Option<layer_core::SourceTarget>,
-    package: Option<(layer_ui::PackagePresentation,Option<js_sys::Uint8Array>)>,
+    package: Option<artwork_transfer::Preserved>,
     lost: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
@@ -95,7 +95,7 @@ impl WebApp {
         self.session.document_request(id).ok().map(|request|request.title(self.session.localization()).to_string())
     }
     pub fn package_view(&self,candidate:&WebProject)->Result<JsValue,JsValue>{candidate.package.as_ref().map_or(Ok(JsValue::NULL),|(data,_)|serialize(&data.summary(self.session.localization())))}
-    pub fn package_preview(&self,candidate:&WebProject)->Option<js_sys::Uint8Array>{candidate.package.as_ref().and_then(|(_,preview)|preview.clone())}
+    pub fn package_preview(&self,candidate:&WebProject)->Option<js_sys::Object>{candidate.package.as_ref().and_then(|(_,preview)|preview.clone())}
     pub fn document_properties(&self) -> Result<js_sys::Promise, JsValue> {
         let info = layer_color::DocumentInfo::capture(self.session.engine().document());
         Ok(future_to_promise(async move {

@@ -475,6 +475,9 @@ Duplicate IDs inside a package, conflicting WGSL declarations, invalid metadata,
 ABI/interfaces and excessive resource requests are rejected. Module names cannot
 escape their directory or select another origin. Limits include 1,024 filters,
 64 categories, 256 modules, a 16 MiB manifest and 16 MiB aggregate module text.
+Native directory loaders admit only regular resource files and bound each read
+before allocating the complete text. Shared Rust exposes the manifest, module
+and aggregate byte limits used by the loaders and catalog validation.
 
 ## Filter spaces
 

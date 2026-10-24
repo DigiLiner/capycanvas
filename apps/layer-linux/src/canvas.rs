@@ -218,14 +218,45 @@ pub(super) fn load_filter_directory(
     directory: &std::path::Path,
     mode: layer_core::EffectInstallMode,
 ) -> Result<UiChange, String> {
-    let manifest =
-        std::fs::read_to_string(directory.join("manifest.json")).map_err(|e| e.to_string())?;
+    let manifest = read_filter_text(&directory.join("manifest.json"), layer_core::EffectPackage::MAX_MANIFEST_BYTES)?;
+    let mut remaining = layer_core::EffectPackage::MAX_MODULES_BYTES;
     let read = |name: &str| {
-        std::fs::read_to_string(directory.join(name))
-            .map(std::sync::Arc::from)
-            .map_err(|e| e.to_string())
+        let text = read_filter_text(&directory.join(name), layer_core::EffectPackage::MAX_MODULE_BYTES.min(remaining))?;
+        remaining -= text.len();
+        Ok(std::sync::Arc::from(text))
     };
     session.load_effect_package(&manifest, read, mode)
+}
+fn read_filter_text(path: &std::path::Path, limit: usize) -> Result<String, String> {
+    use std::{io::Read, os::unix::fs::OpenOptionsExt};
+    let file = std::fs::OpenOptions::new().read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW).open(path).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("Filter resources must be regular files".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    if bytes.len() > limit { return Err("Filter resource exceeds package limits".into()); }
+    String::from_utf8(bytes).map_err(|e| e.to_string())
+}
+#[cfg(test)]
+mod filter_file_tests {
+    use super::read_filter_text;
+    #[test]
+    fn filter_reads_bound_regular_files_and_refuse_links_and_devices() {
+        let directory = std::env::temp_dir().join(format!("capy-filter-read-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let file = directory.join("module.wgsl");
+        std::fs::write(&file, "code").unwrap();
+        assert_eq!(read_filter_text(&file, 4).unwrap(), "code");
+        assert!(read_filter_text(&file, 3).is_err());
+        let link = directory.join("linked.wgsl");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        assert!(read_filter_text(&link, 4).is_err());
+        assert!(read_filter_text(&directory, 4).is_err());
+        assert!(read_filter_text(std::path::Path::new("/dev/null"), 4).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
 fn extent(area: &gtk::Picture) -> [u32; 2] {
     let scale = area.scale_factor() as u32;

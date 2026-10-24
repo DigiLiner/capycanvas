@@ -77,7 +77,8 @@ stays alive until renderer admission succeeds; unsupported preparation presents
 the original package, while cancellation leaves the current drawing intact.
 Unsupported artwork opens
 the shared package presentation with an optional preview, Copy Original File and
-Export Preview Image, without adopting a partial editable document. Preview
+Export Preview Image, without adopting a partial editable document. Presentation
+creates its bitmap from the shared decoder's pixels without native PNG decoding. Preview
 export writes the retained PNG through a private spool to a new provider
 destination; source URI, document identity and file identity checks prevent it
 from replacing the original package.

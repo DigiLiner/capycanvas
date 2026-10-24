@@ -78,8 +78,8 @@ export async function checkPackageView({evaluate,settle}) {
       assert.match(model.reason,/blend/i);
       assert.deepEqual(await snapshot(),incumbent,'Viewing a preserved package keeps the incumbent editor and dirty history');
       assert.deepEqual(await evaluate(`Array.from(document.querySelector('dialog[open]').querySelectorAll('p')).slice(1).map(p=>p.textContent)`),outputs.map(o=>o.name));
-      await wait("document.querySelector('dialog[open] img')?.complete&&document.querySelector('dialog[open] img').naturalWidth===2");
-      assert.deepEqual(await evaluate(`(async()=>{const image=document.querySelector('dialog[open] img');await image.decode();const bitmap=await createImageBitmap(await(await fetch(image.src)).blob());try{const canvas=document.createElement('canvas');canvas.width=2;canvas.height=1;const context=canvas.getContext('2d',{willReadFrequently:true,colorSpace:'srgb'});context.drawImage(bitmap,0,0);return Array.from(context.getImageData(0,0,2,1).data)}finally{bitmap.close()}})()`),[255,0,0,255,0,255,0,255]);
+      assert.equal(await evaluate("document.querySelectorAll('dialog[open] img').length"),0,'Package presentation never reparses the original PNG');
+      assert.deepEqual(await evaluate(`Array.from(document.querySelector('dialog[open] canvas').getContext('2d').getImageData(0,0,2,1).data)`),[255,0,0,255,0,255,0,255]);
       await saveAction(model.copy_original);assert.deepEqual(await output('unsupported.capy'),preserved,'Copy Original preserves every archive byte');
       await saveAction(model.export_preview);assert.deepEqual(await output('unsupported.png'),Buffer.from(preview),'Export Preview Image copies the verified PNG exactly');
       for(const mode of ['cancel','fail','original']) {
@@ -88,7 +88,7 @@ export async function checkPackageView({evaluate,settle}) {
         assert.equal(await evaluate('packageViewTest.files.size'),before.files);
         if(mode==='fail')assert.equal(await evaluate('packageViewTest.aborts'),before.aborts+1,'A failed destination aborts its partial write');
         else assert.equal(await evaluate('packageViewTest.writes'),before.writes,'Cancel and preview overwrite refusal never open a writer');
-        assert.equal(await evaluate("!!document.querySelector('dialog[open] img')"),true);
+        assert.equal(await evaluate("!!document.querySelector('dialog[open] canvas')"),true);
         assert.deepEqual(await snapshot(),incumbent,'Failed publication retains both the package and incumbent');
       }
       await evaluate("packageViewTest.mode='save'");await saveAction(model.copy_original);assert.deepEqual(await output('unsupported.capy'),preserved,'Retry copies the original after failed publication');

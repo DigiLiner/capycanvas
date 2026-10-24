@@ -195,7 +195,9 @@ impl EraserEnd {
     }
 }
 impl Settings {
+    pub const MAX_FILE_BYTES: usize = 1024 * 1024;
     pub fn language_preference(saved: &str) -> crate::LanguagePreference {
+        if saved.len() > Self::MAX_FILE_BYTES { return Default::default(); }
         let value = serde_json::from_str::<serde_json::Value>(saved).ok();
         let preference = value.as_ref().and_then(|value| value.as_object())
             .and_then(|object| object.get("language"))
@@ -212,6 +214,7 @@ impl Settings {
         Self::restore_localized(saved, &Localizer::shared(UiLanguage::English))
     }
     pub fn restore_localized(saved: &str, localization: &Localizer) -> Self {
+        if saved.len() > Self::MAX_FILE_BYTES { return Self::default(); }
         let valid = |value: &serde_json::Value| {
             serde_json::from_value::<Self>(value.clone())
                 .ok()
@@ -2298,6 +2301,17 @@ mod copy_tests {
             assert_eq!(json["presentation"]["alphas"].as_array().unwrap().len(), 4);
             assert_eq!(json["selected"], 1, "Low is the default");
         }
+    }
+
+    #[test]
+    fn settings_bytes_are_admitted_before_restoration() {
+        let mut saved = serde_json::json!({"feedback":false,"language":LanguagePreference::Explicit(UiLanguage::Japanese)}).to_string();
+        saved.extend(std::iter::repeat_n(' ', Settings::MAX_FILE_BYTES - saved.len()));
+        assert!(!Settings::restore(&saved).feedback);
+        assert_ne!(Settings::language_preference(&saved), LanguagePreference::System);
+        saved.push(' ');
+        assert_eq!(Settings::restore(&saved), Settings::default());
+        assert_eq!(Settings::language_preference(&saved), LanguagePreference::System);
     }
 
     #[test]

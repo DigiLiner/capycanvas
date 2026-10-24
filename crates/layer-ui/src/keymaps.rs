@@ -550,6 +550,7 @@ pub(crate) fn export(settings: &Settings) -> String {
 pub(crate) fn import_typed(settings: &Settings, text: &str, platform: crate::Platform, localization: &crate::Localizer) -> Result<KeymapImport, KeymapImportError> {
     use KeymapPreviewEntry as Entry;
     use KeymapPreviewValue as Value;
+    if text.len() > Settings::MAX_FILE_BYTES { return Err(KeymapImportError::Message(crate::MessageId::SETTINGS_KEYMAP_INVALID)); }
     let file: KeymapFile = serde_json::from_str(text).map_err(|error| KeymapImportError::InvalidDetail(error.to_string()))?;
     if file.format != KEYMAP_FORMAT { return Err(KeymapImportError::Message(crate::MessageId::SETTINGS_KEYMAP_INVALID)); }
     if file.version > KEYMAP_VERSION { return Err(KeymapImportError::Message(crate::MessageId::SETTINGS_KEYMAP_NEWER_VERSION)); }
@@ -649,6 +650,16 @@ pub fn modifier_hold_help(localization: &crate::Localizer, label: &str) -> Strin
 #[cfg(test)]
 mod copy_tests {
     use super::*;
+    #[test]
+    fn keymap_file_bytes_are_admitted_before_import() {
+        let settings = Settings::default();
+        let localization = crate::Localizer::shared(crate::UiLanguage::English);
+        let mut file = export(&settings);
+        file.extend(std::iter::repeat_n(' ', Settings::MAX_FILE_BYTES - file.len()));
+        assert!(import_typed(&settings, &file, crate::Platform::Gtk, &localization).is_ok());
+        file.push(' ');
+        assert!(import_typed(&settings, &file, crate::Platform::Gtk, &localization).is_err());
+    }
     #[test]
     fn keymap_language_refresh_retains_candidate_and_unavailable_source() {
         let english = crate::Localizer::shared(crate::UiLanguage::English);

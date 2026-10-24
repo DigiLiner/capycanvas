@@ -53,6 +53,20 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn sqlite_rejects_oversized_values_before_row_materialization() {
+    let f = Fixture::new();
+    let result = f.store.connection.query_row("SELECT zeroblob(?1)", [MAX_ROW_BYTES as i64 + 1], |row| {
+        row.get_ref(0).map(|_| ())
+    });
+    assert!(result.is_err());
+    f.store.connection.execute("INSERT INTO pending(id,hash,payload) VALUES('row-limit','hash',zeroblob(?1))", [MAX_PACKAGE_BYTES as i64]).unwrap();
+    f.store.connection.execute("DELETE FROM pending WHERE id='row-limit'", []).unwrap();
+    use rusqlite::config::DbConfig;
+    assert!(f.store.connection.db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE).unwrap());
+    assert!(!f.store.connection.db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA).unwrap());
+}
+
+#[test]
 fn storage_enforces_included_workspace_name_and_delete_protection() {
     let mut f = Fixture::new();
     let mut browser = BrowserDatabase::default();

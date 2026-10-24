@@ -241,13 +241,13 @@ pub extern "system" fn Java_art_capycanvas_Native_projectPackagePrompt(mut env: 
     })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_projectPackagePreview(mut env: JNIEnv,_:JClass,handle:jlong)->jni::sys::jbyteArray {
+pub extern "system" fn Java_art_capycanvas_Native_projectPackagePreview(mut env: JNIEnv,_:JClass,handle:jlong)->jni::sys::jintArray {
     crate::jni_entry!(env, {
     let bytes = match &unsafe {crate::inspection::borrow_ref::<Task>(handle)}.payload {
-        Payload::Package {view,..} => view.preview().map(|p| p.encoded().as_ref()).unwrap_or(&[]),
+        Payload::Package {view,..} => view.preview().map(|p| p.pixels().as_ref()).unwrap_or(&[]),
         _ => &[],
     };
-    let result = env.byte_array_from_slice(bytes).map(|bytes| bytes.into_raw()).map_err(error);
+    let result = crate::android::argb_array(&mut env, bytes);
     or_throw(&mut env,result,std::ptr::null_mut())
     })
 }

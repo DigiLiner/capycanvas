@@ -134,7 +134,7 @@ impl<'a> Bytes<'a> {
     fn zigzag(&mut self) -> DecodeResult<i64> {
         let value = self.varuint()?;
         let value = (value >> 1) as i64 ^ -((value & 1) as i64);
-        if value.abs() >= MAX_UNITS { return Err(unsupported("coordinate exceeds the admitted range")); }
+        if value.unsigned_abs() >= MAX_UNITS as u64 { return Err(unsupported("coordinate exceeds the admitted range")); }
         Ok(value)
     }
     fn length(&mut self, maximum: usize) -> DecodeResult<usize> {
@@ -256,7 +256,7 @@ fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
             let header = bytes.u8()?;
             let kind = AnchorKind(header >> 2);
             let point = [previous[0] + bytes.zigzag()?, previous[1] + bytes.zigzag()?];
-            if point.iter().any(|v| v.abs() >= MAX_UNITS) { return Err(unsupported("coordinate exceeds the admitted range")); }
+            if point.iter().any(|v| v.unsigned_abs() >= MAX_UNITS as u64) { return Err(unsupported("coordinate exceeds the admitted range")); }
             let mut handle = |present: bool| -> DecodeResult<Option<[i64; 2]>> { if present { Ok(Some([bytes.zigzag()?, bytes.zigzag()?])) } else { Ok(None) } };
             let incoming = handle(header & 2 != 0)?;
             let outgoing = handle(header & 1 != 0)?.unwrap_or([0; 2]);

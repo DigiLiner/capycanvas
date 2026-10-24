@@ -182,6 +182,9 @@ Unverified rows are never shipped as bindings. A preset change that alters
 bindings needs a new revision. The shortcuts page marks a saved keymap with an
 older revision as outdated.
 
+Shared restoration and keymap import reject text larger than 1 MiB before JSON
+parsing. Hosts also bound file acquisition before passing text to Rust.
+
 Keymap files use the `.capykeys` extension, format `capycanvas-keymap`, version
 1. A file contains the preset reference, shortcut overrides, gesture overrides,
 per-tool pen buttons and a customized modifier key table. Export is

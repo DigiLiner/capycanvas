@@ -459,12 +459,11 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
   }
   async function showPackage(candidate,original,name,originalHandle) {
     const model=app.package_view(candidate),preview=app.package_preview(candidate);
-    const url=preview?URL.createObjectURL(new Blob([preview],{type:"image/png"})):null;
-    try {
       await dialog(()=>model.status,(form,finish)=>{
         form.append(element("p","",model.reason));
         for(const output of model.outputs)form.append(element("p","",output.name));
-        if(url){const image=element("img");image.src=url;image.style.maxWidth="100%";image.style.maxHeight="60vh";image.alt=model.status;form.append(image);}
+        if(preview){const image=element("canvas");[image.width,image.height]=model.extent;image.setAttribute("aria-label",model.status);image.style.maxWidth="100%";image.style.maxHeight="60vh";
+          image.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(preview.pixels.buffer,preview.pixels.byteOffset,preview.pixels.byteLength),...model.extent),0,0);form.append(image);}
         const footer=element("footer");
         const savePart=async(bytes,filename,mime,previewOnly)=>{
           try {
@@ -477,10 +476,9 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
           }catch(error){if(error?.name!=="AbortError")message(String(error));}
         };
         if(model.capabilities.copy_original)footer.append(button(()=>model.copy_original,()=>savePart(original,name,"application/vnd.capycanvas",false)));
-        if(model.capabilities.export&&preview)footer.append(button(()=>model.export_preview,()=>savePart(new Blob([preview],{type:"image/png"}),name.replace(/\.[^.]+$/,"")+".png","image/png",true)));
+        if(model.capabilities.export&&preview)footer.append(button(()=>model.export_preview,()=>savePart(new Blob([preview.encoded],{type:"image/png"}),name.replace(/\.[^.]+$/,"")+".png","image/png",true)));
         footer.append(button(()=>model.close,()=>finish(null)));form.append(footer);
       });
-    } finally {if(url)URL.revokeObjectURL(url);}
   }
   async function openBatch(files,request=null){
     if(batching)throw transportFailure("batch_opening");

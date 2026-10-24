@@ -118,8 +118,11 @@ pub struct EffectPackage {
     pub filters: Vec<EffectDefinition>,
 }
 impl EffectPackage {
+    pub const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
+    pub const MAX_MODULE_BYTES: usize = 1024 * 1024;
+    pub const MAX_MODULES_BYTES: usize = 16 * 1024 * 1024;
     pub fn parse(json: &str) -> Result<Self, String> {
-        if json.len() > 16 * 1024 * 1024 {
+        if json.len() > Self::MAX_MANIFEST_BYTES {
             return Err("Filter manifest is too large".into());
         }
         let package: Self =
@@ -178,7 +181,7 @@ impl EffectPackage {
             total = total
                 .checked_add(code.len())
                 .ok_or("Shader module size overflow")?;
-            if code.len() > 1024 * 1024 || total > 16 * 1024 * 1024 {
+            if code.len() > Self::MAX_MODULE_BYTES || total > Self::MAX_MODULES_BYTES {
                 return Err("Shader modules exceed package limits".into());
             }
             modules.insert(name, crate::authored::Resource::from(code));

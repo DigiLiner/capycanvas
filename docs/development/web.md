@@ -90,7 +90,8 @@ completion closes that job. Editor actions resume when the shared request finish
 browser cleanup retains its ownership guards until checkpoint and output cleanup
 finish. Unsupported files keep their original Blob and show shared
 package status, available outputs and an optional preview with Copy Original and
-Export Preview Image. Preview export refuses the original file handle. The
+Export Preview Image. Presentation uses the shared decoder's RGBA pixels;
+preview export retains the verified original PNG and refuses the original file handle. The
 manual-save worker retains its output job and storage lock until publication
 finishes and the host closes the job.
 

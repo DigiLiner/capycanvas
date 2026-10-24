@@ -86,8 +86,8 @@ pub(super) async fn convert_color(original: &layer_core::Document, change: layer
 pub(super) async fn save(capture:ArtworkCapture)->Result<JsValue,JsValue>{let wire=pack_capture(capture).await?;let (metadata,buffers)=parts(&wire)?;JsFuture::from(raster_worker::call("write",&metadata,&buffers)?).await}
 #[derive(Serialize,Deserialize)]
 pub(super) struct OpenOptions {pub dimension:u32,pub photo_policy:layer_ui::PhotoOpenPolicy,pub names:layer_core::DocumentNames,pub intent:layer_ui::ImportIntent,#[serde(default)]pub source_bytes:Option<usize>}
-pub(super) type Preserved = (layer_ui::PackagePresentation,Option<js_sys::Uint8Array>);
-pub(super) enum Opened {Editable {document:layer_ui::ImportedDocument,fallback:Option<Preserved>},Package {presentation:layer_ui::PackagePresentation,preview:Option<js_sys::Uint8Array>}}
+pub(super) type Preserved = (layer_ui::PackagePresentation,Option<js_sys::Object>);
+pub(super) enum Opened {Editable {document:layer_ui::ImportedDocument,fallback:Option<Preserved>},Package {presentation:layer_ui::PackagePresentation,preview:Option<js_sys::Object>}}
 pub(super) async fn open(bytes:js_sys::Uint8Array,options:OpenOptions)->Result<Opened,JsValue>{
     let buffers=js_sys::Array::new();buffers.push(&bytes);
     let wire=JsFuture::from(raster_worker::call("read",&serde_json::to_string(&options).map_err(js)?,&buffers)?).await?;
@@ -125,7 +125,7 @@ pub async fn raster_worker_read(options:&str,bytes:Vec<u8>)->Result<JsValue,JsVa
             let wire=pack(imported.project.artwork).await?;js_sys::Reflect::set(&wire,&js("source"),&serialize(&imported.source)?)?;
             if let Some(view)=fallback {
                 js_sys::Reflect::set(&wire,&js("fallback"),&serialize(&view.presentation())?)?;
-                if let Some(preview)=view.preview(){js_sys::Reflect::set(&wire,&js("preview"),&js_sys::Uint8Array::from(preview.encoded().as_ref()))?;}
+                if let Some(preview)=view.preview(){js_sys::Reflect::set(&wire,&js("preview"),&preview_value(preview)?)?;}
             }
             Ok(wire)
         }
@@ -135,8 +135,14 @@ pub async fn raster_worker_read(options:&str,bytes:Vec<u8>)->Result<JsValue,JsVa
 fn package_value(outcome:layer_core::package::codec::OpenOutcome)->Result<JsValue,JsValue> {
     let view=layer_ui::PackageView::new(outcome).map_err(js)?;
     let wire=js_sys::Object::new();js_sys::Reflect::set(&wire,&js("package"),&serialize(&view.presentation())?)?;
-    if let Some(preview)=view.preview(){js_sys::Reflect::set(&wire,&js("preview"),&js_sys::Uint8Array::from(preview.encoded().as_ref()))?;}
+    if let Some(preview)=view.preview(){js_sys::Reflect::set(&wire,&js("preview"),&preview_value(preview)?)?;}
     Ok(wire.into())
+}
+fn preview_value(preview:&layer_core::package::preview::Preview)->Result<JsValue,JsValue> {
+    let value=js_sys::Object::new();
+    js_sys::Reflect::set(&value,&js("encoded"),&js_sys::Uint8Array::from(preview.encoded().as_ref()))?;
+    js_sys::Reflect::set(&value,&js("pixels"),&js_sys::Uint8Array::from(preview.pixels().as_ref()))?;
+    Ok(value.into())
 }
 
 #[wasm_bindgen]

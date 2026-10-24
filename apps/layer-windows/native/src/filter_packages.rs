@@ -11,9 +11,9 @@ use std::{
     sync::Arc,
 };
 
-const MANIFEST_LIMIT: usize = 16 * 1024 * 1024;
-const MODULE_LIMIT: usize = 1024 * 1024;
-const MODULES_LIMIT: usize = 16 * 1024 * 1024;
+const MANIFEST_LIMIT: usize = EffectPackage::MAX_MANIFEST_BYTES;
+const MODULE_LIMIT: usize = EffectPackage::MAX_MODULE_BYTES;
+const MODULES_LIMIT: usize = EffectPackage::MAX_MODULES_BYTES;
 
 fn merge_mode() -> EffectInstallMode {
     EffectInstallMode::Merge

@@ -30,6 +30,12 @@ The workspace store holds the painter's palettes and custom workspaces. Startup
 replaces it only when this build cannot read it, and keeps a copy of the old
 store first; see [workspace ownership](workspace-ownership.md#startup-always-adopts-a-workspace).
 
+Native workspace connections enable SQLite defensive mode and disable trusted
+schema before reading stored records. SQLite limits values and complete rows
+to the shared 128 MiB workspace package budget plus 64 KiB for row identity and
+framing, and SQL text to 64 KiB, before row strings are materialized. These
+limits do not isolate the native parser.
+
 The paper library keeps each imported paper as `<id>.png`, a gray PNG named by
 the SHA-256 of its samples, with its picker preview in `<id>.preview` and names
 and order in `index.json`. PNGs and the index use the shared native atomic writer

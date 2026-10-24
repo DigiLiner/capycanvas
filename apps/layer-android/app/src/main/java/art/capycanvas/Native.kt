@@ -122,7 +122,7 @@ internal object Native {
     @JvmStatic external fun profileLibrary(request: String, bytes: ByteArray): String
     @JvmStatic external fun paletteFile(request: String, bytes: ByteArray): Array<Any>
     @JvmStatic external fun projectPackagePrompt(task: Long): String
-    @JvmStatic external fun projectPackagePreview(task: Long): ByteArray
+    @JvmStatic external fun projectPackagePreview(task: Long): IntArray
     @JvmStatic external fun projectPackageWrite(task: Long, fd: Int, preview: Boolean)
     @JvmStatic external fun projectProfilePrompt(task: Long): String
     @JvmStatic external fun projectAssumeProfile(task: Long, profile: String)

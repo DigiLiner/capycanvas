@@ -76,8 +76,9 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         val summary = withContext(Dispatchers.IO) { Native.projectPackagePrompt(task) }
         if (summary == "null") return false
         val preview = withContext(Dispatchers.IO) {
-            val bytes = Native.projectPackagePreview(task)
-            if (bytes.isEmpty()) null else android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.size)
+            val pixels = Native.projectPackagePreview(task)
+            val extent = JSONObject(summary).optJSONArray("extent")
+            if (pixels.isEmpty() || extent == null) null else android.graphics.Bitmap.createBitmap(pixels,extent.getInt(0),extent.getInt(1),android.graphics.Bitmap.Config.ARGB_8888)
         }
         val decision = CompletableDeferred<Pair<Uri,Boolean>?>()
         packageDecision = decision

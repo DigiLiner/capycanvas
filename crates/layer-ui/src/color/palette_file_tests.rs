@@ -410,6 +410,21 @@ fn krita_palettes_read_models_and_names_from_colorset_xml() {
 }
 
 #[test]
+fn zip64_palette_offsets_are_checked_before_access() {
+    let original = archive::zip(&[("palette.json", br#"{"name":"Test","swatches":[]}"#)]).unwrap();
+    let central = original.windows(4).position(|b| b == b"PK\x01\x02").unwrap();
+    let name_len = u16::from_le_bytes(original[central + 28..central + 30].try_into().unwrap()) as usize;
+    for offset in [u64::MAX, u32::MAX as u64, u32::MAX as u64 + 1] {
+        let mut bytes = original.clone();
+        bytes[central + 42..central + 46].copy_from_slice(&u32::MAX.to_le_bytes());
+        bytes[central + 30..central + 32].copy_from_slice(&12u16.to_le_bytes());
+        let extra = [1u16.to_le_bytes().as_slice(), 8u16.to_le_bytes().as_slice(), offset.to_le_bytes().as_slice()].concat();
+        bytes.splice(central + 46 + name_len..central + 46 + name_len, extra);
+        assert!(ColorLibrary::import_file(&bytes, "Bad").is_err());
+    }
+}
+
+#[test]
 fn archives_are_bounded_and_checked() {
     let json = format!(
         r#"[{{"name":"Big","swatches":[{}]}}]"#,

@@ -16,16 +16,13 @@ struct Member<'a> {
 }
 
 fn le16(bytes: &[u8], at: usize) -> Result<u16, String> {
-    bytes
-        .get(at..at + 2)
-        .map(|b| u16::from_le_bytes([b[0], b[1]]))
-        .ok_or_else(corrupt)
+    Ok(u16::from_le_bytes(range(bytes, at, 2)?.try_into().unwrap()))
 }
 fn le32(bytes: &[u8], at: usize) -> Result<u32, String> {
-    bytes
-        .get(at..at + 4)
-        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-        .ok_or_else(corrupt)
+    Ok(u32::from_le_bytes(range(bytes, at, 4)?.try_into().unwrap()))
+}
+fn range(bytes: &[u8], at: usize, count: usize) -> Result<&[u8], String> {
+    bytes.get(at..at.checked_add(count).ok_or_else(corrupt)?).ok_or_else(corrupt)
 }
 fn corrupt() -> String {
     "The palette archive is damaged".into()
@@ -41,21 +38,21 @@ fn members(bytes: &[u8]) -> Result<Vec<Member<'_>>, String> {
     let mut at = le32(bytes, end + 16)? as usize;
     let mut members = Vec::with_capacity(count.min(256));
     for _ in 0..count {
-        if le32(bytes, at)? != 0x0201_4b50 {
+        let header = range(bytes, at, 46)?;
+        if le32(header, 0)? != 0x0201_4b50 {
             return Err(corrupt());
         }
-        let name_len = usize::from(le16(bytes, at + 28)?);
-        let extra_len = usize::from(le16(bytes, at + 30)?);
-        let skip = name_len + extra_len + usize::from(le16(bytes, at + 32)?);
+        let name_len = usize::from(le16(header, 28)?);
+        let extra_len = usize::from(le16(header, 30)?);
+        let skip = name_len + extra_len + usize::from(le16(header, 32)?);
+        let record = range(bytes, at, 46 + skip)?;
         let mut sizes = [
-            le32(bytes, at + 24)?,
-            le32(bytes, at + 20)?,
-            le32(bytes, at + 42)?,
+            le32(header, 24)?,
+            le32(header, 20)?,
+            le32(header, 42)?,
         ]
         .map(u64::from);
-        let mut extra = bytes
-            .get(at + 46 + name_len..at + 46 + name_len + extra_len)
-            .ok_or_else(corrupt)?;
+        let mut extra = &record[46 + name_len..46 + name_len + extra_len];
         while extra.len() >= 4 {
             let (id, len) = (le16(extra, 0)?, usize::from(le16(extra, 2)?));
             let field = extra.get(4..4 + len).ok_or_else(corrupt)?;
@@ -69,22 +66,20 @@ fn members(bytes: &[u8]) -> Result<Vec<Member<'_>>, String> {
             }
             extra = &extra[4 + len..];
         }
-        let [size, compressed, local] = sizes.map(|v| usize::try_from(v).unwrap_or(usize::MAX));
-        if le32(bytes, local)? != 0x0403_4b50 {
+        let [size, compressed, local] = sizes.map(usize::try_from);
+        let (size, compressed, local) = (size.map_err(|_| corrupt())?, compressed.map_err(|_| corrupt())?, local.map_err(|_| corrupt())?);
+        let local_header = range(bytes, local, 30)?;
+        if le32(local_header, 0)? != 0x0403_4b50 {
             return Err(corrupt());
         }
-        let start = local
-            + 30
-            + usize::from(le16(bytes, local + 26)?)
-            + usize::from(le16(bytes, local + 28)?);
+        let start = local.checked_add(30 + usize::from(le16(local_header, 26)?)
+            + usize::from(le16(local_header, 28)?)).ok_or_else(corrupt)?;
         members.push(Member {
-            name: bytes.get(at + 46..at + 46 + name_len).ok_or_else(corrupt)?,
-            method: le16(bytes, at + 10)?,
-            crc: le32(bytes, at + 16)?,
+            name: &record[46..46 + name_len],
+            method: le16(header, 10)?,
+            crc: le32(header, 16)?,
             size,
-            data: bytes
-                .get(start..start.checked_add(compressed).ok_or_else(corrupt)?)
-                .ok_or_else(corrupt)?,
+            data: range(bytes, start, compressed)?,
         });
         at += 46 + skip;
     }

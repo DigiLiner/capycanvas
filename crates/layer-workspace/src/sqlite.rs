@@ -9,6 +9,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
+const MAX_ROW_BYTES: usize = MAX_PACKAGE_BYTES + 64 * 1024;
 #[path = "sqlite_ownership.rs"]
 pub(crate) mod ownership;
 pub trait Clock: Send + Sync {
@@ -88,6 +89,11 @@ impl SqliteStore {
         }
         options.open(path).map_err(unavailable)?;
         let mut connection = Connection::open(std::fs::canonicalize(path).map_err(unavailable)?)?;
+        use rusqlite::{config::DbConfig, limits::Limit};
+        connection.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
+        connection.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)?;
+        connection.set_limit(Limit::SQLITE_LIMIT_LENGTH, MAX_ROW_BYTES as i32)?;
+        connection.set_limit(Limit::SQLITE_LIMIT_SQL_LENGTH, 64 * 1024)?;
         connection.busy_timeout(std::time::Duration::from_secs(5))?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         connection.pragma_update(None, "synchronous", "FULL")?;
