@@ -34,6 +34,7 @@ pub(crate) struct Bubbles {
     drag: Option<BubbleDrag>,
     halo: Option<(u32, u32)>,
     ring: Option<RingContact>,
+    wheel: Option<WheelContact>,
     beads: Option<BeadContact>,
     scroll: Vec<(u32, [f32; 2])>,
     pill: Option<u32>,
@@ -51,6 +52,14 @@ struct RingContact {
     setting: &'static str,
     before: f32,
     at: [f32; 2],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WheelContact {
+    id: u32,
+    context: ColorEditContext,
+    before: layer_core::color::RgbColor,
+    part: ColorWheelPart,
 }
 
 fn control_face(state: &UiState, control: ToolbarControl) -> (String, &'static str, bool, bool) {
@@ -115,9 +124,15 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub(crate) fn reset_bubbles(&mut self) -> Result<UiChange, String> {
-        let change = if let Some(ring) = self.bubble_state.ring {
+        let mut change = if let Some(ring) = self.bubble_state.ring {
             self.bubble_ring(ring.id, ContactPhase::Cancel, [0.; 2])?
         } else { UiChange::default() };
+        if let Some(wheel) = self.bubble_state.wheel {
+            let restored = self.bubble_wheel(wheel.id, ContactPhase::Cancel, wheel.part, [0.; 2])?;
+            change.regions |= restored.regions;
+            change.canvas_wake |= restored.canvas_wake;
+            change.revision = change.revision.max(restored.revision);
+        }
         self.bubble_state = Bubbles { stroke: self.bubble_state.stroke, ..Bubbles::default() };
         Ok(change)
     }
@@ -191,6 +206,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         if state.chooser.is_some_and(|c| layout.get(c.id).is_none()) {
             state.chooser = None;
         }
+        if state.wheel.is_some_and(|c| layout.get(c.id).is_none()) {
+            state.wheel = None;
+        }
         state.scroll.retain(|(id, _)| layout.get(*id).is_some());
         let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), b.shape(narrow, pair))).collect();
         if !state.desk.matches(&items, bounds) {
@@ -207,6 +225,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if let Some(id) = self.bubble_state.card.filter(|id| self.state.workspace.layout.bubbles.get(*id).is_some()) {
             grown.push((id, vec![Shape::rect(self.card_size())]));
+        }
+        if let Some(bubble) = self.bubble_state.pill.and_then(|id| self.state.workspace.layout.bubbles.get(id)).filter(|bubble| bubble.options.palette) {
+            let pill = palette_pill(bubble.diameter(self.narrow()));
+            grown.push((bubble.id, vec![bubble.shape(self.narrow(), self.pair_beads()),
+                Shape::rect([pill.width, pill.height]).at([pill.x + pill.width * 0.5, pill.y + pill.height * 0.5])]));
         }
         if let Some(chooser) = self.bubble_state.chooser
             && let Some(bubble) = self.state.workspace.layout.bubbles.get(chooser.id)
@@ -573,6 +596,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::Drag { grab, phase, position, viewport } => self.drag_bubble(grab, phase, position, viewport),
             BubbleAction::Tap { id, position } => self.tap_bubble(id, position),
             BubbleAction::Ring { id, phase, position } => self.bubble_ring(id, phase, position),
+            BubbleAction::Wheel { id, phase, part, position } => self.bubble_wheel(id, phase, part, position),
             BubbleAction::ResetRing { id, position } => {
                 let view = self.bubble_view(&self.bubble(id)?.clone());
                 let ring = view.rings.iter().find(|r| r.enabled && r.arc.covers(position)).ok_or("No setting under the contact")?;
@@ -795,6 +819,34 @@ impl<R: CanvasRenderer> UiSession<R> {
             },
             ContactPhase::Cancel => Ok(UiChange::default()),
         }
+    }
+
+    fn bubble_wheel(&mut self, id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2]) -> Result<UiChange, String> {
+        if !position.into_iter().all(f32::is_finite) {
+            return Err("Invalid wheel position".into());
+        }
+        if phase == ContactPhase::Down {
+            if self.bubble_state.wheel.is_some() { return Err("A color wheel contact is already active".into()); }
+            if self.bubble(id)?.source.kind() != BubbleKind::Color { return Err("This bubble has no color wheel".into()); }
+            let colors = if self.selection_masks.target().is_some() { &self.selection_masks.colors } else { &self.state.colors };
+            self.bubble_state.wheel = Some(WheelContact { id, context: self.color_wheel_context(), before: colors.definition(), part });
+        }
+        let Some(wheel) = self.bubble_state.wheel.filter(|wheel| wheel.id == id) else { return Ok(UiChange::default()); };
+        if wheel.context != self.color_wheel_context() {
+            self.bubble_state.wheel = None;
+            return Ok(UiChange::default());
+        }
+        if matches!(phase, ContactPhase::Cancel | ContactPhase::Up) { self.bubble_state.wheel = None; }
+        if phase == ContactPhase::Up { return Ok(UiChange::default()); }
+        let action = if phase == ContactPhase::Cancel {
+            ColorAction::Definition { color: wheel.before }
+        } else {
+            let size = self.bubble_view(&self.bubble(id)?.clone()).diameter - 2. * RING_RIM;
+            ColorAction::PickWheel { part: wheel.part, point: position.map(|v| v + size / 2.), size }
+        };
+        let mut change = self.dispatch(UiAction::Color { action })?;
+        change.regions |= regions::BUBBLES;
+        Ok(change)
     }
 
     fn bubble_ring(&mut self, id: u32, phase: ContactPhase, position: [f32; 2]) -> Result<UiChange, String> {

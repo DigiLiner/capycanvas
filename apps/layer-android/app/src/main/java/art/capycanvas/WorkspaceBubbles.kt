@@ -127,7 +127,7 @@ internal class BubbleRecord(packet: JSONObject) {
             return p
         }
         val face = v.array("face").bubblePoint()
-        if (v.objectOrNull("card") == null) part("face", v, Offset.Zero, Size(face.x, face.y), radius = if (v.getString("kind") == "layers") 20f else face.y / 2, squircle = v.getString("kind") == "layers", strength = if (v.getBoolean("enabled")) 1f else .4f, delay = if (parts["card"] != null) 150 else 0)
+        if (v.objectOrNull("card") == null) part("face", v, Offset.Zero, Size(face.x, face.y), radius = if (v.getString("kind") == "layers") 20f else face.y / 2, squircle = v.getString("kind") == "layers", strength = if (v.getBoolean("enabled")) 1f else .45f, delay = if (parts["card"] != null) 150 else 0)
         if (v.getString("kind") == "layers" && v.objectOrNull("card") == null) {
             val badge = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(0, 22)))) as JSONArray
             val size = badge.getJSONArray(1).bubblePoint()
@@ -145,7 +145,7 @@ internal class BubbleRecord(packet: JSONObject) {
                 parts.remove(key)?.let { old -> old.appearance.to(0f, 120); parts["retired:$key:${SystemClock.uptimeMillis()}"] = old }
             }
             val delay = if (parts[key] == null) fresh++ * if (brush) 16L else 14L else 0L
-            part(key, item, item.array("center").bubblePoint(), if (brush) Size(152f, 48f) else Size(44f, 44f), delay = delay)
+            part(key, item, item.array("center").bubblePoint(), if (brush) Size(152f, 48f) else Size(44f, 44f), strength = if (item.getBoolean("enabled")) 1f else .45f, delay = delay)
             if (!brush) {
                 val tag = item.getJSONObject("tag")
                 part("tag:$i", item, tag.rect().center, tag.rect().size, radius = 9f, from = 1f, duration = 0)
@@ -213,7 +213,7 @@ internal class BubbleRecord(packet: JSONObject) {
                             val position by androidx.compose.animation.core.animateFloatAsState(if (card.getBoolean("properties")) 1f else 0f,
                                 androidx.compose.animation.core.tween(200), label = "bubble-properties")
                             LayerInspector(host, state, card.getBoolean("properties"), position, part.size.height, 49f,
-                                "bubble:${record.id}:${card.getBoolean("full")}", full = card.getBoolean("full"), labelOverride = card.getString("disclosure"), bubbleId = record.id,
+                                "bubble:${record.id}:${card.getBoolean("full")}", full = card.getBoolean("full"), labelOverride = card.getString("disclosure").takeUnless { card.getBoolean("full") }, bubbleId = record.id,
                                 toggle = { input.send(obj("type" to "properties", "id" to record.id)) }) { size ->
                                 if (record.view.objectOrNull("card") != null) input.send(obj("type" to "measure_card", "id" to record.id, "heights" to size.array("heights")))
                             }
@@ -361,9 +361,9 @@ private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean
             }
             "history" -> v.array("buttons").objects().forEachIndexed { i, button ->
                 val x = record.packet.array("history").getJSONArray(i).bubblePoint().x
-                Box(Modifier.offset(x = x.dp).size(56.dp).graphicsLayer { alpha = if (button.getBoolean("enabled")) 1f else .4f }, contentAlignment = Alignment.Center) {
+                Box(Modifier.offset(x = x.dp).size(56.dp), contentAlignment = Alignment.Center) {
                     if ((record.hovered as? JSONObject)?.optInt("half", -1) == i) Box(Modifier.fillMaxSize().background(colors.text.copy(alpha = if (record.pressed) .14f else .07f), CircleShape))
-                    SharedIcon(button.getString("icon"), button.getString("label"), Modifier.size(20.dp))
+                    SharedIcon(button.getString("icon"), button.getString("label"), Modifier.size(20.dp).graphicsLayer { alpha = if (button.getBoolean("enabled")) 1f else .35f })
                 }
             }
             "layers" -> {

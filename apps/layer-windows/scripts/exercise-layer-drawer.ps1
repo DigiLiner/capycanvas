@@ -10,9 +10,11 @@ $run=Join-Path $repo ('artifacts/windows/layer-drawer/'+[Guid]::NewGuid().ToStri
 [IO.Directory]::CreateDirectory($run)|Out-Null
 function Press([string]$Id){
  if($Id -like 'header-item-*'){
-  $itemId=[long]($Id -replace '^header-item-','');$item=Find $Id -Visible
-  if(!$item){Invoke 'header-overflow-2';Invoke ('header-overflow-item-'+$itemId);return}
-  $r=$item.Current.BoundingRectangle
+  $itemId=[long]($Id -replace '^header-item-','');$zone=-1
+  for($i=0;$i -lt 3;$i++){if(@((Model).header.model.zones[$i]|Where-Object id -eq $itemId).Count){$zone=$i;break}}
+  Wait-Until {(Find $Id -Visible) -or (Find ('header-overflow-'+$zone) -Visible)} "Header item $itemId did not arrange"
+  if(!(Find $Id -Visible)){Invoke ('header-overflow-'+$zone);$Id='header-overflow-item-'+$itemId}
+  $r=(Control $Id -Arranged).Current.BoundingRectangle
   [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
   [CapyRowPointer]::Down('mouse',[int]($r.X+$r.Width*.5),[int]($r.Y+$r.Height*.5));[CapyRowPointer]::Up()
  }
@@ -71,7 +73,7 @@ function Swipe([long]$Id,[int]$Distance){
  $r=Bounds $(if($Distance -lt 0){"layer-$Id-name"}else{"layer-row-$Id"});$x=[int]$(if($Distance -lt 0){$r.X+$r.Width*.5}else{$r.Left+12});$y=[int]($r.Y+$r.Height*.5)
  $row=Bounds "layer-row-$Id"
  [CapyRowPointer]::Down('touch',$x,$y);Start-Sleep -Milliseconds 35
- for($i=1;$i -le 8;$i++){$next=[int][Math]::Clamp(($x+[int]($Distance*$i/8)),$row.Left+4,$row.Right-4);[CapyRowPointer]::Move($next,$y);Start-Sleep -Milliseconds 12}
+ for($i=1;$i -le 8;$i++){$next=[int][Math]::Min([Math]::Max(($x+[int]($Distance*$i/8)),$row.Left+4),$row.Right-4);[CapyRowPointer]::Move($next,$y);Start-Sleep -Milliseconds 12}
  $list=Control 'layer-list';$beforeUp=$list.Current.ItemStatus
  [CapyRowPointer]::Up()
  Start-Sleep -Milliseconds 250
@@ -98,7 +100,7 @@ function Test-AddPaper {
    if((Model).state.document_file.revision -ne $revision -or !(Model).state.layer_tools.add_paper){throw "$device release outside Add paper changed the drawing"}
    [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 35;[CapyRowPointer]::Up()
   }else{
-   $row.SetFocus();Wait-Until {$row.Current.HasKeyboardFocus} 'Add paper did not accept keyboard focus'
+   Focus-Keyboard $row
    [CapyRowPointer]::Key([uint32]$review.Id,$(if($device -eq 'Space'){0x20}else{0x0D}))
   }
   Wait-Until {!((Model).state.layer_tools.add_paper) -and @((Model).state.layers).Count -eq $original.Count -and @((Model).state.layers)[-1].content_icon -eq 'layer-paper-symbolic'} "$device did not create one bottom Paper"
@@ -117,9 +119,11 @@ function Check-Footer {
  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  $footer=Bounds 'layer-footer';$first=Bounds 'layer-new';$last=Bounds 'layer-actions'
  $drawer=Visible-DrawerBounds
- if([Math]::Abs(($first.Left-$footer.Left)-($footer.Right-$last.Right)) -gt 1 -or [Math]::Abs(($first.Left-$drawer.Left)/$scale-8) -gt 1 -or [Math]::Abs(($drawer.Right-$last.Right)/$scale-8) -gt 1){throw 'Layers footer first and last actions do not share their eight-point inset'}
+ $panel=Bounds 'drawer-panel-layers'
+ if([Math]::Abs(($panel.Left-$drawer.Left)/$scale-8) -gt 1 -or [Math]::Abs(($drawer.Right-$panel.Right)/$scale-8) -gt 1){throw 'Layers inspector does not keep its eight-point outer inset'}
+ if([Math]::Abs(($first.Left-$footer.Left)-($footer.Right-$last.Right)) -gt 1 -or [Math]::Abs(($first.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($panel.Right-$last.Right)/$scale-8) -gt 1){throw 'Layers footer actions do not keep their eight-point inner inset and alignment'}
  $ids=@{new_layer='layer-new';new_vector_layer='layer-new-vector';new_group='layer-new-group';new_selection_layer='layer-new-selection';add_mask='layer-add-mask';add_filter='layer-add-filter';import_image='layer-import';delete='layer-delete'}
- $width=$footer.Width/$scale;$previous=$null;$hidden=@()
+ $width=$panel.Width/$scale;$previous=$null;$hidden=@()
  foreach($slot in @((Model).state.layer_tools.footer)){
   $id=$ids[$slot.button];$button=Find $id -Visible
   if($width+.5 -lt $slot.min_width){
@@ -159,6 +163,7 @@ try {
  Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Layer drawer review did not start' 90
  $root=$native.window.Root;$drawingWindow=$native.window.Handle
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
+ Wait-Until {$canvas=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$window=$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Current.WindowVisualState;$window -eq [System.Windows.Automation.WindowVisualState]::Maximized -and [Math]::Abs((Model).state.camera.viewport[0]-$canvas.Width) -lt .1} 'Maximized layer drawer viewport did not settle'
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)

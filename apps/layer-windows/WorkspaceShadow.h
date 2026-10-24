@@ -6,15 +6,17 @@
 #include <vector>
 
 namespace CapyUi {
+void ClipOutside(UIElement const&,float width,float height,std::array<float,4> radii,bool squircle);
+void ClipSurface(UIElement const&,float width,float height,std::array<float,4> radii,bool squircle);
 // A retained compositor shadow beside the clipped panel. The padded root allows
 // overview occlusion to preserve the entire blur while excluding GPU image holes.
 class WorkspaceShadow {
 public:
     WorkspaceShadow();
     Canvas Root()const{return root;}
-    void Layout(Windows::Foundation::Rect bounds,int order,bool visible);
+    void Layout(winrt::Windows::Foundation::Rect bounds,int order,bool visible);
     void Shape(Geometry const& geometry,float width,float height,float blur,float offset,float opacity);
-    void Cut(std::array<float,4> radii,std::vector<Windows::Foundation::Rect> extra={});
+    void Cut(std::array<float,4> radii,std::vector<winrt::Windows::Foundation::Rect> extra={});
     void Uncut();
 private:
     Canvas root,maskHost;

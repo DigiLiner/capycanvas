@@ -174,13 +174,13 @@ function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=
     } "Missing control: $Value" $Seconds
     $hit.item
 }
-function Focus-Keyboard($Element){
+function Focus-Keyboard($Element,[switch]$Backward){
     $Element.SetFocus()
     Wait-Until {$Element.Current.HasKeyboardFocus} 'Native control did not receive focus'
-    [CapyRowPointer]::Key([uint32]$review.Id,0x09)
-    Wait-Until {!$Element.Current.HasKeyboardFocus} 'Tab did not leave the native control'
-    [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x09)
-    Wait-Until {$Element.Current.HasKeyboardFocus} 'Shift+Tab did not return keyboard focus to the native control'
+    if($Backward){[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x09)}else{[CapyRowPointer]::Key([uint32]$review.Id,0x09)}
+    Wait-Until {!$Element.Current.HasKeyboardFocus} 'Keyboard navigation did not leave the native control'
+    if($Backward){[CapyRowPointer]::Key([uint32]$review.Id,0x09)}else{[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x09)}
+    Wait-Until {$Element.Current.HasKeyboardFocus} 'Keyboard navigation did not return focus to the native control'
 }
 function Control-Trace($Element){
     $walker=[System.Windows.Automation.TreeWalker]::RawViewWalker
@@ -243,6 +243,13 @@ function State-File{
     if(!$script:CapyTrace -or $script:CapyTrace.process -ne $review.Id){$script:CapyTrace=@{process=$review.Id;path=$null;model=$null}}
     if(!$script:CapyTrace.path){$script:CapyTrace.path=Trace-File -Isolated}
     $script:CapyTrace.path
+}
+function Search-State{
+ $path=State-File;$base=Read-Snapshot $path
+ $searchPath=Join-Path (Split-Path -Parent $path) ((Split-Path -Leaf $path) -replace '^ui-state-','search-state-')
+ $search=Read-Snapshot $searchPath
+ if($base.process_id -ne $review.Id -or $search.process_id -ne $review.Id -or $search.window_id -ne $base.window_id -or 'search' -notin $search.PSObject.Properties.Name){throw 'The search acknowledgement is not from the owned drawing'}
+ $search.search
 }
 function Model{
     $model=$null

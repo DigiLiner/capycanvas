@@ -252,7 +252,8 @@ void LayerRow::highlight(int position, bool attachment){
     AutomationProperties::SetHelpText(root,position==3?data->caption(L"layers",L"drop_into"):position==1?data->caption(L"layers",L"drop_above"):position==2?data->caption(L"layers",L"drop_below"):L"");
 }
 void LayerRow::refresh(){
-    if(!current())return;auto layer=model();
+    if(!current())return;auto layer=model();auto view=owner.lock();bool full=!view||view->full;
+    check.Visibility(full?Visibility::Visible:Visibility::Collapsed);body.ColumnDefinitions().GetAt(1).Width({full?26.:0.,GridUnitType::Pixel});
     root.Background(flag(layer,L"selected")?selected(data):clear());
     auto actions=array(layer,L"swipe_actions");
     auto key=actions.Stringify()+L":"+to_hstring(data->textSize());
@@ -308,11 +309,11 @@ void LayerRow::refresh(){
     if(AutomationProperties::GetName(eye)!=eyeName){AutomationProperties::SetName(eye,eyeName);CapyUi::tooltip(eye,eyeName);}
     hstring contentName=selectionLayer?data->caption(L"layers",L"edit_selection"):flag(layer,L"group")?(flag(layer,L"collapsed")?data->caption(L"layers",L"expand"):data->caption(L"layers",L"collapse")):data->caption(L"layers",L"edit_content");
     if(AutomationProperties::GetName(content)!=contentName){AutomationProperties::SetName(content,contentName);CapyUi::tooltip(content,contentName);}
-    load.Visibility(selectionLayer?Visibility::Visible:Visibility::Collapsed);
-    body.ColumnDefinitions().GetAt(5).Width({selectionLayer?32.:0.,GridUnitType::Pixel});
+    load.Visibility(full&&selectionLayer?Visibility::Visible:Visibility::Collapsed);
+    body.ColumnDefinitions().GetAt(5).Width({full&&selectionLayer?32.:0.,GridUnitType::Pixel});
     if(selectionLayer){auto tip=str(layer,L"load_selection_tooltip");AutomationProperties::SetName(load,tip);CapyUi::tooltip(load,tip);}
     AutomationProperties::SetItemStatus(check,flag(layer,L"selected")?data->caption(L"search",L"selected"):data->caption(L"layers",L"unselected"));
-    bool hasMask=flag(layer,L"has_mask");
+    bool hasMask=full&&flag(layer,L"has_mask");
     content.Background(clear());mask.Background(clear());
     contentEdge.update(data,flag(layer,L"content_selected"));maskEdge.update(data,flag(layer,L"mask_selected"));
     mask.Visibility(hasMask?Visibility::Visible:Visibility::Collapsed);link.Visibility(hasMask?Visibility::Visible:Visibility::Collapsed);
@@ -323,20 +324,20 @@ void LayerRow::refresh(){
     hstring linkName=flag(layer,L"mask_linked")?data->caption(L"layers",L"unlink_mask"):data->caption(L"layers",L"link_mask_to_layer");
     AutomationProperties::SetName(link,linkName);CapyUi::tooltip(link,linkName);
     maskThumbnail.Opacity(flag(layer,L"mask_enabled")?1:.4);
-    auto paper=object(layer,L"paper");auto paperShown=paper.Size()?Visibility::Visible:Visibility::Collapsed;
+    auto paper=object(layer,L"paper");auto paperShown=full&&paper.Size()?Visibility::Visible:Visibility::Collapsed;
     texture.Visibility(paperShown);textureFrame.Visibility(paperShown);textureEdge.update(data,false);
-    body.ColumnDefinitions().GetAt(8).Width({paper.Size()?32.:0.,GridUnitType::Pixel});
+    body.ColumnDefinitions().GetAt(8).Width({full&&paper.Size()?32.:0.,GridUnitType::Pixel});
     if(paper.Size()){texturePreview->show(paper.GetNamedValue(L"id",JsonValue::CreateNullValue()),str(paper,L"label"));AutomationProperties::SetHelpText(texture,str(paper,L"label"));}
     body.ColumnDefinitions().GetAt(2).Width({std::min(24.,num(layer,L"depth")*8),GridUnitType::Pixel});
     lockImage.Opacity(flag(layer,L"locked")||flag(layer,L"alpha_locked")?1:0);
     AutomationProperties::SetName(lockImage,flag(layer,L"locked")?data->caption(L"layers",L"locked"):flag(layer,L"alpha_locked")?data->caption(L"layers",L"alpha_locked"):L"");
     AutomationProperties::SetAccessibilityView(lockImage,flag(layer,L"locked")||flag(layer,L"alpha_locked")?Automation::Peers::AccessibilityView::Content:Automation::Peers::AccessibilityView::Raw);
-    body.ColumnDefinitions().GetAt(11).Width({flag(layer,L"can_drop_below")?14.:12.,GridUnitType::Pixel});
-    body.ColumnDefinitions().GetAt(12).Width({flag(layer,L"can_drop_below")?16.:0.,GridUnitType::Pixel});
-    grip.Visibility(flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
+    body.ColumnDefinitions().GetAt(11).Width({full&&flag(layer,L"can_drop_below")?14.:12.,GridUnitType::Pixel});
+    body.ColumnDefinitions().GetAt(12).Width({full&&flag(layer,L"can_drop_below")?16.:0.,GridUnitType::Pixel});
+    grip.Visibility(full&&flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
     grip.IsEnabled(flag(layer,L"drag_from_handle"));
     hstring details=str(layer,L"description");
-    meta.Text(details);meta.Visibility(details.empty()?Visibility::Collapsed:Visibility::Visible);
+    meta.Text(details);meta.Visibility(!full||details.empty()?Visibility::Collapsed:Visibility::Visible);
     bool editing=renameTarget(data)==id;
     if(editing&&!renaming){renaming=true;committing=false;rename.Text(str(layer,L"label"));rename.Visibility(Visibility::Visible);name.Visibility(Visibility::Collapsed);
         focusRename();}

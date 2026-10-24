@@ -318,12 +318,29 @@ class AndroidToolBubblesTest {
         val diagnostic = obj("center" to JSONArray(listOf(sharedCenter.x, sharedCenter.y)), "local" to p, "hit" to hit, "before" to palettes, "after" to view(id), "contacts" to contacts)
         java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "validation/tool-bubbles/palette-diagnostic.json").writeText(diagnostic.toString(2))
         waitFor("Palette bead opens pill") { !view(id).isNull("pill") }
-        SystemClock.sleep(250); shot("wheel-beads-pill")
+        val area = workspace()
+        val edgeStart = (center(id) - area.topLeft) / density
+        val edge = Offset(area.width / density - 4, area.height / density - 4)
+        for ((phase, position) in listOf("down" to edgeStart, "move" to edge, "up" to edge)) action(obj("type" to "bubble", "action" to obj("type" to "drag", "grab" to obj("kind" to "bubble", "id" to id), "phase" to phase, "position" to JSONArray(listOf(position.x, position.y)), "viewport" to JSONArray(listOf(area.width / density, area.height / density)))))
+        stable(id)
+        assertTrue("Dragging closes the palette pill", view(id).isNull("pill"))
+        val edgeBead = view(id).getJSONArray("beads").objects().single { it.getJSONObject("placement").getJSONObject("bead").getString("kind") == "palettes" }.getJSONObject("placement").getJSONArray("center")
+        tap(center(id) + Offset(edgeBead.getDouble(0).toFloat(), edgeBead.getDouble(1).toFloat()) * density)
+        waitFor("Palette reopens at the edge") { !view(id).isNull("pill") }
+        stable(id); SystemClock.sleep(250)
+        val layout = packets().single { it.getJSONObject("view").getLong("id") == id }.getJSONObject("pill")
+        val corner = center(id) + Offset(layout.number("x"), layout.number("y")) * density
+        val pillBounds = Rect(corner, androidx.compose.ui.geometry.Size(layout.number("width") * density, layout.number("height") * density))
+        java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "validation/tool-bubbles/$case-palette-bounds.json").writeText(obj("workspace" to area.toString(), "pill" to pillBounds.toString(), "packet" to layout, "nativeCenter" to bounds("tool-bubble-$id").center.toString(), "sharedCenter" to center(id).toString()).toString(2))
+        shot("wheel-beads-pill")
+        assertTrue("Palette pill and both 30dp buttons remain inside workspace: $pillBounds in $area", pillBounds.left >= area.left - 2 && pillBounds.top >= area.top - 2 && pillBounds.right <= area.right + 2 && pillBounds.bottom <= area.bottom + 2)
         val original = view(id).getString("pill")
         val pill = packets().single { it.getJSONObject("view").getLong("id") == id }.getJSONObject("pill")
         val at = center(id) + Offset(pill.number("x"), pill.number("y")) * density
         tap(at + Offset((pill.number("width") - 15) * density, 15 * density))
         waitFor("Next palette changes shared name") { view(id).getString("pill") != original }
+        val next = view(id).getString("pill"); SystemClock.sleep(250)
+        assertEquals("One Next contact advances once", next, view(id).getString("pill"))
         tap(at + Offset(15 * density, 15 * density))
         waitFor("Previous palette restores shared name") { view(id).getString("pill") == original }
         tap(at + Offset(pill.number("width") * density / 2, 15 * density))
@@ -494,6 +511,9 @@ class AndroidToolBubblesTest {
             action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
             action(obj("type" to "set_theme", "theme" to theme))
             val target = workspace().let { Offset(it.left + it.width * .4f, it.top + it.height * .5f) }
+            val emptyHistory = take(5, target)
+            stable(emptyHistory); SystemClock.sleep(250); shot("history-empty")
+            putBack(emptyHistory)
             val brush = take(2, target)
             var v = view(brush)
             assertTrue("Tear-out selects and opens the shared halo", v.getBoolean("selected") && v.getBoolean("open") && v.getJSONArray("rings").length() > 0)
@@ -606,8 +626,10 @@ class AndroidToolBubblesTest {
             action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
             waitFor("Removing a menu owner dismisses its native menu") { findTag("workspace-menu") == null && packets().isEmpty() }
             val history = take(5, target)
+            SystemClock.sleep(250); shot("history-initial")
             val beforeLayers = state().getJSONArray("layers").length()
             action(obj("type" to "layer", "action" to obj("op" to "new", "group" to false, "clipped" to false)))
+            SystemClock.sleep(250); shot("history-redo-disabled")
             tap(center(history) + Offset(-24 * density, 0f))
             waitFor("History bubble native Undo") { state().getJSONArray("layers").length() == beforeLayers }
             tap(center(history) + Offset(24 * density, 0f))
@@ -659,6 +681,25 @@ class AndroidToolBubblesTest {
                 instrumentation.runOnMainSync { found = findTag("bubble-card-$layers")?.second?.find { it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("layer-grip-") == true } != null }
                 found
             }
+            val fullCaptions = JSONArray()
+            fun fullCaption(open: Boolean) {
+                val expected = state().getJSONObject("layer_properties").getJSONObject("disclosure").getString(if (open) "return_label" else "label")
+                var actual: String? = null
+                waitFor("Full footer uses the shared ${if (open) "return" else "disclosure"} caption", { "expected=$expected actual=$actual" }) {
+                    instrumentation.runOnMainSync { actual = findTag("bubble-card-$layers")?.second?.find(hasTag("layer-properties-disclosure-label"))?.config?.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text }
+                    actual == expected
+                }
+                fullCaptions.put(obj("properties" to open, "expected" to expected, "actual" to actual))
+            }
+            fullCaption(false)
+            tap(bounds("bubble-properties-$layers").center)
+            waitFor("Full opens its native Properties page") { view(layers).getJSONObject("card").getBoolean("properties") }
+            fullCaption(true)
+            SystemClock.sleep(250); cardShot(layers, "layers-full-properties")
+            tap(bounds("bubble-properties-$layers").center)
+            waitFor("Full returns to native Layers") { !view(layers).getJSONObject("card").getBoolean("properties") }
+            fullCaption(false)
+            java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "validation/tool-bubbles/$case-full-captions.json").writeText(fullCaptions.toString(2))
             SystemClock.sleep(250); cardShot(layers, "layers-full")
             val retiringFooter = bounds("bubble-properties-$layers").center
             val layersBeforeFold = state().getJSONArray("layers").length()

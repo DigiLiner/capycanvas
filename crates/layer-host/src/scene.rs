@@ -97,12 +97,14 @@ impl Navigators {
 }
 
 /// Glass regions are `[x, y, w, h, tl, tr, br, bl]` in logical points, with an
-/// optional ninth value of 1 for a squircle outline.
+/// optional ninth value of 1 for a squircle outline and tenth value for strength.
 #[derive(Default, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GlassLayout {
     regions: Vec<Vec<f32>>,
     connections: Vec<DrawerConnection>,
+    #[serde(default)]
+    arcs: Vec<[f32; 7]>,
 }
 
 #[derive(Default)]
@@ -114,8 +116,9 @@ pub struct Glass {
 impl Glass {
     pub fn set(&mut self, layout: GlassLayout) -> Result<bool, String> {
         let regions = layout.regions.iter().all(|r| {
-            matches!(r.len(), 8 | 9) && r.iter().all(|v| v.is_finite()) && r[2] >= 0. && r[3] >= 0.
+            matches!(r.len(), 8..=10) && r.iter().all(|v| v.is_finite()) && r[2] >= 0. && r[3] >= 0.
         });
+        let arcs = layout.arcs.iter().all(|a| a.iter().all(|v| v.is_finite()) && a[2] >= 0. && a[3] >= 0.);
         let connections = layout.connections.iter().all(|c| {
             [
                 c.bounds.x,
@@ -130,7 +133,7 @@ impl Glass {
             .chain(&c.radii)
             .all(|v| v.is_finite())
         });
-        if layout.regions.len() + layout.connections.len() > MAX_GLASS || !regions || !connections {
+        if layout.regions.len() + layout.connections.len() + layout.arcs.len() > MAX_GLASS || !regions || !connections || !arcs {
             return Err("Invalid glass geometry".into());
         }
         let changed = self.layout != layout;
@@ -153,7 +156,7 @@ impl Glass {
                     } else {
                         BackdropRegion::CIRCULAR
                     },
-                )
+                ).with_strength(b.get(9).copied().unwrap_or(1.))
             });
             let connections =
                 self.layout
@@ -165,13 +168,16 @@ impl Glass {
                         radii: radii.map(|v| v * scale),
                         shape: BackdropRegion::SQUIRCLE,
                     });
-            self.scaled = boxes.chain(connections).collect();
+            let arcs = self.layout.arcs.iter().map(|a| BackdropRegion::arc(
+                [a[0] * scale, a[1] * scale], a[2] * scale, a[3] * scale, a[4], a[5],
+            ).with_strength(a[6]));
+            self.scaled = boxes.chain(connections).chain(arcs).collect();
         }
         &self.scaled
     }
 
     pub fn count(&self) -> usize {
-        self.layout.regions.len() + self.layout.connections.len()
+        self.layout.regions.len() + self.layout.connections.len() + self.layout.arcs.len()
     }
 }
 
@@ -187,9 +193,10 @@ pub struct SceneDisplay {
 
 impl NativeHost {
     pub fn set_glass(&mut self, glass: &mut Glass, layout: GlassLayout) -> Result<(), String> {
+        let count = glass.count();
         if glass.set(layout)? {
             self.dirty = true;
-            self.invalidate_snapshot();
+            if count != glass.count() { self.invalidate_snapshot(); }
         }
         Ok(())
     }
@@ -280,6 +287,96 @@ mod tests {
 
     fn glass(value: serde_json::Value) -> Result<GlassLayout, serde_json::Error> {
         serde_json::from_value(value)
+    }
+
+    #[test]
+    fn glass_arcs_scale_geometry_once_without_scaling_angles_or_fade() {
+        let mut layer = Glass::default();
+        let layout = |strength| serde_json::json!({"regions":[[10,20,100,50,4,5,6,7,1,strength]],"connections":[],"arcs":[[30,40,20,6,0.25,-1.5,strength]]});
+        assert!(layer.set(glass(layout(0.375)).unwrap()).unwrap());
+        for scale in [2., 1.5, 2.] {
+            let regions = layer.regions(scale);
+            assert_eq!(regions[0].bounds, [10.,20.,100.,50.].map(|v| v*scale));
+            assert_eq!(regions[0].radii, [4.,5.,6.,7.].map(|v| v*scale));
+            assert_eq!(regions[0].shape, [4.,0.375,0.,0.]);
+            let arc = BackdropRegion::arc([30.*scale,40.*scale],20.*scale,6.*scale,0.25,-1.5).with_strength(0.375);
+            assert_eq!(regions[1], arc);
+            assert_eq!(regions[1].radii, [30.*scale,40.*scale,20.*scale,3.*scale]);
+            assert_eq!(regions[1].shape, [0.,0.375,-1.25,1.5]);
+        }
+        let before = layer.regions(2.).to_vec();
+        assert!(layer.set(glass(layout(0.125)).unwrap()).unwrap());
+        assert!(!layer.set(glass(layout(0.125)).unwrap()).unwrap());
+        for (old, new) in before.iter().zip(layer.regions(2.)) {
+            assert_eq!(old.bounds, new.bounds);
+            assert_eq!(old.radii, new.radii);
+            assert_eq!(new.shape[1], 0.125);
+            assert_eq!(old.shape[2..], new.shape[2..]);
+        }
+    }
+
+    #[test]
+    fn invalid_arc_or_fade_preserves_the_last_valid_glass_layout() {
+        let valid = || glass(serde_json::json!({"regions":[[1,2,30,40,3,3,3,3,0,0.5]],"connections":[],"arcs":[[20,30,12,4,0,2,0.75]]})).unwrap();
+        let mut layer = Glass::default();
+        layer.set(valid()).unwrap();
+        let before = layer.regions(1.5).to_vec();
+        for index in 0..7 {
+            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut invalid = valid();
+                invalid.arcs[0][index] = value;
+                assert!(layer.set(invalid).is_err());
+                assert_eq!(layer.regions(1.5), before);
+            }
+        }
+        for index in [2,3] {
+            let mut invalid = valid(); invalid.arcs[0][index] = -1.;
+            assert!(layer.set(invalid).is_err());
+            assert_eq!(layer.regions(1.5), before);
+        }
+        let mut invalid = valid(); invalid.regions[0][9] = f32::NAN;
+        assert!(layer.set(invalid).is_err());
+        let mut invalid = valid(); invalid.arcs = vec![[0.;7]; MAX_GLASS];
+        assert!(layer.set(invalid).is_err());
+        assert_eq!(layer.count(), 2);
+        assert_eq!(layer.regions(1.5), before);
+        let mut maximum = valid(); maximum.arcs = vec![[0.;7]; MAX_GLASS-1];
+        assert!(layer.set(maximum).unwrap());
+        assert_eq!(layer.count(), MAX_GLASS);
+        assert!(glass(serde_json::json!({"regions":[],"connections":[],"arcs":[[0,0,1,1,0,1]]})).is_err());
+    }
+
+    #[test]
+    fn glass_motion_and_fade_dirty_render_without_republishing_the_model() {
+        let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let mut layer = Glass::default();
+        host.take_update_bytes().unwrap().unwrap();
+        let revision = host.session.state().revision;
+        let layout = |x, strength| glass(serde_json::json!({
+            "regions":[[x,20,100,50,8,8,8,8,1,strength]],"connections":[],
+            "arcs":[[x,40,20,6,0.25,1.5,strength]]
+        })).unwrap();
+        host.set_glass(&mut layer, layout(10., 1.)).unwrap();
+        assert!(host.take_update_bytes().unwrap().is_some());
+        let mut previous = layer.regions(1.5).to_vec();
+        for (x, strength) in [(30.,1.),(30.,0.5),(60.,0.125)] {
+            host.dirty = false;
+            host.set_glass(&mut layer, layout(x, strength)).unwrap();
+            assert!(host.dirty, "Motion and fade must redraw glass");
+            assert_eq!(layer.count(), 2);
+            assert_ne!(layer.regions(1.5), previous);
+            previous = layer.regions(1.5).to_vec();
+            assert!(host.take_update_bytes().unwrap().is_none(), "Unchanged metadata must not republish the UI model");
+            assert_eq!(host.session.state().revision, revision);
+            host.dirty = false;
+            host.set_glass(&mut layer, layout(x, strength)).unwrap();
+            assert!(!host.dirty, "Identical geometry must remain idle");
+        }
+        host.set_glass(&mut layer, glass(serde_json::json!({"regions":[],"connections":[]})).unwrap()).unwrap();
+        assert!(host.dirty);
+        assert_eq!(layer.count(), 0);
+        assert!(host.take_update_bytes().unwrap().is_some(), "A changed count must republish host metadata");
+        assert_eq!(host.session.state().revision, revision);
     }
 
     #[test]

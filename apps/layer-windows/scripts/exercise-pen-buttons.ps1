@@ -58,6 +58,7 @@ try {
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
+ Use-PaintWorkspace
  $canvas=(Find 'drawing-canvas').Current.BoundingRectangle
  $model=Model;$area=$model.layout.work_area;$density=$canvas.Width/$model.layout.viewport[0]
  $x=[int]($canvas.X+($area.x+$area.width*.5)*$density)

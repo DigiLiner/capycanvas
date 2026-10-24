@@ -74,7 +74,7 @@ function Save-Evidence([string]$Log) {
     foreach ($folder in $folders) {
         foreach ($owner in $owners | Where-Object { $_ } | Select-Object -Unique) {
             Get-ChildItem -LiteralPath $folder -File | Where-Object {
-                $_.Name -match "^(ui-state|camera-state|windows|prediction|latency)-$owner(-|\.)"
+                $_.Name -match "^(ui-state|camera-state|search-state|windows|prediction|latency)-$owner(-|\.)"
             } | Copy-Item -Destination $evidence
         }
     }

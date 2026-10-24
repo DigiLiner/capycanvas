@@ -50,7 +50,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         var last = start
         var held = false
         var hold: Job? = null
-        var color: CanvasHost.BubbleColorContact? = null
+        var colorStarted = false
         var wheel: String? = null
         var grab: JSONObject? = null
         val fingers = linkedMapOf(id to start)
@@ -157,20 +157,20 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
     private fun sourceControl(grab: JSONObject) = sourceView(grab)?.objectOrNull("resolved_control")?.toString()
     private fun local(c: Contact, point: Offset) = (point - c.record.center).headerPoint()
     private fun restore(c: Contact) {
-        c.color?.let { host.finishBubbleColor(it, true) }; c.color = null
+        finishColor(c, true)
         if (c.mode in listOf("ring", "beads", "choose")) send(obj("type" to c.mode, "id" to c.record.id, "phase" to "cancel", "position" to JSONArray(listOf(0, 0))))
         if (c.mode == "moving") c.grab?.let { drag(it, "cancel", c.last) }
         c.mode = "pending"
     }
-    private fun wheelAction(c: Contact, point: Offset): JSONObject? {
-        val part = c.wheel ?: return null
-        val size = c.record.view.number("diameter") - 14f
-        return obj("op" to "pick_wheel", "part" to part, "size" to size,
-            "point" to (point - c.record.center + Offset(size / 2, size / 2)).headerPoint())
-    }
     private fun pick(c: Contact, point: Offset) {
-        wheelAction(c, point)?.let { host.dispatch(obj("type" to "color", "action" to it), true) }
-        wake()
+        val part = c.wheel ?: return
+        send(obj("type" to "wheel", "id" to c.record.id, "phase" to if (c.colorStarted) "move" else "down", "part" to part, "position" to local(c, point)))
+        c.colorStarted = true
+    }
+    private fun finishColor(c: Contact, cancelled: Boolean) {
+        if (!c.colorStarted) return
+        c.colorStarted = false
+        send(obj("type" to "wheel", "id" to c.record.id, "phase" to if (cancelled) "cancel" else "up", "part" to c.wheel, "position" to local(c, c.last)))
     }
     private fun begin(c: Contact, point: Offset, now: Long) {
         when {
@@ -180,7 +180,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
                 c.wheel = org.json.JSONTokener(Native.colorWheelHit(obj("size" to size,
                     "point" to (point - c.record.center + Offset(size / 2, size / 2)).headerPoint(),
                     "shape" to host.snapshot!!.getJSONObject("color_panel").getString("shape")).toString())).nextValue() as? String
-                c.color = wheelAction(c, point)?.let(host::beginBubbleColor)
+                pick(c, point)
             }
             c.hit == "ring" -> {
                 val repeated = lastRing?.let { it.first == c.record.id && now - it.second <= doubleTapMillis && (point - it.third).getDistance() <= doubleTapDistance } == true
@@ -280,7 +280,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         if (c.mode == "wheel") {
             if (bubbleUi(obj("type" to "color_drag_out", "size" to c.record.view.number("diameter"), "point" to local(c, point))) == true) {
                 restore(c); c.grab = obj("kind" to "rim", "id" to c.record.id); drag(c.grab!!, "down", point); c.mode = "moving"
-            } else if (c.color != null) pick(c, point)
+            } else pick(c, point)
         } else if (c.mode == "pending" && far) {
             c.grab = obj("kind" to "bubble", "id" to c.record.id); drag(c.grab!!, "down", c.start); c.mode = "moving"
         }
@@ -325,14 +325,14 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
             else if (c.mode in listOf("ring", "beads", "choose")) send(obj("type" to c.mode, "id" to c.record.id, "phase" to "up", "position" to local(c, c.last)))
             else if (c.mode == "pending") send(obj("type" to "tap", "id" to c.record.id, "position" to local(c, c.last)))
         }
-        c.color?.let { host.finishBubbleColor(it, false) }; c.color = null
+        finishColor(c, false)
         if (change == null) c.fingers.clear() else c.fingers.remove(change.id)
         if (c.fingers.isEmpty()) { contact = null; c.record.hovered = null; c.record.pressed = false }
         wake()
         return true
     }
     private fun abandon() {
-        contact?.let { it.hold?.cancel(); it.record.pinch = 1f; it.color?.let { color -> host.finishBubbleColor(color, false) } }
+        contact?.let { it.hold?.cancel(); it.record.pinch = 1f }
         contact = null; candidate = null; dock.bubbleCaptured = false; dismiss()
     }
     fun cancel() { refresh(); up(null, true) }

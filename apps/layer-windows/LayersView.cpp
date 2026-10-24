@@ -2,6 +2,8 @@
 #include "LayersView.h"
 #include "EffectControls.h"
 #include "WorkspaceQuery.h"
+#include "WorkspaceGeometry.h"
+#include "PanelScroll.h"
 #include <chrono>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 
@@ -20,7 +22,7 @@ void ElementFactory::RecycleElement(ElementFactoryRecycleArgs const& args){
         if(found!=view->rows.end()){found->second->commit(false);view->rows.erase(found);}
     }
 }
-LayersView::~LayersView(){if(outsideSurface)outsideSurface.RemoveHandler(UIElement::PointerPressedEvent(),box_value(outsidePress));if(pickup)pickup->Cancel();if(timer)timer.Stop();if(menu)menu.Hide();}
+LayersView::~LayersView(){ForgetLayerThumbnails(data->thumbnails,this);if(outsideSurface)outsideSurface.RemoveHandler(UIElement::PointerPressedEvent(),box_value(outsidePress));if(pickup)pickup->Cancel();if(timer)timer.Stop();if(menu)menu.Hide();}
 void LayersView::init(){
     auto weak=weak_from_this();root.RowSpacing(0);
     outsidePress=PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& event){if(auto self=weak.lock()){
@@ -111,9 +113,9 @@ void LayersView::init(){
     addPaper.MinHeight(LayerRowHeight);addPaper.Padding(LayerRowPadding);addPaper.CornerRadius({0});
     addPaper.FontWeight(Windows::UI::Text::FontWeights::Normal());addPaper.HorizontalAlignment(HorizontalAlignment::Stretch);
     AutomationProperties::SetAutomationId(addPaper,L"layer-add-paper");
-    list.Content(repeater);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-    list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
-    AutomationProperties::SetAutomationId(list,L"layer-scroll-container");listFrame.Children().Append(list);
+    list.Content(repeater);list.HorizontalScrollMode(ScrollMode::Disabled);
+    list.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);list.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(list);panelScrolling(list,repeater,data);
+    AutomationProperties::SetAutomationId(list,L"layer-list");copyName(data,list,data->copyCaption(L"layers",L"title"));listFrame.Children().Append(list);
     connectionOverlay.IsHitTestVisible(false);AutomationProperties::SetAccessibilityView(connectionOverlay,Automation::Peers::AccessibilityView::Raw);
     listFrame.Children().Append(connectionOverlay);Grid::SetRow(listFrame,1);root.Children().Append(listFrame);
     list.ViewChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->connections();});
@@ -183,7 +185,7 @@ void LayersView::init(){
     timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->preview();});
     root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->data->thumbnails){self->timer.Start();self->preview();}});
     root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){
-        self->timer.Stop();self->menuOwner.Cancel();if(self->pickup)self->pickup->Cancel();
+        self->timer.Stop();ForgetLayerThumbnails(self->data->thumbnails,self.get());self->menuOwner.Cancel();if(self->pickup)self->pickup->Cancel();
     }});
 }
 void LayersView::refresh(){
@@ -191,10 +193,10 @@ void LayersView::refresh(){
     auto panel=find(array(data->model,L"panels"),L"id",L"layers");
     auto shown=[&](wchar_t const* control){return flag(find(array(panel,L"controls"),L"control",control),L"visible_in_panel",true);};
     bool rowsShown=shown(L"layers"),opacityShown=shown(L"layer_opacity");
-    header.Visibility(rowsShown||opacityShown?Visibility::Visible:Visibility::Collapsed);
+    header.Visibility(full&&(rowsShown||opacityShown)?Visibility::Visible:Visibility::Collapsed);
     blend.Visibility(rowsShown?Visibility::Visible:Visibility::Collapsed);tools.Visibility(rowsShown?Visibility::Visible:Visibility::Collapsed);
     list.Visibility(rowsShown?Visibility::Visible:Visibility::Collapsed);listFrame.Visibility(list.Visibility());opacityGate.Visibility(opacityShown?Visibility::Visible:Visibility::Collapsed);
-    footerFrame.Visibility(shown(L"layer_actions")?Visibility::Visible:Visibility::Collapsed);
+    footerFrame.Visibility(full&&shown(L"layer_actions")?Visibility::Visible:Visibility::Collapsed);
     auto nextEpoch=epochOf(data);if(epoch!=nextEpoch){
         epoch=nextEpoch;menuOwner.Cancel();if(pickup)pickup->Cancel();source.Clear();
     }
@@ -207,12 +209,18 @@ void LayersView::refresh(){
         opacityKey=nextKey;opacityLayer=activeId;opacityBindings.clear();
         auto weak=weak_from_this();auto generation=epoch;NumberPresentation presentation;
         presentation.title=[weak]{if(auto self=weak.lock())return self->data->caption(L"layers",L"opacity");return hstring();};
+        auto captured=std::make_shared<bool>(false);
+        auto apply=[weak,generation,activeId](double value,hstring const& phase){if(auto self=weak.lock();self&&epochOf(self->data)==generation){
+            bool continuing=!phase.empty()&&phase!=L"down";
+            if(!continuing&&(self->data->updating||num(self->editing(),L"id",-1)!=activeId||!flag(object(self->view(),L"controls"),L"opacity")))return;
+            auto action=O({{L"op",S(L"layer_opacity")},{L"layer",N(activeId)},{L"opacity",N(value)}});
+            if(!phase.empty())action=O({{L"op",S(L"gesture")},{L"phase",S(phase)},{L"action",action}});
+            self->data->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action}}),generation);
+        }};
+        presentation.phase=[apply,captured](hstring const& phase,double value){*captured=phase==L"down";apply(value,phase);};
         opacityGate.Content(number(data,data->caption(L"layers",L"opacity"),object(data->catalog,L"layer_opacity"),
             [weak]{if(auto self=weak.lock())return num(self->editing(),L"opacity",1);return 1.;},
-            [weak,generation,activeId](double value){if(auto self=weak.lock();self&&epochOf(self->data)==generation
-                &&num(self->editing(),L"id",-1)==activeId&&flag(object(self->view(),L"controls"),L"opacity"))
-                self->data->dispatchDocument(O({{L"type",S(L"set_layer_opacity")},{L"opacity",N(value)}}),generation);
-            },opacityBindings,nullptr,true,L"layer-opacity",true,presentation));
+            [apply,captured](double value){apply(value,*captured?L"move":L"");},opacityBindings,nullptr,true,L"layer-opacity",true,presentation));
     }
     opacityGate.IsEnabled(flag(capabilities,L"opacity"));for(auto const& bind:opacityBindings)bind();
     for(auto const& bind:controls)bind(active,capabilities);
@@ -303,19 +311,16 @@ void LayersView::layoutConnections(){
     for(size_t i=0;i<glyphs.size();i++){Canvas::SetLeft(connectionGlyphs[i],glyphs[i].X);Canvas::SetTop(connectionGlyphs[i],glyphs[i].Y);}
 }
 void LayersView::preview(){
-    if(!root.IsLoaded()||!root.XamlRoot()||!root.XamlRoot().IsHostVisible()||list.ActualHeight()<=0){timer.Interval(std::chrono::milliseconds(120));return;}
-    // Templates can create or replace the scroll provider after Loaded.
-    if(auto presenter=list.ScrollPresenter();presenter&&AutomationProperties::GetAutomationId(presenter)!=L"layer-list"){
-        AutomationProperties::SetAutomationId(presenter,L"layer-list");copyName(data,presenter,data->copyCaption(L"layers",L"title"));
-
-    }
+    if(!root.IsLoaded()||!root.XamlRoot()||!root.XamlRoot().IsHostVisible()||list.ActualHeight()<=0){ForgetLayerThumbnails(data->thumbnails,this);timer.Interval(std::chrono::milliseconds(120));return;}
+    auto viewport=visibleBounds(list,root.XamlRoot().Content().as<FrameworkElement>());
+    if(viewport.Width<=0||viewport.Height<=0){ForgetLayerThumbnails(data->thumbnails,this);timer.Interval(std::chrono::milliseconds(120));return;}
     std::vector<LayerThumbnail> visible;
     for(auto const& [element,row]:rows){
         if(!row->root.IsLoaded())continue;
         auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
         if(rect.Y+rect.Height>0&&rect.Y<list.ActualHeight())row->thumbnails(visible);
     }
-    auto interval=RefreshLayerThumbnails(data->thumbnails,epoch,visible);
+    auto interval=RefreshLayerThumbnails(data->thumbnails,this,epoch,visible);
     if(timer.Interval()!=interval)timer.Interval(interval);
 }
 void LayersView::showMenu(J spec, FrameworkElement const& anchor){
@@ -409,8 +414,7 @@ bool LayersView::restoreAnchor(J const& anchor){
         auto before=list.VerticalOffset();
         auto target=std::clamp(before+delta,0.,std::max(0.,list.ExtentHeight()-list.ActualHeight()));
         if(std::abs(target-before)<.5)return true;
-        ScrollingScrollOptions options(ScrollingAnimationMode::Disabled,ScrollingSnapPointsMode::Ignore);
-        list.ScrollTo(0,target,options);
+        list.ChangeView(nullptr,box_value(target).as<Windows::Foundation::IReference<double>>(),nullptr,true);
         return false;
     }
     auto layers=array(data->state,L"layers");

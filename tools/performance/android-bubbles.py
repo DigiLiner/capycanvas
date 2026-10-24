@@ -11,6 +11,8 @@ Instrumentation startup also resets Adaptive. On that firmware, --adaptive-scrip
 runs a retained exact-row helper after private fixture setup, then resumes the
 existing private Activity and releases the benchmark-only ready/go barrier.
 FrameMetrics and drawn-center rows are attribution, not presented FPS.
+--workload palette-opening records three short transitions with production-active
+window boundaries, drawn poses and actual presents; it never reports FPS.
 
   tools/devices/devices.py run movinkpad11 -- python3 tools/performance/android-bubbles.py \
     artifacts/bubbles/android-mid --photo /data/local/tmp/capy-tier-24mp.jpg --width 6000 --height 4000 \
@@ -70,6 +72,22 @@ def report(directory):
             continue
         if contact.get("reset_end_ns", contact["begin_ns"]) > contact["begin_ns"]:
             raise ValueError("Position reset overlaps the measured motion window")
+        if contact.get("diagnostic"):
+            windows = contact["moving_windows_ns"]
+            transitions = []
+            for begin, end in windows:
+                presents = [t for t in all_times if begin <= t <= end]
+                draws = [row for row in contact["drawn_centers"] if begin <= row[0] <= end]
+                poses = [len({(row[index * 2 + 1], row[index * 2 + 2]) for row in draws}) for index in range(5)]
+                transitions.append(dict(begin_ns=begin, end_ns=end, production_active_ms=(end - begin) / 1e6,
+                                        actual_present_timestamps_ns=presents, drawn_rows=len(draws), distinct_drawn_centers=poses))
+            result = dict(measurement="Diagnostic palette opening; production-active windows are not sustained motion; no FPS qualification",
+                          surface=capture["surface"], instrumentation_passed="OK (1 test)" in (directory / "instrumentation.log").read_text(),
+                          display_hz=contact.get("display_hz"), thermal_before=contact.get("thermal_before"), thermal_after=contact.get("thermal_after"), transitions=transitions)
+            (directory / "presents.json").write_text(json.dumps(result, indent=2) + "\n")
+            return result
+        if "moving_windows_ns" in contact:
+            raise ValueError("Palette active-state windows do not qualify sustained-motion FPS; use the short diagnostic")
         begin, end = contact["begin_ns"] + 100_000_000, contact["end_ns"] - 100_000_000
         if end - begin < 5_000_000_000:
             raise ValueError("Motion window is shorter than five seconds")
@@ -118,6 +136,8 @@ def main():
     parser.add_argument("--height", type=int)
     parser.add_argument("--duration-ms", type=int, default=6000)
     parser.add_argument("--target-hz", type=float, help="Require this reference display rate before measured contacts")
+    parser.add_argument("--palette-transitions", type=int, choices=range(1, 11), default=3, help="Short diagnostic only; do not calculate FPS")
+    parser.add_argument("--workload", choices=["drag", "palette-opening"], default="drag")
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
     if args.report_only:
@@ -135,8 +155,10 @@ def main():
     if running.stdout.strip():
         parser.error("Stop the owned app before enabling Adaptive; force-stop clears that setting")
     cmd = [adb, "shell", "am", "instrument", "-w", "-r", "-e", "class", "art.capycanvas.AndroidBubbleBenchmarkTest#fiveBubbleMotion",
-           "-e", "bubbleBenchmark", "true", "-e", "photo", args.photo, "-e", "width", str(args.width), "-e", "height", str(args.height),
+           "-e", "workload", args.workload, "-e", "bubbleBenchmark", "true", "-e", "photo", args.photo, "-e", "width", str(args.width), "-e", "height", str(args.height),
            "-e", "durationMs", str(args.duration_ms), "-e", "repeats", str(args.repeats), f"{args.package}.test/androidx.test.runner.AndroidJUnitRunner"]
+    if args.workload == "palette-opening":
+        cmd[4:4] = ["-e", "paletteTransitions", str(args.palette_transitions)]
     if args.target_hz:
         cmd[4:4] = ["-e", "expectedRefreshHz", str(args.target_hz)]
     remote = f"/sdcard/Android/data/{args.package}/files/bubble-benchmark"
@@ -200,10 +222,10 @@ def main():
                 process.wait(timeout=30)
             (args.output / "surface-latency.json").write_text(json.dumps(dict(surface=surface, samples=samples)))
             (args.output / "hardware-after.txt").write_text(command("shell", "dumpsys thermalservice; dumpsys display"))
+    if "OK (1 test)" not in (args.output / "instrumentation.log").read_text():
+        raise RuntimeError("Instrumentation failed; see instrumentation.log; raw surface samples retained")
     for name in ["fixture.json", "result.json"]:
         command("pull", f"{remote}/{name}", str(args.output / name))
-    if "OK (1 test)" not in (args.output / "instrumentation.log").read_text():
-        raise RuntimeError("Instrumentation failed; raw captures retained")
     print(json.dumps(report(args.output), indent=2))
 
 

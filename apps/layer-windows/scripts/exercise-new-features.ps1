@@ -45,8 +45,10 @@ function Drawer([string[]]$Panels) {
     foreach($panel in $Panels){$null=Control ('drawer-panel-'+$panel)}
 }
 function Swipe([int]$Id,[int]$Dx,[string]$Device) {
-    $at=At "layer-$Id-name";[CapyRowPointer]::Down($Device,$at.x,$at.y)
-    for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move($at.x+[int]($Dx*$i/8),$at.y);Start-Sleep -Milliseconds 20}
+    $row=(Control "layer-row-$Id" -Arranged).Current.BoundingRectangle
+    $at=if($Dx -lt 0){At "layer-$Id-name"}else{@{x=[int]($row.Left+12);y=[int]($row.Top+$row.Height/2)}}
+    [CapyRowPointer]::Down($Device,$at.x,$at.y)
+    for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move([int][Math]::Min([Math]::Max(($at.x+[int]($Dx*$i/8)),$row.Left+4),$row.Right-4),$at.y);Start-Sleep -Milliseconds 20}
     [CapyRowPointer]::Up();Start-Sleep -Milliseconds 200
 }
 function Preference([string]$Title){@((Model).preferences.pages.groups.rows|Where-Object title -eq $Title)[0]}
@@ -146,12 +148,12 @@ try {
     Tap $filters;Drawer @('filter_types','adjustments','properties');Tap 'color-bucket' 'touch'
     foreach($theme in @('Light','Dark')){
         Set-Theme $theme;if(!(Model).state.customization.drawer){Tap $filters};Drawer @('filter_types','adjustments','properties')
-        Wait-Until {(Control 'layer-properties').Current.Name -eq 'Paper (Solid Color)'} 'Properties heading omitted the fill type'
+        Wait-Until {$properties=(Model).state.layer_properties;$panel=Control 'layer-properties';$panel.Current.Name -eq $properties.title -and (Control 'properties-layer-name' -Within $panel).Current.Name -eq $properties.name -and (!$properties.layer_type -or (Control 'properties-layer-type' -Within $panel).Current.Name -eq $properties.layer_type)} 'Paper properties heading differs from shared title/name/type'
         Capture ('paper-properties-'+$theme.ToLowerInvariant()) -WithModel
     }
     if(!(Model).state.layer_properties.controls){throw 'Paper properties missing'}
     $fill=@((Model).state.layers|Where-Object id -eq $paper.id)[0]
-    if($fill.has_mask -or !$fill.has_thumbnail -or $fill.content_icon -ne 'layer-fill-symbolic' -or !(Model).state.layer_tools.controls.opacity){throw 'Paper is not an ordinary maskless fill'}
+    if($fill.has_mask -or !$fill.has_thumbnail -or $fill.content_icon -ne 'layer-paper-symbolic' -or !(Model).state.layer_tools.controls.opacity){throw 'Paper does not publish its maskless fill, Paper icon, thumbnail and opacity control'}
     Write-Output 'PASS: Filter replacement/reopen/cancel, drawing target, paper color'
     Tap $layers;Drawer @('layers')
     Wait-Until {$image=Find ('layer-'+$paper.id+'-thumbnail');$image -and $image.Current.ItemStatus -eq 'Ready'} 'Paper thumbnail did not finish' 30
@@ -180,8 +182,8 @@ try {
             Wait-Until {$button=Find "layer-$id-swipe-delete";$button -and !$button.Current.IsOffscreen -and $button.Current.BoundingRectangle.Width -gt 60} 'Swipe did not reveal Delete'
             Capture ('swipe-'+$device) -WithModel;Swipe $id 90 $device
             Wait-Until {$button=Find "layer-$id-swipe-delete";!$button -or $button.Current.IsOffscreen} 'Reverse swipe did not close'
-            Swipe $id -90 $device;[CapyRowPointer]::Key(0x1b)
-            Wait-Until {$button=Find "layer-$id-swipe-delete";!$button -or $button.Current.IsOffscreen} 'Escape did not close swipe'
+            Swipe $id -90 $device;$escapeRevision=(Model).state.document_file.revision;[CapyRowPointer]::Key(0x1b)
+            Wait-Until {$button=Find "layer-$id-swipe-delete";$m=Model;$drawer=$m.state.customization.drawer;(!$button -or $button.Current.IsOffscreen) -and $drawer -and (@($drawer.columns|ForEach-Object {$_}) -join ',') -eq 'layers' -and $m.state.document_file.revision -eq $escapeRevision} 'Escape did not close only the swipe while preserving the Layers drawer and drawing'
             Swipe $id -90 $device;Tap 'layer-actions' $device
             Wait-Until {$button=Find "layer-$id-swipe-delete";!$button -or $button.Current.IsOffscreen} 'Outside press did not close swipe'
             [CapyRowPointer]::Key(0x1b)

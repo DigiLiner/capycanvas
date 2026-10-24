@@ -2,6 +2,11 @@
 
 [Performance targets](../PERFORMANCE_TARGETS.md)
 
+- **Windows tool bubbles need hardware measurements.** The retained native
+  presenter shares ordinary panel components and stops its frame clock at rest.
+  VM software-adapter journeys cannot qualify moving-frame rates, physical pen
+  latency or display timing on any reference tier.
+
 - **Wet, watercolor, Smudge and blending brushes fall behind the pen at 512 px.**
   - A frame consumes input only until its material contacts reach 512 page
     jobs ([brushes](../internals/brushes.md)), so these brushes never run out

@@ -8,6 +8,8 @@ Metal renders the canvas through a `CAMetalLayer` behind native controls. The
 [package README](../../apps/layer-apple/README.md) describes the source layout,
 and the [Apple porting guide](../APPLE_PORTING_GUIDE.md) defines the audit,
 cleanup and validation workflow. Features usually land on GTK, Web and Android first.
+The [tool bubbles handoff](tool-bubbles-apple-handoff.md) identifies the shared
+contracts, Apple components to reuse and validation needed for that port.
 
 Artwork tasks retain shared authored roots and captured effect phases. Native
 saves write source-only packages through coordinated atomic replacement. A

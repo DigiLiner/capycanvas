@@ -16,8 +16,8 @@ inline hstring menuSlug(hstring const& text){
     while(!slug.empty()&&slug.back()==L'-')slug.pop_back();
     return hstring(L"menu-"+slug);
 }
-inline void NativeMenuItems(Windows::Foundation::Collections::IVector<MenuFlyoutItemBase> const& target,
-    A const& sections,std::shared_ptr<WorkspaceData> const& data,std::function<void(J)> const& dispatch){
+inline void NativeMenuItems(winrt::Windows::Foundation::Collections::IVector<MenuFlyoutItemBase> const& target,
+    A const& sections,std::shared_ptr<WorkspaceData> const& data,std::function<void(J)> const& dispatch,std::function<void(bool)> const& keepOpen={}){
     uint32_t at=0;
     auto updateIcon=[&](auto const& item,J const& spec){
         if(auto name=str(spec,L"icon");!name.empty()){
@@ -42,7 +42,7 @@ inline void NativeMenuItems(Windows::Foundation::Collections::IVector<MenuFlyout
             if(children.Size()){
                 auto item=retain(MenuFlyoutSubItem()).first;item.Text(text);item.IsEnabled(flag(spec,L"enabled",true));AutomationProperties::SetAutomationId(item,menuSlug(text));
                 updateIcon(item,spec);
-                item.FontSize(data->textSize());NativeMenuItems(item.Items(),children,data,dispatch);
+                item.FontSize(data->textSize());NativeMenuItems(item.Items(),children,data,dispatch,keepOpen);
             }else{
                 auto identifier=action.Size()?str(action,L"command",L"layer-menu-"+str(object(action,L"action"),L"op")):menuSlug(text);
                 if(str(action,L"type")==L"workspace_manager"){
@@ -50,16 +50,19 @@ inline void NativeMenuItems(Windows::Foundation::Collections::IVector<MenuFlyout
                     identifier=kind==L"switch"?L"workspace-switch-"+str(command,L"id"):
                         kind==L"show_in_switcher"?L"workspace-switcher-show-"+str(command,L"id"):menuSlug(text);
                 }
-                if(str(action,L"type")==L"choose_tool_variant")identifier=menuSlug(text);
+                if(str(action,L"type")==L"choose_tool_variant"||str(action,L"type")==L"bubble")identifier=menuSlug(text);
                 auto checked=spec.GetNamedValue(L"selected",JsonValue::CreateNullValue());
                 auto add=[&](auto fresh){
                     auto [item,added]=retain(fresh);
-                    item.Text(text);item.IsEnabled(flag(spec,L"enabled",true));item.FontSize(data->textSize());item.MinHeight(34);
+                    auto heading=flag(spec,L"is_heading");
+                    item.Text(text);item.IsEnabled(!heading&&flag(spec,L"enabled",true));item.IsTabStop(!heading);item.FontSize(data->textSize());item.MinHeight(34);
+                    item.FontWeight(heading?winrt::Windows::UI::Text::FontWeights::SemiBold():Windows::UI::Text::FontWeights::Normal());
                     item.KeyboardAcceleratorTextOverride(str(spec,L"hint"));AutomationProperties::SetAutomationId(item,identifier);
                     updateIcon(item,spec);
-                    item.Tag(action);
-                    if(added)item.Click([dispatch](auto const& sender,auto&&){
-                        auto action=sender.template as<FrameworkElement>().Tag().template as<J>();if(action.Size())dispatch(action);
+                    item.Tag(spec);
+                    if(added)item.Click([dispatch,keepOpen](auto const& sender,auto&&){
+                        auto spec=sender.template as<FrameworkElement>().Tag().template as<J>();auto action=object(spec,L"action");
+                        if(keepOpen)keepOpen(flag(spec,L"keep_open"));if(action.Size())dispatch(action);
                     });
                     return item;
                 };
@@ -106,7 +109,7 @@ class OwnedPopup {
     struct State:PopupLifetime{
         weak_ref<FrameworkElement> anchor,root;
         HWND window=nullptr;
-        Windows::Foundation::IInspectable press{nullptr};
+        winrt::Windows::Foundation::IInspectable press{nullptr};
         event_token unloaded{};
         bool current(){
             if(!registration||closing)return false;

@@ -196,6 +196,12 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
                     if(at!=self->motion){self->dropQuery();return;}
                     if(!self->ownsFocus()||!self->current()){self->cancel(L"final_invalid");return;}
                     auto next=object(result,L"action");
+                    if(!next.Size()&&self->data->takeBubble){
+                        self->data->takeBubble(object(self->action,L"item"),self->position,
+                            [weak,serial]{auto self=weak.lock();return self&&serial==self->generation&&self->current()&&self->ownsFocus();},
+                            [weak,serial]{if(auto self=weak.lock();self&&serial==self->generation)self->clear();});
+                        return;
+                    }
                     if(next.Size())self->data->dispatch(next);
                     self->clear();return;
                 }

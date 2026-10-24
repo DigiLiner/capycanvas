@@ -89,6 +89,105 @@ fn take_ring(s: &mut UiSession<Recorder>, at: [f32; 2]) -> u32 {
     id
 }
 
+fn wheel_contact(s: &mut UiSession<Recorder>, id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2]) -> Result<UiChange, String> {
+    act(s, BubbleAction::Wheel { id, phase, part, position })
+}
+
+#[test]
+fn bubble_wheel_commits_the_pressed_part_and_cancel_restores_its_start() {
+    let mut s = desk();
+    let id = take_ring(&mut s, FAR);
+    let original = s.state.colors.clone();
+    let checkpoint = s.engine.checkpoint();
+    let size = view(&s, id).diameter - 2. * RING_RIM;
+    let mut expected = original.clone();
+    for (phase, point) in [(ContactPhase::Down,[10.,-20.]),(ContactPhase::Move,[-15.,10.]),(ContactPhase::Up,[20.,15.])] {
+        if phase != ContactPhase::Up {
+            expected.apply(ColorAction::PickWheel { part: ColorWheelPart::Field, point: point.map(|v|v+size/2.), size }).unwrap();
+        }
+        wheel_contact(&mut s,id,phase,if phase == ContactPhase::Down { ColorWheelPart::Field } else { ColorWheelPart::Hue },point).unwrap();
+        assert_eq!(s.state.colors.definition(), expected.definition(), "Move retains the pressed part; Up keeps its last sampled color");
+    }
+    assert_ne!(s.state.colors.definition(),original.definition());
+    let committed = s.state.colors.definition();
+    wheel_contact(&mut s,id,ContactPhase::Cancel,ColorWheelPart::Field,[0.;2]).unwrap();
+    assert_eq!(s.state.colors.definition(),committed,"A late cancellation cannot undo a completed choice");
+    wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[-20.,-15.]).unwrap();
+    assert_ne!(s.state.colors.definition(),committed);
+    wheel_contact(&mut s,id+100,ContactPhase::Cancel,ColorWheelPart::Field,[0.;2]).unwrap();
+    assert_ne!(s.state.colors.definition(),committed,"Another owner's cancellation is ignored");
+    wheel_contact(&mut s,id,ContactPhase::Cancel,ColorWheelPart::Hue,[0.;2]).unwrap();
+    assert_eq!(s.state.colors.definition(),committed);
+    assert_eq!(s.engine.checkpoint(),checkpoint,"Paint color choices do not edit artwork history");
+}
+
+#[test]
+fn returning_a_wheel_retires_its_contact_before_layout_undo_reuses_the_id() {
+    use layer_core::color::{RgbColor,RgbSpace};
+    for all in [false,true] {
+        let mut s=desk();
+        let id=take_ring(&mut s,FAR);
+        wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[20.,-10.]).unwrap();
+        act(&mut s,if all {BubbleAction::PutBackAll} else {BubbleAction::PutBack {id}}).unwrap();
+        invoke(&mut s,CommandId::UndoWorkspace);
+        assert!(s.state.workspace.layout.bubbles.get(id).is_some());
+        let color=RgbColor::new(RgbSpace::Srgb,[0.7,0.2,0.4,1.]).unwrap();
+        s.dispatch(UiAction::Color {action:ColorAction::Definition {color}}).unwrap();
+        wheel_contact(&mut s,id,ContactPhase::Cancel,ColorWheelPart::Field,[0.;2]).unwrap();
+        assert_eq!(s.state.colors.definition(),color,"Returning the owner retires cancellation even when Undo reuses its ID; all={all}");
+        wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[-10.,20.]).unwrap();
+        wheel_contact(&mut s,id,ContactPhase::Cancel,ColorWheelPart::Field,[0.;2]).unwrap();
+        assert_eq!(s.state.colors.definition(),color,"The restored owner accepts a fresh transaction");
+    }
+}
+
+#[test]
+fn bubble_wheel_replacement_cannot_restore_a_previous_context_color() {
+    use layer_core::color::{RgbColor,RgbSpace};
+    for replacement in ["slot","shape","document","workspace"] {
+        let mut s = desk();
+        let id = take_ring(&mut s,FAR);
+        wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[20.,-10.]).unwrap();
+        match replacement {
+            "slot" => {s.dispatch(UiAction::Color {action:ColorAction::Select {slot:ColorSlot::Background}}).unwrap();}
+            "shape" => {s.dispatch(UiAction::Color {action:ColorAction::Shape {shape:ColorShape::Square}}).unwrap();}
+            "document" => {let mut next=desk();next.inherit_window_state(&s).unwrap();s=next;}
+            "workspace" => {s.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState::default())}).unwrap();}
+            _ => unreachable!(),
+        }
+        let color=RgbColor::new(RgbSpace::Srgb,[0.15,0.7,0.3,1.]).unwrap();
+        s.dispatch(UiAction::Color {action:ColorAction::Definition {color}}).unwrap();
+        for phase in [ContactPhase::Move,ContactPhase::Cancel,ContactPhase::Up] {
+            wheel_contact(&mut s,id,phase,ColorWheelPart::Field,[-10.,20.]).unwrap();
+            assert_eq!(s.state.colors.definition(),color,"{replacement}: {phase:?} cannot retarget the old contact");
+        }
+    }
+}
+
+#[test]
+fn bubble_wheel_rejects_invalid_contacts_and_preserves_transparent_and_mask_paint() {
+    let mut s=desk();
+    let id=take_ring(&mut s,FAR);
+    let controls=take_control(&mut s,ToolbarControl::ColorPicker,[900.,450.]);
+    let before=s.state.colors.definition();
+    assert!(wheel_contact(&mut s,controls,ContactPhase::Down,ColorWheelPart::Field,[0.;2]).is_err());
+    assert!(wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[f32::NAN,0.]).is_err());
+    assert_eq!(s.state.colors.definition(),before);
+    for mask in [false,true] {
+        if mask {invoke(&mut s,CommandId::QuickMask);}
+        let artwork=s.state.colors.clone();
+        s.dispatch(UiAction::Color {action:ColorAction::Select {slot:ColorSlot::Transparent}}).unwrap();
+        let original=s.state.display_colors().definition();
+        wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Field,[20.,-10.]).unwrap();
+        assert_ne!(s.state.display_colors().definition(),original);
+        assert!(wheel_contact(&mut s,id,ContactPhase::Down,ColorWheelPart::Hue,[0.;2]).is_err());
+        assert!(wheel_contact(&mut s,id,ContactPhase::Move,ColorWheelPart::Field,[0.,f32::INFINITY]).is_err());
+        wheel_contact(&mut s,id,ContactPhase::Cancel,ColorWheelPart::Field,[0.;2]).unwrap();
+        assert_eq!(s.state.display_colors().definition(),original,"mask={mask}");
+        if mask {assert_eq!(s.state.colors,artwork,"Mask wheel contacts leave artwork colors alone");}
+    }
+}
+
 fn view(s: &UiSession<Recorder>, id: u32) -> BubbleView {
     s.bubbles().into_iter().find(|b| b.id == id).unwrap()
 }
@@ -755,6 +854,95 @@ fn settle(s: &mut UiSession<Recorder>, from: u64) -> u64 {
         now += 16_666_667;
     }
     now
+}
+
+#[test]
+fn opening_the_palette_pill_keeps_its_whole_surface_inside_the_work_area() {
+    for right in [false,true] {
+        let mut s=desk();
+        let work=s.layout(VIEW).work_area;
+        let at=[if right {work.x+work.width-60.} else {work.x+work.width*0.5},work.y+work.height-60.];
+        let id=take_ring(&mut s,at);
+        let now=settle(&mut s,0);
+        let saved=s.state.workspace.layout.bubbles.get(id).unwrap().clone();
+        tap_bead(&mut s,id,Bead::Palettes);
+        settle(&mut s,now);
+        let view=view(&s,id);
+        assert!(view.pill.is_some());
+        let center=s.bubble_placements().into_iter().find(|p|p.id==id).unwrap().center;
+        let pill=palette_pill(view.diameter);
+        let bounds=[center[0]+pill.x,center[1]+pill.y,center[0]+pill.x+pill.width,center[1]+pill.y+pill.height];
+        assert!(bounds[0]>=work.x+8.-0.5 && bounds[1]>=work.y+8.-0.5
+            && bounds[2]<=work.x+work.width-8.+0.5 && bounds[3]<=work.y+work.height-8.+0.5,
+            "The open palette pill must fit the inset work area: right={right}, pill={bounds:?}, work={work:?}, center={center:?}");
+        assert_eq!(s.state.workspace.layout.bubbles.get(id).unwrap(),&saved,"Opening a pill moves the desk projection, not its authored place");
+    }
+}
+
+#[test]
+fn dragging_an_open_palette_closes_it_and_reopening_at_the_edge_stays_inside() {
+    for viewport in [VIEW,[2200./1.75,1440./1.75]] {
+    let mut s=desk();
+    s.set_viewport(viewport,[2200,1440]).unwrap();
+    let work=s.layout(viewport).work_area;
+    let id=take_ring(&mut s,[600.,350.]);
+    act(&mut s,BubbleAction::Resize {id,scale:10.}).unwrap();
+    let mut now=settle(&mut s,0);
+    tap_bead(&mut s,id,Bead::Palettes);
+    now=settle(&mut s,now);
+    assert!(view(&s,id).pill.is_some());
+    let before=s.state.workspace.clone();
+    let from=s.bubble_placements().into_iter().find(|p|p.id==id).unwrap().center;
+    let grab=BubbleGrab::Bubble {id};
+    let drag=|s:&mut UiSession<Recorder>,phase,position| act(s,BubbleAction::Drag {grab,phase,position,viewport}).unwrap();
+    drag(&mut s,ContactPhase::Down,from);
+    assert!(view(&s,id).pill.is_none(),"Dragging closes the palette; its always-published pill rectangle is not a visible surface");
+    let edge=viewport.map(|v|v-4.);
+    drag(&mut s,ContactPhase::Move,edge);
+    drag(&mut s,ContactPhase::Up,edge);
+    now=settle(&mut s,now);
+    let moved=s.state.workspace.clone();
+    assert_ne!(moved,before,"The completed drag authors the new resting place");
+    invoke(&mut s,CommandId::UndoWorkspace);
+    assert_eq!(s.state.workspace,before);
+    invoke(&mut s,CommandId::RedoWorkspace);
+    assert_eq!(s.state.workspace,moved);
+    now=settle(&mut s,now);
+    tap_bead(&mut s,id,Bead::Palettes);
+    settle(&mut s,now);
+    let view=view(&s,id);
+    assert!(view.pill.is_some());
+    let center=s.bubble_placements().into_iter().find(|p|p.id==id).unwrap().center;
+    let pill=palette_pill(view.diameter);
+    let bounds=[center[0]+pill.x,center[1]+pill.y,center[0]+pill.x+pill.width,center[1]+pill.y+pill.height];
+    assert!(bounds[0]>=work.x+8.-0.5 && bounds[1]>=work.y+8.-0.5
+        && bounds[2]<=work.x+work.width-8.+0.5 && bounds[3]<=work.y+work.height-8.+0.5,
+        "Reopening the largest wheel's palette after an edge drop must fit: pill={bounds:?}, work={work:?}");
+    assert_eq!(s.state.workspace,moved,"Reopening changes only the desk projection");
+    }
+}
+
+#[test]
+fn opening_the_palette_pill_pushes_a_nearby_bubble_clear() {
+    let mut s=desk();
+    let id=take_ring(&mut s,[600.,350.]);
+    let now=settle(&mut s,0);
+    let center=s.bubble_placements().into_iter().find(|p|p.id==id).unwrap().center;
+    let pill=palette_pill(view(&s,id).diameter);
+    let other=take_control(&mut s,ToolbarControl::Command {command:CommandId::Undo},[center[0],center[1]+pill.y+pill.height*0.5]);
+    let now=settle(&mut s,now);
+    assert_eq!(overlaps(&mut s),[],"Closed parts start apart");
+    tap_bead(&mut s,id,Bead::Palettes);
+    settle(&mut s,now);
+    assert!(view(&s,id).pill.is_some());
+    assert_eq!(overlaps(&mut s),[],"The pill pushes the neighboring history capsule clear");
+    let places=s.bubble_placements();
+    let a=places.iter().find(|p|p.id==id).unwrap().center;
+    let b=places.iter().find(|p|p.id==other).unwrap().center;
+    let pill=palette_pill(view(&s,id).diameter);
+    let gap=[(b[0]-(a[0]+pill.x+pill.width*0.5)).abs()-pill.width*0.5,
+        (b[1]-(a[1]+pill.y+pill.height*0.5)).abs()-pill.height*0.5];
+    assert!(gap[0]>0. || gap[1]>0.,"The neighbor center cannot remain underneath the pill");
 }
 
 #[test]

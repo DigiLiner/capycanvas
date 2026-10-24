@@ -15,7 +15,8 @@ struct NumericCaption {hstring title,language,errorLanguage;J labels,errorReason
 struct NumberState {
     double value=0;bool editing=false,dragging=false,formatting=false,gesture=false;
     bool scrubbing=false,turning=false,fine=false;std::optional<uint32_t> pointer,sliderPointer;double origin=0,originY=0;
-    double scrubOrigin=0,scrubBase=0,scrubPixels=0,dialShown=0;
+    double scrubOrigin=0,scrubBase=0,scrubPixels=0,dialShown=0,sliderOrigin=0;
+    uint64_t contactGeneration=0;
     hstring identity;
     hstring measuredText;double measuredWidth=-1;
     std::function<J(J const&,double,J const&)> resolve;
@@ -197,6 +198,12 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         header.Children().Append(dialView);
     }
     Slider slider;
+    Grid sliderFrame;Border sliderInput;
+    sliderInput.Background(clear());sliderInput.ManipulationMode(ManipulationModes::None);
+    AutomationProperties::SetAccessibilityView(sliderInput,Peers::AccessibilityView::Raw);
+    if(!preference){slider.IsHitTestVisible(false);sliderFrame.Children().Append(slider);sliderFrame.Children().Append(sliderInput);}
+    FrameworkElement sliderHost=preference?slider.as<FrameworkElement>():sliderFrame.as<FrameworkElement>();
+    UIElement sliderContact=preference?slider.as<UIElement>():sliderInput.as<UIElement>();
     auto presentCaption=[source=std::weak_ptr<WorkspaceData>(data),numericCopy,currentTitle,caption,description=presentation.descriptionText,root=make_weak(root),text=make_weak(text),detail=detailView,entry=make_weak(entry),slider=make_weak(slider),dialWeak]{
         auto data=source.lock();auto control=entry.get();if(!data||!control)return false;
         auto title=currentTitle();auto labels=numericCopy();
@@ -267,8 +274,6 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     slider.Resources().Insert(box_value(L"SliderTrackThemeHeight"),box_value(4.));
     slider.Resources().Insert(box_value(L"SliderPreContentMargin"),box_value((stepSize-4)/2));
     slider.Resources().Insert(box_value(L"SliderPostContentMargin"),box_value((stepSize-4)/2));
-    // The stock outer thumb has a negative margin and remains visible even at
-    // zero size. Keep the native range interaction with a transparent thumb.
     if(!preference){
         for(auto key:{L"SliderOuterThumbBackground",L"SliderOuterThumbBackgroundPointerOver",L"SliderOuterThumbBackgroundPressed",L"SliderThumbBorderBrush"})
             slider.Resources().Insert(box_value(key),clear());
@@ -309,8 +314,9 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     if(admissions)admissions->emplace_back(commit);
     if(panel){
         auto surfaceY=[weak=make_weak(valueSurface)](PointerRoutedEventArgs const& e){return e.GetCurrentPoint(weak.get().XamlRoot().Content().as<UIElement>()).Position().Y;};
-        auto restore=[local,spec,set,setText,finish,weak=make_weak(valueSurface),dialWeak]{
+        auto restore=[data,local,spec,set,setText,finish,weak=make_weak(valueSurface),dialWeak]{
             bool active=std::exchange(local->scrubbing,false);active=std::exchange(local->turning,false)||active;
+            ++local->contactGeneration;if(local->pointer)data->pointerCancels.Forget(*local->pointer,local.get());
             local->pointer.reset();local->dragging=false;
             if(auto target=weak.get())target.ReleasePointerCaptures();
             if(auto target=dialWeak.get())target.ReleasePointerCaptures();
@@ -327,12 +333,14 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             auto next=local->resolve(spec,local->scrubOrigin,O({{L"type",S(L"scrub")},{L"origin",N(local->scrubOrigin)},{L"pixels",N(pixels-local->scrubBase)},{L"fine",B(fine)}}));
             local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);
         };
-        valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
+        valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,commit,restore,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
+            if(data->claimBubbleContact(e))return;
             if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr))||!commit(false))return;
             auto target=weak.get();if(!target||!target.IsEnabled())return;
             local->pointer=e.Pointer().PointerId();local->origin=local->scrubOrigin=local->value;local->originY=surfaceY(e);
             local->fine=shifted(e);local->scrubBase=local->scrubPixels=0;
             if(!target.CapturePointer(e.Pointer())){local->pointer.reset();return;}
+            ++local->contactGeneration;data->pointerCancels.Observe(*local->pointer,local.get(),restore);
             local->dragging=true;target.Focus(FocusState::Pointer);e.Handled(true);
         })),true);
         valueSurface.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([local,move,restore,surfaceY,identity=presentation.identity](auto&&,PointerRoutedEventArgs const& e){
@@ -340,10 +348,11 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()||(identity&&local->identity!=identity())){restore();return;}
             move(surfaceY(e),shifted(e));e.Handled(true);
         })),true);
-        valueSurface.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([local,move,finish,setText,showText,restore,surfaceY,weak=make_weak(entry),surface=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
+        valueSurface.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([data,local,move,finish,setText,showText,restore,surfaceY,weak=make_weak(entry),surface=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(local->pointer!=e.Pointer().PointerId())return;
             if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()){restore();return;}
             bool scrub=local->scrubbing;if(scrub)move(surfaceY(e),shifted(e));
+            ++local->contactGeneration;data->pointerCancels.Forget(*local->pointer,local.get());
             local->pointer.reset();local->dragging=false;local->scrubbing=false;
             if(auto target=surface.get())target.ReleasePointerCaptures();
             if(scrub){finish(L"up");setText(showText(L"text"));}else if(auto entry=weak.get())entry.Focus(FocusState::Pointer);
@@ -379,7 +388,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             dialRange->value=[local]{return local->value;};
             dialRange->text=[local,spec]{return str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text");};
             dialRange->apply=[local,commit,turn](J const& operation){if(!local->pointer&&commit(false))turn(operation);};
-            dialView.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,commit,phase,turn,point,resetValue,dialWeak,pressed=std::make_shared<uint64_t>()](auto&&,PointerRoutedEventArgs const& e){
+            dialView.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,commit,phase,turn,point,resetValue,restore,dialWeak,pressed=std::make_shared<uint64_t>()](auto&&,PointerRoutedEventArgs const& e){
+                if(data->claimBubbleContact(e))return;
                 auto view=dialWeak.get();if(!view||local->pointer||!view.IsEnabled())return;
                 auto contact=e.GetCurrentPoint(view);
                 if(!PointerGesture::PrimaryContact(contact))return;
@@ -388,6 +398,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
                 if(!commit(false)||!view.CapturePointer(e.Pointer()))return;
                 view.Focus(FocusState::Pointer);
                 local->pointer=contact.PointerId();local->origin=local->value;local->dragging=true;local->turning=true;
+                ++local->contactGeneration;data->pointerCancels.Observe(*local->pointer,local.get(),restore);
                 if(phase){local->gesture=true;phase(L"down",local->value);}
                 turn(point(e));e.Handled(true);
             })),true);
@@ -396,10 +407,10 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
                 if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()||(identity&&local->identity!=identity())){restore();return;}
                 turn(point(e));e.Handled(true);
             })),true);
-            dialView.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([local,restore,turn,point,finish,dialWeak](auto&&,PointerRoutedEventArgs const& e){
+            dialView.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([data,local,restore,turn,point,finish,dialWeak](auto&&,PointerRoutedEventArgs const& e){
                 if(local->pointer!=e.Pointer().PointerId()||!local->turning)return;
                 if(e.GetCurrentPoint(nullptr).Properties().IsCanceled()){restore();return;}
-                turn(point(e));local->pointer.reset();local->dragging=false;local->turning=false;
+                turn(point(e));++local->contactGeneration;data->pointerCancels.Forget(*local->pointer,local.get());local->pointer.reset();local->dragging=false;local->turning=false;
                 if(auto view=dialWeak.get())view.ReleasePointerCaptures();
                 finish(L"up");e.Handled(true);
             })),true);
@@ -453,13 +464,42 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     if(!ranged&&phase)entry.AddHandler(UIElement::KeyUpEvent(),box_value(KeyEventHandler([finish](auto&&,KeyRoutedEventArgs const& e){
         if(e.Key()==Windows::System::VirtualKey::Up||e.Key()==Windows::System::VirtualKey::Down)finish(L"up");
     })),true);
-    slider.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([local,phase](auto&&,PointerRoutedEventArgs const& e){
-        if(local->sliderPointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr)))return;local->sliderPointer=e.Pointer().PointerId();
+    auto completeSlider=[data,local,finish,set,setText,spec,weak=make_weak(slider),surface=make_weak(sliderContact)](bool cancel){
+        if(!local->sliderPointer)return;
+        ++local->contactGeneration;data->pointerCancels.Forget(*local->sliderPointer,local.get());local->sliderPointer.reset();
+        bool transaction=local->gesture;local->dragging=false;finish(cancel?L"cancel":L"up");
+        if(auto target=surface.get())target.ReleasePointerCaptures();
+        if(cancel){
+            local->value=local->sliderOrigin;if(!transaction)set(local->value);auto shown=local->resolve(spec,local->value,O({{L"type",S(L"format")}}));setText(str(shown,L"text"));
+            if(auto slider=weak.get()){bool formatting=std::exchange(local->formatting,true);slider.Value(num(shown,L"fill"));local->formatting=formatting;}
+        }
+    };
+    auto moveSlider=[weak=make_weak(slider),surface=make_weak(sliderContact)](PointerRoutedEventArgs const& e){
+        auto slider=weak.get();auto target=surface.get().try_as<FrameworkElement>();if(!slider||!target||target.ActualWidth()<=0)return;
+        double fill=std::clamp(double(e.GetCurrentPoint(target).Position().X)/target.ActualWidth(),0.,1.);
+        if(slider.IsDirectionReversed()!=(slider.FlowDirection()==FlowDirection::RightToLeft))fill=1-fill;
+        slider.Value(fill);
+    };
+    sliderContact.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,phase,get,commit,completeSlider,moveSlider,preference,weak=make_weak(slider)](auto&& sender,PointerRoutedEventArgs const& e){
+        if(data->claimBubbleContact(e))return;
+        auto slider=weak.get();auto target=sender.template as<UIElement>();
+        if(!slider||!slider.IsEnabled()||local->sliderPointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr)))return;
+        if(!preference){
+            if(!commit(false)){e.Handled(true);return;}
+            slider.Focus(FocusState::Pointer);
+            if(!target.CapturePointer(e.Pointer()))return;
+        }
+        local->sliderPointer=e.Pointer().PointerId();
+        ++local->contactGeneration;data->pointerCancels.Observe(*local->sliderPointer,local.get(),[completeSlider]{completeSlider(true);});
+        local->sliderOrigin=preference?get():local->value;
         local->dragging=true;if(phase&&!local->gesture){local->gesture=true;phase(L"down",local->value);}
+        if(!preference){moveSlider(e);e.Handled(true);}
     })),true);
-    PointerGesture::OnCompleted(slider,[local,finish](PointerRoutedEventArgs const& e,bool cancel){
-        if(local->sliderPointer!=e.Pointer().PointerId())return;local->sliderPointer.reset();
-        local->dragging=false;finish(cancel?L"cancel":L"up");
+    if(!preference)sliderContact.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([local,moveSlider,completeSlider](auto&&,PointerRoutedEventArgs const& e){if(local->sliderPointer==e.Pointer().PointerId()){
+        if(e.GetCurrentPoint(nullptr).Properties().IsCanceled())completeSlider(true);else moveSlider(e);e.Handled(true);
+    }})),true);
+    PointerGesture::OnCompleted(sliderContact,[local,completeSlider,moveSlider,preference](PointerRoutedEventArgs const& e,bool cancel){
+        if(local->sliderPointer==e.Pointer().PointerId()){if(!cancel&&!preference)moveSlider(e);completeSlider(cancel);if(!preference)e.Handled(true);}
     },PointerCaptureLoss::CompleteLift);
     slider.ValueChanged([data,local,caption,spec,set,setText,phase,weak=make_weak(entry)](auto&&,Primitives::RangeBaseValueChangedEventArgs const& e){
         if(data->updating||local->formatting)return;
@@ -470,7 +510,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             showNumericError(entry,L"");caption->errorReason=J{};
             setText(str(next,entry.FocusState()==FocusState::Unfocused?L"text":L"edit"));
         }
-        if(phase&&!local->gesture)Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().TryEnqueue([local,set,value=local->value]{if(!local->gesture)set(value);});
+        if(phase&&!local->gesture)Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().TryEnqueue([local,set,value=local->value,generation=local->contactGeneration]{if(generation==local->contactGeneration&&!local->gesture)set(value);});
         else set(local->value);
     });
     bindings.emplace_back([data,track]{
@@ -478,9 +518,11 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         auto panel=color(str(palette,L"panel")),ink=color(str(palette,L"text"));
         track.Color({255,uint8_t((int(panel.R)+ink.R)/2),uint8_t((int(panel.G)+ink.G)/2),uint8_t((int(panel.B)+ink.B)/2)});
     });
-    bindings.emplace_back([data,local,caption,spec,get,entry,slider,setText,presented,finish,identity=presentation.identity]{
+    bindings.emplace_back([data,local,caption,spec,get,entry,slider,setText,presented,finish,surface=make_weak(sliderContact),identity=presentation.identity]{
         if(identity && local->identity!=identity()){
+            ++local->contactGeneration;if(local->sliderPointer)data->pointerCancels.Forget(*local->sliderPointer,local.get());if(local->pointer)data->pointerCancels.Forget(*local->pointer,local.get());
             local->sliderPointer.reset();
+            if(auto target=surface.get())target.ReleasePointerCaptures();
             finish(L"cancel");
             local->identity=identity();local->editing=false;local->dragging=false;local->pointer.reset();local->scrubbing=false;local->turning=false;
             showNumericError(entry,L"");caption->errorReason=J{};
@@ -493,11 +535,11 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         entry.Background(entry.FocusState()==FocusState::Unfocused?clear():data->brush(L"input"));
         slider.Value(num(shown,L"fill"));
     });
-    root.Unloaded([local,finish](auto&&,auto&&){local->sliderPointer.reset();finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->turning=false;local->dragging=false;});
+    root.Unloaded([data,local,finish,surface=make_weak(sliderContact)](auto&&,auto&&){++local->contactGeneration;if(local->sliderPointer)data->pointerCancels.Forget(*local->sliderPointer,local.get());if(local->pointer)data->pointerCancels.Forget(*local->pointer,local.get());local->sliderPointer.reset();if(auto target=surface.get())target.ReleasePointerCaptures();finish(L"cancel");local->pointer.reset();local->scrubbing=false;local->turning=false;local->dragging=false;});
     if(inlineTrack){
         // Compact layer controls retain the same shared value/expression rules
         // and target guards as full numeric controls.
-        header.Children().RemoveAt(0);header.Children().InsertAt(0,slider);
+        header.Children().RemoveAt(0);header.Children().InsertAt(0,sliderHost);
         header.ColumnSpacing(4);header.Height(24);
         auto low=str(local->resolve(spec,num(spec,L"min"),O({{L"type",S(L"format")}})),L"text");
         auto high=str(local->resolve(spec,num(spec,L"max"),O({{L"type",S(L"format")}})),L"text");
@@ -513,8 +555,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         root.Children().Append(entry);return root;
     }
     if(panel){
-        slider.Margin({36,0,76,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);Grid::SetRow(slider,1);
-        if(!dial)header.Children().Append(slider);
+        sliderHost.Margin({36,0,76,0});sliderHost.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(sliderHost,2);Grid::SetRow(sliderHost,1);
+        if(!dial)header.Children().Append(sliderHost);
         root.Children().Append(header);return root;
     }
     StackPanel spin;spin.Orientation(Orientation::Horizontal);spin.Spacing(0);
@@ -558,7 +600,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             step.IsEnabled(enabled);step.Opacity(step.IsEnabled()?1.:.36);
         });
     }
-    Grid::SetColumn(slider,1);trackRow.Children().Append(slider);
+    Grid::SetColumn(sliderHost,1);trackRow.Children().Append(sliderHost);
     root.Children().Append(header);if(ranged)root.Children().Append(trackRow);return root;
 }
 }

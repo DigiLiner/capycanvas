@@ -132,9 +132,11 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
+| Android palette pill opening at the work-area edge | 120 | **FPS unqualified.** Instant clamp; two actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
 | Android tool bubble drag through four neighbours | 120 | **Met.** 115.34–116.72 actual app-window presents/s; p99 ≤16.6673 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 120 | **Web diagnostic:** Navigator column 30.00–30.64 Chrome surface presents/s; p99 50.00–58.34 ms. Tier qualification remains unset | [Web Navigator layout](#web-navigator-layout), 2026-10-19; [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
+| Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; the WARP VM cannot qualify presentation timing | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
@@ -143,6 +145,23 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
 | List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: touch at scale 1 gives 97.24–109.99 presents/s, p99 up to 25.016 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
+
+## Native palette opening
+
+The 2026-10-23 corrected palette journey passed light/dark touch on MovinkPad Pro
+14. The reopened pill bottom is 1775.5 px inside the 1800 px workspace, with both
+buttons visible; Next advances once and Previous restores the original name.
+
+Using the prescribed 9504 × 6336 photo at Fit, default glass, release-Rust benchmark
+APK `27d0bd47`, 120 Hz display and thermal status 0, three short opening diagnostics
+recorded production-active windows of 36.552 / 45.177 / 38.554 ms. Each contains
+two actual SurfaceFlinger app-window presents, two wheel poses and one stationary
+pose per neighbor. The wheel clamps in one step. The active flag also covers
+request/settling bookkeeping, so this is not sustained animation and no moving
+FPS or p99 qualification is claimed. The existing five-bubble drag result remains
+separate. See the [protocol and full build hashes](mid-tier.md#native-palette-opening).
+Evidence is in `artifacts/bubbles/android-palette-growth/top-short/`, with native
+light/dark bounds and screenshots in the adjacent `top-corrected-evidence/`.
 
 ## Native tool bubbles
 

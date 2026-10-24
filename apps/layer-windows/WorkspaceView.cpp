@@ -14,6 +14,7 @@
 #include "OverviewOcclusion.h"
 #include "WorkspaceShadow.h"
 #include "WorkspaceDrawers.h"
+#include "WorkspaceBubbles.h"
 #include <set>
 #include "CollapsedColumns.h"
 #include "WorkspaceGestures.h"
@@ -53,6 +54,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     Canvas root;
     std::shared_ptr<WorkspaceGestures> gestures;
     std::unique_ptr<WorkspaceDrawers> drawers;
+    std::unique_ptr<WorkspaceBubbles> bubbles;
     std::unique_ptr<CollapsedColumns> collapsed;
     std::unique_ptr<WorkspaceExpansion> expansion;
     struct Measurement {double tab=36,content=320;J scroll;};
@@ -150,6 +152,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         commandSearch->data=data;commandSearch->changed=[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();};commandSearch->init(root);
         drawers=std::make_unique<WorkspaceDrawers>(data,root,gestures,[weak=weak_from_this()]{if(auto self=weak.lock())self->publishOverviews();});
         expansion=std::make_unique<WorkspaceExpansion>(data,root,gestures,[weak=weak_from_this()]{if(auto self=weak.lock())self->present();});
+        bubbles=std::make_unique<WorkspaceBubbles>(data,root,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();});
         measureHost.IsHitTestVisible(false);measureHost.Opacity(0);Canvas::SetLeft(measureHost,-100000);root.Children().Append(measureHost);
         root.LayoutUpdated([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
     }
@@ -442,7 +445,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         pressure->attach();pressure->Publish();
         notice->Place(layout);notice->Publish(data->state);data->queueColors();
         expansion->Apply(configurationHeight());present();
-        collapsed->Apply();drawers->Apply();gestures->Refresh();
+        collapsed->Apply();drawers->Apply();bubbles->Apply();gestures->Refresh();
         auto status=object(layout,L"status");place(cameraSlot,status);
         cameraSlot.Visibility(num(status,L"height")>0?Visibility::Visible:Visibility::Collapsed);
         zoom->text.Foreground(data->brush(L"text"));
@@ -618,7 +621,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                     auto inert=std::make_shared<WorkspaceData>(*data);
                     inert->send=[](std::string){};inert->document=[](std::string){};inert->input=[](std::string){};
                     inert->query=nullptr;inert->previews.reset();inert->thumbnails.reset();inert->scopes.reset();
-                    inert->popupChanged=nullptr;inert->transients.clear();inert->colorViews.clear();inert->copyViews.clear();
+                    inert->popupChanged=nullptr;inert->takeBubble=nullptr;inert->bubbleContact=nullptr;inert->pointerCancels.Clear();inert->transients.clear();inert->colorViews.clear();inert->copyViews.clear();
                     copy.key=key;copy.data=inert;copy.body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
                     copy.body->Root().Width(width);measureHost.Children().Append(copy.body->Root());copy.body->Apply(true);
                 }else{copy.data->state=data->state;copy.data->model=data->model;copy.body->Apply(true);}
@@ -834,12 +837,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         if(json!=lastOverviews){lastOverviews=json;overviews(to_string(json));}
         if(glassChanged)glassChanged();
     }
-    A glass(UIElement const& reference,A& connections)const{
+    A glass(UIElement const& reference,A& connections,A& arcs)const{
         A regions;
         for(auto const& [id,group]:groups)if(!group.hidden&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
         collapsed->AppendGlass(regions,connections,reference);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
         canvasBar->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
+        bubbles->Glass(regions,arcs,reference);
         return regions;
     }
     void placePreviews(){
@@ -864,13 +868,16 @@ WorkspaceView::Json WorkspaceView::ChromeFacts(bool popupOpen){impl->data->exter
 void WorkspaceView::CancelPreviews(){for(auto const& panel:impl->previewPanels)panel->Cancel();}
 bool WorkspaceView::CancelGesture(){
     bool closed=impl->data->dismissTransients();
+    closed=impl->bubbles->Cancel()||closed;
     return impl->gestures->Cancel()||closed;
 }
 void WorkspaceView::SetWindowId(uint64_t id){impl->data->windowId=id;}
 void WorkspaceView::SetGlassChanged(std::function<void()> changed){impl->glassChanged=std::move(changed);}
-void WorkspaceView::CanvasContact(bool active){impl->canvasBar->Contact(active);if(active){impl->notice->Hide();hideRevealedTooltip();}}
+void WorkspaceView::CanvasContact(bool active){impl->canvasBar->Contact(active);impl->bubbles->Wake();if(active){impl->notice->Hide();hideRevealedTooltip();}}
+void WorkspaceView::AttachBubbles(UIElement const& root,std::function<void()> cancelHeader){impl->bubbles->Attach(root,[weak=std::weak_ptr<Impl>(impl),cancelHeader]{if(auto self=weak.lock())self->gestures->Cancel();cancelHeader();});}
 JsonArray WorkspaceView::DrawerSources()const{return impl->data->drawerSources;}
-JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections)const{return impl->glass(reference,connections);}
+JsonArray WorkspaceView::BubbleInputRegions(UIElement const& reference)const{return impl->bubbles->InputRegions(reference);}
+JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections,JsonArray& arcs)const{return impl->glass(reference,connections,arcs);}
 void WorkspaceView::SetTitlebarInsets(float left,float right,float height){
     std::array<float,3> value{left,right,height};
     if(value!=impl->titlebar){impl->titlebar=value;impl->lastTitlebar=L"";impl->reportTitlebar();}

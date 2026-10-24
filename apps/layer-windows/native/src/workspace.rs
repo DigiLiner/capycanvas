@@ -27,6 +27,10 @@ fn request(json: &str) -> Result<Value, String> {
             | "image_layer_drop"
             | "drawer"
             | "layer_drawer_sizing"
+            | "bubble_motion"
+            | "bubble_grab"
+            | "can_take_bubble"
+            | "bubble_wheel_color"
             | "drawer_toolbar"
             | "expansion"
             | "renderer_stats"
@@ -54,29 +58,36 @@ fn request(json: &str) -> Result<Value, String> {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum StampQuery {
     ToolbarStamp { context: layer_ui::ToolbarContext, #[serde(default)] known_request: Option<u64> },
+    BubbleStamp { #[serde(default)] known_request: Option<u64> },
     Scopes { #[serde(default)] size: Option<[u32; 2]> },
 }
 
 pub fn query(host: &mut NativeHost, json: &str) -> Result<CapyPreview, String> {
     match serde_json::from_str(json) {
-        Ok(StampQuery::ToolbarStamp { context, known_request }) => return match host.session.toolbar_stamp(context, known_request) {
+        Ok(StampQuery::ToolbarStamp { context, known_request }) => return stamp(host, context, known_request),
+        Ok(StampQuery::BubbleStamp { known_request }) => {
+            let context = host.session.state().toolbar_context();
+            return stamp(host, context, known_request);
+        }
+        Ok(StampQuery::Scopes { size }) => return crate::scopes::query(host.session.state(), size),
+        Err(_) => {}
+    }
+    let (result, error) = match request(json).and_then(|value| host.query(value)) {
+        Ok(result) => (result, Value::Null),
+        Err(error) => (Value::Null, Value::String(error)),
+    };
+    CapyPreview::packet(json!({"result":result,"error":error}), Vec::new())
+}
+
+fn stamp(host: &mut NativeHost, context: layer_ui::ToolbarContext, known_request: Option<u64>) -> Result<CapyPreview, String> {
+    match host.session.toolbar_stamp(context, known_request) {
             Ok(Some(stamp)) => CapyPreview::packet(
                 json!({"result":{"size":stamp.size,"extent":stamp.extent,"request_id":stamp.request_id,"pending":stamp.pending},"error":null}),
                 stamp.alpha,
             ),
             Ok(None) => CapyPreview::packet(json!({"result":null,"error":null}), Vec::new()),
             Err(error) => CapyPreview::packet(json!({"result":null,"error":error}), Vec::new()),
-        },
-        Ok(StampQuery::Scopes { size }) => return crate::scopes::query(host.session.state(), size),
-        Err(_) => {}
     }
-    // A delayed query can reference a group removed by intervening input.
-    // Return that rejection to the view instead of failing the render loop.
-    let (result, error) = match request(json).and_then(|value| host.query(value)) {
-        Ok(result) => (result, Value::Null),
-        Err(error) => (Value::Null, Value::String(error)),
-    };
-    CapyPreview::packet(json!({"result":result,"error":error}), Vec::new())
 }
 
 #[cfg(test)]
@@ -95,6 +106,26 @@ mod tests {
             crate::previews::capy_preview_free(owned);
             result
         }
+    }
+    #[test]
+    fn bubble_queries_forward_shared_policy_without_document_edits() {
+        let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let before = host.session.engine().document().clone();
+        for request in [
+            json!({"type":"bubble_motion","now_ns":100,"reduced":true}),
+            json!({"type":"bubble_grab","grab":{"kind":"header","id":9999},"held":false}),
+            json!({"type":"can_take_bubble","grab":{"kind":"header","id":9999},"position":[320,240],"viewport":[1280,800]}),
+            json!({"type":"bubble_wheel_color"}),
+        ] {
+            let expected = host.query(request.clone()).unwrap();
+            let actual = metadata(query(&mut host, &request.to_string()).unwrap());
+            assert!(actual["error"].is_null(), "{actual}");
+            assert_eq!(actual["result"], expected);
+            assert_authored_eq(host.session.engine().document(), &before);
+        }
+        let malformed = metadata(query(&mut host, r#"{"type":"bubble_grab","grab":{"kind":"header","id":9999}}"#).unwrap());
+        assert!(malformed["error"].is_string());
+        assert_authored_eq(host.session.engine().document(), &before);
     }
     #[test]
     fn layer_drop_query_validates_epoch_and_preserves_document_and_history() {
@@ -169,6 +200,28 @@ mod tests {
             let bytes = crate::previews::capy_preview_bytes(owned, &mut count);
             assert_eq!(count, size * size);
             assert!(std::slice::from_raw_parts(bytes, count).iter().any(|&a| a > 0));
+            let alpha = std::slice::from_raw_parts(bytes, count).to_vec();
+            let (bubble, bubble_metadata) = loop {
+                let bubble = Box::into_raw(Box::new(query(&mut host, r#"{"type":"bubble_stamp"}"#).unwrap()));
+                let bubble_metadata: Value = serde_json::from_slice(std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(bubble)).to_bytes()).unwrap();
+                assert!(bubble_metadata["error"].is_null(), "{bubble_metadata}");
+                if bubble_metadata["result"]["pending"] == false { break (bubble, bubble_metadata); }
+                crate::previews::capy_preview_free(bubble);
+                assert!(std::time::Instant::now() < deadline, "GPU bubble stamp did not complete: {bubble_metadata}");
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            };
+            for field in ["size", "extent", "pending"] {
+                assert_eq!(bubble_metadata["result"][field], reply["result"][field]);
+            }
+            assert!(bubble_metadata["result"]["request_id"].is_u64());
+            let mut bubble_count = 0;
+            let bubble_bytes = crate::previews::capy_preview_bytes(bubble, &mut bubble_count);
+            assert_eq!(bubble_count, count);
+            assert_eq!(std::slice::from_raw_parts(bubble_bytes, bubble_count), alpha);
+            crate::previews::capy_preview_free(bubble);
+            let cached = metadata(query(&mut host, &json!({"type":"bubble_stamp","known_request":bubble_metadata["result"]["request_id"]}).to_string()).unwrap());
+            assert!(cached["error"].is_null());
+            assert_eq!(cached["result"]["request_id"], bubble_metadata["result"]["request_id"]);
             crate::previews::capy_preview_free(owned);
         }
         let mut stale = context;

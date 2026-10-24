@@ -1007,7 +1007,12 @@ can replay older samples.
 For scrubs with modifier keys, ignore repeated coordinates and read
 `KeyModifiers` from the pointer event.
 The canvas has an independent input source; an ancestor XAML observer alone
-cannot guarantee delivery of an outside release. Escape and Control shortcuts
+cannot guarantee delivery of an outside release. Gaps in the bubble overlay also
+deliver canvas contacts through XAML. Both paths copy native samples and capture
+their physical coordinates with the matching view revision before queueing;
+the input thread assigns sequence numbers and tracks contacts. Wheel and held
+picker positions likewise retain the scale from collection across a resize.
+Escape and Control shortcuts
 pressed during a canvas contact are counted from raw keyboard input on a
 key-reader thread; the input thread holds later canvas samples until the UI
 thread has queued each such key, for at most one second, so the key keeps its
@@ -1043,6 +1048,16 @@ the focused header journeys also check placement cancellation and keyboard input
   before sending keys. `Focus-Keyboard` uses native Tab traversal when testing
   keyboard activation: UI Automation's SetFocus requests programmatic focus, and
   HasKeyboardFocus alone does not establish keyboard modality for Space.
+  `-Backward` reverses the traversal when the next target is the canvas, whose
+  Tab keys are handled as application input.
+  Fixtures that need docked Paint controls call `Use-PaintWorkspace` before
+  locating them; a fresh profile starts in Sketch.
+  `Search-State` reads the owned window's partial command-search publication;
+  `Model` can retain an older query. Live picker samples likewise come from
+  the workspace presentation's `color_preview`, independently of full models.
+  An accessibility container's bounds can describe its children without its
+  padding. Compare shared width thresholds with the native panel allocation;
+  check each button's bounds separately for padding, size and spacing.
   The Layers fixture requests keyboard focus explicitly before Space activates
   Add paper or native toggles.
   Revealing an offscreen row can move focus to another child.
@@ -1220,6 +1235,87 @@ reopens each drawing while preserving shared image identities and object poses.
 Repeat with `-Theme light`. Use `exercise-image-rows.ps1` for native
 image-authoring and conversion journeys.
 
+### Tool bubbles
+
+`exercise-tool-bubbles.ps1` follows the GTK bubble journeys with native mouse,
+pen and touch contacts in light and dark themes. Run the six `tool-bubbles`
+variants through the VM fixture runner. It authors its header through the native
+picker and uses shared presentation geometry for contact points. Checks include
+fast tear-off, canvas gaps, cancellation, persistent options, wheel drag-out,
+two-finger movement and pinch, Layers pages, dab previews and exact artwork
+Undo/Redo. The retained presenter shares the ordinary wheel, swatches, brush
+previews, thumbnail cache, numeric controls and Layers inspector.
+The history capsule exposes separate native Undo and Redo buttons for keyboard
+and accessibility input, with labels and availability from Rust. Run
+`tool-bubbles:HistoryOnly` and `tool-bubbles:HistoryLightOnly` to check their
+actions against exact artwork pixels in both themes.
+The [hardware handoff](tool-bubbles-windows-handoff.md) lists the remaining
+physical-input, display and performance qualification work.
+
+Halo tracks, fills and thumbs retain their native elements during motion. Bead
+content changes independently of placement. Dab requests stop after completion
+and resume when their shared model changes. Wheel field rasterization and bitmap
+upload use a worker-owned Direct2D context; device and request identities guard
+delivery to the retained view. Changing drawings retires pending dab requests
+even when the bubble keeps its ID and color. Parent placement and child geometry
+update together when a bubble changes size; asynchronous motion replies do not
+leave native hit targets at the previous extent.
+Lists and folded faces register their thumbnail targets with the same cache by
+owner. Requests and late replies use the combined targets, so one viewport cannot
+discard another's pending pixels. Unloading an owner retires only its targets.
+
+Numeric controls retain the native Slider for rendering, keyboard input and
+accessibility. Painting sliders capture pointer input on their common numeric
+surface and use the existing Rust value mapping. Explicit cancellation releases
+that capture and restores the edit during a two-finger handoff; releasing a
+stock touch Slider's capture alone can leave its pressed state active.
+Completion, cancellation and owner retirement invalidate deferred slider
+changes. Layers opacity uses the shared effect gesture transaction for rollback
+and a single Undo step.
+
+Panel scrolling shares `PanelScroll.h`: native pan and inertia events update a
+ScrollViewer, with explicit cancellation before two-finger bubble takeover.
+The [hardware handoff](tool-bubbles-windows-handoff.md#required-validation-and-measurement)
+records the VM's remaining routed-away failure during active scrolling.
+The ScrollViewer keeps keyboard, wheel, scrollbar and accessibility handling,
+and provides the ItemsRepeater's virtualized viewport. Numeric, curve, row and
+scroll controls offer a second contact to the bubble before starting an edit.
+A row pan suppresses the row's click until release, including when pointer
+motion arrives before the ScrollViewer's offset notification.
+Row gestures and revealed swipe actions join the workspace's existing transient
+registry. Escape dismisses them before the shared action can close their drawer
+or card; destroying a list removes its registration.
+A handoff cancels every native owner of both contacts, including both row and
+scroll handling, and requires successful capture before starting the bubble drag.
+The current native manipulation completes before root capture transfers.
+Unloading or changing drawings retires the scroll contact.
+`tool-bubbles:ScrollEpochOnly` switches drawings during an active native pan,
+returns to the original drawing and checks fresh scrolling and unchanged history.
+The extra touch surface sits behind the bubbles while a first touch is active,
+so the card keeps its native hit targets. Covering them redirects touch motion
+before XAML scrolling starts, even with pointer capture.
+Normal lift capture loss completes the bubble contact so a menu cannot leave
+that surface active over the next interaction. Capture loss from the bubble input
+root cancels its drag even if the native capture list has not yet removed the
+pointer. Descendant capture transfers do not cancel a root-owned drag.
+
+Run `tool-bubbles:RapidOnly` separately for reopening during the 150 ms card
+fold. It observes native card retirement before injecting the reopen contact,
+bounds that contact against the last observed open card, and checks the reopened
+footer and Properties controls. The folded model alone does not establish native
+event ordering; input outside the interval does not qualify the transition.
+
+Hollow native paths can route a canvas contact through XAML instead of the
+independent input source. `CanvasWindow` admits unhandled events targeted at its
+`SwapChainPanel`, copies native samples on the event's owning thread, and sends
+the values to the existing input worker. Both sources share sample conversion,
+ordering, modifiers and contact tracking. Each source runs its hold recognizer
+on its own thread; the worker validates the active contact before a hold acts.
+Native caption passthrough regions cover only intersections with caption areas.
+
+The VM establishes software-adapter behavior. Moving-frame performance and
+physical pen parity still require reference hardware.
+
 ### GPU reconstruction
 
 These remove the process's real D3D12 device. Run each alone and serially, on
@@ -1305,14 +1401,14 @@ $env:CAPY_BITMAP_FIXTURE = Join-Path (Resolve-Path $run).Path 'input.json'
 Launch `artifacts/windows/BitmapReview/CapyCanvas.exe` visibly on the fixture
 runner's private test desktop with that environment. The input path must be
 absolute; the review creates its isolated context beside it. Require exit code
-zero and `bitmap-upload-fixture-result.json` with `passed: 13`. Keep the
+zero and `bitmap-upload-fixture-result.json` with `passed: 14`. Keep the
 90-second outer, 10-second callback and five-second close bounds.
 
 The review checks real asynchronous uploads and rendered pixels, RGBA/BGRA
 encoding, two-buffer reuse, failed-copy retirement, latest-request coalescing,
 callback reentrancy and exceptions, context cancellation during upload,
-closed-owner rejection, and new-document thumbnail requests after cancelling
-an old document's active upload. A retained ImageBrush also checks exact white-to-blue
+closed-owner rejection, independent thumbnail owners, and new-document requests
+after cancelling an old document's active upload. A retained ImageBrush also checks exact white-to-blue
 Paper pixels at 32 × 32. It checks loaded, connected state before waiting for a
 visible rendering event. Its 3 × 2 source-pixel oracle uses Image dimensions
 divided by `XamlRoot.RasterizationScale` and a natural-size `RenderTargetBitmap`

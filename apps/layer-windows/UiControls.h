@@ -69,7 +69,8 @@ inline hstring str(J const& value,wchar_t const* key,hstring fallback=L""){
     return item.ValueType()==JsonValueType::String?item.GetString():fallback;
 }
 inline double num(J const& value,wchar_t const* key,double fallback=0){
-    return value.GetNamedNumber(key,fallback);
+    auto item=value.GetNamedValue(key,JsonValue::CreateNullValue());
+    return item.ValueType()==JsonValueType::Number?item.GetNumber():fallback;
 }
 inline bool flag(J const& value,wchar_t const* key,bool fallback=false){return value.GetNamedBoolean(key,fallback);}
 inline J find(A const& list,wchar_t const* key,hstring const& id){
@@ -219,6 +220,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     std::shared_ptr<LayerThumbnailCache> thumbnails;
     std::shared_ptr<PaperPreviewCache> papers;
     PreviewTransport query;
+    std::function<void(J,Windows::Foundation::Point,std::function<bool()>,std::function<void()>)> takeBubble;
     uint64_t windowId=0;bool glassSurfaces=false;A drawerSources;
     std::shared_ptr<StrokeRecording> strokes;
     std::shared_ptr<ScopeFeed> scopes;
@@ -230,6 +232,9 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     J chrome=O({{L"held",B(false)},{L"dragging",B(false)},{L"popup_open",B(false)}});
     bool externalPopup=false;
     bool updating=false;
+    PointerCancelRegistry pointerCancels;
+    std::function<bool(PointerRoutedEventArgs const&)> bubbleContact;
+    bool claimBubbleContact(PointerRoutedEventArgs const& event){return bubbleContact&&bubbleContact(event);}
     std::map<uint64_t,std::function<bool()>> transients;uint64_t nextTransient=0;
     uint64_t transient(std::function<bool()> close){transients.emplace(++nextTransient,std::move(close));return nextTransient;}
     bool dismissTransients(){

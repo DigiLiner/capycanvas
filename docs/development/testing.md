@@ -498,8 +498,9 @@ Preserve user names and document contents across language changes. Follow the
 
 ## UI and input
 
-- **Tool bubbles.** GTK `native_tool_bubbles`, Web `--tool-bubbles`, and Android
-  `AndroidToolBubblesTest#nativeBubblesAcrossThemesAndDevices` exercise native
+- **Tool bubbles.** GTK `native_tool_bubbles`, Web `--tool-bubbles`, Android
+  `AndroidToolBubblesTest#nativeBubblesAcrossThemesAndDevices` and Windows
+  `tool-bubbles` fixtures exercise native
   contacts in both themes. Include painting through gaps and waiting for the
   specified fade return before editing an arc; a restored model alone does not
   establish that the native presenter accepts input again. Shared
@@ -512,6 +513,15 @@ Preserve user names and document contents across language changes. Follow the
   `outside_bubble_contact_publishes_retained_model_without_painting` requires
   an outside touch to publish the closed card without a paint or camera frame,
   including when the same contact also dismisses a drawer.
+  Windows runs mouse, pen and touch variants in light and dark themes, including
+  fast toolbar tear-off, cancellation, pair takeover from an arc and native
+  Layers opacity, persistent menus and exact artwork Undo/Redo.
+  Its separate `tool-bubbles:RapidOnly` case requires an observed fold followed
+  by native reopening within 150 ms, with working retained card controls.
+  The shared wheel tests require release to preserve the last sampled color,
+  cancellation to restore only the original context and owner removal to
+  retire the contact before layout undo reuses its ID. Snapshot tests require
+  both retained Layers card pages even when neither panel is docked.
 - **Layer thumbnails.** GTK `native_layer_thumbnail_squircles`, Web `--layer-hold`,
   Android `AndroidTitleBarTest#layerRelationships` and Windows `layers` fixtures
   check full squircle clipping, accent borders, preview pixels inside the border

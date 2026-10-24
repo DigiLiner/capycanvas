@@ -25,6 +25,19 @@ class BubblePresentsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bubbles.activity_identity(text, "other.app")
 
+    def test_short_palette_diagnostic_retains_poses_without_fps(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            contact = dict(diagnostic=True, warmup=False, begin_ns=0, end_ns=20_000_000,
+                           moving_windows_ns=[[0, 20_000_000]], drawn_centers=[[0] + [0] * 10, [10_000_000, 1] + [0] * 9])
+            directory.joinpath("result.json").write_text(json.dumps(dict(contacts=[contact])))
+            directory.joinpath("instrumentation.log").write_text("OK (1 test)")
+            directory.joinpath("surface-latency.json").write_text(json.dumps(dict(surface="owned", samples=[dict(text="10000000\n1 5000000 3\n1 15000000 3\n")])))
+            result = bubbles.report(directory)
+            self.assertNotIn("presented_hz", result)
+            self.assertEqual(result["transitions"][0]["distinct_drawn_centers"], [2, 1, 1, 1, 1])
+            self.assertEqual(result["transitions"][0]["actual_present_timestamps_ns"], [5_000_000, 15_000_000])
+
     def test_long_gaps_are_preserved(self):
         result = bubbles.summarize([0, 10_000_000, 20_000_000, 120_000_000])
         self.assertEqual(result["gap_p99_ms"], 100)

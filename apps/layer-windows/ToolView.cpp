@@ -82,6 +82,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
         for(uint32_t i=0;i<items.Size();i++){
             auto item=items.GetObjectAt(i);auto action=object(item,L"action");TextBlock title;
             auto pick=button(data,str(item,L"label"),[weak,action]{if(auto self=weak.lock())self->data->dispatch(action);});
+            pick.Tag(O({{L"bubble_choice",action}}));
             pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
             pick.Padding({17,5,17,5});actionTooltip(data,pick,[action]{return action;});
             AutomationProperties::SetAutomationId(pick,(group?L"tool-group-":L"tool-subtool-")+to_hstring(i));
@@ -100,7 +101,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
                 if(brush){
                     Image image;image.Height(40);image.Stretch(Stretch::Fill);
                     image.HorizontalAlignment(HorizontalAlignment::Stretch);
-                    image.Source(Imaging::BitmapImage(asset(L"brush-previews/"+std::to_wstring(int(preview.GetNumber()))+L"-"+std::wstring(data->theme().c_str())+L".png")));
+                    image.Source(BrushPreview(int(preview.GetNumber()),data->theme()));
                     Border frame;frame.CornerRadius({3,3,3,3});frame.Child(image);content.Children().Append(frame);
                 }
                 auto caption=toolLabel(data,item,true,brush,&title);twoLines(title);

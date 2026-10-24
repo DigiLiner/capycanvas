@@ -113,10 +113,12 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 16 visible paint layers | 90 | | |
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
-| Android tool bubble drag through four neighbours | 90 | **Not met.** 86.30–89.06 actual app-window presents/s; p99 up to 22.331 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
-| Web tool bubble drag through four neighbours | 90 | **Not met.** 56.85–58.86 presented fps, p99 33.51 ms, default glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
+| Android palette pill opening at the work-area edge | 90 | **FPS unqualified.** Instant clamp/short transition; 3–4 actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
+| Android tool bubble drag through four neighbours | 90 | **Not met.** Current release Rust: 86.47–86.99 actual app-window presents/s; p99 up to 22.331154 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
+| Web tool bubble drag through four neighbours | 90 | **Not met.** Current release with promoted CSS: 61.45–72.77 actual presents/s, p99 33.51–33.55 ms, default Low glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
+| Windows tool bubble drag through four neighbours | 90 | Unmeasured on reference hardware; the WARP VM cannot qualify presentation timing | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Drawer open and close | 90 | **Not met.** Layers/Properties completed native motion: 59.70–59.71 moving window frames/s, interval p99 up to 16.86 ms, 24 MP photo, thermal 0, active display mode 60 Hz | [Combined layer drawer](#combined-layer-drawer), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 90 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 90 | Huion: frame CPU p50 4.6–5.1 ms, p95 under 9.6 ms; XP-Pen swatch comparison below is diagnostic only. Huion wheel drags (FrameMetrics, release benchmark, one 5 s mouse and one touch drag each, 90 Hz panel): Edit Color dialog 79.4 / 87.4 fps presented, panel wheel 77.1 / 79.2 fps; not met | [Colour picker](../ui/color-picker.md); [swatch comparison](#selected-swatch-comparison), 2026-10-03; `AndroidWorkspacePerformanceTest#editColorWheelFrameTiming`, 2026-10-04 |
@@ -126,6 +128,40 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK layer input diagnostic](top-tier.md#gtk-layer-input-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
+
+## Native palette opening
+
+The 2026-10-23 shared geometry change includes the open palette pill in desk
+bounds. Light/dark native touch journeys passed on MovinkPad 11 and MovinkPad Pro
+14. Each moves the wheel toward the bottom-right, reopens the pill after drag
+release, checks its full bounds and both buttons, and verifies that Next advances
+once and Previous restores the name. On this tablet the pill bottom is 1415.5 px
+inside the 1440 px workspace; the top tablet has the same 24.5 px clearance.
+
+The release-Rust, nondebuggable, unminified benchmark APK is SHA-256
+`27d0bd478031fe5b5cd521f55f02a2d8357fe7a9aa703ebaa1d211e35f9e9657`.
+Test APK `225cd5c700ab57497028eb209db465a5a9826ef5ab7e2e4943f9ab15f3720376`
+records three native palette-bead taps on the prescribed 6000 × 4000 photo at Fit,
+default glass, 90 Hz display and thermal status 0. The retained production
+`BubbleInteraction.active` flag brackets each diagnostic, while cached semantic
+bounds record individual drawn poses. No full-model reads occur during a window.
+
+| Opening | Production-active window | Actual app-window presents | Distinct wheel poses | Distinct poses per neighbor |
+| --- | --- | --- | --- | --- |
+| 1 | 62.319 ms | 4 | 2 | 1 each |
+| 2 | 75.452 ms | 3 | 2 | 1 each |
+| 3 | 54.882 ms | 3 | 3 | 1 each |
+
+The wheel clamps in one step; the third sample also has a one-pixel adjustment.
+This is not sustained animation or a neighbor return. Production-active time
+includes request/settling bookkeeping beyond the changed pose, so dividing its
+presentation count by that duration would not qualify moving FPS. A window with fewer than two presentations cannot yield an inter-presentation
+interval; the collector rejects sustained-FPS reports for these windows. The valid five-bubble drag measurements remain in their separate row.
+
+`tools/performance/android-bubbles.py --workload palette-opening` retains the
+short diagnostic without an FPS result. Reset and idle periods are excluded.
+Raw presentation timestamps, per-transition drawn positions, build hashes and
+both-theme bounds/screenshots are in `artifacts/bubbles/android-palette-growth/`.
 
 ## Native tool bubbles
 
@@ -148,8 +184,9 @@ OFF setting was restored after capture.
 | --- | --- | --- | --- |
 | Before primitive glass transport, APK `f589c1fa` | 86.642 / 89.238 / 86.475 | 22.336615 / 11.310384 / 22.333308 | Not met |
 | Primitive glass transport, APK `5c2e4751` | 89.063 / 86.296 / 87.166 | 11.289538 / 22.330692 / 22.330384 | Not met |
+| Current release Rust, APK `7014e78c` | 86.475 / 86.988 / 86.647 | 22.331154 / 22.328077 / 22.330769 | Not met |
 
-Both meet the 85.5 presents/s floor but exceed the fixed 22.2 ms p99 limit in two
+The first two builds meet the 85.5 presents/s floor but exceed the fixed 22.2 ms p99 limit in two
 contacts. The comparison does not establish a performance improvement. In the
 later capture, FrameMetrics animation p99 is 3.12–3.68 ms, layout ≤0.542 ms and
 draw ≤0.560 ms; command issue is 9.12–12.70 ms and GPU duration 12.61–18.54 ms.
@@ -158,31 +195,76 @@ These are attribution proxies, not actual presents. Raw evidence is in
 `artifacts/bubbles/android-mid-transport-reference/`; each includes a build manifest,
 contact windows, thermal/display records, JUnit result and raw presentation samples.
 
+The current APK SHA-256 is
+`7014e78cd0ca4980590511875b92d05df2d8c66de37d7c6a19683bfbdc4df855`,
+with test APK
+`0844ff434f0f2aaa7743323160db1e7ab909b448e62655d5e0c530b6b7d03622`.
+It uses release Rust and nondebuggable, unminified white-box Android code,
+not an R8 release. All three contacts pass the rate floor and miss the p99 limit.
+FrameMetrics command issue p99 is 12.19–13.07 ms and GPU duration
+11.52–19.21 ms; layout ≤0.548 ms and draw ≤0.418 ms. Shared renderer
+CPU render/present p99 is 6.16–6.36 ms and owner-thread CPU 5.33–5.47 ms.
+These CPU/HWUI proxies do not isolate a shared-renderer GPU pass. Thermal status
+remained 0 and the app policy/display were 90 Hz. All four neighbours moved;
+JUnit passed, the same Activity was retained, and Adaptive was restored OFF.
+Raw evidence is in `artifacts/bubbles/web-current/native-release/`.
+
 ## Web tool bubbles
 
-Wacom MovinkPad 11, Chrome, optimized `web-release`, base `82486a4c4` plus the
-Web bubble port; Wasm SHA-256 `dac74688fb204e59aeb9b162210a9aa330362aab59d6193c74e2a45221b8e7d6`.
-The prescribed 6000 × 4000 photo sits below an empty paint layer at Fit.
-`tools/performance/web-bubbles.mjs` moves one bubble through four others for
-three warmed six-second contacts, verifying that every neighbour moves.
+Current release measured 2026-10-23 on Wacom MovinkPad 11, Chrome, with the
+prescribed 6000 × 4000 photo below an empty paint layer at Fit and default Low
+glass. Loaded Wasm SHA-256 is
+`1cf5c04479606370fa469f4adedaf3205a65ab012a3672f56f5b088b937a3110`.
+The production CSS containing one transform layer per bubble is
+`17497168dbc97c5d13153915e1da6291babb506b20b154605bb55a80ad0df72d`, verified
+against the browser's loaded stylesheet. Chrome's UID has the temporary 90 Hz
+Adaptive override; display period is 11,111,111 ns and thermal status is 0.
 
-SurfaceFlinger actual-present histories report **58.86, 56.85 and 57.46 fps**,
-with p99 gaps **33.51 ms** in all three contacts. The 90 Hz rate and 22.2 ms gap
-targets remain unmet. Thermal status is 0 before and after. Chrome's adaptive
-refresh entry was enabled for this diagnostic, allowing the selected 90 Hz
-display mode; its original disabled setting was restored afterward.
+One six-second warmup precedes three six-second native CDP touch drags through
+four actual settled neighbors. Every neighbor visibly moves. Direct overlapping
+500 ms SurfaceFlinger content-surface histories are deduplicated inside each
+contact with 100 ms trimmed at both edges. There is no ring rollover loss.
 
-The histories were polled every 500 ms with overlapping entries and deduplicated
-within the contact windows. FrameTimeline's incomplete Chrome child-surface
-events are excluded; its clock snapshots only align the windows. These are
-presentation measurements, not animation-frame callbacks.
+| Production CSS contact | Actual presents/s | p99 gap, ms | rAF callbacks/s (proxy) |
+| --- | --- | --- | --- |
+| 1 | 72.774 | 33.505846 | 85.918 |
+| 2 | 61.447 | 33.539384 | 88.253 |
+| 3 | 61.653 | 33.552693 | 88.083 |
 
-Before retaining command availability during unchanged frames, the same
-fixture measured 57.19, 53.06 and 55.46 fps. A separate profile attributed about
-2.2 ms per frame to repeated command probes. Bubble motion now retains those
-commands and stationary toolbar glass measurements. Glass and presentation
-costs remain: an opaque diagnostic reached 71.46 fps and still missed the gap
-limit. The raw captures and comparison are in `artifacts/bubbles/mid/`.
+**Not met:** each contact misses the 85.5 presents/s floor and 22.2 ms p99 limit.
+Near-90 Hz callbacks do not establish presentation. Before promotion, this same
+release measured 57.367 / 55.513 / 58.036 actual presents/s with p99 gaps
+33.505–33.553 ms. Those are port-internal comparisons, not a pre-port main baseline.
+
+The pre-promotion CPU/browser trace identifies Chrome GPU-service raster work:
+GPU-service RunTask wall occupancy is 89.6–92.5% of moving windows, with thread
+CPU occupancy 77.7–81.9%; renderer-main wall occupancy is 50.6–57.6%, CPU
+44.4–51.1%. Raster work consumes 9.17 s across 18.10 s of motion, including
+5.26 s of raster flushes. Main-thread `app.frame` calls have median 2.1 ms and
+p99 4.2 ms; no full `bubbles()` queries occur in motion. Nested trace categories
+are not additive and these CPU/service timings are not hardware GPU pass times.
+
+An isolated promotion diagnostic reduces raster work to 76.4 ms over 6.05 s.
+CDP observes five additional content layers, one per bubble; an attributable GPU
+memory cost is not available. A matched instrumented default contact has 425 rAF
+callbacks, 425 `app.frame` attempts and 1045 WebGPU queue submissions but only
+52.64 actual presents/s. The promoted contact has 536 / 536 / 1316 respectively,
+and 66.49 presents/s. Queue submissions are work batches, not completed frames.
+
+A separate promoted, transparency-Off diagnostic reaches 89.582 actual
+presents/s with p99 11.269 ms and 89.583 rAF callbacks/s. It does not qualify the
+default appearance. It establishes a remaining glass-associated graphics cost
+after raster pressure is removed; the retained trace cannot separate hardware
+shader duration from compositor/driver waiting. No default 60 Hz rAF cap is
+established. Earlier command-probe profiling and its port-internal guard A/B
+remain in `artifacts/bubbles/mid/`.
+
+Current raw histories, source/binary hashes, instrumented comparisons and
+appearance captures are in `artifacts/bubbles/web-current/`. Large Chrome traces
+are in `/mnt/localssd/capycanvas2-bubbles-perf/web-current/`. Supplemental
+FrameTimeline still reports malformed Chrome child-slice timestamp drops; its
+valid clock snapshots only align the independent SurfaceFlinger timestamps.
+Its child-slice counts are not presentation evidence.
 
 ## Web Navigator resize diagnostic
 

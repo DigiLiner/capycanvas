@@ -84,7 +84,12 @@ radii. The shared `ViewportPresenter` blurs its own artwork beneath them:
   the zoom readout, the canvas action bar and the open command bar. `HeaderView` walks its tree for backgrounds painted
   with a glass brush and skips their contents. After each workspace or header
   layout pass, `CanvasWindow` sends the regions and drawer connections through
-  `capy_glass`, and the host scales them to physical pixels.
+  `capy_glass`, and the host scales them to physical pixels. Bubble frames add
+  rounded boxes and round-capped arc bands with their current fade strength.
+  The native glass layout accepts optional box strength and separate arc
+  geometry; scaling applies to positions and lengths once, not angles or
+  strength. Movement and strength changes redraw without publishing a full UI
+  model; a changed region count still publishes the glass diagnostics.
 - Drawer and column connectors add their rectangle and concave feet from the
   shared `DrawerConnection::glass` geometry.
 

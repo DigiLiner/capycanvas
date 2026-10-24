@@ -21,8 +21,10 @@ public:
     void SetWindowId(uint64_t id);
     void SetGlassChanged(std::function<void()> changed);
     void CanvasContact(bool active);
+    void AttachBubbles(winrt::Microsoft::UI::Xaml::UIElement const&,std::function<void()>);
     winrt::Windows::Data::Json::JsonArray DrawerSources() const;
-    winrt::Windows::Data::Json::JsonArray Glass(winrt::Microsoft::UI::Xaml::UIElement const& reference,winrt::Windows::Data::Json::JsonArray& connections) const;
+    winrt::Windows::Data::Json::JsonArray BubbleInputRegions(winrt::Microsoft::UI::Xaml::UIElement const&)const;
+    winrt::Windows::Data::Json::JsonArray Glass(winrt::Microsoft::UI::Xaml::UIElement const& reference,winrt::Windows::Data::Json::JsonArray& connections,winrt::Windows::Data::Json::JsonArray& arcs) const;
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;

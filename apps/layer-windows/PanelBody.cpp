@@ -12,6 +12,7 @@
 #include "WorkspaceQuery.h"
 #include "ColorPair.h"
 #include "NativeMenus.h"
+#include "PanelScroll.h"
 
 using namespace CapyUi;
 namespace {
@@ -213,15 +214,11 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             else if(scope||str(panel,L"id")==L"proof"){StackPanel natural;natural.Children().Append(content);root=natural;}
             else{
                 scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
-                ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-                scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);
+                ScrollViewer scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollMode::Disabled);
+                scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
+                scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(scroll);panelScrolling(scroll,content,data);
                 scroll.ViewChanged([changed=std::move(layoutChanged)](auto&&,auto&&){if(changed)changed();});
-                scroll.LayoutUpdated([weak=make_weak(scroll),id=L"panel-scroll-"+str(panel,L"id"),presenter=weak_ref<Microsoft::UI::Xaml::Controls::Primitives::ScrollPresenter>{}](auto&&,auto&&)mutable{
-                    if(auto view=weak.get())if(auto current=view.ScrollPresenter();current&&current!=presenter.get()){
-                        AutomationProperties::SetAutomationId(current,id);presenter=make_weak(current);
-                    }
-                });
+                AutomationProperties::SetAutomationId(scroll,L"panel-scroll-"+str(panel,L"id"));
                 root=scroll;
             }
         }

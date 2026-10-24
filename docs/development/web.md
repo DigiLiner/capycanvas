@@ -183,6 +183,9 @@ shared actions and the existing canvas pointer path.
 Tool bubbles use the shared Rust presentations and hit testing. The host retains
 the wheel, swatches, layer thumbnails and the Layers inspector used by drawers.
 Bubble motion updates glass regions without measuring stationary toolbars again.
+Each bubble requests its own compositor layer so moving it reuses its rendered
+contents. Keep the hint on the bubble container; promoting every bead adds
+unnecessary layers.
 Run `bash tools/performance/workspace-motion.sh web --tool-bubbles` for the
 light/dark mouse, touch and pen journeys; `device.test.mjs --tool-bubbles` runs
 the same contacts in tablet Chrome. See the [host contract](../ui/tool-bubbles.md#host-contract)

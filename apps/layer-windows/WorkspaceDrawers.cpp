@@ -3,7 +3,7 @@
 #include "WorkspaceGeometry.h"
 #include "WorkspaceShadow.h"
 #include "WorkspaceQuery.h"
-#include "LayersView.h"
+#include "LayerInspector.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Windows.UI.ViewManagement.h>
 #include <chrono>
@@ -41,21 +41,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
     std::map<std::wstring,J> toolbarLayouts;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<double> heights;
-    struct Inspector {
-        Grid root;
-        Canvas pages;
-        Button footer{nullptr};
-        TextBlock label{nullptr},summary{nullptr};
-        Image mark,chevron;
-        RotateTransform chevronRotation;
-        std::unique_ptr<PanelBody> properties;
-        J sizes,anchor;
-        hstring sizingKey,target;
-        double position=0,startPosition=0,targetPosition=0;
-        Clock::time_point started;
-        bool animating=false;
-    };
-    std::unique_ptr<Inspector> inspector;
+    std::unique_ptr<LayerInspector> inspector;
     Clock::time_point started;
     bool closing=false,animating=false,dirty=true,busy=false,layingOut=false,disposed=false;
     uint64_t generation=0;
@@ -351,14 +337,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 }
             }
             if(inspector&&model.HasKey(L"layer_properties")){
-                auto total=num(placement,L"height"),footer=num(inspector->sizes,L"footer_height",49.),page=std::max(0.,total-footer);
-                inspector->root.Width(width);inspector->root.Height(total);inspector->footer.Height(std::max(0.,footer-1.));
-                inspector->pages.Width(width);inspector->pages.Height(page);
-                RectangleGeometry clip;clip.Rect({0,0,float(width),float(page)});inspector->pages.Clip(clip);
-                auto layers=bodies.at(L"layers").view->Root(),properties=inspector->properties->Root();
-                layers.Width(width);layers.Height(std::max(1.,page));Canvas::SetTop(layers,-inspector->position*page);
-                properties.Width(width);properties.Height(std::max(1.,page));Canvas::SetTop(properties,(1.-inspector->position)*page);
-                layers.IsHitTestVisible(!flag(model,L"layer_properties"));properties.IsHitTestVisible(flag(model,L"layer_properties"));
+                inspector->place(bodies.at(L"layers").view->Root(),width,num(placement,L"height"),num(inspector->sizes,L"footer_height",49.),flag(model,L"layer_properties"));
             }
         }
     }
@@ -395,34 +374,15 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         paintBackground();changed();layingOut=false;
     }
     void initInspector(){
-        inspector=std::make_unique<Inspector>();auto& v=*inspector;auto weak=weak_from_this();
-        v.properties=std::make_unique<PanelBody>(data,panels.at(L"properties"),J{},[weak]{if(auto self=weak.lock())self->wake();},gestures,true);
-        RowDefinition page;page.Height({1,GridUnitType::Star});v.root.RowDefinitions().Append(page);
-        RowDefinition footer;footer.Height({49,GridUnitType::Pixel});v.root.RowDefinitions().Append(footer);
-        v.root.Children().Append(v.pages);
-        v.footer=button(data,L"",[data=data]{data->dispatch(O({{L"type",S(L"customize")},{L"action",O({{L"type",S(L"toggle_layer_drawer_properties")}})}}));});
-        v.footer.MinWidth(0);v.footer.Padding({8,0,8,0});v.footer.BorderThickness({0});v.footer.CornerRadius({0,0,6,6});v.footer.HorizontalAlignment(HorizontalAlignment::Stretch);v.footer.HorizontalContentAlignment(HorizontalAlignment::Stretch);v.footer.Background(clear());v.footer.FontWeight(Windows::UI::Text::FontWeights::Normal());
-        Grid face;face.ColumnSpacing(6);for(int i=0;i<3;++i){ColumnDefinition col;col.Width({i==1?1.:24.,i==1?GridUnitType::Star:GridUnitType::Pixel});face.ColumnDefinitions().Append(col);}
-        v.mark=icon(L"properties",data->theme());v.mark.HorizontalAlignment(HorizontalAlignment::Center);v.mark.VerticalAlignment(VerticalAlignment::Center);face.Children().Append(v.mark);
-        StackPanel text;text.Spacing(1);text.VerticalAlignment(VerticalAlignment::Center);
-        v.label=label(data,L"");v.summary=label(data,L"");for(auto const& line:{v.label,v.summary}){line.MaxLines(1);line.TextTrimming(TextTrimming::CharacterEllipsis);}v.summary.Opacity(.55);text.Children().Append(v.label);text.Children().Append(v.summary);Grid::SetColumn(text,1);face.Children().Append(text);
-        v.chevron=icon(L"chevron-down",data->theme());v.chevron.HorizontalAlignment(HorizontalAlignment::Center);v.chevron.VerticalAlignment(VerticalAlignment::Center);v.chevron.RenderTransformOrigin({.5f,.5f});v.chevron.RenderTransform(v.chevronRotation);Grid::SetColumn(v.chevron,2);face.Children().Append(v.chevron);v.footer.Content(face);
-        Border strip;strip.BorderThickness({0,1,0,0});strip.BorderBrush(data->tint(L"text",41));strip.Child(v.footer);Grid::SetRow(strip,1);v.root.Children().Append(strip);
-        AutomationProperties::SetAutomationId(v.root,L"layer-inspector");AutomationProperties::SetAutomationId(v.footer,L"layer-properties-disclosure");AutomationProperties::SetAutomationId(v.label,L"layer-properties-disclosure-label");
-        v.position=flag(model,L"layer_properties")?1.:0.;refreshInspector();
+        inspector=std::make_unique<LayerInspector>(data,panels.at(L"properties"),gestures,
+            [weak=weak_from_this()]{if(auto self=weak.lock())self->wake();},
+            [data=data]{data->dispatch(O({{L"type",S(L"customize")},{L"action",O({{L"type",S(L"toggle_layer_drawer_properties")}})}}));});
+        inspector->position=flag(model,L"layer_properties")?1.:0.;refreshInspector();
     }
-    void refreshInspector(){
-        auto& v=*inspector;auto view=object(data->state,L"layer_properties"),disclosure=object(view,L"disclosure");auto open=flag(model,L"layer_properties");
-        v.label.Text(str(disclosure,open?L"return_label":L"label"));v.summary.Text(open?L"":str(disclosure,L"summary"));v.summary.Visibility(v.summary.Text().empty()?Visibility::Collapsed:Visibility::Visible);
-        v.footer.IsEnabled(open||view.GetNamedValue(L"layer",JsonValue::CreateNullValue()).ValueType()!=JsonValueType::Null);
-        AutomationProperties::SetName(v.footer,v.label.Text());ToolTipService::SetToolTip(v.footer,box_value(v.label.Text()+(v.summary.Text().empty()?L"":L"\n"+v.summary.Text())));
-        setIcon(v.mark,L"properties",data->theme());setIcon(v.chevron,L"chevron-down",data->theme());v.chevronRotation.Angle(open?0.:180.);v.label.FontSize(data->textSize());v.summary.FontSize(data->textSize()*.9);
-        auto target=CapyLayers::epochOf(data)+L":"+to_hstring(num(view,L"layer",-1));if(v.target!=target){v.target=target;v.anchor=J{};}
-    }
+    void refreshInspector(){inspector->refresh(flag(model,L"layer_properties"));}
     J inspectorSizingRequest()const{
         auto layer=bodies.find(L"layers");if(!inspector||layer==bodies.end()||!layer->second.view)return J{};
-        auto measurement=layer->second.view->ScrollMetrics();if(num(measurement,L"unit_height")<=0)measurement.Insert(L"unit_height",N(40));
-        return O({{L"type",S(L"layer_drawer_sizing")},{L"measurement",measurement},{L"properties_height",N(inspector->properties->ContentHeight())}});
+        return inspector->sizingRequest(*layer->second.view);
     }
     hstring inspectorSizingKey(J const& request)const{return request.Stringify()+L":"+to_hstring(array(data->state,L"layers").Size())+L":"+layoutKey+L":"+object(model,L"anchor").Stringify();}
     hstring inspectorSizingKey()const{return inspectorSizingKey(inspectorSizingRequest());}

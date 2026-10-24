@@ -125,6 +125,14 @@ pub unsafe extern "C" fn capy_numeric_labels(context: *const CapyLocalization, i
 pub unsafe extern "C" fn capy_drawer_frame(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
     unsafe { localized_json(context, input, |source, _| layer_ui::drawer_frame(source)) }
 }
+/// # Safety
+/// Both pointers remain readable for this call; the context remains immutable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_bubble_ui(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+    unsafe { localized_json(context, input, |source, _| layer_host::bubbles::query(
+        serde_json::from_str(source).map_err(|error| error.to_string())?,
+    )) }
+}
 unsafe fn localized_json(context: *const CapyLocalization, input: *const c_char,
     resolve: impl FnOnce(&str, &layer_ui::Localizer) -> Result<serde_json::Value, String> + std::panic::UnwindSafe,
 ) -> *mut c_char {

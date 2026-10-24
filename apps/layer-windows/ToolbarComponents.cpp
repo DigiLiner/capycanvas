@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ToolbarComponents.h"
+#include "StampPreview.h"
 #include "WorkspaceGeometry.h"
 #include "NativeMenus.h"
 #include "RangeControl.h"
@@ -400,53 +401,12 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
     void refreshStamp(){
         if(!stampTimer||stampBusy)return;
         stampBusy=true;auto request=stampRequest;auto weak=weak_from_this();
-        auto dispatcher=root.DispatcherQueue();
         auto query=O({{L"type",S(L"toolbar_stamp")},{L"context",object(model,L"context")}});
         if(stamp.Size())query.SetNamedValue(L"known_request",N(num(stamp,L"request_id")));
-        if(!data->query(CanvasQueryKind::Workspace,to_string(query.Stringify()),[dispatcher,weak,request](PreviewPacket packet){
-            dispatcher.TryEnqueue([weak,request,packet=std::move(packet)]{
-                auto self=weak.lock();if(!self||request!=self->stampRequest)return;
-                self->stampBusy=false;if(!packet)return;
-                try{
-                    auto reply=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
-                    auto result=object(reply,L"result");if(!result.Size())return;
-                    size_t count=0;capy_preview_bytes(packet.get(),&count);
-                    if(count){
-                        auto size=int(num(result,L"size"));
-                        if(size<=0||size>192||count!=size_t(size)*size_t(size))throw hresult_invalid_argument();
-                        Imaging::WriteableBitmap bitmap(size,size);auto buffer=bitmap.PixelBuffer();uint8_t* pixels=nullptr;
-                        check_hresult(buffer.as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&pixels));
-                        if(buffer.Capacity()!=count*4)throw hresult_invalid_argument();
-                        self->stampBusy=true;ConvertStamp(weak,self->root.DispatcherQueue(),std::move(packet),result,
-                            color(str(object(self->data->state,L"palette"),L"text")),request,
-                            winrt::agile_ref(bitmap),winrt::agile_ref(buffer),pixels,count);
-                    }
-                }catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
-            });
-        }))stampBusy=false;
-    }
-    static fire_and_forget ConvertStamp(std::weak_ptr<Impl> weak,
-        Microsoft::UI::Dispatching::DispatcherQueue queue,PreviewPacket packet,J result,
-        winrt::Windows::UI::Color ink,uint64_t request,winrt::agile_ref<Imaging::WriteableBitmap> bitmap,
-        winrt::agile_ref<winrt::Windows::Storage::Streams::IBuffer> buffer,uint8_t* pixels,size_t expected){
-        co_await resume_background();
-        bool valid=true;
-        try{
-            size_t count=0;auto mask=capy_preview_bytes(packet.get(),&count);
-            if(!mask||count!=expected)throw hresult_invalid_argument();
-            for(size_t i=0;i<count;++i){
-                auto a=mask[i];auto p=pixels+i*4;
-                p[0]=uint8_t(ink.B*a/255);p[1]=uint8_t(ink.G*a/255);p[2]=uint8_t(ink.R*a/255);p[3]=a;
-            }
-        }catch(...){valid=false;}
-        packet.reset();
-        queue.TryEnqueue([weak,request,result,bitmap,buffer,valid]{
-            if(auto self=weak.lock();self&&request==self->stampRequest){
-                self->stampBusy=false;
-                try{if(valid)self->openPreview(result,bitmap.get());}
-                catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
-            }
-        });
+        if(!RequestStamp(data->query,query,color(str(object(data->state,L"palette"),L"text")),
+            [weak,request](J result,Imaging::WriteableBitmap bitmap){if(auto self=weak.lock();self&&request==self->stampRequest){
+                self->stampBusy=false;if(bitmap)self->openPreview(result,bitmap);
+            }}))stampBusy=false;
     }
     void openPreview(J const& result,Imaging::WriteableBitmap const& bitmap){
         auto size=int(num(result,L"size"));

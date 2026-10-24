@@ -17,7 +17,7 @@ bubbles push each other, and `session_bubbles.rs` holds taps, choices, beads,
 strokes, menus, history and UI text. The workspace keeps each bubble's place and
 options and each brush's ring settings (`BubbleLayout`). Hosts draw the parts
 at the offsets in `BubbleView`, run the frame clock and forward contacts
-relative to the bubble center. GTK is the reference presenter; Web and Android
+relative to the bubble center. GTK is the reference presenter; Web, Android and Windows
 use the same views, hit testing and actions.
 
 ## What becomes a bubble
@@ -80,14 +80,15 @@ A dragged bubble pushes the bubbles it meets, keeping a 6 px gap. Pushed bubbles
 take 12% of the push as speed and slide with friction (0.86 per 60 Hz frame);
 they keep their new places. Letting go glides a short way, at most 18 px per
 frame, about 130 px in all; with reduced motion there is no glide. An open halo,
-card or chooser pushes neighbours only while it is open, each part pushing where
+card, palette pill or chooser pushes neighbours only while it is open, each part pushing where
 it is (the chooser's media, the shown medium's name tag and the brush pills, not
 the empty space between them), and they return when it closes. A neighbour
 caught among a chooser's parts is pushed outward from the dial, never into the
 ring, and a neighbour pinned against a wall makes the open bubble give way
 instead, so open parts and other bubbles never overlap; every bubble kind is
 checked against an open halo and ring in open space and against walls.
-Walls sit 8 px inside the canvas area, below the title bar and clear of docked
+Every open part, including the palette pill below a color ring, stays inside the
+walls. Walls sit 8 px inside the canvas area, below the title bar and clear of docked
 toolbars; bounces off them keep a quarter of their speed. Saved places keep
 their distance to the nearest window corner, so a bubble near the bottom right
 stays there when the window shrinks.
@@ -277,9 +278,14 @@ a host only presents it and captures native input. GTK
   `PALETTE_PILL`, `FADED_BUBBLE`, `SECOND_FINGER_REACH`, `STROKE_FADE`).
 - **Actions:** `UiAction::Bubble` with `BubbleAction::Drag` (grabs `Bubble`,
   `Rim`, `Tile`, `Header`, `Variant`; phases Down, Move, Up, Cancel), `Tap`,
-  `Ring`, `ResetRing`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
+  `Ring`, `ResetRing`, `Wheel`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
   `Close`, `MeasureCard`, `Option`, `SetOptions`, `ToggleRingSetting`,
-  `PutBack` and `PutBackAll`, all with positions relative to the bubble center.
+  `PutBack` and `PutBackAll`. Drag positions use workspace coordinates; other
+  contact positions are relative to the bubble center.
+  `Wheel` retains the initial color and pressed wheel part in Rust. Down and
+  Move pick; Up keeps the last sampled color, and Cancel restores the initial
+  color only in the original document and color context. Removing its owner
+  retires the contact before layout undo can reuse the bubble ID.
 - **Menus:** `context_menu(ContextTarget::Bubble { id })`; the first item of a
   section may be a heading (`ContextMenuItem::is_heading`). Serialized items
   expose `is_heading` and `keep_open` for the same presentation across hosts.
@@ -297,18 +303,30 @@ Web captures pointer events before canvas input and retains DOM widgets for the
 wheel, swatches and Layers inspector. Mouse resets use the browser's native
 double-click event. Browsers expose no system hold or double-tap thresholds;
 Web uses a 500 ms hold (1000 ms on the wheel) and a 400 ms, 8 px double tap.
-Android uses its native hold and double-tap timing and distance, captures at the workspace,
-and lets the card's native controls retain their contacts. Its wheel's captured
-color and restoration run in order on the render owner; the UI never waits for
-that owner. Canvas contacts wake the bubble frame clock even when the retained
+Web, Android and Windows forward ordered `Wheel` actions; captured color,
+restoration and context validation stay in Rust. Android uses its native hold
+and double-tap timing and distance, captures at the workspace, and lets the
+card's native controls retain their contacts. Windows uses the native gesture
+recognizer for hold timing, doubled over the wheel. Its retained overlay shares
+the ordinary panel wheel renderer, swatches, brush previews, dab conversion,
+layer rows and Layers inspector. Native card controls keep their own captures;
+a second touch transfers capture and cancels their edit. Only while a touch is
+down does the overlay admit another within the shared reach plus 90 px, keeping
+that contact out of the independent canvas input source. Over an open card,
+the extra surface leaves the native card exposed; its controls offer a second
+contact to the bubble before starting another edit.
+Canvas contacts wake the bubble frame clock even when the retained
 view is unchanged, so stroke fade and its delayed return continue to run.
 Native contact delivery checks the latest published bubble identities before
 forwarding an event or hold timeout. Removed or replaced sources retire their
 native contacts without forwarding cancellation to the replacement.
-Shared workspace restoration cancels the ring edit and clears transient bubble
+Shared workspace restoration cancels ring and wheel edits and clears transient bubble
 state before adopting the replacement, including when it reuses bubble IDs.
 An outside contact advances the model revision when it dismisses an open part,
 even when the contact does not paint or move the camera.
+An open Layers card publishes both Layers and Properties panel projections,
+including the hidden page, so hosts retain ordinary panel components when those
+panels are absent from the dock.
 
 - **Targets:** a point belongs to a bubble only when `hit` returns a part;
   everything else goes to the canvas. While a contact or finger is down on a
@@ -344,7 +362,9 @@ even when the contact does not paint or move the camera.
   and the count badge use the toolbar panel color (the panel glass in glass
   mode) with no border; selected parts add the toolbar selection; hovered adds
   7% and pressed 14% of the text color. Text uses the standard UI size; icons
-  are 20 px on faces and 16 px on arcs.
+  are 20 px on faces and 16 px on arcs. Disabled faces and chooser items draw
+  at 45%, including their glass strength. Unavailable Undo and Redo icons draw
+  at 35%; their circular hover highlights keep their normal opacity.
 - **Shadows:** round parts cast one smooth gradient, 8 px spread, 2 px drop,
   8% black at the edge, fading quadratically and clipped outside the part; a
   lifted bubble grows it to 12 px, 4.5 px and 16%. Beads use 3 px, 1 px and

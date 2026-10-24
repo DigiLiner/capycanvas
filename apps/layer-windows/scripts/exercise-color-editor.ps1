@@ -48,6 +48,7 @@ function Paste([string]$Text){
     [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),0x56)
 }
 function Sheet-Open{$sheet=Find 'edit-color-search';$sheet -and !$sheet.Current.IsOffscreen}
+function Presentation{try{(Workspace-Root).Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Paper-Point{
     $area=(Model).state.camera.work_area;$bounds=(Control 'drawing-canvas').Current.BoundingRectangle
     @{x=[int]($bounds.X+$area[0]+$area[2]/2);y=[int]($bounds.Y+$area[1]+$area[3]/2)}
@@ -129,6 +130,7 @@ try {
     Start-Sleep -Milliseconds 600
     $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    Use-PaintWorkspace
     $revision=(Model).state.document_file.revision
 
     Invoke-Id 'color-swap'
@@ -262,11 +264,17 @@ try {
     Wait-Until {!(Find 'edit-color-apply') -and (Model).state.color_picker.editor} 'The eyedropper did not start picking again'
     $script:editorFrame=$null
     for($i=0;$i -lt 6;$i++){[CapyRowPointer]::Hover($paper.x+$i,$paper.y);Start-Sleep -Milliseconds 40}
-    Wait-Until {(Model).state.color_picker.sample_point} 'Hovering the canvas did not sample it'
+    $sampleFrame=@{value=$null}
+    Wait-Until {$sampleFrame.value=Presentation;$sampleFrame.value.color_preview} 'Hovering the canvas did not publish a sample'
+    $sampleFrame=$sampleFrame.value
+    $sample=@($sampleFrame.color_preview.rgba|ForEach-Object {[double]$_})
+    if($sample.Count -ne 4 -or @($sample|Where-Object {[double]::IsNaN($_) -or [double]::IsInfinity($_)}).Count -or [Math]::Abs($sample[3]-1) -gt .0001 -or [Math]::Max($sample[0],[Math]::Max($sample[1],$sample[2])) -le (1./255)){throw 'Paper sample is not finite, opaque and distinct from the black draft'}
+    $sampleHex='#{0:X2}{1:X2}{2:X2}' -f [int][Math]::Round($sample[0]*255),[int][Math]::Round($sample[1]*255),[int][Math]::Round($sample[2]*255)
+    @{rgba=$sample;hex=$sampleHex;presentation_revision=$sampleFrame.revision;model_revision=$sampleFrame.model_revision}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run 'paper-pick-sample.json')
     [CapyRowPointer]::Down('mouse',$paper.x,$paper.y);Start-Sleep -Milliseconds 40;[CapyRowPointer]::Up()
     Wait-Until {Find 'edit-color-apply'} 'Picking did not return to Edit Color'
     $script:editorFrame=Control 'edit-color-dialog-frame'
-    Wait-Until {(Shown 'edit-color-hex') -eq '#FFFFFF'} 'The picked paper color did not reach the draft'
+    Wait-Until {(Shown 'edit-color-hex') -eq $sampleHex} 'The acknowledged paper sample did not reach the draft'
     if(!(Same (Foreground) $white)){throw 'Picking changed the paint'}
     if((Model).state.document_file.revision -ne $revision){throw 'Picking changed the drawing'}
     Paste '#336699'

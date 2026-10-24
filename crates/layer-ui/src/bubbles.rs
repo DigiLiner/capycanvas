@@ -824,6 +824,7 @@ pub enum BubbleAction {
     Drag { grab: BubbleGrab, phase: ContactPhase, position: [f32; 2], viewport: [f32; 2] },
     Tap { id: u32, position: [f32; 2] },
     Ring { id: u32, phase: ContactPhase, position: [f32; 2] },
+    Wheel { id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2] },
     ResetRing { id: u32, position: [f32; 2] },
     Beads { id: u32, phase: ContactPhase, position: [f32; 2] },
     Choose { id: u32, phase: ContactPhase, position: [f32; 2] },

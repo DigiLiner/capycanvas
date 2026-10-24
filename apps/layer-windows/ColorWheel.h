@@ -28,7 +28,7 @@ struct Device {
             nullptr,0,D3D11_SDK_VERSION,d3d.put(),nullptr,nullptr));
         com_ptr<ID2D1Factory3> factory;
         D2D1_FACTORY_OPTIONS options{};
-        check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,__uuidof(ID2D1Factory3),&options,factory.put_void()));
+        check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,__uuidof(ID2D1Factory3),&options,factory.put_void()));
         check_hresult(factory->CreateDevice(d3d.as<IDXGIDevice>().get(),d2d.put()));
     }
     static std::shared_ptr<Device> get(){
@@ -38,8 +38,8 @@ struct Device {
         return device;
     }
 };
-struct FieldRequest {hstring key;uint32_t pixels=0;float hue=0;uint32_t projection=0,rgbSpace=0;bool hdr=false,guide=false;std::string mapped;uint64_t epoch=0;};
-struct FieldResult {hstring key;uint32_t pixels=0;uint64_t epoch=0;std::vector<uint8_t> bytes;};
+struct FieldRequest {hstring key;uint32_t pixels=0;float hue=0;uint32_t projection=0,rgbSpace=0;bool hdr=false,guide=false;std::string mapped;uint64_t epoch=0;std::shared_ptr<Device> device;};
+struct FieldResult {hstring key;uint32_t pixels=0;uint64_t epoch=0;std::shared_ptr<Device> device;com_ptr<ID2D1Bitmap> bitmap;HRESULT status=S_OK;};
 inline bool rasterField(FieldRequest const& request,std::vector<uint8_t>& bytes){
     bytes.resize(size_t(request.pixels)*request.pixels*4);
     return request.hdr?capy_color_mapped_field(request.pixels,request.mapped.c_str(),bytes.data(),bytes.size())
@@ -48,10 +48,10 @@ inline bool rasterField(FieldRequest const& request,std::vector<uint8_t>& bytes)
 struct FieldWorker : std::enable_shared_from_this<FieldWorker> {
     Microsoft::UI::Dispatching::DispatcherQueue queue{Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread()};
     std::function<void(FieldResult)> deliver;
-    std::mutex mutex;std::optional<FieldRequest> pending;bool running=false;hstring active;uint64_t activeEpoch=0;
+    std::mutex mutex;std::optional<FieldRequest> pending;bool running=false;hstring active;uint64_t activeEpoch=0;std::weak_ptr<Device> activeDevice;
     void submit(FieldRequest request){
         std::lock_guard lock(mutex);
-        if(running&&active==request.key&&activeEpoch==request.epoch){pending.reset();return;}
+        if(running&&active==request.key&&activeEpoch==request.epoch&&activeDevice.lock()==request.device){pending.reset();return;}
         pending=std::move(request);
         if(!running){running=true;std::thread([self=shared_from_this()]{self->run();}).detach();}
     }
@@ -60,9 +60,14 @@ struct FieldWorker : std::enable_shared_from_this<FieldWorker> {
         for(;;){
             FieldRequest request;
             {std::lock_guard lock(mutex);if(!pending){running=false;active=L"";return;}
-                request=std::move(*pending);pending.reset();active=request.key;activeEpoch=request.epoch;}
-            auto result=std::make_shared<FieldResult>(FieldResult{request.key,request.pixels,request.epoch,{}});
-            if(!rasterField(request,result->bytes))continue;
+                request=std::move(*pending);pending.reset();active=request.key;activeEpoch=request.epoch;activeDevice=request.device;}
+            auto result=std::make_shared<FieldResult>(FieldResult{request.key,request.pixels,request.epoch,request.device,{}});
+            try{
+                std::vector<uint8_t> bytes;if(!rasterField(request,bytes))throw hresult_error(E_FAIL);
+                com_ptr<ID2D1DeviceContext> context;check_hresult(request.device->d2d->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,context.put()));
+                check_hresult(context->CreateBitmap(D2D1::SizeU(request.pixels,request.pixels),bytes.data(),request.pixels*4,
+                    D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_R8G8B8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED)),result->bitmap.put()));
+            }catch(hresult_error const& error){result->status=error.code();}catch(std::bad_alloc const&){result->status=E_OUTOFMEMORY;}
             queue.TryEnqueue([weak=weak_from_this(),result]{if(auto self=weak.lock();self&&self->deliver)self->deliver(std::move(*result));});
         }
     }
@@ -79,10 +84,19 @@ struct WheelImage {
     std::shared_ptr<FieldWorker> ringWorker,worker;
     std::optional<FieldResult> ringReady,ready;
     uint64_t ringEpoch=0,epoch=0;uint32_t fieldPixels=0;
-    static com_ptr<ID2D1Bitmap> bitmap(ID2D1DeviceContext2* context,FieldResult const& result){
-        com_ptr<ID2D1Bitmap> bitmap;check_hresult(context->CreateBitmap(D2D1::SizeU(result.pixels,result.pixels),result.bytes.data(),result.pixels*4,
-            D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_R8G8B8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED)),bitmap.put()));
-        return bitmap;
+    ~WheelImage(){for(auto const& item:{ringWorker,worker})if(item){item->deliver=nullptr;item->cancel();}}
+    void start(std::function<void()> changed){
+        worker=std::make_shared<FieldWorker>();ringWorker=std::make_shared<FieldWorker>();
+        worker->deliver=[this,changed](FieldResult result){ready=std::move(result);changed();};
+        ringWorker->deliver=[this,changed](FieldResult result){ringReady=std::move(result);changed();};
+    }
+    void present(Image const& image,J const& model,J const& colors,double size,double scale){
+        try{draw(image,model,colors,size,scale);}
+        catch(hresult_error const& error){
+            auto code=error.code();
+            if(code!=DXGI_ERROR_DEVICE_REMOVED&&code!=DXGI_ERROR_DEVICE_RESET&&code!=D2DERR_RECREATE_TARGET&&code!=E_SURFACE_CONTENTS_LOST)throw;
+            draw(image,model,colors,size,scale,true);
+        }
     }
     void draw(Image const& image,J const& model,J const& state,double size,double scale,bool reset=false){
         int next=std::max(1,int(std::ceil(size*scale)));
@@ -116,24 +130,22 @@ struct WheelImage {
             auto working=str(model,L"rgb_space",L"Srgb");uint32_t rgbSpace=working==L"DisplayP3"?1:working==L"AdobeRgb"?2:working==L"ProPhoto"?3:0;
             auto shapeKey=shape+L"/"+working;
             if(shapeKey!=ringLayout){ringLayout=shapeKey;ring=nullptr;ringKey=L"";++ringEpoch;ringReady.reset();ringWorker->cancel();}
-            if(ringReady&&ringReady->epoch==ringEpoch){
-                auto bitmap=WheelImage::bitmap(context.get(),*ringReady);float side=float(ringReady->pixels);
-                ring=nullptr;check_hresult(context->CreateImageBrush(bitmap.get(),D2D1::ImageBrushProperties(D2D1::RectF(0,0,side,side)),
-                    D2D1::BrushProperties(1,D2D1::Matrix3x2F::Scale(1/side,1/side)),ring.put()));ringKey=ringReady->key;
+            if(auto result=std::exchange(ringReady,std::nullopt);result&&result->epoch==ringEpoch&&result->device==device){
+                check_hresult(result->status);float side=float(result->pixels);
+                ring=nullptr;check_hresult(context->CreateImageBrush(result->bitmap.get(),D2D1::ImageBrushProperties(D2D1::RectF(0,0,side,side)),
+                    D2D1::BrushProperties(1,D2D1::Matrix3x2F::Scale(1/side,1/side)),ring.put()));ringKey=result->key;
             }
-            ringReady.reset();
             auto wantedRing=shapeKey+L"/"+to_hstring(pixels);
-            if(ringKey!=wantedRing)ringWorker->submit(FieldRequest{wantedRing,uint32_t(pixels),0,projection,rgbSpace,false,true,{},ringEpoch});
+            if(ringKey!=wantedRing)ringWorker->submit(FieldRequest{wantedRing,uint32_t(pixels),0,projection,rgbSpace,false,true,{},ringEpoch,device});
             Paint white{1,1,1,1};
             float hueValue=float(array(model,L"wheel_components").GetNumberAt(0));
             bool hdr=flag(model,L"hdr");auto rendition=object(model,L"rendition").Stringify();
             auto layoutKey=shapeKey+(hdr?L"/hdr"+rendition:hstring{});
             if(layoutKey!=fieldLayout){fieldLayout=layoutKey;field=nullptr;fieldKey=L"";++epoch;ready.reset();worker->cancel();}
-            if(ready&&ready->epoch==epoch){field=WheelImage::bitmap(context.get(),*ready);fieldKey=ready->key;fieldPixels=ready->pixels;}
-            ready.reset();
+            if(auto result=std::exchange(ready,std::nullopt);result&&result->epoch==epoch&&result->device==device){check_hresult(result->status);field=result->bitmap;fieldKey=result->key;fieldPixels=result->pixels;}
             auto wanted=layoutKey+L"/"+to_hstring(pixels)+L"/"+to_hstring(hueValue);if(hdr)wanted=wanted+state.Stringify();
             if(fieldKey!=wanted)worker->submit(FieldRequest{wanted,uint32_t(pixels),hueValue,projection,rgbSpace,hdr,false,
-                hdr?to_string(O({{L"state",state},{L"rendition",object(model,L"rendition")}}).Stringify()):std::string{},epoch});
+                hdr?to_string(O({{L"state",state},{L"rendition",object(model,L"rendition")}}).Stringify()):std::string{},epoch,device});
             com_ptr<ID2D1Factory> factory;context->GetFactory(factory.put());com_ptr<ID2D1Geometry> clip;
             if(projection==0){auto square=array(geometry,L"square");float x=float(square.GetNumberAt(0)),y=float(square.GetNumberAt(1)),w=float(square.GetNumberAt(2));
                 float radius=float(std::min(6.,size*.02)/size);com_ptr<ID2D1RoundedRectangleGeometry> rounded;

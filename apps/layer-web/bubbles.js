@@ -12,6 +12,7 @@ const svg=(tag,attributes={})=>{const n=document.createElementNS(svgNS,tag);for(
 const path=(a,b,r,sweep)=>`M${a} A${r} ${r} 0 ${Math.abs(sweep)>180?1:0} ${sweep>0?1:0} ${b}`;
 const cornerShape=CSS.supports('corner-shape','squircle');
 const itemScale=node=>node.classList.contains('bubble-hot')?(node.classList.contains('bubble-brush')?1.06:1.12):1;
+const enabledAlpha=node=>node.classList.contains('bubble-disabled')?.45:1;
 
 export function createBubbles({app,workspace,element,button,icon,state,dispatch,wake,glassChanged,customization,contentPanel,rasterWorker,asset,cancelWorkspace,viewport,leaveCanvas}) {
   const root=element('div','tool-bubbles'),stampCanvas=element('canvas','bubble-stamp');
@@ -131,7 +132,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
         if(item.preview!=null){const img=element('img');img.src=asset(`brush-previews/${item.preview}-${state().theme}.png`);img.alt='';img.draggable=false;node.append(img,element('span','',item.label));}else node.append(icon(item.icon));
         r.chooser.append(node);slot={node,key};r.items.set(i,slot);transition(r,node,node,true,180,.6,fresh++*(item.kind==='brush'?16:14));
       }
-      slot.node.disabled=!item.enabled;slot.node.classList.toggle('bubble-selected',item.selected);
+      slot.node.disabled=!item.enabled;slot.node.classList.toggle('bubble-disabled',!item.enabled);slot.node.classList.toggle('bubble-selected',item.selected);
       surface(r,slot.node,item.center,item.kind==='brush'?[152,48]:[44,44]);
       slot.shown=item.shown;
       if(item.kind!=='brush') {
@@ -229,7 +230,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       r.root.style.opacity=r.fade*r.homeAlpha;
       for(const[key,t]of r.transitions) {
         t.start??=now;const progress=t.ms?Math.max(0,Math.min(1,(now-t.start-t.delay)/t.ms)):1;
-        t.value=t.from+(t.to-t.from)*smooth(progress);t.node.style.opacity=t.value;t.node.style.scale=(t.fromScale+(1-t.fromScale)*t.value)*itemScale(t.node);
+        t.value=t.from+(t.to-t.from)*smooth(progress);t.node.style.opacity=t.value*enabledAlpha(t.node);t.node.style.scale=(t.fromScale+(1-t.fromScale)*t.value)*itemScale(t.node);
         if(progress<1)active=true;
         else if(!t.show){t.node.hidden=true;if(key==='card'&&r.face.hidden){r.face.hidden=false;transition(r,'face',r.face,true,180,.6);}if(key==='halo'){r.arcs=[];}}
       }
@@ -266,7 +267,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       for(const b of r.boxes.concat(r.retiring.map(node=>node.bubbleSurface).filter(Boolean))) {
         if(b.node.closest('[hidden]'))continue;
         const t=b.node.bubbleTransition;
-        const factor=(t?t.fromScale+(1-t.fromScale)*t.value:1)*itemScale(b.node),s=scale*factor,alpha=strength*(t?.value??1)*(b.node.bubbleAlpha??1)*(b.node===r.face&&!r.view.enabled?.4:1);
+        const factor=(t?t.fromScale+(1-t.fromScale)*t.value:1)*itemScale(b.node),s=scale*factor,alpha=strength*(t?.value??1)*(b.node.bubbleAlpha??1)*enabledAlpha(b.node);
         if(alpha<=0)continue;
         boxes.push([r.center[0]+b.center[0]*scale-b.size[0]*s/2,r.center[1]+b.center[1]*scale-b.size[1]*s/2,...b.size.map(v=>v*s),...Array(4).fill(b.radius*s*(b.shape&&!cornerShape?.54:1)),cornerShape?b.shape:0,alpha]);
       }

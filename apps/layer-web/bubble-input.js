@@ -17,19 +17,23 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       const event=new PointerEvent('pointercancel',{bubbles:true,pointerId:c.id,pointerType:'touch'});
       event.bubbleNativeCancel=true;c.target.dispatchEvent(event);
     }
-    if(c.color)send({type:'color',action:{op:'definition',color:c.color}},true);
+    finishColor(c,true);
     if(['ring','beads','choose'].includes(c.mode))send({type:c.mode,id:c.r.view.id,phase:'cancel',position:[0,0]});
     if(c.mode==='moving')drag(c.grab,'cancel',c.last);
     c.mode='pending';
   }
   function pick(c,p) {
-    const size=c.r.view.diameter-14,position=local(c.r,p).map(v=>v+size/2);
-    send({type:'color',action:{op:'pick_wheel',part:c.wheel,size,point:position}},true);
+    send({type:'wheel',id:c.r.view.id,phase:c.colorStarted?'move':'down',part:c.wheel,position:local(c.r,p)});
+    c.colorStarted=true;
+  }
+  function finishColor(c,cancel) {
+    if(!c.colorStarted)return;
+    c.colorStarted=false;
+    send({type:'wheel',id:c.r.view.id,phase:cancel?'cancel':'up',part:c.wheel,position:local(c.r,c.last)});
   }
   function begin(c,p) {
     const h=c.hit,id=c.r.view.id;
     if(h==='wheel') {
-      c.color=app.bubble_wheel_color();
       const size=c.r.view.diameter-14;
       c.wheel=app.color_ui({type:'wheel_hit',size,point:local(c.r,p).map(v=>v+size/2),shape:app.color_panel().shape});
       c.mode='wheel';if(c.wheel)pick(c,p);
@@ -169,6 +173,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
         else send({type:'tap',id:c.r.view.id,position:local(c.r,p)});
       }
     }
+    finishColor(c,false);
     if(e)c.fingers.delete(e.pointerId);else c.fingers.clear();
     if(!c.fingers.size){contact=null;c.r.mark?.(null,false);}
     suppressClick=true;wake();if(e)return consume(e);

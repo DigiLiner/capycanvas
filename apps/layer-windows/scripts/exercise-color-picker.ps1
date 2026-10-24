@@ -108,6 +108,7 @@ try {
     Start-Sleep -Milliseconds 600
     $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
+    Use-PaintWorkspace
 
     Color-Resize
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
@@ -246,7 +247,7 @@ try {
     @{tooltip=$tooltip;touch_lift_pixels=$lifted;touch_reach_pixels=$reached;column_resize='retained wheel scaled during the drag; final raster at release without moving controls';sweep_before=(& $counts $before);sweep_after=(& $counts $after)}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run 'result.json')
     Write-Output "Color picker acceptance passed: $run"
 }catch{
-    try{Capture 'failure'}catch{}
+    try{Capture 'failure' -WithModel}catch{}
     try{@{presentation=(Presentation|Select-Object revision,model_revision,full_updates,motion_updates,color_field_pixels,color_preview);picker=(Model).state.color_picker;tool=(Tool)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'failure-state.json')}catch{}
     Set-Content -LiteralPath (Join-Path $run 'failure.txt') -Value ($_|Out-String)
     throw

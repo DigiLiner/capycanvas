@@ -38,6 +38,7 @@ function Signature {$m=$null;for($i=0;$i -lt 40 -and !$m;$i++){$m=Model;if(!$m){
 $checks=[Collections.Generic.List[object]]::new()
 function Check([string]$Name,[scriptblock]$Condition){Wait-Until $Condition $Name;if((Signature) -ne $drawing){throw "Touch changed the drawing: $Name"};$checks.Add(@{name=$Name;camera=Camera});Write-Output "$Name passed"}
 function Stable([string]$Name,$Expected){Start-Sleep -Milliseconds 160;Check $Name {(Same-Camera (Camera) $Expected)}}
+$fixtureFailed=$false
 try{
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
@@ -48,6 +49,7 @@ try{
  $handle=$review.MainWindowHandle;$root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  Wait-Until {$c=Camera;$b=(Control 'drawing-canvas').Current.BoundingRectangle;[Math]::Abs($c.viewport[0]-$b.Width) -lt .1 -and $b.Width -gt 1600} 'Maximized canvas did not settle'
+ Use-PaintWorkspace
  if(@((Model).layout.groups|Where-Object active -eq 'layers').Count){Invoke 'column-icon-layers';Wait-Until {@((Model).layout.groups|Where-Object active -eq 'layers').Count -eq 0} 'Column did not close for gesture space'}
  Fit-Canvas;Select-Tool 'pen';Start-Sleep -Milliseconds 200
  Wait-Until {(Model).canvas_ready -and !(Model).state.document_file.busy} 'Canvas did not settle before input'
@@ -152,5 +154,9 @@ try{
  if((Get-Item -LiteralPath (Join-Path $run 'stderr.log')).Length){throw 'Touch runtime stderr requires inspection'}
  @{checks=$checks;drawing='preserved throughout navigation';pen_after_touch='new stroke and independent Undo';close='zero exit within five seconds';scope='OS-injected multi-touch and pen; physical digitizers, pressure/tilt and 120 Hz acceptance remain separate'}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $run 'result.json')
  Write-Output "Canvas touch acceptance passed: $run"
-}catch{@{camera=Camera;last_expected=$expected;checks=$checks;drawing=$drawing;signature=(Signature)}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $run 'failure-state.json');if($review -and !$review.HasExited -and $root){try{Capture 'failure'}catch{}};throw}
-finally{[CapyCanvasTouch]::Dispose();[CapyRowPointer]::Dispose();Exit-CapyEnvironment}
+}catch{$fixtureFailed=$true;($_|Out-String)+$_.ScriptStackTrace|Set-Content -LiteralPath (Join-Path $run 'failure.txt');@{camera=Camera;last_expected=$expected;checks=$checks;drawing=$drawing;signature=(Signature)}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $run 'failure-state.json');if($review -and !$review.HasExited -and $root){try{Capture 'failure'}catch{}};throw}
+finally{
+ $cleanup=@()
+ foreach($finish in @({[CapyCanvasTouch]::Dispose()},{[CapyRowPointer]::Dispose()},{Exit-CapyEnvironment})){try{& $finish}catch{$cleanup+=($_|Out-String)}}
+ if($cleanup.Count){$cleanup|Set-Content -LiteralPath (Join-Path $run 'cleanup-failure.txt');if(!$fixtureFailed){throw ($cleanup -join "`n")}}
+}

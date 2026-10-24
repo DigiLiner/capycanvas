@@ -93,7 +93,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     UIElement outsideSurface{nullptr};
     PointerEventHandler outsidePress{nullptr};
     StackPanel header,tools,footer;
-    ScrollView list;
+    ScrollViewer list;
     ItemsRepeater repeater;
     Button blend{nullptr},addPaper{nullptr};
     hstring paperKey;
@@ -117,6 +117,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     J view()const{return object(data->state,L"layer_tools");}
     J editing()const{return object(view(),L"editing_layer");}
     void action(J operation){if(!data->updating)data->dispatchDocument(layerAction(operation),epochOf(data));}
+    bool full=true;
     void init();
     void refresh();
     void preview();

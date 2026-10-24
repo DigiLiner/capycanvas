@@ -248,7 +248,7 @@ impl NativeHost {
     ) -> Result<S::Ok, S::Error> {
         let layout = self.session.layout(self.logical);
         let state = self.session.state();
-        // Drawers can show panels absent from ordinary docks.
+        let bubbles = self.session.bubble_presentations();
         let mut panel_ids: Vec<_> = layout
             .groups
             .iter()
@@ -269,6 +269,7 @@ impl NativeHost {
                     .chain(&state.customization.column_drawers)
                     .flat_map(|d| d.panels()),
             )
+            .chain(bubbles.iter().filter(|bubble| bubble.view.card.is_some()).flat_map(|_| [layer_ui::Panel::Layers, layer_ui::Panel::Properties]))
         {
             if !panel_ids.contains(&panel) {
                 panel_ids.push(panel);
@@ -294,7 +295,7 @@ impl NativeHost {
         map.serialize_entry("state", state)?;
         map.serialize_entry("layout", &layout)?;
         map.serialize_entry("panels", &panels)?;
-        map.serialize_entry("bubbles", &self.session.bubble_presentations())?;
+        map.serialize_entry("bubbles", &bubbles)?;
         map.serialize_entry(
             "filter_preview_revision",
             &self.session.filter_preview_revision(),
@@ -471,6 +472,41 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn layers_bubble_publishes_both_retained_panels_until_its_card_folds() {
+        use layer_ui::{BubbleAction, BubbleGrab, ContactPhase, CustomizationAction, HeaderItem, Panel, ToolbarControl, WorkspacePreset};
+        for platform in [Platform::Gtk,Platform::Android,Platform::Mac,Platform::Ios,Platform::Windows] {
+            let mut host=host(platform);
+            host.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+                layout:WorkspacePreset::Painter.layout(platform), ..Default::default()
+            })}).unwrap();
+            let count=|snapshot:&Value,id:&str| snapshot["panels"].as_array().unwrap().iter().filter(|panel|panel["id"]==id).count();
+            let initial=host.take_value().unwrap();
+            assert_eq!(count(&initial,"properties"),0,"{platform:?}: Painter has no docked Properties");
+            let header=host.session.state().workspace.layout.header.entries().find(|entry|entry.item==HeaderItem::Tool {control:ToolbarControl::Panel {panel:Panel::Layers}}).unwrap().id;
+            for phase in [ContactPhase::Down,ContactPhase::Move,ContactPhase::Up] {
+                host.dispatch(UiAction::Bubble {action:BubbleAction::Drag {
+                    grab:BubbleGrab::Header {id:header},phase,position:[640.,520.],viewport:[1200.,900.]
+                }}).unwrap();
+            }
+            let id=host.session.state().workspace.layout.bubbles.bubbles.last().unwrap().id;
+            for properties in [false,true] {
+                if properties {host.dispatch(UiAction::Bubble {action:BubbleAction::Properties {id}}).unwrap();}
+                let snapshot=host.take_value().unwrap();
+                assert!(snapshot["bubbles"][0]["view"]["card"].is_object(),"{platform:?}");
+                for panel in ["layers","properties"] {
+                    assert_eq!(count(&snapshot,panel),1,"{platform:?}: properties={properties} retains {panel} exactly once");
+                }
+            }
+            host.dispatch(UiAction::Bubble {action:BubbleAction::Close {id}}).unwrap();
+            let folded=host.take_value().unwrap();
+            assert!(folded["bubbles"][0]["view"]["card"].is_null());
+            for panel in ["layers","properties"] {assert_eq!(count(&folded,panel),count(&initial,panel),"{platform:?}: folded card retires {panel}");}
+            host.dispatch(UiAction::Customize {action:CustomizationAction::SetPanelVisible {panel:Panel::Properties,visible:true}}).unwrap();
+            assert_eq!(count(&host.take_value().unwrap(),"properties"),1,"{platform:?}: independently configured Properties remains available");
+        }
+    }
+
     #[test]
     fn combined_layer_drawer_publishes_both_retained_panels() {
         use layer_ui::{Bounds, CustomizationAction, HeaderItem, HeaderItemBounds, Panel, ToolbarControl, WorkspacePreset};

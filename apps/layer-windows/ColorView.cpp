@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ColorEditor.h"
 #include "ColorView.h"
+#include "SwatchFace.h"
 #include "PointerGesture.h"
 #include "NativeMenus.h"
 #include "WorkspaceQuery.h"
@@ -137,7 +138,7 @@ struct View:std::enable_shared_from_this<View>{
     bool fitHeight=false;
     Image image;TextBlock drawError;
     std::array<Button,3> swatches;
-    std::array<Shapes::Ellipse,3> swatchBacks,swatchEdges,swatchChecks,swatchPaint;
+    std::array<SwatchFace,3> swatchFaces;
     std::array<bool,3> hovered{};
     Button edit;Shapes::Ellipse editFill;bool editHovered=false;
     Canvas arc;Shapes::Path arcTrack;std::vector<Shapes::Line> ramp;Shapes::Ellipse markerShadow,marker;TextBlock caption;
@@ -172,7 +173,6 @@ struct View:std::enable_shared_from_this<View>{
     explicit View(std::shared_ptr<WorkspaceData> source,bool fit):data(std::move(source)),fitHeight(fit){}
     ~View(){
         data->colorViews.erase(listener);
-        for(auto const& worker:{drawing.ringWorker,drawing.worker})if(worker){worker->deliver=nullptr;worker->cancel();}
     }
     void editColor(hstring slot={}){
         if(slot.empty())slot=str(displayColors(data->state),L"paint_slot");
@@ -256,10 +256,7 @@ struct View:std::enable_shared_from_this<View>{
         root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->cancel();self->scaleChanged.revoke();}});
         contentsLost=CompositionTarget::SurfaceContentsLost(auto_revoke,[weak](auto&&,auto&&){if(auto self=weak.lock()){self->key=L"";self->drawing.surface=nullptr;self->refresh();}});
         listener=data->colorView([weak]{if(auto self=weak.lock())self->refresh();});
-        drawing.worker=std::make_shared<FieldWorker>();
-        drawing.worker->deliver=[weak](FieldResult result){if(auto self=weak.lock()){self->drawing.ready=std::move(result);self->key=L"";self->data->queueColors();}};
-        drawing.ringWorker=std::make_shared<FieldWorker>();
-        drawing.ringWorker->deliver=[weak](FieldResult result){if(auto self=weak.lock()){self->drawing.ringReady=std::move(result);self->key=L"";self->data->queueColors();}};
+        drawing.start([weak]{if(auto self=weak.lock()){self->key=L"";self->data->queueColors();}});
         edit=control(data->caption(L"color",L"edit"),[weak]{if(auto self=weak.lock();self&&!self->transparentSlot())self->editColor();});
         Grid editContent;auto pencil=icon(L"pencil",data->theme());pencil.HorizontalAlignment(HorizontalAlignment::Center);pencil.VerticalAlignment(VerticalAlignment::Center);
         editContent.Children().Append(editFill);editContent.Children().Append(pencil);edit.Content(editContent);
@@ -274,7 +271,7 @@ struct View:std::enable_shared_from_this<View>{
                 self->send(O({{L"op",S(L"select")},{L"slot",S(slot)}}));self->editColor(slot);
             }});
             Grid sample;sample.Background(nullptr);
-            sample.Children().Append(swatchBacks[i]);sample.Children().Append(swatchChecks[i]);sample.Children().Append(swatchPaint[i]);sample.Children().Append(swatchEdges[i]);
+            sample.Children().Append(swatchFaces[i].root);
             pick.Content(sample);swatches[i]=pick;stage.Children().Append(pick);
             if(i<2){
                 MenuFlyout menu;
@@ -517,8 +514,6 @@ struct View:std::enable_shared_from_this<View>{
             const std::array<wchar_t const*,3> slots{L"background",L"foreground",L"transparent"};
             for(int i=0;i<3;i++){
                 auto swatchBox=array(layout,slots[i]);placeBox(swatches[i],swatchBox);
-                double pad=i==1?3:1;swatchChecks[i].Margin({pad,pad,pad,pad});swatchPaint[i].Margin({pad,pad,pad,pad});
-                ImageBrush pixels;pixels.ImageSource(checkerBitmap(swatchBox.GetNumberAt(2)-2*pad,scale,color(str(object(data->state,L"palette"),L"checker_light")),color(str(object(data->state,L"palette"),L"checker_dark"))));pixels.Stretch(Stretch::Fill);swatchChecks[i].Fill(pixels);
             }
         }
         auto icons=data->theme()+array(view,L"other_shapes").Stringify();
@@ -545,23 +540,15 @@ struct View:std::enable_shared_from_this<View>{
             auto swatch=find(array(view,L"swatches"),L"slot",slots[i]);
             int z=slots[i]==front?1:0;
             if(Canvas::GetZIndex(swatches[i])!=z)Canvas::SetZIndex(swatches[i],z);
-            swatchBacks[i].Fill(data->brush(L"panel"));auto stroke=color(str(object(data->state,L"palette"),L"text"));
             bool selected=flag(swatch,L"selected");
-            if(!(selected||hovered[i]))stroke.A=64;
-            swatchEdges[i].Stroke(fill(stroke));swatchEdges[i].StrokeThickness(selected||hovered[i]?2:1);
-            swatchPaint[i].Fill(fill(rgba(array(swatch,L"rgba"))));
+            swatchFaces[i].Update(data,array(swatch,L"rgba"),array(layout,slots[i].c_str()).GetNumberAt(2),scale,selected,i==1,hovered[i]);
             AutomationProperties::SetName(swatches[i],str(swatch,L"label"));AutomationProperties::SetItemStatus(swatches[i],selected?data->caption(L"search",L"selected"):L"");
         }
         auto nextKey=view.Stringify()+to_hstring(side)+L"/"+to_hstring(scale);
         if(nextKey!=key){
             try{
                 auto colors=paintColors();
-                try{drawing.draw(image,view,colors,side,scale);}
-                catch(hresult_error const& exception){
-                    auto code=exception.code();
-                    if(code!=DXGI_ERROR_DEVICE_REMOVED&&code!=DXGI_ERROR_DEVICE_RESET&&code!=D2DERR_RECREATE_TARGET&&code!=E_SURFACE_CONTENTS_LOST)throw;
-                    drawing.draw(image,view,colors,side,scale,true);
-                }
+                drawing.present(image,view,colors,side,scale);
                 data->colorFieldPixels=drawing.fieldPixels;
                 key=nextKey;drawError.Visibility(Visibility::Collapsed);AutomationProperties::SetItemStatus(image,data->caption(L"header",L"ready"));
             }catch(hresult_error const&){drawError.Visibility(Visibility::Visible);AutomationProperties::SetItemStatus(image,data->caption(L"color",L"wheel_failed"));}

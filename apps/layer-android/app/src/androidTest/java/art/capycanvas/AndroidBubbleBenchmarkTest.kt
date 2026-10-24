@@ -143,6 +143,72 @@ class AndroidBubbleBenchmarkTest {
                         host.snapshot?.optBoolean("canvas_ready") == true && host.snapshot?.optBoolean("shaders_ready") == true
                     }
                 }
+                if (args.getString("workload") == "palette-opening") {
+                    val handler = checkNotNull(host.headerKeyHandler)
+                    val inputField = checkNotNull(handler.javaClass.declaredFields.singleOrNull { it.type == BubbleInteraction::class.java }) { "Bubble frame-loop owner missing: ${handler.javaClass.declaredFields.map { it.type.name }}" }.apply { isAccessible = true }
+                    val interaction = inputField.get(handler) as BubbleInteraction
+                    val colorId = packets().single { it.getJSONObject("view").getString("kind") == "color" }.getJSONObject("view").getInt("id")
+                    action(obj("type" to "bubble", "action" to obj("type" to "option", "id" to colorId, "option" to obj("kind" to "palette"))))
+                    val power = instrumentation.targetContext.getSystemService(PowerManager::class.java)
+                    val diagnosticTransitions = args.getString("paletteTransitions", "3")!!.toInt()
+                    require(diagnosticTransitions in 1..10)
+                    val windows = JSONArray()
+                    val thermal = power.currentThermalStatus
+                    drawn.clear(); frameRows.clear(); host.measurementReport(true)
+                    var refresh = Float.MAX_VALUE
+                    while (windows.length() < diagnosticTransitions) {
+                        ids.forEachIndexed { index, id -> place(obj("kind" to "bubble", "id" to id), index) }
+                        val current = (query(obj("type" to "bubble_motion", "now_ns" to System.nanoTime())) as JSONObject).array("placements").objects().single { it.getInt("id") == colorId }.getJSONArray("center")
+                        val edge = JSONArray(listOf(workspace.width / density - 4, workspace.height / density - 4))
+                        for ((phase, position) in listOf("down" to current, "move" to edge, "up" to edge)) action(obj("type" to "bubble", "action" to obj("type" to "drag", "grab" to obj("kind" to "bubble", "id" to colorId), "phase" to phase, "position" to position, "viewport" to JSONArray(listOf(workspace.width / density, workspace.height / density)))))
+                        SystemClock.sleep(150)
+                        host.awaitMain("Reset settles before palette opening") { !interaction.active }
+                        val view = packets().single { it.getJSONObject("view").getInt("id") == colorId }.getJSONObject("view")
+                        check(view.isNull("pill"))
+                        val bead = checkNotNull(view.array("beads").objects().singleOrNull { it.getJSONObject("placement").getJSONObject("bead").getString("kind") == "palettes" }) { "Palette bead absent: $view" }.getJSONObject("placement").getJSONArray("center")
+                        var begin = 0L
+                        instrumentation.runOnMainSync {
+                            nodes = ids.map { id -> checkNotNull(findTag("tool-bubble-$id") ?: findTag("bubble-card-$id")).second }
+                            val center = nodes[ids.indexOf(colorId)].boundsInRoot.center
+                            val point = center + Offset(bead.getDouble(0).toFloat(), bead.getDouble(1).toFloat()) * density
+                            val down = SystemClock.uptimeMillis()
+                            begin = System.nanoTime(); measuring.set(true)
+                            for (phase in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                                val event = motion(MotionEvent.TOOL_TYPE_FINGER, phase, point, down)
+                                try { owner!!.view.dispatchTouchEvent(event) } finally { event.recycle() }
+                            }
+                            refresh = minOf(refresh, owner!!.view.display.refreshRate)
+                        }
+                        val settled = CountDownLatch(1)
+                        var end = 0L
+                        instrumentation.runOnMainSync {
+                            val clock = Choreographer.getInstance()
+                            var observed = interaction.active
+                            lateinit var boundary: Choreographer.FrameCallback
+                            boundary = Choreographer.FrameCallback {
+                                observed = observed || interaction.active
+                                if (observed && !interaction.active) { end = System.nanoTime(); settled.countDown() }
+                                else clock.postFrameCallback(boundary)
+                            }
+                            clock.postFrameCallback(boundary)
+                        }
+                        check(settled.await(10, TimeUnit.SECONDS)) { "Palette opening never settled" }
+                        instrumentation.runOnMainSync { measuring.set(false); refresh = minOf(refresh, owner!!.view.display.refreshRate) }
+                        check(!packets().single { it.getJSONObject("view").getInt("id") == colorId }.getJSONObject("view").isNull("pill"))
+                        windows.put(JSONArray(listOf(begin, end)))
+                    }
+                    val positions = synchronized(drawn) { drawn.toList() }
+                    val distinct = ids.indices.map { index -> positions.map { it[index * 2 + 1] to it[index * 2 + 2] }.toSet().size }
+                    contacts.put(obj("run" to 0, "warmup" to false, "workload" to "palette-opening", "diagnostic" to true, "moving_windows_ns" to windows,
+                        "begin_ns" to windows.getJSONArray(0).getLong(0), "end_ns" to windows.getJSONArray(windows.length() - 1).getLong(1),
+                        "clock" to "MONOTONIC", "display_hz" to refresh, "thermal_before" to thermal, "thermal_after" to power.currentThermalStatus,
+                        "distinct_centers" to JSONArray(distinct), "drawn_centers" to JSONArray(positions.map { JSONArray(it.toList()) }), "frame_metrics_proxy" to JSONArray(synchronized(frameRows) { frameRows.map { JSONArray(it.toList()) } }),
+                        "publication_metrics" to host.measurementReport()))
+                    output.resolve("result.json").writeText(obj("debuggable" to BuildConfig.DEBUG, "duration_ms" to duration,
+                        "width" to width, "height" to height, "contacts" to contacts).toString())
+                    check(distinct[ids.indexOf(colorId)] > 1) { "Palette opening visibly moves its wheel" }
+                    return
+                }
                 for (run in 0..repeats) {
                     val resetBegin = System.nanoTime()
                     ids.forEachIndexed { index, id -> place(obj("kind" to "bubble", "id" to id), index) }

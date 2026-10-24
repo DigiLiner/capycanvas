@@ -34,6 +34,7 @@ export async function measureBubbleMotion(cdp,{duration=6000,repeats=3,diagnosti
   assert.equal(await evaluate("!!document.querySelector('dialog[open]')"),false,'Dismiss dialogs before measuring bubble input');
   const saved=await evaluate('layerApp.app.workspace_persistence()');
   const fixture=structuredClone(saved);
+  fixture.layout.bubbles={bubbles:[],rings:[],kept:[]};
   const controls=[{kind:'command',command:'drawing_brush'},{kind:'color'},{kind:'color_picker'},{kind:'command',command:'undo'},{kind:'panel',panel:'layers'}];
   fixture.layout.header={size:'medium',zones:[[{id:1,item:{kind:'capy'}}],controls.map((control,i)=>({id:i+2,item:{kind:'tool',control}})),[]],next_id:7};
   const touch=async(type,p)=>call('Input.dispatchTouchEvent',{type,touchPoints:p?[{id:1,x:p[0],y:p[1]}]:[]});
@@ -41,10 +42,9 @@ export async function measureBubbleMotion(cdp,{duration=6000,repeats=3,diagnosti
   const result={diagnostic,measurement:'requestAnimationFrame proxy; requires separate SurfaceFlinger actual-present analysis for qualification',contacts:[]};
   try {
     await send({type:'restore_workspace',workspace:fixture});
-    await send({type:'bubble',action:{type:'put_back_all'}});
     const bounds=await evaluate(`(()=>{const r=document.querySelector('#workspace').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`);
     assert(bounds.width>=600&&bounds.height>=400,'Five-bubble fixture requires a landscape workspace');
-    const y=bounds.y+bounds.height*.55,left=bounds.x+bounds.width*.22,right=bounds.x+bounds.width*.78;
+    const y=bounds.height*.55,left=bounds.width*.22,right=bounds.width*.78;
     const ids=[];
     for(let i=0;i<5;i++) {
       const position=[left+(right-left)*i/4,y],before=await evaluate('layerApp.app.bubbles().map(p=>p.view.id)');
@@ -59,7 +59,7 @@ export async function measureBubbleMotion(cdp,{duration=6000,repeats=3,diagnosti
     for(let run=-1;run<repeats;run++) {
       await pause(600);
       const settled=await evaluate(`(${JSON.stringify(ids)}).map(id=>{const n=document.querySelector('.tool-bubble[data-bubble="'+id+'"]');const m=n.style.transform.match(/translate\\(([-.0-9]+)px, ([-.0-9]+)px\\)/);if(!m)throw Error('Missing settled placement');return [Number(m[1]),Number(m[2])]})`);
-      const start=await center(ids[0]),waypoints=[start,...settled.slice(1),start];
+      const start=await center(ids[0]),waypoints=[start,...settled.slice(1).map(([x,y])=>[x+bounds.x,y+bounds.y]),start];
       await touch('touchStart',start);
       await touch('touchMove',[start[0]+12,start[1]]);
       const label=run<0?'warmup':`drag-${run+1}`;
@@ -79,7 +79,7 @@ export async function measureBubbleMotion(cdp,{duration=6000,repeats=3,diagnosti
       await touch('touchEnd');
       const distinctPlacements=record.placements[0]?.map((_,i)=>new Set(record.placements.map(p=>p[i])).size)||[];
       assert(distinctPlacements[0]>10,'Dragged bubble did not visibly move');
-      assert(distinctPlacements.length===5&&distinctPlacements.slice(1).every(n=>n>1),'Every neighbor must visibly move during each contact');
+      assert(distinctPlacements.length===5&&distinctPlacements.slice(1).every(n=>n>1),`Every neighbor must visibly move during each contact (${label}: ${distinctPlacements.join(', ')})`);
       if(run>=0)result.contacts.push({label,begin,boundaryBegin,boundaryEnd,waypoints,distinctPlacements,...record,dispatchedInputCount,...summarizeIntervals(record.times)});
     }
     result.errors=[...cdp.errors];

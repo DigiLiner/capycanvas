@@ -71,9 +71,14 @@ private:
     std::atomic<NavigationCursor> navigationCursor{NavigationCursor::None};
     winrt::Microsoft::UI::Input::InputCursor zoomInCursor{nullptr},zoomOutCursor{nullptr};
     winrt::Microsoft::UI::Input::PointerPredictor pointerPredictor{nullptr}; // input thread only
-    winrt::Microsoft::UI::Input::GestureRecognizer pickerHold{nullptr};
+    struct PickerGesture {
+        winrt::Microsoft::UI::Input::GestureRecognizer recognizer{nullptr};
+        std::optional<uint32_t> contact;
+        std::set<uint32_t> contacts;
+    } pickerHold,xamlPickerHold;
     std::optional<uint32_t> holdContact;
     std::set<uint32_t> contacts;
+    std::set<uint32_t> xamlContacts;
     // Captured together under mutex; never pair a new DPI with an old camera.
     float inputScale=1;
     uint64_t revision=0;
@@ -132,7 +137,7 @@ private:
     bool inputStopped=false; // mutex: admitted work remains owned by the worker.
     bool statusFailed=false; // UI thread: readiness must not hide a reported error.
     Size desired;
-    std::vector<winrt::Windows::Graphics::RectInt32> captionRegions,captionInputRegions;
+    std::vector<winrt::Windows::Graphics::RectInt32> captionRegions,captionInputRegions,bubbleInputRegions;
     bool captionRegionsValid=false;
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer captionRetry{nullptr};
     bool closing=false, closed=false, finishing=false, resize=false, paused=false, servicesReady=false;
@@ -170,13 +175,21 @@ private:
     bool PenButtons(winrt::Microsoft::UI::Input::PointerPoint const& point,uint32_t phase);
     bool PenButtons(uint32_t id,bool primary);
     void Wheel(winrt::Microsoft::UI::Input::PointerEventArgs const&);
+    CanvasScroll ScrollSample(winrt::Windows::Foundation::Point,int32_t,bool,winrt::Windows::System::VirtualKeyModifiers);
     // Explicit smoke fixtures; only the input dispatcher touches replayTime.
     enum class ReplayKind { Stroke, Pan, Backlog, Pen, PenBegin, PenEnd };
     uint64_t replayTime=0;
     void Replay(ReplayKind);
     void StartInput();
     void Pointer(winrt::Microsoft::UI::Input::PointerEventArgs const&, uint32_t phase);
+    using PointerPoints=winrt::Windows::Foundation::Collections::IVector<winrt::Microsoft::UI::Input::PointerPoint>;
+    std::vector<CapyPointer> PointerSamples(winrt::Microsoft::UI::Input::PointerPoint const&,PointerPoints const&,uint32_t phase,bool predict);
+    void Pointer(std::vector<CapyPointer>,winrt::Windows::System::VirtualKeyModifiers,bool pen,bool barrel,uint64_t arrival);
+    void XamlPointer(winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&,uint32_t phase);
     void PickerHold(winrt::Microsoft::UI::Input::PointerEventArgs const&, uint32_t phase);
-    void CancelPickerHold();
+    void PickerHold(PickerGesture&,winrt::Microsoft::UI::Input::PointerPoint const&,PointerPoints const&,uint32_t phase);
+    void StartPickerHold(PickerGesture&);
+    void CancelPickerHold(PickerGesture&);
+    void TrackContact(uint32_t id,uint32_t phase,bool touch);
     float PickerOffset(float scale)const;
 };

@@ -94,19 +94,25 @@ function Search([string]$Query,[scriptblock]$Pick,[string]$Wanted){
  (Control 'drawing-canvas').SetFocus()
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0x4B)
  Wait-Until {Find 'command-search' -Visible} 'Command search did not open'
- (Control 'command-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Query)
+ $entry=Control 'command-search' -Arranged
+ Wait-Until {$entry.Current.HasKeyboardFocus} 'Command search did not take keyboard focus' 5
+ $admission=@{native_value=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;native_focus=$entry.Current.HasKeyboardFocus;shared_query=(Search-State).query}
+ $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Query)
  $hit=@{index=-1;result=$null}
- Wait-Until {
-  $view=(Model).state.command_search
+ try{Wait-Until {
+  $view=(Search-State)
   if(!$view -or $view.query -ne $Query){return $false}
   $results=@($view.results)
   for($i=0;$i -lt $results.Count;$i++){if(& $Pick $results[$i]){$hit.index=$i;$hit.result=$results[$i];return $true}}
   $false
- } "Command search did not offer $Wanted"
+ } "Command search did not offer $Wanted"}catch{
+  @{expected=$Query;before=$admission;native_value=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value;native_focus=$entry.Current.HasKeyboardFocus;shared_query=(Search-State).query}|ConvertTo-Json|Set-Content (Join-Path $run 'command-search-failure.json')
+  throw
+ }
  $row=Control ('command-result-'+$hit.index) -Arranged
  if($row.Current.Name -ne $hit.result.label){throw "Command search shows '$($row.Current.Name)' where Rust offers '$($hit.result.label)'"}
  $row.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
- Wait-Until {!(Find 'command-search' -Visible) -and !(Model).state.command_search} 'Command search did not close'
+ Wait-Until {!(Find 'command-search' -Visible) -and !(Search-State)} 'Command search did not close'
  $hit.result
 }
 function Select-Brush([string]$Brush){

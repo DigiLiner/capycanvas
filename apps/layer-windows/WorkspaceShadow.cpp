@@ -21,19 +21,19 @@ ID2D1Factory* factory(){
     static winrt::com_ptr<ID2D1Factory> value=[]{winrt::com_ptr<ID2D1Factory> created;winrt::check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,created.put()));return created;}();
     return value.get();
 }
-struct ShadowCut{std::array<float,4> radii{};std::vector<winrt::Windows::Foundation::Rect> extra;};
-winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& cut){
+struct ShadowCut{std::array<float,4> radii{};std::vector<winrt::Windows::Foundation::Rect> extra;bool squircle=true;};
+winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& cut,bool exclude=true){
     winrt::com_ptr<ID2D1PathGeometry> path;winrt::check_hresult(factory()->CreatePathGeometry(path.put()));
     winrt::com_ptr<ID2D1GeometrySink> sink;winrt::check_hresult(path->Open(sink.put()));sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
     auto rectangle=[&](float x,float y,float w,float h){
         sink->BeginFigure({x,y},D2D1_FIGURE_BEGIN_FILLED);sink->AddLine({x+w,y});sink->AddLine({x+w,y+h});sink->AddLine({x,y+h});sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     };
-    rectangle(-padding,-padding,width+2*padding,height+2*padding);
+    if(exclude)rectangle(-padding,-padding,width+2*padding,height+2*padding);
     auto radii=cut.radii;for(auto& radius:radii)radius=std::min(radius,std::max(0.f,std::min(width,height)*.5f));
     auto [tl,tr,br,bl]=radii;
     auto corner=[&](float cx,float cy,float sx,float sy,float ex,float ey){
         for(int i=0;i<=24;++i){
-            double angle=i*3.14159265358979/48,along=std::sqrt(std::cos(angle)),across=std::sqrt(std::sin(angle));
+            double angle=i*3.14159265358979/48,along=std::pow(std::cos(angle),cut.squircle?.5:1.),across=std::pow(std::sin(angle),cut.squircle?.5:1.);
             sink->AddLine({float(cx+sx*along+ex*across),float(cy+sy*along+ey*across)});
         }
     };
@@ -43,6 +43,14 @@ winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& 
     for(auto const& r:cut.extra)rectangle(r.X,r.Y,r.Width,r.Height);
     winrt::check_hresult(sink->Close());return path;
 }
+}
+void ClipOutside(UIElement const& element,float width,float height,std::array<float,4> radii,bool squircle){
+    auto visual=ElementCompositionPreview::GetElementVisual(element);auto compositor=visual.Compositor();
+    visual.Clip(compositor.CreateGeometricClip(compositor.CreatePathGeometry(CompositionPath(winrt::make<GeometrySource>(outside(width,height,{radii,{},squircle}))))));
+}
+void ClipSurface(UIElement const& element,float width,float height,std::array<float,4> radii,bool squircle){
+    auto visual=ElementCompositionPreview::GetElementVisual(element);auto compositor=visual.Compositor();
+    visual.Clip(compositor.CreateGeometricClip(compositor.CreatePathGeometry(CompositionPath(winrt::make<GeometrySource>(outside(width,height,{radii,{},squircle},false))))));
 }
 struct WorkspaceShadow::State {
     SpriteVisual visual{nullptr};

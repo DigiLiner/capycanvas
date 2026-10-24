@@ -117,13 +117,6 @@ function Assert-Camera($Before,$After,[double]$Dx=0,[double]$Dy=0){
 function Exact-Camera($Value){
  ConvertTo-Json -InputObject @($Value.zoom,$Value.rotation,$Value.translation,$Value.flipped,$Value.zoom_locked,$Value.rotation_locked) -Depth 8 -Compress
 }
-function Readout-SearchState{
- $path=State-File;$base=Read-Snapshot $path
- $searchPath=Join-Path (Split-Path -Parent $path) ((Split-Path -Leaf $path) -replace '^ui-state-','search-state-')
- $search=Read-Snapshot $searchPath
- if($base.process_id -ne $review.Id -or $search.process_id -ne $review.Id -or $search.window_id -ne $base.window_id -or 'search' -notin $search.PSObject.Properties.Name){throw 'The readout search acknowledgement is not from the owned drawing'}
- $search.search
-}
 function Check-ReadoutCamera{
  Navigation-Command 'actual_pixels'
  Wait-Until {(Camera).zoom -eq 1 -and (Control 'canvas-camera').Current.Name -eq '100% · 0°'} 'Actual Pixels did not settle before the readout camera check'
@@ -138,9 +131,9 @@ function Check-ReadoutCamera{
  Close-Menu
  Navigation-Focus
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x4b)
- Wait-Until {(Find 'command-search' -Visible) -and (Control 'command-search').Current.HasKeyboardFocus -and $null -ne (Readout-SearchState)} 'The readout camera check did not acknowledge its shared command-search roundtrip'
+ Wait-Until {(Find 'command-search' -Visible) -and (Control 'command-search').Current.HasKeyboardFocus -and $null -ne (Search-State)} 'The readout camera check did not acknowledge its shared command-search roundtrip'
  [CapyRowPointer]::Key([uint32]$review.Id,0x1b)
- Wait-Until {!(Find 'command-search' -Visible) -and $null -eq (Readout-SearchState) -and (Focused)} 'The readout camera check did not settle after Escape'
+ Wait-Until {!(Find 'command-search' -Visible) -and $null -eq (Search-State) -and (Focused)} 'The readout camera check did not settle after Escape'
  Capture "zoom-camera-closed-$Theme" -Composed -WithModel
  if((Exact-Camera (Camera)) -cne $expected -or (Navigation-PaintState) -cne $artwork){throw 'Closing the zoom readout changed the exact camera, artwork or history'}
  $checks.readout_preserves_exact_camera=@{camera=$fit;artwork_history='unchanged';acknowledgement='native readout open/closed and shared command-search open/closed';raw_visual_review='required'}

@@ -242,10 +242,28 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         bitmap->Submit(std::move(item));bitmap.reset();
         require(co_await resume_on_signal(entered->get(),std::chrono::seconds(10)),L"Thumbnail reader did not enter background fill");
         co_await apartment;
-        RefreshLayerThumbnails(cache,L"new",{{L"new",L"new",L"revision",false}});
+        RefreshLayerThumbnails(cache,this,L"new",{{L"new",L"new",L"revision",false}});
         SetEvent(gate->get());
         require(*calls==1&&!cache->busy,L"Discarding old document upload stranded new-document thumbnail request");
         co_await wait(result);require(!result->accepted.at(1),L"Discarded document thumbnail was accepted");++checks;
+    }
+    void thumbnailOwners(){
+        auto queries=std::make_shared<std::vector<J>>();
+        auto cache=CreateLayerThumbnailCache([queries](CanvasQueryKind kind,std::string json,PreviewReply){require(kind==CanvasQueryKind::Thumbnails,L"Unexpected cache transport kind");queries->push_back(J::Parse(to_hstring(json)));return false;});
+        int list,face,card;LayerThumbnail a{L"a",L"paint-a",L"1",false},b{L"b",L"paint-b",L"1",false};
+        RefreshLayerThumbnails(cache,&list,L"document",{a});
+        RefreshLayerThumbnails(cache,&face,L"document",{b});
+        require(array(queries->back(),L"requests").Size()==2,L"Second thumbnail owner displaced the list request");
+        cache->pending.emplace(L"waiting-a",a);cache->busy=true;
+        RefreshLayerThumbnails(cache,&card,L"document",{a});
+        ForgetLayerThumbnails(cache,&list);
+        require(cache->targets.Items().size()==2&&cache->targets.Items().at(slot(a))==a,L"Retiring one list invalidated another owner's pending thumbnail");
+        a.revision=L"2";RefreshLayerThumbnails(cache,&card,L"document",{a});
+        require(key(cache->targets.Items().at(slot(a)))!=key(cache->pending.at(L"waiting-a")),L"Changed thumbnail revision accepted stale pending pixels");
+        ForgetLayerThumbnails(cache,&card);
+        require(cache->targets.Items().size()==1&&cache->targets.Items().at(slot(b))==b,L"Retiring a card discarded the folded face thumbnail");
+        RefreshLayerThumbnails(cache,&face,L"document",{});
+        require(cache->targets.Items().empty(),L"Empty owner retained thumbnail demand");++checks;
     }
     winrt::Windows::Foundation::IAsyncAction paperRecolor(){
         ImageBrush brush;brush.Stretch(Stretch::Fill);
@@ -271,7 +289,7 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         try{
             phase=L"encoding";co_await encoding();phase=L"reentrancy";co_await coalescing();
             phase=L"before-copy-context";co_await invalidation();phase=L"throwing-callbacks";co_await exceptions();
-            phase=L"predicate-reentry";co_await predicateReentry();phase=L"awaited-context";co_await awaitedCancellation();phase=L"thumbnail-epoch";co_await thumbnailEpoch();phase=L"paper-recolor";co_await paperRecolor();phase=L"close";
+            phase=L"predicate-reentry";co_await predicateReentry();phase=L"awaited-context";co_await awaitedCancellation();phase=L"thumbnail-epoch";co_await thumbnailEpoch();phase=L"thumbnail-owners";thumbnailOwners();phase=L"paper-recolor";co_await paperRecolor();phase=L"close";
             auto result=std::make_shared<Outcome>();upload->Close();
             upload->Submit(request(frames->rgba,result,1));co_await wait(result);
             require(!result->accepted.at(1),L"Closed owner accepted new pixels");++checks;

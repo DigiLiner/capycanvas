@@ -544,7 +544,12 @@ APK calls, so test-APK benchmarks use the unminified build.
   benchmark and test APKs under the worktree's application ID. The collector
   samples the app window's actual SurfaceFlinger presents; canvas surface
   submissions, `FrameMetrics` and observed widget positions are attribution.
-  `--report-only` rebuilds a report from captured data. The result labels each
+  `--workload palette-opening` repeats native palette-bead taps near the bottom-right
+  edge. The three-transition diagnostic retains production frame-loop active
+  boundaries, individual drawn positions and actual presentations. Opening can
+  clamp in one step, so this mode reports no sustained-motion FPS.
+  `--palette-transitions 1`–`10` changes the diagnostic count.
+  `--report-only` rebuilds a report from captured data. The drag result labels each
   `FrameMetrics` column, including input, animation, layout, draw, synchronization,
   command issue, swap and GPU durations; these do not replace actual presents.
 - **Workspace motion.** `AndroidWorkspacePerformanceTest` runs with

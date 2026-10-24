@@ -473,24 +473,6 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             presentWorkspace(presentation)
         }
     }
-    internal class BubbleColorContact { var original: String? = null; var epoch = 0L }
-    internal fun beginBubbleColor(action: JSONObject): BubbleColorContact {
-        val contact = BubbleColorContact()
-        post {
-            contact.epoch = documentEpoch
-            contact.original = Native.query(handle, obj("type" to "bubble_wheel_color").toString())
-            Native.dispatch(handle, obj("type" to "color", "action" to action).toString())
-            publish(true); wake()
-        }
-        return contact
-    }
-    internal fun finishBubbleColor(contact: BubbleColorContact, restore: Boolean) = post {
-        if (restore && contact.epoch == documentEpoch) contact.original?.let { color ->
-            Native.dispatch(handle, obj("type" to "color", "action" to obj("op" to "definition", "color" to JSONObject(color))).toString())
-            publish(true); wake()
-        }
-        contact.original = null
-    }
     fun invoke(command: String) = dispatch(obj("type" to "invoke", "command" to command))
     fun customize(action: JSONObject) = dispatch(obj("type" to "customize", "action" to action))
     fun preference(action: JSONObject) = dispatch(obj("type" to "preferences", "action" to action))

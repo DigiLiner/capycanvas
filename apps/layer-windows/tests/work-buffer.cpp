@@ -3,6 +3,7 @@
 #include "../NativeKeyRepeats.h"
 #include "../CanvasPointerSample.h"
 #include "../PointerCompletion.h"
+#include "../ThumbnailOwners.h"
 #include "../PointerScrub.h"
 #include <limits>
 #include "../CanvasQueryQueue.h"
@@ -120,6 +121,41 @@ int main() {
     std::cout<<"Combined native key presses retain every repeat and one release\n";
 
     using namespace CapyUi;
+    {
+        PointerCancelRegistry contacts;int slider,scroll,row;std::vector<std::string> canceled;
+        contacts.Observe(1,&slider,[&]{canceled.push_back("slider");contacts.Forget(1,&scroll);contacts.Observe(1,&slider,[&]{canceled.push_back("next");});});
+        contacts.Observe(1,&scroll,[&]{canceled.push_back("scroll");contacts.Forget(1,&row);});
+        contacts.Observe(1,&row,[&]{canceled.push_back("row");});
+        contacts.Observe(2,&scroll,[&]{canceled.push_back("other");});
+        contacts.Forget(1,&row);contacts.Cancel(1);
+        std::sort(canceled.begin(),canceled.end());assert((canceled==std::vector<std::string>{"scroll","slider"}));
+        contacts.Cancel(1);assert(canceled.back()=="next"&&canceled.size()==3);
+        contacts.Cancel(1);assert(canceled.size()==3);
+        contacts.Cancel(2);assert(canceled.back()=="other"&&canceled.size()==4);
+        contacts.Observe(3,&scroll,[&]{canceled.push_back("cleared");});contacts.Clear();contacts.Cancel(3);assert(canceled.size()==4);
+    }
+    std::cout<<"Capture transfer cancels every native owner once while preserving reentrant and unrelated contacts\n";
+
+    {
+        ThumbnailOwners<std::string,std::string> thumbnails;int list,face,card;
+        thumbnails.Update(&list,{{"a","paint:1"}});
+        thumbnails.Update(&face,{{"b","paint:2"}});
+        assert(thumbnails.Items().at("a")=="paint:1"&&thumbnails.Items().at("b")=="paint:2");
+        thumbnails.Update(&card,{{"a","paint:1"}});thumbnails.Forget(&list);
+        assert(thumbnails.Items().size()==2&&thumbnails.Items().at("a")=="paint:1");
+        thumbnails.Update(&list,{{"a","paint:3"}});
+        thumbnails.Update(&card,{{"a","paint:1"}});
+        assert(thumbnails.Items().at("a")=="paint:3");
+        thumbnails.Update(&card,{{"a","mask:3"}});
+        assert(thumbnails.Items().at("a")=="mask:3");
+        thumbnails.Update(&face,{});assert(!thumbnails.Items().contains("b"));
+        thumbnails.Forget(&card);assert(thumbnails.Items().at("a")=="paint:3");
+        thumbnails.Clear();assert(thumbnails.Items().empty());
+        thumbnails.Update(&face,{{"a","new-drawing:1"}});
+        thumbnails.Forget(&list);assert(thumbnails.Items().at("a")=="new-drawing:1");
+    }
+    std::cout<<"Thumbnail owners retain independent pending targets, deduplicate shared rows and retire changed sources\n";
+
     struct CompletionCase {PointerCompletion event;bool canceled,inContact,customCancel,nativeCancel;};
     for(auto test:{
         CompletionCase{PointerCompletion::Released,false,false,false,false},
