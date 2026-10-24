@@ -165,6 +165,7 @@ impl Queue {
                 ClearError::Device(e) => e,
                 _ => DeviceError::Lost,
             })?;
+            drop(trackers);
             texture.initialization_status.write().mips[0].drain(0..1);
         }
 
@@ -1709,14 +1710,20 @@ impl Queue {
                 submit_surface_textures.push(raw);
             }
 
-            unsafe {
+            let result = unsafe {
                 self.raw().submit(
                     &hal_command_buffers,
                     &submit_surface_textures,
                     (self.device.fence.as_ref(), submit_index),
                 )
+            };
+            if let Err(error) = result {
+                drop(submit_surface_textures);
+                drop(pending_writes);
+                drop(command_index_guard);
+                drop(snatch_guard);
+                return Err(self.device.handle_hal_error(error));
             }
-            .map_err(|e| self.device.handle_hal_error(e))?;
 
             // Submissions must have strictly increasing indices, so we must hold the
             // command index guard until we have submitted, to prevent another submission

@@ -110,6 +110,7 @@ define_lock_ranks! {
         DEVICE_SNATCHABLE_LOCK,
         DEVICE_COMMAND_INDICES,
         DEVICE_TRACKERS,
+        SHARED_TRACKER_INDEX_ALLOCATOR_INNER,
     }
     rank COMMAND_BUFFER_DATA "CommandBuffer::data" followed by {
         DEVICE_SNATCHABLE_LOCK,
@@ -146,6 +147,7 @@ define_lock_ranks! {
         BUFFER_POOL,
         QUEUE_PENDING_WRITES,
         QUEUE_LIFE_TRACKER,
+        TEXTURE_INITIALIZATION_STATUS,
         COMMAND_ALLOCATOR_FREE_ENCODERS,
         DEVICE_DEFERRED_DESTROY,
         SHARED_TRACKER_INDEX_ALLOCATOR_INNER,
@@ -167,6 +169,7 @@ define_lock_ranks! {
     rank QUEUE_LIFE_TRACKER "Queue::life_tracker" followed by {
         BUFFER_MAP_STATE,
         BUFFER_INITIALIZATION_STATUS,
+        TEXTURE_CLEAR_MODE,
         BUFFER_POOL,
         COMMAND_ALLOCATOR_FREE_ENCODERS,
         DEVICE_DEFERRED_DESTROY,

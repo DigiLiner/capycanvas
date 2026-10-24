@@ -53,7 +53,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | --- | --- | --- | --- |
 | Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
 | Tool cursor hover, with and without brush size | 120 | Renderer 119.3–119.6 submissions/s; submission interval p99 15.0–15.6 ms. Presentation unqualified. | [Tool cursors](#tool-cursors) |
-| Pan: Hand tool, one or two fingers | 120 | **Not met.** 32.9–36.1 presented fps, p99 41.7 ms, viewport GPU 18.5–18.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
+| Pan: Hand tool, one or two fingers | 120 | **Not met.** 32.9–36.1 presented fps, p99 41.7 ms, viewport GPU 18.5–18.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/`; [GTK surface diagnostic](#gtk-surface-handoff-diagnostic) does not qualify this tier |
 | Pinch zoom | 120 | **Not met.** 32.7–37.8 presented fps, p99 58.3–66.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 120 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Two-finger rotate | 120 | **Misses:** 33.33–45.48 presented fps, p99 33.33–41.67 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
@@ -4301,6 +4301,27 @@ and [build metadata](../../artifacts/panel-tab-press/gtk-preview/workspace-motio
 identify the measured source. The [run log](../../artifacts/panel-tab-press/gtk-preview/workspace-motion-corrected.log)
 records the unchanged input and rate gates. The earlier lifecycle-assertion run
 is preserved separately in the same artifact directory.
+
+## GTK surface handoff diagnostic
+
+On 2026-10-24, the release build at `5579e7b17` plus the surface handoff fixes
+ran `native_frame_pacing` with Pan in both themes. NVIDIA RTX PRO 6000 Blackwell
+Max-Q, Vulkan 615.71.09 and GSK Vulkan drove private Mutter at 1600 × 1000,
+120 Hz. The fixture document was 1333 × 1000 with a 1200 × 900 viewport.
+Each theme supplied one six-second synthetic host gesture; the reported window
+excludes the first and last quarter-second.
+
+| Theme | Canvas worker frames | Presented frames in interior window | Presents/s | Gap p99, ms |
+| --- | ---: | ---: | ---: | ---: |
+| Light | 724 | 660 | 120.010 | 8.679 |
+| Dark | 723 | 660 | 120.008 | 8.615 |
+
+This measures canvas presentation after the ownership changes. It has no frozen
+baseline, reference tablet, tier photo,
+three repeated gestures or per-frame camera matrices, so it does not qualify a
+tier or establish a before/after comparison. [Raw data and window rules](../../artifacts/unsafe-followup/verification/surface/desktop-moving-canvas-summary.json)
+and [build provenance](../../artifacts/unsafe-followup/verification/surface/build-provenance.json)
+identify this diagnostic.
 
 ## GTK tab-hover diagnostic
 

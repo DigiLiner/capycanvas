@@ -229,6 +229,12 @@ impl<T> Mutex<T> {
         }
     }
 
+    #[cfg(test)]
+    #[track_caller]
+    pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        self.inner.try_lock().map(|inner| MutexGuard { inner, _saved: LockStateGuard(acquire(self.rank, Location::caller())) })
+    }
+
     pub fn into_inner(self) -> T {
         self.inner.into_inner()
     }

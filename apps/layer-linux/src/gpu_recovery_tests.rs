@@ -43,6 +43,7 @@ fn check_gpu_failure_recovery(app: &adw::Application, color: layer_core::color::
     composition.color = color;
     composition.blend = composition.blend.for_depth(color.depth);
     let w = Workspace::with_project(app, Some((project, None)));
+    apply_fixture_theme(&w);
     w.window.present();
     until(
         || {

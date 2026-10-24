@@ -296,6 +296,17 @@ before destroying owned resources; pending submissions release their guards in
 reverse acquisition order. Android's `frontBufferSurfaceLifecycle` exercises
 native surfaces.
 
+`wgpu-surface-handoff.patch` keeps configuration excluded until acquisition has
+published its output and until HAL presentation has returned. Duplicate acquire
+is rejected before entering HAL. Presentation preparation retains the live
+output, then verifies that the same texture is still current before consuming
+it. Submission failure releases pending-write, submission and snatch guards
+before invoking device-loss callbacks. Presentation and acquisition release
+their presentation guards before those callbacks too. Initialization drains
+release the tracker lock first, preserving the declared lock order.
+Window-free noop-backend tests check the handoffs and callback reentry with
+`RUSTFLAGS='--cfg wgpu_validate_locks'` as well as ordinary locks.
+
 Remove each patch when an upstream release supplies its equivalent fix, and
 remove these snapshots when no patch remains necessary.
 

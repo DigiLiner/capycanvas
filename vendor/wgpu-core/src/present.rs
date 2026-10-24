@@ -165,8 +165,12 @@ impl Surface {
     pub fn get_current_texture(&self) -> Result<ResolvedSurfaceOutput, SurfaceError> {
         profiling::scope!("Surface::get_current_texture");
 
-        let (device, config) = if let Some(ref present) = *self.presentation.lock() {
+        let mut presentation = self.presentation.lock();
+        let (device, config) = if let Some(ref present) = *presentation {
             present.device.check_is_valid()?;
+            if present.acquired_texture.is_some() {
+                return Err(SurfaceError::AlreadyAcquired);
+            }
             (present.device.clone(), present.config.clone())
         } else {
             return Err(SurfaceError::NotConfigured);
@@ -217,14 +221,18 @@ impl Surface {
                     usage: wgt::TextureUses::COLOR_TARGET,
                     range: wgt::ImageSubresourceRange::default(),
                 };
-                let clear_view = unsafe {
+                let clear_view = match unsafe {
                     device
                         .raw()
                         .create_texture_view(ast.texture.as_ref().borrow(), &clear_view_desc)
-                }
-                .map_err(|e| device.handle_hal_error(e))?;
+                } {
+                    Ok(view) => view,
+                    Err(error) => {
+                        drop(presentation);
+                        return Err(device.handle_hal_error(error).into());
+                    }
+                };
 
-                let mut presentation = self.presentation.lock();
                 let present = presentation.as_mut().unwrap();
                 let needs_initialization = !ast.texture.retains_initialized_contents();
                 let texture = resource::Texture::new(
@@ -247,9 +255,6 @@ impl Surface {
                     .textures
                     .insert_single(&texture, wgt::TextureUses::UNINITIALIZED);
 
-                if present.acquired_texture.is_some() {
-                    return Err(SurfaceError::AlreadyAcquired);
-                }
                 present.acquired_texture = Some(texture.clone());
 
                 let status = if ast.suboptimal {
@@ -266,6 +271,7 @@ impl Surface {
                     hal::SurfaceError::Occluded => Status::Occluded,
                     hal::SurfaceError::Lost => Status::Lost,
                     hal::SurfaceError::Device(err) => {
+                        drop(presentation);
                         return Err(device.handle_hal_error(err).into());
                     }
                     hal::SurfaceError::Outdated => Status::Outdated,
@@ -305,8 +311,8 @@ impl Queue {
         profiling::scope!("Queue::present");
 
         let texture = {
-            let mut presentation = surface.presentation.lock();
-            let present = match presentation.as_mut() {
+            let presentation = surface.presentation.lock();
+            let present = match presentation.as_ref() {
                 Some(present) => present,
                 None => return Err(SurfaceError::NotConfigured),
             };
@@ -327,7 +333,7 @@ impl Queue {
 
             present
                 .acquired_texture
-                .take()
+                .clone()
                 .ok_or(SurfaceError::NothingToPresent)?
         };
 
@@ -337,6 +343,12 @@ impl Queue {
         self.prepare_surface_texture_for_present(&texture)?;
 
         let device = &self.device;
+        let mut presentation = surface.presentation.lock();
+        let present = presentation.as_mut().ok_or(SurfaceError::NotConfigured)?;
+        if !present.acquired_texture.as_ref().is_some_and(|current| Arc::ptr_eq(current, &texture)) {
+            return Err(SurfaceError::NothingToPresent);
+        }
+        drop(present.acquired_texture.take());
 
         let mut exclusive_snatch_guard = device.snatchable_lock.write();
         let inner = texture
@@ -358,6 +370,7 @@ impl Queue {
             }
             _ => unreachable!(),
         };
+        drop(presentation);
 
         match result {
             Ok(()) => Ok(Status::Good),

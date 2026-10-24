@@ -3,14 +3,19 @@ use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use core::{any::Any, sync::atomic::{AtomicBool, Ordering}, time::Duration};
 use crate::{instance::{Adapter, Surface}, lock::{rank, Mutex}};
 
-struct SurfaceAdapter(Box<dyn hal::DynAdapter>);
+type QueueProbe = dyn Fn(bool) -> Result<(), hal::SurfaceError> + Send + Sync;
+struct SurfaceAdapter(Box<dyn hal::DynAdapter>, Option<Arc<QueueProbe>>);
 impl hal::DynResource for SurfaceAdapter {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 }
 impl hal::DynAdapter for SurfaceAdapter {
     unsafe fn open(&self, features: wgt::Features, limits: &wgt::Limits, hints: &wgt::MemoryHints) -> Result<hal::DynOpenDevice, hal::DeviceError> {
-        unsafe { self.0.open(features, limits, hints) }
+        let mut opened = unsafe { self.0.open(features, limits, hints) }?;
+        if let Some(probe) = &self.1 {
+            opened.queue = Box::new(ProbeQueue(opened.queue, probe.clone()));
+        }
+        Ok(opened)
     }
     unsafe fn texture_format_capabilities(&self, format: wgt::TextureFormat) -> hal::TextureFormatCapabilities {
         unsafe { self.0.texture_format_capabilities(format) }
@@ -32,19 +37,45 @@ impl hal::DynAdapter for SurfaceAdapter {
     fn get_ordered_texture_usages(&self) -> wgt::TextureUses { self.0.get_ordered_texture_usages() }
 }
 
-struct ProbeSurface(Box<dyn Fn() -> Result<(), hal::SurfaceError> + Send + Sync>);
+struct ProbeQueue(Box<dyn hal::DynQueue>, Arc<QueueProbe>);
+impl hal::DynResource for ProbeQueue {
+    fn as_any(&self) -> &dyn Any { self.0.as_any() }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self.0.as_any_mut() }
+}
+impl hal::DynQueue for ProbeQueue {
+    unsafe fn submit(&self, commands: &[&dyn hal::DynCommandBuffer], textures: &[&dyn hal::DynSurfaceTexture], fence: (&dyn hal::DynFence, hal::FenceValue)) -> Result<(), hal::DeviceError> {
+        match (self.1)(false) {
+            Ok(()) => (),
+            Err(hal::SurfaceError::Device(error)) => return Err(error),
+            Err(error) => panic!("invalid submission error: {error:?}"),
+        }
+        unsafe { self.0.submit(commands, textures, fence) }
+    }
+    unsafe fn present(&self, _: &dyn hal::DynSurface, _: Box<dyn hal::DynSurfaceTexture>) -> Result<(), hal::SurfaceError> { (self.1)(true) }
+    unsafe fn get_timestamp_period(&self) -> f32 { unsafe { self.0.get_timestamp_period() } }
+    unsafe fn wait_for_idle(&self) -> Result<(), hal::DeviceError> { unsafe { self.0.wait_for_idle() } }
+}
+
+struct ProbeSurface {
+    configure: Box<dyn Fn() -> Result<(), hal::SurfaceError> + Send + Sync>,
+    acquire: Box<dyn Fn() -> Result<hal::DynAcquiredSurfaceTexture, hal::SurfaceError> + Send + Sync>,
+}
 impl hal::DynResource for ProbeSurface {
     fn as_any(&self) -> &dyn Any { self }
     fn as_any_mut(&mut self) -> &mut dyn Any { self }
 }
 impl hal::DynSurface for ProbeSurface {
-    unsafe fn configure(&self, _: &dyn hal::DynDevice, _: &hal::SurfaceConfiguration) -> Result<(), hal::SurfaceError> { (self.0)() }
+    unsafe fn configure(&self, _: &dyn hal::DynDevice, _: &hal::SurfaceConfiguration) -> Result<(), hal::SurfaceError> { (self.configure)() }
     unsafe fn unconfigure(&self, _: &dyn hal::DynDevice) {}
-    unsafe fn acquire_texture(&self, _: Option<Duration>, _: &dyn hal::DynFence) -> Result<hal::DynAcquiredSurfaceTexture, hal::SurfaceError> { Err(hal::SurfaceError::Timeout) }
+    unsafe fn acquire_texture(&self, _: Option<Duration>, _: &dyn hal::DynFence) -> Result<hal::DynAcquiredSurfaceTexture, hal::SurfaceError> { (self.acquire)() }
     unsafe fn discard_texture(&self, _: Box<dyn hal::DynSurfaceTexture>) {}
 }
 
 fn device() -> (Arc<Device>, Arc<crate::device::queue::Queue>) {
+    device_with_probe(None)
+}
+
+fn device_with_probe(probe: Option<Arc<QueueProbe>>) -> (Arc<Device>, Arc<crate::device::queue::Queue>) {
     let mut options = wgt::BackendOptions::default();
     options.noop.enable = true;
     let instance = unsafe { <hal::noop::Context as hal::Instance>::init(&hal::InstanceDescriptor {
@@ -54,7 +85,7 @@ fn device() -> (Arc<Device>, Arc<crate::device::queue::Queue>) {
     }) }.unwrap();
     let exposed = unsafe { <hal::noop::Context as hal::Instance>::enumerate_adapters(&instance, None) }.remove(0);
     let mut exposed: hal::DynExposedAdapter = exposed.into();
-    exposed.adapter = Box::new(SurfaceAdapter(exposed.adapter));
+    exposed.adapter = Box::new(SurfaceAdapter(exposed.adapter, probe));
     Arc::new(Adapter::new(exposed)).create_device_and_queue(&Default::default(), wgt::InstanceFlags::empty()).unwrap()
 }
 
@@ -68,7 +99,14 @@ fn configuration() -> wgt::SurfaceConfiguration<Vec<wgt::TextureFormat>> {
 }
 
 fn surface(probe: impl Fn() -> Result<(), hal::SurfaceError> + Send + Sync + 'static) -> Arc<Surface> {
-    let raw: Box<dyn hal::DynSurface> = Box::new(ProbeSurface(Box::new(probe)));
+    surface_with_acquire(probe, || Err(hal::SurfaceError::Timeout))
+}
+
+fn surface_with_acquire(
+    configure: impl Fn() -> Result<(), hal::SurfaceError> + Send + Sync + 'static,
+    acquire: impl Fn() -> Result<hal::DynAcquiredSurfaceTexture, hal::SurfaceError> + Send + Sync + 'static,
+) -> Arc<Surface> {
+    let raw: Box<dyn hal::DynSurface> = Box::new(ProbeSurface { configure: Box::new(configure), acquire: Box::new(acquire) });
     Arc::new(Surface {
         presentation: Mutex::new(rank::SURFACE_PRESENTATION, None),
         surface_per_backend: [(wgt::Backend::Noop, raw)].into_iter().collect(),
@@ -167,4 +205,103 @@ fn configure_preserves_ranked_presentation_snatch_submission_order() {
     });
     assert!(device.configure_surface(&surface, &configuration()).is_none());
     assert!(surface.presentation.lock().is_some());
+}
+
+fn acquired_texture() -> hal::DynAcquiredSurfaceTexture {
+    hal::DynAcquiredSurfaceTexture { texture: Box::new(hal::noop::Resource), suboptimal: false }
+}
+
+fn presentation_is_locked(surface: &Arc<Surface>) -> bool {
+    let surface = surface.clone();
+    std::thread::spawn(move || surface.presentation.try_lock().is_none()).join().unwrap()
+}
+
+#[test]
+fn acquisition_excludes_reconfiguration_and_rejects_duplicate_before_hal() {
+    use core::sync::atomic::AtomicUsize;
+    let (device, _queue) = device();
+    let slot = Arc::new(std::sync::Mutex::new(alloc::sync::Weak::<Surface>::new()));
+    let probe_slot = slot.clone();
+    let acquisitions = Arc::new(AtomicUsize::new(0));
+    let probe_acquisitions = acquisitions.clone();
+    let surface = surface_with_acquire(|| Ok(()), move || {
+        let surface = probe_slot.lock().unwrap().upgrade().unwrap();
+        assert!(presentation_is_locked(&surface), "configuration can enter during HAL acquisition");
+        probe_acquisitions.fetch_add(1, Ordering::Relaxed);
+        Ok(acquired_texture())
+    });
+    *slot.lock().unwrap() = Arc::downgrade(&surface);
+    assert!(device.configure_surface(&surface, &configuration()).is_none());
+    let output = surface.get_current_texture().unwrap();
+    assert!(matches!(surface.get_current_texture(), Err(crate::present::SurfaceError::AlreadyAcquired)));
+    assert_eq!(acquisitions.load(Ordering::Relaxed), 1);
+    surface.discard().unwrap();
+    drop(output);
+}
+
+#[test]
+fn acquisition_device_error_releases_presentation_before_callback() {
+    let (device, _queue) = device();
+    let surface = surface_with_acquire(|| Ok(()), || Err(hal::SurfaceError::Device(hal::DeviceError::Lost)));
+    assert!(device.configure_surface(&surface, &configuration()).is_none());
+    let called = Arc::new(AtomicBool::new(false));
+    let callback_called = called.clone();
+    let callback_surface = surface.clone();
+    *device.device_lost_closure.lock() = Some(Box::new(move |_, _| {
+        assert!(!presentation_is_locked(&callback_surface));
+        callback_called.store(true, Ordering::Release);
+    }));
+    assert!(surface.get_current_texture().is_err());
+    assert!(called.load(Ordering::Acquire));
+}
+
+#[test]
+fn presentation_retains_live_output_through_preparation_and_serializes_hal_handoff() {
+    for failure in [None, Some(false), Some(true)] {
+        let slot = Arc::new(std::sync::Mutex::new(alloc::sync::Weak::<Surface>::new()));
+        let probe_slot = slot.clone();
+        let submitted = Arc::new(AtomicBool::new(false));
+        let probe_submitted = submitted.clone();
+        let presented = Arc::new(AtomicBool::new(false));
+        let probe_presented = presented.clone();
+        let (device, queue) = device_with_probe(Some(Arc::new(move |is_present| {
+            let Some(surface) = probe_slot.lock().unwrap().upgrade() else { return Ok(()); };
+            if is_present {
+                assert!(presentation_is_locked(&surface), "configuration can enter during HAL presentation");
+                probe_presented.store(true, Ordering::Release);
+            } else {
+                let observer = surface.clone();
+                let retained = std::thread::spawn(move || observer.presentation.lock().as_ref().unwrap().acquired_texture.is_some()).join().unwrap();
+                assert!(retained, "configuration can retire the output during presentation preparation");
+                probe_submitted.store(true, Ordering::Release);
+            }
+            if failure == Some(is_present) { return Err(hal::SurfaceError::Device(hal::DeviceError::Lost)); }
+            Ok(())
+        })));
+        let surface = surface_with_acquire(|| Ok(()), || Ok(acquired_texture()));
+        *slot.lock().unwrap() = Arc::downgrade(&surface);
+        assert!(device.configure_surface(&surface, &configuration()).is_none());
+        let output = surface.get_current_texture().unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+        let callback_called = called.clone();
+        let callback_surface = surface.clone();
+        let callback_device = device.clone();
+        let callback_queue = queue.clone();
+        *device.device_lost_closure.lock() = Some(Box::new(move |_, _| {
+            assert!(!presentation_is_locked(&callback_surface));
+            assert!(callback_device.command_indices.try_write().is_some());
+            assert!(callback_queue.pending_writes.try_lock().is_some());
+            callback_called.store(true, Ordering::Release);
+        }));
+        assert_eq!(queue.present(&surface).is_err(), failure.is_some());
+        assert!(submitted.load(Ordering::Acquire));
+        assert_eq!(presented.load(Ordering::Acquire), failure != Some(false));
+        assert_eq!(called.load(Ordering::Acquire), failure.is_some());
+        if failure == Some(false) {
+            surface.release().unwrap();
+        }
+        assert!(surface.presentation.lock().as_ref().unwrap().acquired_texture.is_none());
+        drop(device.device_lost_closure.lock().take());
+        drop(output);
+    }
 }

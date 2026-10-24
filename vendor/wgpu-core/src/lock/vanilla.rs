@@ -35,6 +35,11 @@ impl<T> Mutex<T> {
         MutexGuard(self.0.lock())
     }
 
+    #[cfg(test)]
+    pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        self.0.try_lock().map(MutexGuard)
+    }
+
     pub fn into_inner(self) -> T {
         self.0.into_inner()
     }
