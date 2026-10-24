@@ -114,7 +114,7 @@ macro_rules! def_align {
                 ptr.cast()
             }
 
-            fn len(&self) -> usize {
+            unsafe fn len(_ptr: *const Self) -> usize {
                 N
             }
         }
@@ -285,8 +285,9 @@ unsafe impl<T: Copy, C: AlignedByteChunk> AsMutPtr for AlignedVec<T, C> {
         ptr
     }
 
-    fn len(&self) -> usize {
-        self.len()
+    unsafe fn len(ptr: *const Self) -> usize {
+        // SAFETY: The caller provides initialized metadata, separate from the element allocation.
+        unsafe { (*ptr).len }
     }
 }
 

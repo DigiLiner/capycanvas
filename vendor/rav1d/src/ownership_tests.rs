@@ -41,6 +41,19 @@ fn applying_grain_preserves_the_borrowed_picture_in_both_release_orders() {
     }
 }
 
+#[test]
+fn unreferencing_a_picture_leaves_no_raw_owners() {
+    let mut picture = Dav1dPicture::from(Rav1dPicture::default());
+    for _ in 0..2 {
+        // SAFETY: picture is an exclusively owned live C picture, including its cleared state.
+        unsafe { dav1d_picture_unref(Some(NonNull::from(&mut picture))); }
+        assert!(picture.itut_t35_ref.is_none());
+        assert!(picture.frame_hdr_ref.is_none());
+        assert!(picture.seq_hdr_ref.is_none());
+        assert!(picture.r#ref.is_none());
+    }
+}
+
 #[cfg(not(debug_assertions))]
 unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
     // SAFETY: the tests retain the AtomicUsize cookie through final unref and

@@ -218,10 +218,12 @@ unsafe impl AsMutPtr for Rav1dPictureDataComponentInner {
     }
 
     #[inline] // Inline so callers can see the assume.
-    fn len(&self) -> usize {
-        // SAFETY: We already checked this in `Self::new`.
-        unsafe { assume(self.len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0) };
-        self.len
+    unsafe fn len(ptr: *const Self) -> usize {
+        // SAFETY: The caller provides initialized metadata, separate from the pixels.
+        let len = unsafe { (*ptr).len };
+        // SAFETY: Construction checks the length's required multiple.
+        unsafe { assume(len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0) };
+        len
     }
 }
 

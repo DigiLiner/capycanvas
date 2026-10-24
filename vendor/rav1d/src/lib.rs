@@ -830,11 +830,9 @@ pub unsafe extern "C" fn dav1d_picture_unref(p: Option<NonNull<Dav1dPicture>>) {
     };
     // SAFETY: `p` is safe to read from.
     let p_c = unsafe { p.as_ptr().read() };
-    let mut p_rust = p_c.to::<Rav1dPicture>();
-    let _ = mem::take(&mut p_rust);
-    let p_c = p_rust.into();
     // SAFETY: `p` is safe to write to.
-    unsafe { p.as_ptr().write(p_c) };
+    unsafe { p.as_ptr().write(Dav1dPicture::default()) };
+    drop(Rav1dPicture::from(p_c));
 }
 
 /// # Safety
@@ -876,10 +874,9 @@ pub unsafe extern "C" fn dav1d_data_wrap(
         let buf = validate_input!(buf.ok_or(EINVAL))?;
         let ptr = validate_input!(ptr.ok_or(EINVAL))?;
         validate_input!((sz <= usize::MAX / 2, EINVAL))?;
-        // SAFETY: `ptr` is the start of a `&[u8]` slice of length `sz`.
-        let data = unsafe { slice::from_raw_parts(ptr.as_ptr(), sz) };
+        let data = NonNull::slice_from_raw_parts(ptr, sz);
         // SAFETY: `ptr`, and thus `data`, is valid to dereference until `free_callback` is called on it, which deallocates it.
-        let data = unsafe { Rav1dData::wrap(data.into(), free_callback, user_data) }?;
+        let data = unsafe { Rav1dData::wrap(data, free_callback, user_data) }?;
         let data_c = data.into();
         // SAFETY: `buf` is safe to write to.
         unsafe { buf.as_ptr().write(data_c) };

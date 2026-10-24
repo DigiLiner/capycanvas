@@ -1,0 +1,222 @@
+diff --git a/rav1d/include/dav1d/picture.rs b/rav1d/include/dav1d/picture.rs
+index 294cf4657..c72e86200 100644
+--- a/rav1d/include/dav1d/picture.rs
++++ b/rav1d/include/dav1d/picture.rs
+@@ -218,10 +218,12 @@ unsafe impl AsMutPtr for Rav1dPictureDataComponentInner {
+     }
+
+     #[inline] // Inline so callers can see the assume.
+-    fn len(&self) -> usize {
+-        // SAFETY: We already checked this in `Self::new`.
+-        unsafe { assume(self.len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0) };
+-        self.len
++    unsafe fn len(ptr: *const Self) -> usize {
++        // SAFETY: The caller provides initialized metadata, separate from the pixels.
++        let len = unsafe { (*ptr).len };
++        // SAFETY: Construction checks the length's required multiple.
++        unsafe { assume(len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0) };
++        len
+     }
+ }
+
+diff --git a/rav1d/src/align.rs b/rav1d/src/align.rs
+index 265d11a5f..f664ebc40 100644
+--- a/rav1d/src/align.rs
++++ b/rav1d/src/align.rs
+@@ -114,7 +114,7 @@ macro_rules! def_align {
+                 ptr.cast()
+             }
+
+-            fn len(&self) -> usize {
++            unsafe fn len(_ptr: *const Self) -> usize {
+                 N
+             }
+         }
+@@ -285,8 +285,9 @@ unsafe impl<T: Copy, C: AlignedByteChunk> AsMutPtr for AlignedVec<T, C> {
+         ptr
+     }
+
+-    fn len(&self) -> usize {
+-        self.len()
++    unsafe fn len(ptr: *const Self) -> usize {
++        // SAFETY: The caller provides initialized metadata, separate from the element allocation.
++        unsafe { (*ptr).len }
+     }
+ }
+
+diff --git a/rav1d/src/disjoint_mut.rs b/rav1d/src/disjoint_mut.rs
+index 41e9f426a..366859570 100644
+--- a/rav1d/src/disjoint_mut.rs
++++ b/rav1d/src/disjoint_mut.rs
+@@ -229,8 +229,8 @@ impl<'a, T: ?Sized + AsMutPtr, V: ?Sized> Deref for DisjointImmutGuard<'a, T, V>
+ ///
+ /// # Safety
+ ///
+-/// This trait must not ever create a mutable reference to the underlying slice,
+-/// as it may be (partially) immutably borrowed concurrently.
++/// Implementations must not create references to the underlying elements.
++/// Disjoint shared and mutable element borrows may already be active.
+ pub unsafe trait AsMutPtr {
+     type Target;
+
+@@ -242,9 +242,8 @@ pub unsafe trait AsMutPtr {
+     /// This method may dereference `ptr` as an immutable reference, so this
+     /// pointer must be safely dereferenceable.
+     unsafe fn as_mut_slice(ptr: *mut Self) -> *mut [Self::Target] {
+-        // SAFETY: The safety precondition of this method requires that we can
+-        // immutably dereference `ptr`.
+-        let len = unsafe { (*ptr).len() };
++        // SAFETY: The caller provides initialized collection metadata.
++        let len = unsafe { Self::len(ptr) };
+         // SAFETY: Mutably dereferencing and calling `.as_mut_ptr()` does not
+         // materialize a mutable reference to the underlying slice according to
+         // its documentated behavior, so we can still allow concurrent immutable
+@@ -265,14 +264,16 @@ pub unsafe trait AsMutPtr {
+     /// the underlying collection.
+     unsafe fn as_mut_ptr(ptr: *mut Self) -> *mut Self::Target;
+
+-    fn len(&self) -> usize;
++    /// # Safety
++    /// `ptr` must point to initialized collection metadata. Element borrows may
++    /// be active; reading the length must not materialize element references.
++    unsafe fn len(ptr: *const Self) -> usize;
+ }
+
+ impl<T: ?Sized + AsMutPtr> DisjointMut<T> {
+     pub fn len(&self) -> usize {
+-        // SAFETY: The inner cell is safe to access immutably. We never create a
+-        // mutable reference to the inner value.
+-        unsafe { (*self.inner.get()).len() }
++        // SAFETY: The collection metadata remains initialized and unmodified.
++        unsafe { T::len(self.inner.get()) }
+     }
+
+     pub fn is_empty(&self) -> bool {
+@@ -967,8 +968,9 @@ unsafe impl<V> AsMutPtr for Vec<V> {
+         unsafe { (*ptr).as_mut_ptr() }
+     }
+
+-    fn len(&self) -> usize {
+-        self.len()
++    unsafe fn len(ptr: *const Self) -> usize {
++        // SAFETY: Only Vec metadata is borrowed; its elements are in a separate allocation.
++        unsafe { (*ptr).len() }
+     }
+ }
+
+@@ -980,7 +982,7 @@ unsafe impl<V, const N: usize> AsMutPtr for [V; N] {
+         ptr.cast()
+     }
+
+-    fn len(&self) -> usize {
++    unsafe fn len(_ptr: *const Self) -> usize {
+         N
+     }
+ }
+@@ -993,8 +995,8 @@ unsafe impl<V> AsMutPtr for [V] {
+         ptr.cast()
+     }
+
+-    fn len(&self) -> usize {
+-        self.len()
++    unsafe fn len(ptr: *const Self) -> usize {
++        ptr.len()
+     }
+ }
+
+@@ -1008,8 +1010,9 @@ unsafe impl<V> AsMutPtr for Box<[V]> {
+         unsafe { addr_of_mut!(**ptr) }.cast()
+     }
+
+-    fn len(&self) -> usize {
+-        (**self).len()
++    unsafe fn len(ptr: *const Self) -> usize {
++        // SAFETY: The caller provides a live Box; raw projection retains slice metadata.
++        unsafe { ptr::addr_of!(**ptr) }.len()
+     }
+ }
+
+@@ -1044,6 +1047,28 @@ fn test_overlapping_mut() {
+     assert_eq!(guard1[2], 42);
+ }
+
++#[test]
++fn test_metadata_preserves_disjoint_mutable_borrows() {
++    fn check<T: ?Sized + AsMutPtr<Target = u8>>(v: &DisjointMut<T>) {
++        let mut left = v.index_mut(0..2);
++        let mut right = v.index_mut(2..4);
++        assert_eq!(v.len(), 4);
++        left[0] = 1;
++        right[0] = 2;
++        assert_eq!((&*left, &*right), (&[1, 0][..], &[2, 0][..]));
++    }
++    check(&DisjointMut::new([0u8; 4]));
++    check(&DisjointMut::new(vec![0u8; 4]));
++    check(&DisjointMut::new(vec![0u8; 4].into_boxed_slice()));
++    check(&DisjointMut::new(crate::src::align::Align64([0u8; 4])));
++    let array = DisjointMut::new([0u8; 4]);
++    let slice: &DisjointMut<[u8]> = &array;
++    check(slice);
++    let mut aligned = AlignedVec::<u8, crate::src::align::Align64<[u8; 64]>>::new();
++    aligned.resize(4, 0);
++    check(&DisjointMut::new(aligned));
++}
++
+ #[test]
+ fn test_pointer_write_disjoint_from_borrow() {
+     let v = DisjointMut::new([[0u8; 4]; 10]);
+diff --git a/rav1d/src/lib.rs b/rav1d/src/lib.rs
+index b5e4180cc..2726492a3 100644
+--- a/rav1d/src/lib.rs
++++ b/rav1d/src/lib.rs
+@@ -830,11 +830,9 @@ pub unsafe extern "C" fn dav1d_picture_unref(p: Option<NonNull<Dav1dPicture>>) {
+     };
+     // SAFETY: `p` is safe to read from.
+     let p_c = unsafe { p.as_ptr().read() };
+-    let mut p_rust = p_c.to::<Rav1dPicture>();
+-    let _ = mem::take(&mut p_rust);
+-    let p_c = p_rust.into();
+     // SAFETY: `p` is safe to write to.
+-    unsafe { p.as_ptr().write(p_c) };
++    unsafe { p.as_ptr().write(Dav1dPicture::default()) };
++    drop(Rav1dPicture::from(p_c));
+ }
+
+ /// # Safety
+@@ -876,10 +874,9 @@ pub unsafe extern "C" fn dav1d_data_wrap(
+         let buf = validate_input!(buf.ok_or(EINVAL))?;
+         let ptr = validate_input!(ptr.ok_or(EINVAL))?;
+         validate_input!((sz <= usize::MAX / 2, EINVAL))?;
+-        // SAFETY: `ptr` is the start of a `&[u8]` slice of length `sz`.
+-        let data = unsafe { slice::from_raw_parts(ptr.as_ptr(), sz) };
++        let data = NonNull::slice_from_raw_parts(ptr, sz);
+         // SAFETY: `ptr`, and thus `data`, is valid to dereference until `free_callback` is called on it, which deallocates it.
+-        let data = unsafe { Rav1dData::wrap(data.into(), free_callback, user_data) }?;
++        let data = unsafe { Rav1dData::wrap(data, free_callback, user_data) }?;
+         let data_c = data.into();
+         // SAFETY: `buf` is safe to write to.
+         unsafe { buf.as_ptr().write(data_c) };
+diff --git a/rav1d/src/ownership_tests.rs b/rav1d/src/ownership_tests.rs
+index 161b8dd95..97163b2f2 100644
+--- a/rav1d/src/ownership_tests.rs
++++ b/rav1d/src/ownership_tests.rs
+@@ -41,6 +41,19 @@ fn applying_grain_preserves_the_borrowed_picture_in_both_release_orders() {
+     }
+ }
+
++#[test]
++fn unreferencing_a_picture_leaves_no_raw_owners() {
++    let mut picture = Dav1dPicture::from(Rav1dPicture::default());
++    for _ in 0..2 {
++        // SAFETY: picture is an exclusively owned live C picture, including its cleared state.
++        unsafe { dav1d_picture_unref(Some(NonNull::from(&mut picture))); }
++        assert!(picture.itut_t35_ref.is_none());
++        assert!(picture.frame_hdr_ref.is_none());
++        assert!(picture.seq_hdr_ref.is_none());
++        assert!(picture.r#ref.is_none());
++    }
++}
++
+ #[cfg(not(debug_assertions))]
+ unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
+     // SAFETY: the tests retain the AtomicUsize cookie through final unref and

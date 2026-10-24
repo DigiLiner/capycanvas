@@ -125,6 +125,13 @@ copies expose their lifetime and exclusivity requirements as unsafe contracts.
 Release builds retain the decoder's existing disjoint-row scheduling contract;
 the overlap registry exists only with debug assertions.
 
+`rav1d-pointer-provenance.patch` reads collection lengths through raw metadata
+without borrowing active pixel elements. Packet wrapping preserves the caller's
+raw pointer provenance through final deallocation. Picture unref clears the C
+record directly so releasing a picture cannot publish a fresh empty metadata
+owner. Focused Miri regressions exercise disjoint array, slice, boxed and aligned
+storage, packet release, and repeated picture unref with leak checking enabled.
+
 ## WebP entropy-table admission
 
 `image-webp` is the published 0.2.4 crate, retaining its MIT/Apache licenses.

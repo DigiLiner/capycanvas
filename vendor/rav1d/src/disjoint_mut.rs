@@ -229,8 +229,8 @@ impl<'a, T: ?Sized + AsMutPtr, V: ?Sized> Deref for DisjointImmutGuard<'a, T, V>
 ///
 /// # Safety
 ///
-/// This trait must not ever create a mutable reference to the underlying slice,
-/// as it may be (partially) immutably borrowed concurrently.
+/// Implementations must not create references to the underlying elements.
+/// Disjoint shared and mutable element borrows may already be active.
 pub unsafe trait AsMutPtr {
     type Target;
 
@@ -242,9 +242,8 @@ pub unsafe trait AsMutPtr {
     /// This method may dereference `ptr` as an immutable reference, so this
     /// pointer must be safely dereferenceable.
     unsafe fn as_mut_slice(ptr: *mut Self) -> *mut [Self::Target] {
-        // SAFETY: The safety precondition of this method requires that we can
-        // immutably dereference `ptr`.
-        let len = unsafe { (*ptr).len() };
+        // SAFETY: The caller provides initialized collection metadata.
+        let len = unsafe { Self::len(ptr) };
         // SAFETY: Mutably dereferencing and calling `.as_mut_ptr()` does not
         // materialize a mutable reference to the underlying slice according to
         // its documentated behavior, so we can still allow concurrent immutable
@@ -265,14 +264,16 @@ pub unsafe trait AsMutPtr {
     /// the underlying collection.
     unsafe fn as_mut_ptr(ptr: *mut Self) -> *mut Self::Target;
 
-    fn len(&self) -> usize;
+    /// # Safety
+    /// `ptr` must point to initialized collection metadata. Element borrows may
+    /// be active; reading the length must not materialize element references.
+    unsafe fn len(ptr: *const Self) -> usize;
 }
 
 impl<T: ?Sized + AsMutPtr> DisjointMut<T> {
     pub fn len(&self) -> usize {
-        // SAFETY: The inner cell is safe to access immutably. We never create a
-        // mutable reference to the inner value.
-        unsafe { (*self.inner.get()).len() }
+        // SAFETY: The collection metadata remains initialized and unmodified.
+        unsafe { T::len(self.inner.get()) }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -967,8 +968,9 @@ unsafe impl<V> AsMutPtr for Vec<V> {
         unsafe { (*ptr).as_mut_ptr() }
     }
 
-    fn len(&self) -> usize {
-        self.len()
+    unsafe fn len(ptr: *const Self) -> usize {
+        // SAFETY: Only Vec metadata is borrowed; its elements are in a separate allocation.
+        unsafe { (*ptr).len() }
     }
 }
 
@@ -980,7 +982,7 @@ unsafe impl<V, const N: usize> AsMutPtr for [V; N] {
         ptr.cast()
     }
 
-    fn len(&self) -> usize {
+    unsafe fn len(_ptr: *const Self) -> usize {
         N
     }
 }
@@ -993,8 +995,8 @@ unsafe impl<V> AsMutPtr for [V] {
         ptr.cast()
     }
 
-    fn len(&self) -> usize {
-        self.len()
+    unsafe fn len(ptr: *const Self) -> usize {
+        ptr.len()
     }
 }
 
@@ -1008,8 +1010,9 @@ unsafe impl<V> AsMutPtr for Box<[V]> {
         unsafe { addr_of_mut!(**ptr) }.cast()
     }
 
-    fn len(&self) -> usize {
-        (**self).len()
+    unsafe fn len(ptr: *const Self) -> usize {
+        // SAFETY: The caller provides a live Box; raw projection retains slice metadata.
+        unsafe { ptr::addr_of!(**ptr) }.len()
     }
 }
 
@@ -1042,6 +1045,28 @@ fn test_overlapping_mut() {
 
     guard2[0] = 42;
     assert_eq!(guard1[2], 42);
+}
+
+#[test]
+fn test_metadata_preserves_disjoint_mutable_borrows() {
+    fn check<T: ?Sized + AsMutPtr<Target = u8>>(v: &DisjointMut<T>) {
+        let mut left = v.index_mut(0..2);
+        let mut right = v.index_mut(2..4);
+        assert_eq!(v.len(), 4);
+        left[0] = 1;
+        right[0] = 2;
+        assert_eq!((&*left, &*right), (&[1, 0][..], &[2, 0][..]));
+    }
+    check(&DisjointMut::new([0u8; 4]));
+    check(&DisjointMut::new(vec![0u8; 4]));
+    check(&DisjointMut::new(vec![0u8; 4].into_boxed_slice()));
+    check(&DisjointMut::new(crate::src::align::Align64([0u8; 4])));
+    let array = DisjointMut::new([0u8; 4]);
+    let slice: &DisjointMut<[u8]> = &array;
+    check(slice);
+    let mut aligned = AlignedVec::<u8, crate::src::align::Align64<[u8; 64]>>::new();
+    aligned.resize(4, 0);
+    check(&DisjointMut::new(aligned));
 }
 
 #[test]
