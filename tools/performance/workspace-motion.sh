@@ -32,7 +32,7 @@ printf '[org.gnome.desktop.wm.keybindings]\nactivate-window-menu=[]\n' >"$motion
 glib-compile-schemas "$motion_schema_dir"
 export GSETTINGS_SCHEMA_DIR="$motion_schema_dir" GSETTINGS_BACKEND=memory
 export WAYLAND_DISPLAY=layer-bench-motion
-export GDK_BACKEND=wayland GSK_RENDERER=vulkan GTK_A11Y=none
+export GDK_BACKEND=wayland GSK_RENDERER=vulkan GTK_A11Y=${GTK_A11Y:-none}
 if [[ "$motion_platform" == gtk ]]; then
     export GDK_DEBUG="${GDK_DEBUG:+$GDK_DEBUG:}no-portals:color-mgmt"
     export XDG_CONFIG_DIRS="$PWD/tools/performance/gtk-config:${XDG_CONFIG_DIRS:-/etc/xdg}"

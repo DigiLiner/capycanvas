@@ -247,7 +247,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectPackagePreview(mut env:
         Payload::Package {view,..} => view.preview().map(|p| p.pixels().as_ref()).unwrap_or(&[]),
         _ => &[],
     };
-    let result = crate::android::argb_array(&mut env, bytes);
+    let result = crate::android::argb_array(&mut env, bytes).map(jni::objects::JIntArray::into_raw);
     or_throw(&mut env,result,std::ptr::null_mut())
     })
 }

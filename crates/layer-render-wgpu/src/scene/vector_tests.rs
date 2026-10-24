@@ -236,9 +236,7 @@ fn crowded_vector_layer_drawing_frames() {
         let start = std::time::Instant::now();
         editor.undo().unwrap();
         let undo_perform = start.elapsed().as_secs_f64() * 1e3;
-        if count == 50_000 { unsafe { std::env::set_var("VECTOR_TRACE", "1") }; }
         let undo = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
-        unsafe { std::env::remove_var("VECTOR_TRACE") };
         let mut small = Vec::new();
         for k in 0..5u64 {
             let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![stroke(70_000 + k, &[[1500. + k as f64 * 40., 1500.], [1510. + k as f64 * 40., 1505.]], 4., [0.2, 0.7, 0.2, 1.])]);

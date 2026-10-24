@@ -35,7 +35,7 @@ pub extern "system" fn Java_art_capycanvas_Native_takeScopes(mut env: JNIEnv, _:
         let header = env.new_string(serde_json::json!({"plots": plots, "colors": colors}).to_string()).map_err(error)?;
         env.set_object_array_element(&result, 0, header).map_err(error)?;
         if let Some((_, bytes)) = image {
-            let pixels = unsafe { jni::objects::JIntArray::from_raw(crate::android::argb_array(&mut env, &bytes)?) };
+            let pixels = crate::android::argb_array(&mut env, &bytes)?;
             env.set_object_array_element(&result, 1, pixels).map_err(error)?;
         }
         Ok(result.into_raw())

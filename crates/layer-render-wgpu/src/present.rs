@@ -382,8 +382,7 @@ impl ViewportPresenter {
             ]
         });
         if self.proof_options != options {
-            let bytes = unsafe { std::slice::from_raw_parts(options.as_ptr().cast::<u8>(), 16) };
-            renderer.queue.write_buffer(&self.proof_uniform, 0, bytes);
+            renderer.queue.write_buffer(&self.proof_uniform, 0, options.map(u32::to_ne_bytes).as_flattened());
             self.proof_options = options;
         }
         Ok(())

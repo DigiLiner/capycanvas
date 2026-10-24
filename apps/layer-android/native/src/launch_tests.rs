@@ -21,11 +21,15 @@ fn android_launch_uses_supplied_preferences_before_first_view_without_gpu() {
 }
 #[test]
 fn every_jni_function_runs_inside_jni_entry() {
-    let sources = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).unwrap()
-        .map(|entry| entry.unwrap().path()).filter(|path| path.extension().is_some_and(|extension| extension == "rs"));
+    let mut pending = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
     let mut unguarded = Vec::new();
     let mut functions = 0;
-    for path in sources {
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            pending.extend(std::fs::read_dir(path).unwrap().map(|entry| entry.unwrap().path()));
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs") { continue; }
         let source = std::fs::read_to_string(&path).unwrap();
         for function in source.split("extern \"system\" fn ").skip(1) {
             functions += 1;

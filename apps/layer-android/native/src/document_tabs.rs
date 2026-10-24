@@ -11,7 +11,7 @@ use jni::{
 };
 use layer_host::{
     Renderer,
-    window::{Activation, DocumentWindow, TabRequest, PreparedClose},
+    window::{Activation, DocumentWindow, TabRequest},
 };
 use layer_ui::UiSession;
 
@@ -77,7 +77,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentPrepareClose(mut env: 
     let result = (|| {
         let a = unsafe {app(handle)};
         let options = a.host.renderer_options(Some(a.cache_directory.clone().into()));
-        a.window.prepare_close(&mut a.host, options).map(|job|Box::into_raw(Box::new(job)) as jlong)
+        a.window.prepare_close(&mut a.host, options).map(|job|Box::into_raw(Box::new(crate::document_close::CloseJob(Some(job)))) as jlong)
     })();
     or_throw(&mut env,result,0)
     })
@@ -87,8 +87,8 @@ pub extern "system" fn Java_art_capycanvas_Native_documentPrepareClose(mut env: 
 pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) -> jlong {
     crate::jni_entry!(env, handle, {
     let a = unsafe {app(handle)};
-    let prepared = *unsafe {Box::from_raw(job as *mut PreparedClose)};
-    let result = a.window.commit_close(&mut a.host,prepared,|_|{}).map(|(activation,_)| {
+    let prepared = unsafe { &mut *(job as *mut crate::document_close::CloseJob) };
+    let result = prepared.commit(&mut a.window, &mut a.host).map(|activation| {
         a.document_retired();a.blank_presented=false;
         Box::into_raw(Box::new(activation)) as jlong
     });
@@ -97,11 +97,13 @@ pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(mut env: J
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_documentCancelPreparedClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe {app(handle)};
-    let prepared = *unsafe {Box::from_raw(job as *mut PreparedClose)};
-    fail(&mut env,a.window.cancel_close(&mut a.host,prepared))
+pub extern "system" fn Java_art_capycanvas_Native_documentReleasePreparedClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) {
+    crate::jni_entry!(env, {
+    let prepared = *unsafe {Box::from_raw(job as *mut crate::document_close::CloseJob)};
+    if let Some(prepared) = prepared.0 {
+        let a = unsafe {app(handle)};
+        if a.host.poisoned().is_none() { fail(&mut env,a.window.cancel_close(&mut a.host,prepared)); }
+    }
     })
 }
 #[unsafe(no_mangle)]

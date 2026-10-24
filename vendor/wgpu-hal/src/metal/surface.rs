@@ -17,17 +17,17 @@ use parking_lot::{Mutex, RwLock};
 
 use super::OsFeatures;
 
-/// Walks up from `start` to the `NSWindow` hosting this layer: the first ancestor
-/// layer with a delegate is the backing `NSView`, and we return its `window`.
-/// `None` off the main thread or if no ancestor has a delegate.
+/// Finds the backing NSView's window among this layer and its ancestors.
+/// Returns None off the main thread or without a view delegate.
 #[cfg(target_os = "macos")]
 fn hosting_window(
     start: Retained<objc2_quartz_core::CALayer>,
 ) -> Option<Retained<objc2::runtime::NSObject>> {
     let _main_thread = objc2::MainThreadMarker::new()?;
+    let view_class = objc2::runtime::AnyClass::get(c"NSView")?;
     let mut current = Some(start);
     while let Some(layer) = current {
-        if let Some(delegate) = layer.delegate() {
+        if let Some(delegate) = layer.delegate().filter(|delegate| delegate.isKindOfClass(view_class)) {
             return unsafe { objc2::msg_send![&*delegate, window] };
         }
         current = layer.superlayer();

@@ -87,12 +87,14 @@ pub struct CapyProjectPreview {
 /// Worker only, after successful preparation. Borrowed pixels remain readable
 /// until the next mutating job call/free; copy them before returning to the UI.
 /// Index 0 is before, 1 after and 2 the encoded SDR base.
+/// Output must be aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_preview_at(task: *const CapyProjectTask, index: u32, output: *mut CapyProjectPreview) -> i32 {
-    let (Some(task), Some(output)) = (unsafe { task.as_ref() }, unsafe { output.as_mut() }) else { return -1; };
+    let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
+    if output.is_null() { return -1; }
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
     let previews = match &state.payload { Payload::Color(c) => c.previews(), Payload::Source(s) => s.previews(), Payload::Export(e) => e.previews(), _ => return -1 };
     let Some(preview) = previews.get(index as usize) else { return -1; };
-    *output = CapyProjectPreview { width: preview.extent[0], height: preview.extent[1], pixels: preview.pixels.as_ptr(), count: preview.pixels.len() };
+    unsafe { output.write(CapyProjectPreview { width: preview.extent[0], height: preview.extent[1], pixels: preview.pixels.as_ptr(), count: preview.pixels.len() }); }
     0
 }

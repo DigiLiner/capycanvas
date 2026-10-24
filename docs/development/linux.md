@@ -315,6 +315,12 @@ private-compositor runner:
 bash tools/performance/workspace-motion.sh gtk --native-test=native_canvas_bar_modes
 ```
 
+Accessibility assertions need GTK's test backend at process startup. Run
+`native_layers_control_copy`, `native_zoom_settings_and_canvas_preferences` and
+`native_live_language_switching` with `GTK_A11Y=test` before the runner command.
+Both private-display runners preserve this variable; other runs default to
+`GTK_A11Y=none`. Tests never mutate the process environment after startup.
+
 `native_three_finger_scrub --tablet` sends three native touch contacts horizontally,
 vertically and diagonally in both themes. It checks clearing before release,
 one clear per scrub, unchanged camera and exact document pixels through Undo/Redo:

@@ -3,7 +3,7 @@
 use crate::app::App;
 use jni::{
     JNIEnv,
-    objects::{JClass, JDoubleArray, JObject, JObjectArray, JString},
+    objects::{JClass, JDoubleArray, JIntArray, JObject, JObjectArray, JString},
     sys::{jboolean, jfloat, jint, jintArray, jlong, jstring},
 };
 use layer_host::scene::SceneDisplay;
@@ -767,12 +767,12 @@ pub(crate) fn string(env: &mut JNIEnv, result: Result<String, String>) -> jstrin
     let result = result.and_then(|value| env.new_string(value).map(|value| value.into_raw()).map_err(error));
     or_throw(env, result, std::ptr::null_mut())
 }
-pub(crate) fn argb_array(env: &mut JNIEnv, rgba: &[u8]) -> Result<jintArray, String> {
+pub(crate) fn argb_array<'local>(env: &mut JNIEnv<'local>, rgba: &[u8]) -> Result<JIntArray<'local>, String> {
     let pixels: Vec<i32> = rgba.chunks_exact(4)
         .map(|p| i32::from_be_bytes([p[3], p[0], p[1], p[2]])).collect();
     let array = env.new_int_array(pixels.len() as i32).map_err(error)?;
     env.set_int_array_region(&array, 0, &pixels).map_err(error)?;
-    Ok(array.into_raw())
+    Ok(array)
 }
 pub(crate) fn read(env: &mut JNIEnv, value: &JString) -> Result<String, String> {
     env.get_string(value).map(Into::into).map_err(error)
@@ -1667,7 +1667,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorFieldPixels(
         if !valid {
             return Err("Unsupported color field raster".into());
         }
-        argb_array(&mut env, &rgba)
+        argb_array(&mut env, &rgba).map(JIntArray::into_raw)
     })();
     match result {
         Ok(array) => array,

@@ -491,7 +491,6 @@ fn assert_zoom_center_copy(w: &Rc<Workspace>, check: &gtk::CheckButton) {
 #[test]
 #[ignore = "private Wayland display, hardware GPU and native pointer input"]
 fn native_zoom_settings_and_canvas_preferences() {
-    unsafe { std::env::set_var("GTK_A11Y", "test"); }
     let app = native_test_app("art.capycanvas.ZoomSettings");
     let w = fixture_workspace(&app);
     w.window.maximize();

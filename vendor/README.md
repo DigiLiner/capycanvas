@@ -254,6 +254,32 @@ native surfaces.
 Remove each patch when an upstream release supplies its equivalent fix, and
 remove these snapshots when no patch remains necessary.
 
+`wgpu-unsafe-boundaries.patch` ties `WriteOnly::from_mut` to its input borrow,
+with compile-fail checks for escaping owners and conflicting writes. The D3D12
+pipeline stream uses aligned `MaybeUninit` storage and raw copies so padded
+descriptors never become initialized byte slices. Its tests read tags and typed
+fields without inspecting padding. Vulkan debug labels use checked conversion
+with the same first-NUL truncation policy as object names.
+
+The patch also retains the actual DXGI exception-handler registration token in
+a device-owned guard, including failed device creation. The callback reads the
+pointed-to ANSI or UTF-16 payload, handles short diagnostic prefixes, and contains
+panics across the full callback. Metal's main-thread hosting-window query skips
+non-view delegates while walking ancestor layers.
+
+Run the lifetime and label regressions from the repository root:
+
+```sh
+cargo test --manifest-path vendor/wgpu-types/Cargo.toml --lib write_only::tests
+cargo test --manifest-path vendor/wgpu-types/Cargo.toml --doc write_only
+cargo test --manifest-path vendor/wgpu-hal/Cargo.toml --features vulkan --lib \
+  vulkan::temp_tests --config 'patch.crates-io.wgpu-types.path="vendor/wgpu-types"'
+```
+
+On Windows, run the `dx12::pipeline_desc::tests` and
+`auxil::dxgi::exception::tests` HAL tests with the `dx12` feature. Metal delegate
+journeys need macOS; cross-target checks validate compilation only.
+
 `wgpu-webgpu-async-pipelines.patch` exposes WebGPU-only asynchronous render and
 compute pipeline creation. Both immediate and asynchronous APIs use the same
 descriptor conversion; the new calls copy descriptor data before returning an

@@ -694,14 +694,16 @@ impl Service {
         if let Some((_, _, candidate)) = self.restored_drawing.take() {
             self.queue(Job::RetireSession(candidate));
         }
+        let mut result = Ok(());
         while let Some(job) = self.deferred.pop_front() {
-            self.send.send(job).map_err(|_| "Session worker stopped")?;
+            if self.send.send(job).is_err() { result = Err("Session worker stopped".into()); }
         }
         let _ = self.send.send(Job::Stop);
         if let Some(thread) = self.thread.take() {
-            thread.join().map_err(|_| "Session shutdown failed")?;
+            let joined = thread.join().map_err(|_| "Session shutdown failed".into());
+            result = result.and(joined);
         }
-        Ok(())
+        result
     }
 }
 impl Drop for Service {
@@ -715,6 +717,24 @@ mod tests {
     use super::*;
     use crate::test_support::TempDir;
     use layer_ui::{Platform, UiAction};
+    #[test]
+    fn failed_deferred_send_still_joins_the_recovery_worker() {
+        let (failed, observed) = mpsc::channel();
+        let mut service = Service::open(move || {
+            failed.send(()).unwrap();
+            std::panic::resume_unwind(Box::new(()));
+        }).unwrap();
+        observed.recv_timeout(Duration::from_secs(30)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !service.thread.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        service.deferred.push_back(Job::Retry);
+        assert!(service.stop().is_err());
+        assert!(service.thread.is_none());
+        service.stop().unwrap();
+    }
     fn capture() -> SessionCapture {
         UiSession::from_project(Renderer(None),layer_ui::new_drawing(32,24,&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),None,[32,24],Platform::Windows).unwrap().capture_session().unwrap()
     }

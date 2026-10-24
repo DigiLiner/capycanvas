@@ -113,18 +113,19 @@ pub unsafe extern "C" fn capy_apple_take_filter_previews(
 }
 
 /// # Safety
-/// Both pointers must be valid. Output views are borrowed until previews_free.
+/// Previews must be live; output must be aligned and exclusively writable.
+/// Output views are borrowed until previews_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_filter_previews_read(
     previews: *const CapyFilterPreviews,
     output: *mut CapyFilterPreviewInfo,
 ) {
-    let (Some(previews), Some(output)) = (unsafe { previews.as_ref() }, unsafe { output.as_mut() })
-    else {
+    let Some(previews) = (unsafe { previews.as_ref() }) else {
         return;
     };
+    if output.is_null() { return; }
     let image = &previews.atlas.image;
-    *output = CapyFilterPreviewInfo {
+    unsafe { output.write(CapyFilterPreviewInfo {
         request: image.request_id,
         width: image.width,
         height: image.height,
@@ -132,7 +133,7 @@ pub unsafe extern "C" fn capy_filter_previews_read(
         pixels: image.bytes.as_ptr(),
         count: image.bytes.len(),
         filters: previews.filters.as_ptr(),
-    };
+    }); }
 }
 
 /// # Safety

@@ -122,9 +122,30 @@ impl<'a, T: ?Sized> WriteOnly<'a, T> {
     /// write_numbers(wgpu::WriteOnly::from_mut(&mut buf));
     /// assert_eq!(buf, [0, 1, 2, 3]);
     /// ```
+    ///
+    /// ```compile_fail
+    /// fn escape() -> wgpu_types::WriteOnly<'static, u32> {
+    ///     let mut owner = Box::new(17);
+    ///     wgpu_types::WriteOnly::from_mut(&mut *owner)
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// let mut value = 0;
+    /// let writer = wgpu_types::WriteOnly::from_mut(&mut value);
+    /// value = 1;
+    /// writer.write(2);
+    /// ```
+    ///
+    /// ```compile_fail
+    /// fn escape() -> wgpu_types::WriteOnly<'static, [u32]> {
+    ///     let mut values = [0, 1];
+    ///     wgpu_types::WriteOnly::from_mut(&mut values[..])
+    /// }
+    /// ```
     #[inline]
     #[must_use]
-    pub const fn from_mut(reference: &mut T) -> Self {
+    pub const fn from_mut(reference: &'a mut T) -> Self {
         // SAFETY: `&mut`’s safety conditions imply ours.
         // FIXME: Use `NonNull::from_mut()` when MSRV ≥ 1.89.0
         unsafe { Self::new(NonNull::new_unchecked(&raw mut *reference)) }
@@ -1010,10 +1031,11 @@ mod tests {
         // RangeBounds isn’t dyn compatible, so we can’t make a list of test cases and have to
         // use a generic function.
         fn assert_oob(range: impl RangeBounds<usize> + UnwindSafe + fmt::Debug + Clone) {
+            let mut values = ['a', 'b', 'c', 'd'];
             let panic_message_1 = expect_panic({
                 let range = range.clone();
                 let target: WriteOnly<'_, [char]> =
-                    WriteOnly::from_mut(['a', 'b', 'c', 'd'].as_mut_slice());
+                    WriteOnly::from_mut(values.as_mut_slice());
                 || {
                     _ = { target }.slice(range);
                 }
@@ -1028,7 +1050,7 @@ mod tests {
             let panic_message_2 = expect_panic({
                 let range = range.clone();
                 let target: WriteOnly<'_, [char]> =
-                    WriteOnly::from_mut(['a', 'b', 'c', 'd'].as_mut_slice());
+                    WriteOnly::from_mut(values.as_mut_slice());
                 || {
                     _ = target.into_slice(range);
                 }

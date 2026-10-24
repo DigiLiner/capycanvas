@@ -985,13 +985,13 @@ impl DocumentService {
         self.papers.stop();
         if let Some(package)=&self.package {package.cancelled.store(true,Ordering::Release);}
         if let Some(cancelled) = self.active.as_ref().and_then(|a| a.cancelled.as_ref()) { cancelled.store(true, Ordering::Release); }
-        if let Some(recovery) = &mut self.recovery { recovery.stop()?; }
+        let recovery = self.recovery.as_mut().map_or(Ok(()), |recovery| recovery.stop());
         self.tone.clear();
         let proof = self.proof.stop();
         if let Some((_, control)) = &self.workflow_control { control.cancel(); }
         if let Some(task) = self.workflow.take() { self.worker.retire_workflow(task); }
         let worker = self.worker.stop();
-        proof.and(worker)
+        recovery.and(proof).and(worker)
     }
 }
 
@@ -1010,6 +1010,14 @@ mod tests {
         let mut service = DocumentService::open_localized(host.session.localization(), || {}).unwrap();
         assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
         assert_eq!(service.window.view(&host, 900.)["tabs"][0]["title"], "無題 1");
+        service.stop_worker().unwrap();
+    }
+    #[test]
+    fn recovery_shutdown_failure_still_joins_the_document_worker() {
+        let mut service = DocumentService::open(|| {}).unwrap();
+        service.recovery = Some(crate::recovery::Service::open(|| std::panic::resume_unwind(Box::new(()))).unwrap());
+        assert!(service.stop_worker().is_err());
+        assert!(service.worker.thread.is_none());
         service.stop_worker().unwrap();
     }
     #[test]

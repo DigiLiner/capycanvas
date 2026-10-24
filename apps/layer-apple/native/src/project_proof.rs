@@ -28,13 +28,13 @@ pub unsafe extern "C" fn capy_apple_proof_task(
         };
         let session = &app.host.session;
         let job = ProofPreparation::begin(session, (request != 0).then_some(request), recipe).map_err(|reason|reason.proof_message(session.localization()))?;
-        Ok(CapyProjectTask::new(
+        Ok(Box::into_raw(CapyProjectTask::new(
             Payload::Proof(Box::new(Task { job, lut: None })),
             session.state().document_file.epoch,
             session.engine().document().revision,
             None,
             session.localization().clone(),
-        ))
+        )))
     })
     .unwrap_or(std::ptr::null_mut())
 }
@@ -61,28 +61,24 @@ pub unsafe extern "C" fn capy_project_proof_build(task: *const CapyProjectTask) 
 /// # Safety
 /// Worker only, after build. Borrowed bytes remain valid until task release;
 /// copy them before another task operation. A null result means no preservation.
+/// Outputs are aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_proof_preservation(
     task: *const CapyProjectTask,
     bytes: *mut *const u8,
     count: *mut usize,
 ) -> i32 {
-    let (Some(task), Some(bytes), Some(count)) = (
-        unsafe { task.as_ref() },
-        unsafe { bytes.as_mut() },
-        unsafe { count.as_mut() },
-    ) else {
+    let Some(task) = (unsafe { task.as_ref() }) else {
         return -1;
     };
-    *bytes = std::ptr::null();
-    *count = 0;
+    if bytes.is_null() || count.is_null() { return -1; }
+    unsafe { bytes.write(std::ptr::null()); count.write(0); }
     task.perform_inner(|payload| {
         let Payload::Proof(proof) = payload else {
             return Err("Not a proof task".into());
         };
         if let Some(value) = proof.job.preservation() {
-            *bytes = value.as_ptr();
-            *count = value.len();
+            unsafe { bytes.write(value.as_ptr()); count.write(value.len()); }
         }
         Ok(())
     })
@@ -132,7 +128,7 @@ pub unsafe extern "C" fn capy_apple_proof_apply(
         if proof.job.preservation().is_some() && !preserved {
             return Err("Save the original in Saved Profiles before replacing it".into());
         }
-        if unsafe { capy_project_begin_commit(task) } < 0 {
+        if task.begin_commit() < 0 {
             return Err("Proof preparation cancelled".into());
         }
         let previous = app.host.session.state().revision;

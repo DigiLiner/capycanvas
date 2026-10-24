@@ -53,12 +53,12 @@ impl super::Device {
         compiler_container: Arc<shader_compilation::CompilerContainer>,
         backend_options: wgt::Dx12BackendOptions,
     ) -> Result<Self, crate::DeviceError> {
-        if private_caps
+        let exception_handler = if private_caps
             .instance_flags
             .contains(wgt::InstanceFlags::VALIDATION)
         {
-            auxil::dxgi::exception::register_exception_handler();
-        }
+            auxil::dxgi::exception::Registration::new()
+        } else { None };
 
         let mem_allocator =
             suballocation::Allocator::new(&raw, memory_hints, memory_budget_thresholds)?;
@@ -204,6 +204,7 @@ impl super::Device {
         };
 
         Ok(super::Device {
+            _exception_handler: exception_handler,
             raw: raw.clone(),
             present_queue,
             idler: super::Idler { fence: idle_fence },

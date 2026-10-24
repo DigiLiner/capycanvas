@@ -6,6 +6,7 @@ use crate::shared_controls::CapyLocalization;
 /// Stateless shared numeric parsing and display projection. No document host is accessed.
 /// # Safety
 /// The input must be a readable, NUL-terminated UTF-8 JSON string for this call.
+/// Context is a live localization handle, borrowed without concurrent free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_color_ui(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
     if input.is_null() { return std::ptr::null_mut(); }
@@ -20,6 +21,7 @@ pub unsafe extern "C" fn capy_color_ui(context: *const CapyLocalization, input: 
 
 /// Shared export form normalization; file validation happens on the worker.
 /// # Safety
+/// Context is a live localization handle, borrowed without concurrent free.
 /// input is a readable NUL-terminated UTF-8 JSON string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_export_draft(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {

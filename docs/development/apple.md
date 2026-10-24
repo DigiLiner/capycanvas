@@ -212,6 +212,13 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
 
 ## Editor integration
 
+The bridge converts each serial-owned app pointer once per operation. Recovery
+preparation uses the same mutable owner through a normal Rust reborrow. Plain
+write-only FFI outputs accept aligned, exclusively writable uninitialized storage;
+the bridge writes whole values without first constructing initialized references.
+Borrowed preview pointers remain valid only until the documented next task
+mutation or release.
+
 - **Shared gates and defaults.** Check `CommandId::available_on`,
   `HeaderItem::available_on`, `Platform` capabilities and `layout_presets.rs`.
   Preserve absent optional identities in native projections; Quick Mask's row ID

@@ -135,6 +135,13 @@ guarantees.
 
 ## Storage
 
+Prepared drawing-close jobs remain allocated until
+`documentReleasePreparedClose`. Commit validates the shared close fence before
+taking the payload; release cancels a remaining payload or frees an already
+committed job. The controller releases the job in its non-cancellable cleanup,
+including after JNI errors. Release still frees the allocation for a poisoned
+host without dispatching another document action.
+
 `AppStorage` passes the platform folders to shared Rust, and
 `layer_host::StorageRoots` names each store within them:
 

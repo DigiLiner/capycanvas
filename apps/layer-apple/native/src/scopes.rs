@@ -49,11 +49,13 @@ pub unsafe extern "C" fn capy_apple_take_scopes(app: *mut CapyApple) -> *mut Cap
 }
 
 /// # Safety
-/// Both pointers must be valid. Output views are borrowed until scopes_free.
+/// Scopes must be live; output must be aligned and exclusively writable.
+/// Output views are borrowed until scopes_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_scopes_read(scopes: *const CapyScopes, output: *mut CapyScopeInfo) {
-    let (Some(scopes), Some(output)) = (unsafe { scopes.as_ref() }, unsafe { output.as_mut() }) else { return; };
-    *output = CapyScopeInfo { plots: scopes.plots.as_ptr(), pixels: scopes.pixels.as_ptr(), count: scopes.pixels.len() };
+    let Some(scopes) = (unsafe { scopes.as_ref() }) else { return; };
+    if output.is_null() { return; }
+    unsafe { output.write(CapyScopeInfo { plots: scopes.plots.as_ptr(), pixels: scopes.pixels.as_ptr(), count: scopes.pixels.len() }); }
 }
 
 /// # Safety

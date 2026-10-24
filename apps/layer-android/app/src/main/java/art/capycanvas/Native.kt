@@ -107,7 +107,7 @@ internal object Native {
     @JvmStatic external fun sessionHydrate(handle: Long, task: Long, id: Long): Long
     @JvmStatic external fun documentPrepareClose(handle: Long): Long
     @JvmStatic external fun documentCommitClose(handle: Long, job: Long): Long
-    @JvmStatic external fun documentCancelPreparedClose(handle: Long, job: Long)
+    @JvmStatic external fun documentReleasePreparedClose(handle: Long, job: Long)
     @JvmStatic external fun sessionFree(task: Long)
     @JvmStatic external fun sessionManifestRead(path: String): String
     @JvmStatic external fun sessionManifestWrite(path: String, value: String): String

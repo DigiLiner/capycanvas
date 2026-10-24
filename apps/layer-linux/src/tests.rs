@@ -14153,7 +14153,6 @@ fn native_preferences_text_menu_live_language() {
 #[test]
 #[ignore = "private display and hardware GPU live language switching"]
 fn native_live_language_switching() {
-    unsafe { std::env::set_var("GTK_A11Y", "test"); }
     let artifacts = std::env::var("LAYER_TEST_ARTIFACTS").ok().map(std::path::PathBuf::from);
     if let Some(path) = &artifacts { std::fs::create_dir_all(path).unwrap(); }
     let input = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").map(|_| RefCell::new(RemoteInput::new().settle_ms(0).timeout_secs(30)));

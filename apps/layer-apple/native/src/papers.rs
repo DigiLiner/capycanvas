@@ -115,9 +115,10 @@ pub unsafe extern "C" fn capy_paper_previews_count(previews: *const CapyPaperPre
 /// previews is live; output pointers are writable. Borrowed bytes remain valid until previews_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_paper_previews_read(previews: *const CapyPaperPreviews, index: usize, bytes: *mut *const u8, count: *mut usize) -> u32 {
-    let (Some(previews), Some(bytes), Some(count)) = (unsafe { previews.as_ref() }, unsafe { bytes.as_mut() }, unsafe { count.as_mut() }) else { return 0 };
+    let Some(previews) = (unsafe { previews.as_ref() }) else { return 0 };
+    if bytes.is_null() || count.is_null() { return 0; }
     let Some(Some(image)) = previews.images.get(index) else { return 0 };
-    *bytes = image.as_ptr(); *count = image.len(); layer_core::paper::PREVIEW_SIZE as u32
+    unsafe { bytes.write(image.as_ptr()); count.write(image.len()); } layer_core::paper::PREVIEW_SIZE as u32
 }
 /// # Safety
 /// previews is owned exactly once; all readers finished. Drop on the image/file worker.

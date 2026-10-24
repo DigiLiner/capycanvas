@@ -35,6 +35,8 @@ mod android;
 mod app;
 #[cfg(any(target_os = "android", test))]
 mod launch;
+#[cfg(any(target_os = "android", test))]
+mod document_close;
 #[cfg(target_os = "android")]
 mod workspaces;
 

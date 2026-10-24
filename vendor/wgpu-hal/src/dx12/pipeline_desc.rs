@@ -12,7 +12,7 @@
 //! consequences if it is written incorrectly. It has been isolated to this file for
 //! that reason.
 
-use core::{ffi::c_void, mem::ManuallyDrop, ptr::NonNull};
+use core::{ffi::c_void, mem::{ManuallyDrop, MaybeUninit}, ptr::NonNull};
 
 use alloc::vec::Vec;
 use windows::Win32::Graphics::Direct3D12::*;
@@ -103,7 +103,7 @@ implement_stream_object! { unsafe D3D12_VIEW_INSTANCING_DESC => D3D12_PIPELINE_S
 /// See <https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_pipeline_state_stream_desc>
 /// for more information.
 pub(super) struct RenderPipelineStateStream<'a> {
-    bytes: Vec<u8>,
+    words: Vec<MaybeUninit<u64>>,
     _marker: core::marker::PhantomData<&'a ()>,
 }
 
@@ -117,36 +117,28 @@ impl<'a> RenderPipelineStateStream<'a> {
         let members = 20; // Approximate number of members we might push
         let capacity = size_of_stream_desc + members * 8; // Extra space for tags and alignment
         Self {
-            bytes: Vec::with_capacity(capacity),
+            words: Vec::with_capacity(capacity.div_ceil(8)),
             _marker: core::marker::PhantomData,
         }
     }
 
-    /// Align the internal byte buffer to the given alignment,
-    /// padding with zeros as necessary.
-    fn align_to(&mut self, alignment: usize) {
-        let aligned_length = self.bytes.len().next_multiple_of(alignment);
-        self.bytes.resize(aligned_length, 0);
-    }
-
     /// Adds a subobject to the pipeline state stream.
     fn add_object<T: RenderPipelineStreamObject>(&mut self, object: T) {
-        // Ensure 8-byte alignment for the subobject start.
-        self.align_to(8);
-
-        // Append the type tag (u32)
+        assert!(align_of::<T>() <= align_of::<u64>());
+        let tag_offset = self.words.len() * 8;
+        let data_offset = (tag_offset + 4).next_multiple_of(align_of::<T>());
+        let words = (data_offset + size_of::<T>()).div_ceil(8);
+        self.words.resize_with(words, MaybeUninit::zeroed);
         let tag: u32 = T::SUBOBJECT_TYPE.0 as u32;
-        self.bytes.extend_from_slice(&tag.to_ne_bytes());
-
-        // Align the data to its natural alignment.
-        self.align_to(align_of_val::<T>(&object));
-
-        // Append the data itself, as raw bytes
-        let data_ptr: *const T = &object;
-        let data_u8_ptr: *const u8 = data_ptr.cast::<u8>();
-        let data_size = size_of_val::<T>(&object);
-        let slice = unsafe { core::slice::from_raw_parts::<u8>(data_u8_ptr, data_size) };
-        self.bytes.extend_from_slice(slice);
+        unsafe {
+            let base = self.words.as_mut_ptr().cast::<u8>();
+            base.add(tag_offset).cast::<u32>().write(tag);
+            core::ptr::copy_nonoverlapping(
+                core::ptr::from_ref(&object).cast::<MaybeUninit<u8>>(),
+                base.add(data_offset).cast::<MaybeUninit<u8>>(),
+                size_of::<T>(),
+            );
+        }
     }
 
     /// Creates a pipeline state object from the stream.
@@ -158,8 +150,8 @@ impl<'a> RenderPipelineStateStream<'a> {
         device: &ID3D12Device2,
     ) -> windows::core::Result<ID3D12PipelineState> {
         let stream_desc = D3D12_PIPELINE_STATE_STREAM_DESC {
-            SizeInBytes: self.bytes.len(),
-            pPipelineStateSubobjectStream: self.bytes.as_mut_ptr().cast(),
+            SizeInBytes: self.words.len() * 8,
+            pPipelineStateSubobjectStream: self.words.as_mut_ptr().cast(),
         };
 
         // Safety: lifetime on Self preserved the contents
@@ -314,31 +306,38 @@ mod tests {
         stream.add_object(84u32);
         stream.add_object(168u64);
 
-        assert_eq!(stream.bytes.len(), 32);
+        assert_eq!(stream.words.len() * 8, 32);
+        let base = stream.words.as_ptr().cast::<u8>();
+        assert_eq!(base.addr() % 8, 0);
+        unsafe {
+            assert_eq!(base.cast::<u32>().read(), 1);
+            assert_eq!(base.add(4).cast::<u16>().read(), 42);
+            assert_eq!(base.add(8).cast::<u32>().read(), 2);
+            assert_eq!(base.add(12).cast::<u32>().read(), 84);
+            assert_eq!(base.add(16).cast::<u32>().read(), 3);
+            assert_eq!(base.add(24).cast::<u64>().read(), 168);
+        }
+    }
 
-        // Object 1: u16
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Padded { marker: u8, value: u64 }
+    implement_stream_object!(unsafe Padded => D3D12_PIPELINE_STATE_SUBOBJECT_TYPE(4));
 
-        // Tag at the beginning
-        assert_eq!(&stream.bytes[0..4], &1u32.to_ne_bytes());
-        // Data tucked in, aligned to the natural alignment of u16
-        assert_eq!(&stream.bytes[4..6], &42u16.to_ne_bytes());
-        // Padding to align the next subobject to an 8 byte boundary.
-        assert_eq!(&stream.bytes[6..8], &[0, 0]);
-
-        // Object 2: u32
-
-        // Tag at the beginning
-        assert_eq!(&stream.bytes[8..12], &2u32.to_ne_bytes());
-        // Data tucked in, aligned to the natural alignment of u32
-        assert_eq!(&stream.bytes[12..16], &84u32.to_ne_bytes());
-
-        // Object 3: u64
-
-        // Tag at the beginning
-        assert_eq!(&stream.bytes[16..20], &3u32.to_ne_bytes());
-        // Padding to align the u64 to an 8 byte boundary.
-        assert_eq!(&stream.bytes[20..24], &[0, 0, 0, 0]);
-        // Data tucked in, aligned to the natural alignment of u64
-        assert_eq!(&stream.bytes[24..32], &168u64.to_ne_bytes());
+    #[test]
+    fn padded_objects_preserve_fields_and_stream_alignment() {
+        let mut stream = RenderPipelineStateStream::new();
+        stream.add_object(Padded { marker: 7, value: 42 });
+        stream.add_object(9u16);
+        assert_eq!(stream.words.len() * 8, 32);
+        let base = stream.words.as_ptr().cast::<u8>();
+        assert_eq!(base.addr() % align_of::<Padded>(), 0);
+        unsafe {
+            assert_eq!(base.cast::<u32>().read(), 4);
+            let value = base.add(8).cast::<Padded>().read();
+            assert_eq!((value.marker, value.value), (7, 42));
+            assert_eq!(base.add(24).cast::<u32>().read(), 1);
+            assert_eq!(base.add(28).cast::<u16>().read(), 9);
+        }
     }
 }

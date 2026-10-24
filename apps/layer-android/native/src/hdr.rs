@@ -59,7 +59,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofTexture(
 ) -> jni::sys::jintArray {
     crate::jni_entry!(env, {
     let bytes = layer_ui::proof_panel::sdr_direction_texture(edge.clamp(1, 512) as u32);
-    let result = argb_array(&mut env, &bytes);
+    let result = argb_array(&mut env, &bytes).map(jni::objects::JIntArray::into_raw);
     or_throw(&mut env, result, std::ptr::null_mut())
     })
 }
@@ -84,7 +84,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorFieldMapped(
         if !state.render_field_mapped(size as u32, rendition, &mut bytes) {
             return Err("Invalid picker field".into());
         }
-        argb_array(&mut env, &bytes)
+        argb_array(&mut env, &bytes).map(jni::objects::JIntArray::into_raw)
     })();
     or_throw(&mut env, result, std::ptr::null_mut())
     })

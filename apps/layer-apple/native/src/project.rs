@@ -92,8 +92,8 @@ pub struct CapyProjectTask {
     localization: std::sync::Arc<layer_ui::Localizer>,
 }
 impl CapyProjectTask {
-    fn new(payload: Payload, epoch: u64, revision: u64, save_request: Option<u32>, localization: std::sync::Arc<layer_ui::Localizer>) -> *mut Self {
-        Box::into_raw(Box::new(Self {
+    fn new(payload: Payload, epoch: u64, revision: u64, save_request: Option<u32>, localization: std::sync::Arc<layer_ui::Localizer>) -> Box<Self> {
+        Box::new(Self {
             state: Mutex::new(State {
                 payload,
                 error: None,
@@ -106,13 +106,19 @@ impl CapyProjectTask {
             revision,
             save_request,
             localization,
-        }))
+        })
     }
     fn check_cancelled(&self) -> Result<(), String> {
         if self.phase.load(Ordering::Acquire) == 1 {
             Err("Document operation cancelled".into())
         } else {
             Ok(())
+        }
+    }
+    fn begin_commit(&self) -> i32 {
+        match self.phase.compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) | Err(2) => 0,
+            Err(_) => -1,
         }
     }
     fn perform(&self, work: impl FnOnce(&mut Payload) -> Result<(), String> + Send) -> i32 {
@@ -250,9 +256,9 @@ pub unsafe extern "C" fn capy_apple_project_task(
             session.localization().clone(),
         );
         if opening == 0 {
-            unsafe { &*task }.state.lock().unwrap_or_else(|e| e.into_inner()).expectation = session.save_destination_expectation();
+            task.state.lock().unwrap_or_else(|e| e.into_inner()).expectation = session.save_destination_expectation();
         }
-        Ok(task)
+        Ok(Box::into_raw(task))
     })
     .unwrap_or(std::ptr::null_mut())
 }
@@ -285,22 +291,28 @@ pub unsafe extern "C" fn capy_apple_prepare_recovery(app: *mut CapyApple, now: u
     let Some(app) = (unsafe { app.as_mut() }) else {
         return -1;
     };
-    app.perform(|app| {
-        app.metal.observe_failure(&mut app.host, true);
-        if app.host.session.engine().backend().0.is_some() {
-            // A failed GPU is suspended with its surviving CPU state. Recovery
-            // still proceeds; the shared snapshot/worker validates the pixels.
-            let _ = app.gpu_operation(|app| app.host.prepare_canvas_frame(now, now, true));
-        }
-        let renderer_ready = app.host.session.engine().backend().0.is_none()
-            || (app.host.startup.canvas_ready
-                && !app.host.session.engine().has_pending_document_edits());
-        Ok(i32::from(
-            !renderer_ready || app.host.session.engine().has_pending_input()
-                || app.host.session.capture_artwork().is_err(),
-        ))
-    })
-    .unwrap_or(-1)
+    app.prepare_recovery(now)
+}
+
+impl CapyApple {
+    fn prepare_recovery(&mut self, now: u64) -> i32 {
+        self.perform(|app| {
+            app.metal.observe_failure(&mut app.host, true);
+            if app.host.session.engine().backend().0.is_some() {
+                // A failed GPU is suspended with its surviving CPU state. Recovery
+                // still proceeds; the shared snapshot/worker validates the pixels.
+                let _ = app.gpu_operation(|app| app.host.prepare_canvas_frame(now, now, true));
+            }
+            let renderer_ready = app.host.session.engine().backend().0.is_none()
+                || (app.host.startup.canvas_ready
+                    && !app.host.session.engine().has_pending_document_edits());
+            Ok(i32::from(
+                !renderer_ready || app.host.session.engine().has_pending_input()
+                    || app.host.session.capture_artwork().is_err(),
+            ))
+        })
+        .unwrap_or(-1)
+    }
 }
 
 /// # Safety
@@ -494,15 +506,19 @@ pub unsafe extern "C" fn capy_project_package_summary(task:*const CapyProjectTas
     };
     summary.ok().and_then(|value| CString::new(value).ok()).map_or(std::ptr::null_mut(),CString::into_raw)
 }
+/// # Safety
+/// Task remains live; output is aligned and exclusively writable. Copy borrowed
+/// pixels before the next mutating task call or free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_package_preview(task:*const CapyProjectTask,output:*mut CapyProjectPreview)->i32 {
-    let (Some(task),Some(output)) = (unsafe {task.as_ref()},unsafe {output.as_mut()}) else{return -1;};
+    let Some(task) = (unsafe {task.as_ref()}) else{return -1;};
+    if output.is_null() { return -1; }
     let state = task.state.lock().unwrap_or_else(|e|e.into_inner());
     let Payload::Package(view) = &state.payload else{return -1;};
     if let Some(preview) = view.preview() {
         let [width,height] = preview.size();
-        *output = CapyProjectPreview {width,height,pixels:preview.pixels().as_ptr(),count:preview.pixels().len()};
-    } else {*output = CapyProjectPreview {width:0,height:0,pixels:std::ptr::null(),count:0};}
+        unsafe { output.write(CapyProjectPreview {width,height,pixels:preview.pixels().as_ptr(),count:preview.pixels().len()}); }
+    } else {unsafe { output.write(CapyProjectPreview {width:0,height:0,pixels:std::ptr::null(),count:0}); }}
     0
 }
 
@@ -619,7 +635,7 @@ pub unsafe extern "C" fn capy_apple_project_prepare_adopt(app:*mut CapyApple,tas
     let opening=matches!(t.state.lock().unwrap_or_else(|e|e.into_inner()).payload,Payload::Open{..});
     if !opening {return 0;}
     if a.host.session.state().document_file.epoch!=t.epoch || a.host.session.engine().document().revision!=t.revision {return 0;}
-    let ready=unsafe{capy_apple_prepare_recovery(app,now)};
+    let ready=a.prepare_recovery(now);
     if ready!=0 {return ready;}
     a.perform(|a|Ok(i32::from(a.host.session.retained_document_tiles().try_blobs()?.is_none()))).unwrap_or(-1)
 }
@@ -648,10 +664,10 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
             return Err(error.clone());
         }
         if let Payload::Color(color) = &mut state.payload {
-            return color.adopt(&mut app.host, task.control.is_cancelled(), || unsafe { capy_project_begin_commit(task) } >= 0);
+            return color.adopt(&mut app.host, task.control.is_cancelled(), || task.begin_commit() >= 0);
         }
         if let Payload::Source(source) = &mut state.payload {
-            return source.adopt(&mut app.host, task.control.is_cancelled(), || unsafe { capy_project_begin_commit(task) } >= 0);
+            return source.adopt(&mut app.host, task.control.is_cancelled(), || task.begin_commit() >= 0);
         }
         if let Payload::Clip { clip, publication, request, .. } = &mut state.payload {
             return clipboard::adopt_clip(app, task, clip, publication.ok_or("The copy was not published")?, *request);
@@ -671,7 +687,7 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
                 || !session.state().requests.iter().any(|r| r.id == *request) {
                 return Err("The canvas or import request changed; try again".into());
             }
-            if unsafe { capy_project_begin_commit(task) } < 0 { return Err("Document operation cancelled".into()); }
+            if task.begin_commit() < 0 { return Err("Document operation cancelled".into()); }
             let previous = session.state().revision;
             let mode = match session.document_request(*request)? { DocumentRequest::Paste { mode } => Some(*mode), _ => None };
             if let (Some(clip), Some(mode)) = (clip.as_ref(), mode) { session.paste_clip(clip, mode)?; } else {
@@ -694,7 +710,7 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
         let fingerprint_location = location.clone();
         let open = OpenAdoption { epoch: task.epoch, revision: task.revision, location };
         let retired = app.window.adopt(&mut app.host, candidate, open,
-            || unsafe { capy_project_begin_commit(task) } >= 0, |session| session)?;
+            || task.begin_commit() >= 0, |session| session)?;
         if let Some(notice) = notice.take() {
             let session = &mut app.host.session;
             session.notify(notice);
@@ -780,13 +796,7 @@ pub unsafe extern "C" fn capy_project_begin_commit(task: *const CapyProjectTask)
     let Some(task) = (unsafe { task.as_ref() }) else {
         return -1;
     };
-    match task
-        .phase
-        .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
-    {
-        Ok(_) | Err(2) => 0,
-        Err(_) => -1,
-    }
+    task.begin_commit()
 }
 /// # Safety
 /// Call after the worker finishes. Returns an owned string, or NULL on success.
@@ -869,6 +879,7 @@ pub unsafe extern "C" fn capy_apple_document_close(
 /// # Safety
 /// Owner only. Returns 0 while shaders/document replay prepare, 1 with a job,
 /// or -1 on failure. The job contains only an independently owned GPU snapshot.
+/// Output is aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_export_task(
     app: *mut CapyApple,
@@ -876,10 +887,11 @@ pub unsafe extern "C" fn capy_apple_export_task(
     now: u64,
     output: *mut *mut CapyProjectTask,
 ) -> i32 {
-    let (Some(app), Some(output)) = (unsafe { app.as_mut() }, unsafe { output.as_mut() }) else {
+    let Some(app) = (unsafe { app.as_mut() }) else {
         return -1;
     };
-    *output = std::ptr::null_mut();
+    if output.is_null() { return -1; }
+    unsafe { output.write(std::ptr::null_mut()); }
     app.perform(|app| {
         app.host.session.require_document_idle()?;
         if !app.host.session.state().requests.iter().any(|r| {
@@ -911,13 +923,14 @@ pub unsafe extern "C" fn capy_apple_export_task(
         let epoch = session.state().document_file.epoch;
         let revision = session.engine().document().revision;
         let export = ExportTask::capture(session, id, "", DISPLAY_SPACE)?;
-        *output = CapyProjectTask::new(
+        let task = CapyProjectTask::new(
             Payload::Export(Box::new(export)),
             epoch,
             revision,
             None,
             session.localization().clone(),
         );
+        unsafe { output.write(Box::into_raw(task)); }
         Ok(1)
     })
     .unwrap_or(-1)

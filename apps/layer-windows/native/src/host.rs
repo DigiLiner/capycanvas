@@ -16,8 +16,8 @@ thread_local! { static ERROR: RefCell<CString> = RefCell::new(CString::default()
 fn fail(e: impl std::fmt::Display) {
     ERROR.with(|slot| *slot.borrow_mut() = CString::new(e.to_string().replace('\0', " ")).unwrap());
 }
-fn guard(host: *mut CapyHost, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
-    let Some(host) = (unsafe { host.as_mut() }) else {
+fn guard(host: Option<&mut CapyHost>, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
+    let Some(host) = host else {
         fail("Null canvas");
         return -1;
     };
@@ -497,7 +497,7 @@ pub unsafe extern "C" fn capy_create(
 /// Exclusive access to a live host; window remains valid for its lifetime.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_set_window(host: *mut CapyHost, window: *mut c_void) -> i32 {
-    guard(host, |host| { host.window = window as usize; host.display_checked = None; Ok(0) })
+    guard(unsafe { host.as_mut() }, |host| { host.window = window as usize; host.display_checked = None; Ok(0) })
 }
 /// Destroy after stopping callers and detaching the panel.
 /// # Safety
@@ -535,7 +535,7 @@ pub unsafe extern "C" fn capy_start_services(
     context: *mut c_void,
     wake: Option<extern "C" fn(*mut c_void)>,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if host.documents.is_none() {
             let context = context as usize;
             host.documents = Some(crate::documents::DocumentService::open_localized(host.native.session.localization(), move || {
@@ -582,14 +582,14 @@ pub unsafe extern "C" fn capy_start_services(
 /// Exclusive render-owner access to a live host.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_needs_frame(host: *mut CapyHost) -> i32 {
-    guard(host, |host| Ok(i32::from(host.native.dirty)))
+    guard(unsafe { host.as_mut() }, |host| Ok(i32::from(host.native.dirty)))
 }
 
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_poll_services(host: *mut CapyHost) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.poll_services()?;
         Ok(i32::from(host.native.dirty))
     })
@@ -651,7 +651,7 @@ pub unsafe extern "C" fn capy_finish_services(host: *mut CapyHost) -> i32 {
 /// Call from the canvas owner, before acquiring surface images.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_prepare_gpu(host: *mut CapyHost) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.prepare_gpu()?;
         Ok(0)
     })
@@ -667,7 +667,7 @@ pub unsafe extern "C" fn capy_resize(
     height: u32,
     scale: f32,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if width == 0 || height == 0 || !scale.is_finite() || scale <= 0.0 {
             return Err("Invalid viewport".into());
         }
@@ -706,7 +706,7 @@ pub unsafe extern "C" fn capy_pointer(
     records: *const CapyPointer,
     count: usize,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if count > 32768 || (count > 0 && records.is_null()) {
             return Err("Invalid pointer batch".into());
         }
@@ -749,7 +749,7 @@ pub unsafe extern "C" fn capy_pointer(
 /// Exclusive access to a live host; json is a readable NUL-terminated buffer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         use crate::workspace_service::WorkspaceAction;
         let action = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
         if matches!(
@@ -799,7 +799,7 @@ pub unsafe extern "C" fn capy_load_filter_directory(
     host: *mut CapyHost,
     json: *const c_char,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let text = unsafe { read_json(json) }?;
         if text.len() > 8192 {
             return Err("Filter directory request is too large.".into());
@@ -823,7 +823,7 @@ pub unsafe extern "C" fn capy_load_filter_directory(
 /// for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let action: crate::actions::Action =
             serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
         host.poll_services()?;
@@ -844,7 +844,7 @@ pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -
 /// for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_document_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let action = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
         let result = host.documents.as_mut().ok_or("Document service is unavailable")?.dispatch(&mut host.native, action);
         if let Err(error) = result {
@@ -861,7 +861,7 @@ pub unsafe extern "C" fn capy_document_action(host: *mut CapyHost, json: *const 
 /// for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_native_prediction(host: *mut CapyHost, available: bool) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.native.session.set_platform_prediction_available(available);
         host.native.invalidate_snapshot();
         Ok(0)
@@ -871,7 +871,7 @@ pub unsafe extern "C" fn capy_native_prediction(host: *mut CapyHost, available: 
 /// Exclusive access to a live host; json is a readable NUL-terminated buffer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_input(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let input = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
         host.poll_services()?;
         if !host.accepts_workspace_input()
@@ -908,7 +908,7 @@ pub unsafe extern "C" fn capy_scroll(
     zoom: bool,
     horizontal: bool,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.poll_services()?;
         if !host.accepts_workspace_input() {
             return Ok(0);
@@ -929,7 +929,7 @@ pub unsafe extern "C" fn capy_chrome(
     canvas: bool,
     popup_open: bool,
 ) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let event = match kind {
             0 => layer_ui::ChromeEvent::Refresh,
             1 => layer_ui::ChromeEvent::Motion,
@@ -952,7 +952,7 @@ pub unsafe extern "C" fn capy_chrome(
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_acquire(host: *mut CapyHost) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if host.device_is_lost() {
             return Err("The GPU device was lost".into());
         }
@@ -987,7 +987,7 @@ pub unsafe extern "C" fn capy_acquire(host: *mut CapyHost) -> i32 {
 /// The host remains exclusively owned on the render thread during this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_localization_input(host: *mut CapyHost, busy: bool) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.localization_input_busy = busy;
         host.poll_services()?;
         Ok(0)
@@ -997,7 +997,7 @@ pub unsafe extern "C" fn capy_localization_input(host: *mut CapyHost, busy: bool
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_frame(host: *mut CapyHost, now: u64, presentation: u64) -> i32 {
-    guard(host, |host| host.frame(now, presentation))
+    guard(unsafe { host.as_mut() }, |host| host.frame(now, presentation))
 }
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -1069,7 +1069,7 @@ struct WindowsMetadata {
 pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnapshotInfo) -> *mut c_char {
     if let Some(info) = unsafe { info.as_mut() } { *info = CapySnapshotInfo::default(); }
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let generation = host.native.localization_generation();
         let localization = if host.localization_generation != Some(generation) {
             Some(crate::settings::localization_presentation(&mut host.native)?)
@@ -1148,7 +1148,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_query(host: *mut CapyHost, json: *const c_char) -> *mut c_char {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let query = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
         result = CString::new(host.native.query(query)?.to_string())
             .map_err(err)?
@@ -1165,7 +1165,7 @@ pub unsafe extern "C" fn capy_query(host: *mut CapyHost, json: *const c_char) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_surface_info(host: *mut CapyHost) -> *mut c_char {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         use windows::core::Interface;
         let native = unsafe { host.surface.as_hal::<wgpu::hal::api::Dx12>() }
             .ok_or("Missing D3D12 surface")?;
@@ -1200,7 +1200,7 @@ pub unsafe extern "C" fn capy_surface_info(host: *mut CapyHost) -> *mut c_char {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_document_preview(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
     let mut packet = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Query { id: u32, index: usize }
@@ -1254,7 +1254,7 @@ pub unsafe extern "C" fn capy_string_free(value: *mut c_char) {
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_suspend(host: *mut CapyHost) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.target = None;
         Ok(0)
     })
@@ -1306,7 +1306,7 @@ pub unsafe extern "C" fn capy_device_lost(host: *const CapyHost) -> bool {
 /// worker parked. Keep the same panel alive through the replacement surface.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_reset_surface(host: *mut CapyHost, panel: *mut c_void) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if panel.is_null() || host.target.is_some() {
             return Err("Surface replacement requires a live panel and no acquired image".into());
         }
@@ -1327,7 +1327,7 @@ pub unsafe extern "C" fn capy_reset_surface(host: *mut CapyHost, panel: *mut c_v
 /// `json` is a readable NUL-terminated pair of group token and window count.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_test_device_loss(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if std::env::var_os("CAPY_SMOKE_TEST").is_none() || !crate::storage::isolated() {
             return Err("Device-loss injection requires an isolated smoke test".into());
         }
@@ -1378,7 +1378,7 @@ pub unsafe extern "C" fn capy_test_device_loss(host: *mut CapyHost, json: *const
 /// contacts are canceled; keep services alive until approved close.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_suspend_renderer(host: *mut CapyHost) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         host.target = None;
         host.cancel_contacts()?;
         host.native.suspend_renderer()?;
@@ -1401,7 +1401,7 @@ pub unsafe extern "C" fn capy_suspend_renderer(host: *mut CapyHost) -> i32 {
 /// or a readable, unchanged NUL-terminated buffer throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let layout = serde_json::from_str(unsafe { read_json(json) }?)
             .map_err(|_| "Invalid glass geometry".to_string());
         match layout.and_then(|layout| host.native.set_glass(&mut host.glass, layout)) {
@@ -1420,7 +1420,7 @@ pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) ->
 /// or a readable, unchanged NUL-terminated buffer throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_overviews(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let slots = serde_json::from_str(unsafe { read_json(json) }?)
             .map_err(|_| "Invalid Navigator geometry".to_string());
         match slots.and_then(|slots| host.navigators.set(slots)) {
@@ -1445,7 +1445,7 @@ pub unsafe extern "C" fn capy_filter_previews(
     json: *const c_char,
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let packet = crate::previews::query(&mut host.native, unsafe { read_json(json) }?)?;
         result = Box::into_raw(Box::new(packet));
         Ok(0)
@@ -1528,7 +1528,7 @@ pub unsafe extern "C" fn capy_layer_menu(
     json: *const c_char,
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         result = Box::into_raw(Box::new(crate::previews::layer_menu(
             &mut host.native,
             unsafe { read_json(json) }?,
@@ -1546,7 +1546,7 @@ pub unsafe extern "C" fn capy_layer_thumbnails(
     json: *const c_char,
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         result = Box::into_raw(Box::new(crate::previews::layer_thumbnails(
             &mut host.native,
             unsafe { read_json(json) }?,
@@ -1565,7 +1565,7 @@ pub unsafe extern "C" fn capy_workspace_query(
     json: *const c_char,
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         result = Box::into_raw(Box::new(crate::workspace::query(
             &mut host.native,
             unsafe { read_json(json) }?,
@@ -1580,7 +1580,7 @@ pub unsafe extern "C" fn capy_workspace_query(
 /// Exclusive access to the render-owned host. Only an isolated smoke test can call it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_test_display(host: *mut CapyHost, hdr: bool) -> i32 {
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         if std::env::var_os("CAPY_SMOKE_TEST").is_none() || std::env::var_os("CAPY_TEST_HDR").is_none()
             || !crate::storage::isolated() {
             return Err("Display injection requires an isolated HDR smoke test".into());
@@ -1621,7 +1621,7 @@ pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_paper_previews(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
-    guard(host, |host| {
+    guard(unsafe { host.as_mut() }, |host| {
         let packet = crate::previews::paper_previews(&host.native, unsafe { read_json(json) }?)?;
         result = Box::into_raw(Box::new(packet));
         Ok(0)

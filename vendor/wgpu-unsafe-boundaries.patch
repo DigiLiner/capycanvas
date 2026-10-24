@@ -1,0 +1,508 @@
+diff --git a/wgpu-hal/src/auxil/dxgi/exception.rs b/wgpu-hal/src/auxil/dxgi/exception.rs
+index ac7d55d8f..510bd7c20 100644
+--- a/wgpu-hal/src/auxil/dxgi/exception.rs
++++ b/wgpu-hal/src/auxil/dxgi/exception.rs
+@@ -3,28 +3,33 @@ use alloc::{borrow::Cow, string::String};
+ use parking_lot::Mutex;
+ use windows::Win32::{Foundation, System::Diagnostics::Debug};
+
+-// This is a mutex as opposed to an atomic as we need to completely
+-// lock everyone out until we have registered or unregistered the
+-// exception handler, otherwise really nasty races could happen.
+-//
+-// By routing all the registration through these functions we can guarantee
+-// there is either 1 or 0 exception handlers registered, not multiple.
+-static EXCEPTION_HANDLER_COUNT: Mutex<usize> = Mutex::new(0);
+-
+-pub fn register_exception_handler() {
+-    let mut count_guard = EXCEPTION_HANDLER_COUNT.lock();
+-    if *count_guard == 0 {
+-        unsafe { Debug::AddVectoredExceptionHandler(0, Some(output_debug_string_handler)) };
++static EXCEPTION_HANDLER: Mutex<Handler> = Mutex::new(Handler { users: 0, token: 0 });
++
++struct Handler { users: usize, token: usize }
++impl Handler {
++    fn acquire(&mut self) -> bool {
++        if self.users == 0 {
++            self.token = unsafe { Debug::AddVectoredExceptionHandler(0, Some(output_debug_string_handler)) } as usize;
++            if self.token == 0 { return false; }
++        }
++        self.users += 1;
++        true
++    }
++    fn release(&mut self) {
++        self.users -= 1;
++        if self.users == 0 {
++            unsafe { Debug::RemoveVectoredExceptionHandler(self.token as *const _) };
++            self.token = 0;
++        }
+     }
+-    *count_guard += 1;
+ }
+
+-pub fn unregister_exception_handler() {
+-    let mut count_guard = EXCEPTION_HANDLER_COUNT.lock();
+-    if *count_guard == 1 {
+-        unsafe { Debug::RemoveVectoredExceptionHandler(output_debug_string_handler as *mut _) };
+-    }
+-    *count_guard -= 1;
++pub struct Registration;
++impl Registration {
++    pub fn new() -> Option<Self> { EXCEPTION_HANDLER.lock().acquire().then(|| Self) }
++}
++impl Drop for Registration {
++    fn drop(&mut self) { EXCEPTION_HANDLER.lock().release(); }
+ }
+
+ const MESSAGE_PREFIXES: &[(&str, log::Level)] = &[
+@@ -40,50 +45,47 @@ const MESSAGE_PREFIXES: &[(&str, log::Level)] = &[
+ unsafe extern "system" fn output_debug_string_handler(
+     exception_info: *mut Debug::EXCEPTION_POINTERS,
+ ) -> i32 {
+-    // See https://stackoverflow.com/a/41480827
+-    let record = unsafe { &*(*exception_info).ExceptionRecord };
+-    if record.NumberParameters != 2 {
+-        return Debug::EXCEPTION_CONTINUE_SEARCH;
+-    }
+-    let message = match record.ExceptionCode {
+-        Foundation::DBG_PRINTEXCEPTION_C => {
+-            String::from_utf8_lossy(bytemuck::cast_slice(&record.ExceptionInformation))
+-        }
+-        Foundation::DBG_PRINTEXCEPTION_WIDE_C => Cow::Owned(String::from_utf16_lossy(
+-            bytemuck::cast_slice(&record.ExceptionInformation),
+-        )),
+-        _ => return Debug::EXCEPTION_CONTINUE_SEARCH,
+-    };
+-
+-    let message = match message.strip_prefix("D3D12 ") {
+-        Some(msg) => msg
+-            .trim_end_matches("\n\0")
+-            .trim_end_matches("[ STATE_CREATION WARNING #0: UNKNOWN]"),
+-        None => return Debug::EXCEPTION_CONTINUE_SEARCH,
+-    };
+-
+-    let (message, level) = match MESSAGE_PREFIXES
+-        .iter()
+-        .find(|&&(prefix, _)| message.starts_with(prefix))
+-    {
+-        Some(&(prefix, level)) => (&message[prefix.len() + 2..], level),
+-        None => (message, log::Level::Debug),
+-    };
++    std::panic::catch_unwind(|| unsafe { handle_debug_string(exception_info) })
++        .unwrap_or(Debug::EXCEPTION_CONTINUE_SEARCH)
++}
+
+-    if level == log::Level::Warn && message.contains("#82") {
+-        // This is are useless spammy warnings (#820, #821):
+-        // "The application did not pass any clear value to resource creation"
+-        return Debug::EXCEPTION_CONTINUE_SEARCH;
++unsafe fn debug_message(record: &Debug::EXCEPTION_RECORD) -> Option<Cow<'_, str>> {
++    if record.NumberParameters < 2 { return None; }
++    let [length, pointer, ..] = record.ExceptionInformation;
++    if length == 0 || pointer == 0 { return None; }
++    match record.ExceptionCode {
++        Foundation::DBG_PRINTEXCEPTION_C if length <= isize::MAX as usize => {
++            Some(String::from_utf8_lossy(unsafe { core::slice::from_raw_parts(pointer as *const u8, length) }))
++        }
++        Foundation::DBG_PRINTEXCEPTION_WIDE_C if length <= isize::MAX as usize / 2 && pointer.is_multiple_of(2) => {
++            Some(Cow::Owned(String::from_utf16_lossy(unsafe { core::slice::from_raw_parts(pointer as *const u16, length) })))
++        }
++        _ => None,
+     }
++}
+
+-    if level == log::Level::Warn && message.contains("DRAW_EMPTY_SCISSOR_RECTANGLE") {
+-        // This is normal, WebGPU allows passing empty scissor rectangles.
+-        return Debug::EXCEPTION_CONTINUE_SEARCH;
++fn message_parts(message: &str) -> Option<(&str, log::Level)> {
++    let message = message.strip_prefix("D3D12 ")?
++        .trim_end_matches(['\n', '\r', '\0'])
++        .trim_end_matches("[ STATE_CREATION WARNING #0: UNKNOWN]");
++    let (message, level) = MESSAGE_PREFIXES.iter().find_map(|&(prefix, level)| {
++        message.strip_prefix(prefix)?.strip_prefix(": ").map(|message| (message, level))
++    }).unwrap_or((message, log::Level::Debug));
++    if level == log::Level::Warn && (message.contains("#82") || message.contains("DRAW_EMPTY_SCISSOR_RECTANGLE")) {
++        return None;
+     }
++    Some((message, level))
++}
+
+-    let _ = std::panic::catch_unwind(|| {
+-        log::log!(level, "{message}");
+-    });
++unsafe fn handle_debug_string(exception_info: *mut Debug::EXCEPTION_POINTERS) -> i32 {
++    let record = unsafe { &*(*exception_info).ExceptionRecord };
++    let Some(message) = (unsafe { debug_message(record) }) else {
++        return Debug::EXCEPTION_CONTINUE_SEARCH;
++    };
++    let Some((message, level)) = message_parts(&message) else {
++        return Debug::EXCEPTION_CONTINUE_SEARCH;
++    };
++    log::log!(level, "{message}");
+
+     #[cfg(feature = "validation_canary")]
+     if cfg!(debug_assertions) && level == log::Level::Error {
+@@ -95,3 +97,51 @@ unsafe extern "system" fn output_debug_string_handler(
+
+     Debug::EXCEPTION_CONTINUE_EXECUTION
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use alloc::vec::Vec;
++
++    #[test]
++    fn registration_is_shared_and_released_by_token() {
++        let mut handler = Handler { users: 0, token: 0 };
++        assert!(handler.acquire());
++        let token = handler.token;
++        assert_ne!(token, 0);
++        assert!(handler.acquire());
++        assert_eq!(handler.token, token);
++        handler.release();
++        assert_eq!((handler.users, handler.token), (1, token));
++        handler.release();
++        assert_eq!((handler.users, handler.token), (0, 0));
++        assert_eq!(unsafe { Debug::RemoveVectoredExceptionHandler(token as *const _) }, 0);
++    }
++
++    #[test]
++    fn diagnostic_payloads_use_the_pointed_to_ansi_or_utf16_text() {
++        let ansi = b"D3D12 ERROR: broken\0";
++        let wide: Vec<_> = "D3D12 WARNING: 猫 🦫\0".encode_utf16().collect();
++        let mut record = Debug::EXCEPTION_RECORD { ExceptionCode: Foundation::DBG_PRINTEXCEPTION_C,
++            NumberParameters: 2, ..Default::default() };
++        record.ExceptionInformation[..2].copy_from_slice(&[ansi.len(), ansi.as_ptr() as usize]);
++        assert_eq!(unsafe { debug_message(&record) }.unwrap(), "D3D12 ERROR: broken\0");
++        record.ExceptionCode = Foundation::DBG_PRINTEXCEPTION_WIDE_C;
++        record.NumberParameters = 4;
++        record.ExceptionInformation[..2].copy_from_slice(&[wide.len(), wide.as_ptr() as usize]);
++        assert_eq!(unsafe { debug_message(&record) }.unwrap(), "D3D12 WARNING: 猫 🦫\0");
++        record.ExceptionInformation[0] = usize::MAX;
++        assert!(unsafe { debug_message(&record) }.is_none());
++    }
++
++    #[test]
++    fn diagnostic_prefixes_cannot_slice_past_short_or_unicode_messages() {
++        for message in ["D3D12 ERROR", "D3D12 ERROR:", "D3D12 ERRORé", "D3D12 "] {
++            assert!(message_parts(message).is_some());
++        }
++        assert_eq!(message_parts("D3D12 ERROR: 猫\n\0"), Some(("猫", log::Level::Error)));
++        assert!(message_parts("unrelated").is_none());
++        assert!(message_parts("D3D12 WARNING: #820").is_none());
++        assert!(message_parts("D3D12 WARNING: DRAW_EMPTY_SCISSOR_RECTANGLE").is_none());
++    }
++}
+diff --git a/wgpu-hal/src/dx12/device.rs b/wgpu-hal/src/dx12/device.rs
+index 54f23d19e..bbc4eabdb 100644
+--- a/wgpu-hal/src/dx12/device.rs
++++ b/wgpu-hal/src/dx12/device.rs
+@@ -53,12 +53,12 @@ impl super::Device {
+         compiler_container: Arc<shader_compilation::CompilerContainer>,
+         backend_options: wgt::Dx12BackendOptions,
+     ) -> Result<Self, crate::DeviceError> {
+-        if private_caps
++        let exception_handler = if private_caps
+             .instance_flags
+             .contains(wgt::InstanceFlags::VALIDATION)
+         {
+-            auxil::dxgi::exception::register_exception_handler();
+-        }
++            auxil::dxgi::exception::Registration::new()
++        } else { None };
+
+         let mem_allocator =
+             suballocation::Allocator::new(&raw, memory_hints, memory_budget_thresholds)?;
+@@ -204,6 +204,7 @@ impl super::Device {
+         };
+
+         Ok(super::Device {
++            _exception_handler: exception_handler,
+             raw: raw.clone(),
+             present_queue,
+             idler: super::Idler { fence: idle_fence },
+diff --git a/wgpu-hal/src/dx12/mod.rs b/wgpu-hal/src/dx12/mod.rs
+index 8e3594a5e..5aca0c78e 100644
+--- a/wgpu-hal/src/dx12/mod.rs
++++ b/wgpu-hal/src/dx12/mod.rs
+@@ -783,19 +783,12 @@ pub struct Device {
+     shader_cache: Mutex<ShaderCache>,
+     counters: Arc<wgt::HalCounters>,
+     limits: wgt::Limits,
++    _exception_handler: Option<auxil::dxgi::exception::Registration>,
+ }
+
+ impl Drop for Device {
+     fn drop(&mut self) {
+         self.rtv_pool.lock().free_handle(self.null_rtv_handle);
+-        if self
+-            .shared
+-            .private_caps
+-            .instance_flags
+-            .contains(wgt::InstanceFlags::VALIDATION)
+-        {
+-            auxil::dxgi::exception::unregister_exception_handler();
+-        }
+     }
+ }
+
+diff --git a/wgpu-hal/src/dx12/pipeline_desc.rs b/wgpu-hal/src/dx12/pipeline_desc.rs
+index 9fcf5661e..165051a2c 100644
+--- a/wgpu-hal/src/dx12/pipeline_desc.rs
++++ b/wgpu-hal/src/dx12/pipeline_desc.rs
+@@ -12,7 +12,7 @@
+ //! consequences if it is written incorrectly. It has been isolated to this file for
+ //! that reason.
+
+-use core::{ffi::c_void, mem::ManuallyDrop, ptr::NonNull};
++use core::{ffi::c_void, mem::{ManuallyDrop, MaybeUninit}, ptr::NonNull};
+
+ use alloc::vec::Vec;
+ use windows::Win32::Graphics::Direct3D12::*;
+@@ -103,7 +103,7 @@ implement_stream_object! { unsafe D3D12_VIEW_INSTANCING_DESC => D3D12_PIPELINE_S
+ /// See <https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_pipeline_state_stream_desc>
+ /// for more information.
+ pub(super) struct RenderPipelineStateStream<'a> {
+-    bytes: Vec<u8>,
++    words: Vec<MaybeUninit<u64>>,
+     _marker: core::marker::PhantomData<&'a ()>,
+ }
+
+@@ -117,36 +117,28 @@ impl<'a> RenderPipelineStateStream<'a> {
+         let members = 20; // Approximate number of members we might push
+         let capacity = size_of_stream_desc + members * 8; // Extra space for tags and alignment
+         Self {
+-            bytes: Vec::with_capacity(capacity),
++            words: Vec::with_capacity(capacity.div_ceil(8)),
+             _marker: core::marker::PhantomData,
+         }
+     }
+
+-    /// Align the internal byte buffer to the given alignment,
+-    /// padding with zeros as necessary.
+-    fn align_to(&mut self, alignment: usize) {
+-        let aligned_length = self.bytes.len().next_multiple_of(alignment);
+-        self.bytes.resize(aligned_length, 0);
+-    }
+-
+     /// Adds a subobject to the pipeline state stream.
+     fn add_object<T: RenderPipelineStreamObject>(&mut self, object: T) {
+-        // Ensure 8-byte alignment for the subobject start.
+-        self.align_to(8);
+-
+-        // Append the type tag (u32)
++        assert!(align_of::<T>() <= align_of::<u64>());
++        let tag_offset = self.words.len() * 8;
++        let data_offset = (tag_offset + 4).next_multiple_of(align_of::<T>());
++        let words = (data_offset + size_of::<T>()).div_ceil(8);
++        self.words.resize_with(words, MaybeUninit::zeroed);
+         let tag: u32 = T::SUBOBJECT_TYPE.0 as u32;
+-        self.bytes.extend_from_slice(&tag.to_ne_bytes());
+-
+-        // Align the data to its natural alignment.
+-        self.align_to(align_of_val::<T>(&object));
+-
+-        // Append the data itself, as raw bytes
+-        let data_ptr: *const T = &object;
+-        let data_u8_ptr: *const u8 = data_ptr.cast::<u8>();
+-        let data_size = size_of_val::<T>(&object);
+-        let slice = unsafe { core::slice::from_raw_parts::<u8>(data_u8_ptr, data_size) };
+-        self.bytes.extend_from_slice(slice);
++        unsafe {
++            let base = self.words.as_mut_ptr().cast::<u8>();
++            base.add(tag_offset).cast::<u32>().write(tag);
++            core::ptr::copy_nonoverlapping(
++                core::ptr::from_ref(&object).cast::<MaybeUninit<u8>>(),
++                base.add(data_offset).cast::<MaybeUninit<u8>>(),
++                size_of::<T>(),
++            );
++        }
+     }
+
+     /// Creates a pipeline state object from the stream.
+@@ -158,8 +150,8 @@ impl<'a> RenderPipelineStateStream<'a> {
+         device: &ID3D12Device2,
+     ) -> windows::core::Result<ID3D12PipelineState> {
+         let stream_desc = D3D12_PIPELINE_STATE_STREAM_DESC {
+-            SizeInBytes: self.bytes.len(),
+-            pPipelineStateSubobjectStream: self.bytes.as_mut_ptr().cast(),
++            SizeInBytes: self.words.len() * 8,
++            pPipelineStateSubobjectStream: self.words.as_mut_ptr().cast(),
+         };
+
+         // Safety: lifetime on Self preserved the contents
+@@ -314,31 +306,38 @@ mod tests {
+         stream.add_object(84u32);
+         stream.add_object(168u64);
+
+-        assert_eq!(stream.bytes.len(), 32);
+-
+-        // Object 1: u16
+-
+-        // Tag at the beginning
+-        assert_eq!(&stream.bytes[0..4], &1u32.to_ne_bytes());
+-        // Data tucked in, aligned to the natural alignment of u16
+-        assert_eq!(&stream.bytes[4..6], &42u16.to_ne_bytes());
+-        // Padding to align the next subobject to an 8 byte boundary.
+-        assert_eq!(&stream.bytes[6..8], &[0, 0]);
+-
+-        // Object 2: u32
+-
+-        // Tag at the beginning
+-        assert_eq!(&stream.bytes[8..12], &2u32.to_ne_bytes());
+-        // Data tucked in, aligned to the natural alignment of u32
+-        assert_eq!(&stream.bytes[12..16], &84u32.to_ne_bytes());
++        assert_eq!(stream.words.len() * 8, 32);
++        let base = stream.words.as_ptr().cast::<u8>();
++        assert_eq!(base.addr() % 8, 0);
++        unsafe {
++            assert_eq!(base.cast::<u32>().read(), 1);
++            assert_eq!(base.add(4).cast::<u16>().read(), 42);
++            assert_eq!(base.add(8).cast::<u32>().read(), 2);
++            assert_eq!(base.add(12).cast::<u32>().read(), 84);
++            assert_eq!(base.add(16).cast::<u32>().read(), 3);
++            assert_eq!(base.add(24).cast::<u64>().read(), 168);
++        }
++    }
+
+-        // Object 3: u64
++    #[repr(C)]
++    #[derive(Clone, Copy)]
++    struct Padded { marker: u8, value: u64 }
++    implement_stream_object!(unsafe Padded => D3D12_PIPELINE_STATE_SUBOBJECT_TYPE(4));
+
+-        // Tag at the beginning
+-        assert_eq!(&stream.bytes[16..20], &3u32.to_ne_bytes());
+-        // Padding to align the u64 to an 8 byte boundary.
+-        assert_eq!(&stream.bytes[20..24], &[0, 0, 0, 0]);
+-        // Data tucked in, aligned to the natural alignment of u64
+-        assert_eq!(&stream.bytes[24..32], &168u64.to_ne_bytes());
++    #[test]
++    fn padded_objects_preserve_fields_and_stream_alignment() {
++        let mut stream = RenderPipelineStateStream::new();
++        stream.add_object(Padded { marker: 7, value: 42 });
++        stream.add_object(9u16);
++        assert_eq!(stream.words.len() * 8, 32);
++        let base = stream.words.as_ptr().cast::<u8>();
++        assert_eq!(base.addr() % align_of::<Padded>(), 0);
++        unsafe {
++            assert_eq!(base.cast::<u32>().read(), 4);
++            let value = base.add(8).cast::<Padded>().read();
++            assert_eq!((value.marker, value.value), (7, 42));
++            assert_eq!(base.add(24).cast::<u32>().read(), 1);
++            assert_eq!(base.add(28).cast::<u16>().read(), 9);
++        }
+     }
+ }
+diff --git a/wgpu-hal/src/metal/surface.rs b/wgpu-hal/src/metal/surface.rs
+index eeef47043..a69d4f0ad 100644
+--- a/wgpu-hal/src/metal/surface.rs
++++ b/wgpu-hal/src/metal/surface.rs
+@@ -17,17 +17,17 @@ use parking_lot::{Mutex, RwLock};
+
+ use super::OsFeatures;
+
+-/// Walks up from `start` to the `NSWindow` hosting this layer: the first ancestor
+-/// layer with a delegate is the backing `NSView`, and we return its `window`.
+-/// `None` off the main thread or if no ancestor has a delegate.
++/// Finds the backing NSView's window among this layer and its ancestors.
++/// Returns None off the main thread or without a view delegate.
+ #[cfg(target_os = "macos")]
+ fn hosting_window(
+     start: Retained<objc2_quartz_core::CALayer>,
+ ) -> Option<Retained<objc2::runtime::NSObject>> {
+     let _main_thread = objc2::MainThreadMarker::new()?;
++    let view_class = objc2::runtime::AnyClass::get(c"NSView")?;
+     let mut current = Some(start);
+     while let Some(layer) = current {
+-        if let Some(delegate) = layer.delegate() {
++        if let Some(delegate) = layer.delegate().filter(|delegate| delegate.isKindOfClass(view_class)) {
+             return unsafe { objc2::msg_send![&*delegate, window] };
+         }
+         current = layer.superlayer();
+diff --git a/wgpu-hal/src/vulkan/mod.rs b/wgpu-hal/src/vulkan/mod.rs
+index 1d9989a3c..d920ada0d 100644
+--- a/wgpu-hal/src/vulkan/mod.rs
++++ b/wgpu-hal/src/vulkan/mod.rs
+@@ -980,7 +980,21 @@ impl Temp {
+         self.marker.clear();
+         self.marker.extend_from_slice(name.as_bytes());
+         self.marker.push(0);
+-        unsafe { CStr::from_bytes_with_nul_unchecked(&self.marker) }
++        CStr::from_bytes_until_nul(&self.marker).unwrap()
++    }
++}
++
++#[cfg(test)]
++mod temp_tests {
++    use super::Temp;
++
++    #[test]
++    fn debug_labels_are_terminated_and_truncated_at_the_first_nul() {
++        let mut temp = Temp::default();
++        for (label, expected) in [("", ""), ("longer label", "longer label"), ("猫", "猫"),
++            ("a\0b", "a"), ("\0tail", ""), ("end\0", "end"), ("a\0\0", "a"), ("x", "x")] {
++            assert_eq!(temp.make_c_str(label).to_bytes(), expected.as_bytes());
++        }
+     }
+ }
+
+diff --git a/wgpu-types/src/write_only.rs b/wgpu-types/src/write_only.rs
+index 83d3e6d29..f7756c21a 100644
+--- a/wgpu-types/src/write_only.rs
++++ b/wgpu-types/src/write_only.rs
+@@ -122,9 +122,30 @@ impl<'a, T: ?Sized> WriteOnly<'a, T> {
+     /// write_numbers(wgpu::WriteOnly::from_mut(&mut buf));
+     /// assert_eq!(buf, [0, 1, 2, 3]);
+     /// ```
++    ///
++    /// ```compile_fail
++    /// fn escape() -> wgpu_types::WriteOnly<'static, u32> {
++    ///     let mut owner = Box::new(17);
++    ///     wgpu_types::WriteOnly::from_mut(&mut *owner)
++    /// }
++    /// ```
++    ///
++    /// ```compile_fail
++    /// let mut value = 0;
++    /// let writer = wgpu_types::WriteOnly::from_mut(&mut value);
++    /// value = 1;
++    /// writer.write(2);
++    /// ```
++    ///
++    /// ```compile_fail
++    /// fn escape() -> wgpu_types::WriteOnly<'static, [u32]> {
++    ///     let mut values = [0, 1];
++    ///     wgpu_types::WriteOnly::from_mut(&mut values[..])
++    /// }
++    /// ```
+     #[inline]
+     #[must_use]
+-    pub const fn from_mut(reference: &mut T) -> Self {
++    pub const fn from_mut(reference: &'a mut T) -> Self {
+         // SAFETY: `&mut`’s safety conditions imply ours.
+         // FIXME: Use `NonNull::from_mut()` when MSRV ≥ 1.89.0
+         unsafe { Self::new(NonNull::new_unchecked(&raw mut *reference)) }
+@@ -1010,10 +1031,11 @@ mod tests {
+         // RangeBounds isn’t dyn compatible, so we can’t make a list of test cases and have to
+         // use a generic function.
+         fn assert_oob(range: impl RangeBounds<usize> + UnwindSafe + fmt::Debug + Clone) {
++            let mut values = ['a', 'b', 'c', 'd'];
+             let panic_message_1 = expect_panic({
+                 let range = range.clone();
+                 let target: WriteOnly<'_, [char]> =
+-                    WriteOnly::from_mut(['a', 'b', 'c', 'd'].as_mut_slice());
++                    WriteOnly::from_mut(values.as_mut_slice());
+                 || {
+                     _ = { target }.slice(range);
+                 }
+@@ -1028,7 +1050,7 @@ mod tests {
+             let panic_message_2 = expect_panic({
+                 let range = range.clone();
+                 let target: WriteOnly<'_, [char]> =
+-                    WriteOnly::from_mut(['a', 'b', 'c', 'd'].as_mut_slice());
++                    WriteOnly::from_mut(values.as_mut_slice());
+                 || {
+                     _ = target.into_slice(range);
+                 }

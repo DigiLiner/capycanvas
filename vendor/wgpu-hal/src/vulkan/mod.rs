@@ -980,7 +980,21 @@ impl Temp {
         self.marker.clear();
         self.marker.extend_from_slice(name.as_bytes());
         self.marker.push(0);
-        unsafe { CStr::from_bytes_with_nul_unchecked(&self.marker) }
+        CStr::from_bytes_until_nul(&self.marker).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod temp_tests {
+    use super::Temp;
+
+    #[test]
+    fn debug_labels_are_terminated_and_truncated_at_the_first_nul() {
+        let mut temp = Temp::default();
+        for (label, expected) in [("", ""), ("longer label", "longer label"), ("猫", "猫"),
+            ("a\0b", "a"), ("\0tail", ""), ("end\0", "end"), ("a\0\0", "a"), ("x", "x")] {
+            assert_eq!(temp.make_c_str(label).to_bytes(), expected.as_bytes());
+        }
     }
 }
 

@@ -31,14 +31,14 @@ pub unsafe extern "C" fn capy_project_clip_run(task: *const CapyProjectTask, non
 
 /// # Safety
 /// Worker only, after `capy_project_clip_run`. The PNG stays borrowed from the
-/// task until it is adopted or freed.
+/// task until it is adopted or freed. Outputs are aligned and exclusively writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_clip_png(task: *const CapyProjectTask, bytes: *mut *const u8, count: *mut usize) -> i32 {
-    let (Some(task), Some(bytes), Some(count)) = (unsafe { task.as_ref() }, unsafe { bytes.as_mut() }, unsafe { count.as_mut() }) else { return -1 };
+    let Some(task) = (unsafe { task.as_ref() }) else { return -1 };
+    if bytes.is_null() || count.is_null() { return -1; }
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
     let Payload::Clip { clip: Some(clip), .. } = &state.payload else { return -1 };
-    *bytes = clip.png.as_ptr();
-    *count = clip.png.len();
+    unsafe { bytes.write(clip.png.as_ptr()); count.write(clip.png.len()); }
     0
 }
 
@@ -55,7 +55,7 @@ pub unsafe extern "C" fn capy_project_clip_published(task: *const CapyProjectTas
 
 pub(super) fn adopt_clip(app: &mut CapyApple, task: &CapyProjectTask, clip: &mut Option<Box<PixelClip>>, publication: u64, request: u32) -> Result<(), String> {
     let clip = clip.take().ok_or("The copy did not finish")?;
-    if unsafe { capy_project_begin_commit(task) } < 0 { return Err("Document operation cancelled".into()); }
+    if task.begin_commit() < 0 { return Err("Document operation cancelled".into()); }
     app.window.documents.clip.set_published(*clip, publication);
     let previous = app.host.session.state().revision;
     let mut change = app.host.session.complete_document_request(request, Ok(true))?;

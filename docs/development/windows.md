@@ -578,6 +578,12 @@ been verified.
 
 ## Test
 
+Service shutdown joins every independent worker even when recovery shutdown
+fails. `capy_finish_services` returns only after stored callback contexts are
+quiescent; callers retain callback code and context through that return.
+Window-free document and recovery tests cover failed-worker shutdown and repeat
+cleanup.
+
 Run `pwsh -NoProfile -File ./apps/layer-windows/tests/model-snapshot-reader.ps1`
 to check the UI fixture model reader during concurrent atomic snapshot publication.
 This windowless test needs no GPU and writes its results under `artifacts/windows`.

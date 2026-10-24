@@ -45,8 +45,8 @@ impl CapyApple {
         })?;
         Ok(json!(true))
     }
-    fn document_job(&self, activation: Option<Activation>) -> *mut CapyDocumentTask {
-        Box::into_raw(Box::new(CapyDocumentTask(Mutex::new(Job {
+    fn document_job(&self, activation: Option<Activation>) -> Box<CapyDocumentTask> {
+        Box::new(CapyDocumentTask(Mutex::new(Job {
             activation,
             close: None,
             retired: None,
@@ -59,7 +59,7 @@ impl CapyApple {
             budget: self.window.documents.budget.inactive_ram,
             error: None,
             storage_error: None,
-        }))))
+        })))
     }
 }
 /// # Safety
@@ -93,15 +93,15 @@ pub unsafe extern "C" fn capy_apple_document_switch(
         if closing {
             let close = a.window.prepare_close(&mut a.host, options)?;
             let task = a.document_job(None);
-            unsafe { &*task }.0.lock().unwrap_or_else(|e| e.into_inner()).close = Some(close);
-            return Ok(task);
+            task.0.lock().unwrap_or_else(|e| e.into_inner()).close = Some(close);
+            return Ok(Box::into_raw(task));
         }
         let Some((activation, _)) = a.window.switch(&mut a.host, id, closing, options, |_| {})?
         else {
-            return Ok(a.document_job(None));
+            return Ok(Box::into_raw(a.document_job(None)));
         };
         a.document_retired();
-        Ok(a.document_job(Some(activation)))
+        Ok(Box::into_raw(a.document_job(Some(activation))))
     })
     .unwrap_or(std::ptr::null_mut())
 }
@@ -136,7 +136,7 @@ pub unsafe extern "C" fn capy_apple_document_close_validate(app: *mut CapyApple,
 /// Serial owner only; schedules inactive backing I/O without changing selection.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_document_storage(app: *mut CapyApple) -> *mut CapyDocumentTask {
-    unsafe { app.as_ref() }.map_or(std::ptr::null_mut(), |a| a.document_job(None))
+    unsafe { app.as_ref() }.map_or(std::ptr::null_mut(), |a| Box::into_raw(a.document_job(None)))
 }
 /// # Safety
 /// Worker only; job stays alive and has no concurrent caller.

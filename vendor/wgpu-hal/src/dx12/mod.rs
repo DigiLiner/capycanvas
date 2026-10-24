@@ -783,19 +783,12 @@ pub struct Device {
     shader_cache: Mutex<ShaderCache>,
     counters: Arc<wgt::HalCounters>,
     limits: wgt::Limits,
+    _exception_handler: Option<auxil::dxgi::exception::Registration>,
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
         self.rtv_pool.lock().free_handle(self.null_rtv_handle);
-        if self
-            .shared
-            .private_caps
-            .instance_flags
-            .contains(wgt::InstanceFlags::VALIDATION)
-        {
-            auxil::dxgi::exception::unregister_exception_handler();
-        }
     }
 }
 

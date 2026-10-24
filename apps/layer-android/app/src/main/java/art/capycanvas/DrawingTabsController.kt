@@ -167,7 +167,7 @@ internal class DrawingTabsController(private val host: CanvasHost) {
                 prepared=host.withNative {Native.documentPrepareClose(it)}
                 withContext(NonCancellable) {
                     host.recovery.remove(closingId)
-                    activation=host.withNative {Native.documentCommitClose(it,prepared)};prepared=0L
+                    activation=host.withNative {Native.documentCommitClose(it,prepared)}
                     host.recovery.closed(closingId)
                 }
                 withContext(Dispatchers.IO) {Native.documentResumeWork(activation)}
@@ -182,7 +182,7 @@ internal class DrawingTabsController(private val host: CanvasHost) {
             }
             finally {
                 withContext(NonCancellable) {
-                    if(prepared!=0L)host.withNative {Native.documentCancelPreparedClose(it,prepared)}
+                    if(prepared!=0L)host.withNative {Native.documentReleasePreparedClose(it,prepared)}
                     if(activation!=0L)withContext(Dispatchers.IO) {Native.documentResumeFree(activation)}
                 }
                 transition(false); if(currentCoroutineContext().isActive && selected!=0L)resume()

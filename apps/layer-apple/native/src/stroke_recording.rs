@@ -15,12 +15,13 @@ pub unsafe extern "C" fn capy_apple_stroke_recording_data(app: *mut CapyApple, l
         return std::ptr::null_mut();
     };
     let bytes = bytes.into_boxed_slice();
-    if let Some(length) = unsafe { length.as_mut() } { *length = bytes.len(); }
+    if !length.is_null() { unsafe { length.write(bytes.len()); } }
     Box::into_raw(bytes) as *mut u8
 }
 
 /// # Safety
-/// Bytes must be an unreleased result of `capy_apple_stroke_recording_data`.
+/// Bytes must be an unreleased result of `capy_apple_stroke_recording_data`,
+/// with its original exact length, after all readers have finished.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_bytes_free(bytes: *mut u8, length: usize) {
     if !bytes.is_null() {

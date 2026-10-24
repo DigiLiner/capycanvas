@@ -112,6 +112,7 @@ pub extern "system" fn Java_art_capycanvas_Native_surfacePixelsForTest(
     _: JClass,
     handle: jlong,
 ) -> jbyteArray {
+    crate::jni_entry!(env, handle, {
     match pixels(unsafe { app(handle) })
         .and_then(|bytes| env.byte_array_from_slice(&bytes).map_err(error))
     {
@@ -121,4 +122,5 @@ pub extern "system" fn Java_art_capycanvas_Native_surfacePixelsForTest(
             std::ptr::null_mut()
         }
     }
+    })
 }

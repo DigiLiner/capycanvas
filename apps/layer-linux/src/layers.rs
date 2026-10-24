@@ -1759,7 +1759,6 @@ mod copy_tests {
     #[test]
     #[ignore = "private display native_layers_control_copy"]
     fn native_layers_control_copy() {
-        unsafe { std::env::set_var("GTK_A11Y", "test"); }
         adw::init().unwrap();
         for theme in [adw::ColorScheme::ForceLight, adw::ColorScheme::ForceDark] {
             adw::StyleManager::default().set_color_scheme(theme);

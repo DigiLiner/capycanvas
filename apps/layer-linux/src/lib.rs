@@ -5,6 +5,7 @@ mod canvas_size;
 mod image_size;
 mod documents;
 mod display_color;
+pub use display_color::enable_gtk_color_management;
 mod proof_view;
 mod screen_view;
 mod hdr;
@@ -98,8 +99,6 @@ fn stylesheet_provider() -> gtk::CssProvider {
 }
 
 pub fn run() -> gtk::glib::ExitCode {
-    // SAFETY: first operation, before GTK initialization or worker creation.
-    unsafe { display_color::enable_gtk_color_management() };
     glib::set_application_name(launch_localization().language().app_name());
     let (app, active) = application(storage::APP_ID);
     let result = app.run();
