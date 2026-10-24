@@ -363,7 +363,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
         }
         Row(Modifier.weight(1f).fillMaxHeight().testTag("layer-properties-disclosure")
             .clickable(enabled=open || !view.isNull("layer")) { toggle() }
-            .padding(horizontal=if(full)8.dp else 16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            .padding(horizontal=if(full)inset*2 else 16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
             if (full) Box(Modifier.size(24.dp).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(1.dp)) {
                 Text(label,Modifier.fillMaxWidth().testTag("layer-properties-disclosure-label"),textAlign=if(full)androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.End,maxLines=1,overflow=TextOverflow.Ellipsis)

@@ -2003,10 +2003,10 @@ class AndroidTitleBarTest {
             val labelLeft=bounds("layer-properties-disclosure-label").left
             observe(obj("theme" to theme,"floor_dp" to floor,"grown_dp" to grown,"density" to density,
                 "first_action_center_x" to first.x,"last_action_center_x" to last.x,"first_disclosure_slot_center_x" to firstSlot,"last_disclosure_slot_center_x" to lastSlot,
-                "label_left" to labelLeft,"expected_label_left" to (disclosure.left+38*density)))
+                "label_left" to labelLeft,"expected_label_left" to (disclosure.left+46*density)))
             assertEquals("First footer slot aligns with New Layer",first.x,firstSlot,1f)
             assertEquals("Last footer slot aligns with Actions",last.x,lastSlot,1f)
-            assertEquals("Disclosure label follows 24 dp slot and 6 dp gap",disclosure.left+38*density,labelLeft,1f)
+            assertEquals("Disclosure label follows aligned 24 dp slot and 6 dp gap",disclosure.left+46*density,labelLeft,1f)
             page(floor,true,"Raster Properties reaches floor")
             waitFor("native properties page") { state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties") }
             assertEquals("Raster properties use six-row floor",floor,height(),2f)
@@ -2130,8 +2130,10 @@ class AndroidTitleBarTest {
                 assertEquals("Swipe right $theme/$device",device!=MotionEvent.TOOL_TYPE_MOUSE,row().getBoolean("alpha_locked"))
                 if(device==MotionEvent.TOOL_TYPE_MOUSE)continue
                 shot("layer-alpha-lock-$theme-$device")
-                action(obj("type" to "invoke","command" to "undo"));assertFalse(row().getBoolean("alpha_locked"))
-                action(obj("type" to "invoke","command" to "redo"));assertTrue(row().getBoolean("alpha_locked"))
+                action(obj("type" to "invoke","command" to "undo"))
+                waitFor("Undo restores alpha lock $theme/$device") { !row().getBoolean("alpha_locked") }
+                action(obj("type" to "invoke","command" to "redo"))
+                waitFor("Redo restores alpha lock $theme/$device") { row().getBoolean("alpha_locked") }
                 swipe(60f);assertFalse("Second swipe unlocks",row().getBoolean("alpha_locked"))
                 swipe(-60f);assertNotNull("Left reveals Delete",node("layer-delete-1"))
                 swipe(90f);assertNull("Reverse closes Delete",node("layer-delete-1"))

@@ -328,7 +328,8 @@ with an isolated application ID on a tablet.
 Read the instrumentation result: `OK (N tests)` or `FAILURES!!!`. `am instrument`
 can exit 0 when tests fail, so the exit status proves nothing. Opt-in tests skip
 through JUnit assumptions when their `-e` argument is missing, so confirm that
-the test ran.
+the test ran. History restoration may finish after a command publication fence;
+wait for the expected published document state before asserting Undo or Redo.
 [Testing](testing.md#known-failures-on-main) lists the tests that fail on `main`.
 
 Emulator runs check logic and layout. Physical stylus accuracy, thermal
@@ -990,7 +991,11 @@ Where to look:
   Motion replies belong to the set of bubbles that requested them. Older
   replies cannot place replacement owners or consume newer input wakes.
   See the [host contract](../ui/tool-bubbles.md#host-contract).
-- Layers: `Layers.kt` draws shared clipping rails and FX connections over measured
+- Layers: The combined Layers/Properties disclosure aligns its icon slots with
+  New Layer and Actions, including both panel and control insets.
+  `AndroidTitleBarTest#layerPropertiesDrawerUsesNativeSizingAndActions` checks
+  these positions and the label gap in both themes.
+  `Layers.kt` draws shared clipping rails and FX connections over measured
   content thumbnails, using the relationship palette role for clipping and native
   text ink for the canonical FX glyph. Connector geometry cancels the row face
   translation while drop hit testing keeps the moved thumbnail bounds. Saved
