@@ -130,7 +130,7 @@ fn the_pair_and_transparent_beads_match_the_color_drawer_and_keep_its_gap_from_t
         assert_eq!(drawer.transparent[2], pair.background);
         assert!((8. ..14.).contains(&pair.gap), "{width}: {}", pair.gap);
         for size in COLOR_RING_SIZES {
-            let beads = color_beads(size, BubbleOptions { pair: true, ..BubbleOptions::default() }, pair, 0, 0, [0.; 2], Bead::Foreground);
+            let beads = color_beads(ColorBubbleLayout::new(size, false), BubbleOptions { pair: true, ..BubbleOptions::default() }, pair, 0, 0, [0.; 2], Bead::Foreground);
             let gap = |bead: Bead| beads.iter().find(|b| b.bead == bead).map(|b| distance(b.center, [0.; 2]) - b.size * 0.5 - size * 0.5).unwrap();
             assert!((gap(Bead::Transparent) - pair.gap).abs() < 0.01, "{width}/{size}: transparent sits the drawer's gap off the grey rim");
             assert!(gap(Bead::Foreground) >= pair.gap - 0.01 && gap(Bead::Background) >= pair.gap - 0.01);
@@ -144,11 +144,56 @@ fn everything(size: f32) -> BubbleOptions {
 }
 
 #[test]
+fn hdr_bubble_contour_keeps_panel_proportions_and_equal_margins() {
+    for size in [128., 136., 216., 280., 344., 352.] {
+        let layout = ColorBubbleLayout::new(size, true);
+        let panel = ColorPanelLayout::with_hdr(layout.stage).unwrap();
+        let arc = layout.intensity.unwrap();
+        let wheel = ColorWheelGeometry::new(panel.wheel[2]).unwrap();
+        assert!((panel.wheel[2] - layout.wheel_size()).abs() < 0.001);
+        assert!((arc.width - (wheel.outer - wheel.inner)).abs() < 0.001);
+        assert!((layout.bounds().height - size * 0.5 - arc.radius - arc.width * 0.5 - layout.margin()).abs() < 0.001);
+        assert!((size * 0.5 - wheel.outer - layout.margin()).abs() < 0.001);
+        for segment in layout.outline(0.) {
+            for i in 0..=100 {
+                let p = segment.point(i as f32 / 100.);
+                assert!((p[0].hypot(p[1]) - layout.radius_at(p, 0.)).abs() < 0.002, "{size}: {p:?}");
+            }
+        }
+        assert!(layout.contains([0., size * 0.5 + layout.margin()]));
+        assert!(!layout.contains([size * 0.5, size * 0.5]));
+        let pair = pair().for_bubble(layout);
+        assert_eq!([pair.foreground, pair.background], [panel.foreground[2], panel.background[2]]);
+    }
+}
+
+#[test]
+fn hdr_bubble_beads_clear_the_contour_and_each_other_at_all_sizes() {
+    for size in [128., 136., 216., 280., 344., 352.] {
+        let layout = ColorBubbleLayout::new(size, true);
+        for (recent, palette, pair_enabled) in [(true, true, true), (false, true, true), (true, false, true), (false, false, true), (true, true, false)] {
+            let options = BubbleOptions { size, recent, palette, pair: pair_enabled, ..Default::default() };
+            for scroll in [[0., 0.], [0.3, 0.6], [2.5, 1.5], [3., 4.2]] {
+                let beads = color_beads(layout, options, pair(), 64, 48, scroll, Bead::Foreground);
+                for (i, a) in beads.iter().enumerate() {
+                    assert!(distance(a.center, [0.; 2]) + 0.01 >= layout.radius_at(a.center, a.size * 0.5 + 3.), "{size} {:?} touches plate: {a:?}", options);
+                    for b in &beads[i + 1..] {
+                        if matches!((a.bead, b.bead), (Bead::Foreground, Bead::Background) | (Bead::Background, Bead::Foreground)) { continue; }
+                        assert!(distance(a.center, b.center) + 0.5 >= (a.size + b.size) * 0.5,
+                            "{size} {options:?} {scroll:?}: {a:?} overlaps {b:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     let size = COLOR_RING_SIZES[1];
     let options = everything(size);
     let radius = size * 0.5;
-    let beads = color_beads(size, options, pair(), 20, 30, [0.; 2], Bead::Foreground);
+    let beads = color_beads(ColorBubbleLayout::new(size, false), options, pair(), 20, 30, [0.; 2], Bead::Foreground);
     let of = |beads: &[BeadPlacement], bead: Bead| beads.iter().find(|b| b.bead == bead).map(|b| b.center).unwrap();
     for bead in &beads {
         assert!(distance(bead.center, [0.; 2]) - bead.size * 0.5 >= radius + 3., "{:?} stays off the plate", bead.bead);
@@ -179,15 +224,15 @@ fn color_beads_orbit_the_plate_with_recents_on_top_and_the_palette_below() {
     assert!(distance(foreground, background) < (pair().foreground + pair().background) * 0.5, "the pair overlaps");
     let overlap = [foreground[0] + offset[0] * 0.5, foreground[1] + offset[1] * 0.5];
     assert_eq!(bead_at(&beads, overlap), Some(Bead::Foreground), "the chosen slot lies on top");
-    let behind = color_beads(size, options, pair(), 20, 30, [0.; 2], Bead::Background);
+    let behind = color_beads(ColorBubbleLayout::new(size, false), options, pair(), 20, 30, [0.; 2], Bead::Background);
     assert_eq!(bead_at(&behind, overlap), Some(Bead::Background));
-    let plain = color_beads(size, BubbleOptions { palette: false, ..options }, pair(), 20, 30, [0.; 2], Bead::Foreground);
+    let plain = color_beads(ColorBubbleLayout::new(size, false), BubbleOptions { palette: false, ..options }, pair(), 20, 30, [0.; 2], Bead::Foreground);
     assert!(of(&plain, Bead::Foreground)[0] < 0. && of(&plain, Bead::Transparent)[0] > 0.);
     assert!(!plain.iter().any(|b| matches!(b.bead, Bead::Palettes | Bead::Swatch { .. })));
-    let turned = color_beads(size, options, pair(), 20, 30, [0., 2.], Bead::Foreground);
+    let turned = color_beads(ColorBubbleLayout::new(size, false), options, pair(), 20, 30, [0., 2.], Bead::Foreground);
     assert!(distance(of(&turned, Bead::Swatch { index: 4 }), a) < 1e-3, "turning two columns brings column two to the start");
     assert_eq!(of(&turned, Bead::Palettes), palette, "the palette bead stays put");
-    let half = color_beads(size, options, pair(), 20, 30, [0.5, 0.5], Bead::Foreground);
+    let half = color_beads(ColorBubbleLayout::new(size, false), options, pair(), 20, 30, [0.5, 0.5], Bead::Foreground);
     assert!(half.iter().any(|b| matches!(b.bead, Bead::Recent { .. }) && b.alpha < 1.), "partly turned ends fade");
     assert_eq!(bead_at(&beads, palette), Some(Bead::Palettes));
     assert_eq!(Bead::Swatch { index: 3 }.strip(), Some(BeadStrip::Palette));
@@ -205,7 +250,7 @@ fn color_beads_never_overlap_at_any_size_or_turn() {
             let options = BubbleOptions { size, recent, palette, pair, ..BubbleOptions::default() };
             for scroll in [[0., 0.], [0.3, 0.6], [2.5, 1.5], [3., 4.2]] {
                 for front in [Bead::Foreground, Bead::Background] {
-                    let beads = color_beads(size, options, fit, 64, 48, scroll, front);
+                    let beads = color_beads(ColorBubbleLayout::new(size, false), options, fit, 64, 48, scroll, front);
                     for (i, a) in beads.iter().enumerate() {
                         for b in &beads[i + 1..] {
                             if matches!((a.bead, b.bead), (Bead::Background, Bead::Foreground) | (Bead::Foreground, Bead::Background)) {
@@ -230,7 +275,7 @@ fn color_beads_never_overlap_at_any_size_or_turn() {
 fn turning_beads_moves_and_fades_them_continuously() {
     let size = COLOR_RING_SIZES[1];
     let options = everything(size);
-    let at = |scroll: f32| color_beads(size, options, pair(), 40, 48, [scroll, scroll], Bead::Foreground);
+    let at = |scroll: f32| color_beads(ColorBubbleLayout::new(size, false), options, pair(), 40, 48, [scroll, scroll], Bead::Foreground);
     let mut previous = at(0.);
     for step in 1..=400 {
         let next = at(step as f32 * 0.01);
@@ -562,8 +607,8 @@ fn faint_dots_show_where_hidden_colors_will_emerge() {
     let limit = bead_scroll_limit(BeadStrip::Palette, size, 48);
     assert!(limit >= 2.);
     let ends = |scroll: f32| {
-        let hints = bead_hints(size, options, 0, 48, [0., scroll]);
-        let beads = color_beads(size, options, pair(), 0, 48, [0., scroll], Bead::Foreground);
+        let hints = bead_hints(ColorBubbleLayout::new(size, false), options, 0, 48, [0., scroll]);
+        let beads = color_beads(ColorBubbleLayout::new(size, false), options, pair(), 0, 48, [0., scroll], Bead::Foreground);
         for (hint, _) in &hints {
             assert!(beads.iter().all(|b| distance(*hint, b.center) >= b.size * 0.5 + HINT_DOT * 0.5), "{scroll}: a hint clears every bead");
         }
@@ -572,13 +617,13 @@ fn faint_dots_show_where_hidden_colors_will_emerge() {
     assert_eq!(ends(0.), 2, "only the far end hides colors, one dot per orbit");
     assert_eq!(ends(1.), 4, "both ends hide colors");
     assert_eq!(ends(limit), 2, "at the end only the start hides colors");
-    assert!(bead_hints(size, options, 0, 4, [0., 0.]).is_empty(), "a palette that fits shows no dots");
+    assert!(bead_hints(ColorBubbleLayout::new(size, false), options, 0, 4, [0., 0.]).is_empty(), "a palette that fits shows no dots");
 }
 
 #[test]
 fn the_transparent_bead_keeps_room_from_the_palette_bead() {
     for size in [128., 136., 216., 280., 344., 352.] {
-        let beads = color_beads(size, everything(size), pair(), 20, 30, [0.; 2], Bead::Foreground);
+        let beads = color_beads(ColorBubbleLayout::new(size, false), everything(size), pair(), 20, 30, [0.; 2], Bead::Foreground);
         let at = |bead: Bead| beads.iter().find(|b| b.bead == bead).unwrap();
         let (transparent, palette) = (at(Bead::Transparent), at(Bead::Palettes));
         let gap = distance(transparent.center, palette.center) - (transparent.size + palette.size) * 0.5;

@@ -138,6 +138,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Apple tool bubble drag through four neighbours | 120 | **Unqualified.** M4 iPad input and presentation timing remain unmeasured; the M2 Pro Mac canvas diagnostic cannot qualify the whole native overlay | [Apple native measurements](#apple-native-measurements), 2026-10-24 |
+| HDR color bubble drag and intensity scrub | 120 | Unqualified on reference hardware; GTK workstation diagnostic below uses a small HDR drawing | [GTK HDR color bubble](#gtk-hdr-color-bubble), 2026-10-24 |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
@@ -146,6 +147,36 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
 | List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: touch at scale 1 gives 97.24–109.99 presents/s, p99 up to 25.016 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
+
+## GTK HDR color bubble
+
+Measured 2026-10-24 on `1c09fa08a` plus the shared HDR bubble and GTK presenter,
+using a release build, NVIDIA RTX PRO 6000 Blackwell Max-Q, Vulkan, the private
+GTK runtime and a 1600 × 1000 Mutter display at 120 Hz. The drawing is 640 × 480
+F16, with the paint pair, recent colors and palette enabled. The compositor
+advertises SDR at 80 nits. This does not qualify physical HDR or a reference tier.
+
+`native_hdr_color_bubble_motion` warms each condition, then records three
+six-second gestures with 4 ms native input. Intensity uses a constant angular
+speed so two-decimal rounding does not create pauses at sinusoidal extrema.
+GTK presentation timestamps exclude release and settling frames.
+
+| Input / motion | Presented frames/s, three trials | Worst presentation gap p99 | GTK paint p95 range |
+| --- | --- | --- | --- |
+| Mouse drag | 82.15 / 80.00 / 91.57 | 41.688 ms | 16.050–25.697 ms |
+| Touch drag | 93.23 / 73.16 / 52.79 | 75.185 ms | 12.180–46.022 ms |
+| Mouse intensity | 102.29 / 100.64 / 98.62 | 25.131 ms | 11.181–11.324 ms |
+| Touch intensity | 98.80 / 104.76 / 104.59 | 25.279 ms | 9.077–12.884 ms |
+
+The final run misses the desktop 120 Hz rate and gap criteria. Earlier
+single-shadow drag trials reached 119.01–120.01 presents/s with p99 below
+8.647 ms; the substantial variation remains unresolved. Concurrent host-load
+records show other CPU workloads, but do not establish their contribution to
+the stalls. No tier target is marked met.
+
+Source, runtime and binary hashes, raw trials and host-load records are in
+`artifacts/hdr-color-bubble/`. The final test binary SHA-256 is
+`d56afe13a8f17f16eb279857f6e5c8de0b0cab06a8c174d14014a96c57aa9d0e`.
 
 ## Native palette opening
 

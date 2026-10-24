@@ -801,6 +801,7 @@ mod wheel {
         pub hdr: Cell<bool>,
         pub bare: Cell<bool>,
         pub bare_range: Cell<(i32, i32)>,
+        pub bubble_layout: Cell<Option<layer_ui::ColorBubbleLayout>>,
         // Background precedes foreground so their deliberate overlap also picks correctly.
         pub corners: RefCell<Vec<WheelButton>>,
         pub menu: RefCell<Option<gtk::Popover>>,
@@ -842,6 +843,10 @@ mod wheel {
             let (size, [left, top]) = self.obj().drawing_bounds();
             let radius = size * 0.5;
             (x as f32 - left - radius).hypot(y as f32 - top - radius) <= radius
+                || self.hdr.get() && {
+                    let (stage, origin) = self.obj().stage_bounds();
+                    layer_ui::HdrIntensityArc::new(stage).is_some_and(|arc| arc.contains([x as f32 - origin[0], y as f32 - origin[1]]))
+                }
         }
         fn request_mode(&self) -> gtk::SizeRequestMode {
             gtk::SizeRequestMode::HeightForWidth
@@ -986,20 +991,16 @@ glib::wrapper! {
 }
 const BARE_WHEEL: (i32, i32) = (160, 232);
 fn bare_stage(wheel: f32, hdr: bool) -> Option<(f32, f32, f32)> {
-    let (mut low, mut high) = (128_f32, wheel + 40.);
-    for _ in 0..24 {
-        let candidate = (low + high) * 0.5;
-        if ColorPanelLayout::new(candidate)?.wheel[2] < wheel { low = candidate; } else { high = candidate; }
-    }
-    let layout = ColorPanelLayout::new(high)?;
+    let stage = ColorPanelLayout::stage_for_wheel(wheel)?;
+    let layout = ColorPanelLayout::new(stage)?;
     let inset = layout.wheel[1];
     let bottom = if hdr {
-        let arc = layer_ui::HdrIntensityArc::new(high)?;
+        let arc = layer_ui::HdrIntensityArc::new(stage)?;
         arc.center[1] + arc.radius + (arc.width * 0.5).max(arc.marker_radius) + 2.
     } else {
         inset + layout.wheel[3]
     };
-    Some((high, inset, bottom - inset))
+    Some((stage, inset, bottom - inset))
 }
 impl ColorWheel {
     pub(crate) fn bare() -> Self {
@@ -1013,9 +1014,8 @@ impl ColorWheel {
         *wheel.imp().intensity.borrow_mut() = Some(intensity);
         wheel
     }
-    pub(crate) fn set_bare_range(&self, range: (i32, i32)) {
-        self.imp().bare_range.set(range);
-        self.queue_resize();
+    pub(crate) fn set_bubble_layout(&self, layout: layer_ui::ColorBubbleLayout) {
+        if self.imp().bubble_layout.replace(Some(layout)) != Some(layout) { self.queue_resize(); }
     }
     pub(crate) fn intensity(&self) -> Option<crate::hdr_color_scale::HdrColorScale> {
         self.imp().intensity.borrow().clone()
@@ -1108,6 +1108,7 @@ impl ColorWheel {
         self.add_controller(drag);
     }
     fn stage_bounds(&self) -> (f32, [f32; 2]) {
+        if let Some(layout) = self.imp().bubble_layout.get() { return (layout.stage, [0.; 2]); }
         if self.imp().bare.get() {
             let hdr = self.imp().hdr.get();
             let fits = |wheel: f32| bare_stage(wheel, hdr).is_some_and(|(_, _, height)| height <= self.height() as f32);

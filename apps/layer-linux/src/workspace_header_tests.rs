@@ -1028,7 +1028,7 @@ impl Driver {
         pump(500);
         Self::start(w, app)
     }
-    fn start(w: Rc<Workspace>, app: NativeTestApp) -> Self {
+    pub(super) fn start(w: Rc<Workspace>, app: NativeTestApp) -> Self {
         let input = RemoteInput::new().settle_ms(180).timeout_secs(8);
         input.ready();
         pump(500);

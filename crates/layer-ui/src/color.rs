@@ -17,6 +17,8 @@ pub use paint_pair::{PaintPairView, PaintSwatchView};
 use hdr_picker::HdrPaint;
 mod hdr_arc;
 pub use hdr_arc::HdrIntensityArc;
+mod bubble;
+pub use bubble::{ColorBubbleArc, ColorBubbleLayout};
 pub use editor::{
     COLOR_FORM_FAMILIES, ColorEditor, ColorEditorAction, ColorEditorError, ColorEditorMemory, ColorEditorTarget, ColorEditorView, ColorForm,
     ColorFormChoice, ColorHexNote, ColorHexNoteKind, ColorRowView, ColorScrubSpeed, ColorShapeChoice, ColorStripCorner, ColorStripPlacement, ColorStripView, ColorValueName, ColorValueView,
@@ -1131,6 +1133,15 @@ pub struct ColorPanelLayout {
     pub intensity_caption: [f32; 3],
 }
 impl ColorPanelLayout {
+    pub fn stage_for_wheel(wheel: f32) -> Option<f32> {
+        if !wheel.is_finite() || wheel < Self::new(128.)?.wheel[2] { return None; }
+        let (mut low, mut high) = (128., wheel + 40.);
+        for _ in 0..24 {
+            let mid = (low + high) * 0.5;
+            if Self::new(mid)?.wheel[2] < wheel { low = mid; } else { high = mid; }
+        }
+        Some(high)
+    }
     pub fn circle_contains([x, y, width, height]: [f32; 4], point: [f32; 2]) -> bool {
         [x, y, width, height, point[0], point[1]].into_iter().all(f32::is_finite)
             && width > 0. && height > 0.

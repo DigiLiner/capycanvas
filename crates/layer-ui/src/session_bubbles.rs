@@ -27,6 +27,23 @@ struct Chooser {
     medium: Option<ToolGroup>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ColorBubbleGeometry {
+    layout: ColorBubbleLayout,
+    options: BubbleOptions,
+    pair: PairBeads,
+    front: Bead,
+    counts: [usize; 2],
+    scroll: [f32; 2],
+}
+
+#[derive(Debug)]
+struct ColorBubbleParts {
+    beads: Vec<BeadPlacement>,
+    hints: Vec<([f32; 2], f32)>,
+    collisions: Vec<Shape>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Bubbles {
     desk: Desk,
@@ -44,6 +61,7 @@ pub(crate) struct Bubbles {
     properties: bool,
     stroke: bool,
     dirty: bool,
+    color_geometry: std::cell::RefCell<Option<(ColorBubbleGeometry, ColorBubbleParts)>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -59,7 +77,8 @@ struct WheelContact {
     id: u32,
     context: ColorEditContext,
     before: layer_core::color::RgbColor,
-    part: ColorWheelPart,
+    part: Option<ColorWheelPart>,
+    intensity: Option<f32>,
 }
 
 fn control_face(state: &UiState, control: ToolbarControl) -> (String, &'static str, bool, bool) {
@@ -92,7 +111,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubbles().into_iter().map(|view| BubblePresentation {
             reach: view.reach(),
             readout: view.readout_center(),
-            pill: palette_pill(view.diameter),
+            pill: view.palette_bounds(),
             history: [history_center(0), history_center(1)],
             dots: view.dot_centers(),
             bead_colors: view.beads.iter().map(|bead| bead.color.map(map)).collect(),
@@ -128,7 +147,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.bubble_ring(ring.id, ContactPhase::Cancel, [0.; 2])?
         } else { UiChange::default() };
         if let Some(wheel) = self.bubble_state.wheel {
-            let restored = self.bubble_wheel(wheel.id, ContactPhase::Cancel, wheel.part, [0.; 2])?;
+            let restored = self.bubble_color(wheel.id, ContactPhase::Cancel, wheel.part, [0.; 2])?;
             change.regions |= restored.regions;
             change.canvas_wake |= restored.canvas_wake;
             change.revision = change.revision.max(restored.revision);
@@ -166,6 +185,15 @@ impl<R: CanvasRenderer> UiSession<R> {
         layers_card(self.bubble_viewport(), self.state.layers.len(), self.bubble_state.card_heights, self.bubble_state.properties)
     }
 
+    fn hdr_color_bubbles(&self) -> bool {
+        self.state.platform == Platform::Gtk && self.selection_masks.target().is_none()
+            && self.engine.document().composition().color.depth.is_float()
+    }
+
+    fn color_bubble(&self, bubble: &ToolBubble) -> ColorBubbleLayout {
+        ColorBubbleLayout::new(bubble.diameter(self.narrow()), self.hdr_color_bubbles())
+    }
+
     fn pair_beads(&self) -> PairBeads {
         PairBeads::for_window(self.bubble_viewport()[0])
     }
@@ -193,6 +221,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let viewport = self.bubble_viewport();
         let narrow = self.narrow();
         let pair = self.pair_beads();
+        let hdr = self.hdr_color_bubbles();
         let layout = &self.state.workspace.layout.bubbles;
         let state = &mut self.bubble_state;
         for open in [&mut state.pill, &mut state.card] {
@@ -210,7 +239,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             state.wheel = None;
         }
         state.scroll.retain(|(id, _)| layout.get(*id).is_some());
-        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), b.shape(narrow, pair))).collect();
+        let items: Vec<_> = layout.bubbles.iter().map(|b| (b.id, b.center(viewport), if hdr && b.source.kind() == BubbleKind::Color { Shape::circle(b.diameter(narrow) * 0.5) } else { b.shape(narrow, pair) })).collect();
         if !state.desk.matches(&items, bounds) {
             state.desk.sync(&items, bounds);
         }
@@ -226,10 +255,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let Some(id) = self.bubble_state.card.filter(|id| self.state.workspace.layout.bubbles.get(*id).is_some()) {
             grown.push((id, vec![Shape::rect(self.card_size())]));
         }
-        if let Some(bubble) = self.bubble_state.pill.and_then(|id| self.state.workspace.layout.bubbles.get(id)).filter(|bubble| bubble.options.palette) {
-            let pill = palette_pill(bubble.diameter(self.narrow()));
-            grown.push((bubble.id, vec![bubble.shape(self.narrow(), self.pair_beads()),
-                Shape::rect([pill.width, pill.height]).at([pill.x + pill.width * 0.5, pill.y + pill.height * 0.5])]));
+        for bubble in self.state.workspace.layout.bubbles.bubbles.iter().filter(|b| b.source.kind() == BubbleKind::Color) {
+            let color = self.color_bubble(bubble);
+            let pill = self.bubble_state.pill == Some(bubble.id) && bubble.options.palette;
+            if color.intensity.is_none() && !pill { continue; }
+            let mut parts = if color.intensity.is_some() {
+                self.color_bubble_parts(bubble).collisions.clone()
+            } else { vec![bubble.shape(self.narrow(), self.pair_beads())] };
+            if pill {
+                let b = color.palette_bounds();
+                parts.push(Shape::rect([b.width, b.height]).at([b.x + b.width * 0.5, b.y + b.height * 0.5]));
+            }
+            grown.push((bubble.id, parts));
         }
         if let Some(chooser) = self.bubble_state.chooser
             && let Some(bubble) = self.state.workspace.layout.bubbles.get(chooser.id)
@@ -323,6 +360,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             diameter: bubble.diameter(narrow),
             face: bubble_face(kind, bubble.diameter(narrow)),
             pair: self.pair_beads(),
+            color: (kind == BubbleKind::Color).then(|| self.color_bubble(bubble)),
             label,
             icon,
             preview: match bubble.source {
@@ -342,8 +380,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             readout,
             stamp,
             buttons,
-            hints: if kind == BubbleKind::Color { self.bubble_hints(bubble, narrow) } else { Vec::new() },
-            beads: if kind == BubbleKind::Color { self.bubble_beads(bubble, narrow) } else { Vec::new() },
+            hints: if kind == BubbleKind::Color { self.bubble_hints(bubble) } else { Vec::new() },
+            beads: if kind == BubbleKind::Color { self.bubble_beads(bubble) } else { Vec::new() },
             pill: (kind == BubbleKind::Color && self.bubble_state.pill == Some(bubble.id) && bubble.options.palette)
                 .then(|| state.color_library.active_palette().name.clone()),
             chooser,
@@ -388,20 +426,34 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.bubble_state.scroll.iter().find(|(bubble, _)| *bubble == id).map_or([0.; 2], |(_, scroll)| *scroll)
     }
 
-    fn bubble_hints(&self, bubble: &ToolBubble, narrow: bool) -> Vec<([f32; 2], f32)> {
+    fn color_bubble_parts(&self, bubble: &ToolBubble) -> std::cell::Ref<'_, ColorBubbleParts> {
         let library = &self.state.color_library;
-        let swatches = library.active_palette().swatches.len();
-        bead_hints(bubble.diameter(narrow), bubble.options, library.history.len(), swatches, self.bead_scroll(bubble.id))
+        let key = ColorBubbleGeometry { layout: self.color_bubble(bubble), options: bubble.options, pair: self.pair_beads(),
+            front: if self.state.display_colors().slot == ColorSlot::Background { Bead::Background } else { Bead::Foreground },
+            counts: [library.history.len(), library.active_palette().swatches.len()], scroll: self.bead_scroll(bubble.id) };
+        let mut cache = self.bubble_state.color_geometry.borrow_mut();
+        if cache.as_ref().is_none_or(|(old, _)| *old != key) {
+            let beads = color_beads(key.layout, key.options, key.pair, key.counts[0], key.counts[1], key.scroll, key.front);
+            let hints = bead_hints(key.layout, key.options, key.counts[0], key.counts[1], key.scroll);
+            let mut collisions: Vec<_> = key.layout.collision_circles().into_iter().map(|[x, y, r]| Shape::circle(r).at([x, y])).collect();
+            collisions.extend(beads.iter().map(|b| Shape::circle(b.size * 0.5).at(b.center)));
+            *cache = Some((key, ColorBubbleParts { beads, hints, collisions }));
+        }
+        drop(cache);
+        std::cell::Ref::map(self.bubble_state.color_geometry.borrow(), |cache| &cache.as_ref().unwrap().1)
     }
 
-    fn bubble_beads(&self, bubble: &ToolBubble, narrow: bool) -> Vec<BubbleBead> {
+    fn bubble_hints(&self, bubble: &ToolBubble) -> Vec<([f32; 2], f32)> {
+        self.color_bubble_parts(bubble).hints.clone()
+    }
+
+    fn bubble_beads(&self, bubble: &ToolBubble) -> Vec<BubbleBead> {
         let state = &self.state;
         let library = &state.color_library;
         let swatches = &library.active_palette().swatches;
         let text = |id: MessageId| self.localization().text(id).to_string();
-        let front = if state.colors.slot == ColorSlot::Background { Bead::Background } else { Bead::Foreground };
-        color_beads(bubble.diameter(narrow), bubble.options, self.pair_beads(), library.history.len(), swatches.len(), self.bead_scroll(bubble.id), front)
-            .into_iter()
+        let colors = state.display_colors();
+        self.color_bubble_parts(bubble).beads.iter().copied()
             .map(|placement| {
                 let (color, label, selected) = match placement.bead {
                     Bead::Recent { index } => (library.history.get(index).copied(), text(MessageId::WORKSPACE_BUBBLE_RECENT_COLORS), false),
@@ -409,12 +461,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                         let swatch = swatches.get(index);
                         (swatch.map(|s| s.color), swatch.map(|s| s.name.clone()).unwrap_or_default(), false)
                     }
-                    Bead::Foreground => (Some(state.colors.foreground), text(MessageId::COMMANDS_FOREGROUND_COLOR), state.colors.slot == ColorSlot::Foreground),
-                    Bead::Background => (Some(state.colors.background), text(MessageId::COMMANDS_BACKGROUND_COLOR), state.colors.slot == ColorSlot::Background),
+                    Bead::Foreground => (Some(colors.foreground), text(MessageId::COMMANDS_FOREGROUND_COLOR), colors.slot == ColorSlot::Foreground),
+                    Bead::Background => (Some(colors.background), text(MessageId::COMMANDS_BACKGROUND_COLOR), colors.slot == ColorSlot::Background),
                     Bead::Transparent => (
-                        Some(layer_core::color::RgbColor { linear_rgb: None, space: state.colors.rgb_space(), rgba: [0.; 4] }),
+                        Some(layer_core::color::RgbColor { linear_rgb: None, space: colors.rgb_space(), rgba: [0.; 4] }),
                         text(MessageId::COMMANDS_TRANSPARENT_PAINT),
-                        state.colors.slot == ColorSlot::Transparent,
+                        colors.slot == ColorSlot::Transparent,
                     ),
                     Bead::Palettes => (None, text(MessageId::WORKSPACE_BUBBLE_PALETTE), self.bubble_state.pill == Some(bubble.id)),
                 };
@@ -596,7 +648,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             BubbleAction::Drag { grab, phase, position, viewport } => self.drag_bubble(grab, phase, position, viewport),
             BubbleAction::Tap { id, position } => self.tap_bubble(id, position),
             BubbleAction::Ring { id, phase, position } => self.bubble_ring(id, phase, position),
-            BubbleAction::Wheel { id, phase, part, position } => self.bubble_wheel(id, phase, part, position),
+            BubbleAction::Wheel { id, phase, part, position } => self.bubble_color(id, phase, Some(part), position),
+            BubbleAction::Intensity { id, phase, position } => self.bubble_color(id, phase, None, position),
+            BubbleAction::SetIntensity { id, stops } => {
+                if self.bubble(id)?.source.kind() != BubbleKind::Color || self.color_bubble(self.bubble(id)?).intensity.is_none() {
+                    return Err("This bubble has no intensity control".into());
+                }
+                self.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops } })
+            },
             BubbleAction::ResetRing { id, position } => {
                 let view = self.bubble_view(&self.bubble(id)?.clone());
                 let ring = view.rings.iter().find(|r| r.enabled && r.arc.covers(position)).ok_or("No setting under the contact")?;
@@ -821,7 +880,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
 
-    fn bubble_wheel(&mut self, id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2]) -> Result<UiChange, String> {
+    fn bubble_color(&mut self, id: u32, phase: ContactPhase, part: Option<ColorWheelPart>, position: [f32; 2]) -> Result<UiChange, String> {
         if !position.into_iter().all(f32::is_finite) {
             return Err("Invalid wheel position".into());
         }
@@ -829,7 +888,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             if self.bubble_state.wheel.is_some() { return Err("A color wheel contact is already active".into()); }
             if self.bubble(id)?.source.kind() != BubbleKind::Color { return Err("This bubble has no color wheel".into()); }
             let colors = if self.selection_masks.target().is_some() { &self.selection_masks.colors } else { &self.state.colors };
-            self.bubble_state.wheel = Some(WheelContact { id, context: self.color_wheel_context(), before: colors.definition(), part });
+            if part.is_none() && (self.color_bubble(self.bubble(id)?).intensity.is_none() || colors.slot == ColorSlot::Transparent) { return Ok(UiChange::default()); }
+            self.bubble_state.wheel = Some(WheelContact { id, context: self.color_wheel_context(), before: colors.definition(),
+                intensity: colors.hdr_depth().is_float().then(|| colors.hdr_intensity()), part });
         }
         let Some(wheel) = self.bubble_state.wheel.filter(|wheel| wheel.id == id) else { return Ok(UiChange::default()); };
         if wheel.context != self.color_wheel_context() {
@@ -839,10 +900,17 @@ impl<R: CanvasRenderer> UiSession<R> {
         if matches!(phase, ContactPhase::Cancel | ContactPhase::Up) { self.bubble_state.wheel = None; }
         if phase == ContactPhase::Up { return Ok(UiChange::default()); }
         let action = if phase == ContactPhase::Cancel {
-            ColorAction::Definition { color: wheel.before }
+            match wheel.intensity {
+                Some(stops) => ColorAction::SetSlotIntensity { slot: wheel.context.paint_slot, color: wheel.before, stops },
+                None => ColorAction::Definition { color: wheel.before },
+            }
+        } else if let Some(part) = wheel.part {
+            let size = self.color_bubble(self.bubble(id)?).wheel_size();
+            ColorAction::PickWheel { part, point: position.map(|v| v + size / 2.), size }
         } else {
-            let size = self.bubble_view(&self.bubble(id)?.clone()).diameter - 2. * RING_RIM;
-            ColorAction::PickWheel { part: wheel.part, point: position.map(|v| v + size / 2.), size }
+            let arc = self.color_bubble(self.bubble(id)?).intensity.ok_or("This bubble has no intensity control")?;
+            let colors = self.state.display_colors();
+            ColorAction::HdrIntensity { stops: arc.value(position, HdrIntensityArc::range(colors.hdr_intensity(), colors.hdr_depth())) }
         };
         let mut change = self.dispatch(UiAction::Color { action })?;
         change.regions |= regions::BUBBLES;
@@ -917,7 +985,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let (recent, swatches) = (library.history.len(), library.active_palette().swatches.len());
         match phase {
             ContactPhase::Down => {
-                let beads: Vec<_> = self.bubble_beads(&bubble, self.narrow()).into_iter().map(|b| b.placement).collect();
+                let beads: Vec<_> = self.bubble_beads(&bubble).into_iter().map(|b| b.placement).collect();
                 let strip = bead_at(&beads, position).and_then(Bead::strip);
                 self.bubble_state.beads = Some(BeadContact { id, strip, start: position, last: position, moved: false });
                 Ok(UiChange::default())
@@ -947,7 +1015,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     }
                     return Ok(self.changed(regions::BUBBLES, false));
                 }
-                let beads: Vec<_> = self.bubble_beads(&bubble, self.narrow()).into_iter().map(|b| b.placement).collect();
+                let beads: Vec<_> = self.bubble_beads(&bubble).into_iter().map(|b| b.placement).collect();
                 match bead_at(&beads, position) {
                     Some(bead) => self.bead_action(id, bead),
                     None => Ok(UiChange::default()),
@@ -1151,12 +1219,16 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             _ => position,
         };
-        let closes = matches!(grab, BubbleGrab::Variant { .. }) && self.state.customization.drawer.is_some();
-        if closes {
-            self.state.customization.drawer = None;
+        let pulled = !matches!(grab, BubbleGrab::Bubble { .. } | BubbleGrab::Rim { .. });
+        let mut closes = pulled && self.state.customization.drawer.take().is_some();
+        if let BubbleGrab::Tile { panel, .. } = grab {
+            self.state.customization.column_drawers.retain(|drawer| {
+                let source = drawer.panels().any(|p| p == panel);
+                closes |= source;
+                !source
+            });
         }
         self.close_bubble_parts(None);
-        let pulled = !matches!(grab, BubbleGrab::Bubble { .. } | BubbleGrab::Rim { .. });
         if pulled && source.kind() == BubbleKind::Layers {
             self.bubble_state.card = Some(id);
             self.bubble_state.properties = false;

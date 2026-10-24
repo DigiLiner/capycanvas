@@ -233,10 +233,7 @@ impl HdrColorScale {
     fn pick(&self, point: [f32; 2]) {
         if let Some(g) = self.geometry() {
             let a = self.adjustment();
-            self.set_value(
-                ((a.lower() + g.fraction(point) as f64 * (a.upper() - a.lower())) * 100.).round()
-                    / 100.,
-            );
+            self.set_value(g.value(point, [a.lower() as f32, a.upper() as f32]) as f64);
         }
     }
     pub fn refresh_color(&self, state: &layer_ui::ColorState, view: ViewColor, headroom: f32, preview: bool) {
@@ -250,10 +247,8 @@ impl HdrColorScale {
         }
         self.imp().updating.set(true);
         let stops = state.hdr_intensity() as f64;
-        self.set_range(
-            (-2f64).min(stops.floor()),
-            6f64.max(stops.ceil()).min(f64::from(state.hdr_depth().max_linear().log2())),
-        );
+        let [minimum, maximum] = HdrIntensityArc::range(stops as f32, state.hdr_depth());
+        self.set_range(minimum as f64, maximum as f64);
         self.set_value(stops);
         self.update_property(&[gtk::accessible::Property::ValueText(&format!(
             "{stops:+.2} EV"

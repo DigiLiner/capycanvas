@@ -77,7 +77,7 @@ pub fn color_ui_localized(request: ColorUiRequest, localizer: &crate::localizati
         ColorUiRequest::IntensityArc {size,stops,depth,base,document_space,recipe,headroom} => {
             super::hdr_picker::HdrPaint::validate_stops(stops).map_err(|reason|reason.message(localizer))?;
             let a=HdrIntensityArc::new(size).ok_or("Invalid picker extent")?;
-            let minimum=(-2f32).min(stops.floor()); let limit=if depth==Some(layer_core::color::SampleDepth::F32) {128.} else {65504f32.log2()}; let maximum=6f32.max(stops.ceil()).min(limit);
+            let [minimum,maximum]=HdrIntensityArc::range(stops,depth.unwrap_or(layer_core::color::SampleDepth::F16));
             let samples=(0..=80).map(|i|{
                 let t=i as f32/80.;
                 let p=super::hdr_picker::scale_linear(base.linear_in(document_space)?,minimum+t*(maximum-minimum)).map(|c|c.clamp(-f32::MAX,f32::MAX));

@@ -52,7 +52,9 @@ moves the existing bubble.
   desk in one step.
 - **Coming out:** a brush, medium or group dial comes out selected, with its
   settings halo open when its brush has settings, and Layers opens into its
-  card as soon as it leaves the toolbar or title bar. Moving a bubble already on the canvas leaves it as it was.
+  card as soon as it leaves the toolbar or title bar. Pulling out a bubble closes
+  the open tool drawer; a tile pulled from a column drawer closes that drawer too.
+  The drag keeps its contact as the drawer disappears. Moving a bubble already on the canvas leaves it as it was.
 - Each take, move or put back is one layout undo step. A drag with no net change
   records nothing; cancelling restores the arrangement.
 
@@ -169,7 +171,7 @@ apart:
 - **Recent colors** along the top, newest on the left, eight at most (fewer on a
   small ring). Slide along them to reach older colors; beads shrink and fade as
   they turn past either end, so the strip never ends in a jump.
-- **Primary, secondary and transparent.** These beads have the Color drawer's
+- **Primary, secondary and transparent.** In SDR these beads have the Color drawer's
   sizes and sit its gap (about 10 px) off the grey rim, and the primary and
   secondary overlap like the drawer's pair, the chosen one in front. Tapping
   the secondary chooses it and brings it to the front; nothing swaps. They sit
@@ -189,6 +191,19 @@ A new ring is the Medium circle alone. The hold menu turns **Recent colors**,
 **Palette** and **Primary and secondary** on or off and chooses Small (136 px),
 Medium (216 px) or Large (344 px). Putting the ring back remembers its options
 and size for the next time it is taken.
+
+In HDR drawings, GTK keeps the wheel's size and adds the Color panel's intensity
+arc below it. The plate follows the wheel and arc with the same margin around
+both, rounded shoulders and a lower bump. Primary, secondary and transparent
+use the panel's swatch proportions; the palette follows the lower outline at
+its normal bead spacing. The palette name sits below those rows. Mask colors
+keep the circular SDR plate.
+
+`ColorBubbleLayout` publishes the contour, wheel stage, expanded bounds, palette
+placement and collision circles. Shared Rust also owns intensity picking,
+rollback and color-context retirement. GTK presents this layout; the other
+hosts retain the circular layout until their intensity controls are ported.
+`UiSession::hdr_color_bubbles` keeps that availability decision in shared Rust.
 
 ## Layers card
 
@@ -306,8 +321,21 @@ a host only presents it and captures native input. GTK
 ### Input
 
 GTK forwards wheel contacts through `BubbleAction::Wheel` from the bubble’s
-native drag gesture. The bare Color wheel presents the colors and retains its
-HDR controls; shared Rust owns picking and cancellation across color contexts.
+native drag gesture and HDR contacts through `BubbleAction::Intensity`.
+Double-clicking or double-tapping the intensity arc resets it to zero EV;
+keyboard edits use `SetIntensity`. A hold or second touch restores the color and
+intensity from before the contact. Shared Rust rejects stale contacts after a
+document, paint slot or mask changes.
+
+`native_hdr_color_bubble` checks all three sizes, optional bead groups, both
+themes, mouse and touch intensity edits, reset, keyboard input, cancellation,
+pinching and mask transitions. `native_hdr_color_bubble_motion` measures three
+warmed six-second drags and intensity gestures per input type. Run both on the
+private display; capture the first with `LAYER_NATIVE_CAPTURE_DIR`, and run the
+second with `LAYER_NATIVE_EVENT_MS=4` and `LAYER_TEST_ARTIFACTS`.
+`native_bubble_pickup_closes_drawers` checks drawer dismissal during pickup and
+continued mouse/touch dragging in both themes. Shared pickup tests cover every
+platform, including cancellation and tiles pulled from column drawers.
 
 Web captures pointer events before canvas input and retains DOM widgets for the
 wheel, swatches and Layers inspector. Mouse resets use the browser's native

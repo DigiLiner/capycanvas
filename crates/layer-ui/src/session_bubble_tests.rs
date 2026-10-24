@@ -34,6 +34,63 @@ fn brush(id: DefaultBrushPreset) -> BubbleGrab {
 }
 
 #[test]
+fn pulling_a_bubble_closes_the_tool_drawer_on_every_platform() {
+    for platform in Platform::ALL {
+        for source in 0..3 {
+            for finish in [ContactPhase::Up, ContactPhase::Cancel] {
+                let mut s = session(platform);
+                s.set_viewport(VIEW, [1200, 900]).unwrap();
+                s.state.workspace.layout = WorkspacePreset::Painter.layout(platform);
+                let control = if source == 2 { ToolbarControl::Command { command: CommandId::DrawingBrush } } else { ToolbarControl::Color };
+                let id = s.state.workspace.layout.header.entries().find(|e| e.item == HeaderItem::Tool { control }).unwrap().id;
+                s.dispatch(UiAction::MeasureHeader { height: 60., items: vec![HeaderItemBounds {
+                    id, bounds: Bounds { x: 800., y: 0., width: 40., height: 60. },
+                }] }).unwrap();
+                s.dispatch(UiAction::ActivateHeaderItem { id }).unwrap();
+                if s.state.customization.drawer.is_none() { s.dispatch(UiAction::ActivateHeaderItem { id }).unwrap(); }
+                assert!(s.state.customization.drawer.is_some());
+                let grab = match source {
+                    0 => BubbleGrab::Header { id },
+                    1 => { let (panel, tile) = toolbar_tile(&mut s, control); BubbleGrab::Tile { panel, tile } },
+                    _ => brush(DefaultBrushPreset::PointyPencil),
+                };
+                let change = contact(&mut s, grab, ContactPhase::Down, FAR).unwrap();
+                assert!(s.state.customization.drawer.is_none(), "{platform:?}/{grab:?}");
+                assert_ne!(change.regions & regions::CUSTOMIZATION, 0, "hosts receive the closed drawer");
+                contact(&mut s, grab, ContactPhase::Move, [700., 550.]).unwrap();
+                contact(&mut s, grab, finish, [700., 550.]).unwrap();
+                assert!(s.state.customization.drawer.is_none());
+                assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), usize::from(finish == ContactPhase::Up));
+                if finish == ContactPhase::Up {
+                    let bubble = s.state.workspace.layout.bubbles.bubbles[0].id;
+                    s.state.customization.drawer = Some(ContentDrawer::for_header(&s.state.workspace.layout, id).unwrap());
+                    contact(&mut s, BubbleGrab::Bubble { id: bubble }, ContactPhase::Down, FAR).unwrap();
+                    assert!(s.state.customization.drawer.is_some(), "moving an existing bubble keeps unrelated drawers");
+                    contact(&mut s, BubbleGrab::Bubble { id: bubble }, ContactPhase::Cancel, FAR).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pulling_a_toolbar_bubble_closes_its_column_drawer() {
+    let mut s = desk();
+    s.state.workspace.layout.column_stack_mut(4).drawers = true;
+    s.dispatch(UiAction::MovePanel { panel: Panel::Toolbar, target: DockTarget::Tab { group: 5, index: None }, viewport: VIEW }).unwrap();
+    s.dispatch(UiAction::DoubleClickPanelHandle { group: 5, viewport: VIEW }).unwrap();
+    s.dispatch(UiAction::Customize { action: CustomizationAction::ToggleColumnDrawer { group: 5, panel: Panel::Toolbar } }).unwrap();
+    assert_eq!(s.state.customization.column_drawers.len(), 1);
+    let tile = s.state.workspace.layout.panel(Panel::Toolbar).unwrap().tiles()[0].id;
+    let grab = BubbleGrab::Tile { panel: Panel::Toolbar, tile };
+    let change = contact(&mut s, grab, ContactPhase::Down, FAR).unwrap();
+    assert!(s.state.customization.column_drawers.is_empty());
+    assert_ne!(change.regions & regions::CUSTOMIZATION, 0);
+    contact(&mut s, grab, ContactPhase::Up, FAR).unwrap();
+    assert_eq!(s.state.workspace.layout.bubbles.bubbles.len(), 1);
+}
+
+#[test]
 fn bubble_pickup_queries_use_shared_sources_and_drop_clearance() {
     let mut s = desk();
     for (control, plain, held) in [
@@ -91,6 +148,76 @@ fn take_ring(s: &mut UiSession<Recorder>, at: [f32; 2]) -> u32 {
 
 fn wheel_contact(s: &mut UiSession<Recorder>, id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2]) -> Result<UiChange, String> {
     act(s, BubbleAction::Wheel { id, phase, part, position })
+}
+
+fn hdr_desk(depth: layer_core::color::SampleDepth, platform: Platform) -> UiSession<Recorder> {
+    let mut document = layer_core::Document::new(layer_core::PortableId::random(), 32, 32,
+        layer_core::DocumentNames { paint: "Paint".into(), paper: "Paper".into() });
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color.depth = depth;
+    let mut s = UiSession::new(Recorder { color: document.composition().color, ..Default::default() }, document, [32, 32], platform).unwrap();
+    s.set_viewport(VIEW, [1200, 900]).unwrap();
+    s
+}
+
+#[test]
+fn hdr_bubble_layout_only_appears_on_hosts_with_the_intensity_control() {
+    for platform in Platform::ALL {
+        let mut s = hdr_desk(layer_core::color::SampleDepth::F16, platform);
+        let id = take_ring(&mut s, FAR);
+        let layout = view(&s, id).color.unwrap();
+        let enabled = platform == Platform::Gtk;
+        assert_eq!(layout.intensity.is_some(), enabled, "{platform:?}");
+        assert_eq!(act(&mut s, BubbleAction::SetIntensity { id, stops: 1. }).is_ok(), enabled, "{platform:?}");
+        if !enabled { assert_eq!(layout.bounds().height, layout.diameter); }
+    }
+}
+
+#[test]
+fn hdr_bubble_intensity_commits_cancels_and_retires_with_its_color_context() {
+    use layer_core::color::{RgbColor, RgbSpace, SampleDepth};
+    for depth in [SampleDepth::F16, SampleDepth::F32] {
+        let mut s = hdr_desk(depth, Platform::Gtk);
+        s.dispatch(UiAction::Color { action: ColorAction::Definition { color: RgbColor::new(RgbSpace::Srgb, [0.2, 0.8, 0.4, 1.]).unwrap() } }).unwrap();
+        s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: -1. } }).unwrap();
+        let original = s.state.colors.clone();
+        let checkpoint = s.engine.checkpoint();
+        let id = take_ring(&mut s, FAR);
+        let bubble = view(&s, id);
+        let arc = bubble.color.unwrap().intensity.unwrap();
+        let transported: BubbleHitGeometry = serde_json::from_value(serde_json::to_value(&bubble).unwrap()).unwrap();
+        for fraction in [0., 0.5, 1.] {
+            assert_eq!(bubble.hit(arc.point(fraction)), Some(BubbleHit::Intensity));
+            assert_eq!(transported.hit(arc.point(fraction)), bubble.hit(arc.point(fraction)));
+        }
+        let change = |s: &mut UiSession<Recorder>, phase, stops: f32| act(s, BubbleAction::Intensity { id, phase, position: arc.point((stops + 2.) / 8.) }).unwrap();
+        change(&mut s, ContactPhase::Down, 2.);
+        change(&mut s, ContactPhase::Move, 4.);
+        assert_eq!(s.state.colors.hdr_intensity(), 4.);
+        assert_eq!(s.state.colors.picker_base(), original.picker_base());
+        change(&mut s, ContactPhase::Cancel, 4.);
+        assert_eq!(s.state.colors.definition(), original.definition());
+        assert_eq!(s.state.colors.hdr_intensity(), -1.);
+        change(&mut s, ContactPhase::Down, 3.);
+        change(&mut s, ContactPhase::Up, 3.);
+        wheel_contact(&mut s, id, ContactPhase::Down, ColorWheelPart::Field, [20., -10.]).unwrap();
+        wheel_contact(&mut s, id, ContactPhase::Up, ColorWheelPart::Field, [20., -10.]).unwrap();
+        assert_eq!(s.state.colors.hdr_intensity(), 3.);
+        change(&mut s, ContactPhase::Down, 4.);
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Background } }).unwrap();
+        let background = s.state.colors.clone();
+        change(&mut s, ContactPhase::Move, 6.);
+        change(&mut s, ContactPhase::Cancel, 6.);
+        assert_eq!(s.state.colors, background);
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+        act(&mut s, BubbleAction::SetIntensity { id, stops: 12. }).unwrap();
+        let [low, high] = HdrIntensityArc::range(12., depth);
+        act(&mut s, BubbleAction::Intensity { id, phase: ContactPhase::Down, position: arc.point((10. - low) / (high - low)) }).unwrap();
+        assert!((s.state.colors.hdr_intensity() - 10.).abs() < 0.01, "sampled highlights retain their expanded intensity range");
+        act(&mut s, BubbleAction::Intensity { id, phase: ContactPhase::Cancel, position: [0.; 2] }).unwrap();
+        assert_eq!(s.state.colors.hdr_intensity(), 12.);
+        invoke(&mut s, CommandId::QuickMask);
+        assert!(view(&s, id).color.unwrap().intensity.is_none());
+    }
 }
 
 #[test]

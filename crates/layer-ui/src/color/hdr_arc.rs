@@ -1,7 +1,7 @@
 //! Shared geometry for the intensity arc; hosts own input capture and timing.
 use super::{ColorPanelLayout, ColorWheelGeometry};
 
-#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HdrIntensityArc {
     pub center: [f32; 2],
     pub radius: f32,
@@ -10,6 +10,12 @@ pub struct HdrIntensityArc {
     end_angle: f32,
 }
 impl HdrIntensityArc {
+    pub fn range(stops: f32, depth: layer_core::color::SampleDepth) -> [f32; 2] {
+        [(-2f32).min(stops.floor()), 6f32.max(stops.ceil()).min(depth.max_linear().log2())]
+    }
+    pub fn value(&self, point: [f32; 2], [minimum, maximum]: [f32; 2]) -> f32 {
+        (((minimum + self.fraction(point) * (maximum - minimum)) * 100.).round() / 100.).clamp(minimum, maximum)
+    }
     pub fn new(size: f32) -> Option<Self> {
         let layout = ColorPanelLayout::new(size)?;
         let wheel = ColorWheelGeometry::new(layout.wheel[2])?;
@@ -53,6 +59,21 @@ impl HdrIntensityArc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rounded_intensity_endpoints_stay_inside_the_document_range() {
+        use layer_core::color::SampleDepth;
+        let arc = HdrIntensityArc::new(226.).unwrap();
+        for depth in [SampleDepth::F16, SampleDepth::F32] {
+            for stops in [-12., 0., depth.max_linear().log2()] {
+                let range = HdrIntensityArc::range(stops, depth);
+                for i in 0..=100 {
+                    let value = arc.value(arc.point(i as f32 / 100.), range);
+                    assert!(value >= range[0] && value <= range[1]);
+                }
+                assert_eq!(arc.value(arc.point(1.), range), range[1]);
+            }
+        }
+    }
     #[test]
     fn arc_hits_follow_angles_and_leave_wheel_and_footer_controls_clear() {
         for size in [128., 144., 226., 264., 400., 1024.] {

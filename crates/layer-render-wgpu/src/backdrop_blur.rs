@@ -16,6 +16,12 @@ impl BackdropRegion {
     pub const CIRCULAR: [f32; 4] = [2., 1., 0., 0.];
     pub const SQUIRCLE: [f32; 4] = [4., 1., 0., 0.];
 
+    pub fn color_bubble(center: [f32; 2], radius: f32, arc_radius: f32, cap: f32, angle: f32) -> Self {
+        let half_width = radius.max(arc_radius * angle.cos() + cap);
+        Self { bounds: [center[0] - half_width, center[1] - radius, half_width * 2., radius + arc_radius + cap],
+            radii: [radius, arc_radius, cap, angle], shape: [-1., 1., 0., 1.] }
+    }
+
     pub fn arc(center: [f32; 2], radius: f32, band: f32, start: f32, sweep: f32) -> Self {
         let (start, sweep) = if sweep < 0. { (start + sweep, -sweep) } else { (start, sweep) };
         let point = |a: f32| [center[0] + radius * a.cos(), center[1] + radius * a.sin()];
@@ -54,6 +60,11 @@ impl BackdropRegion {
             3 => [y, width - x - w, h, w],
             _ => self.bounds,
         };
+        if self.shape[0] == -1. {
+            let [x, y] = [self.shape[2], self.shape[3]];
+            let axis = match turns { 1 => [-y, x], 2 => [-x, -y], 3 => [y, -x], _ => [x, y] };
+            return Self { bounds, shape: [-1., self.shape[1], axis[0], axis[1]], ..self };
+        }
         if self.is_arc() {
             let [cx, cy, radius, half] = self.radii;
             let [x, y] = match turns {
@@ -419,7 +430,7 @@ impl BackdropBlur {
                     (start + size - 2.).floor(), start + size + 1.].map(clamp)
             };
             let [xs, ys] = [lines(x, w, extent[0]), lines(y, h, extent[1])];
-            if region.is_arc() || region.shape[1] < 1. || region.radii.iter().any(|r| *r < 0.) || xs.windows(2).chain(ys.windows(2)).any(|p| p[0] > p[1]) {
+            if region.shape[0] <= 0. || region.shape[1] < 1. || region.radii.iter().any(|r| *r < 0.) || xs.windows(2).chain(ys.windows(2)).any(|p| p[0] > p[1]) {
                 edges.push(Edge { region: *region, area: [xs[0], ys[0], xs[5] - xs[0], ys[5] - ys[0]] });
                 continue;
             }

@@ -91,6 +91,28 @@ fn faded_glass_blends_its_blur_and_arcs_blur_only_their_band() {
 }
 
 #[test]
+fn color_bubble_glass_covers_the_bump_and_fades_uniformly() {
+    let r = document([256, 128]);
+    let surface = texture(&r, [256, 128]);
+    let mut presenter = ViewportPresenter::for_renderer(&r, FORMAT);
+    let raw = present(&r, &mut presenter, &surface, 0.);
+    let region = BackdropRegion::color_bubble([128., 48.], 28., 38., 10., 43f32.to_radians());
+    presenter.set_backdrop(&r, &[region], Default::default(), false);
+    let glass = present(&r, &mut presenter, &surface, 0.);
+    presenter.set_backdrop(&r, &[region.with_strength(0.25)], Default::default(), false);
+    let faded = present(&r, &mut presenter, &surface, 0.);
+    let at = |bytes: &[u8], y: usize| bytes[(y * 256 + 128) * 4] as f32;
+    for y in [25, 48, 70, 80, 90] {
+        assert!((at(&glass, y) - at(&raw, y)).abs() > 12., "plate blurs at y={y}");
+        assert!((at(&faded, y) - (at(&raw, y) * 0.75 + at(&glass, y) * 0.25)).abs() <= 2., "uniform fade at y={y}");
+    }
+    for y in [10, 15, 100, 110] { assert_eq!(at(&glass, y), at(&raw, y), "outside stays sharp at y={y}"); }
+    let rotated = region.with_strength(0.4).rotated(1, [256., 128.]);
+    assert_eq!(rotated.shape, [-1., 0.4, -1., 0.]);
+    assert_eq!(rotated.rotated(3, [128., 256.]), region.with_strength(0.4));
+}
+
+#[test]
 fn cached_blur_is_reused_until_a_long_move() {
     let size = [512, 256];
     let r = document(size);

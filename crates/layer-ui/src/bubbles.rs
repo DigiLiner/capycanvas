@@ -409,7 +409,19 @@ fn faded(column: f32, last: f32) -> f32 {
     (1. - excess / FADE_COLUMNS).clamp(0., 1.)
 }
 
-fn strip_beads(beads: &mut Vec<BeadPlacement>, strip: BeadStrip, size: f32, count: usize, scroll: f32) {
+fn strip_point(layout: ColorBubbleLayout, strip: BeadStrip, row: usize, column: f32, last: f32) -> [f32; 2] {
+    if strip == BeadStrip::Palette && layout.intensity.is_some() {
+        let inner = layout.orbit_from_bottom((last * 0.5 - column) * BEAD_STEP, 19.);
+        let distance = inner[0].hypot(inner[1]);
+        let scale = layout.radius_at(inner, 19. + row as f32 * BEAD_STEP) / distance;
+        inner.map(|v| v * scale)
+    } else {
+        layout.orbit(polar(orbit(layout.diameter, row), strip_angle(strip, layout.diameter, column, last)))
+    }
+}
+
+fn strip_beads(beads: &mut Vec<BeadPlacement>, strip: BeadStrip, layout: ColorBubbleLayout, count: usize, scroll: f32) {
+    let size = layout.diameter;
     let rows = strip_rows(strip);
     let last = strip_last(strip, size, count);
     for index in 0..count {
@@ -417,20 +429,21 @@ fn strip_beads(beads: &mut Vec<BeadPlacement>, strip: BeadStrip, size: f32, coun
         let alpha = faded(column, last);
         if alpha > 0. {
             let bead = if strip == BeadStrip::Palette { Bead::Swatch { index } } else { Bead::Recent { index } };
-            let center = polar(orbit(size, index % rows), strip_angle(strip, size, column, last));
+            let center = strip_point(layout, strip, index % rows, column, last);
             beads.push(BeadPlacement { bead, center, size: BUBBLE_BEAD * (0.6 + 0.4 * alpha), alpha });
         }
     }
 }
 
-fn strip_edges(strip: BeadStrip, size: f32, count: usize) -> Vec<([f32; 2], f32)> {
+fn strip_edges(strip: BeadStrip, layout: ColorBubbleLayout, count: usize) -> Vec<([f32; 2], f32)> {
+    let size = layout.diameter;
     let last = strip_last(strip, size, count);
     let columns = (0..=8).flat_map(|i| [-(i as f32) * 0.1, last + i as f32 * 0.1]);
     columns
         .flat_map(|column| (0..strip_rows(strip)).map(move |row| (column, row)))
         .map(|(column, row)| {
             let radius = BUBBLE_BEAD * 0.5 * (0.6 + 0.4 * faded(column, last));
-            (polar(orbit(size, row), strip_angle(strip, size, column, last)), radius)
+            (strip_point(layout, strip, row, column, last), radius)
         })
         .collect()
 }
@@ -462,39 +475,75 @@ impl PairBeads {
         Self { foreground: layout.foreground[2], background: layout.background[2], gap }
     }
 
+    fn for_bubble(self, bubble: ColorBubbleLayout) -> Self {
+        if bubble.intensity.is_none() { return self; }
+        let layout = bubble.panel();
+        let wheel = ColorWheelGeometry::new(bubble.wheel_size()).unwrap();
+        let sdr = ColorPanelLayout::new(bubble.stage).unwrap();
+        let gap = [sdr.foreground, sdr.background, sdr.transparent].into_iter().map(|[x, y, w, _]|
+            (x + w * 0.5 - bubble.stage * 0.5).hypot(y + w * 0.5 - bubble.stage * 0.5) - wheel.outer - w * 0.5)
+            .fold(f32::MAX, f32::min);
+        Self { foreground: layout.foreground[2], background: layout.background[2], gap: (gap - bubble.margin()).max(4.) }
+    }
+
     fn offset(self) -> [f32; 2] {
         let (fg, bg) = (self.foreground, self.background);
         [0.04 * fg + 0.5 * bg, 0.5 * fg - 0.24 * bg]
     }
 }
 
-fn pair_at(size: f32, angle: f32, pair: PairBeads) -> [[f32; 2]; 2] {
-    let radius = size * 0.5 + pair.gap;
-    let offset = pair.offset();
+impl ColorBubbleLayout {
+    fn pair_angle(self) -> f32 {
+        if self.intensity.is_none() { return 140.; }
+        let p = self.panel().foreground;
+        degrees([p[0] + p[2] * 0.5 - self.stage * 0.5, p[1] + p[3] * 0.5 - self.stage * 0.5])
+    }
+}
+
+fn pair_at(layout: ColorBubbleLayout, angle: f32, pair: PairBeads) -> [[f32; 2]; 2] {
+    let radius = layout.diameter * 0.5 + pair.gap;
+    let offset = if layout.intensity.is_some() {
+        let p = layout.panel();
+        [p.background[0] + p.background[2] * 0.5 - p.foreground[0] - p.foreground[2] * 0.5,
+            p.background[1] + p.background[3] * 0.5 - p.foreground[1] - p.foreground[3] * 0.5]
+    } else { pair.offset() };
     let u = polar(1., angle);
     let along = offset[0] * u[0] + offset[1] * u[1];
     let reach = (radius + pair.background * 0.5).powi(2) - (offset[0] * offset[0] + offset[1] * offset[1]) + along * along;
     let distance = (radius + pair.foreground * 0.5).max(reach.max(0.).sqrt() - along);
+    let distance = if layout.intensity.is_some() {
+        let (mut low, mut high) = (distance, distance + layout.diameter);
+        for _ in 0..20 {
+            let mid = (low + high) * 0.5;
+            let f = polar(mid, angle);
+            let b = [f[0] + offset[0], f[1] + offset[1]];
+            if [(f, pair.foreground), (b, pair.background)].into_iter().all(|(p, size)|
+                p[0].hypot(p[1]) >= layout.radius_at(p, pair.gap + size * 0.5)) { high = mid; } else { low = mid; }
+        }
+        high
+    } else { distance };
     let foreground = polar(distance, angle);
     [foreground, [foreground[0] + offset[0], foreground[1] + offset[1]]]
 }
 
-pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: usize, swatches: usize, scroll: [f32; 2], front: Bead) -> Vec<BeadPlacement> {
-    let step = bead_degrees(size);
+pub fn color_beads(layout: ColorBubbleLayout, options: BubbleOptions, pair: PairBeads, recent: usize, swatches: usize, scroll: [f32; 2], front: Bead) -> Vec<BeadPlacement> {
+    let size = layout.diameter;
+    let pair = pair.for_bubble(layout);
     let mut beads = Vec::new();
     let mut obstacles = Vec::new();
     if options.recent {
-        strip_beads(&mut beads, BeadStrip::Recent, size, recent, scroll[0]);
-        obstacles.extend(strip_edges(BeadStrip::Recent, size, recent));
+        strip_beads(&mut beads, BeadStrip::Recent, layout, recent, scroll[0]);
+        obstacles.extend(strip_edges(BeadStrip::Recent, layout, recent));
     }
     let mut palette = None;
     if options.palette {
-        strip_beads(&mut beads, BeadStrip::Palette, size, swatches, scroll[1]);
-        obstacles.extend(strip_edges(BeadStrip::Palette, size, swatches));
+        strip_beads(&mut beads, BeadStrip::Palette, layout, swatches, scroll[1]);
+        obstacles.extend(strip_edges(BeadStrip::Palette, layout, swatches));
         let last = strip_last(BeadStrip::Palette, size, swatches);
-        let angle = strip_angle(BeadStrip::Palette, size, last + PALETTE_GAP, last);
-        let middle = (orbit(size, 0) + orbit(size, 1)) * 0.5;
-        let center = polar(middle / (PALETTE_GAP * step).to_radians().cos(), angle);
+        let angle = degrees(strip_point(layout, BeadStrip::Palette, 0, last + PALETTE_GAP, last));
+        let ends = [0, 1].map(|row| strip_point(layout, BeadStrip::Palette, row, last, last));
+        let middle = (ends[0][0].hypot(ends[0][1]) + ends[1][0].hypot(ends[1][1])) * 0.5;
+        let center = polar(middle / (angle - degrees(ends[0])).to_radians().cos(), angle);
         palette = Some(BeadPlacement { bead: Bead::Palettes, center, size: PALETTE_BEAD, alpha: 1. });
     }
     if let Some(bead) = palette {
@@ -502,8 +551,8 @@ pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: u
     }
     if options.pair {
         let last = strip_last(BeadStrip::Palette, size, swatches);
-        let start = if options.palette { strip_angle(BeadStrip::Palette, size, -FADE_COLUMNS, last) } else { 140. };
-        let place = |angle: f32| pair_at(size, angle, pair);
+        let start = if options.palette { degrees(strip_point(layout, BeadStrip::Palette, 0, -FADE_COLUMNS, last)) } else { layout.pair_angle() };
+        let place = |angle: f32| pair_at(layout, angle, pair);
         let fits = |[f, b]: [[f32; 2]; 2]| clear(f, pair.foreground * 0.5, &obstacles) && clear(b, pair.background * 0.5, &obstacles);
         let angle = (0..90).map(|i| start + i as f32).find(|a| fits(place(*a))).unwrap_or(start);
         let [foreground, background] = place(angle);
@@ -515,14 +564,16 @@ pub fn color_beads(size: f32, options: BubbleOptions, pair: PairBeads, recent: u
         }
         let radius = size * 0.5 + pair.gap + pair.background * 0.5;
         let start = palette.map_or(45., |p| degrees(p.center) - 10.);
-        let angle = (0..90).map(|i| start - i as f32).find(|a| clear(polar(radius, *a), pair.background * 0.5, &obstacles)).unwrap_or(start);
-        beads.push(BeadPlacement { bead: Bead::Transparent, center: polar(radius, angle), size: pair.background, alpha: 1. });
+        let place = |angle| layout.orbit(polar(radius, angle));
+        let angle = (0..90).map(|i| start - i as f32).find(|a| clear(place(*a), pair.background * 0.5, &obstacles)).unwrap_or(start);
+        beads.push(BeadPlacement { bead: Bead::Transparent, center: place(angle), size: pair.background, alpha: 1. });
     }
     beads.extend(palette);
     beads
 }
 
-pub fn bead_hints(size: f32, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2]) -> Vec<([f32; 2], f32)> {
+pub fn bead_hints(layout: ColorBubbleLayout, options: BubbleOptions, recent: usize, swatches: usize, scroll: [f32; 2]) -> Vec<([f32; 2], f32)> {
+    let size = layout.diameter;
     let mut hints = Vec::new();
     for (shown, strip, count, scroll) in [(options.recent, BeadStrip::Recent, recent, scroll[0]), (options.palette, BeadStrip::Palette, swatches, scroll[1])] {
         if !shown {
@@ -533,7 +584,7 @@ pub fn bead_hints(size: f32, options: BubbleOptions, recent: usize, swatches: us
         let fade = |hidden: f32| ((hidden - FADE_COLUMNS) / (1. - FADE_COLUMNS)).clamp(0., 1.);
         for (column, alpha) in [(-HINT_COLUMN, fade(scroll)), (last + HINT_COLUMN, fade(beyond))] {
             if alpha > 0. {
-                hints.extend((0..rows).map(|row| (polar(orbit(size, row), strip_angle(strip, size, column, last)), alpha)));
+                hints.extend((0..rows).map(|row| (strip_point(layout, strip, row, column, last), alpha)));
             }
         }
     }
@@ -825,6 +876,8 @@ pub enum BubbleAction {
     Tap { id: u32, position: [f32; 2] },
     Ring { id: u32, phase: ContactPhase, position: [f32; 2] },
     Wheel { id: u32, phase: ContactPhase, part: ColorWheelPart, position: [f32; 2] },
+    Intensity { id: u32, phase: ContactPhase, position: [f32; 2] },
+    SetIntensity { id: u32, stops: f32 },
     ResetRing { id: u32, position: [f32; 2] },
     Beads { id: u32, phase: ContactPhase, position: [f32; 2] },
     Choose { id: u32, phase: ContactPhase, position: [f32; 2] },
@@ -946,6 +999,7 @@ pub struct BubbleView {
     pub diameter: f32,
     pub face: [f32; 2],
     pub pair: PairBeads,
+    pub color: Option<ColorBubbleLayout>,
     pub label: String,
     pub icon: &'static str,
     pub preview: Option<u32>,
@@ -978,6 +1032,7 @@ pub enum BubbleHit {
     Bead,
     Pill,
     Wheel,
+    Intensity,
     Face,
     Half(usize),
 }
@@ -995,20 +1050,23 @@ impl BubbleView {
     pub fn readout_center(&self) -> [f32; 2] {
         [0., self.halo.unwrap_or(self.diameter) * 0.5 + 16.]
     }
+    pub fn palette_bounds(&self) -> Bounds {
+        self.color.map_or_else(|| palette_pill(self.diameter), ColorBubbleLayout::palette_bounds)
+    }
     pub fn reach(&self) -> f32 {
         let corner = |at: [f32; 2], size: [f32; 2]| (at[0].abs() + size[0] * 0.5).max(at[1].abs() + size[1] * 0.5);
         let beads = self.beads.iter().map(|b| corner(b.placement.center, [b.placement.size; 2]));
         let items = self.chooser.iter().map(|i| corner(i.center, i.size()) + if i.kind == ChooserKind::Brush { 0. } else { 60. });
         let pill = self.pill.as_ref().map(|_| {
-            let b = palette_pill(self.diameter);
+            let b = self.palette_bounds();
             corner([0., b.y + b.height * 0.5], [b.width, b.height])
         });
         let card = self.card.as_ref().map(|c| corner([0.; 2], c.size));
         let halo = self.halo.map(|size| size * 0.5 + 40.);
-        beads.chain(items).chain(pill).chain(card).chain(halo).fold(self.diameter * 0.5, f32::max)
+        beads.chain(items).chain(pill).chain(card).chain(halo).fold(self.color.map_or(self.diameter * 0.5, |c| c.bounds().height - c.diameter * 0.5), f32::max)
     }
     pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
-        hit_geometry(self.kind, self.diameter, self.face, self.card.as_ref().map(|card| card.size),
+        hit_geometry(self.kind, self.diameter, self.face, self.color, self.card.as_ref().map(|card| card.size),
             self.chooser.iter().map(|item| (item.center, item.size())),
             self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
             self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
@@ -1020,6 +1078,8 @@ pub struct BubbleHitGeometry {
     kind: BubbleKind,
     diameter: f32,
     face: [f32; 2],
+    #[serde(default)]
+    color: Option<ColorBubbleLayout>,
     card: Option<HitCard>,
     chooser: Vec<HitItem>,
     rings: Vec<HitRing>,
@@ -1037,14 +1097,14 @@ struct HitBead { placement: BeadPlacement }
 
 impl BubbleHitGeometry {
     pub fn hit(&self, point: [f32; 2]) -> Option<BubbleHit> {
-        hit_geometry(self.kind, self.diameter, self.face, self.card.as_ref().map(|card| card.size),
+        hit_geometry(self.kind, self.diameter, self.face, self.color, self.card.as_ref().map(|card| card.size),
             self.chooser.iter().map(|item| (item.center, if item.kind == ChooserKind::Brush { BRUSH_PILL } else { [CHOOSER_ITEM; 2] })),
             self.rings.iter().filter(|ring| ring.enabled).map(|ring| ring.arc),
             self.beads.iter().map(|bead| bead.placement), self.pill.is_some(), point)
     }
 }
 
-fn hit_geometry(kind: BubbleKind, diameter: f32, face: [f32; 2], card: Option<[f32; 2]>,
+fn hit_geometry(kind: BubbleKind, diameter: f32, face: [f32; 2], color: Option<ColorBubbleLayout>, card: Option<[f32; 2]>,
     mut items: impl Iterator<Item = ([f32; 2], [f32; 2])>, mut rings: impl Iterator<Item = RingArc>,
     mut beads: impl Iterator<Item = BeadPlacement>, pill: bool, point: [f32; 2]) -> Option<BubbleHit> {
     let within = |[w, h]: [f32; 2]| point[0].abs() <= w * 0.5 && point[1].abs() <= h * 0.5;
@@ -1054,8 +1114,14 @@ fn hit_geometry(kind: BubbleKind, diameter: f32, face: [f32; 2], card: Option<[f
     }
     if rings.any(|arc| arc.covers(point)) { return Some(BubbleHit::Ring); }
     if beads.any(|bead| bead_at(&[bead], point).is_some()) { return Some(BubbleHit::Bead); }
-    if pill && palette_pill(diameter).contains(point[0], point[1]) { return Some(BubbleHit::Pill); }
+    let pill_bounds = color.map_or_else(|| palette_pill(diameter), ColorBubbleLayout::palette_bounds);
+    if pill && pill_bounds.contains(point[0], point[1]) { return Some(BubbleHit::Pill); }
     let radius = point[0].hypot(point[1]);
+    if let Some(color) = color {
+        if color.intensity.is_some_and(|arc| arc.contains(point)) { return Some(BubbleHit::Intensity); }
+        if radius <= color.wheel_size() * 0.5 { return Some(BubbleHit::Wheel); }
+        return color.contains(point).then_some(BubbleHit::Face);
+    }
     match kind {
         BubbleKind::Color if radius <= diameter * 0.5 - RING_RIM => Some(BubbleHit::Wheel),
         BubbleKind::Color => (radius <= diameter * 0.5).then_some(BubbleHit::Face),

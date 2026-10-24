@@ -62,6 +62,11 @@ impl Clip {
 }
 
 const GLASS_ARC: &str = "glass-arc";
+const GLASS_BUBBLE: &str = "glass-color-bubble";
+
+pub fn color_bubble(node: gsk::RenderNode, layout: layer_ui::ColorBubbleLayout) -> gsk::RenderNode {
+    gsk::DebugNode::new(node, format!("{GLASS_BUBBLE} {}", layout.diameter).into()).upcast()
+}
 
 pub fn arc(node: gsk::RenderNode, center: [f32; 2], radius: f32, band: f32, degrees: [f32; 2]) -> gsk::RenderNode {
     let [start, sweep] = degrees.map(f32::to_radians);
@@ -163,6 +168,21 @@ fn visit(
         };
         out.extend(region.map(|r| r.with_strength(at.opacity)));
         Some(n.bounds())
+    } else if let Some(n) = node.downcast_ref::<gsk::DebugNode>()
+        && let Some(size) = n.message().strip_prefix(GLASS_BUBBLE).and_then(|s| s.trim().parse::<f32>().ok())
+    {
+        let child = n.child();
+        let fill = child.downcast_ref::<gsk::FillNode>()?.child().downcast::<gsk::ColorNode>().ok()?;
+        let c = fill.color();
+        if !surfaces.iter().any(|s| s.matches([c.red(), c.green(), c.blue(), c.alpha()])) { return None; }
+        let layout = layer_ui::ColorBubbleLayout::new(size, true);
+        let arc = layout.intensity?;
+        let scale = at.place.scale[0].min(at.place.scale[1]);
+        let center = at.place.offset;
+        let cap = (arc.width * 0.5 + layout.margin()) * scale;
+        let p = arc.point(1.);
+        out.push(BackdropRegion::color_bubble(center, size * 0.5 * scale, arc.radius * scale, cap, p[1].atan2(p[0])).with_strength(at.opacity));
+        None
     } else if let Some(n) = node.downcast_ref::<gsk::DebugNode>()
         && let Some(arc) = n.message().strip_prefix(GLASS_ARC)
     {

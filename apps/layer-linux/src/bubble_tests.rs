@@ -753,6 +753,242 @@ fn native_tool_bubbles() {
 }
 
 #[test]
+#[ignore = "private display: workspace-motion.sh gtk --native-test=native_bubble_pickup_closes_drawers"]
+fn native_bubble_pickup_closes_drawers() {
+    let mut d = Driver::new("art.capycanvas.BubbleDrawers");
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        for device in ["mouse", "touch"] {
+            for (index, control) in [ToolbarControl::Color, ToolbarControl::Panel { panel: Panel::Layers },
+                ToolbarControl::Command { command: CommandId::DrawingBrush }].into_iter().enumerate() {
+                d.w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState {
+                    layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..Default::default()
+                }) });
+                pump(300);
+                let header = header_of(&d, control);
+                let from = d.point(&d.named(&header));
+                tap(&mut d, device, from);
+                if state(&d.w).customization.drawer.is_none() { tap(&mut d, device, from); }
+                pump(300);
+                let drawer = d.named("tool-drawer");
+                assert!(drawer.is_mapped(), "{theme:?}/{device}/{control:?}: drawer starts open");
+                let to = canvas_spot(&d, 0.45, 0.55);
+                d.input.perform(serde_json::json!([contact(device, "down", from),
+                    contact(device, "move", [from[0], from[1] + 8.]), contact(device, "move", [from[0], from[1] + 80.]),
+                    contact(device, "move", to)]));
+                pump(400);
+                assert!(state(&d.w).customization.drawer.is_none() && !drawer.is_mapped(), "{theme:?}/{device}/{control:?}: pickup closes drawer");
+                let bubble = find(&d, BubbleSource::for_control(control).unwrap()).unwrap();
+                assert!(ui_session_mut(&d.w).bubble_placements().iter().any(|p| p.id == bubble.id && p.lifted));
+                let end = [to[0] + 60., to[1] + 40.];
+                d.input.perform(serde_json::json!([contact(device, "move", end), contact(device, "up", end)]));
+                pump(350);
+                assert!(find_id(&d, bubble.id).is_some(), "the drag survives its drawer closing");
+                capture(&mut d, &format!("drawer-pickup-{}-{device}-{index}", format!("{theme:?}").to_lowercase()));
+            }
+        }
+    }
+    d.finish();
+}
+
+#[test]
+#[ignore = "private display: workspace-motion.sh gtk --native-test=native_hdr_color_bubble"]
+fn native_hdr_color_bubble() {
+    let app = native_test_app("art.capycanvas.HdrColorBubble");
+    let w = Workspace::with_project(&app, Some((new_drawing_at(640, 480, layer_core::color::SampleDepth::F16), None)));
+    w.window.maximize();
+    w.window.present();
+    super::new_photo::ready(&w);
+    let mut d = Driver::start(w, app);
+    for theme in [Theme::Light, Theme::Dark] {
+        let name = format!("{theme:?}").to_lowercase();
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        let mut workspace = WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..Default::default() };
+        workspace.layout.set_panel_visible(Panel::Color, true).unwrap();
+        workspace.layout.move_panel([1600., 1000.], Panel::Color, DockTarget::Float { position: [220., 150.] }).unwrap();
+        d.w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
+        let mut editing = ui_session(&d.w).editing_state();
+        editing.color_library.history = (0..12).map(|i| layer_core::color::RgbColor::from_linear(layer_core::color::RgbSpace::Srgb,
+            [0.15 + i as f32 * 0.18, 0.75 - i as f32 * 0.04, 0.35 + i as f32 * 0.03, 1.]).unwrap()).collect();
+        let change = ui_session_mut(&d.w).restore_editing(editing);
+        d.w.changed(change);
+        d.w.dispatch(UiAction::Color { action: ColorAction::Library { action: ColorLibraryAction::Import {
+            name: "Studio".into(), swatches: (0..40).map(|i| (format!("Color {}", i + 1), layer_core::color::RgbColor::new(
+                layer_core::color::RgbSpace::Srgb, [0.2 + (i % 7) as f32 * 0.1, 0.25 + (i % 5) as f32 * 0.12, 0.3 + (i % 3) as f32 * 0.2, 1.]).unwrap())).collect(),
+        } } });
+        let palette = state(&d.w).color_library.palettes.iter().find(|p| p.name == "Studio").unwrap().id;
+        d.w.dispatch(UiAction::Color { action: ColorAction::Library { action: ColorLibraryAction::SelectPalette { id: palette } } });
+        d.w.dispatch(UiAction::SetColor { rgba: [0.2, 0.7, 0.45, 1.] });
+        pump(500);
+        let source = BubbleSource::Control { control: ToolbarControl::Color };
+        let spot = canvas_spot(&d, 0.65, 0.48);
+        let widget = header_of(&d, ToolbarControl::Color);
+        tear(&mut d, "mouse", &widget, spot);
+        let id = find(&d, source).unwrap().id;
+        for size in COLOR_RING_SIZES {
+            for (palette, pair) in [(false, false), (false, true), (true, true)] {
+                let options = BubbleOptions { size, pair, palette, recent: palette, ..Default::default() };
+                d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id, options } });
+                pump(500);
+                let view = find_id(&d, id).unwrap();
+                let layout = view.color.unwrap();
+                let bubble = d.named(&format!("bubble-{id}"));
+                let wheel = widgets(&bubble).find_map(|w| w.downcast::<crate::tool_panels::ColorWheel>().ok()).unwrap();
+                let scale = wheel.intensity().unwrap();
+                assert!(scale.is_visible());
+                assert!((wheel.drawing_bounds().0 - layout.wheel_size()).abs() < 0.01, "the arc never shrinks the wheel");
+                let c = center(&d, id);
+                for p in [[0., -size * 0.5 + 2.], [0., layout.bounds().height - size * 0.5 - 2.]] {
+                    assert!(!canvas_at(&d, id, [c[0] + p[0], c[1] + p[1]]), "plate rim belongs to bubble");
+                }
+                if !pair && !palette { assert!(canvas_at(&d, id, [c[0] + size * 0.5, c[1] + size * 0.5]), "outside the shoulder remains canvas"); }
+                capture(&mut d, &format!("hdr-bubble-{name}-{size}-palette-{palette}-pair-{pair}"));
+            }
+        }
+        d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id, options: BubbleOptions { pair: true, ..Default::default() } } });
+        pump(500);
+        for device in ["mouse", "touch"] {
+            d.w.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: -1. } });
+            let locate = |d: &Driver, stops: f32| {
+                let c = center(d, id);
+                let p = find_id(d, id).unwrap().color.unwrap().intensity.unwrap().point((stops + 2.) / 8.);
+                [c[0] + p[0], c[1] + p[1]]
+            };
+            let base = state(&d.w).colors.picker_base();
+            let points = [locate(&d, -1.), locate(&d, 1.), locate(&d, 3.)];
+            stroke(&mut d, device, &points);
+            assert!((state(&d.w).colors.hdr_intensity() - 3.).abs() < 0.08, "{theme:?}/{device}: intensity gesture");
+            assert_eq!(state(&d.w).colors.picker_base(), base);
+            let c = center(&d, id);
+            stroke(&mut d, device, &[[c[0] + 20., c[1] - 10.], [c[0] - 15., c[1] + 10.]]);
+            assert!((state(&d.w).colors.hdr_intensity() - 3.).abs() < 0.08, "wheel preserves HDR intensity");
+            let at = locate(&d, 2.);
+            d.input.perform(serde_json::json!([{ "wait_ms": 500 }, contact(device, "down", at), contact(device, "up", at),
+                { "wait_ms": 50 }, contact(device, "down", at), contact(device, "up", at)]));
+            assert_eq!(state(&d.w).colors.hdr_intensity(), 0., "{theme:?}/{device}: double tap resets intensity");
+            let view = find_id(&d, id).unwrap();
+            let from = rim(&d, &view, 200.);
+            stroke(&mut d, device, &[from, [from[0] + 25., from[1]], [from[0] + 50., from[1]]]);
+            assert!(center(&d, id)[0] > c[0] + 30., "plate rim drags the complete bubble");
+        }
+        let background = bead_point(&d, id, Bead::Background).unwrap();
+        let background_size = find_id(&d, id).unwrap().beads.iter().find(|b| b.placement.bead == Bead::Background).unwrap().placement.size;
+        tap(&mut d, "mouse", [background[0] + background_size * 0.25, background[1] + background_size * 0.15]);
+        assert_eq!(state(&d.w).colors.slot, ColorSlot::Background);
+        let transparent = bead_point(&d, id, Bead::Transparent).unwrap();
+        tap(&mut d, "touch", transparent);
+        assert_eq!(state(&d.w).colors.slot, ColorSlot::Transparent);
+        d.w.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Foreground } });
+        let bubble = d.named(&format!("bubble-{id}"));
+        let wheel = widgets(&bubble).find_map(|w| w.downcast::<crate::tool_panels::ColorWheel>().ok()).unwrap();
+        let scale = wheel.intensity().unwrap();
+        scale.grab_focus();
+        d.input.key(0xff53);
+        assert!((state(&d.w).colors.hdr_intensity() - 0.1).abs() < 0.02, "keyboard edits the same intensity");
+        d.w.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: -1. } });
+        let original = state(&d.w).colors;
+        let c = center(&d, id);
+        let p = find_id(&d, id).unwrap().color.unwrap().intensity.unwrap().point(0.75);
+        let at = [c[0] + p[0], c[1] + p[1]];
+        d.input.perform(serde_json::json!([{"touch":"down","slot":0,"point":at}, {"touch":"down","slot":1,"point":[c[0],c[1]-100.]},
+            {"touch":"up","slot":0}, {"touch":"up","slot":1}]));
+        assert_eq!(state(&d.w).colors.definition(), original.definition(), "second finger cancels the intensity edit");
+        assert_eq!(state(&d.w).colors.hdr_intensity(), -1.);
+        pinch(&mut d, &format!("hdr-bubble-{name}"));
+        d.w.dispatch(UiAction::Invoke { command: CommandId::QuickMask });
+        pump(250);
+        assert!(find_id(&d, id).unwrap().color.unwrap().intensity.is_none(), "mask controls are SDR");
+        assert!(!scale.is_visible());
+        d.w.dispatch(UiAction::Invoke { command: CommandId::QuickMask });
+        pump(250);
+        assert!(find_id(&d, id).unwrap().color.unwrap().intensity.is_some());
+        capture(&mut d, &format!("hdr-bubble-{name}-review"));
+    }
+    d.finish();
+}
+
+#[test]
+#[ignore = "private display: LAYER_NATIVE_EVENT_MS=4 workspace-motion.sh gtk --native-test=native_hdr_color_bubble_motion"]
+fn native_hdr_color_bubble_motion() {
+    let app = native_test_app("art.capycanvas.HdrBubbleMotion");
+    let w = Workspace::with_project(&app, Some((new_drawing_at(640, 480, layer_core::color::SampleDepth::F16), None)));
+    w.window.maximize();
+    w.window.present();
+    super::new_photo::ready(&w);
+    let mut d = Driver::start(w, app);
+    d.w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..Default::default() }) });
+    pump(400);
+    let header = header_of(&d, ToolbarControl::Color);
+    let spot = canvas_spot(&d, 0.55, 0.5);
+    tear(&mut d, "mouse", &header, spot);
+    let id = find(&d, BubbleSource::Control { control: ToolbarControl::Color }).unwrap().id;
+    d.w.dispatch(UiAction::Bubble { action: BubbleAction::SetOptions { id, options: BubbleOptions { pair: true, recent: true, palette: true, ..Default::default() } } });
+    pump(500);
+    let mut reports = Vec::new();
+    for device in ["mouse", "touch"] {
+        for mode in ["drag", "intensity"] {
+            for run in 0..4 {
+                let view = find_id(&d, id).unwrap();
+                let origin = center(&d, id);
+                let arc = view.color.unwrap().intensity.unwrap();
+                let point = |i: usize| {
+                    let t = i as f32 * 0.004;
+                    let phase = if mode == "intensity" { 1. - 2. * ((t + 0.5).rem_euclid(2.) - 1.).abs() }
+                        else { (t * std::f32::consts::TAU * 0.5).sin() };
+                    let p = if mode == "intensity" { arc.point(0.5 + phase * 0.3) }
+                        else { [phase * 140., -view.diameter * 0.5 + 3. + (t * std::f32::consts::TAU).sin() * 24.] };
+                    [origin[0] + p[0], origin[1] + p[1]]
+                };
+                d.input.perform(serde_json::json!([contact(device, "down", point(0))]));
+                let clock = d.w.surface.frame_clock().unwrap();
+                let timings = Rc::new(RefCell::new(Vec::new()));
+                let paints = Rc::new(RefCell::new(Vec::new()));
+                let paint_start = Rc::new(Cell::new(std::time::Instant::now()));
+                let before = clock.connect_before_paint(glib::clone!(#[strong] paint_start, move |_| paint_start.set(std::time::Instant::now())));
+                let after = clock.connect_after_paint(glib::clone!(#[strong] timings, #[strong] paints, #[strong] paint_start, move |clock| {
+                    if let Some(t) = clock.current_timings() { timings.borrow_mut().push(t); }
+                    paints.borrow_mut().push(paint_start.get().elapsed().as_secs_f64() * 1000.);
+                }));
+                let stats = ui_session(&d.w).engine().backend().stats.clone();
+                *stats.lock().unwrap() = Default::default();
+                let refreshes = d.w.publication.refreshes.get();
+                let count = if run == 0 { 250 } else { 1500 };
+                d.input.perform(serde_json::Value::Array((1..=count).map(|i| contact(device, "move", point(i))).collect()));
+                let end = clock.frame_time();
+                let refreshed = d.w.publication.refreshes.get() - refreshes;
+                d.input.perform(serde_json::json!([contact(device, "up", point(count))]));
+                pump(250);
+                clock.disconnect(before);
+                clock.disconnect(after);
+                if run == 0 { continue; }
+                let mut presented: Vec<_> = timings.borrow().iter().filter(|t| t.is_complete() && t.presentation_time() > 0 && t.frame_time() <= end).map(|t| t.presentation_time()).collect();
+                presented.sort_unstable(); presented.dedup();
+                assert!(presented.len() > 100, "{device}/{mode} produces moving frames");
+                let mut gaps: Vec<_> = presented.windows(2).map(|p| (p[1] - p[0]) as f64 / 1000.).collect();
+                gaps.sort_by(f64::total_cmp);
+                let percentile = |mut values: Vec<f64>| { values.sort_by(f64::total_cmp); values.get(values.len() * 95 / 100).copied() };
+                let canvas = {
+                    let stats = stats.lock().unwrap();
+                    serde_json::json!({"backdrop_frames":stats.backdrop_frames,"frames":stats.cpu.len(),
+                        "gpu_p95_ms":percentile(stats.gpu.iter().map(|v|v[1]).collect()),
+                        "owner_frame_p95_ms":percentile(stats.frame_handler_cpu.clone()),
+                        "owner_input_p95_ms":percentile(stats.input_handler_cpu.clone())})
+                };
+                let report = serde_json::json!({"device":device,"mode":mode,"run":run,"frames":presented.len(),
+                    "presented_hz":(presented.len()-1) as f64 * 1_000_000. / (presented.last().unwrap()-presented[0]) as f64,
+                    "gap_p99_ms":gaps[gaps.len()*99/100],"maximum_gap_ms":gaps.last(),"refreshes":refreshed,
+                    "paint_p95_ms":percentile(paints.borrow().clone()),"canvas":canvas});
+                eprintln!("{report}"); reports.push(report);
+            }
+        }
+    }
+    if let Some(dir) = std::env::var_os("LAYER_TEST_ARTIFACTS") {
+        std::fs::write(std::path::Path::new(&dir).join("hdr-color-bubble-motion.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    }
+    d.finish();
+}
+
+#[test]
 #[ignore = "private display: LAYER_NATIVE_EVENT_MS=4 workspace-motion.sh gtk --native-test=native_tool_bubble_motion"]
 fn native_tool_bubble_motion() {
     let mut d = Driver::new("art.capycanvas.ToolBubbleMotion");
