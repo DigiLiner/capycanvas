@@ -5,6 +5,37 @@ crate keeps its original licences, its registry archive SHA-256 and the upstream
 revision it came from. Each change is a named `.patch` described below. Remove
 the vendored copy once an upstream release contains the fix.
 
+## JPEG allocation ownership and refusal
+
+`libjpeg-turbo-rs` 0.8.0 is the published MIT OR Apache-2.0 crate, source revision
+`ee3f3de097647964e0c3ad8c0aa20d6265b5f2c5`, registry archive SHA-256
+`a0d8a1c652b51dbb85c3c3164b1da63b88dafcc3fc12ecceb52f7577738c21f1`.
+The original licenses, manifest and library sources are retained. Unused upstream
+integration tests, benchmarks and their development dependencies are omitted;
+the library unit tests and the focused allocation regressions remain.
+
+`jpeg-bounded-memory.patch` adapts upstream's Vec-owned entropy writer
+(`09908e22aa9af99dc6bc7f2daad56049a24acdd6`) and fallible mainline decode allocations
+(`c6e792fbbdd74c122626e7bea27e951fda39c61c`) to the published source layout.
+Decoded output, coefficient, component, row, crop and metadata buffers report allocation
+refusal through `JpegError`. Marker payloads and complete Extended XMP packets
+obey the supplied memory limit during initial parsing. Comment UTF-8 replacement
+and metadata lists use fallible growth. ICC reassembly checks lengths and retains
+one output allocation. Pixel algorithms and SIMD selection are unchanged; fused
+Wasm helpers compile under the same `simd128` condition as their callers. Encoder growth
+keeps one Vec owner through an unwind and preserves the initialized prefix.
+
+Capy uses the bounded `Decoder` and baseline `Encoder`; it does not call the
+separate `ProgressiveDecoder`, custom scan scripts or C ABI. This selective
+backport does not qualify those other APIs or prove every unsafe codec operation.
+The memory estimates still need aggregate admission and do not impose an allocator
+quota. Remove this vendor once a qualified release includes the corrections.
+
+```sh
+cargo test --locked -p libjpeg-turbo-rs --lib
+cargo test --locked -p libjpeg-turbo-rs --test codec_allocations
+```
+
 ## Portable HEIF/HEVC decoding
 
 `rust_h265` 0.1.0 is the published MIT OR Apache-2.0 crate. Its decoder sources,

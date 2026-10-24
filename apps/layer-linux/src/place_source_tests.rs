@@ -96,6 +96,13 @@ fn native_common_raster_open_import_and_paste() {
 }
 
 #[test]
+#[ignore = "private Wayland display, hardware GPU and LAYER_RASTER_FIXTURES"]
+fn native_jpeg_open_import_and_paste() {
+    native_raster_open_import_and_paste(&[("cmyk.jpg", "image/jpeg"), ("ycck.jpg", "image/jpeg"),
+        ("progressive.jpg", "image/jpeg"), ("progressive-gray.jpg", "image/jpeg"), ("oriented.jpg", "image/jpeg")]);
+}
+
+#[test]
 #[ignore = "private Wayland display, GPU and LAYER_RASTER_FIXTURES"]
 fn native_heif_avif_open_import_and_paste() {
     native_raster_open_import_and_paste(&[("Photo.heic", "image/heic"), ("P3.avif", "image/avif"), ("ICC.avif", "image/avif")]);
@@ -108,6 +115,8 @@ fn native_raster_open_import_and_paste(cases: &[(&str, &str)]) {
     let app = native_test_app("art.capycanvas.CommonRaster");
     let w = Workspace::with_project(&app, Some((new_drawing(256, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));
     w.window.present();
+    ready(&w);
+    apply_fixture_theme(&w);
     ready(&w);
     let drawing = w.documents.selected();
     for &(name, mime) in cases {

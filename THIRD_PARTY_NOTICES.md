@@ -5,6 +5,14 @@ Capy Canvas's original code and non-brand assets are licensed under
 retains its own terms; our dual license does not relicense dependencies.
 The project-owned capybara mark is a separate exception under [BRANDING.md](BRANDING.md).
 
+## Rust JPEG codec — MIT OR Apache-2.0
+
+`libjpeg-turbo-rs` 0.8.0, Copyright (c) 2025 Yonghye Kwon, retains its original
+[MIT](vendor/libjpeg-turbo-rs/LICENSE-MIT) and
+[Apache-2.0](vendor/libjpeg-turbo-rs/LICENSE-APACHE) license texts. The local
+allocation/ownership correction and exact registry provenance are recorded in
+[the vendor guide](vendor/README.md#jpeg-allocation-ownership-and-refusal).
+
 ## Rust AV1 decoding — BSD-2-Clause
 
 `rav1d` 1.1.0 supplies AVIF decoding. The portability patch and upstream

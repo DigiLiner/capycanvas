@@ -86,6 +86,11 @@ eight times the raw pixel buffer plus scratch and retained metadata. These are a
 not allocator-enforced caps or reservations against concurrent jobs. The 32768
 pixel dimension limit and address-space overflow checks also remain in force.
 
+The pinned JPEG backport keeps entropy output Vec-owned through growth and
+reports refusal of mainline pixel, coefficient, row and metadata allocations as
+errors. Its [provenance and scope](../../vendor/README.md#jpeg-allocation-ownership-and-refusal)
+are explicit; other codec APIs and unsafe internals remain separate qualification work.
+
 The policy leaves headroom for the editor, GPU, other apps and allocation
 overhead. It does not certify every 100 MP editing session: one 100 MP RGBA f32
 surface occupies about 1.49 GiB, and multiple surfaces/history can exceed a

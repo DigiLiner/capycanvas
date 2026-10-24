@@ -321,6 +321,11 @@ check compares its live color sample with an authored snapshot, including the
 selected brush's material response. Tab lifecycle fixtures supply their header
 layout explicitly so shipped workspace changes do not remove the controls under test.
 
+`native_jpeg_open_import_and_paste` uses the JPEG reference directory from
+`tools/validation/jpeg_interchange.py` as `LAYER_RASTER_FIXTURES`. It checks
+CMYK/YCCK, progressive RGB/gray and orientation through Open, Import, clipboard
+paste and retained save/history in the requested fixture theme.
+
 Accessibility assertions need GTK's test backend at process startup. Run
 `native_layers_control_copy`, `native_zoom_settings_and_canvas_preferences` and
 `native_live_language_switching` with `GTK_A11Y=test` before the runner command.
