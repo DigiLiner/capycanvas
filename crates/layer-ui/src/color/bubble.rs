@@ -36,45 +36,51 @@ impl ColorBubbleLayout {
         self.diameter * 0.5 - ColorWheelGeometry::new(self.wheel_size()).unwrap().outer
     }
 
-    fn shoulder(self, outset: f32) -> Option<(f32, f32, f32, f32)> {
+    fn junction(self, outset: f32) -> Option<(f32, f32, f32, f32, f32)> {
         let arc = self.intensity?;
         let radius = self.diameter * 0.5 + outset;
         let cap = arc.width * 0.5 + self.margin() + outset;
         let end = arc.point(1.);
         let angle = end[1].atan2(end[0]);
-        let tangent = angle - ((radius - cap) / arc.radius).clamp(-1., 1.).acos();
-        Some((radius, cap, angle, tangent))
+        let ring_join = angle - ((radius * radius + arc.radius * arc.radius - cap * cap)
+            / (2. * radius * arc.radius)).clamp(-1., 1.).acos();
+        let cap_join = (radius * ring_join.sin() - end[1]).atan2(radius * ring_join.cos() - end[0]);
+        Some((radius, cap, angle, ring_join, cap_join))
     }
 
     pub fn outline(self, outset: f32) -> Vec<ColorBubbleArc> {
         use std::f32::consts::{PI, TAU};
-        let Some((radius, cap, angle, tangent)) = self.shoulder(outset) else {
+        let Some((radius, cap, angle, ring_join, cap_join)) = self.junction(outset) else {
             return vec![ColorBubbleArc { center: [0.; 2], radius: self.diameter * 0.5 + outset, start: 0., sweep: TAU }];
         };
         let arc = self.intensity.unwrap();
         vec![
-            ColorBubbleArc { center: [0.; 2], radius, start: PI - tangent, sweep: PI + 2. * tangent },
-            ColorBubbleArc { center: arc.point(1.), radius: cap, start: tangent, sweep: angle - tangent },
+            ColorBubbleArc { center: [0.; 2], radius, start: PI - ring_join, sweep: PI + 2. * ring_join },
+            ColorBubbleArc { center: arc.point(1.), radius: cap, start: cap_join, sweep: angle - cap_join },
             ColorBubbleArc { center: [0.; 2], radius: arc.radius + cap, start: angle, sweep: PI - 2. * angle },
-            ColorBubbleArc { center: arc.point(0.), radius: cap, start: PI - angle, sweep: angle - tangent },
+            ColorBubbleArc { center: arc.point(0.), radius: cap, start: PI - angle, sweep: angle - cap_join },
         ]
     }
 
     pub fn radius_at(self, point: [f32; 2], outset: f32) -> f32 {
-        let Some((radius, cap, angle, tangent)) = self.shoulder(outset) else { return self.diameter * 0.5 + outset; };
-        let arc = self.intensity.unwrap();
-        let a = point[1].atan2(point[0].abs());
-        if a <= tangent { return radius; }
-        if a >= angle { return arc.radius + cap; }
+        let radius = self.diameter * 0.5 + outset;
+        let Some(arc) = self.intensity else { return radius; };
+        let cap = arc.width * 0.5 + self.margin() + outset;
         let end = arc.point(1.);
-        let join = [end[0] + cap * tangent.cos(), end[1] + cap * tangent.sin()];
-        if a < join[1].atan2(join[0]) { return radius / (a - tangent).cos(); }
+        let angle = end[1].atan2(end[0]);
+        let a = point[1].atan2(point[0].abs());
+        if a >= angle { return arc.radius + cap; }
         let delta = a - angle;
-        arc.radius * delta.cos() + (cap * cap - (arc.radius * delta.sin()).powi(2)).max(0.).sqrt()
+        let along = arc.radius * delta.cos();
+        let discriminant = cap * cap - (arc.radius * delta.sin()).powi(2);
+        if along > 0. && discriminant >= 0. { radius.max(along + discriminant.sqrt()) } else { radius }
     }
 
     pub fn contains(self, point: [f32; 2]) -> bool {
-        point[0].hypot(point[1]) <= self.radius_at(point, 0.)
+        point[0].hypot(point[1]) <= self.diameter * 0.5 || self.intensity.is_some_and(|arc| {
+            let nearest = arc.point(arc.fraction(point));
+            (point[0] - nearest[0]).hypot(point[1] - nearest[1]) <= arc.width * 0.5 + self.margin()
+        })
     }
 
     pub fn orbit(self, point: [f32; 2]) -> [f32; 2] {
@@ -86,7 +92,7 @@ impl ColorBubbleLayout {
     pub fn orbit_from_bottom(self, distance: f32, outset: f32) -> [f32; 2] {
         let sign = if distance < 0. { 1. } else { -1. };
         let mut left = distance.abs();
-        let Some((radius, cap, angle, tangent)) = self.shoulder(outset) else {
+        let Some((radius, cap, angle, ring_join, cap_join)) = self.junction(outset) else {
             let a = std::f32::consts::FRAC_PI_2 - left / (self.diameter * 0.5 + outset);
             return [sign * (self.diameter * 0.5 + outset) * a.cos(), (self.diameter * 0.5 + outset) * a.sin()];
         };
@@ -99,20 +105,13 @@ impl ColorBubbleLayout {
         }
         left -= bottom;
         let end = arc.point(1.);
-        let shoulder = (angle - tangent) * cap;
+        let shoulder = (angle - cap_join) * cap;
         if left <= shoulder {
             let a = angle - left / cap;
             return [sign * (end[0] + cap * a.cos()), end[1] + cap * a.sin()];
         }
         left -= shoulder;
-        let start = [end[0] + cap * tangent.cos(), end[1] + cap * tangent.sin()];
-        let finish = [radius * tangent.cos(), radius * tangent.sin()];
-        let length = (start[0] - finish[0]).hypot(start[1] - finish[1]);
-        if left <= length {
-            let t = left / length;
-            return [sign * (start[0] + (finish[0] - start[0]) * t), start[1] + (finish[1] - start[1]) * t];
-        }
-        let a = tangent - (left - length) / radius;
+        let a = ring_join - left / radius;
         [sign * radius * a.cos(), radius * a.sin()]
     }
 
@@ -139,9 +138,6 @@ impl ColorBubbleLayout {
         if let Some(arc) = self.intensity {
             let cap = arc.width * 0.5 + self.margin();
             circles.extend((0..=12).map(|i| { let p = arc.point(i as f32 / 12.); [p[0], p[1], cap] }));
-            for end in [arc.point(0.), arc.point(1.)] {
-                circles.extend([0.25, 0.5, 0.75].map(|t| [end[0] * t, end[1] * t, radius + (cap - radius) * t]));
-            }
         }
         circles
     }

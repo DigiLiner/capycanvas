@@ -150,7 +150,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 
 ## GTK HDR color bubble
 
-Measured 2026-10-24 on `1c09fa08a` plus the shared HDR bubble and GTK presenter,
+Measured 2026-10-24 on `ae97b0732` plus the equal-distance HDR bubble outline,
 using a release build, NVIDIA RTX PRO 6000 Blackwell Max-Q, Vulkan, the private
 GTK runtime and a 1600 × 1000 Mutter display at 120 Hz. The drawing is 640 × 480
 F16, with the paint pair, recent colors and palette enabled. The compositor
@@ -163,20 +163,19 @@ GTK presentation timestamps exclude release and settling frames.
 
 | Input / motion | Presented frames/s, three trials | Worst presentation gap p99 | GTK paint p95 range |
 | --- | --- | --- | --- |
-| Mouse drag | 82.15 / 80.00 / 91.57 | 41.688 ms | 16.050–25.697 ms |
-| Touch drag | 93.23 / 73.16 / 52.79 | 75.185 ms | 12.180–46.022 ms |
-| Mouse intensity | 102.29 / 100.64 / 98.62 | 25.131 ms | 11.181–11.324 ms |
-| Touch intensity | 98.80 / 104.76 / 104.59 | 25.279 ms | 9.077–12.884 ms |
+| Mouse drag | 119.18 / 119.18 / 120.00 | 8.548 ms | 3.934–4.295 ms |
+| Touch drag | 116.21 / 119.02 / 119.67 | 16.697 ms | 3.965–4.253 ms |
+| Mouse intensity | 69.48 / 69.95 / 67.98 | 16.898 ms | 6.359–6.862 ms |
+| Touch intensity | 112.45 / 112.95 / 108.53 | 16.827 ms | 5.313–6.926 ms |
 
-The final run misses the desktop 120 Hz rate and gap criteria. Earlier
-single-shadow drag trials reached 119.01–120.01 presents/s with p99 below
-8.647 ms; the substantial variation remains unresolved. Concurrent host-load
-records show other CPU workloads, but do not establish their contribution to
-the stalls. No tier target is marked met.
+Intensity still misses the desktop 120 Hz criteria. No builds or tests from
+this task ran concurrently with the measurement. The private GTK runtime
+changed since the previous diagnostic, so the two runs are not a matched
+performance comparison. No tier target is marked met.
 
-Source, runtime and binary hashes, raw trials and host-load records are in
-`artifacts/hdr-color-bubble/`. The final test binary SHA-256 is
-`d56afe13a8f17f16eb279857f6e5c8de0b0cab06a8c174d14014a96c57aa9d0e`.
+Source, runtime and binary hashes and raw trials are in
+`artifacts/hdr-color-bubble-uniform-border/`. The test binary SHA-256 is
+`71a43f75118c762a29890d0ed02029c53af9258cf3b7edcdac7e3aeda8fa5dbf`.
 
 ## Native palette opening
 

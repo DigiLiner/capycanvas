@@ -193,11 +193,12 @@ Medium (216 px) or Large (344 px). Putting the ring back remembers its options
 and size for the next time it is taken.
 
 In HDR drawings, GTK keeps the wheel's size and adds the Color panel's intensity
-arc below it. The plate follows the wheel and arc with the same margin around
-both, rounded shoulders and a lower bump. Primary, secondary and transparent
-use the panel's swatch proportions; the palette follows the lower outline at
-its normal bead spacing. The palette name sits below those rows. Mask colors
-keep the circular SDR plate.
+arc below it. Every point on the plate's outer edge is the same distance from
+the nearest hue-ring or intensity-track edge, including around the arc's caps.
+The offset outlines meet in inward corners beside the lower bump. Primary,
+secondary and transparent use the panel's swatch proportions; the palette follows
+the lower outline at its normal bead spacing. The palette name sits below those
+rows. Mask colors keep the circular SDR plate.
 
 `ColorBubbleLayout` publishes the contour, wheel stage, expanded bounds, palette
 placement and collision circles. Shared Rust also owns intensity picking,

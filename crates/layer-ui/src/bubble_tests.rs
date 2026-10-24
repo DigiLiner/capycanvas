@@ -154,10 +154,27 @@ fn hdr_bubble_contour_keeps_panel_proportions_and_equal_margins() {
         assert!((arc.width - (wheel.outer - wheel.inner)).abs() < 0.001);
         assert!((layout.bounds().height - size * 0.5 - arc.radius - arc.width * 0.5 - layout.margin()).abs() < 0.001);
         assert!((size * 0.5 - wheel.outer - layout.margin()).abs() < 0.001);
-        for segment in layout.outline(0.) {
+        let clearance = |p: [f32; 2]| {
+            let nearest = arc.point(arc.fraction(p));
+            (p[0].hypot(p[1]) - wheel.outer)
+                .min((p[0] - nearest[0]).hypot(p[1] - nearest[1]) - arc.width * 0.5)
+        };
+        let outline = layout.outline(0.);
+        for (index, segment) in outline.iter().enumerate() {
+            let end = segment.point(1.);
+            let next = outline[(index + 1) % outline.len()].point(0.);
             for i in 0..=100 {
-                let p = segment.point(i as f32 / 100.);
-                assert!((p[0].hypot(p[1]) - layout.radius_at(p, 0.)).abs() < 0.002, "{size}: {p:?}");
+                let t = i as f32 / 100.;
+                for p in [segment.point(t), [end[0] + (next[0] - end[0]) * t, end[1] + (next[1] - end[1]) * t]] {
+                    assert!((clearance(p) - layout.margin()).abs() < 0.002, "{size}: unequal border at {p:?}: {}", clearance(p));
+                }
+            }
+        }
+        for x in (-400..=400).step_by(7) {
+            for y in (-400..=400).step_by(7) {
+                let p = [x as f32, y as f32];
+                let gap = clearance(p) - layout.margin();
+                if gap.abs() > 0.002 { assert_eq!(layout.contains(p), gap < 0., "{size}: hit outside the offset outline at {p:?}"); }
             }
         }
         assert!(layout.contains([0., size * 0.5 + layout.margin()]));

@@ -120,27 +120,13 @@ fn arc_coverage(p: vec2<f32>, arc: vec4<f32>, shape: vec4<f32>) -> f32 {
     return clamp(.5 - distance + arc.w, 0., 1.);
 }
 
-fn tapered_distance(p: vec2<f32>, endpoint: vec2<f32>, radius: f32, cap: f32) -> f32 {
-    let extent = length(endpoint);
-    let direction = endpoint / extent;
-    let q = vec2<f32>(abs(dot(p, vec2<f32>(-direction.y, direction.x))), dot(p, direction));
-    let slope = (radius - cap) / extent;
-    let side = sqrt(1. - slope * slope);
-    let along = dot(q, vec2<f32>(-slope, side));
-    if along < 0. { return length(q) - radius; }
-    if along > extent * side { return length(q - vec2<f32>(0., extent)) - cap; }
-    return dot(q, vec2<f32>(side, slope)) - radius;
-}
-
 fn color_bubble_coverage(p: vec2<f32>, bounds: vec4<f32>, radii: vec4<f32>, axis: vec2<f32>) -> f32 {
     let center = bounds.xy + bounds.zw * .5 - axis * ((radii.y + radii.z - radii.x) * .5);
     let v = p - center;
     let q = vec2<f32>(dot(v, vec2<f32>(axis.y, -axis.x)), dot(v, axis));
-    let endpoint = vec2<f32>(cos(radii.w), sin(radii.w)) * radii.y;
     let angle = clamp(atan2(max(q.y, 0.), q.x), radii.w, 3.14159265 - radii.w);
     let arc_distance = length(q - vec2<f32>(cos(angle), sin(angle)) * radii.y) - radii.z;
-    let distance = min(arc_distance, min(tapered_distance(q, endpoint, radii.x, radii.z),
-        tapered_distance(q, vec2<f32>(-endpoint.x, endpoint.y), radii.x, radii.z)));
+    let distance = min(arc_distance, length(q) - radii.x);
     return clamp(.5 - distance, 0., 1.);
 }
 

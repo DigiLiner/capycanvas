@@ -107,6 +107,10 @@ fn color_bubble_glass_covers_the_bump_and_fades_uniformly() {
         assert!((at(&faded, y) - (at(&raw, y) * 0.75 + at(&glass, y) * 0.25)).abs() <= 2., "uniform fade at y={y}");
     }
     for y in [10, 15, 100, 110] { assert_eq!(at(&glass, y), at(&raw, y), "outside stays sharp at y={y}"); }
+    for [x, y] in [[98, 52], [158, 52]] {
+        let offset = (y * 256 + x) * 4;
+        assert_eq!(&glass[offset..offset + 4], &raw[offset..offset + 4], "the gap beside the arc cap stays outside the plate");
+    }
     let rotated = region.with_strength(0.4).rotated(1, [256., 128.]);
     assert_eq!(rotated.shape, [-1., 0.4, -1., 0.]);
     assert_eq!(rotated.rotated(3, [128., 256.]), region.with_strength(0.4));
