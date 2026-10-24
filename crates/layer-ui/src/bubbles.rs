@@ -1148,7 +1148,30 @@ pub struct BubbleRingGeometry {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct BubbleColorPresentation {
+    pub bounds: Bounds,
+    pub outline: Vec<crate::color::ColorBubbleArc>,
+    pub glass: [f32; 4],
+    pub intensity: BubbleIntensityPresentation,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BubbleIntensityPresentation {
+    pub geometry: crate::color::HdrIntensityArc,
+    pub path: Vec<[f32; 2]>,
+    pub point: [f32; 2],
+    pub range: [f32; 2],
+    pub stops: f32,
+    pub ramp: Vec<[f32; 4]>,
+    pub marker: [f32; 4],
+    pub label: String,
+    pub text: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct BubblePresentation {
+    pub color: Option<BubbleColorPresentation>,
     pub view: BubbleView,
     pub reach: f32,
     pub readout: [f32; 2],

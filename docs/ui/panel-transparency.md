@@ -105,9 +105,9 @@ nor used as blur input. Each region's fully covered interior (the cross of a
 5×5 grid through its corners) takes one texture tap, and the viewport skips
 those pixels. Corner blocks and the antialiased outline are drawn with the
 region's superellipse or concave coverage.
-GTK's HDR color bubble uses one shared mask combining its circle and lower
-intensity arc at equal edge clearance. Its blur strength applies once across the
-whole plate, including while the bubble fades during painting.
+The GTK, Web and Android HDR color bubble uses one shared mask combining its
+circle and lower intensity arc at equal edge clearance. Its blur strength
+applies once across the whole plate, including while the bubble fades during painting.
 
 ## Colors
 

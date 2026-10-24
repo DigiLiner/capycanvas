@@ -130,7 +130,8 @@ internal class BubbleRecord(packet: JSONObject) {
             return p
         }
         val face = v.array("face").bubblePoint()
-        if (v.objectOrNull("card") == null) part("face", v, Offset.Zero, Size(face.x, face.y), radius = if (v.getString("kind") == "layers") 20f else face.y / 2, squircle = v.getString("kind") == "layers", strength = if (v.getBoolean("enabled")) 1f else .45f, delay = if (parts["card"] != null) 150 else 0)
+        val colorBounds = next.objectOrNull("color")?.getJSONObject("bounds")?.rect()
+        if (v.objectOrNull("card") == null) part("face", v, colorBounds?.center ?: Offset.Zero, colorBounds?.size ?: Size(face.x, face.y), radius = if (v.getString("kind") == "layers") 20f else face.y / 2, squircle = v.getString("kind") == "layers", strength = if (v.getBoolean("enabled")) 1f else .45f, delay = if (parts["card"] != null) 150 else 0)
         if (v.getString("kind") == "layers" && v.objectOrNull("card") == null) {
             val badge = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(0, 22)))) as JSONArray
             val size = badge.getJSONArray(1).bubblePoint()
@@ -317,7 +318,10 @@ private fun Modifier.bubbleCardSurface(id: Int) = pointerInput(id) {
     val hovered = if (item) (record.hovered as? JSONObject)?.optInt("item", -1) == index
         else part.key == "face" && record.hovered == "face" && record.view.getString("kind") !in listOf("color", "history")
     SideEffect { part.hot = item && hovered && record.pressed }
-    val shape = if (part.squircle) SquircleShape(part.radius.dp) else RoundedCornerShape(part.radius.dp)
+    val color = record.packet.objectOrNull("color").takeIf { part.key == "face" }
+    val shape = if (color != null) remember(record.view.number("diameter")) {
+        BubbleColorShape(record.view.number("diameter"), color.getJSONObject("bounds").rect(), color.array("outline"))
+    } else if (part.squircle) SquircleShape(part.radius.dp) else RoundedCornerShape(part.radius.dp)
     val colors = LocalPalette.current
     Box(Modifier.offset { IntOffset(((origin.x + part.center.x - part.size.width / 2) * density).roundToInt(), ((origin.y + part.center.y - part.size.height / 2) * density).roundToInt()) }
         .requiredSize(part.size.width.dp, part.size.height.dp)
@@ -336,6 +340,24 @@ private fun Modifier.bubbleCardSurface(id: Int) = pointerInput(id) {
     }
 }
 
+private class BubbleColorShape(private val diameter: Float, private val bounds: Rect, private val arcs: JSONArray, private val outset: Float = 0f) : Shape {
+    private val shadows = mutableMapOf<Float, BubbleColorShape>()
+    fun expanded(distance: Float) = shadows.getOrPut(distance) {
+        BubbleColorShape(diameter, bounds, bubbleUi(obj("type" to "color_outline", "size" to diameter, "outset" to distance)) as JSONArray, distance)
+    }
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val path = Path()
+        arcs.objects().forEachIndexed { index, arc ->
+            val center = (arc.array("center").bubblePoint() - bounds.topLeft + Offset(outset, outset)) * density.density
+            val radius = arc.number("radius") * density.density
+            path.arcTo(Rect(center - Offset(radius, radius), Size(radius * 2, radius * 2)),
+                arc.number("start") * 180f / PI.toFloat(), arc.number("sweep") * 180f / PI.toFloat(), index == 0)
+        }
+        path.close()
+        return Outline.Generic(path)
+    }
+}
+
 private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean, lifted: Boolean, bead: Boolean, strength: Float) = drawWithCache {
     val reach = (if (bead) 3f else if (lifted) 12f else 8f) * density
     val drop = (if (bead) 1f else if (lifted) 4.5f else 2f) * density
@@ -345,7 +367,7 @@ private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean
     val outlines = (steps downTo 1).map { index ->
         val distance = index * reach / steps
         val expanded = Size(size.width + distance * 2, size.height + distance * 2)
-        val expandedShape = if (squircle) SquircleShape((radius + distance / density).dp) else RoundedCornerShape((radius + distance / density).dp)
+        val expandedShape = if (shape is BubbleColorShape) shape.expanded(distance / density) else if (squircle) SquircleShape((radius + distance / density).dp) else RoundedCornerShape((radius + distance / density).dp)
         Triple(distance, Path().apply { addOutline(expandedShape.createOutline(expanded, layoutDirection, this@drawWithCache)) }, opacity * (1f - distance / reach).pow(2))
     }
     onDrawBehind {
@@ -366,8 +388,16 @@ private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean
         when (v.getString("kind")) {
             "color" -> {
                 val view = host.colorPreview?.objectOrNull("view") ?: host.snapshot!!.getJSONObject("color_panel")
+                val color = record.packet.objectOrNull("color")
+                val bounds = color?.getJSONObject("bounds")?.rect()
+                val side = v.number("diameter") - 14f
+                val wheel = if (bounds == null) Modifier.size(side.dp) else Modifier.align(Alignment.TopStart)
+                    .offset((-bounds.left - side / 2).dp, (-bounds.top - side / 2).dp).size(side.dp)
                 ColorWheel(host, view, (host.colorPreview?.objectOrNull("colors") ?: host.snapshot!!.getJSONObject("state").displayColors()).toString(), host.colorPreview != null,
-                    Modifier.size((v.number("diameter") - 14f).dp), interactive = false) {}
+                    wheel, interactive = false) {}
+                if (color != null) ColorIntensityArc(view, JSONObject(), Modifier.matchParentSize(),
+                    { action -> host.bubble(obj("type" to "set_intensity", "id" to record.id, "stops" to action.number("stops"))) },
+                    caption = false, presentation = color.getJSONObject("intensity"), origin = -bounds!!.topLeft)
             }
             "history" -> v.array("buttons").objects().forEachIndexed { i, button ->
                 val x = record.packet.array("history").getJSONArray(i).bubblePoint().x

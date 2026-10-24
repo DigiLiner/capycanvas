@@ -2,6 +2,7 @@ import {createBubbleInput} from './bubble-input.js';
 import {createLayerInspector} from './layer-inspector.js';
 import {wheelPainter,hueStopCache,rgba,json} from './color-wheel.js';
 import {createLayerThumbnails} from './layers.js';
+import {bubbleColor} from './bubble-color.js';
 import {bubbleShadow} from './bubble-shadow.js';
 
 const svgNS='http://www.w3.org/2000/svg';
@@ -77,7 +78,11 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     surface(r,r.face,[0,0],v.face,v.kind==='layers'?20:v.face[1]/2,v.kind==='layers'?1:0);
     if(v.kind==='color') {
       const view=app.color_panel(),side=v.diameter-14,key=json([view,side,devicePixelRatio]);
-      place(r.wheel,[v.face[0]/2,v.face[1]/2],[side,side]);
+      const color=packet.color;
+      if(color){r.color??=bubbleColor(r.face,r.body,v.id,send);r.color.refresh(color);}
+      else if(r.color){r.color.dispose();r.color=null;}
+      if(color){const b=color.bounds;place(r.face,[b.x+b.width/2,b.y+b.height/2],[b.width,b.height]);r.boxes.pop();}
+      place(r.wheel,color?[-color.bounds.x,-color.bounds.y]:[v.face[0]/2,v.face[1]/2],[side,side]);
       if(r.wheelKey!==key){r.wheelKey=key;r.painter.paint(view,side,Math.ceil(side*Math.min(2,devicePixelRatio||1)));}
     } else if(v.kind==='history') {
       r.halves.forEach((node,i)=>{const b=v.buttons[i];glyph(node,b.icon);node.disabled=!b.enabled;node.title=b.label;node.setAttribute('aria-label',b.label);place(node,[v.face[0]/2+packet.history[i][0],v.face[1]/2],[v.face[1],v.face[1]]);});
@@ -229,7 +234,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       const r=records.get(p.id);if(!r)continue;
       r.center=p.center;r.scale=(p.homing?.82:p.lifted?1.04:1)*r.pinch;r.homeAlpha=p.homing?.55:1;
       r.root.style.transform=`translate(${p.center[0]}px,${p.center[1]}px)`;r.body.style.transform=`scale(${r.scale})`;
-      r.root.classList.toggle('bubble-lifted',p.lifted);
+      r.root.classList.toggle('bubble-lifted',p.lifted);r.color?.shadow(p.lifted);
       for(const box of r.boxes)if(r.view.kind!=='layers'||box.node!==r.face)bubbleShadow(box.node,box.size,box.radius,p.lifted,false,enabledAlpha(box.node));
       if(r.fadeTween){const t=r.fadeTween;t.start??=now;const progress=reduced.matches?1:Math.min(1,(now-t.start)/140);r.fade=t.from+(t.to-t.from)*smooth(progress);if(progress===1)r.fadeTween=null;else active=true;}
       r.root.style.opacity=r.fade*r.homeAlpha;
@@ -266,9 +271,10 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     workspace.classList.toggle('bubble-dab-active',!!stampWanted);glassChanged();return active||dirty;
   }
   function glass() {
-    const boxes=[],arcs=[];
+    const boxes=[],arcs=[],colors=[];
     for(const r of records.values()) {
       const strength=r.fade*(r.homeAlpha??1),scale=r.scale;
+      if(r.packet.color){const g=r.packet.color.glass;colors.push([...r.center,g[0]*scale,g[1]*scale,g[2]*scale,g[3],strength]);}
       for(const b of r.boxes.concat(r.retiring.map(node=>node.bubbleSurface).filter(Boolean))) {
         if(b.node.closest('[hidden]'))continue;
         const t=b.node.bubbleTransition;
@@ -279,7 +285,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       const t=r.transitions.get('halo'),s=scale*(t?t.fromScale+(1-t.fromScale)*t.value:1);
       for(const a of r.arcs)arcs.push([...r.center,a.radius*s,a.band*s,a.start,a.sweep,strength*a.strength*(t?.value??1)]);
     }
-    return {boxes,arcs};
+    return {boxes,arcs,colors};
   }
   reduced.addEventListener('change',()=>{active=true;wake();});
   setInterval(()=>{

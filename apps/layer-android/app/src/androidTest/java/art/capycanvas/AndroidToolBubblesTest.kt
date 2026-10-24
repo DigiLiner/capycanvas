@@ -54,6 +54,11 @@ class AndroidToolBubblesTest {
         val p = placements().single { it.getLong("id") == id }.getJSONArray("center")
         return workspace().topLeft + Offset(p.getDouble(0).toFloat(), p.getDouble(1).toFloat()) * density
     }
+    private fun faceCenter(id: Long): Offset {
+        val color = packets().single { it.getJSONObject("view").getLong("id") == id }.objectOrNull("color") ?: return center(id)
+        val bounds = color.getJSONObject("bounds")
+        return center(id) + Offset(bounds.number("x") + bounds.number("width") / 2, bounds.number("y") + bounds.number("height") / 2) * density
+    }
     private fun bounds(tag: String): Rect {
         var result: Rect? = null
         instrumentation.runOnMainSync {
@@ -130,7 +135,7 @@ class AndroidToolBubblesTest {
                 val tag = if (view(id).isNull("card")) "tool-bubble-$id" else "bubble-card-$id"
                 var native: Offset? = null
                 instrumentation.runOnMainSync { native = findTag(tag)?.second?.boundsInRoot?.center }
-                native?.let { (it - center(id)).getDistance() < 2f } == true
+                native?.let { (it - faceCenter(id)).getDistance() < 2f } == true
             }
         }
     }
@@ -143,7 +148,7 @@ class AndroidToolBubblesTest {
         val local = (from - c) / density
         val before = obj("view" to v, "nativeBounds" to native.toString(), "center" to c.toString(), "from" to from.toString(), "local" to local.toString(), "hit" to query(obj("type" to "bubble_hit", "id" to id, "x" to local.x, "y" to local.y)), "motion" to query(obj("type" to "bubble_motion", "now_ns" to System.nanoTime())))
         shot("return-$id-before")
-        assertTrue("Return starts at the actual native center: native=${native.center}, shared=$c", (native.center - c).getDistance() < 2f)
+        assertTrue("Return starts at the actual native center: native=${native.center}, shared=${faceCenter(id)}", (native.center - faceCenter(id)).getDistance() < 2f)
         stroke(from, from - Offset(0f, 30 * density), Offset(from.x, bounds("title-bar").center.y))
         java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "validation/tool-bubbles/return-diagnostic.json").writeText(obj("before" to before, "afterBubbles" to JSONArray(packets()), "afterMotion" to query(obj("type" to "bubble_motion", "now_ns" to System.nanoTime())), "contacts" to contacts).toString(2))
         waitFor("Returning $id removes it") { packets().none { it.getJSONObject("view").getLong("id") == id } }
@@ -594,6 +599,96 @@ class AndroidToolBubblesTest {
             repeat((12 - before).coerceAtLeast(0)) { index -> invoke("undo"); waitFor("Count undo completes") { view(id).getInt("layers") == 11 - index } }
             stable(id); SystemClock.sleep(250)
             assertBubbleLabel(id, "badge")
+        }
+    }
+    @Test fun hdrBubbleAcrossThemesSizesAndDevices() {
+        host.createDrawing(640, 480, depth = "F16")
+        waitFor("HDR drawing ready") { host.snapshot?.objectOrNull("color_panel")?.optBoolean("hdr") == true && host.snapshot?.optBoolean("brush_ready") == true }
+        fun packet(id: Long) = packets().single { it.getJSONObject("view").getLong("id") == id }.getJSONObject("color")
+        fun intensity() = host.snapshot!!.getJSONObject("color_panel").getDouble("intensity")
+        fun arcPoint(id: Long, fraction: Float): Offset {
+            val geometry = packet(id).getJSONObject("intensity").getJSONObject("geometry")
+            val end = geometry.number("end_angle")
+            val angle = Math.PI.toFloat() - end - fraction * (Math.PI.toFloat() - 2 * end)
+            return center(id) + (geometry.array("center").bubblePoint() + Offset(cos(angle), sin(angle)) * geometry.number("radius")) * density
+        }
+        for (theme in listOf("light", "dark")) {
+            case = "hdr-$theme"; tool = MotionEvent.TOOL_TYPE_MOUSE
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
+            action(obj("type" to "set_theme", "theme" to theme))
+            val id = take(3, workspace().center)
+            for (size in listOf(136, 216, 344)) for ((palette, pair) in listOf(false to false, false to true, true to true)) {
+                action(obj("type" to "bubble", "action" to obj("type" to "set_options", "id" to id, "options" to obj(
+                    "size" to size, "recent" to true, "palette" to palette, "pair" to pair, "full" to false, "fold" to true, "swap" to false))))
+                stable(id); SystemClock.sleep(250)
+                val color = packet(id)
+                val face = bounds("tool-bubble-$id")
+                assertEquals("Wheel keeps its selected diameter", size.toFloat(), view(id).number("diameter"), .01f)
+                assertTrue("Native HDR plate includes its lower arc", face.height / density > size)
+                assertTrue("Shared HDR outline has rounded segments", color.array("outline").length() >= 4)
+                assertTrue("EV arc remains in the native bubble", findTag("tool-bubble-$id")!!.second.find(hasTag("color-hdr-intensity")) != null)
+                for (fraction in listOf(0f, .5f, 1f)) {
+                    val local = (arcPoint(id, fraction) - center(id)) / density
+                    assertEquals("Visible EV caps own native contact", "intensity", query(obj("type" to "bubble_hit", "id" to id, "x" to local.x, "y" to local.y)))
+                }
+                shot("size-$size-palette-$palette-pair-$pair")
+            }
+            action(obj("type" to "bubble", "action" to obj("type" to "option", "id" to id, "option" to obj("kind" to "size", "size" to 216))))
+            stable(id)
+            for (input in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+                tool = input
+                action(obj("type" to "color", "action" to obj("op" to "hdr_intensity", "stops" to 0)))
+                SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                stroke(arcPoint(id, .125f), arcPoint(id, .375f), arcPoint(id, .625f))
+                waitFor("$theme/$input EV gesture commits") { kotlin.math.abs(intensity() - 3.0) < .08 }
+                val before = intensity()
+                event(MotionEvent.ACTION_DOWN, arcPoint(id, .25f)); event(MotionEvent.ACTION_MOVE, arcPoint(id, .5f))
+                event(MotionEvent.ACTION_CANCEL); host.drain()
+                assertEquals("Cancelled EV gesture restores authored intensity", before, intensity(), .01)
+                val c = center(id)
+                stroke(c + Offset(12 * density, -8 * density), c + Offset(-12 * density, 8 * density))
+                assertEquals("Wheel edits preserve EV", before, intensity(), .01)
+                SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+                doubleTap(arcPoint(id, .5f), arcPoint(id, .5f))
+                waitFor("Double contact resets EV") { intensity() == 0.0 }
+                val rim = center(id) - Offset(0f, view(id).number("diameter") * density / 2 - 2 * density)
+                val old = center(id)
+                stroke(rim, rim + Offset(20 * density, 0f), rim + Offset(40 * density, 0f))
+                assertTrue("HDR rim drags the complete plate", (stable(id) - old).getDistance() > 20 * density)
+                shot("input-$input")
+            }
+            tool = MotionEvent.TOOL_TYPE_FINGER
+            twoTouches(id)
+            invoke("quick_mask")
+            waitFor("Quick Mask retires the HDR arc") { packets().single { it.getJSONObject("view").getLong("id") == id }.isNull("color") }
+            invoke("quick_mask")
+            waitFor("Leaving Quick Mask restores HDR geometry") { !packets().single { it.getJSONObject("view").getLong("id") == id }.isNull("color") }
+            shot("review")
+        }
+    }
+    @Test fun nativeBubblePickupClosesOpenDrawers() {
+        for (theme in listOf("light", "dark")) for (input in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+            tool = input; root = null; case = "drawer-$theme-$input"
+            for (header in listOf(3, 6, 2)) {
+                action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
+                action(obj("type" to "set_theme", "theme" to theme))
+                val from = bounds("header-item-$header").center
+                tap(from)
+                waitFor("Source drawer opens") { findTag("tool-drawer") != null }
+                val before = packets().map { it.getJSONObject("view").getLong("id") }.toSet()
+                val target = workspace().center
+                event(MotionEvent.ACTION_DOWN, from)
+                event(MotionEvent.ACTION_MOVE, from + Offset(0f, 8 * density))
+                event(MotionEvent.ACTION_MOVE, from + Offset(0f, 80 * density))
+                event(MotionEvent.ACTION_MOVE, target)
+                waitFor("Pickup closes the source drawer before release") { state().getJSONObject("customization").isNull("drawer") && findTag("tool-drawer") == null }
+                val id = packets().single { it.getJSONObject("view").getLong("id") !in before }.getJSONObject("view").getLong("id")
+                val continued = target + Offset(35 * density, 25 * density)
+                event(MotionEvent.ACTION_MOVE, continued); event(MotionEvent.ACTION_UP); host.drain()
+                assertTrue("Captured pickup survives drawer dismissal", packets().any { it.getJSONObject("view").getLong("id") == id })
+                assertTrue("Pickup continues after drawer dismissal", (stable(id) - continued).getDistance() < 30 * density)
+                shot("header-$header")
+            }
         }
     }
     @Test fun nativeBubblesAcrossThemesAndDevices() {

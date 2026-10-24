@@ -66,6 +66,22 @@ class BubblePresentsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ring rollover"):
                 bubbles.report(directory)
 
+    def test_hdr_intensity_requires_visible_values_instead_of_neighbor_motion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            contacts = [dict(run=i, warmup=False, workload="hdr-intensity", begin_ns=i * 10_000_000_000,
+                             end_ns=i * 10_000_000_000 + 6_000_000_000, distinct_centers=[1] * 5,
+                             distinct_intensities=24) for i in range(3)]
+            directory.joinpath("result.json").write_text(json.dumps(dict(contacts=contacts)))
+            times = [c["begin_ns"] + n * 10_000_000 for c in contacts for n in range(601)]
+            directory.joinpath("surface-latency.json").write_text(json.dumps(dict(surface="owned",
+                samples=[dict(text="10000000\n" + "\n".join(f"1 {t} 3" for t in times))])))
+            self.assertEqual(len(bubbles.report(directory)["contacts"]), 3)
+            contacts[1]["distinct_intensities"] = 1
+            directory.joinpath("result.json").write_text(json.dumps(dict(contacts=contacts)))
+            with self.assertRaisesRegex(ValueError, "visibly change intensity"):
+                bubbles.report(directory)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -191,6 +191,13 @@ light/dark mouse, touch and pen journeys; `device.test.mjs --tool-bubbles` runs
 the same contacts in tablet Chrome. See the [host contract](../ui/tool-bubbles.md#host-contract)
 for presentation and input requirements.
 
+`workspace-motion.sh web --hdr-bubbles` checks the HDR bubble's equal-margin
+outline in both themes at all three sizes, with the paint pair, recent colors
+and palette enabled. Mouse, touch and pen contacts edit intensity, reset it and
+restore it on cancellation; Quick Mask removes the HDR arc. The journey also
+checks pickup from an open drawer and records moving-frame callback diagnostics.
+Those browser callback measurements do not qualify presentation rates.
+
 Pure unit tests need no browser or GPU:
 
 ```bash

@@ -197,10 +197,11 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private val glassConnections = linkedMapOf<Any, String>()
     private var bubbleGlassBoxes = emptyList<FloatArray>()
     private var bubbleGlassArcs = emptyList<FloatArray>()
-    internal fun bubbleGlass(boxes: List<FloatArray>, arcs: List<FloatArray>) {
+    private var bubbleGlassColors = emptyList<FloatArray>()
+    internal fun bubbleGlass(boxes: List<FloatArray>, arcs: List<FloatArray>, colors: List<FloatArray> = emptyList()) {
         fun same(a: List<FloatArray>, b: List<FloatArray>) = a.size == b.size && a.indices.all { a[it].contentEquals(b[it]) }
-        if (same(bubbleGlassBoxes, boxes) && same(bubbleGlassArcs, arcs)) return
-        bubbleGlassBoxes = boxes; bubbleGlassArcs = arcs; queueGlass()
+        if (same(bubbleGlassBoxes, boxes) && same(bubbleGlassArcs, arcs) && same(bubbleGlassColors, colors)) return
+        bubbleGlassBoxes = boxes; bubbleGlassArcs = arcs; bubbleGlassColors = colors; queueGlass()
     }
     private var glassQueued = false
     internal fun glassBox(key: Any, box: FloatArray?) {
@@ -220,11 +221,11 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         main.post {
             glassQueued = false
             val boxes = glassBoxes.values.toList(); val connections = glassConnections.values.toList()
-            val bubbleBoxes = bubbleGlassBoxes; val bubbleArcs = bubbleGlassArcs
+            val bubbleBoxes = bubbleGlassBoxes; val bubbleArcs = bubbleGlassArcs; val bubbleColors = bubbleGlassColors
             post {
                 fun rows(values: List<FloatArray>) = JSONArray(values.map { JSONArray(it.toList()) })
                 val payload = obj("boxes" to rows(boxes), "connections" to JSONArray(connections.map(::JSONObject)),
-                    "bubble_boxes" to rows(bubbleBoxes), "bubble_arcs" to rows(bubbleArcs)).toString()
+                    "bubble_boxes" to rows(bubbleBoxes), "bubble_arcs" to rows(bubbleArcs), "bubble_colors" to rows(bubbleColors)).toString()
                 Native.glassRegions(handle, payload); wake()
             }
         }

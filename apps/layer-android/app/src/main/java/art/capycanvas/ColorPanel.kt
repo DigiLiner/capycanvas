@@ -461,23 +461,31 @@ private data class ColorFieldRequest(val shape:String,val hue:Float,val pixels:I
     }
 }
 
-@Composable internal fun ColorIntensityArc(view:JSONObject,layout:JSONObject,modifier:Modifier,color:(JSONObject)->Unit,caption:Boolean=true) {
+@Composable internal fun ColorIntensityArc(view:JSONObject,layout:JSONObject,modifier:Modifier,color:(JSONObject)->Unit,caption:Boolean=true,
+    presentation:JSONObject?=null,origin:Offset=Offset.Zero) {
     val host=LocalCanvasHost.current
     val action by rememberUpdatedState(color)
     val density=LocalDensity.current.density
-    Canvas(modifier.testTag("color-hdr-intensity").semantics {contentDescription=host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("intensity");stateDescription="${view.number("intensity")} EV";progressBarRangeInfo=ProgressBarRangeInfo(view.number("intensity").coerceIn(-2f,6f),-2f..6f);setProgress{action(obj("op" to "hdr_intensity","stops" to it.coerceIn(-2f,6f)));true}}) {
+    val range=presentation?.array("range")?.let { it.getDouble(0).toFloat()..it.getDouble(1).toFloat() } ?: -2f..6f
+    val stops=presentation?.number("stops") ?: view.number("intensity")
+    Canvas(modifier.testTag("color-hdr-intensity").semantics {
+        contentDescription=presentation?.getString("label") ?: host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("intensity")
+        stateDescription=presentation?.getString("text") ?: "$stops EV"
+        progressBarRangeInfo=ProgressBarRangeInfo(stops.coerceIn(range),range)
+        if(presentation?.optBoolean("enabled",true)!=false)setProgress{action(obj("op" to "hdr_intensity","stops" to it.coerceIn(range)));true}
+    }) {
         // The surrounding layout uses dp. Query and paint in that same space;
         // shared geometry has fixed-size margins and cannot be queried in pixels.
         val side=size.width/density
-        val arc=JSONObject(Native.colorUi(obj("type" to "arc","size" to side,"fraction" to ((view.number("intensity")+2f)/8f)).toString(), host.languageTag))
+        val arc=presentation ?: JSONObject(Native.colorUi(obj("type" to "arc","size" to side,"fraction" to ((view.number("intensity")+2f)/8f)).toString(), host.languageTag))
         scale(density,pivot=Offset.Zero) {
             val g=arc.getJSONObject("geometry")
-            val path=arc.array("path");val ramp=view.array("intensity_ramp")
-            for(i in 0 until path.length()-1)drawLine(ramp.getJSONArray(i).color(),path.getJSONArray(i).point(1f),path.getJSONArray(i+1).point(1f),g.number("width"),cap=StrokeCap.Round)
+            val path=arc.array("path");val ramp=presentation?.array("ramp") ?: view.array("intensity_ramp")
+            for(i in 0 until path.length()-1)drawLine(ramp.getJSONArray(i).color(),path.getJSONArray(i).point(1f)+origin,path.getJSONArray(i+1).point(1f)+origin,g.number("width"),cap=StrokeCap.Round)
             if(caption){val place=layout.array("intensity_caption");val x=place.getDouble(0).toFloat();val y=place.getDouble(1).toFloat();val font=place.getDouble(2).toFloat()
             drawIntoCanvas{canvas->canvas.nativeCanvas.drawText("%+.2f EV".format(view.number("intensity")),x,y,Paint(Paint.ANTI_ALIAS_FLAG).apply{this.color=android.graphics.Color.GRAY;textSize=font;textAlign=Paint.Align.CENTER})}}
-            val p=arc.array("point").point(1f);val markerRadius=g.number("marker_radius")
-            drawCircle(view.array("marker_color").color(),markerRadius,p)
+            val p=arc.array("point").point(1f)+origin;val markerRadius=g.number("marker_radius")
+            drawCircle((presentation?.array("marker") ?: view.array("marker_color")).color(),markerRadius,p)
             drawCircle(Color.Black.copy(alpha=.5f),markerRadius,p,style=Stroke(4f))
             drawCircle(Color.White,markerRadius,p,style=Stroke(2f))
         }

@@ -282,6 +282,8 @@ struct Glass {
     bubble_boxes: Vec<[f32; 10]>,
     #[serde(default)]
     bubble_arcs: Vec<[f32; 7]>,
+    #[serde(default)]
+    bubble_colors: Vec<[f32; 7]>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1371,6 +1373,7 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
             .map(|b| layer_render_wgpu::BackdropRegion::rounded([b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], squircle))
             .chain(glass.bubble_boxes.iter().map(|b| layer_render_wgpu::BackdropRegion::rounded(
                 [b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], if b[8] > 0. { squircle } else { layer_render_wgpu::BackdropRegion::CIRCULAR }).with_strength(b[9])))
+            .chain(glass.bubble_colors.iter().map(|c| layer_render_wgpu::BackdropRegion::color_bubble([c[0], c[1]], c[2], c[3], c[4], c[5]).with_strength(c[6])))
             .chain(glass.bubble_arcs.iter().map(|a| layer_render_wgpu::BackdropRegion::arc([a[0], a[1]], a[2], a[3], a[4], a[5]).with_strength(a[6])))
             .chain(glass.connections.iter().flat_map(|c| {
                 c.connection.glass().into_iter().map(|(bounds, radii)| layer_render_wgpu::BackdropRegion {

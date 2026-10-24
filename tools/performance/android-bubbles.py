@@ -13,6 +13,8 @@ existing private Activity and releases the benchmark-only ready/go barrier.
 FrameMetrics and drawn-center rows are attribution, not presented FPS.
 --workload palette-opening records three short transitions with production-active
 window boundaries, drawn poses and actual presents; it never reports FPS.
+--workload hdr-drag and hdr-intensity use an F16 tier drawing with the reference
+photo, measuring the color bubble's native rim drag or constant-speed EV sweep.
 
   tools/devices/devices.py run movinkpad11 -- python3 tools/performance/android-bubbles.py \
     artifacts/bubbles/android-mid --photo /data/local/tmp/capy-tier-24mp.jpg --width 6000 --height 4000 \
@@ -100,9 +102,12 @@ def report(directory):
         times = [t for t in all_times if begin <= t <= end]
         if len(times) < 2:
             raise ValueError("Actual app-window presents are unavailable")
-        if len(contact["distinct_centers"]) != 5 or min(contact["distinct_centers"][1:]) <= 1:
+        if contact.get("workload") == "hdr-intensity":
+            if contact.get("distinct_intensities", 0) <= 10:
+                raise ValueError("The HDR gesture did not visibly change intensity")
+        elif len(contact["distinct_centers"]) != 5 or min(contact["distinct_centers"][1:]) <= 1:
             raise ValueError("The gesture did not displace all four neighbors")
-        contacts.append(dict(run=contact["run"], begin_ns=begin, end_ns=end,
+        contacts.append(dict(run=contact["run"], workload=contact.get("workload", "drag"), distinct_intensities=contact.get("distinct_intensities"), begin_ns=begin, end_ns=end,
                              distinct_centers=contact["distinct_centers"], reset_end_ns=contact.get("reset_end_ns"), display_hz=contact.get("display_hz"),
                              thermal_before=contact.get("thermal_before"), thermal_after=contact.get("thermal_after"), **summarize(times)))
     if len(contacts) < 3:
@@ -137,7 +142,7 @@ def main():
     parser.add_argument("--duration-ms", type=int, default=6000)
     parser.add_argument("--target-hz", type=float, help="Require this reference display rate before measured contacts")
     parser.add_argument("--palette-transitions", type=int, choices=range(1, 11), default=3, help="Short diagnostic only; do not calculate FPS")
-    parser.add_argument("--workload", choices=["drag", "palette-opening"], default="drag")
+    parser.add_argument("--workload", choices=["drag", "palette-opening", "hdr-drag", "hdr-intensity"], default="drag")
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
     if args.report_only:

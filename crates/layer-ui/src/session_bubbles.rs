@@ -109,6 +109,23 @@ impl<R: CanvasRenderer> UiSession<R> {
         let colors = self.state.display_colors();
         let map = |color| colors.mapped_swatch(color, self.effective_sdr_rendition());
         self.bubbles().into_iter().map(|view| BubblePresentation {
+            color: view.color.filter(|layout| layout.intensity.is_some()).map(|layout| {
+                let geometry = layout.intensity.unwrap();
+                let stops = colors.hdr_intensity();
+                let range = HdrIntensityArc::range(stops, colors.hdr_depth());
+                let end = geometry.point(1.);
+                BubbleColorPresentation {
+                    bounds: layout.bounds(), outline: layout.outline(0.),
+                    glass: [layout.diameter * 0.5, geometry.radius, geometry.width * 0.5 + layout.margin(), end[1].atan2(end[0])],
+                    intensity: BubbleIntensityPresentation {
+                        geometry, path: (0..=64).map(|i| geometry.point(i as f32 / 64.)).collect(),
+                        point: geometry.point((stops - range[0]) / (range[1] - range[0])), range, stops,
+                        ramp: colors.intensity_ramp(self.effective_sdr_rendition(), range), marker: map(colors.definition()),
+                        label: self.localization().text(MessageId::NATIVE_COLOR_INTENSITY).to_string(),
+                        text: format!("{stops:+.2} EV"), enabled: colors.slot != ColorSlot::Transparent,
+                    },
+                }
+            }),
             reach: view.reach(),
             readout: view.readout_center(),
             pill: view.palette_bounds(),
@@ -186,7 +203,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn hdr_color_bubbles(&self) -> bool {
-        self.state.platform == Platform::Gtk && self.selection_masks.target().is_none()
+        matches!(self.state.platform, Platform::Gtk | Platform::Web | Platform::Android) && self.selection_masks.target().is_none()
             && self.engine.document().composition().color.depth.is_float()
     }
 

@@ -36,6 +36,9 @@ class AndroidBubbleBenchmarkTest {
         val duration = args.getString("durationMs", "6000")!!.toLong()
         val repeats = args.getString("repeats", "3")!!.toInt()
         val expectedRefresh = args.getString("expectedRefreshHz", "0")!!.toFloat()
+        val workload = args.getString("workload", "drag")!!
+        val hdr = workload.startsWith("hdr-")
+        val intensity = workload == "hdr-intensity"
         require(duration in 5000L..10000L && repeats >= 3)
         val width = args.getString("width", "6000")!!.toInt()
         val height = args.getString("height", "4000")!!.toInt()
@@ -58,7 +61,13 @@ class AndroidBubbleBenchmarkTest {
                 return answer
             }
             fun packets() = (query(obj("type" to "bubbles")) as JSONArray).objects()
-            host.openDocument(photo)
+            if (hdr) {
+                host.createDrawing(width, height, depth = "F16")
+                host.importImage(photo)
+                host.awaitMain("Reference photo placement opens", 180_000) { state().objectOrNull("canvas_bar")?.objectOrNull("context")?.optString("kind") == "placement" }
+                invoke("apply_transform")
+                host.awaitMain("Reference photo placement commits", 180_000) { state().objectOrNull("canvas_bar")?.objectOrNull("context")?.optString("kind") != "placement" }
+            } else host.openDocument(photo)
             host.awaitMain("Tier photo opens", 180_000) {
                 state().array("tabs").objects().any { it.optBoolean("active") && it.optInt("width") == width && it.optInt("height") == height }
             }
@@ -74,6 +83,7 @@ class AndroidBubbleBenchmarkTest {
             }
             val controls = listOf(obj("kind" to "command", "command" to "drawing_brush"), obj("kind" to "color"),
                 obj("kind" to "color_picker"), obj("kind" to "command", "command" to "undo"), obj("kind" to "panel", "panel" to "layers"))
+                .let { if (hdr) listOf(it[1], it[0]) + it.drop(2) else it }
             fixture.getJSONObject("layout").put("header", obj("size" to "medium", "next_id" to 7,
                 "zones" to JSONArray(listOf(JSONArray(listOf(obj("id" to 1, "item" to obj("kind" to "capy")))),
                     JSONArray(controls.mapIndexed { i, control -> obj("id" to i + 2, "item" to obj("kind" to "tool", "control" to control)) }), JSONArray()))))
@@ -97,7 +107,7 @@ class AndroidBubbleBenchmarkTest {
                 if (measuring.get()) drawn.add(longArrayOf(System.nanoTime(), *nodes.flatMap {
                     val center = it.boundsInRoot.center
                     listOf((center.x * 1000).toLong(), (center.y * 1000).toLong())
-                }.toLongArray()))
+                }.toLongArray(), ((host.snapshot?.objectOrNull("color_panel")?.optDouble("intensity") ?: 0.0) * 1000).toLong()))
             }
             try {
                 action(obj("type" to "restore_workspace", "workspace" to fixture))
@@ -126,6 +136,11 @@ class AndroidBubbleBenchmarkTest {
                     place(obj("kind" to "header", "id" to i + 2), i)
                     ids.add(packets().single { it.getJSONObject("view").getInt("id") !in before }.getJSONObject("view").getInt("id"))
                 }
+                if (hdr) {
+                    check(host.snapshot!!.getJSONObject("color_panel").getBoolean("hdr"))
+                    action(obj("type" to "bubble", "action" to obj("type" to "set_options", "id" to ids.first(), "options" to obj(
+                        "size" to 216, "recent" to true, "palette" to true, "pair" to true, "full" to false, "fold" to true, "swap" to false))))
+                }
                 SystemClock.sleep(1000)
                 output.resolve("fixture.json").writeText(obj("width" to width, "height" to height, "photo" to photo.path,
                     "bubbles" to JSONArray(packets()), "workspace" to state().getJSONObject("workspace"), "transparency" to state().getJSONObject("settings").getString("transparency")).toString())
@@ -143,7 +158,7 @@ class AndroidBubbleBenchmarkTest {
                         host.snapshot?.optBoolean("canvas_ready") == true && host.snapshot?.optBoolean("shaders_ready") == true
                     }
                 }
-                if (args.getString("workload") == "palette-opening") {
+                if (workload == "palette-opening") {
                     val handler = checkNotNull(host.headerKeyHandler)
                     val inputField = checkNotNull(handler.javaClass.declaredFields.singleOrNull { it.type == BubbleInteraction::class.java }) { "Bubble frame-loop owner missing: ${handler.javaClass.declaredFields.map { it.type.name }}" }.apply { isAccessible = true }
                     val interaction = inputField.get(handler) as BubbleInteraction
@@ -231,6 +246,21 @@ class AndroidBubbleBenchmarkTest {
                         SystemClock.uptimeMillis() - stableAt >= 200
                     }
                     points = lastCenters + lastCenters.first()
+                    val colorPacket = if (hdr) packets().single { it.getJSONObject("view").getInt("id") == ids.first() }.getJSONObject("color") else null
+                    val plate = colorPacket?.getJSONObject("bounds")
+                    val coreCenter = lastCenters.first() - if (plate == null) Offset.Zero else Offset(
+                        plate.number("x") + plate.number("width") / 2, plate.number("y") + plate.number("height") / 2) * density
+                    if (hdr && !intensity) {
+                        val rim = Offset(0f, (-108f + 3f) * density)
+                        points = points.map { it - (lastCenters.first() - coreCenter) + rim }
+                    }
+                    val geometry = colorPacket?.getJSONObject("intensity")?.getJSONObject("geometry")
+                    fun arcPoint(fraction: Float): Offset {
+                        val arc = checkNotNull(geometry)
+                        val end = arc.number("end_angle")
+                        val angle = Math.PI.toFloat() - end - fraction * (Math.PI.toFloat() - 2 * end)
+                        return coreCenter + (arc.array("center").bubblePoint() + Offset(kotlin.math.cos(angle), kotlin.math.sin(angle)) * arc.number("radius")) * density
+                    }
                     val power = instrumentation.targetContext.getSystemService(PowerManager::class.java)
                     val thermalBefore = power.currentThermalStatus
                     val inputRows = mutableListOf<LongArray>()
@@ -239,8 +269,10 @@ class AndroidBubbleBenchmarkTest {
                         try { owner!!.view.dispatchTouchEvent(event) } finally { event.recycle() }
                     }
                     instrumentation.runOnMainSync {
-                        downAt = SystemClock.uptimeMillis(); event(MotionEvent.ACTION_DOWN, points.first())
-                        event(MotionEvent.ACTION_MOVE, points.first() + Offset(12 * density, 0f))
+                        downAt = SystemClock.uptimeMillis()
+                        val start = if (intensity) arcPoint(.125f) else points.first()
+                        event(MotionEvent.ACTION_DOWN, start)
+                        event(MotionEvent.ACTION_MOVE, if (intensity) arcPoint(.13f) else start + Offset(12 * density, 0f))
                     }
                     if (expectedRefresh > 0) host.awaitMain("Reference display reaches $expectedRefresh Hz during native drag", 10_000) {
                         owner!!.view.display.refreshRate >= expectedRefresh * .95f
@@ -262,7 +294,8 @@ class AndroidBubbleBenchmarkTest {
                             else {
                                 val progress = elapsed / duration * (points.size - 1)
                                 val segment = progress.toInt().coerceAtMost(points.size - 2)
-                                val point = points[segment] + (points[segment + 1] - points[segment]) * (progress - segment).toFloat()
+                                val point = if (intensity) arcPoint((.125 + .75 * (1 - kotlin.math.abs(elapsed / duration * 2 - 1))).toFloat())
+                                    else points[segment] + (points[segment + 1] - points[segment]) * (progress - segment).toFloat()
                                 event(MotionEvent.ACTION_MOVE, point)
                                 inputRows.add(longArrayOf(now, (point.x * 1000).toLong(), (point.y * 1000).toLong()))
                                 clock.postFrameCallback(callback)
@@ -274,12 +307,13 @@ class AndroidBubbleBenchmarkTest {
                     finally {
                         instrumentation.runOnMainSync {
                             Choreographer.getInstance().removeFrameCallback(callback); measuring.set(false)
-                            Trace.endAsyncSection(name, run); event(MotionEvent.ACTION_UP, points.first())
+                            Trace.endAsyncSection(name, run); event(MotionEvent.ACTION_UP, if (intensity) arcPoint(.125f) else points.first())
                         }
                     }
                     val positions = synchronized(drawn) { drawn.toList() }
                     val distinct = ids.indices.map { index -> positions.map { it[index * 2 + 1] to it[index * 2 + 2] }.toSet().size }
-                    contacts.put(obj("run" to run, "warmup" to (run == 0), "reset_begin_ns" to resetBegin, "reset_end_ns" to resetEnd,
+                    val distinctIntensities = positions.map { it.last() }.toSet().size
+                    contacts.put(obj("run" to run, "warmup" to (run == 0), "workload" to workload, "distinct_intensities" to distinctIntensities, "reset_begin_ns" to resetBegin, "reset_end_ns" to resetEnd,
                         "path_px" to JSONArray(points.map { JSONArray(listOf(it.x, it.y)) }), "begin_ns" to begin, "end_ns" to end,
                         "clock" to "MONOTONIC", "display_hz" to refresh, "thermal_before" to thermalBefore,
                         "thermal_after" to power.currentThermalStatus, "inputs" to JSONArray(inputRows.map { JSONArray(it.toList()) }),
@@ -291,8 +325,11 @@ class AndroidBubbleBenchmarkTest {
                         "frame_metrics_fields" to JSONArray(listOf("vsync_ns", "total_ns", "deadline_ns", "dropped_reports",
                             "input_ns", "animation_ns", "layout_measure_ns", "draw_ns", "sync_ns", "command_issue_ns", "swap_buffers_ns", "gpu_ns")),
                         "contacts" to contacts).toString())
-                    assertTrue("Dragged bubble visibly moves: $distinct", distinct.first() > 10)
-                    assertTrue("All four neighbors visibly move: $distinct", distinct.drop(1).all { it > 1 })
+                    if (intensity) assertTrue("HDR intensity visibly changes: $distinctIntensities", distinctIntensities > 10)
+                    else {
+                        assertTrue("Dragged bubble visibly moves: $distinct", distinct.first() > 10)
+                        assertTrue("All four neighbors visibly move: $distinct", distinct.drop(1).all { it > 1 })
+                    }
                 }
             } finally {
                 instrumentation.runOnMainSync {

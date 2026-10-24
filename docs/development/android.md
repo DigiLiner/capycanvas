@@ -268,6 +268,20 @@ positions with swapped controls and a 220 × 420 dp private window.
 `countBadgesKeepTheirAnchorWhenTextWidens` checks one- and two-digit counts in
 both themes. The main journey verifies intrinsic readout sizing and the simple
 Layers footer's geometry.
+`hdrBubbleAcrossThemesSizesAndDevices` checks the HDR color bubble at 136, 216
+and 344 dp in both themes, including the shared arc caps, native mouse, touch and
+pen edits, cancellation, double-contact reset, wheel edits, rim dragging, pinch
+and Quick Mask transitions. `nativeBubblePickupClosesOpenDrawers` checks that
+tearing Color, Layers or Drawing out closes its open drawer during the captured
+contact and permits that contact to continue.
+
+The optimized `AndroidBubbleBenchmarkTest#fiveBubbleMotion` also accepts
+`workload=hdr-drag` and `workload=hdr-intensity`. Both use the tier photo imported
+into an F16 drawing, with the color bubble and four neighbours; the latter
+measures a constant-speed native touch sweep of the EV arc. Run them through
+`tools/performance/android-bubbles.py --workload hdr-drag|hdr-intensity` with the
+tier photo, extent and target refresh rate. The collector retains actual
+app-window SurfaceFlinger presents separately from FrameMetrics and drawn poses.
 
 Without a device, build both APKs and run lint:
 

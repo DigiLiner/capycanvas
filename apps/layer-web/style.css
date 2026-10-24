@@ -1631,3 +1631,10 @@ button.new-drawing-preset.disabled { opacity:.4; }
 #workspace.bubble-pointer #canvas { cursor:inherit; }
 #workspace.bubble-dab-active,#workspace.bubble-dab-active * { cursor:none; }
 #header .header-tool { touch-action:none; }
+
+.bubble-hdr-face { background:transparent; border-radius:0; }
+.bubble-hdr-face::before { display:none; }
+.bubble-face > .bubble-color-plate,.bubble-body > .bubble-intensity { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.bubble-face > .bubble-color-plate { z-index:0; }
+.bubble-body > .bubble-intensity { z-index:2; touch-action:none; }
+.bubble-intensity [role=slider] { pointer-events:stroke; touch-action:none; outline:0; }

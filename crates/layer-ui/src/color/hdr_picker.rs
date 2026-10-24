@@ -65,18 +65,21 @@ impl ColorState {
         let mut view=self.view_in_localized(RgbSpace::Srgb, localizer);
         if self.hdr_picker.is_none() {return view;}
         view.rendition=Some(recipe);
-        let base=self.picker_base().linear_in(self.rgb_space).unwrap();
-        let mapper=recipe.mapper(self.rgb_space,RgbSpace::Srgb);
-        view.intensity_ramp=(0..=64).map(|i| {
-            let gain=(-2.+8.*i as f64/64.).exp2();
-            let rgb=mapper.map_rgb([base[0],base[1],base[2]].map(|v|
-                (f64::from(v)*gain).clamp(-f64::from(f32::MAX),f64::from(f32::MAX)) as f32));
-            [RgbSpace::Srgb.encode(rgb[0] as f64) as f32,RgbSpace::Srgb.encode(rgb[1] as f64) as f32,RgbSpace::Srgb.encode(rgb[2] as f64) as f32,1.]
-        }).collect();
+        view.intensity_ramp=self.intensity_ramp(recipe, [-2., 6.]);
         let preview=|color| self.mapped_swatch(color,recipe);
         view.marker_color=preview(self.definition())[..3].try_into().unwrap();
         for swatch in &mut view.swatches {swatch.rgba=match swatch.slot {ColorSlot::Foreground=>preview(self.foreground),ColorSlot::Background=>preview(self.background),ColorSlot::Transparent=>[0.;4],ColorSlot::Temporary=>preview(self.temporary)};}
         view
+    }
+    pub fn intensity_ramp(&self, recipe: layer_core::color::hdr::SdrRendition, range: [f32; 2]) -> Vec<[f32; 4]> {
+        let base=self.picker_base().linear_in(self.rgb_space).unwrap();
+        let mapper=recipe.mapper(self.rgb_space,RgbSpace::Srgb);
+        (0..=64).map(|i| {
+            let gain=(f64::from(range[0])+f64::from(range[1]-range[0])*i as f64/64.).exp2();
+            let rgb=mapper.map_rgb([base[0],base[1],base[2]].map(|v|
+                (f64::from(v)*gain).clamp(-f64::from(f32::MAX),f64::from(f32::MAX)) as f32));
+            [RgbSpace::Srgb.encode(rgb[0] as f64) as f32,RgbSpace::Srgb.encode(rgb[1] as f64) as f32,RgbSpace::Srgb.encode(rgb[2] as f64) as f32,1.]
+        }).collect()
     }
     pub fn render_field_mapped(&self, side:u32, recipe:layer_core::color::hdr::SdrRendition, bytes:&mut [u8]) -> bool {
         if self.validate().is_err() || recipe.validate().is_err() || bytes.len()!=side as usize*side as usize*4{return false;}

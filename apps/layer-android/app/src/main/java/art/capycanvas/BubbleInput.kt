@@ -38,6 +38,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
     var doubleTapMillis = 300L
     var doubleTapDistance = 8f
     private var lastRing: Triple<Int, Long, Offset>? = null
+    private var lastRingKind: Any? = null
     data class Source(val grab: JSONObject, val bounds: Rect)
     val choices = mutableMapOf<Any, Source>()
     val ownsAllTouches get() = contact?.paired == true
@@ -110,7 +111,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         glass()
     }
     private fun glass() {
-        val boxes = mutableListOf<FloatArray>(); val arcs = mutableListOf<FloatArray>(); val density = dock.density
+        val boxes = mutableListOf<FloatArray>(); val arcs = mutableListOf<FloatArray>(); val colors = mutableListOf<FloatArray>(); val density = dock.density
         for (r in records.values) {
             val center = r.center * density + dock.origin
             val scale = r.scale * density
@@ -125,6 +126,12 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
                             arc.number("start") * PI.toFloat() / 180f - icon, arc.number("sweep") * PI.toFloat() / 180f + icon, strength * if (ring.getBoolean("enabled")) 1f else .4f))
                     }
                 } else if (p.glass && strength > 0f) {
+                    val color = r.packet.objectOrNull("color").takeIf { p.key == "face" }
+                    if (color != null) {
+                        val g = color.array("glass"); val s = scale * p.scale
+                        colors.add(floatArrayOf(center.x, center.y, g.getDouble(0).toFloat() * s, g.getDouble(1).toFloat() * s, g.getDouble(2).toFloat() * s, g.getDouble(3).toFloat(), strength))
+                        continue
+                    }
                     val side = p.size * (scale * p.scale)
                     val at = center + p.center * scale - Offset(side.width / 2, side.height / 2)
                     val radius = p.radius * scale * p.scale
@@ -132,7 +139,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
                 }
             }
         }
-        host.bubbleGlass(boxes, arcs)
+        host.bubbleGlass(boxes, arcs, colors)
     }
     fun dismiss() { menuGeneration++; menuModel = null; menuRequest = null; menuOwner = null }
     fun menu(record: BubbleRecord, point: Offset, palettes: Boolean = false) {
@@ -163,14 +170,14 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         c.mode = "pending"
     }
     private fun pick(c: Contact, point: Offset) {
-        val part = c.wheel ?: return
-        send(obj("type" to "wheel", "id" to c.record.id, "phase" to if (c.colorStarted) "move" else "down", "part" to part, "position" to local(c, point)))
+        if (c.mode != "intensity" && c.wheel == null) return
+        send(obj("type" to if (c.mode == "intensity") "intensity" else "wheel", "id" to c.record.id, "phase" to if (c.colorStarted) "move" else "down", "part" to c.wheel, "position" to local(c, point)))
         c.colorStarted = true
     }
     private fun finishColor(c: Contact, cancelled: Boolean) {
         if (!c.colorStarted) return
         c.colorStarted = false
-        send(obj("type" to "wheel", "id" to c.record.id, "phase" to if (cancelled) "cancel" else "up", "part" to c.wheel, "position" to local(c, c.last)))
+        send(obj("type" to if (c.mode == "intensity") "intensity" else "wheel", "id" to c.record.id, "phase" to if (cancelled) "cancel" else "up", "part" to c.wheel, "position" to local(c, c.last)))
     }
     private fun begin(c: Contact, point: Offset, now: Long) {
         when {
@@ -182,11 +189,13 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
                     "shape" to host.snapshot!!.getJSONObject("color_panel").getString("shape")).toString())).nextValue() as? String
                 pick(c, point)
             }
-            c.hit == "ring" -> {
-                val repeated = lastRing?.let { it.first == c.record.id && now - it.second <= doubleTapMillis && (point - it.third).getDistance() <= doubleTapDistance } == true
-                lastRing = if (repeated) null else Triple(c.record.id, now, point)
-                c.mode = if (repeated) "reset" else "ring"
-                send(obj("type" to if (repeated) "reset_ring" else "ring", "id" to c.record.id, "position" to local(c, point)).apply { if (!repeated) put("phase", "down") })
+            c.hit == "ring" || c.hit == "intensity" -> {
+                val repeated = lastRingKind == c.hit && lastRing?.let { it.first == c.record.id && now - it.second <= doubleTapMillis && (point - it.third).getDistance() <= doubleTapDistance } == true
+                lastRing = if (repeated) null else Triple(c.record.id, now, point); lastRingKind = c.hit
+                c.mode = if (repeated) "reset" else c.hit as String
+                if (c.hit == "intensity") {
+                    if (repeated) send(obj("type" to "set_intensity", "id" to c.record.id, "stops" to 0f)) else pick(c, point)
+                } else send(obj("type" to if (repeated) "reset_ring" else "ring", "id" to c.record.id, "position" to local(c, point)).apply { if (!repeated) put("phase", "down") })
             }
             c.hit == "bead" || c.hit is JSONObject && c.hit.has("item") -> {
                 c.mode = if (c.hit == "bead") "beads" else "choose"
@@ -196,9 +205,9 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
     }
     private fun hold(c: Contact) {
         c.hold = scope.launch {
-            delay(holdMillis * if (c.wheel != null) 2 else 1)
+            delay(holdMillis * if (c.wheel != null || c.hit == "intensity") 2 else 1)
             refresh()
-            if (contact === c && !c.paired) { restore(c); c.held = true; menu(c.record, c.start) }
+            if (contact === c && !c.paired) { lastRing = null; restore(c); c.held = true; menu(c.record, c.start) }
         }
     }
     fun down(change: PointerInputChange, secondary: Boolean): Boolean {
@@ -208,7 +217,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
             if (current.device != PointerType.Touch || change.type != PointerType.Touch || (point - current.record.center).getDistance() > current.record.packet.number("reach") + 90f) return false
             current.fingers[change.id] = point
             if (current.fingers.size == 2 && !current.paired) {
-                current.hold?.cancel(); restore(current); dismiss()
+                current.hold?.cancel(); lastRing = null; restore(current); dismiss()
                 current.paired = true; current.mode = "pair"; current.grab = obj("kind" to "bubble", "id" to current.record.id)
                 val pair = current.fingers.values.toList(); current.midpoint = (pair[0] + pair[1]) / 2f; current.spread = (pair[0] - pair[1]).getDistance().coerceAtLeast(1f)
                 drag(current.grab!!, "down", current.midpoint)
@@ -271,13 +280,14 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         }
         if (c.mode == "native") return false
         val far = (point - c.start).getDistance() > 8f
-        if (far) c.hold?.cancel()
+        if (far) { c.hold?.cancel(); lastRing = null }
         if (c.held) {
             if (!far) return true
             c.held = false; dismiss()
             if (c.hit == "wheel") c.mode = "wheel" else begin(c, point, change.uptimeMillis)
         }
-        if (c.mode == "wheel") {
+        if (c.mode == "intensity") pick(c, point)
+        else if (c.mode == "wheel") {
             if (bubbleUi(obj("type" to "color_drag_out", "size" to c.record.view.number("diameter"), "point" to local(c, point))) == true) {
                 restore(c); c.grab = obj("kind" to "rim", "id" to c.record.id); drag(c.grab!!, "down", point); c.mode = "moving"
             } else pick(c, point)
@@ -313,6 +323,7 @@ internal class BubbleInteraction(val host: CanvasHost, val dock: DockInteraction
         val c = contact ?: return captured
         if (change != null && change.id !in c.fingers) return captured
         c.hold?.cancel()
+        if (cancelled) lastRing = null
         if (c.mode == "native") { contact = null; return captured }
         if (c.paired) {
             if (!c.pairEnded) {

@@ -165,7 +165,7 @@ fn hdr_bubble_layout_only_appears_on_hosts_with_the_intensity_control() {
         let mut s = hdr_desk(layer_core::color::SampleDepth::F16, platform);
         let id = take_ring(&mut s, FAR);
         let layout = view(&s, id).color.unwrap();
-        let enabled = platform == Platform::Gtk;
+        let enabled = matches!(platform, Platform::Gtk | Platform::Web | Platform::Android);
         assert_eq!(layout.intensity.is_some(), enabled, "{platform:?}");
         assert_eq!(act(&mut s, BubbleAction::SetIntensity { id, stops: 1. }).is_ok(), enabled, "{platform:?}");
         if !enabled { assert_eq!(layout.bounds().height, layout.diameter); }
@@ -175,8 +175,9 @@ fn hdr_bubble_layout_only_appears_on_hosts_with_the_intensity_control() {
 #[test]
 fn hdr_bubble_intensity_commits_cancels_and_retires_with_its_color_context() {
     use layer_core::color::{RgbColor, RgbSpace, SampleDepth};
-    for depth in [SampleDepth::F16, SampleDepth::F32] {
-        let mut s = hdr_desk(depth, Platform::Gtk);
+    for (depth, platform) in [SampleDepth::F16, SampleDepth::F32].into_iter()
+        .flat_map(|depth| [Platform::Gtk, Platform::Web, Platform::Android].into_iter().map(move |platform| (depth, platform))) {
+        let mut s = hdr_desk(depth, platform);
         s.dispatch(UiAction::Color { action: ColorAction::Definition { color: RgbColor::new(RgbSpace::Srgb, [0.2, 0.8, 0.4, 1.]).unwrap() } }).unwrap();
         s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: -1. } }).unwrap();
         let original = s.state.colors.clone();
@@ -211,12 +212,22 @@ fn hdr_bubble_intensity_commits_cancels_and_retires_with_its_color_context() {
         assert_eq!(s.engine.checkpoint(), checkpoint);
         act(&mut s, BubbleAction::SetIntensity { id, stops: 12. }).unwrap();
         let [low, high] = HdrIntensityArc::range(12., depth);
+        let presentation = s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.unwrap();
+        assert_eq!(presentation.intensity.range, [low, high]);
+        assert_eq!(presentation.intensity.point, arc.point(1.));
+        assert_eq!(presentation.intensity.path.len(), presentation.intensity.ramp.len());
+        assert_eq!(presentation.intensity.path[0], arc.point(0.));
+        assert_eq!(*presentation.intensity.path.last().unwrap(), arc.point(1.));
+        for (actual, expected) in presentation.intensity.ramp.last().unwrap()[..3].iter().zip(presentation.intensity.marker) {
+            assert!((actual - expected).abs() < 0.001, "expanded ramp endpoint matches the selected highlight");
+        }
         act(&mut s, BubbleAction::Intensity { id, phase: ContactPhase::Down, position: arc.point((10. - low) / (high - low)) }).unwrap();
         assert!((s.state.colors.hdr_intensity() - 10.).abs() < 0.01, "sampled highlights retain their expanded intensity range");
         act(&mut s, BubbleAction::Intensity { id, phase: ContactPhase::Cancel, position: [0.; 2] }).unwrap();
         assert_eq!(s.state.colors.hdr_intensity(), 12.);
         invoke(&mut s, CommandId::QuickMask);
         assert!(view(&s, id).color.unwrap().intensity.is_none());
+        assert!(s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.is_none());
     }
 }
 

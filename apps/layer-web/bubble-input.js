@@ -23,13 +23,13 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
     c.mode='pending';
   }
   function pick(c,p) {
-    send({type:'wheel',id:c.r.view.id,phase:c.colorStarted?'move':'down',part:c.wheel,position:local(c.r,p)});
+    send({type:c.mode==='intensity'?'intensity':'wheel',id:c.r.view.id,phase:c.colorStarted?'move':'down',part:c.wheel,position:local(c.r,p)});
     c.colorStarted=true;
   }
   function finishColor(c,cancel) {
     if(!c.colorStarted)return;
     c.colorStarted=false;
-    send({type:'wheel',id:c.r.view.id,phase:cancel?'cancel':'up',part:c.wheel,position:local(c.r,c.last)});
+    send({type:c.mode==='intensity'?'intensity':'wheel',id:c.r.view.id,phase:cancel?'cancel':'up',part:c.wheel,position:local(c.r,c.last)});
   }
   function begin(c,p) {
     const h=c.hit,id=c.r.view.id;
@@ -37,9 +37,14 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       const size=c.r.view.diameter-14;
       c.wheel=app.color_ui({type:'wheel_hit',size,point:local(c.r,p).map(v=>v+size/2),shape:app.color_panel().shape});
       c.mode='wheel';if(c.wheel)pick(c,p);
+    } else if(h==='intensity') {
+      const repeated=c.device!=='mouse'&&lastRing?.kind===h&&lastRing.id===id&&c.time-lastRing.time<=400&&distance(p,lastRing.point)<=8;
+      lastRing=repeated?null:{kind:h,id,time:c.time,point:p};c.mode=repeated?'reset':'intensity';
+      if(repeated)send({type:'set_intensity',id,stops:0});else pick(c,p);
+      c.r.color?.focus();
     } else if(h==='ring') {
-      const repeated=c.device!=='mouse'&&lastRing&&lastRing.id===id&&c.time-lastRing.time<=400&&distance(p,lastRing.point)<=8;
-      lastRing=repeated?null:{id,time:c.time,point:p};
+      const repeated=c.device!=='mouse'&&lastRing?.kind===h&&lastRing.id===id&&c.time-lastRing.time<=400&&distance(p,lastRing.point)<=8;
+      lastRing=repeated?null:{kind:h,id,time:c.time,point:p};
       c.mode=repeated?'reset':'ring';
       send({type:repeated?'reset_ring':'ring',id,...(repeated?{}:{phase:'down'}),position:local(c.r,p)});
     } else if(h==='bead'||typeof h==='object'&&h.item!=null) {
@@ -49,7 +54,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
   }
   function hold(c) {
     if(contact!==c||c.pair)return;
-    c.timer=null;restore(c);c.held=true;menu(c.r,c.start);
+    c.timer=null;lastRing=null;restore(c);c.held=true;menu(c.r,c.start);
   }
   function pairPoints(c) {
     const [a,b]=[...c.fingers.values()];
@@ -64,7 +69,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       if(distance(local(c.r,p),[0,0])>c.r.packet.reach+90)return;
       c.fingers.set(e.pointerId,p);workspace.setPointerCapture(e.pointerId);
       if(c.fingers.size===2&&!c.pair) {
-        stopHold();restore(c);dismiss();
+        stopHold();lastRing=null;restore(c);dismiss();
         const pair=pairPoints(c);c.pair={...pair,start:Math.max(1,pair.distance),scale:1,ended:false};
         c.grab=grab(c.r.view.id);drag(c.grab,'down',pair.mid);c.mode='pair';
       }
@@ -77,7 +82,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       const h=hit(r,p),c={r,hit:h,start:p,last:p,time:e.timeStamp,id:e.pointerId,device:e.pointerType,target:e.target,list:!!e.target.closest('.bubble-card .layer-list'),fingers:new Map([[e.pointerId,p]])};
       if(native(e)) {if(e.pointerType==='touch'){contact=c;c.mode='native';}return;}
       contact=c;begin(c,p);workspace.setPointerCapture(e.pointerId);
-      if(h!=='card'||!e.target.closest('button'))c.timer=setTimeout(()=>hold(c),c.wheel?1000:500);r.mark?.(h,true);if(!c.list)return consume(e);return;
+      if(h!=='card'||!e.target.closest('button'))c.timer=setTimeout(()=>hold(c),c.wheel||h==='intensity'?1000:500);r.mark?.(h,true);if(!c.list)return consume(e);return;
     }
     const node=e.target.closest?.('[data-header-item],[data-workspace-drag],.tool-choice-button');
     if(!node||node.disabled||document.querySelector('#header-editor')?.hidden===false)return;
@@ -131,14 +136,15 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       return consume(e);
     }
     const far=distance(c.start,p)>8;
-    if(far)stopHold();
+    if(far){stopHold();lastRing=null;}
     if(c.held) {
       if(!far)return consume(e);
       c.held=false;dismiss();
       if(c.hit!=='wheel')begin(c,p);else c.mode='wheel';
     }
     if(c.list)return;
-    if(c.mode==='wheel') {
+    if(c.mode==='intensity')pick(c,p);
+    else if(c.mode==='wheel') {
       if(app.bubble_color_drag_out(c.r.view.diameter,...local(c.r,p))) {
         restore(c);c.grab=grab(c.r.view.id,true);drag(c.grab,'down',p);c.mode='moving';
       } else if(c.wheel)pick(c,p);
@@ -158,7 +164,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
     }
     const c=contact;if(!c||e&&!c.fingers.has(e.pointerId))return;
     if(c.mode==='native'){contact=null;return;}
-    stopHold();
+    stopHold();if(cancel)lastRing=null;
     if(c.pair) {
       if(!c.pair.ended) {
         c.pair.ended=true;c.r.pinch=1;drag(c.grab,cancel?'cancel':'up',c.pair.mid);
@@ -191,7 +197,7 @@ export function createBubbleInput({app, workspace, records, send, wake, menu, di
       if(e.type==='lostpointercapture'&&e.target===workspace)return end(e,true);
       if(e.type==='click'&&suppressClick){suppressClick=false;return consume(e);}
       if(e.type==='contextmenu') {const r=target(point(e));if(r&&!native(e)){menu(r,point(e));return consume(e);}}
-      if(e.type==='dblclick') {const r=target(point(e));if(r&&hit(r,point(e))==='ring'){send({type:'reset_ring',id:r.view.id,position:local(r,point(e))});return consume(e);}}
+      if(e.type==='dblclick') {const r=target(point(e));if(r){const h=hit(r,point(e));if(h==='intensity'){send({type:'set_intensity',id:r.view.id,stops:0});return consume(e);}if(h==='ring'){send({type:'reset_ring',id:r.view.id,position:local(r,point(e))});return consume(e);}}}
     },
     validate(){if(contact&&!records.has(contact.r.view.id)){
       const c=contact;stopHold();contact=null;dismiss();
