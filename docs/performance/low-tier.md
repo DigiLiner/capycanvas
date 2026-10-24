@@ -90,12 +90,12 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pan during private session checkpoints | 60 | Unqualified: renderer 60.00–60.12 submissions/s, interval p99 18.70–18.92 ms; screen presentation and thermal status unmeasured | [Session checkpoints](#session-checkpoints) |
 | G-Pen 1024 px during private session checkpoints | 60 | Unqualified: 77.6–79.0 fresh completed updates/s, completion gap p99 23.36–24.07 ms; thermal status unmeasured | [Session checkpoints](#session-checkpoints) |
 | G-Pen 1024 px, repeated short contacts during checkpoints | 60 | Diagnostic only: 11.02–14.27 MiB process writes per 50 contacts; observed head age max 3.52–4.37 s. Paused motion has no qualified frame rate | [Session checkpoints](#session-checkpoints) |
-| Pan: Hand tool, one or two fingers | 60 | **Not met.** 43.6–43.9 presented fps, p99 33–34 ms, viewport GPU 16.2–16.3 ms, 12 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
-| Pinch zoom | 60 | **Not met.** 33.3–35.2 presented fps, p99 117 ms, 12 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
+| Pan: Hand tool, one or two fingers | 60 | **Two-finger path not met.** 44.66–45.37 presented fps, p99 33.34–33.53 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
+| Pinch zoom | 60 | **Not met.** 33.84–35.65 presented fps, p99 116.63–116.73 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 60 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Pan: Hand tool, one or two fingers, M3 BUILD20 | 60 | **Unqualified on current M3.** 59.078–59.729 completed updates/s; completion gap p99 18.821–19.033 ms; presentation unmeasured | [BUILD20 selected canvas comparison](#build20-selected-canvas-comparison); older actual presents below |
 | Pinch zoom, earlier retained-Navigator revision | 60 | Photo, Navigator open: screen 59.40 presents/s, p99 ≤16.83 ms; viewport 59.90 fresh completed updates/s | Retained-Navigator navigation below |
-| Two-finger rotate | 60 | **Current binary unmeasured; earlier 1.0.11 only:** 59.05–59.36 presented fps, p99 16.69–16.86 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
+| Two-finger rotate | 60 | **Not met.** 42.10–42.76 presented fps, p99 33.34–33.42 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
 | Smooth Zoom tool, left/right | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.33–43.82 presented fps, p99 99.95–99.96 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
 | Smooth Zoom tool, up/down | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.43–43.56 presented fps, p99 99.96–116.21 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
 | Footer zoom and rotation sliders | 60 | Unmeasured on the reference tablet | |
@@ -168,6 +168,20 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Workspace visibility checklist: vertical scroll | 60 | Screen 60.02 presents/s, maximum p99 17.03 ms | Workspace switcher scrolling below; long-list fixture |
 | Menu open and close | 60 | Application menu heading switching unmeasured on reference hardware | [Menu interaction](../ui/window-bar.md); functional checks do not qualify presented frame rate |
 | Interface language change | 60 | Current lifecycle binary unmeasured. Earlier German checkpoint: cold publication 169.2–195.5 ms; warm 144.4–194.4 ms; preparation-only maximum 4.095 ms | Matched Web language checkpoint below; no tier qualification |
+
+## Touch navigation
+
+Measured 2026-10-24 on the reference TCL with `dbdaab756`, using the benchmark
+APK and optimized Rust `dev-perf` profile. Each motion has three warmed
+five-second injected native two-finger gestures over the 4248 × 2832 Sony photo
+and one empty paint layer, at 29.8008% Fit zoom. Navigator is open, the default
+workspace has six glass regions, and the display uses its default 60 Hz setting.
+Thermal status is zero at each motion's setup and after the final rotation.
+
+`android-viewport-presents.py` joins canvas SurfaceView buffer numbers to
+SurfaceFlinger actual-present times during each moving window. All three
+motion rows above miss the rate target. Raw traces, gesture JSON, thermal data,
+APK and source hashes are in `artifacts/scrub-navigation-20261024/`.
 
 ## Split transform programs
 
