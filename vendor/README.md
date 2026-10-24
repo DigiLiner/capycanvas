@@ -80,6 +80,20 @@ pending-task struct, makes three borrowed return lifetimes explicit, and builds
 the overlap helper only for debug assertions or tests. This keeps release builds
 warning-free without suppressing lints or changing decoding behavior.
 
+`rav1d-ownership.patch` preserves borrowed picture owners when applying grain
+and restores packet ownership when user-data attachment fails. Stable shared
+references require a `Sync` referent for both thread-safety traits. Isolated
+ownership tests cover picture release order, rejected attachment and the trait
+bounds. Run the rejection test with debug assertions disabled: the decoder
+deliberately aborts on invalid API arguments in debug builds.
+
+`rav1d-disjoint-borrows.patch` registers debug borrows atomically before
+creating references, releases registrations after rejected casts, and removes
+tests that accessed overlapping Rust borrows. Scratch-buffer wrappers and plane
+copies expose their lifetime and exclusivity requirements as unsafe contracts.
+Release builds retain the decoder's existing disjoint-row scheduling contract;
+the overlap registry exists only with debug assertions.
+
 ## WebP entropy-table admission
 
 `image-webp` is the published 0.2.4 crate, retaining its MIT/Apache licenses.

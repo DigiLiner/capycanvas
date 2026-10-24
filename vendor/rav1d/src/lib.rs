@@ -70,6 +70,10 @@ use std::sync::Once;
 use std::thread;
 use to_method::To as _;
 
+#[cfg(test)]
+#[path = "ownership_tests.rs"]
+mod ownership_tests;
+
 #[cold]
 fn init_internal() {
     rav1d_init_cpu();
@@ -658,7 +662,7 @@ pub unsafe extern "C" fn dav1d_apply_grain(
         // Don't `.update_rav1d()` [`Rav1dFrameHeader`] because it's meant to be read-only.
         // Don't `.update_rav1d()` [`Rav1dITUTT35`] because we never read it.
         let mut out_rust = Default::default(); // TODO(kkysen) Temporary until we return it directly.
-        let in_rust = in_c.into();
+        let in_rust = mem::ManuallyDrop::new(Rav1dPicture::from(in_c));
         let result = rav1d_apply_grain(c, &mut out_rust, &in_rust);
         let out_c = out_rust.into();
         // SAFETY: `out` is safe to write to.
@@ -903,11 +907,11 @@ pub unsafe extern "C" fn dav1d_data_wrap_user_data(
         let data_c = unsafe { buf.as_ptr().read() };
         let mut data = data_c.to::<Rav1dData>();
         // SAFETY: `user_data` is valid to dereference until `free_callback` is called on it, which deallocates it.
-        unsafe { data.wrap_user_data(user_data, free_callback, cookie) }?;
+        let result = unsafe { data.wrap_user_data(user_data, free_callback, cookie) };
         let data_c = data.into();
         // SAFETY: `buf` is safe to write to.
         unsafe { buf.as_ptr().write(data_c) };
-        Ok(())
+        result
     }()
     .into()
 }

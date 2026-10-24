@@ -185,9 +185,9 @@ impl Rav1dPictureDataComponentInner {
 
     /// # Safety
     ///
-    /// As opposed to [`Self::new`], this is safe because `buf` is a `&mut` and thus unique,
-    /// so it is sound to further subdivide it into disjoint `&mut`s.
-    pub fn wrap_buf<BD: BitDepth>(buf: &mut [BD::Pixel], stride: usize) -> Self {
+    /// `buf` must remain live and exclusively accessible through the returned
+    /// component until its final use. The component does not retain its borrow.
+    pub unsafe fn wrap_buf<BD: BitDepth>(buf: &mut [BD::Pixel], stride: usize) -> Self {
         let buf = AsBytes::as_bytes_mut(buf);
         let ptr = NonNull::new(buf.as_mut_ptr()).unwrap();
         assert!(ptr.cast::<AlignedPixelChunk>().is_aligned());
@@ -245,10 +245,14 @@ impl Strided for Rav1dPictureDataComponent {
 }
 
 impl Rav1dPictureDataComponent {
-    pub fn wrap_buf<BD: BitDepth>(buf: &mut [BD::Pixel], stride: usize) -> Self {
-        Self(DisjointMut::new(
-            Rav1dPictureDataComponentInner::wrap_buf::<BD>(buf, stride),
-        ))
+    /// # Safety
+    /// `buf` must remain live and exclusively accessible through the returned
+    /// component until its final use. The component does not retain its borrow.
+    pub unsafe fn wrap_buf<BD: BitDepth>(buf: &mut [BD::Pixel], stride: usize) -> Self {
+        // SAFETY: The caller guarantees the backing storage's lifetime and exclusivity.
+        Self(DisjointMut::new(unsafe {
+            Rav1dPictureDataComponentInner::wrap_buf::<BD>(buf, stride)
+        }))
     }
 
     pub fn pixel_offset<BD: BitDepth>(&self) -> usize {
@@ -300,7 +304,10 @@ impl Rav1dPictureDataComponent {
         }
     }
 
-    pub fn copy_from(&self, src: &Self) {
+    /// # Safety
+    /// The destination must be exclusively accessible for this call; its storage
+    /// must not overlap the source, which must not be mutated during the copy.
+    pub unsafe fn copy_from(&self, src: &Self) {
         let dst = &mut *self.0.index_mut(..);
         let src = &*src.0.index(..);
         dst.clone_from_slice(src);

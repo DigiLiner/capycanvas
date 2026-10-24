@@ -1,0 +1,168 @@
+diff --git a/rav1d/src/c_arc.rs b/rav1d/src/c_arc.rs
+index 40627061f..0df126f78 100644
+--- a/rav1d/src/c_arc.rs
++++ b/rav1d/src/c_arc.rs
+@@ -67,11 +67,11 @@ impl<T: ?Sized> Clone for StableRef<T> {
+
+ impl<T: ?Sized> Copy for StableRef<T> {}
+
+-/// SAFETY: [`StableRef`]`<T>`, if it follows its safety guarantees, is essentially a `&T`/`&mut T`, which is [`Send`] if `T: `[`Send`]`.
+-unsafe impl<T: Send + ?Sized> Send for StableRef<T> {}
++/// SAFETY: A stable shared reference is Send when its referent is Sync.
++unsafe impl<T: Sync + ?Sized> Send for StableRef<T> {}
+
+-/// SAFETY: [`StableRef`]`<T>`, if it follows its safety guarantees, is essentially a `&T`/`&mut T`, which is [`Sync`] if `T: `[`Sync`].
+-unsafe impl<T: Send + ?Sized> Sync for StableRef<T> {}
++/// SAFETY: A stable shared reference is Sync when its referent is Sync.
++unsafe impl<T: Sync + ?Sized> Sync for StableRef<T> {}
+
+ impl<T: ?Sized> AsRef<T> for CArc<T> {
+     fn as_ref(&self) -> &T {
+@@ -277,3 +277,21 @@ where
+         Self::wrap(CBox::from_box(owned_slice))
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::cell::Cell;
++
++    #[test]
++    fn stable_shared_references_require_sync_for_thread_access() {
++        fn shared<T: Send + Sync>() {}
++        shared::<StableRef<u8>>();
++        shared::<CArc<[u8]>>();
++        trait AmbiguousIfThreadSafe<A> { fn check() {} }
++        impl<T> AmbiguousIfThreadSafe<()> for T {}
++        impl<T: Send> AmbiguousIfThreadSafe<u8> for T {}
++        impl<T: Sync> AmbiguousIfThreadSafe<u16> for T {}
++        let _ = <StableRef<Cell<u8>> as AmbiguousIfThreadSafe<_>>::check;
++    }
++}
+diff --git a/rav1d/src/lib.rs b/rav1d/src/lib.rs
+index 6c9366eb0..b5e4180cc 100644
+--- a/rav1d/src/lib.rs
++++ b/rav1d/src/lib.rs
+@@ -70,6 +70,10 @@ use std::sync::Once;
+ use std::thread;
+ use to_method::To as _;
+
++#[cfg(test)]
++#[path = "ownership_tests.rs"]
++mod ownership_tests;
++
+ #[cold]
+ fn init_internal() {
+     rav1d_init_cpu();
+@@ -658,7 +662,7 @@ pub unsafe extern "C" fn dav1d_apply_grain(
+         // Don't `.update_rav1d()` [`Rav1dFrameHeader`] because it's meant to be read-only.
+         // Don't `.update_rav1d()` [`Rav1dITUTT35`] because we never read it.
+         let mut out_rust = Default::default(); // TODO(kkysen) Temporary until we return it directly.
+-        let in_rust = in_c.into();
++        let in_rust = mem::ManuallyDrop::new(Rav1dPicture::from(in_c));
+         let result = rav1d_apply_grain(c, &mut out_rust, &in_rust);
+         let out_c = out_rust.into();
+         // SAFETY: `out` is safe to write to.
+@@ -903,11 +907,11 @@ pub unsafe extern "C" fn dav1d_data_wrap_user_data(
+         let data_c = unsafe { buf.as_ptr().read() };
+         let mut data = data_c.to::<Rav1dData>();
+         // SAFETY: `user_data` is valid to dereference until `free_callback` is called on it, which deallocates it.
+-        unsafe { data.wrap_user_data(user_data, free_callback, cookie) }?;
++        let result = unsafe { data.wrap_user_data(user_data, free_callback, cookie) };
+         let data_c = data.into();
+         // SAFETY: `buf` is safe to write to.
+         unsafe { buf.as_ptr().write(data_c) };
+-        Ok(())
++        result
+     }()
+     .into()
+ }
+diff --git a/rav1d/src/ownership_tests.rs b/rav1d/src/ownership_tests.rs
+new file mode 100644
+index 000000000..161b8dd95
+--- /dev/null
++++ b/rav1d/src/ownership_tests.rs
+@@ -0,0 +1,82 @@
++use super::*;
++use crate::include::dav1d::headers::{DRav1d, Dav1dFrameHeader, Rav1dFrameHeader};
++#[cfg(not(debug_assertions))]
++use std::sync::atomic::AtomicUsize;
++
++fn context() -> Option<Dav1dContext> {
++    let mut settings = mem::MaybeUninit::<Dav1dSettings>::uninit();
++    // SAFETY: settings has writable storage for the complete output.
++    unsafe { dav1d_default_settings(NonNull::new(settings.as_mut_ptr()).unwrap()); }
++    // SAFETY: dav1d_default_settings initializes every field.
++    let mut settings = unsafe { settings.assume_init() };
++    settings.n_threads = 1;
++    settings.max_frame_delay = 1;
++    let mut context = None;
++    // SAFETY: settings is initialized; context is an exclusively owned output.
++    assert_eq!(unsafe { dav1d_open(Some(NonNull::from(&mut context)), Some(NonNull::from(&mut settings))) }.0, 0);
++    context
++}
++
++#[test]
++fn applying_grain_preserves_the_borrowed_picture_in_both_release_orders() {
++    for release_input_first in [false, true] {
++        let header = Arc::new(DRav1d::<Rav1dFrameHeader, Dav1dFrameHeader>::from_rav1d(Rav1dFrameHeader::default()));
++        let mut input = Dav1dPicture::from(Rav1dPicture { frame_hdr: Some(header.clone()), ..Default::default() });
++        let mut output = Dav1dPicture::default();
++        let mut context = context();
++        // SAFETY: input owns live initialized picture metadata, output is distinct
++        // writable storage, and context remains live until close.
++        assert_eq!(unsafe { dav1d_apply_grain(context, Some(NonNull::from(&mut output)), Some(NonNull::from(&mut input))) }.0, 0);
++        assert_eq!(Arc::strong_count(&header), 3);
++        // SAFETY: each picture's raw owners are consumed exactly once; the context
++        // is closed only after the operation completes.
++        unsafe {
++            let [first, second] = if release_input_first { [&mut input, &mut output] } else { [&mut output, &mut input] };
++            dav1d_picture_unref(Some(NonNull::from(first)));
++            assert_eq!(Arc::strong_count(&header), 2);
++            dav1d_picture_unref(Some(NonNull::from(second)));
++            assert_eq!(Arc::strong_count(&header), 1);
++            dav1d_close(Some(NonNull::from(&mut context)));
++        }
++    }
++}
++
++#[cfg(not(debug_assertions))]
++unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
++    // SAFETY: the tests retain the AtomicUsize cookie through final unref and
++    // transfer exactly one Box<u8> allocation to each callback.
++    unsafe {
++        cookie.unwrap().cast::<AtomicUsize>().as_ref().fetch_add(1, Ordering::SeqCst);
++        drop(Box::from_raw(ptr.cast_mut()));
++    }
++}
++
++#[test]
++#[cfg(not(debug_assertions))]
++fn rejected_user_data_wrap_retains_packet_bytes_and_existing_user_data() {
++    let data_frees = AtomicUsize::new(0);
++    let user_frees = AtomicUsize::new(0);
++    let mut packet = Dav1dData::default();
++    let data = NonNull::from(Box::leak(Box::new(0x7f)));
++    let user = NonNull::from(Box::leak(Box::new(0x31)));
++    // SAFETY: live exclusive packet output, one-byte owned allocations, and
++    // thread-safe callback cookies retained until all owners are released.
++    unsafe {
++        assert_eq!(dav1d_data_wrap(Some(NonNull::from(&mut packet)), Some(data), 1, Some(free_byte), Some(SendSyncNonNull::from_ref(&data_frees).cast())).0, 0);
++        assert_eq!(dav1d_data_wrap_user_data(Some(NonNull::from(&mut packet)), Some(user), Some(free_byte), Some(SendSyncNonNull::from_ref(&user_frees).cast())).0, 0);
++    }
++    let mut rejected = 0u8;
++    // SAFETY: rejected stays live; the missing callback is rejected before any
++    // ownership transfer of this byte. Packet remains exclusively owned.
++    assert_eq!(unsafe { dav1d_data_wrap_user_data(Some(NonNull::from(&mut packet)), Some(NonNull::from(&mut rejected)), None, None) }.0, -(EINVAL as i32));
++    assert_eq!(data_frees.load(Ordering::SeqCst), 0);
++    assert_eq!(user_frees.load(Ordering::SeqCst), 0);
++    assert_eq!(packet.data, Some(data));
++    assert_eq!(packet.m.user_data.data, Some(user));
++    // SAFETY: the failed call preserves the packet's original live owners.
++    unsafe { dav1d_data_unref(Some(NonNull::from(&mut packet))); }
++    assert_eq!(data_frees.load(Ordering::SeqCst), 1);
++    assert_eq!(user_frees.load(Ordering::SeqCst), 1);
++    assert!(packet.data.is_none());
++    assert!(packet.m.user_data.data.is_none());
++}

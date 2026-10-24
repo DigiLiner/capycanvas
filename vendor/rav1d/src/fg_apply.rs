@@ -116,7 +116,10 @@ pub(crate) fn rav1d_prep_grain<BD: BitDepth>(
     let [in_data, out_data] = [r#in, out].map(|p| &p.data.as_ref().unwrap().data);
     for i in 0..3 {
         if (i == 0 || has_chroma) && num_points[i] == 0 {
-            out_data[i].copy_from(&in_data[i]);
+            // SAFETY: Grain output is freshly allocated, distinct from the live
+            // input, and preparation completes before parallel row processing.
+            #[allow(unsafe_code)]
+            unsafe { out_data[i].copy_from(&in_data[i]); }
         }
     }
 }

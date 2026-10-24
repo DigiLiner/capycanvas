@@ -67,11 +67,11 @@ impl<T: ?Sized> Clone for StableRef<T> {
 
 impl<T: ?Sized> Copy for StableRef<T> {}
 
-/// SAFETY: [`StableRef`]`<T>`, if it follows its safety guarantees, is essentially a `&T`/`&mut T`, which is [`Send`] if `T: `[`Send`]`.
-unsafe impl<T: Send + ?Sized> Send for StableRef<T> {}
+/// SAFETY: A stable shared reference is Send when its referent is Sync.
+unsafe impl<T: Sync + ?Sized> Send for StableRef<T> {}
 
-/// SAFETY: [`StableRef`]`<T>`, if it follows its safety guarantees, is essentially a `&T`/`&mut T`, which is [`Sync`] if `T: `[`Sync`].
-unsafe impl<T: Send + ?Sized> Sync for StableRef<T> {}
+/// SAFETY: A stable shared reference is Sync when its referent is Sync.
+unsafe impl<T: Sync + ?Sized> Sync for StableRef<T> {}
 
 impl<T: ?Sized> AsRef<T> for CArc<T> {
     fn as_ref(&self) -> &T {
@@ -275,5 +275,23 @@ where
     pub fn zeroed_slice(size: usize) -> Rav1dResult<Self> {
         let owned_slice = (0..size).map(|_| Default::default()).collect::<Box<[_]>>(); // TODO fallible allocation
         Self::wrap(CBox::from_box(owned_slice))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn stable_shared_references_require_sync_for_thread_access() {
+        fn shared<T: Send + Sync>() {}
+        shared::<StableRef<u8>>();
+        shared::<CArc<[u8]>>();
+        trait AmbiguousIfThreadSafe<A> { fn check() {} }
+        impl<T> AmbiguousIfThreadSafe<()> for T {}
+        impl<T: Send> AmbiguousIfThreadSafe<u8> for T {}
+        impl<T: Sync> AmbiguousIfThreadSafe<u16> for T {}
+        let _ = <StableRef<Cell<u8>> as AmbiguousIfThreadSafe<_>>::check;
     }
 }
