@@ -1114,6 +1114,7 @@ impl Workspace {
         // Dragged panels retain their size and may extend beyond any edge.
         // Clip at the application surface even in a decorated, windowed app.
         surface.set_overflow(gtk::Overflow::Hidden);
+        surface.set_opacity(0.0);
         let header = header::Header::new();
         let system_status = crate::system_status::SystemStatus::new();
         let view_info = crate::zoom_readout::ZoomReadout::new(localization.clone());
@@ -2644,6 +2645,7 @@ impl Workspace {
         }
     }
     fn gpu_error(self: &Rc<Self>, error: &str) {
+        self.surface.set_opacity(1.0);
         if self
             .gpu
             .borrow()
@@ -2780,6 +2782,7 @@ impl Workspace {
             return;
         };
         self.refreshing.set(true);
+        self.surface.set_opacity(if state.workspace_ready { 1.0 } else { 0.0 });
         self.command_bar.refresh(self, state.command_search.clone());
         if regions & (regions::BUBBLES | regions::LAYOUT | regions::BRUSH | regions::CUSTOMIZATION | regions::DOCUMENT | regions::COMMANDS | regions::SETTINGS) != 0 {
             self.bubbles.refresh(self, &state);

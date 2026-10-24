@@ -1440,6 +1440,7 @@ pub struct UiState {
     /// Observed native/browser window state; never stored in workspace preferences.
     pub fullscreen: bool,
     pub workspace: WorkspaceState,
+    pub workspace_ready: bool,
     pub brush: BrushState,
     pub colors: ColorState,
     pub color_library: ColorLibrary,

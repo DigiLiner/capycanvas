@@ -8,6 +8,14 @@ IDs keep the older names: `builtin:workspace:painter` (Sketch),
 (Photo). Workspaces are the only saved product item: there is no Save Layout or
 Load Layout, and workspace changes save automatically.
 
+New users start in Sketch on Android, iPadOS and mobile browsers, and Paint on
+desktop. Restarts restore the selected workspace, including its saved layout and
+Zen presentation. Hosts keep workspace controls hidden until the shared workspace
+controller adopts that arrangement; GPU preparation does not select a workspace
+or delay its restoration.
+Drawing recovery carries that workspace's readiness and current editing state
+into the restored editor before its controls appear.
+
 ## Design criteria
 
 - **Familiar layouts.** Arrangements follow what artists know from established

@@ -17,7 +17,7 @@ impl Fixture {
         Self::localized(layer_ui::UiLanguage::English)
     }
     fn localized(language: layer_ui::UiLanguage) -> Self {
-        let mut native = NativeHost::launch_localized(Platform::Windows, "", layer_ui::Localizer::shared(language)).unwrap();
+        let native = NativeHost::launch_localized(Platform::Windows, "", layer_ui::Localizer::shared(language)).unwrap();
         let directory = TempDir::new();
         let (notify, notifications) = mpsc::channel();
         let service = WorkspaceService::new(
@@ -28,7 +28,6 @@ impl Fixture {
                 let _ = notify.send(());
             },
         );
-        crate::workspace::initialize(&mut native).unwrap();
         let mut f = Self {
             service,
             native,
@@ -56,6 +55,14 @@ impl Fixture {
             let _ = self.notifications.recv_timeout(Duration::from_millis(5));
         }
     }
+}
+
+#[test]
+fn startup_adopts_paint_before_gpu_preparation() {
+    let f = Fixture::new();
+    assert!(f.native.session.engine().backend().0.is_none());
+    assert!(f.native.session.state().workspace_ready);
+    assert_eq!(f.service.view().name, "Paint");
 }
 
 #[test]

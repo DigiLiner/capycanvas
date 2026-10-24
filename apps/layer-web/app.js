@@ -865,6 +865,7 @@ function contentPanel(id, splitPicker=false, readToolSet=null) {
   panel.refreshPanel();return panel;
 }
 function update(regions) {
+  document.body.toggleAttribute("data-workspace-ready", state.workspace_ready);
   if(regions & (4096 | 16)) pressureCalibration?.refresh();
   commandBar?.refresh(state.command_search);
   if (regions & (1 | 2 | 4 | 8 | 16 | 128)) paintPairView = app.paint_pair();
@@ -1781,7 +1782,9 @@ try {
   try { savedPreferences = localStorage.getItem(settingsKey); }
   catch (error) { restoreError = error; }
   const preferredLanguages = Array.from(navigator.languages ?? []);
-  app = WebApp.create(canvas, savedPreferences, preferredLanguages, screenInfo());
+  const mobileBrowser = navigator.userAgentData?.mobile || /Android|iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  app = WebApp.create(canvas, savedPreferences, preferredLanguages, screenInfo(), mobileBrowser);
   bootstrap = liveCopy(app, "bootstrap_view");
   delivery = liveCopy(app, "document_delivery_copy");
   document.documentElement.lang = bootstrap.active_tag;
@@ -1869,11 +1872,7 @@ try {
   // Test harness accesses the actual Wasm instance and native widgets.
   window.layerApp = { app, dispatch, state: () => app.state(), wake, canvas, startupTimes, documents, restartGpu };
   performance.mark("capy.startup.ui");
-  // Present the controls and let storage replies run before GPU setup starts.
-  await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
-  // Adopt the saved UI before competing with initial GPU allocation. A storage
-  // failure must still allow canvas startup and the workspace recovery UI.
-  await Promise.race([workspaceManager.ready, new Promise(resolve => setTimeout(resolve, 1000))]);
+  await workspaceManager.ready;
   documents.startRecovery().catch(error => {const detail=String(error);message(()=>app.document_recovery_unavailable(detail));});
   performance.mark("capy.startup.gpu");
   await startGpu();

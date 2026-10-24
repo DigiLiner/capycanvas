@@ -183,6 +183,8 @@ impl NativeWorkspaces {
     }
     pub fn start(&self, w: &Rc<Workspace>) {
         let Some(store) = self.store.borrow_mut().take() else {
+            let change = w.gpu.borrow_mut().as_mut().map(|gpu| gpu.session.finish_workspace_startup());
+            if let Some(change) = change { w.changed(Ok(change)); }
             return;
         };
         let mut controller = Controller::new_localized(store, Platform::Gtk, now_ms(), w.localization().clone());

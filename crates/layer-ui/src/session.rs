@@ -572,7 +572,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 tonal_histogram: HistogramView::default(),
                 revision: 0,
                 fullscreen: false,
-                workspace: WorkspaceState::default(),
+                workspace: WorkspaceState::for_platform(platform),
+                workspace_ready: false,
                 brush: BrushState {
                     preset: DefaultBrushPreset::Pencil as u32,
                     tool: Tool::Pencil,

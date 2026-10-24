@@ -74,11 +74,6 @@ impl GpuCanvas {
         let mut session =
             UiSession::from_project_localized(renderer, project, location, extent(area), layer_ui::Platform::Gtk, localization)?;
         if startup { session.mark_startup_drawing(); }
-        session.dispatch(layer_ui::UiAction::RestoreWorkspace {
-            workspace: Box::new(layer_ui::WorkspaceState::for_platform(
-                layer_ui::Platform::Gtk,
-            )),
-        })?;
         // The bundled catalog is already embedded. Honor explicit external
         // packages without loading identical installed resources again.
         let filters = std::env::var_os("CAPY_FILTERS_DIR").map(std::path::PathBuf::from);

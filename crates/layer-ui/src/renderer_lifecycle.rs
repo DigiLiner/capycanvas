@@ -168,6 +168,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.system_theme = previous.system_theme;
         self.system_accent = previous.system_accent;
         self.state.workspace = previous.state.workspace.clone();
+        self.state.workspace_ready = previous.state.workspace_ready;
         self.state.tool_slots = previous.state.tool_slots.clone();
         self.workspace_history = previous.workspace_history.clone();
         self.workspace_read_only = previous.workspace_read_only;
@@ -206,6 +207,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.refresh_layer_presentation();
         self.refresh_commands();
         Ok(self.changed(regions::ALL, true))
+    }
+
+    pub fn inherit_restored_window_state(&mut self, previous: &Self) -> Result<UiChange, String> {
+        self.restore_editing(previous.editing_state())?;
+        self.inherit_window_state(previous)
     }
 
     /// Initialize a newly opened drawing from the current painting tools. Do

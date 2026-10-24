@@ -13,6 +13,12 @@ pub enum WorkspacePreset {
 impl WorkspacePreset {
     pub const ALL: [Self; 3] = [Self::Painter, Self::Illustrator, Self::Photographer];
 
+    pub fn initial(platform: crate::Platform, mobile_browser: bool) -> Self {
+        if matches!(platform, crate::Platform::Android | crate::Platform::Ios)
+            || (platform == crate::Platform::Web && mobile_browser)
+        { Self::Painter } else { Self::Illustrator }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::Painter => "Sketch",

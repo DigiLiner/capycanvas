@@ -31,6 +31,7 @@ pub struct WorkspaceManager<S: WorkspaceStore> {
     pub store: S,
     pub owner: Owner,
     pub platform: Platform,
+    pub(crate) initial_workspace: Cell<layer_ui::WorkspacePreset>,
     state: RefCell<State>,
     saving: Cell<bool>,
     /// Replaces `store` for the rest of this manager's life once set.
@@ -53,6 +54,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
             store,
             owner: Owner::fresh(),
             platform,
+            initial_workspace: Cell::new(layer_ui::WorkspacePreset::initial(platform, false)),
             state: RefCell::new(State::default()),
             saving: Cell::new(false),
             memory: RefCell::new(None),
@@ -394,7 +396,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         let id = binding
             .filter(|id| self.items().iter().any(|i| &i.id == id))
             .or(prior_workspace)
-            .unwrap_or_else(|| DEFAULT_WORKSPACES[0].0.into());
+            .unwrap_or_else(|| DEFAULT_WORKSPACES.iter().find(|(_, preset)| *preset == self.initial_workspace.get()).unwrap().0.into());
         self.prepare_startup(&id, now).await
     }
 

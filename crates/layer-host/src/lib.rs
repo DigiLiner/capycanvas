@@ -1949,6 +1949,7 @@ mod tests {
     fn drawer_queries_measure_and_close_after_the_model_is_removed() {
         use layer_ui::{CustomizationAction, Panel, ToolbarControl};
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        host.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(layer_ui::WorkspaceState::default()) }).unwrap();
         host.resize(1600, 1000, 1.).unwrap();
         let tile = host.session.state().workspace.layout.panel(Panel::Toolbar).unwrap().tiles()
             .iter().find(|t| t.control == ToolbarControl::Color).unwrap().id;

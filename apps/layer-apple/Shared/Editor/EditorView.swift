@@ -30,7 +30,7 @@ struct EditorView<Canvas: View>: View {
                     .accessibilityIdentifier("canvas-startup")
             }
             // Controls need both the live values and their shared specifications.
-            if !store.state.isNull && !store.catalog.isNull {
+            if !store.state.isNull && !store.catalog.isNull && (store.workspaces == nil || store.state["workspace_ready"].bool) {
                 EditorHeader(store: store)
                 if !store.snapshot["chrome_hidden"].bool && store.state["workspace"]["layout"]["canvas_info"]["visible"].bool {
                     HStack(alignment: .bottom, spacing: 12) {

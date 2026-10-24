@@ -3,15 +3,6 @@ use crate::previews::CapyPreview;
 use layer_host::NativeHost;
 use serde_json::{Value, json};
 
-// Match Android's native startup before optional preferences restore a workspace.
-pub(crate) fn initialize(native: &mut NativeHost) -> Result<(), String> {
-    native.dispatch(layer_ui::UiAction::RestoreWorkspace {
-        workspace: Box::new(layer_ui::WorkspaceState::for_platform(
-            layer_ui::Platform::Windows,
-        )),
-    })
-}
-
 fn request(json: &str) -> Result<Value, String> {
     if json.len() > 8192 {
         return Err("Workspace query is too large".into());
@@ -234,14 +225,10 @@ mod tests {
     }
 
     #[test]
-    fn native_startup_uses_editor_preset_and_saved_workspaces_remain_authoritative() {
+    fn native_startup_waits_for_workspace_adoption_and_saved_workspaces_remain_authoritative() {
         use layer_ui::{Platform, UiAction, WorkspaceState};
         let mut host = NativeHost::new(Platform::Windows).unwrap();
-        initialize(&mut host).unwrap();
-        assert_eq!(
-            host.session.state().workspace,
-            WorkspaceState::for_platform(Platform::Android)
-        );
+        assert!(!host.session.state().workspace_ready);
         assert!(host.session.state().requests.is_empty());
         let saved = WorkspaceState::default();
         host.dispatch(UiAction::RestoreWorkspace {
@@ -254,7 +241,6 @@ mod tests {
     #[test]
     fn titlebar_measurements_publish_native_snapshot_insets() {
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        initialize(&mut host).unwrap();
         host.session.begin_workspace_transition().unwrap();
         for insets in [[0., 138., 48.], [0., 92., 32.], [0.; 3]] {
             host.dispatch(layer_ui::UiAction::MeasureTitlebar { insets }).unwrap();
@@ -290,7 +276,6 @@ mod tests {
     fn windows_tab_capture_and_preview_use_frozen_shared_insertion() {
         use layer_ui::{Bounds, ContactPhase, DockItem, Panel, TabHit, UiAction};
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        initialize(&mut host).unwrap();
         host.resize(986, 658, 1.).unwrap();
         let group = host
             .session

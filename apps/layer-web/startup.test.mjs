@@ -2,6 +2,75 @@ import {restartStoreUrl} from './package-fixture.test.mjs';
 import assert from "node:assert/strict";
 import {createDrawing} from './new-drawing-fixture.mjs';
 
+export async function checkWorkspaceStartup({call, evaluate, settle}) {
+  const baseUrl = await evaluate('location.href');
+  const wait = async condition => {
+    for (let n = 0; n < 600; n++) {
+      try { if (await evaluate(`Boolean(${condition})`)) return; }
+      catch (error) { if (!/navigated|context.*destroyed|Cannot find context/i.test(String(error))) throw error; }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    throw Error(`Workspace startup timed out: ${condition}; ${await evaluate(`JSON.stringify({body:document.body.dataset,ready:window.layerApp?.state().workspace_ready,view:window.layerApp&&JSON.parse(layerApp.app.workspace_view()),probe:window.workspaceStartup,styles:[...document.querySelectorAll('#workspace > .chrome')].map(node=>({visibility:getComputedStyle(node).visibility,opacity:getComputedStyle(node).opacity,rect:node.getBoundingClientRect().toJSON()}))},(_,value)=>typeof value==='bigint'?String(value):value)`)}`);
+  };
+  for (const theme of ['light', 'dark']) for (const mobile of [false, true]) {
+    const scenarioUrl = new URL(baseUrl);
+    scenarioUrl.hostname = `${theme}-${mobile ? 'mobile' : 'desktop'}.localhost`;
+    const url = scenarioUrl.href;
+    await activateForReload(call);
+    const {identifier} = await call('Page.addScriptToEvaluateOnNewDocument', {source:`
+      localStorage.setItem('layer.preferences.v1',JSON.stringify({version:1,theme:${JSON.stringify(theme)}}));
+      Object.defineProperty(navigator,'userAgentData',{value:{mobile:${mobile}},configurable:true});
+      Object.defineProperty(navigator,'userAgent',{value:${JSON.stringify(mobile ? 'Android' : 'Desktop')},configurable:true});
+      Object.defineProperty(navigator,'platform',{value:'Linux',configurable:true});
+      const p=window.workspaceStartup={frames:[],release:null,traffic:[]};
+      const held=new Promise(resolve=>{p.release=resolve});
+      import(new URL('./workspace-preload.js',location.href)).then(({workspaceStore})=>{
+        const execute=workspaceStore.execute;
+        workspaceStore.execute=async request=>{p.traffic.push(request);await held;return execute(request)};
+      });
+      function frame(){
+        const visible=[...document.querySelectorAll('#workspace > .chrome,#workspace > .dock-group,#workspace > .collapsed-column')]
+          .some(node=>node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}));
+        if(visible){
+          const view=window.layerApp&&JSON.parse(layerApp.app.workspace_view());
+          p.frames.push({ready:!!window.layerApp?.state().workspace_ready,name:view?.name,zen:window.layerApp?.state().workspace.zen_mode});
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    `});
+    try {
+      await call('Page.navigate', {url});
+      await wait('window.layerApp && workspaceStartup.release');
+      await new Promise(resolve => setTimeout(resolve, 1300));
+      assert.deepEqual(await evaluate('workspaceStartup.frames'), [], 'Slow storage must never expose a provisional workspace');
+      assert.equal(await evaluate('layerApp.state().workspace_ready'), false);
+      await evaluate('workspaceStartup.release()');
+      await wait('document.body.hasAttribute("data-workspace-ready") && workspaceStartup.frames.length');
+      assert.deepEqual(await evaluate('workspaceStartup.frames[0]'), {ready:true,name:mobile?'Sketch':'Paint',zen:false});
+      await wait('layerApp.app.brush_ready()');
+      await evaluate(`layerApp.dispatch({type:'workspace_manager',command:{type:'switch',id:'builtin:workspace:photographer'}})`);
+      await wait('JSON.parse(layerApp.app.workspace_view()).name === "Photo" && !JSON.parse(layerApp.app.workspace_view()).busy');
+      await evaluate(`layerApp.dispatch({type:'invoke',command:'zen_mode'})`);
+      await wait('!JSON.parse(layerApp.app.workspace_view()).dirty && !JSON.parse(layerApp.app.workspace_view()).busy');
+      await settle();
+      await activateForReload(call);
+      await call('Page.reload', {ignoreCache:true});
+      await wait('window.layerApp && workspaceStartup.release');
+      await new Promise(resolve => setTimeout(resolve, 1300));
+      assert.deepEqual(await evaluate('workspaceStartup.frames'), [], 'Restart must keep the saved workspace hidden until adoption');
+      await evaluate('workspaceStartup.release()');
+      await wait('document.body.hasAttribute("data-workspace-ready") && workspaceStartup.frames.length');
+      assert.deepEqual(await evaluate('workspaceStartup.frames[0]'), {ready:true,name:'Photo',zen:true}, 'The first controls after restart belong to the saved workspace');
+      assert.equal(await evaluate('layerApp.state().theme'), theme);
+      await wait('layerApp.app.brush_ready()');
+    } finally {
+      await call('Page.removeScriptToEvaluateOnNewDocument', {identifier});
+    }
+  }
+  console.log('Workspace startup: desktop/mobile defaults and saved Photo/Zen first frames, slow storage, light/dark');
+}
+
 // Delay real WebGPU validation promises at the browser boundary. The renderer,
 // Wasm session, UI and actual GPU rendering continue to run unchanged.
 export async function checkStagedStartup({ call, evaluate, settle, canvasPixels }) {

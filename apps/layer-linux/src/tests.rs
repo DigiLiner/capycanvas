@@ -12777,7 +12777,7 @@ fn native_workspace_menu_input() {
     let manager = w.workspaces.manager().unwrap();
     assert_eq!(
         manager.active_id().as_deref(),
-        Some(layer_workspace::DEFAULT_WORKSPACES[0].0)
+        Some(layer_workspace::DEFAULT_WORKSPACES[1].0)
     );
     let document = ui_session(&w)
         .engine()
@@ -13048,16 +13048,7 @@ fn native_workspace_database_resume_and_independent_windows() {
     apply_fixture_theme(&w);
     assert_eq!(
         w.workspaces.view().id.as_deref(),
-        Some(layer_workspace::DEFAULT_WORKSPACES[0].0)
-    );
-    w.dispatch(UiAction::WorkspaceManager {
-        command: layer_ui::WorkspaceCommand::Switch {
-            id: layer_workspace::DEFAULT_WORKSPACES[1].0.into(),
-        },
-    });
-    until(
-        || w.workspaces.view().id.as_deref() == Some(layer_workspace::DEFAULT_WORKSPACES[1].0),
-        "Paint workspace switch",
+        Some(layer_workspace::DEFAULT_WORKSPACES[1].0)
     );
     let id = w.workspaces.manager().unwrap().active_id().unwrap();
     let baseline = durable_layout(&state(&w).workspace.layout);
@@ -13144,7 +13135,8 @@ fn native_workspace_database_resume_and_independent_windows() {
     wait_saved(&second);
     assert_eq!(state(&again).brush.diameter, 73.);
     assert_eq!(state(&second).brush.diameter, 121.);
-    crate::capture(&second, "/tmp/capy-workspace-persistence.png");
+    let capture = std::path::PathBuf::from(std::env::var_os("LAYER_NATIVE_INPUT_DIR").unwrap()).join("workspace-persistence.png");
+    crate::capture(&second, capture.to_str().unwrap());
     second.window.close();
     again.window.close();
     pump(500);

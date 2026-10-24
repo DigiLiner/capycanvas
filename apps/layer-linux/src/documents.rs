@@ -946,7 +946,7 @@ impl Documents {
         let settings=w.gpu.borrow().as_ref().map(|gpu|gpu.session.state().settings.clone());
         let mut candidate=GpuCanvas::with_project_localized(&w.area,Some((project,None)),w.localization(),settings)?;
         candidate.prepare_import(||!w.window.is_visible()||self.closing_window.get()).await?;
-        if let Some(active)=w.gpu.borrow().as_ref() {candidate.session.inherit_window_state(&active.session)?;}
+        if let Some(active)=w.gpu.borrow().as_ref() {candidate.session.inherit_restored_window_state(&active.session)?;}
         candidate.session.renderer_mut().geometry=Some(crate::wayland::Geometry::of(&w.area));
         candidate.session.restore_session(restored,recovery.recovered.get(),observed)?;
         let deadline=Instant::now()+Duration::from_secs(120);
@@ -1023,8 +1023,9 @@ impl Documents {
         };
         replace_initial&=startup.as_ref().is_some_and(|stamp|previous.session.can_replace_startup_session(stamp));
         next.session.inherit_new_drawing_name(&previous.session);
-        let error = next.session.inherit_window_state(&previous.session).err()
-            .or_else(|| next.session.inherit_initial_drawing_tools(&previous.session).err());
+        let error = if restored.is_some() { next.session.inherit_restored_window_state(&previous.session).err() }
+            else { next.session.inherit_window_state(&previous.session).err()
+                .or_else(|| next.session.inherit_initial_drawing_tools(&previous.session).err()) };
         let recovery = if let Some((restored,recovery,observed))=restored {
             if let Err(error)=next.session.restore_session(restored,recovery.recovered.get(),observed) {
                 let restart_error=previous.reattach(&w.area).err();

@@ -190,9 +190,6 @@ fn apple_launch_on_stack(platform: u32, prepared: &CapyAppleLaunch) -> Result<*m
     };
     let mut host = NativeHost::launch_prepared(platform, prepared.settings.clone(), prepared.localization.clone(), prepared.paper.clone(), prepared.screen)?;
     host.ui_color = layer_host::UiColor::Tagged(DISPLAY_SPACE);
-    host.dispatch(layer_ui::UiAction::RestoreWorkspace {
-        workspace: Box::new(layer_ui::WorkspaceState::for_platform(platform)),
-    })?;
     host.session.set_document_replacement(false);
     let window = document_tabs::Window::localized(host.session.localization());
     Ok(Box::into_raw(Box::new(CapyApple {

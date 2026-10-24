@@ -532,7 +532,7 @@ impl<P: Parked> DocumentWindow<P> {
         for (id, candidate) in candidates.iter_mut() {
             candidate.set_document_replacement(false);
             if *id != selected { candidate.park_document()?; }
-            candidate.inherit_window_state(&host.session)?;
+            candidate.inherit_restored_window_state(&host.session)?;
         }
         let active = candidates.iter().position(|(id, _)| *id == selected).unwrap();
         let selected_candidate = candidates.remove(active);
@@ -593,7 +593,7 @@ impl<P: Parked> DocumentWindow<P> {
         for (_, candidate) in candidates.iter_mut() {
             candidate.set_document_replacement(false);
             candidate.park_document()?;
-            candidate.inherit_window_state(&host.session)?;
+            candidate.inherit_restored_window_state(&host.session)?;
         }
         let mut mapping = Vec::with_capacity(candidates.len());
         let mut retired = Vec::with_capacity(candidates.len());
@@ -647,7 +647,7 @@ impl<P: Parked> DocumentWindow<P> {
         }
         next.set_document_replacement(false);
         next.park_document()?;
-        next.inherit_window_state(&host.session)?;
+        next.inherit_restored_window_state(&host.session)?;
         let mut next = candidate.take().unwrap();
         let retired = next.renderer_mut().0.take();
         let id = if self.documents.order().contains(&id) {
@@ -695,7 +695,9 @@ impl<P: Parked> DocumentWindow<P> {
         }
         next.set_document_replacement(false);
         next.inherit_window_state(&host.session)?;
-        if !restored {
+        if restored {
+            next.restore_editing(host.session.editing_state())?;
+        } else {
             next.inherit_initial_drawing_tools(&host.session)?;
             next.inherit_new_drawing_name(&host.session);
         }

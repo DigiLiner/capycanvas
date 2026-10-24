@@ -86,6 +86,8 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     internal var workspaceManager by mutableStateOf<JSONObject?>(null)
         private set
     private var workspaceManagerKey: String? = null
+    private var pendingCanvasAttach: (() -> Unit)? = null
+    private var startupHeaderMeasured = false
     private val workspaceTick = object : Runnable {
         override fun run() {
             if (disposed || handle == 0L) return
@@ -437,6 +439,13 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             refreshLanguage()
             refreshChrome()
             if (moving) presentMotion() else { publish(true); wake() }
+            if (type == "measure_header" && workspaceManagerKey?.let(::JSONObject)?.optBoolean("ready") == true) {
+                startupHeaderMeasured = true
+                pendingCanvasAttach?.let { attach ->
+                    pendingCanvasAttach = null
+                    worker.post { if (!disposed) attempt(canvas = true, block = attach) }
+                }
+            }
         }
     }
     private var motionAt = 0L
@@ -571,14 +580,20 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             // Sizing computes the toolbars/panels without a GPU. Publish their layout
             // before device creation or even the first compositing shader can block.
             publish(true)
-            if (BuildConfig.DEBUG) beforeGpuAttachForTest?.invoke()
-            Log.i("CapyStartup", "gpu_attach boot_ns=${SystemClock.elapsedRealtimeNanos()}")
-            Native.attach(handle, surface)
-            attached = true
-            awaitingSurfaceFrame = true
-            main.post { failure = null }
-            publish(true)
-            wake()
+            val attach = {
+                if (generation == surfaceGeneration && surface.isValid) {
+                    if (BuildConfig.DEBUG) beforeGpuAttachForTest?.invoke()
+                    Log.i("CapyStartup", "gpu_attach boot_ns=${SystemClock.elapsedRealtimeNanos()}")
+                    Native.attach(handle, surface)
+                    attached = true
+                    awaitingSurfaceFrame = true
+                    main.post { failure = null }
+                    publish(true)
+                    wake()
+                }
+            }
+            if (workspaceManagerKey != null && !startupHeaderMeasured) pendingCanvasAttach = attach
+            else attach()
         }
     }
     fun restartCanvas() {

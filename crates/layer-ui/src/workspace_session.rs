@@ -78,6 +78,10 @@ impl PreparedWorkspace {
     }
 }
 impl<R: CanvasRenderer> UiSession<R> {
+    pub fn finish_workspace_startup(&mut self) -> UiChange {
+        self.state.workspace_ready = true;
+        self.changed(regions::LAYOUT, false)
+    }
     /// An `exact_name` is a typed name and must not collide; library copies
     /// otherwise receive an unused name.
     pub fn install_workspace_toolbar(

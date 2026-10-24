@@ -31,6 +31,9 @@ class AndroidFirstUiTest {
         }
         var scenario: ActivityScenario<MainActivity>? = null
         try {
+            val theme = InstrumentationRegistry.getArguments().getString("theme") ?: "dark"
+            instrumentation.targetContext.getSharedPreferences(CanvasHost.preferencesName, 0).edit()
+                .putString("settings", obj("version" to 1, "theme" to theme).toString()).commit()
             scenario = ActivityScenario.launch(MainActivity::class.java)
             lateinit var host: CanvasHost
             scenario.onActivity { host = it.host }
@@ -40,6 +43,8 @@ class AndroidFirstUiTest {
             compose.onNodeWithTag("canvas-placeholder").assertIsDisplayed()
             compose.runOnIdle {
                 assertFalse(host.snapshot!!.getBoolean("gpu_ready"))
+                assertTrue(host.snapshot!!.getJSONObject("state").getBoolean("workspace_ready"))
+                assertEquals("Sketch", host.workspaceManager!!.getString("name"))
                 assertFalse(host.surfaceReady)
                 assertNull(host.failure)
             }
@@ -64,12 +69,12 @@ class AndroidFirstUiTest {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
                 }
             } finally { bitmap.recycle() }
-            compose.onNodeWithText("View").assertIsDisplayed().performClick()
-            // Menu expansion is native UI and must respond even while its canvas
-            // worker is held. Native commands remain queued in their normal order.
+            compose.onNodeWithContentDescription("Main Menu").assertIsDisplayed()
+            resume.countDown()
+            compose.onNodeWithContentDescription("Main Menu").performClick()
+            compose.onNodeWithText("View", useUnmergedTree = true).assertIsDisplayed().performClick()
             compose.onNodeWithText("Fit canvas").assertIsDisplayed()
             android.util.Log.i("CapyStartupTest", "gray_ui_without_gpu boot_ns=${SystemClock.elapsedRealtimeNanos()}")
-            resume.countDown()
             compose.waitUntil(60_000) { host.surfaceReady || host.failure != null }
             compose.runOnIdle { assertNull(host.failure) }
             compose.onNodeWithTag("canvas-placeholder").assertDoesNotExist()

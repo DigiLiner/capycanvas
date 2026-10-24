@@ -108,7 +108,7 @@ import { checkPreferences, checkSettingsParity, checkLiveLanguage } from "./pref
 import {checkLiveHistogramLanguage,checkLiveWorkspaceLanguage,checkLiveDeliveryLanguage,checkLiveProofLanguage,checkLiveColorFormLanguage,checkLiveToolbarLanguage,checkLiveEffectLanguage,checkLiveToolLanguage} from "./localization-journey.test.mjs";
 import { checkPwa, servePackage } from "./pwa.test.mjs";
 import { checkGpuStartup, checkGpuCompatibility, checkGpuFailureLifecycle, checkCallbackBoundaries, checkOutdatedBrowser } from "./gpu.test.mjs";
-import { checkStagedStartup } from "./startup.test.mjs";
+import { checkStagedStartup, checkWorkspaceStartup } from "./startup.test.mjs";
 import { checkMediumTiles } from "./tiles.test.mjs";
 import { checkCustomization, checkWorkspace, checkTabStyles, checkToolbarManager, checkToolPicker } from "./customization.test.mjs";
 import { checkWorkspaceMotion } from "./workspace-motion.test.mjs";
@@ -362,6 +362,7 @@ try {
     [process.argv.includes("--brush-drawers"), () => checkBrushDrawers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--editor"), () => checkEditor({call,evaluate,settle,canvasPixels}), checkErrors],
     [process.argv.includes("--staged-startup"), () => checkStagedStartup({ call, evaluate, settle, canvasPixels }), checkErrors],
+    [process.argv.includes("--workspace-startup"), () => checkWorkspaceStartup({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--stroke-recording"), () => checkStrokeRecording({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--scopes-smoke"), () => checkScopesSmoke({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--scopes"), () => checkScopes({call,evaluate,settle,canvasPixels}), checkErrors],

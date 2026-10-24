@@ -190,7 +190,6 @@ mod tests {
     fn invalid_tab_capture_cannot_start_or_mutate_a_workspace_gesture() {
         use serde_json::json;
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        crate::workspace::initialize(&mut host).unwrap();
         host.resize(986, 658, 1.).unwrap();
         let before = host.session.state().workspace.clone();
         let revision = host.session.engine().document().revision;

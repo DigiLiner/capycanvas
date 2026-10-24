@@ -1498,7 +1498,8 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
     if(!workspace->Apply(model))return;
     lastModel=model;
     auto suspended=flag(model,L"windows_rendering_suspended");
-    workspace->Root().Visibility(suspended?Visibility::Collapsed:Visibility::Visible);
+    auto workspaceReady=flag(object(model,L"state"),L"workspace_ready");
+    workspace->Root().Visibility(suspended||!workspaceReady?Visibility::Collapsed:Visibility::Visible);
     panel.Visibility(suspended?Visibility::Collapsed:Visibility::Visible);
     auto state=object(model,L"state");auto theme=str(state,L"theme",L"dark");
     if(suspended)root.Background(SolidColorBrush(color(str(object(state,L"palette"),L"bg",L"#323232"))));
@@ -1558,6 +1559,7 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
     auto tabs=array(state,L"tabs");
     if(tabs.Size())window.Title((flag(object(state,L"document_file"),L"modified")?hstring(L"• "):hstring())+str(tabs.GetObjectAt(0),L"title")+L" · "+str(bootstrap,L"app_name"));
     header->Apply(model);ApplyDialogs();
+    header->Root().Visibility(workspaceReady?Visibility::Visible:Visibility::Collapsed);
     // Workspace theme replacement must not take focus from retained Preferences.
     if(retheme&&focus)dispatcher.TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low,
         [weak=weak_from_this(),target=make_weak(focus)]{

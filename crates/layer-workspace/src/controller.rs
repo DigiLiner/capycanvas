@@ -402,6 +402,10 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         self.initialize(now);
         self
     }
+    pub fn with_mobile_browser(self, mobile: bool) -> Self {
+        self.manager.initial_workspace.set(layer_ui::WorkspacePreset::initial(self.manager.platform, mobile));
+        self
+    }
     /// Storage replies call `wake` from any thread; the host then schedules
     /// `tick` on its editor owner.
     pub fn set_wake(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
@@ -1722,6 +1726,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     }
                     if !self.view.ready {
                         self.last_renew = 0;
+                        merge(&mut change, session.finish_workspace_startup());
                     }
                     self.view.ready = true;
                     self.clear_error();

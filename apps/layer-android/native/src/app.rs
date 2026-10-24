@@ -33,11 +33,6 @@ impl App {
         }
         host.startup = Default::default();
         host.session.set_document_replacement(false);
-        host.dispatch(layer_ui::UiAction::RestoreWorkspace {
-            workspace: Box::new(layer_ui::WorkspaceState::for_platform(
-                layer_ui::Platform::Android,
-            )),
-        })?;
         Ok(Self {
             window: crate::document_tabs::Window::localized(host.session.localization()),
             tone: Default::default(),

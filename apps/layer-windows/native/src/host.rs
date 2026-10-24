@@ -118,7 +118,6 @@ impl CapyHost {
             return Err("Invalid Windows canvas surface".into());
         }
         let mut native = launch.native.take().ok_or("Windows launch was already adopted")?;
-        crate::workspace::initialize(&mut native)?;
         native.startup = Default::default();
         native.resize(width, height, scale)?;
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();

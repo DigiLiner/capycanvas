@@ -1461,10 +1461,11 @@ fn assert_started<S: WorkspaceStore + 'static>(
     assert!(!controller.view.busy, "{context}");
     assert_eq!(
         controller.manager.current().map(|e| e.id),
-        Some(DEFAULT_WORKSPACES[0].0.to_string()),
+        Some(DEFAULT_WORKSPACES.iter().find(|(_, preset)| *preset == layer_ui::WorkspacePreset::initial(host.session.state().platform, false)).unwrap().0.to_string()),
         "{context}"
     );
     assert!(host.session.capture_workspace().is_ok(), "{context}");
+    assert!(host.session.state().workspace_ready, "{context}");
 }
 
 #[test]
@@ -1472,6 +1473,7 @@ fn startup_on_every_platform_adopts_from_empty_or_unusable_storage() {
     for platform in Platform::ALL {
         let (controller, mut host) = start(FaultyStore::new(usize::MAX, false), platform);
         assert_started(&controller, &mut host, &format!("{platform:?} empty"));
+        assert_eq!(controller.view.name, if matches!(platform, Platform::Android | Platform::Ios) { "Sketch" } else { "Paint" });
         assert!(!controller.manager.in_memory());
         assert_eq!(notice(&host), None);
 
@@ -1484,6 +1486,55 @@ fn startup_on_every_platform_adopts_from_empty_or_unusable_storage() {
                 "Workspace changes in this window won't be saved: This workspace cannot be opened. Choose another workspace or reset this one."
             )
         );
+    }
+}
+
+#[test]
+fn mobile_browsers_start_in_sketch_and_desktop_browsers_start_in_paint() {
+    for (mobile, expected) in [(false, "Paint"), (true, "Sketch")] {
+        let store = Store(Rc::new(Backend::default()));
+        let mut host = layer_host::NativeHost::new(Platform::Web).unwrap();
+        let mut controller = WorkspaceController::new_localized(store, Platform::Web, 1000, Localizer::shared(UiLanguage::English))
+            .with_mobile_browser(mobile);
+        assert!(!host.session.state().workspace_ready);
+        for _ in 0..20 { controller.tick(&mut host.session, 1000); }
+        assert!(host.session.state().workspace_ready);
+        assert_eq!(controller.view.name, expected);
+    }
+}
+
+#[test]
+fn workspace_controls_become_ready_with_the_restored_layout_on_every_platform() {
+    for platform in Platform::ALL {
+        let store = Store(Rc::new(Backend::default()));
+        store.0.now.set(1000);
+        let manager = WorkspaceManager::new(store.clone(), platform);
+        let incoming = pollster::block_on(manager.initialize(1000)).unwrap();
+        manager.activate(incoming);
+        let saved = pollster::block_on(manager.prepare_switch(DEFAULT_WORKSPACES[2].0, 1000)).unwrap();
+        let expected = saved.entity.capture().unwrap().history.layout().clone();
+        manager.activate(saved);
+        pollster::block_on(manager.close()).unwrap();
+        let (release, hold) = async_channel::bounded(1);
+        *store.0.switcher_gate.borrow_mut() = Some(hold);
+        let mut host = layer_host::NativeHost::new(platform).unwrap();
+        let mut controller = WorkspaceController::new_localized(store, platform, 1000, Localizer::shared(UiLanguage::English));
+        for _ in 0..20 {
+            controller.tick(&mut host.session, 1000);
+            assert!(!controller.view.ready, "{platform:?}");
+            assert!(!host.session.state().workspace_ready, "{platform:?}");
+        }
+        release.try_send(()).unwrap();
+        for _ in 0..20 {
+            controller.tick(&mut host.session, 1000);
+            if host.session.state().workspace_ready {
+                assert!(controller.view.ready, "{platform:?}");
+                assert_eq!(controller.view.name, "Photo", "{platform:?}");
+                assert_eq!(layer_ui::durable_layout(&host.session.state().workspace.layout), layer_ui::durable_layout(&expected), "{platform:?}");
+                break;
+            }
+        }
+        assert!(host.session.state().workspace_ready, "{platform:?}");
     }
 }
 
@@ -1695,7 +1746,7 @@ fn workspace_projection_uses_one_identity_without_publishing_or_dirtying() {
         assert_eq!(manager.active_name().as_deref(), Some(expected.as_str()));
         assert_eq!(manager.binding().unwrap().name, expected);
         assert_eq!(manager.details(&stored, true, 1000).title, expected);
-        let rows = manager.rows(ManagerPage::Workspaces, "Ｓｋｅｔｃｈ", 1000);
+        let rows = manager.rows(ManagerPage::Workspaces, "Ｐａｉｎｔ", 1000);
         assert_eq!(rows[0].title, expected);
         let prompt = manager.form_prompt(&ManagerAction::Delete(id), Some(&stored.entity.metadata)).unwrap();
         assert!(prompt.message.contains(&expected));

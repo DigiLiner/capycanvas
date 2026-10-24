@@ -300,6 +300,8 @@ pub(crate) fn session(platform: Platform) -> UiSession<Recorder> {
         platform,
     )
     .unwrap();
+    session.state.workspace = WorkspaceState::default();
+    session.refresh_panel_copy(false);
     session.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
     session
 }

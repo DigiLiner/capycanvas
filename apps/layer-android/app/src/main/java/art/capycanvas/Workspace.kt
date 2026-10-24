@@ -314,7 +314,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                 }
             }
         }
-        if (snapshot != null && state != null) {
+        if (snapshot != null && state != null && state.optBoolean("workspace_ready")) {
             val hidden = snapshot.optBoolean("chrome_hidden")
             val shown = snapshot.objectOrNull("preferences") == null && (!hidden || snapshot.optBoolean("keep_zen_button"))
             Layout(content = { WorkspaceHeader(host, snapshot, header) },

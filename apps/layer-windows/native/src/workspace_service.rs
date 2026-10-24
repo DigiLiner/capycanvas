@@ -102,12 +102,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceService<S> {
         let changed = native.take_service_changes();
         self.controller
             .observe_regions(&mut native.session, changed, wall_ms);
-        let view = &self.controller.view;
-        if view.ready || view.closing || native.startup.brush_ready {
-            let before = native.session.state().revision;
-            let change = self.controller.tick(&mut native.session, wall_ms);
-            native.apply_change(before, change);
-        }
+        let before = native.session.state().revision;
+        let change = self.controller.tick(&mut native.session, wall_ms);
+        native.apply_change(before, change);
         if let Some(result) = self.export.poll() {
             self.notice_source = Some(result);
             self.refresh_notice(native);

@@ -127,7 +127,7 @@ impl WebApp {
         let initial=serde_wasm_bindgen::from_value(initial).map_err(js)?;
         let replace=self.documents.order().len()==1&&self.session.can_replace_startup_session(&initial);
         let mut candidate=*project.session.take().ok_or_else(||js("Drawing checkpoint was already adopted"))?;
-        candidate.set_document_replacement(false);candidate.inherit_window_state(&self.session).map_err(js)?;
+        candidate.set_document_replacement(false);candidate.inherit_restored_window_state(&self.session).map_err(js)?;
         let config=&self.surface.as_ref().ok_or_else(||js("Canvas unavailable"))?.config;
         candidate.renderer_mut().resize_surface(config.width,config.height).map_err(js)?;
         if !activate || !replace {

@@ -122,7 +122,7 @@ fn concurrent_default_catalog_creation_retires_only_the_duplicate_seed() {
             matches!(m.store.execute(StoreRequest::Pending).await.unwrap(), StoreResponse::Pending(p) if p.is_empty())
         );
         let initial = m.initialize(2_000).await.unwrap();
-        assert_eq!(initial.entity.id, DEFAULT_WORKSPACES[0].0);
+        assert_eq!(initial.entity.id, DEFAULT_WORKSPACES[1].0);
         m.activate(initial);
         let prompt = m.form_prompt(&ManagerAction::New, None).unwrap();
         assert!(prompt.choices.is_empty() && prompt.choice_label.is_none());
@@ -140,7 +140,7 @@ fn startup_reuses_existing_workspaces_before_creating_an_independent_copy() {
         let m = &f.manager;
         let second = WorkspaceManager::new(m.store.worker.clone(), Platform::Gtk);
         let incoming = second.initialize(2_000).await.unwrap();
-        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[1].0);
+        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[0].0);
         second.activate(incoming);
         let third = WorkspaceManager::new(m.store.worker.clone(), Platform::Gtk);
         let incoming = third.initialize(3_000).await.unwrap();
@@ -151,7 +151,7 @@ fn startup_reuses_existing_workspaces_before_creating_an_independent_copy() {
         second.close().await.unwrap();
         let reopened = WorkspaceManager::new(m.store.worker.clone(), Platform::Gtk);
         let incoming = reopened.initialize(4_000).await.unwrap();
-        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[1].0);
+        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[0].0);
         reopened.activate(incoming);
         assert_eq!(reopened.items().len(), 3);
 
@@ -212,7 +212,7 @@ fn startup_write_failure_does_not_switch_elsewhere_or_create_a_workspace() {
         assert_eq!(error.kind, ErrorKind::FailedWrite);
         m.refresh().await.unwrap();
         assert_eq!(m.items().len(), 3);
-        assert_eq!(m.active_id().as_deref(), Some(DEFAULT_WORKSPACES[0].0));
+        assert_eq!(m.active_id().as_deref(), Some(DEFAULT_WORKSPACES[1].0));
         assert!(m.has_failed_operation());
     });
 }
@@ -236,7 +236,7 @@ fn an_unreadable_item_fails_startup_until_storage_is_replaced() {
         );
         m.replace_storage().await.unwrap();
         let incoming = m.initialize(3_000).await.unwrap();
-        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[0].0);
+        assert_eq!(incoming.entity.id, DEFAULT_WORKSPACES[1].0);
         assert_eq!(m.items().len(), DEFAULT_WORKSPACES.len());
         assert!(m.items().iter().all(|i| i.error.is_none()));
         m.activate(incoming);
@@ -250,7 +250,7 @@ fn default_catalog_is_protected_and_workspace_edits_survive_switching_and_restar
         let f = Fixture::new();
         let m = &f.manager;
         assert_eq!(m.items().len(), 3);
-        assert_eq!(m.active_id().as_deref(), Some(DEFAULT_WORKSPACES[0].0));
+        assert_eq!(m.active_id().as_deref(), Some(DEFAULT_WORKSPACES[1].0));
         for (id, preset) in DEFAULT_WORKSPACES {
             let workspace = m.load(id).await.unwrap();
             assert_eq!(workspace.entity.metadata.name, preset.name());
@@ -276,7 +276,7 @@ fn default_catalog_is_protected_and_workspace_edits_survive_switching_and_restar
                     .any(|a| matches!(a.action, ManagerAction::Delete(_)) && a.enabled)
             );
         }
-        let painter = DEFAULT_WORKSPACES[0].0;
+        let paint = DEFAULT_WORKSPACES[1].0;
         let mut capture = m.current().unwrap().capture().unwrap();
         let mut layout = capture.history.layout().clone();
         layout.header.size = layer_ui::HeaderSize::Large;
@@ -290,11 +290,11 @@ fn default_catalog_is_protected_and_workspace_edits_survive_switching_and_restar
             .unwrap();
         let outgoing = m.activate(incoming).unwrap();
         m.release(&outgoing).await;
-        let restored = m.prepare_switch(painter, 7_000).await.unwrap();
-        assert_eq!(restored.entity.metadata.name, "Sketch");
+        let restored = m.prepare_switch(paint, 7_000).await.unwrap();
+        assert_eq!(restored.entity.metadata.name, "Paint");
         assert_eq!(
             restored.entity.capture().unwrap(),
-            m.load(painter).await.unwrap().entity.capture().unwrap()
+            m.load(paint).await.unwrap().entity.capture().unwrap()
         );
         assert_eq!(restored.entity.capture().unwrap().working, capture.working);
         assert_eq!(restored.entity.capture().unwrap().history.layout(), &layout);
@@ -304,8 +304,8 @@ fn default_catalog_is_protected_and_workspace_edits_survive_switching_and_restar
         let reopened =
             WorkspaceManager::new(StoreWorker::shared(&f.directory).unwrap(), Platform::Gtk);
         let incoming = reopened.initialize(8_000).await.unwrap();
-        assert_eq!(incoming.entity.id, painter);
-        assert_eq!(incoming.entity.metadata.name, "Sketch");
+        assert_eq!(incoming.entity.id, paint);
+        assert_eq!(incoming.entity.metadata.name, "Paint");
         assert_eq!(incoming.entity.capture().unwrap().history.layout(), &layout);
         assert_eq!(incoming.entity.capture().unwrap().working, capture.working);
         assert_eq!(reopened.items().len(), 3);
@@ -776,7 +776,7 @@ fn package_validation_and_failed_publication_never_expose_partial_imports() {
         m.store.fail.set(false);
         m.refresh().await.unwrap();
         assert_eq!(m.items().len(), before);
-        assert_eq!(m.active_name().as_deref(), Some("Sketch"));
+        assert_eq!(m.active_name().as_deref(), Some("Paint"));
         assert!(m.import_workspace_package(&bytes, 2_000).await.is_ok());
     });
 }
@@ -786,7 +786,7 @@ fn duplication_switching_and_original_baselines_are_independent() {
     pollster::block_on(async {
         let f = Fixture::new();
         let m = &f.manager;
-        assert_eq!(m.active_name().as_deref(), Some("Sketch"));
+        assert_eq!(m.active_name().as_deref(), Some("Paint"));
         let initial = m.current().unwrap();
         let mut capture = initial.capture().unwrap();
         let mut layout = capture.history.layout().clone();

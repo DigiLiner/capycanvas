@@ -43,6 +43,7 @@ pub struct WebApp {
     tone: hdr::ToneState,
     proof: layer_ui::proof_workflow::ProofView,
     workspaces: Option<layer_workspace::WorkspaceController<workspaces::BrowserStore>>,
+    mobile_browser: bool,
     session: UiSession<AttachedRenderer>,
     documents: layer_ui::DocumentSessions<UiSession<AttachedRenderer>>,
     document_gpu: Option<document_tabs::DocumentGpu>,
@@ -330,7 +331,7 @@ impl WebApp {
         });
         self.session.cursor_input(event);
     }
-    pub fn create(canvas: web_sys::HtmlCanvasElement, saved: Option<String>, preferred_tags: JsValue, screen: JsValue) -> Result<WebApp, JsValue> {
+    pub fn create(canvas: web_sys::HtmlCanvasElement, saved: Option<String>, preferred_tags: JsValue, screen: JsValue, mobile_browser: bool) -> Result<WebApp, JsValue> {
         let tags: Vec<String> = serde_wasm_bindgen::from_value(preferred_tags).map_err(js)?;
         let localization = layer_ui::launch_localization(saved.as_deref().unwrap_or(""), &tags.iter().map(String::as_str).collect::<Vec<_>>());
         let mut session = UiSession::blank_on_screen(
@@ -345,13 +346,6 @@ impl WebApp {
             session.dispatch(UiAction::RestoreSavedSettings { saved }).map_err(js)?;
         }
         session.set_document_replacement(false);
-        session
-            .dispatch(UiAction::RestoreWorkspace {
-                workspace: Box::new(layer_ui::WorkspaceState::for_platform(
-                    layer_ui::Platform::Web,
-                )),
-            })
-            .map_err(js)?;
         let documents = layer_ui::DocumentSessions::localized(session.localization());
         Ok(Self {
             language_transition: layer_ui::LanguageTransition::new(session.localization().clone()),
@@ -365,6 +359,7 @@ impl WebApp {
             document_gpu: None,
             surface: None,
             workspaces: None,
+            mobile_browser,
             canvas,
             viewport_scale: 1.,
             cursor: Default::default(),
@@ -614,6 +609,7 @@ impl WebApp {
             revision,
             fullscreen,
             workspace,
+            workspace_ready,
             brush,
             colors,
             color_library,
@@ -670,6 +666,7 @@ impl WebApp {
         field!(revision);
         field!(fullscreen);
         field!(workspace);
+        field!(workspace_ready);
         field!(brush);
         field!(colors);
         field!(color_library);

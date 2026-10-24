@@ -163,6 +163,12 @@ services; an unprotected local build does not verify the APK processed by Play.
 
 ## Shared Rust
 
+Workspace startup changes run Web's `--workspace-startup` journey. It holds
+workspace storage beyond one second and checks every presented frame through fresh
+desktop/mobile starts and saved Photo/Zen restarts in both themes. Shared
+`workspace_controls_become_ready_with_the_restored_layout_on_every_platform`
+checks that readiness and the restored arrangement publish together.
+
 Storage-folder tests supply the override and platform folders explicitly. Their
 assertions must hold when the suite sets a private `CAPY_STORAGE_DIR`.
 

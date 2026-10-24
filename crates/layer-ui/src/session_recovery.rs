@@ -175,7 +175,7 @@ impl<R:CanvasRenderer> UiSession<R> {
         self.state.camera.revision.checked_sub(self.automatic_camera_revision).expect("Automatic camera revision exceeds camera revision")
     }
     fn session_document_state(&self)->SessionDocumentState {
-        let UiState {pressure_calibration:_,camera,document_file,tool_slots:_,histogram:_,waveform:_,tonal_histogram:_,localization:_,command_search:_,soft_proof:_,preview_sdr:_,hdr_display_available:_,screen:_,gamut_warning:_,revision:_,fullscreen:_,workspace:_,brush:_,colors:_,color_library:_,color_picker:_,tool_settings:_,tool_extra:_,toolbar_context_generation:_,tool_actions:_,tool_set:_,tool_panels:_,canvas_bar:_,layers:_,layer_tools:_,new_drawing:_,adjustments:_,filter_picker:_,filter_categories:_,filter_catalog_revision:_,filter_load:_,layer_properties:_,tabs:_,commands:_,settings:_,theme:_,palette:_,settings_open:_,preferences:_,customization:_,platform:_,requests:_,host_error:_,notice:_}=&self.state;
+        let UiState {pressure_calibration:_,camera,document_file,tool_slots:_,histogram:_,waveform:_,tonal_histogram:_,localization:_,command_search:_,soft_proof:_,preview_sdr:_,hdr_display_available:_,screen:_,gamut_warning:_,revision:_,fullscreen:_,workspace:_,workspace_ready:_,brush:_,colors:_,color_library:_,color_picker:_,tool_settings:_,tool_extra:_,toolbar_context_generation:_,tool_actions:_,tool_set:_,tool_panels:_,canvas_bar:_,layers:_,layer_tools:_,new_drawing:_,adjustments:_,filter_picker:_,filter_categories:_,filter_catalog_revision:_,filter_load:_,layer_properties:_,tabs:_,commands:_,settings:_,theme:_,palette:_,settings_open:_,preferences:_,customization:_,platform:_,requests:_,host_error:_,notice:_}=&self.state;
         self.files.session_state(document_file,SessionCamera::capture(camera))
     }
     pub fn session_stamp(&self)->SessionStamp {
@@ -792,7 +792,11 @@ mod tests {
         let expected=source.session_stamp().state.camera;
         let mut restored=restore(&encode(&source),false);
         let mut window=session(Platform::Gtk);window.set_viewport([900.,700.],[1800,1400]).unwrap();window.frame(0,0).unwrap();
-        restored.inherit_window_state(&window).unwrap();restored.set_viewport([900.,700.],[1800,1400]).unwrap();
+        window.finish_workspace_startup();
+        window.dispatch(UiAction::SelectBrush {id:layer_core::DefaultBrushPreset::Eraser as u32}).unwrap();
+        let editing=window.editing_state();
+        restored.inherit_restored_window_state(&window).unwrap();restored.set_viewport([900.,700.],[1800,1400]).unwrap();
+        assert!(restored.state.workspace_ready);assert_eq!(restored.editing_state(),editing);
         let actual=restored.session_stamp().state.camera;
         assert_eq!(actual.zoom,expected.zoom);assert_eq!(actual.rotation,expected.rotation);
         assert!((actual.center[0]-expected.center[0]).abs()<0.001);assert!((actual.center[1]-expected.center[1]).abs()<0.001);
