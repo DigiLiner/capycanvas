@@ -28,8 +28,7 @@ struct ColorPanel: View {
             let layout = spec["layout"], height = spec["height"].number
             let palette = EditorPalette(source: store.state["palette"])
             ZStack(alignment: .topLeading) {
-                ColorWheelDrawing(model: model, bounds: layout["wheel"], viewing: hdr ? store.colorViewing : JSON(),
-                    previewing: store.colorPreviewing)
+                ColorWheelDrawing(model: model, bounds: layout["wheel"], viewing: hdr ? store.colorViewing : JSON())
                     .frame(width: side, height: side).allowsHitTesting(false)
                 ColorWheelInput(shape: ColorWheelShape(model["shape"].string).rawValue, context: context,
                     value: captureState ?? model["readout_description"].string) { part, point, size in
@@ -184,7 +183,7 @@ private struct ColorPanelButtonStyle: ButtonStyle {
     }
 }
 
-private struct ColorPaintPreview: View {
+struct ColorPaintPreview: View {
     let rgba: JSON
     @Environment(\.editorPalette) private var palette
     var body: some View {

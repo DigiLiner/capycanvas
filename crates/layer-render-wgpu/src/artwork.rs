@@ -84,7 +84,7 @@ impl Frame {
 
 #[derive(Default)]
 pub(super) struct Capture {
-    scene: Option<scene::Scene>,
+    scene: Option<Box<scene::Scene>>,
     target: Option<(wgpu::Texture, wgpu::TextureView)>,
     window: Option<DocRect>,
     pub peak_image_bytes: u64,
@@ -115,7 +115,7 @@ impl Capture {
     }
     pub fn storage_bytes(&self) -> u64 {
         self.target.as_ref().map_or(0, |(t, _)| texture_bytes(t))
-            + self.scene.as_ref().map_or(0, scene::Scene::scratch_bytes)
+            + self.scene.as_deref().map_or(0, scene::Scene::scratch_bytes)
     }
     /// The caller consumes this target before requesting another region. Edges
     /// occupy its top-left prefix; no samples outside `region` are meaningful.

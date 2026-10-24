@@ -4,12 +4,14 @@ struct LayerPanel: View {
     @ObservedObject var store: EditorStore
     let panel: JSON
     var drawerPagePosition: CGFloat? = nil
+    var simple = false
     @StateObject private var interaction = LayerRowInteraction()
     @State private var popupID = UUID()
     @State private var filterMenu = JSON()
     @StateObject private var scrollPosition = EditorScrollPosition()
     @State private var retainedOffset: CGFloat?
     @State private var paperHover = false
+    @State private var footerWidth: CGFloat = 0
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var view: JSON { store.state["layer_tools"] }
     private var current: JSON { view["editing_layer"] }
@@ -24,7 +26,7 @@ struct LayerPanel: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
-                if visible("layer_opacity") { header.modifier(PanelBodyMeasurement(panel: "layers", part: "header")) }
+                if !simple && visible("layer_opacity") { header.modifier(PanelBodyMeasurement(panel: "layers", part: "header")) }
                 if visible("layers") {
                     EditorPositionedScrollView(position: scrollPosition) {
                         LazyVStack(spacing: 0) {
@@ -32,7 +34,7 @@ struct LayerPanel: View {
                                 let thumbnailToken = "\(popupID):\(row.id)"
                                 Group {
                                     LayerSwipeRow(store: store, swipe: store.layerSwipe, owner: interaction.swipeOwner, layer: row.layer) {
-                                        LayerRow(store: store, swipe: store.layerSwipe, layer: row.layer, previews: store.layerThumbnails, interaction: interaction)
+                                        LayerRow(store: store, swipe: store.layerSwipe, layer: row.layer, previews: store.layerThumbnails, simple: simple, interaction: interaction)
                                     }.modifier(PhotoDropTarget(store: store, row: row.id))
                                 }
                                     .modifier(LayerRowMeasurement(id: row.id))
@@ -69,8 +71,9 @@ struct LayerPanel: View {
                     }.overlayPreferenceValue(LayerRowFrames.self) { frames in
                         LayerConnections(store: store, frames: frames)
                     }.accessibilityIdentifier("layer-rows").modifier(LayerInputCheckOrder(layers: layers))
+                        .modifier(BubbleNativeControl(cancel: { interaction.cancel() }))
                 } else { Spacer(minLength: 0) }
-                if visible("layer_actions") { footer.modifier(PanelBodyMeasurement(panel: "layers", part: "footer")) }
+                if !simple && visible("layer_actions") { footer.modifier(PanelBodyMeasurement(panel: "layers", part: "footer")) }
             }
         }
             .onAppear { interaction.store = store }
@@ -139,33 +142,37 @@ struct LayerPanel: View {
             store.layer(["op": op, "id": current["id"].raw, "value": !current[property].bool])
         }
     }
+    private var footerOverflow: [JSON] {
+        view["footer"].array.filter { footerWidth + 0.5 < $0["min_width"].number }.map { $0["item"] }
+    }
     private var footer: some View {
-        ConfigurationFlow(spacing: store.panelMetrics.spacing, trailingLast: true) {
-            LayerButton(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) { store.layer(["op": "new", "group": false, "clipped": false]) }
-            LayerButton(icon: "add-vector-layer", label: store.catalog["native_copy"]["layers"]["new_vector_layer"].string, enabled: store.command("new_vector_layer")["enabled"].bool) {
-                store.invoke("new_vector_layer")
-            }.accessibilityIdentifier("layer-new-vector")
-            LayerButton(icon: "folder", label: store.catalog["native_copy"]["layers"]["new_group"].string) { store.layer(["op": "new", "group": true, "clipped": false]) }
-            LayerButton(icon: "selection-brush", label: store.catalog["native_copy"]["layers"]["new_selection_layer"].string, enabled: store.command("new_selection_layer")["enabled"].bool) {
-                store.invoke("new_selection_layer")
+        HStack(spacing: store.panelMetrics.spacing) {
+            ForEach(view["footer"].array.indices, id: \.self) { index in
+                let slot = view["footer"][index]
+                if footerWidth + 0.5 >= slot["min_width"].number { footerButton(slot) }
             }
-            LayerButton(icon: "mask", label: store.catalog["native_copy"]["layers"]["add_mask"].string, enabled: view["controls"]["mask"].bool) {
-                store.layer(["op": "add_mask", "id": current["id"].raw, "replace": false])
-            }
-            LayerButton(icon: "add-filter", label: store.catalog["native_copy"]["layers"]["add_filter"].string, enabled: !view["add_filter"].isNull) {
-                filterMenu = view["add_filter"]
-            }.accessibilityIdentifier("layer-add-filter")
-                .editorPopover(isPresented: Binding(get: { !filterMenu.isNull }, set: { if !$0 { filterMenu = JSON() } }), placement: .inward) {
-                    EditorActionMenu(model: AppleContextMenu(filterMenu) { store.dispatch($0) }, identifier: "layer-filter-menu", dismiss: { filterMenu = JSON() })
-                }
-            LayerButton(icon: "image", label: store.catalog["native_copy"]["layers"]["import_image"].string, enabled: store.command("import_image")["enabled"].bool) {
-                store.invoke("import_image")
-            }
-            LayerButton(icon: "delete", label: store.catalog["native_copy"]["layers"]["delete_selected"].string, enabled: view["can_delete"].bool) { store.layer(["op": "delete_selected"]) }
+            Spacer(minLength: 0)
             LayerButton(icon: "more-small", label: store.catalog["native_copy"]["layers"]["actions"].string, enabled: !current.isNull) {
                 openMenu(current, mask: current["mask_selected"].bool, source: .footer)
             }.editorPopover(isPresented: menuPresented(at: .footer), placement: .inward) { menuContent }
         }.padding(.horizontal, store.panelMetrics.inset).padding(.vertical, 4)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { footerWidth = $0 }
+    }
+    @ViewBuilder private func footerButton(_ slot: JSON) -> some View {
+        let item = slot["item"], kind = slot["button"].string
+        let button = LayerButton(icon: item["icon"].string, label: item["label"].string,
+            enabled: item["enabled"].bool, selected: item["selected"].bool) {
+                if kind == "add_filter" { filterMenu = view["add_filter"] }
+                else if !item["action"].isNull { store.dispatch(item["action"]) }
+            }
+        if kind == "add_filter" {
+            button.accessibilityIdentifier("layer-add-filter")
+                .editorPopover(isPresented: Binding(get: { !filterMenu.isNull }, set: { if !$0 { filterMenu = JSON() } }), placement: .inward) {
+                    EditorActionMenu(model: AppleContextMenu(filterMenu) { store.dispatch($0) }, identifier: "layer-filter-menu", dismiss: { filterMenu = JSON() })
+                }
+        } else {
+            button.accessibilityIdentifier(kind == "new_vector_layer" ? "layer-new-vector" : "layer-" + item["label"].string)
+        }
     }
     private func menuPresented(at source: LayerMenuSource) -> Binding<Bool> {
         Binding(get: { interaction.menuSource == source && !interaction.menu.isNull }, set: { presented in
@@ -173,7 +180,10 @@ struct LayerPanel: View {
         })
     }
     private var menuContent: some View {
-        EditorActionMenu(model: AppleContextMenu(interaction.menu) { store.dispatch($0) },
+        let extra = interaction.menuSource == .footer ? footerOverflow : []
+        let menu = extra.isEmpty ? interaction.menu : interaction.menu.replacing("sections",
+            with: JSON([extra.map(\.raw)] + interaction.menu["sections"].array.map(\.raw)))
+        return EditorActionMenu(model: AppleContextMenu(menu) { store.dispatch($0) },
             identifier: "layer-context-menu", dismiss: closeMenu)
     }
     private func closeMenu() { interaction.closeMenu() }
@@ -342,6 +352,7 @@ private struct LayerRow: View {
     let layer: JSON
     @ObservedObject var previews: LayerThumbnails
     var preview = false
+    var simple = false
     var interaction: LayerRowInteraction?
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var id: UInt64 { layer["id"].uint }
@@ -355,28 +366,28 @@ private struct LayerRow: View {
             LayerButton(icon: layer["visible"].bool && !layer["visibility_blocked"].bool ? "eye" : "eye-hidden", label: visibilityLabel, height: 36) {
                 perform { store.dispatch(["type": "set_layer_visibility", "id": id, "visible": !layer["visible"].bool]) }
             }.opacity(layer["visibility_blocked"].bool ? 0.35 : 1)
-            LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, selected: layer["selected"].bool, height: 36) {
+            if !simple { LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, selected: layer["selected"].bool, height: 36) {
                 selectRow(toggle: true)
-            }.accessibilityAddTraits(layer["selected"].bool ? .isSelected : [])
+            }.accessibilityAddTraits(layer["selected"].bool ? .isSelected : []) }
             HStack(spacing: 2) {
                 Color.clear.frame(width: 3, height: 28)
                 thumbnail(mask: false)
-                if layer["selection_layer"].bool {
+                if !simple && layer["selection_layer"].bool {
                     IconTile(icon: "selection-load", label: layer["load_selection_tooltip"].string) {
                         perform { store.dispatch(["type": "selection", "action": ["op": "load_layer", "id": id, "mode": "new", "inverted": false]]) }
                     }.frame(width: 30, height: 30).accessibilityIdentifier("selection-load-\(id)")
                 }
-                if layer["has_mask"].bool {
+                if !simple && layer["has_mask"].bool {
                     LayerButton(icon: layer["mask_linked"].bool ? "link" : "unlink", label: layer["mask_linked"].bool ? store.catalog["native_copy"]["layers"]["unlink_mask"].string : store.catalog["native_copy"]["layers"]["link_mask_to_layer"].string, size: 10) {
                         perform { store.layer(["op": "link_mask", "id": id, "value": !layer["mask_linked"].bool]) }
                     }.foregroundStyle(palette["text"]).disabled(layer["locked"].bool)
                     thumbnail(mask: true)
                 }
-                if !layer["paper"].isNull { texture(layer["paper"]) }
+                if !simple && !layer["paper"].isNull { texture(layer["paper"]) }
             }.padding(.leading, min(CGFloat(layer["depth"].uint) * 8, 24))
             VStack(alignment: .leading, spacing: 0) {
                 LayerName(store: store, layer: layer, preview: preview, allowsAction: { interaction?.contact.consumeClick() != true })
-                if !layer["description"].string.isEmpty { Text(layer["description"].string).lineLimit(1).opacity(0.55) }
+                if !simple && !layer["description"].string.isEmpty { Text(layer["description"].string).lineLimit(1).opacity(0.55) }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 6)
                 .modifier(LayerRowMeasurement(id: id, part: \.name, enabled: !preview))
                 .contentShape(Rectangle()).onTapGesture {
@@ -384,9 +395,9 @@ private struct LayerRow: View {
                         selectRow()
                     }
                 }
-            SharedIcon(name: layer["locked"].bool ? "lock" : "alpha-lock", size: 12)
-                .opacity(layer["locked"].bool || layer["alpha_locked"].bool ? 1 : 0)
-            if layer["can_drop_below"].bool {
+            if !simple { SharedIcon(name: layer["locked"].bool ? "lock" : "alpha-lock", size: 12)
+                .opacity(layer["locked"].bool || layer["alpha_locked"].bool ? 1 : 0) }
+            if !simple && layer["can_drop_below"].bool {
                 SharedIcon(name: "grip").opacity(gripOpacity).frame(width: 16, height: 36)
                     .contentShape(Rectangle())
                     .modifier(LayerRowMeasurement(id: id, part: \.grip, enabled: !preview))

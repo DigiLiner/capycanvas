@@ -231,7 +231,7 @@ impl Scene {
             let objects = std::mem::take(&mut self.object_spatial);
             let damage = std::mem::take(&mut self.object_source_damage);
             let query = self.object_query;
-            *self = replacement;
+            *self = *replacement;
             self.exact_object_results = exact;
             self.object_results = display;
             self.object_spatial = objects;
@@ -381,7 +381,7 @@ impl Scene {
         self.record_count = 0;
         self.effect_passes = 0;
     }
-    pub fn new(r: &WgpuRasterizer) -> Result<Self, GpuRasterError> {
+    pub fn new(r: &WgpuRasterizer) -> Result<Box<Self>, GpuRasterError> {
         let device = &r.device;
         let Pipelines {
             uniforms,
@@ -403,7 +403,7 @@ impl Scene {
             contents: target_bytes(&TargetGpu::new([PAGE_SIZE; 2], [PAGE_SIZE; 2], [PAGE_SIZE * 3; 2])),
             usage: wgpu::BufferUsages::UNIFORM,
         })?;
-        Ok(Self {
+        Ok(Box::new(Self {
             valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             placement_display: false,
             object_display: false,
@@ -457,7 +457,7 @@ impl Scene {
             image_evaluation_origin: [0; 2],
             stop_before: None,
             image_damage: None,
-        })
+        }))
     }
     pub(super) fn retire_changed_cells(&mut self,buffers:&[wgpu::Buffer]) {
         if buffers.is_empty() {return;}

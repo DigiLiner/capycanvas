@@ -42,8 +42,8 @@ enum Ready {
 /// Source revision, insertion scope, extent and blend space.
 type SourceKey = (u64, (u64,FilterPreviewSource), [u32; 2], layer_core::BlendSpace);
 pub(crate) struct FilterPreviews {
-    scene: Scene,
-    source_scene: Scene,
+    scene: Box<Scene>,
+    source_scene: Box<Scene>,
     probe_next: usize,
     probe_tiles: Vec<([u32; 2], u32)>,
     probe_batch_size: usize,

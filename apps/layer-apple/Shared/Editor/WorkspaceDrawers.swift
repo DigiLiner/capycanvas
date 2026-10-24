@@ -169,31 +169,31 @@ private struct WorkspaceContentDrawer: View {
 
 }
 
-private struct LayerInspector: View {
+struct LayerInspector<Owner: LayerInspectorOwner>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: EditorStore
-    @ObservedObject var drawer: ContentDrawerPresentation
+    @ObservedObject var drawer: Owner
     let width: CGFloat
     let height: CGFloat
     @State private var measurement = JSON(["fixed_height": 0, "unit_height": 40])
     @State private var propertiesHeight: CGFloat = 0
     @State private var footerHover = false
-    private var open: Bool { drawer.model["layer_properties"].bool }
-    private var footerHeight: CGFloat { drawer.layerSizes.isNull ? 49 : drawer.layerSizes["footer_height"].number }
+    private var open: Bool { drawer.propertiesOpen }
+    private var footerHeight: CGFloat { drawer.footerHeight }
     private var sizingKey: String { JSON([measurement.raw, propertiesHeight, width, store.state["layers"].array.count, store.state["camera"]["viewport"].raw, drawer.sizingContext]).stableKey }
     var body: some View {
         let view = store.state["layer_properties"], disclosure = view["disclosure"]
-        let label = disclosure[open ? "return_label" : "label"].string
+        let label = drawer.disclosure ?? disclosure[open ? "return_label" : "label"].string
         let summary = open ? "" : disclosure["summary"].string
         let pageHeight = max(0, height - footerHeight), palette = EditorPalette(source: store.state["palette"])
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
-                LayerPanel(store: store, panel: drawer.panel(JSON("layers")), drawerPagePosition: drawer.pagePosition)
+                LayerPanel(store: store, panel: drawer.panel(JSON("layers")), drawerPagePosition: drawer.pagePosition, simple: drawer.simple)
                     .environment(\.measuresWorkspacePanel, true)
-                    .frame(width: width, height: max(pageHeight, measurement["fixed_height"].number + measurement["unit_height"].number))
+                    .frame(width: max(0, width - 16), height: max(0, pageHeight - 16, measurement["fixed_height"].number + measurement["unit_height"].number - 16)).padding(8)
                     .offset(y: -drawer.pagePosition * pageHeight).allowsHitTesting(!open).accessibilityHidden(open)
                     .onPreferenceChange(PanelSizeFacts.self) { facts in
-                        let fixed = facts.filter { $0.key.panel == "layers" && $0.key.kind == .fixed }.values.reduce(0, +)
+                        let fixed = facts.filter { $0.key.panel == "layers" && $0.key.kind == .fixed }.values.reduce(16, +)
                         let unit = facts.filter { $0.key.panel == "layers" && $0.key.kind == .unit }.values.max() ?? 40
                         let next = JSON(["fixed_height": fixed, "unit_height": unit])
                         if next.stableKey != measurement.stableKey { measurement = next }
@@ -206,19 +206,28 @@ private struct LayerInspector: View {
             }.frame(height: pageHeight, alignment: .topLeading).contentShape(Rectangle()).clipped()
                 .accessibilityElement(children: .contain).accessibilityIdentifier("layer-properties-pages")
             Rectangle().fill(palette["text"].opacity(0.16)).frame(height: 1).accessibilityHidden(true)
-            Button { store.customize(["type": "toggle_layer_drawer_properties"]) } label: {
+            HStack(spacing: drawer.simple ? store.panelMetrics.group : 0) {
+            if drawer.simple {
+                IconTile(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) {
+                    store.layer(["op": "new", "group": false, "clipped": false])
+                }
+                    .frame(width: 48, height: footerHeight - 1).opacity(open ? 0 : 1).disabled(open).accessibilityHidden(open)
+                    .accessibilityIdentifier("bubble-new-layer")
+            }
+            Button { drawer.toggleProperties() } label: {
                 HStack(spacing: 6) {
-                    SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: 24, height: 24)
-                    VStack(alignment: .leading, spacing: 1) {
+                    if !drawer.simple { SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: 24, height: 24) }
+                    VStack(alignment: drawer.simple ? .trailing : .leading, spacing: 1) {
                         Text(label).lineLimit(1).accessibilityIdentifier("layer-properties-disclosure-label")
-                        if !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 4 / 3 * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180)).frame(width: 24, height: 24)
-                }.padding(.horizontal, 8).frame(height: footerHeight - 1).contentShape(Rectangle())
+                        if !drawer.simple && !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 4 / 3 * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
+                    }.frame(maxWidth: .infinity, alignment: drawer.simple ? .trailing : .leading)
+                    SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180)).frame(width: drawer.simple ? 16 : 24, height: 24)
+                }.padding(.horizontal, 16).frame(height: footerHeight - 1).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(active: footerHover, joinedEdge: "top"))
                 .onHover { footerHover = $0 }.disabled(!open && view["layer"].isNull).help([label, summary].filter { !$0.isEmpty }.joined(separator: "\n"))
                 .accessibilityLabel(label)
                 .accessibilityIdentifier("layer-properties-disclosure")
+            }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onChange(of: reduceMotion, initial: true) { _, value in drawer.reduceMotion = value }
             .task(id: sizingKey) {

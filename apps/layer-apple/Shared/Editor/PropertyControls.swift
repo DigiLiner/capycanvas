@@ -298,6 +298,7 @@ struct CurveEditor: View {
         }.help(curve["help"].string)
             .onChange(of: focused) { _, now in if !now { cancel() } }
             .onDisappear(perform: cancel)
+            .modifier(BubbleNativeControl(cancel: cancel))
     }
     private var plot: some View {
         GeometryReader { geometry in
@@ -367,8 +368,9 @@ struct CurveEditor: View {
                     if let removal { send(owner, removal); self.removal = nil }
                 })
                 .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
+                    let inset = CGFloat(curve["inset"].number)
                     let request: [String: Any] = ["kind": "remove_at", "point": [tap.location.x - curve["inset"].number, tap.location.y - curve["inset"].number],
-                        "extent": [geometry.size.width - 2 * curve["inset"].number, geometry.size.height - 2 * curve["inset"].number], "point_count": sequence?.points ?? points.count]
+                        "extent": [geometry.size.width - 2 * inset, geometry.size.height - 2 * inset], "point_count": sequence?.points ?? points.count]
                     if contact == nil { send(owner, request) } else { removal = request }
                 })
                 .allowsHitTesting(enabled)

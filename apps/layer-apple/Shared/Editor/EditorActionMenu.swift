@@ -85,7 +85,11 @@ struct EditorActionMenu: View {
             itemView(sections[section][row], index: sections.prefix(section).reduce(0) { $0 + $1.count } + row)
         }
     }
-    private func itemView(_ item: AppleContextMenu.Item, index: Int) -> some View {
+    @ViewBuilder private func itemView(_ item: AppleContextMenu.Item, index: Int) -> some View {
+        if item.isHeading {
+            Text(item.label).foregroundStyle(.secondary).padding(.horizontal, 10).frame(minHeight: 36)
+                .accessibilityAddTraits(.isHeader).id(index)
+        } else {
         Button { activate(index) } label: { itemLabel(item) }
             .buttonStyle(.plain).disabled(!item.enabled)
             .accessibilityIdentifier(item.identifier)
@@ -95,6 +99,7 @@ struct EditorActionMenu: View {
                 in: RoundedRectangle(cornerRadius: 4))
             .onHover { if $0 && item.enabled { focus = index } }
             .keyboardShortcut(item.bindings.first.flatMap { menuShortcut($0) })
+        }
     }
     private func itemLabel(_ item: AppleContextMenu.Item) -> some View {
         HStack(spacing: 8) {
@@ -112,7 +117,7 @@ struct EditorActionMenu: View {
                 binding["key"].string == key.lowercased() && (binding["command"].bool || binding["control"].bool) == command
                     && binding["shift"].bool == shift && binding["alt"].bool == alt
             }
-        }) { dismiss(); item.action?(); return }
+        }) { if !item.keepOpen { dismiss() }; item.action?(); return }
         guard !command && !alt else { return }
         switch key {
         case "arrowdown": step(1)
@@ -138,6 +143,6 @@ struct EditorActionMenu: View {
         let item = entries[index]
         guard item.enabled else { return }
         if !item.sections.isEmpty { pages.append(index); focus = initialFocus }
-        else { dismiss(); item.action?() }
+        else { if !item.keepOpen { dismiss() }; item.action?() }
     }
 }

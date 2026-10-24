@@ -17,7 +17,7 @@ bubbles push each other, and `session_bubbles.rs` holds taps, choices, beads,
 strokes, menus, history and UI text. The workspace keeps each bubble's place and
 options and each brush's ring settings (`BubbleLayout`). Hosts draw the parts
 at the offsets in `BubbleView`, run the frame clock and forward contacts
-relative to the bubble center. GTK is the reference presenter; Web, Android and Windows
+relative to the bubble center. GTK is the reference presenter; Web, Android, Apple and Windows
 use the same views, hit testing and actions.
 
 ## What becomes a bubble
@@ -131,6 +131,8 @@ everything rests.
   onto one of its brushes. Picking a brush or tool closes the chooser; letting go
   on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
+  Their layout uses the saved bubble position, so wall displacement cannot
+  repeatedly switch the chooser between gathered and circular arrangements.
 - **Brush controls:** drag along the Size and Strength arcs, or tap a point on
   them. While a contact is on an arc, a dab of the
   current brush in the current color sits under the finger or pen at the
@@ -371,7 +373,8 @@ panels are absent from the dock.
   mode) with no border; selected parts add the toolbar selection; hovered adds
   7% and pressed 14% of the text color. Text uses the standard UI size; icons
   are 20 px on faces and 16 px on arcs. Disabled faces and chooser items draw
-  at 45%, including their glass strength. Unavailable Undo and Redo icons draw
+  at 45%, including their glass strength; stroke previews, dots, count badges
+  and outside shadows retain their own opacity. Unavailable Undo and Redo icons draw
   at 35%; their circular hover highlights keep their normal opacity.
   The drawer mark is a 16 px icon inset 9 px from the face's bottom and right.
   Medium dots are 3.5 px circles at 90% text color for the current brush and
@@ -395,12 +398,14 @@ panels are absent from the dock.
 - **Chooser:** 44 px media circles and 152 × 48 px brush pills with the brush
   stroke (68% of the pill wide, 14 px tall, 6 px from the top) over its name;
   18 px icons on media and tool choices; brush names at 80% opacity, 8 px from
-  the sides and 5 px from the bottom. A shown medium's name uses `tag_center`
+  the sides and 5 px from the bottom. A shown or hovered medium's name uses `tag_center`
   with its measured text width plus 18 px, at most 96 px, a 9 px corner radius
   and 3 px vertical padding.
   Items arrive scaled from 60% and fading in over 180 ms, 14 ms apart (brushes
   16 ms), and leave over 120 ms; the item under a contact grows 12% (brushes
   6%).
+  Each item grows about its own center; leaving items remain until their fade
+  completes, including replacements with the same number of choices.
 - **Halo:** grows from 85% and fades in over 160 ms, and out over 120 ms.
 - **Beads:** the Color panel's swatch widget and styles, tweening 220 ms
   between layouts; hints are `HINT_DOT` dots at 35% text color. The palette bead
@@ -414,7 +419,8 @@ panels are absent from the dock.
   Add cell with a 16 px icon and a right-aligned Properties label. The folded
   face uses a 20 px squircle radius; its 46 px thumbnail uses a 13 px radius,
   white backing and a 1 px, 28% grey outline. The count is semibold and stays
-  centered at `count_badge` while its measured text width changes.
+  centered at `count_badge` while its measured text width changes, with a
+  minimum height of 22 px.
 - **Easing:** halo, chooser, bead and card transitions use cubic ease-out
   (`1 - (1 - t)³`). Stroke fading uses the separate smoothstep below.
 - **Undo and redo:** each button is a circle as tall as the capsule centered at
@@ -473,3 +479,8 @@ panels are absent from the dock.
   for faces and arc icons, swapped controls, a narrow viewport, intrinsic
   readouts and count badges in both themes. These assertions supplement input
   journeys: hitting a wide arc alone does not establish visual alignment.
+- Apple: the mounted `tests/tool-bubbles.swift` fixture checks retained models,
+  contact rollback, pinch, menus, Layers, glass strength, fades and idle work in
+  both themes and Apple policies. The native XCTest journeys run separately on
+  Mac and iPad. See [Apple tool bubbles](../development/apple.md#tool-bubbles)
+  for builds, native input limits and motion measurement.

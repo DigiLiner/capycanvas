@@ -47,6 +47,7 @@ enum ReorderSurface: Equatable {
     var requiresHold: Bool { target?.surface.requiresHold(device) ?? false }
 
     func suppressActivation() { suppressClick = true }
+    func transfer() { cancel(); suppressActivation() }
     func prepare(_ target: ReorderTarget, device: ReorderDevice, origin: CGPoint) {
         cancel(); suppressClick = false
         generation &+= 1

@@ -67,6 +67,10 @@ All state and rules are shared Rust. Hosts present the view and forward input.
 | Saved presets, recents, the last custom sheet and the paper palette | `NewDocumentSettings` in [`document_creation.rs`](../../crates/layer-ui/src/document_creation.rs) |
 | Device memory for layer capacity | `CanvasRenderer::memory_headroom`, from Vulkan, Metal or DXGI budgets |
 
+An unreported Metal working-set recommendation supplies no GPU budget; sheet
+admission uses measured process or system headroom. Optional GPU caches retain
+their zero budget without a driver recommendation.
+
 The dialog opens with the last used preset or custom sheet. Built-in preset
 identities, saved setups and recents are stored in settings; `This screen`
 takes the display's pixels and density from the host.

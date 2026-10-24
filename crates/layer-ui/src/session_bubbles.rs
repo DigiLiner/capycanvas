@@ -425,7 +425,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn chooser_items(&self, bubble: &ToolBubble, chooser: Chooser) -> (Vec<ChooserItem>, Vec<Option<ToolVariant>>) {
         let state = &self.state;
-        let center = self.bubble_center(bubble);
+        let center = bubble.center(self.bubble_viewport());
         let bounds = self.bubble_state.bounds.map_or_else(|| self.state.workspace.layout.free_area(self.bubble_viewport()), |(_, b)| b);
         let brush_item = |id: u32, at: [f32; 2]| ChooserItem {
             kind: ChooserKind::Brush,

@@ -1,7 +1,7 @@
 use super::*;
 use layer_core::EffectValue;
 
-fn inputs(r:&mut WgpuRasterizer,doc:&Document,blend:layer_core::BlendSpace)->(Scene,Cache,Vec<Image>) {
+fn inputs(r:&mut WgpuRasterizer,doc:&Document,blend:layer_core::BlendSpace)->(Box<Scene>,Cache,Vec<Image>) {
     let mut frame=packet(doc.scene(),doc.composition().size);
     frame.view.document_to_surface=[0.25,0.,0.,0.25,0.,0.];
     frame.blend_space=blend;

@@ -1341,8 +1341,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         use LayerAction as A;
         let l = self.localization();
         let tools = &self.state.layer_tools;
-        let invoke = |command: CommandId| (UiAction::Invoke { command }, self.command(command).enabled);
-        let add = self.command(CommandId::AddLayer).enabled;
+        let enabled = |id| self.state.commands.iter().find(|command| command.id == id)
+            .map_or_else(|| self.command(id).enabled, |command| command.enabled);
+        let invoke = |command: CommandId| (UiAction::Invoke { command }, enabled(command));
+        let add = enabled(CommandId::AddLayer);
         LayerFooterButton::ORDER.into_iter().map(|button| {
             let item = |label: Arc<str>, icon: &str, (action, enabled): (UiAction, bool)| ContextMenuItem { icon: Some(icon.into()), enabled, ..ContextMenuItem::command(label.as_ref(), action) };
             let item = match button {

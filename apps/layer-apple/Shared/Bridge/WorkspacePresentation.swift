@@ -34,6 +34,8 @@ import SwiftUI
     private struct Drag {
         let token = UUID()
         let item: JSON
+        let control: String
+        let drawing: String
         var point: CGPoint
         var released = false
     }
@@ -179,7 +181,8 @@ import SwiftUI
         if let drag { cancel(drag.item) }
         store?.contentDrawers.prepareDrag()
         let tabGrab = grabTab(item, at: point)
-        let operation = Drag(item: item, point: point); drag = operation
+        let control = store?.panel(item["panel"].string)["tiles"].array.first { $0["id"].uint == item["tile"].uint }?["resolved_control"].stableKey ?? ""
+        let operation = Drag(item: item, control: control, drawing: store?.drawingIdentity ?? "", point: point); drag = operation
         setTileHint()
         tabSlideToken = operation.token
         if item["kind"].string != "tile" {
@@ -236,7 +239,11 @@ import SwiftUI
                 guard current.point == request.point else { self.queryDrop(); return }
                 self.drag = nil; self.setTileHint(); self.tabSlide.clear()
                 self.refreshChrome()
-                if !hint["action"].isNull { store.dispatch(hint["action"]) }
+                let valid = { self.tabSlideToken == request.token && store.drawingIdentity == request.drawing && self.contains(request.item)
+                    && store.panel(request.item["panel"].string)["tiles"].array.first { $0["id"].uint == request.item["tile"].uint }?["resolved_control"].stableKey == request.control }
+                store.bubbles.take(request.item, at: request.point, valid: valid) { result in
+                    if result == .rejected && valid() && !hint["action"].isNull { store.dispatch(hint["action"]) }
+                }
             } else {
                 self.setTileHint(hint)
                 // Keep the latest completed visual while chasing newer input.

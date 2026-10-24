@@ -15,6 +15,9 @@ import SQLite3
             workspaces.suspend()
             workspaces.resume()
             try await workspaces.started()
+            try await workspaces.perform(["type": "form", "action": ["type": "new"]])
+            try languageReadiness(platform: platform, root: root, projection: workspaces.view)
+            workspaces.cancelPrompt(); try await workspaces.settle()
             try await editable(first, 31)
             let original = workspaces.view["id"].string
             precondition(!original.isEmpty)
@@ -75,6 +78,19 @@ import SQLite3
             try require(Data(contentsOf: badFile) == badData, "In-memory recovery must preserve the corrupt library")
             print("PASS: platform \(platform), SQLite startup, scene restoration, latest-edit switching, failure unlock, suspension, ownership recovery, restart and unreadable-store preservation")
         }
+    }
+    @MainActor static func languageReadiness(platform: UInt32, root: URL, projection: JSON) throws {
+        let editor = EditorStore(platform: platform, persistence: EditorPersistence(root: nil), managedWorkspaces: false)
+        let controller = WorkspaceController(store: editor, directory: root.appendingPathComponent("language-publication"), scene: UUID().uuidString)
+        _ = editor.snapshot.stagePatch(["canvas_ready": JSON(true)])
+        controller.formName = "Unfinished name"; controller.formDescription = "Unfinished description"; controller.formChoice = "Unfinished choice"
+        controller.receiveLanguage(projection)
+        try require(!editor.recovery.restoring, "A ready language publication must start recovery before the ordinary workspace reply")
+        try require(controller.formName == "Unfinished name" && controller.formDescription == "Unfinished description"
+            && controller.formChoice == "Unfinished choice", "Language publication must preserve every open form draft")
+        editor.recovery = ArtworkRecovery(store: editor)
+        controller.receiveLanguage(projection)
+        try require(editor.recovery.restoring, "A repeated ready publication must not replay the initialization transition")
     }
     @MainActor static func editable(_ editor: EditorStore, _ size: Double) async throws {
         var accepted = false

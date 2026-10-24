@@ -128,17 +128,59 @@ mod tests {
     use layer_render::CanvasRenderer;
 
     #[test]
-    fn native_renderer_factory_leaves_stack_for_its_caller() {
+    fn native_renderer_factory_and_frames_leave_stack_for_their_caller() {
         let color = DocumentColor::default();
         let reference = WgpuRasterizer::new_native_headless(color).unwrap();
         let context = GpuContext::of(&reference);
-        std::thread::Builder::new()
+        let renderer = std::thread::Builder::new()
             .name("native-renderer-factory".into())
             .stack_size(640 * 1024)
             .spawn(move || {
                 let renderer = context.rasterizer(color, &RendererOptions::default(), false).unwrap();
                 assert_eq!(renderer.document_color(), color);
                 assert!(renderer.device() == &context.device);
+                renderer
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        let mut host = Box::new(crate::NativeHost::new(layer_ui::Platform::Mac).unwrap());
+        host.replace_renderer(crate::Renderer(Some(renderer))).unwrap();
+        host.resize(640, 480, 1.).unwrap();
+        host.startup = Default::default();
+        let mut host = std::thread::Builder::new()
+            .name("native-renderer-backdrop".into())
+            .stack_size(384 * 1024)
+            .spawn(move || {
+                let submitted = host.session.engine().backend().0.as_ref().unwrap().submitted_updates();
+                host.prepare_canvas_frame(0, 0, false).unwrap();
+                assert!(host.session.engine().backend().0.as_ref().unwrap().submitted_updates() > submitted);
+                host.session.submit_backdrop_frame().unwrap();
+                assert!(host.session.engine().backend().0.as_ref().unwrap().submitted_updates() > submitted);
+                host
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        host.session.renderer_mut().0.as_mut().unwrap().finish_startup_cache();
+        host.startup = Default::default();
+        let clock = std::time::Instant::now();
+        while !host.startup.canvas_ready || !host.startup.brush_ready {
+            let now = clock.elapsed().as_nanos() as u64;
+            host.prepare_canvas_frame(now, now, true).unwrap();
+            assert!(clock.elapsed() < std::time::Duration::from_secs(30), "Blank canvas startup timed out");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        std::thread::Builder::new()
+            .name("native-renderer-frame".into())
+            .stack_size(384 * 1024)
+            .spawn(move || {
+                let submitted = host.session.engine().backend().0.as_ref().unwrap().submitted_updates();
+                host.resize(641, 480, 1.).unwrap();
+                let now = clock.elapsed().as_nanos() as u64;
+                host.prepare_canvas_frame(now, now, true).unwrap();
+                assert!(host.startup.canvas_ready);
+                assert!(host.session.engine().backend().0.as_ref().unwrap().submitted_updates() > submitted);
             })
             .unwrap()
             .join()

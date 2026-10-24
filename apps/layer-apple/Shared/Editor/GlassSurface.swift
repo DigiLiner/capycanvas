@@ -4,6 +4,7 @@ import SwiftUI
     private weak var store: EditorStore?
     private var boxes: [UUID: [CGFloat]] = [:]
     private var connections: [String: JSON] = [:]
+    private var arcs: [UUID: [CGFloat]] = [:]
     private var scheduled = false
     private var sent = ""
     init(store: EditorStore) { self.store = store }
@@ -15,6 +16,9 @@ import SwiftUI
         guard connections[key]?.stableKey != value?.stableKey else { return }
         connections[key] = value; schedule()
     }
+    func arc(_ id: UUID, _ value: [CGFloat]?) {
+        guard arcs[id] != value else { return }; arcs[id] = value; schedule()
+    }
     private func schedule() {
         guard !scheduled else { return }
         scheduled = true
@@ -22,8 +26,9 @@ import SwiftUI
     }
     private func flush() {
         scheduled = false
-        let payload = JSON(["regions": boxes.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) + [1] },
-            "connections": connections.keys.sorted().compactMap { connections[$0]?.raw }])
+        let payload = JSON(["regions": boxes.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) },
+            "connections": connections.keys.sorted().compactMap { connections[$0]?.raw },
+            "arcs": arcs.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) }])
         let key = payload.stableKey
         guard key != sent else { return }
         sent = key
@@ -39,18 +44,55 @@ extension EnvironmentValues {
     }
 }
 
+private struct GlassGeometry: Equatable {
+    var bounds = CGRect.zero
+    var size = CGSize.zero
+    init() {}
+    init(_ proxy: GeometryProxy) { bounds = proxy.frame(in: .named("editor-workspace")); size = proxy.size }
+    var scale: CGFloat { bounds.width / max(1, size.width) }
+}
+
 struct GlassRegistration: ViewModifier {
     let shape: SquircleShape
     var active = true
+    var circular = false
+    var rounded = false
+    var strength: Double = 1
     @Environment(\.glassRegistry) private var registry
     @State private var id = UUID()
+    @State private var geometry = GlassGeometry()
+    private var region: [CGFloat] {
+        let bounds = geometry.bounds
+        guard active && !bounds.isEmpty else { return [] }
+        let radii = circular ? Array(repeating: min(bounds.width, bounds.height) / 2, count: 4)
+            : shape.radii(in: CGRect(origin: .zero, size: geometry.size)).map { $0 * geometry.scale }
+        return [bounds.minX, bounds.minY, bounds.width, bounds.height] + radii + [circular || rounded ? 0 : 1, strength]
+    }
     func body(content: Content) -> some View {
-        content.onGeometryChange(for: [CGFloat].self) { proxy in
-            guard active else { return [] }
-            let frame = proxy.frame(in: .named("editor-workspace"))
-            return [frame.minX, frame.minY, frame.width, frame.height] + shape.radii(in: CGRect(origin: .zero, size: frame.size))
-        } action: { box in registry?.box(id, box.isEmpty ? nil : box) }
+        content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
+            .onChange(of: region, initial: true) { _, box in registry?.box(id, box.isEmpty ? nil : box) }
             .onDisappear { registry?.box(id, nil) }
+    }
+}
+
+struct GlassArcRegistration: ViewModifier {
+    let arc: JSON
+    let strength: Double
+    @Environment(\.glassRegistry) private var registry
+    @State private var id = UUID()
+    @State private var geometry = GlassGeometry()
+    private var region: [CGFloat] {
+        let bounds = geometry.bounds
+        guard !bounds.isEmpty, arc["radius"].number > 0 else { return [] }
+        let radius = arc["radius"].number, scale = geometry.scale
+        let extra = 21 / radius * 180 / .pi, direction = arc["sweep"].number < 0 ? -1.0 : 1.0
+        return [bounds.midX, bounds.midY, radius * scale, arc["band"].number * scale,
+            arc["start"].number - direction * extra, arc["sweep"].number + direction * extra, strength]
+    }
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
+            .onChange(of: region, initial: true) { _, value in registry?.arc(id, value.isEmpty ? nil : value) }
+            .onDisappear { registry?.arc(id, nil) }
     }
 }
 

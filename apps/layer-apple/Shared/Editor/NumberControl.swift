@@ -125,6 +125,7 @@ struct NumberControl: View {
             }
         }
         .modifier(NumberControlMeasurement(id: key + ":root"))
+        .modifier(BubbleNativeControl(cancel: { cancelDrag(); cancel() }))
         .onAppear { field.receive(value); format(); measureInlineRange(); registerAdmission?(key, admit) }
         .onChange(of: store.interfaceLanguage) { _, _ in numericLabels = NativeTextContext.numericLabels(label, language: store.interfaceLanguage); format() }
         .onChange(of: label, initial: true) { _, next in numericLabels = NativeTextContext.numericLabels(next, language: store.interfaceLanguage) }

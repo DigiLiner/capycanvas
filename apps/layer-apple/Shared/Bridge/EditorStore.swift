@@ -90,6 +90,7 @@ import Darwin
     let canvasBar = CanvasBarPresence()
     let notice = CanvasNoticePresence()
     lazy var glass = GlassRegistry(store: self)
+    lazy var bubbles = WorkspaceBubbles(store: self)
     var snapshot: SnapshotProjection { ui.snapshot }
     var state: SnapshotProjection { ui.state }
     var displayColors: JSON {
@@ -105,6 +106,7 @@ import Darwin
     }
     var paintPair: JSON { snapshot["paint_pair"] }
     var workspaceMotion: WorkspaceMotion { ui.workspace }
+    var drawingIdentity: String { "\(snapshot["document_tabs"]["selected"].uint):\(state["document_file"]["epoch"].uint)" }
 
     init(platform: UInt32, scene: String = UUID().uuidString, persistence: EditorPersistence = .shared,
         managedWorkspaces: Bool = true, deferLaunch: Bool = false) {
@@ -207,6 +209,7 @@ import Darwin
                 windowPresentation.receive(state.json)
                 contentDrawers.refresh()
                 workspace.refresh()
+                bubbles.refresh()
                 if state["requests"].array.contains(where: { $0["kind"]["type"].string == "workspace" }) {
                     workspaces?.tick()
                 }
@@ -214,6 +217,7 @@ import Darwin
                 if !SnapshotProjection.equal(camera.value.raw, state["camera"].raw) { camera.value = state["camera"] }
                 contentDrawers.refresh()
                 workspace.refresh()
+                bubbles.refresh()
             case .search: break
             case .workspace, .camera:
                 // Camera patches update the readout alone; dragging the canvas
@@ -348,7 +352,7 @@ import Darwin
         }
     }
     func input(_ value: [String: Any]) {
-        if value["type"] as? String == "blur" { interruptInput?(); workspace.headerHeld = false; workspace.dismissTransients(at: nil) }
+        if value["type"] as? String == "blur" { bubbles.input.cancel(); bubbles.closeMenu(); interruptInput?(); workspace.headerHeld = false; workspace.dismissTransients(at: nil) }
         if value["type"] as? String == "key", let key = value["key"] as? String,
            let modifiers = value["modifiers"] as? [String: Any],
            palettes.key(key, pressed: value["pressed"] as? Bool == true,

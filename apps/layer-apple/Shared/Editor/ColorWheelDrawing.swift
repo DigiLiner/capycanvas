@@ -12,17 +12,16 @@ struct ColorWheelDrawing: View {
     // Use panel coordinates to control the backing surface's pixel alignment.
     let bounds: JSON
     var viewing = JSON()
-    var previewing = false
     @Environment(\.displayScale) private var displayScale
-    @StateObject private var field = ColorFieldImageCache()
-    @StateObject private var guide = ColorFieldImageCache()
     @StateObject private var asyncField = AsyncColorFieldImageCache()
+    @StateObject private var asyncGuide = AsyncColorFieldImageCache()
     var body: some View {
         let side = bounds[2].number
         let pixels = ceil(((bounds[0].number + side).rounded() - bounds[0].number.rounded()) * displayScale)
         let hdrRequest = viewing.isNull ? JSON() : viewing.replacing("stops", with: model["intensity"])
-        let request = viewing.isNull && !previewing ? JSON() : JSON(["side": pixels, "hue": model["wheel_components"][0].number,
+        let request = JSON(["side": pixels, "hue": model["wheel_components"][0].number,
             "shape": model["shape"].string, "space": model["rgb_space"].string, "viewing": hdrRequest.raw])
+        let guideRequest = JSON(["side": pixels, "hue": 0, "shape": model["shape"].string, "space": model["rgb_space"].string, "guide": true])
         let asyncImage = asyncField.image
         Canvas(colorMode: .extendedLinear) { graphics, _ in
             var graphics = graphics
@@ -34,12 +33,10 @@ struct ColorWheelDrawing: View {
             graphics.translateBy(x: x, y: y)
             graphics.scaleBy(x: width / side,
                 y: ((bounds[1].number + side).rounded() - y) / side)
-            let pixels = ceil(width * displayScale)
             let geometry = model["geometry"], shape = ColorWheelShape(model["shape"].string)
             func point(_ value: JSON) -> CGPoint { CGPoint(x: value[0].number * side, y: value[1].number * side) }
             let center = point(geometry["center"])
-            let image = !viewing.isNull ? asyncImage : previewing ? asyncImage ?? field.last : field.image(side: pixels,
-                hue: Float(model["wheel_components"][0].number), shape: shape, rgbSpace: model["rgb_space"].string)
+            let image = asyncImage
             if let image {
                 var clipped = graphics
                 if shape == .circle {
@@ -58,7 +55,7 @@ struct ColorWheelDrawing: View {
             let radius = (geometry["outer"].number + geometry["inner"].number) * side / 2
             let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
                 width: radius * 2, height: radius * 2))
-            if let image = guide.image(side: pixels, hue: 0, shape: shape, rgbSpace: model["rgb_space"].string, guide: true) {
+            if let image = asyncGuide.image {
                 var clipped = graphics
                 clipped.clip(to: ring.strokedPath(StrokeStyle(lineWidth: (geometry["outer"].number - geometry["inner"].number) * side)))
                 clipped.draw(Image(decorative: image, scale: 1).allowedDynamicRange(.high).interpolation(.low),
@@ -78,7 +75,8 @@ struct ColorWheelDrawing: View {
                 graphics.stroke(marker, with: .color(.white), lineWidth: 2)
             }
         }.onChange(of: request.stableKey, initial: true) { _, _ in asyncField.request(request) }
-            .onDisappear { asyncField.cancel() }
+            .onChange(of: guideRequest.stableKey, initial: true) { _, _ in asyncGuide.request(guideRequest) }
+            .onDisappear { asyncField.cancel(); asyncGuide.cancel() }
     }
 }
 
@@ -127,7 +125,7 @@ private final class ColorFieldWorker: @unchecked Sendable {
     func render(_ value: JSON, completion: @escaping @Sendable (CGImage?) -> Void) {
         queue.async {
             completion(self.cache.image(side: value["side"].number, hue: Float(value["hue"].number),
-                shape: ColorWheelShape(value["shape"].string), rgbSpace: value["space"].string, hdr: value["viewing"]))
+                shape: ColorWheelShape(value["shape"].string), rgbSpace: value["space"].string, guide: value["guide"].bool, hdr: value["viewing"]))
         }
     }
 }
@@ -151,7 +149,6 @@ final class ColorPanelLayoutCache: ObservableObject {
 final class ColorFieldImageCache: ObservableObject {
     private var key: Key?
     private var cached: CGImage?
-    var last: CGImage? { cached }
     private var baseKey: Key?
     private var base = [Float]()
     private struct Key: Equatable { let side: UInt32; let hue: Float; let shape: ColorWheelShape; let space: String; let guide: Bool; let hdr: String }

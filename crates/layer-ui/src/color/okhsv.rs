@@ -96,16 +96,16 @@ impl Hue {
 /// once per hue, then reuse it across pixels. Picking retains exact conversion.
 pub(super) struct RasterHue {
     curve: Vec<[f64; 4]>,
-    transfer: &'static [f32; 4097],
+    transfer: &'static [f32],
     to_display: Option<Matrix3>,
     display: RgbSpace,
 }
 impl RasterHue {
     pub(super) fn new_in(degrees: f32, space: RgbSpace, display: RgbSpace) -> Self {
         let hue = Hue::new_in(space, degrees);
-        static TRANSFERS: std::sync::LazyLock<[[f32; 4097]; 4]> = std::sync::LazyLock::new(|| {
+        static TRANSFERS: std::sync::LazyLock<[Vec<f32>; 4]> = std::sync::LazyLock::new(|| {
             RgbSpace::ALL.map(|space| {
-                std::array::from_fn(|i| (space.encode(i as f64 / 4096.) * 255.) as f32)
+                (0..=4096).map(|i| (space.encode(i as f64 / 4096.) * 255.) as f32).collect()
             })
         });
         Self {
@@ -242,6 +242,39 @@ pub(super) fn hue_stops_in(color: impl Fn(f32) -> [f32; 3]) -> Vec<super::ColorH
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cold_raster_transfer_tables_leave_stack_for_their_caller() {
+        const CHILD: &str = "CAPY_OKHSV_COLD_STACK_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            std::thread::Builder::new()
+                .name("cold-raster-transfer-tables".into())
+                .stack_size(384 * 1024)
+                .spawn(|| {
+                    for space in RgbSpace::ALL {
+                        for display in RgbSpace::ALL {
+                            let raster = RasterHue::new_in(155., space, display);
+                            assert_eq!(raster.rgb8(0.5, 0.), [0; 3]);
+                            let linear = Hue::new_in(space, 155.).linear_rgb(0.25, 0.5);
+                            let converted = if space == display { linear } else { apply(space.linear_transform(display), linear) };
+                            let expected = converted.map(|v| (display.encode(v.clamp(0., 1.)) * 255. + 0.5) as u8);
+                            assert!(raster.rgb8(0.25, 0.5).into_iter().zip(expected).all(|(actual, expected)| actual.abs_diff(expected) <= 1));
+                        }
+                    }
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+            return;
+        }
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "color::okhsv::tests::cold_raster_transfer_tables_leave_stack_for_their_caller", "--test-threads=1", "--nocapture"])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(child.status.success(), "Cold raster initialization failed: {:?}\n{}\n{}", child.status,
+            String::from_utf8_lossy(&child.stdout), String::from_utf8_lossy(&child.stderr));
+    }
 
     #[test]
     fn matches_author_reference_samples() {

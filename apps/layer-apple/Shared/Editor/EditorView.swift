@@ -42,6 +42,7 @@ struct EditorView<Canvas: View>: View {
                         .placed(store.snapshot["layout"]["status"])
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
+                WorkspaceBubbleLayer(store: store, bubbles: store.bubbles)
                 PressureCalibration(store: store)
             }
             HStack {
@@ -71,11 +72,14 @@ struct EditorView<Canvas: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(EditorPopoverHost())
         .coordinateSpace(name: "editor-workspace")
+        .onPreferenceChange(BubbleChoices.self) { store.bubbles.input.choiceSources = $0 }
+        .onPreferenceChange(BubbleNativeRegions.self) { store.bubbles.input.nativeRegions = $0 }
         .editorChromeContact { point, held in
             guard let point else { store.workspace.headerHeld = held; store.workspace.refreshChrome(); return false }
             let header = !store.snapshot["chrome_hidden"].bool && point.y >= 0 && point.y < store.header.size["height"].number
             store.workspace.headerHeld = store.workspace.headerHeld || (held && header)
             store.layerSwipe.contact(at: point)
+            if store.bubbles.input.ownsSecondary(point) { return header }
             store.workspace.chrome(["kind": "contact", "position": [point.x, point.y], "canvas": false]); return header
         }
         .onContinuousHover(coordinateSpace: .named("editor-workspace")) { phase in

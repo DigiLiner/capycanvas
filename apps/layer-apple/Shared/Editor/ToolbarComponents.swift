@@ -153,9 +153,9 @@ private struct BrushSliderComponent: View {
     }
 }
 
-private struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
+struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
 
-@MainActor private final class SliderPreviewSession: ObservableObject {
+@MainActor final class SliderPreviewSession: ObservableObject {
     let id = UUID()
     var open = false
     var request: UUID?

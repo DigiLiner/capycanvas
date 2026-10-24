@@ -8,8 +8,8 @@ Metal renders the canvas through a `CAMetalLayer` behind native controls. The
 [package README](../../apps/layer-apple/README.md) describes the source layout,
 and the [Apple porting guide](../APPLE_PORTING_GUIDE.md) defines the audit,
 cleanup and validation workflow. Features usually land on GTK, Web and Android first.
-The [tool bubbles handoff](tool-bubbles-apple-handoff.md) identifies the shared
-contracts, Apple components to reuse and validation needed for that port.
+Both hosts present [tool bubbles](../ui/tool-bubbles.md) through the shared
+native views and actions.
 
 Artwork tasks retain shared authored roots and captured effect phases. Native
 saves write source-only packages through coordinated atomic replacement. A
@@ -310,6 +310,52 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
 - **UIKit fields.** iPadOS consumes Escape before SwiftUI handlers. Use UIKit text
   fields with priority key commands, explicit height, and fonts/placeholders assigned
   only when changed, to avoid repeated size invalidation.
+
+## Tool bubbles
+
+`WorkspaceBubbles` retains each bubble's model independently of its placement.
+`CanvasFrameDriver` advances shared motion and native transitions while they are
+active, then sleeps. The overlay remains in Zen. The stateless
+`capy_apple_bubble_ui` bridge uses the shared hit geometry; gaps between parts
+remain canvas. The workspace's existing `NativeReorderInput` owns native source
+capture, holds, cancellation and two-finger takeover. A second finger cancels
+the captured native edit before starting the bubble's move or resize.
+On Mac, a primary down forwarded to AppKit keeps its matching release when a
+tear-out takes capture. Directly captured contacts retain their release ownership
+through cancellation. Native buttons suppress activation after a card drag;
+the mounted fixture checks both the next ordinary click and dragging its footer.
+
+The color ring uses `ColorWheelDrawing`, native swatches and the shared color
+viewing transform, with the Color panel's separate SDR and HDR presentation.
+Wheel fields and hue guides are prepared on the image worker.
+Brush dabs use the same SDR or HDR color presentation and retain their decoded
+image across metadata-only replies; pending
+readback keeps the frame clock awake, and a ready unchanged dab stops polling.
+The Layers card uses the drawer's `LayerInspector`, layer rows, Properties and
+thumbnail cache. The footer uses shared width thresholds and moves hidden
+commands into More. Each mounted list and folded face keeps its own thumbnail
+demand. Glass registrations carry circular or squircle regions, arc bands and
+strength in logical editor points; the native renderer applies display scale.
+The card and folded count observe placement directly, so their glass follows
+stroke fading and homing even when their retained content stays unchanged.
+Menu replies retain drawing, source and request ownership. Shared headings and
+keep-open choices survive native menu projection.
+
+Labels use the app's native system font at the shared size, matching its other
+native controls. Font rasterization and window chrome differ from GTK and Web.
+Visual checks match authored state, camera, geometry and colors while retaining
+the unaltered full-window image differences.
+
+`tests/tool-bubbles.swift` mounts the production editor and Metal canvas for both
+Apple policies and themes. `EditorLaunchTests/testToolBubbles` and
+`testToolBubblesDark` exercise the full applications. Run them separately for
+macOS and iPadOS. Supplied touch or tablet records do not establish physical
+Pencil behavior. Use [Apple performance](../../apps/layer-apple/PERFORMANCE.md)
+and the [measurement rules](../performance/measuring.md) for motion qualification.
+
+Language publications can contain the first ready workspace view. Their readiness
+transition uses the ordinary workspace handler, preserving native form drafts.
+`tests/workspace-coordinator.swift` checks that recovery starts once in this order.
 
 ## Tests
 

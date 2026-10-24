@@ -597,6 +597,11 @@ checks the asynchronous packet boundary.
 These fail on `main` independently of your change. Don't chase them unless they
 are your task, and remove an entry when you fix it.
 
+- Metal on the M2 Pro Mac mini, reproduced on unmodified `17a4da321`:
+  `dehaze_constant_area_means_keep_exact_airlight_coordinate_ties` reads
+  `0.24999997` against `0.25`; `painterly_blends_high_contrast_hdr_without_a_variance_ceiling`
+  reports HDR scale mismatch `0.9917051793309497` at pixel `8272`.
+  Keep both assertions and their pixel bounds.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `saved_artwork_render_contracts` reports
   `domain_warp/F32` maximum drift 0.000232696533203125 against 0.0002.

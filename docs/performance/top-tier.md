@@ -137,6 +137,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel or column resize | 120 | **Web diagnostic:** Navigator column 30.00–30.64 Chrome surface presents/s; p99 50.00–58.34 ms. Tier qualification remains unset | [Web Navigator layout](#web-navigator-layout), 2026-10-19; [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; the WARP VM cannot qualify presentation timing | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
+| Apple tool bubble drag through four neighbours | 120 | **Unqualified.** M4 iPad input and presentation timing remain unmeasured; the M2 Pro Mac canvas diagnostic cannot qualify the whole native overlay | [Apple native measurements](#apple-native-measurements), 2026-10-24 |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
@@ -3247,6 +3248,47 @@ coverage and collector limitations with each result. Use the
 frames and renderer submissions; a shared geometry poll is not a native frame.
 Synthetic documents and renderer-only rates do not qualify the reference tier
 or physical input latency.
+
+The 2026-10-24 Apple bubble diagnostic uses a Release build on the non-reference
+M2 Pro Mac at 90 Hz, the prescribed 9504 × 6336 photo at Fit, an empty selected
+paint layer above it and default glass. The native editor is 1200 × 870 points
+at 2× scale. Five owners comprise three eligible tool faces, folded Layers and
+Color; this differs from the Android five-owner mix and is not a direct host
+comparison. `tests/tool-bubble-motion.swift` primes a six-second native mouse
+drag, then measures three six-second contacts through four neighbours. Every
+owner must move more than eight points. Workspace Undo and settling happen
+outside timing. Timestamped native owner poses define the first and last
+observed movement; windows exclude pickup delay and 100 ms at either moving
+edge. Unpresented drawables and uncovered boundaries remain explicit failures.
+
+Compiled inputs are based on `be77c6cc8` plus the Apple port, digest
+`a4517f57063e556f3c9b68dab67b27a3b4e427cbad983c1c66fd5982605d936f`.
+Executable SHA-256 is
+`8e5c280eba0a2f68ea2d2c26d9e569e3f8a212038913b9685e5029fabd0650cb`.
+
+| Theme | Canvas presents/s, three moving windows | Presentation interval p99, ms |
+| --- | --- | --- |
+| Light | 89.905 / 90.081 / 89.866 | 11.111292 |
+| Dark | 89.918 / 90.062 / 89.873 | 11.111292 |
+
+All six windows have covered boundaries, unique positive presentation timestamps
+and no missing callbacks or recorder drops. The maximum interval is 22.222417 ms,
+including missed refresh intervals. The observed moving windows last 5.584–5.597 s;
+all five owners move and their sampled pose-change gaps remain below 20.1 ms.
+All 91 thermal samples per theme are nominal, covering startup through the end
+of each 90-second trace.
+
+Pooled CPU owner-service p99 is 2.958 ms light and 2.782 ms dark. This is wall time
+inside the frame's owner-queue block, excluding its earlier queue wait and later
+presentation callback. GPU queue-span p99 is 2.447 ms light and 2.592 ms dark;
+it includes gaps between submissions and is not isolated GPU busy time. These
+overlapping measures cannot be added. Per-window and pooled attribution remain
+separate in `motion-capability-pose-final-summary.json`.
+
+`CAMetalLayer` presented timestamps establish canvas presentation only; native
+overlay presentation and reference-iPad input/timing remain unqualified.
+Raw traces, motion windows, placement witnesses, captures and source hashes are
+under `artifacts/apple/tool-bubbles/`.
 
 On 2026-10-18, a Release offscreen comparison on the M2 Pro Mac mini checked
 the partial-opacity material correction against the previous contact-feature

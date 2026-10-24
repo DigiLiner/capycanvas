@@ -930,7 +930,7 @@ pub struct WgpuRasterizer {
     selection_paint_damage: PixelRect,
     regions: Option<region_requests::RegionRequests>,
     unclipped: wgpu::Buffer,
-    scene: Option<scene::Scene>,
+    scene: Option<Box<scene::Scene>>,
     source_tiles: std::cell::RefCell<scene::sources::DecodedTiles>,
     moving_images: object_image_mips::MovingImages,
     moving_projection: Option<MovingProjection>,
@@ -3979,9 +3979,9 @@ impl WgpuRasterizer {
             // Reject unsupported global dependencies before clearing/restoring
             // paint, allocating the composite, or submitting any part of a frame.
             let resident = self.scale_display.as_ref().map_or(0, |c| c.resident_bytes());
-            let admitted = scene::Scene::window_plan(packet.scene, packet.document_extent, native.image_pixel_budget(resident), self.device.limits().max_texture_dimension_2d,self.scene.as_ref());
+            let admitted = scene::Scene::window_plan(packet.scene, packet.document_extent, native.image_pixel_budget(resident), self.device.limits().max_texture_dimension_2d,self.scene.as_deref());
             if resident > 0 && admitted.is_err() {
-                scene::Scene::window_plan(packet.scene, packet.document_extent, native.image_pixel_budget(0), self.device.limits().max_texture_dimension_2d,self.scene.as_ref())?;
+                scene::Scene::window_plan(packet.scene, packet.document_extent, native.image_pixel_budget(0), self.device.limits().max_texture_dimension_2d,self.scene.as_deref())?;
                 self.scale_display = None;
             } else { admitted?; }
         }

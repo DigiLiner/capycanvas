@@ -93,6 +93,7 @@ struct GradientEditor: View {
                 if owner != next { cancel(); selected = 0; owner = next }
             }
             .onDisappear(perform: cancel)
+            .modifier(BubbleNativeControl(cancel: cancel))
     }
     private func action(_ icon: String, _ label: String, _ name: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
         IconTile(icon: icon, label: label, enabled: enabled, action: run).frame(width: store.panelMetrics.height, height: store.panelMetrics.height)

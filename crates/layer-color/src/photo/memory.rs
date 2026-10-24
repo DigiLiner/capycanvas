@@ -41,7 +41,7 @@ fn available_memory() -> Option<u64> {
     None
 }
 
-#[cfg(all(not(target_arch = "wasm32"), target_os = "ios"))]
+#[cfg(all(not(target_arch = "wasm32"), target_os = "ios", not(target_env = "sim")))]
 fn available_memory() -> Option<u64> {
     unsafe extern "C" {
         fn os_proc_available_memory() -> usize;
@@ -50,7 +50,7 @@ fn available_memory() -> Option<u64> {
     Some(unsafe { os_proc_available_memory() } as u64)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
 fn available_memory() -> Option<u64> {
     let mut system = sysinfo::System::new();
     system.refresh_memory();
@@ -61,9 +61,9 @@ fn available_memory() -> Option<u64> {
     // pages from free/inactive pages, even though they are already excluded.
     // Use its total/used readings to count compression once. Do not invent a
     // minimum: true exhaustion must still produce a zero admission budget.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim")))]
     let headroom = system.total_memory().saturating_sub(system.used_memory());
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", all(target_os = "ios", target_env = "sim"))))]
     let headroom = system.available_memory();
     let available = process_allowance(
         headroom,
@@ -78,7 +78,7 @@ fn available_memory() -> Option<u64> {
     Some(available)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+#[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
 fn process_allowance(available: u64, total: u64, cgroup: Option<(u64, u64)>) -> u64 {
     match cgroup {
         Some((limit, free)) if limit < total => available.min(free),
@@ -90,7 +90,7 @@ fn process_allowance(available: u64, total: u64, cgroup: Option<(u64, u64)>) -> 
 mod tests {
     use super::*;
     #[test]
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))]
+    #[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
     fn unlimited_cgroup_does_not_discard_reclaimable_headroom() {
         assert_eq!(process_allowance(3000, 12000, Some((12000, 1800))), 3000);
         assert_eq!(process_allowance(3000, 12000, Some((4000, 1800))), 1800);

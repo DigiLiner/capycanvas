@@ -65,8 +65,16 @@ final class CanvasView: UIView {
         let pointer = UIPointerInteraction(delegate: self)
         addInteraction(pointer)
         addInteraction(UIPencilInteraction(delegate: self))
-        store.cursorChanged = { [weak pointer] in pointer?.invalidate() }
         installIndirectGestures()
+        updateAccessibility()
+        frames.canPresent = { [weak self] in self?.sceneActive == true && self?.window != nil }
+        frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
+        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+    }
+    private func connectStore() {
+        store.cursorChanged = { [weak self] in self?.interactions.compactMap { $0 as? UIPointerInteraction }.first?.invalidate() }
         store.bootstrapChanged = { [weak self] in self?.updateAccessibility() }
         updateAccessibility()
         store.wake = { [weak self] in self?.wake() }
@@ -77,11 +85,6 @@ final class CanvasView: UIView {
             self.becomeFirstResponder()
         }
         store.interruptInput = { [weak self] in self?.interruptContacts() }
-        frames.canPresent = { [weak self] in self?.sceneActive == true && self?.window != nil }
-        frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
-        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
-        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
-            name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override var canBecomeFirstResponder: Bool { true }
@@ -95,6 +98,7 @@ final class CanvasView: UIView {
         if window == nil { cancelPickerHold() }
         if let window {
             store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) })
+            connectStore()
             shaderActivity.activity = { [weak store] in store?.native?.shaderInput() }
             window.addGestureRecognizer(shaderActivity)
             measureWorkspaceBottom()
@@ -210,7 +214,7 @@ final class CanvasView: UIView {
     func stop() {
         frames.deactivate()
         endKeyRepeat()
-        store.input(["type": "blur"])
+        if attached { store.input(["type": "blur"]) }
         displayLink?.invalidate(); displayLink = nil
         if attached { store.native?.detach(); attached = false }
         contacts.removeAll(); ignoredContacts.removeAll()

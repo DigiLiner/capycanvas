@@ -31,6 +31,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
     private var link: CADisplayLink?
     private var lastTrack: CFTimeInterval?
     private var observer: NSObjectProtocol?
+    private var bubbles: BubbleRecognizer?
     override init(frame: CGRect) {
         super.init(frame: frame); isUserInteractionEnabled = false
         pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
@@ -57,6 +58,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
         guard window !== attached else { return }
         detach(); attached = window
         attached?.addGestureRecognizer(pan); attached?.addGestureRecognizer(press); attached?.addGestureRecognizer(secondary)
+        attachBubbles()
         updateViewport()
     }
     override func layoutSubviews() { super.layoutSubviews(); validate() }
@@ -64,12 +66,18 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
         guard attached != nil else { return }
         cancel(detaching: true); attached?.removeGestureRecognizer(pan); attached?.removeGestureRecognizer(press)
         attached?.removeGestureRecognizer(secondary); attached = nil
+        if let bubbles { bubbles.view?.removeGestureRecognizer(bubbles); self.bubbles = nil }
     }
-    func validate() { updateViewport() }
-    private func cancel(detaching: Bool = false) {
+    func validate() { updateViewport(); attachBubbles() }
+    private func attachBubbles() {
+        guard bubbles == nil, model?.bubbleInput != nil, let window else { return }
+        let bubbles = BubbleRecognizer(marker: self); self.bubbles = bubbles; window.addGestureRecognizer(bubbles)
+    }
+    private func cancel(detaching: Bool = false, all: Bool = true) {
         guard !cancelling else { return }; cancelling = true
         defer { cancelling = false }
-        if detaching { model?.nativeInputDetached() } else { model?.cancel() }
+        if detaching { model?.nativeInputDetached() } else if all { model?.cancel() } else { model?.cancelReorder() }
+        if all { bubbles?.cancel() }
         touch = nil; link?.invalidate(); link = nil
         pan.isEnabled = false; press.isEnabled = false
         pan.isEnabled = true; press.isEnabled = true
@@ -148,7 +156,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
         switch recognizer.state {
         case .began: model?.recognizeHold()
         case .ended: finish()
-        case .cancelled: if model?.swiping != true { cancel() }
+        case .cancelled: if model?.swiping != true { cancel(all: false) }
         default: break
         }
     }
@@ -161,7 +169,7 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
                 let link = CADisplayLink(target: self, selector: #selector(track)); link.add(to: .main, forMode: .common); self.link = link
             }
         case .ended: finish()
-        case .cancelled: cancel()
+        case .cancelled: cancel(all: false)
         default: break
         }
     }

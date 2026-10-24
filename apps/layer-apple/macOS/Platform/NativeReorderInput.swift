@@ -22,6 +22,7 @@ final class ReorderInputView: NSView, NSGestureRecognizerDelegate {
     private var timer: Timer?
     private var lastTrack: TimeInterval?
     private var observers: [NSObjectProtocol] = []
+    private lazy var bubbles = BubbleInputCapture(marker: self)
     override var isFlipped: Bool { true }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override init(frame frameRect: NSRect) {
@@ -54,20 +55,22 @@ final class ReorderInputView: NSView, NSGestureRecognizerDelegate {
         guard next !== attached else { return }
         detach(); attached = next
         for gesture in [pan!, press!, secondary!] { attached?.addGestureRecognizer(gesture) }
+        bubbles.attach()
         updateViewport()
     }
     override func layout() { super.layout(); attach(); updateViewport() }
     func detach() {
         guard attached != nil else { return }
-        cancel(detaching: true); for gesture in [pan!, press!, secondary!] { attached?.removeGestureRecognizer(gesture) }; attached = nil
+        bubbles.detach(); cancel(detaching: true); for gesture in [pan!, press!, secondary!] { attached?.removeGestureRecognizer(gesture) }; attached = nil
     }
     func validate() {
         attach(); updateViewport()
+        bubbles.attach()
     }
-    private func cancel(detaching: Bool = false) {
+    private func cancel(detaching: Bool = false, all: Bool = true) {
         guard !cancelling else { return }; cancelling = true
         defer { cancelling = false }
-        if detaching { model?.nativeInputDetached() } else { model?.cancel() }
+        if detaching { model?.nativeInputDetached() } else if all { model?.cancel() } else { model?.cancelReorder() }
         timer?.invalidate(); timer = nil; downEvent = nil
         pan.isEnabled = false; press.isEnabled = false; pan.isEnabled = true; press.isEnabled = true
     }
@@ -133,7 +136,7 @@ final class ReorderInputView: NSView, NSGestureRecognizerDelegate {
         switch recognizer.state {
         case .began: model?.recognizeHold()
         case .ended: finish()
-        case .cancelled: if model?.swiping != true { cancel() }
+        case .cancelled: if model?.swiping != true { cancel(all: false) }
         default: break
         }
     }
@@ -147,7 +150,7 @@ final class ReorderInputView: NSView, NSGestureRecognizerDelegate {
                 RunLoop.main.add(timer, forMode: .common); self.timer = timer
             }
         case .ended: finish()
-        case .cancelled: cancel()
+        case .cancelled: cancel(all: false)
         default: break
         }
     }

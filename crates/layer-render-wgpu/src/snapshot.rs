@@ -640,7 +640,7 @@ impl SnapshotRenderer {
         } else { 0 };
         let cold = !matches!(self.scope, SceneScope::Raw(_));
         let mut planned = scene::Scene::capture_plan_bound(&self.renderer, view, region)
-            .saturating_add(scene::Scene::geometry_bytes(self.renderer.scene.as_ref()))
+            .saturating_add(scene::Scene::geometry_bytes(self.renderer.scene.as_deref()))
             .saturating_add(reserved_bytes)
             .saturating_add(self.renderer.analysis_bytes())
             .saturating_add(region.area().saturating_mul(32)) // output and mapping

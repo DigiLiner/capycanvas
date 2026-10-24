@@ -10,7 +10,7 @@ import UIKit
 /// rounds each natural Text allocation up to a pixel, accumulating visible drift
 /// across a menu row. The text still uses the ordinary native system font.
 @MainActor enum EditorTextMetrics {
-    enum Weight { case bold, medium, regular }
+    enum Weight { case bold, semibold, medium, regular }
     private struct Key: Hashable { let text: String; let size: Double; let weight: Weight; let monospacedDigits: Bool }
     private struct FontKey: Hashable { let size: Double; let weight: Weight; let monospacedDigits: Bool }
     private static var widths: [Key: CGFloat] = [:]
@@ -20,11 +20,11 @@ import UIKit
         let key = FontKey(size: size, weight: weight, monospacedDigits: monospacedDigits)
         if let font = fonts[key] { return font }
         #if canImport(AppKit)
-        let nativeWeight: NSFont.Weight = weight == .bold ? .bold : weight == .medium ? .medium : .regular
+        let nativeWeight: NSFont.Weight = weight == .bold ? .bold : weight == .semibold ? .semibold : weight == .medium ? .medium : .regular
         let base = monospacedDigits ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: nativeWeight)
             : NSFont.systemFont(ofSize: size, weight: nativeWeight)
         #else
-        let nativeWeight: UIFont.Weight = weight == .bold ? .bold : weight == .medium ? .medium : .regular
+        let nativeWeight: UIFont.Weight = weight == .bold ? .bold : weight == .semibold ? .semibold : weight == .medium ? .medium : .regular
         let base = monospacedDigits ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: nativeWeight)
             : UIFont.systemFont(ofSize: size, weight: nativeWeight)
         #endif

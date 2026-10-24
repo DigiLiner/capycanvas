@@ -16,6 +16,8 @@ import SwiftUI
     init(workspace: WorkspacePresentation, store: EditorStore?) {
         self.workspace = workspace; self.store = store
     }
+    var bubbleInput: BubbleInteraction? { store?.bubbles.input }
+    func relinquishToBubble() { contact.transfer(); closeMenu(); workspace?.refreshChrome() }
     var enabled: Bool {
         guard let store else { return false }
         return store.failure == nil && store.workspaces?.presented != true
@@ -87,7 +89,8 @@ import SwiftUI
         if !menu.isNull { menu = JSON() }
     }
     func recognizeHold() { contact.recognizeHold(); workspace?.refreshChrome() }
-    func cancel() { contact.cancel(); closeMenu(); workspace?.refreshChrome() }
+    func cancelReorder() { contact.cancel(); closeMenu(); workspace?.refreshChrome() }
+    func cancel() { cancelReorder(); bubbleInput?.cancel() }
 }
 
 struct WorkspaceContactMenu: View {

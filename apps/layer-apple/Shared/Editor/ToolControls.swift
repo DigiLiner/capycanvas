@@ -30,7 +30,7 @@ struct ToolSetControls: View {
             let command = item["action"]["type"].string == "invoke"
                 ? store.command(item["action"]["command"].string) : JSON()
             let enabled = item["enabled"].bool && (command.isNull || command["enabled"].bool)
-            Button { store.dispatch(item["action"]) } label: {
+            Button { if !store.bubbles.input.consumeClick() { store.dispatch(item["action"]) } } label: {
                 Group {
                     if group && sets {
                         HStack(spacing: 8) {
@@ -64,6 +64,7 @@ struct ToolSetControls: View {
                     .frame(maxWidth: .infinity, minHeight: group ? nil : item["preview"].isNull ? (store.tonalActive ? 36 : 44) : 64)
                     .contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(selected: item["selected"].bool))
+                .modifier(BubbleChoiceSource(action: item["action"]))
                 .disabled(!enabled).opacity(enabled ? 1 : 0.36)
                 .modifier(ActionHelp(store: store, label: item["label"].string, action: item["action"], tooltip: command["tooltip"].string))
                 .accessibilityLabel(item["label"].string)

@@ -34,7 +34,7 @@ impl Thumbnails {
             .map(|p| p.records.size() + 16 + texture_bytes(&p.result.texture)
                 + p.generated.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()).sum::<u64>()
             + gpu.reduced.iter().map(|layer| layer.image.iter().map(|(texture, _)| texture_bytes(texture)).sum::<u64>()).sum::<u64>()
-            + gpu.generators.as_ref().map_or(0, scene::Scene::scratch_bytes) + gpu.capture.storage_bytes());
+            + gpu.generators.as_deref().map_or(0, scene::Scene::scratch_bytes) + gpu.capture.storage_bytes());
         paint + self.sources.as_ref().map_or(0, |s| s.storage_bytes())
     }
 }
@@ -311,7 +311,7 @@ struct PreviewPipeline {
     reduce: Deferred<wgpu::ComputePipeline>,
     reduced: std::collections::VecDeque<ReducedLayer>,
     capture: artwork::Capture,
-    generators: Option<scene::Scene>,
+    generators: Option<Box<scene::Scene>>,
 }
 struct ReducedLayer {
     id: SourceTarget,

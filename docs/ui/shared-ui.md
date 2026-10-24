@@ -344,7 +344,9 @@ brush/color feedback continue updating during the contact. Unsupported platform
 commands and a closed document still disable immediately. `UiSession::command`
 and dispatch use live availability, including the temporary canvas lock, so a
 shortcut or second contact cannot execute an unsafe action during a stroke.
-Menus requested during a stroke also use live availability.
+Menus requested during a stroke also use live availability. The retained Layers
+footer follows the published commands and refreshes with them, including when a
+temporary workspace lock ends without a document edit.
 
 Each command also publishes `disabled_reason`: the text
 `command_disabled_reason` returns, or null while the command is enabled. The key

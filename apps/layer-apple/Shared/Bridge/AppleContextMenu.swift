@@ -11,6 +11,8 @@ import Foundation
         let marker: Bool
         let identifier: String
         let enabled: Bool
+        let isHeading: Bool
+        let keepOpen: Bool
         let selected: Bool?
         let hint: String
         let bindings: [JSON]
@@ -29,7 +31,7 @@ import Foundation
             value.array.map { section in
                 section.array.map { item in
                     let payload = item["action"], request = item["command"]
-                    let enabled = parentEnabled && item["enabled"].bool
+                    let enabled = parentEnabled && item["enabled"].bool && !item["is_heading"].bool
                     let identifier = !item["identifier"].isNull ? item["identifier"].string
                         : !request.isNull ? (["palette-command", request["command"].string, request["format"].string, request["action"]["op"].string]
                             .filter { !$0.isEmpty }.joined(separator: "-"))
@@ -37,7 +39,7 @@ import Foundation
                     let action: (() -> Void)? = !request.isNull && command != nil ? { if enabled { command?(request) } }
                         : payload.isNull ? nil : { if enabled { invoke(payload) } }
                     return Item(label: item["label"].string, icon: item["icon"].string, marker: item["has_variants"].bool,
-                        identifier: identifier, enabled: enabled,
+                        identifier: identifier, enabled: enabled, isHeading: item["is_heading"].bool, keepOpen: item["keep_open"].bool,
                         selected: item["selected"].isNull ? nil : item["selected"].bool,
                         hint: item["hint"].string, bindings: item["bindings"].array,
                         sections: decodeSections(item["sections"], parentEnabled: enabled),

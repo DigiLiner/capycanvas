@@ -17,6 +17,7 @@ import QuartzCore
     init(store: EditorStore) { self.store = store }
     func activate() { surfaceGeneration &+= 1; resetSubmission(); active = true; wake() }
     func deactivate() {
+        guard active else { return }
         active = false; generation &+= 1; surfaceGeneration &+= 1
         resetSubmission(); pause(true)
     }
@@ -47,6 +48,7 @@ import QuartzCore
         native.observeTick(now: now, target: targetTime, admitted: denial == 0, denial: denial)
         guard denial == 0 else { return }
         pending = true
+        store?.bubbles.tick(CACurrentMediaTime())
         let submittedGeneration = generation
         let submittedSurface = surfaceGeneration
         native.frame(now: now, target: targetTime) { [weak self] again, revision, costs in
@@ -63,7 +65,7 @@ import QuartzCore
                 }
                 // A resize/input/wake during the queued frame must survive its
                 // idle reply, including a surface detached and attached again.
-                self.pause(!again && self.generation == submittedGeneration)
+                self.pause(!again && self.store?.bubbles.needsFrame != true && self.generation == submittedGeneration)
             }
         }
     }

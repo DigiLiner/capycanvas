@@ -6029,7 +6029,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 changed = true;
             }
         }
-        if changed { self.update_slot_drawer(); }
+        if changed {
+            self.state.layer_tools.footer = self.layer_footer();
+            self.update_slot_drawer();
+        }
         changed
     }
     fn refresh_shortcuts(&mut self, bindings_changed: bool) {
@@ -18070,6 +18073,31 @@ mod tests {
         invoke(&mut app, CommandId::DeleteLayer);
         assert_eq!(app.state.layers.len(), 2);
         assert!(app.state.layers.iter().any(|l| l.selected && l.id == 2));
+    }
+    #[test]
+    fn layer_footer_follows_retained_command_availability() {
+        for platform in Platform::ALL {
+            let mut app = session(platform);
+            let enabled = |app: &UiSession<Recorder>| app.state.layer_tools.footer.iter()
+                .find(|slot| slot.button == LayerFooterButton::NewLayer).unwrap().item.enabled;
+            assert!(enabled(&app));
+            app.set_workspace_read_only(true);
+            assert!(!enabled(&app), "{platform:?}: a locked workspace disables the footer");
+            app.set_workspace_read_only(false);
+            assert!(enabled(&app), "{platform:?}: unlocking restores the footer");
+            let command_buttons = |app: &UiSession<Recorder>| app.state.layer_tools.footer.iter()
+                .filter(|slot| matches!(slot.button, LayerFooterButton::NewLayer | LayerFooterButton::NewVectorLayer
+                    | LayerFooterButton::NewGroup | LayerFooterButton::NewSelectionLayer | LayerFooterButton::ImportImage))
+                .map(|slot| (slot.button, slot.item.enabled)).collect::<Vec<_>>();
+            let footer = command_buttons(&app);
+            app.pen(event(&app, 1, PenPhase::Down, 0.5));
+            assert!(!app.command(CommandId::AddLayer).enabled);
+            app.refresh_layer_presentation();
+            assert_eq!(command_buttons(&app), footer, "{platform:?}: canvas locks preserve retained command styling");
+            app.pen(event(&app, 2, PenPhase::Cancel, 0.));
+            app.frame(20_000_000, 28_000_000).unwrap();
+            assert!(enabled(&app));
+        }
     }
     #[test]
     fn pen_uses_camera_and_pressure_without_ui_updates_per_move() {

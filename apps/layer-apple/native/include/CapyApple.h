@@ -107,7 +107,7 @@ int32_t capy_project_compare(const CapyProjectTask *task); /* worker after candi
 char *capy_profile_library(const char *request_json, const uint8_t *bytes, size_t count); /* worker; bounded ICC, owned JSON */
 char *capy_export_draft(const char *recipe_json, const char *action_json); /* worker; owned shared draft JSON */
 char *capy_palette_file(const char *request_json, const uint8_t *bytes, size_t count, int32_t output_fd); /* worker; owned metadata JSON, export bytes to output_fd */
-int32_t capy_apple_glass_regions(CapyApple *app, const char *json); /* owner; logical regions [x,y,w,h,tl,tr,br,bl,1] and DrawerConnection records */
+int32_t capy_apple_glass_regions(CapyApple *app, const char *json); /* owner; logical regions [x,y,w,h,tl,tr,br,bl,shape,strength], arcs [cx,cy,radius,band,start,sweep,strength], connections */
 uint8_t *capy_apple_stroke_recording_data(CapyApple *app, size_t *length); /* owner; raw capture copy or NULL with error */
 void capy_bytes_free(uint8_t *bytes, size_t length);
 char *capy_stroke_recording_write(const uint8_t *bytes, size_t count, int32_t output_fd); /* worker; NULL or owned error JSON */
@@ -139,6 +139,7 @@ char *capy_apple_numeric_labels(const char *json);
    samples. Owned JSON result; same error and lifetime rules as numeric. */
 char *capy_apple_color_ui(const char *json);
 char *capy_apple_toolbar_ui(const char *json);
+char *capy_apple_bubble_ui(const char *json);
 char *capy_apple_drawer_frame(const char *json);
 /* Stateless shared wheel hit test in local logical coordinates. Shape: 0 circle,
    1 square, 2 triangle. Result: 0 miss/invalid, 1 hue ring, 2 field. */

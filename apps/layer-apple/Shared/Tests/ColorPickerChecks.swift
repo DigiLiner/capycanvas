@@ -51,9 +51,25 @@ extension XCTestCase {
     }
 
     @MainActor func checkColorPicker(in app: XCUIApplication, theme: String = "light") {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"new_document"}]"#
         app.launchEnvironment["CAPY_COLOR_PROBE"] = "1"
-        app.launch(); capturePaintEditor(in: app)
+        app.launch()
+        XCTAssertTrue(app.buttons["new-drawing-create"].waitForExistence(timeout: 60))
+        workspaceActivate(app.buttons["new-drawing-paper-color"])
+        editColorValue("hex", "#FFFFFF", in: app)
+        workspaceActivate(app.buttons["new-drawing-color-use"])
+        expectNewDrawingValue("new-drawing-paper-color", "White", in: app)
+        workspaceActivate(app.buttons["new-drawing-texture"])
+        workspaceActivate(app.buttons["new-drawing-paper-tile-2"])
+        enterNewDrawingNumber("paper-relief", "0", in: app)
+        workspaceActivate(app.buttons["new-drawing-paper-use"])
+        createNewDrawing(width: "2400", height: "1800", depth: 0, in: app)
+        capturePaintEditor(in: app)
+        workspaceActivate(app.buttons["paint-edit-color"].firstMatch)
+        XCTAssertTrue(app.buttons["color-use"].waitForExistence(timeout: 10))
+        editColorValue("hex", "#3373CC", in: app)
+        workspaceActivate(app.buttons["color-use"])
+        XCTAssertTrue(app.buttons["color-use"].waitForNonExistence(timeout: 10))
         func expectSelected(_ element: XCUIElement, _ selected: Bool) {
             expectation(for: NSPredicate(format: "selected == %@", NSNumber(value: selected)), evaluatedWith: element)
             waitForExpectations(timeout: 10)
@@ -81,7 +97,12 @@ extension XCTestCase {
         canvas.hover()
         attachEditor(in: app, name: "picker-loupe-\(theme)")
         expectColor([0.2, 0.45, 0.8, 1])
-        app.descendants(matching: .any)["color-panel-controls"].firstMatch.hover()
+        let viewport = workspaceViewport(in: app)
+        let controls = app.descendants(matching: .any)["color-panel-controls"].firstMatch
+        let visible = controls.frame.intersection(viewport.frame)
+        guard visible.width > 0, visible.height > 0 else { XCTFail("Color controls must have a visible point inside the editor window"); return }
+        viewport.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: visible.midX - viewport.frame.minX, dy: visible.midY - viewport.frame.minY)).hover()
         XCTAssertTrue(eyedropper.isSelected, "Leaving the canvas keeps picking")
         canvas.click()
         expectSelected(eyedropper, false)

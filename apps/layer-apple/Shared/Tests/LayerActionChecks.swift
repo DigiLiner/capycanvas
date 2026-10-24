@@ -8,8 +8,19 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
         waitForExpectations(timeout: 30)
         workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "header-tool-panel", "Layers panel")).firstMatch)
-        let footer = app.buttons["layer-properties-disclosure"], label = app.staticTexts["layer-properties-disclosure-label"]
+        let footer = app.buttons["layer-properties-disclosure"]
         XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        func activateFooter() {
+            #if os(macOS)
+            XCTAssertTrue(footer.waitForExistence(timeout: 10))
+            let viewport = workspaceViewport(in: app), visible = footer.frame.intersection(viewport.frame)
+            guard visible.width > 0, visible.height > 0 else { XCTFail("The drawer footer must have an interior point inside the editor window"); return }
+            viewport.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: visible.midX - viewport.frame.minX, dy: visible.midY - viewport.frame.minY)).click()
+            #else
+            workspaceActivate(footer)
+            #endif
+        }
         let drawer = app.descendants(matching: .any)["tool-drawer"].firstMatch
         func settle() {
             var measuredHeight: CGFloat = 0, stableSince = Date()
@@ -41,7 +52,11 @@ extension XCTestCase {
         let first = app.descendants(matching: .any)[rows.firstMatch.identifier].firstMatch
         let firstY = first.frame.minY
         #if os(macOS)
-        list.scroll(byDeltaX: 0, deltaY: -160)
+        let viewport = workspaceViewport(in: app), scrollRegion = list.frame.intersection(viewport.frame)
+        guard scrollRegion.width > 0, scrollRegion.height > 0 else { XCTFail("The layer list must have a visible point inside the editor window"); return }
+        viewport.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: scrollRegion.midX - viewport.frame.minX, dy: scrollRegion.midY - viewport.frame.minY))
+            .scroll(byDeltaX: 0, deltaY: -160)
         #else
         list.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.8)).press(forDuration: 0.05,
             thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)),
@@ -53,17 +68,17 @@ extension XCTestCase {
         XCTAssertNotNil(visible, "The scrolled layer list must expose a visible row")
         let anchor = app.descendants(matching: .any)[visible!.identifier].firstMatch
         let scrolledY = anchor.frame.minY
-        workspaceActivate(footer)
+        activateFooter()
         expectation(for: NSPredicate { _, _ in footer.label == "All layers" && abs(drawer.frame.height - floor) <= 2 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
         attachEditor(in: app, name: "layer-properties-\(theme)")
-        workspaceActivate(footer)
+        activateFooter()
         expectation(for: NSPredicate { _, _ in footer.label == "Layer properties" && abs(drawer.frame.height - grown) <= 2 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(anchor.waitForExistence(timeout: 5))
         XCTAssertEqual(anchor.frame.minY, scrolledY, accuracy: 2, "Switching drawer pages retains the layer list scroll position")
         workspaceActivate(drawer.buttons.matching(NSPredicate(format: "label == %@", "New group")).firstMatch)
-        expectation(for: NSPredicate(format: "label == %@", "Group properties"), evaluatedWith: label)
+        expectation(for: NSPredicate(format: "label == %@", "Group properties"), evaluatedWith: footer)
         waitForExpectations(timeout: 5)
         attachEditor(in: app, name: "layer-properties-group-\(theme)")
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)

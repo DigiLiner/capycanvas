@@ -110,6 +110,7 @@ import SwiftUI
         guard next.stableKey != layerSizes.stableKey || layerSizesContext != sizingContext else { return }
         layerSizesContext = sizingContext; layerSizes = next; refresh(current)
     }
+    func toggleLayerProperties() { store?.customize(["type": "toggle_layer_drawer_properties"]) }
     func stop() { latest = nil; task?.cancel(); task = nil }
 }
 

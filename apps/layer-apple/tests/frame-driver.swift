@@ -3,8 +3,14 @@ import Foundation
 
 @MainActor final class EditorStore {
     let native: NativeOwner? = NativeOwner()
+    let bubbles = WorkspaceBubbles()
     var cameraRevision: UInt64 = 0
     var canvasSubmitted = false
+}
+@MainActor final class WorkspaceBubbles {
+    var needsFrame = false
+    var ticks: [TimeInterval] = []
+    func tick(_ now: TimeInterval) { ticks.append(now) }
 }
 @MainActor final class NativeOwner {
     var admissions: [Bool] = []
@@ -33,6 +39,14 @@ import Foundation
         let store = EditorStore(), driver = CanvasFrameDriver(store: EditorStore())
         // A driver must not retain an abandoned editor window.
         driver.activate(); driver.tick(target: 1)
+        do {
+            let store = EditorStore()
+            let probe = CanvasFrameDriver(store: store)
+            store.canvasSubmitted = true
+            probe.deactivate()
+            await drainMainQueue()
+            assert(store.canvasSubmitted, "A never-active probe must not reset another view's submitted canvas")
+        }
 
         let frames = CanvasFrameDriver(store: store)
         var paused = true, submissions = 0
@@ -42,6 +56,7 @@ import Foundation
         frames.tick(target: 1); frames.tick(target: 2)
         assert(store.native!.completions.count == 1, "Only one frame may be queued")
         assert(store.native!.denials.suffix(2) == [0, 2])
+        assert(store.bubbles.ticks.count == 1, "Rejected duplicate ticks must not advance bubble motion")
         frames.wake()
         store.native!.complete()
         await drainMainQueue()
@@ -100,6 +115,25 @@ import Foundation
         do {
             let store = EditorStore(), native = store.native!
             let frames = CanvasFrameDriver(store: store)
+            var paused = true
+            frames.setPaused = { paused = $0 }
+            frames.activate()
+            store.bubbles.needsFrame = true
+            frames.tick(target: 11)
+            native.complete()
+            await drainMainQueue()
+            assert(!paused && store.bubbles.ticks.count == 1,
+                "Active bubble motion must keep the frame clock running after an idle canvas reply")
+            frames.tick(target: 12)
+            store.bubbles.needsFrame = false
+            native.complete()
+            await drainMainQueue()
+            assert(paused && store.bubbles.ticks.count == 2 && native.completions.isEmpty,
+                "Settled bubbles and an idle canvas must stop the frame clock")
+        }
+        do {
+            let store = EditorStore(), native = store.native!
+            let frames = CanvasFrameDriver(store: store)
             var sceneActive = true, paused = true
             frames.canPresent = { sceneActive }
             frames.setPaused = { paused = $0 }
@@ -121,6 +155,6 @@ import Foundation
             assert(paused && store.canvasSubmitted && native.admissions == [true, true],
                 "The resumed idle frame must preserve canvas readiness without free-running")
         }
-        print("Shared frame-driver checks passed: admission, wake, detach, replacement and visibility")
+        print("Shared frame-driver checks passed: admission, wake, detach, replacement, visibility and bubble motion")
     }
 }

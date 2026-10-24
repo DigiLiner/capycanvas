@@ -74,6 +74,7 @@ pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
 
 #[cfg(target_vendor = "apple")]
 fn metal_headroom(recommended: u64, allocated: u64, available: Option<u64>) -> Option<u64> {
+    if recommended == 0 { return None; }
     // Metal's recommendation is a performance threshold, not free memory.
     // iPadOS's process allowance also accounts for the app's termination limit.
     available.map(|bytes| bytes.min(recommended.saturating_sub(allocated)))
@@ -125,9 +126,14 @@ mod tests {
         assert_eq!(metal_headroom(4096, 1024, Some(8192)), Some(3072));
         assert_eq!(metal_headroom(4096, 1024, Some(512)), Some(512));
         assert_eq!(metal_headroom(4096, 8192, Some(8192)), Some(0));
-        assert_eq!(metal_headroom(0, 0, Some(8192)), Some(0));
         assert_eq!(metal_headroom(4096, 0, Some(0)), Some(0));
         assert_eq!(metal_headroom(4096, 0, None), None);
+    }
+    #[test]
+    #[cfg(target_vendor = "apple")]
+    fn unreported_metal_recommendation_is_not_an_exhausted_budget() {
+        assert_eq!(metal_headroom(0, 0, Some(8192)), None);
+        assert_eq!(allowance(metal_headroom(0, 0, Some(8192)), 4, 0), 0);
     }
     #[test]
     fn retaining_a_pyramid_preserves_its_admission_budget() {

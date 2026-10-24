@@ -480,7 +480,7 @@ pub(crate) fn request(r: &WgpuRasterizer, packet: FramePacket<'_>) -> Result<Req
     let plan = view_plan(packet, level, evaluation).ok_or(GpuRasterError::InvalidExtent)?;
     let output_bytes = |p: display_mips::Plan| p.level_bytes(p.level) + p.level_bytes(p.level + 1) + 32;
     let material_pages = if targets(r, packet).any(|(_, id)| mapped_material(r, packet, id)) { Scene::MATERIAL_CACHE_PAGES as u64 } else { 0 };
-    let native_bytes = Scene::geometry_bytes(r.scene.as_ref()) + output_bytes(plan) + exact_strip_bytes(packet.document_extent) + u64::from(PAGE_SIZE).pow(2) * 16 * material_pages
+    let native_bytes = Scene::geometry_bytes(r.scene.as_deref()) + output_bytes(plan) + exact_strip_bytes(packet.document_extent) + u64::from(PAGE_SIZE).pow(2) * 16 * material_pages
         + if plan.bounds == PixelRect::full(plan.extent) { 0 } else { output_bytes(overview_plan(plan)) };
     if plan.size.iter().any(|n| *n > r.device.limits().max_texture_dimension_2d) || native_bytes > CACHE_BYTES {
         return Err(GpuRasterError::ExtentUnsupported);
@@ -651,7 +651,7 @@ fn use_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'
 
 fn allocation_with_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>, mode:(bool,Evaluation)) -> [u64; 2] {
     let (tiled,evaluation)=mode;
-    let scene=scene.or(r.scene.as_ref());
+    let scene=scene.or(r.scene.as_deref());
     let layers = packet.scene;
     let images = if tiled { scratch_images(layers) }
         else { graph::scratch_images(packet, plan.level, r.device.working_space(),scene.map(|s|&s.object_spatial),evaluation.fine_capacity().and(r.transform_preview.as_ref().map(|preview|preview.target))).unwrap_or_else(|_| scratch_images(layers)) };
@@ -926,7 +926,7 @@ impl Cache {
         requested
     }
     pub(crate) fn auxiliary_budget(&self,r:&WgpuRasterizer,packet:FramePacket<'_>)->u64 {
-        let required=allocation_for_mode(r,self.plan,packet,None,self.streamed_sources,r.scene.as_ref(),self.evaluation).into_iter().sum::<u64>();
+        let required=allocation_for_mode(r,self.plan,packet,None,self.streamed_sources,r.scene.as_deref(),self.evaluation).into_iter().sum::<u64>();
         CACHE_BYTES.saturating_sub(required+self.graph.reserved_bytes(input_plan(self.plan,packet.scene,Some(self.graph.objects()))))
             .min(CACHE_BYTES.saturating_sub(self.working_bytes()))
     }

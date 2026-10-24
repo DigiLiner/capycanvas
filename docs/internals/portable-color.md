@@ -35,11 +35,13 @@ The shared policy uses **remaining memory**, not device model or OS categories:
 | Decoder working set | 1/3 |
 | JPEG encoder working set | 1/2 |
 
-Native defaults refresh available memory for each operation. iOS queries
-`os_proc_available_memory`, which reflects the app's allowance. Other native
-targets use `sysinfo` available memory and its reported cgroup limit where
-available. Hosts with additional process limits should supply the smaller
-remaining allowance explicitly. Zero headroom stays zero.
+Native defaults refresh available memory for each operation. Physical iOS queries
+`os_proc_available_memory`, which reflects the app's allowance. Simulator uses
+the Mac host's memory query because it does not report an iOS app allowance.
+Other native targets use `sysinfo` available memory and its reported cgroup limit
+where available. Apple host queries count compressed pages once through total
+minus used memory. Hosts with additional process limits should supply the smaller
+remaining allowance explicitly. Measured zero headroom stays zero.
 Lossless WebP row output takes the budget's `encode_bytes` directly.
 
 Browsers have no reliable cross-browser query for remaining process memory.

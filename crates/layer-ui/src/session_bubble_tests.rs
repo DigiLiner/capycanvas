@@ -483,6 +483,31 @@ fn the_ring_folds_toward_open_space_near_a_corner() {
 }
 
 #[test]
+fn edge_choosers_settle_without_reflowing_against_their_own_motion() {
+    for reduced in [false, true] {
+        for fraction in [[0.05, 0.05], [0.95, 0.05], [0.05, 0.95], [0.95, 0.95], [0.95, 0.2]] {
+            let mut s = desk();
+            let work = s.layout(VIEW).work_area;
+            let at = [work.x + work.width * fraction[0], work.y + work.height * fraction[1]];
+            let id = take_control(&mut s, ToolbarControl::Command { command: CommandId::DrawingBrush }, FAR);
+            s.state.workspace.layout.bubbles.get_mut(id).unwrap().place(at, VIEW);
+            open_ring(&mut s, id);
+            s.reduce_bubble_motion(reduced);
+            for frame in 0..300 {
+                s.step_bubbles(frame * 16_666_667);
+            }
+            let geometry = view(&s, id).chooser;
+            let center = s.bubble_placements()[0].center;
+            for frame in 300..320 {
+                assert!(!s.step_bubbles(frame * 16_666_667), "edge chooser keeps moving at {fraction:?}, reduced={reduced}");
+                assert_eq!(view(&s, id).chooser, geometry, "settled chooser changes its layout");
+                assert_eq!(s.bubble_placements()[0].center, center, "settled chooser changes its center");
+            }
+        }
+    }
+}
+
+#[test]
 fn medium_bubbles_select_their_brushes_and_fan_only_them() {
     let mut s = desk();
     let id = take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }, FAR);

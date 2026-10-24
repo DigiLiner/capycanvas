@@ -155,6 +155,32 @@ establish movement, filtered pixel freshness or a rate target. Readiness loss,
 missing/zero/duplicate presentations and window-edge coverage remain explicit.
 Canvas presentation callbacks do not measure cached native chrome.
 
+`tests/tool-bubble-motion.swift` mounts the production Mac editor on the reference
+photo, primes and undoes one native drag, then supplies three six-second drags
+through four neighbours, including Color and folded Layers. Every owner must move
+by more than eight points; each drag is restored with workspace Undo outside timing.
+Build before timing, so compilation and the GPU test suites are idle during the run:
+
+```sh
+CAPY_CONFIGURATION=Release CAPY_TEST_ASSETS_APP=/path/to/CapyCanvas-Mac.app \
+  CAPY_TEST_BUILD_DIRECTORY="$PWD/artifacts/bubble-motion-build" \
+  bash apps/layer-apple/scripts/test-project-files.sh \
+  apps/layer-apple/tests/tool-bubble-motion.swift
+CAPY_BUBBLE_MOTION_PHOTO=/path/to/sony_a7r_v_29.jpg \
+  CAPY_BUBBLE_MOTION_THEME=light \
+  CAPY_BUBBLE_MOTION_OUTPUT="$PWD/artifacts/bubble-motion" \
+  CAPY_TRACE_DIRECTORY="$PWD/artifacts/bubble-motion" CAPY_TRACE_SECONDS=90 \
+  artifacts/bubble-motion-build/Check.app/Contents/MacOS/Check
+```
+
+The fixture retains native event counts, timestamped owner poses, captures
+and clock windows. Observed movement defines each window, excluding pickup
+delay and 100 ms at either moving edge. Analyze its trace with `--motion-windows`
+and review those witnesses. Canvas callbacks still cannot qualify the whole
+native overlay's
+presentation rate. Physical iPad input and timing require the device journeys;
+the Mac fixture's Apple policy selection does not establish UIKit delivery.
+
 ## Reading the report
 
 - **Canvas updates.** `workload.canvas_update_progress` joins the shared

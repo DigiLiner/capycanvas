@@ -30,10 +30,28 @@ CAPY_SOURCES=()
 while IFS= read -r CAPY_SOURCE; do CAPY_SOURCES+=("$CAPY_SOURCE"); done < <(
   find "$CAPY_APP/Shared" "$CAPY_APP/macOS" "$CAPY_APP/tests/support" -name '*.swift' | grep -Ev '/Tests/|/CapyCanvasMacApp.swift$'
 )
-cargo build --manifest-path "$CAPY_APP/../../Cargo.toml" -p layer-apple-link --target aarch64-apple-darwin
+CAPY_PROFILE=debug
+CAPY_RUST_OPTIONS=(--profile dev)
+CAPY_SWIFT_OPTIONS=(-D DEBUG -whole-module-optimization)
+if [[ "${CAPY_CONFIGURATION:-Debug}" == Release ]]; then
+  CAPY_PROFILE=release
+  CAPY_RUST_OPTIONS=(--release)
+  CAPY_SWIFT_OPTIONS=(-O -whole-module-optimization)
+fi
+cargo build --manifest-path "$CAPY_APP/../../Cargo.toml" -p layer-apple-link --target aarch64-apple-darwin "${CAPY_RUST_OPTIONS[@]}"
 xcrun swiftc -module-name CapyTest -import-objc-header "$CAPY_APP/native/include/CapyApple.h" \
-  "${CAPY_SOURCES[@]}" "${1:-$CAPY_APP/tests/project-files.swift}" \
-  -L "$CAPY_TARGET_DIR/aarch64-apple-darwin/debug" -llayer_apple -lsqlite3 -lc++ \
+  "${CAPY_SWIFT_OPTIONS[@]}" "${CAPY_SOURCES[@]}" "${1:-$CAPY_APP/tests/project-files.swift}" \
+  -L "$CAPY_TARGET_DIR/aarch64-apple-darwin/$CAPY_PROFILE" -llayer_apple -lsqlite3 -lc++ \
   -framework Metal -framework QuartzCore -framework Security -framework AppKit -framework SwiftUI \
   -o "$CAPY_CHECK_EXECUTABLE"
+if [[ -n "${CAPY_TEST_BUILD_DIRECTORY:-}" ]]; then
+  mkdir -p "$CAPY_TEST_BUILD_DIRECTORY"
+  if [[ -n "${CAPY_TEST_ASSETS_APP:-}" ]]; then
+    mkdir -p "$CAPY_TEST_BUILD_DIRECTORY/Check.app"
+    cp -R "$CAPY_CHECK_DIR/Check.app/." "$CAPY_TEST_BUILD_DIRECTORY/Check.app/"
+  else
+    cp "$CAPY_CHECK_EXECUTABLE" "$CAPY_TEST_BUILD_DIRECTORY/check"
+  fi
+  exit 0
+fi
 "$CAPY_CHECK_EXECUTABLE"

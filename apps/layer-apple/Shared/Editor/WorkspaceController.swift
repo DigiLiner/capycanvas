@@ -47,7 +47,11 @@ import SwiftUI
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
     }
-    func receiveLanguage(_ next: JSON) { view = next }
+    func receiveLanguage(_ next: JSON) {
+        let wasReady = ready, revision = view["switcher_revision"].uint
+        view = next
+        readyChanged(wasReady: wasReady, revision: revision)
+    }
     func tick() { send(["type": "tick"]) }
     @discardableResult func send(_ input: [String: Any]) -> Int {
         if input["type"] as? String == "retry" { dismissedError = nil }
@@ -127,11 +131,14 @@ import SwiftUI
             formChoice = next["prompt"]["selected"].string
         }
         focus(next["focus_window"])
-        if next["ready"].bool && !wasReady {
+        readyChanged(wasReady: wasReady, revision: revision)
+    }
+    private func readyChanged(wasReady: Bool, revision: UInt64) {
+        if ready && !wasReady {
             store?.native?.workspaceDidInitialize()
             store?.recovery.observe()
             store?.projectFiles.submitExternalOpen()
-        } else if wasReady && revision != next["switcher_revision"].uint {
+        } else if wasReady && revision != view["switcher_revision"].uint {
             NotificationCenter.default.post(name: Self.preferencesChanged, object: self)
         }
     }

@@ -7,11 +7,13 @@ import CoreGraphics
     var contact: ReorderContact { get }
     var viewport: CGRect { get set }
     var enabled: Bool { get }
+    var bubbleInput: BubbleInteraction? { get }
     func source(at point: CGPoint) -> ReorderTarget?
     func acceptsContext(at point: CGPoint) -> Bool
     func context(at point: CGPoint)
     func recognizeHold()
     func cancel()
+    func cancelReorder()
     func nativeInputDetached()
     var swiping: Bool { get }
     func beginSwipe(at point: CGPoint) -> Bool
@@ -34,6 +36,8 @@ struct ReorderEdgeScroll {
 }
 
 extension NativeReorderModel {
+    var bubbleInput: BubbleInteraction? { nil }
+    func cancelReorder() { cancel() }
     var swiping: Bool { false }
     func beginSwipe(at point: CGPoint) -> Bool { false }
     func moveSwipe(to point: CGPoint) {}
@@ -44,8 +48,9 @@ extension NativeReorderModel {
         // Native recognizers are already detached. SwiftUI can still own its
         // graph exclusively; defer publication and preserve a remounted contact.
         let generation = contact.generation
+        let bubbleGeneration = bubbleInput?.generation
         DispatchQueue.main.async { [self] in
-            if contact.generation == generation { cancel() }
+            if contact.generation == generation && bubbleInput?.generation == bubbleGeneration { cancel() }
         }
     }
 }

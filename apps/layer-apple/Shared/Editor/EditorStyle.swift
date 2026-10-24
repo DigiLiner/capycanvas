@@ -134,7 +134,7 @@ struct IconTile: View {
 
 /// One shared disabled-opacity step is applied by the caller to the whole
 /// control, including its selection. PlainButtonStyle would dim the glyph again.
-struct EditorControlButtonStyle: ButtonStyle {
+struct EditorControlButtonStyle: PrimitiveButtonStyle {
     var selected = false
     var active = false
     var joinedEdge: String?
@@ -143,9 +143,25 @@ struct EditorControlButtonStyle: ButtonStyle {
     var drawerBackground: Color?
     var corner = SquircleShape.Corner.radius(SquircleShape.controlRadius)
     private var shape: SquircleShape { SquircleShape.joined(joinedEdge, corner: corner) }
-    func makeBody(configuration: Configuration) -> some View { Face(configuration: configuration, style: self) }
+    func makeBody(configuration: Configuration) -> some View { Control(configuration: configuration, style: self) }
+    private struct Control: View {
+        let configuration: PrimitiveButtonStyleConfiguration
+        let style: EditorControlButtonStyle
+        @Environment(\.bubbleEdits) private var edits
+        var body: some View {
+            Button(role: configuration.role) {
+                guard edits?.consumeClick() != true else { return }
+                configuration.trigger()
+            } label: { configuration.label }
+                .buttonStyle(VisualStyle(style: style))
+        }
+    }
+    private struct VisualStyle: ButtonStyle {
+        let style: EditorControlButtonStyle
+        func makeBody(configuration: Configuration) -> some View { Face(configuration: configuration, style: style) }
+    }
     private struct Face: View {
-        let configuration: Configuration
+        let configuration: ButtonStyleConfiguration
         let style: EditorControlButtonStyle
         @Environment(\.editorPalette) private var palette
         var body: some View {
@@ -162,7 +178,7 @@ struct EditorControlButtonStyle: ButtonStyle {
                         style.shape.fill(.foreground).opacity(configuration.isPressed ? 0.16 : 0.10)
                     }
                 }
-            }
+            }.modifier(BubbleNativeControl(drags: false))
         }
     }
 }
@@ -253,8 +269,9 @@ struct ToolActionControl: View {
 }
 
 struct PanelCheckStyle: ToggleStyle {
+    @Environment(\.bubbleEdits) private var edits
     func makeBody(configuration: Configuration) -> some View {
-        Button { configuration.isOn.toggle() } label: {
+        Button { if edits?.consumeClick() != true { configuration.isOn.toggle() } } label: {
             HStack(spacing: 4) {
                 ZStack {
                     SquircleShape(4).stroke(.primary.opacity(0.35), lineWidth: 2)
@@ -263,6 +280,7 @@ struct PanelCheckStyle: ToggleStyle {
                 configuration.label.lineLimit(1)
             }.frame(minHeight: 24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(configuration.isOn ? .isSelected : [])
+            .modifier(BubbleNativeControl(drags: false))
     }
 }
 

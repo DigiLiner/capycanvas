@@ -40,6 +40,12 @@ final class MacCanvasView: NSView {
         setAccessibilityIdentifier("canvas")
         setAccessibilityLabel(store.bootstrap["drawing_canvas"].string)
         setAccessibilityValue(store.bootstrap["starting_canvas"].string)
+        updateAccessibility()
+        frames.canPresent = { [weak self] in self?.window?.occlusionState.contains(.visible) == true }
+        frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
+        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
+    }
+    private func connectStore() {
         store.bootstrapChanged = { [weak self] in self?.updateAccessibility() }
         updateAccessibility()
         store.wake = { [weak self] in self?.wake() }
@@ -49,21 +55,19 @@ final class MacCanvasView: NSView {
             guard let self, self.window?.isKeyWindow == true, self.window?.attachedSheet == nil else { return }
             self.window?.makeFirstResponder(self)
         }
-        frames.canPresent = { [weak self] in self?.window?.occlusionState.contains(.visible) == true }
-        frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
-        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
     }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let window { store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) }) }
         documentDelegate.attach(window)
-        store.cursorChanged = { [weak self] in self?.input.applyCursor() }
         for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }
         windowObservers.removeAll()
         if let shaderInputMonitor { NSEvent.removeMonitor(shaderInputMonitor) }
         shaderInputMonitor = nil
         if let window {
+            connectStore()
+            store.cursorChanged = { [weak self] in self?.input.applyCursor() }
             shaderInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp,
                 .rightMouseDown, .otherMouseDown, .mouseMoved, .scrollWheel, .magnify, .rotate, .keyDown, .keyUp, .tabletPoint]) { [weak self, weak window] event in
                 if event.window === window { self?.store.native?.shaderInput() }
@@ -152,7 +156,8 @@ final class MacCanvasView: NSView {
     }
     func stop() {
         documentDelegate.attach(nil)
-        frames.deactivate(); store.input(["type": "blur"])
+        frames.deactivate()
+        if attached { store.input(["type": "blur"]) }
         for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }
         windowObservers.removeAll()
         if let shaderInputMonitor { NSEvent.removeMonitor(shaderInputMonitor) }

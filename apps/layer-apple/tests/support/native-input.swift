@@ -5,6 +5,16 @@ import SwiftUI
 class NativeWorkspaceInputFixture {
     @MainActor static var previousPoint: CGPoint?
     static func note(_ text: String) { FileHandle.standardError.write(Data((text + "\n").utf8)) }
+    @MainActor static func capture(_ window: NSWindow, to destination: URL) async throws {
+        let number = window.windowNumber
+        try await Task.detached(priority: .utility) {
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-o", "-l", String(number), destination.path]
+            try capture.run(); capture.waitUntilExit()
+            try require(capture.terminationStatus == 0, "Capture only the owned fixture window")
+        }.value
+    }
     @MainActor static func drain(_ seconds: Double = 0.08) async throws {
         try await Task.sleep(for: .seconds(seconds))
     }
