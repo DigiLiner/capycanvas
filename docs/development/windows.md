@@ -355,8 +355,10 @@ Run `exercise-layer-pickup.ps1 -Executable <path> -Device mouse -Theme dark`;
 repeat with `-Device pen` and `-Device touch`, each with `-Theme light` too.
 The UIA helper resolves the current `layer-list` for row searches; explicit
 scopes, names, root controls and owned popup searches keep their original scope.
-Row activation after dragging uses a fresh pointer tap. Keep the original visible
-bounds, stability, history and deadline checks.
+Row activation after dragging uses a fresh pointer tap. Pointer targeting uses
+`Control -Arranged` to retain the native peer while checking its live bounds;
+repeated tree searches must not consume the stability deadline. Keep the original
+visible bounds, stability, history and deadline checks.
 The pickup fixture rejects locked body and handle motion without changing layer
 order or adding history: one Undo unlocks the source, and Redo locks it again.
 It also checks that successive native Escape presses close a submenu and its

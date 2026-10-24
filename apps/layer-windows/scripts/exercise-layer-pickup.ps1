@@ -95,19 +95,10 @@ function Reveal([string]$Id) {
 }
 function Point([string]$Id,[switch]$Name) {
     if(!$Name){Reveal $Id}
-    $stable=@{bounds=$null;count=0}
-    Wait-Until {
-        $item=Find $Id -Name:$Name
-        if(!$item -or $item.Current.IsOffscreen){return $false}
-        $bounds=$item.Current.BoundingRectangle
-        if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){return $false}
-        if($bounds -eq $stable.bounds){$stable.count++}else{$stable.bounds=$bounds;$stable.count=0}
-        $stable.count -ge 2
-    } "Source $Id did not arrange visibly"
-    # Use row padding outside child buttons.
+    $bounds=(Control $Id -Name:$Name -Arranged).Current.BoundingRectangle
     $row=$Id -like 'layer-row-*'
-    $x=if($row){$stable.bounds.X+2}else{$stable.bounds.X+$stable.bounds.Width*.5}
-    $y=$stable.bounds.Y+$stable.bounds.Height*.5
+    $x=if($row){$bounds.X+2}else{$bounds.X+$bounds.Width*.5}
+    $y=$bounds.Y+$bounds.Height*.5
     @{x=[int]$x;y=[int]$y}
 }
 function Move-To($At) {[CapyRowPointer]::Move([int]$At.x,[int]$At.y)}
