@@ -18,11 +18,12 @@ function renderedBubblePrimitives(id) {
 }
 
 export function installBubbleInputTrace() {
-  const abort=new AbortController(),types=['pointerdown','pointerup','pointercancel','mousedown','mouseup','click','dblclick'],records=[];
+  const abort=new AbortController(),types=['pointerdown','pointerup','pointercancel','touchstart','touchend','touchcancel','contextmenu','mousedown','mouseup','click','dblclick'],records=[];
   window.bubbleNativeEvents=records;
-  const describe=e=>({type:e.type,device:e.pointerType,id:e.pointerId,detail:e.detail,trusted:e.isTrusted,x:e.clientX,y:e.clientY,target:e.target?.tagName,classes:typeof e.target?.className==='string'?e.target.className:e.target?.className?.baseVal,header:e.target?.closest?.('[data-header-item]')?.dataset.headerItem,prevented:e.defaultPrevented,cancelBubble:e.cancelBubble});
+  const nodes=new WeakMap();let nextNode=1;const nodeId=n=>{if(!nodes.has(n))nodes.set(n,nextNode++);return nodes.get(n);};
+  const describe=e=>({node:nodeId(e.target),time:e.timeStamp,observed:performance.now(),type:e.type,primary:e.isPrimary,touches:e.touches?.length,changedTouches:e.changedTouches?.length,device:e.pointerType,id:e.pointerId,detail:e.detail,trusted:e.isTrusted,x:e.clientX,y:e.clientY,target:e.target?.tagName,classes:typeof e.target?.className==='string'?e.target.className:e.target?.className?.baseVal,header:e.target?.closest?.('[data-header-item]')?.dataset.headerItem,prevented:e.defaultPrevented,cancelBubble:e.cancelBubble});
   const append=value=>{records.push(value);if(records.length>700)records.shift();};
-  for(const type of types)window.addEventListener(type,e=>{const value=describe(e);append(value);setTimeout(()=>{value.afterPrevented=e.defaultPrevented;value.afterCancelBubble=e.cancelBubble;},0);},{capture:true,signal:abort.signal});
+  for(const type of types)window.addEventListener(type,e=>{const value=describe(e);append(value);setTimeout(()=>{value.afterPrevented=e.defaultPrevented;value.afterCancelBubble=e.cancelBubble;value.afterConnected=e.target.isConnected;},0);if(type==='pointerup')setTimeout(()=>{value.settledConnected=e.target.isConnected;},500);},{capture:true,signal:abort.signal});
   const originals=new Map();
   for(const method of ['preventDefault','stopPropagation','stopImmediatePropagation']) {
     const original=Event.prototype[method];originals.set(method,original);
@@ -93,7 +94,7 @@ export async function checkToolBubbles({call,evaluate,settle}) {
   const putBack=async id=>{const v=await view(id),c=await stable(id),from=v.kind==='color'?[c[0]-v.diameter/2+4,c[1]]:c;await stroke([from,[from[0],from[1]-25],[from[0],12]]);await wait(`!layerApp.app.bubbles().some(p=>p.view.id===${id})`);};
   const sourceJourney=async theme=>{
     const original=await evaluate('({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio,mobile:navigator.userAgentData?.mobile??false})');
-    const resize=async(width,height)=>{await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:original.deviceScaleFactor,mobile:false});await call('Emulation.setTouchEmulationEnabled',{enabled:false});if(device==='touch')await call('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:5});await settle();await pause(500);};
+    const resize=async(width,height)=>{await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:original.deviceScaleFactor,mobile:false});await settle();await pause(500);};
     try {
       await resize(1200,420);await send({type:'customize',action:{type:'close_expanded'}});await send({type:'invoke',command:'drawing_brush'});await tap(await rect('[data-header-item="2"] .header-tool'));await pause(500);await wait(`!!document.querySelector('.content-drawer[data-drawer="tool"]:not([inert]) .tools-control [data-brush]')`);await pause(500);
       await tap(await rect('.content-drawer .brush-sets-control [data-tool-choice="Pen"]'));await pause(500);
@@ -110,6 +111,10 @@ export async function checkToolBubbles({call,evaluate,settle}) {
       await primitives(brush,`${theme}-right-bottom-edge`);let box=await fits();assert.ok(box.right<=box.width-7&&box.bottom<=box.height-7,'dragged bubble stays inside right and bottom walls');
       await resize(800,520);await stable(brush);await primitives(brush,`${theme}-resized-edge`);box=await fits();assert.ok(box.left>=7&&box.top>=box.header+7&&box.right<=box.width-7&&box.bottom<=box.height-7,'viewport resize keeps bubble inside canvas walls');await shot(`${theme}-${device}-viewport-edge`);
       await resize(original.width,original.height);at=await stable(brush);const header=await evaluate('document.querySelector("#header").getBoundingClientRect().bottom');await stroke([at,[40,header+40]]);await stable(brush);box=await fits();assert.ok(box.left>=7&&box.top>=box.header+7,'bubble stays inside left and titlebar walls');await putBack(brush);
+    } catch(error) {
+      try {await shot(`${theme}-${device}-source-failure`);
+      await writeFile(`${directory}/${theme}-${device}-source-failure.json`,JSON.stringify(await evaluate(`(()=>{const button=document.querySelector('[data-header-item="2"] .header-tool'),r=button?.getBoundingClientRect();return {viewport:[innerWidth,innerHeight],header:button?.outerHTML??null,bounds:r?.toJSON()??null,hit:r?document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.outerHTML:null,drawers:[...document.querySelectorAll('.content-drawer')].map(n=>({drawer:n.dataset.drawer,inert:n.inert,bounds:n.getBoundingClientRect().toJSON()})),dialogs:[...document.querySelectorAll('dialog[open],.document-transition')].map(n=>({text:n.textContent,bounds:n.getBoundingClientRect().toJSON()})),events:window.bubbleNativeEvents??null}})()`),null,2));}catch(evidenceError){console.error('Source failure evidence:',evidenceError);}
+      throw error;
     } finally {await call('Emulation.setDeviceMetricsOverride',original);await settle();await send({type:'customize',action:{type:'close_expanded'}});await evaluate('delete window.bubbleSourceScroll');}
   };
   try {

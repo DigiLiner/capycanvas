@@ -198,6 +198,16 @@ node --test apps/layer-web/{run,package,frame,bubbles,glass,pointer,workspace-cl
 node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
+The pointer harness runs the app's contact and release registrations in order,
+retaining every listener for each event type. It checks independent contacts,
+deferred header release and pointer IDs reused before a release callback runs.
+
+Viewport checks keep the selected input device active across resizes; touch
+emulation changes only when selecting a device case or restoring test state.
+Bubble source-journey failures capture the viewport, hit target and native input
+trace before restoring the workspace; enable `LAYER_BUBBLE_INPUT_TRACE=1` to
+retain that trace.
+
 The launcher fixture uses Bash; `LAYER_TEST_BASH` selects its executable
 (default `/bin/bash`). On Windows, set it in Git Bash before those commands:
 

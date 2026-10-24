@@ -55,14 +55,20 @@ test("cursor hover preserves mouse, pen, and eraser device kinds", () => {
   assert.deepEqual(changes, ["cursor-left"]);
 });
 function harness({ raw = false, prediction = false, paint: allowPaint = true } = {}) {
-  const listeners = new Map(), windowListeners = new Map(), records = [], phases = [], buttons = [], cursors = [], captures = [], timers = [];
+  const listeners = new Map(), windowListeners = new Map(), records = [], phases = [], buttons = [], cursors = [], captures = [], timers = [], attributes = new Set();
+  const listen = (target, name, fn) => target.set(name, [...target.get(name) ?? [], fn]);
+  const emit = (target, type, event) => {
+    let stopped = false;
+    const e = {type, ...event, stopImmediatePropagation() { stopped = true; }};
+    for (const listener of target.get(type) ?? []) { listener(e); if (stopped) break; }
+  };
   let contact = null;
   const context = {
     canvas: {
       width: 800, height: 600,
       getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
       focus() {}, setPointerCapture() {},
-      addEventListener: (name, fn) => listeners.set(name, fn),
+      addEventListener: (name, fn) => listen(listeners, name, fn),
     },
     lastPenEvent: null, pending: [], notice: null, state: { camera: { revision: 1 }, settings: { feedback: prediction, platform_prediction: prediction } },
     app: { pen(batch) { records.push(...batch); return batch.length / 11; } },
@@ -82,20 +88,21 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
     cursorInput(event) { cursors.push(event?.type ?? null); }, wake() {},
     heldPointers: new Map(),
     workspace: {setPointerCapture: id => captures.push(id),classList:{contains:()=>false}},
-    document: {documentElement: {hasAttribute: () => false, toggleAttribute() {}}, addEventListener() {}},
+    document: {documentElement: {hasAttribute: name => attributes.has(name), toggleAttribute: (name, value) => value ? attributes.add(name) : attributes.delete(name)}, addEventListener() {}},
     chromeInput: event => ({handled: event.kind === 'contact' && !!context.consumeChrome}),
     zenUpdates:0,updateZen() {context.zenUpdates++;}, closeMenusOutside() {}, requestAnimationFrame() {}, endWorkspaceGesture() {}, queuePen() {},
-    window: { addEventListener: (name, fn) => windowListeners.set(name, fn) }, setTimeout: fn => timers.push(fn), clearTimeout() {},
+    window: { addEventListener: (name, fn) => listen(windowListeners, name, fn) }, setTimeout: fn => timers.push(fn), clearTimeout() {},
   };
   if (raw) context.onpointerrawupdate = null;
-  runInNewContext(source.slice(source.indexOf("function position("),
-    source.indexOf('canvas.addEventListener("contextmenu"')), context);
-  runInNewContext(source.slice(source.indexOf('function pointerStyle('), source.indexOf('function position(')), context);
-  runInNewContext(source.slice(source.indexOf('window.addEventListener("blur", () => {\n  endWorkspaceGesture'), source.indexOf('function tabHits(')), context);
+  runInNewContext([
+    source.slice(source.indexOf('for (const type of ["pointerdown", "pointermove"])'), source.indexOf("for (const type of ['pointerdown','pointermove'")),
+    source.slice(source.indexOf('function pointerStyle('), source.indexOf('canvas.addEventListener("contextmenu"')),
+    source.slice(source.indexOf('window.addEventListener("blur", () => {\n  endWorkspaceGesture'), source.indexOf('function tabHits(')),
+  ].join('\n'), context);
   let timeStamp = 0;
   return {
     send(type, overrides = {}) {
-      listeners.get(type)({ type, pointerId: -7, pointerType: "pen", button: 0,
+      emit(listeners, type, { pointerId: -7, pointerType: "pen", button: 0,
         buttons: 1, pressure: 0.6, clientX: 40, clientY: 50,
         timeStamp: ++timeStamp, cancelable: type !== "pointerrawupdate", preventDefault() {}, ...overrides });
     },
@@ -103,9 +110,9 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
     phases, buttons, cursors,
     chrome(type, overrides = {}) {
       let prevented = false;
-      windowListeners.get(type)?.({pointerId: 1, pointerType: 'mouse', buttons: 1, detail: 1,
+      emit(windowListeners, type, {pointerId: 1, pointerType: 'mouse', buttons: 1, detail: 1,
         target: {closest: selector => selector === '#header' ? {} : null},
-        preventDefault() { prevented = true; }, stopImmediatePropagation() {}, ...overrides});
+        preventDefault() { prevented = true; }, ...overrides});
       return prevented;
     },
     context, captures,flushTimers:()=>timers.splice(0).forEach(fn=>fn()),
@@ -152,10 +159,18 @@ test("foreign pointers cannot end the active stroke", () => {
   h.send("pointermove");
   h.send("pointerup");
   assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3]);
+});
+
+test("header contacts retire independently and preserve a reused pointer", () => {
+  const h = harness();
   for (const ending of ['pointerup', 'pointercancel', 'lostpointercapture', 'pointermove']) {
     h.chrome('pointerdown');
     h.chrome('pointerdown', {pointerId: 2, pointerType: 'touch'});
+    assert.equal(h.context.document.documentElement.hasAttribute('data-touch'), true, 'pointer style and header capture both receive the contact');
+    assert.deepEqual([...h.context.heldPointers.keys()], [1, 2]);
     h.chrome(ending, {pointerId: 2, buttons: 0});
+    if (ending === 'pointerup' || ending === 'lostpointercapture')
+      assert.deepEqual([...h.context.heldPointers.keys()], [1, 2], 'release leaves chrome held through native click dispatch');
     h.flushTimers();
     assert.deepEqual([...h.context.heldPointers.keys()], [1], ending);
     h.chrome('pointerup');
