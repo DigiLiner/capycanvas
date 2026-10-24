@@ -48,6 +48,14 @@ struct ColorWheelDrawing: View {
                     let rect = CGRect(x: square[0].number * side, y: square[1].number * side,
                         width: square[2].number * side, height: square[2].number * side)
                     clipped.clip(to: Path(roundedRect: rect, cornerRadius: min(6, side * 0.02)))
+                } else {
+                    clipped.clip(to: Path { path in
+                        for (index, vertex) in geometry["triangle"].array.enumerated() {
+                            if index == 0 { path.move(to: point(vertex)) }
+                            else { path.addLine(to: point(vertex)) }
+                        }
+                        path.closeSubpath()
+                    })
                 }
                 clipped.draw(Image(decorative: image, scale: 1).allowedDynamicRange(.high).interpolation(.low),
                     in: CGRect(x: 0, y: 0, width: side, height: side))
@@ -130,15 +138,14 @@ private final class ColorFieldWorker: @unchecked Sendable {
     }
 }
 
-final class ColorPanelLayoutCache: ObservableObject {
-    private var side: Float?
-    private var hdr = false
+final class ColorUIResourceCache: ObservableObject {
+    private var key = ""
     private var cached = JSON()
-    func layout(side: CGFloat, hdr: Bool = false) -> JSON {
-        let next = Float(side)
-        if self.side == next && self.hdr == hdr { return cached }
-        self.side = next; self.hdr = hdr
-        cached = ColorUI.resolve(["type": "picker_layout", "size": side, "hdr": hdr])
+    func resolve(_ request: [String: Any], language: String = "en") -> JSON {
+        let next = JSON(["language": language, "request": request]).stableKey
+        if key == next { return cached }
+        key = next
+        cached = ColorUI.resolve(request, language: language)
         return cached
     }
 }

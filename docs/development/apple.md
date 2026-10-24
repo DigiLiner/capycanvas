@@ -334,7 +334,20 @@ the mounted fixture checks both the next ordinary click and dragging its footer.
 
 The color ring uses `ColorWheelDrawing`, native swatches and the shared color
 viewing transform, with the Color panel's separate SDR and HDR presentation.
+Floating-point drawings use the shared HDR wheel contour and intensity arc.
+The arc forwards transactional contacts, reset and keyboard adjustments to Rust.
+Its continuous angular gradient and opaque marker use shared preview mapping for
+the current display headroom. Linear HDR values remain extended-range; SDR
+displays use the drawing's rendition. The shared zero-EV tick follows range
+expansion. The whole contour registers as one glass region, including its lower
+arc and inward corners.
+`ColorUIResourceCache` retains shared layout or intensity responses until their
+inputs change; moving a bubble reuses its color samples. The native slider
+accessibility representation publishes the shared EV value, range and disabled
+state, with adjustments forwarded to the shared action.
 Wheel fields and hue guides are prepared on the image worker.
+Native drawing clips every field to the published circle, square or triangle;
+HDR field textures contain opaque samples beyond the visible shape.
 Brush dabs use the same SDR or HDR color presentation and retain their decoded
 image across metadata-only replies; pending
 readback keeps the frame clock awake, and a ready unchanged dab stops polling.
@@ -343,6 +356,8 @@ thumbnail cache. The footer uses shared width thresholds and moves hidden
 commands into More. Each mounted list and folded face keeps its own thumbnail
 demand. Glass registrations carry circular or squircle regions, arc bands and
 strength in logical editor points; the native renderer applies display scale.
+HDR color plates register their shared contour as a single region; lengths scale
+with the display while the end angle and fade strength remain unchanged.
 The card and folded count observe placement directly, so their glass follows
 stroke fading and homing even when their retained content stays unchanged.
 Menu replies retain drawing, source and request ownership. Shared headings and
@@ -359,6 +374,14 @@ Apple policies and themes. `EditorLaunchTests/testToolBubbles` and
 macOS and iPadOS. Supplied touch or tablet records do not establish physical
 Pencil behavior. Use [Apple performance](../../apps/layer-apple/PERFORMANCE.md)
 and the [measurement rules](../performance/measuring.md) for motion qualification.
+
+`tests/hdr-tool-bubbles.swift` creates F16 and F32 drawings through the actual
+new-drawing pipeline and checks the intensity transaction, exact cancellation,
+reset, keyboard input, second-finger takeover and color-context changes for both
+Apple policies and themes. `testHDRToolBubbles`, `testHDRToolBubblesDark`,
+`testHDRToolBubblesF32` and `testHDRToolBubblesF32Dark` exercise native app input.
+`testHDRToolBubbleTextEntry` checks UIKit text-field input after arc keyboard
+focus as a separate journey.
 
 Language publications can contain the first ready workspace view. Their readiness
 transition uses the ordinary workspace handler, preserving native form drafts.

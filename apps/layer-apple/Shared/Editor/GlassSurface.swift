@@ -5,6 +5,7 @@ import SwiftUI
     private var boxes: [UUID: [CGFloat]] = [:]
     private var connections: [String: JSON] = [:]
     private var arcs: [UUID: [CGFloat]] = [:]
+    private var colorBubbles: [UUID: [CGFloat]] = [:]
     private var scheduled = false
     private var sent = ""
     init(store: EditorStore) { self.store = store }
@@ -19,6 +20,9 @@ import SwiftUI
     func arc(_ id: UUID, _ value: [CGFloat]?) {
         guard arcs[id] != value else { return }; arcs[id] = value; schedule()
     }
+    func colorBubble(_ id: UUID, _ value: [CGFloat]?) {
+        guard colorBubbles[id] != value else { return }; colorBubbles[id] = value; schedule()
+    }
     private func schedule() {
         guard !scheduled else { return }
         scheduled = true
@@ -28,7 +32,8 @@ import SwiftUI
         scheduled = false
         let payload = JSON(["regions": boxes.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) },
             "connections": connections.keys.sorted().compactMap { connections[$0]?.raw },
-            "arcs": arcs.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) }])
+            "arcs": arcs.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) },
+            "color_bubbles": colorBubbles.sorted { $0.key.uuidString < $1.key.uuidString }.map { $0.value.map(Double.init) }])
         let key = payload.stableKey
         guard key != sent else { return }
         sent = key
@@ -96,6 +101,25 @@ struct GlassArcRegistration: ViewModifier {
     }
 }
 
+struct GlassColorBubbleRegistration: ViewModifier {
+    let color: JSON
+    let strength: Double
+    @Environment(\.glassRegistry) private var registry
+    @State private var id = UUID()
+    @State private var geometry = GlassGeometry()
+    private var region: [CGFloat] {
+        let bounds = geometry.bounds, source = color["bounds"], shape = color["glass"], scale = geometry.scale
+        guard !bounds.isEmpty, !shape.isNull else { return [] }
+        return [bounds.minX - source["x"].number * scale, bounds.minY - source["y"].number * scale,
+            shape[0].number * scale, shape[1].number * scale, shape[2].number * scale, shape[3].number, strength]
+    }
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
+            .onChange(of: region, initial: true) { _, value in registry?.colorBubble(id, value.isEmpty ? nil : value) }
+            .onDisappear { registry?.colorBubble(id, nil) }
+    }
+}
+
 struct GlassConnection: ViewModifier {
     let key: String
     let connection: JSON
@@ -112,8 +136,8 @@ extension View {
     }
 }
 
-struct OutsideShadow: View {
-    let shape: SquircleShape
+struct OutsideShadow<S: Shape>: View {
+    let shape: S
     let opacity: Double
     let radius: CGFloat
     let y: CGFloat

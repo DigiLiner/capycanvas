@@ -43,6 +43,12 @@ impl HdrIntensityArc {
             self.center[1] + self.radius * a.sin(),
         ]
     }
+    pub fn zero_tick(&self, [minimum, maximum]: [f32; 2]) -> [[f32; 2]; 2] {
+        let point = self.point(-minimum / (maximum - minimum));
+        [2., 5.].map(|outset| std::array::from_fn(|axis| {
+            point[axis] + (point[axis] - self.center[axis]) / self.radius * (self.width * 0.5 + outset)
+        }))
+    }
     /// Clockwise along the lower arc, clamped to the nearest endpoint off-track.
     pub fn fraction(&self, point: [f32; 2]) -> f32 {
         let x = point[0] - self.center[0];
@@ -59,6 +65,22 @@ impl HdrIntensityArc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn zero_tick_follows_expanded_ranges_and_translated_centers() {
+        for size in [128., 230., 358.] {
+            for center in [[0., 0.], [size * 0.5, size * 0.5]] {
+                let arc = HdrIntensityArc { center, ..HdrIntensityArc::new(size).unwrap() };
+                for range in [[-2., 6.], [-12., 6.], [-2., 12.]] {
+                    let tick = arc.zero_tick(range);
+                    assert!((arc.fraction(tick[0]) + range[0] / (range[1] - range[0])).abs() < 1e-5);
+                    for (point, outset) in tick.into_iter().zip([2., 5.]) {
+                        assert!(((point[0] - center[0]).hypot(point[1] - center[1]) - arc.radius - arc.width * 0.5 - outset).abs() < 1e-4);
+                    }
+                    assert!(((tick[1][0] - tick[0][0]).hypot(tick[1][1] - tick[0][1]) - 3.).abs() < 1e-4);
+                }
+            }
+        }
+    }
     #[test]
     fn rounded_intensity_endpoints_stay_inside_the_document_range() {
         use layer_core::color::SampleDepth;

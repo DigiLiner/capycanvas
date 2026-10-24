@@ -139,7 +139,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Apple tool bubble drag through four neighbours | 120 | **Unqualified.** M4 iPad input and presentation timing remain unmeasured; the M2 Pro Mac canvas diagnostic cannot qualify the whole native overlay | [Apple native measurements](#apple-native-measurements), 2026-10-24 |
-| HDR color bubble drag and intensity scrub | 120 | **Not met.** Android drag 111.38–119.30 actual app-window presents/s; intensity 54.29–55.42/s, p99 up to 41.668 ms, 61 MP F16 photo at Fit | [Web and Android HDR color bubbles](#web-and-android-hdr-color-bubbles), 2026-10-24 |
+| HDR color bubble drag and intensity scrub | 120 | **Not met.** Android drag 111.38–119.30 actual app-window presents/s; intensity 54.29–55.42/s, p99 up to 41.668 ms, 61 MP F16 photo at Fit; Apple: unqualified Mac canvas drag 89.398–89.938/s; intensity presentation, native overlay and reference timing unmeasured | [Web and Android HDR color bubbles](#web-and-android-hdr-color-bubbles); [Apple HDR diagnostic](#apple-hdr-color-bubble-diagnostic), 2026-10-24 |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
@@ -3765,6 +3765,60 @@ samples arrived in order. This measures control-state continuity; presentation
 FPS, motion p99 and thermal coverage remain unmeasured. Raw before/after results
 are in `artifacts/apple/port-oct13-regenerated/source-audit/current-surface-and-optimized-motion-ready/stamp-delivery-diagnostic/full7-run1`
 and the sibling `stamp-classifier-fixed/full7-run1`.
+
+### Apple HDR color bubble diagnostic
+
+The 2026-10-24 follow-up uses the same non-reference M2 Pro Mac mini (16 GiB,
+macOS 26.6.2), 90 Hz display and 1200 × 870-point editor at 2×. A real
+9504 × 6336 F16 drawing contains the imported reference photo and an empty
+selected paint layer at Fit. The 216-point HDR color bubble moves through four
+neighbors with default glass. Its paint pair and palette are populated: 17
+palette swatches plus foreground, background, transparent and palette controls.
+Recent colors are enabled but have zero beads. Actual viewing headroom is 1 and
+`hdr_output` is false; this does not measure physical HDR output.
+
+Four sequential Release runs cover drag and intensity in both themes. Each has
+one prime and three six-second native mouse contacts. Timestamped owner or
+published-marker movement defines each window with 100 ms edges; no FPS-based
+trimming is used. Drag restores the exact workspace with Undo; intensity leaves
+workspace and artwork unchanged. All workload assertions pass.
+
+| Motion / theme | Metal canvas presents/s, three windows | Interval p99, ms | Pooled CPU owner p99, ms | Pooled GPU queue-span p99, ms |
+| --- | --- | --- | --- | --- |
+| Drag, light | 89.919 / 89.592 / 89.398 | ≤11.111331 | 0.526 | 0.448 |
+| Drag, dark | 89.938 / 89.611 / 89.922 | 11.111292 | 0.493 | 0.552 |
+| Intensity, light and dark | Unmeasured: no drawable presentations | Unavailable | Polls only; not interaction cost | No GPU spans |
+
+All six drag windows are collector-eligible, with unique positive presentation
+timestamps, covered boundaries, and no zero-time, missing or duplicate callbacks.
+Their duration is 5.694–5.705 s; the maximum presentation interval is 22.222500 ms.
+All five owners move; sampled pose-change gaps remain below 16.1 ms. CPU owner
+service is wall time inside the frame block, excluding queue wait, action/UI work
+and later callbacks. GPU queue spans include submission gaps, not isolated busy
+time; these overlapping measures cannot be added.
+
+Intensity changes the cached native UI without acquiring Metal canvas drawables,
+so those six windows cannot establish presentation FPS. Light contacts visit
+170 / 180 / 186 distinct published EV values; dark visits 174 / 178 / 185.
+Observed changed-marker samples occur at 31.753 / 32.392 / 32.898 per second
+light and 31.848 / 32.701 / 32.932 dark, with maximum observation gaps
+52.471–59.783 ms. These are model observations, not fresh displayed-marker frames.
+Their windows last 5.669–5.739 s. Low owner poll times do not measure interaction
+cost or SwiftUI/main-thread work.
+
+All four traces retain 90 seconds and cover their final moving window (ending
+43.668–47.985 s after trace start). Each has 91 nominal thermal samples from
+startup through trace end, with no recorder drops. Native overlay presentation,
+physical input latency, physical HDR, Pencil and reference-iPad timing remain
+unqualified; no tier pass follows from these canvas diagnostics.
+
+Measured inputs are `c9c46f8ab` plus the Apple HDR port, compiled-input digest
+`646b2eaa5b3fd348807be94c69235ee1c78d3163f842bc93cc4ec297c629e145`;
+Release executable SHA-256 is
+`6a3e2017d6dc4e6d9d53e160399c50faa517cacfdd468927f1125d761ed192ed`.
+This identifies the measured build, not a later rebased HEAD. Raw traces,
+`setup.json`, timestamps, screenshots, per-window reports, source/binary manifests
+and `motion-summary.json` remain in `artifacts/apple/hdr-tool-bubbles/`.
 
 ## Windows Domain Warp comparison
 

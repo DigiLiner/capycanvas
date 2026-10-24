@@ -34,7 +34,8 @@ pub unsafe extern "C" fn capy_apple_navigator_placements(
 
 /// # Safety
 /// Serial owner call; GlassLayout contains logical regions [x,y,w,h,tl,tr,br,bl,shape,strength],
-/// arcs [cx,cy,radius,band,start_degrees,sweep_degrees,strength] and DrawerConnection records.
+/// arcs [cx,cy,radius,band,start_degrees,sweep_degrees,strength], color_bubbles
+/// [cx,cy,wheel_radius,arc_radius,cap,end_angle_radians,strength] and DrawerConnection records.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_glass_regions(app: *mut CapyApple, json: *const c_char) -> i32 {
     let Some(app) = (unsafe { app.as_mut() }) else {

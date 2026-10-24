@@ -3,7 +3,7 @@ import SwiftUI
 struct ColorPanel: View {
     @State private var shapeCaptions: [String: String] = [:]
     @ObservedObject var store: EditorStore
-    @StateObject private var resources = ColorPanelLayoutCache()
+    @StateObject private var resources = ColorUIResourceCache()
     @FocusState private var readoutFocused: Bool
     private var model: JSON { store.colorPanel }
     private var hdr: Bool { model["hdr"].bool }
@@ -24,7 +24,7 @@ struct ColorPanel: View {
         GeometryReader { allocation in
             let full = ColorUI.resolve(["type": "picker_layout", "size": max(128, allocation.size.width), "hdr": hdr])
             let side = max(128, allocation.size.width * min(1, allocation.size.height / max(1, full["height"].number)))
-            let spec = resources.layout(side: side, hdr: hdr)
+            let spec = resources.resolve(["type": "picker_layout", "size": side, "hdr": hdr])
             let layout = spec["layout"], height = spec["height"].number
             let palette = EditorPalette(source: store.state["palette"])
             ZStack(alignment: .topLeading) {

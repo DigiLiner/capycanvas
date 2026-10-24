@@ -1160,6 +1160,7 @@ pub struct BubbleIntensityPresentation {
     pub geometry: crate::color::HdrIntensityArc,
     pub path: Vec<[f32; 2]>,
     pub point: [f32; 2],
+    pub zero: [[f32; 2]; 2],
     pub range: [f32; 2],
     pub stops: f32,
     pub ramp: Vec<[f32; 4]>,

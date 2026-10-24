@@ -78,18 +78,19 @@ pub fn color_ui_localized(request: ColorUiRequest, localizer: &crate::localizati
             super::hdr_picker::HdrPaint::validate_stops(stops).map_err(|reason|reason.message(localizer))?;
             let a=HdrIntensityArc::new(size).ok_or("Invalid picker extent")?;
             let [minimum,maximum]=HdrIntensityArc::range(stops,depth.unwrap_or(layer_core::color::SampleDepth::F16));
-            let samples=(0..=80).map(|i|{
-                let t=i as f32/80.;
-                let p=super::hdr_picker::scale_linear(base.linear_in(document_space)?,minimum+t*(maximum-minimum)).map(|c|c.clamp(-f32::MAX,f32::MAX));
+            let linear=base.linear_in(document_space)?;
+            let sample=|stops|{
+                let p=super::hdr_picker::scale_linear(linear,stops).map(|c|c.clamp(-f32::MAX,f32::MAX));
                 let color=RgbColor::from_linear(document_space,p)?;
                 crate::color_management::picker_preview(color,document_space,recipe,headroom)
-            }).collect::<Result<Vec<_>,String>>()?;
-            return Ok(serde_json::json!({"minimum":minimum,"maximum":maximum,"colors":samples,"marker":a.point((stops-minimum)/(maximum-minimum)),"zero":a.point(-minimum/(maximum-minimum))}));
+            };
+            let samples=(0..=80).map(|i|sample(minimum+i as f32/80.*(maximum-minimum))).collect::<Result<Vec<_>,String>>()?;
+            return Ok(serde_json::json!({"minimum":minimum,"maximum":maximum,"colors":samples,"marker_color":sample(stops)?,"marker":a.point((stops-minimum)/(maximum-minimum)),"zero":a.point(-minimum/(maximum-minimum))}));
         },
         ColorUiRequest::PickerLayout {size,hdr} => {
             let layout=if hdr {ColorPanelLayout::with_hdr(size)} else {ColorPanelLayout::new(size)}.ok_or("Invalid picker size")?;
             let arc=HdrIntensityArc::new(size).ok_or("Invalid picker size")?;
-            return Ok(serde_json::json!({"layout":layout,"height":layout.height(),"arc":{"width":arc.width,"marker_radius":arc.marker_radius,
+            return Ok(serde_json::json!({"layout":layout,"height":layout.height(),"arc":{"center":arc.center,"width":arc.width,"marker_radius":arc.marker_radius,
                 "points":(0..=80).map(|i|arc.point(i as f32/80.)).collect::<Vec<_>>()}}));
         },
         ColorUiRequest::HdrPreview {color,document_space,recipe,headroom} => {
@@ -260,6 +261,35 @@ mod tests {
     use super::*;
     fn editor_json(request: serde_json::Value) -> serde_json::Value {
         color_ui(serde_json::from_value(request).unwrap()).unwrap()
+    }
+    #[test]
+    fn picker_layout_transports_the_intensity_gradient_origin() {
+        for size in [128., 226., 358.] {
+            let packet = editor_json(serde_json::json!({"type":"picker_layout","size":size,"hdr":true}));
+            let center: [f32; 2] = serde_json::from_value(packet["arc"]["center"].clone()).unwrap();
+            let points: Vec<[f32; 2]> = serde_json::from_value(packet["arc"]["points"].clone()).unwrap();
+            assert_eq!(center, [size * 0.5; 2]);
+            let radius = HdrIntensityArc::new(size).unwrap().radius;
+            for point in points {
+                assert!(((point[0] - center[0]).hypot(point[1] - center[1]) - radius).abs() < 1e-4);
+            }
+        }
+    }
+    #[test]
+    fn intensity_ramp_and_marker_follow_hdr_display_headroom() {
+        let base=RgbColor::new(RgbSpace::Srgb,[0.2,0.8,0.4,0.37]).unwrap();
+        for headroom in [1.,4.] {
+            let packet=editor_json(serde_json::json!({"type":"intensity_arc","size":230.,"stops":4.,"depth":"F32",
+                "base":base,"document_space":"Srgb","recipe":layer_core::color::hdr::SdrRendition::default(),"headroom":headroom}));
+            let colors:Vec<[f32;4]>=serde_json::from_value(packet["colors"].clone()).unwrap();
+            let marker:[f32;4]=serde_json::from_value(packet["marker_color"].clone()).unwrap();
+            assert_eq!(colors.len(),81);
+            assert_eq!(marker,colors[60]);
+            assert_eq!(marker[3],0.37);
+            let peak=colors.iter().flat_map(|color|&color[..3]).copied().fold(0.,f32::max);
+            if headroom>1. {assert!(peak>1. && marker[..3].iter().any(|v|*v>1.));}
+            else {assert!(peak<=1.00001 && marker[..3].iter().all(|v|*v<=1.00001));}
+        }
     }
     #[test]
     fn stateless_editor_round_trips_actions_errors_and_strips() {

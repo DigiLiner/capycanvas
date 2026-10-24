@@ -120,11 +120,29 @@ private struct BubbleParts: View {
     }
     private var wheel: some View {
         let side = view["diameter"].number, wheel = side - 14
-        return ZStack {
-            BubblePlate(size: CGSize(width: side, height: side), palette: palette, strength: opacity, lifted: placement.lifted)
-            ColorWheelDrawing(model: store.colorPanel, bounds: JSON([0, 0, wheel, wheel]), viewing: store.colorPanel["hdr"].bool ? store.colorViewing : JSON()).frame(width: wheel, height: wheel)
-        }.frame(width: side, height: side).position(x: half, y: half)
-            .accessibilityLabel(view["label"].string).accessibilityIdentifier("bubble-wheel-\(item.id)")
+        let color = item.model["color"], bounds = color["bounds"].rect
+        return ZStack(alignment: .topLeading) {
+            if color.isNull {
+                BubblePlate(size: CGSize(width: side, height: side), palette: palette, strength: opacity, lifted: placement.lifted)
+                    .position(x: half, y: half)
+            } else {
+                let shape = BubbleColorShape(color: color)
+                shape.fill(palette.glassPanel)
+                    .background { OutsideShadow(shape: shape, opacity: placement.lifted ? 0.16 : 0.08,
+                        radius: (placement.lifted ? 12 : 8) / 3, y: placement.lifted ? 4.5 : 2) }
+                    .frame(width: bounds.width, height: bounds.height)
+                    .modifier(GlassColorBubbleRegistration(color: color, strength: opacity))
+                    .position(x: half + bounds.midX, y: half + bounds.midY)
+            }
+            ZStack {
+                ColorWheelDrawing(model: store.colorPanel, bounds: JSON([0, 0, wheel, wheel]), viewing: store.colorPanel["hdr"].bool ? store.colorViewing : JSON())
+                    .frame(width: wheel, height: wheel)
+            }.frame(width: side, height: side)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(view["label"].string).accessibilityIdentifier("bubble-wheel-\(item.id)")
+                .position(x: half, y: half)
+            if !color.isNull { BubbleIntensity(store: store, item: item, data: color["intensity"], half: half) }
+        }.frame(width: half * 2, height: half * 2)
     }
     @ViewBuilder private var face: some View {
         let size = CGSize(width: view["face"][0].number, height: view["face"][1].number)
@@ -246,6 +264,79 @@ private struct BubbleParts: View {
                 SharedIcon(name: "go-next", size: 16).frame(width: 32)
             }
         }.frame(width: bounds.width, height: bounds.height).position(x: half + bounds.midX, y: half + bounds.midY)
+    }
+}
+
+private struct BubbleColorShape: Shape {
+    let color: JSON
+    func path(in rect: CGRect) -> Path {
+        let bounds = color["bounds"].rect, scale = rect.width / max(1, bounds.width)
+        return Path { path in
+            for arc in color["outline"].array {
+                let center = arc["center"].point
+                path.addArc(center: CGPoint(x: rect.minX + (center.x - bounds.minX) * scale,
+                    y: rect.minY + (center.y - bounds.minY) * scale), radius: arc["radius"].number * scale,
+                    startAngle: .radians(arc["start"].number), endAngle: .radians(arc["start"].number + arc["sweep"].number),
+                    clockwise: arc["sweep"].number < 0)
+            }
+            path.closeSubpath()
+        }
+    }
+}
+
+private struct BubbleIntensity: View {
+    @ObservedObject var store: EditorStore
+    @ObservedObject var item: BubblePresentation
+    let data: JSON
+    let half: CGFloat
+    @Environment(\.editorPalette) private var palette
+    #if os(macOS)
+    @FocusState private var focused: Bool
+    #endif
+    @StateObject private var resources = ColorUIResourceCache()
+    private var bounds: CGRect {
+        let points = data["path"].array.map(\.point)
+        let margin = max(data["geometry"]["width"].number / 2 + 5, data["geometry"]["marker_radius"].number + 2)
+        let xs = points.map(\.x), ys = points.map(\.y)
+        return CGRect(x: xs.min() ?? 0, y: ys.min() ?? 0,
+            width: (xs.max() ?? 0) - (xs.min() ?? 0), height: (ys.max() ?? 0) - (ys.min() ?? 0)).insetBy(dx: -margin, dy: -margin)
+    }
+    private func point(_ value: JSON, in bounds: CGRect) -> CGPoint { CGPoint(x: value[0].number - bounds.minX, y: value[1].number - bounds.minY) }
+    private func set(_ value: Double) {
+        store.bubbles.input.setIntensity(item.id, stops: value)
+    }
+    var body: some View {
+        let bounds = bounds
+        let model = store.colorPanel, viewing = store.colorViewing
+        let arc = resources.resolve(["type": "intensity_arc", "size": item.view["color"]["stage"].number, "stops": data["stops"].number,
+            "base": model["base"].raw, "document_space": viewing["document_space"].raw, "depth": model["document_depth"].raw,
+            "recipe": viewing["recipe"].raw, "headroom": viewing["headroom"].number])
+        HDRIntensityTrack(points: data["path"].array.map { point($0, in: bounds) }, colors: arc["colors"].array.map(HDRIntensityTrack.linearColor),
+            center: point(data["geometry"]["center"], in: bounds), marker: point(data["point"], in: bounds), width: data["geometry"]["width"].number,
+            radius: data["geometry"]["marker_radius"].number, markerFill: HDRIntensityTrack.linearColor(arc["marker_color"]), rimOpacity: 0.5,
+            zeroTick: data["zero"].array.map { point($0, in: bounds) }, ink: palette["text"])
+            .frame(width: bounds.width, height: bounds.height)
+            .disabled(!data["enabled"].bool)
+            #if os(macOS)
+            .focusable(data["enabled"].bool).focused($focused).focusEffectDisabled()
+            .onChange(of: item.pressed.stableKey) { _, _ in if item.pressed.bubbleHit == "intensity" { focused = true } }
+            .onKeyPress(keys: [.leftArrow, .downArrow, .rightArrow, .upArrow, .home]) { press in
+                let key = press.key == .home ? "home" : press.key == .leftArrow ? "arrowleft"
+                    : press.key == .downArrow ? "arrowdown" : press.key == .rightArrow ? "arrowright" : "arrowup"
+                return store.bubbles.input.intensityKey(key, id: item.id,
+                    command: !press.modifiers.intersection([.command, .control]).isEmpty,
+                    alt: press.modifiers.contains(.option)) ? .handled : .ignored
+            }
+            #endif
+            .accessibilityRepresentation {
+                Slider(value: Binding(get: { data["stops"].number }, set: set),
+                    in: data["range"][0].number...data["range"][1].number, step: 0.1) { Text(data["label"].string) }
+                    .accessibilityValue(Text(data["text"].string))
+                    .accessibilityIdentifier("bubble-intensity-\(item.id)")
+                    .accessibilityAdjustableAction { set(data["stops"].number + ($0 == .increment ? 0.1 : -0.1)) }
+                    .disabled(!data["enabled"].bool)
+            }
+            .position(x: half + bounds.midX, y: half + bounds.midY)
     }
 }
 

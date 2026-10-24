@@ -192,7 +192,7 @@ A new ring is the Medium circle alone. The hold menu turns **Recent colors**,
 Medium (216 px) or Large (344 px). Putting the ring back remembers its options
 and size for the next time it is taken.
 
-In HDR drawings, GTK, Web and Android keep the wheel's size and add the Color
+In HDR drawings, GTK, Web, Android and Apple keep the wheel's size and add the Color
 panel's intensity arc below it. Every point on the plate's outer edge is the
 same distance from the nearest hue-ring or intensity-track edge, including
 around the arc's caps.
@@ -204,9 +204,8 @@ rows. Mask colors keep the circular SDR plate.
 `ColorBubbleLayout` publishes the contour, wheel stage, expanded bounds, palette
 placement and collision circles. Shared Rust also owns intensity picking,
 rollback and color-context retirement. `BubblePresentation::color` carries the
-outline, glass geometry, intensity range, ramp and marker for native presenters.
-Apple and Windows retain the circular layout until their intensity controls
-are ported.
+outline, glass geometry, intensity range, ramp, marker and zero-EV tick for native presenters.
+Windows retains the circular layout until its intensity control is ported.
 `UiSession::hdr_color_bubbles` keeps that availability decision in shared Rust.
 
 ## Layers card
@@ -303,7 +302,7 @@ a host only presents it and captures native input. GTK
   text with their UI font and pass its width to `chooser_tag` and `count_badge`.
 - **Actions:** `UiAction::Bubble` with `BubbleAction::Drag` (grabs `Bubble`,
   `Rim`, `Tile`, `Header`, `Variant`; phases Down, Move, Up, Cancel), `Tap`,
-  `Ring`, `ResetRing`, `Wheel`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
+  `Ring`, `ResetRing`, `Wheel`, `Intensity`, `SetIntensity`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
   `Close`, `MeasureCard`, `Option`, `SetOptions`, `ToggleRingSetting`,
   `PutBack` and `PutBackAll`. Drag positions use workspace coordinates; other
   contact positions are relative to the bubble center.

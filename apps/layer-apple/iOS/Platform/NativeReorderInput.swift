@@ -15,8 +15,7 @@ private struct ReorderInputHost: UIViewRepresentable {
     }
 }
 
-/// Recognizers stay on the containing window while SwiftUI rows scroll/update.
-/// The transparent marker supplies the list's local coordinate system only.
+/// Window recognizers share this marker's coordinates and control-key focus.
 final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
     weak var model: (any NativeReorderModel)?
     private weak var attached: UIWindow?
@@ -32,8 +31,19 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
     private var lastTrack: CFTimeInterval?
     private var observer: NSObjectProtocol?
     private var bubbles: BubbleRecognizer?
+    private var handledKeys: Set<UIKeyboardHIDUsage> = []
+    private var keyRepeat: KeyRepeat?
+    override var canBecomeFirstResponder: Bool { true }
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+    override var keyCommands: [UIKeyCommand]? {
+        guard isFirstResponder, model?.bubbleInput?.acceptsIntensityKeys == true else { return super.keyCommands }
+        let home = UIKeyCommand(input: UIKeyCommand.inputHome, modifierFlags: [], action: #selector(resetIntensity))
+        home.wantsPriorityOverSystemBehavior = true
+        return (super.keyCommands ?? []) + [home]
+    }
+    @objc private func resetIntensity(_ command: UIKeyCommand) { _ = model?.bubbleInput?.intensityKey("home") }
     override init(frame: CGRect) {
-        super.init(frame: frame); isUserInteractionEnabled = false
+        super.init(frame: frame)
         pan = UIPanGestureRecognizer(target: self, action: #selector(panned))
         pan.maximumNumberOfTouches = 1; pan.delegate = self
         press = UILongPressGestureRecognizer(target: self, action: #selector(pressed))
@@ -64,16 +74,74 @@ final class ReorderInputView: UIView, UIGestureRecognizerDelegate {
     override func layoutSubviews() { super.layoutSubviews(); validate() }
     func detach() {
         guard attached != nil else { return }
+        releaseKeyboard()
+        handledKeys.removeAll()
         cancel(detaching: true); attached?.removeGestureRecognizer(pan); attached?.removeGestureRecognizer(press)
         attached?.removeGestureRecognizer(secondary); attached = nil
         if let bubbles { bubbles.view?.removeGestureRecognizer(bubbles); self.bubbles = nil }
     }
-    func validate() { updateViewport(); attachBubbles() }
+    func validate() {
+        updateViewport(); attachBubbles()
+        if isFirstResponder, model?.bubbleInput?.acceptsIntensityKeys != true { releaseKeyboard() }
+    }
+    func focusBubbleKeyboard() {
+        if model?.bubbleInput?.acceptsIntensityKeys == true, !NativeTextContext.composing { becomeFirstResponder() }
+        else if isFirstResponder { releaseKeyboard() }
+    }
+    override func resignFirstResponder() -> Bool { endKeyRepeat(); return super.resignFirstResponder() }
+    private func endKeyRepeat() { keyRepeat?.timer.invalidate(); keyRepeat = nil }
+    private func releaseKeyboard() {
+        endKeyRepeat()
+        guard isFirstResponder else { return }
+        model?.bubbleInput?.releaseIntensityKeys()
+        if isFirstResponder { _ = resignFirstResponder() }
+    }
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled = Set<UIPress>()
+        for press in presses {
+            guard window?.isKeyWindow == true, let key = press.key else { unhandled.insert(press); continue }
+            let name = AppleKeyName.name(key), flags = key.modifierFlags
+            let command = !flags.intersection([.command, .control]).isEmpty, alt = flags.contains(.alternate)
+            guard model?.bubbleInput?.intensityKey(name, command: command, alt: alt) == true else { unhandled.insert(press); continue }
+            handledKeys.insert(key.keyCode)
+            endKeyRepeat()
+            if key.keyCode == .keyboardLeftArrow || key.keyCode == .keyboardRightArrow
+                || key.keyCode == .keyboardDownArrow || key.keyCode == .keyboardUpArrow {
+                let timer = Timer(timeInterval: KeyRepeat.interval, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.isFirstResponder, self.window?.isKeyWindow == true,
+                            self.model?.bubbleInput?.intensityKey(name, command: command, alt: alt) == true else { self?.endKeyRepeat(); return }
+                    }
+                }
+                timer.fireDate = Date(timeIntervalSinceNow: KeyRepeat.delay)
+                RunLoop.main.add(timer, forMode: .common)
+                keyRepeat = KeyRepeat(code: key.keyCode, timer: timer)
+            }
+        }
+        if !unhandled.isEmpty {
+            releaseKeyboard()
+            if let target = FocusedResponder.find(), target !== self { target.pressesBegan(unhandled, with: event) }
+            else { super.pressesBegan(unhandled, with: event) }
+        }
+    }
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled = Set(presses.filter { press in
+            guard let code = press.key?.keyCode else { return true }
+            if keyRepeat?.code == code { endKeyRepeat() }
+            return handledKeys.remove(code) == nil
+        })
+        if !unhandled.isEmpty {
+            if let target = FocusedResponder.find(), target !== self { target.pressesEnded(unhandled, with: event) }
+            else { super.pressesEnded(unhandled, with: event) }
+        }
+    }
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) { pressesEnded(presses, with: event) }
     private func attachBubbles() {
         guard bubbles == nil, model?.bubbleInput != nil, let window else { return }
         let bubbles = BubbleRecognizer(marker: self); self.bubbles = bubbles; window.addGestureRecognizer(bubbles)
     }
     private func cancel(detaching: Bool = false, all: Bool = true) {
+        endKeyRepeat()
         guard !cancelling else { return }; cancelling = true
         defer { cancelling = false }
         if detaching { model?.nativeInputDetached() } else if all { model?.cancel() } else { model?.cancelReorder() }

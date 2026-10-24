@@ -328,3 +328,38 @@ The Swift recorder, workload plan and frame driver have standalone fixtures
 (`tests/frame-trace.swift`, `tests/drawing-workload-plan.swift`,
 `tests/frame-driver.swift`), compiled with their `Shared/Bridge` sources as shown
 in the [development guide](../../docs/development/apple.md#swift-fixtures).
+
+## HDR color bubble motion
+
+The same `tests/tool-bubble-motion.swift` fixture supports
+`CAPY_BUBBLE_MOTION_HDR=1` with `CAPY_BUBBLE_MOTION_KIND=drag` or `intensity`.
+It creates a real 9504 × 6336 F16 drawing, imports the reference photo through
+production image placement, commits it, adds an empty selected paint layer and
+uses Fit. The 216-point HDR color bubble has its paint pair, palette and recent
+colors enabled beside four retained neighbors, with default glass. Record actual
+bead counts: enabled options do not imply populated recent or palette rows.
+
+Use the Release build command above and four fresh output/trace directories:
+light/dark for each workload. Keep `CAPY_TRACE_SECONDS=90` and pass the existing
+`CAPY_BUBBLE_MOTION_PHOTO`, `CAPY_BUBBLE_MOTION_OUTPUT` and
+`CAPY_BUBBLE_MOTION_THEME` variables. Run sequentially with every other native
+window, GPU test, build and CPU comparison idle.
+
+Each condition has one prime followed by three six-second native mouse
+contacts. Drag moves the HDR contour through four neighbors and restores its
+exact authored position with Undo. Intensity follows a constant-angular-speed
+triangular path, preserves artwork/workspace data, and records actual published
+stops, marker positions and distinct values separately from canvas presents.
+Both derive their 5–10-second windows from first/last observed owner or marker
+movement with 100 ms edges; no presentation/FPS-dependent trimming is allowed.
+Keep unchanged-pose samples and disclose interior gaps, zero/missing callbacks,
+boundary coverage and thermal observations.
+
+Retain the binary and compiled-input hashes, actual hardware/display metadata,
+`setup.json`, screenshots, timestamped witnesses, windows and complete traces.
+Report CPU owner wall time separately from GPU queue spans, which include gaps
+between submissions. Metal canvas callbacks do not measure native overlay
+presentation, fresh intensity-marker updates, physical HDR output or input
+latency, and cannot qualify an Apple reference tier. Record current diagnostics
+and reference-hardware status in the
+[Apple native measurements](../../docs/performance/top-tier.md#apple-native-measurements).

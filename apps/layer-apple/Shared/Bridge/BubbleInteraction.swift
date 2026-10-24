@@ -34,7 +34,8 @@ import SwiftUI
     }
     private var contact: Contact?
     private var candidate: Candidate?
-    private var lastRing: (id: UInt64, point: CGPoint, time: TimeInterval)?
+    private weak var keyboardItem: BubblePresentation?
+    private var lastRing: (id: UInt64, kind: String, point: CGPoint, time: TimeInterval)?
     private var suppressClick = false
     var hold: (() -> Void)?
     private(set) var generation: UInt64 = 0
@@ -44,8 +45,34 @@ import SwiftUI
     var cancellations: [String: () -> Void] = [:]
     var active: Bool { contact != nil || candidate != nil }
     var captures: Bool { contact.map { $0.mode != "native" } ?? candidate?.moving ?? false }
-    var holdMultiplier: Double { contact?.hit.bubbleHit == "wheel" ? 2 : 1 }
+    var holdMultiplier: Double { ["wheel", "intensity"].contains(contact?.hit.bubbleHit ?? "") ? 2 : 1 }
     var canHold: Bool { contact != nil && contact?.mode != "native" && contact?.mode != "pair" }
+    var acceptsIntensityKeys: Bool {
+        guard enabled, let keyboardItem else { return false }
+        return bubbles?.items.contains { $0 === keyboardItem } == true && keyboardItem.model["color"]["intensity"]["enabled"].bool
+    }
+    @discardableResult func setIntensity(_ id: UInt64, stops: Double) -> Bool {
+        guard enabled, let item = bubbles?.items.first(where: { $0.id == id }) else { return false }
+        let data = item.model["color"]["intensity"]
+        guard data["enabled"].bool else { return false }
+        bubbles?.action(["type": "set_intensity", "id": id,
+            "stops": min(data["range"][1].number, max(data["range"][0].number, stops))])
+        return true
+    }
+    func intensityKey(_ key: String, id: UInt64? = nil, command: Bool = false, alt: Bool = false) -> Bool {
+        guard !NativeTextContext.composing, !command, !alt,
+            let id = id ?? keyboardItem?.id, let item = bubbles?.items.first(where: { $0.id == id }) else { return false }
+        if key == "escape", active { cancel(); return true }
+        if key == "Shift" { return acceptsIntensityKeys }
+        let stops = item.model["color"]["intensity"]["stops"].number
+        switch key {
+        case "home": return setIntensity(id, stops: 0)
+        case "arrowleft", "arrowdown": return setIntensity(id, stops: stops - 0.1)
+        case "arrowright", "arrowup": return setIntensity(id, stops: stops + 0.1)
+        default: return false
+        }
+    }
+    func releaseIntensityKeys() { keyboardItem = nil; store?.focusCanvas?() }
     func hit(_ point: CGPoint) -> Bool { bubbles?.hit(point) != nil }
     func hidesPointer(at point: CGPoint, pen: Bool) -> Bool {
         (pen && hit(point)) || contact.map { !$0.item.view["stamp"].isNull } == true
@@ -74,7 +101,9 @@ import SwiftUI
         contact = nil; candidate = nil; hold?()
     }
     func cancel() {
+        lastRing = nil
         validate()
+        if contact == nil { keyboardItem = nil }
         if let contact { restore(contact); if contact.held { bubbles?.closeMenu() } }
         if let candidate, candidate.moving { drag(candidate.grab, "cancel", candidate.last) }
         retire()
@@ -112,7 +141,10 @@ import SwiftUI
         return nil
     }
     func down(_ point: CGPoint, id: UInt64, device: ReorderDevice, clicks: Int, doubleTime: TimeInterval, time: TimeInterval) -> Admission {
+        let previousRing = lastRing
+        lastRing = nil
         validate()
+        if contact == nil { keyboardItem = nil }
         guard enabled, let bubbles else { return .ignore }
         generation &+= 1
         if let c = contact {
@@ -138,6 +170,7 @@ import SwiftUI
             return .ignore
         }
         let c = Contact(item: item, hit: hit, point: point, id: id); contact = c
+        if hit.bubbleHit == "intensity", item.model["color"]["intensity"]["enabled"].bool { keyboardItem = item }
         item.pressed = hit
         if hit.bubbleHit == "card", let region = nativeRegions.values.filter({ $0.owner == item.id && $0.bounds.contains(point) }).max(by: {
             $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height
@@ -151,14 +184,19 @@ import SwiftUI
                 "point": [relative.x + size / 2, relative.y + size / 2], "shape": store?.colorPanel["shape"].raw ?? "circle"])
             c.mode = "wheel"
             if !c.part.isNull { send(c, "wheel", "down", point) }
-        } else if hit.bubbleHit == "ring" {
-            let repeated = clicks == 2 || (device != .mouse && lastRing.map {
-                $0.id == item.id && time - $0.time <= doubleTime && hypot(point.x - $0.point.x, point.y - $0.point.y) <= 8
+        } else if hit.bubbleHit == "ring" || hit.bubbleHit == "intensity" {
+            let kind = hit.bubbleHit
+            c.mode = kind
+            guard kind != "intensity" || item.model["color"]["intensity"]["enabled"].bool else { return .capture }
+            let repeated = clicks == 2 || (device != .mouse && previousRing.map {
+                $0.id == item.id && $0.kind == kind && time - $0.time <= doubleTime && hypot(point.x - $0.point.x, point.y - $0.point.y) <= 8
             } == true)
-            lastRing = repeated ? nil : (item.id, point, time)
-            c.mode = repeated ? "reset" : "ring"
-            if repeated { bubbles.action(["type": "reset_ring", "id": item.id, "position": [local(c, point).x, local(c, point).y]]) }
-            else { send(c, "ring", "down", point) }
+            lastRing = repeated ? nil : (item.id, kind, point, time)
+            c.mode = repeated ? "reset" : kind
+            if repeated {
+                if kind == "intensity" { bubbles.action(["type": "set_intensity", "id": item.id, "stops": 0]) }
+                else { bubbles.action(["type": "reset_ring", "id": item.id, "position": [local(c, point).x, local(c, point).y]]) }
+            } else { send(c, kind, "down", point) }
         } else if hit.bubbleHit == "bead" || hit.bubbleHit == "item" {
             c.mode = hit.bubbleHit == "bead" ? "beads" : "choose"; send(c, c.mode, "down", point)
         }
@@ -191,14 +229,15 @@ import SwiftUI
             drag(grab(c.item.id), "move", c.midpoint); return true
         }
         let moved = hypot(point.x - c.origin.x, point.y - c.origin.y) > 8
-        if moved { hold?() }
+        if moved { hold?(); lastRing = nil }
         if c.mode == "native" {
             guard moved && !c.nativeDrags else { return false }
             restore(c)
         }
         if c.held {
             guard moved else { return true }
-            bubbles?.closeMenu(); c.held = false; c.mode = c.hit.bubbleHit == "wheel" ? "wheel" : "pending"
+            bubbles?.closeMenu(); c.held = false
+            c.mode = ["wheel", "intensity"].contains(c.hit.bubbleHit) ? c.hit.bubbleHit : "pending"
         }
         if c.mode == "wheel" {
             let relative = local(c, point)
@@ -209,7 +248,7 @@ import SwiftUI
             c.mode = "moving"; drag(grab(c.item.id), "down", c.origin)
         }
         if c.mode == "moving" || c.mode == "rim" { drag(grab(c.item.id, rim: c.mode == "rim"), "move", point) }
-        else if ["ring", "choose", "beads"].contains(c.mode) { send(c, c.mode, "move", point) }
+        else if ["ring", "intensity", "choose", "beads"].contains(c.mode) { send(c, c.mode, "move", point) }
         c.item.hover = c.item.hit(point)
         return true
     }
@@ -222,7 +261,7 @@ import SwiftUI
         }
         guard let c = contact, c.fingers[id] != nil else { return false }
         let captured = c.mode != "native"
-        if cancelled { restore(c); c.mode = "retired"; c.pairEnded = true }
+        if cancelled { lastRing = nil; restore(c); c.mode = "retired"; c.pairEnded = true }
         else if c.mode == "pair" && !c.pairEnded {
             c.pairEnded = true; drag(grab(c.item.id), "up", c.midpoint)
             c.item.placement.pinch = 1
@@ -231,7 +270,7 @@ import SwiftUI
             switch c.mode {
             case "moving", "rim": drag(grab(c.item.id, rim: c.mode == "rim"), "up", point)
             case "wheel": if !c.part.isNull { send(c, "wheel", "up", point) }
-            case "ring", "beads", "choose": send(c, c.mode, "up", point)
+            case "ring", "intensity", "beads", "choose": send(c, c.mode, "up", point)
             case "pending": bubbles?.action(["type": "tap", "id": c.item.id, "position": [local(c, point).x, local(c, point).y]])
             case "pill": pill(c, point)
             default: break
@@ -244,7 +283,7 @@ import SwiftUI
     func recognizeHold() {
         validate()
         guard let c = contact, canHold else { return }
-        restore(c); c.held = true; bubbles?.showMenu(c.item, at: c.origin)
+        lastRing = nil; restore(c); c.held = true; bubbles?.showMenu(c.item, at: c.origin)
     }
     @discardableResult func context(at point: CGPoint) -> Bool {
         guard enabled, let (item, hit) = bubbles?.hit(point) else { return false }
@@ -268,7 +307,7 @@ import SwiftUI
         if c.mode == "native" { for cancel in Array(cancellations.values) { cancel() } }
         else if c.mode == "pair", !c.pairEnded { drag(grab(c.item.id), "cancel", c.midpoint) }
         else if c.mode == "moving" || c.mode == "rim" { drag(grab(c.item.id, rim: c.mode == "rim"), "cancel", c.last) }
-        else if ["ring", "beads", "choose"].contains(c.mode) || (c.mode == "wheel" && !c.part.isNull) { send(c, c.mode, "cancel", c.last) }
+        else if ["ring", "intensity", "beads", "choose"].contains(c.mode) || (c.mode == "wheel" && !c.part.isNull) { send(c, c.mode, "cancel", c.last) }
         c.mode = "pending"
     }
     private func grab(_ id: UInt64, rim: Bool = false) -> JSON { JSON(["kind": rim ? "rim" : "bubble", "id": id]) }
@@ -277,9 +316,10 @@ import SwiftUI
         bubbles?.action(["type": "drag", "grab": grab.raw, "phase": phase, "position": [point.x, point.y], "viewport": [viewport.width, viewport.height]])
     }
     private func send(_ c: Contact, _ kind: String, _ phase: String, _ point: CGPoint) {
-        if kind == "wheel", (phase == "up" || phase == "cancel") && !c.wheelStarted { return }
-        let phase = kind == "wheel" && phase == "move" && !c.wheelStarted ? "down" : phase
-        if kind == "wheel" { c.wheelStarted = phase == "down" || phase == "move" }
+        let color = kind == "wheel" || kind == "intensity"
+        if color, (phase == "up" || phase == "cancel") && !c.wheelStarted { return }
+        let phase = color && phase == "move" && !c.wheelStarted ? "down" : phase
+        if color { c.wheelStarted = phase == "down" || phase == "move" }
         let p = local(c, point)
         var value: [String: Any] = ["type": kind, "id": c.item.id, "phase": phase, "position": [p.x, p.y]]
         if kind == "wheel" { value["part"] = c.part.raw }

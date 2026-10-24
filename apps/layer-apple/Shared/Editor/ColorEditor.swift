@@ -480,10 +480,10 @@ private struct ColorEditorWheel: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
     @ObservedObject var session: ColorEditorSession
     let side: CGFloat
-    @StateObject private var resources = ColorPanelLayoutCache()
+    @StateObject private var resources = ColorUIResourceCache()
     var body: some View {
         let panel = session.view["panel"], hdr = panel["hdr"].bool
-        let spec = resources.layout(side: side, hdr: hdr), layout = spec["layout"], wheel = layout["wheel"]
+        let spec = resources.resolve(["type": "picker_layout", "size": side, "hdr": hdr]), layout = spec["layout"], wheel = layout["wheel"]
         let height = hdr ? spec["height"].number : side
         let visible = hdr ? height - wheel[1].number : wheel[2].number
         ZStack(alignment: .topLeading) {

@@ -105,6 +105,8 @@ pub struct GlassLayout {
     connections: Vec<DrawerConnection>,
     #[serde(default)]
     arcs: Vec<[f32; 7]>,
+    #[serde(default)]
+    color_bubbles: Vec<[f32; 7]>,
 }
 
 #[derive(Default)]
@@ -119,6 +121,7 @@ impl Glass {
             matches!(r.len(), 8..=10) && r.iter().all(|v| v.is_finite()) && r[2] >= 0. && r[3] >= 0.
         });
         let arcs = layout.arcs.iter().all(|a| a.iter().all(|v| v.is_finite()) && a[2] >= 0. && a[3] >= 0.);
+        let color_bubbles = layout.color_bubbles.iter().all(|b| b.iter().all(|v| v.is_finite()) && b[2..5].iter().all(|v| *v >= 0.));
         let connections = layout.connections.iter().all(|c| {
             [
                 c.bounds.x,
@@ -133,7 +136,7 @@ impl Glass {
             .chain(&c.radii)
             .all(|v| v.is_finite())
         });
-        if layout.regions.len() + layout.connections.len() + layout.arcs.len() > MAX_GLASS || !regions || !connections || !arcs {
+        if layout.regions.len() + layout.connections.len() + layout.arcs.len() + layout.color_bubbles.len() > MAX_GLASS || !regions || !connections || !arcs || !color_bubbles {
             return Err("Invalid glass geometry".into());
         }
         let changed = self.layout != layout;
@@ -171,13 +174,16 @@ impl Glass {
             let arcs = self.layout.arcs.iter().map(|a| BackdropRegion::arc(
                 [a[0] * scale, a[1] * scale], a[2] * scale, a[3] * scale, a[4], a[5],
             ).with_strength(a[6]));
-            self.scaled = boxes.chain(connections).chain(arcs).collect();
+            let color_bubbles = self.layout.color_bubbles.iter().map(|b| BackdropRegion::color_bubble(
+                [b[0] * scale, b[1] * scale], b[2] * scale, b[3] * scale, b[4] * scale, b[5],
+            ).with_strength(b[6]));
+            self.scaled = boxes.chain(connections).chain(arcs).chain(color_bubbles).collect();
         }
         &self.scaled
     }
 
     pub fn count(&self) -> usize {
-        self.layout.regions.len() + self.layout.connections.len() + self.layout.arcs.len()
+        self.layout.regions.len() + self.layout.connections.len() + self.layout.arcs.len() + self.layout.color_bubbles.len()
     }
 }
 
@@ -287,6 +293,55 @@ mod tests {
 
     fn glass(value: serde_json::Value) -> Result<GlassLayout, serde_json::Error> {
         serde_json::from_value(value)
+    }
+
+    #[test]
+    fn color_bubble_glass_transports_one_scaled_contour_and_independent_strength() {
+        let mut layer = Glass::default();
+        let layout = |strength| glass(serde_json::json!({"regions":[],"connections":[],"color_bubbles":[[30,40,64,72,9,0.75,strength]]})).unwrap();
+        assert!(layer.set(layout(0.375)).unwrap());
+        assert_eq!(layer.count(), 1);
+        for scale in [2., 1.5, 2.] {
+            assert_eq!(layer.regions(scale), [BackdropRegion::color_bubble([30.*scale,40.*scale],64.*scale,72.*scale,9.*scale,0.75).with_strength(0.375)]);
+        }
+        let before = layer.regions(2.).to_vec();
+        assert!(layer.set(layout(0.125)).unwrap());
+        assert!(!layer.set(layout(0.125)).unwrap());
+        let after = layer.regions(2.);
+        assert_eq!(before[0].bounds, after[0].bounds);
+        assert_eq!(before[0].radii, after[0].radii);
+        assert_eq!(after[0].shape[1], 0.125);
+        assert_eq!(before[0].shape[2..], after[0].shape[2..]);
+    }
+
+    #[test]
+    fn invalid_color_bubbles_preserve_glass_and_share_the_region_limit() {
+        let valid = || glass(serde_json::json!({"regions":[[1,2,30,40,3,3,3,3]],"connections":[],"color_bubbles":[[30,40,64,72,9,0.75,0.5]]})).unwrap();
+        let mut layer = Glass::default();
+        layer.set(valid()).unwrap();
+        let before = layer.regions(1.5).to_vec();
+        for index in 0..7 {
+            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut invalid = valid(); invalid.color_bubbles[0][index] = value;
+                assert!(layer.set(invalid).is_err());
+                assert_eq!(layer.regions(1.5), before);
+            }
+        }
+        for index in 2..5 {
+            let mut invalid = valid(); invalid.color_bubbles[0][index] = -1.;
+            assert!(layer.set(invalid).is_err());
+            assert_eq!(layer.regions(1.5), before);
+        }
+        let mut invalid = valid(); invalid.color_bubbles = vec![[0.;7]; MAX_GLASS];
+        assert!(layer.set(invalid).is_err());
+        assert_eq!(layer.count(), 2);
+        assert_eq!(layer.regions(1.5), before);
+        let mut maximum = valid(); maximum.color_bubbles = vec![[0.;7]; MAX_GLASS - 1];
+        assert!(layer.set(maximum).unwrap());
+        assert_eq!(layer.count(), MAX_GLASS);
+        for entry in [serde_json::json!([0,0,1,1,1,0]), serde_json::json!([0,0,1,1,1,0,1,1])] {
+            assert!(glass(serde_json::json!({"regions":[],"connections":[],"color_bubbles":[entry]})).is_err());
+        }
     }
 
     #[test]
