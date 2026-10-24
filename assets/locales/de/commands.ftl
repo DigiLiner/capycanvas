@@ -623,6 +623,7 @@ commands-show-waveform = Wellenform anzeigen
 menu-rotation = Drehung
 menu-reset-rotation = Drehung zurücksetzen
 menu-lock-rotation = Drehung sperren
+menu-snap-rotation = Drehung einrasten
 menu-lock-zoom = Zoom sperren
 
 command-enclose-fill = Umranden und füllen

@@ -41,6 +41,99 @@ mod navigation_controls {
     }
 
     #[test]
+    fn rotation_snapping_menu_saves_the_preference_without_moving_the_view() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            let checkpoint = s.engine.checkpoint();
+            let before = s.state.camera.clone();
+            for enabled in [false, true] {
+                let menu = s.zoom_menu();
+                let item = &menu.menu.sections[menu.rotation_section][1];
+                assert_eq!(item.selected, Some(!enabled));
+                assert_eq!(item.action, Some(UiAction::SetRotationSnapping { enabled }));
+                let change = s.dispatch(item.action.clone().unwrap()).unwrap();
+                assert_ne!(change.regions & regions::SETTINGS, 0);
+                assert_ne!(change.regions & regions::HOST, 0);
+                assert!(!change.canvas_wake);
+                assert_eq!(s.state.camera, before);
+                assert_eq!(s.engine.checkpoint(), checkpoint);
+                let saved = s.state.requests.iter().rev().find_map(|request| match &request.kind {
+                    HostRequestKind::SaveSettings { settings } => Some(settings.as_ref()), _ => None,
+                }).unwrap();
+                assert_eq!(saved.snap_rotation, enabled);
+                let restored = Settings::restore(&serde_json::to_string(saved).unwrap());
+                assert_eq!(restored.snap_rotation, enabled);
+            }
+        }
+    }
+
+    #[test]
+    fn native_rotation_snapping_preserves_pan_zoom_and_respects_preferences() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            let checkpoint = s.engine.checkpoint();
+            let from = [350., 400.];
+            let to = [380., 420.];
+            let point = anchor(&s, from);
+            let zoom = s.state.camera.zoom;
+            s.begin_view_gesture();
+            s.multi_touch_gesture(from, to, 1.1, 2_f32.to_radians()).unwrap();
+            assert_eq!(s.state.camera.rotation, 0.);
+            assert!((s.state.camera.zoom - zoom * 1.1).abs() < 1e-5);
+            same_point(anchor(&s, to), point);
+            s.multi_touch_gesture(to, to, 1., 2_f32.to_radians()).unwrap();
+            assert!(s.state.camera.rotation > 0. && s.state.camera.rotation < 4_f32.to_radians());
+            s.dispatch(UiAction::SetRotation { rotation: 0. }).unwrap();
+            for _ in 0..2 {
+                s.begin_view_gesture();
+                s.multi_touch_gesture(to, to, 1., 2_f32.to_radians()).unwrap();
+                assert_eq!(s.state.camera.rotation, 0.);
+            }
+            s.dispatch(UiAction::SetRotationSnapping { enabled: false }).unwrap();
+            s.multi_touch_gesture(to, to, 1., 1_f32.to_radians()).unwrap();
+            assert!((s.state.camera.rotation.to_degrees() - 1.).abs() < 0.001);
+            s.dispatch(UiAction::SetRotationSnapping { enabled: true }).unwrap();
+            s.dispatch(UiAction::SetRotationLocked { locked: true }).unwrap();
+            let before = s.state.camera.rotation;
+            s.multi_touch_gesture(to, to, 1., 10_f32.to_radians()).unwrap();
+            assert_eq!(s.state.camera.rotation, before);
+            s.dispatch(UiAction::SetRotation { rotation: 89_f32.to_radians() }).unwrap();
+            let before = s.state.camera.rotation;
+            s.dispatch(UiAction::SetRotationLocked { locked: false }).unwrap();
+            s.begin_view_gesture();
+            s.multi_touch_gesture(to, to, 1.1, 0.).unwrap();
+            assert_eq!(s.state.camera.rotation, before);
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+            assert_eq!(s.engine.view().document_to_surface, s.state.camera.document_to_surface());
+        }
+    }
+
+    #[test]
+    fn rotate_tool_uses_snapping_and_rebases_between_contacts() {
+        let mut s = session(Platform::Gtk);
+        invoke(&mut s, CommandId::RotateView);
+        let center = s.state.camera.work_area_center();
+        let at = |degrees: f32| {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            [center[0] + 300. * cos, center[1] + 300. * sin]
+        };
+        let point = anchor(&s, center);
+        for _ in 0..2 {
+            pointer(&mut s, ContactPhase::Down, at(0.));
+            pointer(&mut s, ContactPhase::Move, at(2.));
+            assert_eq!(s.state.camera.rotation, 0.);
+            pointer(&mut s, ContactPhase::Up, at(2.));
+            assert_eq!(s.state.camera.rotation, 0.);
+        }
+        s.dispatch(UiAction::SetRotationSnapping { enabled: false }).unwrap();
+        pointer(&mut s, ContactPhase::Down, at(0.));
+        pointer(&mut s, ContactPhase::Move, at(2.));
+        pointer(&mut s, ContactPhase::Up, at(2.));
+        assert!((s.state.camera.rotation.to_degrees() - 2.).abs() < 0.001);
+        same_point(anchor(&s, center), point);
+    }
+
+    #[test]
     fn zoom_tool_click_steps_on_release_and_alt_reverses_it() {
         for platform in [Platform::Gtk, Platform::Android, Platform::Web] {
             let mut s = session(platform);

@@ -245,6 +245,53 @@ function Toggle-Lock([string]$Id,[string]$Field,[bool]$Locked){
  Wait-Until {((Item $Id).Current.ItemStatus -ne '') -eq $Locked} "$Id check mark did not follow the camera"
  Close-Menu
 }
+function Toggle-RotationSnapping([bool]$Enabled){
+ $before=Exact-Camera (Camera);$artwork=Navigation-PaintState
+ Open-Readout $Device;Choose $Device 'zoom-snap-rotation'
+ Wait-Until {(Model).state.settings.snap_rotation -eq $Enabled -and (Read-Snapshot (Settings-File)).snap_rotation -eq $Enabled} 'Snap rotation did not persist its preference'
+ Open-Readout $Device
+ Wait-Until {((Item 'zoom-snap-rotation').Current.ItemStatus -ne '') -eq $Enabled} 'Snap rotation check mark did not follow its preference'
+ Capture "rotation-snap-$Enabled-$Device-$Theme" -Composed -WithModel
+ Close-Menu
+ if((Exact-Camera (Camera)) -cne $before -or (Navigation-PaintState) -cne $artwork){throw 'Toggling Snap rotation changed the view, artwork or history'}
+}
+function Check-RotationSnapping{
+ if((Model).state.settings.snap_rotation -ne $true){throw 'Snap rotation is not enabled by default'}
+ Open-Readout $Device
+ if((Item 'zoom-snap-rotation').Current.ItemStatus -eq ''){throw 'Snap rotation is not checked by default'}
+ $field=Item 'rotation-field';$field.SetFocus()
+ $field.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('2')
+ [CapyRowPointer]::Key([uint32]$review.Id,0x0D)
+ Wait-Until {Near (Camera).rotation (2*[Math]::PI/180)} 'Explicit rotation was snapped to a cardinal'
+ Close-Menu
+ Toggle-RotationSnapping $false
+ Toggle-RotationSnapping $true
+ Navigation-Command 'reset_rotation'
+ Wait-Until {Near (Camera).rotation 0} 'Snap rotation preparation did not reset the view'
+ Navigation-Command 'rotate_view';Wait-Until {Navigation-Selected 'rotate_view'} 'Rotate View did not select for snapping'
+ $artwork=Navigation-PaintState
+ foreach($enabled in @($true,$false)){
+  if(!$enabled){Toggle-RotationSnapping $false}
+  Navigation-Focus;$center=Navigation-Point;$before=Camera
+  try{
+   [CapyRowPointer]::Down($Device,($center[0]+120),$center[1])
+   [CapyRowPointer]::Move(($center[0]+116),($center[1]+31))
+   $free=Changed-Camera $before 'Rotate outside the snap reach' {param($Camera)$Camera.rotation -gt 10*[Math]::PI/180}
+   [CapyRowPointer]::Move(($center[0]+119),($center[1]+13))
+   $eased=Changed-Camera $free 'Rotate through the snap reach' {param($Camera)$Camera.rotation -gt 0 -and $Camera.rotation -lt 10*[Math]::PI/180}
+   if($enabled -and $eased.rotation -ge [Math]::Atan2(13,119)){throw 'Snap rotation did not ease toward the cardinal'}
+   [CapyRowPointer]::Move(($center[0]+120),($center[1]+4))
+   $held=Changed-Camera $eased 'Rotate into the snap hold' {param($Camera)if($enabled){Near $Camera.rotation 0}else{$Camera.rotation -gt [Math]::PI/180 -and $Camera.rotation -lt 3*[Math]::PI/180}}
+   [CapyRowPointer]::Up()
+   $checks["rotation_snap_$enabled"]=@{device=$Device;outside_reach=$free.rotation;inside_reach=$eased.rotation;inside_hold=$held.rotation;artwork_history='unchanged'}
+  }finally{[CapyRowPointer]::Cancel()}
+  Navigation-Command 'reset_rotation';Wait-Until {Near (Camera).rotation 0} 'Rotate gesture did not reset'
+ }
+ Toggle-RotationSnapping $true
+ if((Navigation-PaintState) -cne $artwork){throw 'Rotation snapping changed the artwork or history'}
+ Navigation-Command 'pen';Wait-Until {Navigation-Selected 'pen'} 'Pen did not restore after snapping checks'
+ $checks.rotation_snap_preference='default checked; mouse/pen/touch variant toggle persists, reopens checked state and preserves explicit 2 degree view'
+}
 function Navigation-Point {
  $view=Camera;$bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$ratio=$bounds.Width/$view.viewport[0]
  @([int]($bounds.X+($view.work_area[0]+$view.work_area[2]/2)*$ratio),[int]($bounds.Y+($view.work_area[1]+$view.work_area[3]/2)*$ratio))
@@ -697,7 +744,7 @@ try {
  Open-Readout 'mouse'
  Check-ZoomCaptions
  Capture "zoom-menu-$Theme"
- $order=@('zoom-field','zoom-zoom_in','zoom-200','zoom-lock-zoom','rotation-field','zoom-reset_rotation','zoom-lock-rotation','zoom-button-zoom_out')
+ $order=@('zoom-field','zoom-zoom_in','zoom-200','zoom-lock-zoom','rotation-field','zoom-reset_rotation','zoom-snap-rotation','zoom-lock-rotation','zoom-button-zoom_out')
  $tops=@($order|ForEach-Object {(Item $_).Current.BoundingRectangle.Top})
  for($i=1;$i -lt $tops.Count;$i++){if($tops[$i] -le $tops[$i-1]){throw "Zoom menu shows $($order[$i]) above $($order[$i-1])"}}
  $buttons=@('zoom_out','zoom_in','rotate_left','rotate_right','flip_horizontal','flip_vertical'|ForEach-Object {Item ('zoom-button-'+$_)})
@@ -774,6 +821,7 @@ try {
  Choose 'touch' 'zoom-reset_rotation'
  Wait-Until {Near (Camera).rotation 0} 'Reset rotation did not restore the view'
  $checks.reset_rotation='passed'
+ Check-RotationSnapping
 
  $before=Zoom;Control-Wheel -Acknowledge {Wait-Until {!(Near (Zoom) $before)} 'Ctrl+wheel did not zoom the unlocked view'}
  Toggle-Lock 'zoom-lock-zoom' 'zoom_locked' $true

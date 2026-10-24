@@ -57,6 +57,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pinch zoom | 120 | **Not met.** 32.7–37.8 presented fps, p99 58.3–66.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 120 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Two-finger rotate | 120 | **Misses:** 33.33–45.48 presented fps, p99 33.33–41.67 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
+| Rotation snapping: two fingers and Rotate View | 120 | Unmeasured on the reference tablet | [Shared behavior](../ui/shared-ui.md#drawing-and-navigation); [GTK diagnostic](#gtk-rotation-snapping-diagnostic) |
 | Smooth Zoom tool, left/right | 120 | **Misses:** 35.75–42.09 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
 | Smooth Zoom tool, up/down | 120 | **Misses:** 34.56–43.73 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
 | Painting with Filters previews pending (61 MP) | 120 | One frame-gap outlier; repeat passes. Completed-update rate unqualified. Curves thumbnail opening 6.782 → 0.943–1.015 s | [Filters previews](#filters-previews), 2026-10-06 |
@@ -4408,3 +4409,18 @@ traces are retained under `artifacts/vector-v1-fixes-20261022/performance/`, in
 `baseline/top/`, `candidate-batch2-fast/top/` and
 `candidate-batch2-cap-aware/top/`. The middle tier was reserved by another
 session and was not measured.
+
+## GTK rotation snapping diagnostic
+
+Measured 2026-10-24 on NVIDIA RTX PRO 6000 Blackwell Max-Q, Vulkan driver
+615.71.09, optimized GTK with a private 1600 × 1000 display at 120 Hz.
+The candidate is based on `4a6abf44b`, test executable SHA-256
+`a439c109d2591bc0720ae6ec9669b886f0f780deec50579acf6db477b34ee5e1`.
+A generated 6000 × 4000 ProPhoto source, 32 paint layers and five pointwise
+adjustments produce 958 distinct moving presentations over 7.992 s:
+119.882 presents/s, p99 gap 8.557 ms and maximum gap 16.694 ms.
+Artwork and preview revisions remain unchanged, and presentation stops at idle.
+
+This desktop diagnostic uses 1.6-second workload phases and a generated source;
+it does not qualify sustained five-second gestures, the reference photo or
+reference tablet hardware. Evidence is under `artifacts/rotation-snap/gtk/`.

@@ -155,6 +155,39 @@ fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps
 }
 
 #[test]
+fn native_rotation_snapping_menu_and_gestures_follow_both_platform_policies() {
+    for platform in [0, 1] {
+        let app = App::new(platform);
+        let camera = || unsafe { &*app.0 }.host.session.state().camera.clone();
+        let checkpoint = unsafe { &*app.0 }.host.session.engine().checkpoint();
+        for enabled in [true, false] {
+            let menu = app.request(2, json!({"type":"zoom_menu"})).unwrap();
+            let snap = &menu["sections"][3][1];
+            assert_eq!(snap["label"], "Snap rotation");
+            let before = camera();
+            if snap["selected"] != enabled { app.action(snap["action"].clone()); }
+            assert_eq!(camera(), before);
+            assert_eq!(app.state()["settings"]["snap_rotation"], enabled);
+            let menu = app.request(2, json!({"type":"zoom_menu"})).unwrap();
+            assert_eq!(menu["sections"][3][1]["selected"], enabled);
+            app.action(json!({"type":"set_rotation","rotation":0.}));
+            let [x, y] = camera().work_area_center();
+            assert_eq!(unsafe { capy_apple_gesture(app.0, x, y, 1., 2.5_f32.to_radians(), 1) }, 0);
+            assert!((camera().rotation.to_degrees() - if enabled { 0. } else { 2.5 }).abs() < 0.001);
+            assert_eq!(unsafe { capy_apple_gesture(app.0, x, y, 1., 9.5_f32.to_radians(), 0) }, 0);
+            assert!((camera().rotation.to_degrees() - 12.).abs() < 0.001);
+        }
+        app.action(json!({"type":"set_rotation_snapping","enabled":true}));
+        app.action(json!({"type":"set_rotation","rotation":89_f32.to_radians()}));
+        let before = camera();
+        let [x, y] = before.work_area_center();
+        assert_eq!(unsafe { capy_apple_gesture(app.0, x, y, 1.1, 0., 1) }, 0);
+        assert_eq!(camera().rotation, before.rotation);
+        assert_eq!(unsafe { &*app.0 }.host.session.engine().checkpoint(), checkpoint);
+    }
+}
+
+#[test]
 fn native_gesture_recalls_one_beginning_and_invalid_beginnings_preserve_it() {
     fn same_view(actual: &layer_ui::Camera, expected: &layer_ui::Camera) {
         assert!((actual.zoom - expected.zoom).abs() < 1e-5);

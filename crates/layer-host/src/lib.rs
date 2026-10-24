@@ -2410,6 +2410,16 @@ mod tests {
         assert_eq!(menu["rotation_section"], 3);
         assert_eq!(menu["sections"][2][0]["selected"], true);
         assert_eq!(menu["sections"][3][1]["selected"], true);
+        assert_eq!(menu["sections"][3][2]["selected"], true);
+        let action = menu["sections"][3][1]["action"].clone();
+        assert_eq!(action, json!({"type": "set_rotation_snapping", "enabled": false}));
+        let camera = app.session.state().camera.clone();
+        app.dispatch(serde_json::from_value(action).unwrap()).unwrap();
+        assert!(!app.session.state().settings.snap_rotation);
+        assert_eq!(app.session.state().camera, camera);
+        let menu = app.query(json!({"type": "zoom_menu"})).unwrap();
+        assert_eq!(menu["sections"][3][1]["selected"], false);
+        assert_eq!(menu["sections"][3][2]["selected"], true);
         assert_eq!(menu["buttons"].as_array().unwrap().len(), layer_ui::NAVIGATOR_COMMANDS.len());
     }
 

@@ -154,6 +154,7 @@ final class EditorLaunchTests: XCTestCase {
         #endif
     }
     @MainActor func testZoomReadout() { checkZoomReadout(in: ignoringSavedWindows(editorCaptureApplication())) }
+    @MainActor func testZoomReadoutDark() { checkZoomReadout(in: ignoringSavedWindows(editorCaptureApplication()), theme: "dark") }
     @MainActor func testZoomTool() throws { try checkZoomTool(in: ignoringSavedWindows(editorCaptureApplication()), theme: "light") }
     @MainActor func testZoomToolDark() throws { try checkZoomTool(in: ignoringSavedWindows(editorCaptureApplication()), theme: "dark") }
     @MainActor func testCanvasNavigationControls() throws { try checkCanvasNavigationControls(in: ignoringSavedWindows(editorCaptureApplication()), theme: "light") }

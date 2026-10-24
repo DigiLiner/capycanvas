@@ -126,6 +126,8 @@ view during click zoom. Wheel, pinch and smooth dragging keep their anchors.
 Canvas preferences contain Mouse wheel (Pan/Zoom), Rotate with two fingers,
 and the existing pan and zoom speeds. The rotation switch applies to touch and
 trackpad gestures; it preserves panning, pinch zoom and the Rotate tool.
+The footer's zoom and rotation menu contains the saved Snap rotation preference;
+see [canvas navigation](shared-ui.md#drawing-and-navigation) for its behavior.
 Ctrl-wheel still zooms and Shift-wheel pans
 horizontally. Shortcut styles do not change these navigation choices.
 

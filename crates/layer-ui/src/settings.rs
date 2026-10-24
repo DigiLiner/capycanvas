@@ -89,6 +89,7 @@ pub struct Settings {
     pub zoom_tool: ZoomToolSettings,
     pub wheel_zoom: bool,
     pub rotate_with_two_fingers: bool,
+    pub snap_rotation: bool,
     /// New groups blend Pass Through instead of Normal.
     pub pass_through_groups: bool,
     pub feedback: bool,
@@ -156,6 +157,7 @@ impl Default for Settings {
             zoom_tool: ZoomToolSettings::default(),
             wheel_zoom: false,
             rotate_with_two_fingers: true,
+            snap_rotation: true,
             pass_through_groups: false,
             feedback: true,
             platform_prediction: true,
@@ -2715,6 +2717,7 @@ mod restore_tests {
         let chosen = Settings {
             theme: Some(Theme::Dark),
             zoom_speed: 2.0,
+            snap_rotation: false,
             zen_show_capy: false,
             pan_speed: 1.5,
             ..Default::default()

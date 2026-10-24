@@ -3129,6 +3129,14 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.sync_camera();
                 (CAMERA, false)
             }
+            UiAction::SetRotationSnapping { enabled } => {
+                self.require_navigation_idle()?;
+                save_settings = self.state.settings.snap_rotation != enabled;
+                self.state.settings.snap_rotation = enabled;
+                self.navigation.rotation_snap.reset();
+                self.touch.reset_rotation();
+                (SETTINGS, false)
+            }
             UiAction::FilterPicker { action } => {
                 self.state.filter_picker.apply(action);
                 self.state.adjustments =
@@ -4320,7 +4328,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             phase,
             position,
             self.layer_interaction.tool == LayerCanvasTool::Hand,
-            self.state.settings.rotate_with_two_fingers,
+            &self.state.settings,
         ) {
             self.initial_fit = false;
             self.sync_camera();
@@ -4378,7 +4386,8 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub fn multi_touch_gesture(&mut self, from: [f32; 2], to: [f32; 2], scale: f32, rotation: f32) -> Result<UiChange, String> {
         if !rotation.is_finite() { return Err("Invalid camera gesture".into()); }
-        self.gesture(from, to, scale, if self.state.settings.rotate_with_two_fingers {rotation} else {0.})
+        self.navigation_gesture(from, to, scale, if self.state.settings.rotate_with_two_fingers {rotation} else {0.},
+            self.state.settings.rotate_with_two_fingers)
     }
 
     pub fn gesture(
@@ -4388,10 +4397,17 @@ impl<R: CanvasRenderer> UiSession<R> {
         scale: f32,
         rotation: f32,
     ) -> Result<UiChange, String> {
+        self.navigation_gesture(from, to, scale, rotation, false)
+    }
+
+    fn navigation_gesture(
+        &mut self, from: [f32; 2], to: [f32; 2], scale: f32, rotation: f32, snapping: bool,
+    ) -> Result<UiChange, String> {
         if !self.navigation_idle() || self.interaction.gestures.suspends_navigation() {
             return Ok(self.changed(0, false));
         }
-        self.state.camera.gesture(from, to, scale, rotation)?;
+        self.state.camera.rotation_gesture(from, to, scale, rotation,
+            snapping && self.state.settings.snap_rotation, &mut self.navigation.rotation_snap)?;
         self.initial_fit = false;
         self.sync_camera();
         Ok(self.changed(regions::CAMERA, true))
@@ -5588,6 +5604,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let mask_mode_changed = self.state.settings.selection_painting != settings.selection_painting;
         let bindings_changed = self.state.settings.shortcuts != settings.shortcuts || self.state.settings.keymap != settings.keymap;
+        if self.state.settings.snap_rotation != settings.snap_rotation
+            || self.state.settings.rotate_with_two_fingers != settings.rotate_with_two_fingers
+        {
+            self.navigation.rotation_snap.reset();
+            self.touch.reset_rotation();
+        }
         self.state.settings = settings;
         if mask_mode_changed { self.refresh_document(); }
         self.refresh_shortcuts(bindings_changed);

@@ -619,6 +619,7 @@ commands-show-waveform = 显示波形
 menu-rotation = 旋转
 menu-reset-rotation = 重置旋转
 menu-lock-rotation = 锁定旋转
+menu-snap-rotation = 旋转吸附
 menu-lock-zoom = 锁定缩放
 
 command-enclose-fill = 围住填充

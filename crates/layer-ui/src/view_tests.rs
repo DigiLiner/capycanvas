@@ -74,8 +74,11 @@ fn zoom_menu_groups_zoom_and_rotation_controls() {
     assert_eq!(zoom_lock[0].action, Some(UiAction::SetZoomLocked { locked: true }));
     assert_eq!(zoom_lock[0].selected, Some(false));
     assert_eq!(rotation[0].action, Some(UiAction::Invoke { command: CommandId::ResetRotation }));
-    assert_eq!(rotation[1].action, Some(UiAction::SetRotationLocked { locked: true }));
-    assert_eq!(rotation[1].selected, Some(false));
+    assert_eq!(rotation[1].action, Some(UiAction::SetRotationSnapping { enabled: false }));
+    assert_eq!(rotation[1].selected, Some(true));
+    assert_eq!(rotation[1].label, "Snap rotation");
+    assert_eq!(rotation[2].action, Some(UiAction::SetRotationLocked { locked: true }));
+    assert_eq!(rotation[2].selected, Some(false));
     assert_eq!(menu.buttons.iter().map(|c| c.id).collect::<Vec<_>>(), NAVIGATOR_COMMANDS);
     assert_eq!(invoked, [CommandId::ZoomIn, CommandId::ZoomOut, CommandId::FitCanvas, CommandId::ActualPixels]);
     assert_eq!(commands[3].label, "Actual Pixels");
@@ -133,7 +136,7 @@ fn navigation_locks_preserve_pan_and_leave_explicit_controls_usable() {
             assert!((anchored.x - point.x).abs() < 1e-3 && (anchored.y - point.y).abs() < 1e-3);
             let menu = s.zoom_menu();
             assert_eq!(menu.menu.sections[2][0].selected, Some(zoom));
-            assert_eq!(menu.menu.sections[menu.rotation_section][1].selected, Some(rotation));
+            assert_eq!(menu.menu.sections[menu.rotation_section][2].selected, Some(rotation));
             assert_eq!(s.engine.view().document_to_surface, s.state.camera.document_to_surface());
         }
         s.dispatch(UiAction::SetZoomLocked { locked: true }).unwrap();
@@ -180,7 +183,7 @@ fn rotation_field_preserves_the_center_and_refuses_invalid_or_busy_edits() {
         assert_eq!(s.state.camera, camera);
     }
     s.pen(event(&s, 1, PenPhase::Down, 1.));
-    for action in [UiAction::SetRotation { rotation: 0.0 }, UiAction::SetZoomLocked { locked: true }, UiAction::SetRotationLocked { locked: true }] {
+    for action in [UiAction::SetRotation { rotation: 0.0 }, UiAction::SetZoomLocked { locked: true }, UiAction::SetRotationLocked { locked: true }, UiAction::SetRotationSnapping { enabled: false }] {
         assert!(s.dispatch(action).is_err());
         assert_eq!(s.state.camera, camera);
     }

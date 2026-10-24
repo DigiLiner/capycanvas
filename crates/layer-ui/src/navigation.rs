@@ -25,6 +25,7 @@ impl ViewPosition {
 pub(super) struct Navigation {
     pub previous: Option<ViewPosition>,
     pub saved: Option<ViewPosition>,
+    pub rotation_snap: layer_core::RotationSnap,
 }
 
 pub(super) fn command_mode(command: CommandId) -> Option<NavigationMode> {
@@ -51,6 +52,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.navigation_idle() { self.remember_view(); }
     }
     pub(super) fn remember_view(&mut self) {
+        self.navigation.rotation_snap.reset();
+        self.touch.reset_rotation();
         self.navigation.previous = Some(ViewPosition::capture(&self.state.camera));
     }
     pub fn navigation_mode(&self) -> Option<NavigationMode> {
@@ -121,7 +124,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     let angle = |p: [f32; 2]| (p[1] - center[1]).atan2(p[0] - center[0]);
                     let delta = (angle(position) - angle(from) + std::f32::consts::PI)
                         .rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-                    self.gesture(center, center, 1., delta)
+                    self.navigation_gesture(center, center, 1., delta, true)
                 }
             };
         }

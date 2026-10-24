@@ -1492,7 +1492,9 @@ divided by `XamlRoot.RasterizationScale` and a natural-size `RenderTargetBitmap`
 capture, preserving exact physical pixels at the actual display scale.
 
 The Zoom readout journey checks that opening and closing the readout preserves
-the exact camera, artwork and undo history.
+the exact camera, artwork and undo history. It also checks the saved Snap
+rotation checkbox and native Rotate View drags with snapping enabled and disabled,
+including the 3° hold and smooth transition back to free rotation by 10°.
 
 Pass the native reports to the `number-controls` and `color-panel` scenarios of
 [the visual tools](../../tools/visual/README.md). Rebuild normally before using

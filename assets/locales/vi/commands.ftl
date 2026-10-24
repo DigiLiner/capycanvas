@@ -621,6 +621,7 @@ commands-show-waveform = Hiện dạng sóng
 menu-rotation = Xoay
 menu-reset-rotation = Đặt lại góc xoay
 menu-lock-rotation = Khóa xoay
+menu-snap-rotation = Bắt dính góc xoay
 menu-lock-zoom = Khóa thu phóng
 
 command-enclose-fill = Khoanh và tô

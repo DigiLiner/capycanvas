@@ -921,7 +921,7 @@ function update(regions) {
     systemStatus?.sync();
     refreshPreferences(app.preferences_cached());
   }
-  if (regions & 32) zoomReadout?.refresh(state.camera);
+  if (regions & (16 | 32)) zoomReadout?.refresh(state.camera);
   if (regions & (1 | 16)) updateZen();
   editor.flushPaint();
   if (regions & 64) {

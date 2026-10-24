@@ -73,6 +73,7 @@ fn native_navigation_controls() {
     w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
     pump(150);
     let double_tool = |input: &mut RemoteInput, tile| {
+        pump(gtk::Settings::for_display(&w.surface.display()).gtk_double_click_time().max(0) as u64 + 1);
         let button = named::<gtk::Button>(w.surface.upcast_ref(), &format!("tile-{tile}"));
         let point = screen_point(button.upcast_ref(), &w.window, [0.5, 0.5]);
         input.perform(serde_json::json!([{ "point": point }, { "down": true }, { "down": false },

@@ -624,6 +624,7 @@ commands-show-waveform = Mostrar forma de onda
 menu-rotation = Rotação
 menu-reset-rotation = Redefinir rotação
 menu-lock-rotation = Bloquear rotação
+menu-snap-rotation = Encaixar rotação
 menu-lock-zoom = Bloquear zoom
 
 command-enclose-fill = Contornar e preencher

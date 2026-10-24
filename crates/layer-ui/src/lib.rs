@@ -1610,6 +1610,9 @@ pub enum UiAction {
     SetRotationLocked {
         locked: bool,
     },
+    SetRotationSnapping {
+        enabled: bool,
+    },
     SelectBrush {
         id: u32,
     },

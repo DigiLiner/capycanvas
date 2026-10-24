@@ -1,8 +1,8 @@
 import XCTest
 
 extension XCTestCase {
-    @MainActor func checkZoomReadout(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"}]"#
+    @MainActor func checkZoomReadout(in app: XCUIApplication, theme: String = "light") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = "[{\"type\":\"set_theme\",\"theme\":\"\(theme)\"}]"
         app.launch(); capturePaintEditor(in: app)
         let status = app.buttons["camera-status"]
         let menu = app.descendants(matching: .any)["zoom-menu"].firstMatch
@@ -41,6 +41,18 @@ extension XCTestCase {
         XCTAssertLessThan(rotation.frame.maxY, rotationMenu.frame.minY + 1)
         XCTAssertLessThan(rotationMenu.frame.maxY, rotate.frame.minY + 1, "Navigator's buttons close the menu")
         attachEditor(in: app, name: "zoom-readout-rotation")
+        let snapping = app.buttons["menu-action-Snap rotation"]
+        XCTAssertTrue(snapping.waitForExistence(timeout: 10))
+        XCTAssertTrue(snapping.isSelected)
+        let beforeSnapping = readout()
+        for enabled in [false, true] {
+            workspaceActivate(snapping)
+            XCTAssertTrue(menu.waitForNonExistence(timeout: 5))
+            XCTAssertEqual(readout(), beforeSnapping)
+            workspaceActivate(status)
+            XCTAssertTrue(snapping.waitForExistence(timeout: 10))
+            XCTAssertEqual(snapping.isSelected, enabled)
+        }
         workspaceActivate(rotate)
         expectation(for: NSPredicate { _, _ in !readout().hasSuffix(" 0°") }, evaluatedWith: status)
         waitForExpectations(timeout: 10)

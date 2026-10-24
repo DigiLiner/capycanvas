@@ -623,6 +623,7 @@ commands-show-waveform = Show Waveform
 menu-rotation = Rotation
 menu-reset-rotation = Reset rotation
 menu-lock-rotation = Lock rotation
+menu-snap-rotation = Snap rotation
 menu-lock-zoom = Lock zoom
 
 command-enclose-fill = Enclose and Fill

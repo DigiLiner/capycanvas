@@ -30,18 +30,18 @@ class FakeElement extends SharedElement {
 
 const document = { body: new FakeElement("body"), activeElement: null };
 const commands = ["zoom_out", "zoom_in", "rotate_left", "rotate_right", "flip_horizontal", "flip_vertical"];
-const menuModel = zoomIn => ({ buttons: commands.map(id => ({ id, icon: id, label: id, tooltip: id, enabled: id !== "zoom_in" || zoomIn, selected: false })), title: "Zoom", rotation_section: 3n, sections: [
+const menuModel = (zoomIn, snapRotation = true) => ({ buttons: commands.map(id => ({ id, icon: id, label: id, tooltip: id, enabled: id !== "zoom_in" || zoomIn, selected: false })), title: "Zoom", rotation_section: 3n, sections: [
   [["Zoom in", { type: "invoke", command: "zoom_in" }, zoomIn], ["Actual Pixels", { type: "invoke", command: "actual_pixels" }, true]],
   [["50%", { type: "set_zoom", zoom: 0.5 }, true], ["200%", { type: "set_zoom", zoom: 2 }, true]],
   [["Lock zoom", { type: "set_zoom_locked", locked: true }, true]],
-  [["Reset rotation", { type: "set_rotation", rotation: 0 }, true], ["Lock rotation", { type: "set_rotation_locked", locked: true }, true]],
-].map(section => section.map(([label, action, enabled]) => ({ label, action, enabled, hint: "", selected: null, sections: [] }))) });
+  [["Reset rotation", { type: "set_rotation", rotation: 0 }, true], ["Snap rotation", { type: "set_rotation_snapping", enabled: !snapRotation }, true, snapRotation], ["Lock rotation", { type: "set_rotation_locked", locked: true }, true]],
+].map(section => section.map(([label, action, enabled, selected = null]) => ({ label, action, enabled, hint: "", selected, sections: [] }))) });
 
 function harness() {
   const workspace = new FakeElement("main"), canvas = new FakeElement("canvas"), root = new FakeElement("button");
   const window = new FakeElement("window"), dispatched = [], rendered = [];
   workspace.append(canvas, root);
-  let camera = { zoom: 0.5, rotation: Math.PI / 2 }, zoomIn = true;
+  let camera = { zoom: 0.5, rotation: Math.PI / 2 }, zoomIn = true, snapRotation = true;
   const element = (tag, className) => new FakeElement(tag, className);
   const numberField = (control, label, onChange, inline) => {
     label = typeof label === "function" ? label() : label;
@@ -66,7 +66,7 @@ function harness() {
     icon: name => element("svg", name),
     catalog: { zoom: { kind: "slider", unit: "%" }, rotation: { kind: "slider", unit: "°" }, navigator_commands: commands,
       native_copy: { header: { zoom: "Zoom", rotation: "Rotation" } } },
-    menu: () => menuModel(zoomIn), renderMenu, refreshMenu: renderMenu,
+    menu: () => menuModel(zoomIn, snapRotation), renderMenu, refreshMenu: renderMenu,
     dispatch: action => dispatched.push(action), camera: () => camera, doc: document, target: window,
     viewport: () => ({ width: 1440, height: 1000 }),
   });
@@ -75,7 +75,7 @@ function harness() {
   const row = label => [...readout.items.children, ...readout.rotationItems.children].find(n => n.textContent === label);
   const key = (node, name = "Escape") => { document.activeElement = node; return window.dispatch("keydown", { key: name, target: node }); };
   return { readout, root, canvas, window, dispatched, rendered, row, key,
-    setCamera: next => { camera = next; }, setZoomIn: value => { zoomIn = value; } };
+    setCamera: next => { camera = next; }, setZoomIn: value => { zoomIn = value; }, setSnapRotation: value => { snapRotation = value; } };
 }
 
 test("the readout shows zoom and rotation as a button that never takes focus", () => {
@@ -122,6 +122,27 @@ test("a menu level or command dispatches its shared action and closes", () => {
   h.root.click();
   h.row("Actual Pixels").click();
   assert.deepEqual(h.dispatched.at(-1), { type: "invoke", command: "actual_pixels" });
+});
+
+test("rotation snapping forwards the shared checkbox action and refreshes its state", () => {
+  const h = harness();
+  const snap = () => h.rendered.at(-1).sections.flat().find(item => item.label === "Snap rotation");
+  h.canvas.focus();
+  h.root.click();
+  assert.equal(snap().selected, true);
+  h.row("Snap rotation").click();
+  assert.deepEqual(h.dispatched, [{ type: "set_rotation_snapping", enabled: false }]);
+  assert.equal(h.readout.open(), false);
+  assert.equal(document.activeElement, h.canvas);
+  h.setSnapRotation(false);
+  h.root.click();
+  assert.equal(snap().selected, false);
+  h.row("Snap rotation").click();
+  assert.deepEqual(h.dispatched.at(-1), { type: "set_rotation_snapping", enabled: true });
+  h.root.click();
+  h.setSnapRotation(true);
+  h.readout.refresh({ zoom: 0.5, rotation: Math.PI / 2 });
+  assert.equal(snap().selected, true);
 });
 
 test("the typed field sets the zoom, follows the camera and keeps the menu current", () => {

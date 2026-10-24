@@ -86,6 +86,23 @@ impl Camera {
             if self.rotation_locked { 0.0 } else { rotation })
     }
 
+    pub(crate) fn rotation_gesture(
+        &mut self, from: [f32; 2], to: [f32; 2], scale: f32, rotation: f32,
+        snapping: bool, snap: &mut layer_core::RotationSnap,
+    ) -> Result<(), String> {
+        if !snapping || self.rotation_locked {
+            self.gesture(from, to, scale, rotation)?;
+            snap.reset();
+            return Ok(());
+        }
+        let mut next = *snap;
+        let target = next.rotate(self.rotation, rotation).ok_or("Invalid camera gesture")?;
+        self.gesture(from, to, scale, target - self.rotation)?;
+        self.rotation = target;
+        *snap = next;
+        Ok(())
+    }
+
     pub(crate) fn transform(
         &mut self,
         from: [f32; 2],
@@ -116,9 +133,11 @@ impl Camera {
         }
         self.translation = translation;
         self.zoom = zoom;
-        self.rotation = (self.rotation + rotation + std::f32::consts::PI)
-            .rem_euclid(std::f32::consts::TAU)
-            - std::f32::consts::PI;
+        if rotation != 0. {
+            self.rotation = (self.rotation + rotation + std::f32::consts::PI)
+                .rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI;
+        }
         self.revision += 1;
         Ok(())
     }
@@ -243,6 +262,7 @@ impl Camera {
 #[derive(Default)]
 pub struct TouchGesture {
     points: BTreeMap<u64, [f32; 2]>,
+    rotation: layer_core::RotationSnap,
 }
 impl TouchGesture {
     pub fn is_active(&self) -> bool {
@@ -250,14 +270,17 @@ impl TouchGesture {
     }
     pub fn clear(&mut self) {
         self.points.clear();
+        self.reset_rotation();
     }
+
+    pub(crate) fn reset_rotation(&mut self) { self.rotation.reset(); }
 
     pub(crate) fn is_only_contact(&self, id: u64) -> bool {
         self.points.len() == 1 && self.points.contains_key(&id)
     }
 
     pub(crate) fn release(&mut self, id: u64) {
-        self.points.remove(&id);
+        if self.points.remove(&id).is_some() { self.reset_rotation(); }
     }
 
     pub fn update(
@@ -267,7 +290,7 @@ impl TouchGesture {
         phase: PenPhase,
         point: [f32; 2],
         single_pan: bool,
-        rotate: bool,
+        settings: &crate::Settings,
     ) -> bool {
         // Cancellation may have no usable coordinates. Retire the contact
         // before validating positions or interpreting any camera movement.
@@ -283,6 +306,7 @@ impl TouchGesture {
         match phase {
             PenPhase::Down => {
                 self.points.insert(id, point);
+                self.reset_rotation();
             }
             PenPhase::Move => {
                 if let Some(value) = self.points.get_mut(&id) {
@@ -308,16 +332,19 @@ impl TouchGesture {
         let before_length = (b[0] - a[0]).hypot(b[1] - a[1]);
         let after_length = (d[0] - c[0]).hypot(d[1] - c[1]);
         if before_length < 4.0 || after_length < 4.0 {
+            self.reset_rotation();
             return false;
         }
         let center = |a: [f32; 2], b: [f32; 2]| [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
         let rotation = (d[1] - c[1]).atan2(d[0] - c[0]) - (b[1] - a[1]).atan2(b[0] - a[0]);
         camera
-            .gesture(
+            .rotation_gesture(
                 center(a, b),
                 center(c, d),
                 after_length / before_length,
-                if rotate {rotation} else {0.},
+                if settings.rotate_with_two_fingers {rotation} else {0.},
+                settings.rotate_with_two_fingers && settings.snap_rotation,
+                &mut self.rotation,
             )
             .is_ok()
     }
@@ -443,16 +470,74 @@ mod tests {
         assert_eq!(camera, before);
     }
     #[test]
+    fn touch_snapping_preserves_the_midpoint_and_rebases_when_fingers_change() {
+        let mut camera = Camera::new([1000, 1000], [1000, 1000]);
+        let mut touch = TouchGesture::default();
+        let settings = crate::Settings::default();
+        let at = |degrees: f32| {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            [300. + 200. * cos, 300. + 200. * sin]
+        };
+        touch.update(&mut camera, 1, PenPhase::Down, [300., 300.], false, &settings);
+        touch.update(&mut camera, 2, PenPhase::Down, at(0.), false, &settings);
+        let anchor = camera.input_transform().map(Point { x: 400., y: 300. });
+        touch.update(&mut camera, 2, PenPhase::Move, at(2.), false, &settings);
+        assert_eq!(camera.rotation, 0.);
+        let end = at(2.);
+        near(anchor, camera.input_transform().map(Point { x: (300. + end[0]) * 0.5, y: (300. + end[1]) * 0.5 }));
+        let before = camera.clone();
+        touch.update(&mut camera, 3, PenPhase::Down, [500., 500.], false, &settings);
+        touch.update(&mut camera, 3, PenPhase::Cancel, [f32::NAN; 2], false, &settings);
+        assert_eq!(camera, before);
+        touch.update(&mut camera, 2, PenPhase::Move, at(4.), false, &settings);
+        assert_eq!(camera.rotation, 0.);
+        touch.update(&mut camera, 2, PenPhase::Move, at(6.), false, &settings);
+        assert!(camera.rotation > 0.);
+        let before = camera.clone();
+        touch.update(&mut camera, 2, PenPhase::Up, at(6.), false, &settings);
+        assert_eq!(camera, before);
+    }
+
+    #[test]
+    fn zero_rotation_preserves_exact_angles_after_snapping_and_while_locked() {
+        for angle in [0.2, -0.2, 0.4, std::f32::consts::FRAC_PI_2] {
+            let mut camera = Camera::new([1000, 1000], [1000, 1000]);
+            let mut snap = layer_core::RotationSnap::default();
+            camera.rotation_gesture([400., 350.], [400., 350.], 1., angle, true, &mut snap).unwrap();
+            let rotation = camera.rotation;
+            camera.gesture([400., 350.], [420., 380.], 1.1, 0.).unwrap();
+            assert_eq!(camera.rotation, rotation);
+            camera.rotation_locked = true;
+            camera.gesture([420., 380.], [430., 390.], 1.1, 0.5).unwrap();
+            assert_eq!(camera.rotation, rotation);
+        }
+    }
+
+    #[test]
+    fn rejected_snapped_gestures_do_not_consume_rotation() {
+        let mut camera = Camera::new([1000, 1000], [1000, 1000]);
+        let mut snap = layer_core::RotationSnap::default();
+        let at = [400., 350.];
+        camera.rotation_gesture(at, at, 1., 2_f32.to_radians(), true, &mut snap).unwrap();
+        let before = camera.clone();
+        assert!(camera.rotation_gesture(at, at, 0., 2_f32.to_radians(), true, &mut snap).is_err());
+        assert_eq!(camera, before);
+        camera.rotation_gesture(at, at, 1., 0.25_f32.to_radians(), true, &mut snap).unwrap();
+        assert_eq!(camera.rotation, 0.);
+    }
+
+    #[test]
     fn two_fingers_rotate_zoom_and_pan_without_lifecycle_jumps() {
         let mut camera = Camera::new([1000, 1000], [1000, 1000]);
         let mut touch = TouchGesture::default();
+        let settings = crate::Settings::default();
         let before = camera.clone();
-        assert!(!touch.update(&mut camera, 1, PenPhase::Down, [100.0, 100.0], false, true));
-        assert!(!touch.update(&mut camera, 1, PenPhase::Move, [200.0, 100.0], false, true));
+        assert!(!touch.update(&mut camera, 1, PenPhase::Down, [100.0, 100.0], false, &settings));
+        assert!(!touch.update(&mut camera, 1, PenPhase::Move, [200.0, 100.0], false, &settings));
         assert_eq!(camera, before);
-        touch.update(&mut camera, 2, PenPhase::Down, [300.0, 100.0], false, true);
+        touch.update(&mut camera, 2, PenPhase::Down, [300.0, 100.0], false, &settings);
         let anchor = camera.input_transform().map(Point { x: 250.0, y: 100.0 });
-        assert!(touch.update(&mut camera, 2, PenPhase::Move, [200.0, 300.0], false, true));
+        assert!(touch.update(&mut camera, 2, PenPhase::Move, [200.0, 300.0], false, &settings));
         assert!((camera.zoom - before.zoom * 2.0).abs() < 0.001);
         assert!((camera.rotation - std::f32::consts::FRAC_PI_2).abs() < 0.001);
         near(
@@ -460,10 +545,10 @@ mod tests {
             camera.input_transform().map(Point { x: 200.0, y: 200.0 }),
         );
         let before = camera.clone();
-        touch.update(&mut camera, 3, PenPhase::Down, [400.0, 300.0], false, true);
-        touch.update(&mut camera, 2, PenPhase::Up, [200.0, 300.0], false, true);
+        touch.update(&mut camera, 3, PenPhase::Down, [400.0, 300.0], false, &settings);
+        touch.update(&mut camera, 2, PenPhase::Up, [200.0, 300.0], false, &settings);
         assert_eq!(camera, before);
         touch.clear();
-        assert!(!touch.update(&mut camera, 3, PenPhase::Move, [300.0, 300.0], false, true));
+        assert!(!touch.update(&mut camera, 3, PenPhase::Move, [300.0, 300.0], false, &settings));
     }
 }

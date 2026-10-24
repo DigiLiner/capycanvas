@@ -66,9 +66,20 @@ fn native_zoom_readout_menu_and_field() {
         let lock_zoom = screen_point(&mapped_label(w.view_info.menu.upcast_ref(), "Lock zoom").unwrap(), &w.window, [0.5, 0.5]);
         let rotation = screen_point(w.view_info.rotation.upcast_ref(), &w.window, [0.5, 0.5]);
         let reset = screen_point(&mapped_label(w.view_info.menu.upcast_ref(), "Reset rotation").unwrap(), &w.window, [0.5, 0.5]);
+        let snap_rotation = screen_point(&mapped_label(w.view_info.menu.upcast_ref(), "Snap rotation").unwrap(), &w.window, [0.5, 0.5]);
         let lock_rotation = screen_point(&mapped_label(w.view_info.menu.upcast_ref(), "Lock rotation").unwrap(), &w.window, [0.5, 0.5]);
-        assert!(zoom[1] < lock_zoom[1] && lock_zoom[1] < rotation[1] && rotation[1] < reset[1] && reset[1] < lock_rotation[1]);
+        assert!(zoom[1] < lock_zoom[1] && lock_zoom[1] < rotation[1] && rotation[1] < reset[1]
+            && reset[1] < snap_rotation[1] && snap_rotation[1] < lock_rotation[1]);
         capture_menu(&w, &format!("zoom-menu-{theme:?}.png"));
+        let before = state(&w).camera;
+        for enabled in [false, true] {
+            choose(&w, &mut input, "Snap rotation");
+            until(|| state(&w).settings.snap_rotation == enabled && !w.view_info.menu.is_visible(), "rotation snapping toggles");
+            assert_eq!(state(&w).camera, before);
+            open(&w, &mut input);
+            let model = w.gpu.borrow().as_ref().unwrap().session.zoom_menu();
+            assert_eq!(model.menu.sections[model.rotation_section][1].selected, Some(enabled));
+        }
         choose(&w, &mut input, "Lock rotation");
         until(|| state(&w).camera.rotation_locked && !w.view_info.menu.is_visible(), "rotation lock applies");
         open(&w, &mut input);

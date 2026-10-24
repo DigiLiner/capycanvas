@@ -619,6 +619,7 @@ commands-show-waveform = 파형 표시
 menu-rotation = 회전
 menu-reset-rotation = 회전 초기화
 menu-lock-rotation = 회전 잠금
+menu-snap-rotation = 회전 스냅
 menu-lock-zoom = 확대/축소 잠금
 
 command-enclose-fill = 둘러싸서 채우기

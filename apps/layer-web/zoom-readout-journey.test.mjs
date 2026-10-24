@@ -187,11 +187,12 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
     await writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png',clip})).data,'base64'));
   };
   const theme=await evaluate('layerApp.state().settings.theme ?? null');
+  const snapRotation=await evaluate('layerApp.state().settings.snap_rotation');
   await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
-  await evaluate(`window.zoomWorkspace=layerApp.state().workspace;if(!zoomWorkspace.layout.canvas_info.visible){const w=layerApp.state().workspace;w.layout.canvas_info={visible:true};layerApp.dispatch({type:'restore_workspace',workspace:w});}`);
-  await settle();
+  const workspace=await evaluate('JSON.stringify(layerApp.state().workspace,(_,v)=>typeof v==="bigint"?Number(v):v)');
+  const showReadout=async()=>{await evaluate(`(()=>{const w=layerApp.state().workspace;if(!w.layout.canvas_info.visible){w.layout.canvas_info={visible:true};layerApp.dispatch({type:'restore_workspace',workspace:w});}})()`);await settle();await wait(`!document.querySelector('#canvas-status').hidden&&document.querySelector('${readout}').getBoundingClientRect().width>0`);};
+  await showReadout();
   try {
-    await wait(`!document.querySelector('#canvas-status').hidden&&document.querySelector('${readout}').getBoundingClientRect().width>0`);
     if(await evaluate('layerApp.state().layer_tools.has_selection'))await invoke('deselect');
     await invoke('fit_canvas');
     assert.equal(await evaluate(`document.querySelector('${readout}').tagName`),'BUTTON');
@@ -204,9 +205,9 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
       assert.ok(await evaluate(canvasFocused),`${kind}: opening leaves focus on the canvas`);
       assert.equal(await evaluate(`Number(document.querySelector('${menu} input.number-slider').getAttribute('aria-valuetext')?.replace(/[^0-9.]/g,''))`),37,`${kind}: the field shows the camera zoom`);
       const labels=await evaluate(`[...document.querySelectorAll('${menu} .zoom-menu-items .menu-label')].map(n=>n.textContent)`);
-      assert.deepEqual(labels,['Zoom in','Zoom out','Fit canvas','Actual Pixels','25%','50%','100%','200%','400%','Lock zoom','Reset rotation','Lock rotation'],'the shared zoom menu');
+      assert.deepEqual(labels,['Zoom in','Zoom out','Fit canvas','Actual Pixels','25%','50%','100%','200%','400%','Lock zoom','Reset rotation','Snap rotation','Lock rotation'],'the shared zoom menu');
       assert.ok(await evaluate(`(()=>{const zoom=document.querySelector('${menu} .number-control'),rotation=document.querySelector('${menu} .rotation-field');return zoom.getBoundingClientRect().height===rotation.getBoundingClientRect().height&&!rotation.innerText.includes('Rotation')&&!rotation.querySelector('.number-step');})()`),'rotation matches the single-row zoom slider without a visible label or step buttons');
-      assert.ok(await evaluate(`(()=>{const zoom=document.querySelector('${menu} .number-control').getBoundingClientRect(),rotation=document.querySelector('${menu} .rotation-field').getBoundingClientRect(),lockZoom=${row('Lock zoom')}.getBoundingClientRect(),reset=${row('Reset rotation')}.getBoundingClientRect(),lockRotation=${row('Lock rotation')}.getBoundingClientRect(),buttons=document.querySelector('${menu} .navigator-buttons').getBoundingClientRect();return zoom.bottom<=lockZoom.top&&lockZoom.bottom<=rotation.top&&rotation.bottom<=reset.top&&reset.bottom<=lockRotation.top&&lockRotation.bottom<=buttons.top;})()`),'zoom controls precede rotation controls, with navigation buttons at the bottom');
+      assert.ok(await evaluate(`(()=>{const zoom=document.querySelector('${menu} .number-control').getBoundingClientRect(),rotation=document.querySelector('${menu} .rotation-field').getBoundingClientRect(),lockZoom=${row('Lock zoom')}.getBoundingClientRect(),reset=${row('Reset rotation')}.getBoundingClientRect(),snap=${row('Snap rotation')}.getBoundingClientRect(),lockRotation=${row('Lock rotation')}.getBoundingClientRect(),buttons=document.querySelector('${menu} .navigator-buttons').getBoundingClientRect();return zoom.bottom<=lockZoom.top&&lockZoom.bottom<=rotation.top&&rotation.bottom<=reset.top&&reset.bottom<=snap.top&&snap.bottom<=lockRotation.top&&lockRotation.bottom<=buttons.top;})()`),'zoom controls precede rotation controls, with navigation buttons at the bottom');
       if(index===0)for(const name of ['light','dark']){await send({type:'set_theme',theme:name});await pause(150);await screenshot(`zoom-menu-${name}`);}
       await choose('200%',kind);
       await wait(`layerApp.state().camera.zoom===2&&!${opened}`);
@@ -216,6 +217,62 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
     }
     for (const theme of ['light', 'dark']) {
       await send({type:'set_theme',theme});
+      await openWith('mouse');
+      for(const enabled of [false,true]) {
+        await send({type:'set_rotation_snapping',enabled});
+        assert.ok(await evaluate(opened),`${theme}: settings updates keep the menu open`);
+        assert.equal(await evaluate(`${row('Snap rotation')}.getAttribute('aria-checked')`),String(enabled),`${theme}: open menu follows settings updates`);
+      }
+      await key('Escape','Escape',27);
+      for(const enabled of [false,true]) {
+        await openWith('mouse');
+        assert.equal(await evaluate(`${row('Snap rotation')}.getAttribute('aria-checked')`),String(!enabled),`${theme}: shared snapping checkmark`);
+        await choose('Snap rotation','mouse');
+        await wait(`layerApp.state().settings.snap_rotation===${enabled}&&!${opened}`);
+        const previousOrigin=await evaluate('performance.timeOrigin');
+        await call('Page.reload');
+        for(let i=0;;i++) {
+          if(await evaluate(`performance.timeOrigin!==${previousOrigin}&&!!window.layerApp&&document.body.dataset.gpu==="ready"`).catch(()=>false))break;
+          if(i===399)throw Error('Rotation snapping preference reload');
+          await pause(50);
+        }
+        await evaluate('layerApp.documents.startRecovery().then(()=>true)');await settle();
+        await showReadout();
+        assert.equal(await evaluate('layerApp.state().settings.snap_rotation'),enabled,`${theme}: snapping survives reload`);
+        await openWith('mouse');
+        assert.equal(await evaluate(`${row('Snap rotation')}.getAttribute('aria-checked')`),String(enabled),`${theme}: reloaded checkmark`);
+        await key('Escape','Escape',27);
+        const recovered=await evaluate('({zoom_locked:layerApp.state().camera.zoom_locked,rotation_locked:layerApp.state().camera.rotation_locked,snap_rotation:layerApp.state().settings.snap_rotation,rotate_with_two_fingers:layerApp.state().settings.rotate_with_two_fingers})');
+        if(recovered.zoom_locked||recovered.rotation_locked)console.log(`${theme}: recovered view locks before gesture fixture: ${JSON.stringify(recovered)}`);
+        if(recovered.zoom_locked)await send({type:'set_zoom_locked',locked:false});
+        if(recovered.rotation_locked)await send({type:'set_rotation_locked',locked:false});
+        await send({type:'set_rotation',rotation:0});
+        const point=await middle('#canvas');
+        const gesture=async(type,rotation,scale=1,offset=0)=>{await evaluate(`(()=>{const event=new Event(${JSON.stringify(type)},{bubbles:true,cancelable:true});Object.assign(event,{clientX:${point.x+offset},clientY:${point.y+offset/2},scale:${scale},rotation:${rotation}});layerApp.canvas.dispatchEvent(event);})()`);await settle();};
+        await gesture('gesturestart',0);await gesture('gesturechange',2);
+        const held=(await camera()).rotation;
+        if(enabled)assert.equal(held,0,`${theme}: small rotation holds at the cardinal`);
+        else assert.ok(Math.abs(held-2*Math.PI/180)<.00001,`${theme}: disabled snapping rotates freely: ${JSON.stringify({held,input:2,recovered})}`);
+        await gesture('gesturechange',12);await gesture('gestureend',12);
+        assert.ok(Math.abs((await camera()).rotation-12*Math.PI/180)<.00001,`${theme}: accumulated rotation escapes the snap region`);
+        const settings=await evaluate('layerApp.state().settings');
+        for(const rotation of [89*Math.PI/180,.2]) {
+          await send({type:'set_rotation',rotation});
+          const angle=(await camera()).rotation;
+          assert.ok(Math.abs(angle-rotation)<.00001,`${theme}: explicit angles remain exact`);
+          for(const rotate of [true,false]) {
+            await send({type:'restore_settings',settings:{...settings,rotate_with_two_fingers:rotate}});
+            const before=await camera(),turn=rotate?0:15;
+            await gesture('gesturestart',0);await gesture('gesturechange',turn,1.05,12);await gesture('gestureend',turn,1.05,12);
+            const after=await camera();
+            assert.equal(after.rotation,angle,`${theme}: ${rotate?'pure pan/pinch':'rotation disabled'} preserves the exact explicit angle ${angle}`);
+            assert.ok(after.zoom>before.zoom,`${theme}: pan/pinch still zooms`);
+            assert.notDeepEqual(after.t,before.t,`${theme}: pan/pinch still moves`);
+          }
+        }
+        await send({type:'restore_settings',settings});
+        await send({type:'set_rotation',rotation:0});
+      }
       await openWith('mouse');
       await choose('Lock rotation','mouse');
       await wait('layerApp.state().camera.rotation_locked');
@@ -345,7 +402,7 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
     }
 
     if (process.argv.includes('--zoom-controls')) {
-      console.log('Footer zoom/rotation controls passed: locks, slider, reset, Navigator buttons, mouse/touch/pen, both themes and keyboard focus');
+      console.log('Footer zoom/rotation controls passed: locks, snapping and reload, slider, reset, Navigator buttons, mouse/touch/pen, both themes and keyboard focus');
       return;
     }
     await invoke('fit_canvas');
@@ -407,9 +464,9 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
       return Number((await layerApp.app.export_presets({type:'save',name:'Poster WebP',recipe})).index)})()`);
     try { await exportAs('Webp',{expectError:WEBP_LIMIT,destination:poster}); }
     finally { await evaluate(`layerApp.app.export_presets({type:'remove',index:${poster}}).then(()=>true)`); }
-    console.log(`Zoom readout (mouse, touch, pen${device&&process.env.CAPY_ANDROID_SERIAL?', OS taps':''}), Actual Pixels, typed zoom, chords and WebP export passed`);
+    console.log(`Zoom readout (mouse, touch, pen${device&&process.env.CAPY_ANDROID_SERIAL?', OS taps':''}), rotation snapping and reload in both themes, Actual Pixels, typed zoom, chords and WebP export passed`);
   } finally {
-    await evaluate(`if(window.zoomPicker!==undefined)window.showSaveFilePicker=zoomPicker;document.querySelector('${menu}:popover-open')?.hidePopover();if(!zoomWorkspace.layout.canvas_info.visible)layerApp.dispatch({type:'restore_workspace',workspace:zoomWorkspace})`);
+    await evaluate(`if(window.zoomPicker!==undefined)window.showSaveFilePicker=zoomPicker;document.querySelector('${menu}:popover-open')?.hidePopover();const workspace=${workspace};if(!workspace.layout.canvas_info.visible)layerApp.dispatch({type:'restore_workspace',workspace});layerApp.dispatch({type:'set_rotation_snapping',enabled:${snapRotation}})`);
     if(theme)await evaluate(`layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}})`);
   }
 }

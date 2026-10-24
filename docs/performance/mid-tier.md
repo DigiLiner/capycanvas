@@ -73,6 +73,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pinch zoom | 90 | **Not met.** 46.4–47.2 presented fps with the panel at 90 Hz, p99 156 ms, 24 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 90 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Two-finger rotate | 90 | **Misses:** 58.88–58.95 presented fps, p99 16.78–16.81 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
+| Rotation snapping: two fingers and Rotate View | 90 | **Unqualified diagnostic:** 59.698–59.706 total presents/s at 60 Hz, including stationary snap holds; moving-only rate unmeasured | [Rotation snapping](#rotation-snapping), 2026-10-24 |
 | Smooth Zoom tool, left/right | 90 | **Misses:** 50.20–50.33 presented fps, p99 67.00–83.73 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Smooth Zoom tool, up/down | 90 | **Misses:** 50.03–50.28 presented fps, p99 66.99–117.22 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Footer zoom and rotation sliders | 90 | Unmeasured on the reference tablet | |
@@ -1656,3 +1657,18 @@ summaries and symbolized profiles are in `artifacts/vector-tablets-20261020/`.
 | Open the document | 4 s | Parsed 476–487 ms, first frame 746–849 ms, settled 1.80–1.91 s | **Met** |
 | Paint-layer thumbnail after filling the whole Base layer | No limit | 3.78–3.83 s, polling every 120 ms like the Layers panel | Unqualified |
 | Pan / G-Pen stroke while that thumbnail is pending | 90 | 55.7–55.8 / 89.6/s; 55.7–56.1 / 89.4–89.6/s without polling | No extra drops |
+
+## Rotation snapping
+
+Measured 2026-10-24 on Wacom MovinkPad 11, 6000 × 4000 reference photo,
+thermal status 0 before, during and after three warmed five-second rotation
+sweeps. Snapping holds within 3° and returns to free rotation by 10°.
+The optimized candidate is based on `4a6abf44b`, benchmark APK SHA-256
+`c3f340f3caa451588f7c664a1d667deeb1457ae8221740b7560f2cb6843f9a0a`.
+
+The private app ran at 60 Hz although the panel supports 90 Hz. The existing
+collector includes stationary snap holds and lacks per-sample camera transforms,
+so its 59.698–59.706 total presents/s and 16.779–16.782 ms p99 gaps do not
+qualify moving-frame rate or gaps. Viewport GPU p50 is 13.311–13.318 ms and
+p95 is 14.073–14.098 ms. Rotate View drags remain unmeasured.
+Evidence is under `artifacts/rotation-snap/android/performance/`.

@@ -203,7 +203,8 @@ private struct CameraStatus: View {
     private var copy: JSON { store.catalog["native_copy"]["header"] }
     private var refreshKey: String {
         JSON([camera.value["zoom"].raw, camera.value["rotation"].raw, camera.value["zoom_locked"].raw,
-            camera.value["rotation_locked"].raw, store.catalog["navigator_commands"].array.map { store.command($0.string)["enabled"].raw }]).stableKey
+            camera.value["rotation_locked"].raw, store.state["settings"]["snap_rotation"].raw,
+            store.catalog["navigator_commands"].array.map { store.command($0.string)["enabled"].raw }]).stableKey
     }
     private func refresh() {
         store.query(["type": "zoom_menu"]) { model in

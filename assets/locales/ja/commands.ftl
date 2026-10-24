@@ -619,6 +619,7 @@ commands-show-waveform = 波形を表示
 menu-rotation = 回転
 menu-reset-rotation = 回転をリセット
 menu-lock-rotation = 回転をロック
+menu-snap-rotation = 回転をスナップ
 menu-lock-zoom = ズームをロック
 
 command-enclose-fill = 囲って塗る

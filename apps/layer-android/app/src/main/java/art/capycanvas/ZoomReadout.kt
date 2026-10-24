@@ -44,11 +44,12 @@ import org.json.JSONObject
     val zoom = host.cameraZoom
     val rotation = host.cameraRotation
     val locks = host.cameraLocks
+    val snapRotation = host.snapshot?.objectOrNull("state")?.objectOrNull("settings")?.optBoolean("snap_rotation", true)
     val commands = host.snapshot?.getJSONObject("state")?.array("commands")
     val sections = menu.array("sections").values()
     val rotationSection = menu.getInt("rotation_section")
     val copy = host.catalog.getJSONObject("native_copy").getJSONObject("header")
-    LaunchedEffect(zoom, rotation, locks, commands) {
+    LaunchedEffect(zoom, rotation, locks, snapRotation, commands) {
         host.query(obj("type" to "zoom_menu")) { next -> if (button.menu != null) (next as? JSONObject)?.let { button.menu = it } }
     }
     BackHandler(!typing, close)

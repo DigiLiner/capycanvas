@@ -287,6 +287,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 vec![lock(MessageId::MENU_LOCK_ZOOM, self.state.camera.zoom_locked,
                     UiAction::SetZoomLocked { locked: !self.state.camera.zoom_locked })],
                 vec![command(CommandId::ResetRotation),
+                    lock(MessageId::MENU_SNAP_ROTATION, self.state.settings.snap_rotation,
+                        UiAction::SetRotationSnapping { enabled: !self.state.settings.snap_rotation }),
                     lock(MessageId::MENU_LOCK_ROTATION, self.state.camera.rotation_locked,
                         UiAction::SetRotationLocked { locked: !self.state.camera.rotation_locked })],
             ],

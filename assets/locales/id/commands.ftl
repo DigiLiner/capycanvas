@@ -1203,6 +1203,7 @@ commands-show-waveform = Tampilkan bentuk gelombang
 menu-rotation = Rotasi
 menu-reset-rotation = Atur ulang rotasi
 menu-lock-rotation = Kunci rotasi
+menu-snap-rotation = Lekatkan rotasi
 menu-lock-zoom = Kunci zoom
 
 command-enclose-fill = Lingkari dan Isi

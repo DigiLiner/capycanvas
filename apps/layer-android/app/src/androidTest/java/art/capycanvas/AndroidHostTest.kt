@@ -4182,6 +4182,116 @@ class AndroidHostTest {
         compose.waitUntil(10_000) { host.snapshot!!.objectOrNull("preferences") == null }
     }
 
+    @Test fun rotationSnappingAcrossThemesAndNativeContacts() {
+        fun rotation() = state().getJSONObject("camera").getDouble("rotation") * 180 / Math.PI
+        fun snapped() = state().getJSONObject("settings").getBoolean("snap_rotation")
+        fun open() {
+            val point = screenBounds(compose.onNodeWithTag("camera-readout")).center
+            val down = SystemClock.uptimeMillis()
+            for (phase in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), phase, point.x, point.y, 0)
+                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) } finally { event.recycle() }
+            }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Snap rotation").fetchSemanticsNodes().isNotEmpty() }
+        }
+        fun toggle() {
+            val expected = !snapped()
+            open()
+            compose.onNodeWithText("Snap rotation").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("zoom-menu").fetchSemanticsNodes().isEmpty() }
+            waitState { it.getJSONObject("settings").getBoolean("snap_rotation") == expected }
+        }
+        val workspace = JSONObject(defaultWorkspace).apply { getJSONObject("layout").put("canvas_info", obj("visible" to true)) }
+        action(obj("type" to "restore_workspace", "workspace" to workspace))
+        assertTrue("Rotation snapping starts enabled", snapped())
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "set_rotation_snapping", "enabled" to true))
+            open()
+            compose.onNodeWithText("Snap rotation").performScrollTo().assertIsSelected()
+            val image = instrumentation.uiAutomation.takeScreenshot()
+            val directory = File(compose.activity.getExternalFilesDir(null), "rotation-snap").apply { mkdirs() }
+            File(directory, "menu-$theme.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            image.recycle()
+            for (enabled in listOf(false, true)) {
+                action(obj("type" to "set_rotation_snapping", "enabled" to enabled))
+                compose.waitUntil(10_000) {
+                    compose.onNodeWithText("Snap rotation").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Selected) == enabled
+                }
+            }
+            compose.onNodeWithText("Snap rotation").performClick()
+            waitState { !it.getJSONObject("settings").getBoolean("snap_rotation") }
+            toggle()
+            assertTrue(snapped())
+            for (enabled in listOf(true, false)) {
+                if (snapped() != enabled) toggle()
+                for (touch in listOf(true, false)) {
+                    action(obj("type" to "set_rotation", "rotation" to 0))
+                    action(obj("type" to "invoke", "command" to if (touch) "pen" else "rotate_view"))
+                    if (!touch) assertEquals("rotate_view", state().getJSONObject("layer_tools").getString("tool"))
+                    var width = 1f
+                    var height = 1f
+                    instrumentation.runOnMainSync {
+                        val canvas = findCanvas(compose.activity.window.decorView)!!
+                        width = canvas.width.toFloat(); height = canvas.height.toFloat()
+                    }
+                    val area = state().getJSONObject("camera").getJSONArray("work_area")
+                    val center = androidx.compose.ui.geometry.Offset(
+                        (area.getDouble(0) + area.getDouble(2) / 2).toFloat(),
+                        (area.getDouble(1) + area.getDouble(3) / 2).toFloat())
+                    val radius = minOf(area.getDouble(2), area.getDouble(3)).toFloat() * .4f
+                    fun points(degrees: Double, scale: Float = 1f): List<androidx.compose.ui.geometry.Offset> {
+                        val radians = degrees * Math.PI / 180
+                        val offset = androidx.compose.ui.geometry.Offset(kotlin.math.cos(radians).toFloat() * radius * scale,
+                            kotlin.math.sin(radians).toFloat() * radius * scale)
+                        val positions = if (touch) listOf(center - offset, center + offset) else listOf(center + offset)
+                        return positions.map { androidx.compose.ui.geometry.Offset(it.x / width, it.y / height) }
+                    }
+                    val tool = if (touch) MotionEvent.TOOL_TYPE_FINGER else MotionEvent.TOOL_TYPE_STYLUS
+                    canvasEvent(MotionEvent.ACTION_DOWN, points(0.0).take(1), tool)
+                    if (touch) canvasEvent(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), points(0.0), tool)
+                    canvasEvent(MotionEvent.ACTION_MOVE, points(2.5), tool)
+                    host.drain()
+                    compose.waitUntil(10_000) { kotlin.math.abs(rotation() - if (enabled) 0.0 else 2.5) < .05 }
+                    assertEquals("$theme touch=$touch enabled=$enabled holds small rotation", if (enabled) 0.0 else 2.5, rotation(), .05)
+                    canvasEvent(MotionEvent.ACTION_MOVE, points(12.0), tool)
+                    compose.waitUntil(10_000) { kotlin.math.abs(rotation() - 12.0) < .05 }
+                    assertEquals("$theme touch=$touch enabled=$enabled escapes the snap", 12.0, rotation(), .05)
+                    if (touch) canvasEvent(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), points(12.0), tool)
+                    canvasEvent(MotionEvent.ACTION_UP, points(12.0).take(1), tool)
+                    if (touch) {
+                        action(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "rotate_with_two_fingers", "value" to false)))
+                        action(obj("type" to "set_rotation", "rotation" to .2))
+                        val preserved = state().getJSONObject("camera").getDouble("rotation")
+                        val zoom = state().getJSONObject("camera").getDouble("zoom")
+                        canvasEvent(MotionEvent.ACTION_DOWN, points(0.0).take(1))
+                        canvasEvent(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), points(0.0))
+                        canvasEvent(MotionEvent.ACTION_MOVE, points(12.0, .8f))
+                        waitState { kotlin.math.abs(it.getJSONObject("camera").getDouble("zoom") - zoom) > .001 }
+                        assertEquals("$theme enabled=$enabled pinching preserves the exact disabled rotation", preserved,
+                            state().getJSONObject("camera").getDouble("rotation"), 0.0)
+                        canvasEvent(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), points(12.0, .8f))
+                        canvasEvent(MotionEvent.ACTION_UP, points(12.0, .8f).take(1))
+                        action(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "rotate_with_two_fingers", "value" to true)))
+                    }
+                    action(obj("type" to "set_rotation", "rotation" to 89 * Math.PI / 180))
+                    assertEquals("Typed rotation stays exact", 89.0, rotation(), .001)
+                }
+            }
+            toggle()
+            assertTrue(snapped())
+            toggle()
+            compose.activityRule.scenario.recreate()
+            host.awaitReady(compose = compose)
+            assertFalse("$theme the disabled choice survives Activity recreation", snapped())
+            toggle()
+            assertTrue(snapped())
+            assertNull(host.failure)
+            assertNull(host.actionError)
+        }
+    }
+
     @Test fun cameraNavigationPublishesOnlyReadoutUpdates() {
         compose.waitUntil(60_000) { host.snapshot?.optBoolean("shaders_ready") == true }
         // Warm the camera path, including any initial fit/command changes.

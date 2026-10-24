@@ -44,6 +44,8 @@ pub mod levels;
 pub mod curves;
 mod pressure;
 pub use pressure::PressureResponse;
+mod rotation_snap;
+pub use rotation_snap::RotationSnap;
 #[cfg(test)]
 mod curves_tests;
 #[cfg(test)]

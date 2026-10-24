@@ -522,8 +522,9 @@ menu is open.
 The menu also shows a rotation slider from
 `NumericControl::rotation()`. Both fields use one row with the slider and editable
 value, without a visible label or step buttons. Zoom controls and percentages
-precede Lock zoom; the rotation slider, Reset rotation and Lock rotation follow
-together. Both locks show checkmarks. `SetRotation` rotates about the work-area
+precede Lock zoom; the rotation slider, Reset rotation, Snap rotation and Lock
+rotation follow together. The locks and Snap rotation show checkmarks.
+`SetRotation` rotates about the work-area
 centre without changing the artwork. The locks belong to the camera and stop
 canvas navigation gestures, including touch, wheel and continuous zoom input;
 pan remains available. Explicit sliders, percentages, commands and shortcuts
@@ -531,6 +532,16 @@ remain usable while locked. The bottom row uses the same shared
 `NAVIGATOR_COMMANDS` order as Navigator: zoom out/in, rotate left/right and flip
 horizontal/vertical. These buttons keep the menu open and follow live command
 availability.
+
+Snap rotation is on by default and saved in application settings across drawings.
+It applies to two-finger and trackpad rotation and Rotate View drags. Turning it
+on or off leaves the current view still; explicit angles and rotation commands
+keep their requested values. A shared `layer-core::RotationSnap` retains the raw
+angle while holding exactly at quarter turns within 3°. Between 3° and 10°,
+a continuous cubic response eases back to free rotation with matching endpoint
+slopes. Pan and pinch retain their midpoint anchor. Gesture starts rebase to the
+current displayed angle, finger changes discard residual movement, and release
+adds no motion. The transient snapping state never enters artwork or recovery.
 
 Hosts read numeric specifications from `UiCatalog` and menu sections and buttons
 from the Web `zoom_menu` export or native `zoom_menu` query. Its `rotation_section`

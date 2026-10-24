@@ -619,6 +619,7 @@ commands-show-waveform = แสดงรูปคลื่น
 menu-rotation = การหมุน
 menu-reset-rotation = รีเซ็ตการหมุน
 menu-lock-rotation = ล็อกการหมุน
+menu-snap-rotation = ดูดติดมุมหมุน
 menu-lock-zoom = ล็อกการซูม
 
 command-enclose-fill = ล้อมแล้วเติมสี

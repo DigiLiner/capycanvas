@@ -626,6 +626,7 @@ commands-show-waveform = Показать волновую форму
 menu-rotation = Поворот
 menu-reset-rotation = Сбросить поворот
 menu-lock-rotation = Заблокировать поворот
+menu-snap-rotation = Привязка поворота
 menu-lock-zoom = Заблокировать масштаб
 
 command-enclose-fill = Обвести и залить

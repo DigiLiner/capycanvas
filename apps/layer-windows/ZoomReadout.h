@@ -16,7 +16,7 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
     Bindings fields,controls;
     A buttons;
     double zoom=1,rotation=0;
-    hstring flipped;bool zoomLocked=false,rotationLocked=false;
+    hstring flipped;bool zoomLocked=false,rotationLocked=false,snapRotation=true;
     hstring menuKey;
     OwnedPopup menuOwner;
     uint64_t request=0;
@@ -74,9 +74,10 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
         if(text.Text()!=next)text.Text(next);
         double nextZoom=num(camera,L"zoom",1),nextRotation=num(camera,L"rotation");
         auto nextFlipped=array(camera,L"flipped").Stringify();bool nextZoomLocked=flag(camera,L"zoom_locked"),nextRotationLocked=flag(camera,L"rotation_locked");
+        bool nextSnapping=flag(object(data->state,L"settings"),L"snap_rotation",true);
         bool moved=nextZoom!=zoom||nextRotation!=rotation;
-        bool menu=nextZoom!=zoom||nextFlipped!=flipped||nextZoomLocked!=zoomLocked||nextRotationLocked!=rotationLocked;
-        zoom=nextZoom;rotation=nextRotation;flipped=nextFlipped;zoomLocked=nextZoomLocked;rotationLocked=nextRotationLocked;
+        bool menu=nextZoom!=zoom||nextFlipped!=flipped||nextZoomLocked!=zoomLocked||nextRotationLocked!=rotationLocked||nextSnapping!=snapRotation;
+        zoom=nextZoom;rotation=nextRotation;flipped=nextFlipped;zoomLocked=nextZoomLocked;rotationLocked=nextRotationLocked;snapRotation=nextSnapping;
         if(!open)return;
         if(moved)for(auto const& bind:fields)bind();
         if(menu)query(false);
@@ -114,6 +115,7 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
         if(type==L"set_zoom")return L"zoom-"+to_hstring(int(std::round(num(action,L"zoom")*100)));
         if(type==L"set_zoom_locked")return L"zoom-lock-zoom";
         if(type==L"set_rotation_locked")return L"zoom-lock-rotation";
+        if(type==L"set_rotation_snapping")return L"zoom-snap-rotation";
         if(type==L"set_rotation")return L"zoom-reset-rotation";
         return L"zoom-item";
     }

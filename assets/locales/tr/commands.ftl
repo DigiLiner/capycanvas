@@ -620,6 +620,7 @@ commands-show-waveform = Dalga biçimini göster
 menu-rotation = Döndürme
 menu-reset-rotation = Döndürmeyi sıfırla
 menu-lock-rotation = Döndürmeyi kilitle
+menu-snap-rotation = Döndürmeyi hizala
 menu-lock-zoom = Yakınlaştırmayı kilitle
 
 command-enclose-fill = Çevrele ve doldur
