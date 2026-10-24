@@ -10,6 +10,7 @@ pub trait ResourceWriter {
     fn image(&mut self, image: &crate::authored::Image) -> Result<Value, String>;
 }
 pub trait ResourceReader {
+    fn resolve_program(&self, _: &Arc<EffectProgram>) -> DecodeResult<Arc<EffectProgram>> { Err(super::trusted_programs::unapproved()) }
     fn code(&mut self, reference: &Value) -> DecodeResult<Resource<str>>;
     fn lut(&mut self, reference: &Value) -> DecodeResult<Arc<Lut3d>>;
     fn image(&mut self, reference: &Value) -> DecodeResult<crate::authored::Image>;
@@ -311,7 +312,7 @@ pub fn decode_program(value: &Value, reader: &mut impl ResourceReader) -> Decode
         constant_color:None,period:None,
         auxiliary:fields.get("auxiliary").map(decode_auxiliary).transpose()?,pages:Arc::default(),parameters:parameters.into(),constraints:constraints.into()});
     EffectInstance::new(program.clone()).validate()?;
-    Ok(program)
+    reader.resolve_program(&program)
 }
 
 pub fn encode_values(program: &Arc<EffectProgram>, values: &[EffectValue], writer: &mut impl ResourceWriter) -> Result<Value,String> {
@@ -360,6 +361,7 @@ mod tests {
         }
     }
     impl ResourceReader for Resources {
+        fn resolve_program(&self, program: &Arc<EffectProgram>) -> DecodeResult<Arc<EffectProgram>> { Ok(program.clone()) }
         fn code(&mut self, reference: &Value) -> DecodeResult<Resource<str>> {
             let id=string(required(object(reference,&["ref"])?,"ref")?)?;
             self.code.get(id).cloned().ok_or_else(||"Missing code resource".into())

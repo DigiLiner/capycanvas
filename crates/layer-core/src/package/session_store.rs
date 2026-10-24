@@ -125,6 +125,7 @@ pub struct SessionStore {
     head: Option<Head>,
     loaded: Option<Generation>,
     verified: BTreeMap<PortableId, (u64, u32, [u8; 32])>,
+    programs: BTreeMap<PortableId, super::TrustedPrograms>,
 }
 struct Ownership { owner: Weak<OwnerLock>, writer: Weak<()> }
 type StoreClaim = (Arc<OwnerLock>, Arc<()>);
@@ -158,7 +159,7 @@ impl SessionStore {
         create_directory(&path.join("generations"))?;
         let head = read_optional(&path.join("head.json"), 1024)?.map(|bytes| parse_head(&bytes)).transpose()?;
         let mut store = Self { path: path.into(), _owner: owner, _writer: writer, head, loaded: None,
-            verified: BTreeMap::new() };
+            verified: BTreeMap::new(), programs: BTreeMap::new() };
         match store.resource_roots() {
             Ok(roots) => store.collect_roots(roots)?,
             Err(_) => {
@@ -243,6 +244,9 @@ impl SessionStore {
             || check_cancelled(cancelled))?;
         self.head = Some(head);
         self.loaded = Some(reference);
+        self.programs.insert(generation, prepared.trusted_programs().clone());
+        let previous=self.head.as_ref().and_then(|head|head.previous.as_ref()).map(|previous|previous.id);
+        self.programs.retain(|id,_|*id==generation || Some(*id)==previous);
         self.collect_garbage()?;
         Ok(generation)
     }
@@ -258,7 +262,8 @@ impl SessionStore {
             check_cancelled(cancelled)?;
             match self.load_generation(&generation, limits, cancelled) {
                 Ok(session) => { self.loaded = Some(generation); return Ok(Some(session)); }
-                Err(error) => { if failure.is_none() { failure = Some(error); } }
+                Err(super::session::OpenFailure::Unsupported(message)) => return Err(message),
+                Err(error) => { if failure.is_none() { failure = Some(error.message()); } }
             }
         }
         Err(failure.unwrap_or_else(|| "Recovery checkpoint unavailable".into()))
@@ -269,7 +274,7 @@ impl SessionStore {
         if Generation::new(generation.id, &metadata) != *generation { return Err("Recovery metadata checksum failed".into()); }
         Ok(metadata)
     }
-    fn load_generation(&mut self, generation: &Generation, limits: ProjectLimits, cancelled: &AtomicBool) -> Result<OpenSession, String> {
+    fn load_generation(&mut self, generation: &Generation, limits: ProjectLimits, cancelled: &AtomicBool) -> Result<OpenSession, super::session::OpenFailure> {
         let metadata = self.generation_metadata(generation, limits.metadata_bytes)?;
         let index = resource_index(&metadata, limits)?;
         let mut files = Vec::with_capacity(index.ranges.len());
@@ -285,7 +290,8 @@ impl SessionStore {
             files.push((record.offset, owner));
         }
         let backing = ImmutableBacking::new(Arc::new(ResourcePack { length: index.length, files })).map_err(String::from)?;
-        let session = super::session::open_parts(&metadata, backing, limits, cancelled)?;
+        let programs=self.programs.get(&generation.id).cloned().unwrap_or_default();
+        let session = super::session::open_parts_checked(&metadata, backing, limits, cancelled, &programs)?;
         if verified.iter().any(|(id, value)| self.verified.get(id).is_some_and(|previous| previous != value)) {
             return Err("Conflicting immutable recovery resource descriptor".into());
         }
@@ -303,6 +309,7 @@ impl SessionStore {
         sync_directory(&self.path)?;
         self.head = None;
         self.loaded = None;
+        self.programs.clear();
         self.collect_garbage()
     }
     pub fn prepare_retirement(&mut self) -> Result<(), String> {
@@ -406,7 +413,7 @@ pub fn collect_unreferenced_stores(root: &Path, reachable: &BTreeSet<String>, ca
         let Some((owner, writer)) = claim_store(&path)? else { continue };
         if head.is_some() && !terminal && !retiring { continue; }
         let mut store = SessionStore { path, _owner: owner, _writer: writer,
-            head: None, loaded: None, verified: BTreeMap::new() };
+            head: None, loaded: None, verified: BTreeMap::new(), programs: BTreeMap::new() };
         store.retire()?;
         retired += 1;
     }
@@ -436,9 +443,10 @@ impl Publication for AtomicPublication {
 
 struct ResourceRecord { id: PortableId, offset: u64, length: u64, crc: u32, descriptor: [u8; 32] }
 struct ResourceIndex { records: Vec<ResourceRecord>, ranges: Vec<ResourceRecord>, length: u64 }
-fn resource_index(metadata: &[u8], limits: ProjectLimits) -> Result<ResourceIndex, String> {
+fn resource_index(metadata: &[u8], limits: ProjectLimits) -> Result<ResourceIndex, super::session::OpenFailure> {
     if metadata.len() as u64 > limits.metadata_bytes { return Err("Recovery metadata exceeds admission limit".into()); }
     let value = super::parse_json(metadata, limits.metadata_bytes.min(usize::MAX as u64) as usize)?;
+    super::session::validate_format(&value)?;
     let records = value["resources"].as_array().ok_or("Missing recovery resource inventory")?;
     if records.len() > 262_144 { return Err("Recovery resource count exceeds admission limit".into()); }
     let mut ids = BTreeSet::new();
@@ -696,6 +704,58 @@ mod tests {
         let capture = editor.capture_session(editor.capture(1, Default::default()).unwrap()).unwrap();
         PreparedSession::prepare(&capture, json!({"marker": marker}), &AtomicBool::new(false)).unwrap()
     }
+    #[test]
+    fn custom_authority_is_local_to_committed_generations_and_survives_fallback() {
+        let root=Directory::new();let cancel=AtomicBool::new(false);
+        let mut editor=Editor::new(Document::new(PortableId::random(),19,11,DocumentNames {paint:"ink".into(),paper:"paper".into()}));
+        let handle=editor.document().artwork.effects.iter().next().unwrap().0;
+        let program=crate::effect_catalog::custom_program("solid_color");
+        let values=crate::EffectInstance::new(program.clone()).values;
+        let application=crate::EffectApplication::new(program,values,editor.document().composition().size);
+        editor.perform(crate::Edit::Effect(crate::RecordChange::replace(&editor.document().artwork.effects,handle,Some(application)).unwrap())).unwrap();
+        let capture=editor.capture_session(editor.capture(1,Default::default()).unwrap()).unwrap();
+        let prepared=PreparedSession::prepare(&capture,json!({"marker":42}),&cancel).unwrap();
+        let mut store=SessionStore::open(&root.0).unwrap();
+        let first=store.commit(&prepared,&cancel).unwrap();
+        assert!(store.load(ProjectLimits::default(),&cancel).unwrap().is_some());
+        let authority=store.programs.keys().copied().collect::<Vec<_>>();
+        assert!(store.commit_using(&prepared,&cancel,Interrupted {operation:1,after:false,count:0}).is_err());
+        assert_eq!(store.programs.keys().copied().collect::<Vec<_>>(),authority);
+        let second=store.commit(&prepared,&cancel).unwrap();
+        let first_bytes=fs::read(store.generation_path(first)).unwrap();
+        let second_bytes=fs::read(store.generation_path(second)).unwrap();
+        fs::write(store.generation_path(second),b"corrupt metadata").unwrap();
+        assert!(store.load(ProjectLimits::default(),&cancel).unwrap().is_some());
+        assert_eq!(store.loaded_generation(),Some(first));
+        fs::write(store.generation_path(second),&second_bytes).unwrap();
+        drop(store);
+        let mut reopened=SessionStore::open(&root.0).unwrap();
+        assert!(reopened.load(ProjectLimits::default(),&cancel).err().unwrap().contains("not approved"));
+        assert_eq!(fs::read(reopened.generation_path(first)).unwrap(),first_bytes);
+        assert_eq!(fs::read(reopened.generation_path(second)).unwrap(),second_bytes);
+    }
+    #[test]
+    fn unapproved_generation_never_silently_restores_an_older_builtin_checkpoint() {
+        let root=Directory::new();let cancel=AtomicBool::new(false);
+        let mut editor=Editor::new(Document::new(PortableId::random(),19,11,DocumentNames {paint:"ink".into(),paper:"paper".into()}));
+        let capture=editor.capture_session(editor.capture(1,Default::default()).unwrap()).unwrap();
+        let builtin=PreparedSession::prepare(&capture,json!({"marker":1}),&cancel).unwrap();
+        let mut store=SessionStore::open(&root.0).unwrap();store.commit(&builtin,&cancel).unwrap();
+        let handle=editor.document().artwork.effects.iter().next().unwrap().0;
+        let program=crate::effect_catalog::custom_program("solid_color");let values=crate::EffectInstance::new(program.clone()).values;
+        let application=crate::EffectApplication::new(program,values,editor.document().composition().size);
+        editor.perform(crate::Edit::Effect(crate::RecordChange::replace(&editor.document().artwork.effects,handle,Some(application)).unwrap())).unwrap();
+        let capture=editor.capture_session(editor.capture(1,Default::default()).unwrap()).unwrap();
+        let custom=PreparedSession::prepare(&capture,json!({"marker":2}),&cancel).unwrap();
+        let generation=store.commit(&custom,&cancel).unwrap();
+        let metadata=fs::read(store.generation_path(generation)).unwrap();
+        let head=fs::read(root.0.join("head.json")).unwrap();drop(store);
+        let mut store=SessionStore::open(&root.0).unwrap();
+        assert!(store.load(ProjectLimits::default(),&cancel).err().unwrap().contains("not approved"));
+        assert_eq!(store.loaded_generation(),None);assert_eq!(store.generation(),Some(generation));
+        assert_eq!(fs::read(store.generation_path(generation)).unwrap(),metadata);
+        assert_eq!(fs::read(root.0.join("head.json")).unwrap(),head);
+    }
     fn count(path: &Path) -> usize { match fs::read_dir(path) { Ok(entries) => entries.count(), Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0, Err(error) => panic!("{error}") } }
     fn resource_ids(prepared: &PreparedSession) -> BTreeSet<PortableId> { prepared.resources().entries.iter().map(|entry| entry.payload.id()).collect() }
     fn tile_resource(prepared: &PreparedSession) -> &super::super::resources::PreparedResource {
@@ -827,7 +887,7 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_current_falls_back_then_replacement_collects_corrupt_files() {
+    fn corrupt_current_falls_back_and_unsupported_current_stays_preserved() {
         for corruption in 0..3 {
             let directory = Directory::new();
             let mut store = SessionStore::open(&directory.0).unwrap();
@@ -849,6 +909,15 @@ mod tests {
             }
             drop(store);
             let mut store = SessionStore::open(&directory.0).unwrap();
+            if corruption==2 {
+                let metadata=fs::read(store.generation_path(generation)).unwrap();
+                let head=fs::read(store.path.join("head.json")).unwrap();
+                assert_eq!(store.load(ProjectLimits::default(),&AtomicBool::new(false)).err().unwrap(),"Unsupported session artwork");
+                assert_eq!(store.loaded_generation(),None);assert_eq!(store.generation(),Some(generation));
+                assert_eq!(fs::read(store.generation_path(generation)).unwrap(),metadata);
+                assert_eq!(fs::read(store.path.join("head.json")).unwrap(),head);
+                continue;
+            }
             assert_eq!(marker(&mut store), 1);
             store.commit(&capture(3), &AtomicBool::new(false)).unwrap();
             assert_eq!(marker(&mut store), 3);
@@ -857,6 +926,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn future_session_schema_is_terminal_before_reading_its_resource_inventory() {
+        let directory=Directory::new();let cancel=AtomicBool::new(false);
+        let mut store=SessionStore::open(&directory.0).unwrap();store.commit(&capture(1),&cancel).unwrap();
+        let generation=store.commit(&capture(2),&cancel).unwrap();
+        let metadata=serde_json::to_vec(&json!({"format":"capy.session","version":2,"future_field":[]})).unwrap();
+        fs::write(store.generation_path(generation),&metadata).unwrap();
+        let mut head=store.head.clone().unwrap();head.current=Generation::new(generation,&metadata);
+        let head=serde_json::to_vec(&head).unwrap();fs::write(store.path.join("head.json"),&head).unwrap();drop(store);
+        let mut store=SessionStore::open(&directory.0).unwrap();
+        assert_eq!(store.load(ProjectLimits::default(),&cancel).err().unwrap(),"Unsupported session format");
+        assert_eq!(store.loaded_generation(),None);assert_eq!(store.generation(),Some(generation));
+        assert_eq!(fs::read(store.generation_path(generation)).unwrap(),metadata);
+        assert_eq!(fs::read(store.path.join("head.json")).unwrap(),head);
+    }
     #[test]
     fn reuse_verifies_existing_immutable_bytes_and_does_not_rewrite() {
         let directory = Directory::new();

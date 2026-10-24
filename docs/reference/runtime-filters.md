@@ -7,6 +7,8 @@ stable IDs, parameter-data versions and all authored keyed values. Custom filter
 are a development feature: recovery and worker captures embed their code and
 schema, but `.capy` files cannot contain them yet. Both use the shared renderer; custom filters
 execute separately and do not join built-in fusion.
+Their recovery execution follows the shared
+[program approval contract](../internals/session-recovery.md#private-custom-programs).
 **Curves and Gradient Map are
 the agreed exceptions:** their custom controls and parameter preparation remain
 in Rust; GPU shaders evaluate the prepared segments/stops. Generic preparation,

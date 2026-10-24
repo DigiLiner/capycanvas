@@ -64,7 +64,7 @@ impl TransferPayload {
         })
     }
 }
-pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>}
+pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms}
 fn active(cancel:&AtomicBool)->Result<(),String>{if cancel.load(Ordering::Relaxed){Err("Transfer cancelled".into())}else{Ok(())}}
 fn manifest(descriptor:&TransferDescriptor,limits:ProjectLimits)->Result<Manifest,String>{
     if crate::json_len(descriptor)>limits.metadata_bytes as usize {return Err("Transfer metadata exceeds admission".into());}
@@ -90,6 +90,7 @@ impl PreparedTransfer {
         let (extensions,retained)=art.extensions.edited_retained(&live)?;objects.extend(extensions);
         let opaque=inventory.with_opaque(retained)?;
         let mut roots=crate::RootInventory::default();roots.artwork(art);
+        let trusted_programs=super::TrustedPrograms::from_roots(&roots)?;
         additional_luts.extend(roots.resources.into_iter().filter_map(|lut|lut.resource().map(|r|(r.id(),lut.clone()))));let luts=additional_luts;
         let mut payloads=Vec::new();let mut verification=BTreeMap::new();let mut records=Vec::new();
         fn push(payloads:&mut Vec<TransferPayload>,payload:TransferPayload)->usize{let id=payloads.len();payloads.push(payload);id}
@@ -139,7 +140,7 @@ impl PreparedTransfer {
         if !metadata.is_empty(){value["metadata"]=Value::Object(metadata);}
         let descriptor=TransferDescriptor {manifest:value,layout:TransferLayout::capture(art),checkpoint:capture.checkpoint,working_selection,lengths:payloads.iter().map(TransferPayload::len).collect(),resources:verification,selections,retained_resources,private_resources:BTreeMap::new()};
         manifest(&descriptor,ProjectLimits::default())?;
-        Ok(Self {descriptor,payloads})
+        Ok(Self {descriptor,payloads,trusted_programs})
     }
     pub(crate) fn append_private_resource(&mut self,resource:Arc<OpaqueResource>)->Result<(),String>{
         if self.descriptor.private_resources.contains_key(&resource.id){return Err("Duplicate private transfer resource".into());}
@@ -204,15 +205,18 @@ impl PreparedTransfer {
         self.adopt_verified_with_selection(limits,cancel).map(|(capture,_)|capture)
     }
     pub fn adopt_verified_with_selection(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<(ArtworkCapture,Option<crate::Selection>),String>{
-        self.adopt_verified_with_retention(limits,cancel,false,|_,_|Ok(())).map(|(capture,selection,())|(capture,selection))
+        self.adopt_verified_with_retention(limits,cancel,false,&self.trusted_programs,|_,_|Ok(())).map(|(capture,selection,())|(capture,selection))
     }
-    pub(crate) fn adopt_verified_with<T>(&self,limits:ProjectLimits,cancel:&AtomicBool,additional:impl FnOnce(&Artwork,&mut ResourceReader<'_>)->Result<T,String>)->Result<(ArtworkCapture,Option<crate::Selection>,T),String>{
-        self.adopt_verified_with_retention(limits,cancel,true,additional)
+    pub fn adopt_with_programs(&self,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<ArtworkCapture,String> {
+        self.adopt_verified_with_retention(limits,cancel,false,programs,|_,_|Ok(())).map(|(capture,_,())|capture)
     }
-    fn adopt_verified_with_retention<T>(&self,limits:ProjectLimits,cancel:&AtomicBool,retained:bool,additional:impl FnOnce(&Artwork,&mut ResourceReader<'_>)->Result<T,String>)->Result<(ArtworkCapture,Option<crate::Selection>,T),String>{
+    pub(crate) fn adopt_verified_with<T>(&self,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms,additional:impl FnOnce(&Artwork,&mut ResourceReader<'_>)->Result<T,String>)->Result<(ArtworkCapture,Option<crate::Selection>,T),String>{
+        self.adopt_verified_with_retention(limits,cancel,true,programs,additional)
+    }
+    fn adopt_verified_with_retention<T>(&self,limits:ProjectLimits,cancel:&AtomicBool,retained:bool,programs:&super::TrustedPrograms,additional:impl FnOnce(&Artwork,&mut ResourceReader<'_>)->Result<T,String>)->Result<(ArtworkCapture,Option<crate::Selection>,T),String>{
         active(cancel)?;let manifest=manifest(&self.descriptor,limits)?;
         let empty:Arc<[u8]>=Arc::from([]);let backing=ImmutableBacking::new(Arc::new(empty)).map_err(str::to_string)?;
-        let mut reader=ResourceReader::new(&manifest,&backing,cancel,limits);reader.private=true;reader.require_verified();
+        let mut reader=ResourceReader::new(&manifest,&backing,cancel,limits);reader.private=true;reader.trusted_programs=programs.clone();reader.require_verified();
         if manifest.resources.len()!=self.descriptor.resources.len()||self.descriptor.checkpoint.document!=manifest.document{return Err("Transfer identity inventory mismatch".into());}
         let mut decoded=0u64;
         let slot_counts:BTreeMap<PortableId,usize>=manifest.objects.values().filter(|record|record["type"]=="capy.vector-object/1").flat_map(|record|{
@@ -297,7 +301,7 @@ impl TransferReceiver {
             ||bytes.union(&words).any(|index|*index>=descriptor.lengths.len()) {return Err("Unindexed or conflicting transfer payloads".into());}
         let mut reuse=BTreeMap::new();
         if let Some(previous)=previous {
-            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new()};
+            let candidate=PreparedTransfer {descriptor:descriptor.clone(),payloads:Vec::new(),trusted_programs:Default::default()};
             let keys=candidate.payload_keys()?;let old=previous.payload_keys()?;
             for (key,index) in keys {if let Some(before)=old.get(&key) {reuse.insert(index,previous.payloads[*before].clone());}}
         }
@@ -333,7 +337,7 @@ impl TransferReceiver {
             PayloadBuffer::Bytes(bytes)=>TransferPayload::Bytes(unsafe{bytes.assume_init()}),
             PayloadBuffer::Words(words)=>TransferPayload::Words(unsafe{words.assume_init()}),
         }).collect();
-        Ok(PreparedTransfer{descriptor:self.descriptor,payloads})
+        Ok(PreparedTransfer{descriptor:self.descriptor,payloads,trusted_programs:Default::default()})
     }
 }
 

@@ -111,6 +111,25 @@ portable custom filter contract is designed. Custom programs have a stable
 `key`, evaluation `contract`, `kind`, `code`, `entry`, keyed `parameters`,
 ordered `slots` and literal labels, and execute independently of built-in shader
 fusion. Their `slots` fixes the shader layout.
+Stored code is authored recovery data. Execution requires an independently
+approved program owner. Built-ins resolve through the bundled catalog. Custom
+programs resolve through `package::TrustedPrograms`, created from already
+approved live program owners. Matching covers the complete authored evaluation
+contract, ordered code modules, entry points, passes, parameters and defaults,
+constraints, and lookup sample contents. The reader returns the approved program
+Arc, retaining its UI fields. Resource identities and declared digests carry no
+authority.
+
+Live captures retain approval separately from serialized metadata, including
+programs owned only by Undo or Redo. `SessionStore` retains that approval for its
+successfully committed current and previous generations. A fresh store has no
+custom approval. Unapproved or unsupported authored data stops restoration and
+preserves its files; it cannot trigger fallback to an older supported drawing.
+Ordinary corruption can still use a valid previous checkpoint. Embedders can use
+`open_with_programs`, `open_parts_with_programs` and transfer
+`adopt_with_programs` with independently approved owners. Persisting an installed
+custom-filter trust catalog across application restarts remains separate work.
+
 Their parameter dimensions use `scalar`, `count`, `angle`, `time`, or `length` with a
 `source_pixels`, `composition_pixels` or `normalized` reference. Built-in dimensions
 come from the current catalog; a displayed unit never controls resizing.
@@ -180,8 +199,9 @@ replacement. Each file and the containing directory are synchronized in order.
 The head retains current and previous generation identities and SHA-256 checksums
 of their exact metadata bytes. Decode and cleanup verify these checksums before
 using metadata references. Interrupted publication leaves
-a complete old or new checkpoint; validated fallback to the previous generation
-is treated as recovery. Membership has no previous-generation fallback, which
+a complete old or new checkpoint; validated fallback after corruption is treated
+as recovery. Unsupported authored data remains unavailable until its requirements
+are satisfied. Membership has no previous-generation fallback, which
 would resurrect deliberately closed drawings.
 Publication errors retain whether rename completed. A close cannot be cancelled
 after its membership replacement became visible; a subsequent synchronization

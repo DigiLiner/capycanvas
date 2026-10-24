@@ -269,6 +269,7 @@ pub struct ResourceReader<'a> {
     pub manifest: &'a Manifest, pub backing: &'a ImmutableBacking, pub cancelled: &'a AtomicBool,
     pub limits: crate::ProjectLimits,
     pub(crate) private: bool,
+    pub(crate) trusted_programs: super::TrustedPrograms,
     pub(crate) bytes: BTreeMap<PortableId, Resource<[u8]>>, pub(crate) texts: BTreeMap<PortableId, Resource<str>>,
     pub(crate) tiles: BTreeMap<PortableId, Arc<TileBlob>>, pub(crate) luts: BTreeMap<PortableId, Arc<Lut3d>>, decoded: u64,
     verified: bool,
@@ -292,7 +293,7 @@ pub(crate) struct ResourceCache {
 }
 impl<'a> ResourceReader<'a> {
     pub fn new(manifest: &'a Manifest, backing: &'a ImmutableBacking, cancelled: &'a AtomicBool, limits: crate::ProjectLimits) -> Self {
-        Self {manifest,backing,cancelled,limits,private:false,bytes:BTreeMap::new(),texts:BTreeMap::new(),tiles:BTreeMap::new(),luts:BTreeMap::new(),decoded:0,verified:false,aliases:BTreeMap::new(),rasters:BTreeMap::new(),selections:BTreeMap::new(),images:BTreeMap::new(),programs:BTreeMap::new(),vectors:BTreeMap::new(),opaque:BTreeMap::new()}
+        Self {manifest,backing,cancelled,limits,private:false,trusted_programs:Default::default(),bytes:BTreeMap::new(),texts:BTreeMap::new(),tiles:BTreeMap::new(),luts:BTreeMap::new(),decoded:0,verified:false,aliases:BTreeMap::new(),rasters:BTreeMap::new(),selections:BTreeMap::new(),images:BTreeMap::new(),programs:BTreeMap::new(),vectors:BTreeMap::new(),opaque:BTreeMap::new()}
     }
     pub(crate) fn install_cache(&mut self, cache: ResourceCache) {
         self.bytes=cache.bytes;self.texts=cache.texts;self.tiles=cache.tiles;self.luts=cache.luts;self.decoded=cache.decoded;
@@ -505,6 +506,7 @@ impl super::effect_records::ResourceWriter for ResourceInventory {
     }
 }
 impl super::effect_records::ResourceReader for ResourceReader<'_> {
+    fn resolve_program(&self, program: &Arc<crate::EffectProgram>) -> DecodeResult<Arc<crate::EffectProgram>> { self.trusted_programs.resolve(program) }
     fn code(&mut self, value: &Value) -> DecodeResult<Resource<str>> {
         let (id,record)=self.record(value,"capy.wgsl/1")?;
         values::object(&record["data"],&["decoded_bytes"])?;

@@ -1,4 +1,4 @@
-use crate::package::{session::{PreparedSession, open}, session_transfer::{PreparedSessionTransfer, SessionTransferReceiver}, ImmutableBacking, MAX_RANGE_BYTES};
+use crate::package::{session::{PreparedSession, open_with_programs}, session_transfer::{PreparedSessionTransfer, SessionTransferReceiver}, ImmutableBacking, MAX_RANGE_BYTES};
 use crate::{authored::*, color::{ColorProfile, RgbColor, RgbSpace, ProofRecipe, hdr::SdrRendition},
     raster::{RasterData, RasterPlane, RasterRevision, RasterTile, RasterWatercolor, TileBlob, TileKey, TILE_SIZE},
     BlendSpace, Document, DocumentNames, Edit, Editor, EffectInstance, EffectValue, ImageResolution,
@@ -165,7 +165,7 @@ fn transfer(editor:&Editor)->Editor {
     for index in 0..transfer.payload_count() {let length=transfer.payload_len(index).unwrap();let mut offset=0;
         while offset<length {let count=(length-offset).min(MAX_RANGE_BYTES as u64) as usize;
             receiver.push_chunk(index,&transfer.read_chunk(index,offset,count).unwrap()).unwrap();offset+=count as u64;}}
-    let restored=receiver.finish().unwrap().adopt_verified(ProjectLimits::default(),&cancel).unwrap();
+    let restored=receiver.finish().unwrap().adopt_with_programs(ProjectLimits::default(),&cancel,&capture.trusted_programs().unwrap()).unwrap();
     assert_eq!(restored.metadata.value,metadata);assert_eq!(restored.editor.document().working.generation,editor.document().working.generation);
     assert_editor(editor,&restored.editor);restored.editor
 }
@@ -176,7 +176,7 @@ fn reopen(editor:&Editor)->Editor {
     let metadata=json!({"destination":"file:///private/色.capy","saved_checkpoint":3,"camera":{"zoom":1.75,"rotation":0.25}});
     let prepared=PreparedSession::prepare(&capture,metadata.clone(),&cancel).unwrap();
     let mut bytes=Vec::new();prepared.write(&mut bytes,&cancel).unwrap();
-    let loaded=open(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&cancel).unwrap();
+    let loaded=open_with_programs(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&cancel,prepared.trusted_programs()).unwrap();
     assert_eq!(loaded.metadata.value,metadata);assert_eq!(loaded.editor.document().working.generation,editor.document().working.generation);
     assert_editor(editor,&loaded.editor);transfer(&loaded.editor)
 }
@@ -347,7 +347,7 @@ fn captured_output_phases_remain_reversible_across_session_history() {
     let mut capture=original.capture_session(original.capture(11,if deferred {authored.clone()}else{context.clone()}).unwrap()).unwrap();
     let artwork=Arc::make_mut(&mut capture.artwork_mut().artwork);artwork.outputs.get_mut(artwork.default_output).unwrap().context=context.clone();
     let archive=PreparedSession::prepare(&capture,json!({}),&cancel).unwrap();let mut bytes=Vec::new();archive.write(&mut bytes,&cancel).unwrap();
-    let archived=open(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&cancel).unwrap().editor;
+    let archived=open_with_programs(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&cancel,archive.trusted_programs()).unwrap().editor;
     let transferred=PreparedSessionTransfer::capture(&capture,json!({}),&cancel).unwrap().adopt_verified(ProjectLimits::default(),&cancel).unwrap().editor;
     for mut restored in [archived,transferred] {
         assert_eq!(restored.checkpoint(),checkpoint);assert_eq!(restored.document().output().context,context);

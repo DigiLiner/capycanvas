@@ -18,6 +18,12 @@ type HistoryDocuments=Vec<(Document,u64)>;
 impl EditorCapture {
     pub fn artwork(&self)->&ArtworkCapture {&self.artwork}
     pub fn artwork_mut(&mut self)->&mut ArtworkCapture {&mut self.artwork}
+    pub fn trusted_programs(&self)->Result<super::TrustedPrograms,String> {
+        self.validate_identity()?;
+        let mut roots=crate::RootInventory::default();roots.document(&self.document);roots.artwork(&self.artwork.artwork);
+        for (edit,_) in self.undo.iter().chain(&self.redo) {edit.roots(&mut roots);}
+        super::TrustedPrograms::from_roots(&roots)
+    }
     pub(crate) fn validate_identity(&self)->Result<(),String> {
         if self.artwork.checkpoint!=self.captured_checkpoint || self.artwork.checkpoint.document!=self.document.artwork.id || self.artwork.artwork.id!=self.document.artwork.id
             || self.artwork.checkpoint.owner!=self.document.owner || self.artwork.checkpoint.artwork_generation!=self.document.revision
@@ -151,7 +157,7 @@ struct SessionRecord {
     metadata:Value,metadata_profiles:Vec<Value>,objects:Vec<ObjectVersion>,index_chunks:Vec<Vec<Value>>,resources:Vec<Value>,extension_records:BTreeMap<PortableId,Value>,extension_resources:Vec<PortableId>,current:StateRecord,undo:Vec<StateRecord>,redo:Vec<StateRecord>,
 }
 impl SessionRecord {
-    fn manifest(&self,state:&StateRecord,directory:&Directory,limits:ProjectLimits)->Result<Manifest,String> {
+    fn manifest(&self,state:&StateRecord,directory:&Directory,limits:ProjectLimits)->Result<Manifest,OpenFailure> {
         if state.objects.len()>ManifestLimits::default().graph.objects {return Err("Session object graph exceeds admission".into());}
         let mut expanded=0usize;
         for index in &state.objects {
@@ -175,7 +181,7 @@ impl SessionRecord {
         let bytes=serde_json::to_vec(&value).map_err(|e|e.to_string())?;
         match Manifest::parse_private(&bytes,directory,ManifestLimits {metadata_bytes:limits.metadata_bytes.min(usize::MAX as u64) as usize,..Default::default()})? {
             ManifestRead::Known(manifest) if matches!(manifest.support,Support::Editable)=>Ok(manifest),
-            _=>Err("Unsupported session artwork".into()),
+            _=>Err(OpenFailure::Unsupported("Unsupported session artwork".into())),
         }
     }
 }
@@ -213,7 +219,7 @@ pub(crate) fn decode_profiles(profiles:&[Value],reader:&mut ResourceReader<'_>)-
     if profiles.len()>ManifestLimits::default().resources {return Err("Too many session profiles".into());}
     profiles.iter().map(|profile|reader.profile(profile).map_err(|error|error.to_string())).collect()
 }
-pub struct PreparedSession {metadata:Arc<[u8]>,resources:PreparedResources}
+pub struct PreparedSession {metadata:Arc<[u8]>,resources:PreparedResources,trusted_programs:super::TrustedPrograms}
 impl PreparedSession {
     pub fn prepare(capture:&EditorCapture,metadata:impl Into<SessionMetadata>,cancel:&AtomicBool)->Result<Self,String> {
         let (current,undo,redo)=capture.documents(cancel)?;let mut encoder=StateEncoder::default();encoder.inventory.private=true;
@@ -240,9 +246,10 @@ impl PreparedSession {
             extension_records:art.extensions.records.clone(),extension_resources:art.extensions.resources.keys().copied().collect(),current:current_state,undo:undo_states,redo:redo_states};
         let metadata=serde_json::to_vec(&record).map_err(|e|e.to_string())?;
         if metadata.len()>ProjectLimits::default().metadata_bytes as usize {return Err("Session metadata exceeds admission".into());}
-        Ok(Self {metadata:metadata.into(),resources})
+        Ok(Self {metadata:metadata.into(),resources,trusted_programs:capture.trusted_programs()?})
     }
     pub fn metadata(&self)->&[u8] {&self.metadata}
+    pub fn trusted_programs(&self)->&super::TrustedPrograms {&self.trusted_programs}
     pub fn resources(&self)->&PreparedResources {&self.resources}
     pub fn write(&self,output:&mut impl Write,cancel:&AtomicBool)->Result<(),String> {
         active(cancel)?;let mut mime=Cursor::new(archive::MIMETYPE);let mut metadata=crate::Cancellable {inner:Cursor::new(&*self.metadata),cancelled:||cancel.load(Ordering::Relaxed)};let mut pack=self.resources.reader(cancel);
@@ -312,10 +319,35 @@ fn intern_artwork(art:&mut Artwork,state:&StateRecord,objects:&[ObjectVersion],d
 }
 
 pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool)->Result<OpenSession,String> {
+    open_parts_with_programs(metadata,resource_pack,limits,cancel,&super::TrustedPrograms::default())
+}
+pub(crate) enum OpenFailure { Invalid(String), Unsupported(String) }
+impl OpenFailure {
+    pub(crate) fn message(self)->String {match self {Self::Invalid(message)|Self::Unsupported(message)=>message}}
+}
+impl From<OpenFailure> for String {fn from(error:OpenFailure)->Self {error.message()}}
+pub(crate) fn validate_format(value:&Value)->Result<(),OpenFailure> {
+    let format=value.get("format").and_then(Value::as_str).ok_or("Invalid session format")?;
+    let version=value.get("version").and_then(Value::as_u64).ok_or("Invalid session version")?;
+    if format!="capy.session" || version!=1 {return Err(OpenFailure::Unsupported("Unsupported session format".into()));}
+    Ok(())
+}
+impl From<String> for OpenFailure {fn from(message:String)->Self {Self::Invalid(message)}}
+impl From<&str> for OpenFailure {fn from(message:&str)->Self {Self::Invalid(message.into())}}
+impl From<super::values::DecodeError> for OpenFailure {
+    fn from(error:super::values::DecodeError)->Self {match error {
+        super::values::DecodeError::Invalid(message)=>Self::Invalid(message),
+        super::values::DecodeError::Unsupported(message)=>Self::Unsupported(message),
+    }}
+}
+pub fn open_parts_with_programs(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<OpenSession,String> {
+    open_parts_checked(metadata,resource_pack,limits,cancel,programs).map_err(OpenFailure::message)
+}
+pub(crate) fn open_parts_checked(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<OpenSession,OpenFailure> {
     active(cancel)?;
     let value=super::parse_json(metadata,limits.metadata_bytes.min(usize::MAX as u64) as usize)?;
+    validate_format(&value)?;
     let record:SessionRecord=serde_json::from_value(value).map_err(|e|e.to_string())?;
-    if record.format!="capy.session" || record.version!=1 {return Err("Unsupported session format".into());}
     if record.undo.len()>crate::history_budget::ENTRY_BUDGET || record.redo.len()>crate::history_budget::ENTRY_BUDGET
         || record.next_checkpoint==0 || record.next_stroke_id==0 || record.current.checkpoint!=record.checkpoint.edit_checkpoint
         || std::iter::once(&record.current).chain(&record.undo).chain(&record.redo).any(|s|s.checkpoint>=record.next_checkpoint)
@@ -391,9 +423,9 @@ pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLi
     let mut resource_limits=limits;resource_limits.raster_bytes=resource_limits.raster_bytes.saturating_add(limits.asset_bytes).saturating_add(crate::history_budget::BYTE_BUDGET as u64);
     for state in std::iter::once(&record.current).chain(&record.undo).chain(&record.redo) {
         active(cancel)?;let manifest=record.manifest(state,&directory,limits)?;
-        let mut reader=ResourceReader::new(&manifest,&resource_pack,cancel,resource_limits);reader.private=true;reader.install_cache(cache);
+        let mut reader=ResourceReader::new(&manifest,&resource_pack,cancel,resource_limits);reader.private=true;reader.trusted_programs=programs.clone();reader.install_cache(cache);
         if documents.is_empty() {profiles=decode_profiles(&record.metadata_profiles,&mut reader)?;}
-        let mut artwork=artwork_records::decode_with_layout(&manifest,&mut reader,Some(&record.layout)).map_err(|e|e.to_string())?;
+        let mut artwork=artwork_records::decode_with_layout(&manifest,&mut reader,Some(&record.layout))?;
         artwork.extensions=extensions.clone();
         intern_artwork(&mut artwork,state,&record.objects,&documents,&mut owners)?;
         let mut document=Document::from_artwork(artwork).map_err(|e|e.to_string())?;
@@ -428,6 +460,9 @@ pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLi
 }
 
 pub fn open(source:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool)->Result<OpenSession,String> {
+    open_with_programs(source,limits,cancel,&super::TrustedPrograms::default())
+}
+pub fn open_with_programs(source:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<OpenSession,String> {
     active(cancel)?;let mut reader=BackingReader::new(&source,cancel);let directory=Directory::read(&mut reader,262_144,limits.metadata_bytes)?;
     if directory.members.iter().any(|m|!matches!(m.name.as_str(),"mimetype"|"manifest.json"|"data/tiles-1.bin")) {return Err("Invalid session archive members".into());}
     let metadata=directory.read_member(&mut reader,directory.member("manifest.json").ok_or("Missing session metadata")?,limits.metadata_bytes.min(usize::MAX as u64) as usize)?;
@@ -442,7 +477,7 @@ pub fn open(source:ImmutableBacking,limits:ProjectLimits,cancel:&AtomicBool)->Re
         }
     }
     let backing=ImmutableBacking::new(Arc::new(Pack {source:source.clone(),offset:pack.offset,length:pack.length})).map_err(str::to_string)?;
-    open_parts(&metadata,backing,limits,cancel)
+    open_parts_with_programs(&metadata,backing,limits,cancel,programs)
 }
 
 #[cfg(test)]
@@ -461,7 +496,7 @@ mod tests {
     }
     fn reopen(prepared:&PreparedSession)->OpenSession {
         let mut bytes=Vec::new();prepared.write(&mut bytes,&AtomicBool::new(false)).unwrap();
-        open(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&AtomicBool::new(false)).unwrap()
+        open_with_programs(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&AtomicBool::new(false),prepared.trusted_programs()).unwrap()
     }
     #[test]
     fn history_roundtrip_preserves_undo_redo_checkpoint_and_branch_identity() {
@@ -637,7 +672,7 @@ mod tests {
         record.current.objects=current;
         assert!(crate::json_len(&record)<limits.metadata_bytes as usize);
         let directory=Directory {members:vec![Member{name:"data/tiles-1.bin".into(),offset:0,length:prepared.resources.length,compressed_length:None,crc32:0}],length:prepared.resources.length};
-        assert!(record.manifest(&record.current,&directory,limits).unwrap_err().contains("Expanded session state exceeds admission"));
+        assert!(record.manifest(&record.current,&directory,limits).unwrap_err().message().contains("Expanded session state exceeds admission"));
     }
     #[test]
     fn undo_redo_checkpoint_order_rejects_corrupt_lineages() {

@@ -356,10 +356,11 @@ fn reopened_catalog_shader_ids_reconcile_reinsertion_and_other_shared_programs()
     let shared_record=encode_program(&shared,&mut inventory).unwrap();
     let prepared=inventory.prepare(&cancelled).unwrap();let mut packed=Vec::new();prepared.reader(&cancelled).read_to_end(&mut packed).unwrap();
     let (manifest,backing)=loaded(&prepared,packed.clone().into());let mut reader=ResourceReader::new(&manifest,&backing,&cancelled,Default::default());
+    reader.trusted_programs=crate::package::TrustedPrograms::from_approved([first.clone(),shared.clone()]).unwrap();
     let reopened=decode_program(&record,&mut reader).unwrap();
     let reopened_shared=decode_program(&shared_record,&mut reader).unwrap();
     for (original,loaded) in first.wgsl.sources().unwrap().iter().zip(reopened.wgsl.sources().unwrap()) {
-        assert_eq!(original.id(),loaded.id());assert!(!original.same_owner(loaded));assert_eq!(original.as_ref(),loaded.as_ref());
+        assert_eq!(original.id(),loaded.id());assert!(original.same_owner(loaded));assert_eq!(original.as_ref(),loaded.as_ref());
     }
     let mut reused=ResourceInventory::default();
     assert_eq!(encode_program(&reopened,&mut reused).unwrap(),record);

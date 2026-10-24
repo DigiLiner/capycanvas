@@ -82,6 +82,7 @@ impl PreparedSessionTransfer {
         let luts=roots.resources.into_iter().filter_map(|lut|lut.resource().map(|r|(r.id(),lut.clone()))).collect();
         let mut live=artwork.clone();Arc::make_mut(&mut live.artwork).extensions=Arc::default();
         let mut prepared=PreparedTransfer::capture_with_additional(&live,&None,resources,luts,cancel)?;
+        prepared.trusted_programs=capture.trusted_programs()?;
         for resource in artwork.artwork.extensions.resources.values() {prepared.append_private_resource(resource.clone())?;}
         let descriptor=SessionTransferDescriptor {artwork:prepared.descriptor().clone(),working,undo:undo_records,redo:redo_records,next_checkpoint:*next_checkpoint,next_stroke_id:*next_stroke_id,metadata:metadata.value,metadata_profiles,index_chunks,
             extensions:artwork.artwork.extensions.records.clone(),extension_resources:artwork.artwork.extensions.resources.keys().copied().collect()};
@@ -93,9 +94,12 @@ impl PreparedSessionTransfer {
     pub fn payload_len(&self,index:usize)->Result<u64,String> {self.artwork.payload_len(index)}
     pub fn read_chunk(&self,index:usize,offset:u64,length:usize)->Result<Vec<u8>,String> {self.artwork.read_chunk(index,offset,length)}
     pub fn adopt_verified(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<OpenSession,String> {
+        self.adopt_with_programs(limits,cancel,&self.artwork.trusted_programs)
+    }
+    pub fn adopt_with_programs(&self,limits:ProjectLimits,cancel:&AtomicBool,programs:&super::TrustedPrograms)->Result<OpenSession,String> {
         active(cancel)?;validate(&self.descriptor,limits)?;
         let record=&self.descriptor;
-        let (capture,_,(working,undo,redo,profiles))=self.artwork.adopt_verified_with(limits,cancel,|art,reader|{
+        let (capture,_,(working,undo,redo,profiles))=self.artwork.adopt_verified_with(limits,cancel,programs,|art,reader|{
             let profiles=decode_profiles(&record.metadata_profiles,reader)?;
             let working=record.working.decode(reader)?;
             let undo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.undo,&record.index_chunks,reader,cancel)?;let redo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.redo,&record.index_chunks,reader,cancel)?;
@@ -210,7 +214,7 @@ mod tests {
             let size=(length-offset).min(super::super::MAX_RANGE_BYTES as u64) as usize;
             receiver.push_chunk(i,&prepared.read_chunk(i,offset,size).unwrap()).unwrap();offset+=size as u64;
         }}
-        receiver.finish().unwrap().adopt_verified(ProjectLimits::default(),&cancel).unwrap()
+        receiver.finish().unwrap().adopt_with_programs(ProjectLimits::default(),&cancel,&prepared.artwork.trusted_programs).unwrap()
     }
     #[test]
     fn undo_only_image_dependencies_and_occurrence_offsets_survive_incremental_transfer() {
@@ -229,6 +233,43 @@ mod tests {
         restored.undo().unwrap();assert_eq!(restored.document.artwork.occurrences.get(occurrence).unwrap().offset,[0,0]);
         assert!(restored_image.same_owner(&restored.document.artwork.paint.get(paint).unwrap().base.as_ref().unwrap().image));
         restored.redo().unwrap();restored.redo().unwrap();assert!(restored.document.artwork.paint.get(paint).unwrap().base.is_none());
+    }
+    fn custom_editor()->Editor {
+        let mut editor=editor();
+        let handle=editor.document.artwork.effects.iter().next().unwrap().0;
+        let program=crate::effect_catalog::custom_program("solid_color");let values=crate::EffectInstance::new(program.clone()).values;
+        let application=EffectApplication::new(program,values,editor.document.composition().size);
+        editor.perform(Edit::Effect(RecordChange::replace(&editor.document.artwork.effects,handle,Some(application)).unwrap())).unwrap();editor
+    }
+    #[test]
+    fn wire_and_archive_cannot_approve_current_or_historical_programs() {
+        for location in ["current","undo","redo"] {
+            let cancel=AtomicBool::new(false);let mut original=custom_editor();
+            if location=="undo" {
+                let handle=original.document.artwork.effects.iter().next().unwrap().0;
+                let program=crate::bundled_effect_catalog().get("solid_color").unwrap().program();
+                let values=crate::EffectInstance::new(program.clone()).values;
+                let application=EffectApplication::new(program,values,original.document.composition().size);
+                original.perform(Edit::Effect(RecordChange::replace(&original.document.artwork.effects,handle,Some(application)).unwrap())).unwrap();
+            } else if location=="redo" {original.undo().unwrap();}
+            let capture=original.capture_session(original.capture(1,Default::default()).unwrap()).unwrap();
+            let transfer=PreparedSessionTransfer::capture(&capture,json!({}),&cancel).unwrap();
+            assert!(transfer.adopt_verified(ProjectLimits::default(),&cancel).is_ok(),"{location}: local authority");
+            let mut receiver=SessionTransferReceiver::new(transfer.descriptor().clone(),ProjectLimits::default()).unwrap();
+            for index in 0..transfer.payload_count() {let len=transfer.payload_len(index).unwrap() as usize;
+                for offset in (0..len).step_by(super::super::MAX_RANGE_BYTES) {
+                    receiver.push_chunk(index,&transfer.read_chunk(index,offset as u64,(len-offset).min(super::super::MAX_RANGE_BYTES)).unwrap()).unwrap();
+                }
+            }
+            let received=receiver.finish().unwrap();
+            assert!(received.adopt_verified(ProjectLimits::default(),&cancel).err().unwrap().contains("not approved"),"{location}: wire authority");
+            assert!(received.adopt_with_programs(ProjectLimits::default(),&cancel,&capture.trusted_programs().unwrap()).is_ok(),"{location}: independent authority");
+            let prepared=super::super::session::PreparedSession::prepare(&capture,json!({}),&cancel).unwrap();
+            let mut bytes=Vec::new();prepared.write(&mut bytes,&cancel).unwrap();
+            let backing=super::super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap();
+            assert!(super::super::session::open(backing.clone(),ProjectLimits::default(),&cancel).err().unwrap().contains("not approved"),"{location}: archive authority");
+            assert!(super::super::session::open_with_programs(backing,ProjectLimits::default(),&cancel,prepared.trusted_programs()).is_ok(),"{location}: archive approval");
+        }
     }
     #[test]
     fn custom_program_values_resources_and_spatial_survive_history_transfer() {

@@ -832,6 +832,12 @@ Manual-save identity stays separate from recovery
 publication. Private sessions preserve all retained ancillary data, including
 records excluded by portable edited-save filtering.
 
+Private program descriptors carry authored code and parameter data. Execution
+uses the independent approval boundary in
+[session recovery](../internals/session-recovery.md); serialized descriptors
+cannot supply approval. Locally captured program owners remain separate from
+wire and disk bytes.
+
 `PreparedSession::metadata` and `resources` expose the private checkpoint without
 archive assembly. `open_parts` independently checks resource integrity, complete
 artwork/working state, history transitions and budgets; it returns an error for
