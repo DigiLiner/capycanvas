@@ -70,6 +70,15 @@ function Check-MenuHover([int]$Height) {
     $at=$points[1];[CapyRowPointer]::Hover($at.x,$at.y);Start-Sleep -Milliseconds 350
     foreach($marker in $markers){if(Find $marker -Type $type -Visible){throw 'Hover reopened the application menu after Escape'}}
 }
+function Check-MenuPreferences([string]$Id) {
+    Invoke $Id
+    Wait-Until {$null -ne (Find 'settings' -Type ([System.Windows.Automation.ControlType]::MenuItem) -Visible)} 'Compact menu has no direct Preferences item'
+    Capture ($Id+'-preferences') -Composed
+    Invoke 'settings'
+    $dialog=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
+    Invoke 'CloseButton' -Within $dialog
+    Wait-Until {!(Find 'Preferences' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'Preferences did not release canvas'
+}
 function Check-Geometry {
     Wait-Until {
         $p=Presentation
@@ -613,9 +622,19 @@ try {
     }
     if($Journey -in @('menus','menus-light')){
         Check-MenuHover 800;Check-MenuHover 480
+        $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        foreach($width in @(620,1400)) {
+            & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int]($width*$scale)) -Height ([int](800*$scale))
+            Check-Geometry
+            if($width -eq 620){Check-MenuPreferences 'application-menus'}
+        }
+        (Control 'workspace-switch-builtin:workspace:painter').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {(Model).windows_workspace.id -eq 'builtin:workspace:painter' -and !(Model).windows_workspace.busy} 'Sketch did not open'
+        Check-Geometry
+        Check-MenuPreferences 'application-primary-menu'
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
-        @{theme=$Theme;application_menu_hover='passed';closed_hover='passed';escape='passed';scope='OS-injected mouse on the owned desktop'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+        @{theme=$Theme;application_menu_hover='passed';compact_preferences='passed';closed_hover='passed';escape='passed';scope='OS-injected mouse on the owned desktop'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
         Get-Content (Join-Path $run 'results.json')
         return
     }

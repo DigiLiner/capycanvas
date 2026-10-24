@@ -54,6 +54,26 @@ export async function checkTitleBar({call,evaluate,settle,reload}) {
     await shot('startup');
     await selectWorkspace('Sketch');
     const original=await model();
+    const menu=`#header-item-${original.zones.flat().find(entry=>entry.item.kind==='menu').id} .header-menu`;
+    const originalTheme=await evaluate('document.body.dataset.theme');
+    for(const theme of ['dark','light']) {
+      await send({type:'set_theme',theme});
+      await click(`${menu} > summary`);
+      assert.deepEqual(await evaluate(`(()=>{const row=document.querySelector('${menu} .popover > button:last-child');return[row.menuItem.action,row.previousElementSibling.tagName]})()`),
+        [{type:'invoke',command:'settings'},'HR'],'Preferences is the separated final compact-menu item');
+      await shot(`preferences-menu-${theme}`);
+      for(const nested of [false,true]) {
+        if(nested) {
+          await click(`${menu} > summary`);
+          await click(`${menu} .popover > button:nth-of-type(2)`);
+        }
+        await click(`${menu} .popover > button:last-child`);
+        await wait('layerApp.state().settings_open&&document.querySelector("#settings").open');
+        await click('#close-settings');
+        await wait('!layerApp.state().settings_open&&!document.querySelector("#settings").open');
+      }
+    }
+    await send({type:'set_theme',theme:originalTheme});
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.header-item .toolbar-controls')].length"),0);
     await begin();
     assert.equal(await evaluate("document.querySelectorAll('#header-editor h1,#header-editor h2,#header-editor #tool-picker').length"),0);

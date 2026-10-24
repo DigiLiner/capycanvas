@@ -167,6 +167,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                             } else { self.application_menu(id).sections })
                         })
                         .collect(),
+                    vec![command(CommandId::Settings)],
                 ],
             },
             M::Layer if self.selection_masks.quick() => self.quick_mask_menu(),
@@ -301,6 +302,25 @@ const ZOOM_LEVELS: [f32; 5] = [0.25, 0.5, 1.0, 2.0, 4.0];
 mod tests {
     use super::*;
     use crate::session::test_support::session;
+
+    #[test]
+    fn compact_menu_ends_with_preferences_and_preserves_edit_access_on_every_platform() {
+        for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Ios, Platform::Mac, Platform::Windows] {
+            let mut session = session(platform);
+            let primary = session.application_menu(ApplicationMenu::Primary);
+            assert_eq!(primary.sections.len(), 2, "{platform:?}");
+            assert_eq!(primary.sections[0].iter().map(|item| item.label.as_str()).collect::<Vec<_>>(),
+                ApplicationMenu::ALL.map(|menu| menu.localized_label(session.localization()).to_string()));
+            assert_eq!(primary.sections[1].len(), 1, "{platform:?}");
+            let preferences = &primary.sections[1][0];
+            assert_eq!(preferences.action, Some(UiAction::Invoke { command: CommandId::Settings }));
+            let edit = session.application_menu(ApplicationMenu::Edit);
+            assert_eq!(edit.sections.last().unwrap().last(), Some(preferences), "{platform:?}");
+            assert!(!session.state().settings_open);
+            session.dispatch(preferences.action.clone().unwrap()).unwrap();
+            assert!(session.state().settings_open, "{platform:?}");
+        }
+    }
 
     #[test]
     fn edit_and_image_menus_preserve_live_commands_on_every_platform() {

@@ -308,16 +308,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         AutomationProperties::SetAutomationId(primary,L"application-primary-menu");
         menuOverflow=button(data,data->copyCaption(L"header",L"menus"),[]{});style(menuOverflow,data,false);menuOverflow.Padding({0});
         AutomationProperties::SetAutomationId(menuOverflow,L"application-menus");
-        menuOverflow.Flyout(menu([weak=weak_from_this()](auto target){if(auto self=weak.lock()){
-            uint32_t at=0;
-            for(auto value:array(self->data->model,L"application_menus")){
-                auto spec=value.GetObject();auto item=at<target.Size()?target.GetAt(at).as<MenuFlyoutSubItem>():MenuFlyoutSubItem();
-                item.Text(str(spec,L"label"));item.FontSize(self->data->textSize());
-                AutomationProperties::SetAutomationId(item,L"application-menu-"+str(spec,L"id"));self->fillMenu(item.Items(),object(spec,L"model"));
-                if(at==target.Size())target.Append(item);++at;
-            }
-            while(target.Size()>at)target.RemoveAtEnd();
-        }}));
+        menuOverflow.Flyout(menu(primaryMenu));
         menuCapsule=Border();menuCapsule.Height(36);menuCapsule.Padding({5,5,5,5});menuCapsule.CornerRadius({18*CornerFit,18*CornerFit,18*CornerFit,18*CornerFit});menuCapsule.Background(headerSurface(data));
         menuCapsule.VerticalAlignment(VerticalAlignment::Center);menuCapsule.Child(menuLabels);
         menuGroup=Grid();menuGroup.VerticalAlignment(VerticalAlignment::Center);menuGroup.Children().Append(menuCapsule);menuGroup.Children().Append(menuOverflow);

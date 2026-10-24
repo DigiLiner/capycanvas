@@ -257,6 +257,8 @@ contents for the application-specific menus.
 Edit starts with Undo and Redo, keeps everyday clipboard, fill, clear and transform
 commands direct, and groups specialized pastes under Paste Special. Search
 Commands and Preferences come last; macOS puts settings in its application menu.
+The compact Main Menu ends with a separate Preferences section on every platform,
+and keeps Preferences in its Edit submenu too.
 Whole-image operations live in [Image](image-commands.md). Rasterize Source,
 Discard Paint Edits and Clear Entire Layer live in Layer and its context menus.
 Select holds [selection controls](selections.md#select-menu); pixel and layer

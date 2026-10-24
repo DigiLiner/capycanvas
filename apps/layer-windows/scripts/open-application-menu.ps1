@@ -3,7 +3,6 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $id=$Name.ToLowerInvariant().Replace('application-menu-','')
 if($id -notin @('file','edit','image','layer','select','filter','view','window')){throw "Unknown application menu: $Name"}
-$menuRoute=@{id=$null}
 $menuNodes=@()
 $menuCache=[System.Windows.Automation.CacheRequest]::new()
 $menuCache.TreeScope=[System.Windows.Automation.TreeScope]::Element
@@ -47,13 +46,13 @@ function Visible-Control([string]$Id,$Type,[switch]$ByName,[switch]$Enabled=(!$I
 function Menu-Button {
     foreach($entry in @('application-menus','application-primary-menu','header-recovery-menu')){
         $button=Visible-Control $entry ([System.Windows.Automation.ControlType]::Button)
-        if($button){$menuRoute.id=$entry;return $button}
+        if($button){return $button}
     }
 }
 function Submenu {
     $entry=Visible-Control ('application-menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)
-    if(!$entry -and $menuRoute.id -ne 'application-menus'){$entry=Visible-Control ('menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)}
-    if(!$entry -and $menuRoute.id -ne 'application-menus' -and $Caption){$entry=Visible-Control $Caption ([System.Windows.Automation.ControlType]::MenuItem) -ByName}
+    if(!$entry){$entry=Visible-Control ('menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)}
+    if(!$entry -and $Caption){$entry=Visible-Control $Caption ([System.Windows.Automation.ControlType]::MenuItem) -ByName}
     $entry
 }
 $watch=[Diagnostics.Stopwatch]::StartNew()

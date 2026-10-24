@@ -7294,6 +7294,14 @@ fn native_menu_sections() {
             menu.popdown();
             pump(100);
         }
+        for id in [ApplicationMenu::Primary, ApplicationMenu::Edit] {
+            let menu = open(id);
+            activate(&menu, &CommandId::Settings.label());
+            menu.popdown();
+            until(|| state(&w).settings_open && w.window.visible_dialog().is_some(), "menu opens Preferences");
+            w.dispatch(UiAction::CloseSettings);
+            until(|| !state(&w).settings_open && w.window.visible_dialog().is_none(), "Preferences closes");
+        }
     }
     activate(&open(ApplicationMenu::Select), &CommandId::SelectAll.label());
     assert!(state(&w).layer_tools.has_selection);
@@ -7301,10 +7309,12 @@ fn native_menu_sections() {
         &open(ApplicationMenu::Edit),
         &CommandId::FillSelection.label(),
     );
+    new_photo::ready(&w);
     let checkpoint = ui_session(&w)
         .engine()
         .checkpoint();
     activate(&open(ApplicationMenu::Layer), &CommandId::ClearLayer.label());
+    new_photo::ready(&w);
     assert_ne!(
         ui_session(&w)
             .engine()
@@ -7312,6 +7322,7 @@ fn native_menu_sections() {
         checkpoint
     );
     activate(&open(ApplicationMenu::Edit), &CommandId::Undo.label());
+    new_photo::ready(&w);
     assert_eq!(
         ui_session(&w)
             .engine()

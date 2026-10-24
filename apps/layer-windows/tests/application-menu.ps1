@@ -52,7 +52,7 @@ $overflow|Add-Member ScriptMethod GetCurrentPattern {
     $invoke|Add-Member ScriptMethod Invoke {$this.Root.opened=$true}
     $invoke
 }
-$submenu=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menu-file';Name='File';IsOffscreen=$false;IsEnabled=$true;ControlType=[System.Windows.Automation.ControlType]::MenuItem};Root=$popup}
+$submenu=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='menu-file';Name='File';IsOffscreen=$false;IsEnabled=$true;ControlType=[System.Windows.Automation.ControlType]::MenuItem};Root=$popup}
 $submenu|Add-Member NoteProperty Cached $submenu.Current
 $submenu|Add-Member ScriptMethod GetCurrentPattern {
     param($pattern)

@@ -89,13 +89,8 @@ struct ApplicationMenuButton<Label: View>: View {
             .disabled(!store.snapshot["preferences"].isNull)
         #else
         Menu {
-            if let id { CatalogMenuItems(store: store, id: id) }
-            else {
-                ForEach(store.snapshot["application_menus"].array.indices, id: \.self) { index in
-                    let menu = store.snapshot["application_menus"][index]
-                    Menu(menu["label"].string) { CatalogMenuItems(store: store, id: menu["id"].string) }
-                }
-            }
+            MenuItems(store: store, sections: model["sections"], usesShortcuts: true)
+                .disabled(!store.snapshot["preferences"].isNull)
         } label: { label() }
         #endif
     }
