@@ -323,6 +323,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         surface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->down(e);})),true);
         PointerGesture::OnLeaving(surface,[weak=weak_from_this()](PointerRoutedEventArgs const& e){
             if(auto self=weak.lock();self&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId()&&!self->owns(self->surface)){
+                for(auto const& entry:self->path)if(auto node=entry.get();node&&self->owns(node))return;
                 self->clear(false);
             }
         });

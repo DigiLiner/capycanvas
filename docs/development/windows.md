@@ -1337,6 +1337,8 @@ motion arrives before the ScrollView's offset notification.
 Row gestures and revealed swipe actions join the workspace's existing transient
 registry. Escape dismisses them before the shared action can close their drawer
 or card; destroying a list removes its registration.
+Leaving the Layers surface preserves a pending row drag while a native child
+button still owns its capture. Capture loss continues to cancel the gesture.
 A handoff cancels every native owner of both contacts, including both row and
 scroll handling, and requires successful capture before starting the bubble drag.
 The current native manipulation completes before root capture transfers.
