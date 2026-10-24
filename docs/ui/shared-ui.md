@@ -253,8 +253,10 @@ override. Returning to System uses the latest OS value.
 presentation: it hides the header and docked chrome, keeps floating panels,
 [tool bubbles](tool-bubbles.md) and toolbars marked **Show in Zen mode**, and
 never projects alternate toolbar strips or changes the saved layout. The standalone Capy button or Tab
-exits Zen; Tab toggles Zen outside settings and native text editors. Explicit
-settings dialogs remain usable.
+exits Zen; Tab toggles Zen outside settings and native text editors. Escape exits
+Zen after active edits, menus and dialogs have been cancelled or closed. After
+cancelling something, release Escape before pressing it again to leave Zen.
+Explicit settings dialogs remain usable.
 
 Preferences → Appearance → Zen mode has **Show Capy in Zen mode** (on by
 default) and **Button icon**. Moving or touching a screen edge keeps controls
@@ -266,15 +268,15 @@ can merge with other floating panels without exposing hidden docks.
 
 Zen immediately disables hidden controls. GTK and Web fade other chrome over
 180 ms; Capy switches without fading. Web respects reduced-motion preferences
-and GTK uses the platform animation setting. Keyboard navigation, open menus,
-settings and native title-bar grabs keep controls available. The next canvas
-contact releases an interaction pin without also painting.
+and GTK uses the platform animation setting. Open menus, settings and native
+title-bar grabs keep controls available. The next canvas contact releases an
+interaction pin without also painting.
 
 Zen’s visibility and interaction pins live in Rust (`Settings.zen_show_capy`
 and `InputReply`’s `chrome_hidden` and `keep_zen_button` flags). Hosts send
-`UiInput::Chrome`: `Refresh` updates native facts; `Motion` releases keyboard
-visibility; `Contact` carries the position for drawer dismissal. `ChromeFacts`
-reports native grabs, panel drags and popups. Rust finalizes both visibility flags
+`UiInput::Chrome`: `Refresh` and `Motion` update native facts; `Contact` carries
+the position for drawer dismissal. `ChromeFacts` reports native grabs, panel drags
+and popups. Rust finalizes both visibility flags
 after handling every input. Hosts apply visibility and input ownership; Android
 publishes flag changes even without a document revision.
 

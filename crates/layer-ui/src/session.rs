@@ -1128,7 +1128,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             ..reply
         })
     }
-    fn route_input(&mut self, input: UiInput) -> Result<InputReply, String> {
+    fn route_input(&mut self, mut input: UiInput) -> Result<InputReply, String> {
         self.engine.backend_mut().shader_input();
         // Tool routing and UI transitions may consume terminal events, but
         // must never keep their contacts alive in the camera gesture.
@@ -1162,6 +1162,14 @@ impl<R: CanvasRenderer> UiSession<R> {
         {
             reply.handled = true;
             return Ok(reply);
+        }
+        if let UiInput::Key { key, pressed, repeat, .. } = &mut input {
+            let key = key.to_ascii_lowercase();
+            if *pressed {
+                *repeat |= !self.interaction.keys.insert(key);
+            } else {
+                self.interaction.keys.remove(&key);
+            }
         }
         if let Some(change) = self.color_picker_input(&input)? {
             reply.handled = true;
@@ -1345,9 +1353,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                     })?);
                     reply.handled = true;
                 }
-                if matches!(event, ChromeEvent::Motion | ChromeEvent::Contact { .. }) {
-                    self.interaction.keyboard_chrome = false;
-                }
                 if let ChromeEvent::Contact { canvas: true, .. } = event {
                     contact = Some((was_hidden, facts.popup_open));
                 }
@@ -1443,7 +1448,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 if self.state.command_search.is_some() {
                     if !pressed {
-                        self.interaction.keys.remove(&key);
                         self.settle_holds_into(&mut reply)?;
                     }
                     // Native search entry/list owns text, IME and navigation.
@@ -1460,10 +1464,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     reply.handled = true;
                     return Ok(reply);
                 }
-                if !pressed {
-                    self.interaction.keys.remove(&key);
-                } else {
-                    let repeat = !self.interaction.keys.insert(key.clone()) || repeat;
+                if pressed {
                     if self.state.preferences.capture.is_some() {
                         if !repeat {
                             self.state.preferences.record(
@@ -1499,7 +1500,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                             reply.handled = true;
                             return Ok(reply);
                         }
-                        self.interaction.keyboard_chrome = true;
                         reply.dismiss_popups = true;
                         if self.clear_object_selection()? {
                             reply.change = self.changed(regions::DOCUMENT | regions::COMMANDS, true);
@@ -1585,8 +1585,17 @@ impl<R: CanvasRenderer> UiSession<R> {
                             reply.handled = true;
                         } else {
                             let bindings = self.held_shortcut_matches(&key, modifiers, divider.is_none());
-                            reply.handled |= !bindings.is_empty();
+                            let matched = !bindings.is_empty();
                             let binding = bindings.into_iter().find(|b| self.binding_enabled(&b.action));
+                            if binding.is_none() && !reply.handled
+                                && key == "escape" && !repeat && modifiers == Modifiers::default()
+                                && divider.is_none() && self.canvas_idle()
+                                && self.state.workspace.zen_mode && self.command_flags(CommandId::ZenMode).0
+                            {
+                                reply.change = self.dispatch(UiAction::Invoke { command: CommandId::ZenMode })?;
+                                reply.handled = true;
+                            }
+                            reply.handled |= matched;
                             if let Some(ShortcutDefinition { action: ShortcutAction::Action { action }, repeat: repeats, .. }) = binding
                                 && (!repeat || repeats)
                             {
@@ -1718,7 +1727,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let released: Vec<_> = self.interaction.momentary.drain(..).map(|(_, restore)| restore).collect();
                 self.interaction.restores.extend(released);
                 self.interaction.axes.clear();
-                self.interaction.keyboard_chrome = false;
                 self.interaction.facts.held = false;
                 // A native DND grab can blur the window without ending the
                 // drag. Only the host's drag-end/cancel lifecycle releases it.
@@ -1769,7 +1777,6 @@ impl<R: CanvasRenderer> UiSession<R> {
         let pinned = self.interaction.facts.held
             || self.interaction.facts.dragging
             || self.interaction.facts.popup_open
-            || self.interaction.keyboard_chrome
             || self.interaction.keep_chrome_until_contact
             || self.state.settings_open
             || self.state.customization.is_open()
@@ -5539,7 +5546,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 self.interaction.hidden = self.state.workspace.zen_mode;
                 self.interaction.keep_chrome_until_contact = false;
-                self.interaction.keyboard_chrome = false;
                 Ok((LAYOUT | CUSTOMIZATION, false))
             }
         }
@@ -11554,6 +11560,78 @@ mod tests {
     }
 
     #[test]
+    fn escape_leaves_zen_once_and_keeps_the_controls_visible() {
+        for platform in Platform::ALL { for show in [false, true] {
+            let mut s = session(platform);
+            s.state.settings.zen_show_capy = show;
+            invoke(&mut s, CommandId::ZenMode);
+            let workspace = s.state.workspace.clone();
+            let camera = s.state.camera.clone();
+            let document = s.engine.document().clone();
+            assert!(chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden);
+            let reply = key(&mut s, "Escape", true, false, false);
+            assert!(reply.handled && !reply.chrome_hidden && !reply.keep_zen_button);
+            assert!(!reply.change.canvas_wake);
+            assert!(!s.state.workspace.zen_mode, "{platform:?}/show={show}");
+            for repeat in [false, true, false] {
+                let reply = s.input(UiInput::Key {
+                    key: "Escape".into(), pressed: true, repeat,
+                    modifiers: Modifiers::default(), editing: false, divider: None,
+                }).unwrap();
+                assert!(!reply.chrome_hidden && !reply.change.canvas_wake);
+                assert!(!chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden);
+                assert!(!s.state.workspace.zen_mode);
+            }
+            key(&mut s, "Escape", false, false, false);
+            key(&mut s, "Escape", true, false, false);
+            key(&mut s, "Escape", false, false, false);
+            assert!(!s.state.workspace.zen_mode);
+            assert_eq!(s.state.workspace.layout, workspace.layout);
+            assert_eq!(s.state.camera, camera);
+            assert_eq!(s.engine.document(), &document);
+            assert!(key(&mut s, "Tab", true, false, false).handled);
+            assert!(s.state.workspace.zen_mode);
+        } }
+    }
+
+    #[test]
+    fn escape_cancels_before_leaving_zen_and_waits_for_a_fresh_press() {
+        for platform in Platform::ALL { for owner in 0..6 {
+            let mut s = session(platform);
+            invoke(&mut s, CommandId::ZenMode);
+            match owner {
+                1 => { chrome(&mut s, ChromeEvent::Refresh, ChromeFacts { popup_open: true, ..Default::default() }); }
+                2 => { invoke(&mut s, CommandId::Settings); }
+                3 => { customize(&mut s, CustomizationAction::ShowAllControls { panel: Panel::Brushes }); }
+                4 => { invoke(&mut s, CommandId::Eyedropper); }
+                5 => { invoke(&mut s, CommandId::Crop); assert!(s.cropping()); }
+                _ => (),
+            }
+            key(&mut s, "Escape", true, false, owner == 0);
+            assert!(s.state.workspace.zen_mode, "{platform:?}/owner={owner}");
+            match owner {
+                1 => { chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()); }
+                2 => { s.dispatch(UiAction::CloseSettings).unwrap(); }
+                3 => { assert!(!s.state.customization.has_drawer()); }
+                4 => { assert!(s.eyedropper.picking.previous.is_none()); }
+                5 => { assert!(!s.cropping()); }
+                _ => (),
+            }
+            for repeat in [false, true] {
+                let hidden = chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()).chrome_hidden;
+                let reply = s.input(UiInput::Key { key: "Escape".into(), pressed: true, repeat,
+                    modifiers: Modifiers::default(), editing: false, divider: None }).unwrap();
+                assert!(s.state.workspace.zen_mode, "held Escape: {platform:?}/owner={owner}/repeat={repeat}");
+                assert_eq!(reply.chrome_hidden, hidden);
+                assert_eq!(chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden, hidden);
+            }
+            key(&mut s, "Escape", false, false, false);
+            assert!(key(&mut s, "Escape", true, false, false).handled);
+            assert!(!s.state.workspace.zen_mode, "fresh Escape: {platform:?}/owner={owner}");
+        } }
+    }
+
+    #[test]
     fn zen_preserves_header_camera_layout_and_fit_without_canvas_work() {
         for platform in Platform::ALL {
             for size in HeaderSize::ALL {
@@ -11602,8 +11680,8 @@ mod tests {
     fn zen_visibility_events_keep_capy_neutral_for_every_pin_combination() {
         for platform in Platform::ALL {
             let mut s = session(platform);
-            for zen in [false, true] { for show in [false, true] { for mask in 0..512 {
-                let [held, dragging, popup_open, keyboard, until_contact, settings, customization, read_only, transitioning] =
+            for zen in [false, true] { for show in [false, true] { for mask in 0..256 {
+                let [held, dragging, popup_open, until_contact, settings, customization, read_only, transitioning] =
                     std::array::from_fn(|bit| mask & (1 << bit) != 0);
                 let facts = ChromeFacts { held, dragging, popup_open, ..Default::default() };
                 for input in [ChromeEvent::Refresh, ChromeEvent::Motion,
@@ -11617,7 +11695,6 @@ mod tests {
                     s.state.customization.toolbar_manager = customization.then(Default::default);
                     s.workspace_read_only = read_only;
                     s.workspace_transition = transitioning;
-                    s.interaction.keyboard_chrome = keyboard;
                     s.interaction.keep_chrome_until_contact = until_contact;
                     s.interaction.facts = facts;
                     s.refresh_chrome();
@@ -11626,7 +11703,6 @@ mod tests {
                     let blocked = transitioning || (read_only && contact);
                     let blur = matches!(input, UiInput::Blur) && !blocked;
                     let pinned = (held && !blur) || dragging || popup_open || settings || customization
-                        || ((blocked || matches!(input, UiInput::Chrome { event: ChromeEvent::Refresh, .. } | UiInput::CursorLeave)) && keyboard)
                         || ((blocked || !contact) && until_contact);
                     let hidden = zen && !pinned;
                     let reply = s.input(input.clone()).unwrap();

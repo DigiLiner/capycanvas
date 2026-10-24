@@ -5,6 +5,13 @@ import {createDrawing} from './new-drawing-fixture.mjs';
 export async function checkZen({call, evaluate, settle, capture = async () => {}}) {
   const send = async action => { await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`); await settle(); };
   const invoke = command => send({type:'invoke', command});
+  const press = async (key, repeats = 0) => {
+    const event = {key,code:key,windowsVirtualKeyCode:key==='Tab'?9:27};
+    await call('Input.dispatchKeyEvent',{type:'keyDown',...event});
+    for(let i=0;i<repeats;i++)await call('Input.dispatchKeyEvent',{type:'keyDown',...event,autoRepeat:true});
+    await call('Input.dispatchKeyEvent',{type:'keyUp',...event});
+    await settle();
+  };
   const hidden = () => evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')");
   const capy = () => evaluate("!document.querySelector('#zen-capy').hidden");
   const point = selector => evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]})()`);
@@ -74,6 +81,25 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     await send({type:'restore_settings',settings:{}});
     assert.equal(await evaluate('layerApp.state().settings.zen_show_capy'),true);
     assert.equal(await evaluate("'zen_reveal_at_edges' in layerApp.state().settings"),false);
+    for(const theme of ['dark','light']){
+      await send({type:'restore_settings',settings:{zen_show_capy:false}});
+      await send({type:'set_theme',theme});
+      await evaluate('document.activeElement?.blur()');
+      await press('Tab');
+      assert.ok(await hidden(),`${theme}: Tab enters Zen`);
+      assert.equal(await capy(),false);
+      await press('Escape',3);
+      assert.equal(await hidden(),false,`${theme}: Escape exits Zen with key repeat`);
+      await press('Escape');
+      await motion(await evaluate('[innerWidth/2,innerHeight/2]'));
+      await motion(await evaluate('[innerWidth/2,6]'));
+      assert.equal(await hidden(),false,`${theme}: repeated Escape and motion keep chrome visible`);
+      assert.equal(await capy(),true);
+      await press('Tab');
+      assert.ok(await hidden(),`${theme}: Tab still enters Zen after Escape`);
+      await press('Tab');
+      assert.equal(await hidden(),false,`${theme}: Tab still exits Zen`);
+    }
     for (const preset of ['painter','illustrator','photographer']) {
       await switchWorkspace(preset);
       const initial=await evaluate('layerApp.state().workspace');
@@ -116,9 +142,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
         } else {
           await watchTransition(false);
           await evaluate('document.activeElement?.blur()');
-          await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-          await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-          await settle();
+          await press('Tab');
           assert.equal(await evaluate('layerApp.state().workspace.zen_mode'),false);
           await checkTransition(normal,`${preset}/${theme}/${size}/${device}: keyboard exit`,false,true);
         }
@@ -186,7 +210,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     } finally {
       await call('Emulation.setEmulatedMedia',{features:[]});
     }
-    console.log('PASS: Zen defaults, settings controls, Sketch/Paint/Photo full button and glyph bounds through entry/exit, all sizes/themes, RTL, custom zones, removal/recovery, narrow overflow, restored Zen/hidden resize, touch/mouse/pen exits, edges stay hidden, one-tap Capy exit without an opacity dip, other header controls still fade, keyboard recovery, customized title bar, unchanged layout/camera');
+    console.log('PASS: Zen defaults, settings controls, Sketch/Paint/Photo full button and glyph bounds through entry/exit, all sizes/themes, RTL, custom zones, removal/recovery, narrow overflow, restored Zen/hidden resize, touch/mouse/pen exits, edges stay hidden, one-tap Capy exit without an opacity dip, other header controls still fade, Escape exit with key repeat, Tab toggle, keyboard recovery, customized title bar, unchanged layout/camera');
   } catch (error) {
     console.error('Zen failure state:', await evaluate(`JSON.stringify({zen:layerApp.state().workspace.zen_mode,settings:layerApp.state().settings,settingsOpen:layerApp.state().settings_open,commands:layerApp.state().commands.filter(c=>c.id==='zen_mode'),status:document.querySelector('#status').textContent,hidden:document.querySelector('#workspace').classList.contains('zen-hidden'),focus:document.activeElement?.outerHTML.slice(0,160),popups:[...document.querySelectorAll('details[open],:popover-open:not(.hover-tooltip),dialog[open]')].map(n=>n.outerHTML.slice(0,160))})`));
     await capture('failure');

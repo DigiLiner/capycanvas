@@ -5410,6 +5410,78 @@ fn native_settings_typography() {
 
 #[test]
 #[ignore = "requires a private Wayland display and GPU"]
+fn native_zen_escape_input() {
+    const TAB: u32 = 0xff09;
+    const ESCAPE: u32 = 0xff1b;
+    let app = native_test_app("art.capycanvas.ZenEscapeInput");
+    let w = fixture_workspace(&app);
+    w.window.maximize();
+    w.window.present();
+    until(|| w.gpu.borrow().is_some() && w.workspaces.ready(), "Zen keyboard workspace ready");
+    let mut input = RemoteInput::new().settle_ms(250);
+    input.ready();
+    for theme in [Theme::Dark, Theme::Light] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        w.dispatch(UiAction::Preferences {
+            action: PreferenceAction::Edit { id: PreferenceId::ZenShowCapy, value: PreferenceValue::Bool(false) },
+        });
+        w.area.grab_focus();
+        pump(250);
+        let layout = state(&w).workspace.layout;
+        let camera = state(&w).camera;
+        input.key(TAB);
+        assert!(state(&w).workspace.zen_mode, "{theme:?}: native Tab enters Zen");
+        assert!(!w.zen_capy.is_visible());
+        input.perform(serde_json::json!([
+            { "point": [800., 5.] }, { "point": [5., 500.] }, { "point": [1595., 500.] },
+            { "key": ESCAPE, "down": true }, { "wait_ms": 900 }, { "key": ESCAPE, "down": false },
+        ]));
+        assert!(!state(&w).workspace.zen_mode, "{theme:?}: held native Escape exits Zen");
+        assert!(w.header.root.can_target());
+        input.perform(serde_json::json!([
+            { "point": [800., 5.] }, { "point": [5., 500.] }, { "point": [1595., 500.] },
+            { "key": ESCAPE, "down": true }, { "wait_ms": 900 }, { "key": ESCAPE, "down": false },
+        ]));
+        assert!(!state(&w).workspace.zen_mode, "{theme:?}: pointer motion and repeated Escape keep chrome shown");
+        assert_eq!(state(&w).workspace.layout, layout);
+        assert_eq!(state(&w).camera, camera);
+        input.key(TAB);
+        assert!(state(&w).workspace.zen_mode, "{theme:?}: Tab still enters Zen after Escape");
+        input.key(TAB);
+        assert!(!state(&w).workspace.zen_mode, "{theme:?}: Tab still exits Zen");
+        input.key(TAB);
+        w.dispatch(UiAction::Invoke { command: CommandId::ImageSize });
+        pump(250);
+        let dialog = &w.image_size.dialog;
+        let field = find_named(dialog.upcast_ref(), "image-size-width").unwrap();
+        let number = descendant::<crate::number_control::NumberControl>(&field).unwrap();
+        let spin = descendant::<gtk::SpinButton>(&number).unwrap();
+        let original = number.value();
+        spin.grab_focus();
+        spin.set_text("1/0");
+        input.key(ESCAPE);
+        assert_eq!(number.value(), original, "{theme:?}: native Escape restores numeric draft");
+        assert!(number.input_valid());
+        assert!(state(&w).layer_tools.image_size.is_some(), "{theme:?}: numeric Escape preserves its dialog");
+        assert!(state(&w).workspace.zen_mode, "{theme:?}: numeric Escape preserves Zen");
+        find_button(dialog.upcast_ref(), "Cancel").unwrap().grab_focus();
+        input.key(ESCAPE);
+        assert!(state(&w).layer_tools.image_size.is_none(), "{theme:?}: native Escape closes the dialog");
+        assert!(state(&w).workspace.zen_mode, "{theme:?}: dialog Escape preserves Zen");
+        w.area.grab_focus();
+        input.key(ESCAPE);
+        assert!(!state(&w).workspace.zen_mode, "{theme:?}: a fresh native Escape exits Zen after the dialog");
+        assert_eq!(state(&w).workspace.layout, layout);
+        assert_eq!(state(&w).camera, camera);
+    }
+    input.finish();
+    w.window.close();
+    pump(100);
+    layer_render_wgpu::finish_shader_compiler_shutdown();
+}
+
+#[test]
+#[ignore = "requires a private Wayland display and GPU"]
 fn native_zen_behaviors() {
     fn rect(widget: &impl IsA<gtk::Widget>, w: &Workspace) -> [f32; 4] {
         let r = widget.as_ref().compute_bounds(&w.surface).unwrap();

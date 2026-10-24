@@ -358,7 +358,6 @@ pub(crate) struct Interaction {
     pub hidden: bool,
     pub navigation: Option<(String, NavigationMode)>,
     pub navigation_tap: bool,
-    pub keyboard_chrome: bool,
     pub keep_chrome_until_contact: bool,
     pub facts: ChromeFacts,
     pub viewport: Option<[f32; 2]>,
