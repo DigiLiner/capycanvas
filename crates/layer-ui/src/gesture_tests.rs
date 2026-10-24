@@ -27,6 +27,177 @@ fn painted_session() -> UiSession<Recorder> {
     s
 }
 
+fn scrub_contacts(s: &mut UiSession<Recorder>, phase: ContactPhase, offset: [f32; 2], ms: u64, count: u64) {
+    for id in 0..count {
+        finger(s, 10 + id, phase, [300. + 80. * id as f32 + offset[0], 400. + offset[1]], ms);
+    }
+}
+
+#[test]
+fn three_finger_scrub_clears_once_at_every_angle_and_undo_restores_the_layer() {
+    for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Mac, Platform::Ios, Platform::Windows] {
+        for degrees in (0..360).step_by(15) {
+            let mut s = painted_session();
+            s.state.platform = platform;
+            let painted = s.engine.document().clone();
+            let camera = s.state.camera.clone();
+            let angle = (degrees as f32).to_radians();
+            let offset = |length: f32| [angle.cos() * length, angle.sin() * length];
+            scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], 0, 3);
+            for (step, length) in [60., 0., 60.].into_iter().enumerate() {
+                scrub_contacts(&mut s, ContactPhase::Move, offset(length), 100 + step as u64 * 100, 3);
+                if step < 2 { assert_live_artwork_eq(s.engine.document(), &painted); }
+            }
+            let cleared = s.engine.document().clone();
+            assert!(cleared.target_operations(cleared.working.target.unwrap()).unwrap().is_empty(), "{platform:?} {degrees}°");
+            assert_eq!(s.state.camera.view(), camera.view());
+            let checkpoint = s.engine.checkpoint();
+            for (step, length) in [0., 60., 0., 60.].into_iter().enumerate() {
+                scrub_contacts(&mut s, ContactPhase::Move, offset(length), 400 + step as u64 * 100, 3);
+            }
+            finger(&mut s, 10, ContactPhase::Up, offset(60.), 800);
+            finger(&mut s, 11, ContactPhase::Move, [600., 600.], 810);
+            finger(&mut s, 11, ContactPhase::Up, [600., 600.], 820);
+            finger(&mut s, 12, ContactPhase::Up, offset(60.), 830);
+            assert_eq!(s.engine.checkpoint(), checkpoint, "only one clear per contact group");
+            assert_eq!(s.state.camera.view(), camera.view(), "lifting cannot pan the view");
+            invoke(&mut s, CommandId::Undo);
+            assert_live_artwork_eq(s.engine.document(), &painted);
+            invoke(&mut s, CommandId::Redo);
+            assert_live_artwork_eq(s.engine.document(), &cleared);
+        }
+    }
+}
+
+#[test]
+fn scrub_requires_three_fingers_coherent_travel_and_two_full_reversals() {
+    for (count, path) in [
+        (2, vec![[60., 0.], [0., 0.], [60., 0.]]),
+        (4, vec![[60., 0.], [0., 0.], [60., 0.]]),
+        (3, vec![[60., 0.], [120., 0.], [180., 0.]]),
+        (3, vec![[60., 0.], [0., 0.]]),
+        (3, vec![[10., 0.], [-10., 0.], [10., 0.]]),
+        (3, vec![[60., 0.], [57., 0.], [63., 0.], [60., 0.]]),
+        (3, vec![[60., 0.], [60., 60.], [0., 60.], [0., 0.], [60., 0.]]),
+    ] {
+        let mut s = painted_session();
+        let painted = s.engine.document().clone();
+        scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], 0, count);
+        for (step, offset) in path.into_iter().enumerate() {
+            scrub_contacts(&mut s, ContactPhase::Move, offset, 100 + step as u64 * 100, count);
+        }
+        scrub_contacts(&mut s, ContactPhase::Up, [0.; 2], 900, count);
+        assert_live_artwork_eq(s.engine.document(), &painted);
+    }
+    for moving in [1, 2] {
+        let mut s = painted_session();
+        let painted = s.engine.document().clone();
+        scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], 0, 3);
+        for (step, x) in [180., -180., 180.].into_iter().enumerate() {
+            scrub_contacts(&mut s, ContactPhase::Move, [x, 0.], 100 + step as u64 * 100, moving);
+        }
+        scrub_contacts(&mut s, ContactPhase::Up, [0.; 2], 400, 3);
+        assert_live_artwork_eq(s.engine.document(), &painted);
+    }
+}
+
+#[test]
+fn scrub_cancellation_and_ineligible_contacts_never_clear() {
+    for case in 0..10 {
+        let mut s = painted_session();
+        let painted = s.engine.document().clone();
+        scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], 0, 3);
+        scrub_contacts(&mut s, ContactPhase::Move, [60., 0.], 100, 3);
+        match case {
+            0 => { finger(&mut s, 10, ContactPhase::Cancel, [360., 400.], 110); }
+            1 => { finger(&mut s, 10, ContactPhase::Up, [360., 400.], 110); }
+            2 => { s.input(UiInput::Blur).unwrap(); }
+            3 => {
+                finger(&mut s, 10, ContactPhase::Up, [360., 400.], 110);
+                finger(&mut s, 10, ContactPhase::Down, [360., 400.], 120);
+            }
+            4 => {
+                finger(&mut s, 13, ContactPhase::Down, [540., 400.], 110);
+                finger(&mut s, 13, ContactPhase::Up, [540., 400.], 120);
+            }
+            5 => { s.interaction.facts.popup_open = true; }
+            6 => { invoke(&mut s, CommandId::KeyboardShortcuts); }
+            7 => { s.input(UiInput::ColorPickerHold { id: 10, position: [360., 400.], offset: 40. }).unwrap(); }
+            8 => { scrub_contacts(&mut s, ContactPhase::Move, [60., 0.], 90, 3); }
+            _ => { scrub_contacts(&mut s, ContactPhase::Move, [60., 0.], 2100, 3); }
+        }
+        let start = if case == 9 { 2100 } else { 200 };
+        scrub_contacts(&mut s, ContactPhase::Move, [0., 0.], start + 100, 3);
+        scrub_contacts(&mut s, ContactPhase::Move, [60., 0.], start + 200, 3);
+        scrub_contacts(&mut s, ContactPhase::Up, [60., 0.], start + 300, 3);
+        assert_live_artwork_eq(s.engine.document(), &painted);
+    }
+}
+
+#[test]
+fn scrub_respects_layer_locks_and_native_touch_slop() {
+    let mut s = painted_session();
+    layer(&mut s, LayerAction::Lock { id: 1, value: true });
+    let painted = s.engine.document().clone();
+    scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], 0, 3);
+    for (step, x) in [60., 0., 60.].into_iter().enumerate() {
+        scrub_contacts(&mut s, ContactPhase::Move, [x, 0.], 100 + step as u64 * 100, 3);
+    }
+    scrub_contacts(&mut s, ContactPhase::Up, [60., 0.], 400, 3);
+    assert_eq!(s.engine.document(), &painted);
+    layer(&mut s, LayerAction::Lock { id: 1, value: false });
+    s.set_touch_policy(TouchPolicy { tap_ms: 500, slop: 40. }).unwrap();
+    let painted = s.engine.document().clone();
+    for (start, span) in [(1000, 60.), (2000, 100.)] {
+        scrub_contacts(&mut s, ContactPhase::Down, [0.; 2], start, 3);
+        for (step, x) in [span, 0., span].into_iter().enumerate() {
+            scrub_contacts(&mut s, ContactPhase::Move, [x, 0.], start + 100 + step as u64 * 100, 3);
+        }
+        scrub_contacts(&mut s, ContactPhase::Up, [span, 0.], start + 400, 3);
+        if start == 1000 { assert_live_artwork_eq(s.engine.document(), &painted); }
+    }
+    let doc = s.engine.document();
+    assert!(doc.target_operations(doc.working.target.unwrap()).unwrap().is_empty());
+}
+
+#[test]
+fn trackpad_scrub_preserves_native_navigation_and_does_not_dispatch_taps() {
+    let mut s = painted_session();
+    s.state.platform = Platform::Mac;
+    let contacts = |s: &mut UiSession<Recorder>, phase, offset: f32, ms: u64, count| {
+        for id in 0..count {
+            let input = serde_json::json!({"type": "trackpad_touch", "id": id, "phase": phase,
+                "position": [100. + 30. * id as f32 + offset, 100. + offset], "time_ns": 1_000_000_000 + ms * 1_000_000});
+            s.input(serde_json::from_value(input).unwrap()).unwrap();
+        }
+    };
+    let painted = s.engine.document().clone();
+    contacts(&mut s, "down", 0., 0, 2);
+    let camera = s.state.camera.view();
+    s.scroll([400., 400.], [20., 30.], 2., false, true).unwrap();
+    assert_ne!(s.state.camera.view(), camera, "two-finger trackpad scrolling stays native");
+    contacts(&mut s, "up", 0., 100, 2);
+    assert_live_artwork_eq(s.engine.document(), &painted,);
+    let camera = s.state.camera.view();
+    contacts(&mut s, "down", 0., 1000, 3);
+    for (step, offset) in [60., 0., 60.].into_iter().enumerate() {
+        contacts(&mut s, "move", offset, 1100 + step as u64 * 100, 3);
+        s.scroll([400., 400.], [20., 30.], 2., false, true).unwrap();
+        s.multi_touch_gesture([400., 400.], [400., 400.], 1.2, 0.1).unwrap();
+        assert_eq!(s.state.camera.view(), camera, "native navigation yields to three-finger contacts");
+    }
+    contacts(&mut s, "up", 60., 1400, 3);
+    let cleared = s.engine.document();
+    assert!(cleared.target_operations(cleared.working.target.unwrap()).unwrap().is_empty());
+    invoke(&mut s, CommandId::Undo);
+    assert_live_artwork_eq(s.engine.document(), &painted);
+    contacts(&mut s, "down", 0., 2000, 3);
+    contacts(&mut s, "up", 0., 2100, 3);
+    assert_live_artwork_eq(s.engine.document(), &painted,);
+    s.multi_touch_gesture([400., 400.], [400., 400.], 1.2, 0.1).unwrap();
+    assert_ne!(s.state.camera.view(), camera, "native gestures resume after release");
+}
+
 #[test]
 fn two_and_three_finger_taps_undo_and_redo() {
     let mut s = painted_session();

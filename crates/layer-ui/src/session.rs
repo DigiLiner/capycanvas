@@ -1138,7 +1138,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         } = &input {
             self.touch.release(*id);
         }
-        let tap = self.recognize_tap(&input);
+        let gesture = self.recognize_touch_gesture(&input);
         let mut reply = InputReply::default();
         let mut contact = None;
         if self.workspace_transition {
@@ -1599,6 +1599,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             UiInput::PenButton { button, pressed } => self.pen_button(button, pressed, &mut reply)?,
             UiInput::StylusAction { action } => self.stylus_action(action, &mut reply)?,
             UiInput::Axes { pan, zoom } => self.navigation_axes(pan, zoom, &mut reply)?,
+            UiInput::TrackpadTouch { position, .. } => {
+                if !position.into_iter().all(f32::is_finite) { return Err("Invalid trackpad position".into()); }
+                reply.handled = self.interaction.gestures.suspends_navigation();
+            }
             UiInput::Pointer {
                 id,
                 phase,
@@ -1632,7 +1636,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         || (phase == ContactPhase::Down && self.interaction.pointer.is_none()
                             && !self.touch.is_active() && self.object_touch_hit(position)));
                 if kind == PointerKind::Touch && !transform_contact && !navigation_contact {
-                    if self.interaction.pointer.is_none() && !self.state.settings_open {
+                    if self.interaction.gestures.scrubbed {
+                        reply.handled = true;
+                    } else if self.interaction.pointer.is_none() && !self.state.settings_open {
                         reply.change = if self.edge_swipe(id, phase, position) {
                             self.changed(0, false)
                         } else {
@@ -1732,8 +1738,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.touch.clear();
             }
         }
-        if let Some(fingers) = tap {
-            self.perform_tap(fingers, &mut reply)?;
+        if let Some(gesture) = gesture {
+            self.perform_touch_gesture(gesture, &mut reply)?;
         }
         self.settle_holds_into(&mut reply)?;
         if self.notices.publishing() {
@@ -4375,7 +4381,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         scale: f32,
         rotation: f32,
     ) -> Result<UiChange, String> {
-        if !self.navigation_idle() {
+        if !self.navigation_idle() || self.interaction.gestures.suspends_navigation() {
             return Ok(self.changed(0, false));
         }
         self.state.camera.gesture(from, to, scale, rotation)?;

@@ -4126,6 +4126,89 @@ class AndroidHostTest {
         assertNull(host.failure)
     }
 
+    @Test fun threeFingerDiagonalScrubClearsOnlyTheSelectedLayer() {
+        fun invoke(command: String) = action(obj("type" to "invoke", "command" to command))
+        fun pixels(): ByteArray { settle(); return gradientOutput() }
+        fun screenPixels(): IntArray {
+            settle()
+            val bitmap = instrumentation.uiAutomation.takeScreenshot()
+            val left = bitmap.width * 2 / 5
+            val top = bitmap.height * 2 / 5
+            val width = bitmap.width / 5
+            val height = bitmap.height / 5
+            return IntArray(width * height).also {
+                bitmap.getPixels(it, 0, width, left, top, width, height)
+                bitmap.recycle()
+            }
+        }
+        fun camera() = JSONObject(state().getJSONObject("camera").toString()).apply { remove("revision") }.toString()
+        val contacts = listOf(
+            androidx.compose.ui.geometry.Offset(.44f, .45f),
+            androidx.compose.ui.geometry.Offset(.5f, .5f),
+            androidx.compose.ui.geometry.Offset(.56f, .55f))
+        fun begin() {
+            canvasEvent(MotionEvent.ACTION_DOWN, contacts.take(1))
+            for (index in 1..2) canvasEvent(MotionEvent.ACTION_POINTER_DOWN or
+                (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), contacts.take(index + 1))
+        }
+        fun end(offset: androidx.compose.ui.geometry.Offset) {
+            val points = contacts.map { it + offset }
+            for (index in 2 downTo 1) canvasEvent(MotionEvent.ACTION_POINTER_UP or
+                (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), points.take(index + 1))
+            canvasEvent(MotionEvent.ACTION_UP, points.take(1))
+        }
+        val diagonal = compose.runOnIdle {
+            val canvas = findCanvas(compose.activity.window.decorView)!!
+            val length = android.view.ViewConfiguration.get(canvas.context).scaledTouchSlop * 3f
+            androidx.compose.ui.geometry.Offset(length * .6f / canvas.width, length * .8f / canvas.height)
+        }
+        for (theme in listOf("light", "dark")) {
+            host.createDrawing(128, 128)
+            compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
+            action(obj("type" to "set_theme", "theme" to theme))
+            invoke("fit_canvas")
+            val empty = pixels()
+            action(obj("type" to "set_color", "rgba" to JSONArray(listOf(0, 0, 0, 1))))
+            penStroke(8)
+            val lower = pixels()
+            assertFalse("The lower layer contains visible paint", empty.contentEquals(lower))
+            canvasEvent(MotionEvent.ACTION_HOVER_MOVE, listOf(androidx.compose.ui.geometry.Offset(.7f, .3f)), MotionEvent.TOOL_TYPE_STYLUS)
+            val lowerScreen = screenPixels()
+            invoke("add_layer")
+            action(obj("type" to "set_color", "rgba" to JSONArray(listOf(1, 0, 0, 1))))
+            penStroke(8)
+            val painted = pixels()
+            assertFalse("The selected layer adds visible paint", lower.contentEquals(painted))
+            canvasEvent(MotionEvent.ACTION_HOVER_MOVE, listOf(androidx.compose.ui.geometry.Offset(.7f, .3f)), MotionEvent.TOOL_TYPE_STYLUS)
+            val paintedScreen = screenPixels()
+            assertFalse("The screen shows the selected layer's paint", lowerScreen.contentEquals(paintedScreen))
+            val before = camera()
+
+            begin()
+            for (scale in listOf(.1f, -.1f, .1f)) canvasEvent(MotionEvent.ACTION_MOVE, contacts.map { it + diagonal * scale })
+            end(diagonal * .1f)
+            assertArrayEquals("Three-finger jitter and release preserve paint", painted, pixels())
+            begin(); end(androidx.compose.ui.geometry.Offset.Zero)
+            assertArrayEquals("A three-finger tap does not clear paint", painted, pixels())
+
+            val started = SystemClock.uptimeMillis()
+            begin()
+            for (scale in listOf(1f, 0f, 1f)) canvasEvent(MotionEvent.ACTION_MOVE, contacts.map { it + diagonal * scale })
+            assertTrue("The scrub completes within two seconds", SystemClock.uptimeMillis() - started < 2_000)
+            assertArrayEquals("The scrub clears only the selected layer before release", lowerScreen, screenPixels())
+            assertEquals("The scrub preserves the camera", before, camera())
+            invoke("undo")
+            assertArrayEquals("One Undo restores the selected layer", paintedScreen, screenPixels())
+            for (scale in listOf(0f, 1f, 0f, 1f)) canvasEvent(MotionEvent.ACTION_MOVE, contacts.map { it + diagonal * scale })
+            assertArrayEquals("A contact group clears at most once", paintedScreen, screenPixels())
+            end(diagonal)
+            assertArrayEquals("Releasing the scrub does not issue a tap action", painted, pixels())
+            assertEquals(before, camera())
+            assertNull(host.failure)
+            assertNull(host.actionError)
+        }
+    }
+
     @Test fun touchNavigationHistoryCancellationAndSurfaceRecovery() {
         val a = androidx.compose.ui.geometry.Offset(0.45f, 0.5f)
         val b = androidx.compose.ui.geometry.Offset(0.55f, 0.5f)

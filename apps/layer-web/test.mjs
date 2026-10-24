@@ -10,6 +10,7 @@ import {checkPointwiseEffects,checkLookupTransport} from './pointwise-effects.te
 import {checkTonalSelections} from './tonal-selection.test.mjs';
 import {checkColorPicker} from './color-picker.test.mjs';
 import {checkInputDevices} from './input-devices.test.mjs';
+import {checkTouchScrub} from './touch-scrub-journey.test.mjs';
 import {checkCommandBar} from './command-bar.test.mjs';
 import {checkToolbarComponents} from "./toolbar-components.test.mjs";
 import {checkToolVariations} from "./tool-variations.test.mjs";
@@ -355,6 +356,7 @@ try {
     [process.argv.includes('--vector-files'), () => checkVectorFiles({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--command-bar"), () => checkCommandBar({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--input-devices"), () => checkInputDevices({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--touch-scrub"), () => checkTouchScrub({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-picker"), () => checkColorPicker({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--brush-drawers"), () => checkBrushDrawers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--editor"), () => checkEditor({call,evaluate,settle,canvasPixels}), checkErrors],

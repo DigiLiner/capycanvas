@@ -315,6 +315,14 @@ private-compositor runner:
 bash tools/performance/workspace-motion.sh gtk --native-test=native_canvas_bar_modes
 ```
 
+`native_three_finger_scrub --tablet` sends three native touch contacts horizontally,
+vertically and diagonally in both themes. It checks clearing before release,
+one clear per scrub, unchanged camera and exact document pixels through Undo/Redo:
+
+```bash
+bash tools/performance/workspace-motion.sh gtk --native-test=native_three_finger_scrub --tablet
+```
+
 `native_scroll_wheel_input` exercises wheel pan, Shift-wheel horizontal pan and
 Ctrl-wheel zoom with the middle or right mouse button held and with neither
 held, in both themes. It also checks release and active-stroke exclusion through

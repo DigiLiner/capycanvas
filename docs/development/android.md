@@ -235,6 +235,11 @@ exports it as `$CAPY_APPLICATION_ID`. The commands below write
 
 ## Device tests
 
+`AndroidHostTest#threeFingerDiagonalScrubClearsOnlyTheSelectedLayer` sends native
+three-finger diagonal motion in both themes. It checks clearing before release,
+exact pixel restoration with one Undo, an unchanged lower layer and camera,
+one clear per contact group, and rejection of taps and small jitter.
+
 `AndroidTitleBarTest#paintColorAndNavigatorFitTheirContent` checks Paint's natural
 panel fit and Navigator's continuous-content measurement against the displayed
 overview and controls. Compose reports Navigator's fixed controls, gap and insets

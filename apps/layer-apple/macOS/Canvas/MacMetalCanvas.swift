@@ -29,6 +29,7 @@ final class MacCanvasView: NSView {
     init(store: EditorStore) {
         self.store = store
         super.init(frame: .zero)
+        allowedTouchTypes = .indirect
         let metal = ObservedMetalLayer()
         metal.isOpaque = true
         metal.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
@@ -196,6 +197,10 @@ final class MacCanvasView: NSView {
     override func scrollWheel(with event: NSEvent) { input.scroll(event) }
     override func magnify(with event: NSEvent) { input.gesture(event, rotate: false) }
     override func rotate(with event: NSEvent) { input.gesture(event, rotate: true) }
+    override func touchesBegan(with event: NSEvent) { input.touch(event, phase: .began, name: "down") }
+    override func touchesMoved(with event: NSEvent) { input.touch(event, phase: .moved, name: "move") }
+    override func touchesEnded(with event: NSEvent) { input.touch(event, phase: .ended, name: "up") }
+    override func touchesCancelled(with event: NSEvent) { input.touch(event, phase: .cancelled, name: "cancel") }
     override func keyDown(with event: NSEvent) { input.key(event, pressed: true) }
     override func keyUp(with event: NSEvent) { input.key(event, pressed: false) }
     override func flagsChanged(with event: NSEvent) { input.updateModifiers(event.modifierFlags) }

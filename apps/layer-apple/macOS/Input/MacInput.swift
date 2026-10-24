@@ -20,6 +20,7 @@ import QuartzCore
     private var tools: [Int: UInt32] = [:]
     private var modifiers: NSEvent.ModifierFlags = []
     private var gestures = Set<Bool>()
+    private var touches: [(identity: NSCopying & NSObjectProtocol, id: UInt64)] = []
 
     init(view: MacCanvasView, store: EditorStore) { self.view = view; self.store = store }
     private func tablet(_ event: NSEvent) -> Bool {
@@ -160,7 +161,23 @@ import QuartzCore
     func interrupt() {
         // Focus loss is an explicit shared interruption policy. Native hover
         // and proximity exit above are normal lift, never cancellation.
-        contact = nil; modifiers = []; gestures.removeAll()
+        contact = nil; modifiers = []; gestures.removeAll(); touches.removeAll()
+    }
+    func touch(_ event: NSEvent, phase: NSTouch.Phase, name: String) {
+        guard let view else { return }
+        for touch in event.touches(matching: phase, in: view) where touch.type == .indirect {
+            if phase == .began {
+                nextContact &+= 1
+                touches.append((touch.identity, nextContact))
+            }
+            guard let index = touches.firstIndex(where: { $0.identity.isEqual(touch.identity) }) else { continue }
+            let point = touch.normalizedPosition, size = touch.deviceSize
+            store.input(["type": "trackpad_touch", "id": touches[index].id, "phase": name,
+                "position": [point.x * size.width, (1 - point.y) * size.height],
+                "time_ns": UInt64(event.timestamp * 1_000_000_000)])
+            if phase == .ended || phase == .cancelled { touches.remove(at: index) }
+        }
+        view.wake()
     }
     func scroll(_ event: NSEvent) {
         let point = position(event), unit: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 16

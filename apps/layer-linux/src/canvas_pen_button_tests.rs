@@ -224,6 +224,65 @@ fn native_canvas_touch_taps() {
 }
 
 #[test]
+#[ignore = "isolated native-input.js --native-test=native_three_finger_scrub --tablet"]
+fn native_three_finger_scrub() {
+    let mut d = Driver::new("art.capycanvas.ThreeFingerScrub");
+    let history = |w: &Workspace| ui_session(w).engine().document().revision;
+    until(|| d.w.gpu.borrow().as_ref().is_some_and(|g| {
+        let engine = g.session.engine();
+        engine.backend().paint_ready(engine.document(), engine.brush(), false)
+    }), "active brush startup");
+    let pixels = |w: &Workspace| ui_session(w).engine().backend().document_pixels(9100).unwrap().bytes;
+    let area = d.w.resolved().work_area;
+    let p = [area.x + area.width * 0.45, area.y + area.height * 0.5];
+    let blank = pixels(&d.w);
+    d.input.perform(serde_json::json!([
+        {"pen":"down","point":p}, {"pen":"move","point":[p[0] + 80., p[1] + 30.]},
+        {"pen":"up"}, {"pen":"leave"}
+    ]));
+    pump(300);
+    let painted = pixels(&d.w);
+    assert!(painted != blank, "native pen paints the active layer");
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        for axis in [[1., 0.], [0., 1.], [0.6, 0.8]] {
+            let camera = state(&d.w).camera;
+            let points = [[p[0] - 35., p[1] - 35.], p, [p[0] + 35., p[1] + 35.]];
+            let mut events: Vec<_> = points.iter().enumerate().map(|(slot, point)|
+                serde_json::json!({"touch":"down","slot":slot,"point":point})).collect();
+            for distance in [90., -90., 90.] {
+                events.extend(points.iter().enumerate().map(|(slot, point)|
+                    serde_json::json!({"touch":"move","slot":slot,"point":[point[0] + axis[0] * distance, point[1] + axis[1] * distance]})));
+            }
+            d.input.perform(serde_json::Value::Array(events));
+            pump(200);
+            assert!(pixels(&d.w) == blank, "{theme:?}/{axis:?}: scrub clears before lift");
+            let after_clear = history(&d.w);
+            let mut ending = Vec::new();
+            for distance in [-90., 90.] {
+                ending.extend(points.iter().enumerate().map(|(slot, point)|
+                    serde_json::json!({"touch":"move","slot":slot,"point":[point[0] + axis[0] * distance, point[1] + axis[1] * distance]})));
+            }
+            ending.extend((0..3).map(|slot| serde_json::json!({"touch":"up","slot":slot})));
+            d.input.perform(serde_json::Value::Array(ending));
+            assert_eq!(history(&d.w), after_clear, "held scrub clears once");
+            assert_eq!(state(&d.w).camera.translation, camera.translation, "scrub preserves pan");
+            assert_eq!(state(&d.w).camera.zoom, camera.zoom, "scrub preserves zoom");
+            assert_eq!(state(&d.w).camera.rotation, camera.rotation, "scrub preserves rotation");
+            d.w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+            pump(200);
+            assert!(pixels(&d.w) == painted, "one Undo restores all cleared pixels");
+            d.w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+            pump(200);
+            assert!(pixels(&d.w) == blank, "Redo clears again");
+            d.w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+            pump(200);
+        }
+    }
+    d.finish();
+}
+
+#[test]
 #[ignore = "isolated native-input.js --native-test=native_remote_keys"]
 fn native_remote_keys() {
     let mut d = Driver::new("art.capycanvas.RemoteKeys");

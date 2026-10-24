@@ -267,6 +267,18 @@ turns a tap into an action only when all of these hold:
 A recognized tap restores any view jitter from its brief contacts. Hosts that
 cannot supply timestamps send `time_ns: 0`, which disables taps.
 
+Three fingers scrub to clear the active layer with one Undo step. Move all three
+fingers together in any direction, reverse, then reverse again without lifting.
+Each leg travels at least twice the host's touch slop; the gesture finishes within
+two seconds. The shared recognizer follows the initial direction, allowing
+sideways jitter but rejecting pinches, circles, incomplete scrubs and extra or
+replaced fingers. It clears once per contact group, restores the starting view
+and keeps the remaining contacts from moving it. Layer locks and Clear Layer's
+other availability rules still apply. Pen input, a picker, an open popup or an
+active canvas edit cancels recognition. GTK, Web, Android, iPadOS and Windows
+forward touchscreen contacts; macOS forwards indirect trackpad contacts to the
+same recognizer while retaining native two-finger navigation.
+
 Side-button presses and releases arrive as `pen_button` input, never as pen
 samples. They use the same hold lifecycle as held keys. A button pressed during
 a stroke changes the tool only after the stroke ends, and blur releases it. GTK
@@ -280,7 +292,7 @@ button and the inverted pen as the eraser end, in hover and in contact. Windows
 Ink has no upper button, so Windows lists only the lower one. iPadOS does not
 show the pen button or eraser end rows until its host delivers the same input.
 iPadOS and Windows deliver finger taps with native touch timestamps and list the
-tap rows; macOS receives no finger contacts and lists no taps. Windows keeps
+tap rows; macOS trackpad contacts recognize scrubs only and list no taps. Windows keeps
 three- and four-finger contacts for its own touch gestures while those are on
 in Windows Settings, so only two-finger taps reach the app by default.
 

@@ -41,6 +41,7 @@ import {checkImageCommands} from "./image-commands-journey.test.mjs";
 import {checkMoveSelection} from "./move-selection-journey.test.mjs";
 import {checkClone,checkHeal} from "./clone-journey.test.mjs";
 import {checkRetouchLayers} from "./retouch-layers-journey.test.mjs";
+import {checkTouchScrub} from './touch-scrub-journey.test.mjs';
 import {checkPenRendering} from "./pen-rendering.test.mjs";
 import {checkSmoothing} from "./smoothing.test.mjs";
 import {checkLiquify} from './liquify-journey.test.mjs';
@@ -187,6 +188,7 @@ try {
     [process.argv.includes("--clone"), () => checkClone({call,evaluate,settle,device:true}), checkErrors],
     [process.argv.includes("--heal"), () => checkHeal({call,evaluate,settle,device:true}), checkErrors],
     [process.argv.includes("--retouch-layers"), () => checkRetouchLayers({call,evaluate,settle,device:true}), checkErrors],
+    [process.argv.includes("--touch-scrub"), () => checkTouchScrub({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--canvas-bar"), () => checkCanvasBar({call,evaluate,settle,device:true}), checkErrors],
     [process.argv.includes("--title-bar-feedback"), () => checkTitleBarFeedback({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--local-adjustment-icons"), () => checkIcons({call,evaluate,settle,only:["layer-shadows-highlights-symbolic.svg","layer-clarity-symbolic.svg"]}), checkErrors],

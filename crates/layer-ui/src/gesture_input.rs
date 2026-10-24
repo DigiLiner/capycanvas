@@ -1,6 +1,6 @@
 use super::*;
 use super::held_actions::merge_change;
-use crate::interaction::Restore;
+use crate::interaction::{Restore, TouchGesture};
 
 impl<R: CanvasRenderer> UiSession<R> {
     pub fn set_touch_policy(&mut self, policy: TouchPolicy) -> Result<(), String> {
@@ -18,44 +18,51 @@ impl<R: CanvasRenderer> UiSession<R> {
             || !self.layer_interaction.path.is_empty())
     }
 
-    pub(super) fn recognize_tap(&mut self, input: &UiInput) -> Option<u8> {
+    pub(super) fn recognize_touch_gesture(&mut self, input: &UiInput) -> Option<TouchGesture> {
         match *input {
-            UiInput::Pointer { id, phase, kind: PointerKind::Touch, position, time_ns, .. } => {
-                if phase == ContactPhase::Down && !self.interaction.taps.active() {
-                    self.interaction.taps.camera = Some(self.state.camera.clone());
+            UiInput::Pointer { id, phase, kind: PointerKind::Touch, position, time_ns, .. }
+            | UiInput::TrackpadTouch { id, phase, position, time_ns } => {
+                let indirect = matches!(input, UiInput::TrackpadTouch { .. });
+                if phase == ContactPhase::Down && !self.interaction.gestures.active() {
+                    self.interaction.gestures.camera = Some(self.state.camera.clone());
                 }
                 let eligible = !self.workspace_transition
                     && !self.workspace_read_only
                     && !self.state.settings_open
+                    && !self.interaction.facts.popup_open
+                    && self.state.command_search.is_none()
                     && self.interaction.pointer.is_none()
                     && self.eyedropper.picking.previous.is_none()
                     && self.touch_canvas_idle()
-                    && (phase != ContactPhase::Down || !self.object_touch_hit(position));
+                    && (indirect || phase != ContactPhase::Down || !self.object_touch_hit(position));
                 let policy = self.interaction.touch_policy;
-                self.interaction.taps.contact(id, phase, position, time_ns, policy, eligible)
+                self.interaction.gestures.contact(id, phase, position, time_ns, policy, eligible)
+                    .filter(|gesture| !indirect || matches!(gesture, TouchGesture::Scrub))
             }
             UiInput::Pointer { phase: ContactPhase::Down, .. } | UiInput::ColorPickerHold { .. } => {
-                self.interaction.taps.fail();
+                self.interaction.gestures.fail();
                 None
             }
             UiInput::Blur => {
-                self.interaction.taps = Default::default();
+                self.interaction.gestures = Default::default();
                 None
             }
             _ => None,
         }
     }
 
-    pub(super) fn perform_tap(&mut self, fingers: u8, reply: &mut InputReply) -> Result<(), String> {
-        let trigger = format!("touch.tap.{fingers}");
-        let Some(definition) = self.state.settings.gesture_definition(&trigger, self.state.platform) else {
-            return Ok(());
-        };
-        let ShortcutAction::Action { action } = definition.action else {
-            return Ok(());
+    pub(super) fn perform_touch_gesture(&mut self, gesture: TouchGesture, reply: &mut InputReply) -> Result<(), String> {
+        let action = match gesture {
+            TouchGesture::Scrub => UiAction::Invoke { command: CommandId::ClearLayer },
+            TouchGesture::Tap(fingers) => {
+                let trigger = format!("touch.tap.{fingers}");
+                let Some(definition) = self.state.settings.gesture_definition(&trigger, self.state.platform) else { return Ok(()); };
+                let ShortcutAction::Action { action } = definition.action else { return Ok(()); };
+                *action
+            }
         };
         reply.handled = true;
-        if let Some(camera) = self.interaction.taps.camera.take()
+        if let Some(camera) = self.interaction.gestures.camera.take()
             && camera.viewport == self.state.camera.viewport
             && camera != self.state.camera
         {
@@ -64,8 +71,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.sync_camera();
             reply.change = merge_change(reply.change, self.changed(regions::CAMERA, true));
         }
-        if !matches!(*action, UiAction::Invoke { command } if !self.command(command).enabled) {
-            let change = self.dispatch(*action)?;
+        if !matches!(action, UiAction::Invoke { command } if !self.command(command).enabled) {
+            let change = self.dispatch(action)?;
             reply.change = merge_change(reply.change, change);
         }
         Ok(())

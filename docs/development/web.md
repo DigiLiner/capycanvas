@@ -329,7 +329,7 @@ reloading its corrupted workspace and preference fixtures.
 
 | Area | Selectors |
 | --- | --- |
-| Editor smoke, drawing, pen | `--editor`, `--pen`, `--prediction`, `--raster`, `--color-mixing` |
+| Editor smoke, drawing, pen | `--editor`, `--pen`, `--prediction`, `--raster`, `--color-mixing`, `--touch-scrub` |
 | Enclose and Fill | `--enclose-fill` |
 | Vector layers | `--vector-tools`, `--vector-milestone`, `--vector-edges`, `--vector-files` |
 | Canvas bar, notices, footer zoom | `--canvas-bar`, `--notices`, `--zoom-controls`, `--zoom-readout`, `--zoom-tool-settings`, `--move-selection` |
@@ -344,6 +344,12 @@ reloading its corrupted workspace and preference fixtures.
 | Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--workspace-constraints`, `--drawer-drag`, `--drawer-style` |
 | Workspaces | `--workspace-manager`, `--workspace-switcher`, `--workspace-options`, `--workspace-options-refresh`, `--workspace-focus`, `--workspace-windows`, `--workspace-store` |
 | Settings and retained copy | `--preferences`, `--settings-audit`, `--pressure-calibration`, `--language-switching`, `--live-language-color`, `--live-language-proof`, `--live-language-delivery`, `--live-language-surfaces`, `--live-language-toolbar`, `--live-language-effects` |
+
+`--touch-scrub` runs in both browser runners. It clears the active painted layer
+with horizontal, vertical and diagonal three-finger scrubs in both themes,
+preserves the camera and layer underneath, and checks exact presented pixels
+through Undo/Redo. Run the desktop journey with
+`bash tools/performance/workspace-motion.sh web --touch-scrub`.
 
 `--workspace-constraints` also runs in `device.test.mjs`. It starts each Sketch,
 Paint and Photo theme journey from its starting layout, resizes through seven

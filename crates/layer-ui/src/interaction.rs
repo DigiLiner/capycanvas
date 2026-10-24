@@ -65,21 +65,34 @@ impl Default for TouchPolicy {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum TouchGesture {
+    Tap(u8),
+    Scrub,
+}
+
 #[derive(Default)]
-pub(crate) struct TouchTaps {
-    starts: std::collections::BTreeMap<u64, [f32; 2]>,
+pub(crate) struct TouchGestures {
+    contacts: std::collections::BTreeMap<u64, ([f32; 2], [f32; 2])>,
     first_ns: u64,
+    last_ns: u64,
     peak: usize,
     lifted: bool,
     failed: bool,
+    tap_failed: bool,
+    scrub: Option<TouchScrub>,
+    pub scrubbed: bool,
     pub camera: Option<crate::Camera>,
 }
-impl TouchTaps {
+impl TouchGestures {
     pub fn active(&self) -> bool {
-        !self.starts.is_empty()
+        !self.contacts.is_empty()
     }
     pub fn fail(&mut self) {
         self.failed |= self.active();
+    }
+    pub fn suspends_navigation(&self) -> bool {
+        self.contacts.len() >= 3 || (self.scrubbed && self.active())
     }
     pub fn contact(
         &mut self,
@@ -89,35 +102,104 @@ impl TouchTaps {
         time_ns: u64,
         policy: TouchPolicy,
         eligible: bool,
-    ) -> Option<u8> {
+    ) -> Option<TouchGesture> {
+        if phase == ContactPhase::Down && !self.active() {
+            *self = Self { first_ns: time_ns, camera: self.camera.take(), ..Self::default() };
+        }
+        self.failed |= !eligible || time_ns == 0 || time_ns < self.last_ns || !position.into_iter().all(f32::is_finite);
+        self.last_ns = time_ns;
         match phase {
             ContactPhase::Down => {
-                if !self.active() {
-                    *self = Self { first_ns: time_ns, camera: self.camera.take(), ..Self::default() };
-                }
-                self.failed |= !eligible || time_ns == 0 || self.lifted;
-                self.starts.insert(id, position);
-                self.peak = self.peak.max(self.starts.len());
+                self.failed |= self.lifted || self.contacts.contains_key(&id);
+                self.contacts.insert(id, (position, position));
+                self.peak = self.peak.max(self.contacts.len());
+                self.scrub = (self.peak == 3 && !self.failed && !self.tap_failed
+                    && time_ns.saturating_sub(self.first_ns) <= u64::from(policy.tap_ms) * 1_000_000)
+                    .then(|| TouchScrub::new(self.positions()));
             }
-            ContactPhase::Move => {
-                let start = self.starts.get(&id)?;
-                self.failed |= !eligible || (position[0] - start[0]).hypot(position[1] - start[1]) > policy.slop;
-            }
-            ContactPhase::Up => {
-                self.starts.remove(&id)?;
-                self.lifted = true;
-                self.failed |= time_ns < self.first_ns
-                    || time_ns - self.first_ns > u64::from(policy.tap_ms) * 1_000_000;
-                if !self.active() && !self.failed && (2..=4).contains(&self.peak) {
-                    return Some(self.peak as u8);
+            ContactPhase::Move | ContactPhase::Up => {
+                let (start, current) = self.contacts.get_mut(&id)?;
+                *current = position;
+                self.tap_failed |= (position[0] - start[0]).hypot(position[1] - start[1]) > policy.slop;
+                if phase == ContactPhase::Up {
+                    self.contacts.remove(&id);
+                    self.scrub = None;
+                    self.lifted = true;
+                    self.tap_failed |= time_ns.saturating_sub(self.first_ns) > u64::from(policy.tap_ms) * 1_000_000;
+                    if !self.active() && !self.failed && !self.tap_failed && (2..=4).contains(&self.peak) {
+                        return Some(TouchGesture::Tap(self.peak as u8));
+                    }
+                } else if !self.failed && time_ns.saturating_sub(self.first_ns) <= 2_000_000_000 {
+                    let positions = self.positions();
+                    if self.scrub.as_mut().is_some_and(|scrub| scrub.update(positions, policy.slop * 2.)) {
+                        self.scrub = None;
+                        self.tap_failed = true;
+                        self.scrubbed = true;
+                        return Some(TouchGesture::Scrub);
+                    }
                 }
             }
             ContactPhase::Cancel => {
-                self.starts.remove(&id)?;
+                self.contacts.remove(&id)?;
                 self.failed = true;
+                self.scrub = None;
             }
         }
         None
+    }
+
+    fn positions(&self) -> [[f32; 2]; 3] {
+        let mut positions = [[0.; 2]; 3];
+        for (position, (_, current)) in positions.iter_mut().zip(self.contacts.values()) {
+            *position = *current;
+        }
+        positions
+    }
+}
+
+struct TouchScrub {
+    origins: [[f32; 2]; 3],
+    axis: Option<[f32; 2]>,
+    extremes: [f32; 3],
+    legs: u8,
+    failed: bool,
+}
+impl TouchScrub {
+    fn new(origins: [[f32; 2]; 3]) -> Self {
+        Self { origins, axis: None, extremes: [0.; 3], legs: 0, failed: false }
+    }
+
+    fn update(&mut self, positions: [[f32; 2]; 3], distance: f32) -> bool {
+        if self.failed { return false; }
+        let offsets: [[f32; 2]; 3] = std::array::from_fn(|i| [positions[i][0] - self.origins[i][0], positions[i][1] - self.origins[i][1]]);
+        let axis = if let Some(axis) = self.axis { axis } else {
+            let center = offsets.iter().fold([0.; 2], |sum, p| [sum[0] + p[0] / 3., sum[1] + p[1] / 3.]);
+            let length = center[0].hypot(center[1]);
+            if length < distance { return false; }
+            [center[0] / length, center[1] / length]
+        };
+        if offsets.iter().any(|p| (p[0] * axis[1] - p[1] * axis[0]).abs() > distance) {
+            self.failed = true;
+            return false;
+        }
+        let projected = offsets.map(|p| p[0] * axis[0] + p[1] * axis[1]);
+        if self.legs == 0 {
+            if projected.iter().all(|p| *p >= distance) {
+                self.axis = Some(axis);
+                self.extremes = projected;
+                self.legs = 1;
+            }
+        } else {
+            let direction = if self.legs == 1 { 1. } else { -1. };
+            for (extreme, current) in self.extremes.iter_mut().zip(projected) {
+                if (current - *extreme) * direction > 0. { *extreme = current; }
+            }
+            if projected.iter().zip(self.extremes).all(|(current, extreme)| (extreme - current) * direction >= distance) {
+                self.extremes = projected;
+                self.legs += 1;
+            }
+        }
+        self.legs == 3
     }
 }
 
@@ -187,6 +269,12 @@ pub enum UiInput {
         button: PointerButton,
         position: [f32; 2],
         #[serde(default)]
+        time_ns: u64,
+    },
+    TrackpadTouch {
+        id: u64,
+        phase: ContactPhase,
+        position: [f32; 2],
         time_ns: u64,
     },
     PenButton {
@@ -295,7 +383,7 @@ pub(crate) struct Interaction {
     /// The current and previous tools the artist chose, ignoring holds.
     pub tools: [Option<(crate::LayerCanvasTool, u32)>; 2],
     pub applying_hold: bool,
-    pub taps: TouchTaps,
+    pub gestures: TouchGestures,
     pub touch_policy: TouchPolicy,
     pub axes: NavigationAxes,
 }
