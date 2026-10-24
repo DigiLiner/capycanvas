@@ -12,9 +12,11 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/layer-pickup/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+$sourceReveals=[Collections.Generic.List[object]]::new()
+$fixtureFailed=$false
 function Gesture {try{(Find 'layer-list').Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Layer-Scrollbars {
-    $viewport=(Control 'layer-list').Current.BoundingRectangle
+    $viewport=Layer-Viewport
     $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ScrollBar)
     @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)|Where-Object {
         $bounds=$_.Current.BoundingRectangle
@@ -26,7 +28,9 @@ function Rows($Snapshot=(Model)) {
 }
 function Contact-State {
     $snapshot=Model;$raw=(Control 'layer-list').Current.ItemStatus
-    @{gesture_raw=$raw;gesture=($raw|ConvertFrom-Json);rows=(Rows $snapshot);selected=(@($snapshot.state.layers|Where-Object selected).id -join ',');editing_layer=$snapshot.state.layer_tools.editing_layer;revision=$snapshot.state.document_file.revision}
+    $session=@($snapshot.windows_tabs.session_stamps|Where-Object id -eq $snapshot.windows_tabs.selected)[0]
+    if(!$session){throw 'Contact state lacks its selected drawing checkpoint'}
+    @{gesture_raw=$raw;gesture=($raw|ConvertFrom-Json);rows=(Rows $snapshot);selected=(@($snapshot.state.layers|Where-Object selected).id -join ',');editing_layer=$snapshot.state.layer_tools.editing_layer;revision=$snapshot.state.document_file.revision;checkpoint=$session.stamp.checkpoint;modified=$snapshot.state.document_file.modified}
 }
 function Dismiss {
     [CapyRowPointer]::Key(0x1b)
@@ -36,19 +40,52 @@ function Menu-State($Item) {
     try{$c=$Item.Current;@{id=$c.AutomationId;runtime_id=@($Item.GetRuntimeId());bounds=$c.BoundingRectangle.ToString();offscreen=$c.IsOffscreen;focused=$c.HasKeyboardFocus;enabled=$c.IsEnabled;process=$c.ProcessId}}catch{@{error=$_.Exception.Message}}
 }
 function Layer-History([string]$Name) {Invoke $Name -Name}
+function Layer-Viewport($Container=(Control 'layer-list' -Arranged)) {
+    $list=$Container.Current.BoundingRectangle
+    $header=Find 'layer-controls' -Visible;$footer=Find 'layer-footer' -Visible
+    if(!$header -or !$footer){return $list}
+    $header=$header.Current.BoundingRectangle;$footer=$footer.Current.BoundingRectangle
+    $padding=[Math]::Max(0,$list.Top-$header.Bottom)
+    if($footer.Top-$padding -le $list.Top -or $list.Width -le 0){throw 'Layers native viewport anchors are invalid'}
+    [Windows.Rect]::new($list.X,$list.Top,$list.Width,($footer.Top-$padding-$list.Top))
+}
 function Undo-Redo([string]$Before,[string]$After) {
     Layer-History 'Undo';Wait-Until {(Rows) -eq $Before} 'One Undo did not restore the original layer order'
     Layer-History 'Redo';Wait-Until {(Rows) -eq $After} 'One Redo did not restore the completed layer move'
     Layer-History 'Undo';Wait-Until {(Rows) -eq $Before} 'Final Undo did not restore the fixture'
 }
 function Reveal([string]$Id) {
-    $item=Find $Id
-    if($Id -notlike 'layer-*' -or !$item -or !$item.Current.IsOffscreen){return}
-    $scroll=Scroll-Pattern (Find 'layer-list')
-    if(!$scroll.Current.VerticallyScrollable){return}
-    foreach($percent in @(0,100)){
-        $scroll.SetScrollPercent(-1,$percent);Start-Sleep -Milliseconds 150
-        $item=Find $Id;if($item -and !$item.Current.IsOffscreen){return}
+    if($Id -notmatch '^layer-(?:row-)?\d+(?:-|$)'){return}
+    $attempts=[Collections.Generic.List[object]]::new();$revealed=$false
+    try{
+        $list=Control 'layer-list' -Arranged;$scroll=Scroll-Pattern $list
+        $probe={
+            $viewport=Layer-Viewport $list;$current=$scroll.Current;$item=Find $Id -Within $list
+            $sample=@{percent=$current.VerticalScrollPercent;view_size=$current.VerticalViewSize;viewport=$viewport.ToString();source=$null;visible_hit=$false}
+            if($item){
+                $native=$item.Current;$bounds=$native.BoundingRectangle
+                $sample.source=@{bounds=$bounds.ToString();offscreen=$native.IsOffscreen;point=$null}
+                if(!$bounds.IsEmpty -and $bounds.Width -gt 0 -and $bounds.Height -gt 0 -and @(@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)|Where-Object {[double]::IsNaN($_) -or [double]::IsInfinity($_)}).Count -eq 0){
+                    $point=[Windows.Point]::new($(if($Id -like 'layer-row-*'){$bounds.X+2}else{$bounds.X+$bounds.Width*.5}),($bounds.Y+$bounds.Height*.5))
+                    $sample.source.point=@($point.X,$point.Y)
+                    $sample.visible_hit=!$native.IsOffscreen -and !$viewport.IsEmpty -and $viewport.Contains($point)
+                }
+            }
+            $attempts.Add($sample);$sample.visible_hit
+        }
+        if(& $probe){$revealed=$true;return}
+        if($scroll.Current.VerticallyScrollable){
+            $scroll.SetScrollPercent(-1,0);$clock=[Diagnostics.Stopwatch]::StartNew()
+            do{
+                Start-Sleep -Milliseconds 150
+                if(& $probe){$revealed=$true;return}
+                if($scroll.Current.VerticalScrollPercent -ge 100){break}
+                $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,[System.Windows.Automation.ScrollAmount]::LargeIncrement)
+            }while($clock.Elapsed.TotalSeconds -lt $script:CapyWaitSeconds)
+        }
+        throw "Source $Id could not be revealed within its native layer viewport"
+    }finally{
+        $sourceReveals.Add(@{source=$Id;case=$script:case;revealed=$revealed;attempts=@($attempts.ToArray())})
     }
 }
 function Point([string]$Id,[switch]$Name) {
@@ -130,7 +167,7 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
     $to=Destination $Target $Fraction
     $clientOrigin=[CapyRowPointer+Point]::new()
     [CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$clientOrigin)|Out-Null
-    $script:contact=@{source=$Id;target=$Target;from=$at;to=$to;source_bounds=(Control $Id).Current.BoundingRectangle;target_bounds=(Control "layer-row-$Target").Current.BoundingRectangle;viewport_bounds=(Control 'layer-list').Current.BoundingRectangle;window_bounds=$root.Current.BoundingRectangle;client_origin=@{x=$clientOrigin.x;y=$clientOrigin.y};dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow)}
+    $script:contact=@{source=$Id;target=$Target;from=$at;to=$to;source_bounds=(Control $Id).Current.BoundingRectangle;target_bounds=(Control "layer-row-$Target").Current.BoundingRectangle;viewport_bounds=(Layer-Viewport);window_bounds=$root.Current.BoundingRectangle;client_origin=@{x=$clientOrigin.x;y=$clientOrigin.y};dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow)}
     if($Grip){
         $at=$script:contact.from
         # No UIA wait may accidentally satisfy the hold timeout.
@@ -307,7 +344,7 @@ try {
         $script:case="locked-source-fast-exit-$source"
         $at=Point $source;$to=Point 'drawing-canvas'
         $target=Control $source;$canvas=Control 'drawing-canvas'
-        $bounds=$target.Current.BoundingRectangle;$canvasBounds=$canvas.Current.BoundingRectangle;$viewport=(Control 'layer-list').Current.BoundingRectangle
+        $bounds=$target.Current.BoundingRectangle;$canvasBounds=$canvas.Current.BoundingRectangle;$viewport=Layer-Viewport
         $before=Contact-State
         if($paint -eq $created -or $before.rows -ne $lockedOrder -or $before.selected -ne [string]$created -or $before.editing_layer.id -ne $created -or !$before.editing_layer.locked -or ($source -like '*-drag' -and $target.Current.IsEnabled)){throw 'Fast locked-source exit lacks its selected locked baseline'}
         if(!$bounds.Contains($at.x,$at.y) -or !$canvasBounds.Contains($to.x,$to.y) -or $viewport.Contains($to.x,$to.y) -or !$root.Current.BoundingRectangle.Contains($to.x,$to.y)){throw 'Fast locked-source exit does not leave Layers for the drawing canvas'}
@@ -332,12 +369,12 @@ try {
         Tap "layer-$paint-name"
         try{Wait-Until {$snapshot=Model;$g=Gesture;$snapshot.state.layer_tools.editing_layer.id -eq $paint -and @($snapshot.state.layers|Where-Object id -eq $paint)[0].selected -and $g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Fresh native tap did not select the inactive layer after fast exit'}
         finally{$evidence.followup=Contact-State;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
-        if($evidence.followup.rows -ne $before.rows -or $evidence.followup.selected -ne [string]$paint -or $evidence.followup.revision -ne $before.revision -or $evidence.followup.gesture.phase -ne 'idle' -or $evidence.followup.gesture.captured -or $evidence.followup.gesture.menu_open){throw 'Fresh native selection after fast exit changed authored state or retained a contact'}
+        if($evidence.followup.rows -ne $before.rows -or $evidence.followup.selected -ne [string]$paint -or $evidence.followup.checkpoint -ne $before.checkpoint -or $evidence.followup.modified -ne $before.modified -or $evidence.followup.gesture.phase -ne 'idle' -or $evidence.followup.gesture.captured -or $evidence.followup.gesture.menu_open){throw 'Fresh native selection after fast exit changed authored state or retained a contact'}
         Tap "layer-$created-name"
         try{Wait-Until {$snapshot=Model;$g=Gesture;$snapshot.state.layer_tools.editing_layer.id -eq $created -and @($snapshot.state.layers|Where-Object id -eq $created)[0].selected -and $g.phase -eq 'idle' -and !$g.captured -and !$g.menu_open} 'Native tap did not restore the locked fixture selection'}
         finally{$evidence.restored=Contact-State;$evidence|ConvertTo-Json -Depth 18|Set-Content $tracePath}
         $restored=$evidence.restored
-        if($restored.rows -ne $before.rows -or $restored.selected -ne $before.selected -or $restored.revision -ne $before.revision -or ($restored.editing_layer|ConvertTo-Json -Depth 12 -Compress) -ne ($before.editing_layer|ConvertTo-Json -Depth 12 -Compress) -or $restored.gesture.phase -ne 'idle' -or $restored.gesture.captured -or $restored.gesture.menu_open){throw 'Native selection restore changed the locked fixture or retained a contact'}
+        if($restored.rows -ne $before.rows -or $restored.selected -ne $before.selected -or $restored.checkpoint -ne $before.checkpoint -or $restored.modified -ne $before.modified -or ($restored.editing_layer|ConvertTo-Json -Depth 12 -Compress) -ne ($before.editing_layer|ConvertTo-Json -Depth 12 -Compress) -or $restored.gesture.phase -ne 'idle' -or $restored.gesture.captured -or $restored.gesture.menu_open){throw 'Native selection restore changed the locked fixture or retained a contact'}
     }
     Layer-History 'Undo'
     Wait-Until {$snapshot=Model;(Rows $snapshot) -eq $unlocked -and !@($snapshot.state.layers|Where-Object id -eq $created)[0].locked} 'Rejected locked-source motion added history after the Lock action'
@@ -457,10 +494,17 @@ try {
     foreach($child in @('selection','content','mask','link')){
         Drag-Row ("layer-$created-"+$child) $created $paint
     }
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1780 -Height 1480
-    if(![CapyWindowExercise]::MoveWindow($drawingWindow,200,20,1780,1480,$true)){throw 'Owned layer review did not move clear of desktop edge gestures'}
-    $rowHeight=(Control "layer-row-$created").Current.BoundingRectangle.Height
-    Wait-Until {(Control 'layer-list').Current.BoundingRectangle.Height -ge $rowHeight*5} 'Layer viewport did not expose the group drop targets away from scrolling edges'
+    $before=Contact-State
+    $space=@{before=(Layer-Viewport);artwork_before=@{rows=$before.rows;checkpoint=$before.checkpoint;modified=$before.modified}}
+    try{
+        $window=$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        $window.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
+        Wait-Until {$window.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Maximized -and [Math]::Abs((Control 'drawing-canvas').Current.BoundingRectangle.Width-(Model).state.camera.viewport[0]) -lt .1} 'Maximized pickup geometry did not settle'
+        $rowHeight=(Control "layer-row-$created").Current.BoundingRectangle.Height;$space.row_height=$rowHeight
+        Wait-Until {(Layer-Viewport).Height -ge $rowHeight*5} 'Layer viewport did not expose the group drop targets away from scrolling edges'
+        $after=Contact-State;$space.artwork_after=@{rows=$after.rows;checkpoint=$after.checkpoint;modified=$after.modified}
+        if($after.rows -ne $before.rows -or $after.checkpoint -ne $before.checkpoint -or $after.modified -ne $before.modified){throw 'Layer viewport resize changed artwork or its checkpoint'}
+    }finally{$space.after=Layer-Viewport;$space|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'group-viewport.json')}
     Invoke 'layer-new-group'
     Wait-Until {
         $active=(Model).state.layer_tools.editing_layer
@@ -505,7 +549,7 @@ try {
     $scroll.SetScrollPercent(-1,0)
     Wait-Until {$scroll.Current.VerticalScrollPercent -lt .1} 'Native list did not return to its top'
     if($Device -ne 'mouse'){
-        $viewport=(Control 'layer-list').Current.BoundingRectangle
+        $viewport=Layer-Viewport
         $visible=@((Model).state.layers|Where-Object {
             $row=Find ("layer-row-"+$_.id)
             $row -and !$row.Current.IsOffscreen -and $row.Current.BoundingRectangle.Y -gt $viewport.Y+25 -and $row.Current.BoundingRectangle.Bottom -lt $viewport.Bottom-10
@@ -529,7 +573,7 @@ try {
         if((Rows) -ne $before -or (Gesture).menu_open){throw 'Native scrolling changed the document or opened a menu'}
     }
     $script:case='mouse-scrollbar-transition'
-    $viewport=(Control 'layer-list').Current.BoundingRectangle
+    $viewport=Layer-Viewport
     [CapyRowPointer]::Hover([int]($viewport.Right-4),[int]($viewport.Y+$viewport.Height*.5))
     Wait-Until {@(Layer-Scrollbars).Count -gt 0} 'Mouse did not show the native layer scrollbar'
     $bar=@(Layer-Scrollbars)[0].Current.BoundingRectangle
@@ -543,7 +587,7 @@ try {
     Wait-Until {$scroll.Current.VerticalScrollPercent -lt .1} 'Native list did not return to its top'
     $latest=(Model).state.layer_tools.editing_layer.id
     $at=Point "layer-$latest-drag"
-    $viewport=(Control 'layer-list').Current.BoundingRectangle
+    $viewport=Layer-Viewport
     $before=Rows
     [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
     Move-To @{x=[int]($viewport.X+$viewport.Width*.5);y=[int]($viewport.Bottom-4)}
@@ -598,15 +642,25 @@ try {
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires review'}
     [pscustomobject]@{device=$Device;theme=$Theme;column_mode=$ColumnMode;short_click='passed';hold_release='passed';row_drag=$(if($Device -eq 'mouse'){'passed'}else{'handle_only_passed'});child_control_drag=$(if($Device -eq 'mouse'){'passed'}else{'denied_passed'});immediate_grip='passed';cancel='passed';one_step_undo_redo='passed';row_whitespace='passed';rename_ownership='passed';source_removal='passed';mask_and_selection_children='passed';group_content_and_into_drop='passed';keyboard_context='passed';edge_scroll_retention='passed';minimize_cancellation='passed';native_scroll=$(if($Device -eq 'mouse'){'not_applicable'}else{'passed'});floating_and_drawer_rows='passed';scope='OS-delivered synthetic input; physical-device and presentation-performance acceptance remain separate'}|ConvertTo-Json
 }catch{
-    $failure=$_
-    @{case=$script:case;error=$failure.ToString();contact=$script:contact;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
-    if($review -and !$review.HasExited){
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
-    }
+    $fixtureFailed=$true;$failure=$_
+    try{
+        @{case=$script:case;error=$failure.ToString();contact=$script:contact;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
+        if($review -and !$review.HasExited){
+            & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
+        }
+    }catch{Write-Warning $_}
     throw $failure
 }finally{
-    if($Device -eq 'mouse' -and [CapyRowPointer]::Active){try{[CapyRowPointer]::Key(0x1b)}catch{}}
-    [CapyRowPointer]::Dispose()
-    if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned layer review did not stop during fixture cleanup'}}}
-    Exit-CapyEnvironment
+    $cleanup=@()
+    foreach($finish in @(
+        {if($Device -eq 'mouse' -and [CapyRowPointer]::Active){[CapyRowPointer]::Key(0x1b)}},
+        {[CapyRowPointer]::Dispose()},
+        {if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned layer review did not stop during fixture cleanup'}}}},
+        {Exit-CapyEnvironment},
+        {$sourceReveals|ForEach-Object {$_|ConvertTo-Json -Depth 8 -Compress}|Set-Content (Join-Path $run 'source-reveal.jsonl')}
+    )){try{& $finish}catch{$cleanup+=($_|Out-String)}}
+    if($cleanup.Count){
+        try{$cleanup|Set-Content (Join-Path $run 'cleanup-failure.txt')}catch{Write-Warning $_}
+        if(!$fixtureFailed){throw ($cleanup -join "`n")}
+    }
 }

@@ -312,6 +312,12 @@ and reach its right edge. `exercise-layer-drawer.ps1` checks those bounds and
 equal 72-DIP action widths in the compact drawer. Selection moves with the row;
 Lock and Duplicate blend text into an opaque window background. Pixel checks
 keep those action fills independent of selection and panel transparency.
+Pickup fixtures reveal virtualized sources with native scrolling. Across an
+intentional selection, compare the project checkpoint and dirty state;
+document revisions also advance for navigation.
+For empty viewport space, measure the allocation between the native Layers
+header and footer: transparent scroll peers report occupied content bounds.
+When a drawer clips the footer, use those occupied bounds for row hit checks.
 `exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
 activation, scrolling and undo history in both themes; `-PaperLight` runs the
 light-theme scrolling, history and empty-stack cases. Both variants also walk
