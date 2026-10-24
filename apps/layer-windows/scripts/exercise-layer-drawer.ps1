@@ -189,6 +189,9 @@ try {
  Wait-Until {(Model).state.customization.drawer.layer_properties -eq $false -and (Find 'layer-new' -Visible)} 'Layers did not reopen after Brush'
  Check-Footer
  Test-AddPaper
+ $paper=@((Model).state.layers|Where-Object content_icon -eq 'layer-paper-symbolic')[0]
+ $paperEye=Bounds ("layer-"+$paper.id+'-visibility')
+ $null=Wait-StablePixels {Screen-Pixels ([int]($paperEye.X+$paperEye.Width*.5)) ([int]($paperEye.Y+$paperEye.Height*.5))}
  Capture ('drawer-initial-'+$Theme) -Composed -WithModel
  $before=Visible-DrawerBounds;$initial=@((Model).state.layers).Count
  for($i=$initial;$i -lt 6;$i++){Press 'layer-new'}

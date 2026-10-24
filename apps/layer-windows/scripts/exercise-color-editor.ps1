@@ -50,8 +50,15 @@ function Paste([string]$Text){
 function Sheet-Open{$sheet=Find 'edit-color-search';$sheet -and !$sheet.Current.IsOffscreen}
 function Presentation{try{(Workspace-Root).Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Paper-Point{
-    $area=(Model).state.camera.work_area;$bounds=(Control 'drawing-canvas').Current.BoundingRectangle
-    @{x=[int]($bounds.X+$area[0]+$area[2]/2);y=[int]($bounds.Y+$area[1]+$area[3]/2)}
+    $model=Model;$camera=$model.state.camera;$document=@($model.state.tabs|Where-Object active)[0]
+    $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$area=$camera.work_area
+    if(!$document -or $camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'Color review requires its unrotated paper'}
+    $paper=@{left=$bounds.X+$camera.translation[0];top=$bounds.Y+$camera.translation[1];width=$document.width*$camera.zoom;height=$document.height*$camera.zoom}
+    $point=@{x=[int]($paper.left+$paper.width/2);y=[int]($paper.top+$paper.height/2)}
+    @{point=$point;paper=$paper;canvas=$bounds;camera=$camera}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'paper-point.json')
+    if($point.x -lt [Math]::Max($paper.left,$bounds.X+$area[0])+4 -or $point.x+5 -gt [Math]::Min($paper.left+$paper.width,$bounds.X+$area[0]+$area[2])-4 -or
+       $point.y -lt [Math]::Max($paper.top,$bounds.Y+$area[1])+4 -or $point.y -gt [Math]::Min($paper.top+$paper.height,$bounds.Y+$area[1]+$area[3])-4){throw 'Color review sample is outside visible paper'}
+    $point
 }
 $numericInputChecks=[Collections.Generic.List[object]]::new()
 $numericFieldIds=@('edit-color-hex')+@(foreach($row in 0..2){foreach($column in 0..2){"edit-color-$row-$column"}})

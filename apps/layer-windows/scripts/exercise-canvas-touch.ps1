@@ -45,8 +45,9 @@ try{
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log') -RedirectStandardOutput (Join-Path $run 'stdout.log');$null=$review.Handle
  @{process_id=$review.Id;executable=$Executable;sha256=(Get-FileHash -LiteralPath $Executable).Hash}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $run 'owner.json')
  Write-Output "Owned touch review $($review.Id): $run"
- Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Isolated canvas did not start' 45
- $handle=$review.MainWindowHandle;$root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$native.window -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Isolated canvas did not start' 45
+ $handle=$native.window.Handle;$root=$native.window.Root
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  Wait-Until {$c=Camera;$b=(Control 'drawing-canvas').Current.BoundingRectangle;[Math]::Abs($c.viewport[0]-$b.Width) -lt .1 -and $b.Width -gt 1600} 'Maximized canvas did not settle'
  Use-PaintWorkspace
@@ -116,7 +117,8 @@ try{
  Check 'returning to Pen and Fit preserves the drawing' {$true}
  [CapyCanvasTouch]::Initialize([uint32]$review.Id)
  $resting=Camera;[CapyCanvasTouch]::Down(1,($cx-100),$cy);Start-Sleep -Milliseconds 120
- Invoke 'settings-button'
+ (Control 'drawing-canvas').SetFocus()
+ [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0xBC)
  Wait-Until {$null -ne (Find 'Preferences' -Name)} 'Preferences did not open over a resting finger'
  [CapyCanvasTouch]::Up(1);Start-Sleep -Milliseconds 150
  Invoke 'CloseButton'
@@ -149,8 +151,7 @@ try{
  Wait-Until {(Model).state.document_file.revision -gt $revision -and (Model).state.document_file.modified} 'One Undo did not leave the seed drawing'
  $revision=(Model).state.document_file.revision;Invoke 'Undo' -Name
  Wait-Until {(Model).state.document_file.revision -gt $revision -and !(Model).state.document_file.modified} 'Two independent Undo steps did not remove pen and seed strokes'
- $review.CloseMainWindow()|Out-Null
- if(!$review.WaitForExit(5000) -or $review.ExitCode -ne 0){throw 'Touch review did not close successfully within five seconds'}
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $handle.ToInt64() -Action Close
  if((Get-Item -LiteralPath (Join-Path $run 'stderr.log')).Length){throw 'Touch runtime stderr requires inspection'}
  @{checks=$checks;drawing='preserved throughout navigation';pen_after_touch='new stroke and independent Undo';close='zero exit within five seconds';scope='OS-injected multi-touch and pen; physical digitizers, pressure/tilt and 120 Hz acceptance remain separate'}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $run 'result.json')
  Write-Output "Canvas touch acceptance passed: $run"
