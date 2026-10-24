@@ -8,7 +8,7 @@ import argparse
 import fcntl
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -193,6 +193,22 @@ def run(args):
     if not command:
         sys.exit("Give a command after --.")
     device = find(attached(args.platform), args.device)
+    if args.read_recordings:
+        if device.platform != "android":
+            sys.exit("Reading shared recordings requires an Android tablet.")
+        if command == ["list"]:
+            command = [adb(), "-s", device.serial, "shell", "find /sdcard/Download /sdcard/Documents "
+                       "-maxdepth 2 -type f -iname '*.capystrokes'"]
+        elif len(command) == 3 and command[0] == "pull":
+            remote = PurePosixPath(command[1])
+            roots = (PurePosixPath("/sdcard/Download"), PurePosixPath("/sdcard/Documents"))
+            if ".." in remote.parts or remote.suffix.lower() != ".capystrokes" or not any(
+                    remote.is_relative_to(root) for root in roots):
+                sys.exit("Read recordings only from Download or Documents .capystrokes files.")
+            command = [adb(), "-s", device.serial, "pull", str(remote), str(Path(command[2]).resolve())]
+        else:
+            sys.exit("Use --read-recordings with list or pull REMOTE.capystrokes LOCAL.")
+        return subprocess.run(command).returncode
     record = device.reservation()
     if record and record["owner"] != args.owner:
         sys.exit(f"{device.name} is {describe(record)}.")
@@ -247,6 +263,8 @@ def main():
     command("release", release, "release this owner's reservations").add_argument(
         "device", nargs="?", help="release only this tablet")
     runner = command("run", run, "run a command while holding the tablet's lock")
+    runner.add_argument("--read-recordings", action="store_true",
+                        help="only list/copy shared stroke recordings, without reservations or app interaction")
     runner.add_argument("device", help="tablet name, model or serial")
     runner.add_argument("command", nargs=argparse.REMAINDER, help="-- command and arguments")
     args = parser.parse_args()

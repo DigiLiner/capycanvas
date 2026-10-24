@@ -87,6 +87,26 @@ class DevicesTest(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("Reserve tcl", refused.stderr)
 
+    def test_recording_reads_need_no_reservation_and_preserve_other_owners(self):
+        self.assertEqual(self.devices("beta", "run", "--read-recordings", "tcl", "--", "list").returncode, 0)
+        self.devices("alpha", "reserve", "tcl")
+        reservation = self.state / "capy-LOW0001.reservation.json"
+        original = reservation.read_text()
+        result = self.devices("beta", "run", "--read-recordings", "tcl", "--", "pull",
+                              "/sdcard/Download/pen poses.capystrokes", str(self.state / "capture.capystrokes"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(reservation.read_text(), original)
+        self.assertFalse((self.state / "capy-LOW0001.lock").exists())
+
+    def test_recording_reads_reject_commands_and_paths_outside_shared_recordings(self):
+        for command in [("adb", "shell", "am", "force-stop", "art.capycanvas"),
+                        ("shell", "rm", "-rf", "/sdcard/Download"),
+                        ("pull", "/sdcard/Download/../private.capystrokes", "capture"),
+                        ("pull", "/data/user/0/private.capystrokes", "capture"),
+                        ("pull", "/sdcard/Download/image.png", "capture")]:
+            result = self.devices("beta", "run", "--read-recordings", "tcl", "--", *command)
+            self.assertNotEqual(result.returncode, 0, command)
+
     def test_run_holds_the_lock_and_exports_the_device(self):
         self.devices("capycanvas-2", "reserve", "movinkpad11")
         probe = (

@@ -65,6 +65,12 @@ tools/devices/devices.py release
   `CAPY_CDP_PORT` are set.
 - Build outside `run`; hold the lock only while the device is in use.
 
+For user-authorized file collection, `run --read-recordings <device> -- list`
+lists saved `.capystrokes` files in Download and Documents. Use
+`run --read-recordings <device> -- pull <remote.capystrokes> <local>` to copy one.
+This restricted mode accepts no arbitrary commands, leaves reservations and
+apps alone, and requires no reservation because it only reads shared files.
+
 ## Keeping installs apart
 
 - Install experiments and test builds under your own application ID:
