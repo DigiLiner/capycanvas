@@ -51,8 +51,9 @@ export async function checkWorkspaceStartup({call, evaluate, settle}) {
       await wait('layerApp.app.brush_ready()');
       await evaluate(`layerApp.dispatch({type:'workspace_manager',command:{type:'switch',id:'builtin:workspace:photographer'}})`);
       await wait('JSON.parse(layerApp.app.workspace_view()).name === "Photo" && !JSON.parse(layerApp.app.workspace_view()).busy');
-      await evaluate(`layerApp.dispatch({type:'invoke',command:'zen_mode'})`);
-      await wait('!JSON.parse(layerApp.app.workspace_view()).dirty && !JSON.parse(layerApp.app.workspace_view()).busy');
+      await evaluate(`layerApp.dispatch({type:'invoke',command:'zen_mode'});layerApp.app.workspace_observe()`);
+      await wait('JSON.parse(layerApp.app.workspace_view()).dirty');
+      await wait('!JSON.parse(layerApp.app.workspace_view()).dirty && !JSON.parse(layerApp.app.workspace_view()).busy && !JSON.parse(layerApp.app.workspace_view()).saving');
       await settle();
       await activateForReload(call);
       await call('Page.reload', {ignoreCache:true});

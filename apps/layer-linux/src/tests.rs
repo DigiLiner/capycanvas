@@ -331,9 +331,15 @@ fn fixture_workspace(app: &adw::Application) -> Rc<Workspace> {
     w.area.connect_realize(glib::clone!(
         #[weak]
         w,
-        move |_| w.dispatch(UiAction::RestoreWorkspace {
-            workspace: Box::new(layer_ui::WorkspaceState::default()),
-        })
+        move |_| { glib::timeout_add_local(std::time::Duration::from_millis(10), glib::clone!(
+            #[weak] w,
+            #[upgrade_or] glib::ControlFlow::Break,
+            move || {
+                if w.gpu.borrow().is_none() || !w.workspaces.ready() { return glib::ControlFlow::Continue; }
+                w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(layer_ui::WorkspaceState::default()) });
+                glib::ControlFlow::Break
+            }
+        )); }
     ));
     w
 }

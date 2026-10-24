@@ -2645,7 +2645,6 @@ impl Workspace {
         }
     }
     fn gpu_error(self: &Rc<Self>, error: &str) {
-        self.surface.set_opacity(1.0);
         if self
             .gpu
             .borrow()
