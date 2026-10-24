@@ -336,6 +336,27 @@ fn color_ring(d: &mut Driver, device: &str, name: &str) {
     d.input.perform(serde_json::json!([contact(device, "move", [c[0] - 4., c[1] + 6.]), contact(device, "move", [c[0] + 16., c[1] + 14.]), contact(device, "up", [c[0] + 16., c[1] + 14.])]));
     pump(350);
     assert_ne!(state(&d.w).colors.foreground, first, "{name}: dragging on the wheel picks colors");
+    for mask in [false, true].into_iter().filter(|mask| !*mask || !std::env::var("WAYLAND_DISPLAY").is_ok_and(|display| display.ends_with("-tablet"))) {
+        if mask { d.w.dispatch(UiAction::Invoke { command: CommandId::QuickMask }); pump(200); }
+        let before = state(&d.w).display_colors().definition();
+        d.input.perform(serde_json::json!([contact(device, "down", hold), { "wait_ms": 1300 }, contact(device, "up", hold)]));
+        pump(200);
+        assert_eq!(state(&d.w).display_colors().definition(), before, "{name}: holding restores the original paint color; mask={mask}");
+        d.input.key(0xff1b);
+        pump(200);
+        if mask { d.w.dispatch(UiAction::Invoke { command: CommandId::QuickMask }); pump(200); }
+    }
+    d.input.perform(serde_json::json!([contact(device, "down", hold)]));
+    pump(100);
+    d.w.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Background } });
+    let replacement = layer_core::color::RgbColor::new(layer_core::color::RgbSpace::Srgb, [0.15, 0.7, 0.3, 1.]).unwrap();
+    d.w.dispatch(UiAction::Color { action: ColorAction::Definition { color: replacement } });
+    d.input.perform(serde_json::json!([{ "wait_ms": 1300 }, contact(device, "up", hold)]));
+    pump(200);
+    assert_eq!(state(&d.w).colors.definition(), replacement, "{name}: a retired wheel hold cannot restore into another color slot");
+    d.input.key(0xff1b);
+    d.w.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Foreground } });
+    pump(200);
     let picked = state(&d.w).colors.foreground;
     let size = find_id(d, color.id).unwrap().diameter;
     let out: Vec<_> = (0..=12).map(|i| [c[0] - 4. - size * 1.3 * i as f32 / 12., c[1] + 4.]).collect();

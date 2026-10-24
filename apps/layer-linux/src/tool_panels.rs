@@ -1107,17 +1107,6 @@ impl ColorWheel {
         drag.connect_cancel(move |_, _| part.set(None));
         self.add_controller(drag);
     }
-    pub(crate) fn hits(&self, x: f32, y: f32) -> bool {
-        let (size, [ox, oy]) = self.drawing_bounds();
-        ColorWheelGeometry::new(size).and_then(|g| g.hit_shape([x - ox, y - oy], self.imp().color.borrow().shape)).is_some()
-    }
-    pub(crate) fn cancel_pick(&self) {
-        for controller in self.observe_controllers().iter::<glib::Object>().flatten() {
-            if let Ok(gesture) = controller.downcast::<gtk::Gesture>() {
-                gesture.set_state(gtk::EventSequenceState::Denied);
-            }
-        }
-    }
     fn stage_bounds(&self) -> (f32, [f32; 2]) {
         if self.imp().bare.get() {
             let hdr = self.imp().hdr.get();

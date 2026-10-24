@@ -25,6 +25,7 @@ enum Contact {
     Pending([f32; 2]),
     Moving,
     Ring,
+    Wheel(ColorWheelPart),
     Beads(bool),
     Choose,
     Pair,
@@ -55,7 +56,6 @@ struct Pair {
 struct Press {
     sequence: Option<usize>,
     hit: Option<BubbleHit>,
-    color: Option<layer_core::color::RgbColor>,
     start: [f32; 2],
     moving: bool,
     held: bool,
@@ -792,7 +792,6 @@ impl Bubble {
                 wheel.set_margin_top(RING_RIM as i32);
                 wheel.set_margin_bottom(RING_RIM as i32);
                 wheel.set_vexpand(true);
-                wheel.connect_pick(glib::clone!(#[weak] w, move |action| w.dispatch(UiAction::Color { action })));
                 face.set_can_target(true);
                 face.append(&wheel);
                 *imp.wheel.borrow_mut() = Some(wheel);
@@ -1287,6 +1286,9 @@ impl Bubble {
         let send = |w: &Rc<Workspace>, action: BubbleAction| w.dispatch(UiAction::Bubble { action });
         drag.connect_drag_begin(glib::clone!(#[weak] w, move |gesture, x, y| {
             let Some(bubble) = gesture.widget().and_downcast::<Bubble>() else { return };
+            if gesture.current_event().and_then(|event| event.surface()).is_some_and(|surface| Some(surface) != bubble.native().and_then(|native| native.surface())) {
+                return;
+            }
             let position = local(&bubble, x, y);
             let Some(view) = bubble.imp().view.borrow().clone() else { return };
             let picked = bubble.pick(x, y, gtk::PickFlags::DEFAULT);
@@ -1299,7 +1301,7 @@ impl Bubble {
             }
             let state = match bubble.begin_contact(&w, id, hit, position, at) {
                 None => gtk::EventSequenceState::Denied,
-                Some(Contact::Ring | Contact::Choose) => gtk::EventSequenceState::Claimed,
+                Some(Contact::Ring | Contact::Choose | Contact::Wheel(_)) => gtk::EventSequenceState::Claimed,
                 Some(_) => return,
             };
             gesture.set_state(state);
@@ -1310,6 +1312,11 @@ impl Bubble {
             let (x, y) = (x0 + dx, y0 + dy);
             let position = local(&bubble, x, y);
             match bubble.imp().contact.get() {
+                Some(Contact::Wheel(part)) => {
+                    if let Some(position) = bubble.wheel_position(position) {
+                        send(&w, BubbleAction::Wheel { id, phase: ContactPhase::Move, part, position });
+                    }
+                }
                 Some(Contact::Ring) => send(&w, BubbleAction::Ring { id, phase: ContactPhase::Move, position }),
                 Some(Contact::Choose) => {
                     bubble.hot_item(position);
@@ -1353,6 +1360,7 @@ impl Bubble {
             let (x, y) = (x0 + dx, y0 + dy);
             let position = local(&bubble, x, y);
             match bubble.imp().contact.take() {
+                Some(Contact::Wheel(part)) => send(&w, BubbleAction::Wheel { id, phase: ContactPhase::Up, part, position: [0.; 2] }),
                 Some(Contact::Ring) => send(&w, BubbleAction::Ring { id, phase: ContactPhase::Up, position }),
                 Some(Contact::Choose) => {
                     bubble.imp().hot.set(None);
@@ -1501,11 +1509,36 @@ impl Bubble {
         [at[0] - center[0], at[1] - center[1]]
     }
 
+    fn wheel_position(&self, position: [f32; 2]) -> Option<[f32; 2]> {
+        let wheel = self.imp().wheel.borrow().as_ref()?.clone();
+        let point = self.compute_point(&wheel, &graphene::Point::new(position[0] + self.width() as f32 * 0.5, position[1] + self.height() as f32 * 0.5))?;
+        let (size, origin) = wheel.drawing_bounds();
+        let diameter = self.imp().view.borrow().as_ref()?.diameter - RING_RIM * 2.;
+        (size > 0.).then(|| [(point.x() - origin[0]) / size * diameter - diameter * 0.5, (point.y() - origin[1]) / size * diameter - diameter * 0.5])
+    }
+
+    fn wheel_contact(&self, w: &Rc<Workspace>, position: [f32; 2]) -> Option<(ColorWheelPart, [f32; 2])> {
+        let wheel = self.imp().wheel.borrow().as_ref()?.clone();
+        let point = self.compute_point(&wheel, &graphene::Point::new(position[0] + self.width() as f32 * 0.5, position[1] + self.height() as f32 * 0.5))?;
+        if wheel.pick(point.x() as f64, point.y() as f64, gtk::PickFlags::DEFAULT).is_some_and(|picked| picked != wheel.clone().upcast::<gtk::Widget>()) {
+            return None;
+        }
+        let position = self.wheel_position(position)?;
+        let size = self.imp().view.borrow().as_ref()?.diameter - RING_RIM * 2.;
+        let shape = w.gpu.borrow().as_ref()?.session.state().preview_colors().shape;
+        ColorWheelGeometry::new(size)?.hit_shape(position.map(|v| v + size / 2.), shape).map(|part| (part, position))
+    }
+
     fn begin_contact(&self, w: &Rc<Workspace>, id: u32, hit: Option<BubbleHit>, position: [f32; 2], at: [f32; 2]) -> Option<Contact> {
         let send = |action: BubbleAction| w.dispatch(UiAction::Bubble { action });
         let phase = ContactPhase::Down;
         let contact = match hit? {
-            BubbleHit::Pill | BubbleHit::Wheel => return None,
+            BubbleHit::Pill => return None,
+            BubbleHit::Wheel => {
+                let (part, position) = self.wheel_contact(w, position)?;
+                send(BubbleAction::Wheel { id, phase, part, position });
+                Contact::Wheel(part)
+            }
             BubbleHit::Card | BubbleHit::Face | BubbleHit::Half(_) => Contact::Pending(at),
             BubbleHit::Ring => {
                 send(BubbleAction::Ring { id, phase, position });
@@ -1529,6 +1562,7 @@ impl Bubble {
         let send = |action: BubbleAction| w.dispatch(UiAction::Bubble { action });
         let (phase, position) = (ContactPhase::Cancel, [0.; 2]);
         match self.imp().contact.take() {
+            Some(Contact::Wheel(part)) => send(BubbleAction::Wheel { id, phase, part, position }),
             Some(Contact::Ring) => send(BubbleAction::Ring { id, phase, position }),
             Some(Contact::Choose) => {
                 self.imp().hot.set(None);
@@ -1540,20 +1574,6 @@ impl Bubble {
             }
             _ => {}
         }
-    }
-
-    fn restore_color(&self, w: &Rc<Workspace>, color: layer_core::color::RgbColor) {
-        let current = w.gpu.borrow().as_ref().map(|g| g.session.state().colors.definition());
-        if current.is_some_and(|c| c != color) {
-            w.dispatch(UiAction::Color { action: ColorAction::Definition { color } });
-        }
-    }
-
-    fn cancel_pick(&self, w: &Rc<Workspace>, color: layer_core::color::RgbColor) {
-        if let Some(wheel) = self.imp().wheel.borrow().as_ref() {
-            wheel.cancel_pick();
-        }
-        self.restore_color(w, color);
     }
 
     fn press_down(&self, w: &Rc<Workspace>, id: u32, sequence: Option<usize>, at: [f32; 2]) {
@@ -1572,20 +1592,17 @@ impl Bubble {
             return;
         }
         let hit = self.hit(&view, p, picked.as_ref());
-        let color = w.gpu.borrow().as_ref().map(|g| g.session.state().colors.definition()).filter(|_| wheel);
-        let picking = wheel
-            && self.imp().wheel.borrow().as_ref().is_some_and(|w| self.compute_point(w, &point).is_some_and(|p| w.hits(p.x(), p.y())));
         let long = gtk::Settings::default().map_or(500, |s| s.gtk_long_press_time()) as u64;
-        let delay = if picking { long * 2 } else { long };
+        let delay = if wheel && self.wheel_contact(w, p).is_some() { long * 2 } else { long };
         let hold = glib::timeout_add_local_once(
             std::time::Duration::from_millis(delay),
             glib::clone!(#[weak(rename_to = bubble)] self, #[weak] w, move || bubble.press_held(&w, id)),
         );
-        *self.imp().press.borrow_mut() = Some(Press { sequence, hit, color, start: at, moving: false, held: false, hold: Some(hold) });
+        *self.imp().press.borrow_mut() = Some(Press { sequence, hit, start: at, moving: false, held: false, hold: Some(hold) });
     }
 
     fn press_held(&self, w: &Rc<Workspace>, id: u32) {
-        let (start, color) = {
+        let start = {
             let mut press = self.imp().press.borrow_mut();
             let Some(press) = press.as_mut() else { return };
             press.hold = None;
@@ -1593,11 +1610,8 @@ impl Bubble {
                 return;
             }
             press.held = true;
-            (press.start, press.color)
+            press.start
         };
-        if let Some(color) = color {
-            self.restore_color(w, color);
-        }
         self.cancel_contact(w, id, start);
         let [x, y] = self.local(start);
         let [cx, cy] = self.center();
@@ -1606,7 +1620,7 @@ impl Bubble {
 
     fn press_moved(&self, w: &Rc<Workspace>, id: u32, sequence: Option<usize>, at: [f32; 2]) -> bool {
         let imp = self.imp();
-        let (held, moving, color, hit) = match imp.press.borrow_mut().as_mut().filter(|c| c.sequence == sequence) {
+        let (held, moving, hit) = match imp.press.borrow_mut().as_mut().filter(|c| c.sequence == sequence) {
             Some(press) => {
                 let far = (at[0] - press.start[0]).hypot(at[1] - press.start[1]) > HOLD_SLOP;
                 if press.held && !far {
@@ -1616,15 +1630,13 @@ impl Bubble {
                     press.forget();
                 }
                 let held = std::mem::take(&mut press.held);
-                (held, press.moving, press.color, press.hit)
+                (held, press.moving, press.hit)
             }
             None => return false,
         };
         if held {
             w.dismiss_context();
-            if color.is_none() {
-                self.begin_contact(w, id, hit, self.local(at), at);
-            }
+            self.begin_contact(w, id, hit, self.local(at), at);
             return false;
         }
         if moving {
@@ -1632,8 +1644,8 @@ impl Bubble {
             return true;
         }
         let size = imp.view.borrow().as_ref().map_or(0., |v| v.diameter);
-        let Some(color) = color.filter(|_| color_drag_out(size, self.local(at))) else { return false };
-        self.cancel_pick(w, color);
+        if hit != Some(BubbleHit::Wheel) || !color_drag_out(size, self.local(at)) { return false; }
+        self.cancel_contact(w, id, at);
         let lifted = w.bubbles.drag(w, BubbleGrab::Rim { id }, ContactPhase::Down, at);
         match imp.press.borrow_mut().as_mut() {
             Some(press) if lifted => press.moving = true,
@@ -1650,8 +1662,8 @@ impl Bubble {
         }
         if press.moving {
             w.bubbles.drag(w, BubbleGrab::Rim { id }, if cancel { ContactPhase::Cancel } else { ContactPhase::Up }, at);
-        } else if let Some(color) = press.color.filter(|_| cancel) {
-            self.cancel_pick(w, color);
+        } else if cancel {
+            self.cancel_contact(w, id, at);
         }
     }
 
@@ -1724,9 +1736,6 @@ impl Bubble {
             }
             if press.moving {
                 w.bubbles.drag(w, BubbleGrab::Rim { id }, ContactPhase::Cancel, mid);
-            }
-            if let Some(color) = press.color {
-                self.cancel_pick(w, color);
             }
         }
         imp.hot.set(None);

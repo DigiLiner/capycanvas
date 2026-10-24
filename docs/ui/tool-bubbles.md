@@ -299,6 +299,10 @@ a host only presents it and captures native input. GTK
 
 ### Input
 
+GTK forwards wheel contacts through `BubbleAction::Wheel` from the bubble’s
+native drag gesture. The bare Color wheel presents the colors and retains its
+HDR controls; shared Rust owns picking and cancellation across color contexts.
+
 Web captures pointer events before canvas input and retains DOM widgets for the
 wheel, swatches and Layers inspector. Mouse resets use the browser's native
 double-click event. Browsers expose no system hold or double-tap thresholds;
