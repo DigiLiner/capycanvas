@@ -50,10 +50,18 @@ Chinese uses the animal's name. Japanese uses the approved short name; the other
 languages retain the full brand. Do not create additional abbreviations.
 
 `tools/build/app_names.py` derives Android launcher strings, Apple
-`InfoPlist.strings`, Linux desktop/AppStream names and packaged web manifest
-names from the catalogs. Android and Apple builds generate their resources;
-regenerate tracked Linux names with
-`python3 tools/build/app_names.py linux apps/layer-linux` after changing a name.
+`InfoPlist.strings`, Linux desktop/AppStream text and packaged web manifest
+names from the catalogs. Android and Apple builds generate their resources.
+Linux summaries, descriptions, screenshot captions and search keywords come
+from each language's `store.ftl`; these exported messages must be literal
+one-line text. Regenerate tracked Linux metadata with
+`python3 tools/build/app_names.py linux apps/layer-linux` after changing a name
+or store message. The Flatpak build lists shipped languages as fully translated
+in the composed AppStream catalog. Shared catalog checks require complete
+Fluent translations; no gettext or Qt translation domain is declared.
+Regional XML text includes POSIX and BCP 47 locale aliases for GNOME Software
+and AppStream library consumers. Desktop entries and screenshot images keep
+their desktop locale tags.
 Windows MSIX packaging indexes the same names with MakePRI for localized package
 and launcher labels.
 Launcher labels follow the operating system's language; app text follows the

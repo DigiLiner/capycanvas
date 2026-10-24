@@ -590,6 +590,14 @@ graphics tablet input are supported. Validate changes with
 `appstreamcli validate --no-net apps/layer-linux/art.capycanvas.CapyCanvas.metainfo.xml`
 and `appstreamcli check-syscompat --details apps/layer-linux/art.capycanvas.CapyCanvas.metainfo.xml`.
 
+The listing declares offline use, links to help, bug reports and contributing,
+and supplies light and dark branding colors. Its translated text comes from
+the shared [Fluent catalogs](../ui/localization.md#application-names). After
+composition, `tools/build/app_names.py catalog` adds every shipped language to
+the compressed catalog; the shared catalog checks require complete translations.
+Check the generator with
+`python3 -m unittest discover -s tools/build -p 'test_app_names.py'`.
+
 GNOME Software 50 labels apps supporting keyboard, pointing and touch as Adaptive
 without checking their display limits. Its hardware dialog can also warn on a
 desktop because mobile displays are unsupported. The AppStream compatibility
