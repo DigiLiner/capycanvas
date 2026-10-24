@@ -1940,7 +1940,7 @@ impl Bubbles {
             }
         }
         self.fade(stroke, &faded);
-        self.refresh_wheels(&state.preview_colors(), w.paint_view_color(), w.picker_headroom(), state.color_picker.preview.is_some());
+        self.refresh_wheels(w, &state.preview_colors(), w.paint_view_color(), w.picker_headroom(), state.color_picker.preview.is_some());
         self.animate(w);
     }
 
@@ -1984,10 +1984,11 @@ impl Bubbles {
             .collect()
     }
 
-    pub(super) fn refresh_wheels(&self, colors: &ColorState, view: crate::display_color::ViewColor, headroom: f32, preview: bool) {
+    pub(super) fn refresh_wheels(&self, w: &Workspace, colors: &ColorState, view: crate::display_color::ViewColor, headroom: f32, preview: bool) {
         for bubble in self.layer.bubbles() {
             if let Some(wheel) = bubble.imp().wheel.borrow().as_ref() {
-                wheel.set_state(colors, view, headroom, preview);
+                let range = w.gpu.borrow().as_ref().map(|g| g.session.bubble_intensity_range(bubble.id(), colors));
+                wheel.set_state(colors, view, headroom, preview, range);
             }
         }
     }

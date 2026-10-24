@@ -9,15 +9,21 @@ public static class CapyBubbleFixtureNative {
  [DllImport("layer_windows.dll",CallingConvention=CallingConvention.Cdecl)] static extern IntPtr capy_bubble_ui(IntPtr context,[MarshalAs(UnmanagedType.LPUTF8Str)]string json);
  [DllImport("layer_windows.dll",CallingConvention=CallingConvention.Cdecl)] static extern void capy_localization_free(IntPtr context);
  [DllImport("layer_windows.dll",CallingConvention=CallingConvention.Cdecl)] static extern void capy_string_free(IntPtr value);
- [DllImport("layer_windows.dll",CallingConvention=CallingConvention.Cdecl)] public static extern uint capy_color_hit(float x,float y,float size,uint shape);
+ [DllImport("layer_windows.dll",CallingConvention=CallingConvention.Cdecl)] static extern uint capy_color_hit(float x,float y,float size,uint shape);
  [StructLayout(LayoutKind.Sequential)] struct ScreenPoint {public int x,y;}
  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(ScreenPoint point);
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint process);
  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr window,StringBuilder name,int count);
  public static string WindowAt(int x,int y){var window=WindowFromPoint(new ScreenPoint{x=x,y=y});uint process;GetWindowThreadProcessId(window,out process);var name=new StringBuilder(256);GetClassName(window,name,name.Capacity);return "hwnd="+window.ToInt64().ToString("X")+";class="+name+";process="+process;}
  static IntPtr library;
- public static string Query(string path,string json) {
+ static void EnsureLibrary(string path) {
   if(library==IntPtr.Zero){library=LoadLibrary(path);if(library==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());}
+ }
+ public static uint ColorHit(string path,float x,float y,float size,uint shape) {
+  EnsureLibrary(path);return capy_color_hit(x,y,size,shape);
+ }
+ public static string Query(string path,string json) {
+  EnsureLibrary(path);
   IntPtr context=capy_localization_for_tag("en"),result=IntPtr.Zero;
   try{
    if(context==IntPtr.Zero)throw new InvalidOperationException("Fixture localization unavailable.");

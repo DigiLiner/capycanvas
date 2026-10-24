@@ -837,13 +837,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         if(json!=lastOverviews){lastOverviews=json;overviews(to_string(json));}
         if(glassChanged)glassChanged();
     }
-    A glass(UIElement const& reference,A& connections,A& arcs)const{
+    A glass(UIElement const& reference,A& connections,A& arcs,A& colors)const{
         A regions;
         for(auto const& [id,group]:groups)if(!group.hidden&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
         collapsed->AppendGlass(regions,connections,reference);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
         canvasBar->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
-        bubbles->Glass(regions,arcs,reference);
+        bubbles->Glass(regions,arcs,colors,reference);
         return regions;
     }
     void placePreviews(){
@@ -877,7 +877,7 @@ void WorkspaceView::CanvasContact(bool active){impl->canvasBar->Contact(active);
 void WorkspaceView::AttachBubbles(UIElement const& root,std::function<void()> cancelHeader){impl->bubbles->Attach(root,[weak=std::weak_ptr<Impl>(impl),cancelHeader]{if(auto self=weak.lock())self->gestures->Cancel();cancelHeader();});}
 JsonArray WorkspaceView::DrawerSources()const{return impl->data->drawerSources;}
 JsonArray WorkspaceView::BubbleInputRegions(UIElement const& reference)const{return impl->bubbles->InputRegions(reference);}
-JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections,JsonArray& arcs)const{return impl->glass(reference,connections,arcs);}
+JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections,JsonArray& arcs,JsonArray& colors)const{return impl->glass(reference,connections,arcs,colors);}
 void WorkspaceView::SetTitlebarInsets(float left,float right,float height){
     std::array<float,3> value{left,right,height};
     if(value!=impl->titlebar){impl->titlebar=value;impl->lastTitlebar=L"";impl->reportTitlebar();}

@@ -3,7 +3,9 @@
 #include <d2d1_3.h>
 #include <d3d11.h>
 #include <microsoft.ui.xaml.media.dxinterop.h>
+#include <array>
 #include <mutex>
+#include <numbers>
 #include <thread>
 
 namespace CapyWheel {
@@ -38,10 +40,31 @@ struct Device {
         return device;
     }
 };
-struct FieldRequest {hstring key;uint32_t pixels=0;float hue=0;uint32_t projection=0,rgbSpace=0;bool hdr=false,guide=false;std::string mapped;uint64_t epoch=0;std::shared_ptr<Device> device;};
+struct ArcRaster {Point2 center{};float radius=0,width=0,endAngle=0,size=0;std::vector<Paint> ramp;};
+struct FieldRequest {hstring key;uint32_t pixels=0;float hue=0;uint32_t projection=0,rgbSpace=0;bool hdr=false,guide=false;std::string mapped;uint64_t epoch=0;std::shared_ptr<Device> device;std::shared_ptr<ArcRaster const> arc;};
 struct FieldResult {hstring key;uint32_t pixels=0;uint64_t epoch=0;std::shared_ptr<Device> device;com_ptr<ID2D1Bitmap> bitmap;HRESULT status=S_OK;};
 inline bool rasterField(FieldRequest const& request,std::vector<uint8_t>& bytes){
     bytes.resize(size_t(request.pixels)*request.pixels*4);
+    if(request.arc){
+        auto const& arc=*request.arc;if(arc.ramp.empty()||arc.size<=0||request.pixels==0)return false;
+        auto dpi=float(request.pixels)/arc.size,span=std::numbers::pi_v<float>-2*arc.endAngle;if(span<=0)return false;
+        auto bound=[&](float value,bool upper){return std::clamp(int(upper?std::ceil(value*dpi):std::floor(value*dpi)),0,int(request.pixels));};
+        auto padding=arc.width*.5f+1/dpi,extent=arc.radius*std::cos(arc.endAngle);
+        auto left=bound(arc.center.x-extent-padding,false),right=bound(arc.center.x+extent+padding,true);
+        auto top=bound(arc.center.y+arc.radius*std::sin(arc.endAngle)-padding,false),bottom=bound(arc.center.y+arc.radius+padding,true);
+        std::fill(bytes.begin(),bytes.end(),uint8_t{0});
+        for(int y=top;y<bottom;++y)for(int x=left;x<right;++x){
+            auto dx=(float(x)+.5f)/dpi-arc.center.x,dy=(float(y)+.5f)/dpi-arc.center.y;
+            auto fraction=std::clamp((std::numbers::pi_v<float>-arc.endAngle-std::atan2(std::max(0.f,dy),dx))/span,0.f,1.f);
+            auto angle=std::numbers::pi_v<float>-arc.endAngle-fraction*span;
+            auto coverage=std::clamp((arc.width*.5f-std::hypot(dx-arc.radius*std::cos(angle),dy-arc.radius*std::sin(angle)))*dpi+.5f,0.f,1.f);
+            auto position=fraction*float(arc.ramp.size()-1);auto index=std::min(size_t(position),arc.ramp.size()-1);auto t=position-float(index);
+            auto a=arc.ramp[index],b=arc.ramp[std::min(index+1,arc.ramp.size()-1)];auto alpha=std::clamp(a.a+(b.a-a.a)*t,0.f,1.f)*coverage;
+            std::array<float,4> rgba{std::clamp(a.r+(b.r-a.r)*t,0.f,1.f)*alpha,std::clamp(a.g+(b.g-a.g)*t,0.f,1.f)*alpha,std::clamp(a.b+(b.b-a.b)*t,0.f,1.f)*alpha,alpha};
+            auto offset=(size_t(y)*request.pixels+x)*4;for(size_t i=0;i<4;++i)bytes[offset+i]=uint8_t(std::round(rgba[i]*255));
+        }
+        return true;
+    }
     return request.hdr?capy_color_mapped_field(request.pixels,request.mapped.c_str(),bytes.data(),bytes.size())
         :capy_color_raster(request.pixels,request.hue,request.projection,request.rgbSpace,request.guide,bytes.data(),bytes.size());
 }
@@ -150,6 +173,11 @@ struct WheelImage {
             if(projection==0){auto square=array(geometry,L"square");float x=float(square.GetNumberAt(0)),y=float(square.GetNumberAt(1)),w=float(square.GetNumberAt(2));
                 float radius=float(std::min(6.,size*.02)/size);com_ptr<ID2D1RoundedRectangleGeometry> rounded;
                 check_hresult(factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(D2D1::RectF(x,y,x+w,y+w),radius,radius),rounded.put()));clip=rounded;
+            }else if(projection==1){auto triangle=array(geometry,L"triangle");com_ptr<ID2D1PathGeometry> path;com_ptr<ID2D1GeometrySink> sink;
+                check_hresult(factory->CreatePathGeometry(path.put()));check_hresult(path->Open(sink.put()));
+                sink->BeginFigure(point(triangle.GetArrayAt(0)),D2D1_FIGURE_BEGIN_FILLED);
+                for(uint32_t i=1;i<triangle.Size();++i)sink->AddLine(point(triangle.GetArrayAt(i)));
+                sink->EndFigure(D2D1_FIGURE_END_CLOSED);check_hresult(sink->Close());clip=path;
             }else if(projection==2){com_ptr<ID2D1EllipseGeometry> ellipse;float radius=float(num(geometry,L"disc_radius"));
                 check_hresult(factory->CreateEllipseGeometry(D2D1::Ellipse(center,radius,radius),ellipse.put()));clip=ellipse;}
             if(field){

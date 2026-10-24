@@ -161,11 +161,12 @@ fn hdr_desk(depth: layer_core::color::SampleDepth, platform: Platform) -> UiSess
 
 #[test]
 fn hdr_bubble_layout_only_appears_on_hosts_with_the_intensity_control() {
-    for platform in Platform::ALL {
-        let mut s = hdr_desk(layer_core::color::SampleDepth::F16, platform);
+    for (depth, platform) in [layer_core::color::SampleDepth::F16, layer_core::color::SampleDepth::F32].into_iter()
+        .flat_map(|depth| Platform::ALL.into_iter().map(move |platform| (depth, platform))) {
+        let mut s = hdr_desk(depth, platform);
         let id = take_ring(&mut s, FAR);
         let layout = view(&s, id).color.unwrap();
-        let enabled = matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Mac | Platform::Ios);
+        let enabled = matches!(platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Windows | Platform::Mac | Platform::Ios);
         assert_eq!(layout.intensity.is_some(), enabled, "{platform:?}");
         assert_eq!(act(&mut s, BubbleAction::SetIntensity { id, stops: 1. }).is_ok(), enabled, "{platform:?}");
         if !enabled { assert_eq!(layout.bounds().height, layout.diameter); }
@@ -173,18 +174,113 @@ fn hdr_bubble_layout_only_appears_on_hosts_with_the_intensity_control() {
 }
 
 #[test]
+fn hdr_bubble_eyedropper_preview_overrides_only_preview_presentations() {
+    use layer_core::color::{RgbColor, RgbSpace, SampleDepth};
+    for depth in [SampleDepth::F16, SampleDepth::F32] {
+        let mut s = hdr_desk(depth, Platform::Windows);
+        let id = take_ring(&mut s, FAR);
+        let committed = s.state.colors.clone();
+        let checkpoint = s.engine.checkpoint();
+        let before = serde_json::to_value(s.bubble_presentations()).unwrap();
+        let mut sampled = committed.clone();
+        sampled.apply(ColorAction::Definition { color: RgbColor::new(RgbSpace::Srgb, [0.2, 1., 0.4, 0.37]).unwrap() }).unwrap();
+        sampled.apply(ColorAction::HdrIntensity { stops: 10. }).unwrap();
+        s.state.color_picker.preview = Some(sampled.definition());
+        let expected = s.state.preview_colors().into_owned();
+        {
+            let preview = s.color_preview();
+            assert_eq!(preview.bubble_colors.len(), 1);
+            let (owner, color) = &preview.bubble_colors[0];
+            assert_eq!(*owner, id);
+            let intensity = &color.intensity;
+            assert!(intensity.stops > 6.);
+            assert_eq!(intensity.stops, expected.hdr_intensity());
+            assert_eq!(intensity.range, HdrIntensityArc::range(expected.hdr_intensity(), depth));
+            assert_eq!(intensity.zero, intensity.geometry.zero_tick(intensity.range));
+            assert_eq!(intensity.ramp, expected.intensity_ramp(s.effective_sdr_rendition(), intensity.range));
+            let mapped = expected.mapped_swatch(expected.definition(), s.effective_sdr_rendition());
+            assert_eq!(intensity.marker, [mapped[0], mapped[1], mapped[2], 1.]);
+            assert_eq!(preview.colors.definition().linear_in(RgbSpace::Srgb).unwrap()[3], 0.37);
+            assert_eq!(intensity.point, intensity.geometry.point((intensity.stops-intensity.range[0])/(intensity.range[1]-intensity.range[0])));
+            let serialized = serde_json::to_value(&preview).unwrap();
+            assert_eq!(serialized["bubble_colors"][0][0], id);
+            assert_eq!(serialized["bubble_colors"][0][1], serde_json::to_value(color).unwrap());
+        }
+        assert_eq!(s.state.colors, committed);
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+        assert_eq!(serde_json::to_value(s.bubble_presentations()).unwrap(), before);
+        for editor in [true, false] {
+            s.state.color_picker.editor = editor;
+            s.state.color_picker.calibrating = !editor;
+            assert!(s.color_preview().bubble_colors.is_empty());
+        }
+        s.state.color_picker.calibrating = false;
+        s.state.color_picker.preview = None;
+        let preview = s.color_preview();
+        assert!(preview.bubble_colors.is_empty());
+        assert_eq!(*preview.colors, committed);
+        assert_eq!(serde_json::to_value(s.bubble_presentations()).unwrap(), before);
+        invoke(&mut s, CommandId::QuickMask);
+        s.state.color_picker.preview = Some(sampled.definition());
+        assert!(s.color_preview().bubble_colors.is_empty());
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+    }
+}
+
+#[test]
+fn hdr_bubble_intensity_keeps_its_range_until_release() {
+    use layer_core::color::SampleDepth;
+    for depth in [SampleDepth::F16, SampleDepth::F32] {
+        for platform in Platform::ALL {
+            for initial in [-12., 12.] {
+                for ending in [ContactPhase::Up, ContactPhase::Cancel] {
+                    let mut s = hdr_desk(depth, platform);
+                    let id = take_ring(&mut s, FAR);
+                    act(&mut s, BubbleAction::SetIntensity { id, stops: initial }).unwrap();
+                    let before = s.state.colors.clone();
+                    let checkpoint = s.engine.checkpoint();
+                    let range = HdrIntensityArc::range(initial, depth);
+                    let arc = view(&s, id).color.unwrap().intensity.unwrap();
+                    let position = arc.point(0.625);
+                    let expected = arc.value(position, range);
+                    for phase in [ContactPhase::Down, ContactPhase::Move, ContactPhase::Move, ContactPhase::Move] {
+                        act(&mut s, BubbleAction::Intensity { id, phase, position }).unwrap();
+                        assert!((s.state.colors.hdr_intensity() - expected).abs() < 0.01, "{depth:?} {platform:?} {initial} {phase:?}");
+                        let packet = s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.unwrap();
+                        assert_eq!(packet.intensity.range, range);
+                        assert_eq!(packet.intensity.zero, arc.zero_tick(range));
+                        assert!((packet.intensity.point[0] - position[0]).hypot(packet.intensity.point[1] - position[1]) < 0.01);
+                    }
+                    act(&mut s, BubbleAction::Intensity { id, phase: ending, position }).unwrap();
+                    let stops = if ending == ContactPhase::Cancel { initial } else { expected };
+                    assert!((s.state.colors.hdr_intensity() - stops).abs() < 0.01);
+                    let packet = s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.unwrap();
+                    assert_eq!(packet.intensity.range, HdrIntensityArc::range(stops, depth));
+                    if ending == ContactPhase::Cancel { assert_eq!(s.state.colors, before); }
+                    assert_eq!(s.engine.checkpoint(), checkpoint);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn hdr_bubble_intensity_commits_cancels_and_retires_with_its_color_context() {
     use layer_core::color::{RgbColor, RgbSpace, SampleDepth};
     for (depth, platform) in [SampleDepth::F16, SampleDepth::F32].into_iter()
-        .flat_map(|depth| [Platform::Gtk, Platform::Web, Platform::Android, Platform::Mac, Platform::Ios].into_iter().map(move |platform| (depth, platform))) {
+        .flat_map(|depth| Platform::ALL.into_iter().map(move |platform| (depth, platform))) {
         let mut s = hdr_desk(depth, platform);
-        s.dispatch(UiAction::Color { action: ColorAction::Definition { color: RgbColor::new(RgbSpace::Srgb, [0.2, 0.8, 0.4, 1.]).unwrap() } }).unwrap();
+        s.dispatch(UiAction::Color { action: ColorAction::Definition { color: RgbColor::new(RgbSpace::Srgb, [0.2, 0.8, 0.4, 0.37]).unwrap() } }).unwrap();
         s.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops: -1. } }).unwrap();
         let original = s.state.colors.clone();
         let checkpoint = s.engine.checkpoint();
         let id = take_ring(&mut s, FAR);
         let bubble = view(&s, id);
         let arc = bubble.color.unwrap().intensity.unwrap();
+        let color = s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.unwrap();
+        let mapped = original.mapped_swatch(original.definition(), s.effective_sdr_rendition());
+        assert_eq!(color.intensity.marker, [mapped[0], mapped[1], mapped[2], 1.]);
+        assert_eq!(s.state.colors.definition().linear_in(RgbSpace::Srgb).unwrap()[3], 0.37);
         let transported: BubbleHitGeometry = serde_json::from_value(serde_json::to_value(&bubble).unwrap()).unwrap();
         for fraction in [0., 0.5, 1.] {
             assert_eq!(bubble.hit(arc.point(fraction)), Some(BubbleHit::Intensity));
@@ -226,6 +322,16 @@ fn hdr_bubble_intensity_commits_cancels_and_retires_with_its_color_context() {
         assert!((s.state.colors.hdr_intensity() - 10.).abs() < 0.01, "sampled highlights retain their expanded intensity range");
         act(&mut s, BubbleAction::Intensity { id, phase: ContactPhase::Cancel, position: [0.; 2] }).unwrap();
         assert_eq!(s.state.colors.hdr_intensity(), 12.);
+        s.dispatch(UiAction::Color { action: ColorAction::Select { slot: ColorSlot::Transparent } }).unwrap();
+        let transparent = s.state.colors.clone();
+        for phase in [ContactPhase::Down, ContactPhase::Move, ContactPhase::Up, ContactPhase::Cancel] {
+            act(&mut s, BubbleAction::Intensity { id, phase, position: arc.point(0.5) }).unwrap();
+            assert_eq!(s.state.colors, transparent, "{depth:?} {platform:?} {phase:?}");
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+        }
+        act(&mut s, BubbleAction::SetIntensity { id, stops: 0. }).unwrap();
+        assert_eq!(s.state.colors, transparent, "{depth:?} {platform:?} transparent reset");
+        assert_eq!(s.engine.checkpoint(), checkpoint);
         invoke(&mut s, CommandId::QuickMask);
         assert!(view(&s, id).color.unwrap().intensity.is_none());
         assert!(s.bubble_presentations().into_iter().find(|packet| packet.view.id == id).unwrap().color.is_none());

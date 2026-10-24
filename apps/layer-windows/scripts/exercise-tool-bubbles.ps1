@@ -1,5 +1,5 @@
 param([Parameter(Mandatory)][string]$Executable,
-    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly)
+    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly,[switch]$HdrOnly,[ValidateSet('F16','F32')][string]$HdrDepth='F16')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'BubbleVisualChecks.ps1')
@@ -33,6 +33,7 @@ $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/tool-bubbles/'+$Variant+'/'+[guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $checks=[Collections.Generic.List[string]]::new()
+$hdrEvidence=[Collections.Generic.List[object]]::new();$bubbleFailed=$false
 function Packets {@((Model).bubbles)}
 function Packet([long]$Id) {@(Packets|Where-Object {$_.view.id -eq $Id})[0]}
 function View([long]$Id) {(Packet $Id).view}
@@ -52,7 +53,12 @@ function Card-Bounds([long]$Id,$Element=$null){
     $height=(View $Id).card.size[1]*$scale
     [pscustomobject]@{X=($footer.Right-$outer.Width);Y=($footer.Bottom-$height);Width=$outer.Width;Height=$height;Bottom=$footer.Bottom;Right=$footer.Right}
 }
-function Center([long]$Id){if(Find "bubble-card-$Id" -Visible){$b=Card-Bounds $Id;@{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}else{At "tool-bubble-$Id"}}
+function Center([long]$Id){
+    if(Find "bubble-card-$Id" -Visible){$b=Card-Bounds $Id;return @{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
+    $color=(Packet $Id).color
+    if($color){$b=(Control "tool-bubble-$Id" -Arranged).Current.BoundingRectangle;return @{x=[int][Math]::Round($b.X-$color.bounds.x*$scale);y=[int][Math]::Round($b.Y-$color.bounds.y*$scale)}}
+    At "tool-bubble-$Id"
+}
 function Card([long]$Id){
     $ready=@{element=$null;expected=$null;actual=$null;footer=$null}
     try{Wait-Until {
@@ -95,7 +101,7 @@ function Wheel-FieldPoint([long]$Id){
     $side=(View $Id).diameter-14;$model=(Model).color_panel
     if($model.shape -ne 'circle'){throw 'Wheel fixture requires its registered circle geometry'}
     $point=@(($model.geometry.disc_radius*$side*.5),(-$model.geometry.disc_radius*$side*.25))
-    $hit=[CapyBubbleFixtureNative]::capy_color_hit(($point[0]+$side*.5),($point[1]+$side*.5),$side,2)
+    $hit=[CapyBubbleFixtureNative]::ColorHit((Join-Path $directory 'layer_windows.dll'),($point[0]+$side*.5),($point[1]+$side*.5),$side,2)
     if($hit -ne 2){throw 'Published color field point is not a field hit'}
     return $point
 }
@@ -752,7 +758,9 @@ try{
     [CapyRowPointer]::Initialize([uint32]$review.Id);$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
     Wait-Until {(Model).layout.viewport[0] -gt 1000} 'Owned fixture did not maximize'
+    if($HdrOnly){New-BubbleHdrDrawing $HdrDepth}
     Ensure-Sources
+    if($HdrOnly){Show-BubbleHdrColor}
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'View'
     Invoke 'fit_canvas'
     Wait-Until {
@@ -766,6 +774,13 @@ try{
     $w=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$width=(Model).layout.viewport[0];$height=(Model).layout.viewport[1]
     $revision=Revision
     $initial=Model;$camera=$initial.state.camera;$document=@($initial.state.tabs|Where-Object active)[0]
+    if($HdrOnly){
+        Invoke-BubbleHdrChecks
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved|Out-Null
+        if((Get-Item -LiteralPath $stderr).Length){throw 'HDR bubble native stderr requires inspection'}
+        @{variant=$Variant;depth=$HdrDepth;checks=@($checks);scope='HDR color bubble native input, accessibility, geometry and composed pixels; physical digitizers and HDR display luminance unverified'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'results.json')
+        return
+    }
     $dial=Take 'command' 'drawing_brush' (($camera.translation[0]+$document.width*.35*$camera.zoom)/$scale) (($camera.translation[1]+$document.height*.35*$camera.zoom)/$scale)
     Check-Artwork 'tear-out' $revision
     if($MenuOnly){Document-SwitchMenu $dial;@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved|Out-Null;return}
@@ -938,6 +953,7 @@ try{
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [pscustomobject]@{variant=$Variant;checks=@($checks);scope='OS-injected input with native pixel and geometry checks; physical input, matched GTK captures and presentation performance unverified'}|ConvertTo-Json -Depth 12|Tee-Object -FilePath (Join-Path $run 'results.json')
 }catch{
+    $bubbleFailed=$true
     $CapyEach=$null
     if($review -and !$review.HasExited){
         $diagnostics=@{}
@@ -958,4 +974,10 @@ try{
     ($_|Out-String)+$_.ScriptStackTrace|Set-Content (Join-Path $run 'failure.txt')
     if($review -and !$review.HasExited){try{& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved}catch{}}
     throw
-}finally{[CapyRowPointer]::Dispose();Exit-CapyEnvironment}
+}finally{
+    [CapyRowPointer]::Dispose();Exit-CapyEnvironment
+    if($HdrOnly){
+        try{[CapyCanvasTouch]::Dispose();if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned HDR bubble app did not close'}}}}catch{if(!$bubbleFailed){throw};Write-Warning $_}
+        try{$hdrEvidence|ConvertTo-Json -Depth 40|Set-Content (Join-Path $run 'hdr-evidence.json')}catch{if(!$bubbleFailed){throw};Write-Warning $_}
+    }
+}

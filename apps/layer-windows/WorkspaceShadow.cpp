@@ -21,7 +21,7 @@ ID2D1Factory* factory(){
     static winrt::com_ptr<ID2D1Factory> value=[]{winrt::com_ptr<ID2D1Factory> created;winrt::check_hresult(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED,created.put()));return created;}();
     return value.get();
 }
-struct ShadowCut{std::array<float,4> radii{};std::vector<winrt::Windows::Foundation::Rect> extra;bool squircle=true;};
+struct ShadowCut{std::array<float,4> radii{};std::vector<winrt::Windows::Foundation::Rect> extra;bool squircle=true;std::vector<winrt::Windows::Foundation::Point> contour;};
 winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& cut,bool exclude=true){
     winrt::com_ptr<ID2D1PathGeometry> path;winrt::check_hresult(factory()->CreatePathGeometry(path.put()));
     winrt::com_ptr<ID2D1GeometrySink> sink;winrt::check_hresult(path->Open(sink.put()));sink->SetFillMode(D2D1_FILL_MODE_ALTERNATE);
@@ -29,6 +29,12 @@ winrt::com_ptr<ID2D1Geometry> outside(float width,float height,ShadowCut const& 
         sink->BeginFigure({x,y},D2D1_FIGURE_BEGIN_FILLED);sink->AddLine({x+w,y});sink->AddLine({x+w,y+h});sink->AddLine({x,y+h});sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     };
     if(exclude)rectangle(-padding,-padding,width+2*padding,height+2*padding);
+    if(!cut.contour.empty()){
+        sink->BeginFigure({cut.contour.front().X,cut.contour.front().Y},D2D1_FIGURE_BEGIN_FILLED);
+        for(auto const& point:cut.contour)sink->AddLine({point.X,point.Y});
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        winrt::check_hresult(sink->Close());return path;
+    }
     auto radii=cut.radii;for(auto& radius:radii)radius=std::min(radius,std::max(0.f,std::min(width,height)*.5f));
     auto [tl,tr,br,bl]=radii;
     auto corner=[&](float cx,float cy,float sx,float sy,float ex,float ey){
@@ -88,6 +94,9 @@ void WorkspaceShadow::Layout(Windows::Foundation::Rect bounds,int order,bool vis
 }
 void WorkspaceShadow::Cut(std::array<float,4> radii,std::vector<Windows::Foundation::Rect> extra){
     state->cut=ShadowCut{radii,std::move(extra)};state->apply();
+}
+void WorkspaceShadow::Cut(std::vector<Windows::Foundation::Point> contour){
+    state->cut=ShadowCut{{},{},false,std::move(contour)};state->apply();
 }
 void WorkspaceShadow::Uncut(){state->cut.reset();state->apply();}
 void WorkspaceShadow::Shape(Geometry const& geometry,float width,float height,float blur,float offset,float opacity){

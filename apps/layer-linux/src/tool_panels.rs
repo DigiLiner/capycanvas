@@ -1020,7 +1020,7 @@ impl ColorWheel {
     pub(crate) fn intensity(&self) -> Option<crate::hdr_color_scale::HdrColorScale> {
         self.imp().intensity.borrow().clone()
     }
-    pub(crate) fn set_state(&self, state: &ColorState, view: ViewColor, headroom: f32, preview: bool) -> bool {
+    pub(crate) fn set_state(&self, state: &ColorState, view: ViewColor, headroom: f32, preview: bool, intensity_range: Option<[f32; 2]>) -> bool {
         let imp = self.imp();
         if imp.preview.replace(preview) != preview {
             imp.field.cancel();
@@ -1030,7 +1030,7 @@ impl ColorWheel {
         if let Some(intensity) = imp.intensity.borrow().as_ref() {
             intensity.set_visible(hdr);
             intensity.set_sensitive(state.slot != ColorSlot::Transparent);
-            if hdr { intensity.refresh_color(state, view, headroom, preview); }
+            if hdr { intensity.refresh_color(state, view, headroom, preview, intensity_range); }
         }
         if imp.hdr.replace(hdr) != hdr { self.queue_resize(); }
         if !hdr { imp.linear_field.borrow_mut().take(); }
@@ -1287,7 +1287,7 @@ impl ColorPanel {
             // Rejected out-of-storage-range edits leave the native control at
             // the accepted value, including in retained color-panel drawers.
             let colors = workspace.gpu.borrow().as_ref().map(|g| g.session.state().display_colors().clone());
-            if let Some(colors) = colors { i.refresh_color(&colors, workspace.view_color(), workspace.picker_headroom(), false); }
+            if let Some(colors) = colors { i.refresh_color(&colors, workspace.view_color(), workspace.picker_headroom(), false, None); }
         }));
         self.edit_color.connect_clicked(glib::clone!(#[weak] workspace, move |_| {
             let slot = workspace.gpu.borrow().as_ref().map(|g| g.session.state().display_colors().slot);
@@ -1481,7 +1481,7 @@ impl ColorPanel {
         #[cfg(test)]
         let started = std::time::Instant::now();
         self.edit_color.set_sensitive(state.slot != ColorSlot::Transparent);
-        let changed = self.wheel.set_state(state, view, headroom, preview);
+        let changed = self.wheel.set_state(state, view, headroom, preview, None);
         if self.initialized.replace(true) && !changed {
             return;
         }

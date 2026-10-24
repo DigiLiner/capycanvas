@@ -239,7 +239,8 @@ impl NativeHost {
         let state = self.session.state();
         let colors = state.preview_colors();
         let view = self.color_view(&colors);
-        layer_ui::PickerPreview { picker: &state.color_picker, colors, view }
+        let bubble_colors = self.session.bubble_color_previews(&colors);
+        layer_ui::PickerPreview { picker: &state.color_picker, colors, view, bubble_colors }
     }
     fn serialize_snapshot<S: Serializer>(
         &self,

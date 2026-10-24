@@ -446,7 +446,7 @@ impl ColorForm {
         let Some(view) = self.view() else { return; };
         self.updating.set(true);
         let (display, headroom) = (self.view.get(), self.headroom.get());
-        self.wheel.set_state(self.draft.borrow().picker(), display, headroom, false);
+        self.wheel.set_state(self.draft.borrow().picker(), display, headroom, false, None);
         if let Some(choice) = view.shapes.iter().find(|choice| choice.selected) {
             for (toggle, (shape, ..)) in self.shape_toggles.iter().zip(SHAPES) { toggle.set_active(shape == choice.shape); }
         }

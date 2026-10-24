@@ -110,23 +110,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let colors = self.state.display_colors();
         let map = |color| colors.mapped_swatch(color, self.effective_sdr_rendition());
         self.bubbles().into_iter().map(|view| BubblePresentation {
-            color: view.color.filter(|layout| layout.intensity.is_some()).map(|layout| {
-                let geometry = layout.intensity.unwrap();
-                let stops = colors.hdr_intensity();
-                let range = HdrIntensityArc::range(stops, colors.hdr_depth());
-                let end = geometry.point(1.);
-                BubbleColorPresentation {
-                    bounds: layout.bounds(), outline: layout.outline(0.),
-                    glass: [layout.diameter * 0.5, geometry.radius, geometry.width * 0.5 + layout.margin(), end[1].atan2(end[0])],
-                    intensity: BubbleIntensityPresentation {
-                        geometry, path: (0..=64).map(|i| geometry.point(i as f32 / 64.)).collect(),
-                        point: geometry.point((stops - range[0]) / (range[1] - range[0])), zero: geometry.zero_tick(range), range, stops,
-                        ramp: colors.intensity_ramp(self.effective_sdr_rendition(), range), marker: map(colors.definition()),
-                        label: self.localization().text(MessageId::NATIVE_COLOR_INTENSITY).to_string(),
-                        text: format!("{stops:+.2} EV"), enabled: colors.slot != ColorSlot::Transparent,
-                    },
-                }
-            }),
+            color: view.color.and_then(|layout| self.bubble_color_presentation(view.id, layout, colors)),
             reach: view.reach(),
             readout: view.readout_center(),
             pill: view.palette_bounds(),
@@ -140,6 +124,41 @@ impl<R: CanvasRenderer> UiSession<R> {
             }).collect(),
             view,
         }).collect()
+    }
+
+    pub fn bubble_intensity_range(&self, id: u32, colors: &ColorState) -> [f32; 2] {
+        let stops = self.bubble_state.wheel
+            .filter(|wheel| wheel.id == id && wheel.part.is_none() && wheel.context == self.color_wheel_context())
+            .and_then(|wheel| wheel.intensity).unwrap_or_else(|| colors.hdr_intensity());
+        HdrIntensityArc::range(stops, colors.hdr_depth())
+    }
+
+    fn bubble_color_presentation(&self, id: u32, layout: ColorBubbleLayout, colors: &ColorState) -> Option<BubbleColorPresentation> {
+        layout.intensity.map(|geometry| {
+            let stops = colors.hdr_intensity();
+            let range = self.bubble_intensity_range(id, colors);
+            let end = geometry.point(1.);
+            let mut marker = colors.mapped_swatch(colors.definition(), self.effective_sdr_rendition());
+            marker[3] = 1.;
+            BubbleColorPresentation {
+                bounds: layout.bounds(), outline: layout.outline(0.),
+                glass: [layout.diameter * 0.5, geometry.radius, geometry.width * 0.5 + layout.margin(), end[1].atan2(end[0])],
+                intensity: BubbleIntensityPresentation {
+                    geometry, path: (0..=64).map(|i| geometry.point(i as f32 / 64.)).collect(),
+                    point: geometry.point((stops - range[0]) / (range[1] - range[0])), zero: geometry.zero_tick(range), range, stops,
+                    ramp: colors.intensity_ramp(self.effective_sdr_rendition(), range), marker,
+                    label: self.localization().text(MessageId::NATIVE_COLOR_INTENSITY).to_string(),
+                    text: format!("{stops:+.2} EV"), enabled: colors.slot != ColorSlot::Transparent,
+                },
+            }
+        })
+    }
+
+    pub fn bubble_color_previews(&self, colors: &ColorState) -> Vec<(u32, BubbleColorPresentation)> {
+        let picker = &self.state.color_picker;
+        if picker.preview.is_none() || picker.editor || picker.calibrating { return Vec::new(); }
+        self.state.workspace.layout.bubbles.bubbles.iter().filter(|bubble| bubble.source.kind() == BubbleKind::Color)
+            .filter_map(|bubble| self.bubble_color_presentation(bubble.id, self.color_bubble(bubble), colors).map(|color| (bubble.id, color))).collect()
     }
 
     pub fn bubble_placements(&mut self) -> Vec<BubblePlacement> {
@@ -204,7 +223,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn hdr_color_bubbles(&self) -> bool {
-        matches!(self.state.platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Mac | Platform::Ios) && self.selection_masks.target().is_none()
+        matches!(self.state.platform, Platform::Gtk | Platform::Web | Platform::Android | Platform::Windows | Platform::Mac | Platform::Ios) && self.selection_masks.target().is_none()
             && self.engine.document().composition().color.depth.is_float()
     }
 
@@ -672,6 +691,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if self.bubble(id)?.source.kind() != BubbleKind::Color || self.color_bubble(self.bubble(id)?).intensity.is_none() {
                     return Err("This bubble has no intensity control".into());
                 }
+                if self.state.display_colors().slot == ColorSlot::Transparent { return Ok(UiChange::default()); }
                 self.dispatch(UiAction::Color { action: ColorAction::HdrIntensity { stops } })
             },
             BubbleAction::ResetRing { id, position } => {
@@ -913,10 +933,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some(wheel) = self.bubble_state.wheel.filter(|wheel| wheel.id == id) else { return Ok(UiChange::default()); };
         if wheel.context != self.color_wheel_context() {
             self.bubble_state.wheel = None;
-            return Ok(UiChange::default());
+            return Ok(self.changed(regions::BUBBLES, false));
         }
         if matches!(phase, ContactPhase::Cancel | ContactPhase::Up) { self.bubble_state.wheel = None; }
-        if phase == ContactPhase::Up { return Ok(UiChange::default()); }
+        if phase == ContactPhase::Up { return Ok(self.changed(regions::BUBBLES, false)); }
         let action = if phase == ContactPhase::Cancel {
             match wheel.intensity {
                 Some(stops) => ColorAction::SetSlotIntensity { slot: wheel.context.paint_slot, color: wheel.before, stops },
@@ -928,7 +948,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else {
             let arc = self.color_bubble(self.bubble(id)?).intensity.ok_or("This bubble has no intensity control")?;
             let colors = self.state.display_colors();
-            ColorAction::HdrIntensity { stops: arc.value(position, HdrIntensityArc::range(colors.hdr_intensity(), colors.hdr_depth())) }
+            ColorAction::HdrIntensity { stops: arc.value(position, self.bubble_intensity_range(id, colors)) }
         };
         let mut change = self.dispatch(UiAction::Color { action })?;
         change.regions |= regions::BUBBLES;

@@ -2719,7 +2719,7 @@ impl Workspace {
             for drawer in self.columns.drawers.borrow().iter() {
                 drawer.refresh_color_preview(&colors, view, headroom, preview);
             }
-            self.bubbles.refresh_wheels(&colors, view, headroom, preview);
+            self.bubbles.refresh_wheels(self, &colors, view, headroom, preview);
             crate::color_editor::refresh_display(self);
         }
     }

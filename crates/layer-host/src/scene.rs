@@ -121,7 +121,8 @@ impl Glass {
             matches!(r.len(), 8..=10) && r.iter().all(|v| v.is_finite()) && r[2] >= 0. && r[3] >= 0.
         });
         let arcs = layout.arcs.iter().all(|a| a.iter().all(|v| v.is_finite()) && a[2] >= 0. && a[3] >= 0.);
-        let color_bubbles = layout.color_bubbles.iter().all(|b| b.iter().all(|v| v.is_finite()) && b[2..5].iter().all(|v| *v >= 0.));
+        let color_bubbles = layout.color_bubbles.iter().all(|c| c.iter().all(|v| v.is_finite())
+            && c[2..=4].iter().all(|v| *v >= 0.) && (0.0..=std::f32::consts::FRAC_PI_2).contains(&c[5]));
         let connections = layout.connections.iter().all(|c| {
             [
                 c.bounds.x,
@@ -174,9 +175,9 @@ impl Glass {
             let arcs = self.layout.arcs.iter().map(|a| BackdropRegion::arc(
                 [a[0] * scale, a[1] * scale], a[2] * scale, a[3] * scale, a[4], a[5],
             ).with_strength(a[6]));
-            let color_bubbles = self.layout.color_bubbles.iter().map(|b| BackdropRegion::color_bubble(
-                [b[0] * scale, b[1] * scale], b[2] * scale, b[3] * scale, b[4] * scale, b[5],
-            ).with_strength(b[6]));
+            let color_bubbles = self.layout.color_bubbles.iter().map(|c| BackdropRegion::color_bubble(
+                [c[0] * scale, c[1] * scale], c[2] * scale, c[3] * scale, c[4] * scale, c[5],
+            ).with_strength(c[6]));
             self.scaled = boxes.chain(connections).chain(arcs).chain(color_bubbles).collect();
         }
         &self.scaled
@@ -296,27 +297,35 @@ mod tests {
     }
 
     #[test]
-    fn color_bubble_glass_transports_one_scaled_contour_and_independent_strength() {
+    fn color_bubble_glass_scales_geometry_and_caches_unchanged_packets() {
+        let packet = |strength| glass(serde_json::json!({"regions":[],"connections":[],
+            "color_bubbles":[[30,40,20,26,4,0.75,strength]]})).unwrap();
         let mut layer = Glass::default();
-        let layout = |strength| glass(serde_json::json!({"regions":[],"connections":[],"color_bubbles":[[30,40,64,72,9,0.75,strength]]})).unwrap();
-        assert!(layer.set(layout(0.375)).unwrap());
+        assert!(layer.set(packet(0.375)).unwrap());
         assert_eq!(layer.count(), 1);
         for scale in [2., 1.5, 2.] {
-            assert_eq!(layer.regions(scale), [BackdropRegion::color_bubble([30.*scale,40.*scale],64.*scale,72.*scale,9.*scale,0.75).with_strength(0.375)]);
+            let expected = BackdropRegion::color_bubble([30.*scale,40.*scale],20.*scale,26.*scale,4.*scale,0.75).with_strength(0.375);
+            assert_eq!(layer.regions(scale), [expected]);
+            assert_eq!(layer.regions(scale)[0].radii, [20.*scale,26.*scale,4.*scale,0.75]);
+            let cached = layer.regions(scale).as_ptr();
+            assert!(!layer.set(packet(0.375)).unwrap());
+            assert_eq!(layer.regions(scale).as_ptr(), cached);
         }
-        let before = layer.regions(2.).to_vec();
-        assert!(layer.set(layout(0.125)).unwrap());
-        assert!(!layer.set(layout(0.125)).unwrap());
-        let after = layer.regions(2.);
-        assert_eq!(before[0].bounds, after[0].bounds);
-        assert_eq!(before[0].radii, after[0].radii);
-        assert_eq!(after[0].shape[1], 0.125);
-        assert_eq!(before[0].shape[2..], after[0].shape[2..]);
+        let before = layer.regions(2.)[0];
+        assert!(layer.set(packet(0.125)).unwrap());
+        let after = layer.regions(2.)[0];
+        assert_eq!(before.bounds, after.bounds);
+        assert_eq!(before.radii, after.radii);
+        assert_eq!(after.shape[1], 0.125);
+        assert_eq!(before.shape[2..], after.shape[2..]);
+        assert!(layer.set(packet(2.)).unwrap());
+        assert_eq!(layer.regions(2.)[0].shape[1], 1.);
     }
 
     #[test]
-    fn invalid_color_bubbles_preserve_glass_and_share_the_region_limit() {
-        let valid = || glass(serde_json::json!({"regions":[[1,2,30,40,3,3,3,3]],"connections":[],"color_bubbles":[[30,40,64,72,9,0.75,0.5]]})).unwrap();
+    fn invalid_color_bubble_glass_preserves_the_cached_layout_and_shares_the_limit() {
+        let valid = || glass(serde_json::json!({"regions":[[1,2,30,40,3,3,3,3]],"connections":[],
+            "arcs":[[20,30,12,4,0,2,0.75]],"color_bubbles":[[30,40,20,26,4,0.75,0.5]]})).unwrap();
         let mut layer = Glass::default();
         layer.set(valid()).unwrap();
         let before = layer.regions(1.5).to_vec();
@@ -327,21 +336,22 @@ mod tests {
                 assert_eq!(layer.regions(1.5), before);
             }
         }
-        for index in 2..5 {
-            let mut invalid = valid(); invalid.color_bubbles[0][index] = -1.;
+        for (index, value) in [(2,-1.),(3,-1.),(4,-1.),(5,-0.01),(5,std::f32::consts::FRAC_PI_2+0.01)] {
+            let mut invalid = valid(); invalid.color_bubbles[0][index] = value;
             assert!(layer.set(invalid).is_err());
             assert_eq!(layer.regions(1.5), before);
         }
-        let mut invalid = valid(); invalid.color_bubbles = vec![[0.;7]; MAX_GLASS];
-        assert!(layer.set(invalid).is_err());
-        assert_eq!(layer.count(), 2);
-        assert_eq!(layer.regions(1.5), before);
-        let mut maximum = valid(); maximum.color_bubbles = vec![[0.;7]; MAX_GLASS - 1];
+        let mut maximum = valid(); maximum.color_bubbles = vec![[0.;7]; MAX_GLASS-2];
         assert!(layer.set(maximum).unwrap());
         assert_eq!(layer.count(), MAX_GLASS);
-        for entry in [serde_json::json!([0,0,1,1,1,0]), serde_json::json!([0,0,1,1,1,0,1,1])] {
+        let cached = layer.regions(1.5).to_vec();
+        let mut oversized = valid(); oversized.color_bubbles = vec![[0.;7]; MAX_GLASS-1];
+        assert!(layer.set(oversized).is_err());
+        assert_eq!(layer.regions(1.5), cached);
+        for entry in [serde_json::json!([0,0,1,2,3,0]), serde_json::json!([0,0,1,2,3,0,1,1])] {
             assert!(glass(serde_json::json!({"regions":[],"connections":[],"color_bubbles":[entry]})).is_err());
         }
+        assert!(glass(serde_json::json!({"regions":[],"connections":[]})).unwrap().color_bubbles.is_empty());
     }
 
     #[test]

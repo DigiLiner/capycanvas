@@ -2,7 +2,7 @@
 #include "WorkspaceBubbles.h"
 #include "WorkspaceGeometry.h"
 #include "WorkspaceQuery.h"
-#include "ColorWheel.h"
+#include "IntensityImage.h"
 #include "LayerInspector.h"
 #include "NativeMenus.h"
 #include "StampPreview.h"
@@ -44,6 +44,16 @@ struct RingArt {
     hstring geometryKey,iconKey;
     double fill=-1;
 };
+struct IntensityArt {
+    Canvas root;
+    Slider value;
+    Shapes::Line zero;
+    Shapes::Ellipse edge,marker,focus;
+    Image ramp;
+    std::unique_ptr<CapyWheel::IntensityImage> image;
+    hstring geometryKey;
+    bool syncing=false;
+};
 struct Part {
     hstring key,shadowKey,surfaceKey,theme;
     J data;
@@ -58,6 +68,8 @@ struct Part {
     int order=0;
     bool squircle=false,glass=true,hot=false,retired=false,contentDirty=true;
     std::unique_ptr<CapyWheel::WheelImage> wheel;
+    std::unique_ptr<IntensityArt> intensity;
+    std::unique_ptr<WorkspaceShadow> colorShadow;
     Image wheelImage;
     std::array<Shapes::Ellipse,2> halves;
     ContentControl historyHost{nullptr};
@@ -170,7 +182,8 @@ struct WorkspaceBubbles::Impl:std::enable_shared_from_this<WorkspaceBubbles::Imp
     void content(std::shared_ptr<CapyBubbles::Record> const&,std::shared_ptr<CapyBubbles::Part> const&);
     void stamp(std::shared_ptr<CapyBubbles::Record> const&);
     void thumbnails();
-    void glass(CapyUi::A&,CapyUi::A&,CapyUi::UIElement const&)const;
+    void glass(CapyUi::A&,CapyUi::A&,CapyUi::A&,CapyUi::UIElement const&)const;
+    void intensity(std::shared_ptr<CapyBubbles::Record> const&,std::shared_ptr<CapyBubbles::Part> const&);
     void send(CapyUi::J const&);
     void drag(CapyUi::J const&,winrt::hstring const&,CapyUi::Point);
     CapyUi::V hit(CapyBubbles::Record const&,CapyUi::Point)const;

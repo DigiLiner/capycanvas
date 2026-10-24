@@ -334,9 +334,9 @@ void CanvasWindow::PublishGlass(){
             auto source=Microsoft::UI::Input::InputNonClientPointerSource::GetForWindowId(self->window.AppWindow().Id());source.SetRegionRects(Microsoft::UI::Input::NonClientRegionKind::Passthrough,input);
         }
     }
-    Windows::Data::Json::JsonArray connections,arcs;auto regions=self->workspace->Glass(self->panel,connections,arcs);
+    Windows::Data::Json::JsonArray connections,arcs,colors;auto regions=self->workspace->Glass(self->panel,connections,arcs,colors);
     if(self->header)self->header->AppendGlass(regions,self->panel);
-    Windows::Data::Json::JsonObject request;request.Insert(L"regions",regions);request.Insert(L"connections",connections);request.Insert(L"arcs",arcs);
+    Windows::Data::Json::JsonObject request;request.Insert(L"regions",regions);request.Insert(L"connections",connections);request.Insert(L"arcs",arcs);request.Insert(L"color_bubbles",colors);
     auto json=to_string(request.Stringify());
     if(json==self->lastGlass)return;self->lastGlass=json;self->Send(json,CanvasCommandKind::Glass);
     });

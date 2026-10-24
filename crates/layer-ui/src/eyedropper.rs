@@ -154,11 +154,13 @@ pub struct PickerPreview<'a> {
     pub picker: &'a ColorPickerState,
     pub colors: std::borrow::Cow<'a, ColorState>,
     pub view: crate::ColorPanelView,
+    pub bubble_colors: Vec<(u32, crate::BubbleColorPresentation)>,
 }
 impl<R: CanvasRenderer> crate::UiSession<R> {
     pub fn color_preview(&self) -> PickerPreview<'_> {
         let colors = self.state().preview_colors();
         let view = colors.view_mapped(self.effective_sdr_rendition(), self.localization());
-        PickerPreview { picker: &self.state().color_picker, colors, view }
+        let bubble_colors = self.bubble_color_previews(&colors);
+        PickerPreview { picker: &self.state().color_picker, colors, view, bubble_colors }
     }
 }

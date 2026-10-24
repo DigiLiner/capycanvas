@@ -236,7 +236,7 @@ impl HdrColorScale {
             self.set_value(g.value(point, [a.lower() as f32, a.upper() as f32]) as f64);
         }
     }
-    pub fn refresh_color(&self, state: &layer_ui::ColorState, view: ViewColor, headroom: f32, preview: bool) {
+    pub fn refresh_color(&self, state: &layer_ui::ColorState, view: ViewColor, headroom: f32, preview: bool, range: Option<[f32; 2]>) {
         let changed = self.imp().preview.replace(preview) != preview;
         if changed { self.imp().raster.cancel(); }
         if changed { self.queue_draw(); }
@@ -247,7 +247,7 @@ impl HdrColorScale {
         }
         self.imp().updating.set(true);
         let stops = state.hdr_intensity() as f64;
-        let [minimum, maximum] = HdrIntensityArc::range(stops as f32, state.hdr_depth());
+        let [minimum, maximum] = range.unwrap_or_else(|| HdrIntensityArc::range(stops as f32, state.hdr_depth()));
         self.set_range(minimum as f64, maximum as f64);
         self.set_value(stops);
         self.update_property(&[gtk::accessible::Property::ValueText(&format!(

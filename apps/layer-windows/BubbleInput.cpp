@@ -55,14 +55,14 @@ void WorkspaceBubbles::Impl::contactSurface(){
 }
 void WorkspaceBubbles::Impl::pick(std::shared_ptr<Contact> const& c,Point at){
     if(!c->wheel)return;
-    send(O({{L"type",S(L"wheel")},{L"id",N(c->record->id)},{L"phase",S(c->colorStarted?L"move":L"down")},
-        {L"part",S(c->wheel==1?L"hue":L"field")},{L"position",point(relative(at,c->record->center))}}));
+    auto action=O({{L"type",S(c->wheel==3?L"intensity":L"wheel")},{L"id",N(c->record->id)},{L"phase",S(c->colorStarted?L"move":L"down")},{L"position",point(relative(at,c->record->center))}});
+    if(c->wheel!=3)action.Insert(L"part",S(c->wheel==1?L"hue":L"field"));send(action);
     c->colorStarted=true;
 }
 void WorkspaceBubbles::Impl::finishColor(std::shared_ptr<Contact> const& c,bool cancelled){
     if(!std::exchange(c->colorStarted,false))return;
-    send(O({{L"type",S(L"wheel")},{L"id",N(c->record->id)},{L"phase",S(cancelled?L"cancel":L"up")},
-        {L"part",S(c->wheel==1?L"hue":L"field")},{L"position",point(relative(c->last,c->record->center))}}));
+    auto action=O({{L"type",S(c->wheel==3?L"intensity":L"wheel")},{L"id",N(c->record->id)},{L"phase",S(cancelled?L"cancel":L"up")},{L"position",point(relative(c->last,c->record->center))}});
+    if(c->wheel!=3)action.Insert(L"part",S(c->wheel==1?L"hue":L"field"));send(action);
 }
 void WorkspaceBubbles::Impl::restore(std::shared_ptr<Contact> const& c){
     finishColor(c,true);
@@ -77,11 +77,16 @@ void WorkspaceBubbles::Impl::begin(std::shared_ptr<Contact> const& c,Point at){
         c->mode=L"wheel";auto size=num(c->record->view,L"diameter")-14;
         auto panel=object(data->colorPreview,L"view");if(!panel.Size())panel=object(data->model,L"color_panel");
         auto shape=str(panel,L"shape");c->wheel=capy_color_hit(float(local.X+size/2),float(local.Y+size/2),float(size),shape==L"circle"?2:shape==L"triangle"?1:0);pick(c,at);
-    }else if(hitKind==L"ring"){
+    }else if(hitKind==L"ring"||hitKind==L"intensity"){
         auto scale=workspace.XamlRoot()?workspace.XamlRoot().RasterizationScale():1.;
         auto slop=std::max(8.,double(std::max(GetSystemMetrics(SM_CXDOUBLECLK),GetSystemMetrics(SM_CYDOUBLECLK)))/scale);
         bool repeated=lastRing&&std::get<0>(*lastRing)==c->record->id&&milliseconds()-std::get<1>(*lastRing)<=GetDoubleClickTime()&&distance(at,std::get<2>(*lastRing))<=slop;
         if(repeated)lastRing.reset();else lastRing=std::tuple(c->record->id,milliseconds(),at);
+        if(hitKind==L"intensity"){
+            c->wheel=3;c->mode=repeated?L"reset":L"intensity";
+            if(repeated)send(O({{L"type",S(L"set_intensity")},{L"id",N(c->record->id)},{L"stops",N(0)}}));else pick(c,at);
+            auto face=c->record->parts.find(L"face");if(face!=c->record->parts.end()&&face->second->intensity)face->second->intensity->value.Focus(FocusState::Pointer);return;
+        }
         c->mode=repeated?L"reset":L"ring";
         auto action=O({{L"type",S(repeated?L"reset_ring":L"ring")},{L"id",N(c->record->id)},{L"position",point(local)}});
         if(!repeated)action.Insert(L"phase",S(L"down"));send(action);
@@ -196,6 +201,7 @@ void WorkspaceBubbles::Impl::move(PointerRoutedEventArgs const& e){
         if(ui(data,O({{L"type",S(L"color_drag_out")},{L"size",N(num(c->record->view,L"diameter"))},{L"point",point(relative(at,c->record->center))}})).GetBoolean()){
             restore(c);c->grab=grab(c->record->id,L"rim");drag(c->grab,L"down",at);c->mode=L"moving";
         }else pick(c,at);
+    }else if(c->mode==L"intensity"){pick(c,at);
     }else if(c->mode==L"pending"&&moved){c->grab=grab(c->record->id);drag(c->grab,L"down",c->start);c->mode=L"moving";}
     if(c->mode==L"moving")drag(c->grab,L"move",at);
     else if(c->mode==L"ring"||c->mode==L"beads"||c->mode==L"choose")send(O({{L"type",S(c->mode)},{L"id",N(c->record->id)},{L"phase",S(L"move")},{L"position",point(relative(at,c->record->center))}}));

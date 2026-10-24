@@ -1268,6 +1268,19 @@ fast tear-off, canvas gaps, cancellation, persistent options, wheel drag-out,
 two-finger movement and pinch, Layers pages, dab previews and exact artwork
 Undo/Redo. The retained presenter shares the ordinary wheel, swatches, brush
 previews, thumbnail cache, numeric controls and Layers inspector.
+HDR color bubbles use the shared plate contour and glass mask while retaining
+the wheel's size and center. The native intensity arc presents the shared ramp,
+marker and dynamic range, including temporary eyedropper previews. Its accessible
+slider supports keyboard adjustment and Home/End range endpoints. Double taps
+reset to zero, and holds or a second touch restore the
+starting color before taking ownership. Transparent paint disables intensity
+editing, and mask colors use the circular SDR layout.
+The ramp and marker use the same SDR rendition as the Windows Color panel.
+Run `exercise-tool-bubbles.ps1 -HdrOnly -HdrDepth F16` and `-HdrDepth F32`, each
+with dark and light variants, for intensity input, cancellation, color-context
+changes and composed plate, ramp, bead and palette checks. The fixture also checks
+that repeated input keeps an expanded range and that triangle fields stay inside
+their shared shape in both the docked Color panel and the bubble.
 The fixture checks selected-face hover and pressed pixels against the theme's
 text-color overlays and requires the ordinary face to keep its size. Moving past
 the drag threshold and returning must retain hover shading; pressing starts a

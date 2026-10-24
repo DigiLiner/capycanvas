@@ -192,7 +192,7 @@ A new ring is the Medium circle alone. The hold menu turns **Recent colors**,
 Medium (216 px) or Large (344 px). Putting the ring back remembers its options
 and size for the next time it is taken.
 
-In HDR drawings, GTK, Web, Android and Apple keep the wheel's size and add the Color
+In HDR drawings, GTK, Web, Android, Apple and Windows keep the wheel's size and add the Color
 panel's intensity arc below it. Every point on the plate's outer edge is the
 same distance from the nearest hue-ring or intensity-track edge, including
 around the arc's caps.
@@ -205,7 +205,8 @@ rows. Mask colors keep the circular SDR plate.
 placement and collision circles. Shared Rust also owns intensity picking,
 rollback and color-context retirement. `BubblePresentation::color` carries the
 outline, glass geometry, intensity range, ramp, marker and zero-EV tick for native presenters.
-Windows retains the circular layout until its intensity control is ported.
+The intensity marker stays opaque for translucent paint. Adjusting intensity
+preserves the paint's alpha.
 `UiSession::hdr_color_bubbles` keeps that availability decision in shared Rust.
 
 ## Layers card
@@ -326,7 +327,9 @@ a host only presents it and captures native input. GTK
 GTK forwards wheel contacts through `BubbleAction::Wheel` from the bubble’s
 native drag gesture and HDR contacts through `BubbleAction::Intensity`.
 Double-clicking or double-tapping the intensity arc resets it to zero EV;
-keyboard edits use `SetIntensity`. A hold or second touch restores the color and
+keyboard edits use `SetIntensity`. An intensity gesture keeps its starting range
+until release, so repeated input at one point cannot change the selected value.
+A hold or second touch restores the color and
 intensity from before the contact. Shared Rust rejects stale contacts after a
 document, paint slot or mask changes.
 

@@ -24,7 +24,7 @@ public:
     void AttachBubbles(winrt::Microsoft::UI::Xaml::UIElement const&,std::function<void()>);
     winrt::Windows::Data::Json::JsonArray DrawerSources() const;
     winrt::Windows::Data::Json::JsonArray BubbleInputRegions(winrt::Microsoft::UI::Xaml::UIElement const&)const;
-    winrt::Windows::Data::Json::JsonArray Glass(winrt::Microsoft::UI::Xaml::UIElement const& reference,winrt::Windows::Data::Json::JsonArray& connections,winrt::Windows::Data::Json::JsonArray& arcs) const;
+    winrt::Windows::Data::Json::JsonArray Glass(winrt::Microsoft::UI::Xaml::UIElement const& reference,winrt::Windows::Data::Json::JsonArray& connections,winrt::Windows::Data::Json::JsonArray& arcs,winrt::Windows::Data::Json::JsonArray& colors) const;
 private:
     struct Impl;
     std::shared_ptr<Impl> impl;
