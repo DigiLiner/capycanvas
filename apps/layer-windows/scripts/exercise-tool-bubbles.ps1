@@ -1,6 +1,7 @@
 param([Parameter(Mandatory)][string]$Executable,
-    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly,[switch]$HdrOnly,[ValidateSet('F16','F32')][string]$HdrDepth='F16')
+    [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly,[switch]$HdrOnly,[switch]$HdrRetirementOnly,[ValidateSet('F16','F32')][string]$HdrDepth='F16')
 $ErrorActionPreference='Stop'
+if($HdrRetirementOnly){$HdrOnly=$true}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'BubbleVisualChecks.ps1')
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
@@ -759,6 +760,12 @@ try{
     [CapyRowPointer]::Initialize([uint32]$review.Id);$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
     Wait-Until {(Model).layout.viewport[0] -gt 1000} 'Owned fixture did not maximize'
+    if((Model).windows_workspace.id -ne 'builtin:workspace:painter'){
+        $choice=Find 'workspace-switch-builtin:workspace:painter' -Visible
+        if(!$choice){Invoke 'header-workspace-menu';$choice=Control 'Sketch' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
+        $choice.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {(Model).windows_workspace.id -eq 'builtin:workspace:painter' -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Fixture Sketch workspace did not open'
+    }
     if($HdrOnly){New-BubbleHdrDrawing $HdrDepth}
     Ensure-Sources
     if($HdrOnly){Show-BubbleHdrColor}
@@ -779,7 +786,8 @@ try{
         Invoke-BubbleHdrChecks
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved|Out-Null
         if((Get-Item -LiteralPath $stderr).Length){throw 'HDR bubble native stderr requires inspection'}
-        @{variant=$Variant;depth=$HdrDepth;checks=@($checks);scope='HDR color bubble native input, accessibility, geometry and composed pixels; physical digitizers and HDR display luminance unverified'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'results.json')
+        $scope=if($HdrRetirementOnly){'HDR color context retirement, clear native status and painting with exact Undo after drawing activation'}else{'HDR color bubble native input, accessibility, geometry and composed pixels'}
+        @{variant=$Variant;depth=$HdrDepth;checks=@($checks);scope=($scope+'; physical digitizers and HDR display luminance unverified')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'results.json')
         return
     }
     $dial=Take 'command' 'drawing_brush' (($camera.translation[0]+$document.width*.35*$camera.zoom)/$scale) (($camera.translation[1]+$document.height*.35*$camera.zoom)/$scale)

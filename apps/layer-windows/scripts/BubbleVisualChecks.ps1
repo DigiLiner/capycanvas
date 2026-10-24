@@ -78,6 +78,7 @@ function Invoke-BubbleHdrChecks {
     $element=Control "bubble-intensity-$id" -Arranged;$range=Bubble-HdrRange $id;$shared=(Packet $id).color.intensity
     $hdrEvidence.Add(@{stage='accessible-range';name=$element.Current.Name;minimum=$range.Current.Minimum;maximum=$range.Current.Maximum;value=$range.Current.Value;small_change=$range.Current.SmallChange;shared=$shared;depth=$HdrDepth;display=(Model).windows_display})
     if($element.Current.Name -ne $shared.label -or !$element.Current.IsEnabled -or $range.Current.IsReadOnly -or $range.Current.Minimum -ne $shared.range[0] -or $range.Current.Maximum -ne $shared.range[1] -or [Math]::Abs($range.Current.SmallChange-.1) -gt .0001){throw 'Native HDR accessibility differs from the shared intensity contract'}
+    if($HdrRetirementOnly){Invoke-BubbleHdrRetirement $id;return}
     foreach($pointer in @('mouse','pen','touch')){
         Set-BubbleHdrPaint -1 -Base
         foreach($ending in @('commit','cancel','hold')){
@@ -300,6 +301,17 @@ function Assert-BubbleHdrPickerPreview([long]$Id){
     Assert-BubbleHdrState 'hdr-picker-preview-cancel' $before -Paint;Settled-Capture 'hdr-picker-preview-cancelled'
     $checks.Add('hdr-picker-preview-updates-native-ramp-marker-range-and-cancels-exactly')
 }
+function Assert-BubbleHdrPainting([long]$Id,[string]$Stage){
+    Wait-Until {$m=Model;$m.brush_ready -and $m.canvas_ready -and !$m.windows_rendering_suspended -and !(Find 'canvas-status' -Visible)} 'Drawing transition left an unavailable canvas or a stale failure message'
+    & (Join-Path $CapyScripts 'open-application-menu.ps1') -Root $root -Name 'View';Invoke 'fit_canvas'
+    Wait-BubbleVisualLayout
+    $before=Bubble-HdrState;$at=Document-Point .2 .2;$center=Center $Id
+    Paint-Gap $Id @((($at.x-$center.x)/$scale),(($at.y-$center.y)/$scale)) $Stage -NoHalo
+    $after=Bubble-HdrState
+    foreach($field in @('document','checkpoint','modified','paint')){if($after.$field -ne $before.$field){throw "$Stage Undo did not restore $field"}}
+    if(Find 'canvas-status' -Visible){throw 'Painting after drawing activation left a native failure message'}
+    $hdrEvidence.Add(@{stage=$Stage;before=$before;after=$after;canvas_status_visible=$false;painting_and_exact_pixel_undo=$true})
+}
 function Invoke-BubbleHdrRetirement([long]$Id){
     foreach($context in @(@{name='slot';device='mouse'},@{name='mask';device='pen'},@{name='document';device='touch'})){
         Set-BubbleHdrValue $Id 0;$before=Bubble-HdrState;$at=Bubble-HdrPoint $Id .75;$stale=Bubble-HdrRange $Id
@@ -318,9 +330,11 @@ function Invoke-BubbleHdrRetirement([long]$Id){
                 $rejected=$null;try{$stale.SetValue(2)}catch{$rejected=$_.Exception.Message}
                 $hdrEvidence.Add(@{stage=('hdr-'+$context.name+'-retired-range');error=$rejected})
                 Start-Sleep -Milliseconds 100;Assert-BubbleHdrState ('hdr-'+$context.name+'-retired-range') $target -Paint
+                Wait-Until {!(Find 'canvas-status' -Visible)} 'Retired HDR contact left a stale native failure message'
                 $null=Assert-BubbleVisualGeometry $Id ('hdr-'+$context.name+'-sdr-contour');Settled-Capture ('hdr-'+$context.name+'-sdr-contour')
             }
         }finally{if([CapyRowPointer]::Active){[CapyRowPointer]::Cancel()}}
+        if($context.name -eq 'document'){Assert-BubbleHdrPainting $Id 'hdr-retired-sdr'}
         switch($context.name){
             'slot' {Invoke 'color-foreground';Wait-Until {(Model).state.colors.slot -eq 'foreground'} 'Foreground did not restore after retirement'}
             'mask' {(Control 'drawing-canvas').SetFocus();Escape;Wait-Until {!(Model).state.layer_tools.quick_mask} 'Quick Mask did not close'}
@@ -330,6 +344,7 @@ function Invoke-BubbleHdrRetirement([long]$Id){
         $restored=Bubble-HdrState
         if($restored.document -ne $before.document -or $restored.checkpoint -ne $before.checkpoint -or $restored.modified -ne $before.modified){throw 'HDR context replacement changed authored history'}
         Set-BubbleHdrValue $Id 0
+        if($context.name -eq 'document'){Assert-BubbleHdrPainting $Id 'hdr-reactivated'}
     }
 }
 function Set-BubbleHdrOptions([long]$Id,[bool]$Pair,[bool]$Palette,$Recent=$null){

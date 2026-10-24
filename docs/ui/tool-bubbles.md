@@ -310,7 +310,9 @@ a host only presents it and captures native input. GTK
   `Wheel` retains the initial color and pressed wheel part in Rust. Down and
   Move pick; Up keeps the last sampled color, and Cancel restores the initial
   color only in the original document and color context. Removing its owner
-  retires the contact before layout undo can reuse the bubble ID.
+  retires the contact before layout undo can reuse the bubble ID. Late wheel
+  and intensity events with no current owner also retire while a drawing's
+  renderer is starting; they do not report a painting failure or edit that drawing.
 - **Menus:** `context_menu(ContextTarget::Bubble { id })`; the first item of a
   section may be a heading (`ContextMenuItem::is_heading`). Serialized items
   expose `is_heading` and `keep_open` for the same presentation across hosts.

@@ -1265,7 +1265,8 @@ image-authoring and conversion journeys.
 `exercise-tool-bubbles.ps1` follows the GTK bubble journeys with native mouse,
 pen and touch contacts in light and dark themes. Run the six `tool-bubbles`
 variants through the VM fixture runner or the private-desktop runner on hardware.
-It authors its header through the native picker, fits the drawing after maximizing
+It selects Sketch through the native workspace switch, authors its header through
+the native picker, fits the drawing after maximizing
 the window, and uses shared presentation geometry for contact points. The fit
 must place the paper inside the work area at a usable scale before pixel checks.
 Checks include
@@ -1286,6 +1287,10 @@ with dark and light variants, for intensity input, cancellation, color-context
 changes and composed plate, ramp, bead and palette checks. The fixture also checks
 that repeated input keeps an expanded range and that triangle fields stay inside
 their shared shape in both the docked Color panel and the bubble.
+Use `-HdrRetirementOnly` with either depth and theme for the focused slot, mask
+and drawing-switch checks. Drawing activation must clear the native status;
+both the SDR destination and returning HDR drawing must paint and undo to their
+exact previous pixels and checkpoint.
 The fixture checks selected-face hover and pressed pixels against the theme's
 text-color overlays and requires the ordinary face to keep its size. Moving past
 the drag threshold and returning must retain hover shading; pressing starts a

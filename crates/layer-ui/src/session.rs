@@ -2852,6 +2852,12 @@ impl<R: CanvasRenderer> UiSession<R> {
             | EffectAction::CurveKey{pressed:false,..}})
             || matches!(&action,UiAction::Effect{action:EffectAction::CurveKey{key_event,..}}
                 if key_event=="Escape" || self.property_editor.key().is_some());
+        if let UiAction::Bubble { action: contact @ (
+            BubbleAction::Wheel { phase: ContactPhase::Move | ContactPhase::Up | ContactPhase::Cancel, .. }
+            | BubbleAction::Intensity { phase: ContactPhase::Move | ContactPhase::Up | ContactPhase::Cancel, .. }
+        ) } = action {
+            return self.bubble_action(contact);
+        }
         if self.rendering_suspended && !continuing_effect_gesture && !Self::action_without_renderer(&action) {
             return Err(renderer_lifecycle::PAINTING_UNAVAILABLE.into());
         }

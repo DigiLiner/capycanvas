@@ -410,6 +410,92 @@ fn bubble_wheel_replacement_cannot_restore_a_previous_context_color() {
 }
 
 #[test]
+fn bubble_color_continuations_retire_while_drawings_activate() {
+    use layer_core::color::SampleDepth;
+    for (depth, platform, intensity) in [SampleDepth::F16, SampleDepth::F32].into_iter()
+        .flat_map(|depth| Platform::ALL.into_iter().flat_map(move |platform| [false, true].map(move |intensity| (depth, platform, intensity)))) {
+        let mut source = hdr_desk(depth, platform);
+        let id = take_ring(&mut source, FAR);
+        source.frame(0, 0).unwrap();
+        let position = if intensity { view(&source, id).color.unwrap().intensity.unwrap().point(0.75) } else { [20., -10.] };
+        let send = |s: &mut UiSession<Recorder>, id, phase| act(s, if intensity {
+            BubbleAction::Intensity { id, phase, position }
+        } else { BubbleAction::Wheel { id, phase, part: ColorWheelPart::Field, position } });
+        send(&mut source, id, ContactPhase::Down).unwrap();
+        let source_color = source.state.colors.clone();
+        let source_checkpoint = source.engine.checkpoint();
+        let mut destination = desk();
+        destination.frame(0, 0).unwrap();
+        destination.park_document().unwrap();
+        destination.inherit_window_state(&source).unwrap();
+        source.park_document().unwrap();
+        let destination_color = destination.state.colors.clone();
+        let destination_checkpoint = destination.engine.checkpoint();
+        let destination_layout = destination.state.workspace.layout.clone();
+        for phase in [ContactPhase::Move, ContactPhase::Up, ContactPhase::Cancel] {
+            send(&mut destination, id, phase).unwrap();
+            assert_eq!(destination.state.colors, destination_color, "{depth:?} {platform:?} intensity={intensity} {phase:?}");
+            assert_eq!(destination.engine.checkpoint(), destination_checkpoint);
+            assert_eq!(destination.state.workspace.layout, destination_layout);
+        }
+        assert!(send(&mut destination, id, ContactPhase::Down).is_err());
+        assert!(act(&mut destination, BubbleAction::SetIntensity { id, stops: 2. }).is_err());
+        destination.replace_renderer(Recorder::default()).unwrap();
+        source.inherit_window_state(&destination).unwrap();
+        for phase in [ContactPhase::Move, ContactPhase::Up, ContactPhase::Cancel] {
+            send(&mut source, id, phase).unwrap();
+            assert_eq!(source.state.colors, source_color);
+            assert_eq!(source.engine.checkpoint(), source_checkpoint);
+        }
+        assert!(send(&mut source, id, ContactPhase::Down).is_err());
+        assert!(act(&mut source, BubbleAction::SetIntensity { id, stops: 2. }).is_err());
+        source.replace_renderer(Recorder { color: source.engine.document().composition().color, ..Default::default() }).unwrap();
+        source.dispatch(UiAction::Color { action: ColorAction::Definition { color:
+            layer_core::color::RgbColor::new(layer_core::color::RgbSpace::Srgb, [0.15, 0.7, 0.3, 0.37]).unwrap() } }).unwrap();
+        let fresh_color = source.state.colors.clone();
+        send(&mut source, id, ContactPhase::Down).unwrap();
+        assert_ne!(source.state.colors, fresh_color);
+        send(&mut source, id + 1, ContactPhase::Cancel).unwrap();
+        assert_ne!(source.state.colors, fresh_color);
+        send(&mut source, id, ContactPhase::Cancel).unwrap();
+        assert_eq!(source.state.colors, fresh_color);
+        assert_eq!(source.engine.checkpoint(), source_checkpoint);
+    }
+}
+
+#[test]
+fn bubble_color_continuations_cannot_edit_an_unavailable_owner() {
+    for intensity in [false, true] {
+        for unavailable in ["renderer", "read_only", "transition"] {
+            let mut s = hdr_desk(layer_core::color::SampleDepth::F32, Platform::Windows);
+            let id = take_ring(&mut s, FAR);
+            s.frame(0, 0).unwrap();
+            let send = |s: &mut UiSession<Recorder>, phase| act(s, if intensity {
+                BubbleAction::Intensity { id, phase, position: [40., 100.] }
+            } else { BubbleAction::Wheel { id, phase, part: ColorWheelPart::Field, position: [20., -10.] } });
+            send(&mut s, ContactPhase::Down).unwrap();
+            match unavailable {
+                "renderer" => { s.park_document().unwrap(); }
+                "read_only" => s.workspace_read_only = true,
+                "transition" => s.workspace_transition = true,
+                _ => unreachable!(),
+            }
+            let colors = s.state.colors.clone();
+            let checkpoint = s.engine.checkpoint();
+            let layout = s.state.workspace.layout.clone();
+            assert!(send(&mut s, ContactPhase::Move).is_err(), "{unavailable} intensity={intensity}");
+            assert!(send(&mut s, ContactPhase::Down).is_err());
+            assert!(act(&mut s, BubbleAction::SetIntensity { id, stops: 2. }).is_err());
+            send(&mut s, ContactPhase::Up).unwrap();
+            send(&mut s, ContactPhase::Cancel).unwrap();
+            assert_eq!(s.state.colors, colors);
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+            assert_eq!(s.state.workspace.layout, layout);
+        }
+    }
+}
+
+#[test]
 fn bubble_wheel_rejects_invalid_contacts_and_preserves_transparent_and_mask_paint() {
     let mut s=desk();
     let id=take_ring(&mut s,FAR);
