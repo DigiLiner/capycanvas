@@ -321,7 +321,7 @@ reloading its corrupted workspace and preference fixtures.
 | --- | --- |
 | Editor smoke, drawing, pen | `--editor`, `--pen`, `--prediction`, `--raster`, `--color-mixing` |
 | Enclose and Fill | `--enclose-fill` |
-| Vector layers | `--vector-tools`, `--vector-milestone` |
+| Vector layers | `--vector-tools`, `--vector-milestone`, `--vector-edges`, `--vector-files` |
 | Canvas bar, notices, footer zoom | `--canvas-bar`, `--notices`, `--zoom-controls`, `--zoom-readout`, `--zoom-tool-settings`, `--move-selection` |
 | Retouching | `--clone`, `--heal` |
 | Color | `--color-panel`, `--color-wheel-resize`, `--color-picker`, `--palettes`, `--scopes-smoke`, `--scopes`, `--tonal-controls` |
@@ -605,6 +605,10 @@ Frame calls measure CPU submissions, not fresh GPU updates or presented frames.
   `artifacts/ui/web-failure.png` and prints page errors and GPU diagnostics.
   Check `#gpu-notice`, and in the page evaluate `layerApp.state()`,
   `JSON.parse(layerApp.app.workspace_view())` or `layerApp.startupTimes`.
+- **Vector journeys.** Reuse `vector-journey-fixture.mjs` for input, capture and
+  readiness waits. Keep each journey's line sample count, key event type and pixel
+  reducer; Tools averages a 5 × 5 patch, while Milestone takes its darkest pixel
+  and Edges uses a rounded 9 × 9 patch. Readiness waits allow 60 seconds.
 - **Writing a journey.** Follow
   [workspace-manager.test.mjs](../../apps/layer-web/workspace-manager.test.mjs):
   use the runner's `call`, `evaluate` and `settle` helpers, wait for operations

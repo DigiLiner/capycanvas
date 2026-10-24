@@ -1,27 +1,10 @@
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {vectorHarness} from './vector-journey-fixture.mjs';
 import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkVectorTools({call,evaluate,settle}) {
-  const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/vector-tools/web';
-  await mkdir(directory,{recursive:true});
-  const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
-  const invoke=command=>send({type:'invoke',command});
-  const tool=tool=>send({type:'layer',action:{op:'tool',tool}});
-  const screen=([x,y])=>evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect();return{x:r.x+(${x}*c.zoom+c.translation[0])*r.width/c.viewport[0],y:r.y+(${y}*c.zoom+c.translation[1])*r.height/c.viewport[1]}})()`);
-  const pen=async(type,at)=>call('Input.dispatchMouseEvent',{type,...await screen(at),button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,pointerType:'pen',force:.6});
-  const stroke=async points=>{
-    await pen('mousePressed',points[0]);
-    for(const p of points.slice(1)){await pen('mouseMoved',p);await settle();}
-    await pen('mouseReleased',points.at(-1));await settle();
-  };
-  const line=(from,to,steps=16)=>Array.from({length:steps+1},(_,i)=>[from[0]+(to[0]-from[0])*i/steps,from[1]+(to[1]-from[1])*i/steps]);
-  const key=async(key,code,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key,code,windowsVirtualKeyCode});await settle();};
-  const color=async at=>{
-    const {x,y}=await screen(at);
-    const shot=await call('Page.captureScreenshot',{format:'png',clip:{x:x-2,y:y-2,width:5,height:5,scale:1}});
-    return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${shot.data}';await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);const d=context.getImageData(0,0,canvas.width,canvas.height).data;const sum=[0,0,0];for(let i=0;i<d.length;i+=4)for(let c=0;c<3;c++)sum[c]+=d[i+c];return sum.map(v=>v/(d.length/4))})()`);
-  };
+  const {send,invoke,tool,stroke,line,key,color:sampleColor,capture,until}=await vectorHarness({call,evaluate,settle},{directory:'artifacts/vector-tools/web',keyDown:'keyDown'});
+  const color=at=>sampleColor(at,true);
   const orange=([r,,b])=>r-b>90;
   const green=([r,g,b])=>g-Math.max(r,b)>25;
   const expect=async(name,at,inked,ink=orange)=>{
@@ -29,11 +12,10 @@ export async function checkVectorTools({call,evaluate,settle}) {
     do{seen=await color(at);if(ink(seen)===inked)return;await new Promise(r=>setTimeout(r,100));}while(Date.now()<end);
     assert.equal(ink(seen),inked,`${name}: ${seen}`);
   };
-  const capture=async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const selectedLayer=()=>evaluate('Number(layerApp.state().layers.find(l=>l.selected).id)');
   await invoke('new_document');
   await evaluate(createDrawing({width:2000,height:1400}));
-  await evaluate('new Promise((resolve,reject)=>{const end=performance.now()+60000;function check(){if(!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready())resolve();else if(performance.now()>end)reject(Error("Vector drawing did not become ready"));else setTimeout(check,30);}check();})');
+  await until('the vector drawing is ready','!layerApp.documents.busy()&&!s.document_file.busy&&layerApp.app.brush_ready()',60000);
   await settle();
   for(const theme of ['light','dark']){
     await send({type:'set_theme',theme});

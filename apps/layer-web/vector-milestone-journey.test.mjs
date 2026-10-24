@@ -1,36 +1,11 @@
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {vectorHarness} from './vector-journey-fixture.mjs';
 import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkVectorMilestone({call,evaluate,settle}) {
-  const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/vector-milestone/web';
-  await mkdir(directory,{recursive:true});
-  const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
-  const invoke=command=>send({type:'invoke',command});
-  const tool=tool=>send({type:'layer',action:{op:'tool',tool}});
-  const state=expression=>evaluate(`(()=>{const s=layerApp.state();return ${expression}})()`);
-  const screen=([x,y])=>evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect();return{x:r.x+(${x}*c.zoom+c.translation[0])*r.width/c.viewport[0],y:r.y+(${y}*c.zoom+c.translation[1])*r.height/c.viewport[1]}})()`);
-  const pen=async(type,at)=>call('Input.dispatchMouseEvent',{type,...await screen(at),button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,pointerType:'pen',force:.6});
-  const stroke=async points=>{
-    await pen('mousePressed',points[0]);
-    for(const p of points.slice(1)){await pen('mouseMoved',p);await settle();}
-    await pen('mouseReleased',points.at(-1));await settle();
-  };
-  const line=(from,to,steps=20)=>Array.from({length:steps+1},(_,i)=>[from[0]+(to[0]-from[0])*i/steps,from[1]+(to[1]-from[1])*i/steps]);
+  const {send,invoke,tool,state,stroke,line,key:chord,color,capture,click,until,brush,activeVector}=await vectorHarness({call,evaluate,settle},{directory:'artifacts/vector-milestone/web',lineSteps:20,keyDown:'keyDown'});
   const tap=at=>stroke([at,at]);
-  const click=async selector=>{
-    const at=await evaluate(`(()=>{const e=${selector};if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-    assert.ok(at,`no element for ${selector}`);
-    for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...at,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
-    await settle();
-  };
   const byText=(scope,text)=>`[...document.querySelectorAll(${JSON.stringify(scope)})].find(e=>e.offsetParent&&e.textContent.trim()===${JSON.stringify(text)})`;
-  const chord=async(key,code,windowsVirtualKeyCode,modifiers=0)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key,code,windowsVirtualKeyCode,modifiers});await settle();};
-  const color=async at=>{
-    const {x,y}=await screen(at);
-    const shot=await call('Page.captureScreenshot',{format:'png',clip:{x:x-2,y:y-2,width:5,height:5,scale:1}});
-    return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${shot.data}';await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);const d=context.getImageData(0,0,canvas.width,canvas.height).data;let darkest=[255,255,255];for(let i=0;i<d.length;i+=4)if(d[i]+d[i+1]+d[i+2]<darkest[0]+darkest[1]+darkest[2])darkest=[d[i],d[i+1],d[i+2]];return darkest})()`);
-  };
   const dark=([r,g,b])=>Math.max(r,g,b)<100;
   const marked=([r,g,b])=>r+g+b<600;
   const green=([r,g,b])=>g-Math.max(r,b)>40;
@@ -39,13 +14,6 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     do{seen=await color(at);if(ink(seen)===wanted)return;await new Promise(r=>setTimeout(r,100));}while(Date.now()<end);
     assert.equal(ink(seen),wanted,`${name}: ${seen}`);
   };
-  const until=async(name,expression)=>{
-    const end=Date.now()+20000;
-    while(!(await state(expression))){assert.ok(Date.now()<end,`${name} timed out`);await new Promise(r=>setTimeout(r,100));}
-  };
-  const capture=async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
-  const brush=label=>evaluate(`layerApp.app.catalog().brush_categories.flatMap(c=>c.brushes).find(b=>b.label===${JSON.stringify(label)}).id`);
-  const activeVector='s.layers.find(l=>l.selected)?.content_icon==="layer-path-symbolic"';
   const noticeAction=async id=>{
     await until(`notice ${id}`,`(s.notice?.actions??[]).some(a=>a.id===${JSON.stringify(id)})`);
     const label=await state(`s.notice.actions.find(a=>a.id===${JSON.stringify(id)}).label`);
