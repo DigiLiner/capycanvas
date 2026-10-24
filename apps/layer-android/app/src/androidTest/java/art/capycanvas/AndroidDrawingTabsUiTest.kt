@@ -15,6 +15,7 @@ import androidx.test.core.app.ActivityScenario
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
@@ -74,11 +75,8 @@ class AndroidDrawingTabsUiTest {
     private fun tag(value: String) = hasTag(value)
     private fun text(value: String) = hasLabel(value)
     private fun description(value: String): (SemanticsNode) -> Boolean = { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(value) == true }
-    /** The narrow title bar folds File into its primary menu; exercise the
-     * same route a tablet user sees instead of assuming desktop menu labels. */
     private fun openFileMenu() {
-        if (point(tag("application-menu-file")) != null) tap(tag("application-menu-file"))
-        else { tap(tag("header-menu-labels-compact")); tap(text("File")) }
+        tap(description("Main Menu")); tap(text("File"))
     }
     private fun tap(match: (SemanticsNode) -> Boolean, checkErrors: Boolean = true) {
         var target: Offset? = null
@@ -105,11 +103,11 @@ class AndroidDrawingTabsUiTest {
     }
     private fun create(): Long {
         ready(); val count = ids().size
-        tap(description("New…")); tap(text("Create"))
+        openFileMenu(); tap(text("New…")); tap(tag("new-drawing-create"))
         waitFor("new drawing appended") { ids().size == count + 1 }; ready()
         return tabs().getLong("selected")
     }
-    private fun dirty() { tap(description("New layer")); waitFor("modified drawing") { tabs().array("tabs").objects().first { it.getLong("id") == tabs().getLong("selected") }.getBoolean("modified") }; ready() }
+    private fun dirty() { ui { host.invoke("add_layer") }; waitFor("modified drawing") { tabs().array("tabs").objects().first { it.getLong("id") == tabs().getLong("selected") }.getBoolean("modified") }; ready() }
     private fun closed(id: Long, count: Int) {
         waitFor("approved drawing removed") { id !in ids() && ids().size == count && ui { !host.drawingTabs.switching } }
         // Include later composition/publication frames, where the previous
@@ -156,6 +154,14 @@ class AndroidDrawingTabsUiTest {
         scenario.onActivity { activity = it; host = it.host; it.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
         waitFor("production startup", 120_000) { ui { host.snapshot?.optBoolean("brush_ready") == true && host.workspaceManager?.optBoolean("ready") == true && host.snapshot?.getJSONObject("state")?.array("commands")?.objects()?.any { c -> c.optString("id") == "new_document" && c.optBoolean("enabled") } == true } }
         ready()
+        val workspace = ui { JSONObject(host.snapshot!!.getJSONObject("state").getJSONObject("workspace").toString()) }
+        workspace.getJSONObject("layout").put("header", obj("size" to "small", "next_id" to 4,
+            "zones" to JSONArray(listOf(
+                JSONArray(listOf(obj("id" to 1, "item" to obj("kind" to "capy")), obj("id" to 2, "item" to obj("kind" to "menu")))),
+                JSONArray(listOf(obj("id" to 3, "item" to obj("kind" to "document_title")))), JSONArray()))))
+        ui { host.dispatch(obj("type" to "restore_workspace", "workspace" to workspace)) }
+        val selected = tabs().getLong("selected")
+        waitFor("fixture drawing controls") { point(tag("drawing-selector-button")) != null || point(tag("drawing-close-$selected")) != null }
         androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("theme")?.let {theme ->
             require(theme in listOf("light","dark"))
             ui {host.dispatch(obj("type" to "set_theme","theme" to theme))}

@@ -64,6 +64,12 @@ to look up the pending request before validating its kind.
 Photo profile prompts retain `ImportedDocument` and use its shared `interpret`
 method on the file worker before preparing the candidate session.
 
+Drawing-tab lifecycle UI fixtures pin a header containing Main Menu and the
+drawing selector. They create documents through File and the tagged Create
+control, so shipped workspace choices do not prevent the close/recreation journey.
+Fixture edits use the shared Add Layer command; close and confirmation still
+use native input.
+
 Artwork files use shared immutable capture and the final package reader/writer.
 The render owner supplies captured effect phases before file work starts. Provider
 input can be non-seekable; package parsing uses private spooled backing.
