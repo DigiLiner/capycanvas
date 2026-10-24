@@ -1456,7 +1456,20 @@ class AndroidTitleBarTest {
             shot("layer-input-$theme-$pointer")
             event(MotionEvent.ACTION_CANCEL);idle();assertEquals(before,order())
             if(pointer!=MotionEvent.TOOL_TYPE_MOUSE) {
+                val actionWidth=bounds("layer-row-$id").width.coerceAtMost(216*density)/3
                 down("layer-row-$id");val start=point
+                event(MotionEvent.ACTION_MOVE,start+Offset(-36*density,0f))
+                waitFor("Partial swipe buttons are laid out") { node("layer-delete-$id")!=null }
+                instrumentation.runOnMainSync {
+                    for(action in listOf("lock","duplicate","delete")) {
+                        val button=checkNotNull(node("layer-$action-$id")) { "Missing partial-swipe $action button" }.second
+                        assertEquals("Partial swipe preserves $action content width",actionWidth-8*density,button.size.width.toFloat(),1f)
+                        if(action!="delete")assertEquals("Partial swipe keeps $action covered",0f,button.boundsInRoot.width,1f)
+                    }
+                    val delete=checkNotNull(node("layer-delete-$id")).second
+                    assertEquals("Partial swipe reveals the trailing button",32*density,delete.boundsInRoot.width,1f)
+                }
+                shot("layer-partial-swipe-$theme-$pointer")
                 for(i in 1..4)event(MotionEvent.ACTION_MOVE,start+Offset(-80*density*i/4,0f))
                 event(MotionEvent.ACTION_UP);idle()
                 assertNotNull("Revealed row retains its grip for fading",node("layer-grip-$id"))

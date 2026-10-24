@@ -421,7 +421,7 @@ internal class LayerSwipe {
         ) {
         if(shift>0f) Box(Modifier.matchParentSize(),contentAlignment=Alignment.CenterEnd) {
             Box(Modifier.width((shift/density).dp).fillMaxHeight().clipToBounds(),contentAlignment=Alignment.CenterEnd) {
-                Row(Modifier.width((swipeActions.size*72f).coerceAtMost(rowBounds.width/density).dp).fillMaxHeight()) {
+                Row(Modifier.wrapContentWidth(Alignment.End,unbounded=true).width((swipeActions.size*72f).coerceAtMost(rowBounds.width/density).dp).fillMaxHeight()) {
                     swipeActions.forEach { model ->
                         val actionId=model.getString("id")
                         val fill=when(actionId) {"delete"->Color(0xffc62828);"duplicate"->colors.text.copy(alpha=.24f);else->colors.text.copy(alpha=.16f)}

@@ -122,8 +122,9 @@ it is released on the canvas past the 80-pixel line it takes a bubble too.
   **Duplicate** and **Delete**. A reverse swipe or an outside click closes it.
   Shared Rust supplies their order, labels and availability. They act on the swiped row and
   retain shared Undo. A locked parent disables changes to its children; Quick
-  Mask offers only Delete. The action strip fits the row width, with full labels available through accessibility and
-  tooltips. Swiping right
+  Mask offers only Delete. The action strip fits the row width and keeps its full
+  width throughout the swipe; the moving row reveals clipped buttons without
+  resizing them. Full labels remain available through accessibility and tooltips. Swiping right
   on a closed paint-layer row toggles alpha lock. Locked layers cannot toggle alpha
   lock. Release commits one undo step; a short or cancelled swipe changes nothing.
   Swiping right to close Delete does not also toggle alpha lock.

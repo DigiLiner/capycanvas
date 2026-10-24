@@ -148,7 +148,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 60 | | |
 | Layer opacity scrub | 60 | **Not met.** Maskless Solid Color over photo: screen 47.44 presents/s, p99 ≤49.98 ms; renderer 32.51 fresh completed updates/s | [Solid Color fills](#solid-color-fills); baseline also misses |
 | Layer reorder drag | 60 | | |
-| Layer row swipe | 60 | Unmeasured on the reference tablet; GTK has a desktop diagnostic only | [Layer handle fade](top-tier.md#layer-handle-fade) |
+| Layer row swipe | 60 | **Unqualified.** Partial left reveal: 57.8–59.6 moving window frames/s, maximum interval p99 33.392 ms; full reveal unmeasured | [Layer action reveal](#layer-action-reveal), 2026-10-24 |
 | Layer thumbnail selection animation | 60 | Unmeasured on the reference tablet | [Selection benchmark](../development/android.md#benchmarks) |
 | Attached filter drag inside a clipping run | 60 | **Not met.** 55.64–59.72 native UI fps; moving-frame gap p99 16.75–33.34 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 8 visible paint layers | 60 | | |
@@ -170,6 +170,29 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Workspace visibility checklist: vertical scroll | 60 | Screen 60.02 presents/s, maximum p99 17.03 ms | Workspace switcher scrolling below; long-list fixture |
 | Menu open and close | 60 | Application menu heading switching unmeasured on reference hardware | [Menu interaction](../ui/window-bar.md); functional checks do not qualify presented frame rate |
 | Interface language change | 60 | Current lifecycle binary unmeasured. Earlier German checkpoint: cold publication 169.2–195.5 ms; warm 144.4–194.4 ms; preparation-only maximum 4.095 ms | Matched Web language checkpoint below; no tier qualification |
+
+## Layer action reveal
+
+Measured 2026-10-24 on the reference TCL at `889e89b14` plus the fixed-width
+Android action strip, using the release-profile benchmark APK. The 4248 × 2832
+Sony photo has one empty paint layer above it at Fit, with the default workspace
+and panel glass. `AndroidTitleBarTest#layerSwipeFrameTiming` uses native touch
+input, a one-second warm-up and three five-second gestures per theme.
+Each gesture oscillates 24–64 dp left from rest; full reveal and the release
+animation remain unmeasured.
+
+| Theme | Moving window frames/s, three runs | Vsync interval p99, three runs (ms) |
+| --- | --- | --- |
+| Light | 59.6 / 57.8 / 59.6 | 16.685 / 33.392 / 16.681 |
+| Dark | 59.4 / 58.6 / 59.4 | 16.733 / 33.309 / 16.687 |
+
+FrameMetrics samples count only changed row geometry. Rates divide those samples
+by each five-second motion window; interval p99 uses nearest rank between
+consecutive moving samples. All six runs have zero dropped metric callbacks and
+thermal status 0 before and after each theme. The rates exceed the 57 fps floor,
+but the second light run exceeds the 33.3 ms interval limit. These partial-swipe
+measurements do not qualify the full gesture. Raw arrays, thermal readings and
+captures are in `artifacts/layer-swipe-fixed/`.
 
 ## Touch navigation
 
