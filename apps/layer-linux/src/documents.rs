@@ -930,8 +930,22 @@ impl Documents {
         self.open_prepared(w, (imported.project.clone(), location), Some(imported), false, None, None).await
     }
     pub async fn open_initial_imported(&self, w: &Rc<Workspace>, imported: layer_ui::ImportedDocument, location: Option<DocumentLocation>) -> Result<(), String> {
-        let startup=w.gpu.borrow().as_ref().map(|gpu|gpu.session.session_stamp());
-        self.open_prepared(w, (imported.project.clone(), location), Some(imported), true, None, startup).await
+        if self.changing.replace(true) {
+            return Err(layer_ui::DocumentTransportRefusal::ChangeInProgress.message(&w.localization()).to_string());
+        }
+        let startup = async {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            loop {
+                if !w.window.is_visible() || self.closing_window.get() || self.cancel_open.get() {
+                    return Err("Opening cancelled".to_string());
+                }
+                if let Some(gpu) = w.gpu.borrow().as_ref() { return Ok(gpu.session.session_stamp()); }
+                if Instant::now() >= deadline { return Err("Project canvas preparation timed out".to_string()); }
+                glib::timeout_future(Duration::from_millis(20)).await;
+            }
+        }.await;
+        self.changing.set(false);
+        self.open_prepared(w, (imported.project.clone(), location), Some(imported), true, None, Some(startup?)).await
     }
     pub async fn open_restored(&self,w:&Rc<Workspace>,restored:layer_ui::session_recovery::SessionRestore,recovery:Rc<Recovery>,observed:Option<layer_ui::DestinationFingerprint>,startup:layer_ui::SessionStamp,id:u64)->Result<u64,String> {
         let project=restored.document().clone();

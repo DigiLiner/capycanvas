@@ -925,7 +925,7 @@ impl Input {
         });
     }
     pub(crate) fn send(&self, workspace: &Rc<Workspace>, event: PenEvent) {
-        if !workspace.workspaces.accepts_input(workspace)
+        if (workspace.documents.changing.get() || !workspace.workspaces.accepts_input(workspace))
             && !matches!(event.phase, PenPhase::Up | PenPhase::Cancel)
         {
             return;

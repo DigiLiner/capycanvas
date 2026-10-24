@@ -321,6 +321,13 @@ check compares its live color sample with an authored snapshot, including the
 selected brush's material response. Tab lifecycle fixtures supply their header
 layout explicitly so shipped workspace changes do not remove the controls under test.
 
+`native_application_file_launch` checks cold and warm file activation, retention
+of edited and explicitly created blank drawings, and cancellation during
+preparation. Initial admission captures the shared startup revision after the
+session exists while authored input is held. Closing a modal progress dialog
+cancels its batch; a subsequent window close retires the drawing. Run the fixture
+with `CAPY_NATIVE_TEST_THEME=light` and again with `dark`.
+
 `native_jpeg_open_import_and_paste` uses the JPEG reference directory from
 `tools/validation/jpeg_interchange.py` as `LAYER_RASTER_FIXTURES`. It checks
 CMYK/YCCK, progressive RGB/gray and orientation through Open, Import, clipboard

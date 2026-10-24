@@ -69,6 +69,39 @@ fn launch_window(app: &adw::Application) -> Option<adw::ApplicationWindow> {
         .and_then(|w| w.downcast().ok())
 }
 
+fn admission_input(w: &Rc<Workspace>) {
+    new_photo::invoke(w, CommandId::Pen);
+    w.dispatch(UiAction::SetBrushSize { value: 16. });
+    new_photo::ready(w);
+    let before = place_source::authored_snapshot(w);
+    let strokes = ui_session(w).engine().metrics().committed_strokes;
+    w.documents.changing.set(true);
+    w.dispatch(UiAction::Invoke { command: CommandId::AddLayer });
+    native_pen_path(w, &[[32., 80.], [80., 80.], [128., 80.]]);
+    w.documents.changing.set(false);
+    new_photo::ready(w);
+    assert_eq!(place_source::authored_snapshot(w), before);
+    assert_eq!(ui_session(w).engine().metrics().committed_strokes, strokes);
+    native_pen_path(w, &[[32., 80.], [80., 80.], [128., 80.]]);
+    new_photo::ready(w);
+    assert_eq!(ui_session(w).engine().metrics().committed_strokes, strokes + 1);
+    assert_ne!(place_source::authored_snapshot(w), before);
+    for finish in [PenPhase::Up, PenPhase::Cancel] {
+        let camera = state(w).camera;
+        for (phase, point) in [(PenPhase::Down, [32., 112.]), (PenPhase::Move, [80., 112.])] {
+            w.input.send(w, PenEvent { device_id: 92,
+                ..pen_event(&camera, point, phase, glib::monotonic_time() as u64 * 1000) });
+            pump(20);
+        }
+        assert!(!ui_session(w).can_park_document());
+        w.documents.changing.set(true);
+        w.input.send(w, PenEvent { device_id: 92,
+            ..pen_event(&camera, [128., 112.], finish, glib::monotonic_time() as u64 * 1000) });
+        w.documents.changing.set(false);
+        until(|| ui_session(w).can_park_document(), "finishing pen record retires contact during admission");
+    }
+}
+
 #[test]
 #[ignore = "isolated Wayland/session bus and hardware GPU"]
 fn native_application_file_launch() {
@@ -83,6 +116,12 @@ fn native_application_file_launch() {
     assert!(settings_path.starts_with(std::env::temp_dir()));
     std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
     let mut settings = layer_ui::Settings::default();
+    settings.theme = match std::env::var("CAPY_NATIVE_TEST_THEME").as_deref() {
+        Ok("light") => Some(Theme::Light),
+        Ok("dark") => Some(Theme::Dark),
+        Ok(_) => panic!("CAPY_NATIVE_TEST_THEME must be light or dark"),
+        Err(_) => None,
+    };
     settings.photo_open.promote_to_16 = true;
     settings.photo_open.missing_profile = layer_ui::MissingProfilePolicy::Ask;
     std::fs::write(&settings_path, serde_json::to_vec(&settings).unwrap()).unwrap();
@@ -148,14 +187,19 @@ fn native_application_file_launch() {
 
     // Cold multi-file launch creates one drawing window and no blank tab.
     let mut sender = Sender::new(&id, &[&photo, &master]);
-    until(
-        || {
-            windows.borrow().first().is_some_and(|w| {
-                w.documents.len() == 2 && !w.documents.changing.get() && !w.documents.loading.get()
-            }) && launch_window(&app).is_none()
-        },
-        "cold launch creates tabs",
-    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if windows.borrow().first().is_some_and(|w| {
+            w.documents.len() == 2 && !w.documents.changing.get() && !w.documents.loading.get()
+        }) && launch_window(&app).is_none() { break; }
+        assert!(Instant::now() < deadline, "cold launch creates tabs: documents {:?}; native windows {:?}",
+            windows.borrow().iter().map(|w| (w.documents.len(), w.documents.selected(),
+                w.documents.changing.get(), w.documents.loading.get(), w.servicing.get(),
+                w.gpu.borrow().as_ref().map(|g| (g.session.state().host_error.clone(), g.session.state().document_file.clone())))).collect::<Vec<_>>(),
+            app.windows().iter().map(|w| (w.widget_name(), w.is_visible(), w.downcast_ref::<adw::ApplicationWindow>()
+                .and_then(|w| w.visible_dialog()).map(|d| d.widget_name()))).collect::<Vec<_>>());
+        pump(10);
+    }
     sender.finish();
     let w = windows.borrow()[0].clone();
     new_photo::ready(&w);
@@ -168,6 +212,7 @@ fn native_application_file_launch() {
         state(&w).document_file.location.unwrap().uri,
         gio::File::for_path(&master).uri()
     );
+    admission_input(&w);
     glib::MainContext::default()
         .block_on(w.documents.activate(&w, 1))
         .unwrap();
@@ -219,6 +264,8 @@ fn native_application_file_launch() {
     until(|| windows.borrow().len() == 2, "explicit new window");
     let other = windows.borrow()[1].clone();
     new_photo::ready(&other);
+    let blank = other.documents.selected();
+    let blank_document = place_source::authored_snapshot(&other);
     crate::files::launch::open_in(&other, vec![gio::File::for_path(&master)]);
     until(
         || other.documents.len() == 2 && !other.documents.changing.get(),
@@ -226,19 +273,31 @@ fn native_application_file_launch() {
     );
     assert_eq!(w.documents.len(), 4);
     assert_eq!(app.windows().len(), 2);
+    glib::MainContext::default().block_on(other.documents.activate(&other, blank)).unwrap();
+    new_photo::ready(&other);
+    assert_eq!(place_source::authored_snapshot(&other), blank_document);
     // Closing during preparation cancels the batch; late results never create a window.
+    let progress_seen = Rc::new(Cell::new(false));
+    let observed = progress_seen.clone();
+    let closed_while_loading = Rc::new(Cell::new(false));
+    let closed = closed_while_loading.clone();
+    let workspace = Rc::downgrade(&other);
     let signal = other
         .window
-        .connect_notify_local(Some("visible-dialog"), |window, _| {
+        .connect_notify_local(Some("visible-dialog"), move |window, _| {
             if window
                 .visible_dialog()
                 .is_some_and(|d| d.widget_name() == "document-open-progress")
             {
-                let weak = window.downgrade();
-                glib::idle_add_local_once(move || {
-                    if let Some(window) = weak.upgrade() {
-                        window.close();
+                observed.set(true);
+                let workspace = workspace.clone();
+                let closed = closed.clone();
+                glib::idle_add_local_full(glib::Priority::HIGH, move || {
+                    if let Some(workspace) = workspace.upgrade() {
+                        closed.set(workspace.documents.loading.get());
+                        workspace.window.close();
                     }
+                    glib::ControlFlow::Break
                 });
             }
         });
@@ -246,13 +305,26 @@ fn native_application_file_launch() {
         &other,
         vec![gio::File::for_path(&photo), gio::File::for_path(&master)],
     );
-    until(
-        || !other.window.is_visible(),
-        "close cancels incoming batch",
-    );
+    until(|| progress_seen.get(), "incoming batch begins preparation");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while other.documents.loading.get() || other.documents.changing.get() || other.window.visible_dialog().is_some() {
+        assert!(Instant::now() < deadline,
+            "close cancels incoming batch: progress {}, loading {}, changing {}, close pending {}, closing {}, cancelled {}, dialog {:?}, document {:?}, error {:?}",
+            progress_seen.get(), other.documents.loading.get(), other.documents.changing.get(),
+            other.documents.close_pending.get(), other.documents.closing_window.get(), other.documents.cancel_open.get(),
+            other.window.visible_dialog().map(|dialog| dialog.widget_name()), state(&other).document_file, state(&other).host_error);
+        pump(10);
+    }
+    assert!(progress_seen.get() && closed_while_loading.get());
     pump(100);
-    assert_eq!(windows.borrow().len(), 1);
+    assert!(other.window.is_visible());
+    assert_eq!(other.documents.len(), 2);
+    assert_eq!(other.documents.selected(), blank);
+    assert_eq!(place_source::authored_snapshot(&other), blank_document);
     other.window.disconnect(signal);
+    other.window.close();
+    until(|| !other.window.is_visible(), "close after cancellation");
+    assert_eq!(windows.borrow().len(), 1);
     assert_eq!(std::fs::read(&photo).unwrap(), photo_before);
     assert_eq!(std::fs::read(&master).unwrap(), master_before);
     glib::MainContext::default()
