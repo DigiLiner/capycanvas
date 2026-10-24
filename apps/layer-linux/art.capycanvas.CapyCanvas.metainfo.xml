@@ -30,6 +30,15 @@
   <url type="homepage">https://capycanvas.art/</url>
   <url type="vcs-browser">https://github.com/capyatelier/capycanvas</url>
   <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length side="shortest" compare="ge">600</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>touch</control>
+    <control>tablet</control>
+  </supports>
   <screenshots>
     <screenshot type="default" environment="gnome">
       <caption>Paint an illustration with expressive brushes and layers</caption>

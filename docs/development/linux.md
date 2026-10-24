@@ -582,6 +582,19 @@ python3 tools/validation/gtk_package_photo.py \
 
 ### Flatpak runtime and portals
 
+The [AppStream metainfo](../../apps/layer-linux/art.capycanvas.CapyCanvas.metainfo.xml)
+declares desktop and tablet support with a minimum shortest display edge of 600
+logical pixels. Small tablets may need landscape orientation to fit the GTK
+workspace; phone layouts are unsupported. Keyboard, mouse or trackpad, touch and
+graphics tablet input are supported. Validate changes with
+`appstreamcli validate --no-net apps/layer-linux/art.capycanvas.CapyCanvas.metainfo.xml`
+and `appstreamcli check-syscompat --details apps/layer-linux/art.capycanvas.CapyCanvas.metainfo.xml`.
+
+GNOME Software 50 labels apps supporting keyboard, pointing and touch as Adaptive
+without checking their display limits. Its hardware dialog can also warn on a
+desktop because mobile displays are unsupported. The AppStream compatibility
+check distinguishes supported tablets from unsupported phones.
+
 AppStream catalog generation runs with temporary `.Devel` build metadata so the
 SDK's Glycin icon loader can run without a desktop portal during builds. The
 exported application keeps `art.capycanvas.CapyCanvas` as its identity.
