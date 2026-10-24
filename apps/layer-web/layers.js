@@ -72,8 +72,9 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   let documentEpoch, measurementKey;
   const menu = (node, getLayer, mask = false) => {
     node.dataset.context = "{}";
-    node.layerMenu = () => { const id = getLayer().id, targetMask = typeof mask === "function" ? mask() : mask;
-      send({ op: "context", id, mask: targetMask }); return app.layer_menu(id, targetMask); };
+    const targetMask = () => typeof mask === "function" ? mask() : mask;
+    node.prepareMenu = () => send({ op: "context", id: getLayer().id, mask: targetMask() });
+    node.menuModel = () => app.layer_menu(getLayer().id, targetMask());
   };
   const footerButtons = new Map();
   const place = (id, node) => { node.dataset.footerButton = id; footerButtons.set(id, node); footer.append(node); return node; };
@@ -96,9 +97,12 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   const footerWidth = () => footer.getBoundingClientRect().width;
   const overflow = () => (state().layer_tools.footer ?? []).filter(slot => footerWidth() + 0.5 < slot.min_width).map(slot => slot.item);
   more.classList.add("layer-more"); more.dataset.context = "{}";
-  more.layerMenu = () => {
+  more.prepareMenu = () => {
+    const layer = active();
+    if (layer) send({ op: "context", id: layer.id, mask: layer.mask_selected });
+  };
+  more.menuModel = () => {
     const layer = active(), mask = layer?.mask_selected ?? false;
-    if (layer) send({ op: "context", id: layer.id, mask });
     const model = layer ? app.layer_menu(layer.id, mask) : { title: copy.actions, sections: [] };
     const extra = overflow();
     return extra.length ? { ...model, sections: [extra, ...model.sections] } : model;
@@ -511,7 +515,8 @@ export function createLayerThumbnails(app, wake) {
     poll() {
       for(let image;(image=app.take_layer_thumbnail());) {
         const [id,width,height,bytes]=image,target=pending.get(id);pending.delete(id);target?.owned.delete(id);
-        if(target&&target.revision===target.revisions.get(target.key)) {
+        if(target&&target.revisions.get(target.key)===target) {
+          target.canvas.width=width;target.canvas.height=height;
           target.canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(bytes),width,height),0,0);
           target.canvas.dataset.previewRevision=target.revision;
           target.loaded?.();
@@ -519,10 +524,12 @@ export function createLayerThumbnails(app, wake) {
       }
     },
     request(key,revision,id,canvas,loaded) {
-      if(revisions.get(key)===revision||pending.size>=8)return false;
+      const previous=revisions.get(key);
+      if(previous?.revision===revision&&previous.canvas===canvas||pending.size>=8)return false;
       const token=++thumbnailRequest;
       if(app.request_layer_thumbnail(token,id)) {
-        owned.add(token);revisions.set(key,revision);pending.set(token,{key,revision,revisions,owned,canvas,loaded});
+        const target={key,revision,revisions,owned,canvas,loaded};
+        owned.add(token);revisions.set(key,target);pending.set(token,target);
       }
       if(app.canvas_work_pending()||app.shader_work_pending(true))wake();
       return true;

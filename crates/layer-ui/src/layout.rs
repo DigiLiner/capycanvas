@@ -1276,6 +1276,7 @@ pub struct GroupPlacement {
     /// Content-local trailing drag strip for a lone built-in panel with no tab.
     pub footer_grip: Option<Bounds>,
     pub floating: bool,
+    pub zen_kept: bool,
     pub resize_handles: Vec<FloatingResizeHandle>,
     /// Content-local geometry for the current tool ribbon (no host tab inset math).
     pub tiles: Option<TileLayout>,
@@ -4531,6 +4532,7 @@ fn tabs_placement(
             height: PANEL_GRIP_HEIGHT.min(bounds.height),
         }),
         floating: false,
+        zen_kept: layout.shows_in_zen(*id),
         resize_handles: Vec::new(),
         tiles: (active.kind() == PanelKind::Tiles).then(|| {
             toolbar_tile_layout(

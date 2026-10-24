@@ -247,7 +247,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         host.viewModelScope.launch {
             try {
                 host.withNative {
-                    val untitled = JSONObject(Native.documentTabs(it, obj("op" to "view").toString())).getString("upcoming_untitled")
+                    val untitled = JSONObject(Native.documentTabs(it, obj("op" to "view").toString())).getLong("upcoming_id")
                     Native.dispatch(it, obj("type" to "new_drawing", "action" to obj("op" to "open", "screen" to screen, "untitled" to untitled)).toString())
                 }
                 host.documentChanged()

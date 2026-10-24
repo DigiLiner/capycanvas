@@ -354,6 +354,8 @@ reloading its corrupted workspace and preference fixtures.
 | Photo files, packages and export | `--portable-photo`, `--package-view`, `--image-object-fixture`, `--export-metadata`, `--document-errors` |
 | Title bar | `--title-bar`, `--title-bar-state`, `--title-bar-feedback`, `--title-bar-overflow`, `--menu-labels`, `--compact-workspaces`, `--header-controls` |
 | Tool bubbles | `--tool-bubbles` |
+| Bubble menus, thumbnails and Zen keep/peek | `--bubble-release`, `--bubble-release-cold` |
+| Retained configuration and translated dialog layout | `--bubble-release-localization` |
 | Docking and drags | `--drag-pickup`, `--layout-drops`, `--column-stacks`, `--column-drops`, `--columns`, `--workspace-rendering`, `--workspace-constraints`, `--drawer-drag`, `--drawer-style` |
 | Workspaces | `--workspace-manager`, `--workspace-switcher`, `--workspace-options`, `--workspace-options-refresh`, `--workspace-focus`, `--workspace-windows`, `--workspace-store` |
 | Settings and retained copy | `--preferences`, `--settings-audit`, `--pressure-calibration`, `--language-switching`, `--live-language-color`, `--live-language-proof`, `--live-language-delivery`, `--live-language-surfaces`, `--live-language-toolbar`, `--live-language-effects` |

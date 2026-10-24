@@ -1769,9 +1769,9 @@ impl WgpuRasterizer {
         export.encode(&self.device, encoder, source, coverage, slope, tile.grain(&binding), light, origin).map(Some)
     }
 
-    fn paper_shade_pending(&self) -> bool {
+    fn paper_shade_work_pending(&self) -> bool {
         self.paper_lighting.as_ref().map(|lit| &lit.binding).or(self.paper_overlay.as_ref().map(|o| &o.paper))
-            .and_then(paper::PaperTile::id_for).is_some_and(|id| self.papers.slope(&id).is_none())
+            .and_then(paper::PaperTile::id_for).is_some_and(|id| self.papers.work_pending(&id))
     }
 
     fn texture_view(&self, id: &AssetId) -> Result<&wgpu::TextureView, GpuRasterError> {
@@ -3626,7 +3626,7 @@ impl CanvasRenderer for WgpuRasterizer {
             || (self.object_deferred || self.moving_layer.is_none() && self.scene.as_ref().is_some_and(|scene| scene.objects_pending()))
                 && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting())
             || self.scale_display.as_ref().is_some_and(|cache| cache.has_pending_work(self))
-            || self.paper_shade_pending()
+            || self.paper_shade_work_pending()
     }
     fn prepare_retouch(&mut self, retouch: Option<&layer_render::RetouchPreparation>) {
         self.prepare_retouch_sources(retouch);

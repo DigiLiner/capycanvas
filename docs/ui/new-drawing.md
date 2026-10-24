@@ -86,7 +86,10 @@ iPadOS report pixels without a known PPI. The shared constructor applies the
 
 1. New drawing raises the `document` request `new`. The host dispatches
    `UiAction::NewDrawing { action: Open { screen, untitled } }` with the
-   display it shows the dialog on and the next untitled drawing name.
+   display it shows the dialog on and the next drawing's numeric identity
+   (`DocumentSessions::upcoming_id`, `upcoming_id` in the tab view). The session
+   formats the untitled placeholder in its active language, including while
+   the dialog is open; an entered name remains literal.
 2. While `UiState.new_drawing` is present, the host presents it and sends a
    `NewDrawingAction` for every input. It renders again whenever the HOST
    region changes.

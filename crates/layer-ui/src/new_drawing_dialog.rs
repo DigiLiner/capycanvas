@@ -14,7 +14,7 @@ const DEPTHS: [SampleDepth; 4] = [SampleDepth::U8, SampleDepth::U16, SampleDepth
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NewDrawingAction {
-    Open { #[serde(default)] screen: Option<ScreenInfo>, untitled: String },
+    Open { #[serde(default)] screen: Option<ScreenInfo>, untitled: u64 },
     Name { text: String },
     Width { value: f64 },
     Height { value: f64 },
@@ -302,7 +302,7 @@ enum Drawer {
 pub(super) struct NewDrawingDialog {
     draft: NewDrawingDraft,
     name: String,
-    untitled: String,
+    untitled: u64,
     screen: Option<ScreenInfo>,
     limits: CanvasLimits,
     drawer: Option<Drawer>,
@@ -328,7 +328,7 @@ impl Browser {
 }
 
 impl NewDrawingDialog {
-    fn new(settings: &NewDocumentSettings, screen: Option<ScreenInfo>, limits: CanvasLimits, untitled: String) -> Self {
+    fn new(settings: &NewDocumentSettings, screen: Option<ScreenInfo>, limits: CanvasLimits, untitled: u64) -> Self {
         Self { draft: NewDrawingDraft::new(settings.opening_setup(screen)), name: String::new(), untitled, screen, limits, drawer: None }
     }
 
@@ -370,7 +370,7 @@ impl NewDrawingDialog {
         NewDrawingDialogView {
             copy: NewDrawingCopy::new(l),
             name: self.name.clone(),
-            untitled: self.untitled.clone(),
+            untitled: crate::DocumentTabLabel::untitled(self.untitled, l),
             setup: setup.clone(),
             sheet: SheetView::new(setup),
             page: NewDrawingView::new(&self.draft, catalog, self.limits),
@@ -683,7 +683,7 @@ mod tests {
 
     fn open(s: &mut UiSession<crate::session::test_support::Recorder>) {
         invoke(s, CommandId::NewDocument);
-        s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: Some(ScreenInfo { extent: [2880, 1800], ppi: Some(220) }), untitled: "Untitled 2".into() } }).unwrap();
+        s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: Some(ScreenInfo { extent: [2880, 1800], ppi: Some(220) }), untitled: 2 } }).unwrap();
     }
     fn act(s: &mut UiSession<impl CanvasRenderer>, action: NewDrawingAction) { s.dispatch(UiAction::NewDrawing { action }).unwrap(); }
     fn view(s: &UiSession<impl CanvasRenderer>) -> NewDrawingDialogView { s.state.new_drawing.clone().unwrap() }
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn the_dialog_opens_only_for_a_new_request_and_create_leaves_a_named_order() {
         let mut s = session(Platform::Gtk);
-        assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: None, untitled: "Untitled 2".into() } }).is_err());
+        assert!(s.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: None, untitled: 2 } }).is_err());
         open(&mut s);
         let opened = view(&s);
         assert_eq!((opened.untitled.as_str(), opened.page.preset.as_str()), ("Untitled 2", "Sketchbook A4"));
@@ -719,6 +719,21 @@ mod tests {
         let mut other = session(Platform::Gtk);
         other.inherit_new_drawing_name(&s);
         assert_eq!(other.state.document_file.unsaved_name, None);
+    }
+
+    #[test]
+    fn untitled_names_follow_the_language_without_rewriting_the_artists_name() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            open(&mut s);
+            act(&mut s, NewDrawingAction::Name { text: "Harbor {study}".into() });
+            for language in [UiLanguage::Japanese, UiLanguage::German, UiLanguage::English] {
+                s.set_localization(crate::Localizer::shared(language));
+                let v = view(&s);
+                assert_eq!(v.untitled, crate::DocumentTabLabel::untitled(2, s.localization()));
+                assert_eq!(v.name, "Harbor {study}");
+            }
+        }
     }
 
     fn english() -> Arc<Localizer> { Localizer::shared(UiLanguage::English) }

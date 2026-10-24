@@ -95,7 +95,8 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
         if(v.variants)r.face.append(customization.variationMarker());
         for(const[center,i]of packet.dots.map((center,i)=>[center,i])){const dot=element('i',`bubble-dot${v.dots[i]?' selected':''}`);place(dot,center.map(x=>x+v.face[0]/2),[3.5,3.5]);r.face.append(dot);}
         if(v.kind==='layers') {
-          r.thumbnail=element('canvas','bubble-layer-thumbnail');r.thumbnail.width=r.thumbnail.height=64;r.face.replaceChildren(r.thumbnail);
+          if(!r.thumbnail){r.thumbnail=element('canvas','bubble-layer-thumbnail');r.thumbnail.width=r.thumbnail.height=64;}
+          r.face.replaceChildren(r.thumbnail);
           const badge=element('span','bubble-count bubble-surface');badge.append(element('span','',String(v.layers)));r.face.append(badge);
           r.badge=badge;
         }
@@ -147,7 +148,8 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       if(item.kind!=='brush') {
         if(!slot.tag){slot.tag=element('div','bubble-tag bubble-surface');slot.tag.append(element('span'));r.chooser.append(slot.tag);}
         slot.tag.firstChild.textContent=item.label;slot.tag.hidden=false;
-        const width=Math.min(96,slot.tag.firstChild.scrollWidth+18),height=slot.tag.firstChild.offsetHeight+6;
+        slot.tag.style.width='max-content';
+        const width=Math.min(96,Math.ceil(parseFloat(getComputedStyle(slot.tag.firstChild).width))+18),height=slot.tag.firstChild.offsetHeight+6;
         const b=app.bubble_chooser_tag(...item.center,width);surface(r,slot.tag,[b.x+b.width/2,b.y+b.height/2],[b.width,height],9);
       } else if(slot.tag)slot.tag.hidden=true;
     });

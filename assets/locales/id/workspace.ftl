@@ -273,6 +273,7 @@ workspace-changes = Perubahan ruang kerja
 
 workspace-recovered-name = { $name } Dipulihkan
 
+workspace-tools-toolbar = Bilah alat
 workspace-panel-toolbar = Alat
 
 workspace-panel-commands = Perintah

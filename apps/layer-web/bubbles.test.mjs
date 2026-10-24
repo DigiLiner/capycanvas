@@ -4,6 +4,42 @@ import {runInNewContext} from 'node:vm';
 import test from 'node:test';
 
 const source=readFileSync(new URL('bubbles.js',import.meta.url),'utf8');
+const layers=readFileSync(new URL('layers.js',import.meta.url),'utf8');
+function thumbnails() {
+  const requests=[],images=[];
+  const context={Uint8ClampedArray,Map,ImageData:class {constructor(bytes,width,height){Object.assign(this,{bytes,width,height});}},
+    app:{request_layer_thumbnail:(token,id)=>{requests.push({token,id});return true;},take_layer_thumbnail:()=>images.shift(),canvas_work_pending:()=>false,shader_work_pending:()=>false}};
+  runInNewContext('let thumbnailRequest=0n;const thumbnailPending=new Map();'+layers.slice(layers.indexOf('export function createLayerThumbnails')).replace('export function','function')+';this.preview=createLayerThumbnails(app,()=>{});',context);
+  const canvas=()=>({width:64,height:64,dataset:{},writes:[],getContext(){return{putImageData:(image,x,y)=>this.writes.push({image,x,y})};}});
+  const complete=(token,shade)=>images.push([token,32,32,new Uint8Array(32*32*4).fill(shade)]);
+  return{...context,requests,canvas,complete};
+}
+
+test('layer thumbnail backing uses the delivered image extent',()=>{
+  const h=thumbnails(),canvas=h.canvas();
+  assert.equal(h.preview.request('layer','revision',9,canvas),true);
+  h.complete(h.requests[0].token,255);h.preview.poll();
+  assert.deepEqual([canvas.width,canvas.height],[32,32],'a 64px face canvas uses its 32px image backing across its entire CSS size');
+  assert.equal(canvas.dataset.previewRevision,'revision');
+  assert.equal(canvas.writes.length,1);
+  assert.deepEqual([canvas.writes[0].image.width,canvas.writes[0].image.height],[32,32]);
+  assert.deepEqual([canvas.writes[0].x,canvas.writes[0].y],[0,0]);
+});
+
+test('replacing a layer canvas requests unchanged pixels and rejects its retired reply',()=>{
+  const h=thumbnails(),retired=h.canvas(),current=h.canvas();
+  h.preview.request('layer','revision',9,retired);
+  assert.equal(h.preview.request('layer','revision',9,current),true,'the same revision must fill a replacement canvas after a theme change');
+  assert.equal(h.requests.length,2);
+  h.complete(h.requests[0].token,80);h.preview.poll();
+  assert.equal(retired.writes.length,0);
+  assert.equal(current.writes.length,0,'the retired request cannot publish into the replacement canvas');
+  h.complete(h.requests[1].token,220);h.preview.poll();
+  assert.equal(current.writes.length,1);
+  assert.equal(current.writes[0].image.bytes[0],220);
+  assert.equal(current.dataset.previewRevision,'revision');
+  assert.equal(h.preview.request('layer','revision',9,current),false,'an already filled retained canvas reuses its pixels');
+});
 function preview() {
   const jobs=[],closed=[],wakes=[];
   let request=0;

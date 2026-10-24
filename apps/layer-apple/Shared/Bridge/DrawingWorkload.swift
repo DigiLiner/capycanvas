@@ -85,7 +85,7 @@ import Combine
             let epoch = store.state["document_file"]["epoch"].uint
             try await action(["type": "invoke", "command": "new_document"])
             let steps: [[String: Any]] = [
-                ["op": "open", "screen": NSNull(), "untitled": "Performance workload"],
+                ["op": "open", "screen": NSNull(), "untitled": 1],
                 ["op": "unit", "unit": "px"], ["op": "linked", "linked": false],
                 ["op": "width", "value": extent[0]], ["op": "height", "value": extent[1]],
                 ["op": "space", "space": plan.color["space"] ?? "Srgb"],

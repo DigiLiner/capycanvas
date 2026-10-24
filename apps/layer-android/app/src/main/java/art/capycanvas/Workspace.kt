@@ -329,7 +329,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
             val layout = snapshot.getJSONObject("layout")
             if (!hidden) CollapsedColumns(host, snapshot, panels, dock)
             ContentDrawers(host, snapshot, panels, dock)
-            layout.array("groups").objects().filter { !hidden || it.optBoolean("floating") }
+            layout.array("groups").objects().filter { !hidden || it.optBoolean("floating") || it.optBoolean("zen_kept") }
                 .sortedBy { it.getInt("id") == dock.expansion?.getInt("group") }.forEachIndexed { index, group ->
                 key(group.getInt("id")) {
                   val source = dock.drawerSources["tool"]?.anchor?.optString("panel") == group.getString("active")

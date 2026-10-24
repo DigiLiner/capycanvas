@@ -1281,8 +1281,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled |= canvas;
                     }
                 }
-                if let ChromeEvent::Contact { position, .. } = event {
-                    self.end_zen_peek(position);
+                if let ChromeEvent::Contact { position, .. } = event
+                    && self.end_zen_peek(position)
+                {
+                    reply.change = merge_change(reply.change, self.changed(regions::LAYOUT, false));
                 }
                 if let ChromeEvent::Contact { position, .. } = event
                     && !facts.popup_open
@@ -1650,7 +1652,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled = true;
                     } else if self.interaction.pointer.is_none() && !self.state.settings_open {
                         reply.change = if self.edge_swipe(id, phase, position) {
-                            self.changed(0, false)
+                            self.changed(regions::LAYOUT, false)
                         } else {
                             self.touch(id, pen_phase(phase), position)
                         };
@@ -1789,7 +1791,9 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Measure once in logical workspace units; all hosts use the same chrome
     /// insets, docking topology, and tile allocation rules.
     pub fn layout(&self, viewport: [f32; 2]) -> ResolvedLayout {
-        self.state.workspace.layout.resolved(viewport)
+        let mut layout = self.state.workspace.layout.resolved(viewport);
+        for group in &mut layout.groups { group.zen_kept = self.zen_keeps(group.id); }
+        layout
     }
     /// Layout-aware hosts retain controls at content_revision and apply these
     /// live dimensions on their display clock. Gesture completion remains full.
@@ -10853,6 +10857,21 @@ mod tests {
         assert_eq!(s.engine.document().scene().order().len(), 3);
         s.engine.undo().unwrap();
         assert_eq!(s.engine.document().scene().order().len(), 5);
+    }
+
+    #[test]
+    fn layer_context_selects_the_requested_target_without_reselecting_it() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            layer(&mut s, LayerAction::AddMask { id: 1, replace: false });
+            for mask in [true, false, true] {
+                layer(&mut s, LayerAction::Context { id: 1, mask });
+                assert_eq!(s.state.layer_tools.editing_layer.as_ref().unwrap().mask_selected, mask);
+                let generation = s.engine.document().working.generation;
+                layer(&mut s, LayerAction::Context { id: 1, mask });
+                assert_eq!(s.engine.document().working.generation, generation);
+            }
+        }
     }
 
     #[test]

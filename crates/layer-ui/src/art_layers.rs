@@ -903,7 +903,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             LayerAction::Context { id, mask } => {
                 let selected = self.selected_layers().clone();
                 let handle = occurrence_handle(id)?;
-                if self.engine.document().working.occurrence != Some(handle) || mask {
+                if self.state.layer_tools.editing_layer.as_ref().is_none_or(|layer| layer.id != id || layer.mask_selected != mask) {
                     self.layer_action(LayerAction::Select { id, mask })?;
                 }
                 if selected.contains(&handle) { self.set_selected_layers(selected)?; }

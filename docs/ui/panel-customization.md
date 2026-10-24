@@ -89,6 +89,9 @@ title-bar overflow, `exercise-tools.ps1` for the Tool Set divider and
 
 The Rust UI core owns customization and the complete serializable workspace.
 Hosts translate native events and render its menu, dialog and control models.
+Opening a layer menu selects its target once; refreshing its labels or command
+availability only reads the menu model. Open configuration drawers relabel their
+existing headings and controls when the language changes.
 Customization adds no canvas or rendering path. Zen behavior is described in
 [shared UI](shared-ui.md#window-chrome-and-zen-mode).
 Saved configurations retain every built-in panel. Shared panel views publish

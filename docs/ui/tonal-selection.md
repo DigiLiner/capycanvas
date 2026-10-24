@@ -5,7 +5,8 @@
 GTK, Web, Android, macOS, iPadOS and Windows expose **Tonal range** in the Select family. It writes ordinary byte-coverage
 selections and saved selection masks. The shared Rust model supplies the same
 choice, numeric and selection-mode controls to each host's panel and Tool Options bar.
-The panel presents five SDR tones (Shadows through Highlights, with Midtones in
+The panel labels its tone row **Tones · stops relative to reference white** and
+presents five SDR tones (Shadows through Highlights, with Midtones in
 the middle) and Custom in one horizontal segmented radio-button bar. Floating-point
 HDR documents add Bright HDR before Custom; SDR wide-gamut documents do not.
 Each segment has a distinct band-profile icon, ordered from dark to bright, with

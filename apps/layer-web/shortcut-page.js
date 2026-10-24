@@ -310,7 +310,7 @@ export function createShortcutPage({ app, element, button, icon, send, view, scr
       editor.signature = signature;
       editor.title.textContent = spec.label;
       const description = element("p", "settings-description sheet-summary", spec.description);
-      const section = group("", [`Default: ${spec.defaults.join(" / ") || "none"}`, ...spec.overlaps].join("\n"));
+      const section = group("", [app.native_caption({type:'shortcut_defaults',keys:spec.defaults}), ...spec.overlaps].join("\n"));
       if (spec.modified) section.section.querySelector(".settings-heading").append(flatButton("reset", ()=>copy.reset_default, () => send({ type: "reset_shortcut", id: spec.id }), "shortcut-editor-reset"));
       spec.bindings.forEach((binding, index) => {
         const row = element("div", "preference-row");

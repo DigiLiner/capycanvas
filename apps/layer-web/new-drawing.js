@@ -493,7 +493,7 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
   }
   return {
     async run() {
-      applyChange(app.dispatch({type:'new_drawing', action:{op:'open', screen:screenInfo(), untitled:app.document_tabs(0).upcoming_untitled}}));
+      applyChange(app.dispatch({type:'new_drawing', action:{op:'open', screen:screenInfo(), untitled:app.document_tabs(0).upcoming_id}}));
       return new Promise(resolve => { finish = resolve; refresh(); });
     },
     refresh,

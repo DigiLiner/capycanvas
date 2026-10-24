@@ -121,6 +121,8 @@ impl<T> DocumentSessions<T> {
         true
     }
 
+    pub fn upcoming_id(&self) -> u64 { self.tabs.upcoming() }
+
     pub fn upcoming_untitled(&self, localization: &Localizer) -> String {
         DocumentTabLabel::untitled(self.tabs.upcoming(), localization)
     }
@@ -435,7 +437,7 @@ impl DocumentTabLabel {
         } else { file.title().into() };
         Self::with_title(id, file, title, localization)
     }
-    fn untitled(id: u64, localization: &Localizer) -> String {
+    pub(crate) fn untitled(id: u64, localization: &Localizer) -> String {
         let mut args = FluentArgs::new();
         args.set("number", id);
         localization.format(MessageId::DOCUMENTS_UNTITLED_NUMBERED, &args)

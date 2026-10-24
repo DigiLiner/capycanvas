@@ -2,12 +2,14 @@ import { brushSizeGrid } from "./brush-sizes.js";
 import { composingKey } from "./text-input.js";
 import { createToolbarComponent } from "./toolbar-components.js";
 import { colorButton, pickerButtonAction, updatePaintPairIcon } from './color-controls.js';
+import {liveCopy} from './localization.js';
 // DOM presentation of the shared Rust customization models. This module owns
 // widgets and animation, not catalogs, validation, selection or docking policy.
 export function createCustomization({ app, catalog, state, paintPair, workspace, panels, groups,
   element, button, icon, numberField, panelFrame,
   dispatch, draggable, grip, place, updateZen, editor, rasterWorker }) {
   const send = (action) => dispatch({ type: "customize", action });
+  const common = liveCopy(app, 'bootstrap_view').common;
   const views = new Map(), fields = new Map(), panelViewKeys = new WeakMap();
   const tileResize = new ResizeObserver(entries => {
     for (const { target: strip } of entries) {
@@ -58,9 +60,11 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
       }, "submenu-back");
       back.prepend(icon("down")); container.append(back, element("hr"));
     }
+    let separated = false;
     model.sections.forEach((section, index) => {
       if (!section.length) return;
-      if (index) container.append(element("hr"));
+      if (separated) container.append(element("hr"));
+      separated = true;
       for (const [itemIndex,item] of section.entries()) {
         if (item.is_heading) { container.append(element("div", "menu-heading", item.label)); continue; }
         const submenu = item.sections?.some(section => section.length);
@@ -120,13 +124,14 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
   function refreshContextMenu() {
     if(!context.matches(':popover-open') || !context.menuOwner)return;
     const owner=context.menuOwner;
-    const model=owner.menuModel?owner.menuModel():owner.layerMenu?owner.layerMenu():app.context_menu(JSON.parse(owner.dataset.context));
+    const model=owner.menuModel?owner.menuModel():app.context_menu(JSON.parse(owner.dataset.context));
     refreshMenu(context,model,()=>context.hidePopover());
   }
   function showContext(node, point, focus = node) {
     const claimed = new Event("workspace-context-claimed", { bubbles: true, cancelable: true });
     if (!node.dispatchEvent(claimed)) return;
-    const model = node.menuModel ? node.menuModel() : node.layerMenu ? node.layerMenu() : app.context_menu(JSON.parse(node.dataset.context));
+    node.prepareMenu?.();
+    const model = node.menuModel ? node.menuModel() : app.context_menu(JSON.parse(node.dataset.context));
     menuCommand = node.menuCommand ?? null;
     anchor = point; context.menuOwner = node; context.menuFocus = focus;
     renderMenu(context, model, () => context.hidePopover());
@@ -382,7 +387,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
   const pickerHeader = element("header", "dialog-header"), pickerTitle = element("h2");
   const cancel = () => send({ type: "cancel_tools" });
   const confirm = button("", () => send({ type: "confirm_tools" }), "suggested-action");
-  confirm.id = "confirm-tools"; pickerHeader.append(button("Cancel", cancel), pickerTitle, confirm);
+  confirm.id = "confirm-tools"; pickerHeader.append(button(()=>common.cancel, cancel), pickerTitle, confirm);
   const pickerBody = element("div", "tool-picker-body"), nameRow = element("label", "toolbar-name");
   const nameLabel = element("span"), name = element("input"); name.id = "toolbar-name";
   name.addEventListener("input", () => send({ type: "picker_name", name: name.value })); nameRow.append(nameLabel, name);
@@ -402,7 +407,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
     if (model.name != null && name.value !== model.name) name.value = model.name;
     search.placeholder = model.search_hint; search.setAttribute("aria-label", model.search_hint);
     if (search.value !== model.query) search.value = model.query;
-    count.textContent = `${model.selected_count} selected`;
+    count.textContent = model.selected_label;
     error.textContent = model.error || ""; error.hidden = !model.error;
     confirm.textContent = model.confirm_label; confirm.disabled = !model.can_confirm;
     const key = JSON.stringify(model.choices.map(({ selected, ...c }) => c));
@@ -583,12 +588,17 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
   function refresh() {
     refreshPanels(); refreshPicker(); refreshManager(); refreshPrompt();
     for (const update of fields.values()) update();
-    if (expanded) for (const check of expanded.body.querySelectorAll("[data-visible]")) {
-      check.checked = views.get(expanded.panel)?.controls.find((c) => c.control === check.dataset.visible)?.visible_in_panel || false;
-    }
     if (expanded) {
+      const view = views.get(expanded.panel);
+      expanded.body.querySelector('h3').textContent = view.configuration_title;
+      expanded.body.querySelector('p').textContent = view.configuration_hint;
+      for (const check of expanded.body.querySelectorAll("[data-visible]")) {
+        const control = view.controls.find(c => c.control === check.dataset.visible);
+        check.checked = control?.visible_in_panel || false;
+        check.parentElement.lastChild.textContent = control?.label || '';
+      }
       const options = expanded.body.querySelector(".toolbar-options");
-      if (options) renderToolbarOptions(options, views.get(expanded.panel)?.toolbar_options || []);
+      if (options) renderToolbarOptions(options, view.toolbar_options);
     }
     refreshContextMenu();
     const control = state().customization.control;

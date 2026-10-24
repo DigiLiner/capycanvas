@@ -108,7 +108,7 @@ mod test_support {
     #[cfg(target_os="windows")]
     pub(crate) fn order_new_drawing(host:&mut layer_host::NativeHost,extent:[u32;2],name:&str) {
         use layer_ui::NewDrawingAction as A;
-        for action in [A::Open{screen:None,untitled:"Untitled 2".into()},A::Name{text:name.into()},A::Unit{unit:layer_ui::LengthUnit::Px},A::Width{value:extent[0].into()},A::Height{value:extent[1].into()},A::Create] {
+        for action in [A::Open{screen:None,untitled:2},A::Name{text:name.into()},A::Unit{unit:layer_ui::LengthUnit::Px},A::Width{value:extent[0].into()},A::Height{value:extent[1].into()},A::Create] {
             host.dispatch(layer_ui::UiAction::NewDrawing{action}).unwrap();
         }
         assert!(host.session.new_drawing_view().is_none()&&host.session.new_drawing_order().is_some());

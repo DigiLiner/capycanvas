@@ -138,6 +138,7 @@ workspace-switch-workspace = ワークスペースに切り替え
 workspace-copy-name = { $name }のコピー
 workspace-changes = ワークスペースの変更
 workspace-recovered-name = { $name }（復旧）
+workspace-tools-toolbar = ツールバー
 workspace-panel-toolbar = ツール
 workspace-panel-commands = コマンド
 workspace-panel-brushes = ツールセット

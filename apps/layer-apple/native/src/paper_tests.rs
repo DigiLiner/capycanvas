@@ -272,7 +272,7 @@ fn apple_new_drawing_imports_paper_into_the_library_without_changing_the_drawing
         unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
         let list=PaperJob::new(&app,0,&directory);list.work(None);list.apply(&app);
         app.invoke("new_document");
-        app.new_drawing(json!({"op":"open","screen":null,"untitled":"Untitled 2"}));
+        app.new_drawing(json!({"op":"open","screen":null,"untitled":2}));
         app.new_drawing(json!({"op":"paper"}));
         let before=document(&app);let mark=checkpoint(&app);let requests=app.state()["requests"].clone();
         let picked=|app:&App| app.state()["new_drawing"]["drawer"]["tiles"].as_array().unwrap().iter().find(|tile|tile["selected"]==true).map(|tile|tile["id"].clone());
@@ -306,7 +306,7 @@ fn apple_new_drawing_texture_visibility_reaches_the_drawing_built_on_the_project
         unsafe { &mut *app.0 }.host.session.renderer_mut().0=Some(native_renderer());app.draw_until_idle();
         let dialog=|app:&App| app.state()["new_drawing"].clone();
         app.invoke("new_document");
-        app.new_drawing(json!({"op":"open","screen":null,"untitled":"Untitled 2"}));
+        app.new_drawing(json!({"op":"open","screen":null,"untitled":2}));
         assert_eq!((dialog(&app)["copy"]["relief"].as_str(),dialog(&app)["copy"]["relief_unit"].as_str()),(Some("Texture visibility"),Some("%")));
         let opened=dialog(&app)["setup"]["paper"]["relief"].as_f64().unwrap();
         assert_eq!(dialog(&app)["page"]["relief"],format!("{opened} %"));

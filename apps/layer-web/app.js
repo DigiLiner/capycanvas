@@ -246,7 +246,7 @@ workspace.append(dropIndicator);
 
 function dispatch(action) {
   try {
-    if(documents?.interactionBusy()&&!['complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
+    if(documents?.interactionBusy()&&!['restore_saved_settings','complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
     if (action.type === "measure_column_drawers" && workspaceGesture) workspaceGesture.hits = null;
     if (["move_panel", "move_group", "move_tile", "double_click_panel_handle", "reset_column_width"].includes(action.type))
       action = {
@@ -557,6 +557,7 @@ function arrange(nextLayout, layoutOnly = false) {
       groups.set(group.id, node);
       workspace.append(node);
     }
+    node.classList.toggle("zen-kept", group.zen_kept);
     const tabStyle = app.group_tab_style(group.id);
     const key = JSON.stringify([group.panels.map((id) => {
       const view = customization.view(id); return [id, view.icon];

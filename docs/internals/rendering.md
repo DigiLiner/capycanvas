@@ -192,6 +192,9 @@ computes the surround color alone (`the_surround_skips_the_artwork_shader`).
 The artwork pipelines leave out the paper lighting code; a second set with it
 compiles the first time paper lighting shows, in the background where a startup
 compiler runs, and the plain set draws until it is ready.
+Waiting for optional paper shaders requests no canvas frames and does not block
+layer thumbnail readbacks. Prepared bake steps resume when the compiler wakes
+the host.
 
 When the view is reduced, each screen pixel spans one to two texels of the
 display level and reads only that level, bilinearly. A bilinear sample of the

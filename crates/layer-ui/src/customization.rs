@@ -367,6 +367,7 @@ impl PanelConfig {
         self.custom_name().map(str::to_owned).unwrap_or_else(|| self.id.localized_label(localization).to_string())
     }
     pub(crate) fn menu_name(&self, localization: &Localizer) -> String {
+        if self.id == Panel::Toolbar && self.custom_name().is_none() { return localization.text(MessageId::WORKSPACE_TOOLS_TOOLBAR).to_string(); }
         customization_text(localization, if self.id.kind() == PanelKind::Content { MessageId::WORKSPACE_HISTORY_PANEL } else { MessageId::WORKSPACE_HISTORY_TOOLBAR }, &[("name", self.title_localized(localization))])
     }
     pub fn tiles(&self) -> &[ToolbarTile] {
@@ -2600,6 +2601,8 @@ mod tests {
         assert!(default.custom_name().is_none());
         let localization = Localizer::shared(UiLanguage::English);
         assert_eq!(default.title_localized(&localization), localization.text(MessageId::WORKSPACE_PANEL_TOOLBAR).to_string());
+        assert_eq!(default.menu_name(&Localizer::shared(UiLanguage::Japanese)), "ツールバー");
+        assert_eq!(default.menu_name(&Localizer::shared(UiLanguage::German)), "Werkzeugleiste");
     }
 
     #[test]

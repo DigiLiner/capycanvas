@@ -100,7 +100,7 @@ extension ProjectFiles {
 extension EditorStore {
     func orderNewDrawing(_ edits: [[String: Any]]) async throws {
         try await apply(["type": "invoke", "command": "new_document"])
-        let steps: [[String: Any]] = [["op": "open", "screen": NSNull(), "untitled": "Untitled"]] + edits + [["op": "create"]]
+        let steps: [[String: Any]] = [["op": "open", "screen": NSNull(), "untitled": 1]] + edits + [["op": "create"]]
         for step in steps { try await apply(["type": "new_drawing", "action": step]) }
     }
     func apply(_ action: [String: Any]) async throws {

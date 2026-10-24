@@ -673,7 +673,7 @@ fn a_library_import_from_new_drawing_becomes_its_paper_without_changing_the_draw
     let mut s = session(Platform::Gtk);
     invoke(&mut s, CommandId::NewDocument);
     let new_drawing = |s: &mut UiSession<Recorder>, action| { s.dispatch(UiAction::NewDrawing { action }).unwrap(); };
-    new_drawing(&mut s, NewDrawingAction::Open { screen: None, untitled: "Untitled 2".into() });
+    new_drawing(&mut s, NewDrawingAction::Open { screen: None, untitled: 2 });
     new_drawing(&mut s, NewDrawingAction::Paper);
     let checkpoint = s.engine.checkpoint();
     assert!(matches!(s.capture_library_import().action, Some(PaperRequest::Import { layer: None })));

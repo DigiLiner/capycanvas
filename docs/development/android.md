@@ -401,6 +401,10 @@ manual save checkpoints and undo/redo after an actual process death.
   Color, Cancel, Use Texture with one Undo, Escape and a locked Paper.
   `#selectingFillRowsKeepsPropertiesAndDrawingTargets` checks fill selection,
   painting on the layer above, fill masks and Paper's disabled mask controls.
+- `AndroidFeatureParityTest#dockedToolbarStaysInZenAndEdgeSwipePeeksUntilOutsideContact`
+  checks Show in Zen mode, native toolbar activation, an edge swipe and outside
+  dismissal in both themes. It checks the shared `zen_kept` projection and the
+  actual native controls.
 - `AndroidFeatureParityTest#paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`
   imports through Import… in Choose Texture, renames and deletes through the
   open dialog's tile menu and adds the drawing's own paper back with Add to

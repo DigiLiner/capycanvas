@@ -297,7 +297,7 @@ pub(crate) fn screen(surface: &gdk::Surface) -> Option<ScreenInfo> {
 }
 
 pub(crate) async fn run(w: &Rc<Workspace>) -> Result<Option<NewDrawingOrder>, String> {
-    let untitled = w.documents.model.borrow().upcoming_untitled(&w.localization());
+    let untitled = w.documents.model.borrow().upcoming_id();
     let opened = w.gpu.borrow_mut().as_mut().ok_or_else(|| NewDocumentError::CanvasUnavailable.message(&w.localization()))?
         .session.dispatch(UiAction::NewDrawing { action: NewDrawingAction::Open { screen: w.window.surface().as_ref().and_then(screen), untitled } });
     w.changed(opened.clone());

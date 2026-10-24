@@ -268,6 +268,10 @@ one-finger swipe in from an edge peeks the toolbars docked there until the next
 contact elsewhere. Dropping a bubble on a toolbar kept or peeked in Zen puts it
 back.
 
+Resolved groups publish `zen_kept` for saved toolbar choices and temporary edge
+peeks. Every host keeps those groups visible and interactive while chrome is
+hidden. Starting or dismissing a peek publishes a layout change.
+
 ## Host contract
 
 Everything a port needs from shared Rust is on `UiSession` and in `bubbles.rs`;

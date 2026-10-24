@@ -138,6 +138,7 @@ workspace-switch-workspace = 작업 영역으로 전환
 workspace-copy-name = { $name } 복사본
 workspace-changes = 작업 영역 변경 내용
 workspace-recovered-name = { $name } 복구본
+workspace-tools-toolbar = 도구 모음
 workspace-panel-toolbar = 도구
 workspace-panel-commands = 명령
 workspace-panel-brushes = 도구 세트

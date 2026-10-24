@@ -390,7 +390,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             if(float fit=groupRadius(geometry)*CornerFit;group.frame.CornerRadius().TopLeft!=fit){group.frame.CornerRadius({fit,fit,fit,fit});group.border.CornerRadius({fit,fit,fit,fit});}
             // Geometry-only changes retain controls, focus, capture and scroll.
             auto structure=J::Parse(geometry.Stringify());
-            for(auto field:{L"bounds",L"resize_handles",L"tiles",L"footer_grip",L"min_body_height"})if(structure.HasKey(field))structure.Remove(field);
+            for(auto field:{L"bounds",L"resize_handles",L"tiles",L"footer_grip",L"min_body_height",L"zen_kept"})if(structure.HasKey(field))structure.Remove(field);
             if(auto tiles=object(geometry,L"tiles");tiles.Size())structure.Insert(L"tile_style",S(str(tiles,L"tile_style")));
             structure.Insert(L"footer",B(object(geometry,L"footer_grip").Size()!=0));
             J signature=O({{L"geometry",structure},{L"panel",panelStructure(panel)}});
@@ -408,7 +408,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 for(auto& automatic:group.automatic)if(automatic.tab==tab)automatic.key=panelId+L"\n"+std::wstring(title)+L"\n"+std::to_wstring(data->textSize());
             }
             for(auto const& update:group.paintIcons)update();
-            bool hidden=flag(snapshot,L"chrome_hidden")&&!flag(geometry,L"floating");
+            bool hidden=flag(snapshot,L"chrome_hidden")&&!flag(geometry,L"floating")&&!flag(geometry,L"zen_kept");
             group.hidden=hidden;
             int z=flag(geometry,L"floating")?100+2*order:0;++order;
             group.order=z;

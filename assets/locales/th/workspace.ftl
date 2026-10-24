@@ -135,6 +135,7 @@ workspace-switch-workspace = สลับไปพื้นที่ทำงา
 workspace-copy-name = { $name } สำเนา
 workspace-changes = การเปลี่ยนพื้นที่ทำงาน
 workspace-recovered-name = { $name } กู้คืนแล้ว
+workspace-tools-toolbar = แถบเครื่องมือ
 workspace-panel-toolbar = เครื่องมือ
 workspace-panel-commands = คำสั่ง
 workspace-panel-brushes = ชุดเครื่องมือ

@@ -191,7 +191,7 @@ mod tonal_checks {
         assert!(s.state.tool_settings.iter().all(|f| f.group.is_empty()));
         assert_eq!(s.state.tool_actions.len(), 4);
         assert!(
-            matches!(s.state.tool_extra.as_slice(),[ToolOption::Choice {id:"tonal-tones",segmented:true,items,..}] if items.len()==6 && items.iter().all(|i|!i.selected && i.label.contains("stop")))
+            matches!(s.state.tool_extra.as_slice(),[ToolOption::Choice {id:"tonal-tones",segmented:true,labeled:true,items,..}] if items.len()==6 && items.iter().all(|i|!i.selected && i.label.contains("stop")))
         );
         let ToolOption::Choice {items,..}=&s.state.tool_extra[0] else {unreachable!()};
         let icons:std::collections::BTreeSet<_>=items.iter().map(|i|i.icon).collect();

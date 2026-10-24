@@ -675,6 +675,6 @@ menu-path = 패스
 command-erase-touched-part = 닿은 부분 지우기
 command-erase-to-intersection = 교차점까지 지우기
 
-command-liquify-reset = 유동화 초기화
-command-liquify-adjust = 유동화 조정
-commands-liquify-no-changes = 먼저 이 레이어에 유동화를 적용하세요
+command-liquify-reset = 왜곡 초기화
+command-liquify-adjust = 왜곡 조정
+commands-liquify-no-changes = 먼저 이 레이어에 왜곡을 적용하세요

@@ -138,6 +138,7 @@ workspace-switch-workspace = Switch to Workspace
 workspace-copy-name = { $name } Copy
 workspace-changes = Workspace changes
 workspace-recovered-name = { $name } Recovered
+workspace-tools-toolbar = Tools toolbar
 workspace-panel-toolbar = Tools
 workspace-panel-commands = Commands
 workspace-panel-brushes = Tool Set

@@ -1,4 +1,5 @@
 import {checkHdrBubbles} from './hdr-bubbles.test.mjs';
+import {checkBubbleRelease,checkBubbleReleaseColdStartup} from './bubble-release-journey.test.mjs';
 import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkGradientDefinitions} from './gradient.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
@@ -229,6 +230,9 @@ try {
   console.log('WebGPU hardware:',JSON.stringify(gpuAdapter));
   const checkErrors = () => assert.deepEqual(errors, []);
   if (!await runJourney([
+    [process.argv.includes('--bubble-release'), () => checkBubbleRelease({call,evaluate,settle}), checkErrors],
+    [process.argv.includes('--bubble-release-cold'), () => checkBubbleReleaseColdStartup({call,evaluate,settle}), checkErrors],
+    [process.argv.includes('--bubble-release-localization'), async () => (await import('./bubble-release-localization-journey.test.mjs')).checkBubbleReleaseLocalization({call,evaluate,settle}), checkErrors],
     [process.argv.includes('--panel-controls'), () => checkPanelControls({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--zoom-tool-settings"), () => checkZoomToolSettings({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--wheel-navigation"), () => checkWheelNavigation({call,evaluate,settle}), checkErrors],

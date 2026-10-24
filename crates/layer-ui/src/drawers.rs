@@ -744,6 +744,7 @@ impl CustomizationState {
                     min_body_height: layout.group_min_body_height(panels),
                     footer_grip: None,
                     floating: false,
+                    zen_kept: layout.shows_in_zen(group),
                     resize_handles: Vec::new(),
                     tiles,
                 })

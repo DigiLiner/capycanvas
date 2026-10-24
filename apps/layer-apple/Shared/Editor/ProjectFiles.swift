@@ -287,7 +287,7 @@ import UIKit
         guard let store else { fail("The canvas session is unavailable"); return }
         creating = true
         store.edit(["type": "new_drawing", "action": ["op": "open", "screen": newDrawingScreen as Any? ?? NSNull(),
-            "untitled": store.snapshot["document_tabs"]["upcoming_untitled"].string]]) { [weak self] error in
+            "untitled": store.snapshot["document_tabs"]["upcoming_id"].raw]]) { [weak self] error in
             guard let self else { return }
             if let error { creating = false; fail(error); return }
             dialogs?.create?(store.state["new_drawing"]) { [weak self] edits in

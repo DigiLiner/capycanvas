@@ -225,7 +225,7 @@ mod tests {
         assert!(service.import(&mut host, None, None).is_err());
         host.dispatch(UiAction::Invoke { command:layer_ui::CommandId::NewDocument }).unwrap();
         let checkpoint = host.session.engine().checkpoint();
-        for action in [layer_ui::NewDrawingAction::Open { screen:None, untitled:"Untitled 2".into() }, layer_ui::NewDrawingAction::Paper] {
+        for action in [layer_ui::NewDrawingAction::Open { screen:None, untitled:2 }, layer_ui::NewDrawingAction::Paper] {
             host.dispatch(UiAction::NewDrawing { action }).unwrap();
         }
         let send = pending(&mut service, &host, None);let image = gray();

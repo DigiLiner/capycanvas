@@ -233,10 +233,70 @@ class AndroidFeatureParityTest {
         shown(hasTestTag("tool-group-${state().getJSONObject("tool_set").array("groups").getJSONObject(0).getString("label")}") and hasAnyAncestor(hasTestTag("tool-drawer")))
         assertTrue(state().getJSONObject("workspace").getBoolean("zen_mode"))
         capture("zen-tool-drawer")
-        stroke(Offset(.6f, .8f), Offset(.7f, .8f))
+        val drawer = compose.onNodeWithTag("tool-drawer").fetchSemanticsNode().boundsInRoot
+        val workspace = compose.onNodeWithTag("workspace").fetchSemanticsNode().boundsInRoot
+        val sample = listOf(Offset(.7f, .8f), Offset(.75f, .7f), Offset(.3f, .7f))
+            .first { !drawer.contains(Offset(it.x * workspace.width, it.y * workspace.height) + workspace.topLeft) }
+        val outside = Offset(sample.x * workspace.width, sample.y * workspace.height)
+        val before = pixel(sample)
+        compose.activity.getExternalFilesDir(null)!!.resolve("zen-tool-drawer-contact.json").writeText(obj(
+            "workspace" to workspace.toString(), "drawer" to drawer.toString(), "contact" to outside.toString(), "snapshot" to host.snapshot).toString(2))
+        val owner = checkNotNull(findTag("workspace")).first
+        val downAt = android.os.SystemClock.uptimeMillis()
+        for ((phase, point) in listOf(android.view.MotionEvent.ACTION_DOWN to outside, android.view.MotionEvent.ACTION_MOVE to outside + Offset(20f, 0f), android.view.MotionEvent.ACTION_UP to outside + Offset(20f, 0f))) {
+            val event = motion(android.view.MotionEvent.TOOL_TYPE_STYLUS, phase, point + workspace.topLeft, downAt)
+            try { instrumentation.runOnMainSync { owner.view.dispatchTouchEvent(event) } }
+            finally { event.recycle() }
+            android.os.SystemClock.sleep(40)
+        }
         compose.waitUntil(10_000) { state().getJSONObject("customization").objectOrNull("drawer") == null }
         assertEquals(undoBefore, state().array("commands").objects().first { it.getString("id") == "undo" }.getBoolean("enabled"))
-        awaitPixel(Offset(.65f,.8f)) { android.graphics.Color.red(it) > 245 }
+        awaitPixel(sample) { it == before }
+    }
+    @Test fun dockedToolbarStaysInZenAndEdgeSwipePeeksUntilOutsideContact() {
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(defaultWorkspace.toString())))
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "move_panel", "panel" to "toolbar", "target" to obj("kind" to "edge", "edge" to "right", "outer" to true), "viewport" to viewport()))
+            action(obj("type" to "invoke", "command" to "hand"))
+            val group = host.snapshot!!.getJSONObject("layout").array("groups").objects().first { it.getString("active") == "toolbar" }.getInt("id")
+            fun kept() = host.snapshot!!.getJSONObject("layout").array("groups").objects().first { it.getInt("id") == group }.getBoolean("zen_kept")
+            fun save(step: String) {
+                compose.activity.getExternalFilesDir(null)!!.resolve("zen-toolbar-$theme-$step.json").writeText(host.snapshot!!.toString(2))
+                capture("zen-toolbar-$theme-$step")
+            }
+            fun outside() = compose.onNodeWithTag("workspace").performTouchInput { click(Offset(width * .5f, height * .75f)) }
+            try {
+                action(obj("type" to "customize", "action" to obj("type" to "set_show_in_zen", "panel" to "toolbar", "shown" to true)))
+                action(obj("type" to "invoke", "command" to "zen_mode"))
+                compose.waitUntil(10_000) { host.snapshot!!.optBoolean("chrome_hidden") && kept() }
+                shown("group-$group")
+                val tile = host.snapshot!!.array("panels").objects().first { it.getString("id") == "toolbar" }.array("tiles").objects().first().getInt("id")
+                compose.onNodeWithTag("tile-toolbar-$tile").performTouchInput { click() }
+                compose.waitUntil(10_000) { state().array("commands").objects().first { it.getString("id") == "pen" }.getBoolean("selected") }
+                save("kept-hit")
+                outside()
+                assertTrue(kept())
+                shown("group-$group")
+                action(obj("type" to "customize", "action" to obj("type" to "set_show_in_zen", "panel" to "toolbar", "shown" to false)))
+                compose.waitUntil(10_000) { !kept() && compose.onAllNodesWithTag("group-$group").fetchSemanticsNodes().isEmpty() }
+                val density = compose.activity.resources.displayMetrics.density
+                compose.onNodeWithTag("workspace").performTouchInput {
+                    swipe(Offset(width - 4 * density, height * .5f), Offset(width - 84 * density, height * .5f), 350)
+                }
+                compose.waitUntil(10_000) { kept() }
+                shown("group-$group")
+                assertTrue(state().getJSONObject("workspace").getBoolean("zen_mode"))
+                save("peek")
+                outside()
+                compose.waitUntil(10_000) { !kept() && compose.onAllNodesWithTag("group-$group").fetchSemanticsNodes().isEmpty() }
+                assertTrue(state().getJSONObject("workspace").getBoolean("zen_mode"))
+                save("dismissed")
+            } catch (failure: Throwable) {
+                save("failure")
+                throw failure
+            }
+        }
     }
     @Test fun collapsedColumnOpensNestedToolDrawerAndExpandsWithoutLosingPanels() {
         val group = host.snapshot!!.getJSONObject("layout").array("groups").objects().first { it.getString("active") == "brushes" }.getInt("id")
@@ -282,7 +342,10 @@ class AndroidFeatureParityTest {
         capture("full-editor-preset")
     }
     @Test fun restoreMissingCommandsToolbarPreservesSavedTools() {
-        action(obj("type" to "restore_workspace", "workspace" to savedWorkspace))
+        val workspace = JSONObject(savedWorkspace.toString())
+        workspace.getJSONObject("layout").put("header", obj("size" to "medium", "next_id" to 3, "zones" to JSONArray(listOf(
+            JSONArray(listOf(obj("id" to 1, "item" to obj("kind" to "capy")), obj("id" to 2, "item" to obj("kind" to "menu_labels")))), JSONArray(), JSONArray()))))
+        action(obj("type" to "restore_workspace", "workspace" to workspace))
         val layout = state().getJSONObject("workspace").getJSONObject("layout")
         if (layout.array("panels").objects().any { it.getString("id") == "commands" }) {
             action(obj("type" to "customize", "action" to obj("type" to "delete_toolbar", "panel" to "commands")))

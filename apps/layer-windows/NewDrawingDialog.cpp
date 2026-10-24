@@ -179,7 +179,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         if(IsIconic(handle))ShowWindow(handle,SW_RESTORE);
         auto screen=drawingScreen(window);
         waiting=true;seen=false;creating=false;shown=J{};
-        data->dispatch(O({{L"type",S(L"new_drawing")},{L"action",O({{L"op",S(L"open")},{L"screen",screen},{L"untitled",S(str(object(data->model,L"windows_tabs"),L"upcoming_untitled"))}})}}));
+        data->dispatch(O({{L"type",S(L"new_drawing")},{L"action",O({{L"op",S(L"open")},{L"screen",screen},{L"untitled",object(data->model,L"windows_tabs").GetNamedValue(L"upcoming_id")}})}}));
         changed();
     }
     void apply(){

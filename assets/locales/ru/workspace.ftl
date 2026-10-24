@@ -140,6 +140,7 @@ workspace-switch-workspace = Переключиться в рабочее про
 workspace-copy-name = { $name } — копия
 workspace-changes = Изменения рабочего пространства
 workspace-recovered-name = { $name } — восстановлено
+workspace-tools-toolbar = Панель инструментов
 workspace-panel-toolbar = Инструменты
 workspace-panel-commands = Команды
 workspace-panel-brushes = Набор инструментов

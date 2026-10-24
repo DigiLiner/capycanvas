@@ -138,6 +138,7 @@ workspace-switch-workspace = 切换到工作区
 workspace-copy-name = { $name }副本
 workspace-changes = 工作区更改
 workspace-recovered-name = { $name }已恢复
+workspace-tools-toolbar = 工具栏
 workspace-panel-toolbar = 工具
 workspace-panel-commands = 命令
 workspace-panel-brushes = 工具组

@@ -86,7 +86,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
     assert.ok(!ids.includes('contact_softness'),`${name} Contact softness is hidden`);
     for(let i=1;i<profile.rects.length;i++)near(profile.rects[i].top-profile.rects[i-1].bottom,4,`${name} primary peer gap`);
     if(dry){
-      assert.deepEqual(ids,[...dryPrimary,'angle','opacity','smoothing_strength'],`${name} seven dry fields`);
+      assert.deepEqual(ids,[...dryPrimary,'smoothing_strength','angle','opacity'],`${name} seven dry fields`);
       for(const[id,group]of[['angle','tool-setting-group-tip'],['opacity','tool-setting-group-blending'],['smoothing_strength','tool-setting-group-smoothing']]){
         const field=profile.fields.find(f=>f.id===id),heading=profile.headings.find(h=>h.id===id);
         assert.equal(field.group_id,group,`${name} stable ${id} category`);assert.equal(heading.tag,'H3',`${name} ${id} category heading`);assert.equal(heading.text,field.group,`${name} published category label`);
@@ -143,7 +143,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
           if(width===242)await numericEdit(name,'hardness','37',.37,primary);
         }
         if(tool==='wet-mixing'){
-          const primary=['size','flow','pull'];await family(name,primary);
+          const primary=['size','flow','pull','spread'];await family(name,primary);
           if(width===242)await numericEdit(name,'pull','0',0,primary);
         }
         if(tool==='liquify'){

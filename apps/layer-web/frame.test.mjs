@@ -6,6 +6,22 @@ import {presentCapy} from './header.js';
 import {colorDialogDom} from './color-dialog-fixture.mjs';
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
+test('live preferences publish while document dialogs retain exclusive editing input', () => {
+  let busy=true;
+  const received=[],published=[],change={regions:128};
+  const context={documents:{interactionBusy:()=>busy},app:{dispatch(action){received.push(action);return change;}},
+    applyChange:value=>published.push(value),message:assert.fail};
+  runInNewContext(source.slice(source.indexOf('function dispatch(action)'),source.indexOf('let languageTimer;')),context);
+  const restore={type:'restore_saved_settings',saved:JSON.stringify({language:{Explicit:'ja'}})};
+  context.dispatch(restore);
+  assert.deepEqual(received,[restore]);assert.deepEqual(published,[change]);
+  const invoke={type:'invoke',command:'pen'};
+  context.dispatch(invoke);
+  assert.deepEqual(received,[restore],'the open dialog keeps ownership of editing commands');
+  busy=false;context.dispatch(invoke);
+  assert.deepEqual(received,[restore,invoke]);assert.deepEqual(published,[change,change]);
+});
+
 function harness(moving = false) {
   const calls = [];
   const events = [];

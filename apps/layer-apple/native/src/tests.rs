@@ -944,7 +944,7 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         assert_eq!(unsafe { capy_project_new(unordered.0) }, -1);
         assert!(unordered.error().is_some());
         app.invoke("new_document");
-        app.new_drawing(json!({"op": "open", "screen": null, "untitled": "Untitled 2"}));
+        app.new_drawing(json!({"op": "open", "screen": null, "untitled": 2}));
         app.new_drawing(json!({"op": "unit", "unit": "px"}));
         app.new_drawing(json!({"op": "width", "value": 1_000_000}));
         assert_eq!(app.state()["new_drawing"]["can_create"], false);
@@ -1195,7 +1195,7 @@ impl App {
             assert_eq!(unsafe { capy_apple_document_complete(self.0, request["id"].as_u64().unwrap() as u32, 0) }, 0);
         }
         if !pending { self.invoke("new_document"); }
-        self.new_drawing(json!({"op": "open", "screen": null, "untitled": "Untitled 2"}));
+        self.new_drawing(json!({"op": "open", "screen": null, "untitled": 2}));
         for action in [json!({"op": "unit", "unit": "px"}), json!({"op": "width", "value": extent[0]}), json!({"op": "height", "value": extent[1]}),
             json!({"op": "paper"}), json!({"op": "paper_relief", "value": 0}), json!({"op": "use_paper"}),
             json!({"op": "paper_color"}), json!({"op": "paper_color_value", "color": {"space": "Srgb", "rgba": [1., 1., 1., 1.]}}),

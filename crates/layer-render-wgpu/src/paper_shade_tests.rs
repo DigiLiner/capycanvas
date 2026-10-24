@@ -36,6 +36,32 @@ fn mean(values: &[f32]) -> f32 {
 }
 
 #[test]
+fn paper_lighting_waiting_for_optional_shaders_does_not_keep_frames_busy() {
+    use std::time::{Duration, Instant};
+    let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut document = rough_gray_paper();
+    set_paper(&mut document, &[(paper::RELIEF, EffectValue::Number(150.))]);
+    let mut r = crate::test_support::staged_renderer(&reference, document.composition().color);
+    r.shader_idle(false, false);
+    r.update_paper_lighting(document.scene()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !r.ui_readback_ready() {
+        r.poll_startup().unwrap();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(r.paper_lighting.is_some() && r.paper_shade().is_none());
+    assert!(!r.has_pending_work(), "waiting for optional lighting cannot prevent UI readbacks");
+    r.shader_idle(true, true);
+    while r.paper_shade().is_none() {
+        r.poll_startup().unwrap();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!r.has_pending_work());
+}
+
+#[test]
 fn paper_relief_lights_the_canvas_keeps_its_tone_and_turns_with_the_light() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut document = rough_gray_paper();

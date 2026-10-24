@@ -16,7 +16,7 @@ struct WorkspacePanels: View {
                 Color.clear.contentShape(Rectangle()).onTapGesture { store.customize(["type": "close_expanded"]) }
             }
             ForEach(groups, id: \.workspaceGroupID) { group in
-                if !store.snapshot["chrome_hidden"].bool || group["floating"].bool {
+                if !store.snapshot["chrome_hidden"].bool || group["floating"].bool || group["zen_kept"].bool {
                     WorkspacePanelGroup(store: store, workspace: workspace, id: group["id"].uint)
                         .environment(\.workspaceLayer, groups.firstIndex(where: { $0.workspaceGroupID == group.workspaceGroupID }) ?? 0)
                     if workspace.expansion.isNull {

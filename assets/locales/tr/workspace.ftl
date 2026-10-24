@@ -138,6 +138,7 @@ workspace-switch-workspace = Çalışma alanına geç
 workspace-copy-name = { $name } kopyası
 workspace-changes = Çalışma alanı değişiklikleri
 workspace-recovered-name = { $name } kurtarıldı
+workspace-tools-toolbar = Araç çubuğu
 workspace-panel-toolbar = Araçlar
 workspace-panel-commands = Komutlar
 workspace-panel-brushes = Araç seti

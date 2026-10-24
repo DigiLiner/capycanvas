@@ -394,6 +394,19 @@ impl Papers {
         self.bakes.iter().find(|b| b.id == *id)?.slope.as_ref()
     }
 
+    pub fn work_pending(&self, id: &AssetId) -> bool {
+        self.bakes.iter().any(|bake| bake.id == *id && !bake.complete() && self.ready_to_step(bake))
+    }
+
+    fn ready_to_step(&self, bake: &Bake) -> bool {
+        if matches!(bake.stage, Stage::Ready { .. }) {
+            bake.wants_slope && bake.slope.is_none() && self.slope_programs.as_ref().is_some_and(SlopePrograms::ready)
+        } else {
+            let program = self.programs.iter().find(|program| program.id == bake.program).expect("prepared paper program");
+            program.probe.ready() && program.bake.ready()
+        }
+    }
+
     pub fn requested(&self, id: &AssetId) -> bool {
         self.bakes.iter().any(|bake| bake.id == *id)
     }
@@ -450,18 +463,16 @@ impl Papers {
     }
 
     fn step(&mut self, index: usize, device: &PipelineDevice, queue: &wgpu::Queue, wait: bool) -> Result<bool, GpuRasterError> {
+        if !wait && !self.ready_to_step(&self.bakes[index]) { return Ok(false); }
         if let Stage::Ready { view, relief } = &self.bakes[index].stage {
             let bake = &self.bakes[index];
-            let Some(programs) = self.slope_programs.as_ref().filter(|p| bake.wants_slope && bake.slope.is_none() && (wait || p.ready())) else { return Ok(false) };
+            let Some(programs) = self.slope_programs.as_ref().filter(|_| bake.wants_slope && bake.slope.is_none()) else { return Ok(false) };
             let scale = relief * REFERENCE_RELIEF_UM / (bake.tile.texel_mm() as f32 * 1000.);
             let slope = programs.encode(device, queue, view, scale)?;
             self.bakes[index].slope = Some(slope);
             return Ok(true);
         }
         let programs = self.programs.iter().find(|p| p.id == self.bakes[index].program).expect("prepared paper program");
-        if !wait && !(programs.probe.ready() && programs.bake.ready()) {
-            return Ok(false);
-        }
         let bake = &mut self.bakes[index];
         let next = match &mut bake.stage {
             Stage::Waiting => {

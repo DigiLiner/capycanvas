@@ -138,6 +138,7 @@ workspace-switch-workspace = Passa all'area di lavoro
 workspace-copy-name = { $name } copia
 workspace-changes = Modifiche dell'area di lavoro
 workspace-recovered-name = { $name } recuperato
+workspace-tools-toolbar = Barra degli strumenti
 workspace-panel-toolbar = Strumenti
 workspace-panel-commands = Comandi
 workspace-panel-brushes = Set di strumenti

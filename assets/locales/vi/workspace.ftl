@@ -137,6 +137,7 @@ workspace-switch-workspace = Chuyển sang không gian làm việc
 workspace-copy-name = Bản sao { $name }
 workspace-changes = Thay đổi không gian làm việc
 workspace-recovered-name = { $name } đã khôi phục
+workspace-tools-toolbar = Thanh công cụ
 workspace-panel-toolbar = Công cụ
 workspace-panel-commands = Lệnh
 workspace-panel-brushes = Bộ công cụ
