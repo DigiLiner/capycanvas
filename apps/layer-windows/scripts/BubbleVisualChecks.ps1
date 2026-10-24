@@ -647,7 +647,7 @@ function Assert-BubbleVisualStates([long]$Id){
 function Wait-BubbleVisualLayout{
     $settled=@{last='';same=0}
     Wait-Until {
-        $bounds=@(foreach($packet in Packets){$center=Center $packet.view.id;@($packet.view.id,$center.x,$center.y)})|ConvertTo-Json -Compress
+        $bounds=@(foreach($packet in Packets){$center=Center $packet.view.id $packet;@($packet.view.id,$center.x,$center.y)})|ConvertTo-Json -Compress
         if($bounds -eq $settled.last){$settled.same++}else{$settled.last=$bounds;$settled.same=0}
         $settled.same -ge 5
     } 'Bubble edge scene did not settle'

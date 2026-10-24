@@ -44,18 +44,19 @@ function Document-Point([double]$X,[double]$Y,[long]$IgnoreBubble=-1){
     $m=Model;$camera=$m.state.camera;$document=@($m.state.tabs|Where-Object active)[0]
     if($camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'Fixture document projection requires an unrotated camera'}
     $point=Screen (($camera.translation[0]+$document.width*$X*$camera.zoom)/$scale) (($camera.translation[1]+$document.height*$Y*$camera.zoom)/$scale)
-    foreach($packet in Packets){if($packet.view.id -ne $IgnoreBubble){$center=Center $packet.view.id;$reach=($packet.reach+5)*$scale;if([Math]::Abs($point.x-$center.x) -lt $reach -and [Math]::Abs($point.y-$center.y) -lt $reach){throw 'Artwork sample overlaps another bubble reach'}}}
+    foreach($packet in Packets){if($packet.view.id -ne $IgnoreBubble){$center=Center $packet.view.id $packet;$reach=($packet.reach+5)*$scale;if([Math]::Abs($point.x-$center.x) -lt $reach -and [Math]::Abs($point.y-$center.y) -lt $reach){throw 'Artwork sample overlaps another bubble reach'}}}
     return $point
 }
-function Card-Bounds([long]$Id,$Element=$null){
+function Card-Bounds([long]$Id,$Element=$null,$CardView=$null){
     if(!$Element){$Element=Control "bubble-card-$Id" -Arranged}
     $outer=$Element.Current.BoundingRectangle;$footer=(Control "bubble-properties-$Id" -Within $Element -Arranged).Current.BoundingRectangle
-    $height=(View $Id).card.size[1]*$scale
+    if(!$CardView){$CardView=(View $Id).card};$height=$CardView.size[1]*$scale
     [pscustomobject]@{X=($footer.Right-$outer.Width);Y=($footer.Bottom-$height);Width=$outer.Width;Height=$height;Bottom=$footer.Bottom;Right=$footer.Right}
 }
-function Center([long]$Id){
-    if(Find "bubble-card-$Id" -Visible){$b=Card-Bounds $Id;return @{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
-    $color=(Packet $Id).color
+function Center([long]$Id,$Presentation=$null){
+    $card=if(!$Presentation -or $Presentation.view.card){Find "bubble-card-$Id" -Visible}
+    if($card){$b=Card-Bounds $Id $card $Presentation.view.card;return @{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
+    if(!$Presentation){$Presentation=Packet $Id};$color=$Presentation.color
     if($color){$b=(Control "tool-bubble-$Id" -Arranged).Current.BoundingRectangle;return @{x=[int][Math]::Round($b.X-$color.bounds.x*$scale);y=[int][Math]::Round($b.Y-$color.bounds.y*$scale)}}
     At "tool-bubble-$Id"
 }
@@ -665,7 +666,7 @@ function Next-Drawing{
 }
 function Settle-Bubbles{
     $settle=@{last='';same=0}
-    Wait-Until {$key=@(Packets|ForEach-Object {$point=Center $_.view.id;"$($_.view.id):$($point.x),$($point.y)"}) -join '|';if($key -eq $settle.last){$settle.same++}else{$settle.last=$key;$settle.same=0};$settle.same -ge 4} 'Native bubbles did not settle after document activation'
+    Wait-Until {$key=@(Packets|ForEach-Object {$point=Center $_.view.id $_;"$($_.view.id):$($point.x),$($point.y)"}) -join '|';if($key -eq $settle.last){$settle.same++}else{$settle.last=$key;$settle.same=0};$settle.same -ge 4} 'Native bubbles did not settle after document activation'
 }
 function Document-SwitchMenu([long]$Id){
     $original=(Model).windows_tabs.selected;$originalFile=(Model).state.document_file
@@ -712,7 +713,7 @@ function Retained-Menu([long]$Id){
 }
 function Rapid-Reopen([long]$Id){
     if($RapidOnly){
-        foreach($packet in @(Packets|Where-Object {$_.view.id -ne $Id})){$point=Center $packet.view.id;[CapyRowPointer]::RightClick($point.x,$point.y);(Menu-Item 'Put back').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();Wait-Until {$null -eq (Packet $packet.view.id)} 'Rapid fixture could not clear neighbor'}
+        foreach($packet in @(Packets|Where-Object {$_.view.id -ne $Id})){$point=Center $packet.view.id $packet;[CapyRowPointer]::RightClick($point.x,$point.y);(Menu-Item 'Put back').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();Wait-Until {$null -eq (Packet $packet.view.id)} 'Rapid fixture could not clear neighbor'}
         $bounds=Card-Bounds $Id;$current=Center $Id;$area=(Model).layout.work_area;$desired=Screen ($area.x+$area.width*.5) ($area.y+$area.height*.5)
         $from=@{x=[int]($bounds.X+3*$scale);y=[int]($bounds.Y+$bounds.Height*.5)};$to=@{x=($from.x+$desired.x-$current.x);y=($from.y+$desired.y-$current.y)}
         Drag $from $to;Start-Sleep -Milliseconds 500
@@ -937,6 +938,10 @@ try{
     foreach($id in @($dial,$controls,$history,$color)){if(!(Find "tool-bubble-$id" -Visible)){throw "Zen hid bubble $id"}}
     Settled-Capture 'zen';[CapyRowPointer]::Key([uint32]$review.Id,0x09);Wait-Until {!(Model).state.workspace.zen_mode} 'Tab did not leave Zen'
     $checks.Add('zen-retains-bubbles')
+    $canvas.SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09);Wait-Until {(Model).state.workspace.zen_mode} 'Tab did not reenter Zen'
+    Escape;Wait-Until {!(Model).state.workspace.zen_mode} 'Fresh Escape did not leave Zen'
+    foreach($id in @($dial,$controls,$history,$color)){if(!(Find "tool-bubble-$id" -Visible)){throw "Leaving Zen hid bubble $id"}}
+    $checks.Add('fresh-escape-leaves-zen-and-retains-bubbles')
     if($VisualOnly -or $BeadTransitionsOnly){@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved|Out-Null;return}
     Document-SwitchMenu $dial
     Retained-Menu $color
