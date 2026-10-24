@@ -320,6 +320,8 @@ header and footer: transparent scroll peers report occupied content bounds.
 When a drawer clips the footer, use those occupied bounds for row hit checks.
 Check vertical row motion for unchanged authored state. Test reverse-close with
 Delete explicitly visible, reopening it if native cancellation closed the strip.
+Maximize for the child-control and group-drop tail so the mask context bar leaves
+the row targets exposed; keep the earlier compact, floating and drawer checks.
 `exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
 activation, scrolling and undo history in both themes; `-PaperLight` runs the
 light-theme scrolling, history and empty-stack cases. Both variants also walk

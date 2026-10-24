@@ -14,6 +14,7 @@ $run=Join-Path $repo ('artifacts/windows/layer-pickup/'+[Guid]::NewGuid().ToStri
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $sourceReveals=[Collections.Generic.List[object]]::new()
 $swipeStages=[Collections.Generic.List[object]]::new()
+$pressContacts=[Collections.Generic.List[object]]::new()
 $fixtureFailed=$false
 function Gesture {try{(Find 'layer-list').Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Layer-Scrollbars {
@@ -140,6 +141,9 @@ function Destination([double]$Layer,[double]$Fraction=.6) {
 }
 function Press([string]$Id,[double]$Layer,[switch]$Grip) {
     $at=Point $Id
+    $nativeInput=Input-Trace $at.x $at.y
+    $script:press=@{case=$script:case;source=$Id;point=$at;intended_bounds=(Control $Id).Current.BoundingRectangle;foreground=$nativeInput.foreground;owned_window=$nativeInput.owned_window;hit=$nativeInput.hit}
+    $pressContacts.Add($script:press)
     [CapyRowPointer]::Down($Device,$at.x,$at.y)
     Wait-Until {$g=Gesture;$g.source -eq $Layer -and $g.phase -in @('pressed','held')} 'Layer row did not receive the contact'
     $g=Gesture
@@ -503,13 +507,6 @@ try {
         Wait-Until {((Model).layout|ConvertTo-Json -Depth 80 -Compress) -eq $layoutBefore} 'Workspace Undo did not restore docked Layers'
         $null=Point "layer-$created-name"
     }
-    $script:case='remaining-child-controls'
-    Tap "layer-$created-name";Invoke 'layer-add-mask'
-    Wait-Until {@((Model).state.layers|Where-Object id -eq $created)[0].has_mask} 'Mask did not appear for child pickup tests'
-    Tap "layer-$created-content"
-    foreach($child in @('selection','content','mask','link')){
-        Drag-Row ("layer-$created-"+$child) $created $paint
-    }
     $before=Contact-State
     $space=@{before=(Layer-Viewport);artwork_before=@{rows=$before.rows;checkpoint=$before.checkpoint;modified=$before.modified}}
     try{
@@ -521,6 +518,13 @@ try {
         $after=Contact-State;$space.artwork_after=@{rows=$after.rows;checkpoint=$after.checkpoint;modified=$after.modified}
         if($after.rows -ne $before.rows -or $after.checkpoint -ne $before.checkpoint -or $after.modified -ne $before.modified){throw 'Layer viewport resize changed artwork or its checkpoint'}
     }finally{$space.after=Layer-Viewport;$space|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'group-viewport.json')}
+    $script:case='remaining-child-controls'
+    Tap "layer-$created-name";Invoke 'layer-add-mask'
+    Wait-Until {@((Model).state.layers|Where-Object id -eq $created)[0].has_mask} 'Mask did not appear for child pickup tests'
+    Tap "layer-$created-content"
+    foreach($child in @('selection','content','mask','link')){
+        Drag-Row ("layer-$created-"+$child) $created $paint
+    }
     Invoke 'layer-new-group'
     Wait-Until {
         $active=(Model).state.layer_tools.editing_layer
@@ -660,7 +664,7 @@ try {
 }catch{
     $fixtureFailed=$true;$failure=$_
     try{
-        @{case=$script:case;error=$failure.ToString();contact=$script:contact;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
+        @{case=$script:case;error=$failure.ToString();contact=$script:contact;press=$script:press;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
         if($review -and !$review.HasExited){
             & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
         }
@@ -673,6 +677,7 @@ try {
         {[CapyRowPointer]::Dispose()},
         {if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned layer review did not stop during fixture cleanup'}}}},
         {Exit-CapyEnvironment},
+        {if($pressContacts.Count){$pressContacts|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'press-contacts.json')}},
         {if($swipeStages.Count){$swipeStages|ConvertTo-Json -Depth 18|Set-Content (Join-Path $run 'swipe-stages.json')}},
         {$sourceReveals|ForEach-Object {$_|ConvertTo-Json -Depth 8 -Compress}|Set-Content (Join-Path $run 'source-reveal.jsonl')}
     )){try{& $finish}catch{$cleanup+=($_|Out-String)}}
