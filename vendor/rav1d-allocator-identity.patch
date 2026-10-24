@@ -1,0 +1,121 @@
+diff --git a/rav1d/include/dav1d/picture.rs b/rav1d/include/dav1d/picture.rs
+index c72e86200..9061323f8 100644
+--- a/rav1d/include/dav1d/picture.rs
++++ b/rav1d/include/dav1d/picture.rs
+@@ -680,15 +680,12 @@ pub(crate) struct Rav1dPicAllocator {
+     ///
+     /// # Safety
+     ///
+-    /// If [`Self::is_default`]`()`, then this cookie is a reference to
+-    /// [`Rav1dContext::picture_pool`], a `&Arc<MemPool<u8>`.
+-    /// Thus, its lifetime is that of `&c.picture_pool`,
+-    /// so the lifetime of the `&`[`Rav1dContext`].
+-    /// This is used from `dav1d_default_picture_alloc`
+-    /// ([`Self::default`]`().alloc_picture_callback`),
+-    /// which is called from [`Self::alloc_picture_data`],
+-    /// which is called further up on the call stack with a `&`[`Rav1dContext`].
+-    /// Thus, the lifetime will always be valid where used.
++    /// For the default callbacks, a non-null cookie points to a live
++    /// `Arc<MemPool<u8>>` through allocation. A null cookie creates a pool owned
++    /// by the allocated picture. Pictures clone the pool owner; release does
++    /// not dereference this cookie.
++    /// Context-pool cookies point to [`Rav1dContext::picture_pool`] inside the
++    /// stable context Arc and are used while that context remains borrowed.
+     ///
+     /// Note that this is an `&Arc<MemPool<u8>` turned into a raw pointer,
+     /// not an [`Arc::into_raw`] of that [`Arc`].
+diff --git a/rav1d/src/ownership_tests.rs b/rav1d/src/ownership_tests.rs
+index 97163b2f2..2886e69b7 100644
+--- a/rav1d/src/ownership_tests.rs
++++ b/rav1d/src/ownership_tests.rs
+@@ -54,6 +54,31 @@ fn unreferencing_a_picture_leaves_no_raw_owners() {
+     }
+ }
+
++#[test]
++fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
++    use crate::include::dav1d::picture::{Rav1dPicAllocator, Rav1dPictureParameters};
++    use crate::src::mem::MemPool;
++    for pool in [None, Some(Arc::new(MemPool::<u8>::default()))] {
++        let mut allocator = Rav1dPicAllocator::default();
++        allocator.cookie = pool.as_ref().map(|pool| SendSyncNonNull::from_ref(pool).cast());
++        let mut picture = Dav1dPicture::from(Rav1dPicture {
++            p: Rav1dPictureParameters { w: 8, h: 8, bpc: 8, ..Default::default() },
++            ..Default::default()
++        });
++        // SAFETY: Initialized exclusive picture metadata; the optional pool owner stays live.
++        assert_eq!(unsafe { (allocator.alloc_picture_callback)(&mut picture, allocator.cookie) }.0, 0);
++        assert!(picture.data[0].is_some());
++        if let Some(pool) = &pool { assert_eq!(Arc::strong_count(pool), 2); }
++        // SAFETY: This allocation is released exactly once with its paired callback.
++        unsafe { (allocator.release_picture_callback)(&mut picture, allocator.cookie); }
++        picture.allocator_data = None;
++        picture.data = [None; 3];
++        // SAFETY: The exclusively owned metadata still owns its original raw references.
++        unsafe { dav1d_picture_unref(Some(NonNull::from(&mut picture))); }
++        if let Some(pool) = &pool { assert_eq!(Arc::strong_count(pool), 1); }
++    }
++}
++
+ #[cfg(not(debug_assertions))]
+ unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
+     // SAFETY: the tests retain the AtomicUsize cookie through final unref and
+diff --git a/rav1d/src/picture.rs b/rav1d/src/picture.rs
+index 3697ef0ab..65412d854 100644
+--- a/rav1d/src/picture.rs
++++ b/rav1d/src/picture.rs
+@@ -99,7 +99,7 @@ impl Rav1dPictureParameters {
+ /// # Safety
+ ///
+ /// * `p_c` must be from a `&mut Dav1dPicture`.
+-/// * `cookie` must be from a `&Arc<MemPool<u8>>`.
++/// * `cookie`, when present, must be from a live `&Arc<MemPool<u8>>`.
+ unsafe extern "C" fn dav1d_default_picture_alloc(
+     p_c: *mut Dav1dPicture,
+     cookie: Option<SendSyncNonNull<c_void>>,
+@@ -122,10 +122,13 @@ unsafe extern "C" fn dav1d_default_picture_alloc(
+     let [y_sz, uv_sz] = p.p.pic_len(stride);
+     let pic_size = y_sz + 2 * uv_sz;
+
+-    let pool = cookie.unwrap().cast::<Arc<MemPool<u8>>>();
+-    // SAFETY: Guaranteed by safety preconditions.
+-    let pool = unsafe { pool.as_ref() };
+-    let pool = pool.clone();
++    let pool = match cookie {
++        Some(pool) => {
++            // SAFETY: A non-null cookie points to the live context pool owner.
++            unsafe { pool.cast::<Arc<MemPool<u8>>>().as_ref() }.clone()
++        }
++        None => Arc::default(),
++    };
+     let pic_cap = pic_size + RAV1D_PICTURE_ALIGNMENT;
+     // TODO fallible allocation
+     let buf = pool.pop_init(pic_cap, 0);
+@@ -171,8 +174,7 @@ unsafe extern "C" fn dav1d_default_picture_release(
+     // SAFETY: Guaranteed by safety preconditions.
+     let p = unsafe { &mut *p };
+     let buf = p.allocator_data.unwrap().cast::<MemPoolBuf<u8>>();
+-    // SAFETY: `dav1d_default_picture_alloc` stores `SendSyncNonNull::from_box` of a `Box<MemPoolBuf<u8>>` in `Dav1dPicture::allocator_data`,
+-    // and `(Rav1dPicAllocator::release_picture_callback == dav1d_default_picture_release) == (Rav1dPicAllocator::alloc_picture_callback == dav1d_default_picture_alloc)`.
++    // SAFETY: `dav1d_default_picture_alloc` stores `SendSyncNonNull::from_box` of a `Box<MemPoolBuf<u8>>` in `Dav1dPicture::allocator_data`.
+     let buf = unsafe { buf.into_box() };
+     let MemPoolBuf { pool, buf } = *buf;
+     pool.push(buf);
+@@ -184,8 +186,7 @@ impl Default for Rav1dPicAllocator {
+             cookie: None,
+             // SAFETY: `dav1d_default_picture_alloc` requires `p_c` be from a `&mut Dav1dPicture`,
+             // `Self::alloc_picture_callback` safety preconditions guarantee that.
+-            // `dav1d_default_picture_alloc` also requires that `cookie` be from a `&Arc<MemPool<u8>>`,
+-            // which is set if `Self::is_default()` in `rav1d_open`.
++            // A context cookie borrows its pool owner; None creates a picture-owned pool.
+             alloc_picture_callback: dav1d_default_picture_alloc,
+             // SAFETY: `dav1d_default_picture_release` requires `p` be from a `&mut Dav1dPicture`
+             // initialized by `dav1d_default_picture_alloc`.
+@@ -210,7 +211,6 @@ impl Rav1dPicAllocator {
+             dav1d_default_picture_release
+                 as unsafe extern "C" fn(*mut Dav1dPicture, Option<SendSyncNonNull<c_void>>),
+         );
+-        assert!(alloc == release); // This should be impossible since these `fn`s are private.
+         alloc && release
+     }
+ }

@@ -167,6 +167,12 @@ record directly so releasing a picture cannot publish a fresh empty metadata
 owner. Focused Miri regressions exercise disjoint array, slice, boxed and aligned
 storage, packet release, and repeated picture unref with leak checking enabled.
 
+`rav1d-allocator-identity.patch` permits default allocation without a context
+cookie and removes the assertion that allocation/release address comparisons
+must agree. [Function-address equality can return false for the same function](https://doc.rust-lang.org/std/ptr/fn.fn_addr_eq.html).
+Identified callbacks reuse the context pool; otherwise each picture owns its
+pool. Allocation and release remain valid in either case, with no C ABI change.
+
 ## WebP entropy-table admission
 
 `image-webp` is the published 0.2.4 crate, retaining its MIT/Apache licenses.

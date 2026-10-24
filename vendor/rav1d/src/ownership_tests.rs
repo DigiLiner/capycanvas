@@ -54,6 +54,31 @@ fn unreferencing_a_picture_leaves_no_raw_owners() {
     }
 }
 
+#[test]
+fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
+    use crate::include::dav1d::picture::{Rav1dPicAllocator, Rav1dPictureParameters};
+    use crate::src::mem::MemPool;
+    for pool in [None, Some(Arc::new(MemPool::<u8>::default()))] {
+        let mut allocator = Rav1dPicAllocator::default();
+        allocator.cookie = pool.as_ref().map(|pool| SendSyncNonNull::from_ref(pool).cast());
+        let mut picture = Dav1dPicture::from(Rav1dPicture {
+            p: Rav1dPictureParameters { w: 8, h: 8, bpc: 8, ..Default::default() },
+            ..Default::default()
+        });
+        // SAFETY: Initialized exclusive picture metadata; the optional pool owner stays live.
+        assert_eq!(unsafe { (allocator.alloc_picture_callback)(&mut picture, allocator.cookie) }.0, 0);
+        assert!(picture.data[0].is_some());
+        if let Some(pool) = &pool { assert_eq!(Arc::strong_count(pool), 2); }
+        // SAFETY: This allocation is released exactly once with its paired callback.
+        unsafe { (allocator.release_picture_callback)(&mut picture, allocator.cookie); }
+        picture.allocator_data = None;
+        picture.data = [None; 3];
+        // SAFETY: The exclusively owned metadata still owns its original raw references.
+        unsafe { dav1d_picture_unref(Some(NonNull::from(&mut picture))); }
+        if let Some(pool) = &pool { assert_eq!(Arc::strong_count(pool), 1); }
+    }
+}
+
 #[cfg(not(debug_assertions))]
 unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
     // SAFETY: the tests retain the AtomicUsize cookie through final unref and
