@@ -318,6 +318,8 @@ document revisions also advance for navigation.
 For empty viewport space, measure the allocation between the native Layers
 header and footer: transparent scroll peers report occupied content bounds.
 When a drawer clips the footer, use those occupied bounds for row hit checks.
+Check vertical row motion for unchanged authored state. Test reverse-close with
+Delete explicitly visible, reopening it if native cancellation closed the strip.
 `exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
 activation, scrolling and undo history in both themes; `-PaperLight` runs the
 light-theme scrolling, history and empty-stack cases. Both variants also walk

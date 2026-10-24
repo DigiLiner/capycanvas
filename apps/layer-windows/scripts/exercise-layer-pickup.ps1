@@ -13,6 +13,7 @@ $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/layer-pickup/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $sourceReveals=[Collections.Generic.List[object]]::new()
+$swipeStages=[Collections.Generic.List[object]]::new()
 $fixtureFailed=$false
 function Gesture {try{(Find 'layer-list').Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Layer-Scrollbars {
@@ -31,6 +32,9 @@ function Contact-State {
     $session=@($snapshot.windows_tabs.session_stamps|Where-Object id -eq $snapshot.windows_tabs.selected)[0]
     if(!$session){throw 'Contact state lacks its selected drawing checkpoint'}
     @{gesture_raw=$raw;gesture=($raw|ConvertFrom-Json);rows=(Rows $snapshot);selected=(@($snapshot.state.layers|Where-Object selected).id -join ',');editing_layer=$snapshot.state.layer_tools.editing_layer;revision=$snapshot.state.document_file.revision;checkpoint=$session.stamp.checkpoint;modified=$snapshot.state.document_file.modified}
+}
+function Record-Swipe([string]$Stage) {
+    $swipeStages.Add(@{stage=$Stage;state=(Contact-State);delete_visible=($null -ne (Find "layer-$created-swipe-delete" -Visible))})
 }
 function Dismiss {
     [CapyRowPointer]::Key(0x1b)
@@ -275,6 +279,7 @@ try {
     if($Device -ne 'mouse'){
         $script:case='swipe-delete-close'
         $before=Rows
+        Record-Swipe 'baseline'
         $at=Point "layer-$created-name"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x-90;y=$at.y}
@@ -282,15 +287,25 @@ try {
         $partial=Gesture;[CapyRowPointer]::Up()
         if($partial.source_swipe -le 0 -or $partial.source_grip_opacity -le 0 -or $partial.source_grip_opacity -ge .6){throw 'Partial swipe did not fade the retained grip'}
         Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Left swipe did not reveal Delete'
+        Record-Swipe 'delete-opened'
         $at=Point "layer-row-$created"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x;y=$at.y+24};$displaced=Gesture;[CapyRowPointer]::Up()
         Wait-Until {(Gesture).phase -eq 'idle'} 'Displaced row retained its contact'
         if($displaced.phase -eq 'dragging' -or (Rows) -ne $before){throw 'Displaced row admitted a reorder'}
+        Record-Swipe 'after-vertical-motion'
+        if(!(Find "layer-$created-swipe-delete" -Visible)){
+            $at=Point "layer-$created-name"
+            [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
+            Move-To @{x=$at.x-90;y=$at.y};[CapyRowPointer]::Up()
+        }
+        Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Delete is not revealed before the reverse swipe'
+        Record-Swipe 'open-before-reverse'
         $at=Point "layer-row-$created"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x+110;y=$at.y};[CapyRowPointer]::Up()
-        Wait-Until {$null -eq (Find "layer-$created-swipe-delete" -Visible)} 'Right swipe did not close Delete'
+        Wait-Until {(Gesture).phase -eq 'idle' -and $null -eq (Find "layer-$created-swipe-delete" -Visible)} 'Right swipe did not close Delete'
+        Record-Swipe 'reverse-closed'
         if((Rows) -ne $before){throw 'Closing Delete applied the right swipe action'}
         $at=Point "layer-$created-name"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
@@ -299,6 +314,7 @@ try {
         Tap "layer-$created-swipe-delete"
         Wait-Until {!@((Model).state.layers|Where-Object id -eq $created).Count} 'Revealed Delete did not remove its row'
         Layer-History 'Undo';Wait-Until {(Rows) -eq $before} 'Revealed Delete requires more than one Undo'
+        Record-Swipe 'delete-undone'
     }
     if($Device -eq 'mouse'){
         foreach($source in @("layer-$created-name","layer-$created-drag")){
@@ -657,6 +673,7 @@ try {
         {[CapyRowPointer]::Dispose()},
         {if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned layer review did not stop during fixture cleanup'}}}},
         {Exit-CapyEnvironment},
+        {if($swipeStages.Count){$swipeStages|ConvertTo-Json -Depth 18|Set-Content (Join-Path $run 'swipe-stages.json')}},
         {$sourceReveals|ForEach-Object {$_|ConvertTo-Json -Depth 8 -Compress}|Set-Content (Join-Path $run 'source-reveal.jsonl')}
     )){try{& $finish}catch{$cleanup+=($_|Out-String)}}
     if($cleanup.Count){
