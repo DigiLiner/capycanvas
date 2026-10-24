@@ -48,6 +48,8 @@ mod device;
 mod frame_pacing;
 #[cfg(target_os = "windows")]
 mod host;
+#[cfg(any(target_os = "windows", test, doctest))]
+mod input;
 #[cfg(any(target_os = "windows", test))]
 mod palette_files;
 #[cfg(any(target_os = "windows", test))]

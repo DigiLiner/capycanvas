@@ -9,6 +9,11 @@ on D3D12, presenting through a `SwapChainPanel`. The
 and threads, and the [porting guide](../WINDOWS_PORTING_GUIDE.md) covers bringing
 upstream features to Windows.
 
+Incoming UTF-8 buffers stay borrowed inside the Rust bridge call. JSON ingress
+deserializes into owned values; text-only transports use a scoped callback.
+The boundary tests run on Linux too, and compile-fail doctests reject escaping
+string borrows.
+
 ## Prerequisites
 
 On Windows 11, install:

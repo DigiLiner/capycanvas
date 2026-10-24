@@ -1,4 +1,5 @@
 use crate::device::D3d12Watch;
+use crate::input::{read_json, with_text};
 use layer_host::{
     NativeHost,
     scene::{Glass, Navigators, SceneDisplay},
@@ -8,7 +9,7 @@ use layer_render_wgpu::ViewportPresenter;
 use layer_ui::{CanvasCursor, PointerButton};
 use std::{
     cell::RefCell,
-    ffi::{CStr, CString, c_char, c_void},
+    ffi::{CString, c_char, c_void},
     panic::{AssertUnwindSafe, catch_unwind},
 };
 
@@ -431,8 +432,8 @@ impl CapyHost {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char) -> *mut CapyLaunch {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let tags: Vec<String> = serde_json::from_str(unsafe { read_json(tags) }?).map_err(err)?;
-        let screen = if screen.is_null() { None } else { serde_json::from_str(unsafe { read_json(screen) }?).map_err(err)? };
+        let tags: Vec<String> = unsafe { read_json(tags) }?;
+        let screen = if screen.is_null() { None } else { unsafe { read_json(screen) }? };
         let (native, settings) = crate::settings::SettingsService::launch(&tags.iter().map(String::as_str).collect::<Vec<_>>(), screen)?;
         let bootstrap = CString::new(serde_json::to_string(&native.bootstrap_view()).map_err(err)?).map_err(err)?;
         Ok::<_, String>(CapyLaunch { native: Some(native), settings: Some(settings), bootstrap })
@@ -750,7 +751,7 @@ pub unsafe extern "C" fn capy_pointer(
 pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
         use crate::workspace_service::WorkspaceAction;
-        let action = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let action = unsafe { read_json(json) }?;
         if matches!(
             action,
             WorkspaceAction::PreferencesRetry
@@ -783,12 +784,6 @@ pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const
     })
 }
 
-unsafe fn read_json<'a>(json: *const c_char) -> Result<&'a str, String> {
-    if json.is_null() {
-        return Err("Null JSON".into());
-    }
-    unsafe { CStr::from_ptr(json) }.to_str().map_err(err)
-}
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 /// `json` must be null or a readable NUL-terminated buffer that remains unchanged
@@ -799,11 +794,10 @@ pub unsafe extern "C" fn capy_load_filter_directory(
     json: *const c_char,
 ) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
-        let text = unsafe { read_json(json) }?;
-        if text.len() > 8192 {
-            return Err("Filter directory request is too large.".into());
-        }
-        let request = serde_json::from_str(text).map_err(err)?;
+        let request = unsafe { with_text(json, |text| {
+            if text.len() > 8192 { return Err("Filter directory request is too large.".into()); }
+            serde_json::from_str(text).map_err(err)
+        }) }?;
         let service = host
             .filters
             .as_mut()
@@ -824,7 +818,7 @@ pub unsafe extern "C" fn capy_load_filter_directory(
 pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
         let action: crate::actions::Action =
-            serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+            unsafe { read_json(json) }?;
         host.poll_services()?;
         if !host.accepts_workspace_input() && !action.allowed_while_workspace_blocked() {
             return Ok(0); // A queued widget from before a workspace transition.
@@ -844,7 +838,7 @@ pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_document_action(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
-        let action = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let action = unsafe { read_json(json) }?;
         let result = host.documents.as_mut().ok_or("Document service is unavailable")?.dispatch(&mut host.native, action);
         if let Err(error) = result {
             fail(error);
@@ -871,7 +865,7 @@ pub unsafe extern "C" fn capy_native_prediction(host: *mut CapyHost, available: 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_input(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
-        let input = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let input = unsafe { read_json(json) }?;
         host.poll_services()?;
         if !host.accepts_workspace_input()
             && !matches!(
@@ -1148,7 +1142,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
 pub unsafe extern "C" fn capy_query(host: *mut CapyHost, json: *const c_char) -> *mut c_char {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        let query = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let query = unsafe { read_json(json) }?;
         result = CString::new(host.native.query(query)?.to_string())
             .map_err(err)?
             .into_raw();
@@ -1203,7 +1197,7 @@ pub unsafe extern "C" fn capy_document_preview(host: *mut CapyHost, json: *const
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Query { id: u32, index: usize }
-        let query: Query = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let query: Query = unsafe { read_json(json) }?;
         let result = host.documents.as_ref().ok_or("Documents unavailable")?.preview(query.id, query.index)?;
         packet = Box::into_raw(Box::new(result));
         Ok(0)
@@ -1219,7 +1213,7 @@ pub unsafe extern "C" fn capy_document_preview(host: *mut CapyHost, json: *const
 pub unsafe extern "C" fn capy_number(context: *const crate::CapyLocalization, json: *const c_char) -> *mut c_char {
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<CString, String> {
         let request: layer_ui::NumericRequest =
-            serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+            unsafe { read_json(json) }?;
         let context = unsafe { context.as_ref() }.ok_or("Missing numeric localization")?;
         let value = match request.resolve() {
             Ok(value) => serde_json::to_value(value).map_err(err)?,
@@ -1330,7 +1324,7 @@ pub unsafe extern "C" fn capy_test_device_loss(host: *mut CapyHost, json: *const
         if std::env::var_os("CAPY_SMOKE_TEST").is_none() || !crate::storage::isolated() {
             return Err("Device-loss injection requires an isolated smoke test".into());
         }
-        let (token, participants) = serde_json::from_str(unsafe { read_json(json) }?).map_err(err)?;
+        let (token, participants) = unsafe { read_json(json) }?;
         host.target = None;
         let gpu = host
             .native
@@ -1401,7 +1395,7 @@ pub unsafe extern "C" fn capy_suspend_renderer(host: *mut CapyHost) -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
-        let layout = serde_json::from_str(unsafe { read_json(json) }?)
+        let layout = unsafe { with_text(json, |text| Ok(serde_json::from_str(text))) }?
             .map_err(|_| "Invalid glass geometry".to_string());
         match layout.and_then(|layout| host.native.set_glass(&mut host.glass, layout)) {
             Ok(()) => Ok(0),
@@ -1420,7 +1414,7 @@ pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) ->
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_overviews(host: *mut CapyHost, json: *const c_char) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
-        let slots = serde_json::from_str(unsafe { read_json(json) }?)
+        let slots = unsafe { with_text(json, |text| Ok(serde_json::from_str(text))) }?
             .map_err(|_| "Invalid Navigator geometry".to_string());
         match slots.and_then(|slots| host.navigators.set(slots)) {
             Ok(changed) => {
@@ -1445,7 +1439,7 @@ pub unsafe extern "C" fn capy_filter_previews(
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        let packet = crate::previews::query(&mut host.native, unsafe { read_json(json) }?)?;
+        let packet = unsafe { with_text(json, |text| crate::previews::query(&mut host.native, text)) }?;
         result = Box::into_raw(Box::new(packet));
         Ok(0)
     });
@@ -1485,13 +1479,14 @@ pub extern "C" fn capy_instance_name() -> *const u16 {
 /// points to `length` readable bytes; both stay unchanged during the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_write_file(path: *const c_char, bytes: *const u8, length: usize) -> i32 {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let path = std::path::Path::new(unsafe { read_json(path) }?);
+    let write = |path: &str| {
+        let path = std::path::Path::new(path);
         let bytes = if length == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(bytes, length) } };
         crate::document_io::atomic_write(path, &std::sync::atomic::AtomicBool::new(false), |file| {
             file.write_all(bytes).map_err(err)
         })
-    }));
+    };
+    let result = catch_unwind(AssertUnwindSafe(|| unsafe { with_text(path, write) }));
     match result {
         Ok(Ok(())) => 0,
         Ok(Err(error)) => {
@@ -1528,10 +1523,7 @@ pub unsafe extern "C" fn capy_layer_menu(
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(crate::previews::layer_menu(
-            &mut host.native,
-            unsafe { read_json(json) }?,
-        )?));
+        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::previews::layer_menu(&mut host.native, text)) }?));
         Ok(0)
     });
     result
@@ -1546,10 +1538,7 @@ pub unsafe extern "C" fn capy_layer_thumbnails(
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(crate::previews::layer_thumbnails(
-            &mut host.native,
-            unsafe { read_json(json) }?,
-        )?));
+        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::previews::layer_thumbnails(&mut host.native, text)) }?));
         Ok(0)
     });
     result
@@ -1565,10 +1554,7 @@ pub unsafe extern "C" fn capy_workspace_query(
 ) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(crate::workspace::query(
-            &mut host.native,
-            unsafe { read_json(json) }?,
-        )?));
+        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::workspace::query(&mut host.native, text)) }?));
         Ok(0)
     });
     result
@@ -1621,7 +1607,7 @@ pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: 
 pub unsafe extern "C" fn capy_paper_previews(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(unsafe { host.as_mut() }, |host| {
-        let packet = crate::previews::paper_previews(&host.native, unsafe { read_json(json) }?)?;
+        let packet = unsafe { with_text(json, |text| crate::previews::paper_previews(&host.native, text)) }?;
         result = Box::into_raw(Box::new(packet));
         Ok(0)
     });
