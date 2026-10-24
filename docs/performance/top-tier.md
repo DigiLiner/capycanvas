@@ -133,7 +133,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
 | Android palette pill opening at the work-area edge | 120 | **FPS unqualified.** Instant clamp; two actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
-| Android tool bubble drag through four neighbours | 120 | **Met.** 115.34–116.72 actual app-window presents/s; p99 ≤16.6673 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
+| Android tool bubble drag through four neighbours | 120 | **Met.** Current parity fixes: 115.00–116.55 actual app-window presents/s; p99 ≤16.667447 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 120 | **Web diagnostic:** Navigator column 30.00–30.64 Chrome surface presents/s; p99 50.00–58.34 ms. Tier qualification remains unset | [Web Navigator layout](#web-navigator-layout), 2026-10-19; [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Windows tool bubble drag through four neighbours | 120 | Unmeasured on reference hardware; the WARP VM cannot qualify presentation timing | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
@@ -165,11 +165,13 @@ light/dark bounds and screenshots in the adjacent `top-corrected-evidence/`.
 
 ## Native tool bubbles
 
-Measured 2026-10-23 on the MovinkPad Pro 14 with the prescribed 9504 × 6336 photo
-at Fit, default glass, 120 Hz display and thermal status 0 throughout. Benchmark
-APK SHA-256 `5c2e4751ef908941013c5428a4e60fedba484423d515f53ecb5eb62d94dbee64`
-uses release Rust and unminified, nondebuggable Android code; white-box test APK
-is `d6d185ad72095f5d687653ba6cda1c9eb6296a817b92638b94ec4c8ead785c45`.
+Current Android visual parity fixes measured 2026-10-23 on MovinkPad Pro 14,
+with the prescribed 9504 × 6336 photo at Fit, default Low glass, 120 Hz display
+and thermal status 0 throughout. Benchmark APK SHA-256
+`c9ad05fde41bde88d63b5e0a972334af9a2d9dfa7f6cc90dad4f5b4b747329eb`
+uses release Rust and nondebuggable, unminified Android code; this is the existing
+white-box benchmark, not an R8 release. Test APK SHA-256 is
+`ab325b4472515ca0690ccd7ff6f1f6a35d03e7f692eb8db6c3ec6f1b24e6937d`.
 
 `AndroidBubbleBenchmarkTest#fiveBubbleMotion` warms a six-second native touch
 contact, then performs three six-second drags through four settled neighbors.
@@ -179,16 +181,21 @@ warmup and 100 ms at each contact edge are excluded. No tablet setting changed.
 
 | Contact | Actual presents/s | p99 interval, ms |
 | --- | --- | --- |
-| 1 | 116.720 | 16.667188 |
-| 2 | 115.858 | 16.667239 |
-| 3 | 115.341 | 16.667292 |
+| 1 | 116.547929 | 16.667240 |
+| 2 | 114.996250 | 16.667292 |
+| 3 | 115.314155 | 16.667447 |
 
 All contacts meet the 114 presents/s floor and 16.7 ms p99 limit. JUnit passed
-with clean ActivityScenario teardown. FrameMetrics and renderer timings remain
-attribution proxies. Evidence, build hashes and raw presentation samples are in
-`artifacts/bubbles/android-top-transport-presents/`. Android 16 wraps `--list`
-layer names in `RequestedLayerState`; the collector normalizes those names before
-sampling the exact app-window layer.
+with clean ActivityScenario teardown, `OK (1 test)` in 37.341 s. FrameMetrics and
+renderer timings remain attribution proxies. Current source/binary hashes are
+in `artifacts/bubble-parity-review/performance/source.json`; raw measurements
+are under `/mnt/localssd/capycanvas2-bubble-parity-review/performance/android-top/`.
+
+The earlier APK `5c2e4751` measured 116.720 / 115.858 / 115.341 presents/s with
+p99 16.667188 / 16.667239 / 16.667292 ms, also meeting both limits. That earlier
+evidence remains in `artifacts/bubbles/android-top-transport-presents/`.
+Android 16 wraps SurfaceFlinger layer names in `RequestedLayerState`; the
+collector normalizes those names before sampling the exact app-window layer.
 
 ## Layer thumbnail selection
 

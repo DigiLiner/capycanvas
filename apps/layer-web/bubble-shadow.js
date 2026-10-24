@@ -12,8 +12,8 @@ function shadow(w,h,r,spread,drop,alpha) {
   const image=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-spread} ${drop-spread} ${w+2*spread} ${h+2*spread}"><defs><clipPath id="clip"><path clip-rule="evenodd" d="${round(-spread,drop-spread,w+2*spread,h+2*spread,reach)}${round(0,0,w,h,r)}"/></clipPath>${gradients}<linearGradient id="h" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">${band(h)}</linearGradient><linearGradient id="w">${band(w)}</linearGradient></defs><g clip-path="url(#clip)">${parts}<rect x="${left}" y="${drop-spread}" width="${right-left}" height="${h+2*spread}" fill="url(#h)"/><rect x="${-spread}" y="${top}" width="${w+2*spread}" height="${bottom-top}" fill="url(#w)"/></g></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(image)}")`;
 }
-export function bubbleShadow(node,size,radius,lift=false,bead=false) {
-  const spread=bead?3:lift?12:8,drop=bead?1:lift?4.5:2,alpha=bead?.13:lift?.16:.08;
+export function bubbleShadow(node,size,radius,lift=false,bead=false,strength=1) {
+  const spread=bead?3:lift?12:8,drop=bead?1:lift?4.5:2,alpha=(bead?.13:lift?.16:.08)/strength;
   const key=[...size,radius,spread,drop,alpha].join(',');
   if(node.bubbleShadowKey===key)return;
   node.bubbleShadowKey=key;

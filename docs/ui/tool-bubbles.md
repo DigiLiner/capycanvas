@@ -276,6 +276,10 @@ a host only presents it and captures native input. GTK
   constants (`TOOL_BUBBLE`, `HISTORY_BUBBLE`, `HALO_BANDS`, `RING_ICON`,
   `RING_TRACK`, `RING_RIM`, `CHOOSER_ITEM`, `CHOOSER_TAG`, `BRUSH_PILL`,
   `PALETTE_PILL`, `FADED_BUBBLE`, `SECOND_FINGER_REACH`, `STROKE_FADE`).
+  Every part uses the placement's center, including the always-visible Controls
+  arcs when `halo` is absent. Native layout wrappers may exceed the viewport;
+  constraining those wrappers must not recenter their contents. Hosts measure
+  text with their UI font and pass its width to `chooser_tag` and `count_badge`.
 - **Actions:** `UiAction::Bubble` with `BubbleAction::Drag` (grabs `Bubble`,
   `Rim`, `Tile`, `Header`, `Variant`; phases Down, Move, Up, Cancel), `Tap`,
   `Ring`, `ResetRing`, `Wheel`, `Beads`, `Choose`, `Palette`, `Resize`, `Properties`,
@@ -369,30 +373,50 @@ panels are absent from the dock.
   are 20 px on faces and 16 px on arcs. Disabled faces and chooser items draw
   at 45%, including their glass strength. Unavailable Undo and Redo icons draw
   at 35%; their circular hover highlights keep their normal opacity.
+  The drawer mark is a 16 px icon inset 9 px from the face's bottom and right.
+  Medium dots are 3.5 px circles at 90% text color for the current brush and
+  30% for the others.
 - **Shadows:** round parts cast one smooth gradient, 8 px spread, 2 px drop,
   8% black at the edge, fading quadratically and clipped outside the part; a
   lifted bubble grows it to 12 px, 4.5 px and 16%. Beads use 3 px, 1 px and
-  13%. The Layers card and drawers use the toolbars' 2 px, 8 px, 16% shadow.
+  13%. The glass palette button uses the ordinary resting and lifted shadow,
+  with selection fill and no swatch outline. The Layers card uses the same
+  gradients with an 18 px radius; the folded Layers face has no shadow. Disabled
+  surfaces keep their shadow strength. Ordinary drawers retain the toolbars' shadow.
 - **Halo arcs:** a band `arc.band` wide from `icon_point` to the end with round
   caps in the panel glass, a 4 px track at 18% text color, the set part at
   50%, a 14 px thumb (15 px while dragged) in the toolbar thumb color with a
   1 px border at 60%, and the setting's 16 px icon at `icon_point`; an
-  unavailable arc draws at 40%. The name and value show at `readout_center`.
+  unavailable arc draws at 40%. The name and value show at `readout_center`,
+  fitting their text with 7 px horizontal and 2 px vertical padding and tabular
+  digits; there is no fixed minimum width or height.
 - **Dab:** draw the stamp mask in the stamp color, `stamp.diameter` times the
   stamp's extent, centered at `stamp.center`, behind every bubble.
 - **Chooser:** 44 px media circles and 152 × 48 px brush pills with the brush
   stroke (68% of the pill wide, 14 px tall, 6 px from the top) over its name;
-  a shown medium's name at `tag_center` of its measured width, at most 96 px.
+  18 px icons on media and tool choices; brush names at 80% opacity, 8 px from
+  the sides and 5 px from the bottom. A shown medium's name uses `tag_center`
+  with its measured text width plus 18 px, at most 96 px, a 9 px corner radius
+  and 3 px vertical padding.
   Items arrive scaled from 60% and fading in over 180 ms, 14 ms apart (brushes
   16 ms), and leave over 120 ms; the item under a contact grows 12% (brushes
   6%).
 - **Halo:** grows from 85% and fades in over 160 ms, and out over 120 ms.
 - **Beads:** the Color panel's swatch widget and styles, tweening 220 ms
-  between layouts; hints are `HINT_DOT` dots at 35% text color.
+  between layouts; hints are `HINT_DOT` dots at 35% text color. The palette bead
+  has a 13 px icon. Its 184 × 30 px pill has 24 px Previous and Next buttons,
+  2 px gaps, the shared `go-previous`/`go-next` icons and a centered bold name.
 - **Layers card:** host the Layers drawer's own inspector in the drawer's
   container and styles; report measured page heights with `MeasureCard`.
   Unfold over 200 ms from 60%; fold over 150 ms, then the squircle returns over
-  180 ms.
+  180 ms. The Layers page retains the inspector's 8 px inset, including its
+  16 px contribution to measured fixed height. The simple footer has a 48 px
+  Add cell with a 16 px icon and a right-aligned Properties label. The folded
+  face uses a 20 px squircle radius; its 46 px thumbnail uses a 13 px radius,
+  white backing and a 1 px, 28% grey outline. The count is semibold and stays
+  centered at `count_badge` while its measured text width changes.
+- **Easing:** halo, chooser, bead and card transitions use cubic ease-out
+  (`1 - (1 - t)³`). Stroke fading uses the separate smoothstep below.
 - **Undo and redo:** each button is a circle as tall as the capsule centered at
   `history_center`, and its highlight fills that circle.
 - **Lift and home:** a lifted bubble draws at 104%; one about to be put back at
@@ -443,3 +467,9 @@ panels are absent from the dock.
   history and window edges. `tools/performance/web-bubbles.mjs` drives three
   six-second touch drags through four neighbours on a prepared tier photo;
   pair its changing DOM positions with native presentation measurements.
+- **Rendered geometry:** the Web journey compares actual DOM/SVG bounds with
+  shared placements, arc points, chooser bounds and text measurements, including
+  multi-digit badges. Android's `AndroidToolBubblesTest` checks the same origin
+  for faces and arc icons, swapped controls, a narrow viewport, intrinsic
+  readouts and count badges in both themes. These assertions supplement input
+  journeys: hitting a wide arc alone does not establish visual alignment.

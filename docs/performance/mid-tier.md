@@ -114,8 +114,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
 | Android palette pill opening at the work-area edge | 90 | **FPS unqualified.** Instant clamp/short transition; 3–4 actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
-| Android tool bubble drag through four neighbours | 90 | **Not met.** Current release Rust: 86.47–86.99 actual app-window presents/s; p99 up to 22.331154 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
-| Web tool bubble drag through four neighbours | 90 | **Not met.** Current release with promoted CSS: 61.45–72.77 actual presents/s, p99 33.51–33.55 ms, default Low glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
+| Android tool bubble drag through four neighbours | 90 | **Not met.** Current parity fixes: 85.78–87.17 actual app-window presents/s; p99 up to 22.338077 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
+| Web tool bubble drag through four neighbours | 90 | **Not met.** Current parity fixes: 60.01–74.59 actual presents/s, p99 33.497–33.525 ms, default Low glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
 | Windows tool bubble drag through four neighbours | 90 | Unmeasured on reference hardware; the WARP VM cannot qualify presentation timing | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
@@ -184,7 +184,7 @@ OFF setting was restored after capture.
 | --- | --- | --- | --- |
 | Before primitive glass transport, APK `f589c1fa` | 86.642 / 89.238 / 86.475 | 22.336615 / 11.310384 / 22.333308 | Not met |
 | Primitive glass transport, APK `5c2e4751` | 89.063 / 86.296 / 87.166 | 11.289538 / 22.330692 / 22.330384 | Not met |
-| Current release Rust, APK `7014e78c` | 86.475 / 86.988 / 86.647 | 22.331154 / 22.328077 / 22.330769 | Not met |
+| Previous release Rust, APK `7014e78c` | 86.475 / 86.988 / 86.647 | 22.331154 / 22.328077 / 22.330769 | Not met |
 
 The first two builds meet the 85.5 presents/s floor but exceed the fixed 22.2 ms p99 limit in two
 contacts. The comparison does not establish a performance improvement. In the
@@ -195,7 +195,7 @@ These are attribution proxies, not actual presents. Raw evidence is in
 `artifacts/bubbles/android-mid-transport-reference/`; each includes a build manifest,
 contact windows, thermal/display records, JUnit result and raw presentation samples.
 
-The current APK SHA-256 is
+The previous APK SHA-256 is
 `7014e78cd0ca4980590511875b92d05df2d8c66de37d7c6a19683bfbdc4df855`,
 with test APK
 `0844ff434f0f2aaa7743323160db1e7ab909b448e62655d5e0c530b6b7d03622`.
@@ -209,9 +209,58 @@ remained 0 and the app policy/display were 90 Hz. All four neighbours moved;
 JUnit passed, the same Activity was retained, and Adaptive was restored OFF.
 Raw evidence is in `artifacts/bubbles/web-current/native-release/`.
 
+Current Android visual parity fixes were measured with APK
+`c9ad05fde41bde88d63b5e0a972334af9a2d9dfa7f6cc90dad4f5b4b747329eb`
+and test APK
+`ab325b4472515ca0690ccd7ff6f1f6a35d03e7f692eb8db6c3ec6f1b24e6937d`.
+This uses release Rust and nondebuggable, unminified white-box Android code,
+not an R8 release. The same warmed photo/Fit/default-Low-glass workload gives:
+
+| Current contact | Actual presents/s | p99 gap, ms |
+| --- | --- | --- |
+| 1 | 85.777264 | 22.326154 |
+| 2 | 87.165186 | 22.328693 |
+| 3 | 86.647279 | 22.338077 |
+
+All contacts pass the 85.5 presents/s floor and **miss** the fixed 22.2 ms p99
+limit. Every neighbor moves; resets remain outside motion, thermal status is 0
+and contact display refresh is 90 Hz. The SF metadata includes 60 Hz during
+settings/teardown outside contacts. The ready/go gate retained the same private
+Activity. JUnit passed in 48.228 s. Source/binary hashes are in
+`artifacts/bubble-parity-review/performance/source.json`; raw evidence is under
+`/mnt/localssd/capycanvas2-bubble-parity-review/performance/android-mid/`.
+
 ## Web tool bubbles
 
-Current release measured 2026-10-23 on Wacom MovinkPad 11, Chrome, with the
+Current Web visual parity fixes measured 2026-10-23 on MovinkPad 11 with the
+prescribed 6000 × 4000 photo below an empty paint layer at Fit and default Low
+glass. The loaded web-release Wasm is
+`2392b93b11b6d259d7a9ec905548b2144c495f9ae6246fb896f5e2fc39dd0cea`;
+loaded CSS is
+`ecd2159249290d3b22b6799fbb313b07720af5942b5a2e4c94648073950b7b47`.
+Both were verified against the release package/current source. One six-second
+warmup precedes three six-second touch drags through four settled neighbors.
+Every neighbor visibly moves. Only moving-contact windows count, trimmed by
+100 ms at each edge; direct SurfaceFlinger actual-present histories overlap
+without rollover loss. Display/app policy is 90 Hz, SF period 11,111,111 ns,
+and thermal status is 0 before and after.
+
+| Current contact | Actual presents/s | p99 gap, ms | rAF/s, proxy |
+| --- | --- | --- | --- |
+| 1 | 74.593775 | 33.501154 | 86.416464 |
+| 2 | 60.007487 | 33.524692 | 89.083898 |
+| 3 | 68.090865 | 33.497462 | 88.251425 |
+
+All three contacts **miss** both the 85.5 presents/s floor and 22.2 ms p99 limit.
+Browser exceptions are empty. rAF callbacks remain a proxy, not completed or
+presented frames. Supplemental Chrome FrameTimeline has 452 negative-timestamp
+drops; it supplies only REALTIME/MONOTONIC clock alignment (462 ns offset
+spread), never presentation counts. This run does not isolate a GPU pass cost.
+Source/binary hashes are in `artifacts/bubble-parity-review/performance/source.json`;
+raw evidence is under
+`/mnt/localssd/capycanvas2-bubble-parity-review/performance/web-mid/`.
+
+Previous promoted release measured 2026-10-23 on Wacom MovinkPad 11, Chrome, with the
 prescribed 6000 × 4000 photo below an empty paint layer at Fit and default Low
 glass. Loaded Wasm SHA-256 is
 `1cf5c04479606370fa469f4adedaf3205a65ab012a3672f56f5b088b937a3110`.
@@ -225,7 +274,7 @@ four actual settled neighbors. Every neighbor visibly moves. Direct overlapping
 500 ms SurfaceFlinger content-surface histories are deduplicated inside each
 contact with 100 ms trimmed at both edges. There is no ring rollover loss.
 
-| Production CSS contact | Actual presents/s | p99 gap, ms | rAF callbacks/s (proxy) |
+| Previous promoted CSS contact | Actual presents/s | p99 gap, ms | rAF callbacks/s (proxy) |
 | --- | --- | --- | --- |
 | 1 | 72.774 | 33.505846 | 85.918 |
 | 2 | 61.447 | 33.539384 | 88.253 |

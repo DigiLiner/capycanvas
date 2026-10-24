@@ -38,7 +38,7 @@ export function createLayerInspector({app, state, workspace, element, button, ic
     position=from+((open?1:0)-from)*(1-(1-progress)**3);
     if(measurementDirty||measurement?.viewport!==workspace.clientHeight) {
       const unit=rows.firstElementChild?.offsetHeight||40;
-      const fixed=layers.querySelector(".layer-header").offsetHeight+layerFooter.offsetHeight;
+      const inset=getComputedStyle(layers),fixed=layers.querySelector(".layer-header").offsetHeight+layerFooter.offsetHeight+parseFloat(inset.paddingTop)+parseFloat(inset.paddingBottom);
       const contents=properties.firstElementChild,style=getComputedStyle(contents),viewport=workspace.clientHeight;
       measurement={viewport,...app.layer_drawer_sizing({measurement:{fixed_height:fixed,unit_height:unit},properties_height:contents.scrollHeight+parseFloat(style.marginTop)+parseFloat(style.marginBottom),viewport_height:viewport})};
       measurementDirty=false;

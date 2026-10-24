@@ -392,6 +392,7 @@ class AndroidToolBubblesTest {
             instrumentation.runOnMainSync { readout = findNode(hasLabel(text))?.second }
             assertNotNull("Current readout is native text", readout)
             assertTrue("Readout width remains bounded", readout!!.boundsInRoot.width < 200 * density)
+            assertBubbleLabel(id, "readout")
         }
         event(MotionEvent.ACTION_UP)
         waitFor("Releasing arc removes shared dab") { view(id).isNull("stamp") }
@@ -500,6 +501,101 @@ class AndroidToolBubblesTest {
         if (pressed) event(MotionEvent.ACTION_CANCEL)
         if (::scenario.isInitialized) scenario.close()
     }
+    private fun assertHaloGeometry(id: Long) {
+        val packet = packets().single { it.getJSONObject("view").getLong("id") == id }
+        val v = packet.getJSONObject("view")
+        val c = stable(id)
+        SystemClock.sleep(250)
+        val face = bounds("tool-bubble-$id")
+        assertEquals("Face width follows shared geometry", v.getJSONArray("face").getDouble(0).toFloat(), face.width / density, 1f)
+        assertEquals("Face height follows shared geometry", v.getJSONArray("face").getDouble(1).toFloat(), face.height / density, 1f)
+        assertTrue("Face uses the shared center: $face at $c", (face.center - c).getDistance() < 2f)
+        val halo = bounds("bubble-halo-$id")
+        shot("halo-geometry-${v.getString("kind")}")
+        val reach = (packet.number("reach") + 16f) * density
+        val area = workspace()
+        if (c.x - reach >= area.left && c.x + reach <= area.right && c.y - reach >= area.top && c.y + reach <= area.bottom)
+            assertTrue("Halo and face share their center: halo=${halo.center}, face=${face.center}", (halo.center - face.center).getDistance() < 2f)
+        packet.getJSONArray("rings").objects().forEachIndexed { i, ring ->
+            val icon = bounds("bubble-ring-icon-$id-$i")
+            val expected = c + ring.array("icon").bubblePoint() * density
+            assertTrue("Ring $i icon is at the shared arc point: $icon, expected $expected", (icon.center - expected).getDistance() < 2f)
+            assertEquals("Arc icon width", 16f, icon.width / density, 1f)
+            assertEquals("Arc icon height", 16f, icon.height / density, 1f)
+        }
+    }
+    private fun assertBubbleLabel(id: Long, part: String) {
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        var surface: Rect? = null
+        instrumentation.runOnMainSync {
+            val node = checkNotNull(findTag("bubble-part-$id-$part")).second
+            surface = node.boundsInRoot
+            val text = checkNotNull(node.find { it.config.getOrNull(SemanticsActions.GetTextLayoutResult) != null })
+            assertTrue(text.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts))
+        }
+        val text = layouts.single()
+        val measured = text.size
+        val packet = packets().single { it.getJSONObject("view").getLong("id") == id }
+        val c = center(id)
+        val expected = if (part == "badge") {
+            assertEquals(androidx.compose.ui.text.font.FontWeight.SemiBold, text.layoutInput.style.fontWeight)
+            val geometry = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(measured.width / density, maxOf(22f, measured.height / density))))) as JSONArray
+            geometry.getJSONArray(0).bubblePoint() to geometry.getJSONArray(1).bubblePoint()
+        } else {
+            assertEquals("tnum", text.layoutInput.style.fontFeatureSettings)
+            packet.array("readout").bubblePoint() to Offset(measured.width / density + 14f, measured.height / density + 4f)
+        }
+        assertTrue("$part stays at its shared center: $surface", (surface!!.center - c - expected.first * density).getDistance() < 2f)
+        assertEquals("$part fits its measured text width", expected.second.x * density, surface!!.width, 2f)
+        assertEquals("$part fits its measured text height", expected.second.y * density, surface!!.height, 2f)
+    }
+    @Test fun haloAndFaceShareTheCoreCenter() {
+        for (theme in listOf("light", "dark")) {
+            case = "$theme-geometry"
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
+            action(obj("type" to "set_theme", "theme" to theme))
+            val controls = take(4, workspace().center)
+            assertHaloGeometry(controls)
+            action(obj("type" to "bubble", "action" to obj("type" to "option", "id" to controls, "option" to obj("kind" to "swap"))))
+            assertHaloGeometry(controls)
+            invoke("lasso")
+            assertTrue("Controls publish unavailable arcs for a tool without brush settings", view(controls).array("rings").objects().all { !it.getBoolean("enabled") })
+            assertHaloGeometry(controls); shot("disabled-controls")
+            putBack(controls)
+            val brush = take(2, workspace().center)
+            assertHaloGeometry(brush)
+            val original = android.view.WindowManager.LayoutParams()
+            val originalBounds = workspace()
+            scenario.onActivity { original.copyFrom(it.window.attributes); it.window.setLayout((220 * density).toInt(), (420 * density).toInt()) }
+            try {
+                waitFor("Narrow viewport is measured") { kotlin.math.abs(workspace().width / density - 220f) < 2f }
+                assertHaloGeometry(brush)
+            } finally {
+                scenario.onActivity { it.window.attributes = original }
+                waitFor("Viewport restores after geometry check") { kotlin.math.abs(workspace().width - originalBounds.width) < 2f }
+            }
+        }
+    }
+    @Test fun countBadgesKeepTheirAnchorWhenTextWidens() {
+        for (theme in listOf("light", "dark")) {
+            case = "$theme-badge"
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(fixture.toString())))
+            action(obj("type" to "set_theme", "theme" to theme))
+            val id = take(6, workspace().center)
+            action(obj("type" to "bubble", "action" to obj("type" to "close", "id" to id)))
+            waitFor("Layer card folds") { view(id).isNull("card") }
+            stable(id); SystemClock.sleep(500)
+            assertBubbleLabel(id, "badge")
+            val before = state().getJSONArray("layers").length()
+            repeat((12 - before).coerceAtLeast(0)) { action(obj("type" to "layer", "action" to obj("op" to "new", "group" to false, "clipped" to false))) }
+            waitFor("Badge shows twelve layers") { view(id).getInt("layers") == maxOf(12, before) }
+            stable(id); SystemClock.sleep(250)
+            assertBubbleLabel(id, "badge"); shot("count-12")
+            repeat((12 - before).coerceAtLeast(0)) { index -> invoke("undo"); waitFor("Count undo completes") { view(id).getInt("layers") == 11 - index } }
+            stable(id); SystemClock.sleep(250)
+            assertBubbleLabel(id, "badge")
+        }
+    }
     @Test fun nativeBubblesAcrossThemesAndDevices() {
         val arguments = androidx.test.platform.app.InstrumentationRegistry.getArguments()
         val themes = arguments.getString("bubbleTheme")?.let { listOf(it) } ?: listOf("light", "dark")
@@ -588,6 +684,7 @@ class AndroidToolBubblesTest {
             action(obj("type" to "select_brush", "id" to 1))
             action(obj("type" to "set_color", "rgba" to JSONArray(listOf(.1, .1, .1, 1))))
             val controls = take(4, target)
+            assertHaloGeometry(controls)
             dab(controls)
             if (input == MotionEvent.TOOL_TYPE_FINGER) secondFingerRestoresRing(controls)
             val replacementRing = view(controls).getJSONArray("rings").objects().first()
@@ -650,6 +747,7 @@ class AndroidToolBubblesTest {
             if (input == MotionEvent.TOOL_TYPE_FINGER) secondFingerTakesLayerRow(layers)
             val layerCount = state().getJSONArray("layers").length()
             val footer = bounds("bubble-new-layer-$layers"); val cardCenter = center(layers)
+            assertEquals("Simple Layers footer keeps the GTK 48dp add cell", 48f, footer.width / density, 1f)
             val footerLocal = (footer.center - cardCenter) / density
             val footerHit = query(obj("type" to "bubble_hit", "id" to layers, "x" to footerLocal.x, "y" to footerLocal.y))
             val cardBefore = view(layers); val nativeCardBounds = bounds("bubble-card-$layers"); val beforeMotion = query(obj("type" to "bubble_motion", "now_ns" to System.nanoTime()))

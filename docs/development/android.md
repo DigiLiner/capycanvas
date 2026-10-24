@@ -258,6 +258,11 @@ Layers/Properties cards and workspace undo/redo. Escape must dismiss a held
 menu before the next canvas contact. Replacing the workspace during a captured
 ring contact must leave no stale action or notice on release. Run it on both reference
 tablets after changing the presenter or capture path.
+`haloAndFaceShareTheCoreCenter` additionally checks measured face and arc-icon
+positions with swapped controls and a 220 × 420 dp private window.
+`countBadgesKeepTheirAnchorWhenTextWidens` checks one- and two-digit counts in
+both themes. The main journey verifies intrinsic readout sizing and the simple
+Layers footer's geometry.
 
 Without a device, build both APKs and run lint:
 

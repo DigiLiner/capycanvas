@@ -2,6 +2,14 @@ use super::*;
 use layer_ui::BubbleGrab;
 #[wasm_bindgen]
 impl WebApp {
+    pub fn bubble_count_badge(&self, width: f32, height: f32) -> Result<JsValue, JsValue> {
+        serialize(&layer_ui::count_badge([width, height]))
+    }
+
+    pub fn bubble_chooser_tag(&self, x: f32, y: f32, width: f32) -> Result<JsValue, JsValue> {
+        serialize(&layer_ui::chooser_tag([x, y], width))
+    }
+
     pub fn bubbles(&mut self) -> Result<JsValue, JsValue> {
         let packets = self.session.bubble_presentations();
         self.bubble_views = packets.iter().map(|packet| packet.view.clone()).collect();

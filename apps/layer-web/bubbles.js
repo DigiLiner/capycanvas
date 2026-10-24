@@ -6,6 +6,7 @@ import {bubbleShadow} from './bubble-shadow.js';
 
 const svgNS='http://www.w3.org/2000/svg';
 const smooth=t=>t*t*(3-2*t);
+const ease=t=>1-(1-t)**3;
 const duration=(reduced,ms)=>reduced?0:ms;
 const place=(node,center,size)=>Object.assign(node.style,{left:`${center[0]-size[0]/2}px`,top:`${center[1]-size[1]/2}px`,width:`${size[0]}px`,height:`${size[1]}px`});
 const svg=(tag,attributes={})=>{const n=document.createElementNS(svgNS,tag);for(const [k,v]of Object.entries(attributes))n.setAttribute(k,v);return n;};
@@ -72,8 +73,8 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
   function refreshRecord(r,packet) {
     const v=packet.view,previous=r.view;r.view=v;r.packet=packet;r.boxes=[];
     r.root.setAttribute('aria-label',v.label);r.face.setAttribute('aria-label',v.label);r.face.title=v.label;
-    r.face.classList.toggle('bubble-selected',v.selected);r.face.classList.toggle('bubble-disabled',!v.enabled);
-    surface(r,r.face,[0,0],v.face,v.kind==='layers'?28:v.face[1]/2,v.kind==='layers'?1:0);
+    r.face.classList.toggle('bubble-selected',v.selected&&['dial','brush','medium','controls'].includes(v.kind));r.face.classList.toggle('bubble-disabled',!v.enabled);
+    surface(r,r.face,[0,0],v.face,v.kind==='layers'?20:v.face[1]/2,v.kind==='layers'?1:0);
     if(v.kind==='color') {
       const view=app.color_panel(),side=v.diameter-14,key=json([view,side,devicePixelRatio]);
       place(r.wheel,[v.face[0]/2,v.face[1]/2],[side,side]);
@@ -90,13 +91,16 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
         for(const[center,i]of packet.dots.map((center,i)=>[center,i])){const dot=element('i',`bubble-dot${v.dots[i]?' selected':''}`);place(dot,center.map(x=>x+v.face[0]/2),[3.5,3.5]);r.face.append(dot);}
         if(v.kind==='layers') {
           r.thumbnail=element('canvas','bubble-layer-thumbnail');r.thumbnail.width=r.thumbnail.height=64;r.face.replaceChildren(r.thumbnail);
-          const badge=element('span','bubble-count bubble-surface',String(v.layers));r.face.append(badge);
+          const badge=element('span','bubble-count bubble-surface');badge.append(element('span','',String(v.layers)));r.face.append(badge);
           r.badge=badge;
         }
       }
       if(r.badge) {
-        const width=Math.max(22,r.badge.scrollWidth||22);r.badge.style.width=`${width}px`;
-        r.boxes.push({node:r.badge,center:[24,-24],size:[width,22],radius:11,shape:0});
+        const hidden=r.face.hidden;r.face.hidden=false;
+        const [center,size]=app.bubble_count_badge(r.badge.firstChild.scrollWidth,Math.max(22,r.badge.firstChild.offsetHeight));
+        r.face.hidden=hidden;
+        place(r.badge,center.map((x,i)=>x+v.face[i]/2),size);
+        r.boxes.push({node:r.badge,center,size,radius:size[1]/2,shape:0});
       }
     }
     const hadRings=r.ringNodes.size>0;
@@ -122,7 +126,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     }
     if(v.rings.length||hadRings)transition(r,'halo',r.halo,v.rings.length>0,v.rings.length?160:120,.85);
     r.readout.hidden=!v.readout;
-    if(v.readout){r.readout.firstChild.textContent=v.readout;surface(r,r.readout,packet.readout,[Math.max(80,r.readout.firstChild.scrollWidth+16),28]);}
+    if(v.readout){r.readout.firstChild.textContent=v.readout;surface(r,r.readout,packet.readout,[r.readout.firstChild.scrollWidth+14,r.readout.firstChild.offsetHeight+4]);}
     const liveItems=new Set();let fresh=0;
     v.chooser.forEach((item,i)=>{
       liveItems.add(i);let slot=r.items.get(i);const key=json([item.kind,item.label,item.preview,item.icon,state().theme]);
@@ -137,8 +141,9 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       slot.shown=item.shown;
       if(item.kind!=='brush') {
         if(!slot.tag){slot.tag=element('div','bubble-tag bubble-surface');slot.tag.append(element('span'));r.chooser.append(slot.tag);}
-        slot.tag.firstChild.textContent=item.label;slot.tag.hidden=true;
-        const b=item.tag;surface(r,slot.tag,[b.x+b.width/2,b.y+b.height/2],[b.width,b.height]);
+        slot.tag.firstChild.textContent=item.label;slot.tag.hidden=false;
+        const width=Math.min(96,slot.tag.firstChild.scrollWidth+18),height=slot.tag.firstChild.offsetHeight+6;
+        const b=app.bubble_chooser_tag(...item.center,width);surface(r,slot.tag,[b.x+b.width/2,b.y+b.height/2],[b.width,height],9);
       } else if(slot.tag)slot.tag.hidden=true;
     });
     for(const [i,slot]of r.items)if(!liveItems.has(i)){slot.tag?.remove();retire(r,slot.node);r.items.delete(i);}
@@ -146,7 +151,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     const tweenBeads=previous.diameter===v.diameter&&!input.turning(v.id)&&!reduced.matches;
     v.beads.forEach((bead,i)=>{
       const p=bead.placement,id=json(p.bead);liveBeads.add(id);let slot=r.beadNodes.get(id);
-      if(!slot){const node=button('',()=>send({type:'tap',id:v.id,position:slot.center}),'color-swatch');node.append(element('span'));r.beads.append(node);slot={node};r.beadNodes.set(id,slot);}
+      if(!slot){const node=button('',()=>send({type:'tap',id:v.id,position:slot.center}),packet.bead_colors[i]?'color-swatch':'bubble-surface');node.append(element('span'));r.beads.append(node);slot={node};r.beadNodes.set(id,slot);}
       if(json(slot.target)!==json(p)) {
         slot.tween=tweenBeads?{from:slot.shown??{...p,alpha:0},to:p,start:null}:null;
         slot.shown=slot.tween?.from??p;slot.target=p;
@@ -154,7 +159,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       slot.gone=false;slot.center=p.center;const n=slot.node;n.title=bead.label;n.setAttribute('aria-label',bead.label);n.setAttribute('aria-pressed',bead.selected);n.dataset.colorSlot=p.bead.kind;
       n.style.zIndex=i;
       if(packet.bead_colors[i])n.firstElementChild.style.background=`linear-gradient(${rgba(packet.bead_colors[i])},${rgba(packet.bead_colors[i])}),repeating-conic-gradient(var(--checker-dark) 0 25%,var(--checker-light) 0 50%) 0 0 / 10px 10px`;
-      else {glyph(n,'palette');surface(r,n,p.center,[p.size,p.size]);n.classList.add('bubble-surface');}
+      else {glyph(n,'palette');surface(r,n,p.center,[p.size,p.size]);n.classList.toggle('bubble-selected',bead.selected);}
     });
     for(const[id,slot]of r.beadNodes)if(!liveBeads.has(id)){
       if(!tweenBeads){slot.node.remove();r.beadNodes.delete(id);continue;}
@@ -164,12 +169,12 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     r.hints?.remove();r.hints=element('div','bubble-hints');r.body.append(r.hints);
     for(const[center,alpha]of v.hints){const hint=element('i');place(hint,center,[5,5]);hint.style.opacity=alpha*.35;r.hints.append(hint);}
     if(v.pill) {
-      if(!r.pill){r.pill=element('div','bubble-pill bubble-surface');r.pill.append(button('',()=>send({type:'palette',id:v.id,step:-1})),button('',()=>{r.pill.menuModel=()=>app.context_menu({kind:'bubble_palettes',id:v.id});customization.openMenu(r.pill);}),button('',()=>send({type:'palette',id:v.id,step:1})));r.pill.firstChild.append(icon('chevron-down'));r.pill.lastChild.append(icon('chevron-down'));r.body.append(r.pill);}
+      if(!r.pill){r.pill=element('div','bubble-pill bubble-surface');r.pill.append(button('',()=>send({type:'palette',id:v.id,step:-1})),button('',()=>{r.pill.menuModel=()=>app.context_menu({kind:'bubble_palettes',id:v.id});customization.openMenu(r.pill);}),button('',()=>send({type:'palette',id:v.id,step:1})));r.pill.firstChild.append(icon('go-previous'));r.pill.lastChild.append(icon('go-next'));r.body.append(r.pill);}
       r.pill.hidden=false;r.pill.children[1].textContent=v.pill;const b=packet.pill;surface(r,r.pill,[b.x+b.width/2,b.y+b.height/2],[b.width,b.height]);
     } else if(r.pill)r.pill.hidden=true;
     if(v.card) {
       if(!r.card) {
-        const card=element('div','bubble-card dock-panel content-drawer');r.body.append(card);
+        const card=element('div','bubble-card bubble-surface dock-panel content-drawer');r.body.append(card);
         const inspector=createLayerInspector({app,state,workspace,element,button,icon,contentPanel,toggle:()=>send({type:'properties',id:v.id}),invalidate:()=>{active=true;wake();}});
         card.append(inspector.root);r.card={root:card,inspector};
       }
@@ -225,12 +230,12 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       r.center=p.center;r.scale=(p.homing?.82:p.lifted?1.04:1)*r.pinch;r.homeAlpha=p.homing?.55:1;
       r.root.style.transform=`translate(${p.center[0]}px,${p.center[1]}px)`;r.body.style.transform=`scale(${r.scale})`;
       r.root.classList.toggle('bubble-lifted',p.lifted);
-      for(const box of r.boxes)if(box.node!==r.card?.root)bubbleShadow(box.node,box.size,box.radius,p.lifted);
+      for(const box of r.boxes)if(r.view.kind!=='layers'||box.node!==r.face)bubbleShadow(box.node,box.size,box.radius,p.lifted,false,enabledAlpha(box.node));
       if(r.fadeTween){const t=r.fadeTween;t.start??=now;const progress=reduced.matches?1:Math.min(1,(now-t.start)/140);r.fade=t.from+(t.to-t.from)*smooth(progress);if(progress===1)r.fadeTween=null;else active=true;}
       r.root.style.opacity=r.fade*r.homeAlpha;
       for(const[key,t]of r.transitions) {
         t.start??=now;const progress=t.ms?Math.max(0,Math.min(1,(now-t.start-t.delay)/t.ms)):1;
-        t.value=t.from+(t.to-t.from)*smooth(progress);t.node.style.opacity=t.value*enabledAlpha(t.node);t.node.style.scale=(t.fromScale+(1-t.fromScale)*t.value)*itemScale(t.node);
+        t.value=t.from+(t.to-t.from)*ease(progress);t.node.style.opacity=t.value*enabledAlpha(t.node);t.node.style.scale=(t.fromScale+(1-t.fromScale)*t.value)*itemScale(t.node);
         if(progress<1)active=true;
         else if(!t.show){t.node.hidden=true;if(key==='card'&&r.face.hidden){r.face.hidden=false;transition(r,'face',r.face,true,180,.6);}if(key==='halo'){r.arcs=[];}}
       }
@@ -239,12 +244,12 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
       for(const[id,slot]of r.beadNodes) {
         const t=slot.tween;
         if(t) {
-          t.start??=now;const progress=Math.min(1,(now-t.start)/220),amount=smooth(progress),mix=(a,b)=>a+(b-a)*amount;
+          t.start??=now;const progress=Math.min(1,(now-t.start)/220),amount=ease(progress),mix=(a,b)=>a+(b-a)*amount;
           slot.shown={center:t.from.center.map((v,i)=>mix(v,t.to.center[i])),size:mix(t.from.size,t.to.size),alpha:mix(t.from.alpha,t.to.alpha)};
           if(progress===1){slot.tween=null;if(slot.gone){slot.node.remove();r.beadNodes.delete(id);continue;}}else active=true;
         }
         const p=slot.shown;place(slot.node,p.center,[p.size,p.size]);slot.node.style.opacity=p.alpha;slot.node.bubbleAlpha=p.alpha;
-        bubbleShadow(slot.node,[p.size,p.size],p.size/2,false,true);
+        if(!slot.node.bubbleSurface)bubbleShadow(slot.node,[p.size,p.size],p.size/2,false,true);
         if(slot.node.bubbleSurface)Object.assign(slot.node.bubbleSurface,{center:p.center,size:[p.size,p.size],radius:p.size/2});
       }
       if(r.view.card) {

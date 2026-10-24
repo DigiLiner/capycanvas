@@ -23,6 +23,8 @@ import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.*
 import androidx.compose.ui.zIndex
@@ -37,8 +39,9 @@ internal fun JSONArray.bubblePoint() = Offset(getDouble(0).toFloat(), getDouble(
 internal fun CanvasHost.bubble(action: JSONObject) = dispatch(obj("type" to "bubble", "action" to action), action.optString("phase") == "move")
 private val LocalBubbleOrigin = staticCompositionLocalOf { Offset.Zero }
 private fun smooth(t: Float) = t * t * (3f - 2f * t)
+private fun ease(t: Float) = 1f - (1f - t).let { it * it * it }
 
-internal class BubbleTween(initial: Float = 0f) {
+internal class BubbleTween(initial: Float = 0f, private val easing: (Float) -> Float = ::ease) {
     var value by mutableFloatStateOf(initial)
     var target by mutableFloatStateOf(initial)
     private var from = initial
@@ -54,7 +57,7 @@ internal class BubbleTween(initial: Float = 0f) {
         if (value == target) return false
         if (start < 0) start = now
         val t = if (reduced || duration == 0L) 1f else ((now - start - delay).toFloat() / duration).coerceIn(0f, 1f)
-        value = from + (target - from) * smooth(t)
+        value = from + (target - from) * easing(t)
         return t < 1f
     }
 }
@@ -104,7 +107,7 @@ internal class BubbleRecord(packet: JSONObject) {
     var homing by mutableStateOf(false)
     var pinch by mutableFloatStateOf(1f)
     var faded = false
-    val fade = BubbleTween(1f)
+    val fade = BubbleTween(1f, ::smooth)
     val parts = mutableStateMapOf<String, BubblePart>()
     var hovered by mutableStateOf<Any?>(null)
     var pressed by mutableStateOf(false)
@@ -131,10 +134,10 @@ internal class BubbleRecord(packet: JSONObject) {
         if (v.getString("kind") == "layers" && v.objectOrNull("card") == null) {
             val badge = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(0, 22)))) as JSONArray
             val size = badge.getJSONArray(1).bubblePoint()
-            part("badge", obj("text" to v.getInt("layers").toString()), badge.getJSONArray(0).bubblePoint(), Size(size.x, size.y), from = .6f, duration = 180, delay = if (parts["card"] != null) 150 else 0)
+            part("badge", obj("text" to v.getInt("layers").toString()), badge.getJSONArray(0).bubblePoint(), parts["badge"]?.size ?: Size(size.x, size.y), from = .6f, duration = 180, delay = if (parts["card"] != null) 150 else 0)
         }
         if (v.array("rings").length() > 0) part("halo", v.copy().put("_geometry", next.array("rings")), Offset.Zero, Size.Zero, glass = false, from = .85f, duration = 160)
-        if (!v.isNull("readout")) part("readout", obj("text" to v.getString("readout")), next.array("readout").bubblePoint(), Size(80f, 28f), from = 1f, duration = 0)
+        if (!v.isNull("readout")) part("readout", obj("text" to v.getString("readout")), next.array("readout").bubblePoint(), parts["readout"]?.size ?: Size.Zero, from = 1f, duration = 0)
         var fresh = 0L
         v.array("chooser").objects().forEachIndexed { i, item ->
             val brush = item.getString("kind") == "brush"
@@ -201,7 +204,7 @@ internal class BubbleRecord(packet: JSONObject) {
             val reach = record.packet.number("reach") + 16f
             CompositionLocalProvider(LocalBubbleOrigin provides Offset(reach, reach)) {
             Box(Modifier.offset { IntOffset(((record.center.x - reach) * density).roundToInt(), ((record.center.y - reach) * density).roundToInt()) }
-                .requiredSize((reach * 2).dp).zIndex(if (record.lifted) 701f else 700f).graphicsLayer {
+                .wrapContentSize(Alignment.TopStart, unbounded = true).requiredSize((reach * 2).dp).zIndex(if (record.lifted) 701f else 700f).graphicsLayer {
                     scaleX = record.scale; scaleY = record.scale; alpha = record.alpha
                 }) {
                 for ((partKey, part) in record.parts.entries.sortedWith(compareBy({ it.value.order }, { !it.key.startsWith("retired:") }))) key(partKey) {
@@ -226,21 +229,25 @@ internal class BubbleRecord(packet: JSONObject) {
                         "badge", "readout" -> {
                             val measurer = androidx.compose.ui.text.rememberTextMeasurer()
                             val text = part.data.getString("text")
-                            val measured = measurer.measure(text, androidx.compose.material3.LocalTextStyle.current).size.width / density
+                            val style = androidx.compose.material3.LocalTextStyle.current.let {
+                                if (part.key == "badge") it.copy(fontWeight = FontWeight.SemiBold) else it.copy(fontFeatureSettings = "tnum")
+                            }
+                            val measured = measurer.measure(text, style).size
                             SideEffect {
                                 val size = if (part.key == "badge") {
-                                    val badge = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(measured, 22)))) as JSONArray
+                                    val badge = bubbleUi(obj("type" to "count_badge", "text" to JSONArray(listOf(measured.width / density, max(22f, measured.height / density))))) as JSONArray
                                     val extent = badge.getJSONArray(1).bubblePoint(); Size(extent.x, extent.y)
-                                } else Size(max(80f, measured + 16f), 28f)
+                                } else Size(measured.width / density + 14f, measured.height / density + 4f)
+                                part.radius = size.height / 2
                                 part.place(part.center, size, 1f, false)
                             }
-                            BubbleSurface(record, part) { Text(text, Modifier.padding(horizontal = if (part.key == "badge") 5.dp else 8.dp), maxLines = 1) }
+                            BubbleSurface(record, part) { Text(text, Modifier.padding(horizontal = if (part.key == "badge") 5.dp else 7.dp), style = style, maxLines = 1) }
                         }
                         "pill" -> BubbleSurface(record, part) {
-                            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(30.dp).clickable { input.send(obj("type" to "palette", "id" to record.id, "step" to -1)) }, contentAlignment = Alignment.Center) { SharedIcon("chevron-down", null, Modifier.size(16.dp).graphicsLayer { rotationZ = 90f }) }
-                                Text(part.data.getString("text"), Modifier.weight(1f).clickable { input.menu(record, record.center + part.center, true) }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Box(Modifier.size(30.dp).clickable { input.send(obj("type" to "palette", "id" to record.id, "step" to 1)) }, contentAlignment = Alignment.Center) { SharedIcon("chevron-down", null, Modifier.size(16.dp).graphicsLayer { rotationZ = -90f }) }
+                            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Box(Modifier.width(24.dp).fillMaxHeight().clickable { input.send(obj("type" to "palette", "id" to record.id, "step" to -1)) }, contentAlignment = Alignment.Center) { SharedIcon("go-previous", null) }
+                                Text(part.data.getString("text"), Modifier.weight(1f).clickable { input.menu(record, record.center + part.center, true) }.padding(horizontal = 4.dp), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Box(Modifier.width(24.dp).fillMaxHeight().clickable { input.send(obj("type" to "palette", "id" to record.id, "step" to 1)) }, contentAlignment = Alignment.Center) { SharedIcon("go-next", null) }
                             }
                         }
                         else -> when {
@@ -248,24 +255,25 @@ internal class BubbleRecord(packet: JSONObject) {
                                 {
                                     val text = part.data.getString("label")
                                     val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-                                    val width = min(96f, measurer.measure(text, androidx.compose.material3.LocalTextStyle.current).size.width / density + 18f)
+                                    val measured = measurer.measure(text, androidx.compose.material3.LocalTextStyle.current).size
+                                    val width = min(96f, measured.width / density + 18f)
                                     SideEffect {
                                         val bounds = (bubbleUi(obj("type" to "chooser_tag", "center" to part.data.array("center"), "width" to width)) as JSONObject).rect()
-                                        part.place(bounds.center, Size(width, 26f), 1f, false)
+                                        part.place(bounds.center, Size(width, measured.height / density + 6f), 1f, false)
                                     }
                                     BubbleSurface(record, part) { Text(text, Modifier.padding(horizontal = 9.dp), maxLines = 1, overflow = TextOverflow.Ellipsis) }
                                 }
                             part.key.startsWith("bead:") -> BubbleSurface(record, part, fill = part.glass, bead = true) {
                                 val bead = part.data.getJSONObject("bead")
-                                if (part.glass) SharedIcon("palette", null, Modifier.size(16.dp))
+                                if (part.glass) SharedIcon("palette", null, Modifier.size(13.dp))
                                 else ColorSwatchFace(part.data.array("rgba").color(), bead.getJSONObject("placement").getJSONObject("bead").getString("kind"), bead.getBoolean("selected"), false, Modifier.fillMaxSize())
                             }
                             else -> BubbleSurface(record, part) {
                                 val item = part.data
                                 if (!item.isNull("preview")) {
                                     BrushPreview(host, item.getInt("preview"), Modifier.align(Alignment.TopCenter).padding(top = 6.dp).size(103.36.dp, 14.dp))
-                                    Text(item.getString("label"), Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp, start = 5.dp, end = 5.dp).graphicsLayer { alpha = .8f }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                } else SharedIcon(item.getString("icon"), item.getString("label"), Modifier.size(20.dp))
+                                    Text(item.getString("label"), Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp, start = 8.dp, end = 8.dp).graphicsLayer { alpha = .8f }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                } else SharedIcon(item.getString("icon"), item.getString("label"), Modifier.size(18.dp))
                             }
                         }
                     }
@@ -312,24 +320,26 @@ private fun Modifier.bubbleCardSurface(id: Int) = pointerInput(id) {
     val shape = if (part.squircle) SquircleShape(part.radius.dp) else RoundedCornerShape(part.radius.dp)
     val colors = LocalPalette.current
     Box(Modifier.offset { IntOffset(((origin.x + part.center.x - part.size.width / 2) * density).roundToInt(), ((origin.y + part.center.y - part.size.height / 2) * density).roundToInt()) }
-        .requiredSize(part.size.width.dp, part.size.height.dp).then(modifier)
+        .requiredSize(part.size.width.dp, part.size.height.dp)
+        .then(if (part.key in listOf("face", "card")) Modifier else Modifier.testTag("bubble-part-${record.id}-${part.key}")).then(modifier)
         .then(if (part.appearance.target == 0f) Modifier else Modifier
             .stylusHoverIcon(PointerIcon(android.view.PointerIcon.TYPE_NULL), overrideDescendants = true)
             .pointerHoverIcon(PointerIcon(if (record.view.objectOrNull("stamp") != null) android.view.PointerIcon.TYPE_NULL else android.view.PointerIcon.TYPE_ARROW)))
         .surfaceLayer(18.dp) {
             alpha = part.appearance.value * part.strength
             scaleX = part.scale; scaleY = part.scale
-        }.bubbleShadow(shape, part.radius, part.squircle, record.lifted, bead, part.key == "card").clip(shape).then(if (fill) Modifier.background(colors.panelFill) else Modifier), contentAlignment = Alignment.Center) {
-        if (part.data.optBoolean("selected") && (part.key == "face" || item) || bead && part.glass && part.data.getJSONObject("bead").getBoolean("selected")) Box(Modifier.matchParentSize().background(colors.active))
+        }.then(if (part.key == "face" && record.view.getString("kind") == "layers") Modifier else Modifier.bubbleShadow(shape, part.radius, part.squircle, record.lifted, bead && !part.glass,
+            if ((item || part.key == "face") && !part.data.optBoolean("enabled", true)) .45f else 1f)).clip(shape).then(if (fill) Modifier.background(colors.panelFill) else Modifier), contentAlignment = Alignment.Center) {
+        if (part.data.optBoolean("selected") && (item || part.key == "face" && record.view.getString("kind") in listOf("dial", "brush", "medium", "controls")) || bead && part.glass && part.data.getJSONObject("bead").getBoolean("selected")) Box(Modifier.matchParentSize().background(colors.active))
         if (hovered) Box(Modifier.matchParentSize().background(colors.text.copy(alpha = if (record.pressed) .14f else .07f)))
         content()
     }
 }
 
-private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean, lifted: Boolean, bead: Boolean, card: Boolean = false) = drawWithCache {
+private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean, lifted: Boolean, bead: Boolean, strength: Float) = drawWithCache {
     val reach = (if (bead) 3f else if (lifted) 12f else 8f) * density
     val drop = (if (bead) 1f else if (lifted) 4.5f else 2f) * density
-    val opacity = if (bead) .13f else if (lifted || card) .16f else .08f
+    val opacity = (if (bead) .13f else if (lifted) .16f else .08f) / strength
     val inner = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithCache)) }
     val steps = ceil(reach * 2).toInt().coerceAtLeast(1)
     val outlines = (steps downTo 1).map { index ->
@@ -372,16 +382,19 @@ private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean
                 val images = rememberLayerThumbnails(host, state.getJSONObject("document_file").optLong("epoch")) {
                     if (layer?.optBoolean("has_thumbnail") == true) listOf(LayerThumbnailTarget("${layer.getLong("id")}:false", layer.getLong("id"), layer.getLong("paint_revision"))) else emptyList()
                 }
-                images["${v.optLong("layer")}:false"]?.let { Image(it, null, Modifier.size(46.dp).clip(SquircleShape(13.dp)).background(Color.White)) }
+                images["${v.optLong("layer")}:false"]?.let { Image(it, null, Modifier.size(46.dp).drawWithCache {
+                    val outline = SquircleShape(13.dp).createOutline(size, layoutDirection, this)
+                    onDrawBehind { drawOutline(outline, Color.Gray.copy(alpha = .28f), style = Stroke(2.dp.toPx())) }
+                }.clip(SquircleShape(13.dp)).background(Color.White), contentScale = androidx.compose.ui.layout.ContentScale.Crop) }
                     ?: SharedIcon(v.getString("icon"), null, Modifier.size(20.dp))
             }
             else -> {
                 if (!v.isNull("preview")) BrushPreview(host, v.getInt("preview"), Modifier.offset(y = 11.dp).size(32.dp, 8.dp).graphicsLayer { alpha = .78f })
                 SharedIcon(v.getString("icon"), null, Modifier.offset(y = if (!v.isNull("preview")) (-6).dp else if (v.getString("kind") == "medium") (-4).dp else 0.dp).size(20.dp))
-                if (v.optBoolean("variants")) ToolGroupIndicator(Modifier.align(Alignment.BottomEnd).padding(9.dp).size(9.dp))
+                if (v.optBoolean("variants")) ToolGroupIndicator(Modifier.align(Alignment.BottomEnd).padding(9.dp).size(16.dp))
                 Canvas(Modifier.fillMaxSize()) {
                     record.packet.array("dots").values().forEachIndexed { i, value ->
-                        drawCircle(if (v.array("dots").optBoolean(i)) colors.text else colors.text.copy(alpha = .35f), 1.75.dp.toPx(), center + (value as JSONArray).bubblePoint() * density)
+                        drawCircle(colors.text.copy(alpha = if (v.array("dots").optBoolean(i)) .9f else .3f), 1.75.dp.toPx(), center + (value as JSONArray).bubblePoint() * density)
                     }
                 }
             }
@@ -394,27 +407,29 @@ private fun Modifier.bubbleShadow(shape: Shape, radius: Float, squircle: Boolean
     val v = part.data
     val geometry = part.data.array("_geometry")
     val origin = LocalBubbleOrigin.current
-    val reach = v.optDouble("halo", v.number("diameter").toDouble()).toFloat() / 2 + 40f
-    Box(Modifier.offset((origin.x - reach).dp, (origin.y - reach).dp).requiredSize((reach * 2).dp).graphicsLayer { alpha = part.appearance.value; scaleX = part.scale; scaleY = part.scale }) {
+    val disabled = remember { Paint().apply { alpha = .4f } }
+    Box(Modifier.fillMaxSize().testTag("bubble-halo-${record.id}").graphicsLayer { alpha = part.appearance.value; scaleX = part.scale; scaleY = part.scale }) {
         Canvas(Modifier.fillMaxSize()) {
-            translate(reach * density, reach * density) {
+            translate(origin.x * density, origin.y * density) {
             v.array("rings").objects().forEachIndexed { i, ring ->
                 val arc = ring.getJSONObject("arc"); val radius = arc.number("radius") * density
                 val iconSpan = 21f / arc.number("radius") * 180f / PI.toFloat() * sign(arc.number("sweep"))
-                val alpha = if (ring.getBoolean("enabled")) 1f else .4f
+                val enabled = ring.getBoolean("enabled")
                 val origin = Offset(-radius, -radius); val extent = Size(radius * 2, radius * 2)
-                drawArc(colors.panelFill.copy(alpha = colors.panelFill.alpha * alpha), arc.number("start") - iconSpan, arc.number("sweep") + iconSpan, false, origin, extent, style = Stroke(arc.number("band") * density, cap = StrokeCap.Round))
-                drawArc(colors.text.copy(alpha = .18f * alpha), arc.number("start"), arc.number("sweep"), false, origin, extent, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
-                drawArc(colors.text.copy(alpha = .5f * alpha), arc.number("start"), arc.number("sweep") * ring.number("fill"), false, origin, extent, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
+                if (!enabled) drawContext.canvas.saveLayer(Rect(origin, extent).inflate(arc.number("band") * density), disabled)
+                drawArc(colors.panelFill, arc.number("start") - iconSpan, arc.number("sweep") + iconSpan, false, origin, extent, style = Stroke(arc.number("band") * density, cap = StrokeCap.Round))
+                drawArc(colors.text.copy(alpha = .18f), arc.number("start"), arc.number("sweep"), false, origin, extent, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
+                if (ring.number("fill") > 0f) drawArc(colors.text.copy(alpha = .5f), arc.number("start"), arc.number("sweep") * ring.number("fill"), false, origin, extent, style = Stroke(4.dp.toPx(), cap = StrokeCap.Round))
                 val thumb = geometry.optJSONObject(i)?.array("thumb")?.bubblePoint() ?: Offset.Zero
-                drawCircle(colors.thumb.copy(alpha = alpha), (if (ring.getBoolean("active")) 7.5f else 7f) * density, thumb * density)
-                drawCircle(colors.text.copy(alpha = .6f * alpha), (if (ring.getBoolean("active")) 7.5f else 7f) * density, thumb * density, style = Stroke(1.dp.toPx()))
+                drawCircle(colors.thumb, (if (ring.getBoolean("active")) 7.5f else 7f) * density, thumb * density)
+                drawCircle(colors.text.copy(alpha = .6f), (if (ring.getBoolean("active")) 7.5f else 7f) * density, thumb * density, style = Stroke(1.dp.toPx()))
+                if (!enabled) drawContext.canvas.restore()
             }
             }
         }
         v.array("rings").objects().forEachIndexed { i, ring ->
             geometry.optJSONObject(i)?.array("icon")?.bubblePoint()?.let { center ->
-                SharedIcon(ring.getString("icon"), ring.getString("label"), Modifier.offset((reach + center.x - 8f).dp, (reach + center.y - 8f).dp).size(16.dp).graphicsLayer { alpha = if (ring.getBoolean("enabled")) 1f else .4f })
+                SharedIcon(ring.getString("icon"), ring.getString("label"), Modifier.offset((origin.x + center.x - 8f).dp, (origin.y + center.y - 8f).dp).size(16.dp).testTag("bubble-ring-icon-${record.id}-$i").graphicsLayer { alpha = if (ring.getBoolean("enabled")) 1f else .4f })
             }
         }
     }
