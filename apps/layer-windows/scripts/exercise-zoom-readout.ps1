@@ -1,11 +1,17 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[switch]$Navigation,[ValidateSet('mouse','pen','touch')][string]$Device='mouse')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[switch]$Navigation,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('none','dark-mouse','light-mouse','dark-pen','dark-touch')][string]$RotationSnapping='none',[string]$FixtureContext)
 $ErrorActionPreference='Stop'
+if($RotationSnapping -ne 'none' -and !$env:CAPY_PRIVATE_DESKTOP){
+ & (Join-Path $PSScriptRoot 'test-desktop.ps1') -Script $PSCommandPath -Parameters @{Executable=$Executable;RotationSnapping=$RotationSnapping;FixtureContext=$env:CAPY_FIXTURE_CONTEXT} -TimeoutSeconds 900
+ return
+}
+if($FixtureContext){$env:CAPY_FIXTURE_CONTEXT=$FixtureContext}
+if($RotationSnapping -ne 'none'){$Theme,$Device=$RotationSnapping.Split('-')}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'LocalizationProfiles.ps1')
 $CapyWaitSeconds=20
 $CapyEach={[CapyRowPointer]::Verify()}
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
-if($Navigation){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
+if($Navigation -or $RotationSnapping -ne 'none'){[CapyRowPointer]::VerifyPrivateDesktop($env:CAPY_PRIVATE_DESKTOP)}
 Add-Type -AssemblyName System.Drawing
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
@@ -283,13 +289,14 @@ function Check-RotationSnapping{
    [CapyRowPointer]::Move(($center[0]+120),($center[1]+4))
    $held=Changed-Camera $eased 'Rotate into the snap hold' {param($Camera)if($enabled){Near $Camera.rotation 0}else{$Camera.rotation -gt [Math]::PI/180 -and $Camera.rotation -lt 3*[Math]::PI/180}}
    [CapyRowPointer]::Up()
+   if((Navigation-PaintState) -cne $artwork){throw 'Rotation snapping changed the artwork or history'}
    $checks["rotation_snap_$enabled"]=@{device=$Device;outside_reach=$free.rotation;inside_reach=$eased.rotation;inside_hold=$held.rotation;artwork_history='unchanged'}
+   $checks["rotation_snap_$enabled"]|ConvertTo-Json -Depth 4|Set-Content (Join-Path $run "rotation-gesture-$enabled-$Device-$Theme.json")
   }finally{[CapyRowPointer]::Cancel()}
   Navigation-Command 'reset_rotation';Wait-Until {Near (Camera).rotation 0} 'Rotate gesture did not reset'
  }
  Toggle-RotationSnapping $true
- if((Navigation-PaintState) -cne $artwork){throw 'Rotation snapping changed the artwork or history'}
- Navigation-Command 'pen';Wait-Until {Navigation-Selected 'pen'} 'Pen did not restore after snapping checks'
+ Navigation-Command 'drawing_brush';Wait-Until {Navigation-Selected 'drawing_brush'} 'The drawing brush did not restore after snapping checks'
  $checks.rotation_snap_preference='default checked; mouse/pen/touch variant toggle persists, reopens checked state and preserves explicit 2 degree view'
 }
 function Navigation-Point {
@@ -738,7 +745,10 @@ try {
  (Control 'drawing-canvas').SetFocus()
  Wait-Until {Focused} 'The canvas did not take focus'
 
- if($Navigation){Navigation-Journey}else{
+ if($RotationSnapping -ne 'none'){
+  Check-RotationSnapping
+  $checks.scope='Snap rotation preference and native rotation gesture; full readout journey runs separately'
+ }elseif($Navigation){Navigation-Journey}else{
  Wait-Until {Readout-State $false} 'The readout did not acknowledge its initial closed state'
  Check-ReadoutCamera
  Open-Readout 'mouse'

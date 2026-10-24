@@ -1495,6 +1495,11 @@ The Zoom readout journey checks that opening and closing the readout preserves
 the exact camera, artwork and undo history. It also checks the saved Snap
 rotation checkbox and native Rotate View drags with snapping enabled and disabled,
 including the 3° hold and smooth transition back to free rotation by 10°.
+For the focused preference and gesture journey, pass `-RotationSnapping` with
+one of `dark-mouse`, `light-mouse`, `dark-pen` or `dark-touch`. It uses an owned
+private desktop and retains the default full readout journey. The VM runner accepts
+`zoom-readout:dark-mouse`, `zoom-readout:light-mouse`, `zoom-readout:dark-pen` and
+`zoom-readout:dark-touch`.
 
 Pass the native reports to the `number-controls` and `color-panel` scenarios of
 [the visual tools](../../tools/visual/README.md). Rebuild normally before using
