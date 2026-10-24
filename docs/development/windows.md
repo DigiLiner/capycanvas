@@ -307,6 +307,11 @@ output; a row drop uses shared insertion policy. Native drag feedback uses the s
 normalized destination and release revalidates the original hit. Right swipes dispatch
 the shared row action. `exercise-layers.ps1 -Relationships` checks these interactions
 and their undo history in both themes, alongside the existing pickup fixture variants.
+Row padding belongs to the moving content; revealed actions fill the row height
+and reach its right edge. `exercise-layer-drawer.ps1` checks those bounds and
+equal 72-DIP action widths in the compact drawer. Selection moves with the row;
+Lock and Duplicate blend text into an opaque window background. Pixel checks
+keep those action fills independent of selection and panel transparency.
 `exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
 activation, scrolling and undo history in both themes; `-PaperLight` runs the
 light-theme scrolling, history and empty-stack cases. Both variants also walk

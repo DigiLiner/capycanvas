@@ -1,6 +1,7 @@
 param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
+Add-Type -AssemblyName System.Drawing
 $CapyFind='prefer-visible';$CapyPopups=$true
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -45,7 +46,7 @@ function Custom-Toolbar {
  Wait-Until {!(Find 'workspace-manager') -and (Control 'drawing-canvas').Current.IsEnabled} 'Workspace manager did not close before toolbar input'
  Start-Sleep -Milliseconds 250
  (Control ('ribbon-grip-'+$panel) -Arranged).SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
- Invoke 'Add Tools…' -Name
+ Invoke ('Add Tools'+[char]0x2026) -Name
  foreach($query in @('Layers panel','Brush color','Color panel')){
   (Control 'tool-picker-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($query)
   Wait-Until {(Model).picker.query -eq $query} 'Toolbar picker did not adopt its search'
@@ -213,7 +214,21 @@ try {
  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  $widths=@('lock','duplicate','delete'|ForEach-Object {(Bounds "layer-$id-swipe-$_").Width/$scale})
  if(@($widths|Where-Object {[Math]::Abs($_-72) -gt 1}).Count){throw 'Swipe actions do not share equal 72-point widths'}
+ $row=Bounds "layer-row-$id"
+ foreach($action in @('lock','duplicate','delete')){$bounds=Bounds "layer-$id-swipe-$action";if([Math]::Abs($bounds.Top-$row.Top)/$scale -gt 1 -or [Math]::Abs($bounds.Bottom-$row.Bottom)/$scale -gt 1){throw "Swipe $action does not fill the row height"}}
+ if([Math]::Abs((Bounds "layer-$id-swipe-delete").Right-$row.Right)/$scale -gt 1){throw 'Swipe actions do not reach the row edge'}
  Capture ('drawer-actions-'+$Theme) -Composed -WithModel
+ $palette=(Model).state.palette;$base=[Drawing.ColorTranslator]::FromHtml($palette.bg);$ink=[Drawing.ColorTranslator]::FromHtml($palette.text)
+ $fills=@{}
+ foreach($action in @('lock','duplicate')){
+  $bounds=Bounds "layer-$id-swipe-$action";$path=Join-Path $run ("drawer-$action-fill-$Theme.png")
+  $null=Screen-Pixels ([int]($bounds.X+$bounds.Width*.5)) ([int]($bounds.Y+6*$scale)) $path
+  $bitmap=[Drawing.Bitmap]::new($path);$alpha=if($action -eq 'lock'){.16}else{.24};$maximum=0.
+  try{foreach($y in 44..52){foreach($x in 44..52){$pixel=$bitmap.GetPixel($x,$y);foreach($channel in @('R','G','B')){$maximum=[Math]::Max($maximum,[Math]::Abs($pixel.$channel-((1-$alpha)*$base.$channel+$alpha*$ink.$channel)))}}}}finally{$bitmap.Dispose()}
+  $fills[$action]=@{maximum_error=$maximum;alpha=$alpha;bounds=$bounds}
+ }
+ $fills|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'drawer-action-fills.json')
+ if(@($fills.Values|Where-Object maximum_error -gt 2).Count){throw 'Swipe action fills retain the moving row selection or transparency'}
  Swipe $id 230;Wait-Until {!(Find "layer-$id-swipe-lock" -Visible)} 'Reverse swipe did not close actions'
  if((Layer $id).locked -or @((Model).state.layers).Count -ne $count+1){throw 'Reverse swipe changed the drawing'}
  Swipe $id -230;Press "layer-$id-swipe-lock";Wait-Until {(Layer $id).locked} 'Swipe Lock did not reach shared state'
@@ -286,7 +301,7 @@ try {
  Capture ('drawer-color-pair-'+$Theme) -Composed -WithModel
  Custom-Toolbar
  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
- [pscustomobject]@{theme=$Theme;header='passed';growth='passed';properties='passed';footer='passed';add_paper='passed';swipe_actions='passed';group='passed';overflow='passed';scope='WARP UI and synthetic touch; reference hardware performance unverified'}|ConvertTo-Json
+ [pscustomobject]@{theme=$Theme;header='passed';growth='passed';properties='passed';footer='passed';add_paper='passed';swipe_actions='passed';group='passed';overflow='passed';scope='Native UI and synthetic touch; adapter and presentation performance require separate evidence'}|ConvertTo-Json
 }catch{
  try{if($settled -and $settled.last){$settled.last|ConvertTo-Json -Depth 14|Set-Content (Join-Path $run 'overflow-failure-comparison.json')}}catch{}
  try{$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|ForEach-Object {@{id=$_.Current.AutomationId;name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'failure-native-tree.json')}catch{}

@@ -87,8 +87,8 @@ void LayerRow::init(){
     swipeActions.HorizontalAlignment(HorizontalAlignment::Right);swipeActions.VerticalAlignment(VerticalAlignment::Stretch);
     swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);
     swipeFrame.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->swipeFrame.Clip(clip);}});
-    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();self->textureEdge.stop();}});root.MinHeight(LayerRowHeight);root.Padding(LayerRowPadding);root.BorderThickness({0});
-    root.BorderBrush(accent(data));body.ColumnSpacing(0);body.VerticalAlignment(VerticalAlignment::Center);
+    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();self->textureEdge.stop();}});root.MinHeight(LayerRowHeight);root.BorderThickness({0});
+    root.BorderBrush(accent(data));body.ColumnSpacing(0);body.Padding(LayerRowPadding);
     AutomationProperties::SetAutomationId(root,L"layer-row-"+to_hstring(uint64_t(id)));
     auto rowCaption=[weak]{
         auto self=weak.lock();if(!self||!self->current())return hstring();
@@ -254,7 +254,7 @@ void LayerRow::highlight(int position, bool attachment){
 void LayerRow::refresh(){
     if(!current())return;auto layer=model();auto view=owner.lock();bool full=!view||view->full;
     check.Visibility(full?Visibility::Visible:Visibility::Collapsed);body.ColumnDefinitions().GetAt(1).Width({full?26.:0.,GridUnitType::Pixel});
-    root.Background(flag(layer,L"selected")?selected(data):clear());
+    body.Background(flag(layer,L"selected")?selected(data):clear());swipeActions.Background(data->brush(L"bg"));
     auto actions=array(layer,L"swipe_actions");
     auto key=actions.Stringify()+L":"+to_hstring(data->textSize());
     if(key!=swipeKey){swipeKey=key;
