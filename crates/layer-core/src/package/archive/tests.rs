@@ -256,7 +256,7 @@ fn large_member_and_later_small_member_keep_u64_offsets_without_reading_payloads
         assert_eq!(directory.read_member(&mut input, small, 2).unwrap(), b"ok");
         assert!(directory.read_member(&mut input, large, 1024).is_err());
         assert!(input.read_bytes < 256 * 1024, "directory scanned {} bytes", input.read_bytes);
-        let mut independent = zip::ZipArchive::new(input).unwrap();
+        let mut independent = zip::ZipArchive::with_config(zip::read::Config { archive_offset: zip::read::ArchiveOffset::Known(0) }, input).unwrap();
         assert_eq!(independent.by_name("data/tiles-1.bin").unwrap().size(), length);
         let mut payload = Vec::new(); independent.by_name("data/tail").unwrap().read_to_end(&mut payload).unwrap();
         assert_eq!(payload, b"ok");

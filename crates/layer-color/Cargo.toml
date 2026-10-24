@@ -14,7 +14,7 @@ rav1e = { version = "=0.8.1", default-features = false }
 oxideav-av1 = "=0.1.16"
 rust_h265 = "=0.1.0"
 quick-xml = "=0.41.0"
-moxcms = { version = "=0.9.1", features = ["extended_range", "options"] }
+moxcms = { version = "=0.9.1", default-features = false, features = ["extended_range", "options"] }
 png = "=0.18.1"
 # Bilevel/fax TIFF is outside the supported unsigned 8/16-bit photo matrix.
 tiff = { version = "=0.10.3", default-features = false, features = ["deflate", "jpeg", "lzw"] }

@@ -1,3 +1,9 @@
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2025-0141", reason = "Unmaintained stroke-recording serializer; replay decoding has length framing and a 64 KiB per-record limit. Serializer replacement remains separate work." },
+    { id = "RUSTSEC-2024-0436", reason = "Unmaintained build-time proc macro used by pinned rav1d/rav1e; no runtime parser. Replace through maintained upstream dependencies." },
+]
+
 # Source-repository policy: only explicitly reviewed permissive Rust licenses.
 # Keep every platform in scope; do not restrict the dependency graph to Linux.
 [licenses]

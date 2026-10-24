@@ -642,6 +642,11 @@ or factors and width knots outside their path.
 
 ## Restricted ZIP64 transport
 
+The reader admits terminal metadata before invoking ZIP parsing with a known
+zero archive offset. It checks raw central-directory file-type attributes as
+well as local/central agreement; creator-OS permission normalization cannot
+admit links or directories. Directory discovery never scans member payloads.
+
 Resource packs, previews, signatures and `mimetype` use method 0 (STORED).
 `manifest.json` uses method 8 (raw DEFLATE) when its encoded bytes are smaller
 than the UTF-8 JSON, otherwise STORED. There is one bounded DEFLATE stream, with

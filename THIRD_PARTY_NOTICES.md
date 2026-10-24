@@ -567,7 +567,7 @@ Alliance for Open Media Patent License 1.0
 
 ## ZIP package reading — MIT
 
-`zip` 8.6.0 is an unmodified crates.io dependency from
+`zip` 9.0.5 is an unmodified crates.io dependency from
 <https://github.com/zip-rs/zip2>. The Capy package reader applies its restricted
 header and inventory rules around this archive parser. Its original notice follows.
 

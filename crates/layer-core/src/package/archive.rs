@@ -66,7 +66,8 @@ impl Directory {
             return Err("Invalid ZIP directory".into());
         }
         if count > max_entries as u64 || size > max_metadata { return Err(DecodeError::Unsupported("ZIP directory exceeds admission".into())); }
-        let mut archive = zip::ZipArchive::new(&mut *input).map_err(|e| format!("Invalid ZIP: {e}"))?;
+        let mut archive = zip::ZipArchive::with_config(zip::read::Config { archive_offset: zip::read::ArchiveOffset::Known(0) }, &mut *input)
+            .map_err(|e| format!("Invalid ZIP: {e}"))?;
         if archive.len() as u64 != count || archive.offset() != 0 { return Err("Ambiguous ZIP member inventory".into()); }
         let mut members = Vec::with_capacity(count as usize);
         let mut headers = Vec::with_capacity(count as usize);
@@ -106,6 +107,8 @@ impl Directory {
                 || u32_at(&l, 18) as u64 != encoded_length.min(LIMIT32) || u32_at(&l, 22) as u64 != member.length.min(LIMIT32)
                 || u32_at(&c, 20) as u64 != encoded_length.min(LIMIT32) || u32_at(&c, 24) as u64 != member.length.min(LIMIT32)
                 || u32_at(&c, 42) as u64 != header.min(LIMIT32) || u16_at(&c, 32) != 0 || u16_at(&c, 34) != 0
+                || u32_at(&c, 38) & 0x10 != 0
+                || !matches!((u32_at(&c, 38) >> 16) & 0o170000, 0 | 0o100000)
                 || usize::from(u16_at(&l, 26)) != member.name.len() || usize::from(u16_at(&c, 28)) != member.name.len() {
                 return Err("Conflicting or noncanonical ZIP headers".into());
             }

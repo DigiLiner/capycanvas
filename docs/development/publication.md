@@ -37,7 +37,7 @@ to copy its code, figures, screenshots, textures or other artwork.
 
 Add a dependency or vendored code only when the project cannot reasonably do
 without it. After adding or updating one, run
-`cargo deny --locked check licenses sources` and add any required notice to
+`cargo deny --locked check advisories licenses sources` and add any required notice to
 [third-party notices](../../THIRD_PARTY_NOTICES.md). Vendored crates follow the
 [vendor rules](../../vendor/README.md).
 
@@ -52,7 +52,7 @@ Repeat these checks before publishing:
    absolute personal paths, browser profiles, machine-specific logs, screenshots
    or build outputs. Scan the exact staged tree for secrets, not just the working
    directory. Inspect binary metadata and provenance whenever an asset changes.
-2. Install `cargo-deny` and run `cargo deny --locked check licenses sources`.
+2. Install `cargo-deny` and run `cargo deny --locked check advisories licenses sources`.
    The allowlist checks build/dev dependencies and all platform targets. Missing
    licenses, unreviewed licenses and non-registry sources fail the gate. License
    expressions containing `OR` permit a choice; `AND` requires both terms.
@@ -83,6 +83,12 @@ retain their own terms, including applicable LGPL requirements. Do not assume
 that our MIT option relicenses them or satisfies redistribution obligations.
 Review actual packaged contents before publishing binaries, WebAssembly bundles,
 containers or vendored source archives.
+
+CI checks RustSec advisories alongside licenses and sources. The advisory policy
+has two exact maintenance-notice exceptions: the bounded stroke-recording
+serializer and the decoder build-time macro. These do not suppress other
+advisories for those packages. Review upstream security disclosures as well;
+the advisory database does not contain every published implementation finding.
 
 The [web packager](web-packaging.md) now generates a separate static distribution
 with Wasm dependency/toolchain notices, branding terms and runtime path checks.
