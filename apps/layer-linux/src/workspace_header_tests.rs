@@ -368,7 +368,8 @@ fn layer_footer_alignment(d:&Driver) {
     let bounds=|widget:&gtk::Widget|widget.compute_bounds(&d.w.surface).unwrap();
     let center=|rect:gtk::graphene::Rect|[rect.x()+rect.width()*0.5,rect.y()+rect.height()*0.5];
     let left=bounds(&leading); let right=bounds(&trailing);
-    assert_eq!([leading.width(),leading.height(),trailing.width(),trailing.height()],[24,24,24,24]);
+    let control=layer_ui::PANEL_CONTROL_METRICS.control_height as i32;
+    assert_eq!([leading.width(),leading.height(),trailing.width(),trailing.height()],[control;4]);
     for slot in [&leading,&trailing] {
         let image=slot.first_child().unwrap();
         assert_eq!(image.measure(gtk::Orientation::Horizontal,-1).1,16,"footer glyph uses compact icon size");

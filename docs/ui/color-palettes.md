@@ -79,9 +79,9 @@ or Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y while a palette control has focus. Reordering
 keeps color IDs, definitions, selection, and usage history unchanged. Adding or
 removing swatches clears that palette’s reorder undo/redo; renaming does not.
 
-The footer name and selector use the tool panels’ compact 24-pixel controls.
+The footer name and selector use the tool panels’ compact 26-pixel controls.
 Search and inline editing share their input background and padding; the + menu
-button is a 24-pixel square. Palette rows, color tiles and the + menu use native
+button is a 26-pixel square. Palette rows, color tiles and the + menu use native
 GTK menu rows, separators and disabled states, with the same arrow-free
 presentation as Layers. Swatches grow from 34 to 40 pixels, with gaps of 4. Radius, text, and
 selection colors use existing panel theme values in both dock and drawer views.

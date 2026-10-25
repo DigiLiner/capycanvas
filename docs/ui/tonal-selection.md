@@ -37,7 +37,7 @@ groups the bounds into one field, rendered by each host's reusable range compone
 Its horizontal toolbar row reserves 280 pixels for the compact values and track;
 the entire field moves into overflow when it cannot fit. The existing toolbar
 slider-visibility preference hides the track while retaining both editable values.
-Horizontal preset bars retain the standard 24-pixel form-control height.
+Horizontal preset bars retain the standard 26-pixel form-control height.
 There is no Apply/Cancel workflow, source
 selector, range manager, destination label, or selection-actions menu in this
 panel. Invert remains an independent selection/mask action in existing menus.

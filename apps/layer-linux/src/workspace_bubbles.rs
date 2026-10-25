@@ -740,7 +740,8 @@ impl Card {
         footer.set_visible(!full);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_GROUP_SPACING as i32);
         row.set_height_request(layer_ui::PropertyDisclosure::HEIGHT as i32);
-        let add = crate::icons::button("layer-add-layer-symbolic");
+        let add = gtk::Button::new();
+        add.set_child(Some(&super::drawers::icon_slot(&crate::icons::image("layer-add-layer-symbolic"), "bubble-new-layer-slot")));
         add.add_css_class("flat");
         add.add_css_class("layer-properties-disclosure");
         add.add_css_class("customizable-target");
@@ -756,7 +757,7 @@ impl Card {
         let chevron = crate::icons::image("layer-chevron-down-symbolic");
         chevron.add_css_class("layer-properties-chevron");
         content.append(&disclosure_label);
-        content.append(&chevron);
+        content.append(&super::drawers::icon_slot(&chevron, "bubble-layer-properties-chevron-slot"));
         let disclosure = gtk::Button::new();
         disclosure.add_css_class("flat");
         disclosure.add_css_class("layer-properties-disclosure");

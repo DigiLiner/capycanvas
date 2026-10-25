@@ -408,7 +408,10 @@ impl LayerPanel {
         Self::with_previews(localization, Previews::default())
     }
     pub fn sharing(&self, localization: std::sync::Arc<layer_ui::Localizer>) -> Self {
-        Self::with_previews(localization, self.previews.clone())
+        let view = Self::with_previews(localization, self.previews.clone());
+        view.root.set_margin_top(layer_ui::PANEL_CONTENT_INSET as i32);
+        view.root.set_margin_bottom(layer_ui::PANEL_CONTENT_INSET as i32);
+        view
     }
     fn with_previews(localization: std::sync::Arc<layer_ui::Localizer>, previews: Previews) -> Self {
         let copy = Rc::new(RefCell::new(LayerCopy::new(&localization)));
@@ -1031,7 +1034,7 @@ impl LayerPanel {
         overlay.set_clip_overlay(&connections, true);
         list.vadjustment().connect_value_changed(glib::clone!(#[weak] connections, move |_| connections.queue_draw()));
         root.append(&overlay);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_CONTROL_METRICS.control_spacing as i32);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_CONTROL_METRICS.compound_spacing as i32);
         footer.add_css_class("layer-footer");
         let footer_room = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::External)

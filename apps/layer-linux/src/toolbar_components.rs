@@ -231,7 +231,7 @@ mod imp {
                     axis,
                     &sizes,
                     button,
-                    if self.vertical.get() { self.style.get().gap() } else { 10. },
+                    self.style.get().gap(),
                 );
                 allocate(&children[0], layout.more);
                 for (child, b) in children[1..].iter().zip(layout.fields) {

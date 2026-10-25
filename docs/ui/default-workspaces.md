@@ -171,7 +171,7 @@ window changes clamp the restored position to the list's current limits.
 Window and text-size changes recompute both pages. Shared Rust sets the height
 limits from native control and row measurements. Bottom and side toolbar
 openers use the same content heights. Clients retain the scrolling
-list and asynchronous thumbnails. The footer uses 24-pixel icon slots with
+list and asynchronous thumbnails. The footer uses 26-pixel icon slots with
 16-pixel glyphs and a six-pixel text gap; its icons align with the Layers action
 bar. The bridge joins the drawer to its opener, and the footer's
 top hover corners meet its divider squarely. Properties offers Add filter on raster

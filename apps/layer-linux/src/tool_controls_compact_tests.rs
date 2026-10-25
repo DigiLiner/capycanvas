@@ -224,12 +224,12 @@ fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Th
             }
         }
         if widget.is::<gtk::SpinButton>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::DropDown>() || widget.widget_name().starts_with("tool-action-") || widget.widget_name().starts_with("tool-choice-") && !widget.widget_name().starts_with("tool-choice-transform-reference-") && widget.is::<gtk::ToggleButton>() {
-            assert_eq!(allocated_height, 24., "{context}: {} {}", widget.widget_name(), widget.type_().name());
+            assert_eq!(allocated_height, layer_ui::PANEL_CONTROL_METRICS.control_height, "{context}: {} {}", widget.widget_name(), widget.type_().name());
         }
         if let Ok(number) = widget.clone().downcast::<crate::number_control::NumberControl>() {
             let slider = !number.has_css_class("number-inline") && descendant::<gtk::Scale>(&number).is_some_and(|scale| scale.is_mapped());
             let interval = number.parent().is_some_and(|parent| parent.widget_name().starts_with("tool-range-"));
-            let height = if slider { 36. } else if interval { 28. } else { 24. };
+            let height = if slider { layer_ui::PANEL_CONTROL_METRICS.slider_height } else if interval { layer_ui::PANEL_CONTROL_METRICS.control_height + 4. } else { layer_ui::PANEL_CONTROL_METRICS.control_height };
             assert_eq!(allocated_height, height, "{context}: {}", widget.widget_name());
         }
     }
@@ -565,15 +565,15 @@ fn capture_panel(w: &Rc<Workspace>, output: &std::path::Path, panel_id: Panel, c
             assert!(bounds.x() >= -1. && bounds.x()+bounds.width() <= panel.width() as f32+1., "{context}: {} fits panel: {bounds:?}", widget.widget_name());
         }
         if widget.is::<gtk::DropDown>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::Switch>() || widget.is::<gtk::SearchEntry>() {
-            assert_eq!(bounds.height(), 24., "{context}: {} is a single compact row", widget.widget_name());
+            assert_eq!(bounds.height(), layer_ui::PANEL_CONTROL_METRICS.control_height, "{context}: {} is a single compact row", widget.widget_name());
         }
         if panel_id == Panel::Proof && (widget.is::<adw::ToggleGroup>() || widget.is::<gtk::ToggleButton>()) {
-            assert_eq!(bounds.height(),24.,"{context}: Proof mode {} CSS node {} uses the compact row",widget.type_().name(),widget.css_name());
+            assert_eq!(bounds.height(),layer_ui::PANEL_CONTROL_METRICS.control_height,"{context}: Proof mode {} CSS node {} uses the compact row",widget.type_().name(),widget.css_name());
         }
         if let Ok(number) = widget.clone().downcast::<crate::number_control::NumberControl>() {
             if number.has_css_class("number-panel") {
                 let slider = descendant::<gtk::Scale>(&number).is_some_and(|scale| scale.is_mapped());
-                assert_eq!(bounds.height(), if slider {36.} else {24.}, "{context}: {} retains approved number height", number.widget_name());
+                assert_eq!(bounds.height(), if slider {layer_ui::PANEL_CONTROL_METRICS.slider_height} else {layer_ui::PANEL_CONTROL_METRICS.control_height}, "{context}: {} retains approved number height", number.widget_name());
             }
             if let Some(title) = find_css(number.upcast_ref(), "number-title").filter(|title| title.is_mapped()) {
                 assert_eq!(title.compute_bounds(&panel).unwrap().x(), bounds.x(), "{context}: numeric caption aligns with its row");

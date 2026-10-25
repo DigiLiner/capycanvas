@@ -481,7 +481,7 @@ impl ToolSettings {
                 }
                 let widget: gtk::Widget = if mode {
                     let button = gtk::ToggleButton::new();
-                    button.set_size_request(24, 24);
+                    button.set_size_request(layer_ui::PANEL_CONTROL_METRICS.control_height as i32, layer_ui::PANEL_CONTROL_METRICS.control_height as i32);
                     let image = crate::icons::image(&format!("layer-{}-symbolic", command.icon.unwrap()));
                     image.set_pixel_size(16);
                     button.set_child(Some(&image));

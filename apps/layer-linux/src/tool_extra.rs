@@ -74,7 +74,7 @@ impl ExtraField {
         }
         for (index, button) in buttons.iter().enumerate() {
             if columns.is_none() {
-                button.set_size_request(24, 24);
+                button.set_size_request(layer_ui::PANEL_CONTROL_METRICS.control_height as i32, layer_ui::PANEL_CONTROL_METRICS.control_height as i32);
                 button.set_hexpand(!*labeled);
                 button.child().and_downcast::<gtk::Image>().unwrap().set_pixel_size(16);
             }

@@ -80,12 +80,20 @@ pub(super) struct LayerInspector {
     label: gtk::Label,
     summary: gtk::Label,
 }
+/// A control-height square that centres a compact icon, so disclosure icons
+/// line up with the Layers row icons.
+pub(super) fn icon_slot(image: &gtk::Image, name: &str) -> gtk::Box {
+    let size = layer_ui::PANEL_CONTROL_METRICS.control_height as i32;
+    let slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    slot.set_widget_name(name); slot.set_size_request(size, size); slot.set_valign(gtk::Align::Center); slot.set_hexpand(false);
+    image.set_pixel_size(16); image.set_halign(gtk::Align::Center); image.set_hexpand(true);
+    slot.append(image); slot
+}
 impl LayerInspector {
     pub(super) fn new(w: &Rc<Workspace>, toggle: UiAction) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_overflow(gtk::Overflow::Hidden);
         let layers = Rc::new(w.layer_panel.sharing(w.localization().clone()));
-        margins(&layers.root, PANEL_CONTENT_INSET as i32);
         layers.bind(w);
         let anchor = Rc::new(Cell::new(None));
         let input = gtk::EventControllerLegacy::new();
@@ -120,13 +128,7 @@ impl LayerInspector {
         button.add_css_class("layer-properties-disclosure");
         button.set_height_request(layer_ui::PropertyDisclosure::HEIGHT as i32);
         let content = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_GROUP_SPACING as i32);
-        let slot = |image: &gtk::Image, name: &str| {
-            let slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            slot.set_widget_name(name); slot.set_size_request(24, 24); slot.set_valign(gtk::Align::Center); slot.set_hexpand(false);
-            image.set_pixel_size(16); image.set_halign(gtk::Align::Center); image.set_hexpand(true);
-            slot.append(image); slot
-        };
-        content.append(&slot(&crate::icons::image("layer-properties-symbolic"), "layer-properties-icon-slot"));
+        content.append(&icon_slot(&crate::icons::image("layer-properties-symbolic"), "layer-properties-icon-slot"));
         let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
         text.set_hexpand(true);
         text.set_valign(gtk::Align::Center);
@@ -138,7 +140,7 @@ impl LayerInspector {
         text.append(&label); text.append(&summary); content.append(&text);
         let chevron = crate::icons::image("layer-chevron-down-symbolic");
         chevron.add_css_class("layer-properties-chevron");
-        content.append(&slot(&chevron, "layer-properties-chevron-slot"));
+        content.append(&icon_slot(&chevron, "layer-properties-chevron-slot"));
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
         Self {root, pages, row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
@@ -426,7 +428,6 @@ impl View {
                     Panel::Layers if drawer.layer_properties.is_some() => Body::LayerInspector(LayerInspector::new(w, UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties })),
                     Panel::Layers => {
                         let v = Rc::new(w.layer_panel.sharing(w.localization().clone()));
-                        margins(&v.root, PANEL_CONTENT_INSET as i32);
                         v.bind(w);
                         v.root.set_height_request(360);
                         Body::Layers(v)

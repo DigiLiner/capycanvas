@@ -49,11 +49,11 @@ pub const PANEL_CONTROL_METRICS: PanelControlMetrics = PanelControlMetrics {
     control_spacing: PANEL_CONTROL_SPACING,
     group_spacing: PANEL_GROUP_SPACING,
     compound_spacing: PANEL_COMPOUND_SPACING,
-    control_height: 24.,
-    slider_height: 36.,
+    control_height: 26.,
+    slider_height: 38.,
     field_padding: 6.,
     icon_size: 16.,
-    control_radius: 12.,
+    control_radius: 13.,
 };
 /// Three standard tiles, two gaps, and the tool list's two content insets.
 pub const TOOL_PANEL_MIN_WIDTH: f32 = 3.0 * TILE_SIZE + 2.0 * TILE_GAP + 2.0 * PANEL_CONTENT_INSET;

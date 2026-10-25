@@ -136,7 +136,8 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel.canvas-action-bar { padding: 0; }
 .dock-panel.canvas-action-bar button { min-width: 36px; min-height: 36px; padding: 0; border-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .canvas-action-bar button:checked { background: var(--selection-bg); }
-.canvas-action-bar button.text-tile, .canvas-action-bar menubutton.text-tile > button { padding: 0 10px; }
+.dock-panel.canvas-action-bar button.text-tile, .dock-panel.canvas-action-bar menubutton.text-tile > button { min-height: var(--panel-control-height); padding: 0 10px; border-radius: var(--control-radius); }
+.canvas-action-bar button.text-tile, .canvas-action-bar menubutton.text-tile { margin: 5px; }
 .canvas-action-bar image { -gtk-icon-size: 16px; }
 .canvas-action-bar .canvas-action-bar-label { padding: 0 8px 0 12px; opacity: .8; }
 .dock-panel.join-nw { border-top-left-radius: 0; }
@@ -170,14 +171,14 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel toggle-group.flat { min-height: var(--panel-control-height); padding: 0; }
 .dock-panel toggle-group.flat toggle { min-height: var(--panel-control-height); padding: 0 var(--panel-field-padding); border-radius: var(--control-radius); }
 .dock-panel image { -gtk-icon-size: 14px; }
-.navigator-controls button { min-width: 24px; min-height: 24px; padding: 0; margin: 0; }
+.navigator-controls button { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; margin: 0; }
 .navigator-controls image { -gtk-icon-size: 16px; }
 .navigator-overview { color: var(--accent-color); }
 .number-control { font-size: var(--ui-text-size); }
 .layers-panel { padding: 0; }
-.layer-header, .layer-footer { padding: 4px 8px; }
-.layer-header menubutton > button { min-height: 24px; padding: 0 6px; }
-.layers-panel button.layer-icon, .layers-panel menubutton.layer-icon > button { min-width: 24px; min-height: 24px; padding: 0; }
+.layer-header, .layer-footer { padding: 4px 6px; }
+.layer-header menubutton > button { min-height: var(--panel-control-height); padding: 0 6px; }
+.layers-panel button.layer-icon, .layers-panel menubutton.layer-icon > button { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; }
 .layer-icon image { -gtk-icon-size: 16px; }
 .layer-list { background: transparent; }
 .layer-list > row { padding: 0; margin: 0; border-radius: 0; }
@@ -186,12 +187,12 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-swipe-actions button.layer-swipe-delete { background: #c01c28; color: white; }
 .layer-row { min-height: 36px; padding: 2px 6px; border-radius: 0; }
 .layer-row.selected { background: var(--selection-bg); }
-.layers-panel button.layer-column { min-width: 24px; }
+.layers-panel button.layer-column { min-width: var(--panel-control-height); }
 .layers-panel button.layer-reference:checked { background: alpha(var(--window-fg-color), .12); color: var(--window-fg-color); }
 .layers-panel button.layer-thumbnail { min-width: 28px; min-height: 28px; padding: 0; border: 1px solid alpha(var(--window-fg-color), .10); border-radius: calc(15px * var(--corner-fit)); background: transparent; box-shadow: none; }
 .layers-panel button.layer-thumbnail.layer-editing { border-color: var(--accent-bg-color); outline: 3px solid var(--accent-bg-color); outline-offset: -2px; }
 .layer-thumbnail picture { border-radius: calc(14px * var(--corner-fit)); }
-.layers-panel button.layer-expand { min-width: 24px; min-height: 24px; padding: 0; }
+.layers-panel button.layer-expand { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; }
 .layers-panel button.layer-expand.collapsed image { -gtk-icon-transform: rotate(-90deg); }
 .layer-type-symbol { padding: 1px; border-radius: 2px; background: var(--input-bg); color: var(--window-fg-color); }
 .layers-panel button.layer-effect { background: transparent; }
@@ -200,7 +201,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-folder image { -gtk-icon-size: 28px; }
 .layer-connection-gutter { min-width: 3px; }
 .layer-connections { color: var(--capy-relationship); }
-.layer-name-entry { min-width: 0; padding: 0 2px; min-height: 24px; }
+.layer-name-entry { min-width: 0; padding: 0 2px; min-height: var(--panel-control-height); }
 .layers-panel button.layer-link { min-width: 10px; }
 .layer-link image { -gtk-icon-size: 10px; }
 .layer-drop-before { box-shadow: inset 0 2px var(--accent-color); }
@@ -208,7 +209,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
 .layer-drop-attach { box-shadow: inset 0 0 0 2px var(--accent-color); }
 .dock-panel .number-labels { padding-left: 0; }
-.number-control button.number-value, .number-control entry.number-entry { min-height: 20px; padding: 2px 6px; font-weight: 400; font-feature-settings: "tnum"; }
+.number-control button.number-value, .number-control entry.number-entry { min-height: var(--panel-control-height); padding: 0 6px; font-weight: 400; font-feature-settings: "tnum"; }
 .number-control entry.number-entry { border: 0; border-radius: var(--control-radius); background: var(--input-bg); }
 .number-control button.number-step { min-width: 32px; min-height: 32px; padding: 0; }
 .number-control button.number-step image { -gtk-icon-size: 16px; }
@@ -216,12 +217,12 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .number-control scale trough { min-height: 4px; background: var(--input-bg); }
 .number-control scale slider { min-width: 16px; min-height: 16px; margin: -6px; }
 .number-control scale slider { background: var(--capy-thumb); }
-.dock-panel .number-control button.number-step { min-width: 24px; min-height: 24px; }
-.dock-panel .number-control scale { min-height: 24px; padding: 0; margin: 0 6px; }
+.dock-panel .number-control button.number-step { min-width: var(--panel-control-height); min-height: var(--panel-control-height); }
+.dock-panel .number-control scale { min-height: var(--panel-control-height); padding: 0; margin: 0 6px; }
 .dock-panel .number-control scale highlight { background: mix(var(--panel-bg), var(--window-fg-color), .5); }
 .dock-panel .number-control scale slider { min-width: 0; min-height: 0; padding: 0; border: 0; margin: 0; opacity: 0; }
 .dock-panel .number-inline scale { margin: 0; }
-.number-panel .number-header { min-height: 24px; }
+.number-panel .number-header { min-height: var(--panel-control-height); }
 .number-panel entry.number-entry { min-width: 0; }
 .number-panel .number-track { margin: -4px 76px 0 36px; }
 .number-panel.number-control scale { min-width: 0; min-height: 16px; padding: 0; margin: 0; }
@@ -231,8 +232,8 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .number-dial:disabled { opacity: .4; }
 .number-dial:focus-visible { background: radial-gradient(circle closest-side, var(--input-bg) 76%, alpha(var(--window-fg-color), .6) 80%, alpha(var(--window-fg-color), .6) 92%, transparent 100%); }
 .number-panel .number-dial { margin: 4px 76px 4px 0; }
-.number-inline button.number-value, .number-inline entry.number-entry { padding: 2px 3px; }
-.gradient-editor > box > button { min-width: 24px; padding: 4px; }
+.number-inline button.number-value, .number-inline entry.number-entry { padding: 0 3px; }
+.gradient-editor > box > button { min-width: var(--panel-control-height); padding: 4px; }
 .number-control.error entry { box-shadow: inset 0 0 0 1px #e55; }
 .number-preference { padding: 12px 14px; }
 .image-preference { padding: 12px 14px; }
@@ -266,22 +267,22 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .effect-properties dropdown > button,
 .effect-properties menubutton > button,
 .effect-properties .property-actions > button,
-.effect-properties .gradient-editor > box > button { min-height: 24px; padding: 0 6px; }
-.tool-settings button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
-.dock-panel .number-inline button.number-value, .dock-panel .number-inline entry.number-entry { padding: 2px 6px; }
-.tool-settings .selection-modes button { min-width: 24px; padding: 0; }
+.effect-properties .gradient-editor > box > button { min-height: var(--panel-control-height); padding: 0 6px; }
+.tool-settings button { min-height: var(--panel-control-height); padding: 0 6px; border-radius: var(--control-radius); }
+.dock-panel .number-inline button.number-value, .dock-panel .number-inline entry.number-entry { padding: 0 6px; }
+.tool-settings .selection-modes button { min-width: var(--panel-control-height); padding: 0; }
 .tool-settings .selection-modes.labeled button { padding: 0 6px; }
-.dock-panel button.tool-icon-action, .dock-panel button.panel-icon-action { min-width: 24px; min-height: 24px; padding: 0; }
+.dock-panel button.tool-icon-action, .dock-panel button.panel-icon-action { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; }
 .dock-panel switch { min-height: var(--panel-control-height); padding: 0; }
 .dock-panel switch > slider { min-height: 20px; min-width: 20px; padding: 0; margin: 1px; }
-.dock-panel checkbutton { min-height: 18px; padding: 3px 0; }
+.dock-panel checkbutton { min-height: 18px; padding: 4px 0; }
 .tool-settings dropdown > button, .tool-settings spinbutton { background: var(--input-bg); border-radius: var(--control-radius); }
-.dock-panel .number-panel spinbutton { min-height: 24px; padding: 0; }
-.dock-panel .number-panel spinbutton text { min-width: 0; min-height: 24px; padding: 0 6px; font-feature-settings: "tnum"; }
-.dock-panel .number-panel spinbutton button { min-width: 24px; min-height: 24px; padding: 0; }
+.dock-panel .number-panel spinbutton { min-height: var(--panel-control-height); padding: 0; }
+.dock-panel .number-panel spinbutton text { min-width: 0; min-height: var(--panel-control-height); padding: 0 6px; font-feature-settings: "tnum"; }
+.dock-panel .number-panel spinbutton button { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; }
 .tool-settings .choice-grid button { min-width: 0; min-height: 0; padding: 0; }
-.dock-panel .gradient-editor > box > button { min-width: 24px; padding: 0; }
-.dock-panel dropdown > button, .dock-panel menubutton > button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
+.dock-panel .gradient-editor > box > button { min-width: var(--panel-control-height); padding: 0; }
+.dock-panel dropdown > button, .dock-panel menubutton > button { min-height: var(--panel-control-height); padding: 0 6px; border-radius: var(--control-radius); }
 .dock-panel .brush-choice { padding: 3px 6px; }
 .brush-choice label, .filter-row label { font-size: 1em; }
 .tool-groups flowboxchild { padding: 0; margin: 0; }
@@ -312,18 +313,17 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .toolbar-component .option-segments.vertical > button:first-child { border-top-left-radius: calc(var(--tile-radius) * var(--corner-fit)); border-top-right-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .toolbar-component .option-segments.vertical > button:last-child { border-bottom-left-radius: calc(var(--tile-radius) * var(--corner-fit)); border-bottom-right-radius: calc(var(--tile-radius) * var(--corner-fit)); }
 .toolbar-component.vertical-component .option-labeled-segments > .option-segments > button { min-width: 36px; min-height: 36px; }
-.canvas-action-bar .selection-modes, .toolbar-component:not(.vertical-component) .option-segments { margin: 0 5px; }
-.canvas-action-bar .selection-modes > button, .toolbar-component:not(.vertical-component) .option-segments > button { min-height: 26px; padding: 0 8px; border-radius: 0; }
-.canvas-action-bar .selection-modes > button:first-child, .toolbar-component:not(.vertical-component) .option-segments > button:first-child { border-top-left-radius: calc(13px * var(--corner-fit)); border-bottom-left-radius: calc(13px * var(--corner-fit)); }
-.canvas-action-bar .selection-modes > button:last-child, .toolbar-component:not(.vertical-component) .option-segments > button:last-child { border-top-right-radius: calc(13px * var(--corner-fit)); border-bottom-right-radius: calc(13px * var(--corner-fit)); }
+.canvas-action-bar .selection-modes, .toolbar-component:not(.vertical-component) > box:not(.option-action) { margin: 0 5px; }
+.canvas-action-bar .selection-modes > button, .toolbar-component:not(.vertical-component) .option-segments > button { min-height: var(--panel-control-height); padding: 0 8px; border-radius: 0; }
+.canvas-action-bar .selection-modes > button:first-child, .toolbar-component:not(.vertical-component) .option-segments > button:first-child { border-top-left-radius: var(--control-radius); border-bottom-left-radius: var(--control-radius); }
+.canvas-action-bar .selection-modes > button:last-child, .toolbar-component:not(.vertical-component) .option-segments > button:last-child { border-top-right-radius: var(--control-radius); border-bottom-right-radius: var(--control-radius); }
 .toolbar-component dropdown { margin: 0; }
-.toolbar-component:not(.vertical-component) dropdown > button { min-height: 26px; border-radius: calc(13px * var(--corner-fit)); }
 .toolbar-component.vertical-component dropdown > button { padding: 2px; background: transparent; }
 .toolbar-component.vertical-component.labeled-component dropdown > button { padding-left: 8px; padding-right: 6px; }
 .toolbar-component .number-control { margin: 0; }
 .toolbar-component .toolbar-number scale { min-width: 56px; padding: 0 2px; }
 .toolbar-component .number-readout, .toolbar-component .number-entry, .toolbar-component .number-unit { font-size: var(--ui-text-size); }
-.toolbar-component .toolbar-number .number-value, .toolbar-component .number-entry { min-width: 0; min-height: 24px; padding: 0 4px; }
+.toolbar-component .toolbar-number .number-value, .toolbar-component .number-entry { min-width: 0; min-height: var(--panel-control-height); padding: 0 4px; }
 .toolbar-component.vertical-component .number-compact .number-value { min-width: 0; min-height: 0; padding: 3px 4px; background: transparent; }
 .toolbar-component.vertical-component.small-component .number-compact .number-value { padding: 1px 2px; }
 .toolbar-component.vertical-component.large-component .number-compact .number-value { padding: 4px 6px; }
@@ -446,7 +446,7 @@ window.capy-workspace.glass .workspace-switcher button:checked { background: var
 window.capy-workspace.glass .document-tab.selected { background-color: var(--glass-document-tab); }
 window.capy-workspace.glass .palette-cover { background: transparent; }
 .palette-panel { padding: 8px; }
-button.flat.layer-properties-disclosure { padding: 0 calc(2 * var(--panel-inset)); font-weight: 400; border-top-left-radius: 0; border-top-right-radius: 0; }
+button.flat.layer-properties-disclosure { padding: 0 6px; font-weight: 400; border-top-left-radius: 0; border-top-right-radius: 0; }
 .layer-properties-disclosure image { -gtk-icon-size: 16px; }
 .layer-properties-disclosure image.layer-properties-chevron { -gtk-icon-transform: rotate(180deg); }
 .layer-properties-disclosure.open image.layer-properties-chevron { -gtk-icon-transform: none; }
@@ -457,11 +457,11 @@ button.flat.layer-properties-disclosure { padding: 0 calc(2 * var(--panel-inset)
 .palette-panel button.palette-tile:hover, .picker-dialog button.palette-tile:hover { background: alpha(currentColor, .10); }
 .palette-empty { margin: 3px; border-radius: var(--control-radius); background: alpha(currentColor, .05); }
 .palette-panel button.palette-add { border: 0; border-radius: calc(var(--control-radius) + 3px); background: var(--input-bg); background-clip: content-box; padding: 3px; min-width: 0; min-height: 0; }
-.palette-panel button.palette-selector, .palette-panel button.palette-name { min-width: 0; min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); font-weight: 400; }
+.palette-panel button.palette-selector, .palette-panel button.palette-name { min-width: 0; min-height: var(--panel-control-height); padding: 0 6px; border-radius: var(--control-radius); font-weight: 400; }
 .palette-panel .palette-detail { font-size: .9em; margin-right: 6px; }
-.palette-panel .palette-entry { min-width: 0; min-height: 20px; padding: 2px 6px; background: var(--input-bg); border: 0; border-radius: var(--control-radius); box-shadow: none; }
+.palette-panel .palette-entry { min-width: 0; min-height: var(--panel-control-height); padding: 0 6px; background: var(--input-bg); border: 0; border-radius: var(--control-radius); box-shadow: none; }
 .palette-panel .palette-entry.error { box-shadow: inset 0 0 0 1px #e55; }
-.palette-panel button.palette-icon, .palette-panel menubutton.palette-icon > button { min-width: 24px; min-height: 24px; padding: 0; border-radius: var(--control-radius); }
+.palette-panel button.palette-icon, .palette-panel menubutton.palette-icon > button { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; border-radius: var(--control-radius); }
 .palette-panel .palette-entry text { min-width: 0; padding: 0; }
 .palette-list { background: transparent; }
 .palette-list > row { padding: 4px; border-radius: var(--control-radius); }

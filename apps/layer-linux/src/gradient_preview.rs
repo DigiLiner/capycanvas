@@ -26,7 +26,7 @@ mod imp {
             if orientation == gtk::Orientation::Horizontal {
                 (80, 160, -1, -1)
             } else {
-                let height=if self.compact.get() {24} else {44};
+                let height=if self.compact.get() {layer_ui::PANEL_CONTROL_METRICS.control_height as i32} else {44};
                 (height, height, -1, -1)
             }
         }

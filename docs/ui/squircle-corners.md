@@ -22,8 +22,8 @@ the former 8–10px circular corners.
 - **Surfaces** (panels, tab tops, drawers, collapsed columns, the title-bar
   editor and notices) use `SURFACE_RADIUS`, 18px or half a small tile.
 - **Panel controls** (buttons, entries, dropdowns, segmented choices and list
-  highlights) use the shared 12px control radius. Compact panel content has one
-  8px inset; the control radius is independent of that inset. Controls 24px tall
+  highlights) use the shared 13px control radius. Compact panel content has one
+  8px inset; the control radius is independent of that inset. Controls 26px tall
   or shorter become capsules.
 - **Concave joins** (tab feet, drawer bridges and expanded-panel joins) keep
   their sizes and use inverted squircle curves.
