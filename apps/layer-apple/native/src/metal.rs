@@ -187,7 +187,7 @@ impl MetalHost {
                     apply_limit_buckets: false,
                 }))
                 .map_err(|e| layer_ui::gpu_unsupported(host.session.localization(), &format!("Metal adapter selection: {e}")))?;
-            let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+            let limits = layer_render_wgpu::rendering_limits(adapter.limits());
             check_adapter(host, &adapter, &limits)?;
             let (device, queue, watch) =
                 pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {

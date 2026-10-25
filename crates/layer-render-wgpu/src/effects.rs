@@ -683,16 +683,8 @@ fn effect_properties(device: &PipelineDevice, scene: SceneView<'_>, handle: Occu
         }), time]
 }
 
-pub(super) fn parse_validated(source: &str) -> Result<naga::Module, GpuRasterError> {
-    validated_module(source).map(|(module,_)|module)
-}
 fn validated_module(source:&str)->Result<(naga::Module,naga::valid::ModuleInfo),GpuRasterError> {
-    let module = naga::front::wgsl::parse_str(source)
-        .map_err(|e| GpuRasterError::Effect(e.emit_to_string(source)))?;
-    let info=naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
-        .validate(&module)
-        .map_err(|e| GpuRasterError::Effect(e.emit_to_string(source)))?;
-    Ok((module,info))
+    crate::shader_limits::ValidatedModule::parse(source).map(|module| module.into_parts())
 }
 fn position_independent(programs:&[Arc<EffectProgram>],source:&str)->Result<bool,GpuRasterError> {
     let (module,info)=validated_module(source)?;
@@ -1111,7 +1103,7 @@ mod tests {
         validate_source(&mut source,true,1,false,&programs).unwrap();
         assert!(source.len()<full/2);
         assert!(!source.contains("fn capy_domain_warp")&&!source.contains("fn fx_cube"));
-        parse_validated(&source).unwrap();
+        validated_module(&source).unwrap();
         source.push_str("\n@group(4) @binding(0) var injected:texture_2d<f32>;");
         assert!(validate_source(&mut source,true,1,false,&programs).is_err());
     }
@@ -1126,7 +1118,7 @@ mod tests {
         let programs=[program];
         let mut source=shader_source(&programs,&[4],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
         validate_source(&mut source,true,1,false,&programs).unwrap();
-        parse_validated(&source).unwrap();
+        validated_module(&source).unwrap();
         assert!(source.contains(&format!("{attribute} fn attribute_probe"))&&source.contains("fn attribute_dependency"));
         }
     }

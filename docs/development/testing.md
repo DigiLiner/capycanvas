@@ -23,6 +23,14 @@ The Web `--heal-portability` journey checks Spot Healing's real direct and
 indirect dispatches against its explicit bind-group layouts. It waits for
 healing and raster publication before checking mouse/pen pixels and Undo.
 
+`shader_limits::tests` checks per-entry workgroup storage reachability, WGSL
+layout and WebGPU's per-variable padding without a GPU. The preparation tests
+exercise exact-limit acceptance and padded overflow refusal before pipeline
+creation. `levels_statistics_tests` covers every histogram spill bin and exact
+counts across capture windows on devices requested with both 16,352 and 16,384
+workgroup bytes. The GTK Levels Auto and Web `--tonal-controls`
+Auto journeys check rendered results and history through the shared kernel.
+
 The renderer's `dry_material::tests` module also runs in CI without a GPU.
 `every_kernel_entry_resolves_its_overrides` validates each generated dry-material
 kernel and the destination and reservoir modules of every material operation.

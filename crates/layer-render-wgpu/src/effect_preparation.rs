@@ -93,7 +93,8 @@ impl Preparation {
         }
         let [x, y, z] = lookup.workgroup_size;
         source.push_str(&format!("\n@compute @workgroup_size({x},{y},{z}) fn prep_main(@builtin(local_invocation_id) local:vec3<u32>,@builtin(global_invocation_id) global:vec3<u32>){{{}(local,global);}}",lookup.entry));
-        let module = super::effects::parse_validated(&source)?;
+        let validated = crate::shader_limits::ValidatedModule::parse(&source)?;
+        let module = validated.module();
         // Libraries may declare private/workgroup scratch, never extra bound
         // resources, override constants, or entry points owned by the host.
         if module.entry_points.len() != 1
@@ -125,16 +126,7 @@ impl Preparation {
         }) {
             return Err(GpuRasterError::Effect("Preparation must access storage through prep_parameter/prep_store".into()));
         }
-        let mut sizes = naga::proc::Layouter::default();
-        sizes
-            .update(module.to_ctx())
-            .map_err(|e| GpuRasterError::Effect(e.to_string()))?;
-        let scratch: u64 = module
-            .global_variables
-            .iter()
-            .filter(|(_, v)| v.space == naga::AddressSpace::WorkGroup)
-            .map(|(_, v)| u64::from(sizes[v.ty].size))
-            .sum();
+        let scratch = validated.workgroup_storage("prep_main")?;
         if scratch > u64::from(device.limits().max_compute_workgroup_storage_size)
             || x > device.limits().max_compute_workgroup_size_x
             || y > device.limits().max_compute_workgroup_size_y
@@ -196,5 +188,22 @@ mod tests {
         let error=preparation.pipeline(&r.device,&key).err().unwrap();
         assert!(error.to_string().contains("Preparation exceeds device workgroup limits"),"{error}");
         assert!(preparation.pipelines.is_empty());
+    }
+
+    #[test]
+    fn preparation_counts_padded_reachable_storage_before_pipeline_creation() {
+        let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let limit=r.device.limits().max_compute_workgroup_storage_size;
+        let mut definition=crate::tests::fixture("gaussian_blur").program().lookups[0].clone();
+        definition.entry="lookup".into();definition.workgroup_size=[1;3];
+        for (reserved,accepted) in [(32,true),(16,false)] {
+            let unused=if accepted {format!("var<workgroup> unused:array<u32,{}>;",limit/4)}else{String::new()};
+            definition.wgsl=format!("var<workgroup> head:array<u32,{}>;var<workgroup> one:u32;var<workgroup> two:u32;{unused}fn lookup(local:vec3<u32>,global:vec3<u32>){{head[0]=1u;one=1u;two=1u;prep_store(0u,vec4(f32(head[0]+one+two)));}}",(limit-reserved)/4).into();
+            let key=Key{definition:definition.clone(),inputs:vec![[0,1]],output:2,geometry:1};
+            let mut preparation=Preparation::new(&r.device);
+            let result=preparation.pipeline(&r.device,&key);
+            assert_eq!(result.is_ok(),accepted,"reserved {reserved}: {:?}",result.err());
+            assert_eq!(preparation.pipelines.len(),usize::from(accepted));
+        }
     }
 }

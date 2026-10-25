@@ -287,7 +287,7 @@ impl CapyHost {
                 apply_limit_buckets: false,
             }))
             .map_err(err)?;
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        let limits = layer_render_wgpu::rendering_limits(adapter.limits());
         layer_host::admit_adapter(self.native.session.localization(), &adapter, &limits)?;
         let (device, queue, gpu_state) = pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
             label: Some("Capy Canvas Windows"),

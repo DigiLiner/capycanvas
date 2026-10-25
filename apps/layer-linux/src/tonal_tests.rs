@@ -95,20 +95,30 @@ fn tonal_calibration(effect: &str) {
     let app = native_test_app("art.capycanvas.TonalControls");
     let mut input = RemoteInput::new().settle_ms(150).timeout_secs(30);
     let (w,output) = start(&app,effect);input.ready();
+    let context=glib::MainContext::default();let readback=Cell::new(9400);
+    let pixels=|| {let id=readback.get();readback.set(id+1);context.block_on(read_canvas_pixels(&w,id)).unwrap().bytes};
         let width=w.window.width();
         for theme in [Theme::Light,Theme::Dark] {
             if std::env::var("LAYER_TONAL_THEME").is_ok_and(|wanted| wanted != format!("{theme:?}")) {continue;}
             w.dispatch(UiAction::SetTheme {theme:Some(theme)});pump(150);
             if effect=="levels" {
-                let before=document(&w);let foreground=state(&w).colors.clone();let pixel=shown(&w,[128.,128.]);
+                let before=document(&w);let foreground=state(&w).colors.clone();let pixel=shown(&w,[128.,128.]);let original_pixels=pixels();
                 let button=action_button(&w,&mut input,|action|matches!(action,EffectAction::AutoLevels {..}));
                 crate::snapshot(&w).save_to_png(output.join(format!("levels-actions-{width}-{theme:?}.png"))).unwrap();
                 input.click(screen_point(button.upcast_ref(),&w.window,[0.5,0.5]));
                 until(||artwork_manifest(&document(&w))!=artwork_manifest(&before),"native Auto Levels publishes correction");ready(&w);
                 assert_source_unchanged(&w,&before);assert_eq!(state(&w).colors,foreground);pump(200);assert_ne!(shown(&w,[128.,128.]),pixel);
+                let corrected=artwork_manifest(&document(&w));let corrected_pixels=pixels();
+                assert_ne!(corrected_pixels,original_pixels,"Auto Levels changes document pixels");
                 crate::snapshot(&w).save_to_png(output.join(format!("levels-auto-{width}-{theme:?}.png"))).unwrap();
                 assert_persisted(&w,&output.join(format!("levels-auto-{width}-{theme:?}.capy")));
                 w.dispatch(UiAction::Invoke {command:CommandId::Undo});ready(&w);assert_eq!(artwork_manifest(&document(&w)),artwork_manifest(&before),"one Undo restores Auto Levels");
+                assert_eq!(pixels(),original_pixels,"Undo restores exact Auto Levels pixels");
+                w.dispatch(UiAction::Invoke {command:CommandId::Redo});ready(&w);
+                assert_eq!(artwork_manifest(&document(&w)),corrected,"Redo restores Auto Levels");
+                assert_eq!(pixels(),corrected_pixels,"Redo restores exact Auto Levels pixels");
+                w.dispatch(UiAction::Invoke {command:CommandId::Undo});ready(&w);
+                assert_eq!(artwork_manifest(&document(&w)),artwork_manifest(&before));
             }
             for role in [CalibrationRole::Black,CalibrationRole::Gray,CalibrationRole::White] {
                 if std::env::var("LAYER_TONAL_ROLE").is_ok_and(|wanted|wanted!=format!("{role:?}")) {continue;}

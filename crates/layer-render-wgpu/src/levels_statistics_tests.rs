@@ -7,8 +7,11 @@ fn fixture(space:RgbSpace,depth:SampleDepth,pixels:&[[f32;4]])->Document {
     insert_effect(&mut doc,EffectInstance::new(crate::tests::fixture("levels").program()),0);doc
 }
 fn stats(doc:&Document,channels:bool)->Result<layer_core::levels::LevelsStatistics,String> {
+    stats_using(&gpu(),doc,channels)
+}
+fn stats_using(gpu:&crate::snapshot::SnapshotGpu,doc:&Document,channels:bool)->Result<layer_core::levels::LevelsStatistics,String> {
     let source=if channels {ArtworkSource::EffectChannels(doc.scene().children(None)[0])}else{ArtworkSource::EffectInput(doc.scene().children(None)[0])};
-    pollster::block_on(gpu().levels_statistics(ArtworkQuery::new(doc,source),CaptureControl::default()))
+    pollster::block_on(gpu.levels_statistics(ArtworkQuery::new(doc,source),CaptureControl::default()))
 }
 fn close(a:f64,b:f64,tolerance:f64) {assert!((a-b).abs()<=tolerance,"{a} != {b}, tolerance{tolerance}");}
 
@@ -25,6 +28,38 @@ fn levels_statistics_full_tiles_cover_every_pixel_across_window_edges() {
         close(result.minimum[c],values[0],3e-6);close(result.maximum[c],values[2],3e-6);
         let anchors=result.stretch(c as u8+1).unwrap();let tolerance=(values[2]-values[0])/4096.+3e-6;
         close(anchors[0],values[0],tolerance);close(anchors[1],values[2],tolerance);
+    }
+}
+
+#[test]
+fn levels_statistics_preserves_local_and_spilled_bins_across_capture_windows() {
+    let bins=[0usize,4087,4088,4089,4090,4091,4092,4093,4094,4095,4095,4095];
+    let pixels:Vec<_>=bins.iter().map(|&bin| {
+        let encoded=if bin==0 {0.} else if bin==4095 {1.} else {(bin as f64+0.5)/4096.};
+        let value=RgbSpace::Srgb.decode(encoded) as f32;
+        [value,value,value,1.]
+    }).collect();
+    let extent=[2053,259];
+    let mut doc=generated(extent,DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::F32},&pixels);
+    insert_effect(&mut doc,EffectInstance::new(crate::tests::fixture("levels").program()),0);
+    let mut expected=vec![0u64;4096];
+    for y in 0..extent[1] {for x in 0..extent[0] {expected[bins[((x+3*y) as usize)%bins.len()]]+=1;}}
+    let instance=crate::WgpuRasterizer::headless_instance();
+    let adapter=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference:wgpu::PowerPreference::HighPerformance,..Default::default()
+    })).unwrap();
+    assert_ne!(adapter.get_info().device_type,wgpu::DeviceType::Cpu);
+    assert!(adapter.limits().max_compute_workgroup_storage_size>=16352);
+    for storage in [16352,16384].into_iter().filter(|&storage|storage<=adapter.limits().max_compute_workgroup_storage_size) {
+        let limits=wgpu::Limits {max_compute_workgroup_storage_size:storage,..crate::rendering_limits(adapter.limits())};
+        let (device,queue)=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits:limits,required_features:crate::rendering_features(&adapter),..Default::default()
+        })).unwrap();
+        assert_eq!(device.limits().max_compute_workgroup_storage_size,storage);
+        let renderer=crate::WgpuRasterizer::native_capture_on_gpu(adapter.clone(),device.into(),queue,Default::default()).unwrap();
+        let result=stats_using(&renderer.snapshot_gpu(),&doc,false).unwrap();
+        assert_eq!(result.pixels,u64::from(extent[0])*u64::from(extent[1]));
+        for channel in result.bins {assert_eq!(channel,expected,"storage limit {storage}");}
     }
 }
 

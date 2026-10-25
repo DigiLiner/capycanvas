@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }))?;
     let (device, _) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         required_features: wgpu::Features::FLOAT32_FILTERABLE,
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+        required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
         ..Default::default()
     }))?;
     eprintln!("{:?}", adapter.get_info());

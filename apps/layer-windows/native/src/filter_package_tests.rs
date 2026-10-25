@@ -266,7 +266,7 @@ fn d3d12_file_packages_update_catalog_without_rewriting_live_filters() {
     .unwrap();
     assert!(adapter.get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
     assert_eq!(adapter.get_info().backend, wgpu::Backend::Dx12);
-    let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+    let limits = layer_render_wgpu::rendering_limits(adapter.limits());
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("Windows runtime filter correctness"),
         required_features: adapter.features()

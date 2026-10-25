@@ -1074,6 +1074,17 @@ dependencies. Pipeline keys include blend mode and identity reference axes; para
 values and translations remain buffer data. Sampling prepares finite support
 once per pixel and keeps fractional-grid and reduced-edge reconstruction intact.
 
+Compute preparation admits workgroup storage from the validated entry point's
+statically used variables, including calls. Each variable's WGSL layout size is
+rounded separately to 16 bytes before comparison with the device limit. Unused
+entry points and variables consume none of that entry point's allowance;
+unresolved override-sized arrays cannot pass this check. Shared device limits
+request 16,384 workgroup bytes when the adapter supports them, retaining the
+16,352-byte minimum. Levels Auto uses its original 4,096-bin workgroup kernel
+when the actual device permits it. At the lower limit, 4,088 workgroup bins and
+eight counters per lane combine into the same 4,096-bin shards. External devices
+with lower requested limits use that portable recipe too.
+
 The composition frame, bake destination and temporary image edge do not limit
 source reads. Global filters request the finite retained input domain, subject to
 the same allocation allowance and GPU dimension checks. Output, current-pass

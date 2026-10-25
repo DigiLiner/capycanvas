@@ -1741,7 +1741,7 @@ impl Worker {
             ..Default::default()
         }))
         .map_err(error)?;
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        let limits = layer_render_wgpu::rendering_limits(adapter.limits());
         layer_host::admit_adapter(localization, &adapter, &limits)?;
         let caps = surface.get_capabilities(&adapter);
         let mut config = surface

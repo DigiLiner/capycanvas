@@ -426,7 +426,7 @@ impl App {
                     apply_limit_buckets: false,
                 }))
                 .map_err(|e| unsupported(&e.to_string()))?;
-            let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+            let limits = layer_render_wgpu::rendering_limits(adapter.limits());
             layer_host::admit_adapter(self.host.session.localization(), &adapter, &limits)?;
             let (device, queue, watch) =
                 pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {

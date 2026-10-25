@@ -1041,7 +1041,7 @@ mod tests {
         .unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: layer_render_wgpu::rendering_features(&adapter),
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
             ..Default::default()
         }))
         .unwrap();

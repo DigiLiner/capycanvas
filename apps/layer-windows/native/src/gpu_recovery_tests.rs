@@ -32,7 +32,7 @@ pub(crate) fn renderer() -> (Renderer, DeviceWatch) {
                 & (wgpu::Features::FLOAT32_FILTERABLE
                     | wgpu::Features::FLOAT32_BLENDABLE)
                     | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
             ..Default::default()
         }))
         .unwrap();

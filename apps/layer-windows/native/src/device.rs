@@ -46,7 +46,7 @@ mod tests {
         let adapter = request();
         assert_ne!(adapter.get_info().device_type, wgpu::DeviceType::Cpu);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
             ..Default::default()
         }))
         .unwrap();

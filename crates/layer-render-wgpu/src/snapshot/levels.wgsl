@@ -6,7 +6,6 @@ struct Area {size:vec2<u32>,space:u32,padding:u32,ranges:array<vec4<f32>,3>}
 var<workgroup> minima:array<vec3<u32>,64>;
 var<workgroup> maxima:array<vec3<u32>,64>;
 var<workgroup> totals:array<vec2<u32>,64>;
-var<workgroup> bins:array<atomic<u32>,4096>;
 fn ordered(value:f32)->u32 {let bits=bitcast<u32>(value);return select(bits^0x80000000u,~bits,(bits>>31u)!=0u);}
 fn logarithm(value:u32)->f32 {
     var mantissa=(value&0x7fffffu)|0x800000u;var exponent=i32(value>>23u)-127;
@@ -47,21 +46,6 @@ fn measure(@builtin(local_invocation_index) lane:u32,@builtin(workgroup_id) grou
         for(var c=0u;c<3u;c++) {atomicMin(&summary[c],minima[0][c]);atomicMax(&summary[c+3u],maxima[0][c]);}
         atomicAdd(&summary[6],totals[0].x);atomicOr(&summary[7],totals[0].y);
     }
-}
-@compute @workgroup_size(64)
-fn count(@builtin(local_invocation_index) lane:u32,@builtin(workgroup_id) group:vec3<u32>) {
-    for(var i=lane;i<4096u;i+=64u) {atomicStore(&bins[i],0u);}workgroupBarrier();
-    let channel=group.y;let range=area.ranges[channel];
-    for(var i=group.x*64u+lane;i<area.size.x*area.size.y;i+=1024u) {
-        let color=textureLoad(pixels,vec2<i32>(i32(i%area.size.x),i32(i/area.size.x)),0);
-        if (bitcast<u32>(color.a)&0x7f800000u)==0u {continue;}
-        let value=encoded(color[channel],color.a)/range.z;
-        var index=0u;
-        if range.y>range.x {index=u32(clamp(floor((value-range.x)/(range.y-range.x)*4096.),0.,4095.));}
-        atomicAdd(&bins[index],1u);
-    }
-    workgroupBarrier();
-    for(var i=lane;i<4096u;i+=64u) {let n=atomicLoad(&bins[i]);if n!=0u {atomicAdd(&shards[(group.x*3u+channel)*4096u+i],n);}}
 }
 @compute @workgroup_size(64)
 fn fold(@builtin(global_invocation_id) id:vec3<u32>) {

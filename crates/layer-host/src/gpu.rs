@@ -210,7 +210,7 @@ mod tests {
     fn adapters_short_of_canvas_limits_are_refused_with_a_plain_reason() {
         let gpu = WgpuRasterizer::new_native_headless(DocumentColor::default()).unwrap();
         let adapter = gpu.adapter();
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        let limits = layer_render_wgpu::rendering_limits(adapter.limits());
         assert_eq!(unsupported_adapter(adapter, &limits), None);
         let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits.clone() };
         let cause = unsupported_adapter(adapter, &beyond).unwrap();

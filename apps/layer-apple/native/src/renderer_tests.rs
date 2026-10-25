@@ -140,7 +140,7 @@ fn unsupported_metal_adapter_keeps_localized_explanation_and_native_cause_on_bot
     layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();
     let gpu = native_renderer();
     let adapter = gpu.adapter();
-    let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+    let limits = layer_render_wgpu::rendering_limits(adapter.limits());
     let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits.clone() };
     let cause = layer_host::unsupported_adapter(adapter, &beyond).unwrap();
     assert!(cause.contains("max_bind_groups"), "{cause}");

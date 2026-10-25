@@ -31,7 +31,7 @@ fn hdr_renderer(
                 | layer_render_wgpu::native_tiles::native_in_place_features(&adapter);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: features,
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            required_limits: layer_render_wgpu::rendering_limits(adapter.limits()),
             ..Default::default()
         }))
         .unwrap();

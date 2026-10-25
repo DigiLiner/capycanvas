@@ -1291,7 +1291,7 @@ async fn request_device(instance: &wgpu::Instance, surface: Option<&wgpu::Surfac
                 .await
                 .map_err(|error| gpu_error("adapter", error))?,
         };
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        let limits = layer_render_wgpu::rendering_limits(adapter.limits());
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("web canvas GPU"),

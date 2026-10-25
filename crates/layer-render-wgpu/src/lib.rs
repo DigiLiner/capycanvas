@@ -96,6 +96,7 @@ pub use startup::ShaderActivity;
 pub use startup::enqueue_compiler_failure;
 mod effect_validation;
 mod effects;
+mod shader_limits;
 mod gradient;
 mod flood;
 mod frame_timing;
@@ -342,6 +343,13 @@ pub struct GpuRasterMetrics {
 pub fn rendering_features(adapter: &wgpu::Adapter) -> wgpu::Features {
     adapter.features() & (wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
         | native_tiles::native_in_place_features(adapter)
+}
+
+pub fn rendering_limits(supported: wgpu::Limits) -> wgpu::Limits {
+    let full = supported.max_compute_workgroup_storage_size >= 16384;
+    let mut limits = wgpu::Limits::downlevel_defaults().using_resolution(supported);
+    if full { limits.max_compute_workgroup_storage_size = limits.max_compute_workgroup_storage_size.max(16384); }
+    limits
 }
 
 pub fn memory_hints() -> wgpu::MemoryHints {
@@ -1129,7 +1137,7 @@ impl WgpuRasterizer {
                     .map_err(|_| GpuRasterError::AdapterUnavailable)?,
             }
         };
-        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        let limits = rendering_limits(adapter.limits());
         let omitted = omitted | if std::env::var_os("CAPY_GPU_NO_FLOAT32_BLEND").is_some() { wgpu::Features::FLOAT32_BLENDABLE } else { wgpu::Features::empty() };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
