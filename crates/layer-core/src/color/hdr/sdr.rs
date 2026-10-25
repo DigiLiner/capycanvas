@@ -402,7 +402,7 @@ mod tests {
                 [y, y, y, 1.]
             })
             .collect();
-        for row in pixels.chunks_exact(96) {
+        for row in pixels.as_chunks::<96>().0 {
             builder.push(row).unwrap();
         }
         (builder.finish(|| false).unwrap(), pixels)

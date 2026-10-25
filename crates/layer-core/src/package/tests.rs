@@ -56,7 +56,7 @@ fn owned_ranges_share_bytes_and_retain_only_the_original_owner() {
     assert_eq!(nested.as_ptr(), pointer.wrapping_add(2));
     assert_eq!(nested.retained_bytes(), 5);
     assert!(range.slice(0..5).is_err());
-    assert!(ByteRange::new(bytes.clone(), 4..3).is_err());
+    assert!(ByteRange::new(bytes.clone(), std::ops::Range {start:4,end:3}).is_err());
     drop(bytes); drop(range);
     assert!(weak.upgrade().is_some());
     drop(nested);

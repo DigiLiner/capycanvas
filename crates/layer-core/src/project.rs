@@ -169,7 +169,7 @@ mod tests {
         }
         let document=Document::from_artwork(artwork).unwrap();
         let mut code=BTreeMap::new();
-        for source in main.into_iter().chain(lookup) {code.insert(source.as_ptr() as usize,source.len() as u64);}
+        for source in main.iter().chain(lookup) {code.insert(source.as_ptr() as usize,source.len() as u64);}
         let bytes=code.values().sum();
         document.admit(ProjectLimits {asset_bytes:bytes,..Default::default()}).unwrap();
         assert!(document.admit(ProjectLimits {asset_bytes:bytes-1,..Default::default()}).is_err());

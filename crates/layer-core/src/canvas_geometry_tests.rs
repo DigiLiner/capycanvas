@@ -665,9 +665,8 @@ fn paint_extent_plan_covers_the_canvas_and_preserves_hidden_material_and_masks()
             let mut doc = Document::new(PortableId::random(), 256, 128, crate::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
             let id = fixture::target(&doc,"Current ink");
             let mut data = raster(RasterPlane::Color, doc.composition().color, &[[0, 0], [3, 2]]).wait_data().unwrap().as_ref().clone();
-            for plane in [RasterPlane::WatercolorWetness] {
-                data.tiles.insert(TileKey { plane, coordinate: [3, 2] }, tile(plane, doc.composition().color, 17));
-            }
+            let plane = RasterPlane::WatercolorWetness;
+            data.tiles.insert(TileKey { plane, coordinate: [3, 2] }, tile(plane, doc.composition().color, 17));
             data.watercolor = Some(crate::raster::RasterWatercolor { wet_edge: 0.8, burnt_edge: 0.6, edge_width: 7. });
             fixture::paint_mut(&mut doc,"Current ink").raster = RasterRevision::backed(data);
             fixture::paint_mut(&mut doc,"Current ink").domain=[1024,768];
@@ -1042,7 +1041,8 @@ fn cmyk_source(extent: [u32; 2]) -> color::source::SourceImage {
 #[test]
 fn resampled_photos_fold_into_paint_unless_their_own_samples_can_keep_their_interpretation() {
     let resize = CanvasGeometry::resize([512, 256], [256, 128], Interpolation::Bicubic);
-    let cases: [(&str, fn(&mut Document)); 3] = [
+    type PhotoChange = fn(&mut Document);
+    let cases: [(&str, PhotoChange); 3] = [
         ("CMYK", |doc| fixture::paint_mut(doc, "Photo").base = Some(PaintBase::new(Arc::new(cmyk_source([300, 200])).into()))),
         ("working pixels", |doc| fixture::paint_mut(doc, "Photo").base.as_mut().unwrap().policy = PaintBasePolicy::WorkingPixels),
         ("grayscale layer", |doc| fixture::paint_mut(doc, "Photo").color_mode = color::LayerColorMode::Grayscale),

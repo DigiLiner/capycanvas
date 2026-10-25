@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(a.samples, b.samples);
         assert_eq!(a.peak, b.peak);
         let mut builder = LocalToneBuilder::new([32, 16], RgbSpace::Srgb).unwrap();
-        for row in pixels.chunks_exact(32) {
+        for row in pixels.as_chunks::<32>().0 {
             builder.push(row).unwrap();
         }
         assert!(builder.finish(|| true).unwrap_err().contains("cancelled"));
@@ -355,7 +355,7 @@ mod tests {
         assert!((coverage / expected - 1.).abs() < 1e-7);
         assert!(sample[0].abs() < 1e-5);
         assert!(actual.samples[1..].iter().all(|p| p[2] == 0.));
-        for pixel in &mut pixels { *pixel = [tiny; 4]; }
+        pixels.fill([tiny; 4]);
         let actual = guide([32768, 1], &pixels);
         for sample in actual.samples {
             let coverage = f64::from(sample[2]) * 2f64.powi(sample[3] as i32);

@@ -536,7 +536,7 @@ mod tests {
         let mut restored=reopen(&prepared(&original)).editor;assert_eq!(restored.document.working,original.document.working);
         restored.undo().unwrap();assert!(restored.document.working.selection.is_none());assert_eq!(restored.checkpoint(),initial);
         restored.redo().unwrap();assert_eq!(restored.document.working.selection,original.document.working.selection);
-        let next=prepared(&restored);assert!(next.resources.entries.len()>0);
+        let next=prepared(&restored);assert!(!next.resources.entries.is_empty());
     }
     #[test]
     fn unchanged_history_records_are_stored_once_and_interned_after_read() {

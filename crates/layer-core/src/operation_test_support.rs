@@ -113,8 +113,8 @@ pub fn activate(doc: &mut Document, name: &str) {
 }
 pub fn restored(before: &Document, after: &Document) {
     assert_eq!(
-        after.artwork.occurrences.iter().map(|(h, id, v)| (h, id, v)).collect::<Vec<_>>(),
-        before.artwork.occurrences.iter().map(|(h, id, v)| (h, id, v)).collect::<Vec<_>>()
+        after.artwork.occurrences.iter().collect::<Vec<_>>(),
+        before.artwork.occurrences.iter().collect::<Vec<_>>()
     );
     assert_eq!(after.scene().order(), before.scene().order());
     assert_eq!(after.working.occurrence, before.working.occurrence);

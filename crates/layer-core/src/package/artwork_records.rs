@@ -564,7 +564,7 @@ mod tests {
     fn object_data(art:&Artwork)->BTreeMap<PortableId,Value> {encode(art,&AtomicBool::new(false)).unwrap().0.into_iter().map(|record|(record["id"].as_str().unwrap().parse().unwrap(),record)).collect()}
     fn fixture()->Artwork {
         let mut art=Artwork::new([37,29]).unwrap();let color=art.compositions.get(art.root).unwrap().color;
-        let mut raster=RasterData::default();raster.watercolor=Some(RasterWatercolor {wet_edge:0.25,burnt_edge:0.3,edge_width:3.});
+        let mut raster=RasterData {watercolor:Some(RasterWatercolor {wet_edge:0.25,burnt_edge:0.3,edge_width:3.}),..Default::default()};
         for plane in [RasterPlane::Color,RasterPlane::WatercolorWetness] {
             let descriptor=plane.descriptor(color);let bytes=vec![73;descriptor.byte_len([TILE_SIZE;2]).unwrap()];
             raster.tiles.insert(TileKey {plane,coordinate:[0,0]},RasterTile::backed(crate::raster::TileBlob::encode(descriptor,&bytes).unwrap()));
@@ -616,7 +616,7 @@ mod tests {
             let mut row=vec![0;source.image.row_bytes()];source.image.rows().read(1,&mut row).unwrap();
             assert_eq!(u16::from_le_bytes(row[0..2].try_into().unwrap()),256);assert_eq!(u16::from_le_bytes(row[510..512].try_into().unwrap()),511);
             let mut row=vec![0;working.image.row_bytes()];working.image.rows().read(0,&mut row).unwrap();
-            let bits=row[..32].chunks_exact(4).map(|bytes|u32::from_le_bytes(bytes.try_into().unwrap())).collect::<Vec<_>>();
+            let bits=row[..32].as_chunks::<4>().0.iter().map(|bytes|u32::from_le_bytes(*bytes)).collect::<Vec<_>>();
             assert_eq!(bits,[1,0x80000000,0xbe800000,0,0x7f7fffff,0x40080000,0x3f000000,0x3f800000]);
         };
         verify(&artwork);let (manifest,backing)=captured(&artwork);verify(&reopen(&manifest,&backing).unwrap());

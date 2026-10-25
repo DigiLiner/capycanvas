@@ -381,11 +381,11 @@ mod tests {
         let catalog = disk_catalog();
         assert_eq!(catalog.filters().len(), 54);
         assert_eq!(catalog.filters(), bundled_effect_catalog().filters());
-        let mut shared = std::collections::HashMap::<crate::authored::Resource<str>,crate::authored::Resource<str>>::new();
+        let mut shared = std::collections::HashMap::<&str,crate::authored::Resource<str>>::new();
         for filter in catalog.filters() {
             for module in filter.program.wgsl.sources().unwrap() {
-                if let Some(existing) = shared.get(module) { assert!(Arc::ptr_eq(existing.storage(), module.storage())); assert_eq!(existing.id(), module.id()); }
-                else { shared.insert(module.clone(),module.clone()); }
+                if let Some(existing) = shared.get(module.as_ref()) { assert!(Arc::ptr_eq(existing.storage(), module.storage())); assert_eq!(existing.id(), module.id()); }
+                else { shared.insert(module.as_ref(),module.clone()); }
             }
             filter.preview().unwrap();
         }

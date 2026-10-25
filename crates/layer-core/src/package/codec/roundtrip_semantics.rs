@@ -376,7 +376,7 @@ fn native_sources_preserve_u16_profiles_hidden_rgb_and_shared_ownership() {
     let artwork = source_fixture();
     let document = Document::from_artwork(artwork.clone()).unwrap();
     let original = &artwork.paint.get(artwork.paint.resolve(identity(10)).unwrap()).unwrap().base.as_ref().unwrap().image;
-    assert!(document.snapshot().artwork.paint.get(artwork.paint.resolve(identity(10)).unwrap()).unwrap().base.as_ref().unwrap().image.same_owner(&original));
+    assert!(document.snapshot().artwork.paint.get(artwork.paint.resolve(identity(10)).unwrap()).unwrap().base.as_ref().unwrap().image.same_owner(original));
     let bytes = serialize(&prepare(&artwork, false));
     let loaded = editable(bytes.clone());
     let a = &loaded.paint.get(loaded.paint.resolve(identity(10)).unwrap()).unwrap().base.as_ref().unwrap().image;

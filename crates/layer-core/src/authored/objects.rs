@@ -622,7 +622,7 @@ mod tests {
         let tile_profile=Image::new(Arc::new(samples));
         for invalid in [image_tile,tile_profile] {
             let before=doc.clone();
-            assert!(Image::import_foreign(&[invalid.clone()]).is_err());
+            assert!(Image::import_foreign(std::slice::from_ref(&invalid)).is_err());
             assert!(doc.import_object_layers_edit(vec![("Invalid".into(),ImageObject::new(invalid))],None,0).is_err());
             assert_eq!(doc,before);
         }

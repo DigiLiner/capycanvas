@@ -1233,7 +1233,7 @@ mod tests {
         let prepared = capture(7);
         let generation = store.commit(&prepared, &AtomicBool::new(false)).unwrap();
         let permissions = fs::metadata(&path).unwrap().permissions();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o0)).unwrap();
         let failed = store.collect_garbage();
         fs::set_permissions(&path, permissions).unwrap();
         assert!(failed.is_err());

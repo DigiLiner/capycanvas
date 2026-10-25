@@ -207,7 +207,7 @@ mod tests {
                 let mut gradient=pair(space,alpha);gradient.interpolation=interpolation;
                 let actual=gradient.sample(0.5,space).unwrap().linear_in(space).unwrap();
                 assert_eq!(actual[3],((f64::from(alpha[0])+f64::from(alpha[1]))*0.5) as f32);
-                if alpha==[1.,0.]{for c in 0..3{assert!((actual[c]-gradient.stops[0].color.linear_in(space).unwrap()[c]).abs()<2e-6);}}
+                if alpha==[1.,0.]{for (c,&value) in actual.iter().enumerate().take(3){assert!((value-gradient.stops[0].color.linear_in(space).unwrap()[c]).abs()<2e-6);}}
                 if alpha==[0.,0.]{assert_eq!(actual,[0.;4]);}else{assert!(actual[..3].iter().any(|v|*v>0.));}
             }
         }}

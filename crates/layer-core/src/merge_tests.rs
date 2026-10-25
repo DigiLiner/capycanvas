@@ -14,10 +14,9 @@ fn merged(doc: &mut Document, kind: MergeKind) -> Edit {
     let plan = doc.merge_plan(kind).unwrap();
     let mut edits = plan.edits;
     for edit in &mut edits {
-        if let Edit::Paint(change) = edit {
-            if Some(SourceTarget::Paint(change.handle)) == Some(plan.target) {
-                Arc::make_mut(&mut change.value.as_mut().unwrap().operations).push(plan.operation.clone());
-            }
+        if let Edit::Paint(change) = edit
+            && Some(SourceTarget::Paint(change.handle)) == Some(plan.target) {
+            Arc::make_mut(&mut change.value.as_mut().unwrap().operations).push(plan.operation.clone());
         }
     }
     doc.apply(Edit::Batch(edits)).unwrap()
@@ -381,12 +380,10 @@ fn a_merge_that_undo_history_cannot_hold_is_refused_whole() {
     let plan = doc.merge_plan(MergeKind::Down).unwrap();
     let mut edits = plan.edits;
     for edit in &mut edits {
-        if let Edit::Paint(c) = edit {
-            if c.value.is_some() {
-                let p = c.value.as_mut().unwrap();
-                p.raster = raster::RasterRevision::pending();
-                Arc::make_mut(&mut p.operations).push(plan.operation.clone());
-            }
+        if let Edit::Paint(c) = edit
+            && let Some(p) = c.value.as_mut() {
+            p.raster = raster::RasterRevision::pending();
+            Arc::make_mut(&mut p.operations).push(plan.operation.clone());
         }
     }
     assert_eq!(

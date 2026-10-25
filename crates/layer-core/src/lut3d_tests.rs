@@ -228,7 +228,7 @@ fn resource_candidate_refuses_late_bad_payload_without_partial_mutation() {
     let mut document=resource_document();let distinct=Arc::new(constant([[0.;3],[1.;3]],[0.75;3]).unwrap());document.apply(application_edit(&document,0,EffectValue::Lut3d(Some(distinct)))).unwrap();
     let before=document.clone();let prepared=prepared(&document);let manifest:serde_json::Value=serde_json::from_slice(prepared.manifest()).unwrap();
     assert_eq!(manifest["resources"].as_array().unwrap().iter().filter(|r|r["type"]=="capy.lut3d/1").count(),2);
-    let bytes=archive(&document);let damaged=rewrite_archive(&bytes,|m| {let index=m["resources"].as_array().unwrap().iter().enumerate().filter(|(_,r)|r["type"]=="capy.lut3d/1").last().unwrap().0;m["resources"][index]["crc32"]="00000000".into();});
+    let bytes=archive(&document);let damaged=rewrite_archive(&bytes,|m| {let index=m["resources"].as_array().unwrap().iter().enumerate().rfind(|(_,r)|r["type"]=="capy.lut3d/1").unwrap().0;m["resources"][index]["crc32"]="00000000".into();});
     assert!(open_document(&damaged,Default::default()).is_err());assert_eq!(document,before);
 }
 

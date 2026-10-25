@@ -6,9 +6,8 @@ fn transformed_document(linked: bool) -> Document {
     p.base = Some(PaintBase::new(Arc::new(photo_source([24, 12])).into()));
     p.domain = [768, 512];
     let mut data = raster(RasterPlane::Color, color, &[[0, 0], [1, 0]]).wait_data().unwrap().as_ref().clone();
-    for plane in [RasterPlane::WatercolorWetness] {
-        data.tiles.insert(TileKey { plane, coordinate: [1, 0] }, tile(plane, color, 7));
-    }
+    let plane = RasterPlane::WatercolorWetness;
+    data.tiles.insert(TileKey { plane, coordinate: [1, 0] }, tile(plane, color, 7));
     fixture::paint_mut(&mut doc, "Ink").raster = RasterRevision::backed(data);
     fixture::occurrence_mut(&mut doc, "Ink").offset = [-40, 10];
     let h = fixture::add_mask(&mut doc, owner, [768, 512], [30, -25]);

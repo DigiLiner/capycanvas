@@ -525,7 +525,7 @@ mod tests {
         let free=f::id(&original,"Free");let base=f::id(&original,"Base");
         for hidden in [false,true] {
             for (target,position,owner) in [("Member",Above,"Member"),("Saved",Below,"Member"),("Member",Below,"Group"),("Group",Above,"Group"),("Fill",Below,"Base"),("Base",Above,"Base")] {
-                let mut doc=original.clone();let owner=f::id(&doc,owner);doc.artwork.occurrences.get_mut(owner).unwrap().visible=!hidden;
+                let mut doc=original.clone();let owner=f::id(&doc,owner);doc.artwork.occurrences.get_mut(owner).unwrap().visible= !hidden;
                 let before=doc.clone();let plan=doc.drop_occurrence_edit(free,f::id(&doc,target),position).unwrap();
                 let undo=doc.apply(plan.edit).unwrap();assert_eq!(doc.scene().effect_owner(free),Some(owner));
                 for name in ["Top","Member","Group","Fill"] {assert_eq!(doc.scene().clipping_base(f::id(&doc,name)),Some(base));}

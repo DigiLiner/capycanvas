@@ -161,7 +161,7 @@ mod tests {
         let per_word = if byte_coverage { 4 } else { 8 };
         let count = (extent[0].div_ceil(per_word) * extent[1]) as usize;
         let mut words = vec![if byte_coverage { 0xff804020 } else { 0x43210432 }; count];
-        if extent[0] % per_word != 0 {
+        if !extent[0].is_multiple_of(per_word) {
             let mask = (1u64 << ((extent[0] % per_word) * (32 / per_word))) - 1;
             for word in words.iter_mut().skip(extent[0].div_ceil(per_word) as usize - 1).step_by(extent[0].div_ceil(per_word) as usize) {
                 *word &= mask as u32;
@@ -248,7 +248,7 @@ mod tests {
         let selection = pixels([5, 1], true);
         let SelectionShape::Pixels(pixels) = selection.shape else { panic!() };
         let mut bytes = vec![0; SELECTION_CHUNK_BYTES];
-        for (word, dest) in pixels.words().iter().zip(bytes.chunks_exact_mut(4)) { dest.copy_from_slice(&word.to_le_bytes()); }
+        for (word, dest) in pixels.words().iter().zip(bytes.as_chunks_mut::<4>().0) { dest.copy_from_slice(&word.to_le_bytes()); }
         let mut literal = vec![0xf0];
         let mut length = bytes.len() - 15;
         while length >= 255 { literal.push(255); length -= 255; }

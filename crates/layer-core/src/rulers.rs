@@ -225,16 +225,16 @@ mod tests {
     #[test]
     fn constraints_are_local_stable_and_compose_with_affine_views() {
         let line = Ruler { id: identity(1), geometry: RulerGeometry::Straight { start: p(0., 10.), end: p(100., 10.) } };
-        assert!(choose_ruler(&[line], p(30., 40.), 12.).is_none());
-        let snap = choose_ruler(&[line], p(30., 14.), 12.).unwrap();
+        assert!(choose_ruler([line], p(30., 40.), 12.).is_none());
+        let snap = choose_ruler([line], p(30., 14.), 12.).unwrap();
         near(snap.project(p(200., 60.)), p(200., 10.));
         let parallel = Ruler { id: identity(2), geometry: RulerGeometry::Parallel { start: p(0., 0.), end: p(10., 10.) } };
-        let snap = choose_ruler(&[parallel, line], p(30., 40.), 12.).unwrap();
+        let snap = choose_ruler([parallel, line], p(30., 40.), 12.).unwrap();
         near(snap.project(p(40., 40.)), p(35., 45.));
-        let snap = choose_ruler(&[parallel, line], p(30., 14.), 12.).unwrap();
+        let snap = choose_ruler([parallel, line], p(30., 14.), 12.).unwrap();
         near(snap.project(p(40., 80.)), p(40., 10.));
         let radial = Ruler { id: identity(3), geometry: RulerGeometry::Radial { center: p(5., 5.) } };
-        let mut snap = choose_ruler(&[radial], p(5., 5.), 12.).unwrap();
+        let mut snap = choose_ruler([radial], p(5., 5.), 12.).unwrap();
         assert_eq!(snap.direction, None);
         snap.resolve(p(15., 15.));
         snap.resolve(p(0., 50.));

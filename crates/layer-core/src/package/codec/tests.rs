@@ -157,7 +157,7 @@ fn deflate_resources_decode_exact_samples_and_save_back_as_lz4() {
         assert!(paint.tiles.values().next().unwrap().wait_backing().unwrap().decode().unwrap()==samples);
         let image=&artwork.objects.iter().next().unwrap().2.image;
         let mut row=vec![0;image.row_bytes()];
-        for y in [0,137,199] {image.rows().read(y,&mut row).unwrap();assert!(row.chunks_exact(3).enumerate().all(|(x,p)|p==[x as u8,y as u8,(x as u32^y) as u8]));}
+        for y in [0,137,199] {image.rows().read(y,&mut row).unwrap();assert!(row.as_chunks::<3>().0.iter().enumerate().all(|(x,p)|*p==[x as u8,y as u8,(x as u32^y) as u8]));}
         let path=artwork.vectors.iter().next().unwrap().2.paths().next().unwrap().1;
         assert_eq!(path.geometry.subpaths()[0].anchors().map(|a|a.point()).collect::<Vec<_>>(),[[10.,20.],[150.,90.],[290.,180.]]);
         let EffectValue::Lut3d(Some(lut))=artwork.effects.iter().next().unwrap().2.values.iter().find(|v|matches!(v,EffectValue::Lut3d(_))).unwrap() else {panic!("lookup")};

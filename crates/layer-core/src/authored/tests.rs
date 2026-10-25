@@ -157,9 +157,10 @@ fn permanent_schema_fixtures_keep_structural_classification_and_visible_referenc
         (include_bytes!("../../tests/fixtures/capy/retained-future.json").as_slice(), false),
     ] {
         let value = crate::package::parse_json(bytes, 65536).unwrap();
-        let mut graph = GraphShape::default();
-        graph.outputs = value["outputs"].as_array().unwrap().iter().map(reference).collect();
-        graph.default_output = value.get("default_output").map(reference);
+        let mut graph = GraphShape {
+            outputs: value["outputs"].as_array().unwrap().iter().map(reference).collect(),
+            default_output: value.get("default_output").map(reference), ..Default::default()
+        };
         for object in value["objects"].as_array().unwrap() {
             let id: PortableId = object["id"].as_str().unwrap().parse().unwrap();
             let data = &object["data"];
