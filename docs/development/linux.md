@@ -1,6 +1,16 @@
 # Linux development
 
-[Developer guide](README.md) · [Platform integration](../platforms/README.md)
+[Developer guide](README.md)
+
+External photo import requires an enabled Landlock LSM (Linux 5.13 or newer),
+seccomp and `/proc`. Missing confinement refuses that import. The GTK package
+ships `capy-photo-reader` beside the application; `run.sh` builds it automatically.
+When copying a native test executable to private scratch, copy the helper beside
+it too. `cargo test -p layer-linux` builds the integration-test helper; a standalone
+`--lib` invocation needs `cargo build --locked -p layer-linux --bin capy-photo-reader`
+first, using the same profile. Run `cargo test --locked -p layer-linux --test
+photo_reader` for actual confined decoding, output validation and cancellation.
+ · [Platform integration](../platforms/README.md)
 
 Linux with Wayland is the primary development target. New editor features land
 here first, then move to Web and the native ports, as the

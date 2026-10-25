@@ -5,6 +5,14 @@ Capy Canvas's original code and non-brand assets are licensed under
 retains its own terms; our dual license does not relicense dependencies.
 The project-owned capybara mark is a separate exception under [BRANDING.md](BRANDING.md).
 
+## Linux decoder confinement
+
+The unmodified crates.io `landlock` 0.4.7, `enumflags2` 0.7.12 and
+`enumflags2_derive` 0.7.12 use MIT OR Apache-2.0. The unmodified `seccompiler`
+0.5.0 uses Apache-2.0 OR BSD-3-Clause. Their original license texts and notices
+are included in the generated native dependency notices; their code is not
+vendored into this repository.
+
 ## Rust JPEG codec — MIT OR Apache-2.0
 
 `libjpeg-turbo-rs` 0.8.0, Copyright (c) 2025 Yonghye Kwon, retains its original

@@ -233,6 +233,24 @@ cost and input-to-display latency on the target device.
 
 Shared document compression and photo codecs use Rust implementations, including
 the explicitly selected Rust deflate backend. ICC transforms use Rust too.
+Linux external photo imports run in a one-shot `capy-photo-reader` process.
+Open, Place, Paste and paper import use the same shared import policy with that
+transport. The helper receives a read-only anonymous input file, bounded output
+and diagnostic handles, no inherited environment or other file descriptors.
+It requests termination if its parent dies and checks the startup parent race.
+Before decoding it enforces Landlock filesystem denial and an architecture-checked
+seccomp syscall allowlist. Missing confinement fails the import without an
+unconfined retry. It cannot open files, connect to the network, create processes,
+execute programs, access a display or use the GPU.
+The parent retains the existing two-decoder admission and reserves the child's
+assigned memory while it runs. The assignment starts at half the image pool and
+shrinks under existing ownership; source and codec limits fit that assignment.
+The child bounds additional virtual memory, CPU time and diagnostic output;
+the parent bounds the child/output phase to 120 seconds, kills and reaps
+canceled children, and spools bounded output. It validates the returned package through the existing
+foreign-package reader, extracts only the photo samples and metadata, and applies
+shared photo policy again. App-owned stores, generated caches and bundled assets
+keep their local readers. Other native hosts retain their local photo decoder.
 Native workspace storage builds its bundled SQLite; it does not require system
 SQLite development packages. Apple builds link the SQLite that ships with macOS
 and iPadOS instead, so its file-system checks stay inside Apple's library. Toolkit dependencies belong to the Linux client,

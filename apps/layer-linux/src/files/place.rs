@@ -5,7 +5,6 @@ use super::reader::cancellable_file;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use std::{
-    io::BufReader,
     path::PathBuf,
     rc::Rc,
     sync::{
@@ -240,7 +239,7 @@ fn read_sources(
             path.file_stem().unwrap_or_default().to_string_lossy().into_owned()
         };
         let reader = cancellable_file(&path, cancelled.clone()).map_err(|e| e.to_string())?;
-        images.read(BufReader::new(reader), &name, &cancelled)
+        images.read_with_decoder(reader,&name,&cancelled,crate::photo_reader::read)
             .map_err(|e| format!("{name}: {e}. No images were imported."))?;
     }
     if cancelled.load(Ordering::Acquire) { return Err("Image import cancelled".into()); }

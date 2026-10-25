@@ -3,7 +3,7 @@ use super::reader::cancellable_file;
 use adw::prelude::*;
 use gtk::{gio, glib};
 use layer_ui::paper_library::{PaperLibraryError, PaperRequest};
-use std::{io::BufReader, path::PathBuf, rc::Rc, sync::{Arc, atomic::AtomicBool}};
+use std::{ path::PathBuf, rc::Rc, sync::{Arc, atomic::AtomicBool}};
 
 fn directory(w: &Workspace) -> Result<PathBuf, String> {
     crate::storage::papers().map(PathBuf::from).ok_or_else(|| w.localization().text(layer_ui::MessageId::DOCUMENTS_ERROR_CANVAS_UNAVAILABLE).to_string())
@@ -50,7 +50,7 @@ fn import(directory: PathBuf, path: PathBuf) -> Result<(String, layer_core::colo
     let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
     let mut images = layer_ui::ImageImportBatch::new(Default::default(), layer_core::color::RgbSpace::ProPhoto, Default::default());
     let reader = cancellable_file(&path, cancelled.clone()).map_err(|e| e.to_string())?;
-    images.read(BufReader::new(reader), &name, &cancelled).map_err(|e| format!("{name}: {e}"))?;
+    images.read_with_decoder(reader,&name,&cancelled,crate::photo_reader::read).map_err(|e| format!("{name}: {e}"))?;
     let (_, source) = images.take_sources(false)?.into_iter().next().ok_or_else(|| "No image to import".to_string())?;
     layer_host::papers::import(&directory, &source, &name, &|| false)
 }

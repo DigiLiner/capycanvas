@@ -332,6 +332,10 @@ fn native_new_presets_and_profiled_photo_master() {
     }));
     w.window.present();
     ready(&w);
+    let startup=Workspace::new(&app);
+    startup.window.present();ready(&startup);
+    let startup_size=ui_session(&startup).engine().document().composition().size;
+    startup.window.destroy();w.window.present();ready(&w);
     let action = |action| super::new_drawing_review::new_drawing_action(&w, action);
     super::new_drawing_review::open_new_drawing(&w);
     for edit in [NewDrawingAction::Space { space: RgbSpace::DisplayP3 }, NewDrawingAction::Unit { unit: LengthUnit::Px },
@@ -363,7 +367,7 @@ fn native_new_presets_and_profiled_photo_master() {
     let fresh = Workspace::new(&app);
     fresh.window.present();
     ready(&fresh);
-    assert_eq!(ui_session(&fresh).engine().document().composition().size, [3508, 2480]);
+    assert_eq!(ui_session(&fresh).engine().document().composition().size,startup_size);
     native_pen_path(&fresh, &[[80., 120.], [130., 120.], [180., 120.]]);
     ready(&fresh);
     assert!(!paint_at(ui_session(&fresh).engine().document(), 0).raster.wait_data().unwrap().tiles.is_empty());

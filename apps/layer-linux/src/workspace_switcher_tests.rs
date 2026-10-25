@@ -1220,7 +1220,7 @@ fn native_workspace_rename_pin_capture() {
         std::fs::write(input.dir.join(format!("rename-pin-held-{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"view":w.workspaces.view(),"retained_pin":retained,"retained_ancestors":retained_ancestors,"pressed_path":describe(path(pressed.clone().upcast())),"current_path":describe(path(current.clone().upcast())),"revision_before":revision})).unwrap()).unwrap();
         capture_reference(&w, input.dir.join(format!("rename-pin-held-{name}.png")).to_str().unwrap(), 1.);
         input.perform(serde_json::json!([{"point":point},{"down":false}]));
-        if retained && retained_ancestors { until(|| w.workspaces.view().switcher_revision >= revision + 1 && !w.workspaces.view().switcher_busy, "retained pin release saves toggle"); }
+        if retained && retained_ancestors { until(|| w.workspaces.view().switcher_revision > revision && !w.workspaces.view().switcher_busy, "retained pin release saves toggle"); }
         std::fs::write(input.dir.join(format!("rename-pin-release-{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"view":w.workspaces.view(),"selected_before":selected,"selected_after":pin().is_active(),"revision_before":revision})).unwrap()).unwrap();
         assert!(retained && retained_ancestors, "{name}: inline name save must retain the pressed pin and every ancestor until release");
         assert_eq!(w.workspaces.view().switcher_revision, revision + 1, "one release produces one pin edit");

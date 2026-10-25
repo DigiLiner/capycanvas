@@ -198,7 +198,15 @@ pub fn read_import(
     photo_limits: layer_color::photo::DecodeLimits,
     cancelled: &AtomicBool,
 ) -> Result<ImportOutcome, String> {
-    read_import_input(ImportInput {reader:input,backing:None},intent,policy,names,project_limits,photo_limits,cancelled)
+    read_import_with_decoder(input,intent,policy,names,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
+}
+#[expect(clippy::too_many_arguments,reason="The decoder supplies transport while import policy stays shared")]
+pub fn read_import_with_decoder<R:Read+Seek>(
+    input:R,intent:ImportIntent,policy:PhotoOpenPolicy,names:DocumentNames,project_limits:ProjectLimits,
+    photo_limits:layer_color::photo::DecodeLimits,cancelled:&AtomicBool,
+    decode:impl FnOnce(BufReader<R>,layer_color::photo::DecodeLimits,&AtomicBool)->Result<layer_color::photo::DecodedPhoto,String>,
+)->Result<ImportOutcome,String> {
+    read_import_input(ImportInput {reader:input,backing:None},intent,policy,names,project_limits,photo_limits,cancelled,decode)
 }
 pub fn read_import_backing(
     backing: layer_core::package::ImmutableBacking,
@@ -210,17 +218,19 @@ pub fn read_import_backing(
     cancelled: &AtomicBool,
 ) -> Result<ImportOutcome, String> {
     let reader=layer_core::package::transport::BackingReader::new(&backing,cancelled);
-    read_import_input(ImportInput {reader,backing:Some(backing.clone())},intent,policy,names,project_limits,photo_limits,cancelled)
+    read_import_input(ImportInput {reader,backing:Some(backing.clone())},intent,policy,names,project_limits,photo_limits,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
 }
 struct ImportInput<R> {reader:R,backing:Option<layer_core::package::ImmutableBacking>}
-fn read_import_input(
-    input: ImportInput<impl Read+Seek>,
+#[expect(clippy::too_many_arguments,reason="The decoder supplies transport while import policy stays shared")]
+fn read_import_input<R:Read+Seek>(
+    input:ImportInput<R>,
     intent: ImportIntent,
     policy: PhotoOpenPolicy,
     mut names: DocumentNames,
     project_limits: ProjectLimits,
     photo_limits: layer_color::photo::DecodeLimits,
-    cancelled: &AtomicBool,
+    cancelled:&AtomicBool,
+    decode:impl FnOnce(BufReader<R>,layer_color::photo::DecodeLimits,&AtomicBool)->Result<layer_color::photo::DecodedPhoto,String>,
 ) -> Result<ImportOutcome, String> {
     if cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Image import cancelled".into());
@@ -255,11 +265,7 @@ fn read_import_input(
             }
         },
         ImportSource::Photo => {
-            let photo = layer_color::photo::read_photo_detailed_with_cancel(
-                reader,
-                photo_limits,
-                cancelled,
-            )?;
+            let photo=decode(reader,photo_limits,cancelled)?;
             let stem = names.paint.rsplit_once('.').map_or(names.paint.as_ref(), |(stem, _)| stem);
             names.paint = photo.display_name(stem).into();
             policy.photo_project(photo.source, photo.metadata, names)?
@@ -357,17 +363,15 @@ impl ImageImportBatch {
         }
         result
     }
-    pub fn read(
-        &mut self,
-        input: impl Read + Seek,
-        name: &str,
-        cancelled: &AtomicBool,
-    ) -> Result<(), String> {
-        let result = self.read_candidate(input, name, cancelled);
-        if result.is_err() {
-            self.invalidate();
-        }
-        result
+    pub fn read(&mut self,input:impl Read+Seek,name:&str,cancelled:&AtomicBool)->Result<(),String> {
+        self.read_with_decoder(input,name,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
+    }
+    pub fn read_with_decoder<R:Read+Seek>(
+        &mut self,input:R,name:&str,cancelled:&AtomicBool,
+        decode:impl FnOnce(BufReader<R>,layer_color::photo::DecodeLimits,&AtomicBool)->Result<layer_color::photo::DecodedPhoto,String>,
+    )->Result<(),String> {
+        let result=self.read_candidate_using(input,name,cancelled,decode);
+        if result.is_err() {self.invalidate();}result
     }
     pub fn read_candidate(
         &mut self,
@@ -375,11 +379,15 @@ impl ImageImportBatch {
         name: &str,
         cancelled: &AtomicBool,
     ) -> Result<(), String> {
+        self.read_candidate_using(input,name,cancelled,layer_color::photo::read_photo_detailed_with_cancel)
+    }
+    fn read_candidate_using<R:Read+Seek>(
+        &mut self,input:R,name:&str,cancelled:&AtomicBool,
+        decode:impl FnOnce(BufReader<R>,layer_color::photo::DecodeLimits,&AtomicBool)->Result<layer_color::photo::DecodedPhoto,String>,
+    )->Result<(),String> {
         if cancelled.load(std::sync::atomic::Ordering::Acquire) { self.invalidate(); return Err("Image import cancelled".into()); }
         self.check(false)?;
-        let photo = layer_color::photo::read_photo_detailed_with_cancel(
-            BufReader::new(input), self.limits, cancelled,
-        ).inspect_err(|_| {
+        let photo=decode(BufReader::new(input),self.limits,cancelled).inspect_err(|_| {
             if cancelled.load(std::sync::atomic::Ordering::Acquire) { self.invalidate(); }
         })?;
         self.append(photo.display_name(name), photo.source, cancelled.load(std::sync::atomic::Ordering::Acquire))
@@ -483,6 +491,18 @@ mod tests {
             ImportOutcome::Editable(document) => Ok(document),
             ImportOutcome::Package(outcome) => Err(format!("Expected editable artwork: {outcome:?}")),
         }
+    }
+
+    #[test]
+    fn native_packages_bypass_the_external_photo_decoder() {
+        let names=DocumentNames {paint:"Local".into(),paper:"Paper".into()};
+        let document=PhotoOpenPolicy::default().photo_project(source(),Default::default(),names.clone()).unwrap();
+        let result=read_import_with_decoder(std::io::Cursor::new(native_bytes(&document)),ImportIntent::Open,
+            Default::default(),names,Default::default(),Default::default(),&AtomicBool::new(false),
+            |_,_,_|Err("A native package reached the photo decoder".into())).unwrap();
+        let ImportOutcome::Editable(imported)=result else {panic!("Editable native package");};
+        assert_eq!(imported.source,ImportSource::Master);
+        assert_eq!(photo_source(&imported.project),photo_source(&document));
     }
 
     #[test]

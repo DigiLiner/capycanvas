@@ -58,7 +58,10 @@ enter storage. Stored component graphs retain their size, reference hash, depth
 and schema checks. Browser snapshot serialization remains bounded; schema
 inspection preserves newer versions before allowing a reset. Imported ICC and
 effect source bytes remain untrusted when interpreted, even after storage in an
-app-owned container.
+app-owned container. Linux external photo decoding uses the isolated helper
+described in the [architecture](../architecture.md#files-and-other-host-services);
+its temporary input, output and diagnostics are anonymous files in the existing
+temp folder. Managed paper reloads continue to use their local PNG reader.
 
 Shader pipelines remain in process and in the driver's own caches. The app does
 not load or save opaque driver pipeline-cache blobs from its storage folders.

@@ -4951,3 +4951,29 @@ Raw samples, source hashes, logs and inspected captures are under
 
 The [architecture](../architecture.md) defines the worker and queue bounds.
 Warm canvas motion keeps its existing preparation and GPU paths.
+
+## Linux photo-helper import diagnostic
+
+Measured 2026-10-25 on AMD Ryzen Threadripper PRO 9995WX, x86_64 Linux,
+using the debug photo-reader integration executable SHA-256
+`917623fe4812f57a2831904502fdf155b373713bae2ecb9b85fe95ba95f536fd`
+and helper `91575493f2dc6172b93031e559075b91c2901d858bba66c925d8516a03f69f56`.
+Two fresh processes decoded the generated solid-color progressive JPEG
+8192 × 7324 (59,998,208 pixels), fixture SHA-256
+`15fe621b13d9c05acb83c7c87f3c80907a67dee64728123df6d77fd1b8b42bfb`.
+Both used 768 MiB codec and 64 MiB source limits and returned identical complete
+row hashes and metadata.
+
+| Current decode path | Time until decoded photo is returned | Parent peak RSS, KiB | Child peak RSS, KiB |
+| --- | --- | --- | --- |
+| Local reader | 5.153 s | 539,268 | — |
+| Isolated helper and validated package adoption | 5.501 s | 27,804 | 539,244 |
+
+These are single debug runs on a shared desktop, not reference-tier, release-speed
+or frame-rate measurements. Separate RSS maxima are sampled after row hashing
+and cannot be added into a simultaneous aggregate. The measured import difference
+is 0.348 s; warm canvas motion does not enter this transport. Reproduce with the
+`photo_reader` integration executable's `--measure-direct PATH` and
+`--measure-isolated PATH` modes under private disk-backed `TMPDIR`.
+Raw commands, source hashes and limits are retained under
+`artifacts/input-safety-next/m4-linux-photo-reader-verification.txt`.

@@ -37,10 +37,12 @@ const records = execFileSync("cargo", ["build", "--locked", "--release", "-p", "
   env: { ...process.env, CARGO_ENCODED_RUSTFLAGS: flags.join("\x1f") },
 }).trim().split("\n").map(line => JSON.parse(line));
 const binary = records.find(r => r.reason === "compiler-artifact" && r.target.name === "layer-linux" && r.executable)?.executable;
+const decoder = records.find(r => r.reason === "compiler-artifact" && r.target.name === "capy-photo-reader" && r.executable)?.executable;
 const generated = records.find(r => r.reason === "build-script-executed" && r.package_id.includes("/layer-linux#"))?.out_dir;
-if (!binary || !generated) throw new Error("Cargo did not report the native binary and icon");
+if (!binary || !decoder || !generated) throw new Error("Cargo did not report the native binary and icon");
 const files = [
   [binary, "bin/capycanvas"],
+  [decoder, "bin/capy-photo-reader"],
   [join(app, "art.capycanvas.CapyCanvas.desktop"), "share/applications/art.capycanvas.CapyCanvas.desktop"],
   [join(app, "art.capycanvas.CapyCanvas.xml"), "share/mime/packages/art.capycanvas.CapyCanvas.xml"],
   [join(app, "art.capycanvas.CapyCanvas.metainfo.xml"), "share/metainfo/art.capycanvas.CapyCanvas.metainfo.xml"],
@@ -62,7 +64,7 @@ const rustNotices = [
 ].find(existsSync);
 if (!rustNotices) throw new Error(`Rust toolchain copyright notice not found under ${sysroot}`);
 cpSync(rustNotices, join(docs, "rust-toolchain-notices.html"));
-execFileSync("strip", ["--strip-debug", join(output, "bin/capycanvas")]);
+for (const name of ["capycanvas", "capy-photo-reader"]) execFileSync("strip", ["--strip-debug", join(output, "bin", name)]);
 writeFileSync(join(output, "share/doc/capycanvas-gtk/manifest.json"), JSON.stringify(gtkRuntime, null, 2) + "\n");
 execFileSync("desktop-file-validate", [join(output, "share/applications/art.capycanvas.CapyCanvas.desktop")]);
 writeFileSync(marker, "Generated Capy Canvas native package\n");

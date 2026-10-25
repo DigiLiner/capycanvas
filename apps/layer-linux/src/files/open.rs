@@ -194,8 +194,8 @@ pub(crate) fn read(
 ) -> Result<(layer_ui::ImportOutcome, Option<DocumentLocation>), String> {
     let file = super::reader::cancellable_file(path, cancelled.clone())
         .map_err(|e| e.to_string())?;
-    let imported = layer_ui::read_import(file, layer_ui::ImportIntent::Open, policy,
-        names, Default::default(), Default::default(), &cancelled)?;
+    let imported = layer_ui::read_import_with_decoder(file, layer_ui::ImportIntent::Open, policy,
+        names, Default::default(), Default::default(), &cancelled,crate::photo_reader::read)?;
     let location = match &imported {
         layer_ui::ImportOutcome::Editable(imported) => imported.source.adoption_location(Some(location)),
         layer_ui::ImportOutcome::Package(_) => None,

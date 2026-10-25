@@ -14,6 +14,7 @@ mod effects;
 mod curve_editor;
 mod pressure_calibration;
 mod files;
+mod photo_reader;
 mod glass;
 mod histogram;
 mod color_editor;
