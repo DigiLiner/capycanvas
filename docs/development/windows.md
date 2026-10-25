@@ -725,7 +725,8 @@ D3D12-specific fixtures construct an instance with `Backends::DX12`; a generic
 CPU adapters but does not force every ordinary test onto WARP.
 
 The `software-adapter-tests` feature gives GPU readbacks and their raster
-consumers one shared 60-second budget; normal hardware builds retain 30 seconds.
+consumers one shared 180-second budget, because WARP's first Levels Auto
+statistics dispatch takes about two minutes; normal hardware builds retain 30 seconds.
 The large-canvas fixture keeps its 60-second overall deadline and exact pose and
 pixel checks. Hardware qualification uses normal builds.
 
@@ -967,7 +968,12 @@ presents the shared action row (sampling menu, Auto, targeted adjustment), the
 Color Lookup selector and Import LUT, whose `.cube` file is read and parsed on the
 document worker. `exercise-scopes.ps1 -Executable <path> -Theme dark` walks the
 Photo scopes, Levels, Curves and Color Lookup with mouse, pen and touch; the VM
-fixture names are `scopes` and `scopes:light`. Scope, filter, layer, document,
+fixture names are `scopes` and `scopes:light`. It waits for Photo's first
+Histogram counts before using the canvas, because the render worker answers menus
+and commands only between GPU frames and those counts are the first GPU job
+Photo starts; on the software adapter that job sometimes never completes, and the
+fixture then fails before Fit. Auto waits up to three minutes on the software
+adapter and reports the shared notice when Auto fails. Scope, filter, layer, document,
 paper and gradient previews use
 `BitmapUpload`: one active upload, one latest pending request and two reusable
 software bitmaps per context. Workers copy pixels and convert straight RGBA to

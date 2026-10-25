@@ -4,7 +4,7 @@ use layer_core::color::SampleDepth;
 
 #[test]
 fn raster_capture_waits_share_the_selected_gpu_budget() {
-    let expected = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 60 } else { 30 });
+    let expected = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 180 } else { 30 });
     assert_eq!(layer_core::raster::CAPTURE_TIMEOUT, expected);
     assert_eq!(READBACK_TIMEOUT, expected);
 }

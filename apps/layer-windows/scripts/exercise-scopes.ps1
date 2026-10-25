@@ -257,6 +257,7 @@ try{
     if(!$group -or $group.panels -notcontains 'waveform' -or $group.active -ne 'histogram'){throw 'Photo did not open Histogram with Waveform in the adjacent tab'}
     $null=Control 'histogram-source' -Arranged
     $checks.photo_layout='passed'
+    Wait-Until {$null -ne (View 'histogram').data} 'Photo did not publish Histogram counts before Fit' 60
 
     $fitRevision=(Model).state.camera.revision
     Fit-Canvas
@@ -292,9 +293,9 @@ try{
     Tap-Id 'histogram-log' 'pen';Wait-Until {(View 'histogram').logarithmic} 'Pen did not enable Log counts'
     Tap-Id 'histogram-log' 'touch';Wait-Until {!(View 'histogram').logarithmic} 'Touch did not disable Log counts'
     if((Control 'histogram-log').Current.Name -ne (View 'histogram').labels[0]){throw 'Log counts does not use the shared label'}
-    foreach($pass in @(@('histogram-shadows','shadows','touch'),@('histogram-highlights','highlights','mouse'))){
     $dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     if([Math]::Abs((Native-Bounds 'histogram-log' $dpi).Height/$dpi-26) -gt 1){throw 'Log counts is not the 26-pixel panel control height'}
+    foreach($pass in @(@('histogram-shadows','shadows','touch'),@('histogram-highlights','highlights','mouse'))){
         Tap-Id $pass[0] $pass[2];Wait-Until {(View 'histogram').($pass[1])} "$($pass[1]) did not turn on"
         Tap-Id $pass[0] 'pen';Wait-Until {!(View 'histogram').($pass[1])} "$($pass[1]) did not turn off"
     }
@@ -326,7 +327,9 @@ try{
     Wait-Until {(Chart-Shades 'tonal-chart') -gt 3} 'Levels did not draw its input statistics'
     $before=Properties-Json
     Tap-Id 'property-action-auto_levels' 'mouse'
-    Wait-Until {(Properties-Json) -ne $before} 'Auto did not adjust Levels'
+    $notice=@{text=$null}
+    Wait-Until {$text=(Model).state.notice.text;if($text){$notice.text=$text};(Properties-Json) -ne $before -or $notice.text} 'Auto did not finish' 60
+    if((Properties-Json) -eq $before){throw "Auto finished without adjusting Levels: $($notice.text)"}
     Undo-To $before 'Auto'
     $pixels=Canvas-Hash
     foreach($device in @('mouse','touch','pen')){

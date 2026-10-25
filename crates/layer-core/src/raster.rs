@@ -37,7 +37,7 @@ pub fn page_count(bounds: crate::Rect, extent: [u32; 2]) -> u64 {
     };
     span(bounds.min.x, bounds.max.x, extent[0]) * span(bounds.min.y, bounds.max.y, extent[1])
 }
-pub const CAPTURE_TIMEOUT: Duration = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 60 } else { 30 });
+pub const CAPTURE_TIMEOUT: Duration = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 180 } else { 30 });
 static NEXT_PUBLICATION: AtomicU64 = AtomicU64::new(1);
 static NEXT_TILE_OWNER: AtomicU64 = AtomicU64::new(1);
 fn next_tile_owner() -> u64 {
