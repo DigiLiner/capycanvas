@@ -1891,6 +1891,12 @@ fn filling_outside_paths_names_the_new_paint_layer_and_leads_back() {
     press(&mut s, 20, &[outside, outside]);
     let filled = s.engine.document().working.occurrence.unwrap();
     assert!(s.engine.document().scene().paint_source(filled).is_some());
+    assert_eq!(s.state.notice, None, "the notice waits for the fill to land");
+    let request = s.renderer_mut().region_requests.last().unwrap().clone();
+    let pixels = Arc::new(layer_core::SelectionPixels::bytes([8, 1], [0, 0, 8, 1], vec![0xffffffff; 2]).unwrap());
+    s.renderer_mut().region_reply = Some(layer_render::RegionResult { tonal_sample: None, placement: layer_core::Affine::IDENTITY, request_id: request.request_id, pixels });
+    s.frame(6_000_000_000, 6_000_000_000).unwrap();
+    s.frame(6_016_000_000, 6_016_000_000).unwrap();
     let notice = s.state.notice.clone().expect("the fill says where it went");
     let name = s.engine.document().scene().occurrence(vector).unwrap().name.to_string();
     let mut args = FluentArgs::new(); args.set("layer", name.as_str());

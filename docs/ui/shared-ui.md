@@ -375,7 +375,7 @@ items (`HeaderItemView`) carry the same `disabled_reason` while they are
 disabled, so a dimmed tool says why in a few words. A tool row can also be
 `enabled` with a `disabled_reason`: it cannot act on the edited layer but stays
 choosable, and hosts draw it dimmed. On a vector layer a brush that cannot draw
-paths says "Works on paint layers, not vector layers", and a pen that one of its
+paths says "Doesn’t work on vector layers", and a pen that one of its
 settings stops names that setting; choosing either shows the refusal notice at
 once. GTK shows the reason as the tooltip and dims a choosable row's contents as
 it dims a disabled flat button, keeping its selection highlight.
@@ -393,8 +393,8 @@ published under `regions::HOST`:
   layer below the active layer;
 - choosing a brush or tool that cannot act on the edited vector or image layer,
   before any stroke ([vector layers](vector-layers.md#drawing));
-- Fill outside a vector layer's paths, which fills a new paint layer below and
-  offers **Back to *layer***.
+- Fill outside a vector layer's paths, once the fill has landed on the new layer
+  below; the notice offers **Back to *layer***.
 
 The core writes the text and the action's label, and keeps the action. Every
 notice has a new `id`, so a repeated refusal shows again.

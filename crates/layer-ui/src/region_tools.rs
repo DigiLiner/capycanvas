@@ -15,6 +15,7 @@ pub(super) struct RegionTools {
     queued: Option<RegionRequest>,
     pending: bool,
     target: Option<Target>,
+    filled_below: Option<OccurrenceHandle>,
 }
 struct Target {
     generation: u64,
@@ -49,6 +50,7 @@ impl Default for RegionTools {
             queued: None,
             pending: false,
             target: None,
+            filled_below: None,
         }
     }
 }
@@ -200,7 +202,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !self.engine.backend().region_fits(doc.composition().size) { return Err(self.localization().text(MessageId::DOCUMENTS_TOO_LARGE_MEMORY).to_string()); }
         self.new_paint_layer_under()?;
         self.request_region_at(point, None, Some(source));
-        self.notify_filled_below(layer);
+        self.region_tools.filled_below = Some(layer);
         Ok(())
     }
     fn region_source(&mut self, source: RegionSource, from: Option<layer_render::RegionSource>, source_target: Option<SourceTarget>) -> Option<layer_render::RegionSource> {
@@ -374,17 +376,21 @@ impl<R: CanvasRenderer> UiSession<R> {
                         };
                     }
                     Purpose::Region { operation, .. } if operation.is_some() && result.pixels.bounds() == [0; 4] => {
+                        self.region_tools.filled_below = None;
                         return Ok(0);
                     }
                     Purpose::Region { operation, color, basis } => {
                         let selection = Selection::pixels(result.pixels).transformed(basis).map_err(error)?;
                         if let Some(operation) = operation {
                             self.paint_operation(Some(selection), operation, color.as_slice())?;
+                            if let Some(vector) = self.region_tools.filled_below.take() { self.notify_filled_below(vector); }
                         } else {
                             self.set_mask_coverage(layer_core::SelectionTarget::Current,selection)?;
                         }
                     }
                 }
+            } else {
+                self.region_tools.filled_below = None;
             }
         }
         if !self.region_tools.pending
