@@ -380,10 +380,7 @@ mod selection_refine_checks {
                 ToolOption::Action { state, .. } => Some(state.id),
                 _ => None,
             }).collect();
-            assert_eq!(commands, [
-                CommandId::TransformSnapping, CommandId::TransformFlipHorizontal, CommandId::TransformFlipVertical, CommandId::TransformRotateLeft,
-                CommandId::TransformRotateRight, CommandId::ResetTransform, CommandId::CancelTransform, CommandId::ApplyTransform,
-            ]);
+            assert_eq!(commands, [CommandId::TransformFlipHorizontal, CommandId::TransformSnapping, CommandId::CancelTransform, CommandId::ApplyTransform]);
             for command in [CommandId::TransformDistort, CommandId::TransformWarp] {
                 assert_eq!(s.command_disabled_reason(command).as_deref(), Some(s.localization().text(operation::OUTLINE_AFFINE).as_ref()));
             }

@@ -93,8 +93,8 @@ fn crop_starts_at_the_canvas_with_its_bar_and_blocks_other_edits() {
         ("Reset crop", "Reset".into()),
     ]);
     assert_eq!(bar_items(&bar.completion), [
-        (CommandId::CancelTransform, "Cancel", false),
-        (CommandId::ApplyTransform, "Apply", false),
+        (CommandId::CancelTransform, "", false),
+        (CommandId::ApplyTransform, "", false),
     ]);
     assert_eq!(s.command(CommandId::ApplyTransform).label.as_ref(), "Apply crop");
     let actions: Vec<_> = s.state.tool_actions.iter().map(|a| a.command).collect();

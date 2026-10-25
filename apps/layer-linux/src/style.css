@@ -136,6 +136,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .canvas-action-bar { padding: 6px; }
 .canvas-action-bar button { min-height: 40px; padding: 0 12px; }
 .canvas-action-bar .canvas-action-bar-label { padding: 0 8px; opacity: .8; }
+.canvas-action-bar .canvas-action-bar-divider { margin: 8px 2px; }
 .dock-panel.join-nw { border-top-left-radius: 0; }
 .dock-panel.join-ne { border-top-right-radius: 0; }
 .dock-panel.join-se { border-bottom-right-radius: 0; }

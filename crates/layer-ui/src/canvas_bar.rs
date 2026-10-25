@@ -45,67 +45,59 @@ pub struct CanvasBarContext {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanvasBarMenu {
-    CopyToLayer,
-    Clear,
-    Refine,
-    Adjust,
     Copy,
+    Adjust,
+    Mask,
+    Refine,
+    WarpGrid,
 }
 impl CanvasBarMenu {
     pub fn id(self) -> &'static str {
         match self {
-            Self::CopyToLayer => "copy_to_layer",
-            Self::Clear => "clear",
-            Self::Refine => "refine",
-            Self::Adjust => "adjust",
             Self::Copy => "copy",
+            Self::Adjust => "adjust",
+            Self::Mask => "mask",
+            Self::Refine => "refine",
+            Self::WarpGrid => "warp_grid",
         }
     }
     pub fn label(self, localizer: &Localizer) -> std::sync::Arc<str> {
         localizer.text(match self {
-            Self::CopyToLayer => MessageId::TOOLBAR_COPY_TO_LAYER,
-            Self::Clear => MessageId::TOOLBAR_CLEAR,
-            Self::Refine => MessageId::TOOLBAR_REFINE,
-            Self::Adjust => MessageId::TOOLBAR_ADJUST,
             Self::Copy => MessageId::TOOLBAR_COPY,
+            Self::Adjust => MessageId::TOOLBAR_ADJUST,
+            Self::Mask => MessageId::TOOLBAR_MASK,
+            Self::Refine => MessageId::TOOLBAR_REFINE,
+            Self::WarpGrid => MessageId::TOOL_ACTION_GROUP_TRANSFORM_WARP_GRID,
         })
     }
     pub fn icon(self) -> &'static str {
         match self {
-            Self::CopyToLayer => "copy-to-layer",
-            Self::Clear => "clear-selection",
-            Self::Refine => "feather",
-            Self::Adjust => "add-filter",
             Self::Copy => "copy",
+            Self::Adjust => "add-filter",
+            Self::Mask => "mask",
+            Self::Refine => "feather",
+            Self::WarpGrid => "warp",
         }
     }
     /// The command a host that does not open the menu runs.
     fn primary(self) -> Option<CommandId> {
         match self {
-            Self::CopyToLayer => Some(CommandId::CopySelectionToLayer),
-            Self::Clear => Some(CommandId::ClearSelected),
+            Self::Copy => Some(CommandId::CopySelectionToLayer),
+            Self::Mask => Some(CommandId::MaskSelection),
             Self::Refine => Some(CommandId::FeatherSelection),
-            Self::Copy => Some(CommandId::Copy),
-            Self::Adjust => None,
+            Self::Adjust | Self::WarpGrid => None,
         }
     }
-    fn commands(self) -> &'static [CommandId] {
+    /// Commands whose state the menu button shows.
+    fn shown(self) -> &'static [CommandId] {
         match self {
-            Self::CopyToLayer => &[CommandId::CopySelectionToLayer, CommandId::CutSelectionToLayer],
-            Self::Clear => &[CommandId::ClearSelected, CommandId::ClearOutside],
-            Self::Refine => &[
-                CommandId::GrowSelection,
-                CommandId::ShrinkSelection,
-                CommandId::FeatherSelection,
-                CommandId::BorderSelection,
-                CommandId::SmoothSelection,
-                CommandId::TransformSelectionOutline,
-            ],
-            Self::Copy => &[CommandId::Copy, CommandId::CopyMerged, CommandId::Cut],
-            Self::Adjust => &[],
+            Self::WarpGrid => &WARP_GRIDS,
+            Self::Copy | Self::Adjust | Self::Mask | Self::Refine => &[],
         }
     }
 }
+
+const WARP_GRIDS: [CommandId; 3] = [CommandId::WarpGridThree, CommandId::WarpGridFour, CommandId::WarpGridFive];
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct CanvasBarItem {
@@ -119,6 +111,11 @@ pub struct CanvasBarItem {
     pub menu: Option<CanvasBarMenu>,
     /// The menu's icon, for hosts that draw a menu item as a menu button.
     pub icon: Option<&'static str>,
+    /// The host shows the icon alone; `label` then names a menu in its
+    /// tooltip and accessibility label.
+    pub icon_only: bool,
+    /// A divider precedes the item.
+    pub separated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -150,8 +147,7 @@ impl CanvasBarView {
 /// Short labels for commands that appear on the bar; empty shows the icon alone.
 pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::sync::Arc<str> {
     localizer.text(match command {
-        CommandId::ApplyTransform => MessageId::TOOLBAR_APPLY,
-        CommandId::CancelTransform | CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
+        CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
         CommandId::PlacementOriginalSize => MessageId::TOOLBAR_ORIGINAL_SIZE,
         CommandId::TransformFree => MessageId::TOOLBAR_FREE,
         CommandId::TransformUniform => MessageId::TOOLBAR_UNIFORM,
@@ -162,13 +158,19 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         CommandId::TransformFlipHorizontal
         | CommandId::TransformFlipVertical
         | CommandId::TransformRotateLeft
-        | CommandId::TransformRotateRight => return "".into(),
+        | CommandId::TransformRotateRight
+        | CommandId::TransformSnapping
+        | CommandId::TransformPerspective
+        | CommandId::WarpSelectPoints
+        | CommandId::ApplyTransform
+        | CommandId::CancelTransform
+        | CommandId::ScaleRotate
+        | CommandId::FillSelection
+        | CommandId::ClearSelected
+        | CommandId::InvertSelection
+        | CommandId::Deselect => return "".into(),
         CommandId::ResetTransform => MessageId::TOOLBAR_RESET,
         CommandId::RemoveSelectionPoint => MessageId::TOOLBAR_REMOVE_POINT,
-        CommandId::Deselect => MessageId::TOOLBAR_DESELECT,
-        CommandId::InvertSelection => MessageId::TOOLBAR_INVERT,
-        CommandId::MaskSelection => MessageId::TOOLBAR_MASK,
-        CommandId::FillSelection => MessageId::TOOLBAR_FILL,
         CommandId::SaveSelectionLayer => MessageId::TOOLBAR_SAVE,
         CommandId::CompleteSelection | CommandId::FinishPath => MessageId::TOOLBAR_FINISH,
         CommandId::FillSelectionMask => MessageId::TOOLBAR_FILL,
@@ -179,7 +181,6 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         CommandId::DeleteRuler => MessageId::TOOLBAR_DELETE,
         CommandId::SnapRulers => MessageId::TOOLBAR_SNAP,
         CommandId::ShowRulers => MessageId::TOOLBAR_GUIDES,
-        CommandId::CropCanvasToSelection => MessageId::TOOLBAR_CROP,
         CommandId::GrowSelection => MessageId::TOOLBAR_GROW,
         CommandId::ShrinkSelection => MessageId::TOOLBAR_SHRINK,
         CommandId::FeatherSelection => MessageId::TOOLBAR_FEATHER,
@@ -242,6 +243,7 @@ pub(super) struct CanvasBarKey {
     transaction: u64,
     guide: Option<u64>,
     label: Option<CanvasBarCaption>,
+    narrow: bool,
     anchor: Option<[f32; 4]>,
     flags: Vec<(CommandId, bool, bool, Option<std::sync::Arc<str>>)>,
 }
@@ -277,14 +279,18 @@ enum PlanItem {
     Menu(CanvasBarMenu),
     /// A command shown as a plain button with its own label.
     Button(CommandId, MessageId),
+    /// Separates the items before it from the items after it.
+    Divider,
 }
 impl PlanItem {
-    /// The command whose published state the item shows.
-    fn command(self) -> Option<CommandId> {
-        match self {
-            Self::Command(id) | Self::Button(id, _) => Some(id),
-            Self::Menu(menu) => menu.primary(),
-        }
+    /// The commands whose published state the item shows.
+    fn commands(self) -> impl Iterator<Item = CommandId> {
+        let (primary, shown) = match self {
+            Self::Command(id) | Self::Button(id, _) => (Some(id), &[][..]),
+            Self::Menu(menu) => (menu.primary(), menu.shown()),
+            Self::Divider => (None, &[][..]),
+        };
+        primary.into_iter().chain(shown.iter().copied())
     }
 }
 
@@ -333,26 +339,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         Some(Plan {
             kind: CanvasBarKind::Selection,
             label: None,
-            items: [
-                command(CommandId::Deselect),
-                command(CommandId::InvertSelection),
-            ]
-            .into_iter()
-            .chain((tool == LayerCanvasTool::Move).then_some(command(CommandId::MoveLeaveCopy)))
-            .chain([PlanItem::Menu(CanvasBarMenu::CopyToLayer), PlanItem::Menu(CanvasBarMenu::Copy)])
-            .chain([
+            items: vec![
                 command(CommandId::ScaleRotate),
-                PlanItem::Menu(CanvasBarMenu::Refine),
-                command(CommandId::MaskSelection),
-                PlanItem::Menu(CanvasBarMenu::Adjust),
+                PlanItem::Menu(CanvasBarMenu::Copy),
                 command(CommandId::FillSelection),
-                PlanItem::Menu(CanvasBarMenu::Clear),
-                command(CommandId::CropCanvasToSelection),
-                command(CommandId::QuickMask),
-                command(CommandId::SaveSelectionLayer),
-            ])
-            .collect(),
-            completion: Vec::new(),
+                command(CommandId::ClearSelected),
+                PlanItem::Menu(CanvasBarMenu::Adjust),
+                PlanItem::Menu(CanvasBarMenu::Mask),
+                PlanItem::Divider,
+                command(CommandId::InvertSelection),
+                PlanItem::Menu(CanvasBarMenu::Refine),
+            ],
+            completion: vec![command(CommandId::Deselect)],
             placement: edge.then_some(CanvasBarPlacement::BottomEdge),
         })
     }
@@ -367,7 +365,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 CanvasBarKind::QuickMask,
                 CanvasBarCaption::Message(MessageId::TOOLBAR_QUICK_MASK),
                 vec![
-                    command(CommandId::InvertSelection),
+                    PlanItem::Button(CommandId::InvertSelection, MessageId::TOOLBAR_INVERT),
                     command(CommandId::FillSelectionMask),
                     command(CommandId::ClearSelectionMask),
                     PlanItem::Menu(CanvasBarMenu::Refine),
@@ -523,20 +521,98 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else {
             (count > 1).then_some(CanvasBarCaption::Layers(count))
         };
+        let offered = |id: &CommandId| self.state.tool_actions.iter().any(|a| a.command == *id);
+        let modes = [
+            CommandId::TransformFree,
+            CommandId::TransformUniform,
+            CommandId::TransformDistort,
+            CommandId::TransformWarp,
+            CommandId::TransformPerspective,
+        ];
+        let warp = self.warp_cells().map(|_| [PlanItem::Menu(CanvasBarMenu::WarpGrid), PlanItem::Command(CommandId::WarpSelectPoints)]);
+        let turns = [CommandId::TransformFlipHorizontal, CommandId::TransformSnapping];
         Some(Plan {
             kind: if self.operation.placing() { CanvasBarKind::Placement } else { CanvasBarKind::Transform },
             label,
-            items: self
-                .state
-                .tool_actions
-                .iter()
-                .map(|a| a.command)
-                .filter(|id| !completion.contains(id))
-                .map(PlanItem::Command)
+            items: modes.iter().filter(|id| offered(id)).map(|&id| PlanItem::Command(id))
+                .chain(warp.into_iter().flatten())
+                .chain([PlanItem::Divider])
+                .chain(turns.iter().filter(|id| offered(id)).map(|&id| PlanItem::Command(id)))
                 .collect(),
             completion: completion.map(PlanItem::Command).into(),
             placement: None,
         })
+    }
+
+    /// Ordinary commands the More menu lists before the context's own menu.
+    fn canvas_bar_more_sections(&self, kind: CanvasBarKind) -> Vec<Vec<ContextMenuItem>> {
+        let offered = |id: &CommandId| self.state.tool_actions.iter().any(|a| a.command == *id);
+        let item = |&id: &CommandId| self.bar_command_item(id);
+        match kind {
+            CanvasBarKind::Selection => vec![
+                [CommandId::ClearOutside, CommandId::CropCanvasToSelection]
+                    .iter()
+                    .chain((self.layer_interaction.tool == LayerCanvasTool::Move).then_some(&CommandId::MoveLeaveCopy))
+                    .map(item)
+                    .collect(),
+            ],
+            CanvasBarKind::Transform | CanvasBarKind::Placement if self.operation.active() => {
+                let interpolation: Vec<_> = ToolActionGroup::TransformInterpolation.commands().iter().filter(|id| offered(id)).map(item).collect();
+                vec![
+                    [CommandId::TransformFlipVertical, CommandId::TransformRotateLeft, CommandId::TransformRotateRight]
+                        .iter()
+                        .filter(|id| offered(id))
+                        .map(item)
+                        .collect(),
+                    (!interpolation.is_empty())
+                        .then(|| ContextMenuItem::submenu(&ToolActionGroup::TransformInterpolation.localized_label(self.localization()), vec![interpolation]))
+                        .into_iter()
+                        .collect(),
+                ]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn bar_command_item(&self, id: CommandId) -> ContextMenuItem {
+        let state = self.command(id);
+        ContextMenuItem {
+            enabled: state.enabled,
+            selected: state.checkable.then_some(state.selected),
+            ..ContextMenuItem::command(state.label.as_ref(), UiAction::Invoke { command: id })
+        }
+    }
+
+    fn mask_menu_sections(&self) -> Vec<Vec<ContextMenuItem>> {
+        let doc = self.engine.document();
+        let l = self.localization();
+        let enabled = self.command(CommandId::MaskSelection).enabled;
+        let masks = doc.working.occurrence.and_then(|id| Some((id, doc.scene().occurrence(id)?.mask.is_some()))).map(|(id, masked)| {
+            [
+                (false, if masked { MessageId::RESOURCES_LAYER_MENU_REPLACE_MASK_REVEAL_SELECTION } else { MessageId::RESOURCES_LAYER_MENU_MASK_REVEAL_SELECTION }),
+                (true, if masked { MessageId::RESOURCES_LAYER_MENU_REPLACE_MASK_HIDE_SELECTION } else { MessageId::RESOURCES_LAYER_MENU_MASK_HIDE_SELECTION }),
+            ]
+            .map(|(hide, label)| ContextMenuItem {
+                enabled,
+                ..ContextMenuItem::command(l.text(label).as_ref(), UiAction::Layer { action: LayerAction::MaskSelection { id: occurrence_token(id), hide } })
+            })
+            .to_vec()
+        });
+        let saved = self.saved_selection_menu_items();
+        let replace = self.replace_selection_menu_items();
+        vec![
+            masks.unwrap_or_default(),
+            vec![self.bar_command_item(CommandId::QuickMask)],
+            std::iter::once(self.bar_command_item(CommandId::SaveSelectionLayer))
+                .chain((!saved.is_empty()).then(|| ContextMenuItem::submenu(l.text(MessageId::MENU_LOAD_SELECTION).as_ref(), vec![saved])))
+                .chain((!replace.is_empty()).then(|| {
+                    ContextMenuItem::submenu(l.text(MessageId::MENU_REPLACE_SELECTION_LAYER_FROM_CURRENT_SELECTION).as_ref(), vec![replace])
+                }))
+                .collect(),
+        ]
+        .into_iter()
+        .filter(|section| !section.is_empty())
+        .collect()
     }
 
     /// Document-space points of the selected guide's handles.
@@ -600,12 +676,13 @@ impl<R: CanvasRenderer> UiSession<R> {
             transaction: if self.operation.active() { self.operation.serial() } else { 0 },
             guide: self.selected_ruler_token().filter(|_| plan.kind == CanvasBarKind::Guide),
             label: plan.label.clone(),
+            narrow: self.canvas_bar_narrow(plan.kind),
             anchor: self.canvas_bar_anchor(plan.kind),
             flags: plan
                 .items
                 .iter()
                 .chain(&plan.completion)
-                .filter_map(|item| item.command())
+                .flat_map(|item| item.commands())
                 .filter_map(|id| self.state.commands.iter().find(|c| c.id == id))
                 .map(|c| (c.id, c.enabled, c.selected, c.disabled_reason.clone()))
                 .collect(),
@@ -622,37 +699,55 @@ impl<R: CanvasRenderer> UiSession<R> {
         let mut items: Vec<CanvasBarItem> = Vec::new();
         if plan.kind == CanvasBarKind::Picker && visible {
             for option in self.state.tool_options().into_iter().filter(|option| matches!(option, ToolOption::Choice { id: "sample-size", .. })) {
-                items.push(CanvasBarItem { option, label: self.localization().text(MessageId::TOOLBAR_SAMPLE_SIZE), accent: false, menu: None, icon: None });
+                items.push(CanvasBarItem { option, label: self.localization().text(MessageId::TOOLBAR_SAMPLE_SIZE), accent: false, menu: None, icon: None, icon_only: false, separated: false });
             }
         }
+        let mut separated = false;
         for &entry in &plan.items {
-            let PlanItem::Command(id) = entry else {
-                items.push(self.canvas_bar_item(entry));
-                continue;
+            let id = match entry {
+                PlanItem::Divider => {
+                    separated = !items.is_empty();
+                    continue;
+                }
+                PlanItem::Command(id) => id,
+                PlanItem::Menu(_) | PlanItem::Button(..) => {
+                    items.push(CanvasBarItem { separated: std::mem::take(&mut separated), ..self.canvas_bar_item(entry) });
+                    continue;
+                }
             };
             let state = self.published(id);
             let group = ToolSettingAction { command: id, checkable: state.checkable }.group();
+            let choice = |group: ToolActionGroup| {
+                let item = state.choice_item(self.bar_label(id));
+                if group == ToolActionGroup::TransformMode { ToolSetItem { icon: "", ..item } } else { item }
+            };
             match (group, items.last_mut().map(|item| &mut item.option)) {
-                (Some(group), Some(ToolOption::Choice { id: choice, items, .. })) if *choice == group.id() => {
-                    items.push(state.choice_item(self.bar_label(id)));
+                (Some(group), Some(ToolOption::Choice { id: current, items, .. })) if *current == group.id() => {
+                    items.push(choice(group));
                 }
                 (Some(group), _) => items.push(CanvasBarItem {
                     option: ToolOption::Choice {
                         id: group.id(),
                         label: group.localized_label(self.localization()),
-                        segmented: group.segmented(),
+                        segmented: group.segmented() && !key.narrow,
                         labeled: false,
                         columns: None,
                         beside: None,
-                        items: vec![state.choice_item(self.bar_label(id))],
+                        items: vec![choice(group)],
                     },
                     label: group.localized_label(self.localization()),
                     accent: false,
                     menu: None,
                     icon: None,
+                    icon_only: false,
+                    separated: std::mem::take(&mut separated),
                 }),
-                (None, _) => items.push(self.canvas_bar_item(entry)),
+                (None, _) => items.push(CanvasBarItem { separated: std::mem::take(&mut separated), ..self.canvas_bar_item(entry) }),
             }
+        }
+        let mut completion: Vec<CanvasBarItem> = plan.completion.iter().map(|&item| self.canvas_bar_item(item)).collect();
+        if let Some(first) = completion.first_mut() {
+            first.separated = !items.is_empty();
         }
         self.state.canvas_bar = Some(CanvasBarView {
             context: CanvasBarContext {
@@ -661,7 +756,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             },
             label: plan.label.as_ref().map(|caption| caption.resolve(self.localization())),
             items,
-            completion: plan.completion.iter().map(|&item| self.canvas_bar_item(item)).collect(),
+            completion,
             placement: plan.placement.unwrap_or(if visible {
                 CanvasBarPlacement::NearObject
             } else {
@@ -676,11 +771,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.object_command_label(id).unwrap_or_else(|| short_label(id, self.localization()))
     }
 
+    /// Mode choices collapse into a dropdown where the work area is narrow.
+    fn canvas_bar_narrow(&self, kind: CanvasBarKind) -> bool {
+        matches!(kind, CanvasBarKind::Transform | CanvasBarKind::Placement)
+            && self.logical_viewport.is_some_and(|viewport| self.layout(viewport).work_area.width < CANVAS_BAR_NARROW_WIDTH)
+    }
+
     fn canvas_bar_item(&self, item: PlanItem) -> CanvasBarItem {
         let (id, label) = match item {
             PlanItem::Menu(menu) => return self.canvas_bar_menu_item(menu),
             PlanItem::Command(id) => (id, self.bar_label(id)),
             PlanItem::Button(id, label) => (id, self.localization().text(label)),
+            PlanItem::Divider => unreachable!("dividers mark the next item"),
         };
         let state = self.published(id);
         CanvasBarItem {
@@ -688,17 +790,20 @@ impl<R: CanvasRenderer> UiSession<R> {
                 checkable: state.checkable && matches!(item, PlanItem::Command(_)),
                 state,
             },
-            label,
             accent: matches!(
                 id,
                 CommandId::ApplyTransform | CommandId::CompleteSelection | CommandId::ReturnToArtwork | CommandId::EditLayerContent
             ),
             menu: None,
             icon: matches!(item, PlanItem::Button(_, MessageId::TOOLBAR_CANCEL)).then_some("close"),
+            icon_only: label.is_empty(),
+            separated: false,
+            label,
         }
     }
 
     fn canvas_bar_menu_item(&self, menu: CanvasBarMenu) -> CanvasBarItem {
+        let current = menu.shown().iter().find(|&&id| self.published(id).selected).map(|&id| self.bar_label(id));
         CanvasBarItem {
             option: match menu.primary() {
                 Some(id) => self.canvas_bar_item(PlanItem::Command(id)).option,
@@ -711,10 +816,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                     items: Vec::new(),
                 },
             },
-            label: menu.label(self.localization()),
+            icon_only: current.is_none(),
+            label: current.unwrap_or_else(|| menu.label(self.localization())),
             accent: false,
             menu: Some(menu),
             icon: Some(menu.icon()),
+            separated: false,
         }
     }
 
@@ -758,10 +865,18 @@ impl<R: CanvasRenderer> UiSession<R> {
             let state = self.command(id);
             ContextMenuItem { enabled: state.enabled, ..ContextMenuItem::command(state.label.as_ref(), UiAction::Invoke { command: id }) }
         };
+        let commands = |ids: &[CommandId]| ids.iter().map(|&id| self.bar_command_item(id)).collect::<Vec<_>>();
         let sections = match menu {
-            CanvasBarMenu::CopyToLayer | CanvasBarMenu::Clear | CanvasBarMenu::Copy => {
-                vec![menu.commands().iter().map(|&id| command(id)).collect()]
-            }
+            CanvasBarMenu::Copy => vec![
+                commands(&[CommandId::CopySelectionToLayer, CommandId::CutSelectionToLayer]),
+                commands(&[CommandId::Copy, CommandId::CopyMerged, CommandId::Cut]),
+            ],
+            CanvasBarMenu::Mask => self.mask_menu_sections(),
+            CanvasBarMenu::WarpGrid => vec![
+                commands(&WARP_GRIDS),
+                commands(ToolActionGroup::TransformWarpSplit.commands()),
+                commands(&[CommandId::WarpResetGrid]),
+            ],
             CanvasBarMenu::Refine => vec![
                 self.refine_items(None),
                 vec![ContextMenuItem {
@@ -769,7 +884,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     ..command(CommandId::TransformSelectionOutline)
                 }],
             ],
-            CanvasBarMenu::Adjust => vec![self.filter_category_items()],
+            CanvasBarMenu::Adjust => vec![self.selection_filter_items()],
         };
         ContextMenu { title: menu.label(self.localization()).to_string(), sections }
             .with_shortcuts(&self.state.settings, self.state.platform)
@@ -1003,11 +1118,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 UiAction::Invoke { command: CommandId::ShowCanvasActionBar },
             )
         };
-        let mut sections = vec![overflow.collect::<Vec<_>>()];
-        match bar.context.kind {
-            CanvasBarKind::Selection => sections.extend(self.selection_menu(SelectionMenu::Selection).sections),
+        let extras = self.canvas_bar_more_sections(bar.context.kind);
+        let context_sections = match bar.context.kind {
+            CanvasBarKind::Selection => self.selection_menu(SelectionMenu::Selection).sections,
             CanvasBarKind::QuickMask | CanvasBarKind::SelectionLayer | CanvasBarKind::LayerMask => {
-                sections.extend(self.application_menu(ApplicationMenu::Layer).sections)
+                self.application_menu(ApplicationMenu::Layer).sections
             }
             CanvasBarKind::Placement
             | CanvasBarKind::Picker
@@ -1015,8 +1130,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             | CanvasBarKind::Polygon
             | CanvasBarKind::Guide
             | CanvasBarKind::Crop
-            | CanvasBarKind::CloneSource => (),
-        }
+            | CanvasBarKind::CloneSource => Vec::new(),
+        };
+        let menus: Vec<_> = bar.items.iter().filter_map(|item| item.menu).map(|menu| self.canvas_bar_menu_sections(menu)).collect();
+        let offered: Vec<&UiAction> = menus.iter().flat_map(|sections| menu_actions(sections)).chain(menu_actions(&extras)).collect();
+        let shown: Vec<UiAction> = bar.actions().collect();
+        let mut sections = vec![overflow.collect::<Vec<_>>()];
+        sections.extend(extras.clone());
+        sections.extend(without_offered(context_sections, &|action| shown.contains(action) || offered.contains(&action)));
         sections.push(vec![toggle]);
         Some(
             ContextMenu {
@@ -1041,6 +1162,27 @@ fn wrap_sections(sections: Vec<Vec<ContextMenuItem>>, wrap: &impl Fn(UiAction) -
                 })
                 .collect()
         })
+        .collect()
+}
+
+/// Drops the items the bar already offers, and the submenus and sections that
+/// leaves empty.
+fn without_offered(sections: Vec<Vec<ContextMenuItem>>, offered: &impl Fn(&UiAction) -> bool) -> Vec<Vec<ContextMenuItem>> {
+    sections
+        .into_iter()
+        .map(|section| {
+            section
+                .into_iter()
+                .filter_map(|item| {
+                    if item.sections.is_empty() {
+                        return item.action.as_ref().is_none_or(|action| !offered(action)).then_some(item);
+                    }
+                    let sections = without_offered(item.sections, offered);
+                    (!sections.is_empty()).then_some(ContextMenuItem { sections, ..item })
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|section| !section.is_empty())
         .collect()
 }
 

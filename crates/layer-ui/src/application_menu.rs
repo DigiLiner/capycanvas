@@ -90,9 +90,16 @@ impl ApplicationMenu {
 
 impl<R: CanvasRenderer> UiSession<R> {
     pub(crate) fn filter_category_items(&self) -> Vec<ContextMenuItem> {
-        self.filter_category_items_for(None)
+        self.filter_category_items_for(None, true)
     }
-    fn filter_category_items_for(&self, owner: Option<layer_core::authored::OccurrenceHandle>) -> Vec<ContextMenuItem> {
+    /// Adjustments attach to the editing layer; fills and textures become layers of their own.
+    pub(crate) fn selection_filter_items(&self) -> Vec<ContextMenuItem> {
+        let doc = self.engine.document();
+        let scene = doc.scene();
+        let owner = doc.working.occurrence.map(|id| scene.effect_owner(id).unwrap_or(id)).filter(|&id| scene.eligible_target(id) && !doc.is_locked(id));
+        self.filter_category_items_for(owner, true)
+    }
+    fn filter_category_items_for(&self, owner: Option<layer_core::authored::OccurrenceHandle>, standalone: bool) -> Vec<ContextMenuItem> {
         let enabled = self.effect_insert_enabled();
         self.effect_catalog
             .categories()
@@ -100,8 +107,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             .filter_map(|category| {
                 let items: Vec<_> = self.effect_catalog.filters()
                     .iter()
-                    .filter(|f| f.category == category.id && (owner.is_none() || f.program.kind == layer_core::EffectKind::Adjustment))
-                    .map(|f| ContextMenuItem { enabled, icon: Some(f.icon.clone()), ..ContextMenuItem::command(effects::resource_label(f.label(), self.localization()).to_string(), UiAction::Effect { action: owner.map_or_else(|| EffectAction::Insert { effect: f.program.id.clone() }, |owner| EffectAction::InsertAttached { effect: f.program.id.clone(), owner: occurrence_token(owner), epoch: self.state.document_file.epoch }) }) })
+                    .filter(|f| f.category == category.id && (standalone || f.program.kind == layer_core::EffectKind::Adjustment))
+                    .map(|f| ContextMenuItem { enabled, icon: Some(f.icon.clone()), ..ContextMenuItem::command(effects::resource_label(f.label(), self.localization()).to_string(), UiAction::Effect { action: owner.filter(|_| f.program.kind == layer_core::EffectKind::Adjustment).map_or_else(|| EffectAction::Insert { effect: f.program.id.clone() }, |owner| EffectAction::InsertAttached { effect: f.program.id.clone(), owner: occurrence_token(owner), epoch: self.state.document_file.epoch }) }) })
                     .collect();
                 (!items.is_empty()).then(|| ContextMenuItem {
                     icon: Some(effects::category_icon(&category.id).into()),
@@ -115,7 +122,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let owner = scene.effect_owner(id).unwrap_or(id);
         (scene.eligible_target(owner) && !doc.is_locked(owner) && self.effect_insert_enabled()).then(|| ContextMenu {
             title: self.localization().text(MessageId::RESOURCES_LAYER_ADD_FILTER).to_string(),
-            sections: vec![self.filter_category_items_for(Some(owner))],
+            sections: vec![self.filter_category_items_for(Some(owner), false)],
         })
     }
     fn effect_insert_enabled(&self) -> bool {

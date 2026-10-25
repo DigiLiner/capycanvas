@@ -456,7 +456,8 @@ impl Field {
                 if let Some(selected) = items.iter().find(|i| i.selected)
                     && text.text().as_str() != selected.label.as_ref()
                 {
-                    crate::icons::set(image, Some(&format!("layer-{}-symbolic", selected.icon)));
+                    crate::icons::set(image, (!selected.icon.is_empty()).then(|| format!("layer-{}-symbolic", selected.icon)).as_deref());
+                    image.set_visible(!selected.icon.is_empty());
                     text.set_text(&selected.label);
                 }
             }
@@ -555,11 +556,10 @@ pub(crate) fn segment_buttons(
     let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
     for item in items {
         let button = gtk::ToggleButton::new();
-        let icon = crate::icons::image(&format!("layer-{}-symbolic", item.icon));
-        if captions {
-            button.set_child(Some(&captioned(Some(icon), &item.label)));
-        } else {
-            button.set_child(Some(&icon));
+        let icon = (!item.icon.is_empty()).then(|| crate::icons::image(&format!("layer-{}-symbolic", item.icon)));
+        match (captions, icon) {
+            (false, Some(icon)) => button.set_child(Some(&icon)),
+            (_, icon) => button.set_child(Some(&captioned(icon, &item.label))),
         }
         button.set_tooltip_text(Some(&item.label));
         button.update_property(&[gtk::accessible::Property::Label(&item.label)]);

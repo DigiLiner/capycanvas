@@ -5811,7 +5811,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 CommandId::TransformFlipVertical,
                 CommandId::TransformRotateLeft,
                 CommandId::TransformRotateRight,
-                CommandId::ResetTransform,
                 CommandId::TransformNearest,
                 CommandId::TransformBilinear,
                 CommandId::TransformBicubic,

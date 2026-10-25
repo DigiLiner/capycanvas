@@ -26,7 +26,6 @@ toolbar-adjust = Sesuaikan
 
 toolbar-aligned = Selaras
 
-toolbar-apply = Terapkan
 
 toolbar-apply-mask = Terapkan Mask
 
@@ -38,15 +37,12 @@ toolbar-clear = Bersihkan
 
 toolbar-copy = Salin
 
-toolbar-copy-to-layer = Salin ke Lapisan
 
-toolbar-crop = Pangkas
 
 toolbar-delete = Hapus
 
 toolbar-delete-cropped = Hapus Lukisan Terpangkas
 
-toolbar-deselect = Batalkan Seleksi
 
 toolbar-diagonal = Diagonal
 

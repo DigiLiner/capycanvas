@@ -201,21 +201,10 @@ fn native_canvas_bar_input() {
             press(native, &item);
         }
     };
-    let interpolation = bar_widget(&w, "canvas-bar-choice-transform-interpolation");
-    if interpolation.is_mapped() {
-        press(&mut native, &interpolation);
-        let nearest = until_some(|| mapped_label(w.window.upcast_ref(), "Nearest"), "the dropdown lists the filters");
-        press(&mut native, &nearest);
-    } else {
-        from_more(&mut native, &["Interpolation", "Nearest"]);
-    }
+    assert!(find_named(w.canvas_bar.root.upcast_ref(), "canvas-bar-choice-transform-interpolation").is_none(), "interpolation is in More");
+    from_more(&mut native, &["Interpolation", "Nearest neighbor"]);
     until(|| selected(&w, CommandId::TransformNearest), "choosing Nearest resamples with hard edges");
-    let reset = bar_widget(&w, "canvas-bar-ResetTransform");
-    if reset.is_mapped() {
-        press(&mut native, &reset);
-    } else {
-        from_more(&mut native, &["Reset transform"]);
-    }
+    w.dispatch(UiAction::Invoke { command: CommandId::ResetTransform });
     until(
         || !perspective(&w) && anchor_in_window(&w).iter().zip(anchor).all(|(a, b)| (a - b).abs() < 1.),
         "Reset returns to Free and the starting box",
@@ -413,8 +402,8 @@ fn native_canvas_bar_warps_a_selection() {
     click(&mut native, &warp.expect("the Warp segment"));
     until(
         || state(&w).commands.iter().any(|c| c.id == CommandId::TransformWarp && c.selected)
-            && find_named(w.canvas_bar.root.upcast_ref(), "canvas-bar-choice-transform-warp-grid").is_some(),
-        "Warp shows its grid choice",
+            && find_named(w.canvas_bar.root.upcast_ref(), "canvas-bar-menu-warp_grid").is_some(),
+        "Warp shows its grid menu",
     );
     let mesh = |w: &Workspace| {
         let g = w.gpu.borrow();
@@ -591,13 +580,22 @@ pub(super) fn choose_from_bar_menu(w: &Workspace, native: &mut RemoteInput, devi
         path.insert(0, &menu_label);
         bar_widget(w, "canvas-bar-more")
     };
-    tap(native, device, center(w, &opener));
+    choose_in_menu(w, native, device, &opener, &path);
+}
+
+/// Choose `labels` in turn from the bar's More menu.
+pub(super) fn choose_from_more(w: &Workspace, native: &mut RemoteInput, device: Device, labels: &[&str]) {
+    choose_in_menu(w, native, device, &bar_widget(w, "canvas-bar-more"), labels);
+}
+
+fn choose_in_menu(w: &Workspace, native: &mut RemoteInput, device: Device, opener: &gtk::Widget, path: &[&str]) {
+    tap(native, device, center(w, opener));
     let popover = until_some(
         || opener.downcast_ref::<gtk::MenuButton>()?.popover()?.downcast::<gtk::PopoverMenu>().ok().filter(|p| p.is_visible()),
-        &format!("{device:?} opens {}", menu_label),
+        &format!("{device:?} opens the menu for {}", path.join(" › ")),
     );
     if let Device::Pen = device {
-        let action = until_some(|| popover.menu_model().and_then(|m| menu_action(&m, &path)), &path.join(" › "));
+        let action = until_some(|| popover.menu_model().and_then(|m| menu_action(&m, path)), &path.join(" › "));
         popover.activate_action(&action, None).unwrap();
         return;
     }
@@ -656,7 +654,7 @@ fn native_canvas_bar_selection_menus() {
     for device in [Device::Mouse, Device::Touch, Device::Pen] {
         filled_selection(&w, paint);
         let layers = document(&w).scene().order().len();
-        choose_from_bar_menu(&w, &mut native, device, CanvasBarMenu::CopyToLayer, &["Copy Selection to New Layer"]);
+        choose_from_bar_menu(&w, &mut native, device, CanvasBarMenu::Copy, &["Copy Selection to New Layer"]);
         until(
             || {
                 let doc = document(&w);
@@ -667,7 +665,7 @@ fn native_canvas_bar_selection_menus() {
 
         filled_selection(&w, paint);
         let pixels = document(&w).scene().paint_source(layer_ui::occurrence_handle(paint).unwrap()).unwrap().raster.identity();
-        choose_from_bar_menu(&w, &mut native, device, CanvasBarMenu::Clear, &["Clear Outside Selection"]);
+        choose_from_more(&w, &mut native, device, &["Clear Outside Selection"]);
         until(
             || {
                 let doc = document(&w);
@@ -683,8 +681,9 @@ fn native_canvas_bar_selection_menus() {
                 let doc = document(&w);
                 let effect = doc.scene().occurrence(doc.working.occurrence.unwrap()).unwrap();
                 effect.kind() == layer_core::LayerKind::Effect && effect.mask.is_some() && doc.working.selection.is_none()
+                    && doc.scene().effect_owner(doc.working.occurrence.unwrap()) == layer_ui::occurrence_handle(paint).ok()
             },
-            &format!("{device:?}: Adjust › Curves masks a new Curves layer to the selection"),
+            &format!("{device:?}: Adjust › Curves attaches a Curves filter masked to the selection"),
         );
     }
 }
@@ -893,8 +892,8 @@ fn native_crop_on_the_selection_bar_then_canvas_size_shows_the_hidden_pixels() {
     native_pen_path(&w, &rectangle([width * 0.4, height * 0.4, width * 0.6, height * 0.6]));
     until(|| state(&w).canvas_bar.is_some_and(|b| b.context.kind == layer_ui::CanvasBarKind::Selection) && shown(&w), "the selection bar");
     let mut native = remote_input();
-    press_bar_command(&w, &mut native, "canvas-bar-CropCanvasToSelection", "Crop Canvas to Selection");
-    until(|| document(&w).composition().size[0] < before.composition().size[0], "Crop on the selection bar crops the canvas");
+    choose_from_more(&w, &mut native, Device::Mouse, &["Crop Canvas to Selection"]);
+    until(|| document(&w).composition().size[0] < before.composition().size[0], "Crop in the selection bar's More crops the canvas");
     let cropped = document(&w);
     assert!((cropped.composition().size[0] as f32 - width * 0.2).abs() <= 2. && (cropped.composition().size[1] as f32 - height * 0.2).abs() <= 2.);
     assert!(cropped.scene().paint_source(paint).unwrap().raster == filled, "a crop changes only metadata");

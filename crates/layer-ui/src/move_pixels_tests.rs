@@ -90,7 +90,8 @@ mod move_pixels_checks {
         let state = s.command(CommandId::MoveLeaveCopy);
         assert!(state.checkable && state.enabled && !state.selected);
         let bar = s.state.canvas_bar.clone().unwrap();
-        assert!(bar_commands(&bar.items).contains(&CommandId::MoveLeaveCopy), "on the selection bar under Move");
+        let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
+        assert!(more.sections.concat().iter().any(|i| i.action == Some(UiAction::Invoke { command: CommandId::MoveLeaveCopy })), "in the selection bar's More under Move");
         for (leave_copy, held, keep_source) in [(false, false, false), (true, false, true), (false, true, true), (true, true, false)] {
             if s.operation.leave_copy != leave_copy {
                 invoke(&mut s, CommandId::MoveLeaveCopy);

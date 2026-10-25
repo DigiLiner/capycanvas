@@ -533,7 +533,7 @@ fn canvas_bar_items_carry_the_reason_they_are_disabled() {
         .unwrap();
     assert!(!fill.enabled);
     assert_eq!(fill.disabled_reason.as_deref(), Some("The active layer is locked"));
-    let deselect = bar.items.iter().find_map(|i| match &i.option {
+    let deselect = bar.items.iter().chain(&bar.completion).find_map(|i| match &i.option {
         ToolOption::Action { state, .. } if state.id == CommandId::Deselect => Some(state),
         _ => None,
     });

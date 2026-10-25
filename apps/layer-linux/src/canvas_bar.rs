@@ -37,7 +37,9 @@ pub struct CanvasBar {
 fn same_schema(a: &CanvasBarView, b: &CanvasBarView) -> bool {
     let same = |x: &[CanvasBarItem], y: &[CanvasBarItem]| {
         x.len() == y.len()
-            && x.iter().zip(y).all(|(x, y)| x.menu == y.menu && x.option.same_schema(&y.option))
+            && x.iter().zip(y).all(|(x, y)| {
+                x.menu == y.menu && x.separated == y.separated && x.icon_only == y.icon_only && x.option.same_schema(&y.option)
+            })
     };
     a.context == b.context && same(&a.items, &b.items) && same(&a.completion, &b.completion)
 }
@@ -156,6 +158,7 @@ impl CanvasBar {
                             button.set_tooltip_text(Some(&item.label));
                             button.update_property(&[gtk::accessible::Property::Label(&item.label)]);
                             if item.menu.is_some() { text.set_text(&item.label); }
+                            text.set_visible(!item.icon_only);
                         }
                         Field::Action(button) => {
                             if let Some(label) = button.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { label.set_text(&item.label); }
@@ -185,9 +188,19 @@ impl CanvasBar {
         self.label.set_visible(view.label.is_some());
         for (container, items) in [(&self.items, &view.items), (&self.completion, &view.completion)] {
             for item in items {
-                let field = build(workspace, view.context, item);
-                container.append(&field.0);
-                self.fields.borrow_mut().push(field);
+                let (widget, field) = build(workspace, view.context, item);
+                let widget = if item.separated {
+                    let group = gtk::Box::new(gtk::Orientation::Horizontal, GAP);
+                    let divider = gtk::Separator::new(gtk::Orientation::Vertical);
+                    divider.add_css_class("canvas-action-bar-divider");
+                    group.append(&divider);
+                    group.append(&widget);
+                    group.upcast()
+                } else {
+                    widget
+                };
+                container.append(&widget);
+                self.fields.borrow_mut().push((widget, field));
             }
         }
     }
@@ -294,6 +307,7 @@ fn build(
         unfocused(button.upcast_ref());
         crate::icons::set(&image, Some(&format!("layer-{}-symbolic", menu.icon())));
         text.set_text(&item.label);
+        text.set_visible(!item.icon_only);
         return (button.clone().upcast(), Some(Field::Menu(button, image, text)));
     }
     match &item.option {

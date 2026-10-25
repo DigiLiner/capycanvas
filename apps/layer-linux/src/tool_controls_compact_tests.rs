@@ -124,7 +124,6 @@ fn assert_spacing(panel: &gtk::Widget, context: &str) {
             assert_gap(panel, "tool-action-TransformFlipHorizontal", "tool-action-TransformFlipVertical", 4., true);
             assert_gap(panel, "tool-action-TransformFlipHorizontal", "tool-action-TransformRotateLeft", 4., false);
             assert_gap(panel, "tool-action-TransformRotateLeft", "tool-action-TransformRotateRight", 4., true);
-            assert_gap(panel, "tool-action-TransformRotateLeft", "tool-action-ResetTransform", 4., false);
             assert_gap(panel, "tool-action-ApplyTransform", "tool-action-CancelTransform", 4., true);
             if context == "transform-free" {
                 assert_gap(panel, "tool-choice-bar-transform-reference", "tool-setting-transform_x", 2., true);
