@@ -60,24 +60,18 @@ impl Ownership {
         let rows = tx
             .prepare("SELECT id,owner,epoch,fence,lease_until FROM items WHERE owner IS NOT NULL")?
             .query_map([], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Option<String>>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, Option<String>>(4)?,
-                ))
+                Ok((super::text(r,0,MAX_ITEM_ID_BYTES)?,(
+                    super::text(r,1,MAX_PACKAGE_BYTES)?,
+                    super::optional_text(r,2,MAX_PACKAGE_BYTES)?,
+                    super::text(r,3,20)?,
+                    super::optional_text(r,4,20)?,
+                )))
             })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        self.held.retain(|id, held| {
-            rows.iter().any(|r| {
-                &r.0 == id
-                    && r.1 == held.owner.id
-                    && r.2.as_ref() == Some(&held.owner.epoch)
-                    && r.3 == held.fence.to_string()
-            })
-        });
-        for (id, _, _, _, until) in rows {
+            .collect::<std::result::Result<BTreeMap<_,_>, _>>()?;
+        self.held.retain(|id,held|rows.get(id).is_some_and(|row|
+            row.0==held.owner.id && row.1.as_ref()==Some(&held.owner.epoch) && row.2==held.fence.to_string()));
+        for (id,(_,_,_,until)) in rows {
+            input::work()?;
             let live = self.held.contains_key(&id) || self.try_lock(&id)?.is_none();
             if !live {
                 tx.execute(

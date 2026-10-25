@@ -20,6 +20,16 @@ fn normalize(result: Result<StoreResponse, StoreError>) -> serde_json::Value {
         Err(e) => serde_json::json!({"error":e.kind}),
     }
 }
+
+#[test]
+fn bounded_schema_inspection_cannot_reset_a_newer_large_snapshot() {
+    let newer=SCHEMA_VERSION+1;
+    let text=format!("{{\"schema\":{newer},\"padding\":[{}0]}}","0,".repeat(layer_core::package::MAX_JSON_NODES));
+    assert_eq!(BrowserDatabase::replace(Some(&text)).err().unwrap().kind,ErrorKind::UnsupportedSchema);
+    let late=format!("{{\"padding\":\"{}\",\"schema\":{newer}}}","x".repeat(70*1024));
+    assert!(BrowserDatabase::replace(Some(&late)).is_err());
+    assert!(BrowserDatabase::replace(Some("broken snapshot")).is_ok());
+}
 #[test]
 fn browser_claims_of_closed_documents_are_released_without_waiting_for_the_lease() {
     let mut browser = BrowserDatabase::default();
@@ -35,7 +45,7 @@ fn browser_claims_of_closed_documents_are_released_without_waiting_for_the_lease
         id: id.clone(),
         owner: reopened.clone(),
     };
-    assert!(!browser.release_unlocked(&[closed.id.clone()], 1001));
+    assert!(!browser.release_unlocked(std::slice::from_ref(&closed.id), 1001));
     assert!(
         !browser.release_unlocked(&[], 999),
         "A claim made after the lock query stays"
@@ -44,7 +54,7 @@ fn browser_claims_of_closed_documents_are_released_without_waiting_for_the_lease
         browser.execute(claim.clone(), 1002).unwrap_err().kind,
         ErrorKind::OwnedElsewhere
     );
-    assert!(browser.release_unlocked(&[reopened.id.clone()], 1001));
+    assert!(browser.release_unlocked(std::slice::from_ref(&reopened.id), 1001));
     let StoreResponse::Entity(successor) = browser.execute(claim, 1002).unwrap() else {
         panic!()
     };

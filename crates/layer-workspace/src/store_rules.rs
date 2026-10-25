@@ -1,4 +1,4 @@
-use crate::protocol::{PreparedWrite, unpack};
+use crate::protocol::PreparedWrite;
 use crate::*;
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -80,9 +80,10 @@ pub(crate) fn update_preference(
 }
 pub(crate) fn validate_payload(
     batch: &CommitBatch,
-    mut lookup: impl FnMut(&str) -> Result<String>,
+    mut lookup: impl FnMut(&str,usize) -> Result<String>,
 ) -> Result<()> {
-    if let Some(json) = &batch.editing_json { serde_json::from_str::<layer_ui::EditingState>(json)?.validate().map_err(StoreError::workspace)?; }
+    let mut budget=crate::input::InputBudget::default();
+    if let Some(json) = &batch.editing_json { serde_json::from_value::<layer_ui::EditingState>(budget.json(json)?)?.validate().map_err(StoreError::workspace)?; }
     for (id, json) in &batch.components {
         if content_id(json.as_bytes()) != *id {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::InvalidWorkspaceComponent));
@@ -99,11 +100,12 @@ pub(crate) fn validate_payload(
                 return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::InconsistentMetadataPayload));
             }
         }
+        if let Some(working)=&write.working_json {serde_json::from_value::<layer_ui::WorkspaceWorkingState>(budget.json(working)?)?;}
         if let Some(content) = &write.content_json {
-            unpack(content, |id| match batch.components.get(id) {
-                Some(json) => Ok(json.clone()),
-                None => lookup(id),
-            })?;
+            crate::protocol::unpack_with_budget(content, |id,remaining| match batch.components.get(id) {
+                Some(json) => crate::input::copy(json,remaining),
+                None => lookup(id,remaining),
+            },&mut budget)?;
         }
     }
     Ok(())

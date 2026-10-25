@@ -9,6 +9,7 @@ description = "Shared workspace records, management policy and asynchronous pers
 native = ["dep:rusqlite", "dep:async-channel", "dep:libc"]
 
 [dependencies]
+layer-core = { path = "../layer-core" }
 layer-ui = { path = "../layer-ui" }
 layer-render = { path = "../layer-render" }
 serde = { version = "1", features = ["derive"] }
@@ -18,10 +19,10 @@ uuid = { version = "1", features = ["v4", "js"] }
 async-channel = { version = "2", optional = true }
 
 [target.'cfg(not(target_vendor = "apple"))'.dependencies]
-rusqlite = { version = "0.40.2", features = ["bundled", "backup", "limits"], optional = true }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup", "limits", "hooks"], optional = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
-rusqlite = { version = "0.40.2", features = ["backup", "limits"], optional = true }
+rusqlite = { version = "0.40.2", features = ["backup", "limits", "hooks"], optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 libc = { version = "0.2", optional = true }

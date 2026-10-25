@@ -250,13 +250,7 @@ impl CommitBatch {
                 ));
             }
         }
-        let text = serde_json::to_string(self)?;
-        if text.len() > MAX_PACKAGE_BYTES {
-            return Err(StoreError::invalid(
-                "Workspace operation exceeds the supported size.",
-            ));
-        }
-        Ok(text)
+        crate::input::encoded(self)
     }
 }
 fn intern(value: Value, components: &mut BTreeMap<String, String>) -> Result<Value, StoreError> {
@@ -301,13 +295,18 @@ pub(crate) fn pack(
 }
 pub(crate) fn unpack(
     text: &str,
-    mut read: impl FnMut(&str) -> Result<String, StoreError>,
+    read: impl FnMut(&str,usize) -> Result<String, StoreError>,
 ) -> Result<ItemContent, StoreError> {
+    unpack_with_budget(text,read,&mut crate::input::InputBudget::default())
+}
+pub(crate) fn unpack_with_budget(
+    text:&str,mut read:impl FnMut(&str,usize)->Result<String,StoreError>,budget:&mut crate::input::InputBudget,
+)->Result<ItemContent,StoreError> {
     fn resolve(
         value: Value,
-        read: &mut impl FnMut(&str) -> Result<String, StoreError>,
+        read: &mut impl FnMut(&str,usize) -> Result<String, StoreError>,
         depth: usize,
-        remaining: &mut usize,
+        budget: &mut crate::input::InputBudget,
     ) -> Result<Value, StoreError> {
         if depth > 96 {
             return Err(StoreError::invalid(
@@ -319,26 +318,22 @@ pub(crate) fn unpack(
                 if object.len() == 1
                     && let Some(id) = object.get("$workspace_component").and_then(Value::as_str)
                 {
-                    let json = read(id)?;
-                    *remaining = remaining.checked_sub(json.len()).ok_or_else(|| {
-                        StoreError::invalid("Workspace content exceeds supported limits.")
-                    })?;
+                    if id.len()!=64 || !id.bytes().all(|byte|byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) {return Err(StoreError::invalid("Invalid workspace resource identity."));}
+                    let json = read(id,budget.bytes)?;
                     if content_id(json.as_bytes()) != id {
                         return Err(StoreError::invalid("A workspace resource is corrupt."));
                     }
-                    return resolve(serde_json::from_str(&json)?, read, depth + 1, remaining);
+                    return resolve(budget.json(&json)?, read, depth + 1, budget);
                 }
                 for v in object.values_mut() {
-                    *v = resolve(v.take(), read, depth + 1, remaining)?;
+                    *v = resolve(v.take(), read, depth + 1, budget)?;
                 }
                 Ok(Value::Object(object))
             }
-            Value::Array(values) => Ok(Value::Array(
-                values
-                    .into_iter()
-                    .map(|v| resolve(v, read, depth + 1, remaining))
-                    .collect::<Result<_, _>>()?,
-            )),
+            Value::Array(mut values) => {
+                for value in &mut values {*value=resolve(value.take(),read,depth+1,budget)?;}
+                Ok(Value::Array(values))
+            },
             v => Ok(v),
         }
     }
@@ -347,8 +342,7 @@ pub(crate) fn unpack(
             "Workspace content exceeds supported limits.",
         ));
     }
-    let mut remaining = MAX_PACKAGE_BYTES;
-    let value = resolve(serde_json::from_str(text)?, &mut read, 0, &mut remaining)?;
+    let value = resolve(budget.json(text)?, &mut read, 0, budget)?;
     let content: ItemContent = serde_json::from_value(value)?;
     content.validate()?;
     Ok(content)

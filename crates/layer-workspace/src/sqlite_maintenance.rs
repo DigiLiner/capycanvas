@@ -8,7 +8,7 @@ impl SqliteStore {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         self.ownership.reconcile(&tx, now)?;
-        let items = strings(&tx, "SELECT id FROM items")?
+        let items = strings(&tx, "SELECT id FROM items",MAX_ITEM_ID_BYTES)?
             .iter()
             .map(|id| load(&tx, id))
             .collect::<Result<Vec<_>>>()?;
@@ -23,12 +23,14 @@ impl SqliteStore {
             },
         )?;
         for entity in changed {
+            input::work()?;
             let old = items.iter().find(|s| s.entity.id == entity.id).unwrap();
             if old.entity.content != entity.content {
                 let mut components = BTreeMap::new();
                 let packed =
                     protocol::pack(serde_json::to_value(entity.content)?, &mut components)?;
                 for (id, json) in components {
+            input::work()?;
                     tx.execute(
                         "INSERT OR IGNORE INTO components(id,json) VALUES(?1,?2)",
                         params![id, json],
@@ -54,10 +56,10 @@ impl SqliteStore {
         Ok(())
     }
 }
-fn strings(connection: &Connection, sql: &str) -> Result<Vec<String>> {
+fn strings(connection: &Connection, sql: &str,limit:usize) -> Result<Vec<String>> {
     Ok(connection
         .prepare(sql)?
-        .query_map([], |r| r.get::<_, String>(0))?
+        .query_map([], |r| text(r,0,limit))?
         .collect::<std::result::Result<Vec<_>, _>>()?)
 }
 fn collect_components(connection: &Connection) -> Result<()> {
@@ -67,6 +69,7 @@ fn collect_components(connection: &Connection) -> Result<()> {
         used: &mut BTreeSet<String>,
         depth: usize,
     ) -> Result<()> {
+        input::work()?;
         if depth > 96 {
             return Err(StoreError::invalid(
                 "Resource references exceed supported depth.",
@@ -76,8 +79,8 @@ fn collect_components(connection: &Connection) -> Result<()> {
             serde_json::Value::Object(object) => {
                 if let Some(id) = object.get("$workspace_component").and_then(|v| v.as_str()) {
                     if used.insert(id.into()) {
-                        let json = component(connection, id)?;
-                        visit(&serde_json::from_str(&json)?, connection, used, depth + 1)?;
+                        let json = component(connection, id,MAX_PACKAGE_BYTES)?;
+                        visit(&input::json(&json)?, connection, used, depth + 1)?;
                     }
                 } else {
                     for value in object.values() {
@@ -95,14 +98,17 @@ fn collect_components(connection: &Connection) -> Result<()> {
         Ok(())
     }
     let mut used = BTreeSet::new();
-    for text in strings(connection, "SELECT content FROM items")? {
-        visit(&serde_json::from_str(&text)?, connection, &mut used, 0)?;
+    for text in strings(connection, "SELECT content FROM items",MAX_PACKAGE_BYTES)? {
+            input::work()?;
+        visit(&input::json(&text)?, connection, &mut used, 0)?;
     }
-    for text in strings(connection, "SELECT payload FROM pending")? {
-        let batch: CommitBatch = serde_json::from_str(&text)?;
+    for text in strings(connection, "SELECT payload FROM pending",MAX_PACKAGE_BYTES)? {
+            input::work()?;
+        let batch: CommitBatch = input::json(&text)?;
         used.extend(batch.components.keys().cloned());
     }
-    for id in strings(connection, "SELECT id FROM components")? {
+    for id in strings(connection, "SELECT id FROM components",64)? {
+            input::work()?;
         if !used.contains(&id) {
             connection.execute("DELETE FROM components WHERE id=?1", [id])?;
         }

@@ -13,10 +13,10 @@ pub enum SwitcherEdit {
 
 pub(crate) fn validate_ids(ids: &[String]) -> Result<()> {
     let mut seen = std::collections::BTreeSet::new();
-    if ids.len() > 10_000
+    if ids.len() > MAX_SWITCHER_IDS
         || ids
             .iter()
-            .any(|id| id.is_empty() || id.len() > 512 || !seen.insert(id))
+            .any(|id| id.is_empty() || id.len() > MAX_SWITCHER_ID_BYTES || !seen.insert(id))
     {
         return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::InvalidWorkspaceSwitcherOrder));
     }

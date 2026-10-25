@@ -173,6 +173,7 @@ pub fn validate_database_export_destination(source: &Path, destination: &Path) -
 }
 
 fn backup_database(source: &Path, destination: &Path) -> Result<()> {
+    let _budget=crate::sqlite::input::Guard::new();
     validate_database_export_destination(source, destination)?;
     let parent = destination
         .parent()
@@ -195,11 +196,20 @@ fn backup_database(source: &Path, destination: &Path) -> Result<()> {
             std::fs::canonicalize(source).map_err(unavailable)?,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )?;
-        database.backup(
-            rusqlite::MAIN_DB,
-            std::fs::canonicalize(&temporary).map_err(unavailable)?,
-            None,
-        )?;
+        crate::sqlite::input::install(&database)?;
+        {
+            let mut target=rusqlite::Connection::open(std::fs::canonicalize(&temporary).map_err(unavailable)?)?;
+            crate::sqlite::input::install(&target)?;
+            let backup=rusqlite::backup::Backup::new(&database,&mut target)?;
+            loop {
+                crate::sqlite::input::work()?;
+                match backup.step(128)? {
+                    rusqlite::backup::StepResult::Done=>break,
+                    rusqlite::backup::StepResult::More=>(),
+                    _=>std::thread::sleep(std::time::Duration::from_millis(10)),
+                }
+            }
+        }
         drop(database);
         // Windows FlushFileBuffers requires a writable handle. SQLite has
         // closed its backup connection; reopen without truncating its result.

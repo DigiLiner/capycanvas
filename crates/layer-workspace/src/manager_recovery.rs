@@ -106,7 +106,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                 StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::TheseChangesHaveAlreadyBeenRecoveredOrSaved)
             })?;
         self.flush().await?;
-        let mut entities = Vec::new();
+        let mut entities = Vec::new();let mut budget=crate::input::InputBudget::default();
         for write in &batch.writes {
             if write.delete || (write.create && model::is_default_item(&write.id)) {
                 continue;
@@ -120,9 +120,9 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                 id:new_id(),
                 metadata:write.metadata.clone().or_else(||base.as_ref().map(|e|e.metadata.clone())).ok_or_else(||StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::TheInterruptedItemIsMissingMetadata))?,
                 content:if let Some(content)=&write.content_json {
-                    protocol::unpack(content,|id|batch.components.get(id).cloned().ok_or_else(||StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::AnInterruptedResourceIsMissing)))?
+                    protocol::unpack_with_budget(content,|id,remaining|batch.components.get(id).ok_or_else(||StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::AnInterruptedResourceIsMissing)).and_then(|text|crate::input::copy(text,remaining)),&mut budget)?
                 } else {base.as_ref().ok_or_else(||StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::TheInterruptedItemIsMissingItsLayout))?.content.clone()},
-                working:if let Some(working)=&write.working_json {Some(serde_json::from_str(working)?)} else {base.as_ref().and_then(|e|e.working.clone())},
+                working:if let Some(working)=&write.working_json {Some(serde_json::from_value(budget.json(working)?)?)} else {base.as_ref().and_then(|e|e.working.clone())},
             };
             entity.metadata.name = message(&self.localization(), layer_ui::MessageId::WORKSPACE_RECOVERED_NAME,
                 &[("name", self.display_name(&write.id, &entity.metadata).chars().take(90).collect())])

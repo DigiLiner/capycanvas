@@ -34,7 +34,28 @@ Native workspace connections enable SQLite defensive mode and disable trusted
 schema before reading stored records. SQLite limits values and complete rows
 to the shared 128 MiB workspace package budget plus 64 KiB for row identity and
 framing, and SQL text to 64 KiB, before row strings are materialized. These
-limits do not isolate the native parser.
+limits do not isolate the native parser. Rust checks borrowed text fields for
+type, UTF-8, field size and remaining request bytes before allocating a copy.
+Metadata envelopes include JSON escaping of the allowed description; preference
+envelopes include all 10,000 allowed 512-byte identities with escaping.
+
+A native storage operation shares 128 MiB of copied text, 1,000,000 field/work
+charges and 4,194,304 JSON value nodes across nested calls. SQLite progress
+callbacks admit 10,000 blocks of 1,000 instructions; short-statement loops and
+ownership probes also charge work. A 15-second deadline is checked at these
+progress, field and loop boundaries.
+Budget failures abort the transaction. Teardown still releases owned kernel
+locks when its bounded SQL cleanup fails. Backup copies at most 128 pages per
+step and checks its work/deadline between steps before publishing the file.
+
+Workspace component expansion charges the root and each referenced JSON value
+against one byte/node allowance across all writes or recovered items. Portable
+package acquisition and expanded content have separate 128 MiB allowances.
+Browser snapshots are limited to 128 MiB and the same JSON node bound; bounded
+serialization checks that a snapshot remains readable before IndexedDB receives
+it. Schema inspection refuses a reset if a bounded prefix cannot determine
+whether a large snapshot comes from a newer version. These are input and work
+limits, not allocator quotas or isolation from SQLite and the operating system.
 
 Shader pipelines remain in process and in the driver's own caches. The app does
 not load or save opaque driver pipeline-cache blobs from its storage folders.

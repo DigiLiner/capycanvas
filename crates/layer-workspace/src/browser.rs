@@ -71,12 +71,11 @@ impl Default for BrowserDatabase {
     }
 }
 fn content(text: &str, batch: &CommitBatch) -> Result<ItemContent> {
-    protocol::unpack(text, |id| {
+    protocol::unpack(text, |id,remaining| {
         batch
             .components
             .get(id)
-            .cloned()
-            .ok_or_else(missing_resource)
+            .ok_or_else(missing_resource).and_then(|text|crate::input::copy(text,remaining))
     })
 }
 fn update_ids(
@@ -92,17 +91,38 @@ fn update_ids(
     }
     Ok(field.clone())
 }
-fn schema(text: &str) -> Option<u64> {
-    #[derive(Deserialize)]
-    struct Schema {
-        schema: Option<u64>,
+fn schema(text:&str)->Result<Option<u64>> {
+    struct Schema<'a>(&'a std::cell::Cell<Option<u64>>);
+    impl<'de> serde::de::Visitor<'de> for Schema<'_> {
+        type Value=Option<u64>;
+        fn expecting(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {f.write_str("workspace schema")}
+        fn visit_map<A:serde::de::MapAccess<'de>>(self,mut map:A)->std::result::Result<Self::Value,A::Error> {
+            while let Some(key)=map.next_key::<String>()? {
+                if key=="schema" {
+                    self.0.set(map.next_value()?);
+                    return Err(serde::de::Error::custom("Schema inspected"));
+                }
+                map.next_value::<serde::de::IgnoredAny>()?;
+            }Ok(None)
+        }
     }
-    serde_json::from_str::<Schema>(text).ok()?.schema
+    use serde::Deserializer;
+    const LIMIT:usize=64*1024;
+    let mut decoder=serde_json::Deserializer::from_slice(&text.as_bytes()[..text.len().min(LIMIT)]);
+    let found=std::cell::Cell::new(None);
+    let result=decoder.deserialize_map(Schema(&found));
+    if let Some(schema)=found.get() {return Ok(Some(schema));}
+    match result {
+        Ok(schema)=>Ok(schema),
+        Err(_) if text.len()>LIMIT=>Err(crate::input::limit()),
+        Err(_)=>Ok(None),
+    }
 }
 impl BrowserDatabase {
     pub fn decode(text: &str) -> Result<Self> {
-        match schema(text) {
-            Some(schema) if schema == u64::from(SCHEMA_VERSION) => Ok(serde_json::from_str(text)?),
+        let value=crate::input::InputBudget::default().json(text)?;
+        match value.get("schema").and_then(serde_json::Value::as_u64) {
+            Some(schema) if schema == u64::from(SCHEMA_VERSION) => Ok(serde_json::from_value(value)?),
             Some(schema) if schema > u64::from(SCHEMA_VERSION) => Err(newer_schema()),
             _ => Err(other_schema()),
         }
@@ -110,7 +130,7 @@ impl BrowserDatabase {
     /// `StoreRequest::Reset` for a snapshot that may not decode at all.
     pub fn replace(previous: Option<&str>) -> Result<Self> {
         if previous
-            .and_then(schema)
+            .map(schema).transpose()?.flatten()
             .is_some_and(|schema| schema > u64::from(SCHEMA_VERSION))
         {
             return Err(newer_schema());
@@ -118,7 +138,7 @@ impl BrowserDatabase {
         Ok(Self::default())
     }
     pub fn encoded(&self) -> Result<String> {
-        Ok(serde_json::to_string(self)?)
+        crate::input::encoded(self)
     }
     pub fn release_unlocked(&mut self, live: &[String], queried_at: u64) -> bool {
         let mut released = false;
@@ -176,7 +196,7 @@ impl BrowserDatabase {
                 "An operation ID is already bound to another payload.",
             ));
         }
-        validate_payload(batch, |_| Err(missing_resource()))?;
+        validate_payload(batch, |_,_| Err(missing_resource()))?;
         Ok(hash)
     }
     /// Persist this in a separate completed transaction before publication. If
@@ -411,7 +431,7 @@ impl BrowserDatabase {
                 let working = w
                     .working_json
                     .as_ref()
-                    .map(|j| serde_json::from_str(j))
+                    .map(|j| crate::input::json(j))
                     .transpose()?;
                 self.fences
                     .insert(w.id.clone(), if w.claim { "1" } else { "0" }.into());
@@ -451,7 +471,7 @@ impl BrowserDatabase {
                     s.generations.layout = advance(s.generations.layout)?;
                 }
                 if let Some(j) = &w.working_json {
-                    s.entity.working = Some(serde_json::from_str(j)?);
+                    s.entity.working = Some(crate::input::json(j)?);
                     s.generations.working = advance(s.generations.working)?;
                 }
                 s
