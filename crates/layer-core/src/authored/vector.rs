@@ -702,23 +702,48 @@ impl VectorChunk {
     }
     pub(crate) fn footprint(&self) -> &Footprint {
         self.footprint.get_or_init(|| {
-            let mut bytes = 128 + std::mem::size_of_val(self.records());
-            let mut parts = Vec::new();
-            for record in self.records() {
-                match record {
-                    Record::Path(path) => {
-                        parts.push((Arc::as_ptr(&path.geometry) as usize, 64 + std::mem::size_of_val(path.geometry.subpaths())));
-                        parts.extend(path.geometry.subpaths().iter().flat_map(|s| s.runs()).map(|run| (run.as_ptr() as usize, run.len() * std::mem::size_of::<Anchor>())));
-                        parts.push((Arc::as_ptr(&path.style) as usize, path.style.entries.iter().map(|e| std::mem::size_of::<PaintEntry>() + match e {
-                            PaintEntry::Stroke(s) => s.profile.as_ref().map_or(0, |p| p.knots().len() * 32),
-                            PaintEntry::Opaque(o) => o.properties.len(),
-                            PaintEntry::Fill(_) => 0,
-                        }).sum::<usize>()));
-                    }
-                    Record::Opaque(opaque) => bytes = bytes.saturating_add(opaque.properties.len()),
-                    Record::End => {}
+            fn unknown(value:&Unknown,parts:&mut Vec<(usize,usize)>) {
+                if let Some(value)=value {
+                    parts.push((value.as_ptr() as usize,16+std::mem::size_of_val(value.as_ref())));
+                    parts.extend(value.iter().map(|field|(field.value.as_ptr() as usize,16+field.value.len())));
                 }
             }
+            fn paint(value:&Paint,parts:&mut Vec<(usize,usize)>) {
+                match value {
+                    Paint::Color {unknown:value,..}=>unknown(value,parts),
+                    Paint::Opaque(value)=>parts.push((value.properties.as_ptr() as usize,16+value.properties.len())),
+                }
+            }
+            let mut bytes=128+std::mem::size_of_val(self.records())+std::mem::size_of_val(self.ids.as_ref());
+            let mut parts=Vec::new();
+            for record in self.records() {
+                match record {
+                    Record::Path(path)=>{
+                        parts.push((Arc::as_ptr(&path.geometry) as usize,64+std::mem::size_of_val(path.geometry.subpaths())));
+                        for subpath in path.geometry.subpaths() {
+                            parts.push((subpath.runs().as_ptr() as usize,std::mem::size_of_val(subpath.runs())));
+                            parts.extend(subpath.runs().iter().map(|run|(run.as_ptr() as usize,16+std::mem::size_of_val(run.as_ref()))));
+                        }
+                        parts.push((Arc::as_ptr(&path.style) as usize,32+std::mem::size_of_val(path.style.entries.as_ref())));
+                        for entry in path.style.entries.iter() {
+                            match entry {
+                                PaintEntry::Fill(fill)=>{paint(&fill.paint,&mut parts);unknown(&fill.unknown,&mut parts);},
+                                PaintEntry::Stroke(stroke)=>{
+                                    paint(&stroke.paint,&mut parts);unknown(&stroke.unknown,&mut parts);
+                                    if let Some(profile)=&stroke.profile {parts.push((Arc::as_ptr(profile) as usize,32+std::mem::size_of_val(profile.knots())));}
+                                },
+                                PaintEntry::Opaque(value)=>parts.push((value.properties.as_ptr() as usize,16+value.properties.len())),
+                            }
+                        }
+                        unknown(&path.unknown,&mut parts);
+                        if let Some(name)=&path.name {parts.push((name.as_ptr() as usize,16+name.len()));}
+                        if let Some(shape)=&path.shape {parts.push((Arc::as_ptr(shape) as usize,16+std::mem::size_of_val(shape.as_ref())));}
+                    },
+                    Record::Opaque(value)=>parts.push((value.properties.as_ptr() as usize,16+value.properties.len())),
+                    Record::End=>{},
+                }
+            }
+            bytes=bytes.saturating_add(parts.len().saturating_mul(std::mem::size_of::<(usize,usize)>()));
             Footprint { bytes, parts: parts.into() }
         })
     }

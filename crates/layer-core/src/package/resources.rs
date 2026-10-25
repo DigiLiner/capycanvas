@@ -464,7 +464,9 @@ impl<'a> ResourceReader<'a> {
                 _ => {
                     let (start, highest) = (reading.open, std::mem::take(&mut reading.highest));
                     let bytes = self.bytes(item, "capy.vector-items/1", super::vector_records::MAX_CHUNK_BYTES)?;
-                    let chunk = super::vector_records::decode_chunk(&bytes, count, &mut reading)?;
+                    let remaining=self.limits.raster_bytes.saturating_add(self.limits.asset_bytes).saturating_sub(self.decoded);
+                    reading.limit_bytes(remaining.min(usize::MAX as u64) as usize);
+                    let chunk=super::vector_records::decode_chunk(&bytes,count,&mut reading)?;
                     let own = std::mem::replace(&mut reading.highest, highest);
                     reading.highest = reading.highest.max(own);
                     let resource = match bytes.encoded_if_ready().cloned() {

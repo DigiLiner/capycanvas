@@ -182,7 +182,13 @@ resource records. Project admission also bounds layers, dimensions, retained
 source bytes and raster bytes using the same units on reopen. Shared source
 owners and compressed tile allocations count once; editable raster capacity is
 charged per source. Opening charges vector items for both their decoded bytes
-and the path records they become. Pending edits must resolve before final publication.
+and the path records they become. Vector decoding charges geometry, styles,
+width knots, preserved fields and temporary copies against the remaining project
+allowance before allocating them. Nested style and opaque streams share the
+1,048,576 framed-record limit; a subpath count cannot exceed the path's anchor
+limit before capacity is reserved. Retained accounting includes shared names,
+unknown properties and footprint metadata. Pending edits must resolve
+before final publication.
 
 Current evaluator bounds include 1,024 rulers, 32 mesh cells per axis, 32 curve
 points or gradient stops and LUT cubes of side 65. Precision bounds on invertible

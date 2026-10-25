@@ -84,10 +84,35 @@ const KNOT_START: u8 = 1;
 const KNOT_END: u8 = 2;
 const KNOT_EVEN: u8 = 4;
 
-#[derive(Default)]
-pub struct Reading { pub open: u32, pub slots: usize, pub highest: u64 }
+pub struct Reading { pub open:u32,pub slots:usize,pub highest:u64,bytes:usize,records:usize }
+impl Default for Reading {
+    fn default()->Self {
+        let limits=crate::ProjectLimits::default();
+        Self {open:0,slots:0,highest:0,bytes:limits.raster_bytes.saturating_add(limits.asset_bytes).min(usize::MAX as u64) as usize,records:0}
+    }
+}
 impl Reading {
     pub fn slots(slots: usize) -> Self { Self { slots, ..Self::default() } }
+    pub fn limit_bytes(&mut self,bytes:usize) {self.bytes=self.bytes.min(bytes);}
+    pub fn remaining_bytes(&self)->usize {self.bytes}
+    fn charge(&mut self,bytes:usize)->DecodeResult<()> {
+        self.bytes=self.bytes.checked_sub(bytes).ok_or_else(||unsupported("decoded data exceeds the admitted byte count"))?;Ok(())
+    }
+    fn vector<T>(&mut self,count:usize)->DecodeResult<Vec<T>> {
+        self.charge(count.checked_mul(std::mem::size_of::<T>()).ok_or_else(||unsupported("decoded size overflow"))?)?;
+        let mut values=Vec::new();values.try_reserve_exact(count).map_err(|_|crate::memory::MemoryError)?;Ok(values)
+    }
+    fn grow<T>(&mut self,values:&mut Vec<T>)->DecodeResult<()> {
+        if values.len()==values.capacity() {
+            let capacity=values.capacity().saturating_mul(2).max(4);
+            self.charge(capacity.checked_mul(std::mem::size_of::<T>()).ok_or_else(||unsupported("decoded size overflow"))?)?;
+            values.try_reserve_exact(capacity-values.len()).map_err(|_|crate::memory::MemoryError)?;
+        }Ok(())
+    }
+    fn unknown(&mut self,tag:u64,value:&[u8],unknown:&mut Vec<UnknownProperty>)->DecodeResult<()> {
+        self.charge(value.len().saturating_add(128))?;self.grow(unknown)?;
+        unknown.push(UnknownProperty {tag,value:value.into()});Ok(())
+    }
     fn note(&mut self, id: u64) { self.highest = self.highest.max(id); }
 }
 
@@ -150,6 +175,7 @@ impl<'a> Bytes<'a> {
 struct Framed<'a> { kind: u64, id: u64, properties: &'a [u8] }
 fn framed<'a>(bytes: &mut Bytes<'a>, reading: &mut Reading) -> DecodeResult<Option<Framed<'a>>> {
     let kind = bytes.varuint()?;
+    reading.records=reading.records.checked_add(1).filter(|count|*count<=MAX_RECORDS).ok_or_else(||unsupported("vector data exceeds the admitted record count"))?;
     if kind == 0 { return Ok(None); }
     let id = bytes.varuint()?;
     reading.note(id);
@@ -210,11 +236,14 @@ fn validate_stream(data: &[u8], depth: u32, reading: &mut Reading) -> DecodeResu
     }
     if open == 0 { Ok(()) } else { Err(invalid("unbalanced end marker")) }
 }
-fn opaque(record: &Framed) -> OpaqueRecord { OpaqueRecord { kind: record.kind, id: record.id, properties: record.properties.into() } }
+fn opaque(record:&Framed,reading:&mut Reading)->DecodeResult<OpaqueRecord> {
+    reading.charge(record.properties.len().saturating_add(64))?;
+    Ok(OpaqueRecord {kind:record.kind,id:record.id,properties:record.properties.into()})
+}
 fn unknown_kind(record: &Framed, depth: u32, reading: &mut Reading) -> DecodeResult<OpaqueRecord> {
     if record.kind & KIND_RESERVED != 0 || record.kind & IGNORABLE == 0 { return Err(unsupported("required record kind")); }
     validate_frame(record.properties, depth, reading)?;
-    Ok(opaque(record))
+    opaque(record,reading)
 }
 fn same_number(a: u64, b: u64, shift: u32) -> bool { a >> shift == b >> shift }
 fn check_kind(word: u64) -> DecodeResult<bool> {
@@ -231,18 +260,19 @@ fn unknown_property(tag: u64, value: &[u8], owner: u64, depth: u32, reading: &mu
     }
     if tag & TAG_RESERVED != 0 || tag & IGNORABLE == 0 { return Err(unsupported("required property")); }
     validate_value(tag, value, depth, reading)?;
-    unknown.push(UnknownProperty { tag, value: value.into() });
-    Ok(())
+    reading.unknown(tag,value,unknown)
 }
 fn finish(unknown: Vec<UnknownProperty>) -> Unknown { (!unknown.is_empty()).then(|| unknown.into()) }
 fn flag(value: &[u8]) -> Option<bool> { match value { [0] => Some(false), [1] => Some(true), _ => None } }
 fn exact<T>(bytes: Bytes, value: T) -> DecodeResult<T> { if bytes.done() { Ok(value) } else { Err(invalid("value has trailing bytes")) } }
 
-fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
+fn decode_geometry(value: &[u8],reading:&mut Reading) -> DecodeResult<PathGeometry> {
     let mut bytes = Bytes::new(value);
     let count = bytes.varuint()?;
     if count == 0 || count > (value.len() / 2) as u64 { return Err(invalid("subpath count")); }
-    let mut subpaths = Vec::with_capacity(count as usize);
+    if count>MAX_PATH_ANCHORS as u64 {return Err(unsupported("path exceeds the admitted anchor count"));}
+    reading.charge(128)?;
+    let mut subpaths=reading.vector::<Subpath>(count as usize)?;
     let mut total = 0usize;
     let mut previous = [0i64; 2];
     for _ in 0..count {
@@ -253,7 +283,9 @@ fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
         total += anchors as usize;
         if total > MAX_PATH_ANCHORS { return Err(unsupported("path exceeds the admitted anchor count")); }
         if flags > 1 { return Err(unsupported("subpath flags")); }
-        let mut list = Vec::with_capacity(anchors as usize);
+        let mut list=reading.vector::<Anchor>(anchors as usize)?;
+        reading.charge((anchors as usize).saturating_mul(std::mem::size_of::<Anchor>())
+            .saturating_add((anchors as usize).div_ceil(ANCHOR_RUN).saturating_mul(64)).saturating_add(32))?;
         for _ in 0..anchors {
             let header = bytes.u8()?;
             let kind = AnchorKind(header >> 2);
@@ -271,20 +303,21 @@ fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
     exact(bytes, ())?;
     PathGeometry::new(subpaths).map_err(invalid)
 }
-fn decode_profile(value: &[u8]) -> DecodeResult<WidthProfile> {
+fn decode_profile(value: &[u8],reading:&mut Reading) -> DecodeResult<WidthProfile> {
     let mut bytes = Bytes::new(value);
     let count = bytes.varuint()?;
     if count == 0 || count > (value.len() / KNOT_BYTES) as u64 { return Err(invalid("width knot count")); }
     let mut segment = 0u32;
-    let knots = (0..count).map(|_| {
+    reading.charge(64)?;let mut knots=reading.vector::<WidthKnot>(count as usize)?;
+    for _ in 0..count {
         segment = u32::try_from(bytes.varuint()?).ok().and_then(|delta| segment.checked_add(delta)).ok_or_else(|| unsupported("width knot segment"))?;
         let flags = bytes.u8()?;
         if flags & !(KNOT_START | KNOT_END | KNOT_EVEN) != 0 { return Err(unsupported("width knot flags")); }
         let t = match flags & (KNOT_START | KNOT_END) { KNOT_START => 0., KNOT_END => 1., 0 => bytes.finite_f32()?, _ => return Err(invalid("width knot flags")) };
         let left = bytes.finite_f32()?;
         let right = if flags & KNOT_EVEN != 0 { left } else { bytes.finite_f32()? };
-        Ok(WidthKnot::new(segment, f64::from(t), f64::from(left), f64::from(right)))
-    }).collect::<DecodeResult<Vec<_>>>()?;
+        knots.push(WidthKnot::new(segment,f64::from(t),f64::from(left),f64::from(right)));
+    }
     exact(bytes, ())?;
     WidthProfile::new(knots).map_err(invalid)
 }
@@ -326,7 +359,7 @@ fn decode_entry(record: &Framed, depth: u32, reading: &mut Reading) -> DecodeRes
             CAP if record.kind == STROKE => stroke.cap = coded(&CAPS, value, "stroke cap")?,
             JOIN if record.kind == STROKE => stroke.join = coded(&JOINS, value, "stroke join")?,
             MITER_LIMIT if record.kind == STROKE => stroke.miter_limit = exact_f64(value)?,
-            PROFILE if record.kind == STROKE => stroke.profile = Some(Arc::new(decode_profile(value)?)),
+            PROFILE if record.kind == STROKE => stroke.profile = Some(Arc::new(decode_profile(value,reading)?)),
             _ => unknown_property(tag, value, record.kind, depth, reading, &mut unknown)?,
         }
     }
@@ -345,10 +378,12 @@ fn width(value: &[u8]) -> DecodeResult<f64> {
     exact(bytes, units as f64 / UNITS)
 }
 fn decode_style(value: &[u8], depth: u32, reading: &mut Reading) -> DecodeResult<Style> {
+    reading.charge(64)?;
     let mut bytes = Bytes::new(value);
     let mut entries = Vec::new();
     let mut open = 0u32;
     while !bytes.done() {
+        reading.grow(&mut entries)?;
         match framed(&mut bytes, reading)? {
             None => {
                 open = open.checked_sub(1).ok_or_else(|| invalid("unbalanced end marker"))?;
@@ -357,7 +392,7 @@ fn decode_style(value: &[u8], depth: u32, reading: &mut Reading) -> DecodeResult
             Some(record) if open > 0 => {
                 validate_frame(record.properties, depth + 1, reading)?;
                 if record.kind & KIND_PARENT != 0 { open += 1; }
-                entries.push(PaintEntry::Opaque(opaque(&record)));
+                entries.push(PaintEntry::Opaque(opaque(&record,reading)?));
             }
             Some(record) => {
                 let entry = decode_entry(&record, depth + 1, reading)?;
@@ -378,22 +413,22 @@ fn decode_path(record: &Framed, reading: &mut Reading) -> DecodeResult<PathItem>
     let mut shape = None;
     for (tag, value) in properties(record.properties)? {
         match tag {
-            GEOMETRY => geometry = Some(decode_geometry(value)?),
+            GEOMETRY => geometry = Some(decode_geometry(value,reading)?),
             FILL_RULE => fill_rule = match value { [0] => FillRule::NonZero, [1] => FillRule::EvenOdd, [_] => return Err(unsupported("fill rule")), _ => return Err(invalid("fill rule")) },
             STYLE => style = Some(Arc::new(decode_style(value, 1, reading)?)),
             HIDDEN => hidden = flag(value).ok_or_else(|| invalid("hidden flag"))?,
             NAME => match std::str::from_utf8(value) {
-                Ok(text) if text.len() <= crate::authored::MAX_NAME_BYTES => name = Some(text.into()),
-                _ => unknown.push(UnknownProperty { tag, value: value.into() }),
+                Ok(text) if text.len() <= crate::authored::MAX_NAME_BYTES => {reading.charge(text.len()+64)?;name=Some(text.into());},
+                _ => reading.unknown(tag,value,&mut unknown)?,
             },
-            LOCKED => match flag(value) { Some(value) => locked = value, None => unknown.push(UnknownProperty { tag, value: value.into() }) },
-            LIVE_SHAPE => match decode_shape(value) { Some(recipe) => shape = Some(recipe), None => unknown.push(UnknownProperty { tag, value: value.into() }) },
+            LOCKED => match flag(value) { Some(value) => locked = value, None => reading.unknown(tag,value,&mut unknown)? },
+            LIVE_SHAPE => match decode_shape(value) { Some(recipe) => shape = Some(recipe), None => reading.unknown(tag,value,&mut unknown)? },
             _ => unknown_property(tag, value, PATH, 1, reading, &mut unknown)?,
         }
     }
     let mut path = PathItem::new(ItemId(record.id), Arc::new(geometry.ok_or_else(|| invalid("path requires geometry"))?), style.unwrap_or_default());
     (path.fill_rule, path.hidden, path.locked, path.name) = (fill_rule, hidden, locked, name);
-    if let Some((shape,print))=shape && print==fingerprint(&path)? {path.shape=Some(Arc::new(shape));}
+    if let Some((shape,print))=shape && print==fingerprint(&path)? {reading.charge(std::mem::size_of::<LiveShape>()+64)?;path.shape=Some(Arc::new(shape));}
     path.unknown = finish(unknown);
     path.validate().map_err(invalid)?;
     Ok(path)
@@ -402,12 +437,13 @@ fn decode_path(record: &Framed, reading: &mut Reading) -> DecodeResult<PathItem>
 pub fn decode_chunk(data: &[u8], expected: usize, reading: &mut Reading) -> DecodeResult<VectorChunk> {
     if expected == 0 || expected > CHUNK_RECORDS { return Err(invalid("chunk record count")); }
     let mut bytes = Bytes::new(data);
-    let mut records = Vec::with_capacity(expected);
+    reading.charge(expected.saturating_mul(80).saturating_add(128))?;
+    let mut records=reading.vector::<Record>(expected)?;
     while !bytes.done() {
         if records.len() == expected { return Err(invalid("chunk holds more records than declared")); }
         let record = match framed(&mut bytes, reading)? {
             None => { reading.open = reading.open.checked_sub(1).ok_or_else(|| invalid("unbalanced end marker"))?; Record::End }
-            Some(record) if reading.open > 0 => { validate_frame(record.properties, reading.open, reading)?; if record.kind & KIND_PARENT != 0 { reading.open += 1; } Record::Opaque(opaque(&record)) }
+            Some(record) if reading.open > 0 => { validate_frame(record.properties, reading.open, reading)?; if record.kind & KIND_PARENT != 0 { reading.open += 1; } Record::Opaque(opaque(&record,reading)?) }
             Some(record) => {
                 let decoded = if check_kind(record.kind)? {
                     if record.kind != PATH { return Err(unsupported("record kind in an item list")); }
@@ -593,7 +629,8 @@ fn decode_shape(value: &[u8]) -> Option<(LiveShape, [u8; 16])> {
     let (&kind, rest) = value.split_first()?;
     let numbers = match kind { 1 => 9, 2 => 5, 3 => 6, 4 => 7, _ => return None };
     if rest.len() != numbers * 8 + 16 { return None; }
-    let v: Vec<f64> = rest[..numbers * 8].as_chunks::<8>().0.iter().map(|b| f64::from_le_bytes(*b)).collect();
+    let mut v=[0.;9];
+    for (value,bytes) in v.iter_mut().zip(rest[..numbers*8].as_chunks::<8>().0) {*value=f64::from_le_bytes(*bytes);}
     if !v.iter().all(|n| n.is_finite()) || v[2] < 0. || v[3] < 0. { return None; }
     let count = |n: f64| (n.fract() == 0. && n >= 0. && n <= f64::from(u32::MAX)).then_some(n as u32);
     let kind = match kind {

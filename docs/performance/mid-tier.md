@@ -1833,6 +1833,7 @@ Evidence is under `artifacts/rotation-snap/android/performance/`.
 | Change | Affected work | Reference-device qualification |
 | --- | --- | --- |
 | Shared bounded preparation workers | Cold source/mip preparation, raster restoration and simultaneous windows | Not measured; existing motion results do not qualify this pool |
+| Bounded vector cell index | Picking, marquee selection and edits on crowded vectors | Not measured; capped overflow preserves exact results through a linear fallback |
 
 The [architecture](../architecture.md) defines the worker and queue bounds.
 Warm canvas motion keeps its existing preparation and GPU paths.

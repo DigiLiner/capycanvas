@@ -99,9 +99,10 @@ including when a fallible ownership handoff is refused.
 These limits cover instrumented payloads and scratch, including imported
 selections, profiles, lookup tables, previews, vector encoding buffers and
 transfer chunk copies. They are not an allocator or whole-process quota:
-codec internals, decoded vector structures and unknown-field copies, object
-metadata, host copies, Wasm heap high-water marks and GPU/driver allocations
-need separate limits or process isolation. Small fixed built-in lookup tables
+codec internals, object metadata, host copies, Wasm heap high-water marks and
+GPU/driver allocations need separate limits or process isolation. Vector imports
+bound expanded structures and preserved-field copies before allocation through
+project admission; their retained owners remain outside the image-payload ledger. Small fixed built-in lookup tables
 remain available independently of input admission.
 
 `CanvasEngine`, in `layer-engine`, connects that model to drawing input. It
