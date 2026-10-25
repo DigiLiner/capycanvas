@@ -175,7 +175,7 @@ function Test-LayerRelationships{
         Capture 'relationships-collapsed-group' -Composed -WithModel
         Invoke "layer-$group-content"
         Wait-Until {$null -ne (Find "layer-$child-name")} 'Nested group child did not expand'
-        Invoke 'layer-new-selection'
+        if(Find 'layer-new-selection' -Visible){Invoke 'layer-new-selection'}else{Invoke 'layer-actions';Invoke 'new_selection_layer'}
         Wait-Until {$null -ne (Model).state.layer_tools.rename_layer} 'Saved Selection did not begin naming'
         $saved=(Model).state.layer_tools.rename_layer
         Focus "layer-$saved-rename";[CapyRowPointer]::Key([uint32]$review.Id,0x0d)
