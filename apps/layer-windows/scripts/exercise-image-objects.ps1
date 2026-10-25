@@ -15,7 +15,7 @@ $run=Join-Path $repo ('artifacts/windows/image-objects/'+[Guid]::NewGuid().ToStr
 [IO.Directory]::CreateDirectory($run)|Out-Null
 function Package([string]$Path){
     $members=[CapyPackageFixture]::Read($Path)
-    [Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json -Depth 100
+    [Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json
 }
 function Canonical($Value){
     if($null -ne $Value -and $Value.GetType() -eq [System.Management.Automation.PSCustomObject]){

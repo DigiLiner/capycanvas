@@ -1,6 +1,6 @@
 function Package([string]$Path){
  $members=[CapyPackageFixture]::Read($Path)
- [Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json -Depth 100
+ [Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json
 }
 function Canonical($Value){
  if($null -ne $Value -and $Value.GetType() -eq [System.Management.Automation.PSCustomObject]){
@@ -92,7 +92,7 @@ function Assert-ObjectMotion($Before,$After,[string]$Mode){
  if($edited.Count -ne 1){throw 'Object motion lost its saved image object'}
  $a=Effective-Affine $Before (Front-Layer $Before);$b=Effective-Affine $After (Front-Layer $After)
  if(!@(0..5|Where-Object {$a[$_] -ne $b[$_]}).Count){throw 'Object motion did not change its saved affine'}
- $normalized=(Json $After)|ConvertFrom-Json -Depth 100
+ $normalized=(Json $After)|ConvertFrom-Json
  $object=@($normalized.objects|Where-Object id -eq $old.id)[0]
  if($old.data.PSObject.Properties['affine']){$object.data.affine=$old.data.affine}else{$object.data.PSObject.Properties.Remove('affine')}
  if((Identity $normalized) -ne (Identity $Before)){throw 'Object motion changed a source, other object, layer or order'}

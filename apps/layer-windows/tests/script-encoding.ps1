@@ -41,3 +41,56 @@ try{
     }
 }finally{foreach($case in $writers){[IO.File]::Delete((Join-Path $run $case.file))};[IO.Directory]::Delete($run)}
 Write-Output "$($writers.Count) capture and localization evidence writers preserve Japanese, emoji and ellipsis as UTF-8 without BOM."
+function Fixture-Ast([string]$Name){
+    $tokens=$null;$errors=$null
+    $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot ('../scripts/'+$Name)),[ref]$tokens,[ref]$errors)
+    if(@($errors).Count){throw "$Name failed parsing"};$ast
+}
+Add-Type -AssemblyName System.Drawing
+foreach($fixture in @(@{name='exercise-localization.ps1';width=64;height=64},@{name='exercise-documents.ps1';width=128;height=96})){
+    $ast=Fixture-Ast $fixture.name
+    $guard=$ast.Find({param($n)$n -is [Management.Automation.Language.IfStatementAst] -and $n.Extent.Text.Contains('89504E470D0A1A0A')},$true)
+    if(!$guard){throw 'Missing actual PNG header guard'}
+    $bitmap=[Drawing.Bitmap]::new($fixture.width,$fixture.height);$stream=[IO.MemoryStream]::new()
+    try{$bitmap.Save($stream,[Drawing.Imaging.ImageFormat]::Png);$png=$stream.ToArray()}finally{$bitmap.Dispose();$stream.Dispose()}
+    $bytes=$png;$check=[scriptblock]::Create($guard.Clauses[0].Item1.Extent.Text)
+    if(& $check){throw 'Actual fixture rejected known-size PNG bytes'}
+    $png[0]=0;$bytes=$png
+    if(!(& $check)){throw 'Actual fixture accepted corrupt PNG signature'}
+}
+$ast=Fixture-Ast 'exercise-snap.ps1'
+$hashExpression=$ast.Find({param($n)$n -is [Management.Automation.Language.PipelineAst] -and $n.Extent.Text.Contains('ComputeHash($stream.ToArray())')},$true)
+if(!$hashExpression){throw 'Missing actual snap hash expression'}
+$expected='BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD'
+$stream=[IO.MemoryStream]::new([byte[]]@(97,98,99));$hash=[Security.Cryptography.SHA256]::Create()
+try{if((& ([scriptblock]::Create($hashExpression.Extent.Text))) -cne $expected){throw 'Actual snap expression changed SHA256 of abc'}}finally{$hash.Dispose();$stream.Dispose()}
+$ast=Fixture-Ast 'exercise-localization.ps1'
+$hashExpression=$ast.Find({param($n)$n -is [Management.Automation.Language.PipelineAst] -and $n.Extent.Text.Contains('ComputeHash($encoded.ToArray())')},$true)
+if(!$hashExpression){throw 'Missing actual canvas hash expression'}
+$encoded=[IO.MemoryStream]::new([byte[]]@(97,98,99));$sha=[Security.Cryptography.SHA256]::Create();$hash=$sha
+try{if((& ([scriptblock]::Create($hashExpression.Extent.Text))) -cne $expected){throw 'Actual canvas expression changed SHA256 of abc'}}finally{$sha.Dispose();$encoded.Dispose()}
+$clipboard=Fixture-Ast 'exercise-clipboard.ps1'
+foreach($name in @('Json','Resource-Value')){
+    $fn=$clipboard.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name}.GetNewClosure(),$true)
+    if(!$fn){throw 'Missing actual clipboard helper'};. ([scriptblock]::Create($fn.Extent.Text))
+}
+$leaf='leaf-'+$records[0].title+$records[0].hint;$nested='"'+$leaf+'"'
+foreach($i in 1..80){$nested='{"branch":'+$nested+'}'}
+$members=@([pscustomobject]@{Key='manifest.json';Value=[Text.Encoding]::UTF8.GetBytes($nested)});$After=$nested|ConvertFrom-Json;$decoded=0
+foreach($name in @('exercise-clipboard.ps1','exercise-image-objects.ps1','ObjectFixture.ps1')){
+    $ast=Fixture-Ast $name
+    foreach($command in $ast.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'ConvertFrom-Json'},$true)){
+        $value=& ([scriptblock]::Create($command.Parent.Extent.Text))
+        foreach($i in 1..80){if($value.GetType() -ne [Management.Automation.PSCustomObject]){throw 'Fixture JSON lost structured nested objects'};$value=$value.branch}
+        if($value -cne $leaf){throw 'Fixture JSON truncated nested Unicode data'};$decoded++
+    }
+}
+if($decoded -ne 4){throw 'Expected all four actual fixture JSON decode pipelines'}
+$package=@{members=@([pscustomobject]@{Key='pack';Value=[byte[]]@(0,97,98,99,255)});manifest=@{resources=@(
+    [pscustomobject]@{id='r';type='sample';encoding='raw';bytes='3';location=[pscustomobject]@{pack='pack';offset='1'};data=(' {"values":[true,null,2.5]} '|ConvertFrom-Json)},
+    [pscustomobject]@{id='s';type='nested';encoding='raw';bytes='3';location=[pscustomobject]@{member='pack';offset='1'};data=('{"child":{"ref":"r"}}'|ConvertFrom-Json)}
+)}}
+$resolved=Resource-Value ('{"outer":[null,{"ref":"s"},false]}'|ConvertFrom-Json) $package
+$resource=$resolved['outer'][1];$child=$resource['data']['child']
+if($resolved['outer'][0] -ne $null -or $resolved['outer'][2] -ne $false -or $resource['type'] -cne 'nested' -or $resource['sha256'] -cne $expected -or $child['sha256'] -cne $expected -or $child['data']['values'][0] -ne $true -or $child['data']['values'][1] -ne $null -or $child['data']['values'][2] -ne 2.5){throw 'Actual recursive clipboard helper changed resource bytes or structured data'}
+Write-Output 'PS5-compatible fixture APIs passed: known PNG guards, SHA256 bytes, four nested JSON decoders and recursive clipboard resources.'

@@ -73,7 +73,7 @@ function Cross-Window-Clip{
 }
 function Package([string]$Path){
  $members=[CapyPackageFixture]::Read($Path)
- @{members=$members;manifest=([Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json -Depth 100)}
+ @{members=$members;manifest=([Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json)}
 }
 function Json($Value){ConvertTo-Json -InputObject $Value -Depth 100 -Compress}
 function Resource-Value($Value,$Package){
@@ -86,7 +86,9 @@ function Resource-Value($Value,$Package){
   $member=@($Package.members|Where-Object Key -eq $(if($location.pack){$location.pack}else{$location.member}))
   if($member.Count -ne 1){throw 'Paint resource member is missing'}
   $bytes=[byte[]]::new([int]$resource.bytes);[Array]::Copy($member[0].Value,[int64]$location.offset,$bytes,0,$bytes.Length)
-  return [ordered]@{type=$resource.type;encoding=$resource.encoding;data=(Resource-Value $resource.data $Package);sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))}
+  $hash=[Security.Cryptography.SHA256]::Create()
+  try{$digest=[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','')}finally{$hash.Dispose()}
+  return [ordered]@{type=$resource.type;encoding=$resource.encoding;data=(Resource-Value $resource.data $Package);sha256=$digest}
  }
  $record=[ordered]@{};foreach($property in $Value.PSObject.Properties|Sort-Object Name){$record[$property.Name]=Resource-Value $property.Value $Package};$record
 }

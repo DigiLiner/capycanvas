@@ -622,6 +622,8 @@ code page. Scripts containing Unicode captions or test input use a UTF-8 BOM.
 `tests/script-encoding.ps1` checks encoding and parsing before the native build.
 It also checks that capture manifests, models, layout and localized caption
 evidence retain Unicode in UTF-8 JSON without a BOM.
+Windowless checks execute the fixtures' PNG, SHA-256 and nested JSON expressions
+on known bytes and recursive clipboard data using Windows PowerShell 5.1 APIs.
 
 `tests/renderer-health.ps1` checks the shared fixture assertion against native
 renderer failures and foreign window ownership in a fresh same-version PowerShell

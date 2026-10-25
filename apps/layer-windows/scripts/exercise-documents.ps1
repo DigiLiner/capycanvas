@@ -781,9 +781,9 @@ if(!(Model).state.document_file.modified -or (Model).state.document_file.locatio
 File-Command 'export_document';Picker 'Save As';Choose-Path $exported;Idle
 Wait-Until {Test-Path -LiteralPath $exported} 'Export did not create the chosen PNG'
 $png=[IO.File]::ReadAllBytes($exported)
-if($png.Length -lt 45 -or [Convert]::ToHexString($png[0..7]) -ne '89504E470D0A1A0A' -or
-    [Convert]::ToHexString($png[12..23]) -ne '494844520000008000000060' -or
-    [Convert]::ToHexString($png[($png.Length-8)..($png.Length-1)]) -ne '49454E44AE426082'){
+if($png.Length -lt 45 -or [BitConverter]::ToString($png[0..7]).Replace('-','') -ne '89504E470D0A1A0A' -or
+    [BitConverter]::ToString($png[12..23]).Replace('-','') -ne '494844520000008000000060' -or
+    [BitConverter]::ToString($png[($png.Length-8)..($png.Length-1)]).Replace('-','') -ne '49454E44AE426082'){
     throw 'Export must be a complete PNG of the 128 by 96 document'
 }
 if(!(Model).state.document_file.modified -or (Model).state.document_file.location.uri -ne $first){

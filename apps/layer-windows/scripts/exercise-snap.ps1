@@ -74,7 +74,7 @@ function Patch-Hash {
         $patch=$bitmap.Clone($sample,[Drawing.Imaging.PixelFormat]::Format32bppArgb)
         try{
             $stream=[IO.MemoryStream]::new();$hash=[Security.Cryptography.SHA256]::Create()
-            try{$patch.Save($stream,[Drawing.Imaging.ImageFormat]::Png);[Convert]::ToHexString($hash.ComputeHash($stream.ToArray()))}finally{$hash.Dispose();$stream.Dispose()}
+            try{$patch.Save($stream,[Drawing.Imaging.ImageFormat]::Png);[BitConverter]::ToString($hash.ComputeHash($stream.ToArray())).Replace('-','')}finally{$hash.Dispose();$stream.Dispose()}
         }finally{$patch.Dispose()}
     }finally{$bitmap.Dispose()}
 }

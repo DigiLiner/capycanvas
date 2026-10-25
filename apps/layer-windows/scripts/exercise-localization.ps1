@@ -196,7 +196,8 @@ function Canvas-Pixels([string]$Name){
   $graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)
   if($Name){$bitmap.Save((Join-Path $run ($Name+'.png')),[Drawing.Imaging.ImageFormat]::Png)}
   $bitmap.Save($encoded,[Drawing.Imaging.ImageFormat]::Png)
-  [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($encoded.ToArray()))
+  $hash=[Security.Cryptography.SHA256]::Create()
+  try{[BitConverter]::ToString($hash.ComputeHash($encoded.ToArray())).Replace('-','')}finally{$hash.Dispose()}
  }finally{$encoded.Dispose();$graphics.Dispose();$bitmap.Dispose();[CapyWindowApi]::SetThreadDpiAwarenessContext($dpi)|Out-Null}
 }
 function Open-Search{
@@ -212,7 +213,7 @@ function Export-Image([string]$Path){
  Invoke 'PrimaryButton';Choose-Path $Path
  Wait-Until {Test-Path -LiteralPath $Path} 'Image export did not write the Unicode path' 45
  $bytes=[IO.File]::ReadAllBytes($Path)
- if($bytes.Length -lt 45 -or [Convert]::ToHexString($bytes[0..7]) -ne '89504E470D0A1A0A' -or [Convert]::ToHexString($bytes[12..23]) -ne '494844520000004000000040'){throw 'Export was not a complete 64 by 64 PNG'}
+ if($bytes.Length -lt 45 -or [BitConverter]::ToString($bytes[0..7]).Replace('-','') -ne '89504E470D0A1A0A' -or [BitConverter]::ToString($bytes[12..23]).Replace('-','') -ne '494844520000004000000040'){throw 'Export was not a complete 64 by 64 PNG'}
  (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 function Configuration-CaptionSurface{
