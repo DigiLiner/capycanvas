@@ -224,7 +224,11 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         options.Items().Append(row.up);options.Items().Append(row.down);options.Items().Append(row.separator);
         options.Items().Append(row.rename);options.Items().Append(row.remove);row.more.Flyout(options);
         row.pin.Content(row.pinIcon);row.pin.Width(34);row.pin.Height(34);row.pin.Padding({0,0,0,0});
-        row.pin.Background(clear());row.pin.BorderThickness({0,0,0,0});
+        row.pin.Background(clear());row.pin.BorderBrush(clear());row.pin.BorderThickness({0,0,0,0});
+        for(auto state:{L"",L"PointerOver",L"Pressed",L"Disabled",L"Checked",L"CheckedPointerOver",L"CheckedPressed",L"CheckedDisabled"}){
+            row.pin.Resources().Insert(box_value(hstring(L"ToggleButtonBackground")+state),clear());
+            row.pin.Resources().Insert(box_value(hstring(L"ToggleButtonBorderBrush")+state),clear());
+        }
         row.pin.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(row.pin,3);content.Children().Append(row.pin);
         AutomationProperties::SetAutomationId(row.pin,L"workspace-manager-pin-"+id);
         row.current.Width(14);row.current.Height(14);row.current.Margin({0,0,8,0});

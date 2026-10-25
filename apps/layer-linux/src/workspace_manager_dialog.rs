@@ -428,6 +428,7 @@ impl ManagerUi {
         let pin = gtk::ToggleButton::new();
         pin.set_widget_name(&format!("workspace-pin-{}", item.id));
         pin.add_css_class("flat");
+        pin.add_css_class("workspace-pin");
         pin.set_size_request(34, 34);
         pin.set_valign(gtk::Align::Center);
         let id = item.id.clone();

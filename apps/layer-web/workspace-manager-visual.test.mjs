@@ -22,7 +22,7 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
       await writeFile(`${output}/web-${theme}-${state}.png`,Buffer.from(shot.data,'base64'));
       const geometry=await evaluate(`(()=>{function record(e){const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {tag:e.tagName,css:e.className,text:e.children.length?null:e.textContent,bounds:[r.x,r.y,r.width,r.height],hover:e.matches(':hover'),background:s.backgroundColor,color:s.color,font:s.font,opacity:s.opacity,children:[...e.children].map(record)};}return record(document.querySelector('.workspace-manager'));})()`);
       await writeFile(`${output}/web-${theme}-${state}.json`,JSON.stringify(geometry,null,2));
-      samples[state]=await evaluate(`(()=>{const row=document.querySelector(${JSON.stringify(row)}),background=e=>getComputedStyle(e).backgroundColor;return {row:background(row),choice:background(row.querySelector('.workspace-choice')),grip:background(row.querySelector('.workspace-grip')),options:background(row.querySelector('.workspace-options')),primary:background(document.querySelector('.workspace-manager .suggested-action'))};})()`);
+      samples[state]=await evaluate(`(()=>{const row=document.querySelector(${JSON.stringify(row)}),background=e=>getComputedStyle(e).backgroundColor;return {row:background(row),choice:background(row.querySelector('.workspace-choice')),grip:background(row.querySelector('.workspace-grip')),options:background(row.querySelector('.workspace-options')),pin:background(row.querySelector('.workspace-pin')),primary:background(document.querySelector('.workspace-manager .suggested-action'))};})()`);
     }
     const normal=samples.normal;
     assert.notEqual(samples.row.row,normal.row,'hover highlights the whole row');
@@ -30,6 +30,7 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
     for(const sample of Object.values(samples)) {
       assert.equal(sample.choice,'rgba(0, 0, 0, 0)','row text never gets a separate button background');
       assert.equal(sample.grip,'rgba(0, 0, 0, 0)','the handle never gets a button background');
+      assert.equal(sample.pin,'rgba(0, 0, 0, 0)','the pin stays unboxed while pinned, hovered and focused');
       assert.equal(sample.primary,normal.primary,'hovering disabled confirmation preserves its color');
     }
     assert.equal(samples.row.options,normal.options);
@@ -55,6 +56,7 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
     await pause(500);await settle();
     assert.deepEqual(await evaluate('(()=>{const v=JSON.parse(layerApp.app.workspace_view());return [v.id,v.selected,v.enabled]})()'),['builtin:workspace:illustrator',before,false],'clicking the pin preserves preview selection');
     assert.equal(await evaluate('retainedManagerPin.isConnected&&retainedManagerPin.getAttribute("aria-pressed")==="false"'),true);
+    assert.equal(await evaluate('getComputedStyle(retainedManagerPin).backgroundColor'),'rgba(0, 0, 0, 0)','the unpinned icon has no button background');
     await evaluate('retainedManagerPin.focus()');
     for(const type of ['keyDown','keyUp']) await call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,...(type==='keyDown'?{text:'\r',unmodifiedText:'\r'}:{})});
     await pause(500);await settle();

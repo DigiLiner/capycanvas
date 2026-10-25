@@ -46,14 +46,16 @@ body .workspace-manager::backdrop { background:rgb(0 0 0 / 12%); }
 .workspace-grip + .workspace-choice { padding-left:6px; }
 .workspace-row-mark { display:flex; align-items:center; flex:none; margin-left:6px; transform:translateY(-.5px); }
 .workspace-row-mark svg { width:16px; height:16px; }
+.workspace-manager .workspace-pin { background:transparent; border:0; box-shadow:none; }
 .workspace-pin[aria-pressed="true"] { color:var(--accent); }
 .workspace-pin[aria-disabled="true"] { opacity:.5; }
+.workspace-manager .workspace-pin:active:not([aria-disabled="true"]) { opacity:.65; }
 /* Row bodies and grips share one hover surface. */
 :where(:root:not([data-touch])) .workspace-row:has(.workspace-choice:not(:disabled)):hover { background:color-mix(in srgb,var(--workspace-shade) 3%,transparent); }
 :where(:root:not([data-touch])) .workspace-row[data-selected="true"]:has(.workspace-choice:not(:disabled)):hover { background:color-mix(in srgb,var(--text) 8%,var(--selection)); }
-:where(:root:not([data-touch])) .workspace-manager :is(.workspace-add,.workspace-options,.workspace-pin):hover:not(:disabled):not([aria-disabled="true"]) { background:color-mix(in srgb,var(--workspace-shade) 7%,transparent); }
+:where(:root:not([data-touch])) .workspace-manager :is(.workspace-add,.workspace-options):hover:not(:disabled) { background:color-mix(in srgb,var(--workspace-shade) 7%,transparent); }
 :where(:root:not([data-touch])) .workspace-manager .dialog-close:hover::before { background:color-mix(in srgb,var(--workspace-shade) 15%,transparent); }
-.workspace-manager :is(.workspace-add,.workspace-options,.workspace-pin):active:not(:disabled):not([aria-disabled="true"]) { background:color-mix(in srgb,var(--workspace-shade) 16%,transparent); }
+.workspace-manager :is(.workspace-add,.workspace-options):active:not(:disabled) { background:color-mix(in srgb,var(--workspace-shade) 16%,transparent); }
 .workspace-manager .dialog-close:active::before { background:color-mix(in srgb,var(--workspace-shade) 20%,transparent); }
 .workspace-row:has(.workspace-choice:active:not(:disabled)) { background:color-mix(in srgb,var(--workspace-shade) 8%,transparent); }
 .workspace-row[data-selected="true"]:has(.workspace-choice:active:not(:disabled)) { background:color-mix(in srgb,var(--text) 16%,var(--selection)); }

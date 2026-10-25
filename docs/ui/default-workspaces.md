@@ -320,14 +320,15 @@ context-menu action, and their options open outside Customize Title Bar. Releasi
 not switch workspaces. Ordinary clicks keep their switching behavior.
 
 Manage Workspaces keeps a single ordered list. Every row has a narrow, dimmed
-left grip and a pin button. The pin is filled when the workspace is shown in
-the top bar and outlined otherwise; its tooltip offers **Hide from top bar** or
-**Show in top bar**. Clicking, tapping or activating the focused pin changes only
-its saved visibility, without selecting a preview or starting a row drag. The
-button keeps its place and focus in both states. The current workspace keeps its
-checkmark. The top bar follows the list order and skips unpinned rows. If the current workspace is
-unpinned, it is shown first until the user switches away, without changing the
-saved pins or order; dialog previews do not change this entry.
+left grip and a pin with no button background or border. The pin is filled when
+the workspace is shown in the top bar and outlined otherwise; its tooltip offers
+**Hide from top bar** or **Show in top bar**. Clicking, tapping or activating the
+focused pin changes only its saved visibility, without selecting a preview or
+starting a row drag. The button keeps its place and focus in both states. The
+current workspace keeps its checkmark. The top bar follows the list order and
+skips unpinned rows. If the current workspace is unpinned, it is shown first
+until the user switches away, without changing the saved pins or order; dialog
+previews do not change this entry.
 
 Rows reorder by the list-row and grip rules of the
 [drag convention](drag-and-reorder.md), with an insertion line; Escape cancels.
