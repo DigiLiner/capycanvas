@@ -569,7 +569,8 @@ fn menu_action(model: &gtk::gio::MenuModel, labels: &[&str]) -> Option<String> {
 
 /// Open a bar menu, or its submenu in More when it does not fit, and choose
 /// `labels` in turn. The isolated tablet's synthetic serials cannot grab a
-/// popup, so a pen opens the menu and its item runs through the menu's action.
+/// popup, so a pen opens the menu and its item runs through the menu's action;
+/// afterwards a mouse can no longer open a menu button, so pen runs come last.
 pub(super) fn choose_from_bar_menu(w: &Workspace, native: &mut RemoteInput, device: Device, menu: layer_ui::CanvasBarMenu, labels: &[&str]) {
     let button = bar_widget(w, &format!("canvas-bar-menu-{}", menu.id()));
     let menu_label = menu.label(ui_session(w).localization());
@@ -589,7 +590,11 @@ pub(super) fn choose_from_more(w: &Workspace, native: &mut RemoteInput, device: 
 }
 
 fn choose_in_menu(w: &Workspace, native: &mut RemoteInput, device: Device, opener: &gtk::Widget, path: &[&str]) {
-    tap(native, device, center(w, opener));
+    let at = center(w, opener);
+    if let Device::Mouse = device {
+        native.perform(json!([{"point": at}, {"wait_ms": 120}]));
+    }
+    tap(native, device, at);
     let popover = until_some(
         || opener.downcast_ref::<gtk::MenuButton>()?.popover()?.downcast::<gtk::PopoverMenu>().ok().filter(|p| p.is_visible()),
         &format!("{device:?} opens the menu for {}", path.join(" › ")),
@@ -1076,10 +1081,10 @@ fn native_move_drags_selected_pixels() {
         context.block_on(read_canvas_pixels(w, readback)).unwrap()
     };
     let mut native = remote_input();
-    let runs = [Device::Mouse, Device::Touch, Device::Pen]
+    let runs = [Device::Mouse, Device::Touch]
         .into_iter()
         .flat_map(|device| [(device, false, false), (device, true, false)])
-        .chain([(Device::Mouse, false, true)]);
+        .chain([(Device::Mouse, false, true), (Device::Pen, false, false), (Device::Pen, true, false)]);
     for (device, leave_copy, alt) in runs {
         filled_selection(&w, layer_ui::occurrence_token(paint));
         w.dispatch(UiAction::Invoke { command: CommandId::Move });
