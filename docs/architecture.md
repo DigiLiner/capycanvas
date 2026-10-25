@@ -71,6 +71,8 @@ The render owner reads that generation without scanning owners or querying memor
 Interactive exact image preparation also decodes parked samples on workers.
 Memory and worker-capacity refusals preserve their typed result: interactive work
 pauses without marking the source corrupt, while snapshot jobs return the refusal.
+Private buffer owners release their storage before returning its reservation,
+including when a fallible ownership handoff is refused.
 
 These limits cover instrumented payloads and scratch, including imported
 selections, profiles, lookup tables, previews, vector encoding buffers and

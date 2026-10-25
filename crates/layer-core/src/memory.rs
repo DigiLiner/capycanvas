@@ -112,18 +112,18 @@ impl DecodedBytes {
     pub fn copy_from(bytes:&[u8])->Result<Self,MemoryError> {
         let mut result=Self::zeroed(bytes.len())?;result.copy_from_slice(bytes);Ok(result)
     }
-    pub(crate) fn from_reserved(bytes:Vec<u8>,mut memory:Reservation<'static>)->Result<Self,MemoryError> {
-        memory.resize(bytes.capacity())?;Ok(Self {bytes,_memory:memory})
+    pub(crate) fn from_reserved(bytes:Vec<u8>,memory:Reservation<'static>)->Result<Self,MemoryError> {
+        let mut value=Self {bytes,_memory:memory};
+        value._memory.resize(value.bytes.capacity())?;Ok(value)
     }
     pub fn as_slice(&self)->&[u8] {&self.bytes}
     pub fn capacity(&self)->usize {self.bytes.capacity()}
     pub(crate) fn extend_from_slice(&mut self,bytes:&[u8])->Result<(),MemoryError> {
         extend_bytes(&mut self.bytes,&mut self._memory,bytes)
     }
-    pub fn into_shared(self)->Result<Arc<[u8]>,MemoryError> {
-        let Self {bytes,_memory:mut memory}=self;
-        memory.resize(bytes.capacity().checked_add(bytes.len()).and_then(|bytes|bytes.checked_add(OWNER_CHARGE)).ok_or_else(exhausted)?)?;
-        memory.retain(Arc::<[u8]>::from(bytes))
+    pub fn into_shared(mut self)->Result<Arc<[u8]>,MemoryError> {
+        self._memory.resize(self.bytes.capacity().checked_add(self.bytes.len()).and_then(|bytes|bytes.checked_add(OWNER_CHARGE)).ok_or_else(exhausted)?)?;
+        self._memory.retain(Arc::<[u8]>::from(self.bytes))
     }
 }
 fn extend_bytes(bytes:&mut Vec<u8>,memory:&mut Reservation<'_>,additional:&[u8])->Result<(),MemoryError> {
