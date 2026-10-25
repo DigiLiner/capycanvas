@@ -176,6 +176,10 @@ impl CanvasRenderer for Recorder {
     fn request_content_bounds(&mut self, request: layer_core::ContentBoundsRequest) -> Result<bool, Self::Error> {
         self.bounds_attempts += 1;
         if self.bounds_fails { return Err(BackendError("bounds request failed")); }
+        let scene = request.snapshot.view();
+        if scene.targets().any(|target| scene.operations(target).is_some_and(|operations| !operations.is_empty())) {
+            return Err(BackendError("Wait for the current edit before transferring"));
+        }
         if self.bounds_wait { return Ok(false); }
         self.bounds_requests.push(request);
         Ok(true)
@@ -360,6 +364,7 @@ pub(crate) fn finish_fixture_content_bounds(session: &mut UiSession<Recorder>) -
     for tick in 1..=4 {
         if !session.content_bounds.busy() { break; }
         regions |= session.frame(tick, tick).unwrap().regions;
+        if session.content_bounds.diagnostics()["scan"]["submitted"] != true { continue; }
         let request = session.engine.backend().bounds_requests.last().unwrap();
         let layer_core::ContentScope::Target(target) = request.scope else { panic!("fixture target bounds"); };
         let scene = request.snapshot.view();

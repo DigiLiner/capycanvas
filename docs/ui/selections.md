@@ -59,7 +59,9 @@ moves the whole layer by changing its offset, which resamples nothing.
 - The pixels move by whole layer pixels, so their values are exact. A linked
   mask moves with its layer. Shift keeps the drag horizontal or vertical.
 - Releasing applies the move as one undo step, and the selection moves with the
-  pixels. Move stays the tool, and the selection bar keeps its context.
+  pixels. Move stays the tool, and the selection bar keeps its context. A drag
+  right after a fill starts once the fill lands, and a release while the canvas
+  is still finishing earlier work applies when that work lands.
 - **Leave Copy** (`MoveLeaveCopy`), in Move's Tool Options and in the selection
   bar's More while Move is active, keeps the original in place and places a copy. Alt
   held as the drag starts does the opposite of the toggle.

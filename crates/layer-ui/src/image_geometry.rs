@@ -253,7 +253,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Fit Content edits the open crop; Trim and Reveal All edit the document.
     fn require_content_idle(&self, purpose: ContentUse) -> Result<(), String> {
         match purpose {
-            ContentUse::FitContent | ContentUse::Transform | ContentUse::Move | ContentUse::PrepareMove | ContentUse::PrepareSnap(_) => self.require_idle(),
+            ContentUse::Move => Ok(()),
+            ContentUse::FitContent | ContentUse::Transform | ContentUse::PrepareMove | ContentUse::PrepareSnap(_) => self.require_idle(),
             ContentUse::Trim | ContentUse::RevealAll => self.require_document_idle(),
         }
     }
@@ -264,10 +265,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         refused(self.content_bounds_refusal(purpose))?;
         let doc = self.engine.document();
         let primary = self.bounds_targets().first().copied().or(doc.active_target());
-        let mut request = ContentBoundsRequest::new(doc, purpose.scope(primary)?);
-        if !matches!(request.scope, ContentScope::Target(_)) && doc.has_animated_effects() {
-            request.snapshot = self.engine.scene_snapshot();
-        }
+        let mut request = self.content_request(purpose.scope(primary)?);
         if matches!(request.scope, ContentScope::Target(_)) {
             if let Some(bounds) = self.measured_target_bounds() { return self.use_content_bounds(purpose, bounds); }
             if let Some(target) = self.bounds_targets().into_iter().find(|id| {
@@ -285,15 +283,33 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Ok(());
         }
         self.engine.backend_mut().cancel_content_bounds();
-        let submitted = match self.engine.backend_mut().request_content_bounds(request.clone()) {
-            Ok(submitted) => submitted,
+        self.content_bounds.job = Some(ContentJob { purpose, revision, target, roots, request, submitted: false });
+        self.submit_content_bounds()
+    }
+
+    fn content_request(&self, scope: ContentScope) -> ContentBoundsRequest {
+        let doc = self.engine.document();
+        let mut request = ContentBoundsRequest::new(doc, scope);
+        if !matches!(scope, ContentScope::Target(_)) && doc.has_animated_effects() {
+            request.snapshot = self.engine.scene_snapshot();
+        }
+        request
+    }
+
+    fn submit_content_bounds(&mut self) -> Result<(), String> {
+        if self.engine.raster_backing_pending() { return Ok(()); }
+        let Some(scope) = self.content_bounds.job.as_ref().map(|job| job.request.scope) else { return Ok(()); };
+        let snapshot = self.content_request(scope).snapshot;
+        let job = self.content_bounds.job.as_mut().unwrap();
+        job.request.snapshot = snapshot;
+        match self.engine.backend_mut().request_content_bounds(job.request.clone()) {
+            Ok(submitted) => { job.submitted = submitted; Ok(()) }
             Err(reason) => {
-                if matches!(purpose, ContentUse::PrepareSnap(_)) { self.content_bounds.cache.insert(request, Rect::EMPTY); }
-                return Err(error(reason));
+                let job = self.content_bounds.job.take().unwrap();
+                if matches!(job.purpose, ContentUse::PrepareSnap(_)) { self.content_bounds.cache.insert(job.request, Rect::EMPTY); }
+                Err(error(reason))
             }
-        };
-        self.content_bounds.job = Some(ContentJob { purpose, revision, target, roots, request, submitted });
-        Ok(())
+        }
     }
 
     fn bounds_targets(&self) -> Vec<SourceTarget> {
@@ -456,36 +472,31 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.content_bounds.cache.discard_changed(self.engine.document());
         let Some(job) = &self.content_bounds.job else { return 0 };
         let roots = if job.roots.is_empty() { Vec::new() } else { self.transform_roots() };
-        let job = self.content_bounds.job.as_mut().unwrap();
         let doc = self.engine.document();
         let changed = doc.revision != job.revision || doc.owner != job.request.snapshot.owner
             || (!job.roots.is_empty() && job.roots != roots)
             || (matches!(job.purpose, ContentUse::Transform | ContentUse::Move | ContentUse::PrepareMove) && (doc.active_target() != job.target
                 || doc.working.selection != job.request.selection));
         let cancelled = (job.purpose == ContentUse::FitContent && self.operation.crop.is_none()) || changed;
+        let (purpose, submitted) = (job.purpose, job.submitted);
         let result = if cancelled {
             self.engine.backend_mut().cancel_content_bounds();
             Err("The content bounds scan stopped because the drawing changed".into())
+        } else if !submitted {
+            let Err(message) = self.submit_content_bounds() else { return 0 };
+            self.content_bounds.moving = None;
+            if !matches!(purpose, ContentUse::PrepareMove | ContentUse::PrepareSnap(_)) { self.notify(message); }
+            return regions::HOST;
+        } else if purpose != ContentUse::Move && !self.canvas_idle() {
+            return 0;
         } else {
-            if !job.submitted {
-                match self.engine.backend_mut().request_content_bounds(job.request.clone()).map_err(error) {
-                    Ok(accepted) => { job.submitted = accepted; return 0; }
-                    Err(message) => {
-                        let notify = !matches!(job.purpose, ContentUse::PrepareMove | ContentUse::PrepareSnap(_));
-                        if matches!(job.purpose, ContentUse::PrepareSnap(_)) { self.content_bounds.cache.insert(job.request.clone(), Rect::EMPTY); }
-                        self.content_bounds.job = None;
-                        self.content_bounds.moving = None;
-                        if notify { self.notify(message); }
-                        return regions::HOST;
-                    }
-                }
-            }
             match self.engine.backend_mut().take_content_bounds() {
                 None => return 0,
                 Some(result) => result.map_err(error),
             }
         };
         let job = self.content_bounds.job.take().unwrap();
+        let camera = self.state.camera.revision;
         if matches!(job.purpose, ContentUse::PrepareSnap(_)) && !cancelled && result.is_err() {
             self.content_bounds.cache.insert(job.request.clone(), Rect::EMPTY);
         }
@@ -501,7 +512,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             if !matches!(job.purpose, ContentUse::PrepareMove | ContentUse::PrepareSnap(_)) { self.notify(message); }
         }
         self.refresh_tools();
-        regions::DOCUMENT | regions::BRUSH | regions::COMMANDS | regions::CAMERA | regions::HOST
+        regions::DOCUMENT | regions::BRUSH | regions::COMMANDS | regions::HOST
+            | if self.state.camera.revision == camera { 0 } else { regions::CAMERA }
     }
 
     fn use_content_bounds(&mut self, purpose: ContentUse, bounds: Rect) -> Result<(), String> {

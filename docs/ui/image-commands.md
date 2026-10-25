@@ -125,7 +125,10 @@ place.
   Reveal All and Fit Content. Bounds preparation and rendering run on a worker,
   including a dedicated Web worker. The frame loop keeps running while the query
   is pending. Target changes, cancellation and renderer replacement discard stale
-  results. Move remembers motion and release while preparing; Escape cancels a
+  results. A scan waits for raster edits that are still landing, such as a fill
+  just before Transform or Move, and measures the drawing they produce.
+  Transform opens once the canvas is free; Move continues the drag that asked
+  for the scan and remembers motion and release while preparing; Escape cancels a
   pending Transform. Image placement and Original Size use each image's own
   frame; paint transforms use measured coverage. `image_size.rs` and
   `canvas_size.rs` hold the dialog models, and hosts only present them.

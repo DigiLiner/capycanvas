@@ -1278,6 +1278,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ if locked => l.text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED),
             C::TransformAgain => self.transform_again_refusal().unwrap_or_else(|| l.text(MessageId::COMMANDS_APPLY_OR_CANCEL_THE_TRANSFORM_FIRST)),
             C::TransformSnapping => l.text(MessageId::COMMANDS_START_A_TRANSFORM_FIRST),
+            C::ScaleRotate if self.defers(&UiAction::Invoke { command }) => l.text(MessageId::COMMANDS_WAIT_FOR_CURRENT_EDIT),
             C::ScaleRotate => l.text(MessageId::COMMANDS_SELECT_UNLOCKED_PAINT_CONTENT_OR_A_LAYER_MASK),
             C::ClearLayer | C::FillSelection if !paint => l.text(MessageId::COMMANDS_SELECT_A_PAINT_LAYER),
             C::ClearLayer | C::FillSelection if document.working.target.is_some_and(layer_core::SourceTarget::is_coverage) => l.text(MessageId::COMMANDS_RETURN_TO_THE_LAYER_S_ARTWORK_FIRST),

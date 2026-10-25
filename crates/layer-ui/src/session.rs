@@ -4350,6 +4350,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Ok(());
         }
         if self.layer_interaction.tool != LayerCanvasTool::Paint {
+            if event.phase == PenPhase::Up && (self.operation.moving_pixels() || self.operation.moving_layer())
+                && self.engine.raster_backing_pending() {
+                return Err(event);
+            }
             if let Err(error) = self.layer_pen(event) {
                 let _ = self.cancel_layer_gesture();
                 self.notify(error);

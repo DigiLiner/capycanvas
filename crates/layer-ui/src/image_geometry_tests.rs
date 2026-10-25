@@ -211,6 +211,88 @@ fn transform_waits_for_measured_target_coverage_and_cancel_discards_it() {
     assert!(!s.operation.active());
 }
 
+fn selected_empty_layer() -> UiSession<Recorder> {
+    let mut s = session(Platform::Gtk);
+    s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+    invoke(&mut s, CommandId::FitCanvas);
+    select(&mut s, rectangle([100., 100., 300., 300.]));
+    assert!(!s.command(CommandId::ScaleRotate).enabled, "the layer has no paint yet");
+    s
+}
+
+fn published(s: &UiSession<Recorder>, command: CommandId) -> CommandState {
+    s.state.commands.iter().find(|state| state.id == command).unwrap().clone()
+}
+
+#[test]
+fn transform_and_move_requested_during_a_fill_start_once_the_fill_lands() {
+    let mut s = selected_empty_layer();
+    s.dispatch(UiAction::Invoke { command: CommandId::FillSelection }).unwrap();
+    assert!(s.engine.raster_backing_pending());
+    assert!(s.command(CommandId::ScaleRotate).enabled);
+    s.dispatch(UiAction::Invoke { command: CommandId::ScaleRotate }).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::ScaleRotate }).unwrap();
+    assert!(s.content_bounds.busy() && s.command(CommandId::CancelTransform).enabled);
+    s.frame(2, 2).unwrap();
+    s.frame(3, 3).unwrap();
+    assert_eq!(s.engine.backend().bounds_requests.len(), 1);
+    s.input_pending = true;
+    reply_bounds(&mut s, [100., 100., 300., 300.]);
+    assert!(s.operation.transforming(), "{:?}", notice_text(&s));
+    assert_eq!(notice_text(&s), None);
+
+    let mut s = selected_empty_layer();
+    s.dispatch(UiAction::Invoke { command: CommandId::FillSelection }).unwrap();
+    s.dispatch(UiAction::Invoke { command: CommandId::Move }).unwrap();
+    let before = s.engine.document().working.selection.clone().unwrap();
+    pen_at(&mut s, 1, PenPhase::Down, [150., 150.]);
+    s.frame(4, 4).unwrap();
+    s.frame(5, 5).unwrap();
+    s.renderer_mut().bounds_reply = Some(Ok(layer_core::Rect { min: Point { x: 100., y: 100. }, max: Point { x: 300., y: 300. } }));
+    pen_at(&mut s, 2, PenPhase::Move, [177., 164.]);
+    s.frame(6, 6).unwrap();
+    assert!(s.operation.moving_pixels(), "{:?}", notice_text(&s));
+    s.renderer_mut().settling = true;
+    pen_at(&mut s, 3, PenPhase::Up, [177., 164.]);
+    assert_eq!(s.engine.document().working.selection.as_ref(), Some(&before), "the release waits for the frame in flight");
+    s.renderer_mut().settling = false;
+    for frame in 7..10 { s.frame(frame, frame).unwrap(); }
+    assert_eq!(notice_text(&s), None);
+    assert_eq!(s.engine.document().working.selection, Some(before.translated(Point { x: 27., y: 14. })));
+}
+
+#[test]
+fn a_finished_background_scan_keeps_the_selection_bar_and_its_menu() {
+    let mut s = filled_selection_session();
+    s.dispatch(UiAction::Invoke { command: CommandId::Move }).unwrap();
+    s.frame(2, 2).unwrap();
+    assert!(s.content_bounds.busy());
+    assert_eq!(s.state.canvas_bar.as_ref().unwrap().placement, CanvasBarPlacement::NearObject);
+    let hold = s.canvas_bar_hold();
+    reply_bounds(&mut s, [100., 100., 300., 300.]);
+    assert!(!s.content_bounds.busy() && s.measured_target_bounds().is_some());
+    assert_eq!(s.canvas_bar_hold(), hold);
+}
+
+#[test]
+fn transform_waits_for_a_queued_fill_with_a_busy_reason_and_then_starts() {
+    let mut s = selected_empty_layer();
+    s.renderer_mut().settling = true;
+    s.dispatch(UiAction::Invoke { command: CommandId::FillSelection }).unwrap();
+    assert_eq!(s.deferred_edits.len(), 1, "the fill waits for the earlier frame");
+    let waiting = published(&s, CommandId::ScaleRotate);
+    assert!(!waiting.enabled);
+    assert_eq!(waiting.disabled_reason.as_deref(), Some("Wait for the current edit"));
+    s.dispatch(UiAction::Invoke { command: CommandId::ScaleRotate }).unwrap();
+    assert_eq!(s.deferred_edits.len(), 2, "Transform follows the fill");
+    s.renderer_mut().settling = false;
+    for frame in 2..5 { s.frame(frame, frame).unwrap(); }
+    assert!(s.deferred_edits.is_empty() && s.content_bounds.busy());
+    assert!(published(&s, CommandId::ScaleRotate).enabled);
+    reply_bounds(&mut s, [100., 100., 300., 300.]);
+    assert!(s.operation.transforming(), "{:?}", notice_text(&s));
+}
+
 mod bounds_review {
     use super::*;
     include!("image_geometry_review_tests.rs");
