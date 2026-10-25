@@ -253,7 +253,11 @@ mod tests {
     use super::*;
     use crate::photo::test_support::hdr_pixels;
     fn read_gainmap(input: std::io::Cursor<impl AsRef<[u8]>>, format: GainMapFormat, limits: DecodeLimits, cancelled: &AtomicBool) -> Result<SourceImage, String> {
-        if format == GainMapFormat::Jpeg { let bytes = input.get_ref().as_ref(); return read_jpeg(bytes, bytes.len(), limits, cancelled); }
+        if format == GainMapFormat::Jpeg {
+            let bytes = input.get_ref().as_ref();
+            let mut memory = super::super::jpeg_codec::reserve_input(layer_core::memory::images(), bytes.len(), limits.codec_bytes)?;
+            return read_jpeg(bytes, bytes.len(), limits, cancelled, &mut memory);
+        }
         Ok(super::super::avif_io::read(input, limits, cancelled)?.source)
     }
     #[test]

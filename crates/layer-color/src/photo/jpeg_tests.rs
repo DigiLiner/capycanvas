@@ -29,6 +29,51 @@ fn pattern(channels: SourceChannels, space: RgbSpace) -> SourceImage {
 }
 
 #[test]
+fn concurrent_small_jpeg_decoders_reserve_working_storage_instead_of_caller_allowances() {
+    use layer_core::memory::{Budget, with_input};
+    use libjpeg_turbo_rs::{Encoder, PixelFormat};
+    let memory = Budget::new(16 * 1024 * 1024);
+    let limits = DecodeLimits { codec_bytes: 4 * 1024 * 1024, ..Default::default() };
+    for progressive in [false, true] {
+        let bytes = Encoder::new(&[91; 32 * 32 * 3], 32, 32, PixelFormat::Rgb)
+            .progressive(progressive).encode().unwrap();
+        let ready = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..2).map(|_| scope.spawn(|| with_input(|| {
+                let prepared = (|| -> Result<_, String> {
+                    let mut reservation = jpeg_codec::reserve_input(&memory, bytes.capacity(), limits.codec_bytes)?;
+                    let decoder = jpeg_codec::decoder(&bytes, bytes.capacity(), limits)?;
+                    jpeg_codec::reserve_decode(&decoder, bytes.capacity(), 0, limits.codec_bytes, &mut reservation)?;
+                    Ok((decoder, reservation))
+                })();
+                ready.wait();
+                let (decoder, _reservation) = prepared.unwrap();
+                assert_eq!(decoder.decode_image().unwrap().data.len(), 32 * 32 * 3);
+            }))).collect();
+            for worker in workers { worker.join().unwrap(); }
+        });
+    }
+    assert!(with_input(|| memory.reserve(16 * 1024 * 1024)).is_err());
+    assert!(memory.reserve(16 * 1024 * 1024).is_ok());
+}
+
+#[test]
+fn jpeg_decode_reservation_counts_private_overlap_and_the_caller_ceiling() {
+    use layer_core::memory::Budget;
+    use libjpeg_turbo_rs::{Encoder, PixelFormat};
+    let bytes = Encoder::new(&[91; 32 * 32 * 3], 32, 32, PixelFormat::Rgb).encode().unwrap();
+    let memory = Budget::new(16 * 1024 * 1024);
+    let limits = DecodeLimits { codec_bytes: 4 * 1024 * 1024, ..Default::default() };
+    let mut reservation = jpeg_codec::reserve_input(&memory, bytes.capacity(), limits.codec_bytes).unwrap();
+    let decoder = jpeg_codec::decoder(&bytes, bytes.capacity(), limits).unwrap();
+    assert!(jpeg_codec::reserve_decode(&decoder, bytes.capacity(), limits.codec_bytes, limits.codec_bytes, &mut reservation).is_err());
+    jpeg_codec::reserve_decode(&decoder, bytes.capacity(), 1024 * 1024, limits.codec_bytes, &mut reservation).unwrap();
+    assert!(memory.reserve(13 * 1024 * 1024).is_err());
+    drop(reservation);
+    assert!(memory.reserve(16 * 1024 * 1024).is_ok());
+}
+
+#[test]
 fn camera_mpf_preview_does_not_replace_primary_pixels_or_profile() {
     let source = pattern(SourceChannels::Rgb, RgbSpace::DisplayP3);
     let mut jpeg = Vec::new();

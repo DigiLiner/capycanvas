@@ -4026,7 +4026,6 @@ impl<'a> Decoder<'a> {
         let width: usize = frame.width as usize;
         let height: usize = frame.height as usize;
         self.limits.check_frame(width, height)?;
-        let total_pixels: u64 = (width as u64) * (height as u64);
         if self.metadata.scans.len() > self.limits.max_scans {
             return Err(JpegError::LimitExceeded {
                 what: "scan count",
@@ -4040,25 +4039,7 @@ impl<'a> Decoder<'a> {
         // packed-output term even for decode_raw — one conservative
         // model, one enforcement point.
         if let Some(max_mem) = self.limits.max_memory {
-            let nc = frame.components.len();
-            let out_bpp = self
-                .output_format
-                .unwrap_or(if nc == 1 {
-                    PixelFormat::Grayscale
-                } else {
-                    PixelFormat::Rgb
-                })
-                .bytes_per_pixel();
-            // Progressive adds one [i16; 64] per 8x8 block per component
-            // (~2 B/pixel/component) plus the ac_max_k byte per block —
-            // without this term the ceiling under-enforced by ~1.5x on
-            // exactly the hostile input class (#355 review).
-            let coeff_bytes: u64 = if frame.is_progressive {
-                total_pixels * (2 * nc as u64) + total_pixels * nc as u64 / 64
-            } else {
-                0
-            };
-            let total_estimated: u64 = total_pixels * (out_bpp as u64 + nc as u64) + coeff_bytes;
+            let total_estimated = self.estimated_decode_memory();
             if total_estimated > max_mem {
                 return Err(JpegError::LimitExceeded {
                     what: "estimated decode memory",
@@ -4068,6 +4049,25 @@ impl<'a> Decoder<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Header-derived pixel, component-plane and progressive-coefficient storage
+    /// used by the decode memory limit. Excludes encoded input and metadata.
+    pub fn estimated_decode_memory(&self) -> u64 {
+        let frame = &self.metadata.frame;
+        let total_pixels = u64::from(frame.width) * u64::from(frame.height);
+        let nc = frame.components.len() as u64;
+        let out_bpp = self.output_format.unwrap_or(if nc == 1 {
+            PixelFormat::Grayscale
+        } else {
+            PixelFormat::Rgb
+        }).bytes_per_pixel() as u64;
+        let coeff_bytes = if frame.is_progressive {
+            total_pixels * (2 * nc) + total_pixels * nc / 64
+        } else {
+            0
+        };
+        total_pixels * (out_bpp + nc) + coeff_bytes
     }
 
     /// Bytes `decode_image_into` needs for this stream with the current

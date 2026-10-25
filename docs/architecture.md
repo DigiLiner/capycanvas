@@ -48,9 +48,11 @@ returned document, profile choices, clipboard, history or GPU resources.
 decode/preparation scratch. Native capacity is half the initial available process
 headroom, capped at 4 GiB; an unavailable headroom query uses 256 MiB. Input work
 may occupy three quarters of that capacity, leaving the rest for live canvas
-preparation. A photo decoder also reserves twice its admitted codec allowance;
-each codec allowance is capped at one eighth of the pool. Source admission is
-capped at one quarter. The browser controller admits at most two concurrent
+preparation. JPEG reserves retained input and parser scratch before reading,
+then adds the header-derived decoder estimate and retained gain-map base before
+pixel allocation. Other photo decoders reserve twice their admitted codec
+allowance, capped at one eighth of the pool. Source admission is capped at one
+quarter. The browser controller admits at most two concurrent
 input decoders across its workers; each Wasm instance has its own address-space
 ceiling rather than a measured process-memory budget.
 

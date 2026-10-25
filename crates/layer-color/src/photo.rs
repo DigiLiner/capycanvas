@@ -179,10 +179,10 @@ pub fn read_photo_detailed_with_cancel(
     check_cancel(cancelled)?;
     let _work=layer_core::input_work::DECODERS.enter(cancelled)?;
     let memory=layer_core::memory::images();memory.collect()?;
-    let mut limits=limits;let share=memory.maximum()/8;
-    limits.codec_bytes=limits.codec_bytes.min(share);limits.source_bytes=limits.source_bytes.min(memory.maximum()/4);
-    let _codec=memory.reserve(limits.codec_bytes*2)?;
-    let photo = read_photo_impl(input, limits, cancelled)?;
+    let mut limits=limits;limits.source_bytes=limits.source_bytes.min(memory.maximum()/4);
+    let decoded = read_photo_impl(input, limits, cancelled)?;
+    let _codec = decoded.1;
+    let photo = decoded.0;
     check_cancel(cancelled)?;
     for bytes in photo.metadata.blocks().into_iter().flatten() {memory.track(bytes.storage())?;}
     Ok(photo)
@@ -190,41 +190,46 @@ pub fn read_photo_detailed_with_cancel(
 }
 fn read_photo_impl(
     mut input: impl BufRead + Seek,
-    limits: DecodeLimits,
+    mut limits: DecodeLimits,
     cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<DecodedPhoto, String> {
+) -> Result<(DecodedPhoto, layer_core::memory::Reservation<'static>), String> {
     let origin = input.stream_position().map_err(err)?;
     let mut signature = [0; 8];
     input.read_exact(&mut signature).map_err(err)?;
     input.seek(std::io::SeekFrom::Start(origin)).map_err(err)?;
+    if signature[..2] == [0xff, 0xd8] {
+        let (source, metadata, codec) = jpeg_io::read_jpeg_with_cancel(input, limits, cancelled)?;
+        return Ok((DecodedPhoto { source, metadata, first_frame: false, primary_image: false }, codec));
+    }
+    let memory = layer_core::memory::images();
+    limits.codec_bytes = limits.codec_bytes.min(memory.maximum() / 8);
+    let codec = memory.reserve(limits.codec_bytes * 2)?;
     let (source, metadata) = if signature == *b"\x89PNG\r\n\x1a\n" {
         png_io::read_with_cancel(input, limits, cancelled)
     } else if signature[..4] == [0x76, 0x2f, 0x31, 0x01] {
         exr_io::read_exr(input, limits, cancelled).map(|source| (source, Default::default()))
-    } else if signature[..2] == [0xff, 0xd8] {
-        jpeg_io::read_jpeg_with_cancel(input, limits, cancelled)
     } else if matches!(
         &signature[..4],
         b"II\x2a\x00" | b"MM\x00\x2a" | b"II\x2b\x00" | b"MM\x00\x2b"
     ) {
         tiff_io::read_tiff(input, limits)
     } else if &signature[..4] == b"RIFF" {
-        return webp_io::read(input, limits);
+        return Ok((webp_io::read(input, limits)?, codec));
     } else if matches!(&signature[..6], b"GIF87a" | b"GIF89a") {
-        return gif_io::read(input, limits);
+        return Ok((gif_io::read(input, limits)?, codec));
     } else if &signature[..2] == b"BM" || bmp_io::dib_signature(&signature) {
         bmp_io::read(input, limits).map(|source| (source, Default::default()))
     } else if &signature[4..8] == b"ftyp" {
-        return avif_io::read(input, limits, cancelled);
+        return Ok((avif_io::read(input, limits, cancelled)?, codec));
     } else {
         Err(format!("Supported photo formats: {}", format_names()))
     }?;
-    Ok(DecodedPhoto {
+    Ok((DecodedPhoto {
         source,
         metadata,
         first_frame: false,
         primary_image: false,
-    })
+    }, codec))
 }
 
 fn interpretation(

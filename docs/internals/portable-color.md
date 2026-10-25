@@ -81,10 +81,14 @@ let encode = JpegEncodeOptions::from_memory_budget(95, budget);
 ```
 
 JPEG preflight accounts for retained input capacity and the backend's estimated
-pixel/coefficient storage before allocating decoded pixels. Encoding estimates
-eight times the raw pixel buffer plus scratch and retained metadata. These are admission estimates,
-not allocator-enforced caps or reservations against concurrent jobs. The 32768
-pixel dimension limit and address-space overflow checks also remain in force.
+pixel/coefficient storage before allocating decoded pixels. Shared reservations
+cover input growth and metadata parsing, then the configured decoder estimate;
+gain-map decoding also includes its retained base image. The caller's codec
+ceiling and the shared foreground allowance both apply. Small concurrent JPEGs
+reserve their estimated work rather than their full caller allowances. Encoding
+estimates eight times the raw pixel buffer plus scratch and retained metadata.
+These are admission estimates, not allocator-enforced caps. The 32768 pixel
+dimension limit and address-space overflow checks also remain in force.
 
 The pinned JPEG backport keeps entropy output Vec-owned through growth and
 reports refusal of mainline pixel, coefficient, row and metadata allocations as
@@ -104,9 +108,8 @@ The policy leaves headroom for the editor, GPU, other apps and allocation
 overhead. It does not certify every 100 MP editing session: one 100 MP RGBA f32
 surface occupies about 1.49 GiB, and multiple surfaces/history can exceed a
 device's allowance. Over-budget files currently return a clear error. Automatic
-reduced-resolution import and a shared editor-wide memory reservation manager
-are separate work. Hosts should serialize large photo operations or divide the
-available budget among simultaneous operations.
+reduced-resolution import remains separate work. Shared input execution and
+retained-memory admission also apply across simultaneous native photo operations.
 
 ## ICC compatibility
 

@@ -1,0 +1,66 @@
+--- a/src/decode/pipeline.rs
++++ b/src/decode/pipeline.rs
+@@ -4029 +4028,0 @@
+-        let total_pixels: u64 = (width as u64) * (height as u64);
+@@ -4043,19 +4042 @@
+-            let nc = frame.components.len();
+-            let out_bpp = self
+-                .output_format
+-                .unwrap_or(if nc == 1 {
+-                    PixelFormat::Grayscale
+-                } else {
+-                    PixelFormat::Rgb
+-                })
+-                .bytes_per_pixel();
+-            // Progressive adds one [i16; 64] per 8x8 block per component
+-            // (~2 B/pixel/component) plus the ac_max_k byte per block —
+-            // without this term the ceiling under-enforced by ~1.5x on
+-            // exactly the hostile input class (#355 review).
+-            let coeff_bytes: u64 = if frame.is_progressive {
+-                total_pixels * (2 * nc as u64) + total_pixels * nc as u64 / 64
+-            } else {
+-                0
+-            };
+-            let total_estimated: u64 = total_pixels * (out_bpp as u64 + nc as u64) + coeff_bytes;
++            let total_estimated = self.estimated_decode_memory();
+@@ -4070,0 +4052,19 @@
++    }
++
++    /// Header-derived pixel, component-plane and progressive-coefficient storage
++    /// used by the decode memory limit. Excludes encoded input and metadata.
++    pub fn estimated_decode_memory(&self) -> u64 {
++        let frame = &self.metadata.frame;
++        let total_pixels = u64::from(frame.width) * u64::from(frame.height);
++        let nc = frame.components.len() as u64;
++        let out_bpp = self.output_format.unwrap_or(if nc == 1 {
++            PixelFormat::Grayscale
++        } else {
++            PixelFormat::Rgb
++        }).bytes_per_pixel() as u64;
++        let coeff_bytes = if frame.is_progressive {
++            total_pixels * (2 * nc) + total_pixels * nc / 64
++        } else {
++            0
++        };
++        total_pixels * (out_bpp + nc) + coeff_bytes
+--- a/tests/codec_allocations.rs
++++ b/tests/codec_allocations.rs
+@@ -50,0 +51,18 @@
++}
++
++#[test]
++fn estimated_decode_memory_matches_the_enforced_limit() {
++    for progressive in [false, true] {
++        let bytes = jpeg(progressive, None);
++        let mut decoder = Decoder::new(&bytes).unwrap();
++        for format in [PixelFormat::Grayscale, PixelFormat::Rgb, PixelFormat::Rgba] {
++            decoder.set_output_format(format);
++            let estimate = decoder.estimated_decode_memory();
++            decoder.set_max_memory(estimate as usize);
++            decoder.output_buffer_size().unwrap();
++            decoder.set_max_memory(estimate as usize - 1);
++            assert!(matches!(decoder.output_buffer_size(), Err(JpegError::LimitExceeded {
++                what: "estimated decode memory", actual, limit,
++            }) if actual == estimate && limit == estimate - 1));
++        }
++    }

@@ -49,6 +49,24 @@ fn output_allocation_refusal_preserves_the_decoder() {
     refusal(64*64*3, || decoder.decode_image().map(|_| ()));
     assert_eq!(decoder.decode_image().unwrap().data.len(), 64*64*3);
 }
+
+#[test]
+fn estimated_decode_memory_matches_the_enforced_limit() {
+    for progressive in [false, true] {
+        let bytes = jpeg(progressive, None);
+        let mut decoder = Decoder::new(&bytes).unwrap();
+        for format in [PixelFormat::Grayscale, PixelFormat::Rgb, PixelFormat::Rgba] {
+            decoder.set_output_format(format);
+            let estimate = decoder.estimated_decode_memory();
+            decoder.set_max_memory(estimate as usize);
+            decoder.output_buffer_size().unwrap();
+            decoder.set_max_memory(estimate as usize - 1);
+            assert!(matches!(decoder.output_buffer_size(), Err(JpegError::LimitExceeded {
+                what: "estimated decode memory", actual, limit,
+            }) if actual == estimate && limit == estimate - 1));
+        }
+    }
+}
 #[test]
 fn component_allocation_refusal_preserves_the_decoder() {
     let bytes = jpeg(false, None);

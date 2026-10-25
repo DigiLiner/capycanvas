@@ -28,8 +28,10 @@ keeps one Vec owner through an unwind and preserves the initialized prefix.
 Capy uses the bounded `Decoder` and baseline `Encoder`; it does not call the
 separate `ProgressiveDecoder`, custom scan scripts or C ABI. This selective
 backport does not qualify those other APIs or prove every unsafe codec operation.
-The memory estimates still need aggregate admission and do not impose an allocator
-quota. Remove this vendor once a qualified release includes the corrections.
+`jpeg-shared-admission.patch` exposes the existing header-derived memory estimate for shared
+aggregate admission; its own limit check uses that same estimate. Estimates do
+not impose an allocator quota. Remove this vendor once a qualified release
+includes the corrections.
 
 ```sh
 cargo test --locked -p libjpeg-turbo-rs --lib
