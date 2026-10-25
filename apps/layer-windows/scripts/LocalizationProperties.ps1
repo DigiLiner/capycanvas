@@ -1,4 +1,4 @@
-function Header-MenuState($View,$Identities){
+﻿function Header-MenuState($View,$Identities){
  $specs=@($View.application_menus);$density=[CapyRowPointer]::GetDpiForWindow([IntPtr]$script:current.hwnd)/96.
  $entries=@($View.header.model.zones|ForEach-Object {$_}|Where-Object {$_.item.kind -eq 'menu_labels'})
  if($entries.Count -ne 1 -or $View.header.editing){throw 'Menu localization requires the ordinary wide title bar'}

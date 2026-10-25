@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailPreferences)
+﻿param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailPreferences)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -TypeDefinition @'

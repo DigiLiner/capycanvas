@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('full','dark','light','input','pair-dark','pair-light')][string]$Journey='full')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('full','dark','light','input','pair-dark','pair-light')][string]$Journey='full')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true

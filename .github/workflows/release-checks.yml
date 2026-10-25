@@ -266,6 +266,7 @@ jobs:
       - name: Windows script regressions
         timeout-minutes: 5
         run: |
+          ./apps/layer-windows/tests/script-encoding.ps1
           ./apps/layer-windows/tests/architecture.ps1
           ./apps/layer-windows/tests/application-menu.ps1
           ./apps/layer-windows/tests/application-menu-query.ps1

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly)
 $ErrorActionPreference='Stop'
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
 if($Theme.StartsWith('blend-large-')){$Theme=$Theme.Substring(12);$LargeText=$true;$BlendOnly=$true;$LanguageLimit=2}

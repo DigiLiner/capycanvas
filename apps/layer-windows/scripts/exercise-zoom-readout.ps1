@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[switch]$Navigation,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('none','dark-mouse','light-mouse','dark-pen','dark-touch')][string]$RotationSnapping='none',[string]$FixtureContext)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[switch]$Navigation,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('none','dark-mouse','light-mouse','dark-pen','dark-touch')][string]$RotationSnapping='none',[string]$FixtureContext)
 $ErrorActionPreference='Stop'
 if($RotationSnapping -ne 'none' -and !$env:CAPY_PRIVATE_DESKTOP){
  & (Join-Path $PSScriptRoot 'test-desktop.ps1') -Script $PSCommandPath -Parameters @{Executable=$Executable;RotationSnapping=$RotationSnapping;FixtureContext=$env:CAPY_FIXTURE_CONTEXT} -TimeoutSeconds 900

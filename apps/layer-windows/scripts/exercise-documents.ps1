@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu,[ValidateSet('full','new-drawing')][string]$Journey='full')
+﻿param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu,[ValidateSet('full','new-drawing')][string]$Journey='full')
 if($RecoverGpu -and $FailGpu){throw "Choose successful recovery or exhausted recovery, not both"}
 if($Journey -ne 'full' -and ($RecoverGpu -or $FailGpu)){throw 'GPU recovery requires the full document journey'}
 $ErrorActionPreference='Stop'

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','panel-dark','panel-light')][string]$Theme='dark')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','panel-dark','panel-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 $panelOnly=$Theme.StartsWith('panel-');if($panelOnly){$Theme=$Theme.Substring(6)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')

@@ -6,6 +6,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $build = Resolve-WindowsArchitecture $Architecture
 $packages = 'layer-core','layer-engine','layer-color','layer-render','layer-ui','layer-workspace','layer-host','layer-windows' | ForEach-Object { '-p', $_ }
 $cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
+& (Join-Path $PSScriptRoot '../tests/script-encoding.ps1')
 & (Join-Path $PSScriptRoot '../tests/software-test-runtime.ps1')
 & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -Architecture $build.architecture
 & (Join-Path $PSScriptRoot 'test-input.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $repo "artifacts/windows/tests/$($build.architecture)")

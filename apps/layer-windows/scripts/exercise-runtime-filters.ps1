@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+﻿param([Parameter(Mandatory)][string]$Executable)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true;$CapyCaptureDelay=250

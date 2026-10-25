@@ -594,6 +594,10 @@ quiescent; callers retain callback code and context through that return.
 Window-free document and recovery tests cover failed-worker shutdown and repeat
 cleanup.
 
+Windows PowerShell 5.1 reads scripts without an encoding marker using the system
+code page. Scripts containing Unicode captions or test input use a UTF-8 BOM.
+`tests/script-encoding.ps1` checks encoding and parsing before the native build.
+
 Run `pwsh -NoProfile -File ./apps/layer-windows/tests/model-snapshot-reader.ps1`
 to check the UI fixture model reader during concurrent atomic snapshot publication.
 This windowless test needs no GPU and writes its results under `artifacts/windows`.
