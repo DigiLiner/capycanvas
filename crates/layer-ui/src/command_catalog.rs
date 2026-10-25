@@ -1166,7 +1166,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             C::RasterizeLayer | C::ConvertToObject => self.conversion_refusal(command).unwrap_or_else(|| l.text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET)),
             C::ApplyTransform if self.region_tools.applying_transform() || self.content_bounds.baking() => l.text(MessageId::COMMANDS_APPLYING_THE_TRANSFORM),
             C::TransformPerspective if self.operation.transforming() => l.text(MessageId::COMMANDS_CHOOSE_DISTORT_FIRST),
-            C::TransformUniform if self.operation.transforming() => l.text(MessageId::COMMANDS_CHOOSE_FREE_FIRST),
+            C::TransformUniform if self.operation.transforming() => l.text(MessageId::COMMANDS_CHOOSE_SCALE_FIRST),
             C::ApplyTransform
             | C::CancelTransform
             | C::TransformFlipHorizontal

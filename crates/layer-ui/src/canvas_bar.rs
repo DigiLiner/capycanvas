@@ -149,7 +149,6 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
     localizer.text(match command {
         CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
         CommandId::PlacementOriginalSize => MessageId::TOOLBAR_ORIGINAL_SIZE,
-        CommandId::TransformFree => MessageId::TOOLBAR_FREE,
         CommandId::TransformNearest => MessageId::TOOLBAR_NEAREST,
         CommandId::WarpGridThree => MessageId::TOOLBAR_3_3,
         CommandId::WarpGridFour => MessageId::TOOLBAR_4_4,

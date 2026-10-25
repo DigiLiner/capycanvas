@@ -11,7 +11,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 | Context | Shown when | Items | Placement |
 | --- | --- | --- | --- |
 | Placement | Images are placed or pasted, or whole layers and groups are being moved | For images: flips, quarter turns, Original Size and Nearest or Linear; for layers, the transform's Tool Options · Cancel, Apply | Beside the images or layers |
-| Transform | Transform is open on paint, a mask or selected pixels, or images are selected with Move | Mode (Free, Distort, Warp), Keep proportions in Free, Perspective while distorting, Grid ▾ and Select Points while warping │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical, the quarter turns and Interpolation ▸. For selected images: flips, quarter turns, Original Size, Nearest or Linear, with no Cancel or Apply because each change is already one undo step | Beside the transform box or images |
+| Transform | Transform is open on paint, a mask or selected pixels, or images are selected with Move | Mode (Scale, Distort, Warp), Keep proportions in Scale, Perspective while distorting, Grid ▾ and Select Points while warping │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical, the quarter turns and Interpolation ▸. For selected images: flips, quarter turns, Original Size, Nearest or Linear, with no Cancel or Apply because each change is already one undo step | Beside the transform box or images |
 | Transform, labelled **Transform Outline** | Transform Outline is moving the selection outline | Keep proportions │ Flip Horizontal, Snap │ Cancel, Apply. More adds Flip Vertical and the quarter turns | Beside the outline's box |
 | Polygon | A polygon selection is under construction | Remove Last Point · Cancel, Finish | Bottom edge |
 | Crop | The Crop tool is active | Ratio ▾ (Free, Original, 1:1, 4:5, 2:3, 5:7, 16:9), Swap Orientation, Fit Content, Overlay ▾ (Thirds, Grid, Diagonal, Golden Ratio), Straighten, Delete Cropped Paint Pixels, Reset · Cancel, Apply | Bottom edge |
@@ -80,23 +80,23 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 
 ## Transform modes
 
-- **Free:** scale, rotate and move with the box handles. Ctrl-dragging an edge skews about the opposite edge.
-- **Keep proportions** (`TransformUniform`): a lock beside Free, shown only in Free, that keeps proportions on every handle drag and typed size. It stays on or off across modes and transforms; whole-layer and image placements turn it on.
+- **Scale:** scale, rotate and move with the box handles. Ctrl-dragging an edge skews about the opposite edge.
+- **Keep proportions** (`TransformUniform`): a lock beside Scale, shown only in Scale, that keeps proportions on every handle drag and typed size. It stays on or off across modes and transforms; whole-layer and image placements turn it on.
 - **Distort:** each corner moves independently and each edge moves both of its corners. **Perspective**, or Shift, mirrors a corner drag onto its neighbour so opposite sides stay symmetric.
 - **Warp:** a mesh of curved patches over the content.
   - Drag a point to bend the mesh around it. Pressing a point shows its tangent handles, which shape the curves leaving it. Shift-click, or **Select Points** and tap, selects points to move together. Dragging elsewhere inside moves the whole mesh.
   - **Grid ▾** offers 3 × 3 (the default), 4 × 4 and 5 × 5 cells. A bent grid can only change to a preset that contains every existing line. **Reset Grid** replaces its bends with a straight grid; it keeps the outer transform.
   - **Split Vertically**, **Split Horizontally** and **Split Crosswise** preview lines under the pointer and insert them on release without changing the shape. A grid supports up to 32 cells per direction. Escape cancels a pending split.
 - **Switching modes keeps the geometry:**
-  - Returning to Free from a perspective quad keeps it under a bounding-box frame.
+  - Returning to Scale from a perspective quad keeps it under a bounding-box frame.
   - A parallelogram folds back into position, scale, rotation and skew exactly.
-  - Warp keeps the current outer transform around its mesh. Leaving Warp keeps every control point exactly; Free or Distort then act on its hull.
+  - Warp keeps the current outer transform around its mesh. Leaving Warp keeps every control point exactly; Scale or Distort then act on its hull.
 - **Position anchor:** the compact nine-dot chooser beside X and Y selects the point whose absolute document coordinates they show. Choosing a point changes only the readout; typing X or Y moves that point exactly. The position controls share one labeled group. Transform modes use the same joined radio buttons as other mode bars, with rounded outer corners and square interior joins.
 - **Pivot:** drag the crosshair to set the centre for numeric scale, rotation, flips and quarter turns without moving the artwork. Handle drags keep their opposite anchor; Alt uses the pivot.
 - **Snap:** off by default. Move and transform handles can align to the canvas edges and centre, visible layer or group bounds, and rulers. Moved layers and groups containing them are excluded. Clipped layers are not separate targets; an eligible containing group includes their clipping. Guides appear during the drag; numeric entry stays exact.
 - **Arrow keys** move by one document pixel, or ten with Shift, regardless of view zoom or rotation. Focused text fields keep their arrows. Holding an arrow in Move is one undo step, ending at key-up or loss of focus; Escape cancels it. Within Transform, nudges stay part of the open transform.
 - **Transform Again**, in Edit, repeats the last applied layer transform on the current eligible targets as one undo step, resampling a paint layer's current pixels once more. Selected images repeat the last image transform of the same drawing; Undo makes it unavailable. Warp bends and pixel-selection edits leave the previous repeat unchanged. It has no default shortcut and clears when the drawing is replaced.
-- **Reset** returns to Free and the geometry the transform started with. It is a command only, not on the bar or in Tool Options, because Cancel already discards the transform.
+- **Reset** returns to Scale and the geometry the transform started with. It is a command only, not on the bar or in Tool Options, because Cancel already discards the transform.
 - **Whole layers:** Apply on one paint layer resamples its current pixels once, in the background with Cancel; exact flips and quarter turns keep the samples. Several layers and groups move by whole pixels only, including hidden paint, in one undo step. Locked descendants, generators and Selection Layers refuse the whole operation; Warp requires one paint layer. Object layers transform their images instead ([object layers](image-objects.md)).
 - **Changing tools:** accepts the transform once, then activates the requested tool after Apply succeeds. Another tool choice during Apply replaces that request. Temporary panning keeps the transform open. Cancel and Esc discard the preview, pending Apply and requested tool together; a late result cannot change the drawing. Apply stays unavailable while pending; changing the transform cancels the old job and keeps the new preview open.
 - **Masks:** a linked mask moves and resamples with its owner once; an unlinked mask stays in place, including within selected groups. Copy Mask keeps the mask's document position and linkage when pasted, and linking or unlinking never moves the mask.
@@ -104,7 +104,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
   - The transform stays open, and Apply reads "Applying the transform" until the coverage returns; the result is one undo step.
   - Cancel discards the pending coverage, and any further edit to the transform supersedes it.
 - **Interpolation:** Nearest neighbor, Bilinear, Bicubic or Lanczos, in More and Tool Options.
-  - Until one is chosen, Free resamples bilinearly and Distort bicubically.
+  - Until one is chosen, Scale resamples bilinearly and Distort bicubically.
   - A chosen filter stays for later pixel transforms in the session. Whole-layer transforms reopen with their saved filter.
   - Previews draw a moving Bicubic or Lanczos transform bilinearly; the still preview and Apply use the chosen filter.
 - **Touch:** a finger inside the box or on a handle manipulates the transform; elsewhere it navigates.
@@ -114,7 +114,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 **Transform Outline** (`TransformSelectionOutline`, in Refine ▾ and the Select menu) moves the selection instead of the pixels.
 - The box is the selection's exact bounds, or the canvas for an inverted selection, whose selected area is everything outside its shape.
 - It previews through the selection display, so the marching ants move while the pixels stay. Apply commits one `SetSelection` with the new placement; soft coverage is shared, not resampled.
-- A selection's placement is affine metadata, so only Free is offered, with Keep proportions and no mode choice. Distort, Warp and Interpolation are left out of the bar, More and Tool Options, and are disabled with a reason in menus and search.
+- A selection's placement is affine metadata, so only Scale is offered, with Keep proportions and no mode choice. Distort, Warp and Interpolation are left out of the bar, More and Tool Options, and are disabled with a reason in menus and search.
 - It is unavailable while editing Quick Mask, a Selection Layer or a mask.
 - Dragging it does no pixel work, and moving a pixel selection's outline reuses its uploaded coverage. `LAYER_PACING_TRANSFORM_MODE=outline LAYER_PACING_BRUSH=Transform` with GTK `native_frame_pacing` measures the drag.
 

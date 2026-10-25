@@ -1081,7 +1081,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn toggle_transform_aspect(&mut self) -> Result<(), String> {
         let t = self.operation.current.as_ref().ok_or("Start a transform first")?;
         if t.mode != TransformMode::Free {
-            return Err(self.localization().text(MessageId::COMMANDS_CHOOSE_FREE_FIRST).to_string());
+            return Err(self.localization().text(MessageId::COMMANDS_CHOOSE_SCALE_FIRST).to_string());
         }
         self.operation.aspect = !self.operation.aspect;
         self.refresh_tools();

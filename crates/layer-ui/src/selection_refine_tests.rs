@@ -371,7 +371,7 @@ mod selection_refine_checks {
             assert!(s.renderer_mut().moving_layer.is_none());
             let bar = s.state.canvas_bar.clone().unwrap();
             assert_eq!((bar.context.kind, bar.label.as_deref()), (CanvasBarKind::Transform, Some("Transform Outline")));
-            assert!(bar.items.iter().all(|i| !matches!(i.option, ToolOption::Choice { .. })), "Free is the only mode, so no mode choice");
+            assert!(bar.items.iter().all(|i| !matches!(i.option, ToolOption::Choice { .. })), "Scale is the only mode, so no mode choice");
             let commands: Vec<_> = bar.items.iter().chain(&bar.completion).filter_map(|i| match &i.option {
                 ToolOption::Action { state, .. } => Some(state.id),
                 _ => None,

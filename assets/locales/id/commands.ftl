@@ -273,7 +273,7 @@ command-remove-selection-point = Hapus titik terakhir
 
 command-mask-selection = Mask sesuai seleksi
 
-command-transform-free = Transformasi bebas
+command-transform-free = Skalakan
 
 command-transform-uniform = Pertahankan proporsi
 
@@ -809,7 +809,7 @@ commands-select-an-unlocked-photo-or-image = Pilih lapisan foto atau gambar yang
 commands-applying-the-transform = Menerapkan transformasi
 
 commands-choose-distort-first = Pilih Distorsi terlebih dahulu
-commands-choose-free-first = Pilih Bebas terlebih dahulu
+commands-choose-scale-first = Pilih Skalakan terlebih dahulu
 
 commands-start-a-transform-first = Mulai transformasi terlebih dahulu
 

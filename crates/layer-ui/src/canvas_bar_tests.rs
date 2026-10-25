@@ -1705,7 +1705,7 @@ fn transform_modes_collapse_into_a_dropdown_where_the_work_area_is_narrow() {
     assert!(s.layout([700., 800.]).work_area.width < canvas_bar::CANVAS_BAR_NARROW_WIDTH);
     assert!(!modes(&s), "a narrow work area shows the mode as a dropdown");
     let bar = s.state.canvas_bar.clone().unwrap();
-    assert_eq!(menu_labels(&s.canvas_bar_choice_menu(bar.context, "transform-mode").unwrap()), [["Free", "Distort", "Warp"]]);
+    assert_eq!(menu_labels(&s.canvas_bar_choice_menu(bar.context, "transform-mode").unwrap()), [["Scale", "Distort", "Warp"]]);
     s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
     s.frame(3, 3).unwrap();
     assert!(modes(&s));
@@ -1745,7 +1745,7 @@ fn the_warp_grid_menu_names_and_changes_the_cells() {
 }
 
 #[test]
-fn keep_proportions_is_a_lock_beside_free() {
+fn keep_proportions_is_a_lock_beside_scale() {
     let mut s = filled_selection_session();
     invoke(&mut s, CommandId::ScaleRotate);
     let lock = |s: &UiSession<Recorder>| (s.command(CommandId::TransformUniform).enabled, s.command(CommandId::TransformUniform).selected);
@@ -1754,12 +1754,12 @@ fn keep_proportions_is_a_lock_beside_free() {
     assert!(on_bar(&s));
     invoke(&mut s, CommandId::TransformUniform);
     assert_eq!(lock(&s), (true, true));
-    assert!(s.command(CommandId::TransformFree).selected, "the lock keeps the Free mode");
+    assert!(s.command(CommandId::TransformFree).selected, "the lock keeps the Scale mode");
     invoke(&mut s, CommandId::TransformDistort);
-    assert!(!on_bar(&s), "the lock belongs to Free");
-    assert_eq!(s.command_disabled_reason(CommandId::TransformUniform).as_deref(), Some("Choose Free first"));
+    assert!(!on_bar(&s), "the lock belongs to Scale");
+    assert_eq!(s.command_disabled_reason(CommandId::TransformUniform).as_deref(), Some("Choose Scale first"));
     invoke(&mut s, CommandId::TransformFree);
-    assert_eq!(lock(&s), (true, true), "Free keeps the lock it had");
+    assert_eq!(lock(&s), (true, true), "Scale keeps the lock it had");
     invoke(&mut s, CommandId::TransformUniform);
     assert_eq!(lock(&s), (true, false));
 }
