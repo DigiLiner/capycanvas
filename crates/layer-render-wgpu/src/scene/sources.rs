@@ -208,8 +208,8 @@ impl DecodedTiles {
         }
     }
     pub fn admit(&mut self, allowance: u64) {
-        debug_assert!(self.slots.is_empty(), "source admission precedes pixel allocation");
         self.limits = SourceLimits::admitted(allowance);
+        self.mip_reservation = self.mip_reservation.min(self.mip_budget());
     }
     pub fn admitted_bytes(&self) -> [u64; 2] {
         [self.limits.slots as u64 * self.tile_bytes(), self.limits.upload_bytes]
@@ -386,7 +386,8 @@ impl DecodedTiles {
             ));
         }
         self.misses += 1;
-        let index = if self.slots.len() < self.slot_limit() {
+        let unused = self.slots.iter().position(|s| Arc::strong_count(&s.lease) == 1 && !s.valid.load(Ordering::Acquire));
+        let index = if let Some(index) = unused { index } else if self.slots.len() < self.slot_limit() {
             let texture = r.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("bounded source tile"),
                 size: wgpu::Extent3d {

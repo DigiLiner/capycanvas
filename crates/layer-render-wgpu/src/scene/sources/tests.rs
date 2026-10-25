@@ -378,7 +378,7 @@ fn decoded_sources_preserve_srgb_codes_and_padding() {
 fn source_mip_reservations_wait_for_retired_slots_and_release_discarded_charges() {
     let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut cache=DecodedTiles::default();let source=scan_source(25,0);
-    for x in 0..24 {cache.plan(&r,&source,[x,0]).unwrap();}
+    let first:Vec<_>=(0..24).map(|x|cache.plan(&r,&source,[x,0]).unwrap()).collect();
     assert_eq!(cache.gpu_bytes(),24*FLOAT_TILE_BYTES);
     let bytes=cache.mip_budget();assert_eq!(bytes,44*FLOAT_TILE_BYTES);
     let encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
@@ -391,9 +391,9 @@ fn source_mip_reservations_wait_for_retired_slots_and_release_discarded_charges(
     assert!(cache.reserve_mips(bytes,&encoder).unwrap());
     assert!(cache.reserve_mips(bytes+1,&encoder).is_err());
     cache.reserve_mips(0,&encoder).unwrap();
-    for x in 0..24 {cache.plan(&r,&source,[x,0]).unwrap();}
+    let second:Vec<_>=(0..24).map(|x|cache.plan(&r,&source,[x,0]).unwrap()).collect();
     assert!(!cache.reserve_mips(bytes,&encoder).unwrap());
-    drop(encoder);
+    drop((encoder,first,second));
     cache.reap_retired();
     assert_eq!(cache.retired_bytes.load(Ordering::Acquire),0);
     assert_eq!(cache.gpu_bytes(),MIN_DECODED_SLOTS as u64*FLOAT_TILE_BYTES);
@@ -453,4 +453,32 @@ fn prepared_gray_alpha_samples_are_expanded_by_shared_worker_before_upload() {
     for pixel in crate::test_support::float_pixels(&r,&tile.texture) {
         assert!((pixel[3]-alpha).abs()<2e-6);for channel in &pixel[..3] {assert!((*channel-value).abs()<2e-6);}
     }
+}
+
+#[test]
+fn abandoned_source_writes_are_reused_before_resident_tiles_are_evicted() {
+    let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut cache = DecodedTiles { limits: SourceLimits { slots: 2, ..Default::default() }, ..Default::default() };
+    let source = scan_source(3, 0);
+    let key = |x: u32| Key::raster(&source.tiles[&[x, 0]], RgbSpace::Srgb, RgbSpace::Srgb);
+    let (resident, write) = cache.plan_key(&r, key(0)).unwrap();
+    drop(cache.plan_key(&r, key(1)).unwrap());
+    let (replacement, pending) = cache.plan_key(&r, key(2)).unwrap();
+    assert_ne!(replacement.view, resident.view);
+    let (hit, none) = cache.plan_key(&r, key(0)).unwrap();
+    assert!(none.is_none() && hit.view == resident.view, "a deferred frame keeps decoded tiles resident");
+    drop((write, pending));
+}
+
+#[test]
+fn a_later_display_allowance_admits_matching_source_residency() {
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    for (allowance, slots) in [(3 << 29, 384), (0, 64)] {
+        r.set_complete_display_allowance(allowance);
+        assert_eq!(r.source_tiles.borrow().admitted_bytes()[0], slots * FLOAT_TILE_BYTES);
+        let encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        let budget = r.source_tiles.borrow().mip_budget();
+        assert!(r.source_tiles.get_mut().reserve_mips(budget, &encoder).unwrap());
+    }
+    assert_eq!(r.source_tiles.borrow().slot_limit(), MIN_DECODED_SLOTS);
 }

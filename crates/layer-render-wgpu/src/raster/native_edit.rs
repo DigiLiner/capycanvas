@@ -262,7 +262,14 @@ impl WgpuRasterizer {
             native.display_complete_bytes = bytes;
             native.composition_bytes = bytes.saturating_add(crate::scene::windows::DEFAULT_IMAGE_PIXEL_BYTES);
             self.scale_display = None;
+            self.admit_sources();
         }
+    }
+    fn admit_sources(&mut self) {
+        let allowance = self.native_edit.as_ref().map_or(0, |native| native.display_complete_bytes);
+        #[cfg(not(target_arch = "wasm32"))]
+        let allowance = if self.snapshot_worker { 0 } else { allowance };
+        self.source_tiles.get_mut().admit(allowance);
     }
 
     /// A private candidate shares immutable source samples with the current
@@ -367,12 +374,8 @@ impl WgpuRasterizer {
         self.scene = None;
         self.source_tiles = std::cell::RefCell::new(crate::scene::sources::DecodedTiles::new(color.space));
         let transfer=if let Some(source)=source {source.transfer.clone()}else {self.prepare_native_transfer(color.space)?};
-        let native=NativeEdit::new(self,transfer,source);
-        let allowance = native.display_complete_bytes;
-        #[cfg(not(target_arch = "wasm32"))]
-        let allowance = if self.snapshot_worker { 0 } else { allowance };
-        self.source_tiles.get_mut().admit(allowance);
-        self.native_edit = Some(native);
+        self.native_edit = Some(NativeEdit::new(self,transfer,source));
+        self.admit_sources();
         Ok(())
     }
 
