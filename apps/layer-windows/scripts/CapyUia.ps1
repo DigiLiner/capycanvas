@@ -101,6 +101,39 @@ function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle,[
     if($WindowHandle -and $found.Count -ne 1){throw 'The specified window is not an owned drawing window'}
     if($found.Count){Register-CapyFixtureWindow $Process $found[0].Handle.ToInt64() $TraceDirectory;$found[0]}
 }
+function Same-Curve($Left,$Right){
+    if($null -eq $Left -or $null -eq $Right -or $Left.Count -ne $Right.Count){return $false}
+    for($i=0;$i -lt $Left.Count;$i++){
+        if($Left[$i].Count -ne 2 -or $Right[$i].Count -ne 2){return $false}
+        for($axis=0;$axis -lt 2;$axis++){if([single]$Left[$i][$axis] -ne [single]$Right[$i][$axis]){return $false}}
+    }
+    $true
+}
+function Maximize-DrawingWindow{
+    [CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null
+    Wait-Until {$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Maximized} 'The owned drawing did not maximize'
+    Control 'drawing-canvas' -Arranged|Out-Null
+    Wait-Until {
+        $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$camera=(Model).state.camera
+        [Math]::Abs($camera.viewport[0]-$bounds.Width) -lt 2 -and [Math]::Abs($camera.viewport[1]-$bounds.Height) -lt 2 -and (Model).state.workspace_ready -and !(Model).windows_workspace.busy
+    } 'The maximized native canvas did not receive its viewport and workspace acknowledgement'
+}
+function Clear-CanvasPoint([string]$Utility,[int]$Dx=0,[int]$Dy=0){
+    $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
+    $camera=(Model).state.camera;$tab=@((Model).state.tabs|Where-Object active)[0]
+    if($camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'Canvas pixel sampling requires the initial unrotated camera'}
+    $left=[Math]::Max($camera.work_area[0],$camera.translation[0]);$right=[Math]::Min($camera.work_area[0]+$camera.work_area[2],$camera.translation[0]+$tab.width*$camera.zoom)
+    $top=[Math]::Max($camera.work_area[1],$camera.translation[1]);$bottom=[Math]::Min($camera.work_area[1]+$camera.work_area[3],$camera.translation[1]+$tab.height*$camera.zoom)
+    $sx=$bounds.Width/$camera.viewport[0];$sy=$bounds.Height/$camera.viewport[1]
+    $paper=[System.Windows.Rect]::new($bounds.X+$left*$sx,$bounds.Y+$top*$sy,($right-$left)*$sx,($bottom-$top)*$sy)
+    $panel=(Control $Utility -Arranged).Current.BoundingRectangle
+    foreach($fy in @(.8,.6,.4)){foreach($fx in @(.25,.5,.75)){
+        $x=[int]($paper.X+$paper.Width*$fx);$y=[int]($paper.Y+$paper.Height*$fy)
+        $sample=[System.Windows.Rect]::new($x-48+[Math]::Min(0,$Dx),$y-48+[Math]::Min(0,$Dy),96+[Math]::Abs($Dx),96+[Math]::Abs($Dy))
+        if($bounds.Contains($sample) -and $paper.Contains($sample) -and !$panel.IntersectsWith($sample)){return @($x,$y)}
+    }}
+    throw 'No clear visible paper sample fits outside the utility'
+}
 function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
     $bitmap=[Drawing.Bitmap]::new(96,96)
     $graphics=[Drawing.Graphics]::FromImage($bitmap)

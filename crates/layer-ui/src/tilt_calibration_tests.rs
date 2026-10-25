@@ -21,6 +21,109 @@ fn open(s:&mut UiSession<Recorder>) {invoke(s,CommandId::PenTilt);}
 fn view(s:&UiSession<Recorder>)->&TiltCalibrationView {s.state.tilt_calibration.as_ref().unwrap()}
 
 #[test]
+fn tilt_first_pen_curve_contact_keeps_the_displayed_owner_through_binding() {
+    for platform in Platform::ALL {
+        for ending in [ContactPhase::Up,ContactPhase::Cancel] {
+            let mut s=session(platform);let mut saved=layer_core::TiltCalibration::default();
+            saved.response.sensitivity(false);
+            let mut settings=s.state.settings.clone();settings.tilt_calibrations.insert("pen".into(),saved.clone());
+            s.apply_settings(settings).unwrap();open(&mut s);
+            assert!(!view(&s).ready);let epoch=view(&s).panel.editor.controls.epoch;
+            s.dispatch(UiAction::PenInput{device:device(0,"pen",0),
+                sample:Some([400.,300.,0.5,0.4,0.2,0.,0.,1_000_000_000.,1.])}).unwrap();
+            let loaded=saved.response.points();
+            assert!(view(&s).ready);assert_eq!(view(&s).panel.editor.points,loaded);
+            for (phase,point) in [(ContactPhase::Down,[50.,50.]),(ContactPhase::Move,[40.,25.])] {
+                edit(&mut s,CurveEditorAction::Contact{epoch,phase,point,extent:[100.,100.]});
+            }
+            let edited=view(&s).panel.editor.points.clone();
+            assert_eq!(edited.len(),loaded.len()+1,"{platform:?} {ending:?}: the first pen gesture must edit the loaded response");
+            assert_eq!(edited[0],loaded[0]);assert_eq!(edited[2],loaded[1]);
+            assert!((edited[1][0]-0.4).abs()<f32::EPSILON && (edited[1][1]-0.75).abs()<f32::EPSILON);
+            assert_eq!(view(&s).panel.editor.controls.epoch,epoch);
+            edit(&mut s,CurveEditorAction::Contact{epoch,phase:ending,point:[40.,25.],extent:[100.,100.]});
+            assert_eq!(view(&s).panel.editor.points,if ending==ContactPhase::Cancel {loaded.clone()}else{edited});
+            panel(&mut s,PressureCalibrationAction::Cancel);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"],saved);
+            assert_eq!(s.engine.configured_tilt_curve(),&layer_engine::TiltCurve::new(&saved,TiltAxes::default()));
+            open(&mut s);let next=view(&s).panel.editor.controls.epoch;assert_ne!(next,epoch);
+            assert_eq!(view(&s).panel.editor.points,loaded);
+            edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Down,point:[50.,50.],extent:[100.,100.]});
+            assert_eq!(view(&s).panel.editor.points,loaded,"A closed editor's Down must not enter the reopened editor");
+            for (phase,point) in [(ContactPhase::Down,[50.,50.]),(ContactPhase::Move,[40.,25.])] {
+                edit(&mut s,CurveEditorAction::Contact{epoch:next,phase,point,extent:[100.,100.]});
+            }
+            let current=view(&s).panel.editor.points.clone();assert_ne!(current,loaded);
+            edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Cancel,point:[0.;2],extent:[100.,100.]});
+            assert_eq!(view(&s).panel.editor.points,current,"A closed editor's Cancel must not roll back the current gesture");
+            edit(&mut s,CurveEditorAction::Contact{epoch:next,phase:ContactPhase::Up,point:[40.,25.],extent:[100.,100.]});
+            assert_eq!(view(&s).panel.editor.points,current);
+            panel(&mut s,PressureCalibrationAction::Cancel);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"],saved);
+        }
+    }
+}
+
+#[test]
+fn pen_sensor_dispatch_bypasses_workspace_action_gates_without_canvas_input() {
+    for platform in Platform::ALL {
+        for pressure in [false,true] {
+            let mut s=session(platform);
+            invoke(&mut s,if pressure {CommandId::PenPressure}else{CommandId::PenTilt});
+            s.begin_workspace_transition().unwrap();
+            let document=s.engine.document().clone();let camera=s.state.camera.clone();let cursor=s.cursor.event;
+            let mut pen=device(0,"source",0);pen.label.clear();
+            let input=UiAction::PenInput{device:pen,sample:Some([400.,300.,0.5,0.4,0.2,0.,0.,1_000_000_000.,1.])};
+            assert!(input.is_host_report());let changed=s.dispatch(input.clone()).unwrap();
+            assert_ne!(changed.regions & if pressure {regions::PRESSURE_CALIBRATION}else{regions::TILT_CALIBRATION},0);
+            assert!(!s.input_ui_pending());
+            let repeated=s.dispatch(input).unwrap();assert_eq!(repeated.regions,0);assert_eq!(repeated.revision,changed.revision);
+            if pressure {assert!(s.state.pressure_calibration.as_ref().unwrap().editor.marker.is_some());}
+            else {assert!(view(&s).ready);assert_eq!(view(&s).device,s.state.localization.text(MessageId::COMMAND_PEN).as_ref());}
+            assert_eq!(s.engine.document(),&document);assert_eq!(s.state.camera,camera);assert_eq!(s.cursor.event,cursor);
+            assert!(!s.engine.has_active_stroke());assert!(!s.engine.has_pending_input());
+            s.end_workspace_transition();
+        }
+    }
+}
+
+#[test]
+fn pen_sensor_dispatch_rejects_invalid_samples_before_registering_a_source() {
+    let mut s=session(Platform::Gtk);open(&mut s);let initial=view(&s).clone();
+    let sample=[400.,300.,0.5,0.4,0.2,0.,0.,1_000_000_000.,0.];
+    for (index,value) in [(0,f64::NAN),(0,f64::MAX),(2,f64::INFINITY),(3,f64::NAN),(5,f64::INFINITY),(6,f64::NAN),(6,f64::MAX),(7,-1.),(7,u64::MAX as f64),(8,-1.),(8,5.),(8,0.5)] {
+        let mut invalid=sample;invalid[index]=value;
+        assert!(s.dispatch(UiAction::PenInput{device:device(0,"invalid",0),sample:Some(invalid)}).is_err());
+        assert_eq!(view(&s),&initial);
+    }
+    assert!(s.dispatch(UiAction::PenInput{device:device(0,"",0),sample:None}).is_err());
+    hover(&mut s,0,[0.4,0.2]);assert!(!view(&s).ready);
+}
+
+#[test]
+fn tilt_target_survives_reassigned_hover_aliases_and_follows_its_own_new_contact_frame() {
+    for id in [0,7] {
+        let mut s=session(Platform::Gtk);open(&mut s);
+        s.register_pen_device(&device(id,"first",0));hover(&mut s,id,[0.4,0.2]);
+        let correction=TiltAxes{reverse_horizontal:true,..Default::default()};axes(&mut s,correction);
+        panel(&mut s,PressureCalibrationAction::Sensitivity{lighter:true});
+        let draft=view(&s).clone();
+        s.register_pen_device(&device(id,"second",0));hover(&mut s,id,[0.2,0.6]);
+        assert_eq!(view(&s),&draft,"A reused runtime alias cannot retarget or replace the draft");
+        assert_eq!(s.engine.configured_tilt_curve().map([0.5,0.]),[0.5,0.],"The second pen uses its own neutral response");
+        s.register_pen_device(&device(42,"first",1));
+        assert_eq!(view(&s).axes,correction.in_frame(TiltAxes::quarter_turns(1)));
+        hover(&mut s,42,[0.2,0.4]);
+        assert_eq!(view(&s).device,"Pen first");
+        assert_eq!(view(&s).panel.editor.points,draft.panel.editor.points);
+        panel(&mut s,PressureCalibrationAction::Apply);
+        let saved=&s.state.settings.tilt_calibrations["first"];
+        assert_eq!(saved.axes,correction);assert_eq!(saved.response.points(),draft.panel.editor.points);
+        assert!(!s.state.settings.tilt_calibrations.contains_key("second"));
+    }
+}
+
+#[test]
 fn tilt_editor_identifies_a_pen_and_keeps_its_target_until_closed() {
     let mut s=session(Platform::Gtk);open(&mut s);
     assert!(!view(&s).ready);panel(&mut s,PressureCalibrationAction::Apply);assert!(s.state.tilt_calibration.is_some());
@@ -96,14 +199,14 @@ fn tilt_curve_reuses_point_editing_and_protects_its_origin_and_endpoint() {
 }
 
 #[test]
-fn tilt_and_pressure_share_one_utility_and_only_gtk_exposes_tilt() {
+fn tilt_and_pressure_share_one_utility_on_every_platform() {
     for platform in Platform::ALL {
         let mut s=session(platform);s.dispatch(UiAction::OpenSettings{page:SettingsPage::Input}).unwrap();
         let has=s.preferences().unwrap().pages.iter().flat_map(|p|&p.groups).flat_map(|g|&g.rows).any(|r|r.id==PreferenceId::PenTilt);
-        assert_eq!(has,platform==Platform::Gtk);
+        assert!(has,"{platform:?}");
+        invoke(&mut s,CommandId::PenPressure);open(&mut s);assert!(s.state.pressure_calibration.is_none());
+        invoke(&mut s,CommandId::PenPressure);assert!(s.state.tilt_calibration.is_none());
     }
-    let mut s=session(Platform::Gtk);invoke(&mut s,CommandId::PenPressure);open(&mut s);assert!(s.state.pressure_calibration.is_none());
-    invoke(&mut s,CommandId::PenPressure);assert!(s.state.tilt_calibration.is_none());
 }
 
 #[test]

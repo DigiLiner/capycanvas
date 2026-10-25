@@ -1,5 +1,152 @@
 use super::*;
 
+fn tilt_pen_input(app:&App,id:u64,key:&str,turn:u8,sample:Option<[f64;9]>) {
+    app.action(json!({"type":"pen_input","device":{"id":id,"key":key,"label":format!("Pen {key}"),
+        "native_to_surface":layer_core::TiltAxes::quarter_turns(turn)},"sample":sample}));
+}
+
+#[test]
+fn apple_tilt_sensor_preview_never_routes_canvas_contacts() {
+    for platform in [0,1] {
+        for theme in ["light","dark"] {
+            for panel in ["pen_tilt","pen_pressure"] {
+                for tool in ["lasso","pencil","hand"] {
+                    let app=App::new(platform);app.action(json!({"type":"set_theme","theme":theme}));
+                    app.invoke(tool);app.invoke("select_all");app.invoke(panel);
+                    let document=app.document();
+                    let checkpoint=app.borrow().host.session.engine().checkpoint();
+                    let camera=app.state()["camera"].clone();
+                    let cursor=format!("{:?}",app.borrow().host.session.canvas_cursor());
+                    let settings=app.state()["settings"].clone();
+                    let events=app.borrow().host.session.engine().metrics().input_events;
+                    for phase in 0..=4 {
+                        let sample=[400.+f64::from(phase)*10.,300.,0.3+f64::from(phase)*0.1,0.4,0.2,0.,0.,
+                            1_000_000_000.+f64::from(phase)*10_000_000.,f64::from(phase)];
+                        tilt_pen_input(&app,0,"apple-fixture:pen",0,Some(sample));
+                        let state=app.full_snapshot()["state"].clone();
+                        if panel=="pen_tilt" {
+                            assert_eq!(state["tilt_calibration"]["ready"],true);
+                            assert_eq!(state["tilt_calibration"]["device"],"Pen apple-fixture:pen");
+                            if phase<3 {assert!(!state["tilt_calibration"]["editor"]["marker"].is_null());}
+                        } else if phase<3 {assert!(!state["pressure_calibration"]["editor"]["marker"].is_null());}
+                        assert_eq!(app.document(),document,"{platform} {theme} {panel} {tool} {phase}");
+                        assert_eq!(app.borrow().host.session.engine().checkpoint(),checkpoint);
+                        assert_eq!(app.borrow().host.session.engine().metrics().input_events,events);
+                        assert!(!app.borrow().host.session.engine().has_pending_input());
+                        assert!(!app.borrow().host.session.engine().has_active_stroke());
+                        assert_eq!(state["camera"],camera);assert_eq!(state["settings"],settings);
+                        assert_eq!(format!("{:?}",app.borrow().host.session.canvas_cursor()),cursor);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn apple_tilt_response_uses_stable_source_keys_across_hover_aliases_and_restart() {
+    for platform in [0,1] {
+        for theme in ["light","dark"] {
+            let app=App::new(platform);app.action(json!({"type":"set_theme","theme":theme}));app.invoke("pen_tilt");
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"sensitivity","lighter":true}}}));
+            let axes=layer_core::TiltAxes{reverse_horizontal:true,reverse_vertical:true,swap:false};
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"axes","axes":axes}}));
+            let response=app.state()["tilt_calibration"]["editor"]["points"].clone();
+            let sample=[400.,300.,0.5,0.4,0.2,0.,0.,1_000_000_000.,0.];
+            tilt_pen_input(&app,0,"apple-fixture:first",0,Some(sample));
+            assert_eq!(app.state()["tilt_calibration"]["ready"],true);
+            assert_eq!(app.state()["tilt_calibration"]["editor"]["points"],response);
+            tilt_pen_input(&app,42,"apple-fixture:first",0,None);
+            assert_eq!(unsafe {capy_apple_pointer(app.0,42,0,0,sample.as_ptr(),sample.len(),0,capy_apple_camera_revision(app.0))},0);
+            let first=app.state()["tilt_calibration"].clone();
+            tilt_pen_input(&app,0,"apple-fixture:second",0,Some([420.,340.,0.8,-0.2,0.6,0.,0.,1_100_000_000.,0.]));
+            let retained=app.state()["tilt_calibration"].clone();
+            for key in ["device","axes","ready","bounds","input_direction"] {assert_eq!(retained[key],first[key],"{key}");}
+            for key in ["points","controls","plot"] {assert_eq!(retained["editor"][key],first["editor"][key],"{key}");}
+            for (actual,previous) in [(retained["adjusted_direction"].clone(),first["adjusted_direction"].clone()),
+                (retained["editor"]["marker"].clone(),first["editor"]["marker"].clone())] {
+                for index in 0..2 {assert!((actual[index].as_f64().unwrap()-previous[index].as_f64().unwrap()).abs()<=f64::from(f32::EPSILON));}
+            }
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"apply"}}}));
+            let settings=app.state()["settings"].clone();
+            assert!(settings["tilt_calibrations"]["apple-fixture:second"].is_null());
+            assert_eq!(settings["tilt_calibrations"]["apple-fixture:first"]["axes"],json!(axes));
+            tilt_pen_input(&app,63,"apple-fixture:first",0,Some(sample));
+            app.invoke("pen_tilt");
+            app.action(json!({"type":"curve_editor","target":{"kind":"tilt"},"action":{"kind":"reset"}}));
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"cancel"}}}));
+            assert_eq!(app.state()["settings"],settings);
+            let restored=App::new(platform);restored.action(json!({"type":"restore_settings","settings":settings}));restored.invoke("pen_tilt");
+            tilt_pen_input(&restored,900,"apple-fixture:first",1,None);
+            assert_eq!(restored.state()["tilt_calibration"]["ready"],false);
+            tilt_pen_input(&restored,900,"apple-fixture:first",1,Some(sample));
+            let panel=restored.full_snapshot()["state"]["tilt_calibration"].clone();
+            assert_eq!(panel["ready"],true);assert_eq!(panel["editor"]["points"],response);
+            assert_eq!(panel["axes"],json!(axes.in_frame(layer_core::TiltAxes::quarter_turns(1))));
+            restored.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"apply"}}}));
+            assert_eq!(restored.state()["settings"],settings,"Applying in a rotated frame must preserve native-axis settings");
+        }
+    }
+}
+
+#[test]
+fn apple_tilt_editor_is_editable_before_first_pen_input_in_both_themes() {
+    for platform in [0,1] {
+        for theme in ["light","dark"] {
+            let app=App::new(platform);
+            app.action(json!({"type":"set_theme","theme":theme}));
+            let baseline=app.state()["settings"].clone();
+            let document=app.document();
+            let camera=app.state()["camera"].clone();
+            app.invoke("pen_tilt");
+            let initial=app.full_snapshot()["state"]["tilt_calibration"].clone();
+            assert_eq!(initial["ready"],false,"platform={platform}, theme={theme}");
+            assert_eq!(initial["editor"]["points"],json!([[0.,0.],[1.,1.]]));
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{
+                "kind":"measure","extent":[384.,622.],"viewport":[1200.,900.]}}}));
+            let bounds=app.state()["tilt_calibration"]["bounds"].clone();
+            for (horizontal,vertical,swap) in [(true,false,false),(true,true,false),(true,true,true),(false,true,true)] {
+                let axes=json!({"reverse_horizontal":horizontal,"reverse_vertical":vertical,"swap":swap});
+                app.action(json!({"type":"tilt_calibration","action":{"kind":"axes","axes":axes}}));
+                let panel=app.full_snapshot()["state"]["tilt_calibration"].clone();
+                assert_eq!(panel["axes"],axes);
+                assert_eq!(panel["bounds"],bounds);
+            }
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"sensitivity","lighter":true}}}));
+            assert_ne!(app.state()["tilt_calibration"]["editor"]["points"],initial["editor"]["points"]);
+            app.action(json!({"type":"curve_editor","target":{"kind":"tilt"},"action":{"kind":"reset"}}));
+            let reset=app.state()["tilt_calibration"].clone();
+            assert_eq!(reset["axes"],initial["axes"]);
+            assert_eq!(reset["editor"]["points"],initial["editor"]["points"]);
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"apply"}}}));
+            assert!(!app.state()["tilt_calibration"].is_null(),"Unbound Apply cannot save an unidentified pen");
+            assert_eq!(app.state()["settings"],baseline);
+            app.action(json!({"type":"tilt_calibration","action":{"kind":"panel","action":{"kind":"cancel"}}}));
+            assert!(app.full_snapshot()["state"]["tilt_calibration"].is_null());
+            assert_eq!(app.state()["settings"],baseline);
+            {
+                let fifo=App::new(platform);fifo.action(json!({"type":"set_theme","theme":theme}));fifo.invoke("pen_tilt");
+                let cold=fifo.state()["tilt_calibration"].clone();assert_eq!(cold["ready"],false);
+                let epoch=cold["editor"]["controls"]["epoch"].as_u64().unwrap();
+                tilt_pen_input(&fifo,0,"apple-fixture:first-curve",0,Some([400.,300.,0.5,0.4,0.2,0.,0.,1_000_000_000.,1.]));
+                let bound=fifo.state()["tilt_calibration"].clone();assert_eq!(bound["ready"],true);
+                assert_eq!(bound["device"],"Pen apple-fixture:first-curve");assert_eq!(bound["editor"]["controls"]["epoch"],epoch);
+                fifo.action(json!({"type":"curve_editor","target":{"kind":"tilt"},"action":{"kind":"contact","epoch":epoch,"phase":"down","point":[50.,50.],"extent":[100.,100.]}}));
+                assert_eq!(fifo.state()["tilt_calibration"]["editor"]["points"].as_array().unwrap().len(),3,"The identifying pen contact must reach the displayed curve owner");
+                fifo.action(json!({"type":"curve_editor","target":{"kind":"tilt"},"action":{"kind":"contact","epoch":epoch,"phase":"cancel","point":[0.,0.],"extent":[100.,100.]}}));
+                assert_eq!(fifo.state()["tilt_calibration"]["editor"]["points"],cold["editor"]["points"]);
+            }
+            app.invoke("pen_pressure");app.invoke("pen_tilt");
+            assert!(app.state()["pressure_calibration"].is_null());
+            app.invoke("pen_pressure");
+            assert!(app.full_snapshot()["state"]["tilt_calibration"].is_null());
+            assert!(!app.state()["pressure_calibration"].is_null());
+            assert_eq!(app.document(),document);
+            assert_eq!(app.state()["camera"],camera);
+        }
+    }
+}
+
 #[test]
 fn consumed_paint_timestamp_advances_only_after_real_input_reaches_the_engine() {
     assert_eq!(unsafe { capy_apple_consumed_paint_ns(0) }, 0);

@@ -176,7 +176,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Android tool bubble drag through four neighbours | 90 | **Not met.** Bubble release fixes: 85.784–89.064 actual app-window presents/s; p99 up to 22.339615 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-24 |
 | Web tool bubble drag through four neighbours | 90 | **Unqualified after the bubble release fixes.** Previous parity build missed the target: 60.01–74.59 actual presents/s, p99 33.497–33.525 ms, default Low glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-24 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
-| Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
+| Pen pressure and tilt utilities, curves and live previews | 90 | 87.74–89.25 presented fps; 11.17–22.33 ms gap p99 | [Current utility measurements](#pen-response-utilities); all rate floors pass, two cases narrowly miss the 22.2 ms gap limit |
 | Windows tool bubble drag through four neighbours | 90 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Windows HDR color bubble drag and intensity scrub | 90 | Unmeasured on reference hardware; native input and pixel checks do not qualify presentation timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Apple tool bubble drag through four neighbours | 90 | **Unqualified.** Reference hardware remains unmeasured; the M2 Pro Mac diagnostic uses the 61 MP canvas and does not measure the whole native overlay | [Apple native measurements](top-tier.md#apple-native-measurements), 2026-10-24 |
@@ -1612,6 +1612,58 @@ The physical panel was running at 60 Hz and would not change refresh mode.
 These are GPU completion measurements, not scanout timestamps. The pressure
 utility's 90 Hz presentation target remains unmeasured. Raw reports, APK/JNI
 hashes and provenance are in `artifacts/pen-pressure/android-mid-20261010/`.
+
+## Pen response utilities
+
+Measured on 2026-10-24 on the reference MovinkPad 11 at `d44a2bb89`, using
+an unminified, non-debuggable Android benchmark APK and Rust release profile.
+The 6000 × 4000 reference photo is below one empty paint layer at Fit, with
+the default Sketch workspace, Navigator visible, Stats hidden and Low panel
+glass. Thermal status is zero before and after. The private test application's
+Adaptive entry is enabled after installation; supported rates are 60/90 Hz,
+and utility interaction requests and observes 90 Hz during all 18 runs.
+
+The existing canvas-bar harness measures three six-second gestures per case
+after priming. Window dragging follows a 200 × 100 logical-pixel ellipse;
+curve dragging follows a 12 × 6 surface-pixel sinusoid. These use OS-injected
+stylus contacts. Live previews use Activity-dispatched synthetic pen hover
+with varying pressure, inclination and direction. Rates and intervals are
+Android window `FrameMetrics` during motion, not renderer submissions or
+SurfaceFlinger scanout correlations.
+
+| Utility motion | Presented fps, three runs | Worst gap p99 ms | 90 Hz target |
+| --- | --- | ---: | --- |
+| Pressure window drag | 88.58 / 89.25 / 88.91 | 11.193 | Met |
+| Pressure curve drag | 88.91 / 89.25 / 89.25 | 11.187 | Met |
+| Pressure live preview | 87.74 / 88.75 / 88.24 | 22.325 | Gap limit missed |
+| Tilt window drag | 89.08 / 87.75 / 89.08 | 22.326 | Gap limit missed |
+| Tilt curve drag | 88.26 / 88.75 / 88.75 | 11.226 | Met |
+| Tilt live preview | 88.58 / 88.58 / 88.40 | 11.321 | Met |
+
+Every run passes the 85.5 fps display-paced floor. The worst gaps for pressure live preview and
+tilt-window dragging exceed the nominal 22.2 ms interval limit by about 0.13 ms;
+the complete six-case target is not met. Sensor Activity-dispatch CPU p99 is
+0.493–0.565 ms for pressure and 0.456–0.550 ms for tilt. This includes capture,
+Compose routing and queue enqueue, excluding native-owner execution; it does
+not isolate metadata-registration cost.
+
+The earlier frozen APK, `f84a3d871ea8c442005e83d459079a3dbdcc91bc9e808bd768011089a98d9b0d`,
+ran at 60 Hz with the private app's Adaptive entry disabled. Dragging measured
+59.37–59.71 fps and sensor previews 29.85–30.02 fps by median; the latter used
+the old 33 ms moving-model publication limiter. The current host coalesces
+sensor publication on the owner's display callback and includes utility motion
+in the workspace's refresh request. These builds also differ in upstream native
+presentation code, so this is diagnostic history rather than a controlled speed
+comparison.
+
+Current APK SHA-256 is
+`a3f6036b334fd3497bf5cfe972a6222f19c80e5ebc2ad30ab3c06b0a648a0c2c`;
+JNI SHA-256 is
+`3f42bce45e7dbcd691367d9fa3b930f65422f9b9ad84571df17207e6174d574c`.
+Source/APK hashes, per-run summaries and the earlier baseline are recorded under
+`artifacts/pen-tilt-editor/`; raw reports, refresh setup XML and thermal evidence
+are retained in `/mnt/localssd/capycanvas1-tilt-editor-android/`. These measurements
+apply only to this reference device and these utility motions.
 
 ## Animated filters diagnostic
 

@@ -1,10 +1,49 @@
 import {nativeScreenEvents} from './native-input-fixture.mjs';
+import {observePenInput} from './pen-input.js';
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
+
+function penObserver() {
+  const listeners=new Map(),actions=[],canvas={};let owner=0;
+  observePenInput({canvas,workspace:{addEventListener(type,listener,options){assert.equal(options.capture,true);listeners.set(type,listener);}},dispatch:action=>actions.push(action),position:e=>[e.clientX*2,e.clientY*2],owner:()=>owner});
+  return {canvas,actions,activate(){owner++;},send(type,event={}){listeners.get(type)({pointerType:'pen',pointerId:-7,target:canvas,clientX:20,clientY:30,pressure:.6,tiltX:30,tiltY:-15,twist:45,timeStamp:12,buttons:0,...event});}};
+}
+
+test('pen observer registers canvas pointers without duplicating their native sample stream',()=>{
+  const h=penObserver();
+  h.send('pointermove',{pointerType:'mouse'});h.send('pointermove',{pointerType:'touch'});
+  h.send('pointermove',{target:{closest:()=>null}});assert.equal(h.actions.length,0);
+  h.send('pointermove',{persistentDeviceId:45});h.send('pointerdown');h.send('pointerup');assert.equal(h.actions.length,1);
+  assert.equal(h.actions[0].type,'pen_input');assert.equal(h.actions[0].sample,null);
+  assert.deepEqual(h.actions[0].device,{id:BigInt(-7>>>0),key:'web:pen',label:'',native_to_surface:{reverse_horizontal:false,reverse_vertical:false,swap:false}});
+  h.send('pointermove',{pointerId:17,persistentDeviceId:998});assert.equal(h.actions.length,2);
+  assert.equal(h.actions[1].device.key,h.actions[0].device.key,'Browser pointer and session identifiers do not create orphaned persistent profiles');
+});
+
+test('utility pen sensing preserves raw pressure and tilt without dispatching canvas contacts',()=>{
+  for(const dialog of ['#pen-pressure-dialog','#pen-tilt-dialog']){
+    const h=penObserver(),target={closest:selector=>selector.includes(dialog)?{}:null};
+    for(const [type,buttons,phase] of [['pointermove',0,0],['pointerdown',1,1],['pointermove',1,2],['pointerup',0,3],['pointercancel',0,4]]){
+      h.send(type,{target,buttons});const action=h.actions.at(-1);
+      assert.equal(action.type,'pen_input');assert.equal(action.sample.length,9);
+      assert.deepEqual(action.sample.slice(0,3),[40,60,.6]);
+      for(const [actual,expected] of action.sample.slice(3,6).map((n,i)=>[n,[Math.PI/6,-Math.PI/12,Math.PI/4][i]]))assert.ok(Math.abs(actual-expected)<1e-12);
+      assert.deepEqual(action.sample.slice(6),[0,12000000,phase]);
+    }
+  }
+});
+
+test('the same canvas pen registers again when another drawing activates',()=>{
+  const h=penObserver();h.send('pointermove');h.send('pointerdown');assert.equal(h.actions.length,1);
+  h.activate();h.send('pointermove');assert.equal(h.actions.length,2);
+  assert.deepEqual(h.actions[1],h.actions[0]);
+  h.send('pointerdown');assert.equal(h.actions.length,2,'Ordinary samples reuse registration within the activated drawing');
+  h.activate();h.send('pointerdown');assert.equal(h.actions.length,3);
+});
 
 test("canvas wheel owns browser zoom even when a scroll sequence targets an ancestor", () => {
   const listeners = [], scrolls = [], changes = [];
@@ -90,7 +129,7 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
     heldPointers: new Map(),
     workspace: {setPointerCapture: id => captures.push(id),classList:{contains:()=>false}},
     document: {documentElement: {hasAttribute: name => attributes.has(name), toggleAttribute: (name, value) => value ? attributes.add(name) : attributes.delete(name)}, addEventListener() {}},
-    chromeInput: event => ({handled: event.kind === 'contact' && !!context.consumeChrome}),
+    chromeEvents:[],chromeInput: event => (context.chromeEvents.push(event),{handled: event.kind === 'contact' && !!context.consumeChrome}),
     zenUpdates:0,updateZen() {context.zenUpdates++;}, closeMenusOutside() {}, requestAnimationFrame() {}, endWorkspaceGesture() {}, queuePen() {},
     window: { addEventListener: (name, fn) => listen(windowListeners, name, fn) }, setTimeout: fn => timers.push(fn), clearTimeout() {},
   };
@@ -193,6 +232,18 @@ test("header contacts retire independently and preserve a reused pointer", () =>
   h.chrome('pointercancel', {pointerId: 2});
   h.chrome('blur');
   assert.equal(h.context.heldPointers.size, 0);
+});
+
+test('floating pen utilities receive contacts above expanded workspace chrome',()=>{
+  for(const pointerType of ['mouse','touch','pen']){
+    const h=harness();h.context.consumeChrome=true;
+    const target={closest:selector=>selector==='.utility-panel'?{}:null};
+    assert.equal(h.chrome('pointerdown',{target,pointerType}),false,'Workspace chrome cannot consume a utility control press');
+    h.chrome('pointermove',{target,pointerType,buttons:0});
+    assert.deepEqual(h.context.chromeEvents,[],'Utility motion never hit-tests the workspace underneath');
+    assert.deepEqual(h.captures,[]);assert.equal(h.context.heldPointers.size,0);
+    assert.equal(h.context.zenUpdates,0);
+  }
 });
 
 test("zero pressure with tip or eraser contact is not a lift", () => {

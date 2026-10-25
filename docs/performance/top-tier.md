@@ -4869,3 +4869,26 @@ Reports, exact hashes, screenshots, regression failures and all motion samples
 are under `artifacts/calibration-first-pen/`. The shared release suite passes
 1,850 tests with two ignored cases; the 17 focused tilt tests and six Python
 proxy tests pass. Physical pen input and other native hosts were not exercised.
+
+### Web pen response utility callback diagnostics
+
+Measured on 2026-10-25 UTC from the working tree at `db176bee6`, using optimized
+`dev-perf` Wasm, a private 120 Hz Mutter display and Chrome with hardware WebGPU
+on an NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition. The Wasm SHA-256
+is `32d924ede8ebeea6c54652511214904bcb338a9a3d90af8455f706f99222edbf`;
+`artifacts/pen-response-port/web/build.json` identifies the exact host sources.
+
+Each row contains three 5.19–5.20-second CDP mouse gestures after a priming drag.
+Only animation callbacks whose utility transform or curve controls change count.
+
+| Motion | Light callbacks/s / maximum p99 gap | Dark callbacks/s / maximum p99 gap |
+| --- | --- | --- |
+| Tilt: Frame | 117.07–120.08 / 10.80 ms | 118.52–120.00 / 10.40 ms |
+| Tilt: Curve | 117.05–119.60 / 10.20 ms | 116.27–120.04 / 11.10 ms |
+
+These are desktop callback diagnostics, not presentation timestamps or
+reference-tablet qualification. The functional tilt and pressure journeys pass
+in both themes; tonal Curves also passes its mouse, touch and pen checks.
+Raw samples, source hashes, logs and inspected captures are under
+`artifacts/pen-response-port/web/`. Reproduce with `LAYER_TILT_MOTION=1` and
+`tools/performance/workspace-motion.sh web --tilt-calibration`.

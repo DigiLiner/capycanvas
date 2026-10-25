@@ -287,6 +287,21 @@ touch, mouse and stylus graph input, drag-out removal, the live marker, painting
 and Apply/Cancel persistence. Pair it with the numeric settings fixtures after
 changing the shared curve widget or Preferences row presentations.
 
+`AndroidHostTest#penTiltCalibrationUsesNativeSensorsAndPersistsLight` and its
+`Dark` counterpart check first pen input with Lasso, live sensors over the title
+and direction circle, independent axis corrections, unchanged artwork during
+preview, Apply/Cancel/Reset, saved settings in a new native session and corrections
+across display rotation. Pressure and tilt share one modeless native utility.
+The first non-hovering pen contact in a fresh drawing also edits the curve
+without losing its contact when the utility binds to that pen.
+The Activity captures real pen metadata before child input; only utility contacts
+forward sensor-only `pen_input` samples. Canvas input keeps its numeric batch
+route. Device descriptors identify saved corrections, while Android display
+rotation maps their natural device frame into the current surface frame.
+Utility sensor views coalesce on the render owner's display callback without
+waking the canvas. Pressed utility contacts and pen hover request the display's
+highest supported rate through the workspace's existing motion refresh lease.
+
 `AndroidToolBubblesTest#nativeBubblesAcrossThemesAndDevices` checks tool bubbles
 with native mouse, touch and stylus events in both themes. It covers source
 scrolling and tear-out, painting through halo gaps, arc edits, chooser selection,
@@ -686,7 +701,12 @@ APK calls, so test-APK benchmarks use the unminified build.
   resize the run. `-e photo <readable-file>` uses a JPEG matching `width` and
   `height`; otherwise the fixture generates an image. `-e zoomOut false` keeps
   Fit zoom. `-e project <readable-current-format.capy>` opens a prepared native
-  project through the ordinary loader instead of creating a canvas. For paired
+  project through the ordinary loader instead of creating a canvas.
+  `-e scenarios pen-response -e responseRepeats 3` measures pressure and tilt
+  utility drags, curve drags and live sensor previews on the tier photo. It saves
+  each repeated motion separately, verifies changing view data and records
+  Activity hover-dispatch CPU time separately from native owner execution.
+  For paired
   retained-photo translation, use `-e acceptedPhoto true`,
   `-e labels photo-translate-drag`, and add `-e materialWatercolor true` to paint
   a sparse wet-watercolor stroke on the rasterized photo before Transform. That

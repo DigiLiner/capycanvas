@@ -3120,6 +3120,267 @@ class AndroidHostTest {
         compose.onNodeWithTag("settings-done").performClick()
     }
 
+    @Test fun penTiltCalibrationUsesNativeSensorsAndPersistsLight() = penTiltCalibrationJourney("light")
+
+    @Test fun penTiltCalibrationUsesNativeSensorsAndPersistsDark() = penTiltCalibrationJourney("dark")
+
+    private fun penTiltCalibrationJourney(theme: String) {
+        device.landscape(compose.activityRule.scenario)
+        fun calibration() = state().getJSONObject("tilt_calibration")
+        fun points() = calibration().getJSONObject("editor").getJSONArray("points").toString()
+        fun saved() = state().getJSONObject("settings").getJSONObject("tilt_calibrations").toString()
+        fun axes() = calibration().getJSONObject("axes")
+        fun click(name: String) {
+            val node = compose.onNodeWithTag("pen-tilt-$name")
+            if (name in listOf("firmer", "lighter", "reverse-horizontal", "reverse-vertical", "swap-axes")) node.performScrollTo()
+            node.performClick()
+            host.drain()
+            compose.waitForIdle()
+        }
+        fun open() {
+            openSettings()
+            compose.onNodeWithTag("settings-category-input").performClick()
+            compose.waitUntil(10_000) { preferences().getString("page") == "input" }
+            compose.onNodeWithTag("setting-action-pen_tilt").performScrollTo().performClick()
+            waitState { it.objectOrNull("tilt_calibration") != null }
+            compose.onNodeWithTag("preferences-surface").assertDoesNotExist()
+            compose.onNodeWithTag("pen-tilt-dialog").assertIsDisplayed()
+            host.drain()
+            compose.waitForIdle()
+            compose.onNodeWithTag("pen-tilt-close").assertWidthIsEqualTo(24.dp).assertHeightIsEqualTo(24.dp)
+            assertEquals(bounds("pen-tilt-title").top, bounds("pen-tilt-close").top, 1f)
+            compose.waitUntil(10_000) { bounds("effect-curve").let { kotlin.math.abs(it.width - it.height) < 1f } }
+            val plotCenter = bounds("effect-curve").center.x
+            assertEquals("Symmetric font-sized gutters center the graph", bounds("pen-tilt-dialog").center.x, plotCenter, 1f)
+            compose.onNodeWithTag("pen-tilt-direction").performScrollTo().assertWidthIsEqualTo(72.dp).assertHeightIsEqualTo(72.dp)
+            assertEquals("Direction and graph share a centerline", plotCenter, bounds("pen-tilt-direction").center.x, 1f)
+            for (tag in listOf("firmer", "lighter", "reverse-horizontal", "reverse-vertical", "swap-axes"))
+                compose.onNodeWithTag("pen-tilt-$tag").performScrollTo().assertHeightIsEqualTo(36.dp)
+            for (tag in listOf("reset", "cancel", "apply")) compose.onNodeWithTag("pen-tilt-$tag").assertHeightIsEqualTo(36.dp)
+        }
+        val stylus = InputDevice.getDeviceIds().asSequence().mapNotNull { InputDevice.getDevice(it) }
+            .first { device -> device.motionRanges.any { it.axis == MotionEvent.AXIS_TILT } }
+        fun point(tag: String): androidx.compose.ui.geometry.Offset {
+            if (tag == "pen-tilt-direction") compose.onNodeWithTag(tag).performScrollTo()
+            val node = compose.onNodeWithTag(tag).fetchSemanticsNode()
+            val origin = IntArray(2)
+            instrumentation.runOnMainSync { (node.root as ViewRootForTest).view.getLocationInWindow(origin) }
+            return node.boundsInRoot.center + androidx.compose.ui.geometry.Offset(origin[0].toFloat(), origin[1].toFloat())
+        }
+        val down = SystemClock.uptimeMillis()
+        fun send(phase: Int, at: androidx.compose.ui.geometry.Offset, inclination: Double = 30.0, azimuth: Double = 30.0) {
+            instrumentation.runOnMainSync {
+                val coordinate = MotionEvent.PointerCoords().apply {
+                    x = at.x; y = at.y
+                    pressure = if (phase in listOf(MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_HOVER_EXIT, MotionEvent.ACTION_UP)) 0f else .7f
+                    orientation = kotlin.math.atan2(-kotlin.math.cos(Math.toRadians(azimuth)), kotlin.math.sin(Math.toRadians(azimuth))).toFloat()
+                    setAxisValue(MotionEvent.AXIS_TILT, Math.toRadians(inclination).toFloat())
+                }
+                val property = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), phase, 1, arrayOf(property), arrayOf(coordinate),
+                    0, 0, 1f, 1f, stylus.id, 0, InputDevice.SOURCE_STYLUS, 0)
+                try {
+                    if (phase in listOf(MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE, MotionEvent.ACTION_HOVER_EXIT))
+                        compose.activity.dispatchGenericMotionEvent(event)
+                    else compose.activity.dispatchTouchEvent(event)
+                } finally { event.recycle() }
+            }
+            host.drain()
+        }
+        fun direction(key: String, x: Double, y: Double) {
+            waitState {
+                calibration().optJSONArray(key)?.let { kotlin.math.abs(it.getDouble(0) - x) < .002 && kotlin.math.abs(it.getDouble(1) - y) < .002 } == true
+            }
+            val vector = calibration().getJSONArray(key)
+            assertEquals("$key horizontal", x, vector.getDouble(0), .002)
+            assertEquals("$key vertical", y, vector.getDouble(1), .002)
+        }
+        action(obj("type" to "set_theme", "theme" to theme))
+        action(obj("type" to "restore_settings", "settings" to JSONObject(state().getJSONObject("settings").toString()).put("cursor", "none")))
+        action(obj("type" to "invoke", "command" to "lasso"))
+        val original = saved()
+        open()
+        assertFalse("The fresh editor has not observed a pen", calibration().getBoolean("ready"))
+        compose.onNodeWithTag("pen-tilt-apply").assertIsNotEnabled()
+        capture("tilt-calibration-$theme-default")
+        val neutral = points()
+        val beforeBounds = calibration().getJSONObject("bounds").toString()
+        lateinit var canvas: CanvasSurfaceView
+        val origin = IntArray(2)
+        instrumentation.runOnMainSync {
+            canvas = findCanvas(compose.activity.window.decorView)!!
+            canvas.getLocationInWindow(origin)
+        }
+        val area = host.snapshot!!.getJSONObject("layout").getJSONObject("work_area")
+        val density = compose.activity.resources.displayMetrics.density
+        val canvasPoint = androidx.compose.ui.geometry.Offset(origin[0] + (area.number("x") + 24f) * density,
+            origin[1] + (area.number("y") + area.number("height") * .75f) * density)
+        assertFalse("The first Lasso contact uses uncovered canvas", host.calibrationPenBounds!!.contains(canvasPoint))
+        send(MotionEvent.ACTION_DOWN, canvasPoint)
+        waitState { calibration().getBoolean("ready") }
+        assertEquals("First Lasso pen contact preserves utility placement", beforeBounds, calibration().getJSONObject("bounds").toString())
+        assertEquals(neutral, points())
+        send(MotionEvent.ACTION_UP, canvasPoint)
+        compose.onNodeWithTag("pen-tilt-apply").assertIsEnabled()
+        val beforePixels = gradientOutput()
+        val beforeRevision = state().getJSONObject("document_file").getLong("revision")
+        val beforeHistory = state().array("commands").objects().filter { it.getString("id") in listOf("undo", "redo") }.map { it.getBoolean("enabled") }
+        val x = kotlin.math.sqrt(3.0) / 6.0
+        val y = 1.0 / 6.0
+        send(MotionEvent.ACTION_HOVER_ENTER, point("pen-tilt-title"))
+        compose.runOnIdle { assertTrue(host.calibrationMotionActive) }
+        direction("input_direction", x, y)
+        direction("adjusted_direction", x, y)
+        send(MotionEvent.ACTION_HOVER_MOVE, point("pen-tilt-direction"))
+        send(MotionEvent.ACTION_HOVER_EXIT, point("pen-tilt-direction"))
+        compose.runOnIdle { assertFalse(host.calibrationMotionActive) }
+        send(MotionEvent.ACTION_DOWN, point("pen-tilt-direction"), 60.0, 60.0)
+        send(MotionEvent.ACTION_MOVE, point("pen-tilt-direction"), 60.0, 60.0)
+        direction("input_direction", 1.0 / 3.0, kotlin.math.sqrt(3.0) / 3.0)
+        assertFalse(calibration().getJSONObject("editor").isNull("marker"))
+        send(MotionEvent.ACTION_UP, point("pen-tilt-direction"), 60.0, 60.0)
+        send(MotionEvent.ACTION_HOVER_ENTER, point("pen-tilt-title"))
+        click("reverse-horizontal")
+        direction("adjusted_direction", -x, y)
+        assertFalse(axes().getBoolean("reverse_vertical")); assertFalse(axes().getBoolean("swap"))
+        click("reverse-vertical")
+        direction("adjusted_direction", -x, -y)
+        assertTrue(axes().getBoolean("reverse_horizontal")); assertFalse(axes().getBoolean("swap"))
+        click("swap-axes")
+        direction("adjusted_direction", -y, -x)
+        assertTrue(axes().getBoolean("reverse_horizontal")); assertTrue(axes().getBoolean("reverse_vertical"))
+        capture("tilt-calibration-$theme-preview")
+        assertEquals("Preview does not edit the response", neutral, points())
+        assertEquals(beforeRevision, state().getJSONObject("document_file").getLong("revision"))
+        assertEquals(beforeHistory, state().array("commands").objects().filter { it.getString("id") in listOf("undo", "redo") }.map { it.getBoolean("enabled") })
+        assertArrayEquals("Dialog sensor preview never paints", beforePixels, gradientOutput())
+        action(obj("type" to "invoke", "command" to "pencil"))
+        host.awaitReady(compose = compose)
+        send(MotionEvent.ACTION_DOWN, canvasPoint)
+        val end = canvasPoint + androidx.compose.ui.geometry.Offset(24f * density, 0f)
+        send(MotionEvent.ACTION_MOVE, end)
+        send(MotionEvent.ACTION_UP, end)
+        waitState { it.getJSONObject("document_file").getLong("revision") != beforeRevision }
+        settle()
+        assertFalse("The exposed canvas paints while the utility remains open", beforePixels.contentEquals(gradientOutput()))
+        assertTrue(calibration().getBoolean("ready"))
+        action(obj("type" to "invoke", "command" to "undo"))
+        settle()
+        assertArrayEquals("One Undo removes only the real canvas stroke", beforePixels, gradientOutput())
+        click("firmer")
+        waitState { points() != neutral }
+        click("cancel")
+        waitState { it.objectOrNull("tilt_calibration") == null }
+        assertEquals(original, saved())
+        open()
+        assertEquals(neutral, points())
+        click("reverse-horizontal"); click("firmer")
+        waitState { axes().getBoolean("reverse_horizontal") && points() != neutral }
+        val applied = points()
+        val appliedAxes = axes().toString()
+        click("apply")
+        waitState { it.objectOrNull("tilt_calibration") == null && saved() != original }
+        val committed = saved()
+        val preferences = compose.activity.getSharedPreferences(CanvasHost.preferencesName, 0)
+        compose.waitUntil(10_000) { preferences.getString("settings", null)?.let { JSONObject(it).getJSONObject("tilt_calibrations").toString() == committed } == true }
+        val restored = runBlocking { host.withNative {
+            val other = Native.create(preferences.getString("settings", null)!!, arrayOf("en"), "", false)
+            try { JSONObject(Native.snapshot(other)!!).getJSONObject("state").getJSONObject("settings").getJSONObject("tilt_calibrations").toString() }
+            finally { Native.destroy(other) }
+        } }
+        assertEquals("Saved calibration survives a new native session", committed, restored)
+        compose.activityRule.scenario.recreate()
+        host.awaitReady(compose = compose)
+        open()
+        assertEquals(applied, points()); assertEquals(appliedAxes, axes().toString())
+        capture("tilt-calibration-$theme")
+        device.portrait(compose.activityRule.scenario)
+        host.awaitReady(compose = compose)
+        send(MotionEvent.ACTION_HOVER_ENTER, point("pen-tilt-title"))
+        waitState { axes().getBoolean("reverse_vertical") && !axes().getBoolean("reverse_horizontal") }
+        direction("input_direction", x, y)
+        direction("adjusted_direction", x * .975, -y * .975)
+        assertEquals("Display rotation preserves the saved device-frame correction", committed, saved())
+        device.landscape(compose.activityRule.scenario)
+        host.awaitReady(compose = compose)
+        send(MotionEvent.ACTION_HOVER_ENTER, point("pen-tilt-title"))
+        waitState { axes().toString() == appliedAxes }
+        click("reset")
+        waitState { points() == neutral && !axes().getBoolean("swap") && !axes().getBoolean("reverse_horizontal") && !axes().getBoolean("reverse_vertical") }
+        click("close")
+        waitState { it.objectOrNull("tilt_calibration") == null }
+        assertEquals("Closing discards Reset", committed, saved())
+        open()
+        click("reset")
+        compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        waitState { it.objectOrNull("tilt_calibration") == null }
+        assertEquals("Back discards Reset", committed, saved())
+        open()
+        click("reset"); click("apply")
+        waitState { it.objectOrNull("tilt_calibration") == null }
+        open()
+        assertEquals(neutral, points())
+        assertFalse(axes().getBoolean("swap")); assertFalse(axes().getBoolean("reverse_horizontal")); assertFalse(axes().getBoolean("reverse_vertical"))
+        compose.onNodeWithTag("effect-curve").performScrollTo()
+        val tiltPlot = bounds("effect-curve")
+        click("cancel")
+        action(obj("type" to "invoke", "command" to "pen_pressure"))
+        waitState { it.objectOrNull("pressure_calibration") != null }
+        compose.waitUntil(10_000) { bounds("effect-curve").let { kotlin.math.abs(it.width - it.height) < 1f } }
+        assertEquals("Pressure and tilt share their plot width", tiltPlot.width, bounds("effect-curve").width, 1f)
+        assertEquals("Pressure and tilt share their plot height", tiltPlot.height, bounds("effect-curve").height, 1f)
+        compose.onNodeWithTag("pen-pressure-cancel").performClick()
+        waitState { it.objectOrNull("pressure_calibration") == null }
+        val firstDrawing = host.drawingTabs.selected
+        host.newDocument(128, 128)
+        host.awaitMain("New drawing selected", 30_000, { "${host.drawingTabs.view}" }, compose) {
+            host.drawingTabs.selected != firstDrawing && !host.documentInputBlocked
+        }
+        action(obj("type" to "invoke", "command" to "lasso"))
+        open()
+        assertFalse("The new native drawing session has no registered pen yet", calibration().getBoolean("ready"))
+        assertFalse(host.calibrationPenBounds!!.contains(canvasPoint))
+        send(MotionEvent.ACTION_DOWN, canvasPoint)
+        waitState { calibration().getBoolean("ready") }
+        send(MotionEvent.ACTION_UP, canvasPoint)
+        click("cancel")
+        compose.runOnIdle { host.drawingTabs.select(firstDrawing) }
+        host.awaitMain("Original drawing selected", 30_000, { "${host.drawingTabs.view}" }, compose) {
+            host.drawingTabs.selected == firstDrawing && !host.documentInputBlocked && !host.drawingTabs.switching
+        }
+        open()
+        send(MotionEvent.ACTION_HOVER_ENTER, point("pen-tilt-title"))
+        waitState { calibration().getBoolean("ready") }
+        assertEquals(stylus.name, calibration().getString("device"))
+        click("cancel")
+        compose.runOnIdle { assertFalse(host.calibrationMotionActive) }
+        val previousDrawing = host.drawingTabs.selected
+        host.newDocument(128, 128)
+        host.awaitMain("Cold curve drawing selected", 30_000, { "${host.drawingTabs.view}" }, compose) {
+            host.drawingTabs.selected != previousDrawing && !host.documentInputBlocked
+        }
+        open()
+        assertFalse("The curve receives the first pen contact without hover", calibration().getBoolean("ready"))
+        val coldSaved = saved()
+        val coldPoints = points()
+        compose.onNodeWithTag("effect-curve").performScrollTo()
+        val coldGraph = bounds("effect-curve")
+        val coldDown = point("effect-curve")
+        send(MotionEvent.ACTION_DOWN, coldDown)
+        waitState { calibration().getBoolean("ready") && points() != coldPoints }
+        val addedPoints = points()
+        val coldMove = coldDown + androidx.compose.ui.geometry.Offset(coldGraph.width * .12f, -coldGraph.height * .15f)
+        send(MotionEvent.ACTION_MOVE, coldMove)
+        waitState { points() != addedPoints }
+        send(MotionEvent.ACTION_UP, coldMove)
+        compose.runOnIdle { assertFalse(host.calibrationMotionActive) }
+        assertEquals("Cold curve preview leaves saved corrections unchanged", coldSaved, saved())
+        click("cancel")
+        waitState { it.objectOrNull("tilt_calibration") == null }
+        assertEquals("Cancel discards the cold first-contact edit", coldSaved, saved())
+        assertNull(host.failure); assertNull(host.actionError)
+    }
+
     @Test fun penPressureCalibrationUsesNativeCurveAndPersistsAppliedResponse() {
         fun calibration() = state().getJSONObject("pressure_calibration")
         fun points() = calibration().getJSONObject("editor").getJSONArray("points")
@@ -3137,9 +3398,27 @@ class AndroidHostTest {
             compose.onAllNodesWithTag("setting-slider-pressure").assertCountEquals(0)
         }
         val original = saved()
+        action(obj("type" to "invoke", "command" to "lasso"))
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
             open()
+            val dialog = compose.onNodeWithTag("pen-pressure-dialog").fetchSemanticsNode()
+            val windowOrigin = IntArray(2)
+            instrumentation.runOnMainSync {
+                (dialog.root as ViewRootForTest).view.getLocationInWindow(windowOrigin)
+                val coordinate = MotionEvent.PointerCoords().apply {
+                    x = windowOrigin[0] + dialog.boundsInRoot.center.x
+                    y = windowOrigin[1] + dialog.boundsInRoot.top + 16f * compose.activity.resources.displayMetrics.density
+                    pressure = .4f; orientation = .2f
+                    setAxisValue(MotionEvent.AXIS_TILT, .5f)
+                }
+                val property = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }
+                val now = SystemClock.uptimeMillis()
+                val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 1, arrayOf(property), arrayOf(coordinate),
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
+                try { compose.activity.dispatchGenericMotionEvent(event) } finally { event.recycle() }
+            }
+            waitState { calibration().getJSONObject("editor").optJSONArray("marker")?.let { kotlin.math.abs(it.getDouble(0) - .4) < .001 } == true }
             assertEquals(3, points().length())
             val start = points().toString()
             compose.onNodeWithTag("pen-pressure-firmer").performClick()
@@ -3231,6 +3510,7 @@ class AndroidHostTest {
             compose.onNodeWithTag("pen-pressure-apply").performClick()
             waitState { it.objectOrNull("pressure_calibration") == null }
             assertEquals("Apply saves the edited pressure curve", applied, saved())
+            action(obj("type" to "invoke", "command" to "pencil"))
             penStroke(15)
             waitState { it.array("commands").objects().first { command -> command.getString("id") == "undo" }.getBoolean("enabled") }
             capture("pressure-calibration-$theme")

@@ -17,6 +17,7 @@ pub enum PressureCalibrationAction {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PressureCalibrationView {
     pub bounds: Bounds,
+    pub axis_gutter:String,
     pub title: String,
     pub close: String,
     pub firmer: String,

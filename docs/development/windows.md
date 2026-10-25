@@ -873,8 +873,14 @@ template is created or replaced. Tool fixtures choose scroll direction from the
 control's native, unclipped bounds. UI Automation must still prove full visibility,
 height and stable bounds.
 
-Pen pressure uses the same curve renderer with shared pressure controls and a
-modeless utility frame. Graph drawing clips to its native input bounds, including
+Pen pressure and tilt reuse the curve renderer and `ResponseCalibration`
+modeless utility frame. Shared Rust owns the response drafts, axes, device
+binding and Apply/Cancel/Reset. Native controls use 16px gutters, square plots,
+36px actions and independent tilt segments, and a 72px direction preview. The
+opaque utility sits in the top overlay above the native header, expanded panels
+and drawers. Its visible bounds join the native caption passthrough regions so
+header overlap cannot start OS window dragging. Initial exposure waits for
+the shared owner to accept the native measured extent. Graph drawing clips to its native input bounds, including
 edge handles. Keyboard capture forwards every press in a combined key message's
 repeat count; Rust owns the step and gesture history.
 `exercise-pressure.ps1 -Executable <path> -Theme dark`
@@ -883,6 +889,30 @@ cancellation of curve and panel drags, live pressure,
 canvas painting and calibration transactions. Repeat with `-Theme light`;
 the VM fixture names are `pressure` and `pressure:light`. Physical pen and frame
 performance require Windows hardware.
+
+`PenInput.h` registers native pen metadata through the existing `pen_input`
+owner action before numeric canvas samples. `PenDeviceInterop` supplies the
+physical PenId when available; a product-name key, or a shared Windows pen key,
+is the fallback when Windows provides no unique identity. Runtime pointer IDs
+and native HANDLE values are not saved as physical identities. The canvas
+registration cache retains only the latest descriptor, re-registers returned
+runtime IDs, and resets on selected drawing and document epoch changes; the
+native input tests exercised by `test-without-gpu.ps1` cover both transitions.
+Utility hover and contact send calibration-only samples through the same owner,
+including when a child control handles the routed event. The host forwards
+native X/Y plane angles in radians and an identity coordinate frame; automatic
+rotation correction is not inferred from a mapped monitor or digitizer display
+orientation. Physical pen identity and rotated display behavior need hardware
+verification.
+
+`exercise-tilt.ps1 -Executable <path> -Theme dark` checks cold first Lasso contact,
+preserved utility placement, live circle, header and blank body sensing without canvas or
+document-history changes, all eight independent axis combinations, mouse/touch/pen
+curve edits, cancellation, Apply/Reset and persisted profiles after restart.
+Repeat with `-Theme light`, or run
+`tools/windows-vm/windows-vm.py fixtures tilt pressure` for both themes on WARP.
+Synthetic native input verifies routing and editor behavior, not physical sensors
+or frame performance.
 
 Histogram, Waveform and the input statistics in Levels and Curves
 (`ScopesView.cpp`) draw the shared plots. The snapshot's `windows_scopes` revision

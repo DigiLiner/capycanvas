@@ -93,6 +93,8 @@ final class NativeOwner: @unchecked Sendable {
     private var gpuHealth: DispatchSourceTimer?
     private var hdrDocument = false
     private var selectedDocument: UInt64 = 1
+    private var penDevice: NativePenDevice?
+    private var penDocumentEpoch: UInt64 = 0
     private var launchSessionPending = false
     private var pendingClose: DocumentJob?
     private var documentDeliveryCopy = JSON()
@@ -259,7 +261,15 @@ final class NativeOwner: @unchecked Sendable {
                 catalogLoaded = true
                 documentDeliveryCopy = snapshot["catalog"]["document_delivery_copy"]
             }
-            if !snapshot["document_tabs"].isNull { selectedDocument = snapshot["document_tabs"]["selected"].uint }
+            if !snapshot["document_tabs"].isNull {
+                let selected = snapshot["document_tabs"]["selected"].uint
+                if selected != selectedDocument { penDevice = nil }
+                selectedDocument = selected
+            }
+            if !snapshot["state"].isNull {
+                let epoch = snapshot["state"]["document_file"]["epoch"].uint
+                if epoch != penDocumentEpoch { penDevice = nil; penDocumentEpoch = epoch }
+            }
             if !snapshot["proof_panel"].isNull {
                 let hdr = snapshot["proof_panel"]["hdr"].bool
                 if hdr != hdrDocument {
@@ -882,13 +892,27 @@ final class NativeOwner: @unchecked Sendable {
             layer = nil; surfaceSize = nil
         }
     }
+    private func registerPenDevice(_ device: NativePenDevice) throws {
+        guard penDevice != device else { return }
+        _ = try request(0, device.action())
+        penDevice = device
+    }
+    func penInput(_ device: NativePenDevice, sample: [Double]? = nil) {
+        perform { [self] in
+            guard !launchSessionPending else { return }
+            if let sample {
+                _ = try request(0, device.action(sample: sample)); penDevice = device
+            } else { try registerPenDevice(device) }
+        }
+    }
     func pointer(id: UInt64, tool: UInt32, button: UInt32, records: [Double], predicted: Bool, revision: UInt64,
-                 updates: [UInt64] = [], correction: Bool = false) {
+                 updates: [UInt64] = [], correction: Bool = false, device: NativePenDevice? = nil) {
         precondition(updates.isEmpty || updates.count == records.count / 9 * 2)
         let observation = trace.flatMap { $0.isRecording ? $0 : nil }
         let queued = observation == nil ? 0 : FrameTrace.now()
         perform { [self] in
             guard !launchSessionPending else { return }
+            if let device { try registerPenDevice(device) }
             let start = observation == nil ? 0 : FrameTrace.now()
             var succeeded = false
             defer {

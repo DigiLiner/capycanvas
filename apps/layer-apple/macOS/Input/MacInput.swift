@@ -1,14 +1,13 @@
 import AppKit
 import QuartzCore
 
-/// Capture AppKit values immediately. The Rust owner receives numeric samples;
-/// no NSEvent, NSView, device serial number or vendor identifier crosses queues.
 @MainActor final class MacInput {
     private weak var view: MacCanvasView?
     private let store: EditorStore
     private struct Contact {
         let id: UInt64
         let device: Int?
+        let source: String?
         let tool: UInt32
         let button: UInt32
         let nativeButton: Int
@@ -18,6 +17,8 @@ import QuartzCore
     private var contact: Contact?
     private var nextContact: UInt64 = 0
     private var tools: [Int: UInt32] = [:]
+    private var sources: [Int: String] = [:]
+    private var sensorDevice: Int?
     private var modifiers: NSEvent.ModifierFlags = []
     private var gestures = Set<Bool>()
     private var touches: [(identity: NSCopying & NSObjectProtocol, id: UInt64)] = []
@@ -42,11 +43,41 @@ import QuartzCore
     }
     private func send(_ value: Contact, _ record: [Double]) {
         store.native?.pointer(id: value.id, tool: value.tool, button: value.button,
-            records: record, predicted: false, revision: store.cameraRevision)
+            records: record, predicted: false, revision: store.cameraRevision,
+            device: value.source.map { NativePenDevice(id: value.id, key: $0) })
+        view?.wake()
+    }
+    private func penDevice(_ event: NSEvent, id: UInt64) -> NativePenDevice {
+        NativePenDevice(id: id, key: sources[event.deviceID] ?? "appkit:pen")
+    }
+    func observeCalibration(_ event: NSEvent) {
+        if event.type == .tabletProximity || event.subtype == .tabletProximity { proximity(event); return }
+        guard tablet(event), contact == nil else { return }
+        let terminal = event.type == .leftMouseUp || event.type == .tabletPoint && event.pressure == 0 && !event.buttonMask.contains(.penTip)
+        guard let bounds = store.penResponseBounds else {
+            if terminal && sensorDevice == event.deviceID { sensorDevice = nil }
+            return
+        }
+        let point = position(event), scale = view?.window?.backingScaleFactor ?? 1
+        guard bounds.contains(CGPoint(x: point.x / scale, y: point.y / scale)) || sensorDevice == event.deviceID else { return }
+        guard sensorDevice == nil || sensorDevice == event.deviceID else { return }
+        let phase: Double
+        switch event.type {
+        case .leftMouseDown: phase = 1
+        case .leftMouseDragged: phase = 2
+        case .leftMouseUp: phase = 3
+        case .tabletPoint: phase = event.pressure > 0 || event.buttonMask.contains(.penTip) ? (sensorDevice == nil ? 1 : 2) : 0
+        case .mouseMoved: phase = 0
+        default: return
+        }
+        if phase == 1 { sensorDevice = event.deviceID }
+        store.native?.penInput(penDevice(event, id: 0), sample: pack(event, phase: phase))
+        if terminal { sensorDevice = nil }
         view?.wake()
     }
     func mouse(_ event: NSEvent, phase: Double) {
         if event.subtype == .tabletProximity { proximity(event); return }
+        if tablet(event), sensorDevice == event.deviceID { return }
         // Tablet side buttons arrive as right/other mouse events. They must
         // neither start navigation nor disturb the tip's captured contact.
         if tablet(event), event.buttonNumber != 0 {
@@ -66,7 +97,7 @@ import QuartzCore
             let device = tablet(event) ? event.deviceID : nil
             let tool = device.map { tools[$0] ?? 0 } ?? 1
             let button: UInt32 = event.buttonNumber == 0 ? 0 : event.buttonNumber <= 2 ? 1 : 2
-            let value = Contact(id: nextContact, device: device, tool: tool, button: button,
+            let value = Contact(id: nextContact, device: device, source: device.map { sources[$0] ?? "appkit:pen" }, tool: tool, button: button,
                 nativeButton: event.buttonNumber, last: pack(event, phase: phase))
             contact = value; send(value, value.last)
         } else if var value = contact, value.nativeButton == event.buttonNumber {
@@ -79,6 +110,7 @@ import QuartzCore
         }
     }
     func tabletPoint(_ event: NSEvent, chorded: Bool = false) {
+        if sensorDevice == event.deviceID { return }
         let touching = event.pressure > 0 || event.buttonMask.contains(.penTip)
         updateModifiers(event.modifierFlags, force: contact == nil && touching)
         if var value = contact {
@@ -93,7 +125,7 @@ import QuartzCore
             view.window?.makeFirstResponder(view)
             store.workspace.dismissTransients(at: nil)
             nextContact &+= 1
-            let value = Contact(id: nextContact, device: event.deviceID,
+            let value = Contact(id: nextContact, device: event.deviceID, source: penDevice(event, id: nextContact).key,
                 tool: tools[event.deviceID] ?? 0, button: 0, nativeButton: 0,
                 last: pack(event, phase: 1), chorded: chorded)
             contact = value; send(value, value.last)
@@ -101,10 +133,14 @@ import QuartzCore
     }
     func proximity(_ event: NSEvent) {
         if event.isEnteringProximity {
+            sources[event.deviceID] = NativePenDevice.appKitKey(vendor: UInt64(event.vendorID), unique: event.uniqueID,
+                serial: UInt64(truncatingIfNeeded: event.pointingDeviceSerialNumber))
             tools[event.deviceID] = event.pointingDeviceType == .eraser ? 2 : event.pointingDeviceType == .cursor ? 1 : 0
         } else {
             if contact?.device == event.deviceID { finishAtLastSample(timestamp: event.timestamp) }
             tools.removeValue(forKey: event.deviceID)
+            sources.removeValue(forKey: event.deviceID)
+            if sensorDevice == event.deviceID { sensorDevice = nil }
             clearHover()
         }
     }
@@ -126,7 +162,7 @@ import QuartzCore
         canvasCursor = true; applyCursor()
         let tool: UInt32 = tablet(event) ? tools[event.deviceID] ?? 0 : 1
         store.native?.pointer(id: 0, tool: tool, button: 0, records: pack(event, phase: 0),
-            predicted: false, revision: store.cameraRevision)
+            predicted: false, revision: store.cameraRevision, device: tablet(event) ? penDevice(event, id: 0) : nil)
         view.wake()
     }
     private func finishAtLastSample(timestamp: TimeInterval) {
@@ -161,7 +197,7 @@ import QuartzCore
     func interrupt() {
         // Focus loss is an explicit shared interruption policy. Native hover
         // and proximity exit above are normal lift, never cancellation.
-        contact = nil; modifiers = []; gestures.removeAll(); touches.removeAll()
+        contact = nil; sensorDevice = nil; modifiers = []; gestures.removeAll(); touches.removeAll()
     }
     func touch(_ event: NSEvent, phase: NSTouch.Phase, name: String) {
         guard let view else { return }

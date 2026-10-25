@@ -68,8 +68,11 @@ final class MacCanvasView: NSView {
             connectStore()
             store.cursorChanged = { [weak self] in self?.input.applyCursor() }
             shaderInputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp,
-                .rightMouseDown, .otherMouseDown, .mouseMoved, .scrollWheel, .magnify, .rotate, .keyDown, .keyUp, .tabletPoint]) { [weak self, weak window] event in
-                if event.window === window { self?.store.native?.shaderInput() }
+                .rightMouseDown, .otherMouseDown, .mouseMoved, .scrollWheel, .magnify, .rotate, .keyDown, .keyUp, .tabletPoint, .tabletProximity]) { [weak self, weak window] event in
+                guard let self, let window else { return event }
+                if event.window === window || event.type == .tabletProximity && window.isKeyWindow {
+                    self.store.native?.shaderInput(); self.input.observeCalibration(event)
+                }
                 return event
             }
             windowObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in

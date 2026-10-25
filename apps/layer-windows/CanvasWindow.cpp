@@ -2,6 +2,7 @@
 #include "CanvasWindow.h"
 #include "TraceFile.h"
 #include "CanvasPointerSample.h"
+#include "PenInput.h"
 #include "UiControls.h"
 #include "KeyNames.h"
 #include "NativeKeyRepeats.h"
@@ -152,7 +153,7 @@ void CanvasWindow::Open() {
     }});
     panel.PointerExited([weak=weak_from_this()](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->inputDispatcher&&!e.Handled()){
         auto point=e.GetCurrentPoint(self->panel);auto id=point.PointerId();bool pen=point.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Pen;
-        if(!point.IsInContact())self->inputDispatcher.TryEnqueue([weak,id,pen]{if(auto self=weak.lock();self&&!self->closing){if(pen)self->PenButtons(id,false);self->SendIndependent(CanvasCommand{CanvasCommandKind::Input,R"({"type":"cursor_leave"})"});}});
+        if(!point.IsInContact())self->inputDispatcher.TryEnqueue([weak,id,pen]{if(auto self=weak.lock();self&&!self->closing){if(pen){self->PenButtons(id,false);std::lock_guard lock(self->mutex);self->penSources.Forget(id);}self->SendIndependent(CanvasCommand{CanvasCommandKind::Input,R"({"type":"cursor_leave"})"});}});
     }});
     textFocus=FocusManager::GettingFocus(auto_revoke,[weak=weak_from_this()](auto&&,GettingFocusEventArgs const& e){
         if(auto self=weak.lock();self&&!self->closed)if(auto entry=e.NewFocusedElement().try_as<TextBox>();entry&&entry.XamlRoot()==self->root.XamlRoot()){
@@ -335,7 +336,7 @@ void CanvasWindow::PublishGlass(){
     auto self=weak.lock();if(!self||self->closing||self->closed||!self->panel||!self->workspace)return;
     if(self->header)self->header->SetDrawerSources(self->workspace->DrawerSources());
     if(self->captionRegionsValid){
-        auto bubbles=self->workspace->BubbleInputRegions(self->panel);auto scale=self->root.XamlRoot().RasterizationScale();auto input=self->captionInputRegions;
+        auto bubbles=self->workspace->OverlayInputRegions(self->panel);auto scale=self->root.XamlRoot().RasterizationScale();auto input=self->captionInputRegions;
         for(auto value:bubbles){auto bounds=value.GetObject();
             auto x=int32_t(std::floor(CapyUi::num(bounds,L"x")*scale)),y=int32_t(std::floor(CapyUi::num(bounds,L"y")*scale));
             auto right=int32_t(std::ceil((CapyUi::num(bounds,L"x")+CapyUi::num(bounds,L"width"))*scale)),bottom=int32_t(std::ceil((CapyUi::num(bounds,L"y")+CapyUi::num(bounds,L"height"))*scale));
@@ -452,7 +453,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch  prepared) {
         },[weak=weak_from_this()](std::string json){if(auto self=weak.lock())self->Send(std::move(json),CanvasCommandKind::Input);},
         [weak=weak_from_this()](std::string json){if(auto self=weak.lock())self->Send(std::move(json),CanvasCommandKind::Document);});
     root.Children().Append(header->Root());
-    workspace->AttachBubbles(root,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->header)self->header->CancelGesture();});
+    workspace->AttachOverlays(root,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->header)self->header->CancelGesture();});
     settings=std::make_unique<SettingsView>(send,model,localization,root.XamlRoot(),
         [weak=weak_from_this()](KeyRoutedEventArgs const& e,bool pressed){if(auto self=weak.lock())self->Key(e,pressed);},
         [weak=weak_from_this()](std::string error){if(auto self=weak.lock()){OutputDebugStringA(error.c_str());self->Fail(to_string(CapyUi::str(CapyUi::object(self->bootstrap,L"recovery"),L"preferences_failed")));}},
@@ -644,7 +645,8 @@ void CanvasWindow::StartInput() {
         });
         inputSource.PointerExited([weak=weak_from_this()](auto&&,PointerEventArgs const& e){
             if(auto self=weak.lock();self&&!e.CurrentPoint().IsInContact()){
-                self->PenButtons(e.CurrentPoint(),4);
+                auto point=e.CurrentPoint();self->PenButtons(point,4);
+                if(point.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Pen){std::lock_guard lock(self->mutex);self->penSources.Forget(point.PointerId());}
                 self->SendIndependent(CanvasCommand{CanvasCommandKind::Input,R"({"type":"cursor_leave"})"});
             }
         });
@@ -734,6 +736,16 @@ void CanvasWindow::XamlPointer(PointerRoutedEventArgs const& e,uint32_t phase){
 }
 std::vector<CapyPointer> CanvasWindow::PointerSamples(Microsoft::UI::Input::PointerPoint const& current,PointerPoints const& points,uint32_t phase,bool predict){
     phase=CanvasPointerPhase(phase,current.Properties().IsCanceled());
+    if(current.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Pen){
+        bool describe;
+        {std::lock_guard lock(mutex);describe=penSources.Describe(current.PointerId(),phase==1);}
+        if(describe){
+            auto device=CapyUi::penDevice(current);auto source=to_string(device.Stringify());bool changed;
+            {std::lock_guard lock(mutex);changed=penSources.Update(current.PointerId(),std::move(source));}
+            if(changed||phase==1)Send(to_string(CapyUi::penInput(device).Stringify()));
+        }
+        if(phase==4){std::lock_guard lock(mutex);penSources.Forget(current.PointerId());}
+    }
     uint64_t view;float scale;{std::lock_guard lock(mutex);view=revision;scale=inputScale;}
     uint32_t deviceFlags=0;
     if(current.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Pen){
@@ -1517,6 +1529,7 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
     workspace->Root().Visibility(suspended||!workspaceReady?Visibility::Collapsed:Visibility::Visible);
     panel.Visibility(suspended?Visibility::Collapsed:Visibility::Visible);
     auto state=object(model,L"state");auto theme=str(state,L"theme",L"dark");
+    {std::lock_guard lock(mutex);penSources.Select(to_string(object(model,L"windows_tabs").GetNamedValue(L"selected",JsonValue::CreateNullValue()).Stringify()+L"/"+object(state,L"document_file").GetNamedValue(L"epoch",JsonValue::CreateNullValue()).Stringify()));}
     if(suspended)root.Background(SolidColorBrush(color(str(object(state,L"palette"),L"bg",L"#323232"))));
     else root.Background(nullptr);
     status.VerticalAlignment(suspended?VerticalAlignment::Center:VerticalAlignment::Bottom);

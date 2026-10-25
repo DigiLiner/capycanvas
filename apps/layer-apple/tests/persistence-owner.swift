@@ -170,10 +170,64 @@ private final class State: @unchecked Sendable {
             precondition(state.read().2 == nil && restoredState.read().2 == nil && flush(restored))
             print("PASS pressure platform \(platform): exact Cancel restoration and Apply/flush/fresh-owner curve persistence")
         }
+        func checkTilt(platform: UInt32, theme: String) throws {
+            let persistence = EditorPersistence(root: directory.appendingPathComponent("tilt-\(platform)-\(theme)")), state = State()
+            let owner = try NativeOwner(platform: platform, persistence: persistence, receive: { state.receive($0, $1) })
+            send(owner, ["type": "set_theme", "theme": theme])
+            let baseline = state.read().0["state"]["settings"].stableKey
+            func command(_ owner: NativeOwner) { send(owner, ["type": "invoke", "command": "pen_tilt"]) }
+            func calibration(_ kind: String) {
+                send(owner, ["type": "tilt_calibration", "action": ["kind": "panel", "action": ["kind": kind]]])
+            }
+            func sensor(_ owner: NativeOwner, id: UInt64) {
+                send(owner, ["type": "pen_input", "device": ["id": id, "key": "apple-fixture:pencil", "label": "Fixture Pencil",
+                    "native_to_surface": ["reverse_horizontal": false, "reverse_vertical": false, "swap": false]],
+                    "sample": [400.0, 300.0, 0.6, 0.4, 0.2, 0.0, 0.0, 1_000_000_000.0, 0.0]])
+            }
+            func alter() {
+                send(owner, ["type": "tilt_calibration", "action": ["kind": "panel", "action": ["kind": "sensitivity", "lighter": true]]])
+                send(owner, ["type": "tilt_calibration", "action": ["kind": "axes", "axes": [
+                    "reverse_horizontal": true, "reverse_vertical": false, "swap": true]]])
+            }
+            command(owner)
+            precondition(!state.read().0["state"]["tilt_calibration"]["ready"].bool)
+            let original = state.read().0["state"]["tilt_calibration"]["editor"]["points"].stableKey
+            let camera = state.read().0["state"]["camera"].stableKey, layers = state.read().0["state"]["layers"].stableKey
+            alter(); sensor(owner, id: 0)
+            precondition(state.read().0["state"]["tilt_calibration"]["ready"].bool
+                && state.read().0["state"]["tilt_calibration"]["device"].string == "Fixture Pencil")
+            precondition(state.read().0["state"]["camera"].stableKey == camera && state.read().0["state"]["layers"].stableKey == layers
+                && !state.read().0["state"]["document_file"]["modified"].bool,
+                "Owner-routed dialog sensor samples must preserve the drawing and camera")
+            calibration("cancel")
+            precondition(state.read().0["state"]["settings"].stableKey == baseline && flush(owner))
+            command(owner)
+            precondition(state.read().0["state"]["tilt_calibration"]["editor"]["points"].stableKey == original)
+            alter()
+            let response = state.read().0["state"]["tilt_calibration"]["editor"]["points"].stableKey
+            let axes = state.read().0["state"]["tilt_calibration"]["axes"].stableKey
+            calibration("apply"); precondition(flush(owner))
+            let settings = state.read().0["state"]["settings"]
+            let disk = try JSON.decode(String(decoding: Data(contentsOf: persistence.locations!.settings), as: UTF8.self))
+            precondition(disk.stableKey == settings.stableKey && settings.stableKey != baseline)
+            let restoredState = State()
+            let restored = try NativeOwner(platform: platform, persistence: persistence, receive: { restoredState.receive($0, $1) })
+            command(restored); sensor(restored, id: 900)
+            precondition(restoredState.read().0["state"]["tilt_calibration"]["editor"]["points"].stableKey == response
+                && restoredState.read().0["state"]["tilt_calibration"]["axes"].stableKey == axes,
+                "A fresh render owner must restore response and axes for the stable Pencil source despite a new contact alias")
+            send(restored, ["type": "curve_editor", "target": ["kind": "tilt"], "action": ["kind": "reset"]])
+            precondition(restoredState.read().0["state"]["tilt_calibration"]["editor"]["points"].stableKey == original)
+            send(restored, ["type": "tilt_calibration", "action": ["kind": "panel", "action": ["kind": "cancel"]]])
+            precondition(restoredState.read().0["state"]["settings"].stableKey == settings.stableKey
+                && state.read().2 == nil && restoredState.read().2 == nil && flush(restored))
+            print("PASS tilt platform \(platform) \(theme): cold sensor binding, Cancel/Reset rollback, Apply/flush and fresh-owner stable-source persistence")
+        }
         for platform: UInt32 in [0,1] {
             try checkCatalogTrace(platform: platform)
             try checkPreferenceRows(platform: platform)
             try checkPressure(platform: platform)
+            for theme in ["light", "dark"] { try checkTilt(platform: platform, theme: theme) }
             let root = directory.appendingPathComponent("platform-\(platform)")
             let persistence = EditorPersistence(root: root)
             let stateA = State(), stateB = State()

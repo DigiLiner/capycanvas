@@ -639,6 +639,7 @@ impl WebApp {
             settings_open,
             preferences,
             pressure_calibration,
+            tilt_calibration,
             customization,
             platform,
             requests,
@@ -697,6 +698,7 @@ impl WebApp {
         field!(settings_open);
         field!(preferences);
         field!(pressure_calibration);
+        field!(tilt_calibration);
         field!(customization);
         field!(platform);
         field!(requests);

@@ -52,7 +52,7 @@ using V=IJsonValue;
 using namespace CapyUi;
 struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::shared_ptr<WorkspaceData> data=std::make_shared<WorkspaceData>();
-    Canvas root;
+    Canvas root,utilities;
     std::shared_ptr<WorkspaceGestures> gestures;
     std::unique_ptr<WorkspaceDrawers> drawers;
     std::unique_ptr<WorkspaceBubbles> bubbles;
@@ -112,7 +112,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::shared_ptr<CanvasNotice> notice=std::make_shared<CanvasNotice>();
     std::shared_ptr<ColorStrip> colorStrip=std::make_shared<ColorStrip>();
     std::array<std::shared_ptr<PreviewPanel>,2> previewPanels{std::make_shared<PreviewPanel>(),std::make_shared<PreviewPanel>()};
-    std::shared_ptr<PressureCalibration> pressure=std::make_shared<PressureCalibration>();
+    std::shared_ptr<ResponseCalibration> pressure=std::make_shared<ResponseCalibration>();
     double cameraRevision=-1;
     hstring previousTheme,previousPalette;
     Flyout popup{nullptr};
@@ -885,9 +885,14 @@ bool WorkspaceView::CancelGesture(){
 void WorkspaceView::SetWindowId(uint64_t id){impl->data->windowId=id;}
 void WorkspaceView::SetGlassChanged(std::function<void()> changed){impl->glassChanged=std::move(changed);}
 void WorkspaceView::CanvasContact(bool active){impl->canvasBar->Contact(active);impl->bubbles->Wake();if(active){impl->notice->Hide();hideRevealedTooltip();}}
-void WorkspaceView::AttachBubbles(UIElement const& root,std::function<void()> cancelHeader){impl->bubbles->Attach(root,[weak=std::weak_ptr<Impl>(impl),cancelHeader]{if(auto self=weak.lock())self->gestures->Cancel();cancelHeader();});}
+void WorkspaceView::AttachOverlays(UIElement const& root,std::function<void()> cancelHeader){
+    auto weak=std::weak_ptr<Impl>(impl);root.as<Panel>().Children().Append(impl->utilities);Canvas::SetZIndex(impl->utilities,1100);impl->pressure->attach(impl->utilities);
+    auto sync=[weak](auto&&,auto&&){if(auto self=weak.lock()){self->utilities.Visibility(self->root.Visibility());self->utilities.IsHitTestVisible(self->root.IsHitTestVisible());}};
+    impl->root.RegisterPropertyChangedCallback(UIElement::VisibilityProperty(),sync);impl->root.RegisterPropertyChangedCallback(UIElement::IsHitTestVisibleProperty(),sync);sync(nullptr,nullptr);
+    impl->bubbles->Attach(root,[weak,cancelHeader]{if(auto self=weak.lock())self->gestures->Cancel();cancelHeader();});
+}
 JsonArray WorkspaceView::DrawerSources()const{return impl->data->drawerSources;}
-JsonArray WorkspaceView::BubbleInputRegions(UIElement const& reference)const{return impl->bubbles->InputRegions(reference);}
+JsonArray WorkspaceView::OverlayInputRegions(UIElement const& reference)const{auto result=impl->bubbles->InputRegions(reference);for(auto value:impl->pressure->inputRegions(reference))result.Append(value);return result;}
 JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections,JsonArray& arcs,JsonArray& colors)const{return impl->glass(reference,connections,arcs,colors);}
 void WorkspaceView::SetTitlebarInsets(float left,float right,float height){
     std::array<float,3> value{left,right,height};

@@ -715,7 +715,6 @@ impl CommandId {
         match self {
             Self::Fullscreen => matches!(platform, Platform::Gtk | Platform::Web | Platform::Mac | Platform::Windows),
             Self::NewWindow => platform.native_windows(),
-            Self::PenTilt => platform == Platform::Gtk,
             _ => true,
         }
     }
@@ -1496,6 +1495,7 @@ pub enum UiAction {
     CurveEditor { target: CurveEditorTarget, action: CurveEditorAction },
     PressureCalibration { action: PressureCalibrationAction },
     TiltCalibration { action: TiltCalibrationAction },
+    PenInput { device: PenDeviceInfo, sample: Option<[f64;9]> },
     ChooseToolVariant { anchor: DrawerAnchor, variant: ToolVariant },
     Histogram { action: HistogramAction },
     CommandSearch { action: CommandSearchAction },
@@ -1789,6 +1789,7 @@ impl UiAction {
         matches!(
             self,
             Self::PrepareExport { .. }
+                | Self::PenInput { .. }
                 | Self::CompleteRequest { .. }
                 | Self::CompleteRequestFailure { .. }
                 | Self::CloseSettings

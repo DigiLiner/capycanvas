@@ -10,14 +10,6 @@ $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/pressure/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 function Json($Value){ConvertTo-Json -InputObject $Value -Compress -Depth 40}
-function Same-Curve($Left,$Right){
-    if($null -eq $Left -or $null -eq $Right -or $Left.Count -ne $Right.Count){return $false}
-    for($i=0;$i -lt $Left.Count;$i++){
-        if($Left[$i].Count -ne 2 -or $Right[$i].Count -ne 2){return $false}
-        for($axis=0;$axis -lt 2;$axis++){if([single]$Left[$i][$axis] -ne [single]$Right[$i][$axis]){return $false}}
-    }
-    $true
-}
 function Pressure{(Model).state.pressure_calibration}
 function Points{(Pressure).editor.points}
 function Curve{Json (Points)}
@@ -28,7 +20,8 @@ function Status-Checkpoint([string]$Name){
 }
 function Open-Pressure{
     $script:pressureLaunch++
-    Invoke 'settings-button'
+    Invoke-Id 'settings-button'
+    Wait-Until {(Model).state.settings_open} 'Preferences action was not acknowledged'
     Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)|Out-Null
     Status-Checkpoint "open-$pressureLaunch-preferences"
     Invoke 'Pen & Input' -Name
@@ -60,15 +53,8 @@ function Drag([string]$Device,[int[]]$From,[int[]]$To,[switch]$Escape,[switch]$C
 }
 function Native-Stroke([string]$Device){
     $bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
-    $camera=(Model).state.camera;$work=$camera.work_area;$tab=@((Model).state.tabs|Where-Object active)[0]
-    if($camera.rotation -ne 0 -or $camera.flipped[0] -or $camera.flipped[1]){throw 'The stroke fixture requires the initial unrotated document camera'}
-    $left=[Math]::Max($work[0],$camera.translation[0]);$right=[Math]::Min($work[0]+$work[2],$camera.translation[0]+$tab.width*$camera.zoom)
-    $top=[Math]::Max($work[1],$camera.translation[1]);$bottom=[Math]::Min($work[1]+$work[3],$camera.translation[1]+$tab.height*$camera.zoom)
-    if($right-$left -lt 150 -or $bottom-$top -lt 150){throw 'The visible document is too small for the authored pixel comparison'}
-    $from=@([int]($bounds.X+($left+($right-$left)*.25)*$bounds.Width/$camera.viewport[0]),[int]($bounds.Y+($top+($bottom-$top)*.8)*$bounds.Height/$camera.viewport[1]))
+    $from=Clear-CanvasPoint 'pen-pressure-dialog' 40 8
     $to=@([int]($from[0]+40),[int]($from[1]+8))
-    $panel=(Control 'pen-pressure-dialog').Current.BoundingRectangle
-    if(!$bounds.Contains([double]$from[0],[double]$from[1]) -or !$bounds.Contains([double]$to[0],[double]$to[1]) -or $panel.Contains([double]$from[0],[double]$from[1]) -or $panel.Contains([double]$to[0],[double]$to[1])){throw 'Stroke projection intersects the utility or leaves the owned canvas'}
     $before=Wait-StablePixels {Screen-Pixels $from[0] $from[1]}
     [CapyRowPointer]::Down($Device,$from[0],$from[1])
     for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move([int]($from[0]+($to[0]-$from[0])*$i/8),[int]($from[1]+($to[1]-$from[1])*$i/8));Start-Sleep -Milliseconds 30}
@@ -82,7 +68,10 @@ function Native-Stroke([string]$Device){
     $after=Wait-StablePixels {Screen-Pixels $from[0] $from[1]}
     if($after -eq $before){throw "$Device stroke did not change authored canvas pixels"}
     Wait-Until {$null -eq (Pressure).editor.marker} 'Pen pressure marker did not clear on release'
-    Invoke 'Undo' -Name
+    $undo=Control 'Undo' -Name -Type ([System.Windows.Automation.ControlType]::Button) -Arranged
+    Wait-Until {$undo.Current.IsEnabled} 'The native Undo button did not acknowledge the committed stroke'
+    @{device=$Device;id=$undo.Current.AutomationId;name=$undo.Current.Name;enabled=$undo.Current.IsEnabled;offscreen=$undo.Current.IsOffscreen;document=(Model).state.document_file}|ConvertTo-Json -Compress|Add-Content (Join-Path $run 'native-history.jsonl')
+    $undo.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {!(Model).state.document_file.modified} "$Device stroke did not undo to the clean checkpoint"
     $restored=Wait-StablePixels {Screen-Pixels $from[0] $from[1]}
     if($restored -ne $before){throw "$Device Undo did not restore the exact sampled canvas pixels"}
@@ -98,6 +87,7 @@ try{
     $owned=@{window=$null}
     Wait-Until {$owned.window=Owned-DrawingWindow $review;$null -ne $owned.window -and (Model).brush_ready} 'Pressure review did not start' 45
     $root=$owned.window.Root;$drawingWindow=$owned.window.Handle
+    Maximize-DrawingWindow
     Use-PaintWorkspace
     if(!(Model).windows_isolated_settings){throw 'Refusing to use non-isolated preferences'}
     [CapyWindowApi]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null

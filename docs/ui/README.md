@@ -228,7 +228,7 @@ space. Intensity blends either kind with the original. Presets and imported
 tables share the same saved resource, renderer and undo path.
 Curves uses these pages for RGB and channel
 selection, with [precise point controls](numeric-controls.md#properties-and-curves).
-[Pen pressure](pen-pressure.md) and GTK’s [Pen tilt](pen-tilt.md) share the curve
+[Pen pressure](pen-pressure.md) and [Pen tilt](pen-tilt.md) share the curve
 widget and modeless utility. Their calibration state and input mapping live in Rust.
 The [Sketch, Paint and Photo defaults](default-workspaces.md)
 provide initial arrangements and remain editable workspaces.

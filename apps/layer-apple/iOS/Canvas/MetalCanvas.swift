@@ -28,11 +28,18 @@ final class CanvasView: UIView {
     private var sceneGeometry: NSKeyValueObservation?
     private var keyboardCoversField = false
     private let shaderActivity = ShaderActivityRecognizer()
+    private lazy var calibrationHover: UIHoverGestureRecognizer = {
+        let hover = UIHoverGestureRecognizer(target: self, action: #selector(calibrationHovered(_:)))
+        hover.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        hover.cancelsTouchesInView = false; hover.delegate = shaderActivity
+        return hover
+    }()
     private var workspaceBottom: CGFloat = -1
     var contacts: [ObjectIdentifier: PencilContact] = [:]
     var indirectGestures = Set<ObjectIdentifier>()
     var nextContact: UInt64 = 0
     var ignoredContacts: Set<ObjectIdentifier> = []
+    var sensorContacts: Set<ObjectIdentifier> = []
     var pickerHold: PickerHold?
     var estimates = EstimatedInput()
     var modifiers: UIKeyModifierFlags = []
@@ -95,12 +102,15 @@ final class CanvasView: UIView {
         sceneGeometry = nil
         store.projectFiles.presentationScreen = window?.screen
         shaderActivity.view?.removeGestureRecognizer(shaderActivity)
+        calibrationHover.view?.removeGestureRecognizer(calibrationHover)
         if window == nil { cancelPickerHold() }
         if let window {
             store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) })
             connectStore()
             shaderActivity.activity = { [weak store] in store?.native?.shaderInput() }
+            shaderActivity.samples = { [weak self] touches, event, phase in self?.observeCalibration(touches, event: event, phase: phase) }
             window.addGestureRecognizer(shaderActivity)
+            window.addGestureRecognizer(calibrationHover)
             measureWorkspaceBottom()
             store.systemSceneID = window.windowScene?.session.persistentIdentifier
             store.focusWindow = { [weak window] in
@@ -217,7 +227,9 @@ final class CanvasView: UIView {
         if attached { store.input(["type": "blur"]) }
         displayLink?.invalidate(); displayLink = nil
         if attached { store.native?.detach(); attached = false }
-        contacts.removeAll(); ignoredContacts.removeAll()
+        shaderActivity.view?.removeGestureRecognizer(shaderActivity)
+        calibrationHover.view?.removeGestureRecognizer(calibrationHover)
+        contacts.removeAll(); ignoredContacts.removeAll(); sensorContacts.removeAll()
     }
     func setSceneActive(_ active: Bool) {
         guard sceneActive != active else { return }
@@ -279,14 +291,23 @@ private extension UIResponder {
 
 private final class ShaderActivityRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
     var activity: (() -> Void)?
+    var samples: ((Set<UITouch>, UIEvent, Double) -> Void)?
+    private var active = Set<ObjectIdentifier>()
     init() {
         super.init(target: nil, action: nil)
         cancelsTouchesInView = false; delaysTouchesBegan = false; delaysTouchesEnded = false
         delegate = self
     }
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { activity?() }
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { activity?() }
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .failed }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        active.formUnion(touches.map(ObjectIdentifier.init)); activity?(); samples?(touches, event, 1)
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { activity?(); samples?(touches, event, 2) }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        samples?(touches, event, 3); active.subtract(touches.map(ObjectIdentifier.init)); if active.isEmpty { state = .failed }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        samples?(touches, event, 4); active.subtract(touches.map(ObjectIdentifier.init)); if active.isEmpty { state = .failed }
+    }
+    override func reset() { super.reset(); active.removeAll() }
     func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
 }

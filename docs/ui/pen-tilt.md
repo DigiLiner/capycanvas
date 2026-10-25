@@ -2,13 +2,13 @@
 
 [Workspace and UI](README.md) · [Pen pressure](pen-pressure.md)
 
-GTK exposes **Preferences → Input → Pen response → Pen tilt → Adjust…** directly
+Every client exposes **Preferences → Input → Pen response → Pen tilt → Adjust…** directly
 after Pen pressure. It closes Preferences and opens the same modeless, draggable
 utility used for pressure. Only one pen response editor opens at a time; switching
-editors discards the previous draft. Other hosts do not expose this editor yet.
+editors discards the previous draft.
 
 Curve, sensitivity, direction and Reset controls work immediately, including
-before any pen has been used. Hover or press the pen anywhere over the GTK
+before any pen has been used. Hover or press the pen anywhere over the
 dialog, including the direction circle, to identify the device and enable Apply.
 The circle and graph preview the sensor without painting, changing a selection
 or moving the canvas. Canvas input also identifies the pen; no stroke is required,
@@ -18,6 +18,7 @@ are retained; saved response or direction settings that were not edited remain
 intact. An open editor keeps its target when another pen is used; close and reopen
 it to adjust the last pen used. Drawing stays available.
 First identification preserves the measured window and any active window drag.
+The pen contact that identifies the device can edit the curve immediately.
 When a curve gesture began before identification, binding waits until that
 gesture ends. Cancelling restores the pen's saved response unless earlier
 explicit edits are still pending.
@@ -40,7 +41,7 @@ can be combined to represent all eight signed axis mappings.
 Swapping happens before the reflections. Direction correction preserves the lean
 magnitude; the response curve changes magnitude without changing direction.
 
-GTK gives both calibration utilities a 384-pixel minimum width and 16-pixel
+Both calibration utilities use a 384-unit width, bounded by the viewport, and 16-unit
 content margins. The pen name sits below the title; the title and Close share a
 vertical center. Both units use the same square plot size, with equal side gutters
 measured from the common maximum-label width in the current font. Sensitivity
@@ -67,8 +68,7 @@ composition, inverse and frame conversion. `TiltCalibration` stores the response
 and direction. Settings keep profiles by stable input-source key.
 
 The shared response editor supplies curve actions, sensitivity, window placement
-and view projection for both pressure and tilt. GTK reuses one panel and the same
-`CurveEditor`. Hosts register `PenDeviceInfo` and forward native samples; they do
+and view projection for both pressure and tilt. Each host reuses its pressure utility and curve widget. Hosts register `PenDeviceInfo` and forward native samples; they do
 not evaluate response curves or own calibration transactions.
 
 `PenDeviceInfo.native_to_surface` describes the stable input frame in current
@@ -78,14 +78,35 @@ reflection after a quarter turn, retaining its physical meaning. All eight
 mappings and four quarter-turn frames have headless regression coverage. Canvas
 rotation, zoom and mirroring happen after calibration and do not change it.
 
-GTK keys combine tablet vendor/product/name and pen serial/hardware identifiers.
-Pens without serials share a profile when those identifiers are indistinguishable.
-GTK currently uses its delivered logical-tablet axes as the calibration frame.
-GDK does not expose the physical tablet-to-monitor rotation mapping through its
-public device API. Automatic reprojection after a physical monitor or compositor
-tablet-mapping change is therefore not established on GTK; screen dimensions must
-not be used to guess it. Native hosts with a known frame supply that frame to the
-same shared model.
+Native source registration is separate from contact IDs, which may change or be
+reused between strokes. An open draft owns its source key and follows that
+source's new contacts without following another pen that reuses an ID.
+
+| Client | Saved source key | Calibration frame |
+| --- | --- | --- |
+| GTK | Tablet vendor/product/name plus pen serial or hardware ID when available | Delivered logical-tablet axes |
+| Web | One `web:pen` profile | Browser surface axes |
+| Android | `InputDevice.descriptor`, with a shared pen fallback | Native display axes, reprojected using the current display rotation |
+| macOS | Proximity unique ID, with vendor/serial fallback | Delivered logical-tablet axes |
+| iPadOS | One `apple:pencil` profile | Fixed portrait coordinates converted into canvas coordinates |
+| Windows | WinUI pen GUID when available, then product/shared fallback | Delivered surface axes |
+
+Indistinguishable pens share a profile. Browsers and iPadOS do not expose a durable
+physical pen identity; browser pointer IDs identify contacts, and
+`persistentDeviceId` does not persist across browser sessions. GTK, macOS and
+Windows do not provide a verified physical tablet-to-surface rotation mapping
+through these adapters. Their correction follows the delivered logical axes;
+automatic reprojection after a compositor or tablet-driver mapping change is not
+established. Screen dimensions or display orientation must not be used to guess it.
+
+GTK forwards typed native samples directly. Other hosts enqueue the shared
+`pen_input` action before ordinary canvas input to register source metadata.
+An optional nine-number sample carries x, y, pressure, projected tilt X/Y in
+radians, twist, distance, nanosecond time and phase for preview-only sensing.
+The action bypasses document-edit admission and never enters the painting,
+selection or camera input path. Native adapters observe utility input before
+child widgets handle it, so the direction circle and ordinary controls both
+identify the pen without requiring a canvas stroke.
 
 `layer_engine::TiltCurve` decodes projected sensor angles to physical radial tilt,
 applies the response and direction, then lets the camera map direction into the
@@ -114,3 +135,13 @@ Cancel, Close and Escape. Run the pressure and tonal Curves journeys after chang
 to their shared widgets. Set `LAYER_TILT_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8`
 for three five-second frame and curve drags with native presentation timestamps.
 These desktop diagnostics do not qualify reference-tablet painting performance.
+
+Web's `--tilt-calibration` journey checks both themes, native browser pointer
+input, identification over the utility, independent direction controls, matched
+pressure geometry, stacking, window dragging and settings across reload.
+Android's `AndroidHostTest` contains separate light and dark tilt journeys;
+Apple's `testTiltCalibrationLight` and `testTiltCalibrationDark` exercise the
+shared SwiftUI utility on macOS and iPadOS. Windows uses
+`exercise-tilt.ps1 -Theme light|dark`. Native Apple UI checks require Xcode;
+Windows VM checks do not establish physical pen or GPU performance. See each
+[platform guide](../platforms/README.md) for the host test commands.

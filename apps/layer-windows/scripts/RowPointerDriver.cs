@@ -88,12 +88,12 @@ public static class CapyRowPointer {
  [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
  static long lastInjection,contactDown;public static double MaxGapMilliseconds {get;private set;}
  public static double ContactDurationMilliseconds {get;private set;}
- static uint owner,kind,penButtons,mouseRelease;static bool active,hovering,eraserEnd;static Point last;static IntPtr pen;
+ static uint owner,kind,penButtons,mouseRelease;static int tiltX,tiltY;static bool active,hovering,eraserEnd;static Point last;static IntPtr pen;
  static readonly object gate=new object();static Timer pulse;static Exception failure;
  public static bool Active {get{lock(gate)return active;}}
  public static void Initialize(uint process) {
   if(active||pulse!=null||pen!=IntPtr.Zero)throw new InvalidOperationException("Dispose the previous pointer review first.");
-  failure=null;kind=0;penButtons=0;mouseRelease=0;hovering=false;eraserEnd=false;owner=process;contactDown=0;ContactDurationMilliseconds=double.NaN;
+  failure=null;kind=0;penButtons=0;mouseRelease=0;tiltX=tiltY=0;hovering=false;eraserEnd=false;owner=process;contactDown=0;ContactDurationMilliseconds=double.NaN;
   if(Marshal.SizeOf(typeof(TouchInfo))!=144||Marshal.SizeOf(typeof(PenInfo))!=120||Marshal.SizeOf(typeof(TypeInfo))!=152)
    throw new Exception("Pointer structures require the x64 ABI.");
   if(!InitializeTouchInjection(1,3))throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -130,7 +130,7 @@ public static class CapyRowPointer {
    bool accepted;
    if(kind==2)accepted=InjectTouchInput(1,new[]{new TouchInfo{pointer=info,mask=7,
     contact=new Rect{left=point.x-2,top=point.y-2,right=point.x+2,bottom=point.y+2},orientation=90,pressure=512}});
-   else accepted=InjectSyntheticPointerInput(pen,new[]{new TypeInfo{type=3,pen=new PenInfo{pointer=info,flags=penButtons|(eraserEnd?6u:0u),mask=1,pressure=512}}},1);
+   else accepted=InjectSyntheticPointerInput(pen,new[]{new TypeInfo{type=3,pen=new PenInfo{pointer=info,flags=penButtons|(eraserEnd?6u:0u),mask=13,pressure=512,tiltX=tiltX,tiltY=tiltY}}},1);
    if(accepted){
     long now=System.Diagnostics.Stopwatch.GetTimestamp();
     if(active)MaxGapMilliseconds=Math.Max(MaxGapMilliseconds,(now-lastInjection)*1000.0/System.Diagnostics.Stopwatch.Frequency);
@@ -164,6 +164,10 @@ public static class CapyRowPointer {
   }
  }
  public static void EraserEnd(bool on) {lock(gate){eraserEnd=on;}}
+ public static void PenTilt(int x,int y) {
+  if(x < -90||x > 90||y < -90||y > 90)throw new ArgumentOutOfRangeException("tilt");
+  lock(gate){Check();tiltX=x;tiltY=y;}
+ }
  public static void Barrel(bool held) {
   lock(gate){
    Check();if(kind!=3)throw new Exception("The barrel button needs a pen in range.");

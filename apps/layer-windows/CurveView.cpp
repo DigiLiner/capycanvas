@@ -29,6 +29,7 @@ TextBlock axisText(std::shared_ptr<WorkspaceData> const& data){
 struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
     std::shared_ptr<Property> property;
     std::shared_ptr<WorkspaceData> data;
+    hstring responseTarget;
     StackPanel root;
     Grid chart;
     ContentControl focus;
@@ -44,16 +45,17 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
     hstring heldKey,drawn,labels;
     double owner=0,firstCount=0;
     Point extent{};
-    J model()const{return property?property->model():object(object(data->state,L"pressure_calibration"),L"editor");}
+    J response()const{auto view=object(data->state,responseTarget==L"tilt"?L"tilt_calibration":L"pressure_calibration");return view;}
+    J model()const{return property?property->model():object(response(),L"editor");}
     J curve()const{return property?property->curve():object(model(),L"controls");}
-    hstring caption()const{return property?str(model(),L"label"):str(object(data->state,L"pressure_calibration"),L"title");}
+    hstring caption()const{return property?str(model(),L"label"):str(response(),L"title");}
     double epoch()const{return num(curve(),L"epoch");}
     A points()const{return property?array(object(model(),L"value"),L"value"):array(model(),L"points");}
     void send(J operation,hstring const& phase={})const{
         if(!phase.empty())operation=O({{L"kind",S(L"gesture")},{L"phase",S(phase)},{L"action",operation}});
         bool continuing=(!phase.empty()&&phase!=L"down")||(str(operation,L"kind")==L"contact"&&str(operation,L"phase")!=L"down");
         if(!continuing&&(data->updating||(property&&(!property->current()||!flag(property->view(),L"enabled")))))return;
-        auto target=property?O({{L"kind",S(L"effect")},{L"layer",N(property->layer)},{L"key",S(property->key)}}):O({{L"kind",S(L"pressure")}});
+        auto target=property?O({{L"kind",S(L"effect")},{L"layer",N(property->layer)},{L"key",S(property->key)}}):O({{L"kind",S(responseTarget)}});
         auto request=O({{L"type",S(L"curve_editor")},{L"target",target},{L"action",operation}});
         if(property)data->dispatchDocument(request,to_hstring(uint64_t(property->epoch)));else data->dispatch(request);
     }
@@ -124,10 +126,10 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         line.Stroke(data->brush(L"text"));line.StrokeThickness(1.5);
         focus.Content(graph);focus.IsTabStop(true);focus.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         focus.VerticalContentAlignment(VerticalAlignment::Stretch);
-        AutomationProperties::SetAutomationId(focus,property?property->id()+L"-curve":L"pen-pressure-curve");
+        AutomationProperties::SetAutomationId(focus,property?property->id()+L"-curve":L"pen-"+responseTarget+L"-curve");
         reset=button(data,L"",[weak]{if(auto self=weak.lock()){self->cancel();self->send(O({{L"kind",S(L"reset")}}));}});
         reset.Width(data->panelMetric(L"control_height"));reset.Height(data->panelMetric(L"control_height"));reset.Content(icon(L"reset",data->theme()));reset.Visibility(Visibility::Collapsed);
-        AutomationProperties::SetAutomationId(reset,property?property->id()+L"-reset":L"pen-pressure-curve-reset");
+        AutomationProperties::SetAutomationId(reset,property?property->id()+L"-reset":L"pen-"+responseTarget+L"-curve-reset");
         chart.Height(200);chart.MinWidth(64);chart.Background(data->brush(L"input"));
         if(property)chart.Children().Append(CapyScopes::TonalPlot(data,bindings));chart.Children().Append(focus);
         Grid frame;frame.ColumnSpacing(data->panelMetric(L"control_spacing"));frame.RowSpacing(4);
@@ -142,8 +144,15 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
             Grid::SetRow(axes[1][2-i],i);vertical.Children().Append(axes[1][2-i]);
         }
         if(!flag(curve(),L"coordinate_readouts")){
-            vertical.Width(36);axes[1][1].HorizontalAlignment(HorizontalAlignment::Center);
+            vertical.Width(36);
+            axes[1][1].HorizontalAlignment(HorizontalAlignment::Center);
             RotateTransform rotation;rotation.Angle(-90);axes[1][1].RenderTransform(rotation);axes[1][1].RenderTransformOrigin({.5,.5});
+            if(!property){
+                auto reference=axisText(data);reference.Text(str(response(),L"axis_gutter"));reference.Measure({INFINITY,INFINITY});
+                auto gutter=std::max(36.,std::ceil(double(reference.DesiredSize().Width)));vertical.Width(gutter);
+                ColumnDefinition right;right.Width({gutter,GridUnitType::Pixel});frame.ColumnDefinitions().Append(right);
+                chart.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock();self&&std::abs(self->chart.Height()-e.NewSize().Width)>.5)self->chart.Height(e.NewSize().Width);});
+            }
         }
         axes[0][1].HorizontalAlignment(HorizontalAlignment::Center);axes[1][1].VerticalAlignment(VerticalAlignment::Center);
         Grid::SetColumn(chart,1);Grid::SetColumn(horizontal,1);Grid::SetRow(horizontal,1);
@@ -258,7 +267,7 @@ FrameworkElement CapyEffects::CurveField(std::shared_ptr<Property> const& proper
     bindings.emplace_back([view]{view->refresh();});return view->root;
 }
 
-FrameworkElement CapyEffects::PressureCurveField(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings){
-    auto view=std::make_shared<CurveEditor>();view->data=data;view->init(bindings);
+FrameworkElement CapyEffects::ResponseCurveField(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,hstring const& target){
+    auto view=std::make_shared<CurveEditor>();view->data=data;view->responseTarget=target;view->init(bindings);
     bindings.emplace_back([view]{view->refresh();});return view->root;
 }

@@ -28,6 +28,7 @@ done <<'FIXTURES'
 json-lookup Shared/Bridge/JSON.swift
 reorder-contact Shared/Bridge/ReorderContact.swift
 estimated-input Shared/Bridge/EstimatedInput.swift
+pen-response-input Shared/Bridge/JSON.swift Shared/Bridge/StylusTilt.swift
 frame-trace Shared/Bridge/FrameTrace.swift
 drawing-workload-plan Shared/Bridge/DrawingWorkloadPlan.swift
 native-input-gate Shared/Bridge/NativeInputGate.swift

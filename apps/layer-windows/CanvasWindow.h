@@ -14,6 +14,7 @@
 #include "FilterPreviews.h"
 #include "GamepadInput.h"
 #include "NativeHandles.h"
+#include "PenSourceCache.h"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -93,6 +94,7 @@ private:
     uint64_t revision=0;
     std::unordered_map<uint32_t,std::wstring> heldKeys; // UI thread
     std::unordered_set<uint32_t> penButtons; // input thread
+    PenSourceCache penSources;
     HWND orderedKeys=nullptr; // input thread
     bool orderingKeys=false; // input thread
     std::unordered_set<uint32_t> rawKeys; // key reader thread

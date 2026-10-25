@@ -67,9 +67,10 @@ class MainActivity : ComponentActivity() {
         host.systemLocalesChanged(newConfig.locales)
     }
     private val devices = object : android.hardware.input.InputManager.InputDeviceListener {
-        override fun onInputDeviceAdded(id: Int) {}
-        override fun onInputDeviceChanged(id: Int) {}
+        override fun onInputDeviceAdded(id: Int) { host.forgetPenDevice(id) }
+        override fun onInputDeviceChanged(id: Int) { host.forgetPenDevice(id) }
         override fun onInputDeviceRemoved(id: Int) {
+            host.forgetPenDevice(id)
             host.input(obj("type" to "axes", "pan" to org.json.JSONArray(listOf(0, 0)), "zoom" to 0))
             for (code in KeyEvent.KEYCODE_BUTTON_A..KeyEvent.KEYCODE_BUTTON_MODE) deviceKey(code)?.let { key ->
                 host.input(obj("type" to "key", "key" to key, "pressed" to false, "repeat" to false))
@@ -86,6 +87,7 @@ class MainActivity : ComponentActivity() {
         host.restartingWindow = false
     }
     override fun onPause() {
+        host.endCalibrationMotion()
         host.input(obj("type" to "blur"))
         super.onPause()
     }
@@ -127,11 +129,13 @@ class MainActivity : ComponentActivity() {
     }
     override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
         host.shaderInput()
+        host.observePen(event, window.decorView.display?.rotation ?: 0)
         PointerScrollbars.input(event)
         return super.dispatchTouchEvent(event)
     }
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
         host.shaderInput()
+        host.observePen(event, window.decorView.display?.rotation ?: 0)
         if (!event.isFromSource(android.view.InputDevice.SOURCE_JOYSTICK)) PointerScrollbars.input(event)
         if (event.isFromSource(android.view.InputDevice.SOURCE_JOYSTICK) && event.actionMasked == android.view.MotionEvent.ACTION_MOVE) {
             fun axis(axis: Int): Double {

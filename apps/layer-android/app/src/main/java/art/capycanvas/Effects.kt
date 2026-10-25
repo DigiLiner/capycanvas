@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
@@ -309,11 +310,19 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
 }
 
 @Composable internal fun SharedCurveControl(host: CanvasHost, state: JSONObject, control: JSONObject, label: String, target: JSONObject,
-    enabled: Boolean = true, histogram: Boolean = false) {
+    enabled: Boolean = true, histogram: Boolean = false, gutterLabel: String? = null) {
     val colors = LocalPalette.current
     val density = LocalDensity.current.density
     val current by rememberUpdatedState(control)
-    val key = target.optString("key", "pressure")
+    val key = target.optString("key", target.getString("kind"))
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current
+    val fontDensity = LocalDensity.current
+    val gutter = remember(gutterLabel, style, fontDensity) {
+        if (gutterLabel != null) (measurer.measure(gutterLabel, style).size.width / density).dp + 8.dp else 40.dp
+    }
+    var graphWidth by remember { mutableIntStateOf(0) }
+    val graphHeight = if (gutterLabel != null && graphWidth > 0) (graphWidth / density).dp else 200.dp
     val curve = control.getJSONObject("controls")
     val axes = curve.array("axes").objects()
     val focus = remember { FocusRequester() }
@@ -335,16 +344,16 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
     DisposableEffect(Unit) { onDispose { cancel(); if (host.pointControlFocus === focus) host.pointControlFocus = null } }
     Column(Modifier.fillMaxWidth().testTag("curve-$key"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Column(Modifier.height(200.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.then(if (gutterLabel != null) Modifier.width(gutter) else Modifier).height(graphHeight), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(axes[1].getString("maximum"), color = colors.secondary)
                 if (curve.getBoolean("coordinate_readouts")) Text(axes[1].getString("label"), color = colors.secondary)
-                else Box(Modifier.width(40.dp).weight(1f), contentAlignment = Alignment.Center) {
+                else Box(Modifier.width(gutter).weight(1f), contentAlignment = Alignment.Center) {
                     Text(axes[1].getString("label"), Modifier.wrapContentSize(unbounded = true).rotate(-90f), color = colors.secondary)
                 }
                 Text(axes[1].getString("minimum"), color = colors.secondary)
             }
             Column(Modifier.weight(1f)) {
-                Box(Modifier.fillMaxWidth().height(200.dp).background(colors.input)) {
+                Box(Modifier.fillMaxWidth().height(graphHeight).onSizeChanged { graphWidth = it.width }.background(colors.input)) {
                     if (histogram) ScopeGraph(host, state, "tonal_histogram", Modifier.fillMaxSize())
                     Canvas(Modifier.fillMaxSize().testTag("effect-curve").semantics { contentDescription = label }
                         .onGloballyPositioned { origin = it.positionInRoot() }.focusRequester(focus)
@@ -444,6 +453,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
                     Text(axes[0].getString("maximum"), Modifier.align(Alignment.CenterEnd), color = colors.secondary)
                 }
             }
+            if (gutterLabel != null) Spacer(Modifier.width(gutter))
         }
         if (curve.getBoolean("coordinate_readouts")) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf("input", "output").forEachIndexed { index, axis ->

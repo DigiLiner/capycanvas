@@ -245,7 +245,7 @@ private val HiddenChromeShape=object:Shape {
                     TextureDialogLayer(host)
                     NewDrawingLayer(host)
                     PreferencesOverlay(host, snapshot?.objectOrNull("preferences"))
-                    PressureCalibration(host, state, state.objectOrNull("pressure_calibration"))
+                    ResponseCalibration(host, state, state.objectOrNull("pressure_calibration"), state.objectOrNull("tilt_calibration"))
                     if (snapshot?.objectOrNull("preferences") == null && snapshot?.objectOrNull("picker") != null)
                         ToolPicker(host, snapshot.getJSONObject("picker"))
                     if (snapshot?.objectOrNull("preferences") == null)
@@ -291,7 +291,7 @@ private val HiddenChromeShape=object:Shape {
         onDispose { bubbles.cancel(); header.finish(true); host.headerKeyHandler = null }
     }
     val activity = LocalActivity.current
-    val requestingMotionFrames = dock.dragging || bubbles.active
+    val requestingMotionFrames = dock.dragging || bubbles.active || host.calibrationMotionActive
     DisposableEffect(requestingMotionFrames, activity) {
         val window = activity?.window
         val previous = window?.attributes?.preferredRefreshRate ?: 0f

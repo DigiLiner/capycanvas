@@ -116,6 +116,7 @@ extension CanvasView {
         let ordered = touches.sorted { $0.timestamp < $1.timestamp }
         for touch in ordered {
             let key = ObjectIdentifier(touch)
+            if sensorContacts.contains(key) { continue }
             // A fresh contact may reuse an interrupted touch's identity.
             if phase == 1 { ignoredContacts.remove(key) }
             if ignoredContacts.contains(key) {
@@ -177,7 +178,7 @@ extension CanvasView {
             }
             if !records.isEmpty {
                 store.native?.pointer(id: contact.id, tool: contact.tool, button: contact.button, records: records,
-                    predicted: false, revision: revision, updates: updates)
+                    predicted: false, revision: revision, updates: updates, device: contact.tool == 0 ? pencilDevice(id: contact.id) : nil)
             }
             if phase >= 3 {
                 contacts.removeValue(forKey: key)
@@ -191,7 +192,7 @@ extension CanvasView {
         }
         wake()
     }
-    private func pack(_ touch: UITouch, phase: Double, scale: CGFloat? = nil) -> [Double] {
+    func pack(_ touch: UITouch, phase: Double, scale: CGFloat? = nil) -> [Double] {
         let point = touch.preciseLocation(in: self)
         let pencil = touch.type == .pencil
         let pressure = pencil && touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 1
@@ -201,6 +202,36 @@ extension CanvasView {
         return [Double(point.x * scale), Double(point.y * scale),
             Double(pressure), tilt.x, tilt.y, pencil ? Double(touch.rollAngle) : 0, 0,
             touch.timestamp * 1_000_000_000, phase]
+    }
+    func pencilDevice(id: UInt64) -> NativePenDevice {
+        var device = NativePenDevice(id: id, key: "apple:pencil")
+        if let window {
+            let surface: any UICoordinateSpace = self, native = window.screen.fixedCoordinateSpace
+            let origin = surface.convert(CGPoint.zero, from: native)
+            let right = surface.convert(CGPoint(x: 1, y: 0), from: native), down = surface.convert(CGPoint(x: 0, y: 1), from: native)
+            let x = CGPoint(x: right.x - origin.x, y: right.y - origin.y), y = CGPoint(x: down.x - origin.x, y: down.y - origin.y)
+            device.align(nativeX: x, nativeY: y)
+        }
+        return device
+    }
+    func observeCalibration(_ touches: Set<UITouch>, event: UIEvent, phase: Double) {
+        for touch in touches where touch.type == .pencil {
+            let key = ObjectIdentifier(touch)
+            if phase == 1 && store.penResponseBounds?.contains(touch.preciseLocation(in: self)) == true { sensorContacts.insert(key) }
+            guard sensorContacts.contains(key) else { continue }
+            store.native?.penInput(pencilDevice(id: 0), sample: pack(touch, phase: phase))
+            if phase >= 3 { sensorContacts.remove(key) }
+            wake()
+        }
+    }
+    @objc func calibrationHovered(_ recognizer: UIHoverGestureRecognizer) {
+        guard contacts.values.allSatisfy({ $0.tool != 0 }), sensorContacts.isEmpty,
+            ![.ended, .cancelled].contains(recognizer.state), store.penResponseBounds?.contains(recognizer.location(in: self)) == true else { return }
+        let point = recognizer.location(in: self)
+        let tilt = StylusTilt.towardBarrel(altitude: recognizer.altitudeAngle, azimuth: recognizer.azimuthAngle(in: self))
+        store.native?.penInput(pencilDevice(id: 0), sample: [Double(point.x * contentScaleFactor), Double(point.y * contentScaleFactor), 0,
+            tilt.x, tilt.y, Double(recognizer.rollAngle), Double(recognizer.zOffset), CACurrentMediaTime() * 1_000_000_000, 0])
+        wake()
     }
     func updateEstimates(_ touches: Set<UITouch>) {
         for touch in touches {
@@ -237,11 +268,12 @@ extension CanvasView {
         finishEstimates()
         ignoredContacts.formUnion(contacts.keys)
         contacts.removeAll(); indirectGestures.removeAll()
+        sensorContacts.removeAll()
         modifiers = []
     }
     private func send(_ contact: PencilContact, records: [Double], predicted: Bool) {
         store.native?.pointer(id: contact.id, tool: contact.tool, button: contact.button, records: records,
-            predicted: predicted, revision: store.cameraRevision)
+            predicted: predicted, revision: store.cameraRevision, device: contact.tool == 0 ? pencilDevice(id: contact.id) : nil)
     }
     @objc func hovered(_ recognizer: UIHoverGestureRecognizer) {
         guard contacts.values.allSatisfy({ $0.tool != 0 }) else { return }
@@ -252,7 +284,7 @@ extension CanvasView {
         let record: [Double] = [point.x * contentScaleFactor, point.y * contentScaleFactor, 0, tilt.x, tilt.y,
             recognizer.rollAngle, recognizer.zOffset,
             CACurrentMediaTime() * 1_000_000_000, 0]
-        store.native?.pointer(id: 0, tool: 0, button: 0, records: record, predicted: false, revision: store.cameraRevision)
+        store.native?.pointer(id: 0, tool: 0, button: 0, records: record, predicted: false, revision: store.cameraRevision, device: pencilDevice(id: 0))
         wake()
     }
     private func leave() {

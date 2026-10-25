@@ -5,6 +5,7 @@ import {checkGradientDefinitions} from './gradient.test.mjs';
 import {checkNativeWriteback,installNativeWritebackTrace} from './native-writeback.test.mjs';
 import {installHealPortabilityTrace} from './heal-portability.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
+import {checkTiltCalibration} from './tilt-calibration.test.mjs';
 import {checkScopes,checkScopesSmoke} from './scopes.test.mjs';
 import {checkTonalControls} from './tonal-controls.test.mjs';
 import {checkDocumentErrors} from './document-errors-journey.test.mjs';
@@ -382,6 +383,7 @@ try {
     [process.argv.includes("--tonal-controls"), () => checkTonalControls({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--curves"), () => checkCurves({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--pressure-calibration"), () => checkPressureCalibration({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--tilt-calibration"), () => checkTiltCalibration({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--pointwise-effects"), () => checkPointwiseEffects({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--pointwise-effects-smoke"), () => checkPointwiseEffects({call,evaluate,settle,motion:false,widths:[1100],effects:['threshold']}), checkErrors],
     [process.argv.includes("--local-adjustments"), () => checkPointwiseEffects({call,evaluate,settle,motion:false,localAdjustments:true,widths:process.env.LAYER_LOCAL_WIDTH?[Number(process.env.LAYER_LOCAL_WIDTH)]:[640,1100]}), checkErrors],

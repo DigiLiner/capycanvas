@@ -1,5 +1,7 @@
 import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkCurves} from "./effects.test.mjs";
+import {checkPressureCalibration} from './pressure-calibration.test.mjs';
+import {checkTiltCalibration} from './tilt-calibration.test.mjs';
 import {checkPointwiseEffects,checkLookupTransport} from './pointwise-effects.test.mjs';
 import {runJourney} from "./journeys.mjs";
 import {checkTonalSelections} from './tonal-selection.test.mjs';
@@ -203,6 +205,8 @@ try {
     [process.argv.includes("--color-picker"), () => checkColorPicker({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--brush-drawers"), () => checkBrushDrawers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--editor"), () => checkEditor({call,evaluate,settle,canvasPixels}), checkErrors],
+    [process.argv.includes("--pressure-calibration"), () => checkPressureCalibration({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--tilt-calibration"), () => checkTiltCalibration({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--workspace-constraints"), () => checkWorkspaceConstraints({call,evaluate,settle,reload}), checkErrors],
     [process.argv.includes("--workspace-resize"), () => checkWorkspaceResize({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--long-press-drag"), () => checkLongPressDragging({call,evaluate,settle}), checkErrors],

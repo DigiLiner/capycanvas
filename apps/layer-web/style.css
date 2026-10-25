@@ -765,15 +765,38 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 .curve-without-readouts .curve-axis-y { width:24px; }
 .curve-without-readouts .curve-axis-y .curve-axis-label { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) rotate(-90deg); white-space:nowrap; }
 .curve-without-readouts .curve-axis-x .curve-axis-label { position:absolute; left:50%; transform:translateX(-50%); }
-.utility-panel { z-index:1100; left:0; top:0; background:var(--panel); --glass-panel:var(--panel); --glass-strip:var(--tabbar); }
-.utility-header { height:34px; min-height:34px; gap:8px; padding:4px 6px 4px 12px; }
-.utility-title { flex:1; font-weight:700; }
+.utility-panel { z-index:2200; left:0; top:0; background:var(--panel); --glass-panel:var(--panel); --glass-strip:var(--panel); display:flex; flex-direction:column; overflow:hidden; --curve-gutter:41px; }
+.utility-panel [hidden] { display:none!important; }
+.utility-header { height:auto; min-height:48px; gap:8px; padding:12px 16px; flex:none; align-items:start; background:var(--panel); }
+.utility-heading { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; cursor:grab; touch-action:none; }
+.utility-title { display:block; min-height:24px; line-height:24px; font-weight:700; }
+.utility-device { color:var(--secondary); line-height:18px; overflow-wrap:anywhere; }
 .utility-close { flex:none; width:24px; height:24px; min-height:24px; padding:0; display:grid; place-items:center; border-radius:var(--control-radius); }
-.utility-body { height:auto; padding:12px; }
-.utility-sensitivity { display:flex; gap:8px; margin-top:10px; }
+.utility-close svg { width:16px; height:16px; }
+.utility-body { min-height:0; overflow:auto; padding:0 max(0px,calc(16px - var(--utility-scrollbar,0px))) 0 16px; display:flex; flex-direction:column; gap:12px; }
+.utility-sensitivity { display:flex; gap:8px; }
 .utility-sensitivity > button { flex:1; }
-.utility-actions { display:flex; align-items:center; gap:6px; margin-top:14px; }
+.utility-panel .utility-actions { display:flex; align-items:center; gap:8px; padding:16px; border:0; flex:none; }
 .utility-actions > span { flex:1; }
+.utility-panel :is(.utility-sensitivity,.utility-actions) > button { min-height:36px; height:36px; padding:0 16px; border-radius:var(--control-radius); }
+.utility-panel .curve-frame { grid-template-columns:max-content minmax(0,1fr) max-content; }
+.utility-panel .curve-plot { grid-column:2; grid-row:1; }
+.utility-panel .curve-editor { width:100%; height:auto; aspect-ratio:1; }
+.utility-panel .curve-axis-y { grid-column:1; grid-row:1; width:var(--curve-gutter); box-sizing:border-box; align-items:end; }
+.utility-panel .curve-axis-y .curve-axis-label { left:5px; }
+.utility-panel .curve-axis-x { grid-column:2; grid-row:2; min-height:18px; }
+.utility-panel .curve-frame > span { grid-column:3; grid-row:1; padding-left:10px; white-space:pre; font-size:.85em; opacity:0; pointer-events:none; }
+.utility-direction-section { margin-top:4px; }
+.utility-direction-title { display:block; line-height:18px; }
+.utility-direction-input { display:flex; flex-direction:column; align-items:center; gap:8px; margin-top:8px; }
+.utility-direction { width:72px; height:72px; overflow:visible; touch-action:none; }
+.utility-direction circle { fill:none; stroke:var(--text); stroke-opacity:.18; }
+.utility-direction path { fill:none; stroke:var(--text); stroke-opacity:.55; stroke-width:1.5; }
+.utility-direction path.adjusted { stroke:#2985f2; stroke-opacity:1; stroke-width:2.5; }
+.utility-panel .utility-direction-controls { width:auto; border:0; }
+.utility-panel .utility-direction-controls > button { flex:none; width:36px; height:36px; min-height:36px; padding:0; background:var(--input); border:0; }
+.utility-panel .utility-direction-controls > button[aria-pressed=true] { background:var(--selection); }
+.utility-panel .utility-direction-controls svg { width:16px; height:16px; }
 .curve-ev { min-height:1em; text-align:right; color:var(--secondary); }
 .gradient-editor { display:flex; flex-direction:column; gap:var(--panel-control-spacing); }
 .gradient-controls { display:flex; gap:var(--panel-control-spacing); align-items:center; min-width:0; }

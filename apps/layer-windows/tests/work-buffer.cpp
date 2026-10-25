@@ -2,6 +2,7 @@
 #include "../TextCompositionKeys.h"
 #include "../NativeKeyRepeats.h"
 #include "../CanvasPointerSample.h"
+#include "../PenSourceCache.h"
 #include "../PointerCompletion.h"
 #include "../ThumbnailOwners.h"
 #include "../PointerScrub.h"
@@ -21,6 +22,19 @@
 #endif
 
 int main() {
+    PenSourceCache penSources;
+    penSources.Select("document-1/epoch-1");assert(penSources.Describe(7,false));
+    assert(penSources.Update(7,"physical-pen"));assert(!penSources.Describe(7,false));assert(penSources.Describe(7,true));
+    assert(!penSources.Update(7,"physical-pen"));
+    penSources.Select("document-1/epoch-1");assert(!penSources.Describe(7,false));
+    penSources.Select("document-2/epoch-1");assert(penSources.Describe(7,false));assert(penSources.Update(7,"physical-pen"));
+    penSources.Select("document-2/epoch-2");assert(penSources.Describe(7,false));assert(penSources.Update(7,"physical-pen"));
+    penSources.Forget(7);assert(penSources.Describe(7,false));
+    assert(penSources.Update(7,"physical-pen"));assert(penSources.Describe(8,false));
+    assert(penSources.Update(8,"physical-pen"));assert(penSources.Describe(7,false));
+    penSources.Forget(7);assert(!penSources.Describe(8,false));
+    assert(penSources.Update(7,"physical-pen"));assert(!penSources.Describe(7,false));
+    std::cout<<"Pen sources register again when drawing sessions or epochs change\n";
     static_assert(offsetof(CapySnapshotInfo,camera)==((3*sizeof(uint32_t)+alignof(size_t)-1)&~(alignof(size_t)-1)));
     static_assert(offsetof(CapySnapshotInfo,brush_ready)==offsetof(CapySnapshotInfo,camera)+6*sizeof(size_t));
     static_assert(sizeof(CapySnapshotInfo)==offsetof(CapySnapshotInfo,camera)+8*sizeof(size_t));

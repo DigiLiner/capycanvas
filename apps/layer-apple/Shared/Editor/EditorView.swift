@@ -44,7 +44,7 @@ struct EditorView<Canvas: View>: View {
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
                 WorkspaceBubbleLayer(store: store, bubbles: store.bubbles)
-                PressureCalibration(store: store)
+                PenResponseCalibration(store: store)
             }
             HStack {
                 ToneStatusLabel(store: store, palette: palette)

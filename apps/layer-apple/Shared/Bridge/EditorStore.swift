@@ -62,6 +62,14 @@ import Darwin
     var focusCanvas: (() -> Void)?
     var cursorChanged: (() -> Void)?
     var navigationCursor: String { snapshot["navigation_cursor"].string }
+    var measuredPenResponse: String?
+    var penResponseBounds: CGRect? {
+        guard let measuredPenResponse else { return nil }
+        let view = state[measuredPenResponse + "_calibration"]
+        guard !view.isNull else { return nil }
+        let bounds = view["bounds"]
+        return CGRect(x: bounds["x"].number, y: bounds["y"].number, width: bounds["width"].number, height: bounds["height"].number)
+    }
     var systemSceneID: String?
     let sessionIdentity: String
     private var launch: ((JSON?) -> Void)?

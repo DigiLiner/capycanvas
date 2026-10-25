@@ -24,8 +24,9 @@ replacement to keep the original package intact.
 
 ## Prerequisites
 
-Everything except the Rust bridge tests needs an Apple Silicon Mac with Xcode,
-the iOS simulator runtime, Python 3 and Rust. [Test devices](devices.md#apple)
+Native builds and AppKit/UIKit fixtures need an Apple Silicon Mac with Xcode,
+the iOS simulator runtime, Python 3 and Rust. Rust bridge tests and the portable
+Foundation fixtures also run on Linux. [Test devices](devices.md#apple)
 lists the Mac and iPad. The build targets arm64 macOS, arm64 iPad devices and
 the arm64 iOS simulator:
 
@@ -535,7 +536,19 @@ without ICC bytes. Publishing a language reprojects those descriptors through
 
 ### Navigation input
 
-Pen pressure uses the shared curve editor in a modeless utility above the canvas.
+Pen pressure and tilt use the shared curve editor in one opaque modeless utility
+above the canvas and expanded columns. Switching response kinds replaces native
+curve capture state. Tilt presents shared input and adjusted direction vectors
+with three independent axis toggles. Apply stays disabled until a pen is known;
+mouse edits made before the first pen sample remain available to that pen.
+Window observers forward dialog pen samples through the render owner using the
+shared `pen_input` action, without painting or stealing input from native controls.
+Normal canvas contacts retain their native contact IDs. macOS captures the
+pointing device's proximity identity; drivers without a proximity identity share
+the generic pen profile. UIKit has one persistent `apple:pencil` profile because
+its public input APIs do not identify individual Pencils. Its native frame comes
+from the screen's fixed portrait coordinate space converted into canvas axes.
+macOS keeps the AppKit tablet frame; physical display rotation is unverified.
 The utility is an accessibility container; its curve plot exposes its shared
 label and point count as one accessible element, like effect curves. Its native
 accessibility action focuses the plot for keyboard editing. Handle absent curve
@@ -550,6 +563,20 @@ establish UI behavior.
 `tests/persistence-owner.swift` verifies exact pressure response restoration
 after Cancel and durable Apply values after a fresh owner opens the same private
 settings directory, on both Apple policies.
+`testTiltCalibrationLight` and `testTiltCalibrationDark` check cold opening,
+independent axis toggles, Reset/Cancel, dragging and pressure/tilt switching.
+The persistence-owner fixture also checks tilt sensor binding and durable
+response/axis restoration across fresh owners and contact aliases in both themes.
+The GPU-free Rust `apple_tilt_` tests cover both Apple policies through the C
+request boundary. The portable Swift input fixture checks actual action encoding,
+projected tilt and all four native coordinate frames:
+
+```sh
+swiftc -parse-as-library apps/layer-apple/Shared/Bridge/JSON.swift \
+  apps/layer-apple/Shared/Bridge/StylusTilt.swift \
+  apps/layer-apple/tests/pen-response-input.swift -o artifacts/pen-response-input
+artifacts/pen-response-input
+```
 
 Native cursors read the shared `navigation_cursor` snapshot, including command,
 modifier and restored-document changes. Toolbar and header double activation use

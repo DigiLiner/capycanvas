@@ -7,6 +7,25 @@ import org.junit.Test
 import kotlin.math.PI
 
 class AndroidStylusTest {
+    @Test fun deviceFrameUsesAndroidDisplayRotationWithoutChangingHandedness() {
+        val expected = listOf(.3 to .7, .7 to -.3, -.3 to -.7, -.7 to .3)
+        for (rotation in 0..3) {
+            val axes = androidPenFrame(rotation)
+            fun mapped(x: Double, y: Double): Pair<Double, Double> {
+                val (horizontal, vertical) = if (axes.getBoolean("swap")) y to x else x to y
+                return (if (axes.getBoolean("reverse_horizontal")) -horizontal else horizontal) to
+                    (if (axes.getBoolean("reverse_vertical")) -vertical else vertical)
+            }
+            val actual = mapped(.3, .7)
+            assertEquals(expected[rotation].first, actual.first, .000001)
+            assertEquals(expected[rotation].second, actual.second, .000001)
+            val horizontal = mapped(1.0, 0.0)
+            val vertical = mapped(0.0, 1.0)
+            assertEquals("A display rotation preserves handedness", 1.0,
+                horizontal.first * vertical.second - vertical.first * horizontal.second, .000001)
+        }
+    }
+
     @Test fun indirectStylusSourcesPreservePenIdentityAndBarrelTwist() {
         for (tool in listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_ERASER, MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER)) {
             for ((source, indirect) in listOf(

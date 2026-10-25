@@ -2843,6 +2843,18 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub fn dispatch(&mut self, action: UiAction) -> Result<UiChange, String> {
+        if let UiAction::PenInput{device,sample}=action {
+            if device.key.is_empty() || sample.is_some_and(|v|v.iter().any(|n|!n.is_finite()) || v[..7].iter().any(|n|!(*n as f32).is_finite()) || v[7]<0. || v[7]>=u64::MAX as f64 || v[8]<0. || v[8]>4. || v[8].fract()!=0.) {return Err("Invalid pen input".into());}
+            self.register_pen_device(&device);
+            if let Some(v)=sample {
+                self.calibration_input(PenEvent{device_id:device.id,sequence:0,timestamp_ns:v[7] as u64,view_revision:self.state.camera.revision,
+                    surface_position:layer_core::Point{x:v[0] as f32,y:v[1] as f32},pressure:v[2] as f32,tilt_radians:[v[3] as f32,v[4] as f32],twist_radians:v[5] as f32,distance:v[6] as f32,
+                    phase:match v[8] as u8 {0=>PenPhase::Hover,1=>PenPhase::Down,2=>PenPhase::Move,3=>PenPhase::Up,_=>PenPhase::Cancel},tool:layer_engine::ToolKind::Pen,flags:layer_engine::SampleFlags::PRIMARY});
+            }
+            let regions=if std::mem::take(&mut self.pressure_meter_changed){regions::PRESSURE_CALIBRATION}else{0}
+                | if std::mem::take(&mut self.tilt_meter_changed){regions::TILT_CALIBRATION}else{0};
+            return Ok(self.changed(regions,false));
+        }
         if let UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } = action {
             return self.dispatch(UiAction::Effect { action: action.effect(layer, &key) });
         }
@@ -3049,7 +3061,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 save_settings=self.tilt_action(action); (TILT_CALIBRATION | if save_settings { SETTINGS } else { 0 }, false)
             }
             UiAction::Histogram { action } => { self.histogram_action(action)?; (HISTOGRAM, true) }
-            UiAction::CommandSearch { .. } => unreachable!("handled above"),
+            UiAction::CommandSearch { .. } | UiAction::PenInput{..} => unreachable!("handled above"),
             UiAction::ToolbarEdit { .. } | UiAction::CanvasBarEdit { .. } | UiAction::ColorEdit { .. } | UiAction::Notice { .. } => {
                 unreachable!("validated before dispatch")
             }

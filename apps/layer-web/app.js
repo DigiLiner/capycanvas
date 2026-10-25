@@ -9,7 +9,8 @@ import { createDocumentStorage } from "./document-storage.js";
 import { workspaceStore, modulePromise, setWorkspaceWake } from "./workspace-preload.js";
 import { createWorkspaceManager } from "./workspace-manager.js";
 import { createPreferences } from "./preferences.js";
-import {createPressureCalibration} from "./pressure-calibration.js";
+import {createPenResponse} from "./pen-response.js";
+import {observePenInput} from "./pen-input.js";
 import { createCommandBar } from "./command-bar.js";
 import { showGpuNotice } from "./gpu.js";
 import { createGpuDiagnostics, gpuErrorText, gpuReportDetails, suspendGpuForReport } from './gpu-diagnostics.js';
@@ -74,7 +75,7 @@ let app,
   statusTimer,
   statusError = null,
   shownHostError = null;
-let pressureCalibration, refreshPreferences, customization, layerPanel, effectPanels, palettes, editor, selectionUi, frequencySeparationUi, canvasSizeUi, imageSizeUi, workspaceChrome, glass, documents, systemStatus, header, canvasBar, notice, zoomReadout, screenStatus;
+let penResponse, refreshPreferences, customization, layerPanel, effectPanels, palettes, editor, selectionUi, frequencySeparationUi, canvasSizeUi, imageSizeUi, workspaceChrome, glass, documents, systemStatus, header, canvasBar, notice, zoomReadout, screenStatus;
 let commandBar, paintPairView;
 let bubbles;
 const compilerContacts = new Set();
@@ -106,7 +107,7 @@ for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
   { capture: true },
 );
 for (const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture','contextmenu','click','dblclick'])
-  window.addEventListener(type,e=>bubbles?.handle(e),{capture:true,passive:false});
+  window.addEventListener(type,e=>{if(!e.target.closest?.('.utility-panel'))bubbles?.handle(e);},{capture:true,passive:false});
 const fullscreenRequests = new Set(), colorSlotRequests = new Set();
 let gpuStarting = false;
 let gpuReady = false;
@@ -246,7 +247,7 @@ workspace.append(dropIndicator);
 
 function dispatch(action) {
   try {
-    if(documents?.interactionBusy()&&!['restore_saved_settings','complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
+    if(documents?.interactionBusy()&&!['pen_input','restore_saved_settings','complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
     if (action.type === "measure_column_drawers" && workspaceGesture) workspaceGesture.hits = null;
     if (["move_panel", "move_group", "move_tile", "double_click_panel_handle", "reset_column_width"].includes(action.type))
       action = {
@@ -333,7 +334,7 @@ function applyChange(change) {
           // the workspace behind it. Keep its controls and geometry intact.
           refreshPreferences(app.preferences_cached());
           updateZen();
-        } else update(languageChanged ? 16383 : change.regions | (moving ? 1 : 0));
+        } else update(languageChanged ? 32767 : change.regions | (moving ? 1 : 0));
         if (reopeningCanvas) {
           deferOptionalCompiler();
           wake();
@@ -867,7 +868,7 @@ function contentPanel(id, splitPicker=false, readToolSet=null) {
 }
 function update(regions) {
   document.body.toggleAttribute("data-workspace-ready", state.workspace_ready);
-  if(regions & (4096 | 16)) pressureCalibration?.refresh();
+  if(regions & (4096 | 16384 | 16)) penResponse?.refresh();
   commandBar?.refresh(state.command_search);
   if (regions & (1 | 2 | 4 | 8 | 16 | 128)) paintPairView = app.paint_pair();
   // Canvas-based controls read these colors while refreshing their pixels.
@@ -1377,6 +1378,7 @@ window.addEventListener(
   "pointermove",
   (e) => {
     if (e.target.closest?.("dialog[open]")) return;
+    if(e.target.closest?.('.utility-panel')){cursorInput(e);return;}
     if (!e.buttons) heldPointers.delete(e.pointerId);
     // A captured paint contact cannot reveal chrome. The canvas listener owns
     // its samples/cursor; querying popups and hit-testing here duplicates work
@@ -1398,6 +1400,7 @@ window.addEventListener(
     // consume editor input, so forwarding a dialog contact would swallow its
     // buttons before the DOM click handler can run.
     if (e.target.closest("dialog[open]")) return closeMenusOutside(e.target);
+    if(e.target.closest('.utility-panel'))return closeMenusOutside(e.target);
     if (e.target === canvas && e.pointerType === "pen" && !(e.buttons & 33)) {
       e.preventDefault();
       return;
@@ -1828,7 +1831,8 @@ try {
   document.documentElement.style.setProperty("--ui-text-size", `${catalog.text_size_pt}pt`);
   for(const [key,value] of Object.entries(catalog.panel_metrics))document.documentElement.style.setProperty(`--panel-${key.replaceAll("_","-")}`,`${value}px`);
   publishAppName();
-  pressureCalibration=createPressureCalibration({state:()=>state,workspace,element,button,icon,numberField,panelFrame,dispatch});
+  penResponse=createPenResponse({state:()=>state,workspace,element,button,icon,numberField,dispatch});
+  observePenInput({workspace,canvas,dispatch,position,owner:()=>state.document_file.epoch});
   refreshPreferences = createPreferences({ app, element, button, icon, numberField, panelFrame, dispatch, nativeCopy: catalog.native_copy, view: () => app.preferences_cached() });
   commandBar = createCommandBar({element, button, icon, dispatch, style:catalog.command_search_style, nativeCopy:catalog.native_copy, canvas, layoutChanged:() => glass?.queue()});
   panelNames = Object.fromEntries(catalog.panels.map((p) => [p.id, p.label]));

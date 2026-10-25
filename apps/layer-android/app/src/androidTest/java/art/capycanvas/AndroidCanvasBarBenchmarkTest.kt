@@ -370,12 +370,23 @@ class AndroidCanvasBarBenchmarkTest {
                 val visibleLayerIdsBefore = state().array("layers").objects().filter { it.optBoolean("visible") }.map { it.getLong("id") }
                 synchronized(uiFrames) { uiFrames.clear() }
                 val bars = mutableListOf<Boolean>()
+                val requestedRates = mutableSetOf<Float>()
+                val activeRates = mutableSetOf<Float>()
                 val anchorBefore = state().optJSONObject("canvas_bar")?.optJSONArray("anchor")
                 measuring = true
                 val began = System.nanoTime()
                 val beganBoot = SystemClock.elapsedRealtimeNanos()
                 val sampler = Thread {
-                    while (measuring) { instrumentation.runOnMainSync { bars.add(host.canvasBar != null && host.canvasBarVisible) }; SystemClock.sleep(8) }
+                    while (measuring) {
+                        instrumentation.runOnMainSync {
+                            bars.add(host.canvasBar != null && host.canvasBarVisible)
+                            if (label.startsWith("pen-") && host.calibrationMotionActive) {
+                                requestedRates.add(activity.window.attributes.preferredRefreshRate)
+                                activeRates.add(activity.window.decorView.display.refreshRate)
+                            }
+                        }
+                        SystemClock.sleep(8)
+                    }
                 }.apply { start() }
                 android.os.Trace.beginAsyncSection("canvas-bar-$label", 1)
                 try { operation() } finally { android.os.Trace.endAsyncSection("canvas-bar-$label", 1) }
@@ -402,6 +413,7 @@ class AndroidCanvasBarBenchmarkTest {
                 val vsyncs = ui.map { it.vsync }.filter { it <= operated }.distinct().sorted()
                 val seconds = (operated - began) / 1e9
                 val result = obj("label" to label, "display_hz" to refreshRate, "seconds" to seconds, "transparency" to transparency,
+                    "utility_requested_hz" to JSONArray(requestedRates.toList()), "utility_active_display_hz" to JSONArray(activeRates.toList()),
                     "canvas" to documentExtent, "debuggable" to BuildConfig.DEBUG, "material_watercolor" to materialWatercolor,
                     "transform_entry" to transformEntry,
                     "snap_neighbor_layer" to snapNeighbor,
@@ -654,6 +666,102 @@ class AndroidCanvasBarBenchmarkTest {
                 return before
             }
 
+            if (only?.contains("pen-response") == true) {
+                photoDocument()
+                fun point(tag: String, fraction: Double = .5): Pair<Double, Double> {
+                    var result = 0.0 to 0.0
+                    instrumentation.runOnMainSync {
+                        val (root, node) = findTag(tag)!!
+                        val origin = IntArray(2); root.view.getLocationOnScreen(origin)
+                        result = origin[0] + node.positionInRoot.x + node.size.width * fraction - host.surfaceOrigin.x to
+                            origin[1] + node.positionInRoot.y + node.size.height * fraction - host.surfaceOrigin.y
+                    }
+                    return result
+                }
+                val repeats = args.getString("responseRepeats", "3")!!.toInt()
+                for (kind in listOf("pressure", "tilt")) {
+                    fun view() = state().getJSONObject("${kind}_calibration")
+                    fun panel(op: String) = action(if (kind == "tilt") obj("type" to "tilt_calibration", "action" to obj("kind" to "panel", "action" to obj("kind" to op)))
+                        else obj("type" to "pressure_calibration", "action" to obj("kind" to op)))
+                    fun open() {
+                        invoke("pen_$kind")
+                        waitFor("$kind utility") { findTag("pen-$kind-title") != null }
+                        SystemClock.sleep(350)
+                    }
+                    fun sensor(milliseconds: Int, costs: MutableList<Double>) {
+                        val at = point(if (kind == "tilt") "pen-tilt-direction" else "pen-pressure-title")
+                        val origin = IntArray(2)
+                        instrumentation.runOnMainSync { activity.window.decorView.getLocationOnScreen(origin) }
+                        val began = System.nanoTime()
+                        val count = (milliseconds / interval).toInt()
+                        for (index in 0..count) {
+                            val left = began + (index * interval * 1e6).toLong() - System.nanoTime()
+                            if (left > 0) java.util.concurrent.locks.LockSupport.parkNanos(left)
+                            instrumentation.runOnMainSync {
+                                val coords = MotionEvent.PointerCoords().apply {
+                                    x = (at.first + host.surfaceOrigin.x - origin[0]).toFloat()
+                                    y = (at.second + host.surfaceOrigin.y - origin[1]).toFloat()
+                                    pressure = (.5 + .3 * sin(index * interval / 170.0)).toFloat()
+                                    val azimuth = .3 + index * interval / 1000.0
+                                    orientation = kotlin.math.atan2(sin(azimuth), cos(azimuth)).toFloat()
+                                    setAxisValue(MotionEvent.AXIS_TILT, (.65 + .3 * sin(index * interval / 320.0)).toFloat())
+                                }
+                                val props = MotionEvent.PointerProperties().apply { id = 5; toolType = MotionEvent.TOOL_TYPE_STYLUS }
+                                val now = SystemClock.uptimeMillis()
+                                val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_HOVER_MOVE, 1, arrayOf(props), arrayOf(coords),
+                                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
+                                val started = System.nanoTime()
+                                try { activity.dispatchGenericMotionEvent(event) }
+                                finally { costs.add((System.nanoTime() - started) / 1e6); event.recycle() }
+                            }
+                        }
+                    }
+                    open()
+                    for (motion in listOf("panel", "curve", "sensor")) {
+                        action(obj("type" to "curve_editor", "target" to obj("kind" to kind), "action" to obj("kind" to "reset")))
+                        if (motion == "curve") {
+                            drag(point("effect-curve"), 80) { 0.0 to 0.0 }
+                            SystemClock.sleep(350)
+                        }
+                        if (motion == "sensor") { sensor(250, mutableListOf()); panel("cancel"); open() }
+                        fun move(milliseconds: Int, costs: MutableList<Double>) {
+                            if (motion == "sensor") sensor(milliseconds, costs)
+                            else {
+                                val at = point(if (motion == "panel") "pen-$kind-title" else "effect-curve")
+                                val radius = if (motion == "panel") 100.0 * activity.resources.displayMetrics.density else 12.0
+                                drag(at, milliseconds) { t -> if (motion == "panel") radius * (cos(2 * PI * t) - 1) to radius * .5 * sin(2 * PI * t)
+                                    else radius * sin(2 * PI * t) to radius * .5 * sin(4 * PI * t) }
+                            }
+                        }
+                        move(1000, mutableListOf())
+                        SystemClock.sleep(350)
+                        repeat(repeats) { index ->
+                            val label = "pen-$kind-$motion"
+                            val variants = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+                            val sampling = java.util.concurrent.atomic.AtomicBoolean(true)
+                            val sampler = Thread {
+                                while (sampling.get()) {
+                                    val current = view()
+                                    variants += when (motion) {
+                                        "panel" -> current.getJSONObject("bounds").toString()
+                                        "curve" -> current.getJSONObject("editor").getJSONArray("points").toString()
+                                        else -> current.getJSONObject("editor").optJSONArray("marker").toString()
+                                    }
+                                    SystemClock.sleep(8)
+                                }
+                            }.apply { start() }
+                            val costs = mutableListOf<Double>()
+                            try { measure(label) { move(duration, costs) } } finally { sampling.set(false); sampler.join() }
+                            check(variants.size > 1) { "$label did not change its native view" }
+                            val file = File(output, "$label.json")
+                            val report = JSONObject(file.readText()).put("view_variants", variants.size)
+                                .put("sensor_activity_dispatch_ms", quantiles(costs))
+                            file.writeText(report.toString(2)); file.copyTo(File(output, "$label-${index + 1}.json"), overwrite = true)
+                        }
+                    }
+                    panel("cancel")
+                }
+            }
             if (wanted("ui")) {
                 val photoLayer = photoDocument()
                 action(obj("type" to "select_layer", "id" to photoLayer))

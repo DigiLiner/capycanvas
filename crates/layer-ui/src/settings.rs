@@ -1075,7 +1075,6 @@ impl Settings {
                 self,
             ),
         ];
-        if platform!=Platform::Gtk {input.retain(|row|row.id!=PreferenceId::PenTilt);}
         for r in &mut input {
             if matches!(r.id, PredictionHorizon | PlatformPrediction) {
                 r.enabled = self.feedback;

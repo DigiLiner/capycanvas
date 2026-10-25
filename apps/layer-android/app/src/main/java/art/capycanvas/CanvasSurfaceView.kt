@@ -236,6 +236,8 @@ class CanvasSurfaceView(context: Context, private val host: CanvasHost,
         return super.onGenericMotionEvent(event)
     }
     private fun send(event: MotionEvent, index: Int, phase: Int, history: Boolean, predicted: Boolean = false) {
+        if (!predicted && (event.getToolType(index) == MotionEvent.TOOL_TYPE_STYLUS || event.getToolType(index) == MotionEvent.TOOL_TYPE_ERASER))
+            host.registerPen(event, index, display?.rotation ?: 0)
         val indirect = event.isFromSource(InputDevice.SOURCE_MOUSE) || event.isFromSource(InputDevice.SOURCE_TOUCHPAD)
         val tool = when (event.getToolType(index)) {
             MotionEvent.TOOL_TYPE_STYLUS -> 0
@@ -254,7 +256,7 @@ class CanvasSurfaceView(context: Context, private val host: CanvasHost,
             if (predicted) for (h in 0..count) samples[h * 9 + 5] = lastBarrelTwist
             else lastBarrelTwist = samples[count * 9 + 5]
         }
-        val id = (event.deviceId.toLong().and(0xffffffffL) shl 16) or event.getPointerId(index).toLong()
+        val id = pointerContactId(event, index)
         if (!predicted) {
             val x = samples[count * 9]; val y = samples[count * 9 + 1]
             when (phase) {
@@ -284,6 +286,15 @@ internal fun pointerDeviceFlags(event: MotionEvent, index: Int, barrelTwist: Boo
     val indirect = event.isFromSource(InputDevice.SOURCE_MOUSE) || event.isFromSource(InputDevice.SOURCE_TOUCHPAD)
     return (if (pen && indirect) 0x40 else 0) or (if (barrelTwist) 0x80 else 0)
 }
+
+internal fun pointerContactId(event: MotionEvent, index: Int) =
+    (event.deviceId.toLong().and(0xffffffffL) shl 16) or event.getPointerId(index).toLong()
+
+internal fun androidPenFrame(rotation: Int) = obj(
+    "swap" to (rotation % 2 != 0),
+    "reverse_horizontal" to (rotation == 2 || rotation == 3),
+    "reverse_vertical" to (rotation == 1 || rotation == 2),
+)
 
 /** Shared packing for real, historical and Android-predicted samples. */
 internal fun packPointerSamples(event: MotionEvent, index: Int, phase: Int, historySize: Int,

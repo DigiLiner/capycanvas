@@ -43,6 +43,8 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testSettingsNumericReset() { checkSettingsNumericReset(in: editorCaptureApplication()) }
     @MainActor func testPressureCalibrationLight() { checkPressureCalibration(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testPressureCalibrationDark() { checkPressureCalibration(in: editorCaptureApplication(), theme: "dark") }
+    @MainActor func testTiltCalibrationLight() { checkTiltCalibration(in: editorCaptureApplication(), theme: "light") }
+    @MainActor func testTiltCalibrationDark() { checkTiltCalibration(in: editorCaptureApplication(), theme: "dark") }
 
     @MainActor func testSettingsTextState() {
         #if os(iOS)

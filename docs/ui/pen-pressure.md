@@ -3,7 +3,7 @@
 [Workspace and UI](README.md)
 
 In **Preferences → Input → Pen response**, **Pen pressure → Adjust…** closes
-Preferences and opens a modeless, draggable utility above the canvas. On GTK, Pen tilt follows this row; other hosts place Stroke prediction next.
+Preferences and opens a modeless, draggable utility above the canvas. Pen tilt follows this row on every client.
 The command is also available in command search and toolbar customization. Its
 bold title and inset Close button distinguish it from dockable workspace panels.
 It has no tabs, docking targets, workspace persistence or workspace undo entry.
@@ -11,7 +11,7 @@ Each client reuses its existing panel surfaces, theme roles and curve widget. Th
 button uses the shared window-close glyph in a 16px icon box, with a compact
 squircle hover area and space around it in the title bar.
 Its opaque background prevents inner controls from requesting canvas backdrops.
-On GTK, pressure and tilt utilities stay above workspace panels, expanded columns and
+Pressure and tilt utilities stay above workspace panels, expanded columns and
 their drawer connections. Each opening starts near the upper-right corner of
 the clear canvas area with a 16-pixel inset, avoiding floating panels and open
 drawers where space allows. A dragged position lasts until the utility closes.
@@ -35,7 +35,7 @@ other control. The output stays between zero and the next control's output.
 **Reset** restores the built-in soft curve. These actions preview the response
 without saving settings. **Apply** saves and closes; **Cancel** and Close discard
 the preview. Escape cancels an active editor or panel drag before closing the
-panel. GTK uses standard dialog actions for Reset, Cancel and Apply. The
+panel. Both utilities use standard dialog actions for Reset, Cancel and Apply. The
 384-pixel utility has 16-pixel content margins, a centered square plot, and matching
 36-pixel sensitivity and footer actions, matching toolbar tile height. Its font-measured axis gutters match Pen
 tilt so both plots have the same size. The title and Close share a vertical center.
@@ -46,7 +46,7 @@ captures the curve when each contact starts, including queued contacts. Real
 samples, native predictions, corrections and the contact cursor retain that
 curve until the contact ends. Changes affect subsequent contacts. Prediction
 pressure observations retain the raw sensor pressure.
-On GTK, hovering or pressing over the dialog also updates the pressure marker
+Hovering or pressing over the dialog also updates the pressure marker
 without sending a painting or selection gesture to the canvas.
 
 ## Shared model and editor
@@ -87,7 +87,7 @@ error by that span. Settings and recordings store controls, never compiled table
 
 `CurveEditorView` separates evaluated paths, editable handles and a live marker.
 Its `CurveControls` provides control guides, inset and optional coordinate readouts. Pressure omits the readouts;
-tonal Curves keeps its numeric editing fields. [Pen tilt](pen-tilt.md) shares the calibration editor and GTK panel with pressure.
+tonal Curves keeps its numeric editing fields. [Pen tilt](pen-tilt.md) shares the calibration editor and native utility with pressure.
 `CurveEditorTarget` routes editor
 actions to the owner. Tonal Curves retains its existing interpolating function;
 pressure supplies its spline constraints. Native widgets do not evaluate either

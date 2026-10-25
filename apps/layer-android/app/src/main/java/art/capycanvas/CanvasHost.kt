@@ -9,6 +9,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.util.Log
 import android.view.Choreographer
+import android.view.MotionEvent
 import android.view.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -47,6 +48,83 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         internal val preferencesName get() = AppStorage.directoryForTest?.let { "capy-test-${it.hashCode()}" } ?: "capy-canvas"
     }
     internal val strokeRecording = StrokeRecording(this)
+    internal var calibrationPenBounds: androidx.compose.ui.geometry.Rect? = null
+    private var calibrationPenContact: Long? = null
+    private val calibrationContacts = mutableSetOf<Long>()
+    private var calibrationPenHover = false
+    internal var calibrationMotionActive by mutableStateOf(false)
+        private set
+    internal fun endCalibrationMotion() {
+        calibrationContacts.clear(); calibrationPenHover = false; calibrationPenContact = null; calibrationMotionActive = false
+    }
+    private fun calibrationMotion(event: MotionEvent) {
+        val bounds = calibrationPenBounds ?: return endCalibrationMotion()
+        val index = event.actionIndex
+        val inside = bounds.contains(androidx.compose.ui.geometry.Offset(event.getX(index), event.getY(index)))
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                if (inside) calibrationContacts.add(pointerContactId(event, index))
+                calibrationPenHover = false
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> { calibrationContacts.remove(pointerContactId(event, index)); calibrationPenHover = false }
+            MotionEvent.ACTION_CANCEL -> { calibrationContacts.clear(); calibrationPenHover = false }
+            MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> calibrationPenHover = inside &&
+                (event.getToolType(index) == MotionEvent.TOOL_TYPE_STYLUS || event.getToolType(index) == MotionEvent.TOOL_TYPE_ERASER)
+            MotionEvent.ACTION_HOVER_EXIT -> calibrationPenHover = false
+        }
+        calibrationMotionActive = calibrationContacts.isNotEmpty() || calibrationPenHover
+    }
+    private var lastPenDevice: JSONObject? = null
+    private var lastPenRotation = -1
+    private var lastPenDocument = 0L
+    private var lastPenEpoch = -1L
+    internal fun forgetPenDevice(id: Int) {
+        if (lastPenDevice?.getLong("id")?.ushr(16)?.toInt() == id) lastPenDevice = null
+    }
+    internal fun registerPen(event: MotionEvent, index: Int, rotation: Int): JSONObject {
+        val id = pointerContactId(event, index)
+        val document = drawingTabs.selected
+        val epoch = snapshot?.optJSONObject("state")?.optJSONObject("document_file")?.optLong("epoch") ?: 0L
+        val previous = lastPenDevice
+        if (previous != null && previous.getLong("id") == id && lastPenRotation == rotation &&
+            lastPenDocument == document && lastPenEpoch == epoch) return previous
+        val device = event.device
+        val key = device?.descriptor?.takeIf { it.isNotEmpty() }?.let { "android:$it" } ?: "android:pen"
+        val label = device?.name.orEmpty()
+        val info = obj("id" to id, "key" to key, "label" to label, "native_to_surface" to androidPenFrame(rotation))
+        lastPenDevice = info
+        lastPenRotation = rotation
+        lastPenDocument = document
+        lastPenEpoch = epoch
+        dispatch(obj("type" to "pen_input", "device" to info, "sample" to null), moving = true)
+        return info
+    }
+    internal fun observePen(event: MotionEvent, rotation: Int) {
+        calibrationMotion(event)
+        for (index in 0 until event.pointerCount) {
+            val tool = event.getToolType(index)
+            if (tool != MotionEvent.TOOL_TYPE_STYLUS && tool != MotionEvent.TOOL_TYPE_ERASER) continue
+            val info = registerPen(event, index, rotation)
+            val id = pointerContactId(event, index)
+            val action = event.actionMasked
+            val inside = calibrationPenBounds?.contains(androidx.compose.ui.geometry.Offset(event.getX(index), event.getY(index))) == true
+            if (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN) && index == event.actionIndex && inside) calibrationPenContact = id
+            if (inside || calibrationPenContact == id) {
+                val phase = when (action) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> if (index == event.actionIndex) 1 else 2
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> if (android.os.Build.VERSION.SDK_INT >= 33 && event.flags and MotionEvent.FLAG_CANCELED != 0) 4 else 3
+                    MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_HOVER_EXIT -> 4
+                    MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> 0
+                    else -> 2
+                }
+                val samples = DoubleArray((event.historySize + 1) * 9)
+                packPointerSamples(event, index, phase, event.historySize, false, false, samples)
+                for (offset in samples.indices step 9) dispatch(obj("type" to "pen_input", "device" to info,
+                    "sample" to JSONArray((offset until offset + 9).map { samples[it] })), moving = true)
+            }
+            if (action in listOf(MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL)) calibrationPenContact = null
+        }
+    }
     internal var bootstrap by mutableStateOf<JSONObject?>(null)
         private set
     private var bootstrapForOwner: JSONObject? = null
@@ -276,6 +354,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private val thread = HandlerThread("capy-canvas", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
     private val worker = Handler(thread.looper)
     @Volatile internal var documentInputBlocked = false
+        set(value) { field = value; lastPenDevice = null; calibrationPenContact = null }
     internal fun documentCanvasFailure(message: String?) { failure=message }
     internal val storage by lazy { AppStorage.of(application) }
     internal val drawingTabs = DrawingTabsController(this)
@@ -426,12 +505,12 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     }
     internal var dialogKeyHandler: ((android.view.KeyEvent) -> Boolean)? = null
     internal fun commandFocus() = if (editingText || dialogKeyHandler != null) "text" else if (palettes.focus != null) "palette" else "canvas"
-    fun dispatch(action: JSONObject, moving: Boolean = false) {
+    fun dispatch(action: JSONObject, moving: Boolean = false, published: (() -> Unit)? = null) {
         // Capture the editor owner before a menu action opens a native dialog.
         val focus = if (action.optString("type") == "invoke" && action.optString("command") == "search_commands") commandFocus() else null
         post {
             val type=action.optString("type")
-            if(documentInputBlocked && !type.startsWith("measure_") && type !in listOf("complete_request", "system_theme_changed", "window_fullscreen")) return@post
+            if(documentInputBlocked && !type.startsWith("measure_") && type !in listOf("complete_request", "system_theme_changed", "window_fullscreen", "pen_input")) return@post
             val tracing = android.os.Trace.isEnabled()
             if (tracing) android.os.Trace.beginSection("capy.action." + type + "." + action.optString("command"))
             try {
@@ -441,7 +520,10 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             finally { if (tracing) android.os.Trace.endSection() }
             refreshLanguage()
             refreshChrome()
-            if (moving) presentMotion() else { publish(true); wake() }
+            if (type == "pen_input") {
+                if (!penPublicationQueued) { penPublicationQueued = true; choreographer?.postFrameCallback(penPublication) }
+            } else if (moving) presentMotion() else { publish(true); wake() }
+            if (published != null) main.post { published() }
             if (type == "measure_header" && workspaceManagerKey?.let(::JSONObject)?.optBoolean("ready") == true) {
                 startupHeaderMeasured = true
                 pendingCanvasAttach?.let { attach ->
@@ -452,6 +534,11 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         }
     }
     private var motionAt = 0L
+    private var penPublicationQueued = false
+    private val penPublication = Choreographer.FrameCallback {
+        penPublicationQueued = false
+        if (!disposed && handle != 0L) attempt(canvas = false) { publish(true) }
+    }
     private val motionPublication = Runnable { if (!disposed && handle != 0L) attempt(canvas = false) { publish(true) } }
     private fun presentMotion() {
         motionAt = SystemClock.uptimeMillis()
@@ -905,7 +992,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         val epoch = state.getJSONObject("document_file").optLong("epoch")
         if (epoch != documentEpoch) {
             documentEpoch = epoch
-            main.post { filterPreviewCache.reset() }
+            main.post { filterPreviewCache.reset(); lastPenDevice = null; calibrationPenContact = null }
         }
         state.array("requests").objects().forEach { request ->
             val kind = request.getJSONObject("kind")

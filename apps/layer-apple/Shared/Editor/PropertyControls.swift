@@ -196,12 +196,14 @@ struct CurveEditor: View {
     let target: JSON
     let label: String
     var histogram = false
+    var axisGutter: String?
     @Environment(\.isEnabled) private var enabled
     @FocusState private var focused: Bool
     @State private var contact: [String: Any]?
     @State private var held: (key: String, owner: [String: Any])?
     @State private var sequence: (time: Date, points: Int)?
     @State private var numberOwner: [String: Any]?
+    @State private var plotHeight: CGFloat = 200
     private var key: String { target["key"].string }
     private var curve: JSON { control["controls"] }
     private var points: [JSON] { control["points"].array }
@@ -254,17 +256,22 @@ struct CurveEditor: View {
         let labels = [axis["minimum"].string, axis["label"].string, axis["maximum"].string]
         return reversed ? labels.reversed() : labels
     }
+    @ViewBuilder private func verticalAxis(_ axis: JSON) -> some View {
+        let labels = VStack {
+            ForEach(Array(axisLabels(axis, reversed: true).enumerated()), id: \.offset) { index, text in
+                if index > 0 { Spacer(minLength: 0) }
+                Text(text).fixedSize().rotationEffect(.degrees(index == 1 && !curve["coordinate_readouts"].bool ? -90 : 0))
+                    .frame(width: curve["coordinate_readouts"].bool || axisGutter != nil ? nil : 36)
+            }
+        }
+        if let axisGutter { Text(axisGutter).hidden().frame(height: plotHeight).overlay { labels }.font(.caption).foregroundStyle(palette["text"].opacity(0.7)) }
+        else { labels.font(.caption).foregroundStyle(palette["text"].opacity(0.7)).frame(height: 200) }
+    }
     var body: some View {
         let axes = curve["axes"]
         VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
-            HStack(spacing: 4) {
-                VStack {
-                    ForEach(Array(axisLabels(axes[1], reversed: true).enumerated()), id: \.offset) { index, text in
-                        if index > 0 { Spacer(minLength: 0) }
-                        Text(text).fixedSize().rotationEffect(.degrees(index == 1 && !curve["coordinate_readouts"].bool ? -90 : 0))
-                            .frame(width: curve["coordinate_readouts"].bool ? nil : 36)
-                    }
-                }.font(.caption).foregroundStyle(palette["text"].opacity(0.7)).frame(height: 200)
+            HStack(alignment: axisGutter == nil ? .center : .top, spacing: 4) {
+                verticalAxis(axes[1])
                 VStack(spacing: 2) {
                     plot
                     ZStack {
@@ -272,6 +279,7 @@ struct CurveEditor: View {
                         Text(axes[0]["label"].string)
                     }.font(.caption).foregroundStyle(palette["text"].opacity(0.7))
                 }
+                if let axisGutter { Text(axisGutter).font(.caption).hidden().accessibilityHidden(true) }
             }
             if curve["coordinate_readouts"].bool { HStack(alignment: .top, spacing: store.panelMetrics.spacing) {
                 ForEach(["input", "output"].indices, id: \.self) { index in
@@ -298,7 +306,13 @@ struct CurveEditor: View {
             .onDisappear(perform: cancel)
             .modifier(BubbleNativeControl(cancel: cancel))
     }
-    private var plot: some View {
+    @ViewBuilder private var plot: some View {
+        if axisGutter != nil {
+            plotContent.aspectRatio(1, contentMode: .fit)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { plotHeight = $0 }
+        } else { plotContent.frame(height: 200) }
+    }
+    private var plotContent: some View {
         GeometryReader { geometry in
             Canvas(colorMode: .extendedLinear) { context, size in
                 let inset = curve["inset"].number
@@ -382,8 +396,7 @@ struct CurveEditor: View {
                     Button(label) { focused = true }.accessibilityValue(String(points.count))
                         .accessibilityIdentifier("effect-curve")
                 }
-        }.frame(height: 200)
-            .overlay(alignment: .bottomTrailing) {
+        }.overlay(alignment: .bottomTrailing) {
                 if histogram && control["modified"].bool {
                     Button { store.dispatch(["type": "curve_editor", "target": target.raw, "action": ["kind": "reset"]]) } label: {
                         SharedIcon(name: "reset").frame(width: 28, height: 28).contentShape(Rectangle())
