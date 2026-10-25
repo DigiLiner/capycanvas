@@ -102,4 +102,6 @@ No acceptance on Linux implies Windows, Apple or physical-tablet GUI testing.
 
 `node apps/layer-web/test.mjs --headless --workspace-windows` navigates a window
 away and back three times within the lease and requires the same workspace
-without a copy, then checks two live windows, reload identity and takeover.
+without a copy, then checks two live windows, independent saved Zen state,
+reload identity and takeover. Drawing checkpoints finish before navigation so
+this journey tests workspace ownership independently of interrupted recovery.

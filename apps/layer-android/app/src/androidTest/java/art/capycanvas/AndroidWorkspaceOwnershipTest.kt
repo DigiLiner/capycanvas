@@ -29,13 +29,17 @@ class AndroidWorkspaceOwnershipTest {
                 request(handle, obj("type" to "start", "directory" to directory.absolutePath))
                 return settled(handle).also { assertTrue(it.toString(), it.optBoolean("ready") && it.isNull("error")) }
             }
-            val firstId = start(first).getString("id")
+            val firstView = start(first)
+            val firstId = firstView.getString("id")
+            val firstOwner = firstView.getString("owner")
             val secondId = start(second).getString("id")
             assertNotEquals("A live owner keeps its workspace", firstId, secondId)
             request(second, obj("type" to "switch", "id" to firstId))
             val occupied = settled(second)
             assertEquals(secondId, occupied.getString("id"))
-            assertEquals("Switch requests the existing owner instead of taking its lock", firstId, occupied.getString("focus_window"))
+            val focus = occupied.getJSONObject("focus_window")
+            assertEquals("Switch requests the existing workspace", firstId, focus.getString("id"))
+            assertEquals("Switch requests its current owning window", firstOwner, focus.getString("owner"))
             Native.destroy(first); first = 0
             request(second, obj("type" to "switch", "id" to firstId))
             val released = settled(second)

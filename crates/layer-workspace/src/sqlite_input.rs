@@ -6,7 +6,7 @@ use std::{cell::RefCell,time::{Duration,Instant}};
 const MAX_CELLS:usize=1_000_000;
 const MAX_SQL_STEPS:usize=10_000_000;
 struct Budget {depth:usize,bytes:usize,cells:usize,nodes:usize,failed:bool,steps:usize,deadline:Instant}
-thread_local! {static BUDGET:RefCell<Option<Budget>>=const {RefCell::new(None)};}
+thread_local! {static BUDGET:RefCell<Option<Budget>>=Default::default();}
 pub(crate) struct Guard(std::marker::PhantomData<std::rc::Rc<()>>);
 impl Guard {
     pub fn new()->Self {

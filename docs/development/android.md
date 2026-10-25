@@ -430,7 +430,8 @@ manual save checkpoints and undo/redo after an actual process death.
 - [`AndroidWorkspaceManagerTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceManagerTest.kt)
   and [`AndroidWorkspaceSwitcherTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceSwitcherTest.kt):
   persistence, menus and window lifecycle. `AndroidWorkspaceOwnershipTest`
-  checks that a second native session cannot take an active workspace.
+  checks that a second native session cannot take an active workspace, identifies
+  its owning window and can claim it after that window closes.
 - [`AndroidTitleBarTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidTitleBarTest.kt):
   the title-bar editor, compact menus, keyboard focus, Sketch drawers and
   persistence. `#toolVariantCornersAndContextMenusShareRememberedChoices` checks

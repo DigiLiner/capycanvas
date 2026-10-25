@@ -55,7 +55,7 @@ class AndroidWorkspaceManagerTest {
             compose.onNodeWithText("Window", useUnmergedTree = true).performTouchInput { click() }
         }
         compose.onNodeWithText("Workspaces", useUnmergedTree = true).performTouchInput { click() }
-        compose.onNodeWithText(label, useUnmergedTree = true).performTouchInput { click() }
+        compose.onNodeWithText(label, useUnmergedTree = true).assertIsEnabled().performTouchInput { click() }
         Thread.sleep(300); idle()
     }
     private fun editing() = listOf("brush", "colors", "color_library").map { state().getJSONObject(it).toString() }
@@ -176,6 +176,9 @@ class AndroidWorkspaceManagerTest {
         action(obj("type" to "invoke", "command" to "brush"))
         assertNotEquals(73.0, state().getJSONObject("brush").getDouble("diameter"))
         assertEquals(normalized(beforeReset), normalized(capture()))
+        val headerSize = state().getJSONObject("workspace").getJSONObject("layout").getJSONObject("header").getString("size")
+        action(obj("type" to "customize", "action" to obj("type" to "header", "action" to obj("type" to "set_size", "size" to if (headerSize == "small") "large" else "small"))))
+        assertNotEquals(normalized(beforeReset), normalized(capture()))
         menu("Restore Starting Layout…"); tap("workspace-submit"); idle()
         assertEquals(beforeReset.getJSONObject("working").toString(), capture().getJSONObject("working").toString())
         scenario.close(); Thread.sleep(500); launch()
