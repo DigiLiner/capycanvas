@@ -40,6 +40,7 @@ pub(in crate::retouch_sources) struct Pipelines {
     pages: wgpu::BindGroupLayout,
     candidate: wgpu::BindGroupLayout,
     chosen: wgpu::BindGroupLayout,
+    empty: wgpu::BindGroup,
     apply_planes: wgpu::BindGroupLayout,
     apply_pages: wgpu::BindGroupLayout,
     seed: Deferred<wgpu::ComputePipeline>,
@@ -86,7 +87,9 @@ impl Pipelines {
         let plane_layout = layout("heal planes", &[Some(&planes)]);
         let page_layout = layout("heal page fields", &[Some(&planes), Some(&pages)]);
         let score_layout = layout("heal candidate scores", &[Some(&planes), Some(&pages), Some(&candidate)]);
-        let pick_layout = layout("heal chosen source", &[Some(&parameters), None, Some(&candidate), Some(&chosen)]);
+        let empty_layout = bindings::layout(device, "heal empty", &[]);
+        let empty = bindings::group(device, "heal empty", &empty_layout, []);
+        let pick_layout = layout("heal chosen source", &[Some(&parameters), Some(&empty_layout), Some(&candidate), Some(&chosen)]);
         let apply_layout = layout("heal apply", &[Some(&apply_planes), Some(&apply_pages)]);
         let shader = Deferred::wgsl(device, "heal", compose_wgsl(&[&working_color::shader(device), include_str!("retouch_sample.wgsl"), include_str!("heal.wgsl")]));
         let kernel = |layout: &wgpu::PipelineLayout, entry| Deferred::compute(device, entry, layout, &shader, entry);
@@ -104,6 +107,7 @@ impl Pipelines {
             pages,
             candidate,
             chosen,
+            empty,
             apply_planes,
             apply_pages,
         }
@@ -644,6 +648,7 @@ impl Job {
                                 pass.dispatch_workgroups(self.boxes[i][0], self.boxes[i][1], 1);
                             } else {
                                 pass.set_bind_group(0, &self.parameters, &[self.seeds[i]]);
+                                pass.set_bind_group(1, &k.empty, &[]);
                                 pass.set_bind_group(3, &page, &[]);
                                 if kind == CandidatePass::Gather { pass.dispatch_workgroups(self.boxes[i][0], self.boxes[i][1], 1); }
                                 else { pass.dispatch_workgroups_indirect(&self.choice, (self.choice_at + CHOICE_WORDS + 4 * i as u64) * 4); }

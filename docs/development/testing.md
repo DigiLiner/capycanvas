@@ -19,6 +19,10 @@ bindings, paints grayscale and two-tone tiles, and checks pixels plus exact
 Undo/Redo and saved-file reopening. Browser defaults can exceed lower requested
 limits, so native limit checks do not replace this journey.
 
+The Web `--heal-portability` journey checks Spot Healing's real direct and
+indirect dispatches against its explicit bind-group layouts. It waits for
+healing and raster publication before checking mouse/pen pixels and Undo.
+
 The renderer's `dry_material::tests` module also runs in CI without a GPU.
 `every_kernel_entry_resolves_its_overrides` validates each generated dry-material
 kernel and the destination and reservoir modules of every material operation.

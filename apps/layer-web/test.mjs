@@ -3,6 +3,7 @@ import {checkBubbleRelease,checkBubbleReleaseColdStartup} from './bubble-release
 import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs";
 import {checkGradientDefinitions} from './gradient.test.mjs';
 import {checkNativeWriteback,installNativeWritebackTrace} from './native-writeback.test.mjs';
+import {installHealPortabilityTrace} from './heal-portability.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
 import {checkScopes,checkScopesSmoke} from './scopes.test.mjs';
 import {checkTonalControls} from './tonal-controls.test.mjs';
@@ -215,6 +216,7 @@ try {
   if(process.argv.some(flag=>['--pipeline-readiness','--drawing-tabs-recovery','--staged-startup'].includes(flag)))await call('Page.addScriptToEvaluateOnNewDocument',{source:'Error.stackTraceLimit=100'});
   const pageUrl = packageHost?.url || process.env.LAYER_WEB_URL || "http://127.0.0.1:4173";
   if(process.argv.includes('--native-writeback'))await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installNativeWritebackTrace})()`});
+  if(process.argv.includes('--heal-portability'))await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installHealPortabilityTrace})()`});
   if(process.argv.includes('--tool-bubbles')&&process.env.LAYER_BUBBLE_INPUT_TRACE==='1')await call('Page.addScriptToEvaluateOnNewDocument',{source:`(${installBubbleInputTrace})()`});
   await call("Page.navigate", { url: pageUrl });
   await evaluate(
@@ -282,6 +284,7 @@ try {
     [process.argv.includes("--retouch-layers"), () => checkRetouchLayers({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--move-selection"), () => checkMoveSelection({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--clone"), () => checkClone({call,evaluate,settle}), checkErrors],
+    [process.argv.includes('--heal-portability'), () => checkHeal({call,evaluate,settle,portability:true}), checkErrors],
     [process.argv.includes("--heal"), () => checkHeal({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--photo-paint"), () => checkPhotoPaint({call,evaluate,settle}), checkRasterErrors],
     [process.argv.includes("--proof"), () => checkProof({call,evaluate,settle}), checkRasterErrors],

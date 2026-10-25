@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {crc32,deflateSync} from 'node:zlib';
+import {checkHealPortability} from './heal-portability.test.mjs';
 
 const BLUE=[.1,.3,.8,1];
 const LIGHT=[199,184,158].map(v=>v/255),DARK=[107,92,77].map(v=>v/255),SCRATCH=[230,64,51].map(v=>v/255),DOT=[242,217,77].map(v=>v/255);
@@ -338,7 +339,7 @@ function texturedPhoto(width,height) {
   });
 }
 
-export async function checkHeal({call,evaluate,settle,device=false}) {
+export async function checkHeal({call,evaluate,settle,device=false,portability=false}) {
   const original=await evaluate('JSON.parse(layerApp.app.workspace_view()).id');
   const workspace=async id=>{
     await evaluate(`layerApp.app.workspace_input(${JSON.stringify(JSON.stringify({type:'switch',id}))});null`);
@@ -372,6 +373,24 @@ export async function checkHeal({call,evaluate,settle,device=false}) {
     h.target=await h.newLayer();
     await invoke('use_reference_below');
     await wait(`!!layerApp.state().layers.find(l=>String(l.id)==='${photo}')?.reference`);
+
+    if(portability) {
+      await invoke('spot_heal');await ready('spot_heal');await send({type:'set_brush_size',value:100});
+      const dot=at(.8,.72),beside=await sample(at(.8,.62),like(DARK,.05),'the texture around the dot');
+      for(const kind of ['mouse','pen']) {
+        await sample(dot,like(DOT,.08),`${kind}: the dot before Spot Healing`);await ready('spot_heal');
+        const dispatchStart=await evaluate('healPortabilityTrace.dispatches.length');
+        await stroke([dot[0]-12,dot[1]],[dot[0]+12,dot[1]],kind);
+        await wait(`healPortabilityTrace.dispatches.length>${dispatchStart}`);
+        await wait('!layerApp.app.canvas_work_pending()&&layerApp.app.document_park_ready()');
+        await evaluate('layerApp.app.wait_for_canvas()');
+        await checkHealPortability(evaluate,directory);
+        await sample(dot,like(beside,.05),`${kind}: Spot Healing removes the dot`);
+        if(kind==='pen')await h.captureThemes('spot-heal',async()=>[await h.around(dot,90)]);
+        await invoke('undo');await sample(dot,like(DOT,.08),`${kind}: one Undo restores the dot`);
+      }
+      return;
+    }
 
     await choose('heal','mouse');
     await invoke('brush');

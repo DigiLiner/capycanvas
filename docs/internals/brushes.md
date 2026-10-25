@@ -339,6 +339,8 @@ that window; the next stroke or a history step closes it.
   so a transparent source, like the Clone Stamp's, never erases.
 
 The healing pipelines compile with the retouching pipelines, before pen-down.
+Spot Healing's chosen-source pipeline declares and binds an explicit empty
+group between its parameters and candidate source on every backend.
 
 ## Performance and mobile devices
 
