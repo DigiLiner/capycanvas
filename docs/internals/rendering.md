@@ -1305,6 +1305,13 @@ snapshot API streams bounded strips. Thumbnails and color sampling use separate
 bounded requests. Source bytes and immutable compressed
 tile backing are shared with save snapshots. See the [artwork capture and package contract](../reference/project-format.md).
 
+Exact filter dependencies, such as Kaleidoscope's whole-image input, are
+admitted against the driver's reported memory budget. Where a Linux driver
+reports none (wgpu disables RADV's budget extension), they use a quarter of
+available memory on integrated GPUs and a quarter of the largest device-local
+heap on discrete GPUs, instead of the 256 MiB minimum. Optional display caches
+never use this allowance.
+
 Live composite color samples and region classification retain their frame while
 cold image-object captures prepare on workers. Polling advances prepared GPU
 sampling without inline source decoding or GPU waits. Region classification

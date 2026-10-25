@@ -18,16 +18,21 @@ fn resource_allowance(gpu: Option<u64>, system: Option<u64>, retained: u64) -> u
     allowance(headroom, 4, retained).min(512 * 1024 * 1024)
 }
 
-/// Exact filter dependencies can use available unified memory when the driver
-/// budget is unavailable. This must not enlarge optional display/source caches:
-/// system capacity alone does not establish their fast-residency budget.
+/// Exact filter dependencies can use a quarter of available unified memory, or
+/// of a discrete GPU's local heap, when the driver budget is unavailable. This
+/// must not enlarge optional display/source caches: capacity alone does not
+/// establish their fast-residency budget.
 pub(super) fn composition_budget(device: &wgpu::Device, display: u64) -> u64 {
     let budget = display.saturating_add(crate::scene::windows::DEFAULT_IMAGE_PIXEL_BYTES);
     // wgpu disables RADV's unreliable memory-budget extension. Respect that
-    // workaround; query available process/system memory only for dependencies.
+    // workaround; size only dependencies from memory the device reports.
     #[cfg(target_os = "linux")]
     if display == 0 && unified_memory(device) {
         return budget.max(allowance(layer_color::photo::PhotoMemoryBudget::available_memory(), 4, 0));
+    }
+    #[cfg(target_os = "linux")]
+    if display == 0 && device_headroom(device).is_none() {
+        return budget.max(allowance(local_heap(device), 4, 0));
     }
     #[cfg(not(target_os = "linux"))]
     let _ = device;
@@ -127,6 +132,17 @@ fn vulkan_headroom(device: &wgpu::Device) -> Option<u64> {
 
 
 
+/// The largest device-local heap, which Vulkan reports without a budget.
+#[cfg(target_os = "linux")]
+fn local_heap(device: &wgpu::Device) -> Option<u64> {
+    use ash::vk;
+    // SAFETY: the guard owns the live instance; this query only reads properties.
+    let hal = unsafe { device.as_hal::<wgpu::hal::api::Vulkan>() }?;
+    let memory = unsafe { hal.shared_instance().raw_instance().get_physical_device_memory_properties(hal.raw_physical_device()) };
+    memory.memory_heaps[..memory.memory_heap_count as usize].iter()
+        .filter(|heap| heap.flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL)).map(|heap| heap.size).max()
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn unified_memory(device: &wgpu::Device) -> bool {
     use ash::vk;
@@ -195,6 +211,12 @@ pub(super) fn resource_budget(device: &wgpu::Device, retained: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn the_local_heap_is_reported_without_a_memory_budget() {
+        let r = crate::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        assert!(local_heap(&r.device).is_some_and(|bytes| bytes >= 256 << 20));
+    }
     #[test]
     fn essential_resource_admission_preserves_reported_limits_and_optional_cache_policy() {
         assert_eq!(resource_allowance(None, Some(4096), 0), 1024);
