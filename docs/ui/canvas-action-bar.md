@@ -36,7 +36,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
   - Undo and Redo that restore a selection do not bring it back.
   - A tool change ends the visibility that a selection command started.
 - **Bottom-edge placement:** inverted, tonal and painted selections use the bottom edge.
-- **Tiles:** the bar is a strip of Small toolbar tiles, like a standalone toolbar without its grip: 36 logical pixels tall with no padding, 2-pixel gaps, 8-pixel dividers, the tile radius, 16-pixel icons and the toolbar's selected background.
+- **Tiles:** the bar is a strip of Small toolbar tiles, whatever tile size the toolbars use, like a standalone toolbar without its grip: 36 logical pixels tall with no padding, 2-pixel gaps, 8-pixel dividers, the tile radius, 16-pixel icons and the toolbar's selected background.
 - **Compact items:** an item with `icon_only` is one square tile showing its icon alone; a menu item carries the toolbar's tool-group corner triangle instead of an arrow. Names are in tooltips, accessibility labels and More. Transform modes keep their icons and words, and dropdowns that show a value (the modes on a narrow work area, Warp's grid and the crop choices) keep their caption and arrow, at tile height. An item with `separated` follows a divider: the selection bar separates what uses the selection from what changes it, the transform bar separates its modes from the rest, and the exits always follow a divider.
 - **Accent:** Apply and Finish are drawn in the accent color.
 - **Dropdowns:** a choice that is not segmented, such as the crop ratio, opens its items from the bar. Where the work area is narrower than 600 logical pixels the transform modes become a dropdown too.
