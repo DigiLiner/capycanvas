@@ -7,9 +7,13 @@ after Pen pressure. It closes Preferences and opens the same modeless, draggable
 utility used for pressure. Only one pen response editor opens at a time; switching
 editors discards the previous draft. Other hosts do not expose this editor yet.
 
-Use the pen on the canvas to choose the input device. The caption identifies the
-pen being adjusted. An open editor keeps its target when another pen is used;
-close and reopen it to adjust the last pen used. Drawing stays available.
+Curve, sensitivity, direction and Reset controls work immediately, including
+before any pen has been used. Hover the pen over the canvas to identify the input
+device and enable Apply; no stroke is required, even with the brush cursor hidden.
+The caption identifies the pen being adjusted. Edits made before identification
+are retained; saved response or direction settings that were not edited remain
+intact. An open editor keeps its target when another pen is used; close and reopen
+it to adjust the last pen used. Drawing stays available.
 
 The graph maps physical lean from upright, with Input and Output axes from 0° to
 90°. The neutral response is a straight line. The origin stays at zero; interior
@@ -21,11 +25,18 @@ it rescales the other controls while preserving the normalized curve shape.
 reduce output even from the neutral response. Each step changes an endpoint
 coordinate by 2.5 percentage points; its minimum is 2.25°.
 
-The direction preview shows input in gray and adjusted tilt in blue. Lean the
-barrel toward an edge and make the blue arrow follow it. **Reverse horizontal**,
-**Reverse vertical** and **Swap axes** represent all eight signed axis mappings.
+The direction preview shows input in gray and adjusted tilt in blue. A centered
+row places the preview beside one
+joined icon bar. Its independent **Reverse horizontal**, **Reverse vertical** and
+**Swap axes** toggles retain their text in tooltips and accessible labels. They
+can be combined to represent all eight signed axis mappings.
 Swapping happens before the reflections. Direction correction preserves the lean
 magnitude; the response curve changes magnitude without changing direction.
+
+GTK aligns the header, body and footer to one 20-pixel inset, with 8-pixel body
+gaps and standard dialog footer padding. Reset, Cancel and Apply use ordinary
+34-pixel dialog buttons; Apply is the suggested action. The direction preview and
+icon bar are centered together, with their vertical centers aligned.
 
 **Reset** previews the neutral response and direction. **Apply** saves this pen's
 profile and closes. **Cancel**, Close and Escape discard the draft. Escape first
@@ -75,7 +86,9 @@ Run the core tilt tests, engine tests and UI tilt, pressure calibration, held
 contact and localization tests. Run `native_tilt_calibration` through
 `tools/performance/workspace-motion.sh gtk --native-test=native_tilt_calibration --tablet`
 in both themes. It covers Preferences, mouse/touch/pen controls, native tilt
-metadata, live arrows, graph and window dragging, canvas painting, Apply, Reset,
+metadata, editing before first pen input, hover with a hidden cursor, retained
+drafts, independent icon toggles, tooltips, footer geometry, live arrows, graph and
+window dragging, canvas painting, Apply, Reset,
 Cancel, Close and Escape. Run the pressure and tonal Curves journeys after changes
 to their shared widgets. Set `LAYER_TILT_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8`
 for three five-second frame and curve drags with native presentation timestamps.

@@ -610,6 +610,4 @@ tilt-direction = Yön
 tilt-reverse-horizontal = Yatayı ters çevir
 tilt-reverse-vertical = Dikeyi ters çevir
 tilt-swap-axes = Eksenleri değiştir
-tilt-adjusted = Ayarlanmış
-tilt-direction-help = Kalemi bir kenara doğru eğin. Mavi ok aynı yönü izlemeli.
 tilt-use-pen = Kaleminizi tuvalde kullanın

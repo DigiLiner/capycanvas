@@ -694,6 +694,4 @@ tilt-direction = Arah
 tilt-reverse-horizontal = Balik horizontal
 tilt-reverse-vertical = Balik vertikal
 tilt-swap-axes = Tukar sumbu
-tilt-adjusted = Disesuaikan
-tilt-direction-help = Miringkan pena ke arah tepi. Panah biru harus mengikutinya.
 tilt-use-pen = Gunakan pena di kanvas

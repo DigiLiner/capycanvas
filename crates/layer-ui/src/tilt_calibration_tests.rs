@@ -20,7 +20,7 @@ fn open(s:&mut UiSession<Recorder>) {invoke(s,CommandId::PenTilt);}
 fn view(s:&UiSession<Recorder>)->&TiltCalibrationView {s.state.tilt_calibration.as_ref().unwrap()}
 
 #[test]
-fn tilt_editor_waits_for_a_pen_and_keeps_its_target_until_closed() {
+fn tilt_editor_identifies_a_pen_and_keeps_its_target_until_closed() {
     let mut s=session(Platform::Gtk);open(&mut s);
     assert!(!view(&s).ready);panel(&mut s,PressureCalibrationAction::Apply);assert!(s.state.tilt_calibration.is_some());
     s.register_pen_device(&device(2,"first",0));hover(&mut s,2,[0.5,0.]);assert!(view(&s).ready);
@@ -116,4 +116,62 @@ fn tilt_window_measurement_clamps_short_viewports_without_rebuilding_curve_data(
     }
     let bounds=view(&s).panel.bounds;assert_eq!(bounds.x,0.);assert_eq!(bounds.y,0.);
     assert_eq!(view(&s).panel.editor.plot.as_ptr(),plot);assert_eq!(view(&s).panel.editor.points.as_ptr(),points);
+}
+
+#[test]
+fn tilt_edits_before_first_pen_input_survive_binding_and_apply_to_its_input_frame() {
+    let mut s=session(Platform::Gtk);open(&mut s);
+    assert!(!view(&s).ready);assert!(view(&s).panel.lighter_enabled);
+    panel(&mut s,PressureCalibrationAction::Sensitivity{lighter:true});
+    axes(&mut s,TiltAxes{reverse_horizontal:true,..Default::default()});
+    let draft=view(&s).panel.editor.points.clone();assert_eq!(draft,[[0.,0.],[0.975,1.]]);
+    assert!(view(&s).axes.reverse_horizontal);
+    let mut settings=s.state.settings.clone();
+    settings.tilt_calibrations.insert("pen".into(),layer_core::TiltCalibration{axes:TiltAxes{swap:true,..Default::default()},..Default::default()});
+    s.apply_settings(settings).unwrap();
+    s.register_pen_device(&device(2,"pen",1));hover(&mut s,2,[0.4,0.]);
+    assert!(view(&s).ready);assert_eq!(view(&s).panel.editor.points,draft);
+    assert_eq!(view(&s).axes,TiltAxes{reverse_horizontal:true,..Default::default()});
+    panel(&mut s,PressureCalibrationAction::Apply);
+    let saved=&s.state.settings.tilt_calibrations["pen"];
+    assert_eq!(saved.response.points(),draft);
+    assert_eq!(saved.axes,TiltAxes{reverse_vertical:true,..Default::default()});
+}
+
+#[test]
+fn tilt_cancel_and_reset_work_before_any_pen_is_known() {
+    let mut s=session(Platform::Gtk);open(&mut s);
+    let epoch=view(&s).panel.editor.controls.epoch;
+    for phase in [ContactPhase::Down,ContactPhase::Up] {
+        edit(&mut s,CurveEditorAction::Contact{epoch,phase,point:[50.,50.],extent:[100.,100.]});
+    }
+    assert_eq!(view(&s).panel.editor.points.len(),3);
+    axes(&mut s,TiltAxes{swap:true,..Default::default()});edit(&mut s,CurveEditorAction::Reset);
+    assert_eq!(view(&s).panel.editor.points,[[0.,0.],[1.,1.]]);assert_eq!(view(&s).axes,TiltAxes::default());
+    panel(&mut s,PressureCalibrationAction::Cancel);assert!(s.state.tilt_calibration.is_none());
+    open(&mut s);assert_eq!(view(&s).axes,TiltAxes::default());assert!(s.state.settings.tilt_calibrations.is_empty());
+}
+
+#[test]
+fn binding_a_pen_preserves_saved_response_components_that_were_not_edited() {
+    for edit_response in [false,true] {
+        let mut s=session(Platform::Gtk);
+        let mut saved=layer_core::TiltCalibration::default();saved.response.sensitivity(false);saved.axes.swap=true;
+        let mut settings=s.state.settings.clone();settings.tilt_calibrations.insert("pen".into(),saved.clone());s.apply_settings(settings).unwrap();open(&mut s);
+        if edit_response {panel(&mut s,PressureCalibrationAction::Sensitivity{lighter:true});}
+        else {axes(&mut s,TiltAxes{reverse_horizontal:true,..Default::default()});}
+        s.register_pen_device(&device(2,"pen",0));hover(&mut s,2,[0.4,0.]);
+        if edit_response {assert_eq!(view(&s).axes,saved.axes);}
+        else {assert_eq!(view(&s).panel.editor.points,saved.response.points());}
+    }
+}
+
+#[test]
+fn hidden_cursor_still_requests_a_frame_for_pen_binding_and_live_tilt() {
+    let mut s=session(Platform::Gtk);let mut settings=s.state.settings.clone();settings.cursor=CursorMode::None;s.apply_settings(settings).unwrap();
+    open(&mut s);s.frame(1,1).unwrap();assert!(!s.input_ui_pending());
+    s.register_pen_device(&device(2,"pen",0));s.frame(2,2).unwrap();assert!(!s.input_ui_pending());
+    hover(&mut s,2,[0.4,0.]);assert!(s.input_ui_pending());assert!(s.wants_continuous_frames());assert!(view(&s).ready);
+    let change=s.frame(3,3).unwrap();assert_ne!(change.regions & regions::TILT_CALIBRATION,0);assert!(!s.input_ui_pending());
+    hover(&mut s,2,[0.6,0.]);assert!(s.input_ui_pending());
 }

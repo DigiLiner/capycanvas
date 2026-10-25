@@ -616,6 +616,4 @@ tilt-direction = Direction
 tilt-reverse-horizontal = Reverse horizontal
 tilt-reverse-vertical = Reverse vertical
 tilt-swap-axes = Swap axes
-tilt-adjusted = Adjusted
-tilt-direction-help = Lean the pen toward an edge. The blue arrow should follow.
 tilt-use-pen = Use your pen on the canvas

@@ -619,6 +619,4 @@ tilt-direction = Direction
 tilt-reverse-horizontal = Inverser horizontalement
 tilt-reverse-vertical = Inverser verticalement
 tilt-swap-axes = Permuter les axes
-tilt-adjusted = Ajustée
-tilt-direction-help = Inclinez le stylet vers un bord. La flèche bleue doit suivre.
 tilt-use-pen = Utilisez le stylet sur la toile

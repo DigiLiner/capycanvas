@@ -619,6 +619,4 @@ tilt-direction = Dirección
 tilt-reverse-horizontal = Invertir horizontal
 tilt-reverse-vertical = Invertir vertical
 tilt-swap-axes = Intercambiar ejes
-tilt-adjusted = Ajustada
-tilt-direction-help = Inclina el lápiz hacia un borde. La flecha azul debe seguirlo.
 tilt-use-pen = Usa el lápiz en el lienzo

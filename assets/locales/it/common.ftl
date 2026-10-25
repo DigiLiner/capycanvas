@@ -393,6 +393,4 @@ tilt-direction = Direzione
 tilt-reverse-horizontal = Inverti orizzontale
 tilt-reverse-vertical = Inverti verticale
 tilt-swap-axes = Scambia assi
-tilt-adjusted = Regolata
-tilt-direction-help = Inclina la penna verso un bordo. La freccia blu dovrebbe seguirla.
 tilt-use-pen = Usa la penna sulla tela

@@ -2054,7 +2054,7 @@ impl Workspace {
             .gpu
             .borrow_mut()
             .as_mut()
-            .is_some_and(|g| g.update_cursor());
+            .is_some_and(|g| g.update_cursor() || g.session.input_ui_pending());
         if changed && let Some(owner) = self.surface.imp().owner.borrow().upgrade() {
             owner.wake();
         }

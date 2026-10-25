@@ -29,9 +29,6 @@ pub struct TiltCalibrationView {
     pub reverse_horizontal:String,
     pub reverse_vertical:String,
     pub swap_axes:String,
-    pub input:String,
-    pub adjusted:String,
-    pub help:String,
     pub input_direction:Option<[f32;2]>,
     pub adjusted_direction:Option<[f32;2]>,
 }
@@ -44,6 +41,8 @@ pub(crate) struct Calibration {
     devices:BTreeMap<u64,Device>,
     last:Option<u64>,
     target:Option<u64>,
+    unbound_response:bool,
+    unbound_axes:bool,
     current:Option<u64>,
     neutral:TiltCurve,
 }
@@ -62,14 +61,24 @@ impl<R:CanvasRenderer> UiSession<R> {
     fn bind_tilt_target(&mut self,id:u64) {
         let Some(device)=self.tilt_calibration.devices.get(&id) else{return};
         let calibration=self.state.settings.tilt_calibrations.get(&device.info.key).cloned().unwrap_or_default();
-        self.tilt_calibration.target=Some(id);self.tilt_calibration.axes=calibration.axes;
-        self.tilt_calibration.editor.close();self.tilt_calibration.editor.open(&calibration.response);
-        self.tilt_calibration.editor.selected=Some(calibration.response.points().len()-1);
+        let frame=device.info.native_to_surface;
+        self.tilt_calibration.target=Some(id);
+        if self.tilt_calibration.unbound_axes {
+            self.tilt_calibration.axes=self.tilt_calibration.axes.in_frame(frame.inverse());
+        } else {self.tilt_calibration.axes=calibration.axes;}
+        if !self.tilt_calibration.unbound_response {
+            let drag=self.tilt_calibration.editor.frame_drag.take();
+            self.tilt_calibration.editor.close();self.tilt_calibration.editor.open(&calibration.response);
+            self.tilt_calibration.editor.frame_drag=drag;
+            self.tilt_calibration.editor.selected=Some(calibration.response.points().len()-1);
+        }
+        self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.sync_tilt_curves();
     }
     pub(crate) fn open_tilt_calibration(&mut self) {
         self.state.settings_open=false;self.state.preferences=PreferencesState::default();
         if self.tilt_calibration.editor.source().is_some(){return;}
         if self.pressure_calibration.source().is_some() {self.pressure_action(PressureCalibrationAction::Cancel);}
+        self.tilt_calibration.axes=TiltAxes::default();self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;
         self.tilt_calibration.editor.open(&TiltResponse::default());
         if let Some(id)=self.tilt_calibration.last {self.bind_tilt_target(id);}
         self.refresh_tilt_calibration();
@@ -124,13 +133,11 @@ impl<R:CanvasRenderer> UiSession<R> {
         let editor=&self.tilt_calibration.editor;let l=&self.state.localization;
         let Some(mut panel)=editor.view_as(l,MessageId::TILT_TITLE,MessageId::TILT_LESS_SENSITIVE,MessageId::TILT_MORE_SENSITIVE,CurveDomain::Degrees) else{return};
         let device=self.tilt_calibration.target.and_then(|id|self.tilt_calibration.devices.get(&id));
-        if device.is_none() {panel.firmer_enabled=false;panel.lighter_enabled=false;}
         if editor.placement.is_none() {panel.bounds.height=520.;}
         let mut view=TiltCalibrationView {panel,device:device.map_or_else(||l.text(MessageId::TILT_USE_PEN).to_string(),|d|d.info.label.clone()),ready:device.is_some(),
-            axes:device.map_or_default(|device|self.tilt_calibration.axes.in_frame(device.info.native_to_surface)),
+            axes:device.map_or(self.tilt_calibration.axes,|device|self.tilt_calibration.axes.in_frame(device.info.native_to_surface)),
             direction:l.text(MessageId::TILT_DIRECTION).to_string(),reverse_horizontal:l.text(MessageId::TILT_REVERSE_HORIZONTAL).to_string(),
             reverse_vertical:l.text(MessageId::TILT_REVERSE_VERTICAL).to_string(),swap_axes:l.text(MessageId::TILT_SWAP_AXES).to_string(),
-            input:l.text(MessageId::RESOURCES_SECTION_LEVELS_INPUT).to_string(),adjusted:l.text(MessageId::TILT_ADJUSTED).to_string(),help:l.text(MessageId::TILT_DIRECTION_HELP).to_string(),
             input_direction:None,adjusted_direction:None};
         if let Some(old)=old {
             view.input_direction=old.input_direction;
@@ -148,11 +155,12 @@ impl<R:CanvasRenderer> UiSession<R> {
             && !self.tilt_calibration.editor.input_busy() {
             self.tilt_action(TiltCalibrationAction::Panel{action:PressureCalibrationAction::Cancel});return;
         }
-        if self.tilt_calibration.target.is_none(){return;}
         let old=self.tilt_calibration.editor.source().cloned();let reset=matches!(action,CurveEditorAction::Reset);
         self.tilt_calibration.editor.action(action);
         if reset {self.tilt_calibration.axes=TiltAxes::default();}
         if reset || self.tilt_calibration.editor.source()!=old.as_ref() {
+            self.tilt_calibration.unbound_response|=self.tilt_calibration.target.is_none();
+            self.tilt_calibration.unbound_axes|=reset && self.tilt_calibration.target.is_none();
             self.tilt_calibration.editor.compile();self.sync_tilt_curves();
         }
         self.refresh_tilt_calibration();
@@ -163,10 +171,10 @@ impl<R:CanvasRenderer> UiSession<R> {
         let placement_only=matches!(&action,TiltCalibrationAction::Panel{action:PressureCalibrationAction::Measure{..}|PressureCalibrationAction::Drag{..}});
         match action {
             TiltCalibrationAction::Axes{axes}=>{
-                if let Some(device)=self.tilt_calibration.target.and_then(|id|self.tilt_calibration.devices.get(&id)) {
-                    self.tilt_calibration.axes=axes.in_frame(device.info.native_to_surface.inverse());
-                    self.sync_tilt_curves();
-                }
+                let frame=self.tilt_calibration.target.and_then(|id|self.tilt_calibration.devices.get(&id)).map_or_default(|device|device.info.native_to_surface);
+                self.tilt_calibration.axes=axes.in_frame(frame.inverse());
+                self.tilt_calibration.unbound_axes|=self.tilt_calibration.target.is_none();
+                self.sync_tilt_curves();
             }
             TiltCalibrationAction::Panel{action}=>match action {
                 PressureCalibrationAction::Apply|PressureCalibrationAction::Cancel=>{
@@ -176,9 +184,10 @@ impl<R:CanvasRenderer> UiSession<R> {
                         let device=self.tilt_calibration.devices.get(&self.tilt_calibration.target.unwrap()).unwrap();
                         self.state.settings.tilt_calibrations.insert(device.info.key.clone(),TiltCalibration{response,axes:self.tilt_calibration.axes});save=true;
                     }
-                    self.tilt_calibration.target=None;self.sync_tilt_curves();
+                    self.tilt_calibration.target=None;self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.sync_tilt_curves();
                 }
-                PressureCalibrationAction::Sensitivity{lighter}=>if self.tilt_calibration.target.is_some(){
+                PressureCalibrationAction::Sensitivity{lighter}=>{
+                    self.tilt_calibration.unbound_response|=self.tilt_calibration.target.is_none();
                     self.tilt_calibration.editor.sensitivity(lighter);self.sync_tilt_curves();
                 },
                 PressureCalibrationAction::Measure{extent,viewport}=>self.tilt_calibration.editor.fit(extent,viewport),

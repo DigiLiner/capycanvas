@@ -13,9 +13,7 @@ pub(crate) struct PressurePanel {
     direction: gtk::Box,
     direction_title: gtk::Label,
     arrows: gtk::DrawingArea,
-    legend: gtk::Label,
-    help: gtk::Label,
-    axes: [gtk::CheckButton;3],
+    axes: [gtk::ToggleButton;3],
     tilt: Cell<bool>,
     projecting: Cell<bool>,
     tilt_view: RefCell<Option<TiltCalibrationView>>,
@@ -40,15 +38,15 @@ impl PressurePanel {
         root.set_visible(false);
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         header.add_css_class("dock-tabs"); header.add_css_class("utility-header"); header.set_height_request(layer_ui::TAB_BAR_HEIGHT as i32);
-        let title = gtk::Label::builder().hexpand(true).xalign(0.).margin_start(12).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let title = gtk::Label::builder().hexpand(true).xalign(0.).margin_start(20).ellipsize(gtk::pango::EllipsizeMode::End).build();
         title.set_widget_name("pen-pressure-title"); title.set_cursor_from_name(Some("grab"));
         title.add_css_class("utility-title");
         let close = crate::icons::button("layer-window-close-symbolic"); close.add_css_class("flat"); close.set_widget_name("pen-pressure-close");
         close.add_css_class("utility-close"); close.set_valign(gtk::Align::Center);
         close.set_margin_start(4); close.set_margin_end(6); close.set_margin_top(4); close.set_margin_bottom(4);
         header.append(&title); header.append(&close); column.append(&header);
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        body.set_margin_start(12); body.set_margin_end(12); body.set_margin_top(12); body.set_margin_bottom(12);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        body.set_margin_start(20); body.set_margin_end(20); body.set_margin_top(12);
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vscrollbar_policy(gtk::PolicyType::Automatic)
             .propagate_natural_height(true).vexpand(true).child(&body).build();
         column.append(&scroller);
@@ -59,19 +57,22 @@ impl PressurePanel {
         let device = gtk::Label::builder().xalign(0.).wrap(true).build(); device.add_css_class("dim-label"); body.prepend(&device);
         let direction = gtk::Box::new(gtk::Orientation::Vertical,6);
         let direction_title = gtk::Label::builder().xalign(0.).build(); direction_title.add_css_class("heading"); direction.append(&direction_title);
-        let arrows = gtk::DrawingArea::builder().content_height(72).hexpand(true).build(); arrows.set_widget_name("pen-tilt-direction"); direction.append(&arrows);
-        let legend = gtk::Label::new(None); direction.append(&legend);
-        let axes = std::array::from_fn(|_|gtk::CheckButton::new());
-        for button in &axes {direction.append(button);}
-        let help = gtk::Label::builder().wrap(true).xalign(0.).build(); help.add_css_class("dim-label"); direction.append(&help); body.append(&direction);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        footer.set_margin_start(12); footer.set_margin_end(12); footer.set_margin_bottom(12);
-        let reset = gtk::Button::new(); reset.set_widget_name("pen-pressure-reset"); reset.add_css_class("flat");
+        let direction_controls=gtk::Box::new(gtk::Orientation::Horizontal,8);direction_controls.set_halign(gtk::Align::Center);
+        let arrows = gtk::DrawingArea::builder().content_width(72).content_height(72).build(); arrows.set_widget_name("pen-tilt-direction");direction_controls.append(&arrows);
+        let axis_bar=gtk::Box::new(gtk::Orientation::Horizontal,0);axis_bar.add_css_class("linked");axis_bar.add_css_class("selection-modes");
+        axis_bar.set_widget_name("pen-tilt-axes");axis_bar.set_valign(gtk::Align::Center);
+        let axes = ["layer-flip-horizontal-symbolic","layer-flip-vertical-symbolic","layer-swap-orientation-symbolic"].map(|icon|{
+            let button=gtk::ToggleButton::new();crate::icons::set_button(&button,icon);axis_bar.append(&button);button
+        });
+        direction_controls.append(&axis_bar);direction.append(&direction_controls);body.append(&direction);
+        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        footer.add_css_class("dialog-footer");
+        let reset = gtk::Button::new(); reset.set_widget_name("pen-pressure-reset");
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0); spacer.set_hexpand(true);
         let cancel = gtk::Button::new(); cancel.set_widget_name("pen-pressure-cancel");
         let apply = gtk::Button::new(); apply.set_widget_name("pen-pressure-apply"); apply.add_css_class("suggested-action");
         footer.append(&reset); footer.append(&spacer); footer.append(&cancel); footer.append(&apply); column.append(&footer);
-        Rc::new(Self { root, column, title, close, body, device, direction, direction_title, arrows, legend, help, axes,
+        Rc::new(Self { root, column, title, close, body, device, direction, direction_title, arrows, axes,
             tilt:Cell::new(false), projecting:Cell::new(false), tilt_view:RefCell::new(None), firmer, lighter, reset, cancel, apply,
             editor: RefCell::new(None), bounds: Cell::new(None), pending_bounds: Cell::new(None), presented: RefCell::new(None), measured: Cell::new(None), bound: Cell::new(false) })
     }
@@ -168,20 +169,19 @@ impl PressurePanel {
             (self.firmer.upcast_ref(),"firmer"),(self.lighter.upcast_ref(),"lighter"),(self.reset.upcast_ref(),"reset"),
             (self.cancel.upcast_ref(),"cancel"),(self.apply.upcast_ref(),"apply")] {widget.set_widget_name(&format!("{prefix}-{suffix}"));}
         self.device.set_visible(tilt.is_some()); self.direction.set_visible(tilt.is_some());
-        let ready=tilt.is_none_or(|v|v.ready);self.reset.set_sensitive(ready);self.apply.set_sensitive(ready);
+        let ready=tilt.is_none_or(|v|v.ready);self.apply.set_sensitive(ready);
         self.projecting.set(true);
         if let Some(tilt)=tilt {
             self.device.set_label(&tilt.device);self.direction_title.set_label(&tilt.direction);
-            self.legend.set_label(&format!("{} · {}",tilt.input,tilt.adjusted));self.help.set_label(&tilt.help);
             for (i,(label,active)) in [(&tilt.reverse_horizontal,tilt.axes.reverse_horizontal),(&tilt.reverse_vertical,tilt.axes.reverse_vertical),(&tilt.swap_axes,tilt.axes.swap)].into_iter().enumerate(){
-                self.axes[i].set_label(Some(label));self.axes[i].set_active(active);self.axes[i].set_sensitive(ready);
+                self.axes[i].set_tooltip_text(Some(label));self.axes[i].update_property(&[gtk::accessible::Property::Label(label)]);self.axes[i].set_active(active);
             }
             self.arrows.queue_draw();
         }
         self.projecting.set(false);
         self.title.set_label(&view.title); self.column.update_property(&[gtk::accessible::Property::Label(&view.title),gtk::accessible::Property::Modal(false)]);
         self.close.set_tooltip_text(Some(&view.close)); self.close.update_property(&[gtk::accessible::Property::Label(&view.close)]);
-        set_button_content(&self.reset, "layer-reset-symbolic", &view.reset);
+        self.reset.set_label(&view.reset);
         set_button_content(&self.firmer, "layer-minus-symbolic", &view.firmer);
         set_button_content(&self.lighter, "layer-plus-symbolic", &view.lighter);
         self.firmer.set_sensitive(view.firmer_enabled); self.lighter.set_sensitive(view.lighter_enabled);
@@ -190,7 +190,6 @@ impl PressurePanel {
             let editor = CurveEditor::new(w, self.target(), prefix, &view.title, &view.editor);
             self.body.insert_child_after(&editor.root,Some(&self.device)); *self.editor.borrow_mut() = Some(editor);
         }
-        self.editor.borrow().as_ref().unwrap().root.set_sensitive(ready);
         self.editor.borrow().as_ref().unwrap().update(&view.editor, &w.localization());
         let width = 336f32.max(self.column.measure(gtk::Orientation::Horizontal,-1).0 as f32).min(viewport[0]);
         let extent = [width,360f32.max(self.column.measure(gtk::Orientation::Vertical,width as i32).1 as f32).min(viewport[1])];

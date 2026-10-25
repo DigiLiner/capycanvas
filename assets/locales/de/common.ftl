@@ -617,6 +617,4 @@ tilt-direction = Richtung
 tilt-reverse-horizontal = Horizontal umkehren
 tilt-reverse-vertical = Vertikal umkehren
 tilt-swap-axes = Achsen tauschen
-tilt-adjusted = Angepasst
-tilt-direction-help = Neige den Stift zu einem Rand. Der blaue Pfeil sollte folgen.
 tilt-use-pen = Stift auf der Leinwand verwenden

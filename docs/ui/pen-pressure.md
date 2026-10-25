@@ -30,7 +30,8 @@ other control. The output stays between zero and the next control's output.
 **Reset** restores the built-in soft curve. These actions preview the response
 without saving settings. **Apply** saves and closes; **Cancel** and Close discard
 the preview. Escape cancels an active editor or panel drag before closing the
-panel.
+panel. GTK uses its standard dialog footer for Reset, Cancel and Apply, with
+34-pixel buttons and the same 20-pixel content inset as the header and graph body.
 
 Draw on the ordinary canvas to test the response. Test strokes use normal
 artwork history; discarding calibration does not erase those strokes. The engine

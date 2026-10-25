@@ -4736,3 +4736,32 @@ JSON and screenshots are under `artifacts/tilt-editor-design/`, including
 Reproduce the tilt case with `native_tilt_calibration --tablet`,
 `LAYER_TILT_MOTION=1`, and `LAYER_NATIVE_EVENT_MS=8`. The
 [tilt guide](../ui/pen-tilt.md) describes profile and coordinate-frame limits.
+
+### Immediate tilt editing and compact calibration controls
+
+Measured on 2026-10-25 UTC on the `ea6bc7ba8` working tree, with editing enabled
+before pen identification, cursor-independent UI wakes, a joined direction icon
+bar and standard dialog footers in both utilities. The release test executable
+SHA-256 is `1a2e01477679eb50ad72bc002385e94d8586e50a8d6706a420c084b9343f2a19`.
+The GPU, driver, 1600 × 1000/120 Hz private display, drawing and six-gesture
+protocol match the preceding diagnostic. Tilt also exercises first-hover
+identification with the brush cursor hidden and no stroke, retained pending
+edits, combined icon toggles, tooltips, 20-pixel aligned insets, 34-pixel footer
+buttons and the 8-pixel Cancel/Apply gap. Both themes pass all functional and
+geometry assertions for tilt and pressure; screenshots were inspected.
+
+| Case | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Tilt: Frame | 114.43–118.41 / 16.690 ms | 119.01–119.02 / 10.766 ms |
+| Tilt: Curve | 117.41–118.61 / 16.761 ms | 117.41–118.60 / 16.644 ms |
+| Pressure: Frame | 116.82–118.41 / 16.713 ms | 116.82–118.61 / 16.748 ms |
+| Pressure: Curve | 117.41–118.01 / 16.695 ms | 117.81–118.60 / 16.669 ms |
+
+All 24 current gestures pass the unchanged 114 presents/s rate floor. Fifteen
+pass both gates; nine exceed the strict 2000/120 ms gap limit, with a worst p99
+of 16.761 ms. External desktop and application GPU activity remains present.
+These diagnostics do not qualify the tier target or establish an isolated
+performance comparison. No thresholds were adjusted or user processes stopped.
+Raw reports, screenshots, load observations and the complete assertion summary
+are in `artifacts/tilt-editor-startup-fix/`, including `motion/` and
+`verification-summary.json`.

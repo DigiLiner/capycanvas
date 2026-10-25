@@ -31,6 +31,7 @@ fn native_pressure_calibration() {
         let snapshot=gtk::Snapshot::new();w.surface.snapshot_child(panel,&snapshot);
         let mut glass=Vec::new();crate::glass::collect(&snapshot.to_node().unwrap(),&state(&w).palette.glass.surfaces(),&mut glass);
         assert!(glass.is_empty(),"opaque utility owns its background: {glass:?}");
+        assert_dialog_footer(panel,"pen-pressure");
         let graph = find_named(panel,"pen-pressure-graph").unwrap();
         assert!(find_named(panel,"pen-pressure-input").is_none() && find_named(panel,"pen-pressure-output").is_none());
         let input_axis=find_named(panel,"pen-pressure-input-axis").unwrap();
@@ -262,8 +263,37 @@ fn native_tilt_calibration() {
     w.dispatch(UiAction::SetTheme{theme:Some(theme)});
     let mut native=RemoteInput::new();native.ready();
     let output=std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap());std::fs::create_dir_all(&output).unwrap();
+    let mut settings=state(&w).settings;settings.cursor=layer_ui::CursorMode::None;
+    w.dispatch(UiAction::RestoreSettings{settings:Box::new(settings)});
+    w.dispatch(UiAction::OpenSettings{page:SettingsPage::Input});pump(200);
+    let adjust=find_named(w.preferences.dialog.upcast_ref(),"setting-pen-tilt-action").unwrap();super::histogram::scroll_to(&adjust);pump(100);
+    native.click(screen_point(&adjust,&w.window,[0.5,0.5]));until(||!w.preferences.dialog.is_mapped(),"first tilt editor opens");pump(250);
+    let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+    assert!(!state(&w).tilt_calibration.unwrap().ready);
+    for name in ["pen-tilt-graph","pen-tilt-firmer","pen-tilt-lighter","pen-tilt-reset","pen-tilt-cancel","pen-tilt-reverse-horizontal","pen-tilt-reverse-vertical","pen-tilt-swap-axes"] {
+        assert!(find_named(panel,name).unwrap().is_sensitive(),"{name} works before first pen input");
+    }
+    let apply=find_named(panel,"pen-tilt-apply").unwrap();assert!(!apply.is_sensitive());
+    let graph=find_named(panel,"pen-tilt-graph").unwrap();let at=graph_point_for(&w,&graph,[0.5,0.5],true);native.click(at);
+    assert_eq!(response_view(&w,true).editor.points.len(),3);
+    let more=find_named(panel,"pen-tilt-lighter").unwrap();native.click(screen_point(&more,&w.window,[0.5,0.5]));
+    let reverse=find_named(panel,"pen-tilt-reverse-horizontal").unwrap();native.click(screen_point(&reverse,&w.window,[0.5,0.5]));
+    let swap=find_named(panel,"pen-tilt-swap-axes").unwrap();native.click(screen_point(&swap,&w.window,[0.5,0.5]));
+    assert!(state(&w).tilt_calibration.as_ref().unwrap().axes.reverse_horizontal);
+    assert!(state(&w).tilt_calibration.as_ref().unwrap().axes.swap,"the icon bar preserves combined corrections");
+    let reset=find_named(panel,"pen-tilt-reset").unwrap();native.click(screen_point(&reset,&w.window,[0.5,0.5]));
+    assert_eq!(response_view(&w,true).editor.points,[[0.,0.],[1.,1.]]);assert_eq!(state(&w).tilt_calibration.unwrap().axes,Default::default());
+    native.click(screen_point(&more,&w.window,[0.5,0.5]));let before=response_view(&w,true).editor.points;
+    crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-before-pen.png"))).unwrap();
+    pump(500);
     let canvas=window_point(&w,[60.,140.]);
     native.perform(json!([{"pen":"move","point":canvas,"tilt":[30.,0.]}]));
+    assert!(apply.is_sensitive(),"hover identifies the pen with the brush cursor hidden");
+    assert_eq!(response_view(&w,true).editor.points,before,"first hover keeps the edited curve");
+    assert_eq!(ui_session(&w).engine().metrics().committed_strokes,0,"no stroke is needed to activate the editor");
+    let cancel=find_named(panel,"pen-tilt-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
+    assert!(state(&w).tilt_calibration.is_none());
+
     for device in ["mouse","touch","pen"] {
         w.dispatch(UiAction::OpenSettings{page:SettingsPage::Input});pump(200);
         let adjust=find_named(w.preferences.dialog.upcast_ref(),"setting-pen-tilt-action").unwrap();super::histogram::scroll_to(&adjust);pump(100);
@@ -271,6 +301,8 @@ fn native_tilt_calibration() {
         until(||!w.preferences.dialog.is_mapped(),"tilt closes preferences");pump(200);
         let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();assert!(panel.is_mapped());
         assert!(state(&w).tilt_calibration.as_ref().unwrap().ready,"native tablet identity binds the editor");
+        assert_dialog_footer(panel,"pen-tilt");
+        assert_axis_bar(panel,&w);
         let graph=find_named(panel,"pen-tilt-graph").unwrap();
         let less=find_named(panel,"pen-tilt-firmer").unwrap();let at=screen_point(&less,&w.window,[0.5,0.5]);
         native.perform(json!([contact(device,"down",at),contact(device,"up",at)]));
@@ -318,4 +350,37 @@ fn native_tilt_calibration() {
         pump(200);native.settle_ms=0;native.timeout=Duration::from_secs(30);measure_motion(&w,&mut native,&output,true);
     }
     native.finish();w.window.close();
+}
+
+fn assert_dialog_footer(panel:&gtk::Widget,prefix:&str) {
+    let buttons=["reset","cancel","apply"].map(|name|find_named(panel,&format!("{prefix}-{name}")).unwrap());
+    let footer=buttons[0].parent().unwrap();assert!(footer.has_css_class("dialog-footer"));
+    assert!(!buttons[0].has_css_class("flat"));
+    let reset_bounds=buttons[0].compute_bounds(panel).unwrap();
+    let title=find_named(panel,&format!("{prefix}-title")).unwrap().compute_bounds(panel).unwrap();
+    let sensitivity=find_named(panel,&format!("{prefix}-firmer")).unwrap().compute_bounds(panel).unwrap();
+    let apply=buttons[2].compute_bounds(panel).unwrap();
+    assert!((reset_bounds.x()-title.x()).abs()<1.5 && (reset_bounds.x()-sensitivity.x()).abs()<1.5,"title, content and footer share an inset");
+    assert!((panel.width() as f32-apply.x()-apply.width()-20.).abs()<1.5,"balanced footer end inset");
+    let bounds=buttons.each_ref().map(|button|button.compute_bounds(&footer).unwrap());
+    assert!(bounds.iter().all(|b|b.height()>=34.),"standard dialog button height: {bounds:?}");
+    assert!(bounds.iter().all(|b|(b.y()-bounds[0].y()).abs()<1.));
+    assert!((bounds[2].x()-bounds[1].x()-bounds[1].width()-8.).abs()<1.);
+    let reset=buttons[0].clone().downcast::<gtk::Button>().unwrap();assert!(reset.child().is_some_and(|c|c.is::<gtk::Label>()));
+}
+
+fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
+    let bar=find_named(panel,"pen-tilt-axes").unwrap();assert!(bar.has_css_class("linked"));
+    let buttons=["reverse-horizontal","reverse-vertical","swap-axes"].map(|name|find_named(panel,&format!("pen-tilt-{name}")).unwrap().downcast::<gtk::ToggleButton>().unwrap());
+    let view=state(w).tilt_calibration.unwrap();
+    for (button,label) in buttons.iter().zip([view.reverse_horizontal,view.reverse_vertical,view.swap_axes]) {
+        assert!(button.child().is_some_and(|c|c.is::<gtk::Image>()));assert_eq!(button.tooltip_text().as_deref(),Some(label.as_str()));
+    }
+    let preview=find_named(panel,"pen-tilt-direction").unwrap();
+    let preview_bounds=preview.compute_bounds(panel).unwrap();let bar_bounds=bar.compute_bounds(panel).unwrap();
+    assert!((preview_bounds.y()+preview_bounds.height()*0.5-bar_bounds.y()-bar_bounds.height()*0.5).abs()<1.);
+    let row=bar.parent().unwrap().compute_bounds(panel).unwrap();
+    assert!((row.x()+row.width()*0.5-panel.width() as f32*0.5).abs()<1.5,"the preview and icon bar share the panel center");
+    let bounds=buttons.each_ref().map(|button|button.compute_bounds(&bar).unwrap());
+    assert!(bounds.windows(2).all(|pair|(pair[0].x()+pair[0].width()-pair[1].x()).abs()<1.));
 }

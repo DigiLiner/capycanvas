@@ -434,6 +434,4 @@ tilt-direction = 方向
 tilt-reverse-horizontal = 水平反轉
 tilt-reverse-vertical = 垂直反轉
 tilt-swap-axes = 交換座標軸
-tilt-adjusted = 調整後
-tilt-direction-help = 將筆向螢幕邊緣傾斜。藍色箭頭應指向同一方向。
 tilt-use-pen = 在畫布上使用筆

@@ -4705,9 +4705,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(())
     }
 
+    pub fn input_ui_pending(&self)->bool {self.pressure_meter_changed || self.tilt_meter_changed}
+
     /// Includes shared background work as well as the drawing engine's needs.
     pub fn wants_continuous_frames(&self) -> bool {
-        self.effect_analyses.busy() || (self.histogram.demand && !self.histogram.settled) || (self.tonal_histogram.demand && !self.tonal_histogram.settled)
+        self.input_ui_pending() || self.effect_analyses.busy() || (self.histogram.demand && !self.histogram.settled) || (self.tonal_histogram.demand && !self.tonal_histogram.settled)
             || self.interaction.axes.active()
             || self.paper_preview.active()
             || (!self.rendering_suspended && self.papers.pending.as_ref().is_some_and(|pending| pending.image.is_some()))

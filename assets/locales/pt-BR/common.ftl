@@ -622,6 +622,4 @@ tilt-direction = Direção
 tilt-reverse-horizontal = Inverter horizontal
 tilt-reverse-vertical = Inverter vertical
 tilt-swap-axes = Trocar eixos
-tilt-adjusted = Ajustada
-tilt-direction-help = Incline a caneta em direção a uma borda. A seta azul deve acompanhar.
 tilt-use-pen = Use a caneta na tela

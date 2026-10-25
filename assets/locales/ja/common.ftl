@@ -434,6 +434,4 @@ tilt-direction = 方向
 tilt-reverse-horizontal = 左右を反転
 tilt-reverse-vertical = 上下を反転
 tilt-swap-axes = 軸を入れ替え
-tilt-adjusted = 調整後
-tilt-direction-help = ペンを画面の端に向けて傾けてください。青い矢印が同じ方向を指すようにします。
 tilt-use-pen = キャンバスでペンを使ってください

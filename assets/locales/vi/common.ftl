@@ -610,6 +610,4 @@ tilt-direction = Hướng
 tilt-reverse-horizontal = Đảo ngang
 tilt-reverse-vertical = Đảo dọc
 tilt-swap-axes = Đổi trục
-tilt-adjusted = Đã điều chỉnh
-tilt-direction-help = Nghiêng bút về một cạnh. Mũi tên xanh phải cùng hướng.
 tilt-use-pen = Dùng bút trên vùng vẽ

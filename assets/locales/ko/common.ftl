@@ -434,6 +434,4 @@ tilt-direction = 방향
 tilt-reverse-horizontal = 좌우 반전
 tilt-reverse-vertical = 상하 반전
 tilt-swap-axes = 축 바꾸기
-tilt-adjusted = 조절 후
-tilt-direction-help = 펜을 화면 가장자리 쪽으로 기울이세요. 파란 화살표가 따라가야 합니다.
 tilt-use-pen = 캔버스에서 펜을 사용하세요
