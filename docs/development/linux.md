@@ -319,10 +319,13 @@ The private runner uses isolated memory-backed compositor preferences and
 disables Mutter’s Alt+Space window menu there so navigation keys reach the app.
 On a desktop that reserves Alt+Space, Ctrl+Alt+Space remains the Zoom out chord.
 
-Model tests run with `cargo test --locked -p layer-linux`. Native tests are
-`#[ignore]`d GTK journeys in `tests.rs` and the `*_tests.rs` modules. They need a
-real Wayland display, a Vulkan GPU and injected input, so run them through the
-private-compositor runner:
+Model tests run with `cargo test --locked -p layer-linux`. Tests that call file
+readers directly first initialize `crate::storage::roots()` so anonymous files
+use the test's temporary folder, including a private `CAPY_STORAGE_DIR` override.
+
+Native tests are `#[ignore]`d GTK journeys in `tests.rs` and the `*_tests.rs`
+modules. They need a real Wayland display, a Vulkan GPU and injected input, so run
+them through the private-compositor runner:
 
 ```bash
 bash tools/performance/workspace-motion.sh gtk --native-test=native_canvas_bar_modes

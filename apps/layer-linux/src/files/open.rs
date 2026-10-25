@@ -300,6 +300,7 @@ mod tests {
     }
     #[test]
     fn untagged_jpeg_opens_with_the_assumed_default_profile() {
+        crate::storage::roots();
         let directory =
             std::env::temp_dir().join(format!("capy-open-photo-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
