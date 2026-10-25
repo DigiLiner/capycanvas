@@ -179,10 +179,6 @@ fn apple_launch_localized(platform: u32, saved: &str, localization: std::sync::A
     apple_launch_prepared(platform, &prepared)
 }
 fn apple_launch_prepared(platform: u32, prepared: &CapyAppleLaunch) -> Result<*mut CapyApple, String> {
-    on_large_stack("capy-launch", move || apple_launch_on_stack(platform, prepared).map(|app| app as usize))?
-        .map(|app| app as *mut CapyApple)
-}
-fn apple_launch_on_stack(platform: u32, prepared: &CapyAppleLaunch) -> Result<*mut CapyApple, String> {
     let platform = match platform {
         0 => layer_ui::Platform::Ios,
         1 => layer_ui::Platform::Mac,

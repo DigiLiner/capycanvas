@@ -74,7 +74,7 @@ struct ScreenReport: Equatable {
 }
 
 final class NativeOwner: @unchecked Sendable {
-    private let queue: DispatchQueue
+    private let queue: RenderOwnerQueue
     private let languageWorker = DispatchQueue(label: "art.capycanvas.language", qos: .userInitiated)
     private var languageReady = false
     private var languagePollScheduled = false
@@ -153,10 +153,7 @@ final class NativeOwner: @unchecked Sendable {
         #if DEBUG
         let fixtureActions = try ProcessInfo.processInfo.environment["CAPY_INITIAL_ACTIONS"].map { try JSON.decode($0).array } ?? []
         #endif
-        // Drain temporary native/Metal objects after each owner task, including
-        // the last frame before idle, rather than inheriting a worker pool.
-        let queue = DispatchQueue(label: "art.capycanvas.render", qos: .userInteractive,
-            autoreleaseFrequency: .workItem)
+        let queue = RenderOwnerQueue()
         let preferredLanguages = Locale.preferredLanguages
         self.queue = queue; self.receive = receive
         self.persistence = persistence; self.managedWorkspaces = managedWorkspaces
@@ -232,7 +229,7 @@ final class NativeOwner: @unchecked Sendable {
         persistence.unsubscribe(observerID)
         trace?.finish()
         let handle = handle, retainedLayer = layer
-        queue.async {
+        queue.finish {
             capy_apple_detach(handle)
             capy_apple_destroy(handle)
             withExtendedLifetime(retainedLayer) {}
@@ -779,9 +776,10 @@ final class NativeOwner: @unchecked Sendable {
     }
     private func startGpuHealthChecks() {
         guard gpuHealth == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
         timer.schedule(deadline: .now() + 1, repeating: hdrDocument ? 0.2 : 0.25, leeway: .milliseconds(50))
         timer.setEventHandler { [weak self] in
+            self?.queue.async { [weak self] in
             guard let self else { return }
             // EDR headroom can change while the display link is asleep. Poll
             // only HDR documents, using the existing foreground health timer.
@@ -792,6 +790,7 @@ final class NativeOwner: @unchecked Sendable {
             if status != 0 {
                 do { try check(status); try publish() }
                 catch { try? publish(); receive(nil, error.localizedDescription) }
+            }
             }
         }
         gpuHealth = timer; timer.resume()

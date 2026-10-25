@@ -44,6 +44,22 @@ Fitted Color panels use their natural height without a scroll container on
 iPadOS 17, preserving the entire control target at the same position.
 Both versions use the same renderer and brush quality.
 
+`NativeOwner` runs Rust and Metal state on one Foundation thread with an 8 MiB
+stack. Its queue preserves FIFO input, delayed retries and the asynchronous
+startup gate; GCD timers enqueue work onto that thread. Final detach and destruction
+drain there before the thread exits. Launch constructs the shared session directly
+on its owner rather than moving a non-`Send` App across a worker boundary.
+The queue fixture can run without an Apple UI:
+
+```sh
+swiftc apps/layer-apple/Shared/Bridge/RenderOwnerQueue.swift \
+  apps/layer-apple/tests/render-owner-queue.swift -o artifacts/render-owner-queue
+artifacts/render-owner-queue
+```
+
+The Linux fixture substitutes only the unavailable Objective-C autorelease pool;
+it verifies queue mechanics, not Metal, SwiftUI or native Apple integration.
+
 The scripts default to `/Applications/Xcode.app/Contents/Developer`; set
 `DEVELOPER_DIR` if Xcode is elsewhere. A physical iPad also needs Developer Mode,
 pairing, a development certificate and a profile covering the device. A first
