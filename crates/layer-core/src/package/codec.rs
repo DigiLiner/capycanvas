@@ -178,6 +178,7 @@ fn limited(source:ImmutableBacking,value:Value,preview:Option<Preview>,reason:St
 }
 pub fn open(source:ImmutableBacking,limits:crate::ProjectLimits,cancelled:&AtomicBool) -> Result<OpenOutcome,String> {
     active(cancelled)?;
+    let _work=crate::input_work::DECODERS.enter(cancelled)?;
     let mut reader=BackingReader::new(&source,cancelled);
     let directory=match Directory::read(&mut reader,262_144,limits.metadata_bytes) {
         Ok(directory)=>directory,

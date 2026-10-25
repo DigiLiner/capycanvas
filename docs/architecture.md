@@ -37,6 +37,13 @@ its original bytes and any independently verified preview. See the
 [authored model](reference/authored-model.md) and
 [package contract](reference/capy-package.md).
 
+Photo, native-package and stored-paper decoders share four active execution slots
+per process. Native file workers wait before decoding and check a caller's
+cancellation flag while waiting; stored-paper reads have no cancellation argument.
+Browser worker heaps have independent counters and also need controller admission.
+An execution slot ends when decoding stops. It does not reserve memory for the
+returned document, profile choices, clipboard, history or GPU resources.
+
 `CanvasEngine`, in `layer-engine`, connects that model to drawing input. It
 interprets ordered pen samples, evaluates brush dynamics and produces work for a
 renderer. Brush dynamics are the rules that map inputs such as pressure to

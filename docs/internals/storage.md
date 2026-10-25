@@ -48,6 +48,18 @@ Budget failures abort the transaction. Teardown still releases owned kernel
 locks when its bounded SQL cleanup fails. Backup copies at most 128 pages per
 step and checks its work/deadline between steps before publishing the file.
 
+Native windows share process-wide admission for at most 32 accepted storage jobs
+and 256 MiB of queued request ownership. The byte charge includes string and
+vector capacities, duplicated prepared JSON and component-map bookkeeping,
+without serializing or copying a request on the calling thread. Both the worker
+and reply retain one shared permit: abandoning a reply does not release a queued
+or running request, and an unread reply continues to consume a job slot. Accepted
+writes always deliver their result without a second admission decision. Saturation
+refuses new work without blocking the caller. Coalesced window retirement uses a
+separate control lane in the same FIFO, so accepted writes drain before their
+owner's locks are released. The byte charge covers request ownership, not the
+heap size of returned entities or SQLite's internal allocations.
+
 Workspace component expansion charges the root and each referenced JSON value
 against one byte/node allowance across all writes or recovered items. Portable
 package acquisition and expanded content have separate 128 MiB allowances.

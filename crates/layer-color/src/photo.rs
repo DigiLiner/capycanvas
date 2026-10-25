@@ -176,6 +176,7 @@ pub fn read_photo_detailed_with_cancel(
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<DecodedPhoto, String> {
     check_cancel(cancelled)?;
+    let _work=layer_core::input_work::DECODERS.enter(cancelled)?;
     let photo = read_photo_impl(input, limits, cancelled)?;
     check_cancel(cancelled)?;
     Ok(photo)

@@ -180,6 +180,7 @@ pub fn encode_png(image: &SourceImage) -> Result<Vec<u8>, String> {
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<SourceImage, String> {
+    let _work=crate::input_work::DECODERS.enter(&std::sync::atomic::AtomicBool::new(false))?;
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let info = reader.info();
