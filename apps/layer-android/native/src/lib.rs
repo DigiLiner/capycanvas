@@ -64,4 +64,5 @@ mod hdr;
 #[cfg(test)]
 mod launch_tests;
 
+#[cfg(target_os = "android")]
 mod port_controls;

@@ -13,11 +13,13 @@ pub(crate) fn p3_surface(caps: &wgpu::SurfaceCapabilities, format: wgpu::Texture
 mod tests {
     #[test]
     fn require_float_pq_surface() {
-        let mut caps=wgpu::SurfaceCapabilities::default();
-        caps.format_capabilities=vec![wgpu::SurfaceFormatCapabilities {
-            format:wgpu::TextureFormat::Rgba8Unorm,
-            color_spaces:wgpu::SurfaceColorSpaces::BT2100_PQ | wgpu::SurfaceColorSpaces::SRGB,
-        }];
+        let mut caps=wgpu::SurfaceCapabilities {
+            format_capabilities:vec![wgpu::SurfaceFormatCapabilities {
+                format:wgpu::TextureFormat::Rgba8Unorm,
+                color_spaces:wgpu::SurfaceColorSpaces::BT2100_PQ | wgpu::SurfaceColorSpaces::SRGB,
+            }],
+            ..Default::default()
+        };
         assert!(!super::hdr_surface(&caps));
         caps.format_capabilities[0].format=wgpu::TextureFormat::Rgba16Float;
         assert!(super::hdr_surface(&caps));
@@ -29,8 +31,7 @@ mod tests {
 
     #[test]
     fn p3_needs_the_sdr_format_to_offer_display_p3() {
-        let mut caps=wgpu::SurfaceCapabilities::default();
-        caps.format_capabilities=vec![
+        let mut caps=wgpu::SurfaceCapabilities {format_capabilities:vec![
             wgpu::SurfaceFormatCapabilities {
                 format:wgpu::TextureFormat::Rgba8UnormSrgb,
                 color_spaces:wgpu::SurfaceColorSpaces::SRGB,
@@ -39,7 +40,7 @@ mod tests {
                 format:wgpu::TextureFormat::Rgba16Float,
                 color_spaces:wgpu::SurfaceColorSpaces::SRGB | wgpu::SurfaceColorSpaces::DISPLAY_P3,
             },
-        ];
+        ], ..Default::default()};
         assert!(!super::p3_surface(&caps, wgpu::TextureFormat::Rgba8UnormSrgb));
         caps.format_capabilities[0].color_spaces|=wgpu::SurfaceColorSpaces::DISPLAY_P3;
         assert!(super::p3_surface(&caps, wgpu::TextureFormat::Rgba8UnormSrgb));
