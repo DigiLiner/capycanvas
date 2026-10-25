@@ -321,6 +321,7 @@ fn build(
         ToolOption::Choice { id, label, segmented: true, items, .. } => {
             let segments = gtk::Box::new(gtk::Orientation::Horizontal, 0);
             segments.set_widget_name(&format!("canvas-bar-choice-{id}"));
+            segments.set_valign(gtk::Align::Center);
             let buttons = segment_buttons(&segments, label, items, true, send);
             buttons.iter().for_each(|button| unfocused(button.upcast_ref()));
             (segments.upcast(), Some(Field::Segments(buttons)))

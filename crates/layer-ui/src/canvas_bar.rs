@@ -738,7 +738,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         let mut completion: Vec<CanvasBarItem> = plan.completion.iter().map(|&item| self.canvas_bar_item(item)).collect();
         if let Some(first) = completion.first_mut() {
-            first.separated = !items.is_empty();
+            first.separated = !items.is_empty() && first.icon_only;
         }
         self.state.canvas_bar = Some(CanvasBarView {
             context: CanvasBarContext {

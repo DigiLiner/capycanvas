@@ -805,7 +805,7 @@ impl CommandId {
             Self::ResetMaskColors => "color",
             Self::SwapMaskColors => "swap",
             Self::FillSelectionMask => "fill",
-            Self::ClearSelectionMask => "clear",
+            Self::ClearSelectionMask => "clear-selection",
 
             Self::SelectionBrushPressure => "pen",
             Self::SelectionNew => "selection-new",

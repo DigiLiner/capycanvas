@@ -171,7 +171,7 @@ command-figure = Bentuk
 
 command-ruler = Penggaris
 
-command-show-rulers = Tampilkan penggaris
+command-show-rulers = Tampilkan garis bantu
 
 command-snap-rulers = Lekatkan ke penggaris
 
@@ -816,7 +816,7 @@ commands-start-a-transform-first = Mulai transformasi terlebih dahulu
 commands-choose-warp-first = Pilih Lengkungkan terlebih dahulu
 
 
-commands-show-rulers-first = Tampilkan penggaris terlebih dahulu
+commands-show-rulers-first = Tampilkan garis bantu terlebih dahulu
 
 commands-select-a-ruler-first = Pilih penggaris terlebih dahulu
 

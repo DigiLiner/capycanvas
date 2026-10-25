@@ -1141,6 +1141,7 @@ fn quick_mask_bar_offers_its_actions_and_exit_under_painting_tools() {
     assert_eq!(bar.items[3].menu, Some(CanvasBarMenu::Refine));
     assert_eq!(bar_items(&bar.completion), [(CommandId::ReturnToArtwork, "Exit", false)]);
     assert!(bar.completion[0].accent, "the exit finishes the mode");
+    assert!(!bar.completion[0].separated, "a worded exit follows no divider");
     let more = s.canvas_bar_menu(bar.context, bar.items.len()).unwrap();
     assert!(find_item(&more.sections, "Swap Mask Colors").is_none());
     assert!(find_item(&more.sections, "Return to Artwork").is_none(), "More leaves out the bar's own exit");
