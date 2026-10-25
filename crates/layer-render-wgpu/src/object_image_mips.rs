@@ -417,7 +417,11 @@ impl DecodePressure {
 
 pub(crate) struct MipDecodeQueue {
     #[cfg(not(target_arch="wasm32"))]
-    requests:std::sync::mpsc::SyncSender<MipDecodeRequest>,
+    pool:Arc<DecodePool>,
+    #[cfg(not(target_arch="wasm32"))]
+    context:Arc<DecodeContext>,
+    #[cfg(not(target_arch="wasm32"))]
+    waiting:Option<u64>,
     #[cfg(not(target_arch="wasm32"))]
     results:std::sync::mpsc::Receiver<PreparedImageWork>,
     #[cfg(target_arch="wasm32")]
@@ -429,11 +433,59 @@ pub(crate) struct MipDecodeQueue {
     capacity:usize,
 }
 #[cfg(not(target_arch="wasm32"))]
+struct DecodeContext {
+    cache:Arc<layer_core::raster::DecodedTileCache>,destination:RgbSpace,
+    send:std::sync::mpsc::SyncSender<PreparedImageWork>,ready:Arc<std::sync::atomic::AtomicUsize>,
+}
+#[cfg(not(target_arch="wasm32"))]
+struct DecodeJob {request:MipDecodeRequest,context:Weak<DecodeContext>}
+#[cfg(not(target_arch="wasm32"))]
+struct DecodePool {requests:std::sync::mpsc::SyncSender<DecodeJob>,capacity:usize,epoch:Arc<std::sync::atomic::AtomicU64>}
+#[cfg(not(target_arch="wasm32"))]
+type Decoders=std::collections::VecDeque<(Weak<SourceImage>,RgbSpace,layer_color::WorkingDecoder)>;
+#[cfg(not(target_arch="wasm32"))]
+impl DecodeJob {
+    fn run(self,decoders:&mut Decoders) {
+        let Some(context)=self.context.upgrade() else {return;};
+        let (cache,destination)=(context.cache.clone(),context.destination);drop(context);
+        let result=prepare_request(self.request,destination,&cache,decoders);
+        if let Some(context)=self.context.upgrade() && context.send.send(result).is_ok() {
+            context.ready.fetch_add(1,Ordering::AcqRel);
+        }
+    }
+}
+#[cfg(not(target_arch="wasm32"))]
+impl DecodePool {
+    fn shared()->Result<Arc<Self>,GpuRasterError> {
+        static POOL:std::sync::OnceLock<std::io::Result<Arc<DecodePool>>>=std::sync::OnceLock::new();
+        POOL.get_or_init(||Self::start(std::thread::available_parallelism().map_or(1,|count|count.get().saturating_sub(2).clamp(1,3))))
+            .as_ref().cloned().map_err(|_|GpuRasterError::Color("Image preparation worker unavailable".into()))
+    }
+    fn start(workers:usize)->std::io::Result<Arc<Self>> {
+        let capacity=workers*6;
+        let (requests,receive)=std::sync::mpsc::sync_channel::<DecodeJob>(capacity);
+        let epoch=Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let receive=Arc::new(std::sync::Mutex::new(receive));
+        for worker in 0..workers {
+            let (receive,epoch)=(receive.clone(),epoch.clone());
+            std::thread::Builder::new().name(format!("capy-image-prefilter-{worker}")).spawn(move || {
+                let mut decoders=Decoders::new();
+                loop {
+                    let Ok(job)=receive.lock().unwrap().recv() else {break;};
+                    epoch.fetch_add(1,Ordering::Release);
+                    job.run(&mut decoders);
+                }
+            })?;
+        }
+        Ok(Arc::new(Self {requests,capacity,epoch}))
+    }
+}
+#[cfg(not(target_arch="wasm32"))]
 fn contained<T,E:From<String>>(work:impl FnOnce()->Result<T,E>)->Result<T,E> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| Err(crate::panic_message(&*payload).into()))
 }
 #[cfg(not(target_arch="wasm32"))]
-fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut std::collections::VecDeque<(Weak<SourceImage>,layer_color::WorkingDecoder)>)->PreparedImageWork {
+fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut Decoders)->PreparedImageWork {
     match request {
         MipDecodeRequest::Raster(request) => {
             let attempt=layer_core::memory::DecodeAttempt::new();
@@ -452,13 +504,13 @@ fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_co
                     return prepare_image_tile(&request.source,request.coordinate,destination,cache,None);
                 }
                 let weak=Arc::downgrade(&request.source);
-                let index=if let Some(index)=decoders.iter().position(|(source,_)|source.ptr_eq(&weak)) {index} else {
+                let index=if let Some(index)=decoders.iter().position(|(source,space,_)|source.ptr_eq(&weak) && *space==destination) {index} else {
                     let decoder=layer_color::WorkingDecoder::new(&request.source.interpretation,destination,Default::default())?;
                     if decoders.len()==4 {decoders.pop_front();}
-                    decoders.push_back((weak,decoder));decoders.len()-1
+                    decoders.push_back((weak,destination,decoder));decoders.len()-1
                 };
                 let decoder=decoders.remove(index).unwrap();
-                let decoded=prepare_image_tile(&request.source,request.coordinate,destination,cache,Some(&decoder.1));
+                let decoded=prepare_image_tile(&request.source,request.coordinate,destination,cache,Some(&decoder.2));
                 decoders.push_back(decoder);
                 decoded
             });
@@ -468,33 +520,20 @@ fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_co
 }
 impl MipDecodeQueue {
     pub(crate) fn accepts_held(&self,held:usize,receipt:bool)->bool {self.outstanding.len().saturating_add(held)<self.capacity+usize::from(receipt)}
-    pub(crate) fn new(device:&PipelineDevice)->Self {
+    pub(crate) fn new(device:&PipelineDevice)->Result<Self,GpuRasterError> {
         #[cfg(not(target_arch="wasm32"))]
         {Self::native(device.source_samples.clone(),device.working_space())}
         #[cfg(target_arch="wasm32")]
-        {let _=device;Self {external:None,completed:None,ready:Default::default(),outstanding:Vec::new(),capacity:1}}
+        {let _=device;Ok(Self {external:None,completed:None,ready:Default::default(),outstanding:Vec::new(),capacity:1})}
     }
     #[cfg(not(target_arch="wasm32"))]
-    fn native(cache:Arc<layer_core::raster::DecodedTileCache>,destination:RgbSpace)->Self {
-        let workers=std::thread::available_parallelism().map_or(1,|count|count.get().saturating_sub(2).clamp(1,3));
-        let capacity=workers*6;
+    fn native(cache:Arc<layer_core::raster::DecodedTileCache>,destination:RgbSpace)->Result<Self,GpuRasterError> {
+        let pool=DecodePool::shared()?;
+        let capacity=pool.capacity;
         let ready=Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (requests,receive)=std::sync::mpsc::sync_channel::<MipDecodeRequest>(capacity);
         let (send,results)=std::sync::mpsc::sync_channel(capacity);
-        let receive=Arc::new(std::sync::Mutex::new(receive));
-        for worker in 0..workers {
-            let (receive,send,cache,completion)=(receive.clone(),send.clone(),cache.clone(),ready.clone());
-            std::thread::Builder::new().name(format!("capy-image-prefilter-{worker}")).spawn(move || {
-                let mut decoders=std::collections::VecDeque::new();
-                loop {
-                    let Ok(request)=receive.lock().unwrap().recv() else {break;};
-                    let result=prepare_request(request,destination,&cache,&mut decoders);
-                    if send.send(result).is_err() {break;}
-                    completion.fetch_add(1,Ordering::AcqRel);
-                }
-            }).expect("Immutable image preparation worker");
-        }
-        Self {requests,results,ready,outstanding:Vec::new(),capacity}
+        let context=Arc::new(DecodeContext {cache,destination,send,ready:ready.clone()});
+        Ok(Self {pool,context,waiting:None,results,ready,outstanding:Vec::new(),capacity})
     }
     pub(crate) fn request(&mut self,id:PortableId,source:Arc<SourceImage>,coordinate:[u32;2])->bool {
         let weak=Arc::downgrade(&source);
@@ -511,7 +550,11 @@ impl MipDecodeQueue {
         if key.as_ref().is_some_and(|key|self.outstanding.iter().flatten().any(|stored|stored.matches(key))) {return true;}
         if self.outstanding.len()>=self.capacity {return false;}
         #[cfg(not(target_arch="wasm32"))]
-        if self.requests.try_send(request).is_err() {return false;}
+        {
+            let epoch=self.pool.epoch.load(Ordering::Acquire);
+            if self.pool.requests.try_send(DecodeJob {request,context:Arc::downgrade(&self.context)}).is_err() {self.waiting=Some(epoch);return false;}
+            self.waiting=None;
+        }
         #[cfg(target_arch="wasm32")]
         {self.external=Some(request);}
         self.outstanding.push(key);true
@@ -536,7 +579,11 @@ impl MipDecodeQueue {
         if let Some(index)=index {self.outstanding.swap_remove(index);}
         Some(result)
     }
-    pub(crate) fn pending(&self)->bool {!self.outstanding.is_empty()}
+    pub(crate) fn pending(&self)->bool {
+        #[cfg(not(target_arch="wasm32"))]
+        if self.waiting.is_some_and(|epoch|epoch==self.pool.epoch.load(Ordering::Acquire)) {return true;}
+        !self.outstanding.is_empty()
+    }
     pub(crate) fn ready(&self)->bool {self.ready.load(Ordering::Acquire)>0}
     #[cfg(target_arch="wasm32")]
     pub(crate) fn take_external(&mut self)->Option<MipDecodeRequest> {self.external.take()}
@@ -549,6 +596,13 @@ mod tests {
     use super::*;
     use crate::test_support::{page_texture,upload_page};
     use layer_render::CanvasRenderer;
+    #[cfg(not(target_arch="wasm32"))]
+    fn queued(requests:std::sync::mpsc::SyncSender<DecodeJob>,results:std::sync::mpsc::Receiver<PreparedImageWork>,
+        ready:Arc<std::sync::atomic::AtomicUsize>,outstanding:Vec<Option<DecodeKey>>,capacity:usize)->MipDecodeQueue {
+        let (send,_)=std::sync::mpsc::sync_channel(capacity);
+        let context=Arc::new(DecodeContext {cache:Arc::new(layer_core::raster::DecodedTileCache::new(0)),destination:RgbSpace::Srgb,send,ready:ready.clone()});
+        MipDecodeQueue {pool:Arc::new(DecodePool {requests,capacity,epoch:Default::default()}),context,waiting:None,results,ready,outstanding,capacity}
+    }
     #[cfg(not(target_arch="wasm32"))]
     #[test]
     fn collection_startup_failure_is_terminal_instead_of_paused_quota_pressure() {
@@ -656,7 +710,7 @@ mod tests {
             let (send,results)=std::sync::mpsc::sync_channel(1);assert!(send.send(prepared).is_ok());
             let (requests,receive)=std::sync::mpsc::sync_channel(1);
             r.snapshot_worker=snapshot;r.decode_pressure=Default::default();
-            r.moving_decode=Some((space,MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),outstanding:vec![Some(key)],capacity:1}));
+            r.moving_decode=Some((space,queued(requests,results,Arc::new(std::sync::atomic::AtomicUsize::new(1)),vec![Some(key)],1)));
             if early_release {drop(layer_core::memory::images().reserve(1).unwrap());}
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
             let result=r.drain_image_decode(&mut encoder);
@@ -690,7 +744,7 @@ mod tests {
             let (send,results)=std::sync::mpsc::sync_channel(1);
             assert!(send.send(PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id,source:source.clone(),coordinate:[0;2],pixels:Err(error)})).is_ok());
             let (requests,_receive)=std::sync::mpsc::sync_channel(1);
-            r.moving_decode=Some((r.device.working_space(),MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(source),[0;2]))],capacity:1}));
+            r.moving_decode=Some((r.device.working_space(),queued(requests,results,Arc::new(std::sync::atomic::AtomicUsize::new(1)),vec![Some(DecodeKey::Image(Arc::downgrade(source),[0;2]))],1)));
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());assert!(matches!(r.drain_image_decode(&mut encoder),Ok(None)));
         }
         let mut r=crate::test_support::private_sample_renderer(Default::default());
@@ -739,8 +793,8 @@ mod tests {
             pixels:prepare_image_tile(source,[0;2],space,&r.device.source_samples,None)});
         let (send,results)=std::sync::mpsc::sync_channel(2);assert!(send.send(result(bid,&b)).is_ok());assert!(send.send(result(aid,&a)).is_ok());
         let (requests,receive)=std::sync::mpsc::sync_channel(2);
-        r.moving_decode=Some((space,MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(2)),
-            outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(&a),[0;2])),Some(DecodeKey::Image(Arc::downgrade(&b),[0;2]))],capacity:2}));
+        r.moving_decode=Some((space,queued(requests,results,Arc::new(std::sync::atomic::AtomicUsize::new(2)),
+            vec![Some(DecodeKey::Image(Arc::downgrade(&a),[0;2])),Some(DecodeKey::Image(Arc::downgrade(&b),[0;2]))],2)));
         r.source_receipt=Some(Arc::downgrade(&ra));
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
         r.drain_image_decode(&mut encoder).unwrap();assert_eq!(r.source_results.len(),1);assert!(ra.prepared().is_none());
@@ -753,7 +807,7 @@ mod tests {
         r.drain_image_decode(&mut encoder).unwrap();assert!(r.source_results.is_empty());assert!(receive.try_recv().is_err());
         let c=layer_core::color::source::rgba8_source([1;2],|_,_|[0,255,0,255]);
         assert!(r.request_image_decode(bid,c.clone(),[0;2]).unwrap());
-        assert!(matches!(receive.try_recv(),Ok(MipDecodeRequest::Image(request)) if Arc::ptr_eq(&request.source,&c)));
+        assert!(matches!(receive.try_recv(),Ok(DecodeJob {request:MipDecodeRequest::Image(request),..}) if Arc::ptr_eq(&request.source,&c)));
         assert!(!encoder.has_work(),"raw receipts must not publish into shared GPU cache slots");
     }
 
@@ -763,7 +817,7 @@ mod tests {
         let (requests,_)=std::sync::mpsc::sync_channel(1);
         let (sender,results)=std::sync::mpsc::sync_channel(1);
         let ready=Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut queue=MipDecodeQueue {requests,results,ready:ready.clone(),outstanding:vec![None],capacity:1};
+        let mut queue=queued(requests,results,ready.clone(),vec![None],1);
         let target=Arc::new(std::sync::Mutex::new(None));
         let destination=Arc::downgrade(&target);
         assert!(sender.send(PreparedImageWork::Coordinates {destination:destination.clone(),pixels:Ok(Arc::new(vec![7]))}).is_ok());
@@ -788,7 +842,7 @@ mod tests {
             results
         }
         let cache=Arc::new(layer_core::raster::DecodedTileCache::new(64*1024*1024));
-        let mut queue=MipDecodeQueue::native(cache.clone(),RgbSpace::Srgb);
+        let mut queue=MipDecodeQueue::native(cache.clone(),RgbSpace::Srgb).unwrap();
         let source=layer_core::color::source::rgba8_source([2048;2],|x,y|[(x%256) as u8,(y%256) as u8,0,255]);
         let id=PortableId::random();
         let tiles:Vec<[u32;2]>=(0..64).map(|index|[index%8,index/8]).collect();
@@ -996,8 +1050,8 @@ mod tests {
             assert!(send.send(PreparedImageWork::Image(PreparedMipTile {attempt:layer_core::memory::generation(),id:PortableId::random(),
                 source:source.clone(),coordinate:[0;2],pixels:Err(error)})).is_ok());
             let (requests,_receive)=std::sync::mpsc::sync_channel(1);
-            r.moving_decode=Some((r.device.working_space(),MipDecodeQueue {requests,results,ready:Arc::new(std::sync::atomic::AtomicUsize::new(1)),
-                outstanding:vec![Some(DecodeKey::Image(Arc::downgrade(&source),[0;2]))],capacity:1}));
+            r.moving_decode=Some((r.device.working_space(),queued(requests,results,Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+                vec![Some(DecodeKey::Image(Arc::downgrade(&source),[0;2]))],1)));
             assert!(matches!(r.readback_srgb_rgba8(),Err(error) if error==expected));
             assert!(r.failed_image_tiles.is_empty() && r.failed_raster_tiles.is_empty());
             assert!(r.can_submit());
@@ -1005,3 +1059,7 @@ mod tests {
     }
 
 }
+
+#[cfg(all(test,not(target_arch="wasm32")))]
+#[path="object_image_pool_tests.rs"]
+mod pool_tests;

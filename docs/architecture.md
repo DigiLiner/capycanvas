@@ -76,6 +76,13 @@ results retain their attempt generation, excluding their own temporary cleanup;
 asynchronous attempts count releases within each poll and final future cleanup,
 so releases by other tasks between polls remain retry signals.
 Interactive exact image preparation also decodes parked samples on workers.
+Native image, raster and coordinate preparation shares one bounded pool across
+windows and renderers: at most three workers and eighteen queued jobs. Dropping
+a queue invalidates its queued jobs and discards any result already in progress;
+workers finish at most the pool's active jobs. Each queue retains its existing
+outstanding/result limit and ordered receipt allowance. Worker decoder caches
+include the destination color space. Pool-capacity waits use their own generation,
+so freeing a queue slot does not trigger memory-pressure retries.
 Memory and worker-capacity refusals preserve their typed result: interactive work
 pauses without marking the source corrupt, while snapshot jobs return the refusal.
 Raster restoration prepares private color, coverage and wetness pages before

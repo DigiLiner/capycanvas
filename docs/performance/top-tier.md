@@ -4941,3 +4941,12 @@ in both themes; tonal Curves also passes its mouse, touch and pen checks.
 Raw samples, source hashes, logs and inspected captures are under
 `artifacts/pen-response-port/web/`. Reproduce with `LAYER_TILT_MOTION=1` and
 `tools/performance/workspace-motion.sh web --tilt-calibration`.
+
+## Native source preparation qualification
+
+| Change | Affected work | Reference-device qualification |
+| --- | --- | --- |
+| Shared bounded preparation workers | Cold source/mip preparation, raster restoration and simultaneous windows | Not measured; existing motion results do not qualify this pool |
+
+The [architecture](../architecture.md) defines the worker and queue bounds.
+Warm canvas motion keeps its existing preparation and GPU paths.

@@ -1827,3 +1827,12 @@ so its 59.698–59.706 total presents/s and 16.779–16.782 ms p99 gaps do not
 qualify moving-frame rate or gaps. Viewport GPU p50 is 13.311–13.318 ms and
 p95 is 14.073–14.098 ms. Rotate View drags remain unmeasured.
 Evidence is under `artifacts/rotation-snap/android/performance/`.
+
+## Native source preparation qualification
+
+| Change | Affected work | Reference-device qualification |
+| --- | --- | --- |
+| Shared bounded preparation workers | Cold source/mip preparation, raster restoration and simultaneous windows | Not measured; existing motion results do not qualify this pool |
+
+The [architecture](../architecture.md) defines the worker and queue bounds.
+Warm canvas motion keeps its existing preparation and GPU paths.

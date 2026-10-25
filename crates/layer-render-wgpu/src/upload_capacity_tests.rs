@@ -36,7 +36,7 @@ fn fixture() -> (WgpuRasterizer, layer_core::Document) {
     r.prepare_uploads(packet(document.scene(), [64; 2]), &mut [], &mut encoder).unwrap();
     r.uploads.finish(&encoder);
     encoder.submit(&r.queue);
-    crate::test_support::complete(&mut r);
+    crate::test_support::complete(&r);
     assert!(r.style_upload_valid.load(Ordering::Acquire));
     (r, document)
 }
@@ -45,7 +45,7 @@ fn fixture() -> (WgpuRasterizer, layer_core::Document) {
 fn actual_device_upload_limits_refuse_before_buffer_or_cache_changes() {
     let (mut r, _) = fixture();
     let limits = r.device.limits();
-    let dab_limit = limits.max_buffer_size.min(u64::from(limits.max_storage_buffer_binding_size));
+    let dab_limit = limits.max_buffer_size.min(limits.max_storage_buffer_binding_size);
     let style_limit = (limits.max_buffer_size / r.style_stride).min(u64::from(u32::MAX) / r.style_stride + 1);
     let dab_growth = r.dab_capacity_bytes as usize / mem::size_of::<DabGpu>() + 1;
     for (dabs, styles) in [
@@ -70,7 +70,7 @@ fn reordered_duplicate_dabs_refuse_before_cpu_staging_or_gpu_growth() {
     style.rendering.blend_mode = BrushBlendMode::Multiply;
     let batches = [dab_batch(target, style, dabs[0].bounds())];
     assert!(r.reorders_dabs(&batches[0]));
-    let limit = r.device.limits().max_buffer_size.min(u64::from(r.device.limits().max_storage_buffer_binding_size));
+    let limit = r.device.limits().max_buffer_size.min(r.device.limits().max_storage_buffer_binding_size);
     let repeated = limit as usize / mem::size_of::<DabGpu>();
     let mut tiles = [vec![BrushTile { coordinate: [0; 2], local: PixelRect::full([64; 2]), dabs: 0..1, indices: vec![0; repeated] }]];
     let before = state(&r);
@@ -103,7 +103,8 @@ fn invalid_dab_batch_ranges_refuse_before_upload_state_changes() {
     }
 }
 
-fn tile_state(tiles: &[Vec<BrushTile>]) -> Vec<Vec<([u32; 2], PixelRect, std::ops::Range<u32>, Vec<u32>)>> {
+type TileState=([u32;2],PixelRect,std::ops::Range<u32>,Vec<u32>);
+fn tile_state(tiles: &[Vec<BrushTile>]) -> Vec<Vec<TileState>> {
     tiles.iter().map(|row| row.iter().map(|tile|
         (tile.coordinate, tile.local, tile.dabs.clone(), tile.indices.clone())).collect()).collect()
 }

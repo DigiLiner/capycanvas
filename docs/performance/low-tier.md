@@ -2571,3 +2571,12 @@ traces are retained under `artifacts/vector-v1-fixes-20261022/performance/`, in
 `baseline/low/`, `candidate-batch2-fast/low/` and
 `candidate-batch2-cap-aware/low/`. The middle tier was reserved by another
 session and was not measured.
+
+## Native source preparation qualification
+
+| Change | Affected work | Reference-device qualification |
+| --- | --- | --- |
+| Shared bounded preparation workers | Cold source/mip preparation, raster restoration and simultaneous windows | Not measured; existing motion results do not qualify this pool |
+
+The [architecture](../architecture.md) defines the worker and queue bounds.
+Warm canvas motion keeps its existing preparation and GPU paths.

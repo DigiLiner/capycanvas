@@ -3467,6 +3467,10 @@ impl WgpuRasterizer {
             std::task::Poll::Pending
         }).await
     }
+    fn image_decode_queue(&mut self,space:layer_core::color::RgbSpace)->Result<&mut object_image_mips::MipDecodeQueue,GpuRasterError> {
+        if self.moving_decode.is_none() {self.moving_decode=Some((space,object_image_mips::MipDecodeQueue::new(&self.device)?));}
+        Ok(&mut self.moving_decode.as_mut().unwrap().1)
+    }
     pub(crate) fn request_image_decode(&mut self, id: layer_core::authored::PortableId, source: Arc<layer_core::color::source::SourceImage>, coordinate: [u32; 2]) -> Result<bool, GpuRasterError> {
         #[cfg(target_arch="wasm32")]
         if self.browser_image_decoder.is_none() { return Err(GpuRasterError::Color("Image preparation worker unavailable".into())); }
@@ -3483,7 +3487,7 @@ impl WgpuRasterizer {
         if self.decode_pressure.image(&source,coordinate,space,layer_core::memory::generation())? {return Ok(false);}
         let receipt=self.source_receipt.as_ref().and_then(std::sync::Weak::upgrade).is_some_and(|receipt|receipt.matches_image(&source,coordinate));
         if self.moving_decode.as_ref().is_some_and(|(_,queue)|!queue.accepts_held(self.source_results.len(),receipt)) {return Ok(false);}
-        let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request(id, source, coordinate);
+        let requested = self.image_decode_queue(space)?.request(id, source, coordinate);
         #[cfg(target_arch = "wasm32")]
         self.dispatch_browser_image_decode()?;
         Ok(requested)
@@ -3509,7 +3513,7 @@ impl WgpuRasterizer {
             return Err(GpuRasterError::Color(error.clone()));
         }
         if self.decode_pressure.raster(&blob,source,destination,layer_core::memory::generation())? {return Ok(false);}
-        let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request_raster(blob, source, destination);
+        let requested = self.image_decode_queue(space)?.request_raster(blob, source, destination);
         #[cfg(target_arch="wasm32")]
         self.dispatch_browser_image_decode()?;
         Ok(requested)
@@ -3526,7 +3530,7 @@ impl WgpuRasterizer {
             { self.browser_image_result = Default::default(); self.browser_image_wake = Default::default(); }
         }
         if self.moving_decode.as_ref().is_some_and(|(_,queue)|!queue.accepts_held(self.source_results.len(),false)) {return Ok(false);}
-        let requested = self.moving_decode.get_or_insert_with(|| (space,object_image_mips::MipDecodeQueue::new(&self.device))).1
+        let requested = self.image_decode_queue(space)?
             .request_coordinates(inverse,size,first,count,destination);
         #[cfg(target_arch = "wasm32")]
         self.dispatch_browser_image_decode()?;
