@@ -408,8 +408,8 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         assert_eq!(dry.softness,0.05);
         assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 40° long axis");
         let extent=if preset==P::PastelBlock {1.95} else {poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max)};
-        for (pose,expected) in dry.poses.iter().zip(poses) {for axis in 0..2 {
-            assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected[axis]/extent).abs()<2e-5,
+        for (pose,expected) in dry.poses.iter().zip(poses) {for (axis,&expected_radius) in expected.iter().enumerate() {
+            assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected_radius/extent).abs()<2e-5,
                 "{preset:?}: full-pressure footprint axis{axis}");
         }}
         let mut support_brush=brush.clone();support_brush.diameter=24.;
@@ -1128,12 +1128,11 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
     assert_eq!(view.bookmarks.len(), 1);
     assert_eq!(view.bookmarks[0].value, 64.);
     assert!(view.bookmarks[0].selected);
-    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37)] {
-        s.dispatch(control.slider().unwrap().action(value)).unwrap();
-        s.dispatch(UiAction::ToolbarEdit {context,
-            action:Box::new(UiAction::ToggleSliderBookmark {control})}).unwrap();
-    }
-    for (control,value) in [(control,64.),(ToolbarControl::BrushStrengthSlider,0.37)] {
+    let strength=ToolbarControl::BrushStrengthSlider;
+    s.dispatch(strength.slider().unwrap().action(0.37)).unwrap();
+    s.dispatch(UiAction::ToolbarEdit {context,
+        action:Box::new(UiAction::ToggleSliderBookmark {control:strength})}).unwrap();
+    for (control,value) in [(control,64.),(strength,0.37)] {
         let bookmarks=s.state().toolbar_component(control).unwrap().bookmarks;
         assert_eq!(bookmarks.len(),1);assert_eq!(bookmarks[0].value,value);
         assert!(bookmarks[0].selected);
@@ -1179,13 +1178,9 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
             .bookmarks
             .is_empty()
     );
-    for control in [ToolbarControl::BrushStrengthSlider] {
-        assert!(s.state().toolbar_component(control).unwrap().bookmarks.is_empty());
-    }
+    assert!(s.state().toolbar_component(strength).unwrap().bookmarks.is_empty());
     s.dispatch(UiAction::SelectBrush {id:context.brush}).unwrap();
-    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37)] {
-        assert_eq!(s.state().toolbar_component(control).unwrap().bookmarks[0].value,value);
-    }
+    assert_eq!(s.state().toolbar_component(strength).unwrap().bookmarks[0].value,0.37);
 }
 
 #[test]
@@ -1548,8 +1543,8 @@ fn toolbar_brush_metadata_updates_while_raster_backing_is_pending() {
                     context: s.state().toolbar_context(), action: Box::new(action),
                 } } else { action };
                 s.dispatch(action).unwrap();
-                assert_eq!(s.state().brush.diameter, value as f32, "{platform:?}, wrapped={wrapped}");
-                assert_eq!(s.engine.configured_brush().diameter, value as f32);
+                assert_eq!(s.state().brush.diameter, value, "{platform:?}, wrapped={wrapped}");
+                assert_eq!(s.engine.configured_brush().diameter, value);
                 assert!(s.deferred_edits.is_empty());
                 assert_eq!(s.engine.checkpoint(), checkpoint);
             }

@@ -13,7 +13,7 @@ fn targeted_reply(s:&mut UiSession<Recorder>) {
     s.frame(30,30).unwrap();
 }
 fn targeted_points(s:&UiSession<Recorder>,page:usize)->Vec<[f32;2]> {
-    match s.engine.document().scene().effect(s.engine.document().scene().order()[0]).unwrap().value(layer_core::CURVE_KEYS[usize::from(page)]) {Some(layer_core::EffectValue::Curve(points))=>points.clone(),_=>panic!("missing curve")}
+    match s.engine.document().scene().effect(s.engine.document().scene().order()[0]).unwrap().value(layer_core::CURVE_KEYS[page]) {Some(layer_core::EffectValue::Curve(points))=>points.clone(),_=>panic!("missing curve")}
 }
 
 #[test]

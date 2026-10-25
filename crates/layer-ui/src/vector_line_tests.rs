@@ -1996,7 +1996,8 @@ fn crowded_vector_gesture_costs() {
         (s, layer)
     };
     struct Costs { input: f64, frames: f64, publish: f64, inputs: usize, count: usize, published: usize, release: f64 }
-    let run = |s: &mut UiSession<Recorder>, inputs: usize, mut input: Box<dyn FnMut(&mut UiSession<Recorder>, usize, u64)>| {
+    type InputStep = Box<dyn FnMut(&mut UiSession<Recorder>, usize, u64)>;
+    let run = |s: &mut UiSession<Recorder>, inputs: usize, mut input: InputStep| {
         let mut costs = Costs { input: 0., frames: 0., publish: 0., inputs: 0, count: 0, published: 0, release: 0. };
         let mut model = s.workspace_model_revision();
         let mut now = 10_000_000_000u64;
@@ -2076,7 +2077,7 @@ fn crowded_vector_gesture_costs() {
         report(&format!("width scrub, frame per update, {selected}"), costs);
         let (mut s, _) = crowded(selected);
         let costs = run(&mut s, 120, Box::new(move |s: &mut UiSession<Recorder>, i: usize, _| {
-            let change = s.gesture([960., 600.], [960. + if i % 2 == 0 { 3. } else { -3. }, 600.], 1., 0.).unwrap();
+            let change = s.gesture([960., 600.], [960. + if i.is_multiple_of(2) { 3. } else { -3. }, 600.], 1., 0.).unwrap();
             std::hint::black_box(change);
         }));
         report(&format!("pan, {selected} paths selected"), costs);

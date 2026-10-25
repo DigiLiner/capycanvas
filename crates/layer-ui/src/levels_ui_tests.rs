@@ -197,7 +197,7 @@ fn levels_auto_success_noop_and_refusal_restart_visible_histogram_without_anothe
             s.engine.apply_edit(effects::effect_edit(s.engine.document(),handle,candidate).unwrap()).unwrap();s.refresh_document();
         }
         levels_auto(&mut s);let before=s.engine.document().artwork.clone();
-        let result=if outcome==2 {Err(layer_render::BackendError("Refused Auto".into()))}else{Ok(layer_render::SnapshotResult::LevelsStatistics(levels_result()))};
+        let result=if outcome==2 {Err(layer_render::BackendError("Refused Auto"))}else{Ok(layer_render::SnapshotResult::LevelsStatistics(levels_result()))};
         levels_reply(&mut s,result);assert!(s.auto_levels.is_none());
         if outcome!=0 {assert_eq!(s.engine.document().artwork,before);}
         assert!(s.tonal_histogram.demand,"completion must restore visible consumer {outcome}");

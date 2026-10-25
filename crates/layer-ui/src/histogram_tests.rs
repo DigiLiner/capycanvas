@@ -602,11 +602,11 @@ fn waveform_dedicated_command_is_localized_and_queries_statistics() {
 fn waveform_rgba_maps_hdr_endpoints_and_tiny_counts_to_premultiplied_pixels() {
     use layer_core::color::{DocumentColor,SampleDepth,histogram::{Histogram,Waveform}};
     let color=DocumentColor{depth:SampleDepth::F32,..Default::default()};let mut data=Histogram::new(color);let bins=data.plot_bins();
-    let mut counts=vec![0;Waveform::WORDS];counts[0*256+7]=1;counts[255*256+9]=1;counts[((bins.start+bins.end)/2)*256+11]=1000;data.waveform=Some(Waveform{counts});
+    let mut counts=vec![0;Waveform::WORDS];counts[7]=1;counts[255*256+9]=1;counts[((bins.start+bins.end)/2)*256+11]=1000;data.waveform=Some(Waveform{counts});
     let mut view=crate::HistogramView::default();view.data=Some(std::sync::Arc::new(data));view.channel=1;view.logarithmic=true;
     let (size,rgba)=view.waveform_premultiplied_rgba([[255,0,0],[0,255,0],[0,0,255],[255,255,255]]).unwrap();assert_eq!(size,[256,bins.len() as u32]);
     let pixel=|x:usize,y:usize|&rgba[(y*256+x)*4..(y*256+x+1)*4];assert!(pixel(7,bins.len()-1)[3]>0);assert!(pixel(9,0)[3]>0);assert_eq!(pixel(11,bins.len()-1-((bins.start+bins.end)/2-bins.start)),[255,0,0,255]);
-    for pixel in rgba.chunks_exact(4) {assert!(pixel[..3].iter().all(|c|*c<=pixel[3]));}
+    for pixel in rgba.as_chunks::<4>().0 {assert!(pixel[..3].iter().all(|c|*c<=pixel[3]));}
     view.data=None;assert!(view.waveform_premultiplied_rgba([[0;3];4]).is_none());
 }
 

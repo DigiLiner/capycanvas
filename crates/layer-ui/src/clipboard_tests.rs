@@ -282,7 +282,7 @@ mod clipboard_checks {
         let resize = |s: &mut UiSession<Recorder>, value: f32| {
             let action = if toolbar { UiAction::ToolbarEdit {
                 context: s.state().toolbar_context(),
-                action: Box::new(UiAction::SetToolSetting { id: "size".into(), value: value.into() }),
+                action: Box::new(UiAction::SetToolSetting { id: "size".into(), value }),
             } } else { UiAction::SetBrushSize { value } };
             s.dispatch(action).unwrap();
         };

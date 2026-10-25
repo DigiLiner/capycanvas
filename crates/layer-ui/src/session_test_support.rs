@@ -269,16 +269,15 @@ impl CanvasRenderer for Recorder {
         }
         self.recorded_dabs.extend_from_slice(packet.dabs);
         for target in packet.scene.targets().filter(|_| packet.commit_rasters) {
-            if let Some(revision) = packet.scene.raster(target) {
-                if revision.try_data().is_none() {
-                    use layer_core::raster::*;
-                    let plane = if target.is_coverage() { RasterPlane::Mask } else { RasterPlane::Color };
-                    let descriptor = plane.descriptor_for(self.document_color(), packet.scene.color_mode(target));
-                    let bytes = vec![if descriptor.sample == layer_core::color::SampleType::Float { 0 } else { 128 }; descriptor.byte_len([TILE_SIZE; 2]).unwrap()];
-                    let mut data = RasterData::default();
-                    data.tiles.insert(TileKey { plane, coordinate: [0, 0] }, RasterTile::backed(TileBlob::encode(descriptor, &bytes).unwrap()));
-                    revision.publish(Ok(data)).unwrap();
-                }
+            if let Some(revision) = packet.scene.raster(target)
+                && revision.try_data().is_none() {
+                use layer_core::raster::*;
+                let plane = if target.is_coverage() { RasterPlane::Mask } else { RasterPlane::Color };
+                let descriptor = plane.descriptor_for(self.document_color(), packet.scene.color_mode(target));
+                let bytes = vec![if descriptor.sample == layer_core::color::SampleType::Float { 0 } else { 128 }; descriptor.byte_len([TILE_SIZE; 2]).unwrap()];
+                let mut data = RasterData::default();
+                data.tiles.insert(TileKey { plane, coordinate: [0, 0] }, RasterTile::backed(TileBlob::encode(descriptor, &bytes).unwrap()));
+                revision.publish(Ok(data)).unwrap();
             }
         }
         self.composites += usize::from(packet.composite_all);
@@ -548,7 +547,7 @@ pub(crate) fn reopen_capture(capture: &layer_core::ArtworkCapture) -> Document {
     let cancelled = std::sync::atomic::AtomicBool::new(false);
     let prepared = PreparedPackage::prepare(capture, None, &cancelled).unwrap();
     let mut bytes = Vec::new(); prepared.write(&mut bytes, &cancelled).unwrap();
-    let chunks = bytes.chunks(layer_core::package::MAX_RANGE_BYTES).map(|chunk| std::sync::Arc::<[u8]>::from(chunk)).collect();
+    let chunks = bytes.chunks(layer_core::package::MAX_RANGE_BYTES).map(std::sync::Arc::<[u8]>::from).collect();
     let source = layer_core::package::transport::ChunkedBytes::new(chunks).unwrap();
     let backing = ImmutableBacking::new(std::sync::Arc::new(source)).unwrap();
     let OpenOutcome::Candidate { artwork, .. } = layer_core::package::codec::open(backing, Default::default(), &cancelled).unwrap() else { panic!("editable artwork"); };

@@ -757,8 +757,8 @@ mod tests {
     fn untouched_rows_keep_the_exact_definition_and_one_edit_changes_one_channel() {
         let definition = RgbColor::new(RgbSpace::DisplayP3, [0.23137, 0.4941177, 0.631, 1.]).unwrap();
         let mut editor = ColorEditor::for_color(&colors(RgbSpace::DisplayP3), definition, false).unwrap();
-        for row in 0..3 {
-            for form in COLOR_FORM_FAMILIES[row] {
+        for (row, forms) in COLOR_FORM_FAMILIES.iter().enumerate() {
+            for form in *forms {
                 editor.apply(ColorEditorAction::Form { row, form: *form }).unwrap();
                 assert_eq!(editor.value(), definition);
             }

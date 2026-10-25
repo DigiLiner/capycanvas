@@ -2496,6 +2496,17 @@ fn customization_text(localization: &Localizer, id: MessageId, values: &[(&str, 
     localization.format(id, &args)
 }
 
+pub fn workspace_name_valid(name: &str) -> bool {
+    name.trim() == name && !name.is_empty() && name.chars().count() <= 100
+        && !name.chars().any(char::is_control)
+}
+
+pub fn workspace_name_validation(name: &str, localization: &Localizer) -> Option<String> {
+    (!workspace_name_valid(name.trim())).then(|| localization.text(
+        MessageId::WORKSPACE_REFUSAL_ENTER_A_NAME_OF_1_100_CHARACTERS_WITHOUT_LEADING_OR_TRAILING_SPACES,
+    ).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::session::test_support::tile_ids;
@@ -3315,15 +3326,4 @@ mod tests {
             }
         }
     }
-}
-
-pub fn workspace_name_valid(name: &str) -> bool {
-    name.trim() == name && !name.is_empty() && name.chars().count() <= 100
-        && !name.chars().any(char::is_control)
-}
-
-pub fn workspace_name_validation(name: &str, localization: &Localizer) -> Option<String> {
-    (!workspace_name_valid(name.trim())).then(|| localization.text(
-        MessageId::WORKSPACE_REFUSAL_ENTER_A_NAME_OF_1_100_CHARACTERS_WITHOUT_LEADING_OR_TRAILING_SPACES,
-    ).to_string())
 }

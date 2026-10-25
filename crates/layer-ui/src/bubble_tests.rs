@@ -42,7 +42,7 @@ fn halo_arcs_sit_on_glass_rings_with_their_icons_at_the_start() {
             }
             assert_eq!(ring_at(&arcs, arc.point(0.5)), Some(i), "{count}/{i}");
             assert!((distance(arc.icon_point(), arc.point(0.)) - RING_ICON).abs() < 0.5, "the icon sits before its track");
-            assert!(RING_ICON - 8. - 7.5 >= 5., "a 16 px icon and the thumb at zero keep a gap");
+            const { assert!(RING_ICON - 8. - 7.5 >= 5., "a 16 px icon and the thumb at zero keep a gap"); }
             let [start, middle, end] = [arc.point(0.), arc.point(0.5), arc.point(1.)];
             if arc.sweep.abs() > 200. {
                 assert!(start[0] < 0. && end[0] > 0. && middle[1] < 0., "one setting is a gauge over the top");

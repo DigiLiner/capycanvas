@@ -1026,10 +1026,10 @@ fn shared_gradient_toolbar_admits_only_its_published_tool_destination(){
     let dispatch=|app:&mut UiSession<Recorder>,context,target,mode|app.dispatch(UiAction::ToolbarEdit{context,action:Box::new(UiAction::Effect{action:EffectAction::Gradient{target,edit:G::Interpolation{value:mode}}})});
     assert!(dispatch(&mut app,stale_context,target.clone(),layer_core::ColorMixSpace::Classic).is_err());
     assert_eq!(p28_definition(&app),original);
-    assert!(dispatch(&mut app,context.clone(),effect,layer_core::ColorMixSpace::Classic).is_err());
+    assert!(dispatch(&mut app,context,effect,layer_core::ColorMixSpace::Classic).is_err());
     assert_eq!(p28_definition(&app),original);
     let stale_epoch=app.state.document_file.epoch.wrapping_sub(1);
-    assert!(dispatch(&mut app,context.clone(),D::Tool{epoch:stale_epoch},layer_core::ColorMixSpace::Classic).is_err());
+    assert!(dispatch(&mut app,context,D::Tool{epoch:stale_epoch},layer_core::ColorMixSpace::Classic).is_err());
     assert_eq!(p28_definition(&app),original);
     dispatch(&mut app,context,target,layer_core::ColorMixSpace::Classic).unwrap();
     assert_eq!(p28_definition(&app).interpolation,layer_core::ColorMixSpace::Classic);

@@ -8859,11 +8859,11 @@ mod tests {
         // Drag the straight guide's body, then edit its start handle.
         send(&mut s, PenPhase::Down, [200., 125.]);
         send(&mut s, PenPhase::Up, [200., 160.]);
-        let (a, b) = s.engine.document().rulers().nth(0).unwrap().geometry.handles();
+        let (a, b) = s.engine.document().rulers().next().unwrap().geometry.handles();
         assert!((a.y - 135.).abs() < 0.001);
         send(&mut s, PenPhase::Down, [a.x, a.y]);
         send(&mut s, PenPhase::Up, [a.x - 20., a.y + 20.]);
-        let (moved, end) = s.engine.document().rulers().nth(0).unwrap().geometry.handles();
+        let (moved, end) = s.engine.document().rulers().next().unwrap().geometry.handles();
         assert!((moved.x - 80.).abs() < 0.001);
         assert_eq!(end, b);
         let before = s.engine.document().rulers().collect::<Vec<_>>();
@@ -8916,7 +8916,7 @@ mod tests {
         // never moves the paint layer while a ruler handle owns contact.
         invoke(&mut s, CommandId::Move);
         let artwork=s.engine.document().artwork.clone();
-        let end = s.engine.document().rulers().nth(0).unwrap().geometry.handles().1.unwrap();
+        let end = s.engine.document().rulers().next().unwrap().geometry.handles().1.unwrap();
         send(&mut s, PenPhase::Down, [end.x, end.y]);
         send(&mut s, PenPhase::Up, [end.x + 25., end.y + 30.]);
         assert_eq!(s.state.layer_tools.tool, LayerCanvasTool::Move);
@@ -10479,9 +10479,8 @@ mod tests {
         for selected in [base, clips[1], top] {
             s.dispatch(UiAction::SelectLayer { id: occurrence_token(selected) })
                 .unwrap();
-            assert_eq!(
+            assert!(
                 s.state.layer_tools.can_delete,
-                true,
                 "deleting a base carries its clipping run"
             );
             s.dispatch(UiAction::Effect {
@@ -15509,9 +15508,9 @@ mod tests {
                 s.scroll(anchor, [20., -40.], 2., true, true).unwrap();
                 let after = &s.state.camera;
                 assert!(after.zoom > before.zoom);
-                for axis in 0..2 {
-                    let old = (anchor[axis] - before.translation[axis]) / before.zoom;
-                    let new = (anchor[axis] - after.translation[axis]) / after.zoom;
+                for (axis,&coordinate) in anchor.iter().enumerate() {
+                    let old = (coordinate - before.translation[axis]) / before.zoom;
+                    let new = (coordinate - after.translation[axis]) / after.zoom;
                     assert!((old - new).abs() < 0.001, "{platform:?}: wheel zoom retains its anchor");
                 }
                 assert_eq!(after.rotation, before.rotation);
@@ -16856,8 +16855,8 @@ mod tests {
         }
         customize(&mut app, CustomizationAction::ConfirmTools);
         let tiles = app.state.workspace.layout.panel(Panel::Toolbar).unwrap().tiles().to_vec();
-        for index in TOOLBAR_CONTROLS.len()..tiles.len() {
-            app.dispatch(UiAction::ActivateTile { panel: Panel::Toolbar, tile: tiles[index].id }).unwrap();
+        for (index,tile) in tiles.iter().enumerate().skip(TOOLBAR_CONTROLS.len()) {
+            app.dispatch(UiAction::ActivateTile { panel: Panel::Toolbar, tile: tile.id }).unwrap();
             assert!(app.panel_view(Panel::Toolbar).unwrap().tiles[index].choice.selected);
         }
         assert_eq!(app.state.brush.diameter, 1.5);
