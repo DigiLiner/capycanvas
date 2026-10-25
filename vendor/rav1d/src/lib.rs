@@ -73,6 +73,9 @@ use to_method::To as _;
 #[cfg(test)]
 #[path = "ownership_tests.rs"]
 mod ownership_tests;
+#[cfg(test)]
+#[path = "decode_tests.rs"]
+mod decode_tests;
 
 #[cold]
 fn init_internal() {
@@ -266,7 +269,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
                     .name(format!("rav1d-worker-{n}"))
                     .spawn(|| rav1d_worker_task(thread_data_copy))
                     .unwrap();
-                Rav1dContextTaskType::Worker(handle)
+                Rav1dContextTaskType::Worker(Mutex::new(Some(handle)))
             } else {
                 Rav1dContextTaskType::Single(Mutex::new(Box::new(Rav1dTaskContext::new(
                     thread_data_copy,
@@ -300,10 +303,9 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
 
     if c.allocator.is_default() {
         let c = Arc::get_mut(&mut c).unwrap();
-        // SAFETY: When `allocator.is_default()`, `allocator.cookie` should be a `&c.picture_pool`.
-        // See `Rav1dPicAllocator::cookie` docs for more, including an analysis of the lifetime.
-        // Note also that we must do this after we created the `Arc` so that `c` has a stable address.
-        c.allocator.cookie = Some(SendSyncNonNull::from_ref(&c.picture_pool).cast::<c_void>());
+        let pool = NonNull::new(Arc::as_ptr(&c.picture_pool).cast_mut()).unwrap();
+        // SAFETY: The context and each allocated picture retain this thread-safe pool.
+        c.allocator.cookie = Some(unsafe { SendSyncNonNull::new_unchecked(pool) }.cast());
     }
     let c = c;
 
@@ -311,7 +313,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
         if let Rav1dContextTaskType::Worker(handle) = &tc.task {
             // Unpark each thread once we set its `thread_data.c`.
             *tc.thread_data.c.lock() = Some(Arc::clone(&c));
-            handle.thread().unpark();
+            handle.lock().as_ref().unwrap().thread().unpark();
         }
     }
 
@@ -735,6 +737,12 @@ pub(crate) fn rav1d_close(c: Arc<Rav1dContext>) {
     let c = &*c;
     rav1d_flush(c);
     c.tell_worker_threads_to_die();
+    for tc in c.tc.iter() {
+        if let Rav1dContextTaskType::Worker(slot) = &tc.task {
+            let handle = slot.lock().take();
+            if let Some(handle) = handle { let _ = handle.join(); }
+        }
+    }
 }
 
 /// # Safety

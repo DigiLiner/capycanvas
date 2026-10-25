@@ -175,6 +175,7 @@ wrap_fn_ptr!(pub unsafe extern "C" fn fguv_32x32xn(
     _dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
     _src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
     _luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+    luma_width: usize,
 ) -> ());
 
 impl fguv_32x32xn::Fn {
@@ -190,6 +191,7 @@ impl fguv_32x32xn::Fn {
         bh: usize,
         row_num: usize,
         luma: &Rav1dPictureDataComponent,
+        luma_width: usize,
         is_uv: bool,
         is_id: bool,
         bd: BD,
@@ -235,6 +237,7 @@ impl fguv_32x32xn::Fn {
                 dst_row,
                 src_row,
                 luma_row,
+                luma_width,
             )
         }
     }
@@ -701,6 +704,7 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
     bh: usize,
     row_num: usize,
     luma_row: Rav1dPictureDataComponentOffset,
+    luma_width: usize,
     is_uv: bool,
     is_id: bool,
     is_sx: bool,
@@ -762,7 +766,7 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
 
         let luma_row_uv = |y| {
             let row = luma_row + (y << sy) as isize * luma_row.pixel_stride::<BD>();
-            (row + (bx << sx)).slice::<BD>(bw << sx)
+            (row + (bx << sx)).slice::<BD>(cmp::min(bw << sx, luma_width - (bx << sx)))
         };
         let src_row_uv = |y| {
             let row = src_row + y as isize * src_row.pixel_stride::<BD>();
@@ -776,7 +780,8 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
         let noise_uv = |src: BD::Pixel, grain, luma: &[BD::Pixel]| {
             let mut avg = luma[0];
             if is_sx {
-                avg = ((avg.as_::<c_int>() + luma[1].as_::<c_int>() + 1) >> 1).as_::<BD::Pixel>();
+                let next = luma.get(1).copied().unwrap_or(avg);
+                avg = ((avg.as_::<c_int>() + next.as_::<c_int>() + 1) >> 1).as_::<BD::Pixel>();
             }
             let mut val = avg.as_::<c_int>();
             if !data.chroma_scaling_from_luma {
@@ -880,6 +885,7 @@ unsafe extern "C" fn fguv_32x32xn_c_erased<
     dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
     src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
     luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+    luma_width: usize,
 ) {
     let [dst_row, src_row, luma_row] = [dst_row, src_row, luma_row].map(|row| {
         // SAFETY: Was passed as `FFISafe::new(_)` in `fguv_32x32xn::Fn::call`.
@@ -905,6 +911,7 @@ unsafe extern "C" fn fguv_32x32xn_c_erased<
         bh,
         row_num,
         luma_row,
+        luma_width,
         uv_pl != 0,
         is_id,
         IS_SX,
@@ -1157,6 +1164,7 @@ mod neon {
         _dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
         _src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
         _luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+        _luma_width: usize,
     ) {
         let dst_row = dst_row_ptr.cast();
         let src_row = src_row_ptr.cast();
@@ -1388,3 +1396,7 @@ impl Rav1dFilmGrainDSPContext {
         Self::default::<BD>().init::<BD>(flags)
     }
 }
+
+#[cfg(test)]
+#[path = "filmgrain_tests.rs"]
+mod tests;

@@ -4994,9 +4994,7 @@ pub fn rav1d_submit_frame(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResu
     ) {
         fc.task_thread.error.store(1, Ordering::Relaxed);
         let _ = mem::take(&mut *fc.in_cdf.try_write().unwrap());
-        if f.frame_hdr.as_ref().unwrap().refresh_context != 0 {
-            let _ = mem::take(&mut f.out_cdf);
-        }
+        let _ = mem::take(&mut f.out_cdf);
         for i in 0..7 {
             if f.refp[i].p.frame_hdr.is_some() {
                 let _ = mem::take(&mut f.refp[i]);

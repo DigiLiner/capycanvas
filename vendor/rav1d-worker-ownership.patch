@@ -1,0 +1,1057 @@
+diff --git a/rav1d/include/dav1d/picture.rs b/rav1d/include/dav1d/picture.rs
+index 9061323f8..77c5d56d0 100644
+--- a/rav1d/include/dav1d/picture.rs
++++ b/rav1d/include/dav1d/picture.rs
+@@ -134,7 +134,7 @@ pub struct Rav1dPictureDataComponentInner {
+     /// even if [`Self::stride`] is negative.
+     ///
+     /// It is aligned to [`RAV1D_PICTURE_ALIGNMENT`].
+-    ptr: NonNull<u8>,
++    ptr: SendSyncNonNull<u8>,
+
+     /// The length of [`Self::ptr`] in [`u8`] bytes.
+     ///
+@@ -156,7 +156,8 @@ impl Rav1dPictureDataComponentInner {
+             None => {
+                 return Self {
+                     // Ensure it is aligned enough.
+-                    ptr: NonNull::<AlignedPixelChunk>::dangling().cast(),
++                    // SAFETY: Empty storage is never dereferenced.
++                    ptr: unsafe { SendSyncNonNull::new_unchecked(NonNull::<AlignedPixelChunk>::dangling().cast()) },
+                     len: 0,
+                     stride,
+                 };
+@@ -180,6 +181,9 @@ impl Rav1dPictureDataComponentInner {
+         };
+         // Guaranteed by `Dav1dPicAllocator::alloc_picture_callback`.
+         assert!(len % RAV1D_PICTURE_MULTIPLE == 0);
++        // SAFETY: The allocator transfers exclusive initialized storage until release;
++        // subsequent access is disjoint and release supports any owning thread.
++        let ptr = unsafe { SendSyncNonNull::new_unchecked(ptr) };
+         Self { ptr, len, stride }
+     }
+
+@@ -194,6 +198,8 @@ impl Rav1dPictureDataComponentInner {
+         let len = buf.len();
+         assert!(len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0);
+         let stride = (stride * mem::size_of::<BD::Pixel>()) as isize;
++        // SAFETY: The caller retains exclusive storage through all component uses.
++        let ptr = unsafe { SendSyncNonNull::new_unchecked(ptr) };
+         Self { ptr, len, stride }
+     }
+ }
+@@ -212,9 +218,9 @@ unsafe impl AsMutPtr for Rav1dPictureDataComponentInner {
+         // Normally we'd store this as a slice so the compiler would know,
+         // but since it's a ptr due to `DisjointMut`, we explicitly assume it here.
+         // SAFETY: We already checked this in `Self::new`.
+-        unsafe { assume(this.ptr.cast::<AlignedPixelChunk>().is_aligned()) };
++        unsafe { assume(this.ptr.as_ptr().cast::<AlignedPixelChunk>().is_aligned()) };
+
+-        this.ptr.as_ptr()
++        this.ptr.as_ptr().as_ptr()
+     }
+
+     #[inline] // Inline so callers can see the assume.
+@@ -576,6 +582,9 @@ pub struct Dav1dPicAllocator {
+     /// and with a pixel width/height multiple of 128 pixels.
+     /// Any allocated memory area should also be padded by [`DAV1D_PICTURE_ALIGNMENT`] bytes.
+     /// [`data`]`[1]` and [`data`]`[2]` must share the same [`stride`]`[1]`.
++    /// The planes must be disjoint and exclusively accessible through the
++    /// returned picture data until release. Independent live allocations must
++    /// not overlap, and their storage must not be reused before release.
+     ///
+     /// # Safety
+     ///
+@@ -637,12 +646,12 @@ pub struct Dav1dPicAllocator {
+     ///
+     /// # Safety
+     ///
+-    /// If frame threading is used, accesses to `cookie` must be thread-safe.
++    /// Accesses to `cookie` must be thread-safe. Contexts and pictures may move
++    /// between threads even when frame threading is disabled.
+     ///
+-    /// If frame threading is used, this function may be called by the main thread
+-    /// (the thread which calls [`dav1d_get_picture`]),
+-    /// or any of the frame threads and thus must be thread-safe.
+-    /// If frame threading is not used, this function will only be called on the main thread.
++    /// This function may run on any thread owning a picture, including after the
++    /// context closes. Independent pictures may be released concurrently.
++    /// `cookie` and `allocator_data` must remain valid until final picture release.
+     ///
+     /// # Args
+     ///
+@@ -680,21 +689,11 @@ pub(crate) struct Rav1dPicAllocator {
+     ///
+     /// # Safety
+     ///
+-    /// For the default callbacks, a non-null cookie points to a live
+-    /// `Arc<MemPool<u8>>` through allocation. A null cookie creates a pool owned
+-    /// by the allocated picture. Pictures clone the pool owner; release does
+-    /// not dereference this cookie.
+-    /// Context-pool cookies point to [`Rav1dContext::picture_pool`] inside the
+-    /// stable context Arc and are used while that context remains borrowed.
+-    ///
+-    /// Note that this is an `&Arc<MemPool<u8>` turned into a raw pointer,
+-    /// not an [`Arc::into_raw`] of that [`Arc`].
+-    /// This is because storing the [`Arc`] would require C to
+-    /// free data owned by a [`Dav1dPicAllocator`] potentially,
+-    /// which it may not do, as there are no current APIs for doing so.
+-    ///
+-    /// [`Rav1dContext::picture_pool`]: crate::src::internal::Rav1dContext::picture_pool
+-    /// [`Rav1dContext`]: crate::src::internal::Rav1dContext
++    /// For the default callbacks, a non-null cookie comes from `Arc::as_ptr`
++    /// of a pool retained by the context or a source picture. Allocation clones
++    /// that owner into the new picture, so copied allocator cookies remain valid
++    /// after context close. A null cookie creates a picture-owned pool.
++    /// Release uses the picture's pool owner without dereferencing this cookie.
+     pub cookie: Option<SendSyncNonNull<c_void>>,
+
+     /// See [`Dav1dPicAllocator::alloc_picture_callback`].
+@@ -703,8 +702,9 @@ pub(crate) struct Rav1dPicAllocator {
+     ///
+     /// `pic` is passed as a `&mut`.
+     ///
+-    /// If frame threading is used, accesses to [`Self::cookie`] must be thread-safe,
+-    /// i.e. [`Self::cookie`] must be [`Send`]` + `[`Sync`].
++    /// Accesses to [`Self::cookie`] must be thread-safe. The callback and its
++    /// opaque allocation state must remain valid through final picture release,
++    /// including release from another thread or after the context closes.
+     pub alloc_picture_callback: unsafe extern "C" fn(
+         pic: *mut Dav1dPicture,
+         cookie: Option<SendSyncNonNull<c_void>>,
+@@ -716,8 +716,9 @@ pub(crate) struct Rav1dPicAllocator {
+     ///
+     /// `pic` is passed as a `&mut`.
+     ///
+-    /// If frame threading is used, accesses to [`Self::cookie`] must be thread-safe,
+-    /// i.e. [`Self::cookie`] must be [`Send`]` + `[`Sync`].
++    /// Accesses to [`Self::cookie`] must be thread-safe. The callback and its
++    /// opaque allocation state must remain valid through final picture release,
++    /// including release from another thread or after the context closes.
+     pub release_picture_callback:
+         unsafe extern "C" fn(pic: *mut Dav1dPicture, cookie: Option<SendSyncNonNull<c_void>>) -> (),
+ }
+diff --git a/rav1d/src/decode.rs b/rav1d/src/decode.rs
+index a72c9353c..ce3852a3e 100644
+--- a/rav1d/src/decode.rs
++++ b/rav1d/src/decode.rs
+@@ -4994,9 +4994,7 @@ pub fn rav1d_submit_frame(c: &Rav1dContext, state: &mut Rav1dState) -> Rav1dResu
+     ) {
+         fc.task_thread.error.store(1, Ordering::Relaxed);
+         let _ = mem::take(&mut *fc.in_cdf.try_write().unwrap());
+-        if f.frame_hdr.as_ref().unwrap().refresh_context != 0 {
+-            let _ = mem::take(&mut f.out_cdf);
+-        }
++        let _ = mem::take(&mut f.out_cdf);
+         for i in 0..7 {
+             if f.refp[i].p.frame_hdr.is_some() {
+                 let _ = mem::take(&mut f.refp[i]);
+diff --git a/rav1d/src/decode_tests.rs b/rav1d/src/decode_tests.rs
+new file mode 100644
+index 000000000..147830571
+--- /dev/null
++++ b/rav1d/src/decode_tests.rs
+@@ -0,0 +1,410 @@
++use super::*;
++use crate::include::common::bitdepth::{AsPrimitive as _, BitDepth};
++use crate::include::dav1d::headers::{DRav1d, Rav1dFrameHeader, Rav1dPixelLayout};
++use crate::include::dav1d::picture::Rav1dPicAllocator;
++use crate::src::c_arc::RawArc;
++use crate::src::strided::Strided as _;
++
++const STILL: [&[u8]; 3] = [
++    include_bytes!("testdata/still-8bit.obu"),
++    include_bytes!("testdata/still-10bit.obu"),
++    include_bytes!("testdata/still-12bit.obu"),
++];
++
++struct Decoder(Option<Dav1dContext>);
++
++impl Decoder {
++    fn new(threads: i32) -> Self {
++        Self::with_allocator(threads, Rav1dPicAllocator::default())
++    }
++
++    fn with_allocator(threads: i32, allocator: Rav1dPicAllocator) -> Self {
++        let mut settings = mem::MaybeUninit::<Dav1dSettings>::uninit();
++        // SAFETY: settings has exclusive writable storage for the complete output.
++        unsafe { dav1d_default_settings(NonNull::new(settings.as_mut_ptr()).unwrap()); }
++        // SAFETY: default_settings initializes every field.
++        let mut settings = unsafe { settings.assume_init() };
++        settings.n_threads = threads;
++        settings.max_frame_delay = threads;
++        settings.frame_size_limit = 4096;
++        settings.allocator = allocator.into();
++        let mut context = None;
++        // SAFETY: Initialized settings and exclusively owned output.
++        assert_eq!(unsafe { dav1d_open(Some(NonNull::from(&mut context)), Some(NonNull::from(&mut settings))) }.0, 0);
++        Self(context)
++    }
++
++    fn picture(&self) -> Result<Picture, i32> {
++        let mut picture = Dav1dPicture::default();
++        // SAFETY: The context is live and externally serialized; picture is exclusive output.
++        let result = unsafe { dav1d_get_picture(self.0, Some(NonNull::from(&mut picture))) }.0;
++        if result == 0 { Ok(Picture(picture)) } else { Err(result) }
++    }
++
++    fn push(&mut self, bytes: &[u8], pictures: &mut Vec<Picture>) -> Result<(), i32> {
++        let mut packet = Dav1dData::default();
++        // SAFETY: packet is exclusive output; the API owns the returned initialized allocation.
++        let raw = unsafe { dav1d_data_create(Some(NonNull::from(&mut packet)), bytes.len()) };
++        assert!(!raw.is_null());
++        // SAFETY: The allocation is writable for bytes.len(); the source is distinct immutable data.
++        unsafe { raw.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()); }
++        let result = (|| {
++            for _ in 0..32 {
++                // SAFETY: The context and packet are live and exclusively accessed by this owner.
++                let result = unsafe { dav1d_send_data(self.0, Some(NonNull::from(&mut packet))) }.0;
++                if result == 0 { return Ok(()); }
++                if result != -(EAGAIN as i32) { return Err(result); }
++                pictures.push(self.picture()?);
++            }
++            panic!("bounded packet admission did not finish")
++        })();
++        // SAFETY: The local packet retains its original owner or has been cleared by send_data.
++        unsafe { dav1d_data_unref(Some(NonNull::from(&mut packet))); }
++        result
++    }
++
++    fn drain(&mut self, pictures: &mut Vec<Picture>) -> Result<(), i32> {
++        let mut empty = 0;
++        for _ in 0..32 {
++            match self.picture() {
++                Ok(picture) => { empty = 0; pictures.push(picture); }
++                Err(error) if error == -(EAGAIN as i32) => {
++                    empty += 1;
++                    if empty == 2 { return Ok(()); }
++                }
++                Err(error) => return Err(error),
++            }
++        }
++        panic!("bounded output drain did not finish")
++    }
++
++    fn flush(&mut self) {
++        // SAFETY: The live context is exclusively accessed by this owner.
++        unsafe { dav1d_flush(self.0.unwrap()); }
++    }
++}
++
++impl Drop for Decoder {
++    fn drop(&mut self) {
++        // SAFETY: This is the sole close of the live context; close clears its handle.
++        unsafe { dav1d_close(Some(NonNull::from(&mut self.0))); }
++    }
++}
++
++struct Picture(Dav1dPicture);
++impl Drop for Picture {
++    fn drop(&mut self) {
++        // SAFETY: Each decoded picture owner is released exactly once.
++        unsafe { dav1d_picture_unref(Some(NonNull::from(&mut self.0))); }
++    }
++}
++
++#[derive(Debug, PartialEq, Eq)]
++struct Frame { size: [i32; 2], depth: i32, layout: i32, samples: Vec<u8> }
++
++impl Picture {
++    fn into_rust(mut self) -> Rav1dPicture {
++        mem::take(&mut self.0).into()
++    }
++
++    fn frame(&self) -> Frame {
++        let p = &self.0;
++        let mut samples = Vec::new();
++        let bytes = if p.p.bpc > 8 { 2 } else { 1 };
++        for plane in 0..if p.p.layout == 0 { 1 } else { 3 } {
++            let sx = usize::from(plane > 0 && p.p.layout != 3);
++            let sy = usize::from(plane > 0 && p.p.layout == 1);
++            let width = (p.p.w as usize + sx) >> sx;
++            let height = (p.p.h as usize + sy) >> sy;
++            let stride = p.stride[usize::from(plane > 0)];
++            assert!(stride.unsigned_abs() >= width * bytes);
++            for row in 0..height {
++                // SAFETY: Decoded metadata bounds each visible row; the picture retains its allocation.
++                let data = unsafe { p.data[plane].unwrap().as_ptr().cast::<u8>().offset(row as isize * stride) };
++                // SAFETY: The row is initialized, in bounds, and only read while this owner is live.
++                samples.extend_from_slice(unsafe { slice::from_raw_parts(data, width * bytes) });
++            }
++        }
++        Frame { size: [p.p.w, p.p.h], depth: p.p.bpc, layout: p.p.layout as i32, samples }
++    }
++}
++
++fn moving_frames() -> Vec<&'static [u8]> {
++    let bytes = include_bytes!("testdata/moving-8bit.ivf");
++    assert_eq!(&bytes[..4], b"DKIF");
++    let mut at = 32;
++    let mut frames = Vec::new();
++    while at < bytes.len() {
++        let len = u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
++        at += 12;
++        frames.push(&bytes[at..at + len]);
++        at += len;
++    }
++    frames
++}
++
++fn decode(packets: &[&[u8]], threads: i32) -> Vec<Frame> {
++    let mut decoder = Decoder::new(threads);
++    let mut pictures = Vec::new();
++    for bytes in packets { decoder.push(bytes, &mut pictures).unwrap(); }
++    decoder.drain(&mut pictures).unwrap();
++    drop(decoder);
++    pictures.iter().map(Picture::frame).collect()
++}
++
++#[test]
++fn invalid_tiles_are_rejected_and_flush_allows_a_new_image() {
++    for threads in [1, 4] {
++        let mut decoder = Decoder::new(threads);
++        let mut pictures = Vec::new();
++        let result = decoder.push(include_bytes!("testdata/invalid-tile.obu"), &mut pictures)
++            .and_then(|_| decoder.drain(&mut pictures));
++        assert!(result.is_err());
++        pictures.clear();
++        decoder.flush();
++        decoder.push(STILL[0], &mut pictures).unwrap();
++        decoder.drain(&mut pictures).unwrap();
++        assert_eq!(pictures.iter().map(Picture::frame).collect::<Vec<_>>(), decode(&[STILL[0]], 1));
++    }
++}
++
++#[test]
++fn independent_decoders_keep_exact_pixels_and_owned_output_after_close() {
++    let packets = moving_frames();
++    let expected = decode(&packets, 1);
++    assert_eq!(expected.len(), 6);
++    std::thread::scope(|scope| {
++        for _ in 0..4 {
++            let expected = &expected;
++            let packets = &packets;
++            scope.spawn(move || {
++                assert_eq!(decode(packets, 4), *expected);
++                for bytes in STILL { assert_eq!(decode(&[bytes], 4), decode(&[bytes], 1)); }
++            });
++        }
++    });
++}
++
++#[test]
++fn close_releases_worker_context_owners_before_returning() {
++    for (threads, drain) in [1, 4].into_iter().flat_map(|threads| [None, Some(false), Some(true)].map(|drain| (threads, drain))) {
++        let mut decoder = Decoder::new(threads);
++        // SAFETY: Transfer the single public raw owner into an Arc, then publish it once again.
++        let owner = unsafe { decoder.0.take().unwrap().into_arc() };
++        decoder.0 = Some(RawArc::from_arc(Arc::clone(&owner)));
++        let mut pictures = Vec::new();
++        if let Some(drain) = drain {
++            decoder.push(STILL[0], &mut pictures).unwrap();
++            if drain { decoder.drain(&mut pictures).unwrap(); }
++        }
++        drop(decoder);
++        for tc in owner.tc.iter() {
++            if let Rav1dContextTaskType::Worker(slot) = &tc.task {
++                assert!(slot.lock().is_none());
++            }
++        }
++        assert_eq!(Arc::strong_count(&owner), 1);
++        assert_eq!(pictures.len(), usize::from(drain == Some(true)));
++        for picture in &pictures { assert_eq!(picture.frame().depth, 8); }
++    }
++}
++
++#[derive(Default)]
++struct AllocatorState {
++    inner: Rav1dPicAllocator,
++    allocations: std::sync::atomic::AtomicUsize,
++    releases: std::sync::atomic::AtomicUsize,
++    after_close: std::sync::atomic::AtomicUsize,
++    closed: std::sync::atomic::AtomicBool,
++}
++
++unsafe extern "C" fn tracked_alloc(picture: *mut Dav1dPicture,
++    cookie: Option<SendSyncNonNull<c_void>>) -> Dav1dResult
++{
++    let cookie = cookie.unwrap().cast::<AllocatorState>();
++    // SAFETY: The test retains the synchronized allocator state through final release.
++    let state = unsafe { cookie.as_ref() };
++    // SAFETY: The decoder provides exclusive picture output; the default allocator owns each allocation.
++    let result = unsafe { (state.inner.alloc_picture_callback)(picture, state.inner.cookie) };
++    if result.0 == 0 { state.allocations.fetch_add(1, Ordering::SeqCst); }
++    result
++}
++
++unsafe extern "C" fn tracked_release(picture: *mut Dav1dPicture,
++    cookie: Option<SendSyncNonNull<c_void>>)
++{
++    let cookie = cookie.unwrap().cast::<AllocatorState>();
++    // SAFETY: The test retains the synchronized allocator state through final release.
++    let state = unsafe { cookie.as_ref() };
++    // SAFETY: Each default allocation is passed back exactly once for final release.
++    unsafe { (state.inner.release_picture_callback)(picture, state.inner.cookie); }
++    state.releases.fetch_add(1, Ordering::SeqCst);
++    if state.closed.load(Ordering::SeqCst) { state.after_close.fetch_add(1, Ordering::SeqCst); }
++}
++
++#[test]
++fn retained_picture_releases_allocator_on_another_thread_after_close() {
++    for threads in [1, 4] {
++        let state = AllocatorState::default();
++        let allocator = Rav1dPicAllocator {
++            cookie: Some(SendSyncNonNull::from_ref(&state).cast()),
++            alloc_picture_callback: tracked_alloc,
++            release_picture_callback: tracked_release,
++        };
++        let mut decoder = Decoder::with_allocator(threads, allocator);
++        let mut pictures = Vec::new();
++        decoder.push(STILL[0], &mut pictures).unwrap();
++        decoder.drain(&mut pictures).unwrap();
++        assert_eq!(pictures.len(), 1);
++        let retained = pictures.pop().unwrap().into_rust();
++        drop(decoder);
++        state.closed.store(true, Ordering::SeqCst);
++        assert!(state.allocations.load(Ordering::SeqCst) > state.releases.load(Ordering::SeqCst));
++        std::thread::spawn(move || {
++            let picture = Picture(retained.into());
++            assert_eq!(picture.frame(), decode(&[STILL[0]], 1)[0]);
++        }).join().unwrap();
++        assert_eq!(state.after_close.load(Ordering::SeqCst), 1);
++        assert_eq!(state.allocations.load(Ordering::SeqCst), state.releases.load(Ordering::SeqCst));
++    }
++}
++
++#[test]
++fn outer_thread_traits_follow_owned_components() {
++    fn shared<T: Send + Sync>() {}
++    shared::<Rav1dContext>();
++    shared::<crate::src::internal::TaskThreadDataDelayedFg>();
++    shared::<crate::include::dav1d::picture::Rav1dPicture>();
++}
++
++fn grain_input<BD: BitDepth>(width: i32, depth: u8, layout: Rav1dPixelLayout,
++    from_luma: bool, overlap: bool) -> Rav1dPicture
++{
++    let mut sequence = rav1d_parse_sequence_header(STILL[0]).unwrap().rav1d;
++    sequence.layout = layout;
++    sequence.hbd = (depth - 8) / 2;
++    let mut header = Rav1dFrameHeader::default();
++    let grain = &mut header.film_grain.data;
++    grain.seed = 12345;
++    grain.num_y_points = 2;
++    grain.y_points[..2].copy_from_slice(&[[0, 8], [255, 64]]);
++    grain.chroma_scaling_from_luma = from_luma;
++    grain.num_uv_points = if from_luma { [0; 2] } else { [2; 2] };
++    for points in &mut grain.uv_points { points[..2].copy_from_slice(&[[0, 12], [255, 72]]); }
++    grain.scaling_shift = 8;
++    grain.ar_coeff_shift = 6;
++    grain.uv_mult = [16, 32];
++    grain.uv_luma_mult = [48, 32];
++    grain.uv_offset = [7, -9];
++    grain.overlap_flag = overlap;
++    let picture = Rav1dPicAllocator::default().alloc_picture_data(width, 35,
++        Arc::new(DRav1d::from_rav1d(sequence)), Some(Arc::new(DRav1d::from_rav1d(header)))).unwrap();
++    for (plane, data) in picture.data.as_ref().unwrap().data.iter().enumerate() {
++        for (i, pixel) in data.slice_mut::<BD, _>(..).iter_mut().enumerate() {
++            *pixel = ((((i * 29 + plane * 53 + 17) & 255) << (depth - 8)) as i32).as_();
++        }
++    }
++    picture
++}
++
++fn allocation<BD: BitDepth>(picture: &Rav1dPicture) -> [Vec<BD::Pixel>; 3] {
++    picture.data.as_ref().unwrap().data.each_ref().map(|data| data.slice::<BD, _>(..).to_vec())
++}
++
++fn grain_edge_case<BD: BitDepth>(width: i32, depth: u8, layout: Rav1dPixelLayout,
++    from_luma: bool, overlap: bool)
++{
++    let input = grain_input::<BD>(width, depth, layout, from_luma, overlap);
++    let before = allocation::<BD>(&input);
++    let pad = i32::from(layout != Rav1dPixelLayout::I444 && width & 1 != 0);
++    let reference = grain_input::<BD>(width + pad, depth, layout, from_luma, overlap);
++    if pad != 0 {
++        let luma = &reference.data.as_ref().unwrap().data[0];
++        let stride = luma.pixel_stride::<BD>() as usize;
++        let mut pixels = luma.slice_mut::<BD, _>(..);
++        for row in pixels.chunks_mut(stride) {
++            row[width as usize] = row[width as usize - 1];
++        }
++    }
++    let context = rav1d_open(&Rav1dSettings { n_threads: 1, max_frame_delay: 1, ..Default::default() }).unwrap();
++    let mut expected = Rav1dPicture::default();
++    rav1d_apply_grain(&context, &mut expected, &reference).unwrap();
++    let mut serial = Rav1dPicture::default();
++    rav1d_apply_grain(&context, &mut serial, &input).unwrap();
++    assert!(allocation::<BD>(&input) == before, "serial grain changed source allocation");
++    rav1d_close(context);
++    expected.p.w = width;
++    let expected = Picture(expected.into()).frame();
++    assert_eq!(Picture(serial.into()).frame(), expected);
++    assert_ne!(expected.samples, Picture(input.clone().into()).frame().samples);
++    let barrier = std::sync::Barrier::new(2);
++    std::thread::scope(|scope| {
++        for threads in [1, 4] {
++            let (input, barrier, expected) = (&input, &barrier, &expected);
++            scope.spawn(move || {
++                let context = rav1d_open(&Rav1dSettings { n_threads: threads, max_frame_delay: 1, ..Default::default() }).unwrap();
++                let mut output = Rav1dPicture::default();
++                barrier.wait();
++                rav1d_apply_grain(&context, &mut output, input).unwrap();
++                rav1d_close(context);
++                assert_eq!(Picture(output.into()).frame(), *expected,
++                    "width={width}, depth={depth}, layout={}, from_luma={from_luma}, overlap={overlap}", layout as u8);
++            });
++        }
++    });
++    assert!(allocation::<BD>(&input) == before, "source allocation changed");
++}
++
++#[test]
++fn shared_grain_input_keeps_visible_pixels_and_padding_unchanged() {
++    for width in [1, 31, 33, 32] {
++        for layout in [Rav1dPixelLayout::I420, Rav1dPixelLayout::I422, Rav1dPixelLayout::I444] {
++            for from_luma in [false, true] {
++                for overlap in [false, true] {
++                    grain_edge_case::<BitDepth8>(width, 8, layout, from_luma, overlap);
++                    for depth in [10, 12] {
++                        grain_edge_case::<BitDepth16>(width, depth, layout, from_luma, overlap);
++                    }
++                }
++            }
++        }
++    }
++}
++
++#[test]
++fn grained_c_picture_keeps_borrowed_owners_in_both_release_orders() {
++    for release_input_first in [false, true] {
++        let template = grain_input::<BitDepth8>(33, 8, Rav1dPixelLayout::I420, true, true);
++        let original_context = rav1d_open(&Rav1dSettings { n_threads: 1, ..Default::default() }).unwrap();
++        let input = original_context.allocator.alloc_picture_data(33, 35,
++            template.seq_hdr.clone().unwrap(), template.frame_hdr.clone()).unwrap();
++        for (destination, source) in input.data.as_ref().unwrap().data.iter()
++            .zip(&template.data.as_ref().unwrap().data)
++        {
++            // SAFETY: The fresh destination is exclusive and disjoint from the retained template.
++            unsafe { destination.copy_from(source); }
++        }
++        rav1d_close(original_context);
++        let data = Arc::downgrade(input.data.as_ref().unwrap());
++        let mut source = Picture(input.into());
++        let before = source.frame();
++        let decoder = Decoder::new(4);
++        let mut output = Picture(Dav1dPicture::default());
++        // SAFETY: The live context is serialized, source retains its owners, and output is distinct exclusive storage.
++        assert_eq!(unsafe { dav1d_apply_grain(decoder.0,
++            Some(NonNull::from(&mut output.0)), Some(NonNull::from(&mut source.0))) }.0, 0);
++        assert_eq!(source.frame(), before);
++        assert_ne!(output.frame().samples, before.samples);
++        if release_input_first {
++            drop(source);
++            assert!(data.upgrade().is_none());
++            drop(decoder);
++            assert_eq!(output.frame().size, before.size);
++        } else {
++            drop(output);
++            drop(decoder);
++            assert_eq!(source.frame(), before);
++            assert!(data.upgrade().is_some());
++        }
++    }
++}
+diff --git a/rav1d/src/fg_apply.rs b/rav1d/src/fg_apply.rs
+index a56bd268e..eac7b5a5e 100644
+--- a/rav1d/src/fg_apply.rs
++++ b/rav1d/src/fg_apply.rs
+@@ -9,7 +9,6 @@ use crate::src::align::ArrayDefault;
+ use crate::src::filmgrain::Rav1dFilmGrainDSPContext;
+ use crate::src::filmgrain::FG_BLOCK_SIZE;
+ use crate::src::internal::GrainBD;
+-use crate::src::strided::Strided as _;
+ use std::cmp;
+
+ fn generate_scaling<BD: BitDepth>(bd: BD, points: &[[u8; 2]]) -> BD::Scaling {
+@@ -170,17 +169,6 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
+
+     let bh = cmp::min(h - row * FG_BLOCK_SIZE, FG_BLOCK_SIZE) + ss_y >> ss_y;
+
+-    // extend padding pixels
+-    if out.p.w as usize & ss_x != 0 {
+-        let luma = in_data[0].with_offset::<BD>();
+-        let luma = luma + (row * FG_BLOCK_SIZE) as isize * luma.pixel_stride::<BD>();
+-        for y in 0..bh {
+-            let luma = luma + (y as isize * (luma.pixel_stride::<BD>() << ss_y));
+-            let padding = &mut *(luma + (out.p.w as usize - 1)).slice_mut::<BD>(2);
+-            padding[1] = padding[0];
+-        }
+-    }
+-
+     let layout = r#in.p.layout.try_into().unwrap();
+     if data.chroma_scaling_from_luma {
+         for pl in 0..2 {
+@@ -195,6 +183,7 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
+                 bh,
+                 row,
+                 &in_data[0],
++                w,
+                 pl != 0,
+                 is_id,
+                 bd,
+@@ -214,6 +203,7 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
+                     bh,
+                     row,
+                     &in_data[0],
++                    w,
+                     pl != 0,
+                     is_id,
+                     bd,
+diff --git a/rav1d/src/filmgrain.rs b/rav1d/src/filmgrain.rs
+index 52d5eae55..8c39e0489 100644
+--- a/rav1d/src/filmgrain.rs
++++ b/rav1d/src/filmgrain.rs
+@@ -175,6 +175,7 @@ wrap_fn_ptr!(pub unsafe extern "C" fn fguv_32x32xn(
+     _dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+     _src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+     _luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
++    luma_width: usize,
+ ) -> ());
+
+ impl fguv_32x32xn::Fn {
+@@ -190,6 +191,7 @@ impl fguv_32x32xn::Fn {
+         bh: usize,
+         row_num: usize,
+         luma: &Rav1dPictureDataComponent,
++        luma_width: usize,
+         is_uv: bool,
+         is_id: bool,
+         bd: BD,
+@@ -235,6 +237,7 @@ impl fguv_32x32xn::Fn {
+                 dst_row,
+                 src_row,
+                 luma_row,
++                luma_width,
+             )
+         }
+     }
+@@ -701,6 +704,7 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
+     bh: usize,
+     row_num: usize,
+     luma_row: Rav1dPictureDataComponentOffset,
++    luma_width: usize,
+     is_uv: bool,
+     is_id: bool,
+     is_sx: bool,
+@@ -762,7 +766,7 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
+
+         let luma_row_uv = |y| {
+             let row = luma_row + (y << sy) as isize * luma_row.pixel_stride::<BD>();
+-            (row + (bx << sx)).slice::<BD>(bw << sx)
++            (row + (bx << sx)).slice::<BD>(cmp::min(bw << sx, luma_width - (bx << sx)))
+         };
+         let src_row_uv = |y| {
+             let row = src_row + y as isize * src_row.pixel_stride::<BD>();
+@@ -776,7 +780,8 @@ fn fguv_32x32xn_rust<BD: BitDepth>(
+         let noise_uv = |src: BD::Pixel, grain, luma: &[BD::Pixel]| {
+             let mut avg = luma[0];
+             if is_sx {
+-                avg = ((avg.as_::<c_int>() + luma[1].as_::<c_int>() + 1) >> 1).as_::<BD::Pixel>();
++                let next = luma.get(1).copied().unwrap_or(avg);
++                avg = ((avg.as_::<c_int>() + next.as_::<c_int>() + 1) >> 1).as_::<BD::Pixel>();
+             }
+             let mut val = avg.as_::<c_int>();
+             if !data.chroma_scaling_from_luma {
+@@ -880,6 +885,7 @@ unsafe extern "C" fn fguv_32x32xn_c_erased<
+     dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+     src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+     luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
++    luma_width: usize,
+ ) {
+     let [dst_row, src_row, luma_row] = [dst_row, src_row, luma_row].map(|row| {
+         // SAFETY: Was passed as `FFISafe::new(_)` in `fguv_32x32xn::Fn::call`.
+@@ -905,6 +911,7 @@ unsafe extern "C" fn fguv_32x32xn_c_erased<
+         bh,
+         row_num,
+         luma_row,
++        luma_width,
+         uv_pl != 0,
+         is_id,
+         IS_SX,
+@@ -1157,6 +1164,7 @@ mod neon {
+         _dst_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+         _src_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
+         _luma_row: *const FFISafe<Rav1dPictureDataComponentOffset>,
++        _luma_width: usize,
+     ) {
+         let dst_row = dst_row_ptr.cast();
+         let src_row = src_row_ptr.cast();
+@@ -1388,3 +1396,7 @@ impl Rav1dFilmGrainDSPContext {
+         Self::default::<BD>().init::<BD>(flags)
+     }
+ }
++
++#[cfg(test)]
++#[path = "filmgrain_tests.rs"]
++mod tests;
+diff --git a/rav1d/src/filmgrain_tests.rs b/rav1d/src/filmgrain_tests.rs
+new file mode 100644
+index 000000000..2c3750916
+--- /dev/null
++++ b/rav1d/src/filmgrain_tests.rs
+@@ -0,0 +1,67 @@
++use super::*;
++use crate::include::common::bitdepth::{BitDepth8, BitDepth16};
++use crate::src::align::{Align64, ArrayDefault};
++
++fn chroma_edge<BD: BitDepth>(width: usize, bd: BD) {
++    let shift = bd.bitdepth() - 8;
++    let mut luma = Align64(std::array::from_fn::<_, 64, _>(|i| {
++        ((((i * 17 + 23) & 255) as i32) << shift).as_::<BD::Pixel>()
++    }));
++    let mut source = Align64(std::array::from_fn::<_, 64, _>(|i| {
++        ((((i * 7 + 61) & 255) as i32) << shift).as_::<BD::Pixel>()
++    }));
++    let original_luma = luma.0;
++    let original_source = source.0;
++    let mut padded = luma;
++    padded[width] = padded[width - 1];
++    let mut scaling = <BD::Scaling as ArrayDefault>::default();
++    for (i, value) in scaling.as_mut().iter_mut().enumerate() {
++        *value = ((i >> shift) / 2 + 1) as u8;
++    }
++    let grain = [[2i32.as_::<BD::Entry>(); GRAIN_WIDTH]; GRAIN_HEIGHT + 1];
++
++    for from_luma in [false, true] {
++        for subsampled_y in [false, true] {
++            let mut output = Align64([BD::Pixel::from(0); 64]);
++            let mut reference = output;
++            let data = Rav1dFilmGrainData {
++                seed: 12345,
++                scaling_shift: 5,
++                chroma_scaling_from_luma: from_luma,
++                uv_luma_mult: [48, 32],
++                uv_mult: [16, 32],
++                uv_offset: [7, -9],
++                overlap_flag: true,
++                ..Default::default()
++            };
++            {
++                // SAFETY: Each aligned buffer is live and accessed only through
++                // its component until this scope ends; all buffers are disjoint.
++                let [luma, source, padded, output, reference] = unsafe {
++                    [&mut luma.0, &mut source.0, &mut padded.0, &mut output.0, &mut reference.0]
++                        .map(|pixels| Rav1dPictureDataComponent::wrap_buf::<BD>(pixels, 64))
++                };
++                for (destination, input, luma_width) in [
++                    (&output, &luma, width),
++                    (&reference, &padded, width + 1),
++                ] {
++                    fguv_32x32xn_rust::<BD>(destination.with_offset::<BD>(), source.with_offset::<BD>(),
++                        &data, (width + 1) >> 1, &scaling, &grain, 1, 0,
++                        input.with_offset::<BD>(), luma_width, false, false, true, subsampled_y, bd);
++                }
++            }
++            assert!(output.0 == reference.0, "odd luma edge differs from explicit padding");
++            assert!(luma.0 == original_luma, "luma source allocation changed");
++            assert!(source.0 == original_source, "chroma source allocation changed");
++        }
++    }
++}
++
++#[test]
++fn odd_luma_edges_match_explicit_padding_without_source_writes() {
++    for width in [1, 33] {
++        chroma_edge::<BitDepth8>(width, BitDepth8::from_c(255));
++        chroma_edge::<BitDepth16>(width, BitDepth16::from_c(1023));
++        chroma_edge::<BitDepth16>(width, BitDepth16::from_c(4095));
++    }
++}
+diff --git a/rav1d/src/internal.rs b/rav1d/src/internal.rs
+index b30f86067..b0a76d32b 100644
+--- a/rav1d/src/internal.rs
++++ b/rav1d/src/internal.rs
+@@ -304,11 +304,6 @@ pub(crate) struct TaskThreadDataDelayedFg {
+     pub grain: Grain,
+ }
+
+-// TODO(SJC): Remove when TaskThreadDataDelayedFg is thread-safe
+-unsafe impl Send for TaskThreadDataDelayedFg {}
+-// TODO(SJC): Remove when TaskThreadDataDelayedFg is thread-safe
+-unsafe impl Sync for TaskThreadDataDelayedFg {}
+-
+ #[derive(Default)]
+ #[repr(C)]
+ pub(crate) struct TaskThreadData {
+@@ -339,7 +334,7 @@ pub(crate) struct Rav1dContextRefs {
+
+ pub(crate) enum Rav1dContextTaskType {
+     /// Worker thread in a multi-threaded context.
+-    Worker(JoinHandle<()>),
++    Worker(Mutex<Option<JoinHandle<()>>>),
+     /// Main thread in a single-threaded context. There are no worker threads so
+     /// we need to store a Rav1dTaskContext for work that requires it.
+     // This Rav1dTaskContext is heap-allocated because we don't want to bloat
+@@ -436,11 +431,6 @@ pub struct Rav1dContext {
+     pub(crate) picture_pool: Arc<MemPool<u8>>,
+ }
+
+-// TODO(SJC): Remove when Rav1dContext is thread-safe
+-unsafe impl Send for Rav1dContext {}
+-// TODO(SJC): Remove when Rav1dContext is thread-safe
+-unsafe impl Sync for Rav1dContext {}
+-
+ #[derive(Default)]
+ #[repr(C)]
+ pub struct Rav1dTask {
+diff --git a/rav1d/src/lib.rs b/rav1d/src/lib.rs
+index 2726492a3..d6535cb46 100644
+--- a/rav1d/src/lib.rs
++++ b/rav1d/src/lib.rs
+@@ -73,6 +73,9 @@ use to_method::To as _;
+ #[cfg(test)]
+ #[path = "ownership_tests.rs"]
+ mod ownership_tests;
++#[cfg(test)]
++#[path = "decode_tests.rs"]
++mod decode_tests;
+
+ #[cold]
+ fn init_internal() {
+@@ -266,7 +269,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
+                     .name(format!("rav1d-worker-{n}"))
+                     .spawn(|| rav1d_worker_task(thread_data_copy))
+                     .unwrap();
+-                Rav1dContextTaskType::Worker(handle)
++                Rav1dContextTaskType::Worker(Mutex::new(Some(handle)))
+             } else {
+                 Rav1dContextTaskType::Single(Mutex::new(Box::new(Rav1dTaskContext::new(
+                     thread_data_copy,
+@@ -300,10 +303,9 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
+
+     if c.allocator.is_default() {
+         let c = Arc::get_mut(&mut c).unwrap();
+-        // SAFETY: When `allocator.is_default()`, `allocator.cookie` should be a `&c.picture_pool`.
+-        // See `Rav1dPicAllocator::cookie` docs for more, including an analysis of the lifetime.
+-        // Note also that we must do this after we created the `Arc` so that `c` has a stable address.
+-        c.allocator.cookie = Some(SendSyncNonNull::from_ref(&c.picture_pool).cast::<c_void>());
++        let pool = NonNull::new(Arc::as_ptr(&c.picture_pool).cast_mut()).unwrap();
++        // SAFETY: The context and each allocated picture retain this thread-safe pool.
++        c.allocator.cookie = Some(unsafe { SendSyncNonNull::new_unchecked(pool) }.cast());
+     }
+     let c = c;
+
+@@ -311,7 +313,7 @@ pub(crate) fn rav1d_open(s: &Rav1dSettings) -> Rav1dResult<Arc<Rav1dContext>> {
+         if let Rav1dContextTaskType::Worker(handle) = &tc.task {
+             // Unpark each thread once we set its `thread_data.c`.
+             *tc.thread_data.c.lock() = Some(Arc::clone(&c));
+-            handle.thread().unpark();
++            handle.lock().as_ref().unwrap().thread().unpark();
+         }
+     }
+
+@@ -735,6 +737,12 @@ pub(crate) fn rav1d_close(c: Arc<Rav1dContext>) {
+     let c = &*c;
+     rav1d_flush(c);
+     c.tell_worker_threads_to_die();
++    for tc in c.tc.iter() {
++        if let Rav1dContextTaskType::Worker(slot) = &tc.task {
++            let handle = slot.lock().take();
++            if let Some(handle) = handle { let _ = handle.join(); }
++        }
++    }
+ }
+
+ /// # Safety
+diff --git a/rav1d/src/ownership_tests.rs b/rav1d/src/ownership_tests.rs
+index 2886e69b7..f78d21b22 100644
+--- a/rav1d/src/ownership_tests.rs
++++ b/rav1d/src/ownership_tests.rs
+@@ -60,7 +60,11 @@ fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
+     use crate::src::mem::MemPool;
+     for pool in [None, Some(Arc::new(MemPool::<u8>::default()))] {
+         let mut allocator = Rav1dPicAllocator::default();
+-        allocator.cookie = pool.as_ref().map(|pool| SendSyncNonNull::from_ref(pool).cast());
++        allocator.cookie = pool.as_ref().map(|pool| {
++            let ptr = NonNull::new(Arc::as_ptr(pool).cast_mut()).unwrap();
++            // SAFETY: The test retains the synchronized pool through allocation and release.
++            unsafe { SendSyncNonNull::new_unchecked(ptr) }.cast()
++        });
+         let mut picture = Dav1dPicture::from(Rav1dPicture {
+             p: Rav1dPictureParameters { w: 8, h: 8, bpc: 8, ..Default::default() },
+             ..Default::default()
+@@ -79,6 +83,30 @@ fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
+     }
+ }
+
++#[test]
++fn retained_picture_allocator_keeps_its_pool_after_context_owner_drops() {
++    use crate::include::dav1d::picture::Rav1dPicAllocator;
++    use crate::src::mem::MemPool;
++    let pool = Arc::new(MemPool::<u8>::default());
++    let weak = Arc::downgrade(&pool);
++    let ptr = NonNull::new(Arc::as_ptr(&pool).cast_mut()).unwrap();
++    let allocator = Rav1dPicAllocator {
++        // SAFETY: The initial pool and then the source picture retain the Arc allocation.
++        cookie: Some(unsafe { SendSyncNonNull::new_unchecked(ptr) }.cast()),
++        ..Default::default()
++    };
++    let sequence = Arc::new(rav1d_parse_sequence_header(include_bytes!("testdata/still-8bit.obu")).unwrap());
++    let first = allocator.alloc_picture_data(8, 8, sequence.clone(), None).unwrap();
++    drop(pool);
++    assert_eq!(weak.strong_count(), 1);
++    let second = first.data.as_ref().unwrap().allocator.alloc_picture_data(8, 8, sequence, None).unwrap();
++    assert_eq!(weak.strong_count(), 2);
++    drop(first);
++    assert_eq!(weak.strong_count(), 1);
++    drop(second);
++    assert!(weak.upgrade().is_none());
++}
++
+ #[cfg(not(debug_assertions))]
+ unsafe extern "C" fn free_byte(ptr: *const u8, cookie: Option<SendSyncNonNull<c_void>>) {
+     // SAFETY: the tests retain the AtomicUsize cookie through final unref and
+diff --git a/rav1d/src/picture.rs b/rav1d/src/picture.rs
+index 65412d854..a4884b53f 100644
+--- a/rav1d/src/picture.rs
++++ b/rav1d/src/picture.rs
+@@ -99,7 +99,7 @@ impl Rav1dPictureParameters {
+ /// # Safety
+ ///
+ /// * `p_c` must be from a `&mut Dav1dPicture`.
+-/// * `cookie`, when present, must be from a live `&Arc<MemPool<u8>>`.
++/// * `cookie`, when present, must come from `Arc::as_ptr` of a live `MemPool<u8>` owner.
+ unsafe extern "C" fn dav1d_default_picture_alloc(
+     p_c: *mut Dav1dPicture,
+     cookie: Option<SendSyncNonNull<c_void>>,
+@@ -124,8 +124,12 @@ unsafe extern "C" fn dav1d_default_picture_alloc(
+
+     let pool = match cookie {
+         Some(pool) => {
+-            // SAFETY: A non-null cookie points to the live context pool owner.
+-            unsafe { pool.cast::<Arc<MemPool<u8>>>().as_ref() }.clone()
++            let pool = pool.cast::<MemPool<u8>>().as_ptr().as_ptr();
++            // SAFETY: The context or source picture retains an Arc owner with this provenance.
++            unsafe {
++                Arc::increment_strong_count(pool);
++                Arc::from_raw(pool)
++            }
+         }
+         None => Arc::default(),
+     };
+diff --git a/rav1d/src/testdata/invalid-tile.obu b/rav1d/src/testdata/invalid-tile.obu
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ffef1e02ffb99e3c83dc185b4a7a060ff5877f6
+GIT binary patch
+literal 355
+zcmV-p0i6C40165K0006f?rnU)ATrVd5CE+JFv18Vy5JzssK24gMCwZis>ydJr?aqM
+zc(T5;{!g#`7`SaF>s&RF;=vp@H-2e@b4LyxT@(zADAw9SRDK{~tG<^+I%3hhC11a6
+zC!z}Tn5R8xf9AOqi~2qh9T*Xk8a4-N6~>#-c0rwqS++z)ZSP%!$e@i^SuexgL(4;#
+z8b(tz^C#lKKHR+@mGFS}F<fujc0bm~#mdh<82!U$;GCyy6u}TPyl{E}3Fe3VxXG-v
+zPcdgA{aJz{h=|!+OMP8~L<k}6Wy$XR+3I2n4@$hOBo_!Y>sQKz`HP?eF>_8g={Ui=
+zqh<4?{x@RlgXL!0<s9qnYDpD7+u@$!2Nkw%r)7PvzY6LjYgK<BxIENWve`pe#UHSD
+zrNxkti4Z7B&+mIlL5y?=d5w1iozWHiSN<c=cQtninC{`z7+kBfgG2s7DpKYC44N(4
+Bswn^f
+
+literal 0
+HcmV?d00001
+
+diff --git a/rav1d/src/testdata/moving-8bit.ivf b/rav1d/src/testdata/moving-8bit.ivf
+new file mode 100644
+index 0000000000000000000000000000000000000000..a0b4692d4b8e4383c97cff5f43795d9843f30724
+GIT binary patch
+literal 979
+zcmZ?q_H<)lP+)KjGcZ(OkYHe8U|?WmU|?WlfPiEW2MUB3xVRV?7?{-G<<=ZfFuKGf
+zz_6CV;1Gw(t_KR|SL|PS%H@?e`>K=W>dQB8h_BeRZ}UI@^?xLG<f^@nF`fA6pp3bB
+zU1oE!JD+T<2v3j3wOdXhbqa~A_f2=PO1ij5HGY4N`Xa8+GnU(C)IZxP(*4U$P*y^4
+zl9U;HmguqB=gS=Dc1CV<am{@n+k9d{Z+N8s;k(YKou^B=1)F?Ue{{g^&R+Sc9~!<H
+z#^m2Bv%hxy=&AE|5`Pb;J(#mRN93S@@t%SzM$TvLe|DT)v&G*qUFmORlTt^=&1mo1
+z*k%_F#kZ*^-~GAyDv68VYtI@LaSoH$;ip=Db}wKuEcP>hX>oA(;?&Pe{+TDeZho3}
+z>#5A^w^^Q|cDEnSd&n-jEpK^h?YjM6UnysY)+_9=xe~VNrgOwm`3>buk4~7-DWKtb
+z{(ZHlV^0Z3Wp6q2+>4@r!v85>C^s$VnDOr6Wr>*8o12~gIcfzx{l_!Q3L5+%AjDu~
+zX25))fq}toBRH739&j*7|6!B78!xdUV!Bw&|0#<Xsw@eVef9nS*WDdI3fjAlKF!&0
+zD!9QE6ie_(Gcq(_J;=hq;I<86%HKG%)pB2sSEiXhJo?k$e)jbDo?owMCNXQTV&gwL
+z>4_Nw0|PU{03!o7CKeV3wgU{4oH#Ug9nfIde`U9AxKaDu_BkR^>We166nk@N$~nn@
+zM*?-4nPk6DI@{pG$N)}D5Ragwo83$T3|ko-nZW7h$ir#2S41k5FS4sDEiz`Ew4$Mj
+zukOz5e@ir6-qqhY$h;}5XtC?;RV|ZynCzcR+*Vxbeq3^8;j!f2#s4lFi*DTcvN^Gf
+zQ(m!U+s!8t>uZf0n74X8OFI8wDwt_Oti5FP(ZnqwhD+@0XKYpE7x>t<R_A`<nIn@{
+zE=<c8aI+Wm7xmcrG`CmGwAFe#^W&mUiQg)Mx7x1oT6<V{b}jh){|AHL(F>=Jvafh^
+za=}``qWJ~|`|Q(QH*b=-v$BKBs+vP1j%oetCx;KaO1V27Y|mj$y=eX}WUtb;OSi1L
+zLT+B%!q@#k?d0vSWoN2|{WLG_nZR&n;o^%2wT_<^;a$VMC*5l0@yC`|#ZKv!PsvJi
+z*Q?wsJkx$6Lw&;W?P-71OWu4uYT#Sh)h8b-y`pmm+Yb%lFoWs{aRvqkRz%DQLlOwv
+P0Z@2qFfed1^b`O9eMpX`
+
+literal 0
+HcmV?d00001
+
+diff --git a/rav1d/src/testdata/still-10bit.obu b/rav1d/src/testdata/still-10bit.obu
+new file mode 100644
+index 0000000000000000000000000000000000000000..521669bcfba3ecf2f9ffcd53874223799c51f5c0
+GIT binary patch
+literal 150
+zcmV;H0BQdc0165K0004>`L*+afHH*v5CFgcX`}!sy5JzhVeh}%t=-EaFRJ%OjE6aT
+zt>QejnqjNE`#XvF`|+PR*hAL6E8WP$0cYCQ7JzFXD7a)lsT!KrPaP7X*Z%D^1fUxf
+zx2z-$|1#yEq)cP(Onay)_ey2;woir^S6U9vksBPs0!Vt_-dH5t<atmnYHkF0wXllc
+EKC_ue+W-In
+
+literal 0
+HcmV?d00001
+
+diff --git a/rav1d/src/testdata/still-12bit.obu b/rav1d/src/testdata/still-12bit.obu
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a2d2105cd3cd4ff4ed40a4252c8a4809b75f64f
+GIT binary patch
+literal 146
+zcmV;D0B!#g0165~0004>`L*-L5Hf)Q5CFgcFu(vPy5JzhU|*nqt96hqItZLg^-znl
+z?+i@9ZdLQ&4Lp8%<9231t37Mdz1)m1lKP0zfk@0^xk=HpTQ|r|VU5xGFJ!toZGm8p
+zZ9=%~!j_nIQ?3}S<5|MYi|fC}r=NX1?`S<V`ya759!<QOXQ@R9H#P>|-vFQItikL>
+A{r~^~
+
+literal 0
+HcmV?d00001
+
+diff --git a/rav1d/src/testdata/still-8bit.obu b/rav1d/src/testdata/still-8bit.obu
+new file mode 100644
+index 0000000000000000000000000000000000000000..bec63d19d37c652d1770d5602cd8a515382c7543
+GIT binary patch
+literal 146
+zcmV;D0B!#g0165K0004>`L*)^fHHvr5CFgc5I_JZy5JzmXF$6KViHdHSWBh+?#5Il
+zi2%Qp3w^P-8Z<B^tmS*yC|ZgTN!>qmn`H6p5r1f+d;gzN$YOn;;{)wVb<O5o6|1X}
+zx|$R7e2BmCfU+^3Aijmg*W8s&ufIE-Q~P`OhrE2q?rGRS4q@V;5!cU@s56H6jn8~W
+A?f?J)
+
+literal 0
+HcmV?d00001
+
+diff --git a/rav1d/src/testdata/README.md b/rav1d/src/testdata/README.md
+new file mode 100644
+index 000000000..32829f0a9
+--- /dev/null
++++ b/rav1d/src/testdata/README.md
+@@ -0,0 +1,25 @@
++# Decoder regression fixtures
++
++[Vendored decoder](../../../README.md#av1-decoder-portability)
++
++The healthy fixtures are synthetic AV1 media retained for Capy's decoder
++ownership tests. They contain no user artwork. The original encoder command and
++version were not retained. Stream metadata is verified with FFmpeg's `ffprobe`;
++the tests compare visible pixels across independent decoder contexts and retain
++picture owners after close.
++
++`invalid-tile.obu` is the fixed rejected-tile sample retained with the decoder
++cleanup regression. Its bytes remain fixed; the tests require rejection, flush
++and successful reuse with a healthy image.
++
++| File | Bytes | Content | SHA-256 |
++| --- | ---: | --- | --- |
++| `moving-8bit.ivf` | 979 | Six 32 × 24 I420 8-bit frames | `9e67ed8a85aa6f291e2dcddc323dfb980b1d6a5115d4d1b3c3bfae216d0b6a2e` |
++| `still-8bit.obu` | 146 | 16 × 16 I420 8-bit still | `02d57af3443d653a213f3107bdc8e5c2dc60dec4f663084b32a100ea6cf238f9` |
++| `still-10bit.obu` | 150 | 16 × 16 I420 10-bit still | `6b0a8eb33473b3e3db696d0f9a5e35d035a148f3e99e4a5838de103614ac7bf4` |
++| `still-12bit.obu` | 146 | 16 × 16 I420 12-bit still | `a5ea160aa217b9a4ece878355e6182046f87d76faba3ffe4688c169550b8280c` |
++| `invalid-tile.obu` | 355 | Rejected tile data | `724f8e37b211abae18870ead803e340ecdb3d44aeab69db48ff96affcd43750f` |
++
++Grain edge tests allocate their own initialized planes and explicit padded
++references, covering I420, I422 and I444 at 8, 10 and 12 bits without relying on
++encoded grain metadata.

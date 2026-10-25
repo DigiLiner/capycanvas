@@ -99,7 +99,7 @@ impl Rav1dPictureParameters {
 /// # Safety
 ///
 /// * `p_c` must be from a `&mut Dav1dPicture`.
-/// * `cookie`, when present, must be from a live `&Arc<MemPool<u8>>`.
+/// * `cookie`, when present, must come from `Arc::as_ptr` of a live `MemPool<u8>` owner.
 unsafe extern "C" fn dav1d_default_picture_alloc(
     p_c: *mut Dav1dPicture,
     cookie: Option<SendSyncNonNull<c_void>>,
@@ -124,8 +124,12 @@ unsafe extern "C" fn dav1d_default_picture_alloc(
 
     let pool = match cookie {
         Some(pool) => {
-            // SAFETY: A non-null cookie points to the live context pool owner.
-            unsafe { pool.cast::<Arc<MemPool<u8>>>().as_ref() }.clone()
+            let pool = pool.cast::<MemPool<u8>>().as_ptr().as_ptr();
+            // SAFETY: The context or source picture retains an Arc owner with this provenance.
+            unsafe {
+                Arc::increment_strong_count(pool);
+                Arc::from_raw(pool)
+            }
         }
         None => Arc::default(),
     };

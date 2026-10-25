@@ -173,6 +173,24 @@ must agree. [Function-address equality can return false for the same function](h
 Identified callbacks reuse the context pool; otherwise each picture owns its
 pool. Allocation and release remain valid in either case, with no C ABI change.
 
+`rav1d-worker-ownership.patch` removes the context and delayed-grain blanket
+thread-trait assertions. Owned plane pointers carry the narrower thread-safety
+contract; allocator storage must be exclusive, and callback state must support
+release from another thread after context close. The default cookie points to
+the pool allocation retained by each picture, so a retained picture can allocate
+grain output after its original context closes. Close joins workers after
+signalling shutdown and releasing the task lock.
+
+Submission error cleanup releases the output CDF even when frame exit has
+already cleared the frame header. Chroma grain duplicates an odd-width luma
+edge locally without writing to shared source padding. Fixed decode, recovery,
+retained-picture and parallel-grain regressions exercise these paths; small
+allocator and chroma-edge tests also run under Miri. The
+[fixture manifest](rav1d/src/testdata/README.md) records their provenance and
+hashes. These checks cover the executed ownership and edge paths, not every
+decoder schedule, allocation failure or external callback. Assembly stays
+disabled, and Capy's adapter still requests one decode thread.
+
 ## WebP entropy-table admission
 
 `image-webp` is the published 0.2.4 crate, retaining its MIT/Apache licenses.

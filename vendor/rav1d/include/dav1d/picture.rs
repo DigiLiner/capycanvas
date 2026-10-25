@@ -134,7 +134,7 @@ pub struct Rav1dPictureDataComponentInner {
     /// even if [`Self::stride`] is negative.
     ///
     /// It is aligned to [`RAV1D_PICTURE_ALIGNMENT`].
-    ptr: NonNull<u8>,
+    ptr: SendSyncNonNull<u8>,
 
     /// The length of [`Self::ptr`] in [`u8`] bytes.
     ///
@@ -156,7 +156,8 @@ impl Rav1dPictureDataComponentInner {
             None => {
                 return Self {
                     // Ensure it is aligned enough.
-                    ptr: NonNull::<AlignedPixelChunk>::dangling().cast(),
+                    // SAFETY: Empty storage is never dereferenced.
+                    ptr: unsafe { SendSyncNonNull::new_unchecked(NonNull::<AlignedPixelChunk>::dangling().cast()) },
                     len: 0,
                     stride,
                 };
@@ -180,6 +181,9 @@ impl Rav1dPictureDataComponentInner {
         };
         // Guaranteed by `Dav1dPicAllocator::alloc_picture_callback`.
         assert!(len % RAV1D_PICTURE_MULTIPLE == 0);
+        // SAFETY: The allocator transfers exclusive initialized storage until release;
+        // subsequent access is disjoint and release supports any owning thread.
+        let ptr = unsafe { SendSyncNonNull::new_unchecked(ptr) };
         Self { ptr, len, stride }
     }
 
@@ -194,6 +198,8 @@ impl Rav1dPictureDataComponentInner {
         let len = buf.len();
         assert!(len % RAV1D_PICTURE_GUARANTEED_MULTIPLE == 0);
         let stride = (stride * mem::size_of::<BD::Pixel>()) as isize;
+        // SAFETY: The caller retains exclusive storage through all component uses.
+        let ptr = unsafe { SendSyncNonNull::new_unchecked(ptr) };
         Self { ptr, len, stride }
     }
 }
@@ -212,9 +218,9 @@ unsafe impl AsMutPtr for Rav1dPictureDataComponentInner {
         // Normally we'd store this as a slice so the compiler would know,
         // but since it's a ptr due to `DisjointMut`, we explicitly assume it here.
         // SAFETY: We already checked this in `Self::new`.
-        unsafe { assume(this.ptr.cast::<AlignedPixelChunk>().is_aligned()) };
+        unsafe { assume(this.ptr.as_ptr().cast::<AlignedPixelChunk>().is_aligned()) };
 
-        this.ptr.as_ptr()
+        this.ptr.as_ptr().as_ptr()
     }
 
     #[inline] // Inline so callers can see the assume.
@@ -576,6 +582,9 @@ pub struct Dav1dPicAllocator {
     /// and with a pixel width/height multiple of 128 pixels.
     /// Any allocated memory area should also be padded by [`DAV1D_PICTURE_ALIGNMENT`] bytes.
     /// [`data`]`[1]` and [`data`]`[2]` must share the same [`stride`]`[1]`.
+    /// The planes must be disjoint and exclusively accessible through the
+    /// returned picture data until release. Independent live allocations must
+    /// not overlap, and their storage must not be reused before release.
     ///
     /// # Safety
     ///
@@ -637,12 +646,12 @@ pub struct Dav1dPicAllocator {
     ///
     /// # Safety
     ///
-    /// If frame threading is used, accesses to `cookie` must be thread-safe.
+    /// Accesses to `cookie` must be thread-safe. Contexts and pictures may move
+    /// between threads even when frame threading is disabled.
     ///
-    /// If frame threading is used, this function may be called by the main thread
-    /// (the thread which calls [`dav1d_get_picture`]),
-    /// or any of the frame threads and thus must be thread-safe.
-    /// If frame threading is not used, this function will only be called on the main thread.
+    /// This function may run on any thread owning a picture, including after the
+    /// context closes. Independent pictures may be released concurrently.
+    /// `cookie` and `allocator_data` must remain valid until final picture release.
     ///
     /// # Args
     ///
@@ -680,21 +689,11 @@ pub(crate) struct Rav1dPicAllocator {
     ///
     /// # Safety
     ///
-    /// For the default callbacks, a non-null cookie points to a live
-    /// `Arc<MemPool<u8>>` through allocation. A null cookie creates a pool owned
-    /// by the allocated picture. Pictures clone the pool owner; release does
-    /// not dereference this cookie.
-    /// Context-pool cookies point to [`Rav1dContext::picture_pool`] inside the
-    /// stable context Arc and are used while that context remains borrowed.
-    ///
-    /// Note that this is an `&Arc<MemPool<u8>` turned into a raw pointer,
-    /// not an [`Arc::into_raw`] of that [`Arc`].
-    /// This is because storing the [`Arc`] would require C to
-    /// free data owned by a [`Dav1dPicAllocator`] potentially,
-    /// which it may not do, as there are no current APIs for doing so.
-    ///
-    /// [`Rav1dContext::picture_pool`]: crate::src::internal::Rav1dContext::picture_pool
-    /// [`Rav1dContext`]: crate::src::internal::Rav1dContext
+    /// For the default callbacks, a non-null cookie comes from `Arc::as_ptr`
+    /// of a pool retained by the context or a source picture. Allocation clones
+    /// that owner into the new picture, so copied allocator cookies remain valid
+    /// after context close. A null cookie creates a picture-owned pool.
+    /// Release uses the picture's pool owner without dereferencing this cookie.
     pub cookie: Option<SendSyncNonNull<c_void>>,
 
     /// See [`Dav1dPicAllocator::alloc_picture_callback`].
@@ -703,8 +702,9 @@ pub(crate) struct Rav1dPicAllocator {
     ///
     /// `pic` is passed as a `&mut`.
     ///
-    /// If frame threading is used, accesses to [`Self::cookie`] must be thread-safe,
-    /// i.e. [`Self::cookie`] must be [`Send`]` + `[`Sync`].
+    /// Accesses to [`Self::cookie`] must be thread-safe. The callback and its
+    /// opaque allocation state must remain valid through final picture release,
+    /// including release from another thread or after the context closes.
     pub alloc_picture_callback: unsafe extern "C" fn(
         pic: *mut Dav1dPicture,
         cookie: Option<SendSyncNonNull<c_void>>,
@@ -716,8 +716,9 @@ pub(crate) struct Rav1dPicAllocator {
     ///
     /// `pic` is passed as a `&mut`.
     ///
-    /// If frame threading is used, accesses to [`Self::cookie`] must be thread-safe,
-    /// i.e. [`Self::cookie`] must be [`Send`]` + `[`Sync`].
+    /// Accesses to [`Self::cookie`] must be thread-safe. The callback and its
+    /// opaque allocation state must remain valid through final picture release,
+    /// including release from another thread or after the context closes.
     pub release_picture_callback:
         unsafe extern "C" fn(pic: *mut Dav1dPicture, cookie: Option<SendSyncNonNull<c_void>>) -> (),
 }

@@ -60,7 +60,11 @@ fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
     use crate::src::mem::MemPool;
     for pool in [None, Some(Arc::new(MemPool::<u8>::default()))] {
         let mut allocator = Rav1dPicAllocator::default();
-        allocator.cookie = pool.as_ref().map(|pool| SendSyncNonNull::from_ref(pool).cast());
+        allocator.cookie = pool.as_ref().map(|pool| {
+            let ptr = NonNull::new(Arc::as_ptr(pool).cast_mut()).unwrap();
+            // SAFETY: The test retains the synchronized pool through allocation and release.
+            unsafe { SendSyncNonNull::new_unchecked(ptr) }.cast()
+        });
         let mut picture = Dav1dPicture::from(Rav1dPicture {
             p: Rav1dPictureParameters { w: 8, h: 8, bpc: 8, ..Default::default() },
             ..Default::default()
@@ -77,6 +81,30 @@ fn default_picture_allocator_owns_storage_with_or_without_a_context_pool() {
         unsafe { dav1d_picture_unref(Some(NonNull::from(&mut picture))); }
         if let Some(pool) = &pool { assert_eq!(Arc::strong_count(pool), 1); }
     }
+}
+
+#[test]
+fn retained_picture_allocator_keeps_its_pool_after_context_owner_drops() {
+    use crate::include::dav1d::picture::Rav1dPicAllocator;
+    use crate::src::mem::MemPool;
+    let pool = Arc::new(MemPool::<u8>::default());
+    let weak = Arc::downgrade(&pool);
+    let ptr = NonNull::new(Arc::as_ptr(&pool).cast_mut()).unwrap();
+    let allocator = Rav1dPicAllocator {
+        // SAFETY: The initial pool and then the source picture retain the Arc allocation.
+        cookie: Some(unsafe { SendSyncNonNull::new_unchecked(ptr) }.cast()),
+        ..Default::default()
+    };
+    let sequence = Arc::new(rav1d_parse_sequence_header(include_bytes!("testdata/still-8bit.obu")).unwrap());
+    let first = allocator.alloc_picture_data(8, 8, sequence.clone(), None).unwrap();
+    drop(pool);
+    assert_eq!(weak.strong_count(), 1);
+    let second = first.data.as_ref().unwrap().allocator.alloc_picture_data(8, 8, sequence, None).unwrap();
+    assert_eq!(weak.strong_count(), 2);
+    drop(first);
+    assert_eq!(weak.strong_count(), 1);
+    drop(second);
+    assert!(weak.upgrade().is_none());
 }
 
 #[cfg(not(debug_assertions))]

@@ -9,7 +9,6 @@ use crate::src::align::ArrayDefault;
 use crate::src::filmgrain::Rav1dFilmGrainDSPContext;
 use crate::src::filmgrain::FG_BLOCK_SIZE;
 use crate::src::internal::GrainBD;
-use crate::src::strided::Strided as _;
 use std::cmp;
 
 fn generate_scaling<BD: BitDepth>(bd: BD, points: &[[u8; 2]]) -> BD::Scaling {
@@ -170,17 +169,6 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
 
     let bh = cmp::min(h - row * FG_BLOCK_SIZE, FG_BLOCK_SIZE) + ss_y >> ss_y;
 
-    // extend padding pixels
-    if out.p.w as usize & ss_x != 0 {
-        let luma = in_data[0].with_offset::<BD>();
-        let luma = luma + (row * FG_BLOCK_SIZE) as isize * luma.pixel_stride::<BD>();
-        for y in 0..bh {
-            let luma = luma + (y as isize * (luma.pixel_stride::<BD>() << ss_y));
-            let padding = &mut *(luma + (out.p.w as usize - 1)).slice_mut::<BD>(2);
-            padding[1] = padding[0];
-        }
-    }
-
     let layout = r#in.p.layout.try_into().unwrap();
     if data.chroma_scaling_from_luma {
         for pl in 0..2 {
@@ -195,6 +183,7 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
                 bh,
                 row,
                 &in_data[0],
+                w,
                 pl != 0,
                 is_id,
                 bd,
@@ -214,6 +203,7 @@ pub(crate) fn rav1d_apply_grain_row<BD: BitDepth>(
                     bh,
                     row,
                     &in_data[0],
+                    w,
                     pl != 0,
                     is_id,
                     bd,
