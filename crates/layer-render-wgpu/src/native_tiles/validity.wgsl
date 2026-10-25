@@ -13,13 +13,6 @@ fn color_error(value:vec4<f32>)->u32 {
     return scalar_error(value.a);
 }
 
-// The entire dirty set is checked before any in-place canonical write.
-fn hdr_color_error(value:vec4<f32>)->u32 {
-    let error=color_error(value);
-    if error!=0u {return error;}
-    if value.a>0. && any(abs(value.rgb)>vec3(65504.*value.a)) {return 4u;}
-    return 0u;
-}
 // Check unassociation too: finite premultiplied values can overflow on division.
 fn float32_color_error(value:vec4<f32>)->u32 {
     let error=color_error(value);

@@ -509,6 +509,20 @@ host: up to two RGBA tiles or one gray-alpha tile per dispatch. Tracking,
 pipeline indexing and upload batching share those capacities. Higher browser
 device limits do not select a different gray-alpha shader recipe.
 
+Floating publication rejects non-finite RGB and coverage outside [0, 1].
+At the half-float boundary, finite straight RGB saturates to ±65,504. The
+encoder bounds associated RGB before division, handles coverage that rounds
+to either signed zero, and reconstructs canonical pixels from the emitted
+half bits and rounded coverage. Preflight applies the same validity policy.
+Float32 publication separately checks that unassociation remains finite.
+
+Gradient interpolation retains the nearer endpoint's weight from its distance
+and derives the other weight as its complement. Coverage stays within the two
+stops' alpha interval.
+Subtracting a rounded interpolation fraction from one can erase a nonzero
+weight next to a transparent stop. Zero mixed coverage returns transparent
+black before unassociation.
+
 [`working_color.wgsl`](../../crates/layer-render-wgpu/src/working_color.wgsl) shares
 unassociation, interpolation and perceptual conversion across scene composition,
 effects and materials. `working_unassociate`, `working_ratio` and

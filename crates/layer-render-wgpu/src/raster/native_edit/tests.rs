@@ -110,6 +110,54 @@ fn engine(
 }
 
 #[test]
+fn native_half_float_multiply_brush_saturates_finite_output() {
+    let mut document=paint_document([256;2],"Half float Multiply");
+    set_color(&mut document,DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::F16});
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend=layer_core::BlendSpace::Linear;
+    let id=target(&document);
+    let (mut input,mut live)=engine(document);
+    live.append_raster_operation(id,layer_core::RasterOperation {placement:layer_core::Affine::IDENTITY,coverage:reveal_all([256;2],[0,0]),
+        kind:layer_core::RasterOperationKind::Fill {color:[40000.,40000.,40000.,1.],alpha_locked:false}}).unwrap();
+    flush(&mut live);
+    let mut brush=layer_core::BrushSnapshot {color_rgba_linear:[2.,2.,2.,1.],diameter:64.,hardness:1.,opacity:1.,flow:1.,mappings:Arc::from([]),..Default::default()};
+    brush.rendering.blend_mode=layer_core::BrushBlendMode::Multiply;
+    live.set_brush(brush).unwrap();
+    stroke(&mut live,&mut input,1,64.);
+    flush(&mut live);
+    let data=backing(&paint(live.document()).raster);
+    assert!(data.values().any(|bytes|bytes.chunks_exact(8).any(|p|layer_core::color::hdr::decode_samples(SampleDepth::F16,p).unwrap()[0]==65504.)));
+}
+
+#[test]
+fn native_half_float_exposure_bake_saturates_finite_output() {
+    use crate::tests::native_effects::{empty_document,insert_effect};
+    use layer_core::{Affine,EffectInstance,EffectValue,RasterOperation,RasterOperationKind,SceneScope,Point};
+    let color=DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::F16};
+    let mut document=paint_document([256;2],"Half float exposure");
+    set_color(&mut document,color);
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend=layer_core::BlendSpace::Linear;
+    let id=target(&document);
+    let (_,mut live)=engine(document);
+    let mut members=empty_document([256;2],color);
+    members.artwork.compositions.get_mut(members.artwork.root).unwrap().blend=layer_core::BlendSpace::Linear;
+    let catalog=layer_core::bundled_effect_catalog();
+    let mut exposure=EffectInstance::new(catalog.get("exposure").unwrap().program());
+    exposure.set("exposure",EffectValue::Number(16.)).unwrap();
+    insert_effect(&mut members,exposure);
+    let mut white=EffectInstance::new(catalog.get("solid_color").unwrap().program());
+    white.set("color",EffectValue::Color(layer_core::color::RgbColor::from_linear(color.space,[1.;4]).unwrap())).unwrap();
+    insert_effect(&mut members,white);
+    live.append_raster_operation(id,RasterOperation {placement:Affine::IDENTITY,coverage:reveal_all([256;2],[0,0]),
+        kind:RasterOperationKind::Bake {scene:members.snapshot(),scope:SceneScope::Members(members.scene().order().to_vec().into()),offset:Point::default()}}).unwrap();
+    flush(&mut live);
+    let data=backing(&paint(live.document()).raster);
+    assert!(!data.is_empty());
+    for bytes in data.values() {
+        for pixel in bytes.chunks_exact(8) {assert_eq!(layer_core::color::hdr::decode_samples(SampleDepth::F16,pixel).unwrap(),[65504.,65504.,65504.,1.]);}
+    }
+}
+
+#[test]
 fn partial_bakes_back_tiles_without_publishing_the_layer() {
     let mut document = layer_core::Document::new(PortableId::random(), 1280, 768, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
     let root = document.artwork.root;
@@ -554,7 +602,7 @@ fn prevalidated_publication_matches_independent_native_encoding_at_every_depth()
             let pixels=(0..65536).map(|i| {
                 let alpha=[0.,1e-30,1e-8,1./65536.,0.37,0.5,1.][i%7];
                 if alpha==0. {[1e30,-1e20,3e10,0.]}
-                else {let rgb=if depth.is_float() {[-2.00001,3.012345,10000.125]} else {[-1.,0.1234567,3.]};
+                else {let rgb=if depth==SampleDepth::F16 {[-65536.,65536.,f32::MAX]} else if depth.is_float() {[-2.00001,3.012345,10000.125]} else {[-1.,0.1234567,3.]};
                     [rgb[0]*alpha,rgb[1]*alpha,rgb[2]*alpha,alpha]}
             }).flat_map(|pixel|pixel.into_iter().flat_map(f32::to_le_bytes)).collect::<Vec<_>>();
             upload_page(&r,&image,&pixels);

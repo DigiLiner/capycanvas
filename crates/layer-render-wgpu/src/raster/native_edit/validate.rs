@@ -37,7 +37,7 @@ impl Validator {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipelines = [match depth { layer_core::color::SampleDepth::F16 => "hdr_color_error(value)", layer_core::color::SampleDepth::F32 => "float32_color_error(value)", _ => "color_error(value)" }, "scalar_error(value.r)"].map(|expression| {
+        let pipelines = [match depth { layer_core::color::SampleDepth::F32 => "float32_color_error(value)", _ => "color_error(value)" }, "scalar_error(value.r)"].map(|expression| {
             let source = format!(
                 "{}\n{}",
                 include_str!("../../native_tiles/validity.wgsl"),

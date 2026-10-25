@@ -387,6 +387,43 @@ fn native_gradient_normalized_alpha_keeps_subnormal_coordinate_weights() {
 }
 
 #[test]
+fn native_gradient_equal_opaque_stops_keep_unit_coverage() {
+    use layer_core::{GradientStop,color::RgbColor};
+    let space=RgbSpace::Srgb;
+    let mut r=WgpuRasterizer::new_native_headless(DocumentColor {space,depth:SampleDepth::F32}).unwrap();
+    let mut layer=table_probe("gradient_map",false,0);
+    Arc::make_mut(&mut layer.program).wgsl="fn table_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{let alpha=fx_lut(b,0u,.02).a;return vec4(alpha,alpha,alpha,1.);}".into();
+    set(&mut layer,"gradient",EffectValue::Gradient(GradientDefinition {stops:[
+        (0.,[1.,0.,0.,1.]),(0.01,[1.,0.,0.,1.]),(0.14,[0.,1.,0.,1.]),(1.,[0.,1.,0.,1.]),
+    ].into_iter().map(|(position,color)|GradientStop {position,color:RgbColor::from_linear(space,color).unwrap()}).collect(),interpolation:ColorMixSpace::LinearRgb}));
+    let actual=frame(&mut r,&[layer]);
+    assert_eq!(actual,[1.;4],"equal opaque gradient coverage: {actual:?}");
+}
+
+#[test]
+fn native_gradient_rounded_transparent_endpoint_keeps_finite_color() {
+    use layer_core::{GradientStop,color::RgbColor};
+    let space=RgbSpace::Srgb;
+    let a=f32::from_bits(0x3e477da6);let b=f32::from_bits(0x3f4386bc);let x=f32::from_bits(0x3f4386bb);
+    assert!(x<b);assert_eq!((x-a)/(b-a),1.);
+    let gradient=GradientDefinition {stops:vec![
+        GradientStop {position:0.,color:RgbColor::from_linear(space,[1.,0.,0.,1.]).unwrap()},
+        GradientStop {position:a,color:RgbColor::from_linear(space,[1.,0.,0.,1.]).unwrap()},
+        GradientStop {position:b,color:RgbColor::from_linear(space,[0.,1.,0.,0.]).unwrap()},
+        GradientStop {position:1.,color:RgbColor::from_linear(space,[0.,1.,0.,0.]).unwrap()},
+    ],interpolation:ColorMixSpace::LinearRgb};
+    let expected=gradient.sample(x,space).unwrap().linear_in(space).unwrap();
+    let mut layer=table_probe("gradient_map",false,0);
+    Arc::make_mut(&mut layer.program).wgsl="fn table_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{let v=fx_lut(b,0u,bitcast<f32>(0x3f4386bbu));return vec4(v.rgb,1.);}".into();
+    set(&mut layer,"gradient",EffectValue::Gradient(gradient));
+    let mut r=WgpuRasterizer::new_native_headless(DocumentColor {space,depth:SampleDepth::F32}).unwrap();
+    let actual=frame(&mut r,&[layer]);
+    eprintln!("ROUNDED_GRADIENT actual={actual:?} cpu={expected:?}");
+    assert!(actual.iter().all(|v|v.is_finite()),"rounded transparent gradient: {actual:?}");
+    close(actual,[expected[0],expected[1],expected[2]],1.,"rounded transparent gradient");
+}
+
+#[test]
 fn native_gradient_signed_hdr_interpolation_keeps_finite_interior_values() {
     use layer_core::{GradientStop,color::RgbColor};
     let mut r=WgpuRasterizer::new_native_headless(DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::F32}).unwrap();

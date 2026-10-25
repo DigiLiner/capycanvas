@@ -65,8 +65,9 @@ fn encode_pixel(invocation:vec3<u32>) {
         }
         HALF_VALIDATION
         let alpha_bits=half_bits(value.a);
-        if alpha_bits==0u {store_outputs(invocation.z,pixel,vec4(0u),vec4(0.));return;}
-        let rgb=value.rgb/value.a;
+        if (alpha_bits&32767u)==0u {store_outputs(invocation.z,pixel,vec4(0u),vec4(0.));return;}
+        let limit=65504.*value.a;
+        let rgb=clamp(clamp(value.rgb,vec3(-limit),vec3(limit))/value.a,vec3(-65504.),vec3(65504.));
         let bits=vec4(half_bits(rgb.r),half_bits(rgb.g),half_bits(rgb.b),alpha_bits);
         let alpha=half_value(alpha_bits);
         store_outputs(invocation.z,pixel,bits,vec4(vec3(half_value(bits.r),half_value(bits.g),half_value(bits.b))*alpha,alpha));

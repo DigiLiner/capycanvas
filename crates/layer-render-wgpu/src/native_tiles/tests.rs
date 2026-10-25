@@ -667,6 +667,48 @@ fn native_restore_writeback_capture_round_trip_preserves_committed_codes() {
 }
 
 #[test]
+fn half_gray_alpha_publication_saturates_and_matches_canonical_pixels() {
+    use layer_core::{color::{DocumentColor,LayerColorMode,f16},raster::RasterTile};
+    use crate::raster::{CaptureSource,TileCapture};
+    let mut r=WgpuRasterizer::new_native_headless(DocumentColor {depth:SampleDepth::F16,..Default::default()}).unwrap();
+    let working=texture(&r,wgpu::TextureFormat::Rgba32Float);
+    let candidate=texture(&r,wgpu::TextureFormat::Rgba32Float);
+    let transfer=r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
+    let status=NativeEncodeStatus::new(&r.device);
+    let output=r.device.create_buffer(&wgpu::BufferDescriptor {label:Some("half gray alpha saturation"),size:256*256*4,
+        usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC,mapped_at_creation:false});
+    let pixels:Vec<_>=(0..65536).map(|i| {
+        let alpha=[1.,0.37,1./65536.,1./16777216.,1./67108864.,0.,-0.][i%7];
+        let rgb=if i/7%2==0 {65536.*alpha} else {-65536.*alpha};
+        [rgb,rgb,rgb,alpha]
+    }).collect();
+    for in_place in [false,true] {
+        upload(&r,&working,&working_bytes(&pixels));
+        let canonical=if in_place {&working} else {&candidate};
+        let encoder=NativeTileEncoder::with_mode(&r.device,in_place,false);
+        let request=NativeTileRequest {working:&working,canonical,encoded:(&output).into(),mode:LayerColorMode::Grayscale,
+            space:RgbSpace::Srgb,transfer:&transfer,depth:SampleDepth::F16,alpha:AlphaAssociation::Straight,region:[0,0,256,256]};
+        let tile=RasterTile::pending(request.descriptor());
+        let batch=encoder.prepare(&r.device,&[request],&status,&mut Default::default()).unwrap();
+        submit(&r,&encoder,&status,&[batch],true);
+        r.capture_tiles(&[TileCapture {source:CaptureSource::Packed(&output),tile:tile.clone()}],Some(&status)).unwrap().finish().unwrap();
+        let bytes=tile.wait_backing().unwrap().decode().unwrap();
+        let cache=page_bytes(&r,canonical);
+        for (i,((encoded,linear),pixel)) in bytes.chunks_exact(4).zip(cache.chunks_exact(16)).zip(&pixels).enumerate() {
+            let alpha=f16::from_f32(pixel[3]);
+            let expected=if alpha.to_bits()&32767==0 {[0u16;2]} else {[f16::from_f32(if pixel[0]>0. {65504.} else {-65504.}).to_bits(),alpha.to_bits()]};
+            let actual:[u16;2]=std::array::from_fn(|c|u16::from_le_bytes(encoded[c*2..c*2+2].try_into().unwrap()));
+            assert_eq!(actual,expected,"gray pixel{i} in_place={in_place}");
+            for c in 0..4 {
+                let actual=f32::from_le_bytes(linear[c*4..c*4+4].try_into().unwrap());
+                let expected=if c==3 {f16::from_bits(expected[1]).to_f32()} else {f16::from_bits(expected[0]).to_f32()*f16::from_bits(expected[1]).to_f32()};
+                assert_eq!(actual,expected,"gray canonical pixel{i} channel{c} in_place={in_place}");
+            }
+        }
+    }
+}
+
+#[test]
 fn hdr_half_publication_preserves_finite_codes_subnormals_and_canonical_cache() {
     use layer_core::color::{DocumentColor, f16};
     let mut r = WgpuRasterizer::new_native_headless(DocumentColor { space: RgbSpace::Srgb, depth: SampleDepth::F16 }).unwrap();
@@ -704,12 +746,52 @@ fn hdr_half_publication_preserves_finite_codes_subnormals_and_canonical_cache() 
             }
         }
     }
-    for pixel in [[65505.,0.,0.,1.],[-65505.,0.,0.,1.],[f32::NAN,0.,0.,1.],[1.,0.,0.,-0.1]] {
+    for pixel in [[f32::NAN,0.,0.,1.],[f32::INFINITY,0.,0.,1.],[1.,0.,0.,-0.1],[1.,0.,0.,1.1]] {
         upload(&r,&working,&working_bytes(&vec![pixel;65536]));
         let batch=encoder.prepare(&r.device,&[NativeTileRequest { mode: Default::default(), space: RgbSpace::Srgb, working:&working, encoded: (&output).into(), canonical:&canonical, transfer:&transfer,
             depth:SampleDepth::F16,alpha:AlphaAssociation::Straight,region:[0,0,256,256] }],&status, &mut Default::default()).unwrap();
         submit(&r,&encoder,&status,&[batch],true);
         assert!(read_status(&r,&status).is_err());
+    }
+}
+
+#[test]
+fn half_publication_saturates_finite_rgb_and_reconstructs_quantized_alpha() {
+    use layer_core::color::{DocumentColor, f16};
+    let mut r=WgpuRasterizer::new_native_headless(DocumentColor {depth:SampleDepth::F16,..Default::default()}).unwrap();
+    let transfer=r.prepare_native_transfer(RgbSpace::Srgb).unwrap();
+    let status=NativeEncodeStatus::new(&r.device);
+    let working=texture(&r,wgpu::TextureFormat::Rgba32Float);
+    let output=texture(&r,wgpu::TextureFormat::Rgba16Uint);
+    let pixels:Vec<_>=(0..65536).map(|i| {
+        let alpha=[1.,0.37,1./65536.,1./16777216.,1./67108864.,0.,-0.][i%7];
+        let rgb=[65504.,65505.,65536.,f32::MAX,f32::MIN,-65505.,0.][i/7%7];
+        [rgb,-rgb,0.,alpha]
+    }).collect();
+    for in_place in [false,true] {
+        let encoder=NativeTileEncoder::with_mode(&r.device,in_place,false);
+        let canonical=if in_place {working.clone()} else {texture(&r,wgpu::TextureFormat::Rgba32Float)};
+        upload(&r,&working,&working_bytes(&pixels));
+        let batch=encoder.prepare(&r.device,&[NativeTileRequest {mode:Default::default(),space:RgbSpace::Srgb,
+            working:&working,canonical:&canonical,encoded:(&output).into(),transfer:&transfer,depth:SampleDepth::F16,
+            alpha:AlphaAssociation::Straight,region:[0,0,256,256]}],&status,&mut Default::default()).unwrap();
+        submit(&r,&encoder,&status,&[batch],true);
+        read_status(&r,&status).unwrap();
+        let bytes=page_bytes(&r,&output);let cache=page_bytes(&r,&canonical);
+        for (i,((encoded,linear),pixel)) in bytes.chunks_exact(8).zip(cache.chunks_exact(16)).zip(&pixels).enumerate() {
+            let alpha=f16::from_f32(pixel[3]);
+            let expected=if alpha.to_bits()&32767==0 {[0u16;4]} else {
+                let rgb=[0,1,2].map(|c|f16::from_f32((f64::from(pixel[c])/f64::from(pixel[3])).clamp(-65504.,65504.) as f32).to_bits());
+                [rgb[0],rgb[1],rgb[2],alpha.to_bits()]
+            };
+            for c in 0..4 {
+                let code=u16::from_le_bytes(encoded[c*2..c*2+2].try_into().unwrap());
+                assert_eq!(code,expected[c],"pixel={i} channel={c} in_place={in_place}");
+                let canonical=f32::from_le_bytes(linear[c*4..c*4+4].try_into().unwrap());
+                let value=f16::from_bits(code).to_f32()*if c<3 {alpha.to_f32()} else {1.};
+                assert_eq!(canonical,value,"canonical pixel={i} channel={c}");
+            }
+        }
     }
 }
 
