@@ -205,6 +205,21 @@ try {
         if((Manager).selected -ne $preview -or (Layout) -ne $previewLayout){throw 'Direct pin input changed the preview'}
         if(((Control $pinId).GetRuntimeId() -join ':') -ne $pinRuntime){throw 'Direct pin input replaced its native button'}
     }
+    foreach($count in @(2,3,3,4)){
+        $selected=@((Storage).switcher.id) -contains $active
+        $at=At $pinId;$revision=(Storage).switcher_revision
+        for($n=0;$n -lt $count;$n++){
+            [CapyRowPointer]::Down($Device,$at.x,$at.y)
+            if($Device -ne 'mouse'){Start-Sleep -Milliseconds 50}
+            [CapyRowPointer]::Up($Device -eq 'pen')
+            if($Device -ne 'mouse'){Start-Sleep -Milliseconds 30}
+        }
+        Wait-Until {(Storage).switcher_revision -ge $revision+$count} 'Rapid pin input lost an activation'
+        Settled
+        $expected=if($count%2){!$selected}else{$selected}
+        if((@((Storage).switcher.id) -contains $active) -ne $expected){throw 'Rapid pin input did not preserve toggle parity'}
+        if((Manager).selected -ne $preview -or (Layout) -ne $previewLayout){throw 'Rapid pin input changed the preview'}
+    }
     foreach($selected in @($false,$true)){
         (Control $pinId).SetFocus();$revision=(Storage).switcher_revision
         [CapyRowPointer]::Key([uint32]$review.Id,0x20)
@@ -232,7 +247,8 @@ try {
     foreach($id in @((Storage).switcher.id)){Preference $id 'show'}
     if(@((Storage).switcher_display).Count -ne 1 -or (Storage).switcher_display[0].id -ne $preview){throw 'Empty pins did not retain the current workspace'}
     Choose 'Cancel';Closed
-    Invoke 'workspace-switcher-options';Options;Dismiss 'workspace-switcher-options'
+    $at=At 'workspace-switcher-options';[CapyRowPointer]::Down('mouse',$at.x,$at.y);[CapyRowPointer]::Up()
+    Options;Dismiss 'workspace-switcher-options'
     $emptyOrder=@((Storage).order)
     Close
     Launch 'empty-pins-restart'

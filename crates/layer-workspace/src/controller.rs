@@ -243,7 +243,7 @@ pub struct WorkspaceController<S: WorkspaceStore + 'static> {
     task: Option<Task<Outcome>>,
     quiet: bool,
     preferences: Option<Task<()>>,
-    preferences_edited: bool,
+    preference_edit: Option<SwitcherEdit>,
     preference_edits: VecDeque<SwitcherEdit>,
     refresh_preferences: bool,
     incoming: Option<StoredEntity>,
@@ -359,7 +359,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             task: None,
             quiet: false,
             preferences: None,
-            preferences_edited: false,
+            preference_edit: None,
             preference_edits: VecDeque::new(),
             refresh_preferences: false,
             incoming: None,
@@ -713,7 +713,8 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                 })
                 .collect(),
         };
-        self.view.present_manager_pins(&self.localization);
+        let pins = self.requested_pin_ids();
+        self.view.present_manager_pins(&self.localization, &pins);
         let selected = self
             .view
             .selected
@@ -859,6 +860,10 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::OpenAWorkspaceBeforeEditingItsSwitcher));
                 }
                 self.set_switcher_error(None);
+                let edit = match edit {
+                    SwitcherEdit::Toggle { id } => SwitcherEdit::Show { visible: !self.requested_pin_ids().contains(&id), id },
+                    edit => edit,
+                };
                 self.preference_edits.push_back(edit);
             }
             WorkspaceInput::RefreshSwitcher => self.refresh_preferences = true,
@@ -986,6 +991,19 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         self.present(now);
         self.publish_flags();
         Ok(change)
+    }
+    fn requested_pin_ids(&self) -> Vec<String> {
+        let mut pins = self.manager.switcher_ids();
+        for edit in self.preference_edit.iter().chain(&self.preference_edits) {
+            if let SwitcherEdit::Show { id, visible } = edit {
+                if *visible {
+                    if !pins.contains(id) { pins.push(id.clone()); }
+                } else {
+                    pins.retain(|pinned| pinned != id);
+                }
+            }
+        }
+        pins
     }
     fn publish_flags(&mut self) {
         self.view.switcher_busy = self.preferences.is_some() || !self.preference_edits.is_empty();
@@ -1484,23 +1502,23 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         // publication. Their acknowledgement must not select/reload a row.
         if let Some(result) = self.preferences.as_mut().and_then(Task::poll) {
             self.preferences = None;
+            let edited = self.preference_edit.take().is_some();
             presentation_changed = true;
             match result {
                 Ok(()) => {
                     self.set_switcher_error(None);
-                    if self.preferences_edited {
+                    if edited {
                         self.view.switcher_revision = self.view.switcher_revision.wrapping_add(1);
                     }
                     self.pending_binding = self.manager.binding();
                 }
                 Err(error) => {
-                    if self.preferences_edited && self.view.page.is_none() {
+                    if edited && self.view.page.is_none() {
                         self.notify(session, WorkspaceNoticeCopy::SwitcherError(error.clone()));
                     }
                     self.set_switcher_error(Some(error));
                 },
             }
-            self.preferences_edited = false;
         }
         if self.view.ready
             && (self.task.is_none() || self.quiet)
@@ -1509,7 +1527,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         {
             let manager = self.manager.clone();
             if let Some(edit) = self.preference_edits.pop_front() {
-                self.preferences_edited = true;
+                self.preference_edit = Some(edit.clone());
                 self.preferences = self.spawn(async move { manager.edit_switcher(edit).await });
             } else if self.refresh_preferences && !self.terminating {
                 self.refresh_preferences = false;

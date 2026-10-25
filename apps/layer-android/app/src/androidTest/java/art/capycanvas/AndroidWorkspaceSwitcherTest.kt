@@ -52,19 +52,19 @@ class AndroidWorkspaceSwitcherTest {
     }
     private fun send(value: JSONObject) { instrumentation.runOnMainSync { host.workspaceInput(value) }; idle() }
     private fun capture() = jsonValue(JSONObject(host.workspaceCapture()))
-    private fun event(action: Int, next: Offset = point) {
+    private fun event(action: Int, next: Offset = point, delay: Long = 40) {
         point = next
         if (action == MotionEvent.ACTION_DOWN) downAt = SystemClock.uptimeMillis()
         val event = motion(tool, action, next, downAt, button)
         try { instrumentation.runOnMainSync { checkNotNull(pressed).view.dispatchTouchEvent(event) } }
         finally { event.recycle() }
         if (action in listOf(MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL)) pressed = null
-        SystemClock.sleep(40)
+        SystemClock.sleep(delay)
     }
-    private fun down(tag: String) {
+    private fun down(tag: String, delay: Long = 40) {
         var start = Offset.Zero
         instrumentation.runOnMainSync { checkNotNull(node(tag)) { "Missing $tag; ${view()}" }.let { pressed = it.first; start = it.second.boundsInRoot.center } }
-        event(MotionEvent.ACTION_DOWN, start)
+        event(MotionEvent.ACTION_DOWN, start, delay)
     }
     private fun tap(tag: String) {
         android.util.Log.i("SwitcherAcceptance", "Tap $tag")
@@ -114,6 +114,17 @@ class AndroidWorkspaceSwitcherTest {
             for (selected in listOf(false, true)) {
                 tap("workspace-pin-$current")
                 assertEquals(selected, current in ids("switcher"))
+                assertEquals(defaults.last(), view().getString("selected"))
+                assertEquals(preview, layout()); assertEquals(before, capture())
+                assertNull(node("workspace-row-menu"))
+            }
+            for (count in listOf(2, 3, 3, 4)) {
+                val selected = current in ids("switcher")
+                val revision = view().getLong("switcher_revision")
+                repeat(count) { down("workspace-pin-$current", 0); event(MotionEvent.ACTION_UP, delay = 0) }
+                waitFor("every rapid pin activation saves") { view().getLong("switcher_revision") >= revision + count }
+                idle()
+                assertEquals(if (count % 2 == 0) selected else !selected, current in ids("switcher"))
                 assertEquals(defaults.last(), view().getString("selected"))
                 assertEquals(preview, layout()); assertEquals(before, capture())
                 assertNull(node("workspace-row-menu"))
@@ -189,6 +200,7 @@ class AndroidWorkspaceSwitcherTest {
         waitFor("options dismissed") { node("workspace-menu") == null && node("title-bar")?.first?.view?.hasWindowFocus() == true }
     }
     private fun focus(tag: String) {
+        key(KeyEvent.KEYCODE_TAB, KeyEvent.META_SHIFT_ON)
         var focused: SemanticsNode? = null
         instrumentation.runOnMainSync {
             focused = checkNotNull(node(tag)).second.find { it.config.getOrNull(SemanticsActions.RequestFocus) != null }
@@ -242,6 +254,7 @@ class AndroidWorkspaceSwitcherTest {
             for (pinned in listOf(false, true)) {
                 tap("workspace-switcher-options")
                 waitFor("checkbox keyboard focus window") { node("workspace-menu")?.first?.view?.hasWindowFocus() == true }
+                key(KeyEvent.KEYCODE_TAB, KeyEvent.META_SHIFT_ON)
                 instrumentation.runOnMainSync {
                     val item = checkNotNull(label(checkNotNull(node("workspace-menu")).second, keyboardRow))
                     val row = generateSequence(item) { it.parent }.first { it.config.getOrNull(SemanticsActions.RequestFocus) != null }

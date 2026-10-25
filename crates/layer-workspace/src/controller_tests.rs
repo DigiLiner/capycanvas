@@ -70,7 +70,7 @@ impl WorkspaceStore for Store {
     }
 }
 #[test]
-fn manager_pins_preserve_preview_and_confirmed_state_until_the_save_finishes() {
+fn manager_pin_activations_preserve_preview_and_compose_while_preferences_save() {
     let mut f = Fixture::new();
     let active = f.controller.view.switcher[0].id.clone();
     f.input(serde_json::json!({"type":"switch","id":active}));
@@ -82,15 +82,22 @@ fn manager_pins_preserve_preview_and_confirmed_state_until_the_save_finishes() {
     let order = f.controller.view.order.clone();
     let pin = |f: &Fixture| f.controller.view.rows.iter().find(|row| row.id == active).unwrap().pin.clone().unwrap();
     let before = pin(&f);
+    let revision = f.controller.view.switcher_revision;
     assert!(before.selected && before.enabled);
     let (release, gate) = async_channel::bounded(1);
     *f.backend.switcher_gate.borrow_mut() = Some(gate);
-    f.input(serde_json::json!({"type":"edit_switcher","edit":before.edit}));
-    assert!(pin(&f).selected);
-    assert!(!pin(&f).enabled);
+    for selected in [false, true, false] {
+        f.input(serde_json::json!({"type":"edit_switcher","edit":before.edit}));
+        assert_eq!(pin(&f).selected, selected, "each activation updates the requested pin immediately");
+        assert!(pin(&f).enabled, "a pending save must not discard the next activation");
+        assert!(f.controller.view.switcher.iter().any(|row| row.id == active), "the saved switcher stays confirmed until storage replies");
+        assert_eq!(f.controller.view.selected.as_ref(), Some(&preview_id));
+        assert_eq!(f.host.session.state().workspace.layout, layout);
+    }
     release.try_send(()).unwrap();
     f.pump();
     let after = pin(&f);
+    assert_eq!(f.controller.view.switcher_revision, revision + 3);
     assert!(!after.selected && after.enabled);
     assert_ne!(after.icon, before.icon);
     assert_ne!(after.label, before.label);
@@ -100,9 +107,19 @@ fn manager_pins_preserve_preview_and_confirmed_state_until_the_save_finishes() {
     assert_eq!(f.host.session.state().workspace.layout, layout);
     assert_eq!(f.controller.manager.current_record().unwrap(), original);
     f.backend.fail_preferences.set(true);
-    f.input(serde_json::json!({"type":"edit_switcher","edit":after.edit}));
+    let (release, gate) = async_channel::bounded(1);
+    *f.backend.switcher_gate.borrow_mut() = Some(gate);
+    for selected in [true, false, true] {
+        f.input(serde_json::json!({"type":"edit_switcher","edit":after.edit}));
+        assert_eq!(pin(&f).selected, selected);
+        assert!(pin(&f).enabled);
+    }
+    release.try_send(()).unwrap();
+    f.pump();
     assert!(f.controller.view.switcher_error.is_some());
     assert!(!pin(&f).selected && pin(&f).enabled);
+    assert_eq!(f.controller.view.switcher_revision, revision + 3);
+    assert_eq!(f.controller.view.selected.as_ref(), Some(&preview_id));
     f.backend.fail_preferences.set(false);
     f.input(serde_json::json!({"type":"edit_switcher","edit":pin(&f).edit}));
     assert!(pin(&f).selected);
@@ -901,8 +918,8 @@ fn switcher_edits_wait_for_refresh_and_close_drains_them_in_order() {
     *f.backend.switcher_gate.borrow_mut() = Some(gate);
     f.input(serde_json::json!({"type":"refresh_switcher"}));
     assert!(f.controller.view.switcher_busy);
-    for visible in [false, true, false] {
-        f.input(serde_json::json!({"type":"edit_switcher","edit":{"type":"show","id":id,"visible":visible}}));
+    for _ in 0..3 {
+        f.input(serde_json::json!({"type":"edit_switcher","edit":{"type":"toggle","id":id}}));
     }
     assert_eq!(f.controller.view.switcher_revision, revision);
     f.input(serde_json::json!({"type":"close"}));

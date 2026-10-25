@@ -242,11 +242,11 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
   const rect = selector => evaluate(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node)throw Error('Missing '+${JSON.stringify(selector)});const r=node.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height};})()`);
   const point = async (selector, y=.5) => { const r=await rect(selector); return {x:r.x+r.width/2,y:r.y+r.height*y}; };
   let pressed = false, device = "mouse", lastPoint;
-  const pointer = async (type, p=lastPoint, button="left") => {
+  const pointer = async (type, p=lastPoint, button="left", delay=35) => {
     lastPoint=p;
     if (device === "touch") await call("Input.dispatchTouchEvent",{type:{down:"touchStart",move:"touchMove",up:"touchEnd",cancel:"touchCancel"}[type],touchPoints:["up","cancel"].includes(type)?[]:[{id:1,...p}]});
     else await call("Input.dispatchMouseEvent",{type:{down:"mousePressed",move:"mouseMoved",up:"mouseReleased"}[type],...p,pointerType:device,button,buttons:type==="up"?0:button==="right"?2:1,clickCount:1});
-    pressed=!["up","cancel"].includes(type); await pause(35);
+    pressed=!["up","cancel"].includes(type); await pause(delay);
   };
   const click = async selector => {
     device="mouse";
@@ -298,6 +298,16 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
         assert.deepEqual(await layout(),preview);
         assert.equal(await menuOpen(),false,`${kind}: pin does not open a row menu`);
         assert.equal(await evaluate(`retainedPin===document.querySelector(${JSON.stringify(`${row(p)} .workspace-pin`)})`),true,'pin updates retain its native button');
+      }
+      for(const count of [2,3,3,4]) {
+        const selected=(await pins()).includes(p), target=await point(`${row(p)} .workspace-pin`);
+        const revision=(await view()).switcher_revision;
+        for(let n=0;n<count;n++) { await pointer("down",target,"left",0); await pointer("up",target,"left",0); }
+        await wait(`JSON.parse(layerApp.app.workspace_view()).switcher_revision>=${revision+count}`); await idle();
+        assert.equal((await pins()).includes(p),count%2?!selected:selected,`${kind}: every rapid pin activation is saved`);
+        assert.equal((await view()).selected,f,`${kind}: rapid pin input preserves preview selection`);
+        assert.deepEqual(await layout(),preview);
+        assert.equal(await menuOpen(),false);
       }
       device=kind;
       await pointer("down",await point(`${row(p)} .workspace-choice`)); await pause(600);

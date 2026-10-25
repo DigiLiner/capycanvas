@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SwitcherEdit {
     Show { id: String, visible: bool },
+    Toggle { id: String },
     Move { id: String, before: Option<String> },
 }
 
@@ -120,38 +121,10 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         self.refresh().await?;
         self.refresh_switcher().await?;
         let request = match edit {
-            SwitcherEdit::Show { id, visible } => {
-                let expected = self.state.borrow().switcher.clone();
-                let mut ids = self.switcher_ids();
-                if !self
-                    .items()
-                    .iter()
-                    .any(|i| i.id == id && i.metadata.kind == ItemKind::Workspace)
-                {
-                    return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ThisWorkspaceIsNoLongerAvailable));
-                }
-                // Freeze the initial/legacy row order before visibility changes.
-                if self.state.borrow().workspace_order.is_none() {
-                    let order = self.workspace_ids();
-                    let StoreResponse::WorkspaceOrder(saved) = self
-                        .execute(StoreRequest::UpdateWorkspaceOrder {
-                            expected: None,
-                            ids: order,
-                        })
-                        .await?
-                    else {
-                        return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::UnexpectedWorkspaceOrderReply));
-                    };
-                    self.state.borrow_mut().workspace_order = saved;
-                }
-                if visible {
-                    if !ids.contains(&id) {
-                        ids.push(id);
-                    }
-                } else {
-                    ids.retain(|i| i != &id);
-                }
-                StoreRequest::UpdateSwitcher { expected, ids }
+            SwitcherEdit::Show { id, visible } => self.switcher_visibility_request(id, visible).await?,
+            SwitcherEdit::Toggle { id } => {
+                let visible = !self.switcher_ids().contains(&id);
+                self.switcher_visibility_request(id, visible).await?
             }
             SwitcherEdit::Move { id, before } => {
                 let expected = self.state.borrow().workspace_order.clone();
@@ -188,5 +161,39 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
             }
             _ => Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::UnexpectedWorkspaceSwitcherReply)),
         }
+    }
+
+    async fn switcher_visibility_request(&self, id: String, visible: bool) -> Result<StoreRequest> {
+        let expected = self.state.borrow().switcher.clone();
+        let mut ids = self.switcher_ids();
+        if !self
+            .items()
+            .iter()
+            .any(|i| i.id == id && i.metadata.kind == ItemKind::Workspace)
+        {
+            return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ThisWorkspaceIsNoLongerAvailable));
+        }
+        // Freeze the initial/legacy row order before visibility changes.
+        if self.state.borrow().workspace_order.is_none() {
+            let order = self.workspace_ids();
+            let StoreResponse::WorkspaceOrder(saved) = self
+                .execute(StoreRequest::UpdateWorkspaceOrder {
+                    expected: None,
+                    ids: order,
+                })
+                .await?
+            else {
+                return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::UnexpectedWorkspaceOrderReply));
+            };
+            self.state.borrow_mut().workspace_order = saved;
+        }
+        if visible {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        } else {
+            ids.retain(|i| i != &id);
+        }
+        Ok(StoreRequest::UpdateSwitcher { expected, ids })
     }
 }

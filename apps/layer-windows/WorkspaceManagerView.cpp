@@ -243,7 +243,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         row.pin.RegisterPropertyChangedCallback(Primitives::ToggleButton::IsCheckedProperty(),[weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock();self&&!self->updating){
             for(auto value:array(self->model,L"rows")){
                 auto data=value.GetObject();if(str(data,L"id")!=id)continue;
-                auto pin=object(data,L"pin");if(flag(pin,L"enabled"))self->editSwitcher(object(pin,L"edit"));break;
+                auto pin=object(data,L"pin");if(flag(pin,L"enabled"))self->dispatch(O({{L"type",S(L"edit_switcher")},{L"edit",object(pin,L"edit")}}));break;
             }
         }});
         row.up.Click([weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock())self->moveWorkspace(id,false);});
@@ -288,7 +288,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
 
             row.current.Visibility(configurable&&flag(data,L"current")?Visibility::Visible:Visibility::Collapsed);
             auto theme=str(object(snapshot,L"state"),L"theme",L"dark"),glyph=str(pin,L"icon",L"pin");
-            if(theme!=row.theme||glyph!=row.pinGlyph){row.pinGlyph=glyph;row.pinIcon.Source(icon(glyph,theme,16).Source());}
+            if(theme!=row.theme||glyph!=row.pinGlyph){row.pinGlyph=glyph;setIcon(row.pinIcon,glyph,theme,16);}
             if(theme!=row.theme){row.theme=theme;row.current.Source(icon(L"check",theme,14).Source());row.grip.Content(panelGrip(theme));}
             row.grip.Visibility(configurable?Visibility::Visible:Visibility::Collapsed);row.grip.IsEnabled(canReorder());
             if(row.captionTitle!=label){row.captionTitle=label;AutomationProperties::SetName(row.grip,caption(O({{L"type",S(L"reorder")},{L"title",S(label)}})));AutomationProperties::SetName(row.more,caption(O({{L"type",S(L"options_for")},{L"title",S(label)}})));}

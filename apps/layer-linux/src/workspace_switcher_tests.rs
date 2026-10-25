@@ -258,6 +258,21 @@ fn native_workspace_manager_visual() {
             assert_eq!(layer_ui::durable_layout(&state(&w).workspace.layout), before);
             assert_eq!(find_named(&row(&w, id), &format!("workspace-pin-{id}")).unwrap(), pin.clone().upcast::<gtk::Widget>());
         }
+        for count in [2, 3, 3, 4] {
+            let selected = pin.is_active();
+            let revision = w.workspaces.view().switcher_revision;
+            let point = screen_point(pin.upcast_ref(), &w.window, [0.5, 0.5]);
+            let mut events = vec![serde_json::json!({"point":point})];
+            for _ in 0..count {
+                events.extend([serde_json::json!({"down":true}), serde_json::json!({"down":false})]);
+            }
+            input.perform(serde_json::Value::Array(events));
+            until(|| w.workspaces.view().switcher_revision >= revision + count, "every rapid pin activation saves");
+            wait_switcher(&w);
+            assert_eq!(pin.is_active(), if count % 2 == 0 { selected } else { !selected });
+            assert_eq!(w.workspaces.view().selected, original.selected);
+            assert_eq!(layer_ui::durable_layout(&state(&w).workspace.layout), before);
+        }
         assert!(pin.grab_focus());
         until(|| pin.is_focus(), "workspace pin focus");
         for selected in [false, true] {

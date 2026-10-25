@@ -326,8 +326,10 @@ left grip and a pin with no button background or border. The pin is filled when
 the workspace is shown in the top bar and outlined otherwise; its tooltip offers
 **Hide from top bar** or **Show in top bar**. Clicking, tapping or activating the
 focused pin changes only its saved visibility, without selecting a preview or
-starting a row drag. The button keeps its place and focus in both states. The
-current workspace keeps its checkmark. The top bar follows the list order and
+starting a row drag. The pin responds immediately and accepts repeated clicks
+while saving. Failed saves restore the saved state and report the error. The pin
+keeps its place and focus in both states. The current workspace keeps its
+checkmark. The top bar follows the list order and
 skips unpinned rows. If the current workspace is unpinned, it is shown first
 until the user switches away, without changing the saved pins or order; dialog
 previews do not change this entry.
@@ -341,14 +343,17 @@ all workspaces and windows; Cancel does not undo them.
 
 The shared manager exposes `workspace_ids` (complete order), `switcher_ids`
 (saved pins), `switcher_display_ids()` (what the bar shows), `refresh_switcher`
-and `edit_switcher(SwitcherEdit::{Show, Move})`
+and `edit_switcher(SwitcherEdit::{Show, Toggle, Move})`
 ([`manager_switcher.rs`](../../crates/layer-workspace/src/manager_switcher.rs)).
 Hosts read preferences at startup, on focus and when refreshing the manager;
 hosts with several windows notify the others after `switcher_revision` changes.
 `WorkspaceController` queues accepted pin and order edits while preferences are
 refreshing. Edits run in order, can complete during background autosave, and
 drain before closing releases the workspace. Hosts wait for the published
-switcher revision or error to acknowledge an edit.
+switcher revision or error to acknowledge an edit. Manager rows send a stable
+`Toggle` action; the controller resolves each activation against all requested
+changes and presents that state while serializing the saves. Header menus
+continue to present confirmed saved state.
 `StoreRequest::Switcher` returns optional visible IDs: `None` means the three
 defaults and `Some([])` saves no pins. The active workspace still appears in
 the switcher. Without a saved order, pins seed it and

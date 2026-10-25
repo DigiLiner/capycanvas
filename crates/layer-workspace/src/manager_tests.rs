@@ -932,9 +932,8 @@ fn switcher_preferences_survive_restart_and_do_not_edit_or_claim_workspaces() {
             })
             .await
             .unwrap();
-        m.edit_switcher(SwitcherEdit::Show {
+        m.edit_switcher(SwitcherEdit::Toggle {
             id: defaults[2].clone(),
-            visible: false,
         })
         .await
         .unwrap();

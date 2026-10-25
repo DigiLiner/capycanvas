@@ -437,7 +437,7 @@ impl ManagerUi {
             {
                 button.set_active(pin.selected);
                 if pin.enabled {
-                    w.workspaces.ui.edit_switcher(&w, pin.edit);
+                    w.workspaces.send(&w, WorkspaceInput::EditSwitcher { edit: pin.edit });
                 }
             }
         }));

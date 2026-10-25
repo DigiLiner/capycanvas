@@ -8,16 +8,16 @@ fn command(label: String, command: WorkspaceCommand, selected: Option<bool>) -> 
 }
 
 impl WorkspaceView {
-    pub(crate) fn present_manager_pins(&mut self, localization: &Localizer) {
+    pub(crate) fn present_manager_pins(&mut self, localization: &Localizer, pins: &[String]) {
         if self.page != Some(ManagerPage::Workspaces) { return; }
         for row in &mut self.rows {
-            let selected = self.switcher.iter().any(|pinned| pinned.id == row.id);
+            let selected = pins.contains(&row.id);
             row.pin = Some(WorkspacePin {
                 label: localization.text(if selected { MessageId::WORKSPACE_HIDE_FROM_TOP_BAR } else { MessageId::WORKSPACE_SHOW_IN_TOP_BAR }).to_string(),
                 icon: if selected { "pin" } else { "pin-outline" }.into(),
                 selected,
                 enabled: false,
-                edit: SwitcherEdit::Show { id: row.id.clone(), visible: !selected },
+                edit: SwitcherEdit::Toggle { id: row.id.clone() },
             });
         }
         self.update_switcher_menu_availability();
@@ -64,7 +64,7 @@ impl WorkspaceView {
         let editing = available && !self.switcher_busy;
         update(&mut self.switcher_options.sections, available, editing);
         update(&mut self.switcher_menu.sections, available, editing);
-        let manager_editing = self.ready && !self.busy && !self.closing && !self.switcher_busy && self.prompt.is_none();
+        let manager_editing = self.ready && !self.busy && !self.closing && self.prompt.is_none();
         for pin in self.rows.iter_mut().filter_map(|row| row.pin.as_mut()) {
             pin.enabled = manager_editing;
         }
