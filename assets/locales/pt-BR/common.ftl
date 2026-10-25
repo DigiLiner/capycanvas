@@ -623,3 +623,4 @@ tilt-reverse-horizontal = Inverter horizontal
 tilt-reverse-vertical = Inverter vertical
 tilt-swap-axes = Trocar eixos
 tilt-use-pen = Use a caneta aqui
+common-stroke-input-canceled = O traço era longo demais e foi cancelado. Você pode continuar pintando.

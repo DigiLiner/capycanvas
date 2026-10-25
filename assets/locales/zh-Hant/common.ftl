@@ -435,3 +435,4 @@ tilt-reverse-horizontal = 水平反轉
 tilt-reverse-vertical = 垂直反轉
 tilt-swap-axes = 交換座標軸
 tilt-use-pen = 在這裡使用筆
+common-stroke-input-canceled = 該筆畫過長，已取消。你可以繼續繪畫。

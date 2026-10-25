@@ -42,6 +42,13 @@ so editing a brush later does not change old strokes during replay.
 
 ## From samples to dabs
 
+The shared [input contract](input.md#platform-records) admits numerical samples
+before cursor, tool and recording consumers.
+
+The engine caps a contact at 131,072 retained real points. Reaching that limit
+cancels the contact, restores its prior committed pixels and raises a shared
+notice. It leaves rendering, earlier history and subsequent strokes available.
+
 [`DabGenerator`](../../crates/layer-engine/src/brush.rs) processes the ordered path
 and places contacts by distance traveled. A *dab* is one resolved brush contact:
 its location, shape, color and other parameters are ready for the renderer.

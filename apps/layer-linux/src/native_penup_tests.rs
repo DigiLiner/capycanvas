@@ -371,3 +371,74 @@ fn native_terminal_wake_preserves_commit_cancel_and_idle() {
     w.window.destroy();
     pump(100);
 }
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_malformed_pen_samples_preserve_valid_input_and_cancel_release() {
+    let app = native_test_app("art.capycanvas.MalformedPenSamples");
+    let w = Workspace::with_project(&app, Some((new_drawing(256, 256,
+        &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));
+    w.window.present();
+    wait_workspaces(&w);
+    let settle = || until(|| {
+        let gpu = w.gpu.borrow();
+        gpu.as_ref().is_some_and(|gpu| {
+            let engine = gpu.session.engine();
+            engine.backend().startup.complete
+                && engine.backend().paint_ready(engine.document(), engine.configured_brush(), false)
+                && !engine.has_pending_input() && !engine.has_pending_document_edits()
+                && active_raster(engine.document()).host_backed()
+        })
+    }, "malformed pen input settles");
+    settle();
+    w.dispatch(UiAction::SetBrushSize { value: 24. });
+    let context = glib::MainContext::default();
+    let original = context.block_on(read_canvas_pixels(&w, 9301)).unwrap();
+    let checkpoint = ui_session(&w).engine().checkpoint();
+    let camera = state(&w).camera;
+    let event = |at, phase| PenEvent { device_id: 91, pressure: 0.65, ..pen_event(&camera, at, phase, 0) };
+    ui_session_mut(&w).stroke_recording().start("Gtk").unwrap();
+    w.input.send(&w, event([30., 70.], PenPhase::Down));
+    pump(20);
+    let last = event([160., 80.], PenPhase::Move);
+    w.input.send(&w, last);
+    pump(20);
+    assert_ne!(context.block_on(read_canvas_pixels(&w, 9300)).unwrap().bytes, original.bytes);
+    w.input.send(&w, PenEvent { pressure: f32::NAN, ..event([180., 90.], PenPhase::Move) });
+    w.input.send(&w, PenEvent { surface_position: Point { x: f32::NAN, y: 100. },
+        ..event([220., 100.], PenPhase::Up) });
+    settle();
+    assert!(!ui_session(&w).engine().has_active_stroke());
+    assert_eq!(ui_session(&w).engine().checkpoint(), checkpoint);
+    assert_eq!(ui_session(&w).engine().metrics().committed_strokes, 0);
+    let cancelled = context.block_on(read_canvas_pixels(&w, 9302)).unwrap();
+    assert_eq!(cancelled.bytes, original.bytes);
+    ui_session_mut(&w).stroke_recording().stop(layer_engine::recording::StopReason::Manual);
+    let records = layer_engine::recording::read(ui_session_mut(&w).stroke_recording().bytes().unwrap().as_slice()).unwrap();
+    let samples: Vec<_> = records.into_iter().filter_map(|record| match record {
+        layer_engine::recording::Record::Raw { event, .. } if event.device_id == 91 => Some(event),
+        _ => None,
+    }).collect();
+    assert_eq!(samples.iter().map(|sample| sample.phase).collect::<Vec<_>>(),
+        [PenPhase::Down, PenPhase::Move, PenPhase::Cancel]);
+    assert!(samples.iter().all(|sample| sample.is_finite()));
+    assert!(samples.windows(2).all(|pair| pair[1].sequence == pair[0].sequence + 1));
+    assert_eq!(samples[2].surface_position, last.surface_position);
+    assert_eq!(samples[2].pressure, last.pressure);
+    for (at, phase) in [([30., 150.], PenPhase::Down), ([160., 160.], PenPhase::Move), ([220., 170.], PenPhase::Up)] {
+        w.input.send(&w, event(at, phase));
+        pump(20);
+    }
+    settle();
+    assert_eq!(ui_session(&w).engine().metrics().committed_strokes, 1);
+    let painted = context.block_on(read_canvas_pixels(&w, 9303)).unwrap();
+    assert_ne!(painted.bytes, original.bytes);
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    settle();
+    assert_eq!(context.block_on(read_canvas_pixels(&w, 9304)).unwrap().bytes, original.bytes);
+    w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+    settle();
+    assert_eq!(context.block_on(read_canvas_pixels(&w, 9305)).unwrap().bytes, painted.bytes);
+    w.window.destroy();
+    pump(100);
+}

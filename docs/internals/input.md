@@ -15,6 +15,15 @@ converts its native units into that contract and preserves chronological order.
 History delivered with an event is often called *coalesced input*; it is measured
 input that should not be confused with prediction.
 
+Shared numerical admission drops samples with non-finite coordinates or pen
+axes before cursor, tool and recording consumers. A damaged real release
+cancels its contact using the last valid sample. Damaged predictions and
+corrections leave the real contact intact. The session retains at most sixteen
+contacts in storage allocated once when it starts. Packed batches preserve
+valid siblings; malformed native structures cancel their matching real contact.
+GTK routes a damaged current Move through its latest eligible valid historical
+sample and retains historical paint order.
+
 `PenEvent.tilt_radians` contains signed barrel angles projected onto the surface
 XZ and YZ planes, as in [Pointer Events](https://www.w3.org/TR/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle).
 Android converts its scalar inclination and tip orientation into those projected

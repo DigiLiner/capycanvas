@@ -18,6 +18,40 @@ fn picker_reply(s: &mut UiSession<Recorder>, rgba: [f32; 4]) {
 }
 
 #[test]
+fn invalid_pen_release_cancels_the_consumed_picker_contact() {
+    let mut s=session(Platform::Gtk);
+    let colors=s.state.colors.clone();
+    invoke(&mut s,CommandId::Eyedropper);
+    assert!(!picker_pointer(&mut s,7,ContactPhase::Down,PointerKind::Pen,[300.,300.]).paint);
+    assert!(s.interaction.pointer.is_none());
+    assert!(s.eyedropper.picking.consumed.contains(&(PointerKind::Pen,7)));
+    picker_pointer(&mut s,7,ContactPhase::Up,PointerKind::Pen,[f32::NAN;2]);
+    assert!(s.eyedropper.picking.previous.is_none() && s.eyedropper.picking.consumed.is_empty());
+    assert_eq!(s.state.colors,colors);
+    assert!(picker_pointer(&mut s,8,ContactPhase::Down,PointerKind::Pen,[300.,300.]).paint);
+    picker_pointer(&mut s,8,ContactPhase::Cancel,PointerKind::Pen,[300.,300.]);
+}
+
+#[test]
+fn malformed_hover_has_no_cursor_or_eraser_side_effects() {
+    let mut s=session(Platform::Gtk);
+    let valid=event(&s,1,PenPhase::Hover,0.5);
+    s.cursor_input(Some(valid));
+    for corrupt in 0..7 {
+        let mut bad=PenEvent {tool:layer_engine::ToolKind::Eraser,..valid};
+        match corrupt {
+            0=>bad.surface_position.x=f32::NAN,1=>bad.surface_position.y=f32::INFINITY,
+            2=>bad.pressure=f32::NAN,3=>bad.tilt_radians[0]=f32::NAN,
+            4=>bad.tilt_radians[1]=f32::NAN,5=>bad.twist_radians=f32::NAN,
+            _=>bad.distance=f32::NAN,
+        }
+        s.cursor_input(Some(bad));
+        assert!(!s.interaction.eraser_end);
+        assert_eq!(s.cursor.event,Some(valid));
+    }
+}
+
+#[test]
 fn picker_cancellation_replies_release_zen_chrome_and_keep_capy() {
     for platform in Platform::ALL {
         let mut s = session(platform);
@@ -454,8 +488,9 @@ fn touch_release_cleans_up_even_when_normal_routing_is_blocked() {
             s.state.settings_open = blocked == "settings";
             s.workspace_transition = blocked == "workspace transition";
             let reply = s.input(pointer_input(1, terminal, PointerKind::Touch, PointerButton::Primary, if blocked == "invalid position" { [f32::NAN; 2] } else { [200., 200.] }, 0));
-            assert_eq!(reply.is_err(), blocked == "invalid position");
+            reply.unwrap();
             assert!(!s.touch.is_active(), "{blocked}/{terminal:?}");
+            assert!(!s.interaction.gestures.active(), "{blocked}/{terminal:?}");
         }
     }
 }

@@ -1069,9 +1069,10 @@ impl WebApp {
             return Err(js("Invalid pen batch length"));
         }
         for item in records.chunks_exact(11) {
-            if !item.iter().all(|n| n.is_finite()) {
-                return Err(js("Invalid pen sample"));
-            }
+            if !item[0].is_finite() || item[0]<0. || item[0].fract()!=0. || item[0]>=u64::MAX as f64 {continue;}
+            let valid_phase=item[1].is_finite() && (0. ..=4.).contains(&item[1]) && item[1].fract()==0.;
+            let valid_flags=item[9].is_finite() && (0. ..=u16::MAX as f64).contains(&item[9]) && item[9].fract()==0.;
+            let valid_time=item[8].is_finite() && item[8]>=0.;
             let event = PenEvent {
                 device_id: item[0] as u64,
                 sequence: self.sequence + 1,
@@ -1081,18 +1082,19 @@ impl WebApp {
                     x: item[2] as f32,
                     y: item[3] as f32,
                 },
-                pressure: item[4] as f32,
+                pressure: if valid_phase && valid_flags && valid_time {item[4] as f32} else {f32::NAN},
                 tilt_radians: [item[5] as f32, item[6] as f32],
                 twist_radians: item[7] as f32,
                 distance: 0.0,
-                phase: phase(item[1] as u8)?,
-                flags: SampleFlags(item[9] as u16),
+                phase: if valid_phase {phase(item[1] as u8)?} else {PenPhase::Cancel},
+                flags: if valid_flags {SampleFlags(item[9] as u16)} else {SampleFlags::NONE},
                 tool: match item[10] as u8 {
                     1 => ToolKind::Mouse,
                     2 => ToolKind::Eraser,
                     _ => ToolKind::Pen,
                 },
             };
+            let Some(event)=self.session.filter_pen(event) else {continue;};
             if event.phase == PenPhase::Down {
                 if let Some(control) = self.tone.pending.take() { control.cancel(); }
             }

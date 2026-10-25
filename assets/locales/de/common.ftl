@@ -618,3 +618,4 @@ tilt-reverse-horizontal = Horizontal umkehren
 tilt-reverse-vertical = Vertikal umkehren
 tilt-swap-axes = Achsen tauschen
 tilt-use-pen = Stift hier verwenden
+common-stroke-input-canceled = Der Strich war zu lang und wurde verworfen. Du kannst weiter malen.

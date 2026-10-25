@@ -4,6 +4,7 @@ import {checkToolBubbles,installBubbleInputTrace} from "./tool-bubbles.test.mjs"
 import {checkGradientDefinitions} from './gradient.test.mjs';
 import {checkNativeWriteback,installNativeWritebackTrace} from './native-writeback.test.mjs';
 import {installHealPortabilityTrace} from './heal-portability.test.mjs';
+import {checkInputStability} from './input-stability.test.mjs';
 import {checkPressureCalibration} from './pressure-calibration.test.mjs';
 import {checkTiltCalibration} from './tilt-calibration.test.mjs';
 import {checkScopes,checkScopesSmoke} from './scopes.test.mjs';
@@ -289,6 +290,7 @@ try {
     [process.argv.includes("--move-selection"), () => checkMoveSelection({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--clone"), () => checkClone({call,evaluate,settle}), checkErrors],
     [process.argv.includes('--heal-portability'), () => checkHeal({call,evaluate,settle,portability:true}), checkErrors],
+    [process.argv.includes('--input-stability'), () => checkInputStability({call,evaluate,settle}), checkRasterErrors],
     [process.argv.includes("--heal"), () => checkHeal({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--photo-paint"), () => checkPhotoPaint({call,evaluate,settle}), checkRasterErrors],
     [process.argv.includes("--proof"), () => checkProof({call,evaluate,settle}), checkRasterErrors],

@@ -394,3 +394,4 @@ tilt-reverse-horizontal = Inverti orizzontale
 tilt-reverse-vertical = Inverti verticale
 tilt-swap-axes = Scambia assi
 tilt-use-pen = Usa la penna qui
+common-stroke-input-canceled = Il tratto era troppo lungo ed è stato annullato. Puoi continuare a dipingere.

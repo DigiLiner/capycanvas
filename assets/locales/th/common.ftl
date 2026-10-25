@@ -387,3 +387,4 @@ tilt-reverse-horizontal = กลับแนวนอน
 tilt-reverse-vertical = กลับแนวตั้ง
 tilt-swap-axes = สลับแกน
 tilt-use-pen = ใช้ปากกาที่นี่
+common-stroke-input-canceled = เส้นยาวเกินไปจึงถูกยกเลิก คุณสามารถวาดต่อได้

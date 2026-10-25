@@ -21,6 +21,42 @@ fn predicted(s: &UiSession<Recorder>, sequence: u64) -> PenEvent {
 }
 
 #[test]
+fn invalid_pen_samples_preserve_valid_siblings_and_cancel_invalid_release() {
+    for field in 0..7 {
+        for (terminal,held) in [(false,false),(true,false),(false,true),(true,true)] {
+            let mut s=if held {held_session()} else {session(Platform::Gtk)};
+            s.frame(1,1).unwrap();
+            let checkpoint=s.engine.checkpoint();
+            s.pen(event(&s,1,PenPhase::Down,0.5));
+            let mut bad=event(&s,2,if terminal {PenPhase::Up} else {PenPhase::Move},0.5);
+            match field {
+                0=>bad.surface_position.x=f32::NAN,1=>bad.surface_position.y=f32::INFINITY,
+                2=>bad.pressure=f32::NAN,3=>bad.tilt_radians[0]=f32::NAN,
+                4=>bad.tilt_radians[1]=f32::INFINITY,5=>bad.twist_radians=f32::NAN,
+                _=>bad.distance=f32::NAN,
+            }
+            s.pen(bad);
+            if !terminal {s.pen(event(&s,3,PenPhase::Up,0.5));}
+            s.renderer_mut().painting_unready=false;
+            settle(&mut s);
+            assert!(!s.pen_contact && !s.engine.has_active_stroke() && !s.holding_input(),"field={field} terminal={terminal}");
+            if terminal {
+                assert_eq!(s.engine.checkpoint(),checkpoint);
+                assert_eq!(s.engine.metrics().committed_strokes,0);
+            } else {assert_eq!(s.engine.metrics().committed_strokes,1);}
+            for (sequence,phase) in [(4,PenPhase::Down),(5,PenPhase::Move),(6,PenPhase::Up)] {s.pen(event(&s,sequence,phase,0.5));}
+            settle(&mut s);
+            assert_eq!(s.engine.metrics().committed_strokes,if terminal {1} else {2});
+            assert!(s.engine.can_undo());
+            s.engine.undo().unwrap();
+            assert!(s.engine.can_redo());
+            s.engine.redo().unwrap();
+            assert!(s.engine.capture_artwork(0).is_ok());
+        }
+    }
+}
+
+#[test]
 fn a_completed_contact_waits_for_painting_before_the_edits_that_follow_it() {
     let mut s = held_session();
     let committed = s.engine.metrics().committed_strokes;

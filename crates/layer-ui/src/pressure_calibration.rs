@@ -40,8 +40,7 @@ impl Calibration {
 
 impl<R: CanvasRenderer> UiSession<R> {
     pub fn calibration_input(&mut self,event:PenEvent) {
-        if ![event.surface_position.x,event.surface_position.y,event.pressure,event.tilt_radians[0],event.tilt_radians[1],event.twist_radians]
-            .into_iter().all(f32::is_finite) {return;}
+        if !event.is_finite() {return;}
         self.prepare_tilt_input(event);
         self.prepare_pressure_input(event);
     }

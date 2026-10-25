@@ -855,37 +855,13 @@ impl Input {
     fn stylus(&self,workspace:&Rc<Workspace>,gesture:&gtk::GestureStylus,phase:PenPhase,x:f64,y:f64) {
         let native=gesture.current_event();
         let Some(event)=self.sample(workspace,native.as_ref(),phase,x,y) else{return;};
-        let tool_kind=event.tool;
         let dpi=workspace.area.scale_factor() as f32;
-        workspace.cursor_input(Some(event));
-        if phase == PenPhase::Hover {
-            return;
-        }
-        let reply = workspace.interact(UiInput::Pointer {
-            id: event.device_id,
-            phase: contact_phase(phase),
-            kind: if tool_kind == ToolKind::Mouse {
-                PointerKind::Mouse
-            } else {
-                PointerKind::Pen
-            },
-            button: PointerButton::Primary,
-            position: [event.surface_position.x, event.surface_position.y],
-            time_ns: event.timestamp_ns,
-        });
-        #[cfg(test)]
-        if let Some(gpu) = workspace.gpu.borrow().as_ref() {
-            gpu.session.engine().backend().stats.lock().unwrap().pen_routes.push((
-                event.timestamp_ns, format!("{phase:?}"), if reply.paint { "paint" } else { "interaction" }));
-        }
-        if !reply.paint {
-            return;
-        }
-        if phase == PenPhase::Move {
-            for point in gesture.backlog().unwrap_or_default() {
+        let defaults=if event.is_finite() {event} else {self.last.get().filter(|p|p.device_id==event.device_id).unwrap_or(event)};
+        let history=if phase==PenPhase::Move {gesture.backlog().unwrap_or_default()} else {Vec::new()};
+        let decode=|point:&gdk::TimeCoord| {
                 let flags = point.flags();
                 if !flags.contains(gdk::AxisFlags::X | gdk::AxisFlags::Y) {
-                    continue;
+                    return None;
                 }
                 let get = |a: gdk::AxisUse| point.axes()[a.into_glib() as usize] as f32;
                 let history = PenEvent {
@@ -897,22 +873,50 @@ impl Input {
                     pressure: if flags.contains(gdk::AxisFlags::PRESSURE) {
                         get(gdk::AxisUse::Pressure)
                     } else {
-                        event.pressure
+                        defaults.pressure
                     },
                     tilt_radians: [
                         if flags.contains(gdk::AxisFlags::XTILT) {
                             get(gdk::AxisUse::Xtilt) * std::f32::consts::FRAC_PI_2
                         } else {
-                            event.tilt_radians[0]
+                            defaults.tilt_radians[0]
                         },
                         if flags.contains(gdk::AxisFlags::YTILT) {
                             get(gdk::AxisUse::Ytilt) * std::f32::consts::FRAC_PI_2
                         } else {
-                            event.tilt_radians[1]
+                            defaults.tilt_radians[1]
                         },
                     ],
+                    twist_radians:defaults.twist_radians,
+                    distance:defaults.distance,
                     ..event
                 };
+                Some(history)
+            };
+        let routing=if phase==PenPhase::Move && !event.is_finite() {
+            let Some(last)=history.iter().rev().filter_map(decode).find(|p|p.is_finite()
+                && self.last.get().is_none_or(|last|p.timestamp_ns>=last.timestamp_ns)) else {return;};
+            last
+        } else {event};
+        let routing={
+            let mut gpu=workspace.gpu.borrow_mut();
+            let Some(routing)=gpu.as_mut().and_then(|gpu|gpu.session.filter_pen(routing)) else {return;};
+            routing
+        };
+        workspace.cursor_input(Some(routing));
+        if routing.phase==PenPhase::Hover {return;}
+        let reply=workspace.interact(UiInput::Pointer {
+            id:routing.device_id,phase:contact_phase(routing.phase),
+            kind:if routing.tool==ToolKind::Mouse {PointerKind::Mouse} else {PointerKind::Pen},
+            button:PointerButton::Primary,position:[routing.surface_position.x,routing.surface_position.y],time_ns:routing.timestamp_ns,
+        });
+        #[cfg(test)]
+        if let Some(gpu)=workspace.gpu.borrow().as_ref() {
+            gpu.session.engine().backend().stats.lock().unwrap().pen_routes.push((event.timestamp_ns,
+                format!("{:?}",routing.phase),if reply.paint {"paint"} else {"interaction"}));
+        }
+        if !reply.paint {return;}
+        for history in history.iter().filter_map(decode) {
                 if self
                     .last
                     .get()
@@ -920,9 +924,9 @@ impl Input {
                 {
                     self.send(workspace, history);
                 }
-            }
         }
-        self.send(workspace, event);
+        if event.is_finite() {self.send(workspace,event);}
+        else if matches!(routing.phase,PenPhase::Up|PenPhase::Cancel) {self.send(workspace,routing);}
     }
     fn touch_pen(&self, workspace: &Rc<Workspace>, id: u64, phase: PenPhase, position: Option<[f32; 2]>, timestamp_ns: u64) {
         let mut points = self.touch_points.borrow_mut();
@@ -963,6 +967,11 @@ impl Input {
         self.deliver(workspace, event);
     }
     fn deliver(&self, workspace: &Rc<Workspace>, mut event: PenEvent) {
+        {
+            let mut gpu=workspace.gpu.borrow_mut();
+            let Some(filtered)=gpu.as_mut().and_then(|gpu|gpu.session.filter_pen(event)) else {return;};
+            event=filtered;
+        }
         #[cfg(test)]
         let delivered_ns = glib::monotonic_time() as u64 * 1000;
         #[cfg(test)]

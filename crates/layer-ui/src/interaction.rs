@@ -94,6 +94,7 @@ impl TouchGestures {
     pub fn suspends_navigation(&self) -> bool {
         self.contacts.len() >= 3 || (self.scrubbed && self.active())
     }
+    pub(crate) fn contact_position(&self,id:u64)->Option<[f32;2]> {self.contacts.get(&id).map(|(_,current)|*current)}
     pub fn contact(
         &mut self,
         id: u64,

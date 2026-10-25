@@ -476,7 +476,7 @@ fn calibration_input_rejects_predicted_corrected_nonpen_and_nonfinite_samples() 
         for sample in [PenEvent{flags:SampleFlags::PREDICTED,..valid},PenEvent{flags:SampleFlags::CORRECTION,..valid},
             PenEvent{tool:ToolKind::Mouse,..valid},PenEvent{tool:ToolKind::Finger,..valid},
             PenEvent{pressure:f32::NAN,..valid},PenEvent{tilt_radians:[f32::NAN,0.2],..valid},
-            PenEvent{tilt_radians:[0.4,f32::INFINITY],..valid},PenEvent{twist_radians:f32::NAN,..valid},
+            PenEvent{tilt_radians:[0.4,f32::INFINITY],..valid},PenEvent{twist_radians:f32::NAN,..valid},PenEvent{distance:f32::NAN,..valid},
             PenEvent{surface_position:layer_core::Point{x:f32::NAN,y:300.},..valid},
             PenEvent{surface_position:layer_core::Point{x:250.,y:f32::INFINITY},..valid}] {
             s.calibration_input(sample);

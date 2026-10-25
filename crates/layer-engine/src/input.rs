@@ -32,6 +32,9 @@ pub enum ToolKind {
     Mouse,
     Unknown,
 }
+impl ToolKind {
+    fn pointer_class(self)->u8 {match self {Self::Finger=>0,Self::Mouse=>1,_=>2}}
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(transparent)]
@@ -80,6 +83,49 @@ pub struct PenEvent {
     pub phase: PenPhase,
     pub tool: ToolKind,
     pub flags: SampleFlags,
+}
+impl PenEvent {
+    pub fn is_finite(self)->bool {
+        [self.surface_position.x,self.surface_position.y,self.pressure,self.tilt_radians[0],self.tilt_radians[1],
+            self.twist_radians,self.distance].into_iter().all(f32::is_finite)
+    }
+}
+
+pub struct PenInput {
+    contacts: Box<[Option<PenEvent>]>,
+}
+impl Default for PenInput {
+    fn default()->Self {Self {contacts:vec![None;16].into_boxed_slice()}}
+}
+impl PenInput {
+    pub fn clear(&mut self) {self.contacts.fill(None);}
+    pub fn cancel(&mut self, id:u64, tool:ToolKind) -> Option<PenEvent> {
+        let slot=self.contacts.iter().position(|previous|previous.is_some_and(|p|p.device_id==id && p.tool.pointer_class()==tool.pointer_class()))?;
+        self.contacts[slot].take().map(|previous|PenEvent {phase:PenPhase::Cancel,..previous})
+    }
+    pub fn filter(&mut self, mut event: PenEvent) -> Option<PenEvent> {
+        let real=!event.flags.contains(SampleFlags::PREDICTED) && !event.flags.contains(SampleFlags::CORRECTION);
+        let contact=self.contacts.iter().position(|previous| previous.is_some_and(|p|p.device_id==event.device_id
+            && p.tool.pointer_class()==event.tool.pointer_class()));
+        if !event.is_finite() {
+            if !real || !matches!(event.phase,PenPhase::Up|PenPhase::Cancel) {return None;}
+            let previous=self.contacts[contact?]?;
+            event=PenEvent {phase:PenPhase::Cancel,sequence:event.sequence,
+                timestamp_ns:event.timestamp_ns.max(previous.timestamp_ns),..previous};
+        }
+        if real {
+            match event.phase {
+                PenPhase::Down => {
+                    let slot=contact.or_else(||self.contacts.iter().position(Option::is_none))?;
+                    self.contacts[slot]=Some(event);
+                },
+                PenPhase::Move => if let Some(slot)=contact {self.contacts[slot]=Some(event);},
+                PenPhase::Up|PenPhase::Cancel => if let Some(slot)=contact {self.contacts[slot]=None;},
+                PenPhase::Hover=>{},
+            }
+        }
+        Some(event)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -396,6 +442,54 @@ mod tests {
             },
             ..crate::test_support::event(sequence, PenPhase::Move, sequence as f32)
         }
+    }
+
+    #[test]
+    fn invalid_predictions_and_corrections_cannot_replace_real_contact_data() {
+        let mut input=PenInput::default();
+        let down=crate::test_support::event(1,PenPhase::Down,16.);
+        assert_eq!(input.filter(down),Some(down));
+        for flag in [SampleFlags::PREDICTED,SampleFlags::CORRECTION] {
+            let mut bad=crate::test_support::event(22,PenPhase::Up,32.);
+            bad.flags=flag;bad.pressure=f32::NAN;
+            assert!(input.filter(bad).is_none());
+            let valid=PenEvent {pressure:0.6,..bad};
+            assert_eq!(input.filter(valid),Some(valid));
+        }
+        let mut release=crate::test_support::event(40,PenPhase::Up,64.);
+        release.surface_position.x=f32::NAN;
+        let cancel=input.filter(release).unwrap();
+        assert_eq!(cancel,PenEvent {phase:PenPhase::Cancel,sequence:release.sequence,timestamp_ns:release.timestamp_ns,..down});
+        assert!(input.filter(release).is_none());
+    }
+
+    #[test]
+    fn numerical_admission_bounds_contacts_and_cancels_only_matching_identity() {
+        let mut input=PenInput::default();
+        for device_id in 0..16 {
+            let down=PenEvent {device_id,..crate::test_support::event(1,PenPhase::Down,device_id as f32)};
+            assert_eq!(input.filter(down),Some(down));
+        }
+        assert!(input.filter(PenEvent {device_id:16,..crate::test_support::event(1,PenPhase::Down,16.)}).is_none());
+        assert_eq!(input.cancel(5,ToolKind::Pen).unwrap().device_id,5);
+        assert!(input.cancel(5,ToolKind::Pen).is_none());
+        assert!(input.filter(PenEvent {device_id:16,..crate::test_support::event(2,PenPhase::Down,16.)}).is_some());
+        assert_eq!(input.cancel(6,ToolKind::Pen).unwrap().device_id,6);
+        input.clear();
+        assert!(input.cancel(0,ToolKind::Pen).is_none());
+    }
+
+    #[test]
+    fn pen_and_touch_contacts_with_the_same_id_keep_separate_valid_samples() {
+        let mut input=PenInput::default();
+        let pen=crate::test_support::event(1,PenPhase::Down,16.);
+        let touch=PenEvent {tool:ToolKind::Finger,surface_position:Point{x:32.,y:32.},..pen};
+        input.filter(pen).unwrap();input.filter(touch).unwrap();
+        let up=PenEvent {phase:PenPhase::Up,pressure:f32::NAN,sequence:2,..pen};
+        let cancel=input.filter(up).unwrap();
+        assert_eq!(cancel.tool,pen.tool);assert_eq!(cancel.surface_position,pen.surface_position);
+        let remaining=input.cancel(touch.device_id,touch.tool).unwrap();
+        assert_eq!(remaining.tool,touch.tool);assert_eq!(remaining.surface_position,touch.surface_position);
     }
 
     #[test]

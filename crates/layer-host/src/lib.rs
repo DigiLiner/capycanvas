@@ -501,16 +501,13 @@ impl NativeHost {
             view_revision,
             device_flags,
         } = batch;
+        if !self.accepts_pointer_input(view_revision) {return Ok(());}
+        let pointer_tool=match tool {1=>ToolKind::Mouse,2=>ToolKind::Eraser,3=>ToolKind::Finger,_=>ToolKind::Pen};
         if device_flags.0 & !(SampleFlags::INDIRECT_POINTER.0 | SampleFlags::BARREL_TWIST.0) != 0
             || records.is_empty()
             || !records.len().is_multiple_of(9)
-            || !records.iter().all(|n| n.is_finite())
-            || records
-                .as_chunks::<9>()
-                .0
-                .iter()
-                .any(|r| r[7] < 0.0 || r[8] < 0.0 || r[8] > 4.0 || r[8].fract() != 0.0)
         {
+            if !predicted && !correction {self.cancel_pointer(id,pointer_tool)?;}
             return Err("Invalid native pointer batch".into());
         }
         if (!updates.is_empty() && updates.len() != records.len() / 9 * 2)
@@ -525,14 +522,13 @@ impl NativeHost {
                     || updates.as_chunks::<2>().0.iter().any(|u| u[0] == 0)))
             || (predicted && !updates.is_empty())
         {
+            if !predicted && !correction {self.cancel_pointer(id,pointer_tool)?;}
             return Err("Invalid native input estimates".into());
-        }
-        if !self.accepts_pointer_input(view_revision) {
-            return Ok(());
         }
         for (index, sample) in records.as_chunks::<9>().0.iter().enumerate() {
             let update = updates.get(index * 2..index * 2 + 2).unwrap_or(&[0, 0]);
-            let phase = match sample[8] as u8 {
+            let valid_phase=sample[8].is_finite() && (0. ..=4.).contains(&sample[8]) && sample[8].fract()==0.;
+            let phase = match if valid_phase {sample[8] as u8} else {4} {
                 0 => PenPhase::Hover,
                 1 => PenPhase::Down,
                 2 => PenPhase::Move,
@@ -553,17 +549,12 @@ impl NativeHost {
                     x: position[0],
                     y: position[1],
                 },
-                pressure: sample[2] as f32,
+                pressure: if valid_phase && sample[7].is_finite() && sample[7]>=0. {sample[2] as f32} else {f32::NAN},
                 tilt_radians: [sample[3] as f32, sample[4] as f32],
                 twist_radians: sample[5] as f32,
                 distance: sample[6] as f32,
                 phase,
-                tool: match tool {
-                    1 => ToolKind::Mouse,
-                    2 => ToolKind::Eraser,
-                    3 => ToolKind::Finger,
-                    _ => ToolKind::Pen,
-                },
+                tool: pointer_tool,
                 flags: SampleFlags(
                     SampleFlags::PRIMARY.0
                         | if correction {
@@ -587,8 +578,10 @@ impl NativeHost {
             if correction {
                 // Corrections refer to previously admitted sample tokens and never
                 // enter UI pointer ownership or replace the current cursor.
-                self.sequence += 1;
-                self.deliver(event);
+                if let Some(event)=self.session.filter_pen(event) {
+                    self.sequence += 1;
+                    self.deliver(event);
+                }
                 continue;
             }
             self.pointer_event_inner(
@@ -601,6 +594,10 @@ impl NativeHost {
                 update[0] != 0,
             )?;
         }
+        Ok(())
+    }
+    fn cancel_pointer(&mut self, id:u64,tool:ToolKind) -> Result<(),String> {
+        if let Some(event)=self.session.take_pen_cancel(id,tool) {self.pointer_event_inner(event,PointerButton::Primary,false)?;}
         Ok(())
     }
     /// Route a validated typed platform sample through shared input policy.
@@ -626,6 +623,8 @@ impl NativeHost {
         button: PointerButton,
         preserve_token: bool,
     ) -> Result<(), String> {
+        let Some(filtered)=self.session.filter_pen(event) else {return Ok(());};
+        event=filtered;
         let id = event.device_id;
         let phase = event.phase;
         let predicted = event.flags.0 & SampleFlags::PREDICTED.0 != 0;
@@ -2690,6 +2689,22 @@ mod tests {
     }
 
     #[test]
+    fn invalid_packed_samples_do_not_discard_valid_hover_siblings() {
+        let mut host=NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let mut control=NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let valid=[150.,120.,0.5,0.,0.,0.,0.,2_000_000.,0.];
+        let records=[100.,100.,0.5,0.,0.,0.,0.,1_000_000.,0.,
+            110.,110.,f64::NAN,0.,0.,0.,0.,1_500_000.,0.,
+            150.,120.,0.5,0.,0.,0.,0.,2_000_000.,0.];
+        pointer(&mut host,7,0,0,&records,false).unwrap();
+        pointer(&mut control,7,0,0,&valid,false).unwrap();
+        let actual=host.session.canvas_cursor().unwrap();
+        let expected=control.session.canvas_cursor().unwrap();
+        assert_eq!(actual.center,expected.center);
+        assert_eq!(actual.mode,expected.mode);
+    }
+
+    #[test]
     fn packed_pen_device_flags_reach_hover_and_reject_sample_flags() {
         let mut host = NativeHost::new(layer_ui::Platform::Android).unwrap();
         let mut settings = host.session.state().settings.clone();
@@ -2915,16 +2930,16 @@ mod tests {
     }
 
     #[test]
-    fn malformed_input_is_rejected_before_changing_state() {
+    fn malformed_input_is_refused_or_dropped_before_changing_state() {
         let mut app = NativeHost::new(layer_ui::Platform::Android).unwrap();
         for sample in [
             vec![],
             vec![0.0; 8],
-            vec![f64::NAN; 9],
-            vec![0., 0., 1., 0., 0., 0., 0., -1., 1.],
         ] {
             assert!(pointer(&mut app, 1, 0, 0, &sample, false).is_err());
         }
+        pointer(&mut app,1,0,0,&[f64::NAN;9],false).unwrap();
+        pointer(&mut app,1,0,0,&[0.,0.,1.,0.,0.,0.,0.,-1.,1.],false).unwrap();
         assert_eq!(app.sequence, 0);
         assert!(app.resize(0, 100, 1.0).is_err());
         assert!(app.resize(100, 100, 0.0).is_err());

@@ -266,6 +266,7 @@ pub struct UiSession<R: CanvasRenderer> {
     canvas_bar: canvas_bar::CanvasBarState,
     notices: notices::Notices,
     pen: InputProducer<PenEvent>,
+    pen_input: layer_engine::PenInput,
     input_pending: bool,
     host_requests_changed: bool,
     pen_contact: bool,
@@ -500,6 +501,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             input_pending: false,
             host_requests_changed: false,
             pen_contact: false,
+            pen_input: Default::default(),
             discarded_contacts: Vec::new(),
             rendering_suspended: false,
             touch: TouchGesture::default(),
@@ -964,6 +966,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     /// Hover is presentation input, separate from the paint queue and UI state.
     pub fn cursor_input(&mut self, mut event: Option<PenEvent>) {
+        if event.is_some_and(|event|!event.is_finite()) {return;}
         match &mut event {
             Some(event) => self.eraser_end(event),
             None if self.interaction.eraser_end => {
@@ -973,20 +976,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             None => {}
         }
         self.engine.backend_mut().shader_input();
-        if event.is_some_and(|e| {
-            ![
-                e.surface_position.x,
-                e.surface_position.y,
-                e.pressure,
-                e.tilt_radians[0],
-                e.tilt_radians[1],
-                e.twist_radians,
-            ]
-            .into_iter()
-            .all(f32::is_finite)
-        }) {
-            return;
-        }
         if let Some(event)=event { self.prepare_tilt_input(event); }
         if let Some(event) =
             event.filter(|e| e.phase == PenPhase::Hover && self.engine.recording.is_active())
@@ -1151,6 +1140,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         })
     }
     fn route_input(&mut self, mut input: UiInput) -> Result<InputReply, String> {
+        if let UiInput::Pointer {id,kind,phase,position,..}=&mut input
+            && !position.iter().all(|v|v.is_finite()) {
+            let previous=self.interaction.pointer.filter(|p|p.id==*id && p.kind==*kind).map(|p|p.position)
+                .or_else(||(*kind==PointerKind::Touch).then(||self.touch.contact_position(*id)
+                    .or_else(||self.interaction.gestures.contact_position(*id))).flatten())
+                .or_else(||self.eyedropper.picking.consumed.contains(&(*kind,*id))
+                    .then(||self.eyedropper.picking.position.unwrap_or([0.;2])));
+            if matches!(phase,ContactPhase::Up|ContactPhase::Cancel) && let Some(previous)=previous {
+                *phase=ContactPhase::Cancel;*position=previous;
+            } else {
+                return Ok(InputReply::default());
+            }
+        }
         self.engine.backend_mut().shader_input();
         // Tool routing and UI transitions may consume terminal events, but
         // must never keep their contacts alive in the camera gesture.
@@ -1657,9 +1659,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 position,
                 ..
             } => {
-                if !position.into_iter().all(f32::is_finite) {
-                    return Err("Invalid pointer position".into());
-                }
                 if phase == ContactPhase::Down {
                     self.dismiss_notice();
                 }
@@ -1735,6 +1734,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
             }
             UiInput::Blur => {
+                self.pen_input.clear();
                 if self.finish_transform_nudge(true)? {
                     reply.change = self.changed(regions::BRUSH | regions::DOCUMENT | regions::COMMANDS, true);
                 }
@@ -4259,6 +4259,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Raw records retain platform timestamp/history/prediction metadata. A
     /// full queue returns the untouched record; hosts must retry after a frame.
     pub fn pen(&mut self, event: PenEvent) {
+        let Some(event)=self.filter_pen(event) else {return;};
         self.prepare_tilt_input(event);
         if !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION) {
             self.bubble_stroke(event.phase, [event.surface_position.x, event.surface_position.y]);
@@ -4269,6 +4270,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             && let Err(error) = self.liquify_contact(ContactPhase::Up) { self.notify(error); }
         self.admit_pen(event)
     }
+
+    /// Shared numerical admission before cursor, tool and recording consumers.
+    pub fn filter_pen(&mut self, event: PenEvent) -> Option<PenEvent> {self.pen_input.filter(event)}
+    pub fn take_pen_cancel(&mut self, id:u64,tool:layer_engine::ToolKind) -> Option<PenEvent> {self.pen_input.cancel(id,tool)}
 
     fn pen_ready(&mut self, mut event: PenEvent) -> Result<(), PenEvent> {
         self.eraser_end(&mut event);
@@ -4760,9 +4765,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.sync_vector_line_preview(now_ns, presentation_ns);
         let preview = self.sync_previews(now_ns, presentation_ns);
         let clone_source = self.engine.clone_source();
+        let input_cancellations=self.engine.metrics().input_budget_cancellations;
         self.engine
             .render_frame_for(now_ns, presentation_ns)
             .map_err(error)?;
+        if self.engine.metrics().input_budget_cancellations!=input_cancellations {
+            self.raise_message_notice(MessageId::COMMON_STROKE_INPUT_CANCELED);
+        }
         if self.engine.clone_source() != clone_source {
             self.sync_retouch_points();
         }

@@ -61,6 +61,7 @@ pub struct EngineMetrics {
     pub last_consumed_paint_ns: u64,
     pub frames: u64,
     pub committed_strokes: u64,
+    pub input_budget_cancellations: u64,
     pub platform_prediction_frames: u64,
     pub engine_prediction_frames: u64,
 }
@@ -1519,12 +1520,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         if self.settings.retouch.is_some() {
             self.refresh_retouch();
         }
-        if self.builder.real_points().len() >= MAX_CONTACT_POINTS {
-            self.cancel_active();
-            return Err(EngineError::Document(DocumentError::InvalidLayerOperation(
-                "Stroke exceeded the live input budget and was cancelled",
-            )));
-        }
+        self.cancel_over_budget_contact();
         let mut rebuilt = false;
         if self.rebuild_all || self.rebuild_completed {
             rebuilt |= self.rebuild_all;
@@ -1819,14 +1815,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             let Some(event) = self.input.pop() else {
                 break;
             };
-            if self.builder.real_points().len() >= MAX_CONTACT_POINTS
-                && !matches!(event.phase, PenPhase::Up | PenPhase::Cancel)
-            {
-                self.cancel_active();
-                return Err(EngineError::Document(DocumentError::InvalidLayerOperation(
-                    "Stroke exceeded the live input budget and was cancelled",
-                )));
-            }
+            self.cancel_over_budget_contact();
             self.process_captured_event(event)?;
             // Publish one contact boundary before consuming the next contact.
             // This keeps each undo revision tied to its exact GPU queue point.
@@ -2581,6 +2570,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.dab_generator.reset();
         self.rebuild_all = true;
     }
+
+    fn cancel_over_budget_contact(&mut self) {
+        if self.active_stroke.is_some() && self.builder.real_points().len()>=MAX_CONTACT_POINTS {
+            self.cancel_active();
+            self.metrics.input_budget_cancellations=self.metrics.input_budget_cancellations.saturating_add(1);
+        }
+    }
 }
 
 /// `retouch` copying through the document offset `offset`, in `layer`'s pixels.
@@ -3063,6 +3059,37 @@ mod tests {
         restored.undo().unwrap();
         assert_eq!(restored.checkpoint(), 0);
         assert_eq!(active_occurrence(restored.document()).opacity, 1.);
+    }
+
+    #[test]
+    fn exhausting_contact_input_cancels_only_that_contact_and_keeps_rendering() {
+        for remaining in [0,1] {
+            let (mut input,mut canvas)=engine("Input budget",64,64);
+            for (sequence,phase) in [(1,PenPhase::Down),(2,PenPhase::Up)] {
+                input.push(event(sequence,phase,16.)).unwrap();canvas.render_frame().unwrap();
+            }
+            let document=canvas.document().clone();let checkpoint=canvas.checkpoint();
+            input.push(event(3,PenPhase::Down,24.)).unwrap();canvas.render_frame().unwrap();
+            for sequence in 4..(MAX_CONTACT_POINTS-remaining+3) {
+                canvas.builder.push(event(sequence as u64,PenPhase::Move,24.),TRANSFORM,PressureCurve::default());
+            }
+            if remaining!=0 {
+                for sequence in [200_000,200_001] {input.push(event(sequence,PenPhase::Move,24.)).unwrap();}
+            }
+            canvas.render_frame().expect("a contact limit cannot stop the canvas");
+            input.push(event(200_002,PenPhase::Up,24.)).unwrap();canvas.render_frame().unwrap();
+            assert!(!canvas.has_active_stroke());
+            assert_eq!(canvas.metrics().input_budget_cancellations,1);
+            assert_eq!(canvas.checkpoint(),checkpoint);
+            assert_eq!(canvas.document().artwork,document.artwork);
+            assert_eq!(canvas.document().working,document.working);
+            for (sequence,phase) in [(200_003,PenPhase::Down),(200_004,PenPhase::Up)] {
+                input.push(event(sequence,phase,32.)).unwrap();canvas.render_frame().unwrap();
+            }
+            assert_eq!(canvas.metrics().committed_strokes,2);
+            canvas.undo().unwrap();assert_eq!(canvas.checkpoint(),checkpoint);
+            canvas.redo().unwrap();assert!(canvas.capture_artwork(0).is_ok());
+        }
     }
 
     #[test]
@@ -5177,7 +5204,8 @@ mod tests {
                 PressureCurve::default(),
             );
         }
-        assert!(engine.render_frame().is_err());
+        engine.render_frame().unwrap();
+        assert_eq!(engine.metrics().input_budget_cancellations,1);
         assert!(!engine.has_active_stroke());
         assert_eq!(engine.checkpoint(), checkpoint);
         assert!(!engine.can_undo());

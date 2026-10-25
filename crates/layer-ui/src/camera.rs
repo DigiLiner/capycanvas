@@ -279,6 +279,8 @@ impl TouchGesture {
         self.points.len() == 1 && self.points.contains_key(&id)
     }
 
+    pub(crate) fn contact_position(&self,id:u64)->Option<[f32;2]> {self.points.get(&id).copied()}
+
     pub(crate) fn release(&mut self, id: u64) {
         if self.points.remove(&id).is_some() { self.reset_rotation(); }
     }
