@@ -250,7 +250,7 @@ fn inline_edit(w: &Rc<Workspace>, output: &std::path::Path, context: &str, id: &
     pump(100);
     let editor = find_css(number.upcast_ref(), "number-entry").unwrap().downcast::<gtk::Entry>().unwrap();
     let editing = editor.compute_bounds(&panel).unwrap();
-    assert_eq!(editing.height(), 24., "{context}: inline editor preserves approved height");
+    assert_eq!(editing.height(), layer_ui::PANEL_CONTROL_METRICS.control_height, "{context}: inline editor preserves approved height");
     assert_eq!(editing.x() + editing.width(), before.x() + before.width(), "{context}: editor keeps outer right edge");
     let padding = padding(&editor);
     assert_eq!([padding[3],padding[1]], [6,6], "{context}: editor and readout horizontal padding match");
@@ -615,8 +615,8 @@ fn capture_panel(w: &Rc<Workspace>, output: &std::path::Path, panel_id: Panel, c
     let mut shapes = Vec::new();
     if let Some(button) = find_named(&panel, "gradient-reverse").filter(|button| button.is_mapped()) {
         let bounds = button.compute_bounds(&panel).unwrap();
-        assert_eq!([bounds.width(),bounds.height()], [24.,24.], "gradient action is a small square control");
-        shapes.push(shape(&button, 12.));
+        assert_eq!([bounds.width(),bounds.height()], [layer_ui::PANEL_CONTROL_METRICS.control_height;2], "gradient action is a small square control");
+        shapes.push(shape(&button, layer_ui::PANEL_CONTROL_METRICS.control_radius));
     }
     let mut ancestor = panel.parent();
     while let Some(widget) = ancestor {

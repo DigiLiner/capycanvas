@@ -50,7 +50,7 @@ pub const PANEL_CONTROL_METRICS: PanelControlMetrics = PanelControlMetrics {
     group_spacing: PANEL_GROUP_SPACING,
     compound_spacing: PANEL_COMPOUND_SPACING,
     control_height: 26.,
-    slider_height: 38.,
+    slider_height: 36.,
     field_padding: 6.,
     icon_size: 16.,
     control_radius: 13.,
