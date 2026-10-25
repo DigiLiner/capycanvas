@@ -11,6 +11,7 @@ use std::{
     time::Duration,
 };
 
+type Choices = (Vec<std::sync::Arc<str>>, Vec<std::sync::Arc<str>>);
 pub struct Settings {
     pub root: gtk::Box,
     source: gtk::DropDown,
@@ -18,7 +19,7 @@ pub struct Settings {
     source_row: gtk::Box,
     labels: [gtk::Label; 2],
     copy: RefCell<layer_ui::native_copy::SamplerCopy>,
-    choices: RefCell<(Vec<std::sync::Arc<str>>, Vec<std::sync::Arc<str>>)>,
+    choices: RefCell<Choices>,
     widths: Rc<RefCell<Vec<u32>>>,
     owner: Rc<RefCell<Weak<Workspace>>>,
     updating: Rc<Cell<bool>>,

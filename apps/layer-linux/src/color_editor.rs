@@ -26,6 +26,8 @@ const TILE_GAP: i32 = 4;
 const TILE_PADDING: i32 = 3;
 
 type Accepted = Box<dyn FnOnce(&Rc<Workspace>, RgbColor, Option<f32>)>;
+type Viewed = Box<dyn Fn(&ColorEditorView)>;
+type Blocked = Box<dyn Fn(bool)>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Target {
@@ -132,8 +134,8 @@ pub(crate) struct ColorForm {
     pub(crate) left: gtk::Box,
     pub(crate) header: gtk::Grid,
     pub(crate) values: gtk::Box,
-    viewed: RefCell<Option<Box<dyn Fn(&ColorEditorView)>>>,
-    blocked: RefCell<Option<Box<dyn Fn(bool)>>>,
+    viewed: RefCell<Option<Viewed>>,
+    blocked: RefCell<Option<Blocked>>,
 }
 
 pub(crate) struct Editor {

@@ -137,12 +137,11 @@ impl ImageSizeDialog {
         let shown = self.shown.clone();
         self.dialog.connect_response(None, glib::clone!(#[strong] this, move |_, response| {
             let Some(this) = this.upgrade() else { return };
-            if response == "apply" {
-                if !Self::commit(&this.numbers) {
+            if response == "apply"
+                && !Self::commit(&this.numbers) {
                     if let Some(w) = this.workspace.borrow().upgrade() { w.refresh_document_view(); }
                     return;
                 }
-            }
             if !shown.replace(false) { return; }
             send(&this.workspace.borrow(), if response == "apply" {
                 ImageSizeAction::Apply

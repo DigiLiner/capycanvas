@@ -753,9 +753,7 @@ impl ProofDial {
                             self.root.upcast_ref(),
                             text,
                             g.field.center,
-                            radius as f64,
-                            angle as f64,
-                            reverse,
+                            (radius as f64, angle as f64, reverse),
                             size,
                         );
                     } else {
@@ -857,9 +855,7 @@ fn curved_text(
     widget: &gtk::Widget,
     text: &str,
     center: [f32; 2],
-    radius: f64,
-    angle: f64,
-    reverse: bool,
+    (radius, angle, reverse): (f64, f64, bool),
     size: f32,
 ) {
     text_style(cr, widget, size);

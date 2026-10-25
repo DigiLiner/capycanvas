@@ -252,11 +252,10 @@ impl Launcher {
                     } else if let Some(windows) = self.windows.upgrade() {
                         crate::open_workspace_ready(app, &windows, None, Some(settings), localization.clone());
                         target = windows.borrow().last().cloned();
-                        if let Some(w) = &target {
-                            if let Err(error) = w.documents.open_initial_imported(w, project.0, project.1).await {
+                        if let Some(w) = &target
+                            && let Err(error) = w.documents.open_initial_imported(w, project.0, project.1).await {
                                 w.changed(Err(error));
                             }
-                        }
                         if let Some(window) = &placeholder {
                             window.destroy();
                         }

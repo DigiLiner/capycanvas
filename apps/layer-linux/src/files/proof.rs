@@ -280,14 +280,12 @@ impl ProofPanel {
         {
             glib::timeout_future(std::time::Duration::from_millis(20)).await;
         }
-        if self.model.page.get() == Page::Print && self.model.print_dirty.get() {
-            if let Some(form) = self.form.borrow().as_ref() {
+        if self.model.page.get() == Page::Print && self.model.print_dirty.get()
+            && let Some(form) = self.form.borrow().as_ref() {
                 (form.chooser.selected)()?;
             }
-        }
-        if self.model.page.get() == Page::Print {
-            if let Some(error) = self.model.error.borrow().as_ref() { return Err(error.proof_message(&w.localization())); }
-        }
+        if self.model.page.get() == Page::Print
+            && let Some(error) = self.model.error.borrow().as_ref() { return Err(error.proof_message(&w.localization())); }
         Ok(())
     }
     fn edit_print(self: &Rc<Self>, w: &Rc<Workspace>, form: &Form) {
@@ -441,11 +439,10 @@ impl ProofPanel {
         f.stack.set_visible_child_name(page.name());
         f.dial.set_recipe(recipe);
         let p = self.model.print.borrow();
-        if let Some(profile) = &p.profile {
-            if (f.chooser.selected)().ok().as_ref() != Some(profile) {
+        if let Some(profile) = &p.profile
+            && (f.chooser.selected)().ok().as_ref() != Some(profile) {
                 f.chooser.restore_document(profile.clone());
             }
-        }
         f.intent.set_selected(
             PROOF_INTENTS
                 .iter()
@@ -580,7 +577,7 @@ impl Form {
             f.warning.set_label(Some(&PrintProofControl::GamutWarning.localized_label(localization)));
             f.progress.update_property(&[gtk::accessible::Property::Label(&copy.preparing_print)]);
             f.dial.set_localization(localization.clone());
-            if let Some(model) = model.upgrade() { if let Some(error) = model.error.borrow().as_ref() { f.error.set_label(&error.proof_message(localization)); } }
+            if let Some(model) = model.upgrade() && let Some(error) = model.error.borrow().as_ref() { f.error.set_label(&error.proof_message(localization)); }
             f.updating.set(false);
             true
         });

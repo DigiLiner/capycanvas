@@ -101,15 +101,14 @@ mod imp {
             let corners = self.hover_bottom.borrow();
             for (i, button) in buttons.iter().enumerate().filter(|(_, button)| Some(*button) != selected) {
                 if button.is_sensitive() && button.opacity() > 0. && !button.has_css_class("selected-tool")
-                    && button.state_flags().contains(gtk::StateFlags::PRELIGHT) {
-                    if let Some(tab) = button.compute_bounds(&*obj) {
+                    && button.state_flags().contains(gtk::StateFlags::PRELIGHT)
+                    && let Some(tab) = button.compute_bounds(&*obj) {
                         let cr = background.append_cairo(&bounds);
                         let color = button.color();
                         cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), f64::from(color.alpha()) * 0.08 * button.opacity());
                         super::hover(&cr, &tab, corners.get(i).copied().unwrap_or_default());
                         let _ = cr.fill();
                     }
-                }
             }
             let Some(mut node) = background.to_node() else { return };
             if let Some(tab) = active {

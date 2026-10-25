@@ -375,7 +375,7 @@ pub(crate) async fn manage_for_window(
             *state.copy.borrow_mut() = copy;
             *state.localization.borrow_mut() = localization.clone();
             state.render();
-            if let Some(note) = state.note.upgrade() { if let Some(reason) = state.failure.borrow().as_ref() { note.set_text(&reason.profile_message(localization)); } }
+            if let Some(note) = state.note.upgrade() && let Some(reason) = state.failure.borrow().as_ref() { note.set_text(&reason.profile_message(localization)); }
             true
         });
     }

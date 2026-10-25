@@ -122,11 +122,10 @@ impl RangeControl {
                 let changed = changed.clone();
                 let weak = Rc::downgrade(&control);
                 let callback = move |value| {
-                    if let Some(c) = weak.upgrade() && !c.updating.get() {
-                        if let Ok(resolved) = c.spec.resolve(value, NumericOperation::Value { value }) {
+                    if let Some(c) = weak.upgrade() && !c.updating.get()
+                        && let Ok(resolved) = c.spec.resolve(value, NumericOperation::Value { value }) {
                             changed(i, resolved.value);
                         }
-                    }
                 };
                 if source == 0 { control.inputs[i].connect_value_changed(move |n| callback(n.value())); }
                 else { control.handles[i].connect_value_changed(move |s| callback(s.value())); }

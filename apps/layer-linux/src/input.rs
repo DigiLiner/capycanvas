@@ -821,9 +821,8 @@ impl Input {
             .map_or(SampleFlags::NONE, |device| self.tablets.flags(&device, tool.as_ref()));
         let pen=native.and_then(|event|event.device()).zip(tool.as_ref())
             .map(|(device,tool)|self.tablets.pen(&device,tool));
-        if let Some(pen)=&pen {
-            if let Some(gpu)=workspace.gpu.borrow_mut().as_mut(){gpu.session.register_pen_device(pen);}
-        }
+        if let Some(pen)=&pen
+            && let Some(gpu)=workspace.gpu.borrow_mut().as_mut(){gpu.session.register_pen_device(pen);}
         let dpi = workspace.area.scale_factor() as f32;
         let axis = |a| native.and_then(|event|event.axis(a)).unwrap_or(0.0) as f32;
         Some(PenEvent {

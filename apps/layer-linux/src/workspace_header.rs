@@ -562,12 +562,11 @@ impl Header {
                     })));
                 }
             }
-            if let Some(button) = &item.button {
-                if let Some(caption) = button.tooltip_text() {
+            if let Some(button) = &item.button
+                && let Some(caption) = button.tooltip_text() {
                     button.update_property(&[gtk::accessible::Property::Label(&caption)]);
                     item.root.update_property(&[gtk::accessible::Property::Label(&caption)]);
                 }
-            }
             if let Some(compact) = &item.compact {
                 let caption = w.localization().text(layer_ui::MessageId::WORKSPACE_HEADER_SWITCH_WORKSPACE);
                 compact.set_tooltip_text(Some(&caption));

@@ -1044,8 +1044,7 @@ async fn choose_recipe(w: &Rc<Workspace>, snapshot: &DocumentExport) -> Result<O
     presets::install(
         w,
         document.depth.is_float(),
-        &presets_body,
-        &preset,
+        (&presets_body, &preset),
         library.clone(),
         destination.clone(),
         updating.clone(),

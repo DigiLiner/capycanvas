@@ -757,11 +757,10 @@ impl Documents {
             w,
             async move {
                 let prepared = w.documents.pending.borrow_mut().pop_front();
-                if let Some(queued) = prepared {
-                    if let Err(error) = w.documents.open_prepared(&w, queued.prepared, queued.imported, false, None, None).await {
+                if let Some(queued) = prepared
+                    && let Err(error) = w.documents.open_prepared(&w, queued.prepared, queued.imported, false, None, None).await {
                         w.changed(Err(error));
                     }
-                }
                 w.documents.draining.set(false);
             }
         ));
@@ -1049,8 +1048,7 @@ impl Documents {
             }
             recovery
         } else {
-            let recovery=Rc::new(Recovery::default());
-            recovery
+            Rc::new(Recovery::default())
         };
         if let Some((location,fingerprint))=destination {next.session.record_destination_fingerprint(&location,fingerprint)?;}
         if replace_initial {

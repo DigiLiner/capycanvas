@@ -580,9 +580,8 @@ impl ToolSettings {
                 if *label != caption {
                     if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
                         check.set_label(Some(&caption));
-                    } else if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-                        if let Some(child) = button.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { child.set_text(&caption); }
-                    }
+                    } else if let Some(button) = widget.downcast_ref::<gtk::Button>()
+                        && let Some(child) = button.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { child.set_text(&caption); }
                     widget.update_property(&[gtk::accessible::Property::Label(&command.label)]);
                     *label = caption;
                 }
@@ -789,6 +788,7 @@ mod field;
 
 mod wheel {
     use super::*;
+    type Disc = (u32, f32, ColorShape, layer_core::color::RgbSpace, ViewColor, f32, f32, gtk::gdk::Texture);
     #[derive(Default)]
     pub struct Wheel {
         pub color: RefCell<ColorState>,
@@ -807,7 +807,7 @@ mod wheel {
         pub view: Cell<ViewColor>,
         pub headroom: Cell<f32>,
         pub linear_field: RefCell<Option<super::field::LinearField>>,
-        pub disc: RefCell<Option<(u32, f32, ColorShape, layer_core::color::RgbSpace, ViewColor, f32, f32, gtk::gdk::Texture)>>,
+        pub disc: RefCell<Option<Disc>>,
         pub ring: RefCell<Option<super::field::Guide>>,
         #[cfg(test)]
         pub field_render_ms: RefCell<Vec<f64>>,

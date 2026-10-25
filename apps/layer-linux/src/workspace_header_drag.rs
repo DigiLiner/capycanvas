@@ -363,7 +363,7 @@ impl Header {
             b.width.min(b.height) / 2. * crate::squircle::CORNER_FIT,
         );
         snapshot.push_rounded_clip(&shape);
-        snapshot.append_color(&drag.background, &shape.bounds());
+        snapshot.append_color(&drag.background, shape.bounds());
         snapshot.pop();
         draw(&drag.held, b, snapshot, scale);
         let color = if drag.preview.detached && matches!(drag.source, HeaderDragSource::Item(_)) {

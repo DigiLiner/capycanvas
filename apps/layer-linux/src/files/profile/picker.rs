@@ -23,12 +23,13 @@ pub(crate) struct ProfilePicker {
     state: Rc<State>,
 }
 
+type Changed = Rc<dyn Fn(&str)>;
 struct State {
     copy: RefCell<layer_ui::color_feature_copy::ProfileCopy>,
     localization: RefCell<std::sync::Arc<layer_ui::Localizer>>,
     w: std::rc::Weak<Workspace>,
     window: glib::WeakRef<adw::ApplicationWindow>,
-    changed: RefCell<Vec<Rc<dyn Fn(&str)>>>,
+    changed: RefCell<Vec<Changed>>,
     edits: RefCell<Vec<Rc<dyn Fn()>>>,
     error: glib::WeakRef<gtk::Label>,
     menu: glib::WeakRef<gtk::MenuButton>,

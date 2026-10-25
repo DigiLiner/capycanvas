@@ -541,16 +541,14 @@ impl ManagerUi {
                     };
                     if let Some(id) = id { entry.set_placeholder_text(Some(&w.localization().text(id))); }
                 }
-                if widget.widget_name() == "workspace-item-choice-label" {
-                    if let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(prompt.choice_label.as_deref().unwrap_or("")); }
-                }
-                if widget.widget_name() == "workspace-item-choice" {
-                    if let Some(choice) = widget.downcast_ref::<gtk::DropDown>() {
+                if widget.widget_name() == "workspace-item-choice-label"
+                    && let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(prompt.choice_label.as_deref().unwrap_or("")); }
+                if widget.widget_name() == "workspace-item-choice"
+                    && let Some(choice) = widget.downcast_ref::<gtk::DropDown>() {
                         let selected = choice.selected();
                         choice.set_model(Some(&gtk::StringList::new(&prompt.choices.iter().map(|choice| choice.label.as_str()).collect::<Vec<_>>())));
                         choice.set_selected(selected);
                     }
-                }
             });
             return;
         }

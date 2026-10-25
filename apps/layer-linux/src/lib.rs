@@ -326,7 +326,7 @@ fn open_workspace(
         let (settings, localization) = prepare_application_context(&app, &active).await;
         let offer_recovery = project.is_none() && active.borrow().is_empty();
         open_workspace_ready(&app, &active, project, settings, localization);
-        if offer_recovery { if let Some(workspace) = active.borrow().last() { recovery::restore_stale(workspace, &app, &active); } }
+        if offer_recovery && let Some(workspace) = active.borrow().last() { recovery::restore_stale(workspace, &app, &active); }
         drop(hold);
     }));
 }

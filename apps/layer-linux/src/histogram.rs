@@ -132,7 +132,7 @@ impl Inspector {
         if self.waveform && (previous.channel!=view.channel || previous.logarithmic!=view.logarithmic || self.colors.get()!=colors
             || previous.data.as_ref().map(std::sync::Arc::as_ptr)!=view.data.as_ref().map(std::sync::Arc::as_ptr)) {
             *self.plot.borrow_mut()=view.waveform_premultiplied_rgba(colors).and_then(|([width,height],mut rgba)| {
-                for pixel in rgba.chunks_exact_mut(4) {
+                for pixel in rgba.as_chunks_mut::<4>().0 {
                     let packed=u32::from_be_bytes([pixel[3],pixel[0],pixel[1],pixel[2]]);pixel.copy_from_slice(&packed.to_ne_bytes());
                 }
                 gtk::cairo::ImageSurface::create_for_data(rgba,gtk::cairo::Format::ARgb32,width as i32,height as i32,width as i32*4).ok()

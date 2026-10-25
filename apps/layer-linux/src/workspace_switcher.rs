@@ -45,9 +45,8 @@ fn menu_rows(widget: &gtk::Widget, rows: &mut Vec<(gtk::Widget, glib::GString)>)
         child = widget.next_sibling();
         menu_rows(&widget, rows);
     }
-    if rows.len() == count && widget.is_mapped() && widget.is_focusable() {
-        if let Some(label) = menu_label(widget) { rows.push((widget.clone(), label)); }
-    }
+    if rows.len() == count && widget.is_mapped() && widget.is_focusable()
+        && let Some(label) = menu_label(widget) { rows.push((widget.clone(), label)); }
 }
 
 pub(super) fn build() -> (gtk::Box, gtk::Box, gtk::MenuButton) {

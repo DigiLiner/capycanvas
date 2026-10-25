@@ -322,10 +322,11 @@ impl ToolbarManagerUi {
     }
 }
 
+type PaletteColors = ([layer_core::color::RgbColor; 2], layer_ui::ColorSlot, crate::display_color::ViewColor, f32);
 pub(super) struct Customization {
     pub toolbars: RefCell<Vec<ToolbarView>>,
     color_patches: RefCell<Vec<glib::WeakRef<crate::display_color::ColorPair>>>,
-    palette_colors: Cell<Option<([layer_core::color::RgbColor; 2], layer_ui::ColorSlot, crate::display_color::ViewColor, f32)>>,
+    palette_colors: Cell<Option<PaletteColors>>,
     context: gtk::PopoverMenu,
     context_bubble: Cell<bool>,
     context_target: Cell<Option<ContextTarget>>,
@@ -1076,11 +1077,10 @@ impl Customization {
                 None => (),
                 Some(FieldValue::Brush(input)) => {
                     let labels = layer_ui::brush_catalog_localized(&localization).map(|brush| brush.label.to_string()).collect::<Vec<_>>();
-                    if let Some(model) = input.model().and_downcast::<gtk::StringList>() {
-                        if labels.iter().enumerate().any(|(index, label)| model.string(index as u32).as_deref() != Some(label)) {
+                    if let Some(model) = input.model().and_downcast::<gtk::StringList>()
+                        && labels.iter().enumerate().any(|(index, label)| model.string(index as u32).as_deref() != Some(label)) {
                             model.splice(0, model.n_items(), &labels.iter().map(String::as_str).collect::<Vec<_>>());
                         }
-                    }
                     input.set_selected(
                     layer_ui::brush_ids()
                         .position(|id| id == brush.preset)
@@ -1107,9 +1107,8 @@ impl Customization {
                 }
             }
         }
-        if let Some(control) = control {
-            if let Some(label) = self.popup.child().and_then(|body| body.first_child()).and_downcast::<gtk::Label>() { label.set_text(&control.localized_label(&w.localization())); }
-        }
+        if let Some(control) = control
+            && let Some(label) = self.popup.child().and_then(|body| body.first_child()).and_downcast::<gtk::Label>() { label.set_text(&control.localized_label(&w.localization())); }
         if self.popup_control.get() != control {
             self.popup_control.set(control);
             self.popup.set_child(None::<&gtk::Widget>);

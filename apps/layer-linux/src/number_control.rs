@@ -1288,9 +1288,8 @@ impl NumberControl {
     }
     /// Accept text typed into the field that it has not committed yet.
     pub fn commit_text(&self) -> bool {
-        if let Some(editor) = self.imp().popover_control.get().filter(|_| self.imp().popover.get().is_some_and(|popover| popover.is_visible())) {
-            if !editor.commit_text() { return false; }
-        }
+        if let Some(editor) = self.imp().popover_control.get().filter(|_| self.imp().popover.get().is_some_and(|popover| popover.is_visible()))
+            && !editor.commit_text() { return false; }
         if !self.input_valid() { return false; }
         if let Some(spin) = self.imp().spin.get() {
             if self.text_input(&spin.text()).is_err() { return false; }
@@ -1349,9 +1348,8 @@ impl NumberControl {
     }
     fn validate_input(&self) {
         if let Some(spin) = self.imp().spin.get() { let _ = self.text_input(&spin.text()); }
-        else if self.imp().editing.get() {
-            if let Some(entry) = self.imp().entry.get() { let _ = self.text_input(&entry.text()); }
-        }
+        else if self.imp().editing.get()
+            && let Some(entry) = self.imp().entry.get() { let _ = self.text_input(&entry.text()); }
     }
     fn track_preedit(&self, editable: &impl IsA<gtk::Editable>) {
         if let Some(text) = editable.delegate().and_downcast::<gtk::Text>() {

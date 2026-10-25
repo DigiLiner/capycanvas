@@ -4,6 +4,7 @@ use gtk::{glib, subclass::prelude::*};
 use std::cell::{Cell, OnceCell, RefCell};
 
 const REVEAL: f64 = 72.;
+type Changed = Box<dyn Fn(&SwipeRow)>;
 mod imp {
     use super::*;
     #[derive(Default)]
@@ -18,7 +19,7 @@ mod imp {
         pub admitted: Cell<bool>,
         pub can_swipe_right: Cell<bool>,
         pub animation: RefCell<Option<adw::TimedAnimation>>,
-        pub changed: OnceCell<Box<dyn Fn(&super::SwipeRow)>>,
+        pub changed: OnceCell<Changed>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for SwipeRow {

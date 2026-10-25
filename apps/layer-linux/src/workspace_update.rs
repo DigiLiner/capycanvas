@@ -2,6 +2,7 @@
 //! keep their native render nodes; moving allocations also moves picking,
 //! clipping, resize handles and Navigator projection without scaling textures.
 use super::*;
+type Placement = (u32, Bounds, Vec<(gtk::Widget, Bounds)>);
 
 #[derive(Default)]
 pub(super) struct Publication {
@@ -11,7 +12,7 @@ pub(super) struct Publication {
     pending: RefCell<Option<WorkspaceUpdate>>,
     current: RefCell<Option<WorkspaceUpdate>>,
     tick: RefCell<Option<gtk::TickCallbackId>>,
-    placement: RefCell<Option<(u32, Bounds, Vec<(gtk::Widget, Bounds)>)>>,
+    placement: RefCell<Option<Placement>>,
     pub hits: RefCell<Option<Vec<TabHit>>>,
     #[cfg(test)]
     pub refreshes: Cell<usize>,

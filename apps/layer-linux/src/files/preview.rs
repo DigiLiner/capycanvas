@@ -3,6 +3,8 @@
 use super::*;
 use layer_render_wgpu::snapshot::{CaptureControl, SnapshotGpu};
 use std::cell::{Cell, RefCell};
+type StatusCopy = ((u8, bool, layer_core::color::RgbSpace), String);
+type Changed = Box<dyn Fn(bool)>;
 
 struct Image {
     extent: [u32; 2],
@@ -94,7 +96,7 @@ pub(super) struct Comparison {
     after: gtk::Picture,
     labels: [gtk::Label; 2],
     pub status: gtk::Label,
-    status_copy: RefCell<Option<((u8, bool, layer_core::color::RgbSpace), String)>>,
+    status_copy: RefCell<Option<StatusCopy>>,
     original: RefCell<Option<layer_core::authored::ArtworkCapture>>,
     context: layer_core::authored::EvaluationContext,
     before_ready: Cell<bool>,
@@ -109,7 +111,7 @@ pub(super) struct Comparison {
     pub has_transparency: Cell<Option<bool>>,
     show_sdr: Cell<bool>,
     textures: RefCell<[Option<gtk::gdk::Texture>;2]>,
-    pub changed: RefCell<Option<Box<dyn Fn(bool)>>>,
+    pub changed: RefCell<Option<Changed>>,
 }
 impl Comparison {
     pub fn new(gpu: SnapshotGpu, original: Document, context: layer_core::authored::EvaluationContext, view: crate::display_color::ViewColor, localization: &std::sync::Arc<layer_ui::Localizer>) -> Rc<Self> {

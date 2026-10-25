@@ -895,24 +895,20 @@ impl LayerPanel {
                 let other_rows = Rc::downgrade(&rows);
                 let swipe = crate::swipe_row::SwipeRow::new(&root,
                     glib::clone!(#[weak] item, #[strong] owner, move || {
-                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "delete") { action(&w, model.action.clone()); }
-                        }
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade())
+                            && let Some(model) = row.swipe_actions.iter().find(|model|model.id == "delete") { action(&w, model.action.clone()); }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
-                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "lock") { action(&w, model.action.clone()); }
-                        }
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade())
+                            && let Some(model) = row.swipe_actions.iter().find(|model|model.id == "lock") { action(&w, model.action.clone()); }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
-                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "duplicate") { action(&w, model.action.clone()); }
-                        }
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade())
+                            && let Some(model) = row.swipe_actions.iter().find(|model|model.id == "duplicate") { action(&w, model.action.clone()); }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
-                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            if let Some(command) = row.right_swipe { action(&w, command); }
-                        }
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade())
+                            && let Some(command) = row.right_swipe { action(&w, command); }
                     }),
                     move |opened| {
                         if let Some(rows) = other_rows.upgrade() {
@@ -1423,10 +1419,8 @@ impl LayerPanel {
         if !same {
             self.model.splice(0, self.model.n_items(), &panel_items(&state.layers, state.layer_tools.add_paper.as_ref()));
         } else {
-            let mut position = 0;
-            for l in &state.layers {
-                let object = self.model.item(position).and_downcast::<glib::BoxedAnyObject>().unwrap();
-                position += 1;
+            for (position, l) in state.layers.iter().enumerate() {
+                let object = self.model.item(position as u32).and_downcast::<glib::BoxedAnyObject>().unwrap();
                 if *object.borrow::<LayerState>() != *l {
                     *object.borrow_mut::<LayerState>() = l.clone();
                     for row in self.rows.borrow().values().filter(|row| row.id.get() == l.id) { row.refresh(l); }

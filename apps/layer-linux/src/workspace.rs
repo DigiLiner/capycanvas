@@ -13,6 +13,7 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+type ChromeContact = (Option<gdk::Device>, Option<gdk::EventSequence>, u32);
 
 #[path = "workspace_bubbles.rs"]
 mod bubbles;
@@ -871,7 +872,7 @@ pub(crate) fn system_appearance() -> (Theme, Option<HexColor>) {
 pub struct Workspace {
     localization: RefCell<std::sync::Arc<layer_ui::Localizer>>,
     language_transition: RefCell<layer_ui::LanguageTransition>,
-    localization_callbacks: RefCell<Vec<Box<dyn Fn(&std::sync::Arc<layer_ui::Localizer>) -> bool>>>,
+    localization_callbacks: RefCell<Vec<crate::LocalizationCallback>>,
     pub window: adw::ApplicationWindow,
     pub area: gtk::Picture,
     pub gpu: RefCell<Option<GpuCanvas>>,
@@ -893,7 +894,7 @@ pub struct Workspace {
     zen_capy: gtk::Button,
     system_status: Rc<crate::system_status::SystemStatus>,
     popovers: RefCell<Vec<glib::WeakRef<gtk::Popover>>>,
-    chrome_contacts: RefCell<std::collections::HashMap<(Option<gdk::Device>, Option<gdk::EventSequence>, u32), gdk::Event>>,
+    chrome_contacts: RefCell<std::collections::HashMap<ChromeContact, gdk::Event>>,
     dragging: Cell<bool>,
     drag_targets: RefCell<Vec<(glib::WeakRef<gtk::Widget>, DragTarget)>>,
     workspace_drag: RefCell<Option<NativeWorkspaceDrag>>,
@@ -2154,12 +2155,11 @@ impl Workspace {
         if self.refreshing.get() {
             return;
         }
-        if self.gpu.borrow().is_none() {
-            if let UiAction::RestoreSettings { settings } = &action {
+        if self.gpu.borrow().is_none()
+            && let UiAction::RestoreSettings { settings } = &action {
                 *self.initial_settings.borrow_mut() = Some((**settings).clone());
                 return;
             }
-        }
         self.remember_command_focus();
         // Display-wide settings arrive from the host, including while another
         // window owns this workspace or its layout is still loading.

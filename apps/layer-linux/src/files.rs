@@ -163,9 +163,8 @@ impl Workspace {
                                 });
                                 if let Some(result) = result {
                                     if result.is_ok() {
-                                        if let Some((location,fingerprint))=w.saved_fingerprint.borrow_mut().take() {
-                                            if let Some(gpu)=w.gpu.borrow_mut().as_mut() {let _=gpu.session.record_destination_fingerprint(&location,fingerprint);}
-                                        }
+                                        if let Some((location,fingerprint))=w.saved_fingerprint.borrow_mut().take()
+                                            && let Some(gpu)=w.gpu.borrow_mut().as_mut() {let _=gpu.session.record_destination_fingerprint(&location,fingerprint);}
                                     } else {w.saved_fingerprint.borrow_mut().take();}
                                     w.changed(result);
                                 }

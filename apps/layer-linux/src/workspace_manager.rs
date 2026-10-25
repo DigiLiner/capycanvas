@@ -13,8 +13,9 @@ use std::{
 };
 
 type Controller = WorkspaceController<StoreWorker>;
+type StatusKey = (bool, bool, usize, String, Option<String>);
 thread_local! {
-    static WINDOWS: RefCell<std::collections::BTreeMap<String, std::rc::Weak<Workspace>>> = RefCell::new(std::collections::BTreeMap::new());
+    static WINDOWS: RefCell<std::collections::BTreeMap<String, std::rc::Weak<Workspace>>> = const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 #[path = "workspace_manager_dialog.rs"]
 mod dialog;
@@ -53,7 +54,7 @@ pub(crate) struct NativeWorkspaces {
     close_prompt: Cell<bool>,
     focused: RefCell<Option<layer_workspace::FocusTarget>>,
     switcher_revision: Cell<u64>,
-    status_key: RefCell<Option<(bool, bool, usize, String, Option<String>)>>,
+    status_key: RefCell<Option<StatusKey>>,
     #[cfg(test)]
     paused: Cell<bool>,
 }
@@ -395,8 +396,8 @@ impl NativeWorkspaces {
     }
     fn update_status(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
         if self.controller.borrow().is_none() { return; }
-        if self.status_key.borrow().as_ref().is_some_and(|key| key.0 == view.ready && key.1 == view.busy && key.2 == view.interrupted as usize && key.3 == view.name && key.4 == view.error) { return; }
-        *self.status_key.borrow_mut() = Some((view.ready, view.busy, view.interrupted as usize, view.name.clone(), view.error.clone()));
+        if self.status_key.borrow().as_ref().is_some_and(|key| key.0 == view.ready && key.1 == view.busy && key.2 == view.interrupted && key.3 == view.name && key.4 == view.error) { return; }
+        *self.status_key.borrow_mut() = Some((view.ready, view.busy, view.interrupted, view.name.clone(), view.error.clone()));
         if let Some(error) = &view.error {
             self.recovery.set_label(&w.localization().text(layer_ui::MessageId::WORKSPACE_ACTION_SAVE_AS_NEW_WORKSPACE));
             self.root.set_visible(true);

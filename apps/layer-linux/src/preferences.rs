@@ -48,8 +48,8 @@ impl Field {
             if let Some(action) = self.widget().downcast_ref::<adw::ActionRow>() {
                 action.set_subtitle(&row.description);
             }
-        } else if let Some(body) = self.widget().first_child().and_downcast::<gtk::Box>() {
-            if let Some(text) = body.first_child().and_downcast::<gtk::Box>() {
+        } else if let Some(body) = self.widget().first_child().and_downcast::<gtk::Box>()
+            && let Some(text) = body.first_child().and_downcast::<gtk::Box>() {
                 if let Some(title) = text.first_child().and_downcast::<gtk::Label>() {
                     title.set_text(&row.title);
                 }
@@ -59,7 +59,6 @@ impl Field {
                     description.set_text(&row.description);
                 }
             }
-        }
         self.widget().set_sensitive(row.enabled);
         self.widget().set_visible(row.visible);
         match (self, &row.kind) {
@@ -983,9 +982,8 @@ impl Preferences {
             }
             if self.dialog.title().as_str() != view.title { self.dialog.set_title(&view.title); }
             if self.sidebar_page.title().as_str() != view.title { self.sidebar_page.set_title(&view.title); }
-            if let Some(page) = view.pages.iter().find(|page| page.id == view.page) {
-                if self.content_page.title().as_str() != page.title { self.content_page.set_title(&page.title); }
-            }
+            if let Some(page) = view.pages.iter().find(|page| page.id == view.page)
+                && self.content_page.title().as_str() != page.title { self.content_page.set_title(&page.title); }
             self.search_toggle.set_tooltip_text(Some(&view.search_label));
             self.search.set_placeholder_text(Some(&view.search_placeholder));
             self.empty.set_text(&view.no_results);

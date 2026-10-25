@@ -419,7 +419,7 @@ async fn restore_window(w:&Rc<Workspace>,claim:ClaimedWindow,startup:Option<laye
             if desired!=drawing.id {manifest.remap(&[(drawing.id,desired)])} else {Ok(manifest)}
         }).await?;
     }
-    if !protected_placeholder {if let Some(&id)=identity.get(&original.active) {w.documents.activate(w,id).await?;}}
+    if !protected_placeholder&& let Some(&id)=identity.get(&original.active) {w.documents.activate(w,id).await?;}
     let mut order=original.drawings.iter().filter(|drawing|restored_ids.contains(&drawing.id)).map(|drawing|identity[&drawing.id]).collect::<Vec<_>>();
     for &id in w.documents.model.borrow().order() {if !order.contains(&id) {order.push(id);}}
     let selected=w.documents.selected();

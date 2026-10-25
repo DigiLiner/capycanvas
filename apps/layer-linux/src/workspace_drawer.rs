@@ -219,7 +219,7 @@ impl Drop for LayerInspector {
 enum Body {
     Toolbar(ToolbarBody),
     Tools(Panel, ToolSet),
-    Settings(ToolSettings),
+    Settings(Box<ToolSettings>),
     Color(ColorPanel),
     Palettes(Rc<crate::color_library::PalettePanel>),
     Sizes(crate::tool_panels::SizePanel),
@@ -403,7 +403,7 @@ impl View {
                         margins(&v.root, PANEL_CONTENT_INSET as i32);
                         Body::Tools(*panel, v)
                     }
-                    Panel::ToolSettings => Body::Settings(ToolSettings::new()),
+                    Panel::ToolSettings => Body::Settings(Box::new(ToolSettings::new())),
                     Panel::Color => {
                         let v = ColorPanel::new();
                         v.bind(w);

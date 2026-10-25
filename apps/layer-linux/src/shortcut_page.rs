@@ -271,9 +271,8 @@ impl PerTool {
             crate::text_language::visit(self.content.upcast_ref(), &mut |widget| {
                 if widget.widget_name().as_str() == format!("{}-action-{category}", self.prefix) {
                     if let Some(row) = widget.downcast_ref::<adw::ActionRow>() { row.set_title(&action.label); }
-                } else if widget.widget_name().as_str() == format!("{}-value-{category}", self.prefix) {
-                    if let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(&action.action); }
-                }
+                } else if widget.widget_name().as_str() == format!("{}-value-{category}", self.prefix)
+                    && let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(&action.action); }
             });
         }
     }
@@ -1219,12 +1218,11 @@ impl ShortcutPage {
                 if let (Some(row), Some(label)) = (widget.downcast_ref::<adw::ActionRow>(), editor.bindings.get(index)) { row.set_title(label); }
             } else if let Some(index) = name.strip_prefix("shortcut-gesture-").and_then(|index| index.parse::<usize>().ok()) {
                 if let (Some(row), Some(label)) = (widget.downcast_ref::<adw::ActionRow>(), editor.gestures.get(index)) { row.set_title(label); }
-            } else if name.as_str() == "shortcut-editor-gestures" {
-                if let Some(group) = widget.downcast_ref::<adw::PreferencesGroup>() {
+            } else if name.as_str() == "shortcut-editor-gestures"
+                && let Some(group) = widget.downcast_ref::<adw::PreferencesGroup>() {
                     group.set_title(&localization.text(MessageId::NATIVE_SHORTCUTS_PEN_TOUCH));
                     group.set_description(Some(&glib::markup_escape_text(&localization.text(MessageId::NATIVE_SHORTCUTS_PEN_PAGE_HELP))));
                 }
-            }
         });
         if let (Some(row), Some(capture)) = (self.editor.recording.borrow().as_ref(), capture) { refresh_recording(row, capture, &localization); }
         self.editor.present(dialog);
@@ -1300,9 +1298,8 @@ impl ShortcutPage {
             widget.set_title(&spec.label);
             if let Some(row) = widget.downcast_ref::<adw::ActionRow>() { row.set_subtitle(&spec.detail); }
             crate::text_language::visit(widget.upcast_ref(), &mut |widget| {
-                if widget.widget_name().as_str() == "modifier-action" {
-                    if let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(&spec.action); }
-                }
+                if widget.widget_name().as_str() == "modifier-action"
+                    && let Some(label) = widget.downcast_ref::<gtk::Label>() { label.set_text(&spec.action); }
             });
         }
         relabel_controls(self.modifiers_category.upcast_ref(), &w.localization());
@@ -1433,21 +1430,19 @@ impl ShortcutPage {
             let name = widget.widget_name();
             if let Some(id) = name.strip_prefix("action-selected-") {
                 if let Some(check) = widget.downcast_ref::<gtk::Image>() { check.set_visible(if id.is_empty() { picker.nothing } else { picker.sections.iter().flat_map(|section| &section.actions).any(|action| action.id == id && action.selected) }); }
-            } else if let Some(id) = name.strip_prefix("action-") {
-                if let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
+            } else if let Some(id) = name.strip_prefix("action-")
+                && let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
                     if id.is_empty() { row.set_title(&nothing); }
                     else if let Some(action) = picker.sections.iter().flat_map(|section| &section.actions).find(|action| action.id == id) {
                         row.set_title(&action.label);
                         row.set_subtitle(&action.detail);
                     }
                 }
-            }
-            if name.as_str() == "action-picker-empty" {
-                if let Some(status) = widget.downcast_ref::<adw::StatusPage>() {
+            if name.as_str() == "action-picker-empty"
+                && let Some(status) = widget.downcast_ref::<adw::StatusPage>() {
                     status.set_title(&localization.text(MessageId::SHORTCUT_SEARCH_EMPTY_TITLE));
                     status.set_description(Some(&localization.text(MessageId::SHORTCUT_SEARCH_EMPTY_HELP)));
                 }
-            }
         });
         if self.picker.show(true, dialog) {
             self.picker_search.grab_focus();
@@ -1505,12 +1500,11 @@ impl ShortcutPage {
         self.details.dialog.set_title(&keymap.title);
         self.details.title.set_title(&keymap.title);
         crate::text_language::visit(self.details_body.upcast_ref(), &mut |widget| {
-            if widget.widget_name().as_str() == "keymap-defaults" {
-                if let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
+            if widget.widget_name().as_str() == "keymap-defaults"
+                && let Some(row) = widget.downcast_ref::<adw::ActionRow>() {
                     row.set_title(&localization.text(MessageId::NATIVE_SHORTCUTS_NO_DIFFERENCES));
                     row.set_subtitle(&localization.text(MessageId::NATIVE_SHORTCUTS_DEFAULTS_HELP));
                 }
-            }
         });
         self.details.show(keymap.details, dialog);
         let shown = self.import.borrow().clone();

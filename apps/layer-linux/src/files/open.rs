@@ -256,9 +256,8 @@ fn write_package(package: &layer_ui::PackageView, original: Option<&Path>, desti
 
 pub(super) fn same_file(source: &Path, destination: &Path) -> bool {
     if source == destination { return true; }
-    if let (Ok(source), Ok(destination)) = (source.canonicalize(), destination.canonicalize()) {
-        if source == destination { return true; }
-    }
+    if let (Ok(source), Ok(destination)) = (source.canonicalize(), destination.canonicalize())
+        && source == destination { return true; }
     use std::os::unix::fs::MetadataExt;
     match (source.metadata(), destination.metadata()) {
         (Ok(source), Ok(destination)) => source.dev() == destination.dev() && source.ino() == destination.ino(),

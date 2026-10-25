@@ -244,19 +244,17 @@ mod imp {
                             .and_downcast::<gtk::Window>()
                             .and_then(|w| gtk::prelude::GtkWindowExt::focus(&w))
                             .is_some_and(|focus| focus == *child || focus.is_ancestor(child))
-                        {
-                            if let Some(button) = children[0].first_child() {
+                            && let Some(button) = children[0].first_child() {
                                 button.grab_focus();
                             }
-                        }
                         child.set_child_visible(false);
                     }
                 }
             }
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
-            if self.slider.get() {
-                if let Some(scale) = self
+            if self.slider.get()
+                && let Some(scale) = self
                     .children
                     .borrow()
                     .get(1)
@@ -270,7 +268,6 @@ mod imp {
                         self.vertical.get(),
                     );
                 }
-            }
             for child in self
                 .children
                 .borrow()
@@ -310,8 +307,8 @@ impl ComponentBody {
         } else {
             self.remove_css_class("vertical-component");
         }
-        if self.imp().slider.get() {
-            if let Some(scale) = self
+        if self.imp().slider.get()
+            && let Some(scale) = self
                 .imp()
                 .children
                 .borrow()
@@ -325,7 +322,6 @@ impl ComponentBody {
                 });
                 scale.set_inverted(vertical);
             }
-        }
         self.update_option_axis();
         self.queue_allocate();
     }
@@ -380,8 +376,8 @@ impl ComponentBody {
                     dropdown.set_show_arrow(!vertical);
                     dropdown.set_factory(Some(&choice_factory(vertical && !labeled, true, 16)));
                 }
-                if row.has_css_class("option-action") || row.has_css_class("option-segments") {
-                    if let Some(image) = w
+                if (row.has_css_class("option-action") || row.has_css_class("option-segments"))
+                    && let Some(image) = w
                         .clone()
                         .downcast::<gtk::Button>()
                         .ok()
@@ -394,7 +390,6 @@ impl ComponentBody {
                             16
                         });
                     }
-                }
                 child = w.next_sibling();
             }
         }
@@ -729,9 +724,9 @@ impl Component {
         self.updating.set(true);
         let context = state.context;
         let changed_context = self.context.replace(Some(context)) != Some(context);
-        if self.slider.is_some() {
+        if let Some(slider) = &self.slider {
             let enabled = state.numeric.is_some();
-            self.slider.as_ref().unwrap().set_sensitive(enabled);
+            slider.set_sensitive(enabled);
             self.button.set_sensitive(enabled);
             if changed_context {
                 self.close_preview();
@@ -754,11 +749,8 @@ impl Component {
                 .numeric
                 .resolve(field.value as f64, NumericOperation::Format)
                 .unwrap();
-            self.slider.as_ref().unwrap().set_value(value.fill);
-            self.slider
-                .as_ref()
-                .unwrap()
-                .update_property(&[gtk::accessible::Property::ValueText(&value.text)]);
+            slider.set_value(value.fill);
+            slider.update_property(&[gtk::accessible::Property::ValueText(&value.text)]);
         } else {
             let options = &state.options;
             let mut fields = self.fields.take();
@@ -951,8 +943,8 @@ impl Component {
                 poll: RefCell::new(None),
             })));
         }
-        if let Some(preview)=self.preview.borrow().clone() {
-            if preview.poll.borrow().is_none() {
+        if let Some(preview)=self.preview.borrow().clone()
+            && preview.poll.borrow().is_none() {
                 let source=glib::timeout_add_local(std::time::Duration::from_millis(16), glib::clone!(
                     #[weak(rename_to=component)] self,
                     #[weak] w,
@@ -962,23 +954,20 @@ impl Component {
                         let Some(context)=component.context.get() else { return glib::ControlFlow::Break; };
                         let result=w.gpu.borrow_mut().as_mut().and_then(|g|
                             g.session.toolbar_stamp(context,preview.request.get()).ok()).flatten();
-                        if let Some(stamp)=result {
-                            if !stamp.alpha.is_empty() {
-                                if let Ok(image)=gtk::cairo::ImageSurface::create_for_data(stamp.alpha,
+                        if let Some(stamp)=result
+                            && !stamp.alpha.is_empty()
+                                && let Ok(image)=gtk::cairo::ImageSurface::create_for_data(stamp.alpha,
                                     gtk::cairo::Format::A8,stamp.size as i32,stamp.size as i32,stamp.size as i32) {
                                     preview.request.set(Some(stamp.request_id));
                                     preview.extent.set(stamp.extent);
                                     preview.image.replace(Some(image));
                                     component.update_preview(&w.localization());
                                 }
-                            }
-                        }
                         glib::ControlFlow::Continue
                     }
                 ));
                 preview.poll.replace(Some(source));
             }
-        }
         self.update_preview(&w.localization());
         let preview = self.preview.borrow().clone();
         if let Some(preview) = preview {

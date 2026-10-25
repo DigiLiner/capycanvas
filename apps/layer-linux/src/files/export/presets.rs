@@ -72,8 +72,7 @@ pub(super) async fn save(expected: ExportPresets, next: ExportPresets) -> Result
 pub(super) fn install(
     workspace: &Rc<Workspace>,
     hdr_document: bool,
-    group: &gtk::Box,
-    preset: &adw::ComboRow,
+    (group, preset): (&gtk::Box, &adw::ComboRow),
     library: Rc<std::cell::RefCell<ExportPresets>>,
     destination: Rc<std::cell::Cell<usize>>,
     updating: Rc<std::cell::Cell<bool>>,

@@ -112,6 +112,9 @@ and `files.rs` supplies native dialogs and project/photo transport.
 GTK setters and host callbacks can synchronously dispatch an edit and refresh
 widgets. Release `RefCell` guards before those calls by taking owned values or
 cloning handles; keep each collection borrow inside the state operation.
+Release `RefCell` borrows of workflows, sessions and GPU state before awaiting
+dialogs or worker results. Reborrow and validate the current operation identity
+when committing a prepared result.
 
 Navigator measures its controls, spacing and insets separately from the continuous
 overview; Palettes reports its fixed controls and arranged swatch-row pitch.

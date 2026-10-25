@@ -340,7 +340,7 @@ pub(super) async fn run(
         w.open_document.borrow().as_ref().ok_or("New drawing window is unavailable")?(project, None);
         Ok(true)
     } else {
-        adopt(w, &mut state.workflow.borrow_mut(), &state.gpu).await
+        adopt(w, &state.workflow, &state.gpu).await
     }
 }
 
@@ -352,16 +352,17 @@ pub(super) async fn history(w: &Rc<Workspace>, id: u32) -> Result<bool, String> 
     };
     workflow.context = context.resolve().await?;
     workflow.select(None, false)?;
-    adopt(w, &mut workflow, &w.snapshot_gpu()?).await
+    adopt(w, &RefCell::new(workflow), &w.snapshot_gpu()?).await
 }
 
 async fn adopt(
     w: &Rc<Workspace>,
-    workflow: &mut ColorWorkflow,
+    workflow: &RefCell<ColorWorkflow>,
     original_gpu: &layer_render_wgpu::snapshot::SnapshotGpu,
 ) -> Result<bool, String> {
     let copy = std::rc::Rc::new(layer_ui::color_feature_copy::DocumentColorCopy::new(&w.localization()));
     {
+        let workflow = workflow.borrow();
         let mut gpu = w.gpu.borrow_mut();
         let session = &mut gpu.as_mut().ok_or("Canvas unavailable")?.session;
         workflow.identity.validate(session, false, original_gpu.same_device(&session.engine().backend().snapshot_gpu()?))?;
@@ -418,11 +419,13 @@ async fn adopt(
     let should_commit = matches!(result, Ok(true)) && !cancelled.get();
     dialog.force_close();
     let result = if should_commit {
-        let mut gpu = w.gpu.borrow_mut();
-        let session = &mut gpu.as_mut().ok_or("Canvas unavailable")?.session;
-        let prepared = workflow.prepare_commit(session, false, original_gpu.same_device(&session.engine().backend().snapshot_gpu()?));
-        let change = prepared.and_then(|p| session.commit_document_color_candidate(p, |_| {}));
-        drop(gpu);
+        let change = {
+            let mut workflow = workflow.borrow_mut();
+            let mut gpu = w.gpu.borrow_mut();
+            let session = &mut gpu.as_mut().ok_or("Canvas unavailable")?.session;
+            let prepared = workflow.prepare_commit(session, false, original_gpu.same_device(&session.engine().backend().snapshot_gpu()?));
+            prepared.and_then(|p| session.commit_document_color_candidate(p, |_| {}))
+        };
         match change {
             Ok(change) => { w.changed(Ok(change)); Ok(true) }
             Err(error) => Err(error),

@@ -198,17 +198,23 @@ pub(super) async fn run(w: &Rc<Workspace>, mode: Option<layer_ui::PasteMode>) ->
         let Some(source) = super::open::interpret(w, source, policy).await? else { return Ok(false); };
         interpreted.append(name, source, false)?;
     }
-    let mut gpu = w.gpu.borrow_mut();
-    let session = &mut gpu.as_mut().ok_or("Canvas unavailable")?.session;
-    let sources = interpreted.take_sources(false)?;
+    let sources = {
+        let gpu = w.gpu.borrow();
+        let session = &gpu.as_ref().ok_or("Canvas unavailable")?.session;
+        let sources = interpreted.take_sources(false)?;
+        if mode == Some(layer_ui::PasteMode::NewImage) {
+            session.validate_image_placement(&context)?;
+        }
+        sources
+    };
     if mode == Some(layer_ui::PasteMode::NewImage) {
-        session.validate_image_placement(&context)?;
-        drop(gpu);
         let localization = w.localization();
         let project = gio::spawn_blocking(move || layer_ui::clipboard_document(sources, policy, &localization)).await.map_err(|_| "The paste failed")??;
         w.documents.enqueue_imported(w, layer_ui::ImportedDocument::new(project, layer_ui::ImportSource::Photo), None);
         return Ok(true);
     }
+    let mut gpu = w.gpu.borrow_mut();
+    let session = &mut gpu.as_mut().ok_or("Canvas unavailable")?.session;
     match mode {
         Some(mode) => session.paste_layer_sources(sources, mode, &context)?,
         None => {
