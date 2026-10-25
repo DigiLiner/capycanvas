@@ -51,10 +51,20 @@ then became the industry standard for all modern drawing apps.
 The *Sketch* workspace is a tribute to our roots. The place where
 everyone starts out.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sketch-workspace-dark.svg">
-  <img src="docs/assets/sketch-workspace-light.svg" width="1920" alt="An ink drawing of a train beneath a large tree in Sketch, with the drawing filling the screen and tools at the edges.">
-</picture>
+<p>
+  <a href="docs/assets/sketch-workspace-light.webp#gh-light-mode-only">
+    <picture>
+      <source type="image/webp" media="(prefers-reduced-motion: no-preference)" srcset="docs/assets/sketch-workspace-light.webp">
+      <img src="docs/assets/sketch-workspace-light.svg" width="1920" alt="An ink drawing of a train beneath a large tree in Sketch, with the drawing filling the screen and tools at the edges.">
+    </picture>
+  </a>
+  <a href="docs/assets/sketch-workspace-dark.webp#gh-dark-mode-only">
+    <picture>
+      <source type="image/webp" media="(prefers-reduced-motion: no-preference)" srcset="docs/assets/sketch-workspace-dark.webp">
+      <img src="docs/assets/sketch-workspace-dark.svg" width="1920" alt="An ink drawing of a train beneath a large tree in Sketch, with the drawing filling the screen and tools at the edges.">
+    </picture>
+  </a>
+</p>
 
 ## Paint
 
