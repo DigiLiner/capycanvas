@@ -11,3 +11,18 @@ foreach($file in $files){
     if($errors.Count){throw "$($file.Name): $($errors.Message -join '; ')"}
 }
 Write-Output "PowerShell source encoding and parsing passed for $($files.Count) scripts."
+$fixture=Join-Path $PSScriptRoot '../scripts/exercise-localization.ps1'
+$ast=[Management.Automation.Language.Parser]::ParseFile($fixture,[ref]$tokens,[ref]$errors)
+$writer=$ast.Find({param($node)$node -is [Management.Automation.Language.PipelineAst] -and $node.Extent.Text.Contains("'configuration-captions.json'")},$true)
+if(!$writer){throw 'Configuration caption evidence writer is missing'}
+$repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+$run=Join-Path $repo ('artifacts/windows/script-encoding/'+[Guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($run)|Out-Null
+$records=@([pscustomobject]@{tag='ja';title=([string][char]0x65e5+[char]0x672c+[char]0x8a9e);hint=[char]::ConvertFromUtf32(0x1f3a8)})
+$evidence=Join-Path $run 'configuration-captions.json'
+try{
+    & ([scriptblock]::Create($writer.Extent.Text))
+    $actual=[Text.UTF8Encoding]::new($false,$true).GetString([IO.File]::ReadAllBytes($evidence))|ConvertFrom-Json
+    if($actual.title -cne $records[0].title -or $actual.hint -cne $records[0].hint){throw 'Configuration caption evidence lost Unicode text'}
+}finally{[IO.File]::Delete($evidence);[IO.Directory]::Delete($run)}
+Write-Output 'Configuration caption evidence preserves Unicode text.'

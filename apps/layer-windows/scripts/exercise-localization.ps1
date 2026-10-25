@@ -280,7 +280,7 @@ function Configuration-CaptionSurface{
   $records.Add(@{tag=$choice.tag;title=$title.Current.Name;hint=$hint.Current.Name;title_runtime=$titleIdentity;hint_runtime=$hintIdentity;controls=$captions})
   Capture-Window $first ('configuration-'+$records.Count+'-'+$choice.tag)
  }
- $records|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'configuration-captions.json')
+ [IO.File]::WriteAllText((Join-Path $run 'configuration-captions.json'),($records|ConvertTo-Json -Depth 8))
  (Control 'panel-tab-sizes').SetFocus();Key 27
  Wait-Until {$null -eq (Model).state.customization.expanded -and !(Find 'panel-configuration-sizes')} 'Escape did not close the retained configuration'
  Use-Window $second;Invoke 'CloseButton'
