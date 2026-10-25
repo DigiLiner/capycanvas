@@ -96,7 +96,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
   root.dataset.tile = tile.id; root.dataset.toolbarComponent = tile.control.kind;
   const item = { kind: 'tile', panel, tile: tile.id };
   target(root, item);
-  let model, schema = '', fields = [], vertical = false, extent = [0, 0], measured = '', popup;
+  let model, schema = '', fields = [], vertical = false, extent = [0, 0], measured = '', selections = '', popup;
   let tileStyle = view.tile_style, style = app.toolbar_ui({ type: 'style', style: tileStyle });
   const controlHeight = liveCopy(app, 'catalog').panel_metrics.control_height;
   const clear = (app.toolbar_ui({ type: 'style', style: 'small' }).size[1] - controlHeight) / 2;
@@ -389,6 +389,8 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     }
     if (standalone) fields[0].update(sliderField());
     else fields.forEach((f, i) => f.update(value.options[i]));
+    const selected = key(value.options.map(o => o.Choice && !o.Choice.segmented ? o.Choice.items.findIndex(i => i.selected) : null));
+    if (selected !== selections) { selections = selected; measured = ''; }
     if (!measured) { layout(); measured = schema; }
   };
   root.layoutComponent = (bounds, axis, presented = tileStyle) => {

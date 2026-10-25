@@ -88,7 +88,8 @@ export async function checkScopesSmoke({call,evaluate,settle}) {
     const compactScope=async kind=>{
       const geometry=await evaluate(`(()=>{const root=document.querySelector('[data-scope="${kind}"]'),log=root.querySelector('.scope-log'),status=root.querySelector('[data-scope-control=status]'),axis=root.querySelector('.scope-axis');const text=node=>{const style=getComputedStyle(node),canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.fillStyle=style.color;context.fillRect(0,0,1,1);return{color:style.color,opacity:style.opacity,rgba:Array.from(context.getImageData(0,0,1,1).data)};};return{target:log.getBoundingClientRect().height,status:text(status),axis:text(axis),palette:layerApp.state().palette.text}})()`);
       await writeFile(`${directory}/${kind}-compact.json`,JSON.stringify(geometry,null,2));
-      const failures=[];if(geometry.target!==24)failures.push(`Log counts target ${geometry.target}, expected 24`);
+      const target=await evaluate('layerApp.app.catalog().panel_metrics.control_height');
+      const failures=[];if(geometry.target!==target)failures.push(`Log counts target ${geometry.target}, expected ${target}`);
       for(const [name,text] of Object.entries({status:geometry.status,axis:geometry.axis})){
         if(text.rgba[3]!==140)failures.push(`${name} secondary alpha ${text.rgba[3]}, expected 140`);
         if(Number(text.opacity)!==1)failures.push(`${name} compounds secondary opacity`);

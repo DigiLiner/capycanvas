@@ -503,6 +503,13 @@ and squircle radii. Panel captions start
 at the row top and end above the slider hit area. Properties checks the 4-pixel
 gap after its heading and the 6-pixel gap before the parameter group.
 
+Panel dropdowns are native selects drawn like GTK's: the value in bold and the
+shared chevron on the input fill. Property, Tool Settings and picker rows keep
+their caption beside the control at every panel width, wrapping it to two lines.
+Radio segments, the Tool panel's selection menu, the Layers blend button and Add
+Filter use GTK's button fill (`--control-fill`). Horizontal Tool Options dropdowns
+take their natural width and refit when the chosen item changes.
+
 `--pointwise-effects` checks Hue range pages and Colorize value retention,
 Threshold and Photo Filter controls, Invert/Desaturate insertion, slider history,
 visible source pixels, keyboard focus and saved source identity at narrow and
