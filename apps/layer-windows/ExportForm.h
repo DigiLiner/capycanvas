@@ -3,8 +3,8 @@
 #include <array>
 namespace CapyUi {
 struct ExportFormView : std::enable_shared_from_this<ExportFormView> {
-    std::shared_ptr<CapyLocalization> localization;
-    explicit ExportFormView(std::shared_ptr<CapyLocalization> context):localization(std::move(context)){}
+    NativeLocalization localization;
+    explicit ExportFormView(NativeLocalization context):localization(std::move(context)){}
     StackPanel root;
     ComboBox format,profile,depth,background,dither,intent,resolution,metadata;
     NumberBox quality,width,height,ppi;
@@ -60,7 +60,7 @@ struct ExportFormView : std::enable_shared_from_this<ExportFormView> {
         auto result=exportDraft(localization.get(),O({{L"recipe",value},{L"color",color},{L"action",O({{L"type",S(L"refresh")}})},{L"validate",B(true)},{L"extent",extent}}));
         if(result.HasKey(L"error")){validationReason=result.GetNamedValue(L"error_reason",JsonValue::CreateNullValue());throw hresult_invalid_argument(str(result,L"error"));}return object(result,L"recipe");
     }
-    void relocalize(std::shared_ptr<CapyLocalization> context,J const& details,hstring const& tag){
+    void relocalize(NativeLocalization context,J const& details,hstring const& tag){
         localization=std::move(context);copy=object(object(details,L"form"),L"copy");root.Language(tag);
         for(auto const& [control,key]:std::initializer_list<std::pair<ComboBox,wchar_t const*>>{{format,L"format"},{profile,L"profile"},{depth,L"depth"},{background,L"background"},{dither,L"dither"},{intent,L"intent"},{resolution,L"resolution"}}){
             control.Header(box_value(text(key)));AutomationProperties::SetName(control,text(key));

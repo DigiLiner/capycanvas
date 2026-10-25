@@ -786,7 +786,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         if(next<limit)add(next,limit);return result;
     }
 };
-HeaderView::HeaderView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,std::function<void(bool)> popup,std::function<void()> layout,
+HeaderView::HeaderView(Dispatch send,Json catalog,NativeLocalization localization,std::function<void(bool)> popup,std::function<void()> layout,
     std::function<void()> fullscreen,std::function<void()> newWindow,PreviewTransport queries,Dispatch input,Dispatch documents):impl(std::make_shared<Impl>()){
     impl->data->send=std::move(send);impl->data->localization=localization;impl->data->catalog=catalog;impl->data->query=std::move(queries);impl->data->input=std::move(input);impl->data->document=std::move(documents);
     impl->data->popupChanged=std::move(popup);impl->changed=std::move(layout);impl->fullscreen=std::move(fullscreen);impl->newWindow=std::move(newWindow);impl->init();

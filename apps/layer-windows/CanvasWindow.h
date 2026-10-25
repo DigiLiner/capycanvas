@@ -13,7 +13,7 @@
 #include "CanvasSnapshotMailbox.h"
 #include "FilterPreviews.h"
 #include "GamepadInput.h"
-#include "native/include/capy_windows.h"
+#include "NativeHandles.h"
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -101,7 +101,7 @@ private:
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer holdTimer{nullptr}; // input thread
     std::unique_ptr<GamepadInput> gamepad;
     bool inputDone=false;
-    CapyHost* host=nullptr;
+    CapyHost  host=0;
     std::unique_ptr<WorkspaceView> workspace;
     std::unique_ptr<HeaderView> header;
     std::unique_ptr<SettingsView> settings;
@@ -153,9 +153,9 @@ private:
     std::atomic<bool> rendererDone{false};
     uint64_t sequence=0;
     void Start();
-    bool StartPrepared(CapyLaunch*);
+    bool StartPrepared(CapyLaunch );
     bool launchReady=false,launchSucceeded=false;
-    std::shared_ptr<CapyLocalization> localization;
+    NativeLocalization localization;
     winrt::Windows::Data::Json::JsonObject bootstrap;
     void Resize();
     void PublishGlass();

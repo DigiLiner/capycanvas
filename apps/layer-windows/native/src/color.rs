@@ -1,19 +1,19 @@
 //! Stateless native color presentation. CPU pixels never touch a canvas host.
 use layer_ui::{ColorShape, ColorState, ColorWheelGeometry, ColorWheelPart};
 use std::ffi::{CString, c_char};
-use crate::shared_controls::CapyLocalization;
+use crate::shared_controls::localization;
 
 /// Stateless shared numeric parsing and display projection. No document host is accessed.
 /// # Safety
 /// The input must be a readable, NUL-terminated UTF-8 JSON string for this call.
 /// Context is a live localization handle, borrowed without concurrent free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_color_ui(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
-    if input.is_null() { return std::ptr::null_mut(); }
+pub unsafe extern "C" fn capy_color_ui(context: u64, input: *const c_char) -> u64 {
+    if input.is_null() { return 0; }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let input = unsafe { std::ffi::CStr::from_ptr(input) }.to_str().map_err(|e| e.to_string())?;
         if input.len() > 256 * 1024 { return Err("Color request is too large".into()); }
-        let context = unsafe { context.as_ref() }.ok_or("Missing color localization")?;
+        let context = localization(context).ok_or("Missing color localization")?;
         layer_ui::color_ui_localized(serde_json::from_str(input).map_err(|e| e.to_string())?, &context.localizer)
     })).unwrap_or_else(|_| Err("Color request failed".into()));
     json(match result { Ok(value) => value, Err(error) => serde_json::json!({"error": error}) })
@@ -24,8 +24,8 @@ pub unsafe extern "C" fn capy_color_ui(context: *const CapyLocalization, input: 
 /// Context is a live localization handle, borrowed without concurrent free.
 /// input is a readable NUL-terminated UTF-8 JSON string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_export_draft(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
-    if input.is_null() { return std::ptr::null_mut(); }
+pub unsafe extern "C" fn capy_export_draft(context: u64, input: *const c_char) -> u64 {
+    if input.is_null() { return 0; }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<serde_json::Value, String> {
         #[derive(serde::Deserialize)]
         struct DraftRequest { recipe: layer_ui::ExportRecipe, action: layer_ui::ExportDraftAction, #[serde(default)] validate: bool, extent: Option<[u32;2]>, color: Option<layer_core::color::DocumentColor> }
@@ -39,7 +39,8 @@ pub unsafe extern "C" fn capy_export_draft(context: *const CapyLocalization, inp
         #[serde(untagged)]
         enum Request { Draft(DraftRequest), Copy { copy: CopyRequest } }
         let text = unsafe { std::ffi::CStr::from_ptr(input) }.to_str().map_err(|e| e.to_string())?;
-        let context = unsafe { context.as_ref() }.ok_or("Missing export localization")?;
+        if text.len()>256*1024 {return Err("Export request is too large".into());}
+        let context = localization(context).ok_or("Missing export localization")?;
         let request: Request = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let request = match request {
             Request::Draft(request) => request,
@@ -95,11 +96,11 @@ pub extern "C" fn capy_color_hit(x: f32, y: f32, size: f32, projection: u32) -> 
     }
 }
 
-fn json(value: impl serde::Serialize) -> *mut c_char {
+fn json(value: impl serde::Serialize) -> u64 {
     serde_json::to_string(&value)
         .ok()
         .and_then(|text| CString::new(text).ok())
-        .map_or(std::ptr::null_mut(), CString::into_raw)
+        .map_or(0, crate::owned::text)
 }
 
 /// Shared SDR projection of the active HDR picker, including its EV and recipe.
@@ -123,11 +124,11 @@ pub unsafe extern "C" fn capy_color_mapped_field(side: u32, input: *const c_char
 mod tests {
     use super::*;
 
-    fn export_reply(context: &CapyLocalization, input: &serde_json::Value) -> serde_json::Value {
+    fn export_reply(context: &crate::test_support::Localization, input: &serde_json::Value) -> serde_json::Value {
         let input = CString::new(input.to_string()).unwrap();
-        let raw = unsafe { capy_export_draft(context, input.as_ptr()) };
-        assert!(!raw.is_null());
-        let output = unsafe { CString::from_raw(raw) };
+        let raw = unsafe { capy_export_draft(context.raw(), input.as_ptr()) };
+        assert_ne!(raw,0);
+        let output = crate::owned::take_text(raw);
         serde_json::from_slice(output.as_bytes()).unwrap()
     }
 
@@ -138,13 +139,13 @@ mod tests {
         recipe.profile.profile = layer_core::color::ColorProfile::Icc(vec![19;8192].into());
         recipe.jpeg_quality = 0;
         let retained = serde_json::to_value(&recipe).unwrap();
-        let context = CapyLocalization { localizer: layer_ui::Localizer::shared(layer_ui::UiLanguage::English) };
+        let context = crate::test_support::Localization::new(layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
         let failed = export_reply(&context, &serde_json::json!({"recipe":retained,"action":{"type":"refresh"},"validate":true,"extent":[64,64]}));
         assert_eq!(failed["error_reason"], "ExportQuality");
         let copy = serde_json::json!({"copy":{"error_reason":failed["error_reason"]}});
         assert!(copy.to_string().len()<80);
         for language in layer_ui::UiLanguage::ALL {
-            let context = CapyLocalization { localizer: layer_ui::Localizer::shared(language) };
+            let context = crate::test_support::Localization::new(layer_ui::Localizer::shared(language));
             let projected = export_reply(&context,&copy);
             assert_eq!(projected["error_reason"],failed["error_reason"]);
             assert_eq!(projected["error"],layer_ui::ColorFeatureError::ExportQuality.message(&context.localizer));
@@ -161,21 +162,21 @@ mod tests {
         let input = serde_json::json!({"copy":{"choices":choices,"profile_captions":[{"type":"literal","name":literal},{"type":"embedded"}]}});
         assert!(input.to_string().len()<4096);
         for language in layer_ui::UiLanguage::ALL {
-            let context = CapyLocalization { localizer: layer_ui::Localizer::shared(language) };
+            let context = crate::test_support::Localization::new(layer_ui::Localizer::shared(language));
             let projected = export_reply(&context,&input);
             assert_eq!(projected["choices"],serde_json::to_value(draft.choices.localized(&context.localizer)).unwrap());
             assert_eq!(projected["profile_names"][0],literal);
             assert_eq!(projected["profile_names"][1],context.localizer.text(layer_ui::MessageId::COLOR_FEATURES_PROFILE_EMBEDDED).as_ref());
             assert!(!projected.as_object().unwrap().contains_key("recipe"));
         }
-        let context = CapyLocalization { localizer: layer_ui::Localizer::shared(layer_ui::UiLanguage::English) };
+        let context = crate::test_support::Localization::new(layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
         assert!(export_reply(&context,&serde_json::json!({"copy":{"recipe":draft.recipe}}))["error"].is_string());
     }
 
     #[test]
     fn export_metadata_copy_keeps_scalar_selection_and_uses_current_copy() {
         for language in layer_ui::UiLanguage::ALL {
-            let context = CapyLocalization { localizer: layer_ui::Localizer::shared(language) };
+            let context = crate::test_support::Localization::new(layer_ui::Localizer::shared(language));
             for (format, keep, location, available) in [("Jpeg","All",true,true),("Jpeg","CopyrightContact",false,true),("Exr","All",false,false)] {
                 let input=serde_json::json!({"copy":{"metadata":{"format":format,"keep":keep}}});
                 assert!(input.to_string().len()<96);

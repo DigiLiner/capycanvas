@@ -52,7 +52,7 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
         busy=false;
         if(expected!=context()||size!=waveformSize){requested=-1;refresh();return;}
         if(packet)try{
-            auto result=object(J::Parse(to_hstring(capy_preview_metadata(packet.get()))),L"result");
+            auto result=object(J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get())),L"result");
             if(result.Size()){
                 auto palette=array(result,L"colors");
                 for(uint32_t i=0;i<4&&i<palette.Size();++i){

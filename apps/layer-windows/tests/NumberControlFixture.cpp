@@ -11,7 +11,7 @@ namespace {
 int resultCode=0;
 struct Fixture : std::enable_shared_from_this<Fixture> {
     struct Item {hstring key;StackPanel root;J row;};
-    std::shared_ptr<CapyLocalization> localization;
+    NativeLocalization localization;
     Window window;Canvas surface;ContentControl viewport;
     std::shared_ptr<WorkspaceData> data=std::make_shared<WorkspaceData>();
     Bindings bindings;std::vector<Item> items;J source;
@@ -118,8 +118,8 @@ struct Fixture : std::enable_shared_from_this<Fixture> {
 struct App : ApplicationT<App,Markup::IXamlMetadataProvider> {
     Microsoft::UI::Xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider metadata;
     std::shared_ptr<Fixture> fixture;
-    std::shared_ptr<CapyLocalization> localization;
-    App(std::shared_ptr<CapyLocalization> context):localization(std::move(context)){
+    NativeLocalization localization;
+    App(NativeLocalization context):localization(std::move(context)){
         UnhandledException([this](auto&&,UnhandledExceptionEventArgs const& args){
             resultCode=1;args.Handled(true);
             if(fixture){std::ofstream error(fixture->output.parent_path()/L"numeric-fixture-error.log");error<<to_string(args.Message());}

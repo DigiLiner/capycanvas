@@ -12,8 +12,8 @@ inline Rect rectangle(J const& value){
 inline J rectangle(Rect value){
     return O({{L"x",N(value.X)},{L"y",N(value.Y)},{L"width",N(value.Width)},{L"height",N(value.Height)}});
 }
-inline V toolbarUi(CapyLocalization const* localization,J const& request){
-    std::unique_ptr<char,decltype(&capy_string_free)> result(capy_toolbar_ui(localization,to_string(request.Stringify()).c_str()),capy_string_free);
+inline V toolbarUi(CapyLocalization  localization,J const& request){
+    NativeString result(capy_toolbar_ui(localization,to_string(request.Stringify()).c_str()),capy_string_free);
     if(!result)throw hresult_invalid_argument(L"Toolbar request failed");
     auto value=JsonValue::Parse(to_hstring(result.get()));
     if(value.ValueType()==JsonValueType::Object&&value.GetObject().HasKey(L"error"))
@@ -83,7 +83,7 @@ inline CornerRadius facingCorners(double r,hstring const& direction){
 inline std::array<bool,4> sourceCorners(std::shared_ptr<WorkspaceData> const& data,J const& source,J const& container){
     std::array<bool,4> result{};
     auto request=O({{L"type",S(L"drawer_source_corners")},{L"anchor",object(source,L"bounds")},{L"direction",S(str(source,L"direction"))},{L"container",container}});
-    std::unique_ptr<char,decltype(&capy_string_free)> reply(capy_toolbar_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
+    NativeString reply(capy_toolbar_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
     if(!reply)return result;auto value=JsonValue::Parse(to_hstring(reply.get()));if(value.ValueType()!=JsonValueType::Array)return result;
     auto list=value.GetArray();for(uint32_t i=0;i<4&&i<list.Size();++i)result[i]=list.GetBooleanAt(i);
     return result;
@@ -105,7 +105,7 @@ inline void fitAutomaticTabs(std::shared_ptr<WorkspaceData> const& data,std::vec
         A pair;pair.Append(N(found->second));pair.Append(N(36));pairs.Append(pair);
     }
     auto request=O({{L"type",S(L"automatic_tab_names")},{L"available",N(available)},{L"widths",pairs}});
-    std::unique_ptr<char,decltype(&capy_string_free)> reply(capy_toolbar_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
+    NativeString reply(capy_toolbar_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
     if(!reply)return;auto names=JsonValue::Parse(to_hstring(reply.get()));if(names.ValueType()!=JsonValueType::Array)return;
     auto list=names.GetArray();
     for(uint32_t i=0;i<tabs.size()&&i<list.Size();++i)tabs[i].name.Visibility(list.GetBooleanAt(i)?Visibility::Visible:Visibility::Collapsed);

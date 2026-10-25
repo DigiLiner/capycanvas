@@ -199,7 +199,7 @@ struct SizeDialog::Impl:std::enable_shared_from_this<Impl>{
         if(!showing)show();
     }
 };
-SizeDialog::SizeDialog(Kind kind,Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,XamlRoot root,std::function<void()> changed):impl(std::make_shared<Impl>()){
+SizeDialog::SizeDialog(Kind kind,Dispatch send,Json catalog,NativeLocalization localization,XamlRoot root,std::function<void()> changed):impl(std::make_shared<Impl>()){
     impl->kind=kind;impl->data->send=std::move(send);impl->data->localization=localization;impl->data->catalog=catalog;
     impl->xamlRoot=root;impl->changed=std::move(changed);impl->init();
 }

@@ -23,7 +23,7 @@ inline Point point(A const& a){return a.Size()==2?Point{float(a.GetNumberAt(0)),
 inline double distance(Point a,Point b={}){return std::hypot(a.X-b.X,a.Y-b.Y);}
 inline Point relative(Point a,Point b){return {a.X-b.X,a.Y-b.Y};}
 inline V ui(std::shared_ptr<WorkspaceData> const& data,J const& request){
-    std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_bubble_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
+    NativeString raw(capy_bubble_ui(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
     if(!raw)throw hresult_invalid_argument();return JsonValue::Parse(to_hstring(raw.get()));
 }
 inline hstring kind(V const& value){return value&&value.ValueType()==JsonValueType::String?value.GetString():L"";}

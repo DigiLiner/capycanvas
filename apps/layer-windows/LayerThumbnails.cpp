@@ -56,7 +56,7 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
     void receive(PreviewPacket packet,hstring const& generation,std::map<hstring,LayerThumbnail> const& proposed){
         busy=false;if(!packet||epoch!=generation)return;
         try{
-            auto status=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
+            auto status=J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get()));
             if(str(status,L"epoch")!=epoch)return;
             wait=std::chrono::milliseconds(std::max(8,int(num(status,L"wait_ms"))));
             for(auto value:array(status,L"accepted")){

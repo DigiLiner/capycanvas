@@ -16,10 +16,10 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     bool nameValid=false,validationRunning=false,validationQueued=true;
     std::shared_ptr<WorkspaceData> copyData=std::make_shared<WorkspaceData>();
     J catalog;
-    std::shared_ptr<CapyLocalization> localization;
+    NativeLocalization localization;
     hstring copy(wchar_t const* group,wchar_t const* key)const{return str(object(object(catalog,L"native_copy"),group),key);}
     hstring caption(J const& request)const{
-        auto source=to_string(request.Stringify());std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_native_caption(localization.get(),source.c_str()),capy_string_free);
+        auto source=to_string(request.Stringify());NativeString raw(capy_native_caption(localization.get(),source.c_str()),capy_string_free);
         if(!raw)throw hresult_error(E_OUTOFMEMORY);return str(J::Parse(to_hstring(raw.get())),L"text");
     }
     hstring recovery(wchar_t const* key) const {return str(object(object(catalog,L"bootstrap"),L"recovery"),key);}
@@ -479,7 +479,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         }else if(open()&&!blocked)show();
     }
 };
-WorkspaceManagerView::WorkspaceManagerView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,XamlRoot root,std::function<void()> changed,PreviewTransport query):impl(std::make_shared<Impl>()){
+WorkspaceManagerView::WorkspaceManagerView(Dispatch send,Json catalog,NativeLocalization localization,XamlRoot root,std::function<void()> changed,PreviewTransport query):impl(std::make_shared<Impl>()){
     impl->query=std::move(query);impl->copyData->catalog=catalog;impl->copyData->localization=localization;impl->send=std::move(send);impl->catalog=catalog;impl->localization=std::move(localization);impl->root=root;impl->changed=std::move(changed);impl->init();
 }
 WorkspaceManagerView::~WorkspaceManagerView()=default;

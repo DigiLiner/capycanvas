@@ -367,7 +367,7 @@ void LayersView::context(double id,bool mask,UIElement const& anchor,std::option
             if(!self||!ticket.Current())return;
             if(epochOf(self->data)!=document||!packet||(id>=0&&!panelRow(self->data->state,id).Size())){ticket.Cancel();return;}
             try{
-                auto reply=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
+                auto reply=J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get()));
                 if(str(reply,L"epoch")!=document){ticket.Cancel();return;}
                 auto spec=object(reply,L"menu");if(!spec.Size()){ticket.Cancel();return;}
                 auto menuId=double(std::stoull(to_string(str(reply,L"id"))));

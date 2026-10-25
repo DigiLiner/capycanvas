@@ -1,5 +1,5 @@
 #pragma once
-#include "native/include/capy_windows.h"
+#include "NativeHandles.h"
 #include <deque>
 #include <functional>
 #include <memory>
@@ -8,7 +8,7 @@
 #include <utility>
 
 enum class CanvasQueryKind { Filters, Thumbnails, LayerMenu, Workspace, Document, Papers };
-using PreviewPacket=std::shared_ptr<CapyPreview>;
+using PreviewPacket=NativePreview;
 using PreviewReply=std::function<void(PreviewPacket)>;
 using PreviewTransport=std::function<bool(CanvasQueryKind,std::string,PreviewReply)>;
 struct CanvasQuery {CanvasQueryKind kind;std::string json;PreviewReply reply;};

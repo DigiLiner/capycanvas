@@ -248,7 +248,7 @@ struct WorkspaceDialogs::Impl:std::enable_shared_from_this<Impl>{
         if(!showing)show();
     }
 };
-WorkspaceDialogs::WorkspaceDialogs(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,XamlRoot root,std::function<void()> changed,Dispatch report):
+WorkspaceDialogs::WorkspaceDialogs(Dispatch send,Json catalog,NativeLocalization localization,XamlRoot root,std::function<void()> changed,Dispatch report):
     impl(std::make_shared<Impl>()){
     impl->data->send=std::move(send);impl->data->localization=localization;impl->data->catalog=catalog;impl->xamlRoot=root;
     impl->changed=std::move(changed);impl->report=std::move(report);impl->init();

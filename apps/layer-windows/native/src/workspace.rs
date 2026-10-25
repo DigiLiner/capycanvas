@@ -88,18 +88,12 @@ mod tests {
     use crate::test_support::*;
     use super::*;
     fn metadata(packet: CapyPreview) -> Value {
-        let owned = Box::into_raw(Box::new(packet));
-        // Exercise the same CPU packet interface as the C++ projection.
-        unsafe {
-            let json = std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(owned));
-            let result = serde_json::from_slice(json.to_bytes()).unwrap();
-            let mut count = usize::MAX;
-            crate::previews::capy_preview_bytes(owned, &mut count);
-            assert_eq!(count, 0);
-            crate::previews::capy_preview_free(owned);
-            result
-        }
+        let owned=crate::previews::store(packet).unwrap();
+        let result=crate::previews::copied_metadata(owned);
+        assert_eq!(crate::previews::capy_preview_length(owned),0);
+        crate::previews::capy_preview_free(owned);result
     }
+
     #[test]
     fn prompt_validation_and_profile_search_packets_use_current_shared_policy() {
         let mut host=NativeHost::new(layer_ui::Platform::Windows).unwrap();
@@ -199,29 +193,26 @@ mod tests {
         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
         let owned=loop {
             let packet=query(&mut host,&json!({"type":"toolbar_stamp","context":context}).to_string()).unwrap();
-            let owned=Box::into_raw(Box::new(packet));
-            let reply:Value=unsafe {serde_json::from_slice(std::ffi::CStr::from_ptr(
-                crate::previews::capy_preview_metadata(owned)).to_bytes()).unwrap()};
+            let owned=crate::previews::store(packet).unwrap();
+            let reply=crate::previews::copied_metadata(owned);
             assert!(reply["error"].is_null(),"{reply}");
             if !reply["result"].is_null() && reply["result"]["pending"]==false {break owned;}
-            unsafe {crate::previews::capy_preview_free(owned);}
+            crate::previews::capy_preview_free(owned);
             assert!(std::time::Instant::now()<deadline,"GPU toolbar stamp did not complete: {reply}");
             std::thread::sleep(std::time::Duration::from_millis(1));
         };
-        unsafe {
-            let json = std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(owned));
-            let reply: Value = serde_json::from_slice(json.to_bytes()).unwrap();
+        {
+            let reply=crate::previews::copied_metadata(owned);
             assert!(reply["error"].is_null(), "{reply}");
             let size = reply["result"]["size"].as_u64().unwrap() as usize;
             assert!(reply["result"]["extent"].as_f64().unwrap() > 0.);
-            let mut count = 0;
-            let bytes = crate::previews::capy_preview_bytes(owned, &mut count);
+            let bytes=crate::previews::copied_bytes(owned);let count=bytes.len();
             assert_eq!(count, size * size);
-            assert!(std::slice::from_raw_parts(bytes, count).iter().any(|&a| a > 0));
-            let alpha = std::slice::from_raw_parts(bytes, count).to_vec();
+            assert!(bytes.iter().any(|&a| a > 0));
+            let alpha = bytes;
             let (bubble, bubble_metadata) = loop {
-                let bubble = Box::into_raw(Box::new(query(&mut host, r#"{"type":"bubble_stamp"}"#).unwrap()));
-                let bubble_metadata: Value = serde_json::from_slice(std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(bubble)).to_bytes()).unwrap();
+                let bubble = crate::previews::store(query(&mut host, r#"{"type":"bubble_stamp"}"#).unwrap()).unwrap();
+                let bubble_metadata=crate::previews::copied_metadata(bubble);
                 assert!(bubble_metadata["error"].is_null(), "{bubble_metadata}");
                 if bubble_metadata["result"]["pending"] == false { break (bubble, bubble_metadata); }
                 crate::previews::capy_preview_free(bubble);
@@ -232,10 +223,9 @@ mod tests {
                 assert_eq!(bubble_metadata["result"][field], reply["result"][field]);
             }
             assert!(bubble_metadata["result"]["request_id"].is_u64());
-            let mut bubble_count = 0;
-            let bubble_bytes = crate::previews::capy_preview_bytes(bubble, &mut bubble_count);
+            let bubble_bytes=crate::previews::copied_bytes(bubble);let bubble_count=bubble_bytes.len();
             assert_eq!(bubble_count, count);
-            assert_eq!(std::slice::from_raw_parts(bubble_bytes, bubble_count), alpha);
+            assert_eq!(bubble_bytes, alpha);
             crate::previews::capy_preview_free(bubble);
             let cached = metadata(query(&mut host, &json!({"type":"bubble_stamp","known_request":bubble_metadata["result"]["request_id"]}).to_string()).unwrap());
             assert!(cached["error"].is_null());

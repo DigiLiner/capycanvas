@@ -1,6 +1,6 @@
 #pragma once
 #include "pch.h"
-#include "native/include/capy_windows.h"
+#include "NativeHandles.h"
 #include <functional>
 #include <memory>
 #include <string>

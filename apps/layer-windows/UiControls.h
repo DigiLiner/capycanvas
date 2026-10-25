@@ -3,7 +3,7 @@
 #include "FilterPreviews.h"
 #include "LayerThumbnails.h"
 #include "PointerGesture.h"
-#include "native/include/capy_windows.h"
+#include "NativeHandles.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.UI.Text.h>
@@ -173,18 +173,18 @@ inline Image panelGrip(hstring const& theme,bool vertical=false){
     result.HorizontalAlignment(HorizontalAlignment::Center);result.VerticalAlignment(VerticalAlignment::Center);
     result.RenderTransformOrigin({.5f,.5f});orientGrip(result,vertical);return result;
 }
-inline J exportDraft(CapyLocalization const* localization,J const& request){
-    auto input=to_string(request.Stringify());std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_export_draft(localization,input.c_str()),capy_string_free);
+inline J exportDraft(CapyLocalization  localization,J const& request){
+    auto input=to_string(request.Stringify());NativeString raw(capy_export_draft(localization,input.c_str()),capy_string_free);
     if(!raw)throw hresult_error(E_OUTOFMEMORY);return J::Parse(to_hstring(raw.get()));
 }
 struct NumericFailure : hresult_invalid_argument {
     J reason;
     NumericFailure(hstring const& message,J value):hresult_invalid_argument(message),reason(std::move(value)){}
 };
-inline J numeric(CapyLocalization const* localization,J const& spec,double value,J const& operation){
+inline J numeric(CapyLocalization  localization,J const& spec,double value,J const& operation){
     auto json=to_string(O({{L"control",spec},{L"value",N(value)},{L"operation",operation}}).Stringify());
-    std::unique_ptr<char,decltype(&capy_string_free)> result(capy_number(localization,json.c_str()),capy_string_free);
-    if(!result)throw hresult_invalid_argument(to_hstring(capy_error()));
+    NativeString result(capy_number(localization,json.c_str()),capy_string_free);
+    if(!result)throw hresult_invalid_argument(to_hstring(NativeString(capy_error()).get()));
     auto response=J::Parse(to_hstring(result.get()));
     if(response.HasKey(L"error_reason"))throw NumericFailure(str(response,L"error"),object(response,L"error_reason"));
     return response;
@@ -196,7 +196,7 @@ struct LocalizedCopy : hstring {
     LocalizedCopy(hstring value,std::function<hstring()> resolve):hstring(value),current(std::move(resolve)){}
 };
 struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
-    std::shared_ptr<CapyLocalization> localization;
+    NativeLocalization localization;
     uint64_t localizationGeneration=uint64_t(-1);
     std::vector<std::function<bool()>> copyViews;
     size_t copyCleanup=64;
@@ -211,7 +211,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         if(localizationGeneration==generation)return false;
         auto nextCatalog=object(presentation,L"catalog"),bootstrap=object(presentation,L"bootstrap");
         auto tag=to_string(str(bootstrap,L"active_tag"));
-        std::shared_ptr<CapyLocalization> next(capy_localization_for_tag(tag.c_str()),capy_localization_free);
+        NativeLocalization next(capy_localization_for_tag(tag.c_str()),capy_localization_free);
         if(!next)throw hresult_invalid_argument(L"Invalid localization presentation");
         if(snapshot.HasKey(L"state")){model=snapshot;state=object(snapshot,L"state");}
         nextCatalog.Insert(L"bootstrap",bootstrap);catalog=nextCatalog;localization=std::move(next);localizationGeneration=generation;
@@ -277,7 +277,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     }
     hstring caption(J const& request)const{
         auto source=to_string(request.Stringify());
-        std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_native_caption(localization.get(),source.c_str()),capy_string_free);
+        NativeString raw(capy_native_caption(localization.get(),source.c_str()),capy_string_free);
         if(!raw)throw hresult_error(E_OUTOFMEMORY);
         auto result=J::Parse(to_hstring(raw.get()));
         if(result.HasKey(L"error"))throw hresult_invalid_argument(str(result,L"error"));

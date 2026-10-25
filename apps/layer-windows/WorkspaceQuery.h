@@ -12,7 +12,7 @@ inline bool QueryWorkspace(PreviewTransport const& transport,J const& request,
         [dispatcher,reply=std::move(reply)](PreviewPacket packet){
             dispatcher.TryEnqueue([reply,packet=std::move(packet)]{
                 J result;
-                if(packet)try{result=J::Parse(to_hstring(capy_preview_metadata(packet.get())));}
+                if(packet)try{result=J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get()));}
                     catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
                 reply(result);
             });

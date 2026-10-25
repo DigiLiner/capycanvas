@@ -27,7 +27,7 @@
 #include "LayersView.h"
 #include "NativeMenus.h"
 #include "UiControls.h"
-#include "native/include/capy_windows.h"
+#include "NativeHandles.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
@@ -122,7 +122,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::shared_ptr<ZoomReadout> zoom=std::make_shared<ZoomReadout>();
     Grid cameraSlot;
     Border cameraSurface;std::function<void()> glassChanged;std::map<std::wstring,double> tabWidths;
-    Impl(Dispatch send,J catalog,std::shared_ptr<CapyLocalization> localization,Dispatch report,PreviewTransport previews,std::function<void(bool)> popupChanged,Dispatch document,Dispatch input):overviews(std::move(report)){
+    Impl(Dispatch send,J catalog,NativeLocalization localization,Dispatch report,PreviewTransport previews,std::function<void(bool)> popupChanged,Dispatch document,Dispatch input):overviews(std::move(report)){
         data->input=std::move(input);gestures=std::make_shared<WorkspaceGestures>(data,root);
         data->document=std::move(document);
         data->popupChanged=std::move(popupChanged);
@@ -871,7 +871,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         zoom->Update(view);
     }
 };
-WorkspaceView::WorkspaceView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,Dispatch overviews,PreviewTransport previews,std::function<void(bool)> popupChanged,Dispatch document,Dispatch input):impl(std::make_shared<Impl>(std::move(send),catalog,localization,std::move(overviews),std::move(previews),std::move(popupChanged),std::move(document),std::move(input))){impl->init();}
+WorkspaceView::WorkspaceView(Dispatch send,Json catalog,NativeLocalization localization,Dispatch overviews,PreviewTransport previews,std::function<void(bool)> popupChanged,Dispatch document,Dispatch input):impl(std::make_shared<Impl>(std::move(send),catalog,localization,std::move(overviews),std::move(previews),std::move(popupChanged),std::move(document),std::move(input))){impl->init();}
 WorkspaceView::~WorkspaceView()=default;
 Canvas WorkspaceView::Root()const{return impl->root;}
 bool WorkspaceView::Apply(Json const& snapshot){return impl->apply(snapshot);}

@@ -30,9 +30,7 @@ struct BitmapUpload : std::enable_shared_from_this<BitmapUpload> {
     };
     static Reader ReadPacket(PreviewPacket packet){
         return [packet=std::move(packet)]{
-            size_t length=0;auto bytes=capy_preview_bytes(packet.get(),&length);
-            if(!bytes&&length)throw winrt::hresult_invalid_argument();
-            return std::span<uint8_t const>(bytes,length);
+            return packet.Bytes();
         };
     }
     static std::shared_ptr<BitmapUpload> Create(){

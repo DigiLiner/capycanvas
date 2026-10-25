@@ -167,7 +167,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
             auto end=closing?from:endpoint;
             auto fraction=inspector->animating?pageProgress:progress;
             auto request=O({{L"from",from.Size()?V(from):JsonValue::CreateNullValue()},{L"to",end},{L"progress",N(1.-std::pow(1.-fraction,3))},{L"closing",B(closing)}});
-            std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_drawer_frame(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
+            NativeString raw(capy_drawer_frame(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
             if(!raw)throw hresult_invalid_argument(L"Drawer frame failed");
             geometry=J::Parse(to_hstring(raw.get()));inspector->position=pagePosition;
             if(pageComplete)inspector->animating=false;

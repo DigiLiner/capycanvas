@@ -2,7 +2,7 @@
 use layer_host::NativeHost;
 use serde::Deserialize;
 use std::{
-    ffi::{CString, c_char},
+    ffi::CString,
     sync::Arc,
 };
 
@@ -31,38 +31,42 @@ pub fn query(host: &mut NativeHost, json: &str) -> Result<CapyPreview, String> {
     } else { Vec::new() };
     CapyPreview::packet(metadata, bytes)
 }
-/// # Safety
-/// The packet must be null or a live uniquely owned result of a canvas UI query.
-/// The returned buffer stays valid until the packet is freed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_preview_metadata(packet: *const CapyPreview) -> *const c_char {
-    unsafe { packet.as_ref() }.map_or(std::ptr::null(), |p| p.metadata.as_ptr())
+pub(crate) fn store(packet:CapyPreview)->Result<u64,String> {
+    layer_host::handles::insert_shared(Arc::new(packet)).map(layer_host::handles::Handle::raw).map_err(|error|error.to_string())
 }
-/// # Safety
-/// The packet must be null or a live result of a canvas UI query; length must
-/// point to writable storage. The bytes are immutable until capy_preview_free.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_preview_bytes(
-    packet: *const CapyPreview,
-    length: *mut usize,
-) -> *const u8 {
-    let Some(length) = (unsafe { length.as_mut() }) else {
-        return std::ptr::null();
-    };
-    *length = 0;
-    unsafe { packet.as_ref() }.map_or(std::ptr::null(), |p| {
-        *length = p.bytes.len();
-        p.bytes.as_ptr()
-    })
+fn packet(value:u64)->Option<Arc<CapyPreview>> {
+    layer_host::handles::Handle::from_raw(value).and_then(layer_host::handles::shared::<CapyPreview>).ok()
 }
-/// # Safety
-/// Free a packet from a canvas UI query once, after all buffer readers finish.
-/// The packet owns CPU data only and may be transferred to a conversion worker.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_preview_free(packet: *mut CapyPreview) {
-    if !packet.is_null() {
-        unsafe { drop(Box::from_raw(packet)) };
+pub extern "C" fn capy_preview_metadata(value:u64)->u64 {
+    packet(value).map_or(0,|packet|crate::owned::text(packet.metadata.clone()))
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_preview_length(value:u64)->usize {packet(value).map_or(0,|packet|packet.bytes.len())}
+/// # Safety
+/// Nonempty output is writable and exclusive for length bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_preview_copy(value:u64,offset:usize,output:*mut u8,length:usize)->bool {
+    packet(value).is_some_and(|packet|unsafe {layer_host::ffi::copy_bytes(&packet.bytes,offset,output,length)})
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_preview_free(value:u64) {
+    let _=layer_host::handles::Handle::from_raw(value).and_then(layer_host::handles::release::<CapyPreview>);
+}
+
+#[cfg(test)]
+pub(crate) fn copied_bytes(value:u64)->Vec<u8> {
+    let mut bytes=vec![0;capy_preview_length(value)];
+    for offset in (0..bytes.len()).step_by(layer_core::package::MAX_RANGE_BYTES) {
+        let count=(bytes.len()-offset).min(layer_core::package::MAX_RANGE_BYTES);
+        assert!(unsafe {capy_preview_copy(value,offset,bytes.as_mut_ptr().add(offset),count)});
     }
+    assert!(unsafe {capy_preview_copy(value,bytes.len(),std::ptr::null_mut(),0)});
+    bytes
+}
+#[cfg(test)]
+pub(crate) fn copied_metadata(value:u64)->serde_json::Value {
+    serde_json::from_slice(crate::owned::take_text(capy_preview_metadata(value)).as_bytes()).unwrap()
 }
 
 impl CapyPreview {
@@ -218,24 +222,21 @@ mod tests {
     }
     #[test]
     fn owned_binary_lifetime() {
-        let p = Box::into_raw(Box::new(CapyPreview {
-            metadata: CString::new("{}").unwrap(),
-            bytes: vec![1, 2, 3, 4],
-        }));
-        unsafe {
-            let mut n = 0;
-            let bytes = capy_preview_bytes(p, &mut n);
-            assert_eq!(std::slice::from_raw_parts(bytes, n), &[1, 2, 3, 4]);
-            assert_eq!(
-                std::ffi::CStr::from_ptr(capy_preview_metadata(p))
-                    .to_str()
-                    .unwrap(),
-                "{}"
-            );
-            capy_preview_free(p);
-            assert!(capy_preview_bytes(std::ptr::null(), &mut n).is_null());
-            assert_eq!(n, 0);
-        }
+        let p=store(CapyPreview {metadata:CString::new("{}").unwrap(),bytes:vec![1,2,3,4]}).unwrap();
+        let mut bytes=[93;4];
+        assert_eq!(capy_preview_length(p),4);
+        assert!(unsafe {capy_preview_copy(p,0,bytes.as_mut_ptr(),4)});
+        assert_eq!(bytes,[1,2,3,4]);
+        let metadata=capy_preview_metadata(p);
+        capy_preview_free(metadata);
+        assert_eq!(crate::owned::take_text(metadata).to_str().unwrap(),"{}");
+        assert!(!unsafe {capy_preview_copy(p,usize::MAX,bytes.as_mut_ptr(),1)});
+        assert!(!unsafe {capy_preview_copy(p,3,bytes.as_mut_ptr(),2)});
+        capy_preview_free(p);capy_preview_free(p);
+        assert_eq!(capy_preview_length(p),0);
+        assert!(!unsafe {capy_preview_copy(p,0,bytes.as_mut_ptr(),0)});
+        assert_eq!(capy_preview_metadata(p),0);
+        assert_eq!(bytes,[1,2,3,4]);
     }
 
     #[test]

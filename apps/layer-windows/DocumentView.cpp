@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "DocumentView.h"
+#include "BitmapUpload.h"
 #include "UiControls.h"
 #include "WorkspaceQuery.h"
-#include "BitmapUpload.h"
 #include "ExportForm.h"
 #include "ProofForm.h"
 #include "NewDrawingDialog.h"
@@ -31,7 +31,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
     bool busyDialog=false,busyCompleted=false;
     std::function<void()> changed;
     std::shared_ptr<WorkspaceData> data=std::make_shared<WorkspaceData>();
-    std::shared_ptr<CapyLocalization> localization;
+    NativeLocalization localization;
     std::function<void()> presentationChanged,workflowChanged;
     J catalog,model,proofDraft;
     std::unique_ptr<NewDrawingDialog> newDrawing;
@@ -45,12 +45,16 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
     uint32_t handled=0;
     uint32_t interpreted=0;
     bool showing=false,stopping=false;
+    std::vector<std::shared_ptr<BitmapUpload>> previewUploads;
+    void clearPreviews(){for(auto& upload:previewUploads)upload->Close();previewUploads.clear();}
+    ~Impl(){clearPreviews();}
+
 
     hstring recovery(wchar_t const* key) const {return str(object(object(catalog,L"bootstrap"),L"recovery"),key);}
     hstring common(wchar_t const* key) const {return str(object(object(catalog,L"bootstrap"),L"common"),key);}
     hstring native(wchar_t const* group,wchar_t const* key) const {return str(object(object(catalog,L"native_copy"),group),key);}
     hstring caption(J const& request) const {
-        auto input=to_string(request.Stringify());std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_native_caption(localization.get(),input.c_str()),capy_string_free);
+        auto input=to_string(request.Stringify());NativeString raw(capy_native_caption(localization.get(),input.c_str()),capy_string_free);
         if(!raw)throw hresult_error(E_OUTOFMEMORY);auto value=J::Parse(to_hstring(raw.get()));if(value.HasKey(L"error"))throw hresult_invalid_argument(str(value,L"error"));return str(value,L"text");
     }
     LocalizedCopy featureText(wchar_t const* group,wchar_t const* key)const{
@@ -195,7 +199,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                     {L"error",S(recovery(L"document_dialog_failed"))}});
             }
         }
-        picker=nullptr;dialog=nullptr;presentationChanged={};
+        picker=nullptr;clearPreviews();dialog=nullptr;presentationChanged={};
         if(!stopping)send(to_string(response.Stringify()));
         if(!stopping&&queued.Size())send(to_string(O({{L"operation",S(L"open_paths")},{L"paths",queued}}).Stringify()));
         showing=false;
@@ -223,7 +227,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             accepted=co_await dialog.ShowAsync()==ContentDialogResult::Primary;
             if(accepted)profile=choices.GetObjectAt(space.SelectedIndex());
         }catch(hresult_error const& e){if(!stopping)report(to_string(e.message()));}
-        dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"interpret")},{L"id",N(id)},
+        clearPreviews();dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"interpret")},{L"id",N(id)},
             {L"profile",accepted?V(profile):JsonValue::CreateNullValue()}}).Stringify()));
         showing=false;changed();
     }
@@ -291,17 +295,21 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
     }
     void preview(Image const& image,uint32_t id,uint32_t index,std::function<bool()> accepted={},std::shared_ptr<BitmapUpload> upload={}){
         auto queue=window.DispatcherQueue();
-        if(!upload){upload=BitmapUpload::Create();image.Unloaded([upload](auto&&,auto&&){upload->Close();});}
+        if(!upload)upload=BitmapUpload::Create();
+        if(std::find(previewUploads.begin(),previewUploads.end(),upload)==previewUploads.end())previewUploads.push_back(upload);
         query(CanvasQueryKind::Document,to_string(O({{L"id",N(id)},{L"index",N(index)}}).Stringify()),[queue,image,id,accepted,upload,weak=weak_from_this()](PreviewPacket packet){
             queue.TryEnqueue([packet,image,id,accepted,upload,weak]{
                 auto self=weak.lock();if(!self||self->stopping||!packet||(accepted&&!accepted()))return;
                 try{
-                    auto meta=J::Parse(to_hstring(capy_preview_metadata(packet.get())));if(uint32_t(num(meta,L"id"))!=id)return;
+                    auto meta=J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get()));if(uint32_t(num(meta,L"id"))!=id)return;
                     int width=int(num(meta,L"width")),height=int(num(meta,L"height"));if(width<=0||height<=0||width>1024||height>1024)return;
-                    auto current=[weak,accepted]{auto self=weak.lock();return self&&!self->stopping&&(!accepted||accepted());};
-                    upload->Submit({BitmapUpload::ReadPacket(packet),0,size_t(width)*height*4,width,height,true,true,current,
+                    auto length=capy_preview_length(packet.get());if(length!=size_t(width)*height*4)return;
+                    auto current=[weak,accepted,expected=std::weak_ptr<BitmapUpload>(upload)]{auto self=weak.lock();auto upload=expected.lock();
+                        return self&&upload&&!self->stopping&&(!accepted||accepted())&&
+                            std::find(self->previewUploads.begin(),self->previewUploads.end(),upload)!=self->previewUploads.end();};
+                    upload->Submit({BitmapUpload::ReadPacket(packet),0,length,width,height,true,true,current,
                         [owner=make_weak(image),source=std::weak_ptr<BitmapUpload>(upload),current](bool applied){if(applied&&current())if(auto image=owner.get())if(auto upload=source.lock())image.Source(upload->Image());}});
-                }catch(hresult_error const&){}
+                }catch(std::exception const&){}catch(hresult_error const&){}
             });
         });
     }
@@ -315,7 +323,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             for(auto value:array(summary,L"outputs"))text(str(value.GetObject(),L"name"));
             if(flag(object(summary,L"capabilities"),L"view")){Image image;image.MaxHeight(384);image.Stretch(Stretch::Uniform);body.Children().Append(image);preview(image,id,0);}
             dialog.Content(body);presentationChanged=[this]{auto summary=object(object(model,L"windows_document"),L"summary");dialog.Title(box_value(str(summary,L"status")));dialog.PrimaryButtonText(str(summary,L"copy_original"));dialog.SecondaryButtonText(flag(object(summary,L"capabilities"),L"export")?str(summary,L"export_preview"):L"");dialog.CloseButtonText(str(summary,L"close"));};
-            auto result=co_await dialog.ShowAsync();dialog=nullptr;presentationChanged={};
+            auto result=co_await dialog.ShowAsync();clearPreviews();dialog=nullptr;presentationChanged={};
             if((result==ContentDialogResult::Primary||result==ContentDialogResult::Secondary)&&!stopping){
                 bool exporting=result==ContentDialogResult::Secondary;Pickers::FileSavePicker save(window.AppWindow().Id());
                 if(exporting){
@@ -328,7 +336,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                 if(selected){destination=selected.Path();action=exporting?L"export_preview":L"copy_original";}
             }
         }catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
-        dialog=nullptr;presentationChanged={};
+        clearPreviews();dialog=nullptr;presentationChanged={};
         if(!stopping)send(to_string(O({{L"operation",S(L"package")},{L"id",N(id)},{L"action",S(action)},{L"path",action!=L"close"?S(destination):JsonValue::CreateNullValue()}}).Stringify()));
         showing=false;changed();
     }
@@ -363,7 +371,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             if(kind==L"repair"){AutomationProperties::SetAutomationId(text(featureText(L"color",L"current_source")),L"document-source-current-label");AutomationProperties::SetAutomationId(text(documentText(L"source_profile")),L"document-source-profile");}
             if(kind==L"rasterize")text(featureText(L"color",L"source_baked_help"));
             std::array<Image,3> images;std::array<TextBlock,3> headings;
-            std::array<std::shared_ptr<BitmapUpload>,3> uploads;for(uint32_t i=0;i<3;++i){uploads[i]=BitmapUpload::Create();images[i].Unloaded([upload=uploads[i]](auto&&,auto&&){upload->Close();});}
+            std::array<std::shared_ptr<BitmapUpload>,3> uploads;for(uint32_t i=0;i<3;++i){uploads[i]=BitmapUpload::Create();}
             for(uint32_t i=0;i<3;++i){headings[i].TextWrapping(TextWrapping::Wrap);body.Children().Append(headings[i]);images[i].MaxHeight(210);images[i].Stretch(Stretch::Uniform);images[i].Visibility(Visibility::Collapsed);body.Children().Append(images[i]);}
             body.Children().Append(status);ScrollViewer scroll;scroll.Content(body);scroll.MaxHeight(std::max(180.,double(window.Content().XamlRoot().Size().Height)-220));dialog.Content(scroll);
             auto pending=std::make_shared<bool>(true);auto seen=std::make_shared<hstring>();auto generation=std::make_shared<uint64_t>(0);
@@ -402,7 +410,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             workflowChanged={};auto current=object(model,L"windows_document");workflowStamp=to_hstring(id)+L"/"+to_hstring(uint32_t(num(current,L"serial")));
             if(result==ContentDialogResult::Primary&&!*pending)response=O({{L"op",S(flag(object(current,L"details"),L"copy")?L"open_copy":L"commit")}});
         }catch(hresult_canceled const&){}catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
-        workflowChanged={};dialog=nullptr;
+        workflowChanged={};clearPreviews();dialog=nullptr;
         if(!stopping)send(to_string(O({{L"operation",S(L"workflow")},{L"id",N(id)},{L"action",response}}).Stringify()));showing=false;changed();
     }
     fire_and_forget workflow(J request){
@@ -602,7 +610,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                 auto selected=co_await picker;if(selected)*scripted=O({{L"op",S(L"profile_import")},{L"path",S(selected.Path())}});
             }
         }catch(hresult_canceled const&){}catch(hresult_error const& e){if(!stopping)report(to_string(e.message()));}
-        dialog=nullptr;picker=nullptr;presentationChanged={};
+        clearPreviews();dialog=nullptr;picker=nullptr;presentationChanged={};
         if(scripted->Size())action=*scripted;
         if(!stopping)send(to_string(O({{L"operation",S(L"workflow")},{L"id",N(id)},{L"action",action}}).Stringify()));
         showing=false;changed();
@@ -616,7 +624,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             presentationChanged=[this,text]{dialog.Title(box_value(recovery(L"attention")));dialog.PrimaryButtonText(recovery(L"retry"));dialog.CloseButtonText(common(L"keep_open"));text.Text(str(object(model,L"windows_recovery"),L"error"));};
             if(co_await dialog.ShowAsync()==ContentDialogResult::Primary)action=L"retry";
         }catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
-        dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"recovery")},{L"action",O({{L"op",S(action)}})}}).Stringify()));showing=false;changed();
+        clearPreviews();dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"recovery")},{L"action",O({{L"op",S(action)}})}}).Stringify()));showing=false;changed();
     }
     fire_and_forget recoverDrawing(double id){
         auto lifetime=shared_from_this();showing=true;changed();hstring action=L"later";
@@ -628,7 +636,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             auto result=co_await dialog.ShowAsync();
             if(result==ContentDialogResult::Primary)action=L"restore_drawing";else if(result==ContentDialogResult::Secondary)action=L"discard";
         }catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
-        dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"recovery")},{L"action",O({{L"op",S(action)},{L"id",N(id)}})}}).Stringify()));showing=false;changed();
+        clearPreviews();dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"recovery")},{L"action",O({{L"op",S(action)},{L"id",N(id)}})}}).Stringify()));showing=false;changed();
     }
     hstring busyTitle(J const& state){auto title=str(state,L"title");return title.empty()?str(object(catalog,L"bootstrap"),L"preparing_document"):title;}
     fire_and_forget working(J state){
@@ -637,7 +645,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             dialog=ContentDialog();dialog.XamlRoot(window.Content().XamlRoot());dialog.Title(box_value(busyTitle(state)));dialog.CloseButtonText(common(L"cancel"));
             ProgressRing progress;progress.IsActive(true);progress.Width(48);progress.Height(48);dialog.Content(progress);co_await dialog.ShowAsync();
         }catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
-        dialog=nullptr;presentationChanged={};
+        clearPreviews();dialog=nullptr;presentationChanged={};
         if(!stopping&&!busyCompleted&&str(state,L"type")==L"package_busy")send(to_string(O({{L"operation",S(L"package")},{L"id",N(num(state,L"id"))},{L"action",S(L"close")},{L"path",JsonValue::CreateNullValue()}}).Stringify()));
         else if(!stopping&&!busyCompleted&&str(state,L"type")==L"opening_busy")send(to_string(O({{L"operation",S(L"cancel")},{L"id",N(num(state,L"id"))}}).Stringify()));
         else if(!stopping&&!busyCompleted)send(to_string(O({{L"operation",S(L"workflow")},{L"id",N(num(state,L"id"))},{L"action",O({{L"op",S(L"cancel")}})}}).Stringify()));
@@ -692,7 +700,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         }
     }
 };
-DocumentView::DocumentView(Dispatch send,Dispatch action,Json catalog,std::shared_ptr<CapyLocalization> localization,Window window,std::function<void()> changed,PreviewTransport query,Dispatch report)
+DocumentView::DocumentView(Dispatch send,Dispatch action,Json catalog,NativeLocalization localization,Window window,std::function<void()> changed,PreviewTransport query,Dispatch report)
     :impl(std::make_shared<Impl>()) {
     impl->data->catalog=catalog;impl->data->localization=localization;impl->localization=localization;impl->send=std::move(send);impl->catalog=catalog;impl->window=window;
     impl->query=std::move(query);impl->changed=std::move(changed);impl->report=std::move(report);
@@ -702,7 +710,7 @@ DocumentView::~DocumentView()=default;
 void DocumentView::Apply(Json const& snapshot,bool blocked){impl->apply(snapshot,blocked);}
 bool DocumentView::IsOpen()const{return impl->showing||(impl->newDrawing&&impl->newDrawing->IsOpen());}
 void DocumentView::Hide(){
-    impl->stopping=true;
+    impl->stopping=true;impl->clearPreviews();
     if(impl->newDrawing)impl->newDrawing->Hide();
     if(impl->dialog)impl->dialog.Hide();
     if(impl->picker)impl->picker.Cancel();

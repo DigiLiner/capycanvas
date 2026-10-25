@@ -3,9 +3,9 @@
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
 
 namespace CapyUi {
-inline V colorUi(CapyLocalization const* localization,J const& request) {
+inline V colorUi(CapyLocalization  localization,J const& request) {
     auto text=to_string(request.Stringify());
-    std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_color_ui(localization,text.c_str()),capy_string_free);
+    NativeString raw(capy_color_ui(localization,text.c_str()),capy_string_free);
     if(!raw)throw hresult_error(E_OUTOFMEMORY);
     return JsonValue::Parse(to_hstring(raw.get()));
 }

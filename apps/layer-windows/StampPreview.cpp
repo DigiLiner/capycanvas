@@ -10,8 +10,8 @@ static fire_and_forget ConvertStamp(Microsoft::UI::Dispatching::DispatcherQueue 
     co_await resume_background();
     bool valid=true;
     try{
-        size_t count=0;auto mask=capy_preview_bytes(packet.get(),&count);
-        if(!mask||count!=expected)throw hresult_invalid_argument();
+        auto mask=packet.Bytes();auto count=mask.size();
+        if(count!=expected)throw hresult_invalid_argument();
         for(size_t i=0;i<count;++i){auto alpha=uint32_t(mask[i])*ink.A/255;auto p=pixels+i*4;
             p[0]=uint8_t(ink.B*alpha/255);p[1]=uint8_t(ink.G*alpha/255);p[2]=uint8_t(ink.R*alpha/255);p[3]=uint8_t(alpha);}
     }catch(...){valid=false;}
@@ -25,8 +25,8 @@ bool RequestStamp(PreviewTransport const& transport,J const& query,winrt::Window
     return transport&&queue&&transport(CanvasQueryKind::Workspace,to_string(query.Stringify()),
         [queue,ink,reply=std::move(reply)](PreviewPacket packet){queue.TryEnqueue([queue,ink,reply,packet=std::move(packet)]{
             try{
-                auto result=packet?object(J::Parse(to_hstring(capy_preview_metadata(packet.get()))),L"result"):J{};
-                size_t count=0;if(packet)capy_preview_bytes(packet.get(),&count);
+                auto result=packet?object(J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get())),L"result"):J{};
+                auto count=capy_preview_length(packet.get());
                 if(!count){reply(result,nullptr);return;}
                 auto size=int(num(result,L"size"));
                 if(size<=0||size>192||count!=size_t(size)*size_t(size))throw hresult_invalid_argument();

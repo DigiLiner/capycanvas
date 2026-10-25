@@ -174,8 +174,9 @@ impl NativeEncodeStatus {
             ));
         }
         if bytes != [0; 4] {
+            let status=u32::from_le_bytes(bytes.try_into().unwrap());
             return Err(GpuRasterError::Color(
-                "Color processing produced non-finite values, invalid coverage or RGB outside the selected storage range".into(),
+                format!("Color processing produced non-finite values, invalid coverage or RGB outside the selected storage range (status {status:#010x})"),
             ));
         }
         Ok(())

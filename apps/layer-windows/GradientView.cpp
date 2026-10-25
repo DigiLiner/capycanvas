@@ -8,9 +8,9 @@
 #include <optional>
 using namespace CapyEffects;
 namespace {
-struct RampRequest {std::shared_ptr<CapyLocalization> localization;std::string request;int width=0,height=0;winrt::Windows::UI::Color light{},dark{};double cell=1;};
+struct RampRequest {NativeLocalization localization;std::string request;int width=0,height=0;winrt::Windows::UI::Color light{},dark{};double cell=1;};
 bool rasterRamp(RampRequest const& request,std::vector<uint8_t>& bytes){
-    std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_color_ui(request.localization.get(),request.request.c_str()),capy_string_free);
+    NativeString raw(capy_color_ui(request.localization.get(),request.request.c_str()),capy_string_free);
     if(!raw)return false;
     char const* cursor=std::strstr(raw.get(),"\"argb\":[");if(!cursor)return false;cursor+=8;
     size_t count=size_t(request.width)*request.height;bytes.resize(count*4);

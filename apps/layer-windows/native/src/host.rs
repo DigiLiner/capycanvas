@@ -1,3 +1,5 @@
+use layer_host::handles::{self,Handle,Borrowed};
+use crate::owned::text;
 use crate::device::D3d12Watch;
 use crate::input::{read_json, with_text};
 use layer_host::{
@@ -17,11 +19,9 @@ thread_local! { static ERROR: RefCell<CString> = RefCell::new(CString::default()
 fn fail(e: impl std::fmt::Display) {
     ERROR.with(|slot| *slot.borrow_mut() = CString::new(e.to_string().replace('\0', " ")).unwrap());
 }
-fn guard(host: Option<&mut CapyHost>, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
-    let Some(host) = host else {
-        fail("Null canvas");
-        return -1;
-    };
+fn guard(raw:u64, f: impl FnOnce(&mut CapyHost) -> Result<i32, String>) -> i32 {
+    let mut owned=match borrow::<CapyHost>(raw) {Ok(host)=>host,Err(error)=> {fail(error);return -1;}};
+    let host=&mut *owned;
     match layer_host::contain(host, f) {
         Ok(value) => value,
         Err(error) => {
@@ -32,6 +32,9 @@ fn guard(host: Option<&mut CapyHost>, f: impl FnOnce(&mut CapyHost) -> Result<i3
             -1
         }
     }
+}
+fn borrow<T:Send+'static>(raw:u64)->Result<Borrowed<T>,String> {
+    Handle::from_raw(raw).and_then(handles::lease::<T>).and_then(|lease|lease.borrow()).map_err(err)
 }
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
@@ -426,7 +429,7 @@ impl CapyHost {
 /// # Safety
 /// Call on the startup worker. `tags` and non-null `screen` are readable NUL-terminated JSON.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char) -> *mut CapyLaunch {
+pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char) -> u64 {
     let result = catch_unwind(AssertUnwindSafe(|| {
         let tags: Vec<String> = unsafe { read_json(tags) }?;
         let screen = if screen.is_null() { None } else { unsafe { read_json(screen) }? };
@@ -435,30 +438,28 @@ pub unsafe extern "C" fn capy_launch(tags: *const c_char, screen: *const c_char)
         Ok::<_, String>(CapyLaunch { native: Some(native), settings: Some(settings), bootstrap })
     }));
     match result {
-        Ok(Ok(launch)) => Box::into_raw(Box::new(launch)),
-        Ok(Err(error)) => { fail(error); std::ptr::null_mut() },
-        Err(_) => { fail("Windows launch panic"); std::ptr::null_mut() },
+        Ok(Ok(launch)) => match handles::insert(launch) {Ok(handle)=>handle.raw(),Err(error)=> {fail(error);0}},
+        Ok(Err(error)) => { fail(error); 0 },
+        Err(_) => { fail("Windows launch panic"); 0 },
     }
 }
 /// # Safety
 /// The launch remains alive and exclusively owned until this call returns.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_launch_view(launch: *const CapyLaunch) -> *const c_char {
-    unsafe { launch.as_ref() }.map_or(std::ptr::null(), |launch| launch.bootstrap.as_ptr())
+pub unsafe extern "C" fn capy_launch_view(launch:u64)->u64 {
+    borrow::<CapyLaunch>(launch).map_or(0,|launch|text(launch.bootstrap.clone()))
 }
 /// # Safety
 /// Borrow a live, unadopted launch exclusively for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_launch_localization(launch: *const CapyLaunch) -> *mut crate::CapyLocalization {
-    unsafe { launch.as_ref() }.and_then(|launch| launch.native.as_ref()).map_or(std::ptr::null_mut(), |native| {
-        Box::into_raw(Box::new(crate::CapyLocalization { localizer: native.session.localization().clone() }))
-    })
+pub unsafe extern "C" fn capy_launch_localization(launch: u64) -> u64 {
+    borrow::<CapyLaunch>(launch).ok().and_then(|launch|launch.native.as_ref().map(|native|crate::shared_controls::store_localization(native.session.localization().clone()))).unwrap_or(0)
 }
 /// # Safety
 /// Free a uniquely owned launch once, after its surface adoption or cancellation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_launch_free(launch: *mut CapyLaunch) {
-    if !launch.is_null() { drop(unsafe { Box::from_raw(launch) }); }
+pub unsafe extern "C" fn capy_launch_free(launch: u64) {
+    let _=Handle::from_raw(launch).and_then(handles::release::<CapyLaunch>);
 }
 /// # Safety
 /// Call on the panel's XAML thread. `panel` must point to a live
@@ -471,20 +472,20 @@ pub unsafe extern "C" fn capy_create(
     width: u32,
     height: u32,
     scale: f32,
-    launch: *mut CapyLaunch,
-) -> *mut CapyHost {
+    launch: u64,
+) -> u64 {
     match catch_unwind(AssertUnwindSafe(|| unsafe {
-        let launch = launch.as_mut().ok_or("Missing Windows launch")?;
-        CapyHost::new(panel, width, height, scale, launch)
+        let mut launch=borrow::<CapyLaunch>(launch)?;
+        CapyHost::new(panel,width,height,scale,&mut launch)
     })) {
-        Ok(Ok(host)) => Box::into_raw(Box::new(host)),
+        Ok(Ok(host)) => match handles::insert(host) {Ok(handle)=>handle.raw(),Err(error)=> {fail(error);0}},
         Ok(Err(e)) => {
             fail(e);
-            std::ptr::null_mut()
+            0
         }
         Err(_) => {
             fail("Canvas initialization panic");
-            std::ptr::null_mut()
+            0
         }
     }
 }
@@ -492,17 +493,16 @@ pub unsafe extern "C" fn capy_create(
 /// # Safety
 /// Exclusive access to a live host; window remains valid for its lifetime.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_set_window(host: *mut CapyHost, window: *mut c_void) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| { host.window = window as usize; host.display_checked = None; Ok(0) })
+pub unsafe extern "C" fn capy_set_window(host: u64, window: *mut c_void) -> i32 {
+    guard(host, |host| { host.window = window as usize; host.display_checked = None; Ok(0) })
 }
 /// Destroy after stopping callers and detaching the panel.
 /// # Safety
 /// The pointer must be uniquely owned and freed once.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_destroy(host: *mut CapyHost) {
-    if !host.is_null() {
-        let _ = catch_unwind(AssertUnwindSafe(|| {
-            let host = unsafe { Box::from_raw(host) };
+pub unsafe extern "C" fn capy_destroy(host: u64) {
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if let Ok(host)=borrow::<CapyHost>(host) {
             // One opt-in write after input/rendering stop, never in the pen path.
             if let Some([platform, engine]) = host.prediction_frames {
                 let report = serde_json::json!({
@@ -514,24 +514,25 @@ pub unsafe extern "C" fn capy_destroy(host: *mut CapyHost) {
                 let path = format!("prediction-{}-{}.json", std::process::id(), host.window);
                 let _ = std::fs::write(path, report.to_string());
             }
-        }));
-    }
+        }
+        let _=Handle::from_raw(host).and_then(handles::release::<CapyHost>);
+    }));
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn capy_error() -> *const c_char {
-    ERROR.with(|v| v.borrow().as_ptr())
+pub extern "C" fn capy_error() -> u64 {
+    ERROR.with(|v| text(v.borrow().clone()))
 }
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
-/// `wake` and its `context` must stay valid until `capy_finish_services` returns.
+/// `wake` and its `context` must stay valid until `capy_finish_services` succeeds on the render owner.
 /// The callback must tolerate concurrent worker calls and must not unwind.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_start_services(
-    host: *mut CapyHost,
+    host: u64,
     context: *mut c_void,
     wake: Option<extern "C" fn(*mut c_void)>,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         if host.documents.is_none() {
             let context = context as usize;
             host.documents = Some(crate::documents::DocumentService::open_localized(host.native.session.localization(), move || {
@@ -577,28 +578,26 @@ pub unsafe extern "C" fn capy_start_services(
 /// # Safety
 /// Exclusive render-owner access to a live host.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_needs_frame(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| Ok(i32::from(host.native.dirty)))
+pub unsafe extern "C" fn capy_needs_frame(host: u64) -> i32 {
+    guard(host, |host| Ok(i32::from(host.native.dirty)))
 }
 
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_poll_services(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_poll_services(host: u64) -> i32 {
+    guard(host, |host| {
         host.poll_services()?;
         Ok(i32::from(host.native.dirty))
     })
 }
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
-/// Keep service callback code and context alive until this function returns.
+/// Keep callback code and context alive until this function succeeds on the render owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_finish_services(host: *mut CapyHost) -> i32 {
-    let Some(host) = (unsafe { host.as_mut() }) else {
-        fail("Null canvas");
-        return -1;
-    };
+pub unsafe extern "C" fn capy_finish_services(host: u64) -> i32 {
+    let mut owned=match borrow::<CapyHost>(host) {Ok(host)=>host,Err(error)=> {fail(error);return -1;}};
+    let host=&mut *owned;
     let filters = catch_unwind(AssertUnwindSafe(|| {
         if let Some(mut service) = host.filters.take() {
             service.stop();
@@ -646,8 +645,8 @@ pub unsafe extern "C" fn capy_finish_services(host: *mut CapyHost) -> i32 {
 /// `host` must be null or a live host exclusively accessed by this caller.
 /// Call from the canvas owner, before acquiring surface images.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_prepare_gpu(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_prepare_gpu(host: u64) -> i32 {
+    guard(host, |host| {
         host.prepare_gpu()?;
         Ok(0)
     })
@@ -658,12 +657,12 @@ pub unsafe extern "C" fn capy_prepare_gpu(host: *mut CapyHost) -> i32 {
 /// image; surface configuration attaches the swap chain to that panel.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_resize(
-    host: *mut CapyHost,
+    host: u64,
     width: u32,
     height: u32,
     scale: f32,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         if width == 0 || height == 0 || !scale.is_finite() || scale <= 0.0 {
             return Err("Invalid viewport".into());
         }
@@ -698,11 +697,11 @@ pub unsafe extern "C" fn capy_resize(
 /// CapyPointer values, readable and unchanged throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_pointer(
-    host: *mut CapyHost,
+    host: u64,
     records: *const CapyPointer,
     count: usize,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         if count > 32768 || (count > 0 && records.is_null()) {
             return Err("Invalid pointer batch".into());
         }
@@ -744,8 +743,8 @@ pub unsafe extern "C" fn capy_pointer(
 /// # Safety
 /// Exclusive access to a live host; json is a readable NUL-terminated buffer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_workspace_action(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         use crate::workspace_service::WorkspaceAction;
         let action = unsafe { read_json(json) }?;
         if matches!(
@@ -781,10 +780,10 @@ pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const
 /// for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_load_filter_directory(
-    host: *mut CapyHost,
+    host: u64,
     json: *const c_char,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         let request = unsafe { with_text(json, |text| {
             if text.len() > 8192 { return Err("Filter directory request is too large.".into()); }
             serde_json::from_str(text).map_err(err)
@@ -806,8 +805,8 @@ pub unsafe extern "C" fn capy_load_filter_directory(
 /// `json` must be null or a readable NUL-terminated buffer that remains unchanged
 /// for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_action(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         let action: crate::actions::Action =
             unsafe { read_json(json) }?;
         host.poll_services()?;
@@ -827,8 +826,8 @@ pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -
 /// `json` must be null or a readable NUL-terminated buffer that remains unchanged
 /// for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_action(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_document_action(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         let action = unsafe { read_json(json) }?;
         let result = host.documents.as_mut().ok_or("Document service is unavailable")?.dispatch(&mut host.native, action);
         if let Err(error) = result {
@@ -844,8 +843,8 @@ pub unsafe extern "C" fn capy_document_action(host: *mut CapyHost, json: *const 
 /// `json` must be null or a readable NUL-terminated buffer that remains unchanged
 /// for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_native_prediction(host: *mut CapyHost, available: bool) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_native_prediction(host: u64, available: bool) -> i32 {
+    guard(host, |host| {
         host.native.session.set_platform_prediction_available(available);
         host.native.invalidate_snapshot();
         Ok(0)
@@ -854,8 +853,8 @@ pub unsafe extern "C" fn capy_native_prediction(host: *mut CapyHost, available: 
 /// # Safety
 /// Exclusive access to a live host; json is a readable NUL-terminated buffer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_input(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_input(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         let input = unsafe { read_json(json) }?;
         host.poll_services()?;
         if !host.accepts_workspace_input()?
@@ -883,7 +882,7 @@ pub unsafe extern "C" fn capy_input(host: *mut CapyHost, json: *const c_char) ->
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_scroll(
-    host: *mut CapyHost,
+    host: u64,
     x: f32,
     y: f32,
     dx: f32,
@@ -892,7 +891,7 @@ pub unsafe extern "C" fn capy_scroll(
     zoom: bool,
     horizontal: bool,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         host.poll_services()?;
         if !host.accepts_workspace_input()? {
             return Ok(0);
@@ -906,14 +905,14 @@ pub unsafe extern "C" fn capy_scroll(
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_chrome(
-    host: *mut CapyHost,
+    host: u64,
     kind: u32,
     x: f32,
     y: f32,
     canvas: bool,
     popup_open: bool,
 ) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+    guard(host, |host| {
         let event = match kind {
             0 => layer_ui::ChromeEvent::Refresh,
             1 => layer_ui::ChromeEvent::Motion,
@@ -935,8 +934,8 @@ pub unsafe extern "C" fn capy_chrome(
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_acquire(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_acquire(host: u64) -> i32 {
+    guard(host, |host| {
         if host.device_is_lost() {
             return Err("The GPU device was lost".into());
         }
@@ -970,8 +969,8 @@ pub unsafe extern "C" fn capy_acquire(host: *mut CapyHost) -> i32 {
 /// # Safety
 /// The host remains exclusively owned on the render thread during this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_localization_input(host: *mut CapyHost, busy: bool) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_localization_input(host: u64, busy: bool) -> i32 {
+    guard(host, |host| {
         host.localization_input_busy = busy;
         host.poll_services()?;
         Ok(0)
@@ -980,8 +979,8 @@ pub unsafe extern "C" fn capy_localization_input(host: *mut CapyHost, busy: bool
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_frame(host: *mut CapyHost, now: u64, presentation: u64) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| host.frame(now, presentation))
+pub unsafe extern "C" fn capy_frame(host: u64, now: u64, presentation: u64) -> i32 {
+    guard(host, |host| host.frame(now, presentation))
 }
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -1050,10 +1049,10 @@ struct WindowsMetadata {
 /// Ranges address the returned UTF-8 allocation only until `capy_string_free`.
 /// A nonnull result belongs to the caller and must be freed with `capy_string_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnapshotInfo) -> *mut c_char {
+pub unsafe extern "C" fn capy_snapshot(host: u64, info: *mut CapySnapshotInfo) -> u64 {
     if let Some(info) = unsafe { info.as_mut() } { *info = CapySnapshotInfo::default(); }
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+    let mut result = 0;
+    guard(host, |host| {
         let generation = host.native.localization_generation();
         let localization = if host.localization_generation != Some(generation) {
             Some(crate::settings::localization_presentation(&mut host.native)?)
@@ -1115,7 +1114,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
             let routing = if info.is_null() { None } else { Some(CapySnapshotInfo::read(&bytes).map_err(err)?) };
             let snapshot = CString::new(bytes).map_err(err)?;
             if let Some(routing) = routing { unsafe { *info = routing; } }
-            result = snapshot.into_raw();
+            result = text(snapshot);
         }
         Ok(0)
     });
@@ -1127,13 +1126,12 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
 /// for the duration of this call.
 /// A nonnull result belongs to the caller and must be freed with `capy_string_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_query(host: *mut CapyHost, json: *const c_char) -> *mut c_char {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_query(host: u64, json: *const c_char) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
         let query = unsafe { read_json(json) }?;
         result = CString::new(host.native.query(query)?.to_string())
-            .map_err(err)?
-            .into_raw();
+            .map(text).map_err(err)?;
         Ok(0)
     });
     result
@@ -1144,9 +1142,9 @@ pub unsafe extern "C" fn capy_query(host: *mut CapyHost, json: *const c_char) ->
 /// `host` must be null or a live host exclusively accessed by this caller.
 /// A nonnull result belongs to the caller and must be freed with `capy_string_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_surface_info(host: *mut CapyHost) -> *mut c_char {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_surface_info(host: u64) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
         use windows::core::Interface;
         let native = unsafe { host.surface.as_hal::<wgpu::hal::api::Dx12>() }
             .ok_or("Missing D3D12 surface")?;
@@ -1170,7 +1168,7 @@ pub unsafe extern "C" fn capy_surface_info(host: *mut CapyHost) -> *mut c_char {
             "format": format!("{:?}", config.format),
             "maximum_frame_latency": config.desired_maximum_frame_latency
         });
-        result = CString::new(info.to_string()).map_err(err)?.into_raw();
+        result = CString::new(info.to_string()).map(text).map_err(err)?;
         Ok(0)
     });
     result
@@ -1179,15 +1177,15 @@ pub unsafe extern "C" fn capy_surface_info(host: *mut CapyHost) -> *mut c_char {
 /// # Safety
 /// The host is exclusively owned by the caller; json is a readable C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_preview(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
-    let mut packet = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_document_preview(host: u64, json: *const c_char) -> u64 {
+    let mut packet = 0;
+    guard(host, |host| {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Query { id: u32, index: usize }
         let query: Query = unsafe { read_json(json) }?;
         let result = host.documents.as_ref().ok_or("Documents unavailable")?.preview(query.id, query.index)?;
-        packet = Box::into_raw(Box::new(result));
+        packet = crate::previews::store(result)?;
         Ok(0)
     });
     packet
@@ -1198,11 +1196,11 @@ pub unsafe extern "C" fn capy_document_preview(host: *mut CapyHost, json: *const
 /// for the duration of this call. The immutable context must be live and
 /// unmodified. Free a nonnull result with `capy_string_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_number(context: *const crate::CapyLocalization, json: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_number(context: u64, json: *const c_char) -> u64 {
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<CString, String> {
         let request: layer_ui::NumericRequest =
             unsafe { read_json(json) }?;
-        let context = unsafe { context.as_ref() }.ok_or("Missing numeric localization")?;
+        let context = crate::shared_controls::localization(context).ok_or("Missing numeric localization")?;
         let value = match request.resolve() {
             Ok(value) => serde_json::to_value(value).map_err(err)?,
             Err(reason) => serde_json::json!({"error":reason.message(&context.localizer),"error_reason":reason}),
@@ -1210,32 +1208,22 @@ pub unsafe extern "C" fn capy_number(context: *const crate::CapyLocalization, js
         CString::new(serde_json::to_string(&value).map_err(err)?).map_err(err)
     }));
     match result {
-        Ok(Ok(value)) => value.into_raw(),
+        Ok(Ok(value)) => text(value),
         Ok(Err(error)) => {
             fail(error);
-            std::ptr::null_mut()
+            0
         }
         Err(_) => {
             fail("Numeric policy panic");
-            std::ptr::null_mut()
+            0
         }
-    }
-}
-/// # Safety
-/// `value` must be null or an unmodified, still-owned string returned by
-/// `capy_snapshot`, `capy_query`, `capy_surface_info` or `capy_number`, freed once.
-/// Never pass the borrowed pointer returned by `capy_error`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_string_free(value: *mut c_char) {
-    if !value.is_null() {
-        unsafe { drop(CString::from_raw(value)) }
     }
 }
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_suspend(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_suspend(host: u64) -> i32 {
+    guard(host, |host| {
         host.target = None;
         Ok(0)
     })
@@ -1243,8 +1231,8 @@ pub unsafe extern "C" fn capy_suspend(host: *mut CapyHost) -> i32 {
 /// # Safety
 /// `host` must be null or a valid host with no concurrent mutation or destruction.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_view_revision(host: *const CapyHost) -> u64 {
-    unsafe { host.as_ref() }.map_or(0, |h| h.native.session.state().camera.revision)
+pub unsafe extern "C" fn capy_view_revision(host: u64) -> u64 {
+    borrow::<CapyHost>(host).map_or(0, |h| h.native.session.state().camera.revision)
 }
 
 // The backbuffer is sized in physical pixels. SwapChainPanel otherwise scales
@@ -1278,16 +1266,16 @@ fn bundled_shader_compiler() -> wgpu::Dx12Compiler {
 /// Exclusive host access, or the UI owner while the render worker is parked.
 /// Poisoned hosts cannot resume after an ABI panic.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_device_lost(host: *const CapyHost) -> bool {
-    unsafe { host.as_ref() }.is_some_and(|host| host.native.poisoned().is_none() && host.device_is_lost())
+pub unsafe extern "C" fn capy_device_lost(host: u64) -> bool {
+    borrow::<CapyHost>(host).is_ok_and(|host| host.native.poisoned().is_none() && host.device_is_lost())
 }
 
 /// # Safety
 /// Call on the XAML thread after detaching the old swap chain, with the render
 /// worker parked. Keep the same panel alive through the replacement surface.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_reset_surface(host: *mut CapyHost, panel: *mut c_void) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_reset_surface(host: u64, panel: *mut c_void) -> i32 {
+    guard(host, |host| {
         if panel.is_null() || host.target.is_some() {
             return Err("Surface replacement requires a live panel and no acquired image".into());
         }
@@ -1307,8 +1295,8 @@ pub unsafe extern "C" fn capy_reset_surface(host: *mut CapyHost, panel: *mut c_v
 /// Exclusive render-owner access. Available only in an isolated smoke-test host.
 /// `json` is a readable NUL-terminated pair of group token and window count.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_test_device_loss(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_test_device_loss(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         if std::env::var_os("CAPY_SMOKE_TEST").is_none() || !crate::storage::isolated() {
             return Err("Device-loss injection requires an isolated smoke test".into());
         }
@@ -1358,8 +1346,8 @@ pub unsafe extern "C" fn capy_test_device_loss(host: *mut CapyHost, json: *const
 /// Exclusive render-owner access after canvas input has stopped. Unsubmitted
 /// contacts are canceled; keep services alive until approved close.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_suspend_renderer(host: *mut CapyHost) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_suspend_renderer(host: u64) -> i32 {
+    guard(host, |host| {
         host.target = None;
         host.cancel_contacts()?;
         host.native.suspend_renderer()?;
@@ -1381,8 +1369,8 @@ pub unsafe extern "C" fn capy_suspend_renderer(host: *mut CapyHost) -> i32 {
 /// `host` must be null or a live exclusively accessed host. `json` must be null
 /// or a readable, unchanged NUL-terminated buffer throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_glass(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         let layout = unsafe { with_text(json, |text| Ok(serde_json::from_str(text))) }?
             .map_err(|_| "Invalid glass geometry".to_string());
         match layout.and_then(|layout| host.native.set_glass(&mut host.glass, layout)) {
@@ -1400,8 +1388,8 @@ pub unsafe extern "C" fn capy_glass(host: *mut CapyHost, json: *const c_char) ->
 /// `host` must be null or a live exclusively accessed host. `json` must be null
 /// or a readable, unchanged NUL-terminated buffer throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_overviews(host: *mut CapyHost, json: *const c_char) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_overviews(host: u64, json: *const c_char) -> i32 {
+    guard(host, |host| {
         let slots = unsafe { with_text(json, |text| Ok(serde_json::from_str(text))) }?
             .map_err(|_| "Invalid Navigator geometry".to_string());
         match slots.and_then(|slots| host.navigators.set(slots)) {
@@ -1422,13 +1410,13 @@ pub unsafe extern "C" fn capy_overviews(host: *mut CapyHost, json: *const c_char
 /// buffer. Transfer/free a nonnull CPU packet using capy_preview_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_filter_previews(
-    host: *mut CapyHost,
+    host: u64,
     json: *const c_char,
-) -> *mut crate::previews::CapyPreview {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
         let packet = unsafe { with_text(json, |text| crate::previews::query(&mut host.native, text)) }?;
-        result = Box::into_raw(Box::new(packet));
+        result = crate::previews::store(packet)?;
         Ok(0)
     });
     result
@@ -1467,6 +1455,9 @@ pub extern "C" fn capy_instance_name() -> *const u16 {
 /// points to `length` readable bytes; both stay unchanged during the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_write_file(path: *const c_char, bytes: *const u8, length: usize) -> i32 {
+    if length>isize::MAX as usize || (length>0 && bytes.is_null()) {
+        fail("Invalid file output buffer");return -1;
+    }
     let write = |path: &str| {
         let path = std::path::Path::new(path);
         let bytes = if length == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(bytes, length) } };
@@ -1506,12 +1497,12 @@ pub extern "C" fn capy_finish_process() -> i32 {
 /// Free the returned CPU-only packet with capy_preview_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_layer_menu(
-    host: *mut CapyHost,
+    host: u64,
     json: *const c_char,
-) -> *mut crate::previews::CapyPreview {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::previews::layer_menu(&mut host.native, text)) }?));
+) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
+        result = crate::previews::store(unsafe {with_text(json,|text|crate::previews::layer_menu(&mut host.native,text))}?)?;
         Ok(0)
     });
     result
@@ -1521,12 +1512,12 @@ pub unsafe extern "C" fn capy_layer_menu(
 /// Free the returned CPU-only packet with capy_preview_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_layer_thumbnails(
-    host: *mut CapyHost,
+    host: u64,
     json: *const c_char,
-) -> *mut crate::previews::CapyPreview {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::previews::layer_thumbnails(&mut host.native, text)) }?));
+) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
+        result = crate::previews::store(unsafe {with_text(json,|text|crate::previews::layer_thumbnails(&mut host.native,text))}?)?;
         Ok(0)
     });
     result
@@ -1537,12 +1528,12 @@ pub unsafe extern "C" fn capy_layer_thumbnails(
 /// Free the returned CPU-only packet with capy_preview_free.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_workspace_query(
-    host: *mut CapyHost,
+    host: u64,
     json: *const c_char,
-) -> *mut crate::previews::CapyPreview {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
-        result = Box::into_raw(Box::new(unsafe { with_text(json, |text| crate::workspace::query(&mut host.native, text)) }?));
+) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
+        result = crate::previews::store(unsafe {with_text(json,|text|crate::workspace::query(&mut host.native,text))}?)?;
         Ok(0)
     });
     result
@@ -1552,8 +1543,8 @@ pub unsafe extern "C" fn capy_workspace_query(
 /// # Safety
 /// Exclusive access to the render-owned host. Only an isolated smoke test can call it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_test_display(host: *mut CapyHost, hdr: bool) -> i32 {
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_test_display(host: u64, hdr: bool) -> i32 {
+    guard(host, |host| {
         if std::env::var_os("CAPY_SMOKE_TEST").is_none() || std::env::var_os("CAPY_TEST_HDR").is_none()
             || !crate::storage::isolated() {
             return Err("Display injection requires an isolated HDR smoke test".into());
@@ -1570,8 +1561,8 @@ pub unsafe extern "C" fn capy_test_display(host: *mut CapyHost, hdr: bool) -> i3
 /// # Safety
 /// `host` is exclusively owned by the render thread; `values` writes six u64s.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: *mut u64) -> i32 {
-    let Some(host) = (unsafe { host.as_ref() }) else { return -1; };
+pub unsafe extern "C" fn capy_presentation_stats(host: u64, values: *mut u64) -> i32 {
+    let Ok(host)=borrow::<CapyHost>(host) else {return -1;};
     if values.is_null() { return -1; }
     let Some(native) = (unsafe { host.surface.as_hal::<wgpu::hal::api::Dx12>() }) else { return -1; };
     let Some(swapchain) = native.swap_chain() else { return -1; };
@@ -1592,11 +1583,11 @@ pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: 
 /// Exclusive render-owner access; json is a readable NUL-terminated request.
 /// Free the returned CPU-only packet with capy_preview_free.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_paper_previews(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
-    let mut result = std::ptr::null_mut();
-    guard(unsafe { host.as_mut() }, |host| {
+pub unsafe extern "C" fn capy_paper_previews(host: u64, json: *const c_char) -> u64 {
+    let mut result = 0;
+    guard(host, |host| {
         let packet = unsafe { with_text(json, |text| crate::previews::paper_previews(&host.native, text)) }?;
-        result = Box::into_raw(Box::new(packet));
+        result = crate::previews::store(packet)?;
         Ok(0)
     });
     result
@@ -1663,12 +1654,12 @@ mod snapshot_routing_tests {
     #[test]
     fn snapshot_error_resets_descriptor_without_a_host() {
         let mut info=CapySnapshotInfo::read(br#"{"state":{},"brush_ready":true,"localization":{"text":"x"}}"#).unwrap();
-        assert!(unsafe { capy_snapshot(std::ptr::null_mut(),&mut info) }.is_null());
+        assert_eq!(unsafe { capy_snapshot(0,&mut info) },0);
         assert_eq!((info.full,info.workspace,info.search),(0,0,0));
         for range in [info.camera,info.localization,info.navigation_cursor,info.brush_ready] {
             assert_eq!((range.offset,range.length),(0,0));
         }
-        assert!(unsafe { capy_snapshot(std::ptr::null_mut(),std::ptr::null_mut()) }.is_null());
+        assert_eq!(unsafe { capy_snapshot(0,std::ptr::null_mut()) },0);
     }
 }
 
@@ -1684,28 +1675,77 @@ mod numeric_localization_tests {
         let format = CString::new(serde_json::json!({"control":control,"value":0.5,
             "operation":{"type":"format"}}).to_string()).unwrap();
         for language in UiLanguage::ALL {
-            let context = crate::CapyLocalization { localizer: Localizer::shared(language) };
-            let result = unsafe { capy_number(&context, input.as_ptr()) };
-            assert!(!result.is_null());
-            let value: serde_json::Value = serde_json::from_slice(unsafe { CString::from_raw(result) }.as_bytes()).unwrap();
+            let context = crate::test_support::Localization::new(Localizer::shared(language));
+            let result = unsafe { capy_number(context.raw(), input.as_ptr()) };
+            assert_ne!(result,0);
+            let value: serde_json::Value = serde_json::from_slice(crate::owned::take_text(result).as_bytes()).unwrap();
             assert_eq!(value["error"], context.localizer.text(MessageId::NUMERIC_EXPRESSION_REQUIRED).as_ref());
             assert_eq!(value["error_reason"], serde_json::to_value(NumericError::ExpressionRequired).unwrap());
             let request = CString::new(serde_json::json!({"type":"numeric_error","reason":value["error_reason"]}).to_string()).unwrap();
-            let projected = unsafe { crate::shared_controls::capy_native_caption(&context, request.as_ptr()) };
-            assert!(!projected.is_null());
-            let projected: serde_json::Value = serde_json::from_slice(unsafe { CString::from_raw(projected) }.as_bytes()).unwrap();
+            let projected = unsafe { crate::shared_controls::capy_native_caption(context.raw(), request.as_ptr()) };
+            assert_ne!(projected,0);
+            let projected: serde_json::Value = serde_json::from_slice(crate::owned::take_text(projected).as_bytes()).unwrap();
             assert_eq!(projected["text"],value["error"]);
-            let result = unsafe { capy_number(&context, format.as_ptr()) };
-            assert!(!result.is_null());
-            let value: serde_json::Value = serde_json::from_slice(unsafe { CString::from_raw(result) }.as_bytes()).unwrap();
+            let result = unsafe { capy_number(context.raw(), format.as_ptr()) };
+            assert_ne!(result,0);
+            let value: serde_json::Value = serde_json::from_slice(crate::owned::take_text(result).as_bytes()).unwrap();
             assert_eq!(value["value"],0.5);
             assert!(value.get("error").is_none());
         }
         let malformed = CString::new("literal İı ไทย { $reason }").unwrap();
-        let context = crate::CapyLocalization { localizer: Localizer::shared(UiLanguage::English) };
-        assert!(unsafe { capy_number(&context, malformed.as_ptr()) }.is_null());
-        assert!(unsafe { capy_number(std::ptr::null(), format.as_ptr()) }.is_null());
+        let context = crate::test_support::Localization::new(Localizer::shared(UiLanguage::English));
+        assert_eq!(unsafe { capy_number(context.raw(), malformed.as_ptr()) },0);
+        assert_eq!(unsafe { capy_number(0, format.as_ptr()) },0);
     }
 }
 
 const _:fn()=|| {fn send<T:Send>(){}send::<CapyHost>();send::<CapyLaunch>();};
+
+#[cfg(test)]
+mod handle_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_file_buffers_are_rejected_before_accessing_path_or_bytes() {
+        for length in [1,usize::MAX] {
+            assert_eq!(unsafe {capy_write_file(std::ptr::null(),std::ptr::null(),length)},-1);
+        }
+    }
+
+    #[test]
+    fn invalid_and_wrong_kind_calls_leave_immutable_handles_usable() {
+        let context=crate::shared_controls::store_localization(layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
+        for raw in [0,1,u64::MAX,context] {
+            unsafe {
+                assert_eq!(capy_needs_frame(raw),-1);
+                assert_eq!(capy_finish_services(raw),-1);
+                assert_eq!(capy_query(raw,std::ptr::null()),0);
+                assert_eq!(capy_launch_view(raw),0);
+                assert_eq!(capy_launch_localization(raw),0);
+                assert_eq!(capy_create(std::ptr::null_mut(),0,0,1.,raw),0);
+                capy_destroy(raw);capy_launch_free(raw);
+            }
+        }
+        assert!(crate::shared_controls::localization(context).is_some());
+        unsafe {crate::capy_localization_free(context);}
+        assert!(crate::shared_controls::localization(context).is_none());
+    }
+
+    #[test]
+    fn launch_release_retires_active_tokens_and_text_outlives_its_parent() {
+        let launch=handles::insert(CapyLaunch {native:None,settings:None,bootstrap:CString::new("{\"日本語\":1}").unwrap()}).unwrap().raw();
+        let view=unsafe {capy_launch_view(launch)};assert_ne!(view,0);
+        let active=borrow::<CapyLaunch>(launch).unwrap();
+        unsafe {capy_launch_free(launch);assert_eq!(capy_launch_view(launch),0);}
+        assert_eq!(active.bootstrap.to_str().unwrap(),"{\"日本語\":1}");
+        drop(active);
+        unsafe {capy_launch_free(launch);capy_launch_free(launch);}
+        assert_eq!(unsafe {capy_launch_view(launch)},0);
+        assert_eq!(crate::owned::take_text(view).to_str().unwrap(),"{\"日本語\":1}");
+        let next=handles::insert(CapyLaunch {native:None,settings:None,bootstrap:CString::default()}).unwrap().raw();
+        assert_ne!(launch,next);unsafe {capy_launch_free(launch);}
+        let view=unsafe {capy_launch_view(next)};assert_ne!(view,0);
+        assert_eq!(crate::owned::take_text(view).as_bytes(),b"");
+        unsafe {capy_launch_free(next);}
+    }
+}

@@ -3,20 +3,26 @@ use std::ffi::{CStr, CString, c_char};
 pub struct CapyLocalization {
     pub(crate) localizer: std::sync::Arc<layer_ui::Localizer>,
 }
+pub(crate) fn store_localization(localizer:std::sync::Arc<layer_ui::Localizer>)->u64 {
+    layer_host::handles::insert_shared(std::sync::Arc::new(CapyLocalization {localizer})).map_or(0,layer_host::handles::Handle::raw)
+}
+pub(crate) fn localization(value:u64)->Option<std::sync::Arc<CapyLocalization>> {
+    layer_host::handles::Handle::from_raw(value).and_then(layer_host::handles::shared::<CapyLocalization>).ok()
+}
 /// # Safety
 /// The input is a readable NUL-terminated shipped language tag.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_localization_for_tag(tag: *const c_char) -> *mut CapyLocalization {
-    if tag.is_null() { return std::ptr::null_mut(); }
-    let Ok(tag) = unsafe { CStr::from_ptr(tag) }.to_str() else { return std::ptr::null_mut(); };
-    let Some(language) = layer_ui::UiLanguage::ALL.into_iter().find(|language| language.tag() == tag) else { return std::ptr::null_mut(); };
-    Box::into_raw(Box::new(CapyLocalization { localizer: layer_ui::Localizer::shared(language) }))
+pub unsafe extern "C" fn capy_localization_for_tag(tag: *const c_char) -> u64 {
+    if tag.is_null() { return 0; }
+    let Ok(tag) = unsafe { CStr::from_ptr(tag) }.to_str() else { return 0; };
+    let Some(language) = layer_ui::UiLanguage::ALL.into_iter().find(|language| language.tag() == tag) else { return 0; };
+    store_localization(layer_ui::Localizer::shared(language))
 }
 /// # Safety
 /// Free a uniquely owned immutable context after its final borrowed call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_localization_free(context: *mut CapyLocalization) {
-    if !context.is_null() { drop(unsafe { Box::from_raw(context) }); }
+pub unsafe extern "C" fn capy_localization_free(context: u64) {
+    let _=layer_host::handles::Handle::from_raw(context).and_then(layer_host::handles::release::<CapyLocalization>);
 }
 /// # Safety
 /// The key is a readable NUL-terminated UTF-8 shared key name.
@@ -29,9 +35,9 @@ pub unsafe extern "C" fn capy_control_takes_key(key: *const c_char, command: boo
 /// # Safety
 /// Input is readable NUL-terminated UTF-8 JSON for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_proof_dial(input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_proof_dial(input: *const c_char) -> u64 {
     if input.is_null() {
-        return std::ptr::null_mut();
+        return 0;
     }
     let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<serde_json::Value, String> {
         #[derive(serde::Deserialize)]
@@ -56,7 +62,7 @@ pub unsafe extern "C" fn capy_proof_dial(input: *const c_char) -> *mut c_char {
             .unwrap_or_else(|error| serde_json::json!({"error":error}))
             .to_string(),
     )
-    .map_or(std::ptr::null_mut(), CString::into_raw)
+    .map_or(0, crate::owned::text)
 }
 /// # Safety
 /// Output is writable for length bytes for the duration of this call.
@@ -75,9 +81,9 @@ pub unsafe extern "C" fn capy_proof_texture(edge: u32, output: *mut u8, length: 
 /// Input is readable NUL-terminated UTF-8 JSON. The immutable context remains
 /// alive and unmodified for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_toolbar_ui(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_toolbar_ui(context: u64, input: *const c_char) -> u64 {
     if input.is_null() {
-        return std::ptr::null_mut();
+        return 0;
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<serde_json::Value, String> {
         let text = unsafe { CStr::from_ptr(input) }
@@ -86,7 +92,7 @@ pub unsafe extern "C" fn capy_toolbar_ui(context: *const CapyLocalization, input
         if text.len() > 64 * 1024 {
             return Err("Toolbar request is too large".into());
         }
-        let context = unsafe { context.as_ref() }.ok_or("Missing toolbar localization")?;
+        let context = localization(context).ok_or("Missing toolbar localization")?;
         layer_ui::toolbar_ui(serde_json::from_str(text).map_err(|e| e.to_string())?, &context.localizer)
     }))
     .unwrap_or_else(|_| Err("Toolbar request failed".into()));
@@ -95,13 +101,13 @@ pub unsafe extern "C" fn capy_toolbar_ui(context: *const CapyLocalization, input
             .unwrap_or_else(|error| serde_json::json!({"error":error}))
             .to_string(),
     )
-    .map_or(std::ptr::null_mut(), CString::into_raw)
+    .map_or(0, crate::owned::text)
 }
 
 /// # Safety
 /// Both pointers remain readable for this call; the context remains immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_native_caption(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_native_caption(context: u64, input: *const c_char) -> u64 {
     unsafe { localized_json(context, input, |source, localization| {
         let request: layer_ui::NativeCaption = serde_json::from_str(source).map_err(|e| e.to_string())?;
         Ok(serde_json::json!({"text": request.message(localization)}))
@@ -110,7 +116,7 @@ pub unsafe extern "C" fn capy_native_caption(context: *const CapyLocalization, i
 /// # Safety
 /// Both pointers remain readable for this call; the context remains immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_numeric_labels(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_numeric_labels(context: u64, input: *const c_char) -> u64 {
     unsafe { localized_json(context, input, |source, localization| {
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
@@ -122,29 +128,29 @@ pub unsafe extern "C" fn capy_numeric_labels(context: *const CapyLocalization, i
 /// # Safety
 /// Both pointers remain readable for this call; the context remains immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_drawer_frame(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_drawer_frame(context: u64, input: *const c_char) -> u64 {
     unsafe { localized_json(context, input, |source, _| layer_ui::drawer_frame(source)) }
 }
 /// # Safety
 /// Both pointers remain readable for this call; the context remains immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_bubble_ui(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_bubble_ui(context: u64, input: *const c_char) -> u64 {
     unsafe { localized_json(context, input, |source, _| layer_host::bubbles::query(
         serde_json::from_str(source).map_err(|error| error.to_string())?,
     )) }
 }
-unsafe fn localized_json(context: *const CapyLocalization, input: *const c_char,
+unsafe fn localized_json(context: u64, input: *const c_char,
     resolve: impl FnOnce(&str, &layer_ui::Localizer) -> Result<serde_json::Value, String> + std::panic::UnwindSafe,
-) -> *mut c_char {
+) -> u64 {
     let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let context = unsafe { context.as_ref() }.ok_or("Missing launch localization")?;
+        let context = localization(context).ok_or("Missing launch localization")?;
         if input.is_null() { return Err("Missing localized view request".into()); }
         let source = unsafe { CStr::from_ptr(input) }.to_str().map_err(|e| e.to_string())?;
         if source.len() > 64 * 1024 { return Err("Localized view request is too large".into()); }
         resolve(source, &context.localizer)
     })).unwrap_or_else(|_| Err("Localized view request failed".into()));
     CString::new(value.unwrap_or_else(|error| serde_json::json!({"error":error})).to_string())
-        .map_or(std::ptr::null_mut(), CString::into_raw)
+        .map_or(0, crate::owned::text)
 }
 
 /// Native layout projection uses the same compact threshold as other hosts.
@@ -155,9 +161,9 @@ pub extern "C" fn capy_document_tabs_compact(width: f32, count: usize) -> bool {
 /// # Safety
 /// Input is readable NUL-terminated JSON, released after this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_tab_slide(input: *const c_char) -> *mut c_char {
+pub unsafe extern "C" fn capy_document_tab_slide(input: *const c_char) -> u64 {
     if input.is_null() {
-        return std::ptr::null_mut();
+        return 0;
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<serde_json::Value, String> {
         #[derive(serde::Deserialize)]
@@ -184,7 +190,7 @@ pub unsafe extern "C" fn capy_document_tab_slide(input: *const c_char) -> *mut c
     }))
     .unwrap_or_else(|_| Err("Drawing target failed".into()));
     CString::new(result.unwrap_or(serde_json::Value::Null).to_string())
-        .map_or(std::ptr::null_mut(), CString::into_raw)
+        .map_or(0, crate::owned::text)
 }
 
 #[cfg(test)]
@@ -209,23 +215,21 @@ mod tests {
         .to_string();
         let input = CString::new(request).unwrap();
         let reply = unsafe { capy_document_tab_slide(input.as_ptr()) };
-        let value = serde_json::from_str(unsafe { CStr::from_ptr(reply) }.to_str().unwrap()).unwrap();
-        drop(unsafe { CString::from_raw(reply) });
-        value
+        serde_json::from_str(crate::owned::take_text(reply).to_str().unwrap()).unwrap()
     }
     #[test]
     fn toolbar_number_ffi_preserves_the_supplied_context_and_shared_expression_policy() {
         let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
-        let context = CapyLocalization { localizer: localization.clone() };
+        let context = crate::test_support::Localization::new(localization.clone());
         let invoke = |text: &str| {
             let input = CString::new(serde_json::json!({
                 "type": "number", "compact": false, "units": false,
                 "request": { "control": layer_ui::NumericControl::number(0., 100., 1., 0),
                     "value": 0., "operation": { "type": "expression", "text": text } }
             }).to_string()).unwrap();
-            let reply = unsafe { capy_toolbar_ui(&context, input.as_ptr()) };
-            assert!(!reply.is_null());
-            let owned = unsafe { CString::from_raw(reply) };
+            let reply = unsafe { capy_toolbar_ui(context.raw(), input.as_ptr()) };
+            assert_ne!(reply,0);
+            let owned = crate::owned::take_text(reply);
             serde_json::from_str::<serde_json::Value>(owned.to_str().unwrap()).unwrap()
         };
         assert_eq!(invoke("12+3")["value"], 15.);
@@ -236,12 +240,12 @@ mod tests {
     #[test]
     fn caption_ffi_retains_context_and_literal_user_text() {
         let l = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
-        let context = CapyLocalization { localizer: l.clone() };
-        let invoke = |f: unsafe extern "C" fn(*const CapyLocalization, *const c_char) -> *mut c_char, request: serde_json::Value| {
+        let context = crate::test_support::Localization::new(l.clone());
+        let invoke = |f: unsafe extern "C" fn(u64, *const c_char) -> u64, request: serde_json::Value| {
             let input = CString::new(request.to_string()).unwrap();
-            let reply = unsafe { f(&context, input.as_ptr()) };
-            assert!(!reply.is_null());
-            let text = unsafe { CString::from_raw(reply) };
+            let reply = unsafe { f(context.raw(), input.as_ptr()) };
+            assert_ne!(reply,0);
+            let text = crate::owned::take_text(reply);
             serde_json::from_str::<serde_json::Value>(text.to_str().unwrap()).unwrap()
         };
         let title = "{ $name } 日本語🎨\u{2068}literal\u{2069}";

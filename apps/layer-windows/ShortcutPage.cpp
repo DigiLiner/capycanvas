@@ -596,7 +596,7 @@ struct ShortcutPage::Impl:std::enable_shared_from_this<Impl>{
         if(path.empty()){finish(id,L"",L"");co_return;}
         background(id,[path=to_string(path),bytes=to_string(text)]{
             if(capy_write_file(path.c_str(),reinterpret_cast<uint8_t const*>(bytes.data()),bytes.size())!=0)
-                return KeymapResult{to_hstring(capy_error()),L""};
+                return KeymapResult{to_hstring(NativeString(capy_error()).get()),L""};
             return KeymapResult{};
         });
     }

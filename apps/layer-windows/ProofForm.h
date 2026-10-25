@@ -4,8 +4,8 @@
 namespace CapyUi {
 // Native controls project the shared print settings and option availability.
 struct ProofFormView {
-    std::shared_ptr<CapyLocalization> localization;
-    explicit ProofFormView(std::shared_ptr<CapyLocalization> context):localization(std::move(context)){}
+    NativeLocalization localization;
+    explicit ProofFormView(NativeLocalization context):localization(std::move(context)){}
     StackPanel root;
     ComboBox profile,intent,simulation;
     CheckBox bpc;
@@ -23,7 +23,7 @@ struct ProofFormView {
         result.Insert(L"bpc",B(bpc.IsChecked().Value()));
         return result;
     }
-    void relocalize(std::shared_ptr<CapyLocalization> context,J const& details,hstring const& tag){
+    void relocalize(NativeLocalization context,J const& details,hstring const& tag){
         localization=std::move(context);
         copy=object(object(details,L"form"),L"copy");root.Language(tag);
         for(auto const& [control,key]:std::initializer_list<std::pair<ComboBox,wchar_t const*>>{{profile,L"profile"},{simulation,L"simulation"},{intent,L"intent"}}){

@@ -212,7 +212,14 @@ Expanded workspace buttons cache the measured caption plus their native padding,
 up to 130 DIP. Their named group contains both the choices and Options; scroll
 automation uses the inner viewer.
 
-The render owner routes snapshots using borrowed UTF-8 field ranges. The UI
+The native bridge uses typed generation handles for hosts, launches, localization,
+preview packets and text. Stale and wrong-kind handles are rejected before access;
+active operations retain their state through release. C++ owners copy text and
+preview bytes through checked ranges of at most 8 MiB. Packet copies are shared
+across preview readers and acquired on the image worker. Caller-owned input and
+output buffers must remain readable or writable and exclusive during each call.
+
+The render owner routes snapshots using ranges in the exact copied UTF-8. The UI
 parses retained models; full model parsing on the owner is limited to opt-in
 UI traces. Presentation and overview pipelines are prepared on the shader workers;
 an acquired frame remains owned until presentation is ready. Cursor and brush
@@ -604,8 +611,9 @@ been verified.
 ## Test
 
 Service shutdown joins every independent worker even when recovery shutdown
-fails. `capy_finish_services` returns only after stored callback contexts are
-quiescent; callers retain callback code and context through that return.
+fails. Successful render-owner `capy_finish_services` makes stored callback
+contexts quiescent. Callers retain callback code and context until that success;
+an owner error requires retrying shutdown on the render thread.
 Window-free document and recovery tests cover failed-worker shutdown and repeat
 cleanup.
 
@@ -884,7 +892,8 @@ presents the shared action row (sampling menu, Auto, targeted adjustment), the
 Color Lookup selector and Import LUT, whose `.cube` file is read and parsed on the
 document worker. `exercise-scopes.ps1 -Executable <path> -Theme dark` walks the
 Photo scopes, Levels, Curves and Color Lookup with mouse, pen and touch; the VM
-fixture names are `scopes` and `scopes:light`. Scope, filter, layer and gradient previews use
+fixture names are `scopes` and `scopes:light`. Scope, filter, layer, document,
+paper and gradient previews use
 `BitmapUpload`: one active upload, one latest pending request and two reusable
 software bitmaps per context. Workers copy pixels and convert straight RGBA to
 premultiplied BGRA. The UI submits `SoftwareBitmapSource.SetBitmapAsync` and

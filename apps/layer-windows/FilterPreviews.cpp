@@ -56,7 +56,7 @@ struct FilterPreviewCache : std::enable_shared_from_this<FilterPreviewCache> {
         if(!packet){timer.Interval(std::chrono::milliseconds(1000));return;}
         if(requestedContext!=context||requestedSource!=source||requestedExtent!=extent)return;
         try {
-            auto status=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
+            auto status=J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get()));
             if(status.GetNamedValue(L"epoch").Stringify()!=context)return;
             auto next=str(status,L"key");
             if(key!=next){key=next;for(auto& [id,tile]:images)tile.key=L"";}

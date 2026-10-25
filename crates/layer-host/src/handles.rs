@@ -55,49 +55,50 @@ impl Table {
     }
 }
 fn table()->&'static Mutex<Table> {static TABLE:OnceLock<Mutex<Table>>=OnceLock::new();TABLE.get_or_init(Default::default)}
-fn lock_table()->Result<std::sync::MutexGuard<'static,Table>,Error> {table().lock().map_err(|_|Error::Poisoned)}
+fn lock(values:&Mutex<Table>)->Result<std::sync::MutexGuard<'_,Table>,Error> {values.lock().map_err(|_|Error::Poisoned)}
+fn lock_table()->Result<std::sync::MutexGuard<'static,Table>,Error> {lock(table())}
 
 fn register(entry:Entry)->Result<Handle,Error> {
     let mut table=lock_table()?;let index=table.vacant()?;let slot=&mut table.slots[index];
     slot.entry=Some(entry);Ok(Handle((u64::from(slot.generation)<<32)|(index as u64+1)))
 }
 
-pub struct Lease<T>(Arc<Mutex<Option<T>>>);
+pub struct Lease<T>(Arc<Mutex<Option<Box<T>>>>);
 impl<T> Clone for Lease<T> {fn clone(&self)->Self {Self(self.0.clone())}}
 impl<T> Lease<T> {
     pub fn with<R>(&self,work:impl FnOnce(&mut T)->R)->Result<R,Error> {
         let mut value=self.0.try_lock().map_err(|error|match error {TryLockError::WouldBlock=>Error::Busy,TryLockError::Poisoned(_)=>Error::Poisoned})?;
-        Ok(work(value.as_mut().ok_or(Error::Consumed)?))
+        Ok(work(value.as_deref_mut().ok_or(Error::Consumed)?))
     }
     pub fn borrow(&self)->Result<Borrowed<T>,Error> {
         let value=self.0.try_lock().map_err(|error|match error {TryLockError::WouldBlock=>Error::Busy,TryLockError::Poisoned(_)=>Error::Poisoned})?.take().ok_or(Error::Busy)?;
         Ok(Borrowed {value:Some(value),slot:self.0.clone()})
     }
 }
-pub struct Borrowed<T> {value:Option<T>,slot:Arc<Mutex<Option<T>>>}
-impl<T> Deref for Borrowed<T> {type Target=T;fn deref(&self)->&T {self.value.as_ref().unwrap()}}
-impl<T> DerefMut for Borrowed<T> {fn deref_mut(&mut self)->&mut T {self.value.as_mut().unwrap()}}
+pub struct Borrowed<T> {value:Option<Box<T>>,slot:Arc<Mutex<Option<Box<T>>>>}
+impl<T> Deref for Borrowed<T> {type Target=T;fn deref(&self)->&T {self.value.as_deref().unwrap()}}
+impl<T> DerefMut for Borrowed<T> {fn deref_mut(&mut self)->&mut T {self.value.as_deref_mut().unwrap()}}
 impl<T> Drop for Borrowed<T> {
     fn drop(&mut self) {
         if !thread::panicking() && let Ok(mut slot)=self.slot.lock() {*slot=self.value.take();}
     }
 }
 pub fn insert<T:Send+'static>(value:T)->Result<Handle,Error> {
-    let storage=Arc::new(Mutex::new(Some(value)));
+    let storage=Arc::new(Mutex::new(Some(Box::new(value))));
     register(Entry {kind:TypeId::of::<T>(),storage:Storage::Mutable(storage)})
 }
 pub fn lease<T:Send+'static>(handle:Handle)->Result<Lease<T>,Error> {
     let storage={let table=lock_table()?;match &table.entry::<T>(handle)?.storage {
         Storage::Mutable(value)=>value.clone(),_=>return Err(Error::WrongType),
     }};
-    storage.downcast::<Mutex<Option<T>>>().map(Lease).map_err(|_|Error::WrongType)
+    storage.downcast::<Mutex<Option<Box<T>>>>().map(Lease).map_err(|_|Error::WrongType)
 }
 pub fn take<T:Send+'static>(handle:Handle)->Result<T,Error> {
     let lease=lease::<T>(handle)?;
     let mut value=lease.0.try_lock().map_err(|error|match error {TryLockError::WouldBlock=>Error::Busy,TryLockError::Poisoned(_)=>Error::Poisoned})?;
     if value.is_none(){return Err(Error::Busy);}
     let removed={lock_table()?.remove::<T>(handle)?};drop(removed);
-    value.take().ok_or(Error::Consumed)
+    value.take().map(|value|*value).ok_or(Error::Consumed)
 }
 pub fn insert_shared<T:Send+Sync+'static>(value:Arc<T>)->Result<Handle,Error> {
     register(Entry {kind:TypeId::of::<T>(),storage:Storage::Shared(value)})
@@ -180,7 +181,7 @@ mod tests {
         }
     }
     fn entry(value:usize)->Entry {
-        Entry {kind:TypeId::of::<usize>(),storage:Storage::Mutable(Arc::new(Mutex::new(Some(value))))}
+        Entry {kind:TypeId::of::<usize>(),storage:Storage::Mutable(Arc::new(Mutex::new(Some(Box::new(value)))))}
     }
 
     #[test]
@@ -204,6 +205,17 @@ mod tests {
         assert_eq!(take::<usize>(handle),Err(Error::Busy));
         assert_eq!(lease.with(|value|*value),Err(Error::Consumed));
         drop(value);assert_eq!(take::<usize>(handle),Ok(42));
+    }
+
+    #[test]
+    fn owned_calls_keep_large_host_state_at_its_original_address() {
+        let _serial=serial();let handle=insert([19u8;65536]).unwrap();let lease=lease::<[u8;65536]>(handle).unwrap();
+        let address=lease.with(|value|value as *const [u8;65536]).unwrap();
+        for _ in 0..4 {
+            let mut value=lease.borrow().unwrap();
+            assert!(std::ptr::eq(address,&*value));value[0]+=1;
+        }
+        assert_eq!(take::<[u8;65536]>(handle).unwrap()[0],23);
     }
 
     #[test]
@@ -412,17 +424,16 @@ mod tests {
     }
 
     #[test]
-    fn global_poison_refuses_operations_without_dropping_live_values() {
+    fn registry_poison_refuses_access_without_dropping_live_values() {
         let _serial=serial();
-        struct Recover;impl Drop for Recover {fn drop(&mut self) {table().clear_poison();}}
-        let drops=Arc::new(AtomicUsize::new(0));
-        let handle=insert(Counted(drops.clone())).unwrap();let recovery=Recover;
-        assert!(catch_unwind(|| {let _guard=table().lock().unwrap();panic!("table panic")}).is_err());
-        assert_eq!(lease::<Counted>(handle).err(),Some(Error::Poisoned));
-        assert_eq!(release::<Counted>(handle),Err(Error::Poisoned));
+        let drops=Arc::new(AtomicUsize::new(0));let values=Mutex::new(Table::default());
+        {let mut table=lock(&values).unwrap();let index=table.vacant().unwrap();
+            table.slots[index].entry=Some(Entry {kind:TypeId::of::<Counted>(),storage:Storage::Mutable(
+                Arc::new(Mutex::new(Some(Box::new(Counted(drops.clone()))))))});}
+        assert!(catch_unwind(|| {let _guard=values.lock().unwrap();panic!("table panic")}).is_err());
+        assert_eq!(lock(&values).err(),Some(Error::Poisoned));
         assert_eq!(drops.load(Ordering::SeqCst),0);
-        drop(recovery);release::<Counted>(handle).unwrap();
-        assert_eq!(drops.load(Ordering::SeqCst),1);
+        drop(values);assert_eq!(drops.load(Ordering::SeqCst),1);
     }
 
     #[test]

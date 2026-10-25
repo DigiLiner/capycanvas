@@ -50,7 +50,7 @@ static std::string PreferredLanguages() {
     }();
     return tags;
 }
-static int DispatchCanvasCommand(CapyHost* host,CanvasCommand const& command) {
+static int DispatchCanvasCommand(CapyHost  host,CanvasCommand const& command) {
     auto json=command.json.c_str();
     switch(command.kind){
         case CanvasCommandKind::Input:return capy_input(host,json);
@@ -363,7 +363,7 @@ void CanvasWindow::Start() {
             Apartment(){init_apartment(apartment_type::multi_threaded);}
             ~Apartment(){uninit_apartment();}
         } apartment;
-        auto prepared=std::shared_ptr<CapyLaunch>(capy_launch(tags.c_str(),screen.c_str()),capy_launch_free);
+        auto prepared=NativeLaunch(capy_launch(tags.c_str(),screen.c_str()),capy_launch_free);
         bool posted=prepared&&dispatcher.TryEnqueue([weak=weak_from_this(),prepared]{
             if(auto self=weak.lock()){
                 bool initialized=false;
@@ -377,7 +377,7 @@ void CanvasWindow::Start() {
         if(posted){
             std::unique_lock lock(mutex);wake.wait(lock,[&]{return launchReady||closing;});
             if(host&&launchSucceeded&&!closing){lock.unlock();Run();return;}
-        }else Fail(capy_error());
+        }else Fail(NativeString(capy_error()).get());
         prepared.reset();
         } catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed")));}
           catch(std::exception const& error){OutputDebugStringA(error.what());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed")));}
@@ -385,11 +385,11 @@ void CanvasWindow::Start() {
         dispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock();self&&self->closing)self->Finish();});
     });
 }
-bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
+bool CanvasWindow::StartPrepared(CapyLaunch  prepared) {
     if(host||closing)return false;
-    bootstrap=Windows::Data::Json::JsonObject::Parse(to_hstring(capy_launch_view(prepared)));
+    bootstrap=Windows::Data::Json::JsonObject::Parse(to_hstring(NativeString(capy_launch_view(prepared)).get()));
     window.Title(CapyUi::str(bootstrap,L"app_name"));
-    localization=std::shared_ptr<CapyLocalization>(capy_launch_localization(prepared),capy_localization_free);
+    localization=NativeLocalization(capy_launch_localization(prepared),capy_localization_free);
     if(!localization)throw hresult_error(E_ABORT);
     root.Language(CapyUi::str(bootstrap,L"active_tag"));
     TraceState("bootstrap",to_string(bootstrap.Stringify()));
@@ -401,7 +401,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     Resize();
     auto native=panel.as<ISwapChainPanelNative>();
     host=capy_create(native.get(),desired.width,desired.height,desired.scale,prepared);
-    if(!host) {OutputDebugStringA(capy_error());status.Text(CapyUi::str(bootstrap,L"canvas_init_failed"));return false;}
+    if(!host) {OutputDebugStringA(NativeString(capy_error()).get());status.Text(CapyUi::str(bootstrap,L"canvas_init_failed"));return false;}
     capy_set_window(host,Handle());
     SetWindowSubclass(Handle(),AltKeyMenuFilter,1,0);
     auto dark=panel.ActualTheme()==ElementTheme::Dark;
@@ -414,9 +414,9 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     window.AppWindow().TitleBar().ButtonForegroundColor(dark?
         Windows::UI::Color{255,225,225,229}:Windows::UI::Color{255,32,32,36});
     auto catalog=capy_query(host,R"({"type":"catalog"})");
-    if(!catalog){OutputDebugStringA(capy_error());status.Text(CapyUi::str(bootstrap,L"canvas_init_failed"));return false;}
-    std::unique_ptr<char,decltype(&capy_string_free)> ownedCatalog(catalog,capy_string_free);
-    auto catalogView=Windows::Data::Json::JsonObject::Parse(to_hstring(catalog));
+    if(!catalog){OutputDebugStringA(NativeString(capy_error()).get());status.Text(CapyUi::str(bootstrap,L"canvas_init_failed"));return false;}
+    NativeString ownedCatalog(catalog,capy_string_free);
+    auto catalogView=Windows::Data::Json::JsonObject::Parse(to_hstring(ownedCatalog.get()));
     catalogView.Insert(L"bootstrap",bootstrap);
     screenCopy=CapyUi::object(CapyUi::object(catalogView,L"native_copy"),L"color");
     screenFontSize=CapyUi::num(catalogView,L"text_size_pt",11)*4/3;
@@ -495,8 +495,8 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
         catalogView,localization,root.XamlRoot(),[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();},
         [weak=weak_from_this()](CanvasQueryKind kind,std::string json,PreviewReply reply){if(auto self=weak.lock())return self->RequestPreviews(kind,std::move(json),std::move(reply));return false;});
     if(auto snapshot=capy_snapshot(host,nullptr)){
-        std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-        ApplyModel(Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot)));
+        NativeString owned(snapshot,capy_string_free);
+        ApplyModel(Windows::Data::Json::JsonObject::Parse(to_hstring(owned.get())));
     }
     {std::lock_guard lock(mutex);revision=capy_view_revision(host);inputScale=desired.scale;}
     status.Text(CapyUi::str(bootstrap,L"preparing_brush"));
@@ -960,17 +960,17 @@ void CanvasWindow::Run() {
         if(prepared){
             CapySnapshotInfo routing{};
             if(auto snapshot=capy_snapshot(host,&routing)){
-                std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                Publish(snapshot,routing);
+                NativeString owned(snapshot,capy_string_free);
+                Publish(std::move(owned.bytes),routing);
             }
             prepared=capy_prepare_gpu(host)>=0;
         }
-        if(!prepared) {std::string cause=capy_error();OutputDebugStringA(cause.c_str());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed"))+"\n\n"+cause);}
+        if(!prepared) {std::string cause=NativeString(capy_error()).get();OutputDebugStringA(cause.c_str());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed"))+"\n\n"+cause);}
         else {std::lock_guard lock(mutex);resize=true;}
         bool dirty=true;
         auto refreshFrameDemand=[&]{
             auto requested=capy_needs_frame(host);
-            if(requested<0)throw std::runtime_error(capy_error());
+            if(requested<0)throw std::runtime_error(NativeString(capy_error()).get());
             dirty|=requested!=0;
         };
         bool inputStarted=false;
@@ -1005,13 +1005,13 @@ void CanvasWindow::Run() {
             }
             if(pollServices){
                 auto serviceResult=capy_poll_services(host);
-                if(serviceResult<0){if(capy_device_lost(host))continue;Fail(capy_error());break;}
+                if(serviceResult<0){if(capy_device_lost(host))continue;Fail(NativeString(capy_error()).get());break;}
                 nextServices=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
                 dirty|=serviceResult!=0;
                 CapySnapshotInfo routing{};
                 if(auto snapshot=capy_snapshot(host,&routing)){
-                    std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                    Publish(snapshot,routing);
+                    NativeString owned(snapshot,capy_string_free);
+                    Publish(std::move(owned.bytes),routing);
                 }
             }
             std::optional<CanvasQuery> idleQuery;
@@ -1022,7 +1022,7 @@ void CanvasWindow::Run() {
             }
             if(idleQuery){
                 PreviewPacket packet(capy_workspace_query(host,idleQuery->json.c_str()),capy_preview_free);
-                if(!packet&&!capy_device_lost(host))Fail(capy_error());
+                if(!packet&&!capy_device_lost(host))Fail(NativeString(capy_error()).get());
                 refreshFrameDemand();
                 idleQuery->reply(std::move(packet));continue;
             }
@@ -1037,7 +1037,7 @@ void CanvasWindow::Run() {
             auto acquireStart=latencyTrace.enabled?Now():0;
             auto acquired=capy_acquire(host);
             auto acquiredAt=latencyTrace.enabled?Now():0;
-            if(acquired<0) {if(capy_device_lost(host))continue;Fail(capy_error());break;}
+            if(acquired<0) {if(capy_device_lost(host))continue;Fail(NativeString(capy_error()).get());break;}
             if(acquired==2) {std::lock_guard lock(mutex);resize=true;continue;}
             if(acquired==0) {
                 std::unique_lock lock(mutex);
@@ -1051,15 +1051,15 @@ void CanvasWindow::Run() {
             {std::lock_guard lock(mutex);pending=recoveryAttempts?work.TakeBeforePointers():work.Take();overflow=transportFailed;hover=std::exchange(pendingHover,std::nullopt);}
             space.notify_all();
             bool failed=false;
-            if(hover&&capy_chrome(host,*hover?0:1,0,0,false,menuOpen.load())<0){Fail(capy_error());break;}
+            if(hover&&capy_chrome(host,*hover?0:1,0,0,false,menuOpen.load())<0){Fail(NativeString(capy_error()).get());break;}
             for(auto& item:pending) {
                 auto result=DispatchWork(item,false);
-                if(result>0)Fail(capy_error()); // A rejected UI action leaves the canvas running.
-                if(result<0) {Fail(capy_error());failed=true;break;}
+                if(result>0)Fail(NativeString(capy_error()).get()); // A rejected UI action leaves the canvas running.
+                if(result<0) {Fail(NativeString(capy_error()).get());failed=true;break;}
             }
             if(failed) break;
-            if((!pending.empty()||hover)&&capy_chrome(host,0,0,0,false,menuOpen.load())<0){Fail(capy_error());break;}
-            if(overflow){sentModifiers.store(0);if(capy_input(host,R"({"type":"blur"})")<0){Fail(capy_error());break;}}
+            if((!pending.empty()||hover)&&capy_chrome(host,0,0,0,false,menuOpen.load())<0){Fail(NativeString(capy_error()).get());break;}
+            if(overflow){sentModifiers.store(0);if(capy_input(host,R"({"type":"blur"})")<0){Fail(NativeString(capy_error()).get());break;}}
             if(capy_device_lost(host))continue;
             auto now=Now();
             auto result=capy_frame(host,now,now);
@@ -1067,7 +1067,7 @@ void CanvasWindow::Run() {
                 auto end=Now();uint64_t stats[6]{};auto error=capy_presentation_stats(host,stats);
                 latencyTrace.Frame(acquireStart,acquiredAt,now,end,stats,error);
             }
-            if(result<0){if(capy_device_lost(host))continue;Fail(capy_error());break;}
+            if(result<0){if(capy_device_lost(host))continue;Fail(NativeString(capy_error()).get());break;}
             dirty=result!=0;
             lastPresent=std::chrono::steady_clock::now();
             if(!inputStarted){
@@ -1078,19 +1078,19 @@ void CanvasWindow::Run() {
             {std::lock_guard lock(mutex);revision=capy_view_revision(host);}
             CapySnapshotInfo routing{};
             if(auto snapshot=capy_snapshot(host,&routing)) {
-                std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                Publish(snapshot,routing);
+                NativeString owned(snapshot,capy_string_free);
                 if(routing.brush_ready.length) {
-                    bool ready=Windows::Data::Json::JsonValue::Parse(to_hstring(std::string(snapshot+routing.brush_ready.offset,routing.brush_ready.length))).GetBoolean();
+                    bool ready=Windows::Data::Json::JsonValue::Parse(to_hstring(std::string(owned.get()+routing.brush_ready.offset,routing.brush_ready.length))).GetBoolean();
                     brushReady=ready;
                     if(ready)recoveryAttempts=0;
                 }
+                Publish(std::move(owned.bytes),routing);
             }
             if(latencyTrace.enabled&&!probeReady&&result==0&&brushReady) {
                 auto info=capy_surface_info(host);
-                if(!info){Fail(capy_error());break;}
-                std::unique_ptr<char,decltype(&capy_string_free)> owned(info,capy_string_free);
-                auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(info));
+                if(!info){Fail(NativeString(capy_error()).get());break;}
+                NativeString owned(info,capy_string_free);
+                auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(owned.get()));
                 model.Insert(L"process_id",Windows::Data::Json::JsonValue::CreateNumberValue(GetCurrentProcessId()));
                 model.Insert(L"ready_qpc_ns",Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(std::to_string(Now()))));
                 model.Insert(L"window_id",Windows::Data::Json::JsonValue::CreateNumberValue(double(windowId)));
@@ -1108,7 +1108,7 @@ void CanvasWindow::Run() {
                     preview->kind==CanvasQueryKind::LayerMenu?capy_layer_menu:
                     preview->kind==CanvasQueryKind::Document?capy_document_preview:capy_workspace_query;
                 PreviewPacket packet(request(host,preview->json.c_str()),capy_preview_free);
-                if(!packet&&!capy_device_lost(host))Fail(capy_error());
+                if(!packet&&!capy_device_lost(host))Fail(NativeString(capy_error()).get());
                 refreshFrameDemand();
                 preview->reply(std::move(packet));
             }
@@ -1125,12 +1125,12 @@ void CanvasWindow::Run() {
     space.notify_all();
     for(auto& item:finalWork)if(auto command=std::get_if<CanvasCommand>(&item)){
         auto result=DispatchCanvasCommand(host,*command);
-        if(result!=0)Fail(capy_error());
+        if(result!=0)Fail(NativeString(capy_error()).get());
         if(result<0)break;
     }
     capy_suspend(host);
     CapyLifecycle("services_finishing");
-    if(capy_finish_services(host)<0)Fail(capy_error());
+    if(capy_finish_services(host)<0)Fail(NativeString(capy_error()).get());
     CapyLifecycle("services_finished");
     rendererDone.store(true);
     CapyLifecycle("renderer_done");
@@ -1141,7 +1141,7 @@ void CanvasWindow::Run() {
 }
 bool CanvasWindow::RecoverGpu() {
     CapyLifecycle("gpu_recovery_started");
-    if(capy_suspend(host)<0)throw std::runtime_error(capy_error());
+    if(capy_suspend(host)<0)throw std::runtime_error(NativeString(capy_error()).get());
     {
         std::lock_guard lock(mutex);
         if(closing)return false;
@@ -1161,7 +1161,7 @@ bool CanvasWindow::RecoverGpu() {
     // D3D12 singleton briefly. Yield between bounded attempts; close wakes us.
     auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while(capy_prepare_gpu(host)<0){
-        if(std::chrono::steady_clock::now()>=deadline)throw std::runtime_error(capy_error());
+        if(std::chrono::steady_clock::now()>=deadline)throw std::runtime_error(NativeString(capy_error()).get());
         std::unique_lock lock(mutex);
         if(wake.wait_for(lock,std::chrono::milliseconds(250),[&]{return closing;}))return false;
     }
@@ -1175,13 +1175,13 @@ void CanvasWindow::SaveAfterGpuFailure(std::string const& reason) {
     {std::lock_guard lock(mutex);inputStopped=true;admitted=work.Take();pendingHover.reset();previewWork.Clear();}
     space.notify_all();
     capy_suspend(host);
-    if(capy_suspend_renderer(host)<0)throw std::runtime_error(capy_error());
+    if(capy_suspend_renderer(host)<0)throw std::runtime_error(NativeString(capy_error()).get());
     // Raster recovery retains completed edits; queued contacts cannot be drawn
     // without a renderer. Drain accepted commands after closing canvas input.
     for(auto& item:admitted){
         auto result=DispatchWork(item,true);
-        if(result<0)throw std::runtime_error(capy_error());
-        if(result>0)Fail(capy_error());
+        if(result<0)throw std::runtime_error(NativeString(capy_error()).get());
+        if(result>0)Fail(NativeString(capy_error()).get());
     }
     OutputDebugStringA(reason.c_str());
     Fail(to_string(CapyUi::str(bootstrap,L"painting_unavailable_save")));
@@ -1205,16 +1205,16 @@ void CanvasWindow::SaveAfterGpuFailure(std::string const& reason) {
         space.notify_all();
         for(auto& item:pending)if(auto command=std::get_if<CanvasCommand>(&item)){
             auto result=DispatchCanvasCommand(host,*command);
-            if(result!=0)Fail(capy_error());
+            if(result!=0)Fail(NativeString(capy_error()).get());
         }
-        if(capy_poll_services(host)<0)throw std::runtime_error(capy_error());
+        if(capy_poll_services(host)<0)throw std::runtime_error(NativeString(capy_error()).get());
         CapySnapshotInfo routing{};
         if(auto snapshot=capy_snapshot(host,&routing)){
-            std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-            Publish(snapshot,routing);
+            NativeString owned(snapshot,capy_string_free);
+            Publish(std::move(owned.bytes),routing);
         }
         if(query){
-            PreviewPacket packet(query->kind==CanvasQueryKind::Workspace?capy_workspace_query(host,query->json.c_str()):nullptr,capy_preview_free);
+            PreviewPacket packet(query->kind==CanvasQueryKind::Workspace?capy_workspace_query(host,query->json.c_str()):0,capy_preview_free);
             query->reply(std::move(packet));
         }
     }
@@ -1225,7 +1225,7 @@ void CanvasWindow::ResetSurface() {
     auto detached=native->SetSwapChain(nullptr);
     if(FAILED(detached)||capy_reset_surface(host,native.get())<0){
         std::lock_guard lock(mutex);
-        surfaceError=FAILED(detached)?"Could not detach the lost GPU surface":capy_error();
+        surfaceError=FAILED(detached)?"Could not detach the lost GPU surface":NativeString(capy_error()).get();
     }
     {std::lock_guard lock(mutex);paused=false;}
     wake.notify_one();
@@ -1235,7 +1235,7 @@ void CanvasWindow::ApplyResize() {
     Size next;
     {std::lock_guard lock(mutex);if(closing)return;next=desired;resize=false;}
     int result=capy_resize(host,next.width,next.height,next.scale);
-    if(result<0&&!capy_device_lost(host)) {status.Text(to_hstring(capy_error()));Stop();return;}
+    if(result<0&&!capy_device_lost(host)) {status.Text(to_hstring(NativeString(capy_error()).get()));Stop();return;}
     {std::lock_guard lock(mutex);revision=capy_view_revision(host);inputScale=next.scale;paused=false;}
     wake.notify_one();
 }
@@ -1300,7 +1300,7 @@ void CanvasWindow::Finish() {
     if(renderer.joinable()) renderer.join();
     CapyLifecycle("detach_surface");
     panel.as<ISwapChainPanelNative>()->SetSwapChain(nullptr);
-    auto retired=host;host=nullptr;
+    auto retired=host;host=0;
     renderer=std::jthread([lifetime,retired]{
         init_apartment(apartment_type::multi_threaded);
         CapyLifecycle("destroy_host");
@@ -1502,7 +1502,7 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
     auto presentation=object(model,L"localization");
     if(presentation.Size()){
         bootstrap=object(presentation,L"bootstrap");auto tag=to_string(str(bootstrap,L"active_tag"));
-        localization=std::shared_ptr<CapyLocalization>(capy_localization_for_tag(tag.c_str()),capy_localization_free);
+        localization=NativeLocalization(capy_localization_for_tag(tag.c_str()),capy_localization_free);
         root.Language(str(bootstrap,L"active_tag"));
         AutomationProperties::SetName(canvasFocus,str(bootstrap,L"drawing_canvas"));
         AutomationProperties::SetHelpText(canvasFocus,str(bootstrap,L"drawing_canvas_help"));

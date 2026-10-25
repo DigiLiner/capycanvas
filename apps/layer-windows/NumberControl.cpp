@@ -72,7 +72,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         auto data=source.lock();if(!data)return J{};auto title=currentTitle();auto language=data->language();
         if(!caption->labels.Size()||caption->title!=title||caption->language!=language){
             auto input=to_string(O({{L"label",S(title)}}).Stringify());
-            std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_numeric_labels(data->localization.get(),input.c_str()),capy_string_free);
+            NativeString raw(capy_numeric_labels(data->localization.get(),input.c_str()),capy_string_free);
             if(!raw)throw hresult_error(E_OUTOFMEMORY);auto labels=J::Parse(to_hstring(raw.get()));
             if(labels.HasKey(L"error"))throw hresult_invalid_argument(str(labels,L"error"));
             caption->title=title;caption->language=language;caption->labels=std::move(labels);

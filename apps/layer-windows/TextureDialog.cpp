@@ -52,7 +52,7 @@ struct PaperPreviewCache : std::enable_shared_from_this<PaperPreviewCache> {
     void receive(PreviewPacket const& packet,std::vector<hstring> const& batch){
         busy=false;std::set<hstring> delivered;
         try{
-            auto status=packet?J::Parse(to_hstring(capy_preview_metadata(packet.get()))):J{};
+            auto status=packet?J::Parse(to_hstring(NativeString(capy_preview_metadata(packet.get())).get())):J{};
             auto images=array(status,L"images");int size=int(num(status,L"size"));
             if(size>0&&size<=512&&images.Size()<=batch.size()){
                 size_t bytes=size_t(size)*size_t(size)*4*images.Size();auto weak=weak_from_this();

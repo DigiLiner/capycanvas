@@ -21,7 +21,7 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
     J geometry(std::optional<winrt::Windows::Foundation::Point> point={})const{
         J request=O({{L"size",N(side)},{L"recipe",object(form(),L"rendition")}});
         if(point){A p;p.Append(N(point->X));p.Append(N(point->Y));request.Insert(L"point",p);}
-        auto json=to_string(request.Stringify());std::unique_ptr<char,decltype(&capy_string_free)> reply(capy_proof_dial(json.c_str()),capy_string_free);
+        auto json=to_string(request.Stringify());NativeString reply(capy_proof_dial(json.c_str()),capy_string_free);
         return reply?J::Parse(to_hstring(reply.get())):J{};
     }
     void send(J const& action,hstring const& at){data->dispatch(O({{L"windows_proof_action",action},{L"windows_epoch",S(at)}}));}

@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod export;
 pub mod gpu;
 pub mod handles;
+pub mod ffi;
 mod header;
 mod snapshot;
 mod model_update;

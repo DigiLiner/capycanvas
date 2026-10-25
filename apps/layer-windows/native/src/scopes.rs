@@ -57,16 +57,13 @@ mod tests {
     use super::*;
     use layer_core::color::histogram::{Histogram, Waveform};
     fn read(packet: CapyPreview) -> (serde_json::Value, Vec<u8>) {
-        let owned = Box::into_raw(Box::new(packet));
-        unsafe {
-            let metadata = std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(owned));
-            let metadata = serde_json::from_slice(metadata.to_bytes()).unwrap();
-            let mut length = 0;
-            let bytes = std::slice::from_raw_parts(crate::previews::capy_preview_bytes(owned, &mut length), length).to_vec();
-            crate::previews::capy_preview_free(owned);
-            (metadata, bytes)
-        }
+        let owned=crate::previews::store(packet).unwrap();
+        let metadata=crate::previews::copied_metadata(owned);
+        let bytes=crate::previews::copied_bytes(owned);
+        crate::previews::capy_preview_free(owned);
+        (metadata,bytes)
     }
+
     #[test]
     fn scope_revision_follows_plot_inputs_and_waveform_is_premultiplied_bgra() {
         let host = layer_host::NativeHost::new(layer_ui::Platform::Windows).unwrap();

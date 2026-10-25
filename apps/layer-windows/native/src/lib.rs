@@ -60,6 +60,8 @@ mod paper_files;
 pub use host::*;
 
 mod shared_controls;
+mod owned;
+pub use owned::{capy_string_copy,capy_string_free,capy_string_length};
 pub use shared_controls::*;
 mod color;
 pub use color::*;
@@ -74,6 +76,15 @@ mod gpu_recovery_tests;
 
 #[cfg(test)]
 mod test_support {
+    pub(crate) struct Localization {value:u64,pub(crate) localizer:std::sync::Arc<layer_ui::Localizer>}
+    impl Localization {
+        pub(crate) fn new(localizer:std::sync::Arc<layer_ui::Localizer>)->Self {
+            Self {value:crate::shared_controls::store_localization(localizer.clone()),localizer}
+        }
+        pub(crate) fn raw(&self)->u64 {self.value}
+    }
+    impl Drop for Localization {fn drop(&mut self) {unsafe {crate::capy_localization_free(self.value);}}}
+
     use std::path::PathBuf;
 
     use layer_core::{Document, ProjectLimits, authored::{ArtworkCapture,CaptureCheckpoint,SourceTarget,PaintSource,OccurrenceHandle}};

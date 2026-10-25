@@ -71,7 +71,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
     J slideRequest(){return O({{L"id",N(double(source))},{L"hits",slideHits},{L"clip",slideClip},{L"press",point(origin)},{L"point",point(position)}});}
     J slideAt(){
         auto request=slideRequest();request.Insert(L"order",slideOrder);auto json=to_string(request.Stringify());
-        std::unique_ptr<char,decltype(&capy_string_free)> reply(capy_document_tab_slide(json.c_str()),capy_string_free);
+        NativeString reply(capy_document_tab_slide(json.c_str()),capy_string_free);
         if(!reply||std::string_view(reply.get())=="null")return J{};return J::Parse(to_hstring(reply.get()));}
     void beginSlide(){
         slideOrder=A{};for(auto v:array(model(),L"tabs"))slideOrder.Append(N(num(v.GetObject(),L"id")));slideHits=hits();
