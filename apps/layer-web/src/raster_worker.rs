@@ -14,7 +14,9 @@ thread_local! { static WORKER: RefCell<Option<js_sys::Function>> = const { RefCe
 pub fn configure_raster_worker(worker: js_sys::Function)->Result<(),JsValue> {
     if let Ok(configure)=js_sys::Reflect::get(&worker,&js("configure"))?.dyn_into::<js_sys::Function>() {
         let limits=layer_core::ProjectLimits::default();
-        configure.call1(&worker,&js_sys::JSON::parse(&serde_json::json!({"metadata":limits.metadata_bytes,"range":layer_core::package::MAX_RANGE_BYTES,"total":limits.raster_bytes}).to_string())?)?;
+        configure.call1(&worker,&js_sys::JSON::parse(&serde_json::json!({"metadata":limits.metadata_bytes,"range":layer_core::package::MAX_RANGE_BYTES,"total":limits.raster_bytes,
+            "workers":layer_core::input_work::MAX_BROWSER_WORKERS,"requests":layer_core::input_work::MAX_BROWSER_REQUESTS,
+            "payloads":layer_core::input_work::MAX_BROWSER_PAYLOAD_BYTES,"resultAge":layer_core::input_work::BROWSER_RESULT_LIFETIME_MS}).to_string())?)?;
     }
     WORKER.with(|slot| *slot.borrow_mut() = Some(worker));Ok(())
 }

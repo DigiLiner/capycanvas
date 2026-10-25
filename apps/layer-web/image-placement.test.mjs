@@ -87,7 +87,8 @@ export async function checkImagePlacement({call,evaluate,settle}) {
   try {
     await call('Page.setInterceptFileChooserDialog',{enabled:true});
     blobReads=await checkBlobReads(evaluate);
-    await evaluate(`window.placementTest={open:window.showOpenFilePicker,save:window.showSaveFilePicker};window.showOpenFilePicker=undefined;
+    await evaluate(`window.placementTest={open:window.showOpenFilePicker,save:window.showSaveFilePicker,workerEvents:[]};window.showOpenFilePicker=undefined;
+      {const OriginalWorker=Worker;window.Worker=class extends OriginalWorker{constructor(...args){super(...args);const events=placementTest.workerEvents;this.addEventListener('message',({data})=>{if(data.gpu_event||data.error){events.push(data.gpu_event??{kind:'worker_error',message:String(data.error)});if(events.length>16)events.shift();}});this.addEventListener('error',event=>events.push({kind:'worker_error',message:event.message}));}};}
       window.showSaveFilePicker=async o=>({name:o.suggestedName,async createWritable(){return{async write(b){placementTest.saved=new Uint8Array(b instanceof Blob?await blobReadChecks.read(b):b)},async close(){},async abort(){}}}});
       layerApp.dispatch({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});`);
     if(process.env.LAYER_PHOTO_FILES)files=JSON.parse(process.env.LAYER_PHOTO_FILES);
@@ -248,8 +249,10 @@ export async function checkImagePlacement({call,evaluate,settle}) {
       const painted=await save();
       assert.notDeepEqual(rasterIdentity(painted),rasterIdentity(rasterized),'The rasterized layer paints immediately');
       assert.ok(new Set(packageObject(painted,paint.data.content.paint).data.tiles.map(t=>t.plane)).has('watercolor_wetness'),'Wet watercolor writes its scalar plane on the rasterized layer');
-      await invoke('liquify');await evaluate(`layerApp.dispatch({type:'select_brush',id:13});layerApp.dispatch({type:'set_brush_size',value:80});`);await settle();
-      await stroke();assert.notDeepEqual(rasterIdentity(await save()),rasterIdentity(painted),'Liquify edits the rasterized layer');
+      await invoke('liquify');await evaluate(`{const events=placementTest.workerEvents;layerApp.canvas.getContext('webgpu').getConfiguration().device.addEventListener('uncapturederror',event=>events.push({kind:'main_gpu_error',message:event.error.message}));}layerApp.dispatch({type:'select_brush',id:13});layerApp.dispatch({type:'set_brush_size',value:80});`);await settle();
+      await stroke();
+      try {assert.notDeepEqual(rasterIdentity(await save()),rasterIdentity(painted),'Liquify edits the rasterized layer');}
+      catch(error){console.error('Image placement Liquify diagnostic:',await evaluate(`JSON.stringify({state:layerApp.state(),gpu:layerApp.app.gpu_diagnostics(),worker_events:placementTest.workerEvents,status:document.querySelector('#status')?.textContent},(_,value)=>typeof value==='bigint'?String(value):value)`));throw error;}
       await invoke('undo');await invoke('undo');assert.deepEqual(rasterIdentity(await save()),rasterIdentity(rasterized));
       await invoke('undo');
       const restored=await save();

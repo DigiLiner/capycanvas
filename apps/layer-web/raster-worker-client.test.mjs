@@ -16,7 +16,7 @@ function fixture(module) {
     error(){this.onerror({preventDefault(){},message:'worker failed'});}
   };
   const events=[],run=createRasterWorker(module,event=>events.push(event));
-  run.configure({metadata:64*1024*1024,range:8*1024*1024,total:1024*1024*1024});
+  run.configure({workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,metadata:64*1024*1024,range:8*1024*1024,total:1024*1024*1024});
   return {run,workers,events,async flush(){for(let i=0;i<4;i++)await Promise.resolve();},
     async advance(delay){const end=now+delay;while(true){const ready=[...timers].filter(([,t])=>t.at<=end).sort((a,b)=>a[1].at-b[1].at)[0];if(!ready)break;const [id,t]=ready;now=t.at;if(!t.interval)timers.delete(id);t.callback();if(t.interval&&timers.has(id))t.at+=t.interval;await this.flush();}now=end;},
     close(){for(const [k,v]of Object.entries(original))globalThis[k]=v;}};
@@ -24,6 +24,156 @@ function fixture(module) {
 async function withFixture(body){const f=fixture();try{await body(f);}finally{f.close();}}
 const request=(operation='snapshot',extra={})=>({operation,metadata:'{}',buffers:[],...(operation==='read'?{file:new Blob(['input'])}:{}),...extra});
 const transfer=(kind='artwork',metadata='descriptor',buffers=[new Uint8Array([3,7,11])])=>({transfer_kind:kind,metadata,buffers});
+const admission=(run,values)=>run.configure({metadata:64*1024*1024,range:8*1024*1024,total:1024*1024*1024,workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,...values});
+
+test('pending requests and unconsumed results share one job slot',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});
+  const first=f.run(request('encode'));
+  await assert.rejects(f.run(request()),/Raster workers are busy/);assert.equal(f.workers.length,1);
+  const bytes=new Uint8Array([3,7]);f.workers[0].reply(bytes);const key=await first;
+  await assert.rejects(f.run(request()),/Raster workers are busy/);
+  assert.equal(f.run.consumeResult('encode',key),bytes);
+  const retry=f.run(request());f.workers[1].reply('ready');assert.equal(await retry,'ready');
+}));
+
+test('aggregate payload charges survive transfer and resize to the held result',()=>withFixture(async f=>{
+  admission(f.run,{payloads:20});
+  const first=f.run(request('encode',{buffers:[new Uint8Array(12)]}));
+  await assert.rejects(f.run(request('encode',{buffers:[new Uint8Array(1)]})),/Raster workers are busy/);
+  f.workers[0].reply(new Uint8Array(17));const key=await first;
+  await assert.rejects(f.run(request()),/Raster workers are busy/);
+  f.run.consumeResult('encode',key);
+  const retry=f.run(request('encode'));f.workers[0].reply(new Uint8Array(20));const next=await retry;
+  assert.equal(f.run.consumeResult('encode',next).byteLength,20);
+}));
+
+test('a small view cannot hide a large transferred ArrayBuffer',()=>withFixture(async f=>{
+  admission(f.run,{payloads:20});
+  await assert.rejects(f.run(request('encode',{buffers:[new Uint8Array(32).subarray(0,1)]})),/Raster workers are busy/);
+  assert.equal(f.workers.length,0);
+}));
+
+test('oversized results and transport failures return their admission',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,payloads:20});
+  const first=f.run(request('encode')),refused=assert.rejects(first,/aggregate admission/);
+  f.workers[0].reply(new Uint8Array(21));await refused;
+  f.workers[0].postError=Error('transport stopped');
+  await assert.rejects(f.run(request('encode')),/transport stopped/);
+  delete f.workers[0].postError;
+  const retry=f.run(request('encode'));f.workers[0].reply(new Uint8Array(3));const key=await retry;
+  assert.equal(f.run.consumeResult('encode',key).byteLength,3);
+}));
+
+test('cancellation returns one admission slot and late replies cannot release another',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});let cancelled=false;
+  const first=f.run(request('snapshot',{cancelled:()=>cancelled})),refused=assert.rejects(first,{name:'AbortError'}),old=f.workers[0];
+  cancelled=true;await f.advance(50);await refused;
+  const next=f.run(request()),current=f.workers[1];old.reply('late');
+  await assert.rejects(f.run(request()),/Raster workers are busy/);
+  current.reply('ready');assert.equal(await next,'ready');
+}));
+
+test('producer and independent validation retain one logical admission through consumption',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,workers:3});
+  const pending=f.run(request('read'));f.workers[0].reply(transfer());await f.flush();
+  assert.equal(f.workers.length,2);await assert.rejects(f.run(request()),/Raster workers are busy/);
+  f.workers[1].reply(transfer());const result=await pending;
+  await assert.rejects(f.run(request()),/Raster workers are busy/);
+  assert.ok(f.run.consume('artwork',result.metadata,result.buffers));
+  const retry=f.run(request());f.workers.at(-1).reply('ready');assert.equal(await retry,'ready');
+}));
+
+test('worker pressure evicts an idle arena while preserving other active owners',()=>withFixture(async f=>{
+  admission(f.run,{workers:3});
+  const first=f.run(request()),second=f.run(request()),a=f.workers[0],b=f.workers[1];
+  await assert.rejects(f.run(request()),/Raster workers are busy/);assert.equal(f.workers.length,2);
+  a.reply('first');await first;
+  const next=f.run(request('fingerprint'));assert.equal(a.terminated,true);assert.equal(b.terminated,false);
+  f.workers[2].reply('next');assert.equal(await next,'next');b.reply('second');assert.equal(await second,'second');
+}));
+
+test('saturated jobs and worker arenas still admit output cleanup and read cancellation',()=>withFixture(async f=>{
+  admission(f.run,{workers:3,requests:2});
+  const first=f.run(request()),second=f.run(request());
+  const cleanup=f.run(request('output-close',{metadata:'retired-output'}));
+  assert.equal(f.workers.length,3);assert.equal(f.workers[2].messages[0].request.operation,'output-discard');
+  f.workers[2].reply(true);assert.equal(await cleanup,true);
+  assert.equal(await f.run(request('cancel-read')),true);
+  f.workers[0].reply('first');f.workers[1].reply('second');await Promise.all([first,second]);
+}));
+
+test('an abandoned opaque result expires and releases both payload and job capacity',()=>withFixture(async f=>{
+  admission(f.run,{requests:1,payloads:20,resultAge:100});
+  const first=f.run(request('encode'));f.workers[0].reply(new Uint8Array(20));const key=await first;
+  await assert.rejects(f.run(request()),/Raster workers are busy/);
+  await f.advance(100);assert.equal(f.run.consumeResult('encode',key),null);
+  const retry=f.run(request('encode'));f.workers[0].reply(new Uint8Array(20));const next=await retry;
+  assert.equal(f.run.consumeResult('encode',next).byteLength,20);
+}));
+
+test('producer payload admission happens before an independent validator is created',()=>withFixture(async f=>{
+  admission(f.run,{requests:2,payloads:20});
+  const first=f.run(request('read')),refused=assert.rejects(first,/aggregate admission/);
+  f.workers[0].reply(transfer('artwork','{}',[new Uint8Array(17)]));await refused;
+  assert.equal(f.workers.length,1);assert.equal(f.workers[0].terminated,true);
+  const retry=f.run(request());f.workers[1].reply('ready');assert.equal(await retry,'ready');
+}));
+
+test('cancelled validation disposes any receipt produced in the completion race',()=>withFixture(async f=>{
+  admission(f.run,{requests:1});
+  const first=f.run(request('read')),refused=assert.rejects(first,{name:'AbortError'});
+  f.workers[0].reply(transfer());await f.flush();f.workers[1].reply(transfer());
+  await f.run(request('cancel-read'));await refused;
+  const retry=f.run(request());f.workers.at(-1).reply('ready');assert.equal(await retry,'ready');
+}));
+
+test('callbacks can repeat identical configuration while work and receipts remain live',()=>withFixture(async f=>{
+  const first=f.run(request('encode'));
+  assert.doesNotThrow(()=>admission(f.run,{}));
+  assert.throws(()=>admission(f.run,{requests:1}),/already in use/);
+  f.workers[0].reply(new Uint8Array(3));const key=await first;
+  assert.doesNotThrow(()=>admission(f.run,{}));
+  assert.equal(f.run.consumeResult('encode',key).byteLength,3);
+}));
+
+test('ordinary warm roles leave room for a new reader and its independent validator',()=>withFixture(async f=>{
+  for(const operation of ['fingerprint','restart-begin','color-field','encode','lookup','image-decode']){
+    const pending=f.run(request(operation)),worker=f.workers.at(-1);
+    worker.reply(operation==='lookup'?{metadata:'{}',bytes:new Uint8Array(3)}:new Uint8Array(3));
+    const result=await pending;if(['encode','lookup','image-decode'].includes(operation))f.run.consumeResult(operation,result);
+  }
+  assert.equal(f.workers.filter(worker=>!worker.terminated).length,6);
+  const pending=f.run(request('read'));f.workers.at(-1).reply(transfer());await f.flush();
+  assert.equal(f.workers[1].terminated,false,'Checkpoint cache cannot be evicted between restart phases');
+  assert.equal(f.workers.filter(worker=>!worker.terminated).length,7);
+  f.workers.at(-1).reply(transfer());const result=await pending;
+  assert.ok(f.run.consume('artwork',result.metadata,result.buffers));
+}));
+
+test('the cleanup lane coalesces tokens and refuses oversized or excess control inputs',()=>withFixture(async f=>{
+  const first=f.run(request('output-close',{metadata:'first'})),same=f.run(request('output-close',{metadata:'first'}));
+  const second=f.run(request('output-close',{metadata:'second'}));
+  assert.equal(f.workers.length,1);assert.equal(f.workers[0].messages.length,2);
+  await assert.rejects(f.run(request('output-close',{metadata:'third'})),/Finish the current output/);
+  await assert.rejects(f.run(request('cancel-read',{buffers:[new Uint8Array(1)]})),/Invalid worker cleanup/);
+  await assert.rejects(f.run(request('output-close',{metadata:'x'.repeat(129)})),/Invalid worker cleanup/);
+  const worker=f.workers[0];
+  worker.onmessage({data:{id:worker.messages[0].id,result:true}});assert.equal(await first,true);assert.equal(await same,true);
+  worker.reply(true);assert.equal(await second,true);
+}));
+
+for(const [operation,parallel]of [['color-convert','fingerprint'],['restart-write','restart-retain']])test(`${operation} stays active while a parallel retired reply finishes before validation`,()=>withFixture(async f=>{
+  admission(f.run,{workers:4});
+  const first=f.run(request(operation)),second=f.run(request(parallel)),parent=f.workers[0];
+  parent.onmessage({data:{id:parent.messages[0].id,result:transfer(),retire:true}});await f.flush();
+  const validator=f.workers[1];parent.reply('parallel',{retire:true});assert.equal(await second,'parallel');
+  await f.advance(6000);assert.equal(parent.terminated,false);assert.equal(validator.terminated,false);
+  const analysis=f.run(request());await assert.rejects(f.run(request('color-field')),/Raster workers are busy/);
+  assert.equal(parent.terminated,false);assert.equal(validator.terminated,false);
+  f.workers[2].reply('analysis');await analysis;
+  validator.reply(transfer());const result=await first;assert.ok(f.run.consume('artwork',result.metadata,result.buffers));
+  await f.advance(5000);assert.equal(parent.terminated,true);
+}));
 
 test('encoded inputs clone their Blob without a whole-input buffer transfer',()=>withFixture(async f=>{
   const file=new Blob([new Uint8Array(9*1024*1024)]);
@@ -267,7 +417,7 @@ for(const [name,result,reason]of [
   ['oversized total',()=>transfer('artwork','{}',[new Uint8Array(4),new Uint8Array(3)]),/exceeds admission/],
   ['shared block',()=>transfer('artwork','{}',[new Uint8Array(new SharedArrayBuffer(1))]),/Invalid worker payload block/],
 ])test(`validator ${name} rejects without granting a receipt`,()=>withFixture(async f=>{
-  f.run.configure({metadata:4,range:4,total:6});
+  f.run.configure({workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,metadata:4,range:4,total:6});
   const pending=f.run(request('validate-artwork')),rejected=assert.rejects(pending,reason);
   const worker=f.workers[0],reply=result();worker.reply(reply);await rejected;
   assert.equal(worker.terminated,true);assert.equal(f.run.consume('artwork',reply.metadata,reply.buffers),null);
@@ -279,7 +429,7 @@ for(const [name,extra,reason]of [
   ['total',{buffers:[new Uint8Array(4),new Uint8Array(3)]},/exceeds admission/],
   ['shared block',{buffers:[new Uint8Array(new SharedArrayBuffer(1))]},/Invalid worker payload block/],
 ])test(`validation input ${name} is admitted before creating an owner`,()=>withFixture(async f=>{
-  f.run.configure({metadata:4,range:4,total:6});
+  f.run.configure({workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,metadata:4,range:4,total:6});
   await assert.rejects(f.run(request('validate-artwork',extra)),reason);
   assert.equal(f.workers.length,0);
 }));
@@ -399,13 +549,13 @@ for(const [operation,result,reason]of [
   ['lookup',()=>({metadata:'12345',bytes:new Uint8Array(1)}),/Oversized worker metadata/],
   ['lookup',()=>({metadata:'{}',bytes:new Uint8Array(5)}),/Invalid worker payload block/],
 ])test(`${operation} rejects an inadmissible direct result ${reason.source}`,()=>withFixture(async f=>{
-  f.run.configure({metadata:4,range:4,total:6});
+  f.run.configure({workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,metadata:4,range:4,total:6});
   const pending=f.run(request(operation)),rejected=assert.rejects(pending,reason),value=result();
   f.workers[0].reply(value);await rejected;assert.equal(f.run.consumeResult(operation,value),null);
 }));
 
 test('large direct encoder payload uses its total limit while lookup keeps the bounded-block limit',()=>withFixture(async f=>{
-  f.run.configure({metadata:4,range:4,total:6});
+  f.run.configure({workers:8,requests:32,payloads:256*1024*1024,resultAge:180000,metadata:4,range:4,total:6});
   const pending=f.run(request('encode')),bytes=new Uint8Array(6);
   f.workers[0].reply(bytes);const key=await pending;assert.equal(f.run.consumeResult('encode',key),bytes);
 }));

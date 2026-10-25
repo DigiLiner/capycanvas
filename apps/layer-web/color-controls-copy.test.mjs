@@ -89,7 +89,7 @@ test('rendered dialog and panel color wheels share the injected configured worke
   globalThis.requestAnimationFrame=callback=>{const id=++nextFrame;frames.set(id,callback);return id;};
   globalThis.cancelAnimationFrame=id=>frames.delete(id);
   t.after(()=>{for(const[key,descriptor]of Object.entries(previous))if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
-  const rasterWorker=createRasterWorker();rasterWorker.configure({metadata:65536,range:1048576,total:1048576});
+  const rasterWorker=createRasterWorker();rasterWorker.configure({metadata:65536,range:1048576,total:1048576,workers:8,requests:32,payloads:256*1024*1024,resultAge:180000});
   const element=(...args)=>{const node=dom.element(...args);node.clientWidth=node.clientHeight=256;Object.defineProperty(node,'firstElementChild',{get:()=>node.children.find(child=>child.tagName)});return node;};
   const button=(text,action,cls)=>{const node=element('button',cls,text);node.addEventListener('click',action);return node;};
   const view={hdr:false,intensity:0,rgb_space:'Srgb',shape:'circle',rendition:null,geometry:{center:[.5,.5],inner:.4,outer:.5,disc_radius:.3},wheel_components:[0,0,0],wheel_hue_start_degrees:0,wheel_hue_marker:[.5,.5],wheel_hue_color:[1,0,0,1],wheel_marker:[.5,.5],marker_color:[0,0,0,1],front_swatch:'foreground',other_shapes:['square','triangle'],swatches:['background','foreground','transparent'].map(slot=>({slot,label:slot,rgba:[0,0,0,1],selected:slot==='foreground'})),readout_label:'RGB',readout:'rgb',readout_layout_text:[]};

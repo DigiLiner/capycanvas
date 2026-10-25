@@ -112,6 +112,18 @@ cross-thread reads. Unsupported files retain the original Blob for Copy Original
 This relies on the browser's [immutable Blob contract](https://www.w3.org/TR/FileAPI/);
 it does not verify the browser implementation or impose an aggregate memory quota.
 
+Shared Rust supplies controller limits of eight raster workers, 32 outstanding
+requests and 256 MiB of logical transfer payloads per page. The payload charge
+includes the complete ArrayBuffers behind views and UTF-16 metadata. Producer
+and independent validator share one request charge; completed opaque results
+retain their slot and payload charge until consumption or a three-minute expiry.
+Admission precedes dispatch and validator creation. Idle arenas can be retired
+for new work, and one worker slot remains available for output cleanup. Read
+cancellation and output close bypass normal request saturation. Cancellation
+returns capacity after the worker/validation path stops, and late replies cannot
+return it twice. These limits cover coordinator-owned transfers and worker
+counts, not Wasm heap high-water marks, copied Rust results, editor/history assets,
+GPU allocations or other tabs. Native decoder execution limits are separate.
 
 Clipboard output carries the full-depth source transfer and a separate PNG for
 other applications. The PNG is a separate reply field, so it cannot change the source transfer
