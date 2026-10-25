@@ -47,7 +47,7 @@ struct CanvasFloorLayer: View {
                 let width = CGFloat(placement["max_width"].number)
                 let palette = EditorPalette(source: store.state["palette"])
                 VStack(spacing: Self.margin) {
-                    if !presence.notice.isNull { notice(palette, width: width) }
+                    if !presence.notice.isNull { notice(palette.glassy, width: width, minTextWidth: CGFloat(placement["min_text_width"].number)) }
                     if let preview {
                         CanvasPreviewPanel(store: store, view: preview.view, operations: preview.operations, palette: palette)
                             .frame(width: min(Self.previewWidth, width))
@@ -58,24 +58,58 @@ struct CanvasFloorLayer: View {
         }.onChange(of: preview == nil) { _, closed in if !closed { previewBar = bar.bounds } }
             .onChange(of: bar.bounds) { _, bounds in if let bounds { previewBar = bounds } }
     }
-    private func notice(_ palette: EditorPalette, width: CGFloat) -> some View {
-        HStack(spacing: 12) {
-            Text(presence.notice["text"].string).fixedSize(horizontal: false, vertical: true)
-                .allowsHitTesting(false).accessibilityIdentifier("canvas-notice-text")
-            ForEach(presence.notice["actions"].array.indices, id: \.self) { index in
-                let action = presence.notice["actions"].array[index], token = action["id"].string
-                Button(action["label"].string) { presence.accept(token) }
-                    .disabled(!action["enabled"].bool)
+    private var textSize: CGFloat { store.catalog["text_size_pt"].number > 0 ? store.catalog["text_size_pt"].number * 4 / 3 : 44 / 3 }
+    private func notice(_ palette: EditorPalette, width: CGFloat, minTextWidth: CGFloat) -> some View {
+        let metrics = store.barMetrics, text = presence.notice["text"].string, actions = presence.notice["actions"].array
+        let widths = actions.map { ceil(toolbarTextWidth($0["label"].string, size: textSize)) + 2 * (BarMetrics.textPadding + metrics.clear) }
+        let actionsWidth = widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * metrics.gap
+        let caption = ceil(toolbarTextWidth(text, size: textSize))
+        let beside = actions.isEmpty || BarMetrics.captionLeading + caption + BarMetrics.captionTrailing + metrics.gap + actionsWidth <= width
+            || width - actionsWidth - metrics.gap >= minTextWidth
+        return Group {
+            if beside {
+                HStack(spacing: metrics.gap) {
+                    Text(text).lineLimit(actions.isEmpty ? nil : 1).fixedSize(horizontal: !actions.isEmpty, vertical: true)
+                        .padding(.vertical, 6).padding(.leading, BarMetrics.captionLeading)
+                        .padding(.trailing, actions.isEmpty ? BarMetrics.captionLeading : BarMetrics.captionTrailing)
+                        .allowsHitTesting(false).accessibilityIdentifier("canvas-notice-text")
+                    if !actions.isEmpty { actionRow(actions, palette: palette, metrics: metrics) }
+                }.frame(minHeight: metrics.tile)
+            } else {
+                VStack(alignment: .trailing, spacing: metrics.gap) {
+                    Text(text).fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10).padding(.horizontal, BarMetrics.captionLeading).padding(.bottom, 2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .allowsHitTesting(false).accessibilityIdentifier("canvas-notice-text")
+                    actionRow(actions, palette: palette, metrics: metrics)
+                }.frame(width: min(width, max(2 * BarMetrics.captionLeading + caption, actionsWidth)))
+            }
+        }.foregroundStyle(palette["text"])
+            .environment(\.editorPalette, palette)
+            .background { SquircleShape.surface.fill(palette.glassPanel).allowsHitTesting(false) }
+            .modifier(GlassRegistration(shape: SquircleShape.surface))
+            .background { OutsideShadow(shape: SquircleShape.surface, opacity: 0.16, radius: 4, y: 2).accessibilityHidden(true) }
+            .frame(maxWidth: width)
+            .accessibilityElement(children: .contain).accessibilityLabel(presence.notice["name"].string).accessibilityIdentifier("canvas-notice")
+    }
+    private func actionRow(_ actions: [JSON], palette: EditorPalette, metrics: BarMetrics) -> some View {
+        HStack(spacing: metrics.gap) {
+            ForEach(actions.indices, id: \.self) { index in
+                let action = actions[index], token = action["id"].string, enabled = action["enabled"].bool
+                let accent = action["accent"].bool && enabled
+                Button { presence.accept(token) } label: {
+                    Text(action["label"].string).lineLimit(1).fixedSize()
+                        .padding(.horizontal, BarMetrics.textPadding)
+                        .foregroundStyle(accent ? palette.accentForeground : palette["text"])
+                        .frame(maxHeight: .infinity)
+                        .background(accent ? palette.accent : .clear, in: SquircleShape.tile)
+                        .contentShape(Rectangle())
+                }.buttonStyle(EditorControlButtonStyle(selected: false, corner: .half))
+                    .frame(height: metrics.control).padding(metrics.clear)
+                    .disabled(!enabled).opacity(enabled ? 1 : 0.36)
                     .help(action["reason"].string).accessibilityHint(action["reason"].string)
                     .accessibilityIdentifier("canvas-notice-action-\(token)")
             }
-        }.padding(.vertical, 8).padding(.horizontal, 14)
-            .foregroundStyle(palette["text"])
-            .background {
-                SquircleShape.surface.fill(palette["panel"]).shadow(color: .black.opacity(0.27), radius: 4, y: 2)
-                    .allowsHitTesting(false)
-            }
-            .frame(maxWidth: width)
-            .accessibilityElement(children: .contain).accessibilityLabel(presence.notice["name"].string).accessibilityIdentifier("canvas-notice")
+        }
     }
 }

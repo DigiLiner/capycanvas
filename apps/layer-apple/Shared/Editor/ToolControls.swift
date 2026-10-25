@@ -30,6 +30,8 @@ struct ToolSetControls: View {
             let command = item["action"]["type"].string == "invoke"
                 ? store.command(item["action"]["command"].string) : JSON()
             let enabled = item["enabled"].bool && (command.isNull || command["enabled"].bool)
+            let reason = item["disabled_reason"].isNull ? command.disabledReason : item["disabled_reason"].string
+            let identifier = sets ? "\(panel)-\(item["label"].string)" : item["preview"].isNull ? "tool-\(group ? "group" : "subtool")-\(index)" : "brush-\(item["preview"].uint)"
             Button { if !store.bubbles.input.consumeClick() { store.dispatch(item["action"]) } } label: {
                 Group {
                     if group && sets {
@@ -62,14 +64,16 @@ struct ToolSetControls: View {
                     }
                 }.padding(.horizontal, group ? 0 : 6).padding(.vertical, group ? 0 : 3)
                     .frame(maxWidth: .infinity, minHeight: group ? nil : item["preview"].isNull ? (store.tonalActive ? 36 : 44) : 64)
+                    .opacity(enabled && reason != nil ? 0.36 : 1)
                     .contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(selected: item["selected"].bool))
                 .modifier(BubbleChoiceSource(action: item["action"]))
                 .disabled(!enabled).opacity(enabled ? 1 : 0.36)
-                .modifier(ActionHelp(store: store, label: item["label"].string, action: item["action"], tooltip: command["tooltip"].string))
+                .modifier(ActionHelp(store: store, label: item["label"].string, action: item["action"], tooltip: reason ?? command["tooltip"].string))
                 .accessibilityLabel(item["label"].string)
                 .accessibilityAddTraits(item["selected"].bool ? .isSelected : [])
-                .accessibilityIdentifier(sets ? "\(panel)-\(item["label"].string)" : item["preview"].isNull ? "tool-\(group ? "group" : "subtool")-\(index)" : "brush-\(item["preview"].uint)")
+                .accessibilityIdentifier(identifier)
+                .modifier(DisabledExplanation(reason: enabled ? nil : reason, identifier: identifier + "-reason"))
         }
     }
 }

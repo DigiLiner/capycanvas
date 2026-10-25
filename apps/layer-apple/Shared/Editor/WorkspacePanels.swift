@@ -292,7 +292,7 @@ private struct WorkspaceTile: View {
                     }
                 }.tracksToolActivation()
             }
-        }.accessibilityLabel(tile["label"].string).help(tile["tooltip"].string)
+        }.accessibilityLabel(tile["label"].string).help(tile.disabledReason ?? tile["tooltip"].string)
             .accessibilityIdentifier("toolbar-tile-\(panel["id"].string)-\(tile["id"].uint)")
             .accessibilityAddTraits(tile["selected"].bool ? .isSelected : [])
     }

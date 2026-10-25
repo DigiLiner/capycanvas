@@ -444,7 +444,7 @@ typealias ToolOptionEdit = (Any, @escaping @MainActor (String?) -> Void) -> Void
 private let captionPadding: CGFloat = 10, captionGap: CGFloat = 6, choicePadding: CGFloat = 8, chevronSize: CGFloat = 12, gridCell: CGFloat = 18
 
 struct BarMetrics {
-    static let dividerSlot: CGFloat = 8
+    static let dividerSlot: CGFloat = 8, captionLeading: CGFloat = 12, captionTrailing: CGFloat = 8, textPadding: CGFloat = 10
     let tile: CGFloat
     let gap: CGFloat
     let icon: CGFloat
@@ -716,7 +716,7 @@ struct SegmentedChoiceBar: View {
                     .contentShape(Rectangle())
                     .frame(width: cellSize?.width, height: cellSize?.height)
             }.buttonStyle(.plain)
-                .accessibilityLabel(item["label"].string).help(item["label"].string)
+                .accessibilityLabel(item["label"].string).help(item["disabled_reason"].isNull ? item["label"].string : item["disabled_reason"].string)
                 .accessibilityAddTraits(item["selected"].bool ? .isSelected : [])
                 .accessibilityIdentifier("\(prefix)-segment-\(choice["id"].string)-\(index)")
         }

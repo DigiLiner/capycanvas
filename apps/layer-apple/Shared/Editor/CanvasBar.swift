@@ -35,8 +35,7 @@ private struct PlacedCanvasBar: View {
     @State private var placed = JSON()
     @State private var menu = JSON()
     @State private var menus: [String: JSON] = [:]
-    private static let captionLeading: CGFloat = 12, captionTrailing: CGFloat = 8, captionOpacity = 0.8
-    private static let textPadding: CGFloat = 10, textGap: CGFloat = 6, chevron: CGFloat = 12
+    private static let captionOpacity = 0.8, textGap: CGFloat = 6, chevron: CGFloat = 12
     private static let preferences = JSON(["sliders": false, "text": true])
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]).glassy }
     private var textSize: CGFloat { store.catalog["text_size_pt"].number > 0 ? store.catalog["text_size_pt"].number * 4 / 3 : 44 / 3 }
@@ -50,14 +49,14 @@ private struct PlacedCanvasBar: View {
     private func fieldWidth(_ item: JSON) -> CGFloat {
         if !item["menu"].isNull {
             if item["icon_only"].bool { return metrics.tile }
-            return 2 * metrics.clear + 2 * Self.textPadding + metrics.icon + 2 * Self.textGap + Self.chevron
+            return 2 * metrics.clear + 2 * BarMetrics.textPadding + metrics.icon + 2 * Self.textGap + Self.chevron
                 + ceil(toolbarTextWidth(item["label"].string, size: textSize))
         }
         return toolOptionSize(item["option"], vertical: false, width: 0, tile: CGSize(width: metrics.tile, height: metrics.tile),
             preferences: Self.preferences, textSize: textSize, bar: metrics, caption: item["label"].string, language: store.interfaceLanguage).width
     }
     private var labelWidth: CGFloat {
-        view["label"].isNull ? 0 : ceil(toolbarTextWidth(view["label"].string, size: textSize)) + Self.captionLeading + Self.captionTrailing
+        view["label"].isNull ? 0 : ceil(toolbarTextWidth(view["label"].string, size: textSize)) + BarMetrics.captionLeading + BarMetrics.captionTrailing
     }
     private var measure: [String: Any] {
         ["context": context.raw, "label": labelWidth, "items": items.map(width), "completion": completion.map(width),
@@ -89,7 +88,7 @@ private struct PlacedCanvasBar: View {
         HStack(spacing: metrics.gap) {
             if !view["label"].isNull {
                 Text(view["label"].string).lineLimit(1).foregroundStyle(palette["text"].opacity(Self.captionOpacity))
-                    .padding(.leading, Self.captionLeading).padding(.trailing, Self.captionTrailing)
+                    .padding(.leading, BarMetrics.captionLeading).padding(.trailing, BarMetrics.captionTrailing)
                     .frame(width: labelWidth, alignment: .leading).accessibilityIdentifier("canvas-bar-label")
             }
             ForEach(Array(items.prefix(shown).enumerated()), id: \.offset) { _, item in field(item) }
@@ -141,7 +140,7 @@ private struct PlacedCanvasBar: View {
                         SharedIcon(name: item["icon"].string, size: metrics.icon)
                         Text(label).lineLimit(1).fixedSize()
                         SharedIcon(name: "chevron-down", size: Self.chevron)
-                    }.padding(.horizontal, Self.textPadding).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }.padding(.horizontal, BarMetrics.textPadding).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }.buttonStyle(EditorControlButtonStyle(selected: false, corner: .half)).disabled(disabled)

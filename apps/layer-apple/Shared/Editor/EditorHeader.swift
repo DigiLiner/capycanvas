@@ -368,7 +368,7 @@ private struct HeaderItemControl: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         }.buttonStyle(HeaderButtonStyle(selected: selected, hovering: hovering, inBar: inBar, drawerOpen: drawerOpen, radius: radius))
             .disabled(!enabled).opacity(enabled ? 1 : 0.36)
-            .accessibilityLabel(description["label"].string).help(description["label"].string)
+            .accessibilityLabel(description["label"].string).help((enabled ? nil : description.disabledReason) ?? description["label"].string)
             .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
