@@ -1,4 +1,4 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ConfigurationOnly)
 $ErrorActionPreference='Stop'
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
 if($Theme.StartsWith('blend-large-')){$Theme=$Theme.Substring(12);$LargeText=$true;$BlendOnly=$true;$LanguageLimit=2}
@@ -214,6 +214,77 @@ function Export-Image([string]$Path){
  if($bytes.Length -lt 45 -or [Convert]::ToHexString($bytes[0..7]) -ne '89504E470D0A1A0A' -or [Convert]::ToHexString($bytes[12..23]) -ne '494844520000004000000040'){throw 'Export was not a complete 64 by 64 PNG'}
  (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
+function Configuration-CaptionSurface{
+ $english=[Array]::IndexOf($shippedTags,'en')+1;$japanese=[Array]::IndexOf($shippedTags,'ja')+1
+ if($english -lt 1 -or $japanese -lt 1){throw 'Configuration localization requires shipped English and Japanese'}
+ Use-Window $second;Menu-Command 'edit' 'settings';Invoke-Id 'preference-page-appearance'
+ $inventory=@((Language-Row).kind.options)
+ if($inventory.Count -ne $shippedTags.Count+1){throw 'Language preference differs from the shared shipped-tag inventory'}
+ Language-Choice $english|Out-Null
+ Wait-Until {(Model $first).windows_active_tag -eq 'en'} 'Configuration baseline did not adopt English' 30
+ Use-Window $first
+ if((Fresh-Model).state.customization.drawer -or !@((Fresh-Model).layout.groups|Where-Object active -eq 'sizes').Count){Invoke-Id 'panel-tab-sizes'}
+ $panel=@((Fresh-Model).panels|Where-Object id -eq 'sizes')[0]
+ if(!$panel -or !$panel.configuration_hint -or !@($panel.controls).Count){throw 'Brush size configuration metadata is missing'}
+ (Control 'panel-tab-sizes' -Arranged).SetFocus()
+ [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+ Invoke ($panel.configuration_title+[char]0x2026) -Name
+ Wait-Until {(Model).state.customization.expanded -eq 'sizes'} 'Native menu did not open Brush size configuration'
+ $configuration=Control 'panel-configuration-sizes' -Arranged
+ $hint=Control $panel.configuration_hint -Name -Within $configuration -Type ([System.Windows.Automation.ControlType]::Text) -Arranged
+ $hintIdentity=$hint.GetRuntimeId() -join ':'
+ $title=Control $panel.configuration_title -Name -Within $configuration -Type ([System.Windows.Automation.ControlType]::Text) -Arranged
+ $titleIdentity=$title.GetRuntimeId() -join ':'
+ $ids=@('panel-configuration-sizes')+@($panel.controls|ForEach-Object {'configure-show-'+$_.control})
+ $identities=Native-Identities $ids
+ $baseline=Fresh-Model;$document=$baseline.state.document_file|ConvertTo-Json -Depth 20 -Compress
+ $workspace=$baseline.state.workspace|ConvertTo-Json -Depth 80 -Compress
+ $brush=$baseline.state.brush|ConvertTo-Json -Depth 30 -Compress
+ $history=@($baseline.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress
+ $gpu=$baseline.windows_gpu_generation;$records=[Collections.Generic.List[object]]::new()
+ foreach($index in @($english,$japanese,$english)){
+  Use-Window $second;$choice=Language-Choice $index
+  Wait-Until {(Model $first).windows_active_tag -eq $choice.tag} 'Retained configuration did not adopt the selected language' 30
+  Use-Window $first;$view=Fresh-Model $first $choice.tag
+  $currentPanel=@($view.panels|Where-Object id -eq 'sizes')[0]
+  if(!$currentPanel -or $view.state.customization.expanded -ne 'sizes'){throw 'Language publication closed the retained configuration'}
+  Check-Identities $identities
+  Wait-Until {$hint.Current.Name -eq $currentPanel.configuration_hint -and $title.Current.Name -eq $currentPanel.configuration_title -and $configuration.Current.Name -eq $currentPanel.configuration_title} 'Retained configuration title or hint kept an earlier language' 15
+  if(($hint.GetRuntimeId() -join ':') -ne $hintIdentity -or ($title.GetRuntimeId() -join ':') -ne $titleIdentity){throw 'Language publication replaced configuration text controls'}
+  $scroll=Scroll-Pattern $configuration
+  if($scroll.Current.VerticallyScrollable){
+   $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,0)
+   Wait-Until {$scroll.Current.VerticalScrollPercent -le .01} 'Configuration did not scroll to its first control'
+  }
+  $captions=@(foreach($spec in $currentPanel.controls){
+   $id='configure-show-'+$spec.control;$checkbox=Control $id -Within $configuration
+   for($step=0;$step -lt 40;$step++){
+    $bounds=$checkbox.Current.BoundingRectangle;$clip=$configuration.Current.BoundingRectangle
+    if(!$checkbox.Current.IsOffscreen -and !$bounds.IsEmpty -and $clip.Contains($bounds)){break}
+    $beforeScroll=$scroll.Current.VerticalScrollPercent
+    $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,[System.Windows.Automation.ScrollAmount]::SmallIncrement)
+    Wait-Until {$scroll.Current.VerticalScrollPercent -gt $beforeScroll} "Configuration did not reveal $id"
+   }
+   $checkbox=Control $id -Within $configuration -Arranged
+   Wait-Until {$checkbox.Current.Name -eq $spec.label} "Retained configuration checkbox kept an earlier language: $id" 15
+   $checked=$checkbox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
+   if($checked -ne $spec.visible_in_panel){throw "Language publication changed configuration visibility: $id"}
+   if($spec.control -in @('brush_size','brush_opacity','brush_color')){
+    $body=Control ($(if($spec.control -eq 'brush_color'){'configure-control-brush_color'}else{'configure-'+$spec.control})) -Within $configuration
+    Wait-Until {$body.Current.Name.Contains($spec.label)} "Retained configuration control kept an earlier label: $($spec.control)" 15
+   }
+   @{id=$id;caption=$checkbox.Current.Name;runtime_id=($checkbox.GetRuntimeId() -join ':');checked=$checked}
+  })
+  if(($view.state.document_file|ConvertTo-Json -Depth 20 -Compress) -ne $document -or ($view.state.workspace|ConvertTo-Json -Depth 80 -Compress) -ne $workspace -or ($view.state.brush|ConvertTo-Json -Depth 30 -Compress) -ne $brush -or $view.windows_gpu_generation -ne $gpu -or (@($view.state.commands|Where-Object {$_.id -in @('undo','redo')}|Select-Object id,enabled)|ConvertTo-Json -Compress) -ne $history){throw 'Language publication changed configuration layout, brush, artwork, history or GPU ownership'}
+  $records.Add(@{tag=$choice.tag;title=$title.Current.Name;hint=$hint.Current.Name;title_runtime=$titleIdentity;hint_runtime=$hintIdentity;controls=$captions})
+  Capture-Window $first ('configuration-'+$records.Count+'-'+$choice.tag)
+ }
+ $records|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'configuration-captions.json')
+ (Control 'panel-tab-sizes').SetFocus();Key 27
+ Wait-Until {$null -eq (Model).state.customization.expanded -and !(Find 'panel-configuration-sizes')} 'Escape did not close the retained configuration'
+ Use-Window $second;Invoke 'CloseButton'
+ Wait-Until {!(Model).preferences} 'Preferences did not close after configuration localization'
+}
 try{
  Enter-CapyEnvironment
  $previousTextScale=Text-Scale
@@ -236,7 +307,13 @@ try{
  Menu-Command 'file' 'new_window'
  Wait-Until {@(Windows).Count -eq 2} 'Second window did not register' 45
  $second=@(Windows|Where-Object id -ne $first.id)[0];Ready $second
- if($HeaderOnly -and $BlendOnly){throw 'Choose one focused localization mode'}
+ if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if($ConfigurationOnly){
+  [CapyRowPointer]::Initialize([uint32]$review.Id)
+  Configuration-CaptionSurface
+  [pscustomobject]@{theme=$Theme;languages=@('en','ja','en');retained_configuration_title_hint_and_visibility_captions='passed';configuration_control_identity='passed';layout_brush_artwork_history_and_gpu='unchanged';evidence=$run}|ConvertTo-Json -Depth 6|Tee-Object -FilePath (Join-Path $run 'results.json')
+  $completed=$true;return
+ }
  if($GroupedToolsOnly){
   if($HeaderOnly -or $BlendOnly -or $NoticeOnly){throw 'Choose one focused localization mode'}
   [CapyRowPointer]::Initialize([uint32]$review.Id)

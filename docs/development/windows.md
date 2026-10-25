@@ -299,6 +299,11 @@ state. Run both themes. WinUI can omit separate text providers for boxed button
 content and collapsed choices; review the saved raw captures for caption fit and
 visible text instead of treating accessible names alone as visual proof.
 
+`-ConfigurationOnly` switches English, Japanese and English through another
+window's Preferences while Brush size configuration stays open. It checks
+retained hint, visibility and control captions, native identities and unchanged
+layout, brush, artwork, history and GPU ownership. Run both themes.
+
 Activating Preferences deliberately sends shared Blur, restoring the tool used
 before temporary eyedropping. The sampler journey checks that restoration, then
 reenters the picker and checks current captions and unchanged sample choices.

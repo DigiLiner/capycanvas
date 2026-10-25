@@ -75,11 +75,12 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
             auto layer=editing(data);double id=num(layer,L"id",-1);auto generation=epoch(data),key=generation+L":"+to_hstring(id);
             if(key!=state->key){
                 state->key=key;state->values.clear();
+                NumberPresentation presentation;presentation.title=[source=std::weak_ptr<WorkspaceData>(data)]{auto data=source.lock();return data?data->caption(L"layers",L"opacity"):hstring{};};
                 gate.Content(number(data,data->caption(L"layers",L"opacity"),object(data->catalog,L"layer_opacity"),
                     [data]{return num(editing(data),L"opacity",1);},
                     [data,generation,id](double value){if(epoch(data)==generation&&num(editing(data),L"id",-1)==id)
                         data->dispatchDocument(O({{L"type",S(L"set_layer_opacity")},{L"opacity",N(value)}}),generation);
-                    },state->values,nullptr,false,L"configure-layer-opacity"));
+                    },state->values,nullptr,false,L"configure-layer-opacity",false,presentation));
             }
             gate.IsEnabled(flag(object(object(data->state,L"layer_tools"),L"controls"),L"opacity"));
             for(auto const& bind:state->values)bind();
@@ -105,6 +106,7 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
         if(kind==L"brush_size"||kind==L"brush_opacity"){
             bool size=kind==L"brush_size";
             NumberPresentation presentation;presentation.reset=[data=data,size]{data->dispatch(O({{L"type",S(L"reset_tool_setting")},{L"id",S(size?L"size":L"opacity")}}));};
+            presentation.title=[weak=weak_from_this(),kind]{auto self=weak.lock();return self?str(find(array(self->panel,L"controls"),L"control",kind),L"label"):hstring{};};
             return number(data,labelText,object(data->catalog,size?L"brush_size":L"opacity"),
                 [data=data,size]{return num(object(data->state,L"brush"),size?L"diameter":L"opacity");},
                 [data=data,size](double value){data->dispatch(O({{L"type",S(size?L"set_brush_size":L"set_brush_opacity")},{L"value",N(value)}}));},
@@ -117,8 +119,8 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
             pick.VerticalContentAlignment(VerticalAlignment::Stretch);pick.Background(buttonBackground(data));
             pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
             Border swatch;swatch.CornerRadius({4,4,4,4});pick.Content(swatch);anchors.insert_or_assign(L"brush_color",pick);
-            AutomationProperties::SetAutomationId(pick,L"configure-brush-color");
-            bindings.emplace_back([data=data,swatch,key=std::make_shared<hstring>()]{
+            bindings.emplace_back([weak=weak_from_this(),data=data,pick,swatch,key=std::make_shared<hstring>()]{
+                if(auto self=weak.lock())AutomationProperties::SetName(pick,str(find(array(self->panel,L"controls"),L"control",L"brush_color"),L"label"));
                 auto paint=array(object(data->model,L"paint_pair"),L"rgba");
                 if(auto next=paint.Stringify();next!=*key){
                     *key=next;swatch.Background(fill(previewColor(paint)));
@@ -133,7 +135,10 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
                 auto pick=button(data,str(command,L"label"),[data=data,id]{data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(id)}}));});
                 pick.Width(34);pick.Height(34);pick.Content(icon(str(command,L"icon"),data->theme()));row.Children().Append(pick);
                 tooltip(pick,str(command,L"label"));
-                bindings.emplace_back([data=data,id,pick]{pick.IsEnabled(flag(find(array(data->state,L"commands"),L"id",id),L"enabled"));});
+                bindings.emplace_back([data=data,id,pick]{
+                    auto command=find(array(data->state,L"commands"),L"id",id);auto caption=str(command,L"label");
+                    if(AutomationProperties::GetName(pick)!=caption){AutomationProperties::SetName(pick,caption);tooltip(pick,caption);}
+                    pick.IsEnabled(flag(command,L"enabled"));});
             }
             return row;
         }
@@ -163,8 +168,10 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
                     {L"visible",B(checkbox.IsChecked()&&checkbox.IsChecked().Value())}}));
             }};
             visible.Checked(toggle);visible.Unchecked(toggle);
-            bindings.emplace_back([weak,visible,kind]{if(auto self=weak.lock())
-                visible.IsChecked(flag(find(array(self->panel,L"controls"),L"control",kind),L"visible_in_panel"));});
+            bindings.emplace_back([weak,visible,kind]{if(auto self=weak.lock()){
+                auto spec=find(array(self->panel,L"controls"),L"control",kind);auto caption=str(spec,L"label");
+                if(unbox_value<hstring>(visible.Content())!=caption)visible.Content(box_value(caption));
+                visible.IsChecked(flag(spec,L"visible_in_panel"));}});
             section.Children().Append(visible);
             auto body=control(kind,str(spec,L"label"));AutomationProperties::SetAutomationId(body,L"configure-control-"+kind);
             section.Children().Append(body);content.Children().Append(section);
@@ -212,6 +219,7 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
         auto key=O({{L"controls",keys},{L"options",options}}).Stringify();
         if(key!=structure){structure=key;build();}else menuModels=std::move(models);
         title.Text(str(panel,L"configuration_title"));AutomationProperties::SetName(root,title.Text());
+        hint.Text(str(panel,L"configuration_hint"));
         for(auto const& bind:bindings)bind();if(navigator)navigator->Apply(visible);
     }
 };
