@@ -155,6 +155,7 @@ fn chooser(d: &mut Driver, device: &str, name: &str, id: u32) {
         assert_eq!(Some(state(&d.w).brush.preset), target.preview, "{name}: sliding through a medium to a brush picks it");
     }
     assert!(find_id(d, id).unwrap().chooser.is_empty(), "{name}: picking closes the ring");
+    assert!(!find_id(d, id).unwrap().rings.is_empty(), "{name}: picking opens the selected brush's sliders");
 }
 
 fn layers_card(d: &mut Driver, device: &str, name: &str) {
@@ -630,6 +631,52 @@ fn pinch(d: &mut Driver, name: &str) {
     let moved = center(d, ring.id);
     assert!(moved[0] > c[0] + 15., "{name}: two fingers move the ring");
     capture(d, &format!("{name}-pinched"));
+}
+
+#[test]
+#[ignore = "private display: workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders"]
+fn native_bubble_chooser_sliders() {
+    let mut d = Driver::new("art.capycanvas.BubbleChooserSliders");
+    for theme in [Theme::Light, Theme::Dark] {
+        for device in ["mouse", "touch"] {
+            for material in [false, true] {
+                d.w.dispatch(UiAction::RestoreWorkspace {
+                    workspace: Box::new(WorkspaceState { layout: WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default() }),
+                });
+                d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+                d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::PointyPencil as u32 });
+                pump(300);
+                let grab = if material {
+                    BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group: ToolGroup::Pastel } }
+                } else {
+                    let id = state(&d.w).workspace.layout.header.entries().find_map(|entry| {
+                        (entry.item == HeaderItem::Tool { control: ToolbarControl::Command { command: CommandId::DrawingBrush } }).then_some(entry.id)
+                    }).unwrap();
+                    BubbleGrab::Header { id }
+                };
+                let spot = canvas_spot(&d, 0.45, 0.5);
+                let id = take(&mut d, grab, spot);
+                let at = center(&d, id);
+                tap(&mut d, device, at);
+                let pick = find_id(&d, id).unwrap().chooser.into_iter().find(|item| item.kind == ChooserKind::Brush && !item.selected).unwrap();
+                let at = item_point(&d, id, &pick);
+                tap(&mut d, device, at);
+                let name = format!("{theme:?}-{device}-{material}").to_lowercase();
+                let selected = find_id(&d, id).unwrap();
+                assert_eq!(Some(state(&d.w).brush.preset), pick.preview, "{name}: chooser picks its brush");
+                assert!(selected.chooser.is_empty() && !selected.rings.is_empty(), "{name}: chooser pick opens its sliders");
+                capture(&mut d, &format!("{name}-picked-settings"));
+                let ring = &selected.rings[0];
+                let value = |d: &Driver| state(&d.w).tool_settings.iter().find(|setting| setting.id == ring.setting).unwrap().value;
+                let before = value(&d);
+                let at = center(&d, id);
+                let arc = |f| { let point = ring.arc.point(f); [at[0] + point[0], at[1] + point[1]] };
+                let path = if ring.fill > 0.5 { [0.8, 0.5, 0.2] } else { [0.2, 0.5, 0.8] };
+                stroke(&mut d, device, &path.map(arc));
+                assert_ne!(value(&d), before, "{name}: the shown slider changes its setting");
+            }
+        }
+    }
 }
 
 #[test]

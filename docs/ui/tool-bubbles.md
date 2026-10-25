@@ -130,8 +130,9 @@ everything rests.
   the name, ellipsized only past 96 px) so it never covers a neighbour, and its
   brushes curve beside it as pills with their strokes, just past the name; when that side lacks
   room they open on the other side without the name's offset. Tapping a medium fans its brushes, even a single one; a press can slide through a medium
-  onto one of its brushes. Picking a brush or tool closes the chooser; letting go
-  on nothing keeps it. A medium bubble fans its own brushes. Near a window edge
+  onto one of its brushes. Picking a brush or tool closes the chooser and opens
+  its settings halo when it has sliders; letting go on nothing keeps the chooser.
+  A medium bubble fans its own brushes. Near a window edge
   the media gather on the open side, in a second arc when one doesn't hold them.
   Their layout uses the saved bubble position, so wall displacement cannot
   repeatedly switch the chooser between gathered and circular arrangements.
@@ -483,6 +484,9 @@ panels are absent from the dock.
 
 ## Validation
 
+- Chooser picks: `bash tools/performance/workspace-motion.sh gtk --native-test=native_bubble_chooser_sliders`
+  picks brushes from group and medium bubbles, then adjusts their newly shown
+  sliders with mouse and touch in both themes.
 - Shared: `cargo test --locked -p layer-ui bubble`, which covers geometry,
   pushing, tear-off and put back, tap states, halos, the chooser and its slides,
   beads, the card, stroke fading, menus, history and workspace round trips

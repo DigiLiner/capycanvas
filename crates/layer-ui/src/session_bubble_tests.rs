@@ -855,7 +855,51 @@ fn medium_bubbles_select_their_brushes_and_fan_only_them() {
     choose(&mut s, id, ContactPhase::Down, pick.center);
     choose(&mut s, id, ContactPhase::Up, pick.center);
     assert_eq!(Some(s.state.brush.preset), pick.preview);
-    assert!(!view(&s, id).open);
+    assert!(view(&s, id).chooser.is_empty() && !view(&s, id).rings.is_empty());
+}
+
+#[test]
+fn chooser_picks_open_the_selected_tool_halo_on_every_platform() {
+    for platform in Platform::ALL {
+        for source in [
+            BubbleSource::Medium { group: ToolGroup::Pastel },
+            BubbleSource::Control { control: ToolbarControl::ToolSlot { slot: ToolSlotId::Drawing } },
+            BubbleSource::Control { control: ToolbarControl::Command { command: CommandId::DrawingBrush } },
+        ] {
+            for same_tool in [false, true] {
+                let mut s = session(platform);
+                s.set_viewport(VIEW, [1200, 900]).unwrap();
+                s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::PointyPencil as u32 }).unwrap();
+                let id = match source {
+                    BubbleSource::Medium { group } => take(&mut s, BubbleGrab::Variant { variant: ToolVariant::BrushGroup { group } }, FAR),
+                    BubbleSource::Control { control } => take_control(&mut s, control, FAR),
+                };
+                open_ring(&mut s, id);
+                let pick = view(&s, id).chooser.into_iter().find(|item| matches!(item.kind, ChooserKind::Brush | ChooserKind::Tool) && item.selected == same_tool)
+                    .unwrap_or_else(|| panic!("{platform:?}/{source:?}/{same_tool}: chooser needs a matching tool"));
+                choose(&mut s, id, ContactPhase::Down, pick.center);
+                let change = act(&mut s, BubbleAction::Choose { id, phase: ContactPhase::Up, position: pick.center }).unwrap();
+                let selected = view(&s, id);
+                let defaults = tool_settings::ring_defaults(s.engine.configured_brush(), &s.state.tool_settings);
+                if let Some(brush) = pick.preview {
+                    assert_eq!(s.state.brush.preset, brush);
+                } else {
+                    assert_eq!(selected.label, pick.label);
+                }
+                assert!(selected.selected && selected.chooser.is_empty());
+                assert!(!defaults.is_empty());
+                assert_eq!(selected.rings.iter().map(|ring| ring.setting).collect::<Vec<_>>(), defaults, "{platform:?}/{source:?}/{same_tool}");
+                assert_ne!(change.regions & regions::BUBBLES, 0);
+                let ring = selected.rings[0].clone();
+                for phase in [ContactPhase::Down, ContactPhase::Up] {
+                    act(&mut s, BubbleAction::Ring { id, phase, position: ring.arc.point(0.7) }).unwrap();
+                }
+                assert!(!view(&s, id).rings.is_empty());
+                s.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 }).unwrap();
+                assert!(view(&s, id).rings.is_empty());
+            }
+        }
+    }
 }
 
 #[test]

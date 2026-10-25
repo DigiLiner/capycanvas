@@ -909,6 +909,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     self.bubble_state.chooser = None;
                     let mut change = self.dispatch(self.variant_action(variant))?;
                     self.remember_tool_slots();
+                    if !self.halo_settings().is_empty() {
+                        self.set_halo(Some(id));
+                    }
                     change.regions |= regions::BUBBLES;
                     Ok(change)
                 }
