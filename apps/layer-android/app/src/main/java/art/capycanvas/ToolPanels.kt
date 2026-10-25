@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,11 +85,15 @@ import kotlinx.coroutines.withContext
     val label = item.getString("label")
     val action = item.getJSONObject("action")
     val enabled = item.optBoolean("enabled", true)
+    val reason = item.nullableString("disabled_reason")
     val preview = item.opt("preview").takeIf { it is Number } as? Number
-    ActionTip(host, label, action, modifier.bubbleChoice(action)) {
+    var reveal by remember { mutableIntStateOf(0) }
+    val row = @Composable {
         Column(Modifier.fillMaxWidth().clip(ControlShape).alpha(if (enabled) 1f else .4f)
             .background(if (item.optBoolean("selected")) colors.active else Color.Transparent)
-            .clickable(enabled = enabled) { host.dispatch(action) }.padding(horizontal = 6.dp, vertical = 3.dp)) {
+            .clickable(enabled = enabled || reason != null) { if (enabled) host.dispatch(action) else reveal++ }
+            .semantics { if (!enabled) disabled() }
+            .alpha(if (enabled && reason != null) .4f else 1f).padding(horizontal = 6.dp, vertical = 3.dp)) {
             if (preview != null) {
                 BrushPreview(host, preview.toInt(), Modifier.fillMaxWidth().height(40.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -101,6 +107,8 @@ import kotlinx.coroutines.withContext
             }
         }
     }
+    if (reason == null) ActionTip(host, label, action, modifier.bubbleChoice(action), row)
+    else HoverTip(reason, modifier.bubbleChoice(action), reveal = reveal, content = row)
 }
 
 @Composable internal fun ToolSettingsControls(host: CanvasHost, state: JSONObject) {

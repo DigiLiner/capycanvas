@@ -287,8 +287,8 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
 }
 
 /** A disabled captioned action shows its published reason on tap, hold or hover. */
-@Composable private fun ToolOptionAction(command: JSONObject, checkable: Boolean, iconSize: Int, caption: String?, accent: Boolean,
-    prefix: String, invoke: (String) -> Unit) {
+@Composable internal fun ToolOptionAction(command: JSONObject, checkable: Boolean, iconSize: Int, caption: String?, accent: Boolean,
+    prefix: String, focusable: Boolean = caption == null, invoke: (String) -> Unit) {
     val colors = LocalPalette.current
     val id = command.getString("id")
     val enabled = command.getBoolean("enabled")
@@ -310,7 +310,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
         Row(Modifier.fillMaxSize().testTag("$prefix-action-$id").clip(if (caption.isNullOrEmpty()) TileShape else ControlShape)
             .background(when { accent && enabled -> colors.accent; checkable && command.getBoolean("selected") -> colors.active; else -> Color.Transparent })
             .alpha(if (enabled || caption == null) 1f else .4f)
-            .then(if (caption == null) Modifier else Modifier.focusProperties { canFocus = false })
+            .then(if (focusable) Modifier else Modifier.focusProperties { canFocus = false })
             .combinedClickable(enabled = enabled || explained, role = Role.Button, onClickLabel = command.getString("label"),
                 onLongClick = if (explained) {{ reveal++ }} else null) { if (enabled) invoke(id) else reveal++ }
             .semantics {
@@ -451,7 +451,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
                 Row {
                     cells.forEachIndexed { column, item ->
                         val selected = item.getBoolean("selected")
-                        HoverTip(item.getString("label"), Modifier.size(18.dp)) {
+                        HoverTip(item.nullableString("disabled_reason") ?: item.getString("label"), Modifier.size(18.dp)) {
                             Box(Modifier.fillMaxSize().testTag("$prefix-segment-$id-${row * columns + column}")
                                 .background(if (selected) colors.active else Color.Transparent)
                                 .selectable(selected, role = Role.RadioButton) { edit(item.getJSONObject("action")) }, contentAlignment = Alignment.Center) {
@@ -470,7 +470,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
         val density = LocalDensity.current.density
         fun weight(item: JSONObject) = if (captions) segmentWidth(item.getString("label")) { measurer.measure(it, textStyle).size.width / density } else 1f
         val segment: @Composable (JSONObject, Int, Modifier) -> Unit = { item, index, modifier ->
-            HoverTip(item.getString("label"), modifier) {
+            HoverTip(item.nullableString("disabled_reason") ?: item.getString("label"), modifier) {
             Row(Modifier.fillMaxSize().testTag(if(prefix=="tool" && id=="selection-mode") "tool-action-${item.getJSONObject("action").getString("command")}" else "$prefix-segment-$id-$index").background(if (item.getBoolean("selected")) colors.active else colors.input)
                 .then(if (captions) Modifier.focusProperties { canFocus = false } else Modifier)
                 .selectable(item.getBoolean("selected"), role = Role.RadioButton) { edit(item.getJSONObject("action")) },

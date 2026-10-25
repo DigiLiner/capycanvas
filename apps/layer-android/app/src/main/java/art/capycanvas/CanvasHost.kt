@@ -32,6 +32,7 @@ internal fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { ge
 internal fun JSONArray.values(): List<Any> = (0 until length()).map { get(it) }
 internal fun JSONObject.array(key: String) = optJSONArray(key) ?: JSONArray()
 internal fun JSONObject.objectOrNull(key: String) = optJSONObject(key)
+internal fun JSONObject.nullableString(key: String) = if (isNull(key)) null else optString(key)
 internal fun JSONObject.number(key: String, default: Double = 0.0) = optDouble(key, default).toFloat()
 internal fun JSONObject.copy() = JSONObject().also { copy -> keys().forEach { copy.put(it, opt(it)) } }
 
@@ -495,7 +496,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             noticeName = notice.getString("name")
             CanvasNotice(id, noticeName, notice.getString("text"), (0 until (actions?.length() ?: 0)).map { index ->
                 val action = actions!!.getJSONObject(index)
-                CanvasNoticeAction(action.getString("id"), action.getString("label"), action.getBoolean("enabled"), action.optString("reason").takeUnless { action.isNull("reason") })
+                CanvasNoticeAction(action.getString("id"), action.getString("label"), action.getBoolean("enabled"), action.optBoolean("accent"), action.nullableString("reason"))
             })
         }
             ?: notice?.takeIf { it.id == null }

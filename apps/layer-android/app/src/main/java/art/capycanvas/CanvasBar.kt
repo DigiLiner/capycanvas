@@ -29,11 +29,11 @@ import org.json.JSONObject
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-private const val LabelStart = 12f
-private const val LabelEnd = 8f
+internal const val LabelStart = 12f
+internal const val LabelEnd = 8f
 private val BarItemStyle = obj("sliders" to false, "text" to true)
 
-private val BarElevation = 6.dp
+internal val BarElevation = 6.dp
 private val BarShadowMargin = BarElevation * PanelShadowReach
 
 private class BarFrame {

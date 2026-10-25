@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
@@ -55,17 +57,20 @@ import kotlin.math.roundToInt
                 val activation=pickerClick(host,tile.getJSONObject("resolved_control"),anchor) {
                     host.dispatch(obj("type" to "activate_tile","panel" to panel.getString("id"),"tile" to tile.getInt("id")))
                 }
-                HoverTip(tile.getString("tooltip"), modifier) {
+                val enabled = tile.getBoolean("enabled")
+                val reason = tile.nullableString("disabled_reason")
+                var reveal by remember { mutableIntStateOf(0) }
+                HoverTip(reason ?: tile.getString("tooltip"), modifier, reveal = reveal) {
                 Box(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxSize().clip(shape).alpha(if (tile.getBoolean("enabled")) 1f else .4f)
+                Row(Modifier.fillMaxSize().clip(shape).alpha(if (enabled) 1f else .4f)
                     .background(when {
                         tile.optBoolean("selected") -> colors.active
                         else -> Color.Transparent
                     })
-                    .then(activation.modifier).combinedClickable(enabled = tile.getBoolean("enabled"),
-                        onDoubleClick = if (tile.optBoolean("double_click")) ({ host.dispatch(obj("type" to "double_click_tool", "control" to tile.getJSONObject("resolved_control"))) }) else null,
-                        onLongClick = { dock.holdContext(obj("kind" to "tile", "panel" to panel.getString("id"), "tile" to tile.getInt("id"))) },
-                        onClick = activation.click),
+                    .then(activation.modifier).combinedClickable(enabled = enabled || reason != null,
+                        onDoubleClick = if (enabled && tile.optBoolean("double_click")) ({ host.dispatch(obj("type" to "double_click_tool", "control" to tile.getJSONObject("resolved_control"))) }) else null,
+                        onLongClick = if (enabled) {{ dock.holdContext(obj("kind" to "tile", "panel" to panel.getString("id"), "tile" to tile.getInt("id"))) }} else {{ reveal += 1 }},
+                        onClick = if (enabled) activation.click else {{ reveal += 1 }}).semantics { if (!enabled) disabled() },
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     Box(if (labelLines > 0) Modifier.width(36.dp) else Modifier, contentAlignment = Alignment.Center) {
                         val glyph = Modifier.size(geometry.getInt("tile_icon_size").dp).testTag("tile-icon-${panel.getString("id")}-${tile.getInt("id")}")

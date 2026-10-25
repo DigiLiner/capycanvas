@@ -55,8 +55,6 @@ internal fun searchChord(event: android.view.KeyEvent): JSONObject? {
     return obj("key" to name, "command" to (event.isCtrlPressed || event.isMetaPressed), "shift" to event.isShiftPressed, "alt" to event.isAltPressed)
 }
 
-private fun JSONObject.nullableString(key: String) = if (isNull(key)) null else optString(key)
-
 private fun subtitle(row: JSONObject): String =
     listOf(row.optString("detail"), row.optString("scope_caption")).filter { it.isNotEmpty() }.joinToString(" · ")
 

@@ -512,6 +512,19 @@ class AndroidVectorLayerTest {
             if (b.left < bounds.left - 1 || b.top < bounds.top - 1 || b.right > bounds.right + 1 || b.bottom > bounds.bottom + 1) findings.add("$place: $tagOrLabel at $b leaves $name at $bounds")
         }
     }
+    private fun noticeShape(place: String, findings: MutableList<String>) {
+        val dp = compose.activity.resources.displayMetrics.density
+        fun box(tag: String) = compose.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInWindow
+        val bubble = box("canvas-notice") ?: run { findings.add("$place: no notice shows"); return }
+        val text = box("canvas-notice-text")!!
+        val actions = state().getJSONObject("notice").getJSONArray("actions").objects().mapNotNull { box("canvas-notice-action-${it.getString("id")}") }
+        val beside = actions.all { it.top < text.bottom }
+        if (beside && kotlin.math.abs(bubble.height - 36 * dp) > 1) findings.add("$place: a one-row notice is ${bubble.height / dp} dp tall, not the bar's 36")
+        for (action in actions) if (kotlin.math.abs(action.height - 26 * dp) > 1) findings.add("$place: an action is ${action.height / dp} dp tall, not the bar's 26")
+        if (!beside && actions.any { it.top < text.bottom }) findings.add("$place: stacked actions overlap the text")
+        if (!beside && kotlin.math.abs(bubble.right - actions.maxOf { it.right } - 5 * dp) > 1) findings.add("$place: stacked actions end ${(bubble.right - actions.maxOf { it.right }) / dp} dp from the right edge")
+    }
+    private fun tooltipSays(text: String) = findTag("hover-tooltip") != null && findNode(hasLabel(text)) != null
     private fun reveal(tag: String) {
         runCatching { compose.onAllNodesWithTag(tag, useUnmergedTree = true).onFirst().performScrollTo() }
         compose.waitForIdle()
@@ -635,6 +648,7 @@ class AndroidVectorLayerTest {
                     awaitState("$place-de-notice") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.length() == 3 }
                     fits("canvas-notice", true, "$place notice", findings)
                     for (id in listOf("use_vector_pen", "new_paint_layer", "rasterize_layer")) fits("canvas-notice-action-$id", true, "$place notice", findings, "canvas-notice")
+                    noticeShape("$place", findings)
                     screenshot("vector-edges-$theme-$orientation-$workspace-de-notice.png")
                     compose.waitUntil(15_000) { state().isNull("notice") }
                 }
@@ -672,6 +686,58 @@ class AndroidVectorLayerTest {
             }
         }
         compose.waitForIdle()
+    }
+
+    @Test fun vectorSketchExplainsDimmedToolsAndNoticesKeepTheBarShape() {
+        val findings = mutableListOf<String>()
+        val rough = "Rough G-Pen"
+        try {
+            switchWorkspace("painter")
+            for (theme in listOf("light", "dark")) {
+                freshVector(theme)
+                val row = state().getJSONObject("tool_set").getJSONArray("subtools").objects().first { it.getString("label") == rough }
+                val reason = row.optString("disabled_reason")
+                if (!row.getBoolean("enabled") || reason.isEmpty()) findings.add("$theme: $rough is not dimmed and choosable: $row")
+                fromDrawer("command", "drawing_brush", { compose.onAllNodesWithTag("subtool-$rough").fetchSemanticsNodes().isNotEmpty() }) {
+                    reveal("subtool-$rough")
+                    compose.onNodeWithTag("subtool-$rough").performMouseInput { moveTo(center) }
+                    try { compose.waitUntil(5_000) { tooltipSays(reason) } } catch (_: Throwable) { findings.add("$theme: hovering $rough does not say $reason") }
+                    screenshot("vector-sketch-$theme-dimmed-pen.png")
+                    compose.onNodeWithTag("subtool-$rough").performMouseInput { exit() }
+                    tapTag("subtool-$rough")
+                    awaitState("$theme-dimmed-pen-explains") { s -> s.getJSONObject("brush").getLong("preset") == brushId(rough)
+                        && s.optJSONObject("notice")?.getJSONArray("actions")?.objects()?.firstOrNull()?.let { it.getString("id") == "use_vector_pen" && it.getBoolean("accent") } == true }
+                    compose.waitForIdle()
+                    noticeShape("$theme dimmed $rough", findings)
+                    screenshot("vector-sketch-$theme-dimmed-pen-notice.png")
+                }
+                noticeAction("use_vector_pen")
+                awaitState("$theme-use-g-pen") { it.getJSONObject("brush").getLong("preset") == brushId("G-Pen") }
+
+                if (theme == "dark") {
+                    device.portrait(compose.activityRule.scenario); host.awaitReady(compose = compose); compose.waitForIdle(); fitPaper()
+                    action(obj("type" to "layer", "action" to obj("op" to "rename", "id" to selectedLayer(), "name" to "Inked outlines for the second chapter cover, final pass")))
+                }
+                tool(obj("region" to obj("fill" to true, "source" to "visible")))
+                tap(onPaper(Offset(.2f, .85f)))
+                awaitState("$theme-filled-below") { s -> s.optJSONObject("notice")?.getJSONArray("actions")?.objects()?.map { it.getString("id") } == listOf("back_to_layer") }
+                compose.waitForIdle()
+                noticeShape("$theme fill below", findings)
+                screenshot("vector-sketch-$theme-fill-notice.png")
+                noticeAction("back_to_layer")
+                awaitState("$theme-back-to-vector") { vectorSelected() }
+
+                val vector = selectedLayer()
+                action(obj("type" to "layer", "action" to obj("op" to "lock", "id" to vector, "value" to true)))
+                val locked = state().getJSONArray("commands").objects().first { it.getString("id") == "scale_rotate" }.optString("disabled_reason")
+                val scaleRotate = headerTool("command", "scale_rotate").replace("header-item-", "header-control-")
+                tapTag(scaleRotate)
+                try { compose.waitUntil(5_000) { tooltipSays(locked) } } catch (_: Throwable) { findings.add("$theme: tapping greyed Scale/rotate does not say \"$locked\"") }
+                screenshot("vector-sketch-$theme-locked-scale-rotate.png")
+                action(obj("type" to "layer", "action" to obj("op" to "lock", "id" to vector, "value" to false)))
+            }
+        } finally { runCatching { action(obj("type" to "set_theme", "theme" to "light")) } }
+        assertTrue("findings:\n${findings.joinToString("\n")}", findings.isEmpty())
     }
 
     @Test fun vectorEdgeRowsFilesAndRecreate() {

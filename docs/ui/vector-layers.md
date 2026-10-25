@@ -446,7 +446,10 @@ undoes a G-Pen line with stylus events in both themes and checks the screen, and
 `vectorToolsDrawEditRestyleScaleAndErase` walks the same tools as
 `native_vector_tools`, and `vectorMilestoneDiscoverColorEraseAndMerge` walks the
 footer button, the refusal actions, coloring, Erase up to intersection and the
-merge notice ([Android](../development/android.md#device-tests)). On
+merge notice, and `vectorSketchExplainsDimmedToolsAndNoticesKeepTheBarShape`
+chooses a dimmed pen in Sketch, follows the Fill notice and a locked layer's
+greyed Scale/rotate, and checks each notice's bar shape in both themes
+([Android](../development/android.md#device-tests)). On
 Web, `tools/performance/workspace-motion.sh web --vector-tools` walks them with
 pen events in both themes and checks presented pixels, and `--vector-milestone`
 walks the same discovery, coloring, erasing and merge steps as Android, plus

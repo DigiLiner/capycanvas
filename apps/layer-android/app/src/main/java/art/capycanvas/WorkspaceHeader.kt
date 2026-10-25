@@ -355,7 +355,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
                 kind == "space" -> if (editing) Text("·", color = colors.secondary)
                 else -> HeaderButton(label, spec.optBoolean("selected"), !editing && spec.optBoolean("enabled"), open,
                     Modifier.fillMaxSize().testTag(if (kind == "menu_labels") "header-menu-labels-compact" else "header-control-$id"),
-                    inBar = inBar,
+                    inBar = inBar, reason = spec.nullableString("disabled_reason").takeUnless { editing },
                     onDoubleClick = if (spec.optBoolean("double_click")) ({ host.dispatch(obj("type" to "double_click_tool", "control" to spec.getJSONObject("resolved_control"))) }) else null,
                     onClick = {
                         when (kind) {
@@ -388,14 +388,17 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
 /** Active tools stay blue through hover/press; actions use neutral feedback. */
 @Composable internal fun HeaderButton(label: String, selected: Boolean, enabled: Boolean, open: Boolean,
     modifier: Modifier, fillWidth: Boolean = true, surface: Boolean = true, shape: Shape = drawerButtonShape(if (open) "bottom" else null),
-    inBar: Boolean = false, active: Boolean = true, onDoubleClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
+    inBar: Boolean = false, active: Boolean = true, reason: String? = null, onDoubleClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
     val colors = LocalPalette.current
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
+    var reveal by remember { mutableIntStateOf(0) }
+    val explained = !enabled && reason != null
     val click = Modifier.hoverable(interaction).combinedClickable(interactionSource = interaction, indication = rememberChromeFocusIndication(),
-        enabled = enabled, role = Role.Button, onClickLabel = label, onDoubleClick = onDoubleClick, onLongClick = onLongClick, onClick = onClick)
-    HoverTip(label, modifier) {
+        enabled = enabled || explained, role = Role.Button, onClickLabel = label, onDoubleClick = onDoubleClick.takeIf { enabled },
+        onLongClick = if (explained) {{ reveal += 1 }} else onLongClick, onClick = if (enabled) onClick else {{ reveal += 1 }}).semantics { if (!enabled) disabled() }
+    HoverTip(reason.takeIf { explained } ?: label, modifier, reveal = reveal) {
     Box((if (fillWidth) Modifier.fillMaxSize() else Modifier.fillMaxHeight()).clip(shape)
         .then(if (surface && !inBar) Modifier.glass(shape, colors.headerSurface, active = active) else Modifier).background(when {
         selected -> colors.headerActive
