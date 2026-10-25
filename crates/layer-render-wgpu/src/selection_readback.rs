@@ -21,7 +21,6 @@ pub(super) fn capture_selection<T: Send + 'static>(
                 |offset: usize| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
             let count =
                 extent[0].div_ceil(if byte_coverage { 4 } else { 8 }) as usize * extent[1] as usize;
-            let memory=layer_core::memory::images().reserve_payload(count*4).map_err(|error|GpuRasterError::MapFailed(error.to_string()))?;
             // One bulk copy into immutable history. A per-word iterator
             // also builds an intermediate Vec and performs slow scalar
             // reads from mapped device memory on mobile GPUs.
@@ -43,7 +42,6 @@ pub(super) fn capture_selection<T: Send + 'static>(
                     words.assume_init()
                 }
             };
-            let words=memory.retain(words).map_err(|error|GpuRasterError::MapFailed(error.to_string()))?;
             let bounds = if read(coverage_size as usize + 16) == 0 {
                 [0; 4]
             } else {

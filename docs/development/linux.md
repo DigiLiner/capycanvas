@@ -2,8 +2,8 @@
 
 [Developer guide](README.md)
 
-External photo import requires an enabled Landlock LSM (Linux 5.13 or newer),
-seccomp and `/proc`. Missing confinement refuses that import. The GTK package
+External photo import requires seccomp and `/proc`. Missing confinement refuses
+that import. The GTK package
 ships `capy-photo-reader` beside the application; `run.sh` builds it automatically.
 When copying a native test executable to private scratch, copy the helper beside
 it too. `cargo test -p layer-linux` builds the integration-test helper; a standalone
@@ -352,7 +352,7 @@ paste and retained save/history in the requested fixture theme.
 
 `native_tiff_open_import_and_paste` uses `LAYER_RASTER_FIXTURES` containing the
 independent libtiff reference set. It covers CMYK/RGB edge tiles, straight RGBA
-and gray alpha strips, and WhiteIsZero through the same native journeys.
+strips and WhiteIsZero through the same native journeys.
 
 `native_heif_avif_open_import_and_paste` embeds the committed synthetic HEIC,
 P3 AVIF and ICC AVIF fixtures. It needs no `LAYER_RASTER_FIXTURES` directory and

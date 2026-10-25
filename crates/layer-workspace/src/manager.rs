@@ -160,7 +160,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
     pub fn editing(&self) -> Option<Box<layer_ui::EditingState>> { self.state.borrow().editing.clone() }
     pub async fn load_editing(&self) -> Result<()> {
         if let StoreResponse::Editing(json) = self.execute(StoreRequest::Editing).await? {
-            let editing: Option<Box<layer_ui::EditingState>> = json.map(|json| crate::input::stored_json(&json)).transpose()?;
+            let editing: Option<Box<layer_ui::EditingState>> = json.map(|json| serde_json::from_str(&json)).transpose()?;
             if let Some(editing) = &editing { editing.validate().map_err(StoreError::workspace)?; }
             let mut state = self.state.borrow_mut();
             state.saved_editing = editing.clone();

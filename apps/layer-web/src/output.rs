@@ -8,8 +8,6 @@ use layer_ui::{ExportFormat, ExportRecipe};
 use std::io::{Seek, SeekFrom, Write};
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
 
-type EncodedRows<'a> = dyn FnMut(u32, &mut [u8]) -> Result<(), String> + 'a;
-
 #[wasm_bindgen]
 pub struct WebCaptureControl {
     pub(super) inner: CaptureControl,
@@ -374,7 +372,7 @@ pub async fn raster_worker_output(
                     return Err("Incomplete output source row".into());
                 }
                 data.copy_to(&mut bytes);
-                for (pixel, source) in pixels.iter_mut().zip(bytes.as_chunks::<16>().0) {
+                for (pixel, source) in pixels.iter_mut().zip(bytes.chunks_exact(16)) {
                     *pixel = std::array::from_fn(|c| {
                         f32::from_le_bytes(source[c * 4..c * 4 + 4].try_into().unwrap())
                     });
@@ -407,7 +405,9 @@ pub async fn raster_worker_output(
                 empty.into()
             }
         };
-        js_sys::Reflect::set(&result, &js("png"), &js_sys::Uint8Array::from(png.as_slice()))?;
+        let buffers: js_sys::Array = js_sys::Reflect::get(&result, &js("buffers"))?.dyn_into()?;
+        js_sys::Reflect::set(&result, &js("png"), &JsValue::from(buffers.length()))?;
+        buffers.push(&js_sys::Uint8Array::from(png.as_slice()));
         return Ok(result);
     }
     let before = if metadata.preview && metadata.rendition.is_some() {
@@ -482,7 +482,7 @@ pub async fn raster_worker_output(
             for (i,p) in pixels.iter_mut().enumerate() {
                 let rgb=layer_core::color::rgb::apply(to_working,[p[0],p[1],p[2]].map(f64::from));
                 p[..3].copy_from_slice(&rgb.map(|v|v as f32));
-                *p=mapper.map_local_premultiplied(*p,std::array::from_fn(|c| (if c==0 { i as u32%size[0] } else { i as u32/size[0] }) as f32 * metadata.extent[c] as f32/size[c] as f32 + 0.5*metadata.extent[c] as f32/size[c] as f32),guide);
+                *p=mapper.map_local_premultiplied(*p,std::array::from_fn(|c| (if c==0 { i as u32%size[0] } else { i as u32/size[0] }) as f32 * metadata.extent[c] as f32/size[c] as f32 + 0.5*metadata.extent[c] as f32/size[c] as f32),&guide);
             }
             (Some(layer_render_wgpu::snapshot::SnapshotPreview {extent:size,pixels,space:layer_core::color::RgbSpace::Srgb}),stats)
         } else {
@@ -494,7 +494,7 @@ pub async fn raster_worker_output(
     }
     let mut preview = None;
     let mut flattened = None;
-    let write = |extent, target: &_, rows: &mut EncodedRows<'_>| {
+    let write = |extent, target: &_, rows: &mut dyn FnMut(u32, &mut [u8]) -> Result<(), String>| {
         if let Some(color) = metadata.flatten {
             flattened = Some(layer_color::flattened_document(
                 extent,

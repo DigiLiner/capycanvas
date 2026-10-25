@@ -107,7 +107,7 @@ fn native_jpeg_open_import_and_paste() {
 fn native_tiff_open_import_and_paste() {
     native_raster_open_import_and_paste(&external_raster_fixtures(), &[("libtiff-cmyk-tiles-tables3.tiff", "image/tiff"),
         ("libtiff-rgb-tiles-tables0.tiff", "image/tiff"), ("libtiff-rgba-strips-tables3.tiff", "image/tiff"),
-        ("libtiff-la-strips-tables0.tiff", "image/tiff"), ("libtiff-l-white-tiles-tables3.tiff", "image/tiff")]);
+        ("libtiff-l-white-tiles-tables3.tiff", "image/tiff")]);
 }
 
 #[test]

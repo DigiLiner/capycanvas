@@ -166,11 +166,10 @@ impl SourceImage {
 pub struct SourceRows<'a> {
     source: &'a SourceImage,
     band: u32,
-    tiles: Vec<crate::memory::DecodedBytes>,
+    tiles: Vec<Vec<u8>>,
 }
 impl SourceRows<'_> {
     pub fn read(&mut self, y: u32, output: &mut [u8]) -> Result<(), String> {
-    crate::memory::with_input(|| {
         if y >= self.source.extent[1] || output.len() != self.source.row_bytes() {
             return Err("Invalid source row".into());
         }
@@ -197,8 +196,7 @@ impl SourceRows<'_> {
             pixels.copy_from_slice(&tile[tile_row..tile_row + pixels.len()]);
         }
         Ok(())
-        })
-}
+    }
 }
 
 /// Straight 8-bit RGBA codes in the default profile, one `pixel(x, y)` per sample.
@@ -231,7 +229,6 @@ pub struct SourceBuilder {
     band: Vec<u8>,
     retained_bytes: usize,
     max_bytes: usize,
-    _memory:crate::memory::Reservation<'static>,
 }
 impl SourceBuilder {
     pub fn new(
@@ -239,16 +236,12 @@ impl SourceBuilder {
         interpretation: SourceInterpretation,
         max_bytes: usize,
     ) -> Result<Self, String> {
-    crate::memory::with_input(|| {
         if extent.contains(&0) || extent.iter().any(|v| *v > 32768) {
             return Err("Unsupported source dimensions".into());
         }
         let row = extent[0] as usize * interpretation.pixel_bytes();
-        if let ColorProfile::Icc(bytes)=&interpretation.profile {crate::memory::images().track(bytes.storage())?;}
-        let bytes=row.checked_mul(extent[1].min(TILE_SIZE) as usize).ok_or("Source row-band size overflow")?;
-        let memory=crate::memory::images().reserve(bytes)?;
         let mut band = Vec::new();
-        band.try_reserve_exact(bytes)
+        band.try_reserve_exact(row * TILE_SIZE as usize)
             .map_err(|_| "Source row-band allocation failed")?;
         Ok(Self {
             image: SourceImage {
@@ -261,10 +254,8 @@ impl SourceBuilder {
             band,
             retained_bytes: 0,
             max_bytes,
-            _memory:memory,
         })
-        })
-}
+    }
     pub fn push_row(&mut self, bytes: &[u8]) -> Result<(), String> {
         if self.next_y >= self.image.extent[1] || bytes.len() != self.image.row_bytes() {
             return Err("Invalid decoded source row".into());
@@ -277,12 +268,9 @@ impl SourceBuilder {
         Ok(())
     }
     fn flush(&mut self) -> Result<(), String> {
-    crate::memory::with_input(|| {
         let bpp = self.image.interpretation.pixel_bytes();
         let descriptor = self.image.interpretation.descriptor();
-        let bytes=TILE_SIZE as usize*TILE_SIZE as usize*bpp;
-        let _memory=crate::memory::images().reserve(bytes)?;
-        let mut tile=Vec::new();tile.try_reserve_exact(bytes).map_err(|_|"Source tile allocation failed")?;tile.resize(bytes,0);
+        let mut tile = vec![0; TILE_SIZE as usize * TILE_SIZE as usize * bpp];
         for x in 0..self.image.extent[0].div_ceil(TILE_SIZE) {
             tile.fill(0);
             let offset = x as usize * TILE_SIZE as usize * bpp;
@@ -302,8 +290,7 @@ impl SourceBuilder {
         }
         self.band.clear();
         Ok(())
-        })
-}
+    }
     pub fn finish(self) -> Result<SourceImage, String> {
         if self.next_y != self.image.extent[1] {
             return Err("Source decoding is incomplete".into());
@@ -359,7 +346,7 @@ mod tests {
         struct MissingChunk { len: usize, reads: AtomicUsize }
         impl TileChunk for MissingChunk {
             fn len(&self) -> usize { self.len }
-            fn poll(&self) -> Result<Option<Arc<[u8]>>, crate::raster::TileError> { self.reads.fetch_add(1, Ordering::Relaxed); Err("Unavailable parked tile".into()) }
+            fn poll(&self) -> Result<Option<Arc<[u8]>>, String> { self.reads.fetch_add(1, Ordering::Relaxed); Err("Unavailable parked tile".into()) }
             fn resident_bytes(&self) -> usize { 0 }
             fn evict(&self) {}
         }

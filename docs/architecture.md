@@ -37,54 +37,13 @@ its original bytes and any independently verified preview. See the
 [authored model](reference/authored-model.md) and
 [package contract](reference/capy-package.md).
 
-Photo, native-package and stored-paper decoders share two active execution slots
-per process. Native file workers wait before decoding and check a caller's
-cancellation flag while waiting; stored-paper reads have no cancellation argument.
-Browser worker heaps have independent counters and also need controller admission.
-An execution slot ends when decoding stops. It does not reserve memory for the
-returned document, profile choices, clipboard, history or GPU resources.
-
-`layer-core::memory` separately accounts retained image payloads and instrumented
-decode/preparation scratch. Native capacity is half the initial available process
-headroom, capped at 4 GiB; an unavailable headroom query uses 256 MiB. Input work
-may occupy three quarters of that capacity, leaving the rest for live canvas
-preparation. JPEG reserves retained input and parser scratch before reading,
-then adds the header-derived decoder estimate and retained gain-map base before
-pixel allocation. Other photo decoders reserve twice their admitted codec
-allowance, capped at one eighth of the pool. Source admission is capped at one
-quarter. The browser controller admits at most two concurrent
-input decoders across its workers; each Wasm instance has its own address-space
-ceiling rather than a measured process-memory budget.
-
-Reservations follow decoded buffers through row caches and pending uploads.
-Immutable byte, word and text Arcs register their actual allocation once, so
-document, clipboard and history aliases share one charge. The ledger's private
-Weak owner pins that allocation until the last strong alias disappears and
-collection releases it. Published payloads must remain immutable: do not use
-`Arc::make_mut`, consume their storage, or create raw-payload Weak aliases.
-Uninitialized transfer/readback buffers register only after complete validation
-and initialization. The disposable decoded sample cache is shared across native
-windows, bounded separately, and evicted before refusing work under pressure.
-Owner retirement advances the preparation retry generation after payload fields
-drop; the worker reclaims dead ledger entries before admitting the next allocation.
-The render owner reads that generation without scanning owners or querying memory.
-Native preparation under memory pressure registers a shared collector that scans
-on a worker every 250 ms while watched and sleeps when no work is parked. This
-also catches a raw Arc alias released after its enclosing owner's notification.
-Existing host service ticks wake preparation after a generation change. Decode
-results retain their attempt generation, excluding their own temporary cleanup;
-asynchronous attempts count releases within each poll and final future cleanup,
-so releases by other tasks between polls remain retry signals.
-Interactive exact image preparation also decodes parked samples on workers.
-Native image, raster and coordinate preparation shares one bounded pool across
-windows and renderers: at most three workers and eighteen queued jobs. Dropping
-a queue invalidates its queued jobs and discards any result already in progress;
-workers finish at most the pool's active jobs. Each queue retains its existing
+Interactive exact image preparation decodes parked samples on workers. Native
+image, raster and coordinate preparation shares one bounded pool across windows
+and renderers: at most three workers and eighteen queued jobs. Dropping a queue
+invalidates its queued jobs and discards any result already in progress; workers
+finish at most the pool's active jobs. Each queue retains its existing
 outstanding/result limit and ordered receipt allowance. Worker decoder caches
-include the destination color space. Pool-capacity waits use their own generation,
-so freeing a queue slot does not trigger memory-pressure retries.
-Memory and worker-capacity refusals preserve their typed result: interactive work
-pauses without marking the source corrupt, while snapshot jobs return the refusal.
+include the destination color space.
 Raster restoration prepares private color, coverage and wetness pages before
 publishing them together. Source preparation includes transform and retouch
 footprints, displaced Liquify inputs and brush neighborhoods before authored
@@ -93,17 +52,6 @@ outputs and published pages under the renderer's composition and cache policy.
 Native and browser document candidates finish their initial canvas preparation
 before restoring editor history or adopting the drawing, using the operation's
 existing cancellation and deadline.
-Private buffer owners release their storage before returning its reservation,
-including when a fallible ownership handoff is refused.
-
-These limits cover instrumented payloads and scratch, including imported
-selections, profiles, lookup tables, previews, vector encoding buffers and
-transfer chunk copies. They are not an allocator or whole-process quota:
-codec internals, object metadata, host copies, Wasm heap high-water marks and
-GPU/driver allocations need separate limits or process isolation. Vector imports
-bound expanded structures and preserved-field copies before allocation through
-project admission; their retained owners remain outside the image-payload ledger. Small fixed built-in lookup tables
-remain available independently of input admission.
 
 `CanvasEngine`, in `layer-engine`, connects that model to drawing input. It
 interprets ordered pen samples, evaluates brush dynamics and produces work for a
@@ -242,14 +190,12 @@ Open, Place, Paste and paper import use the same shared import policy with that
 transport. The helper receives a read-only anonymous input file, bounded output
 and diagnostic handles, no inherited environment or other file descriptors.
 It requests termination if its parent dies and checks the startup parent race.
-Before decoding it enforces Landlock filesystem denial and an architecture-checked
-seccomp syscall allowlist. Missing confinement fails the import without an
-unconfined retry. It cannot open files, connect to the network, create processes,
+Before decoding it installs an architecture-checked seccomp syscall allowlist
+that excludes every call that opens a path. Missing confinement fails the import
+without an unconfined retry. It cannot open files, connect to the network, create processes,
 execute programs, access a display or use the GPU.
-The parent retains the existing two-decoder admission and reserves the child's
-assigned memory while it runs. The assignment starts at half the image pool and
-shrinks under existing ownership; source and codec limits fit that assignment.
-The child bounds additional virtual memory, CPU time and diagnostic output;
+The child bounds additional virtual memory to its source and codec limits, and
+bounds CPU time and diagnostic output;
 the parent bounds the child/output phase to 120 seconds, kills and reaps
 canceled children, and spools bounded output. It validates the returned package through the existing
 foreign-package reader, extracts only the photo samples and metadata, and applies

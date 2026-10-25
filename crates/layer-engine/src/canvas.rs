@@ -911,10 +911,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 .any(raster_edit_batch)
     }
     pub fn wants_continuous_frames(&self) -> bool {
-        (!self.backend.preparation_paused() && (self.has_pending_input()
+        self.has_pending_input()
             || self.has_active_stroke()
             || self.has_pending_document_edits()
-            || self.editor.document().has_animated_effects()))
+            || self.editor.document().has_animated_effects()
             || self.backend.has_pending_work()
     }
     pub fn has_pending_input(&self) -> bool {
@@ -3120,26 +3120,6 @@ mod tests {
     }
 
     #[test]
-    fn paused_restore_preserves_queued_finish_and_explicit_frames_resume_after_release() {
-        let (mut input,mut canvas)=engine("Restore preparation pressure",64,64);
-        canvas.render_frame().unwrap();let before=canvas.checkpoint();
-        canvas.backend_mut().restore_blocked=true;canvas.backend_mut().preparation_paused=true;
-        input.push(event(1,PenPhase::Down,16.)).unwrap();canvas.render_frame().unwrap();
-        assert!(canvas.pending_frame.is_some() && canvas.has_active_stroke());
-        assert!(!canvas.wants_continuous_frames());
-        input.push(event(2,PenPhase::Up,24.)).unwrap();canvas.render_frame().unwrap();
-        assert!(canvas.has_pending_input());assert!(!canvas.wants_continuous_frames());
-        assert_eq!(canvas.checkpoint(),before);
-        canvas.backend_mut().background_work=true;assert!(canvas.wants_continuous_frames());
-        canvas.backend_mut().background_work=false;
-        canvas.backend_mut().preparation_paused=false;canvas.backend_mut().restore_blocked=false;
-        assert!(canvas.wants_continuous_frames());canvas.render_frame().unwrap();canvas.render_frame().unwrap();
-        assert!(!canvas.has_pending_input() && !canvas.has_active_stroke());
-        assert_eq!(canvas.metrics().committed_strokes,1);
-        assert!(canvas.undo().unwrap());assert_eq!(canvas.checkpoint(),before);
-    }
-
-    #[test]
     fn frame_time_stays_precise_after_untimed_preparation_and_flushes() {
         let (_, mut engine) = engine("Frame timing", 64, 64);
         engine.render_frame_for(0, 0).unwrap();
@@ -3174,8 +3154,6 @@ mod tests {
         color_adoptions: usize,
         capture_blocked: bool,
         restore_blocked: bool,
-        preparation_paused: bool,
-        background_work: bool,
         unrelated_submission: bool,
         time_seconds: f32,
         phases: Vec<(layer_core::authored::EffectHandle, f32)>,
@@ -3229,8 +3207,6 @@ mod tests {
         fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&layer_render::TransformPreview>) -> bool {
             !self.restore_blocked
         }
-        fn preparation_paused(&self)->bool {self.preparation_paused}
-        fn has_pending_work(&self)->bool {self.background_work}
         fn can_capture_raster(&self) -> bool {
             !self.capture_blocked
         }

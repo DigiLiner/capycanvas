@@ -177,10 +177,7 @@ fn limited(source:ImmutableBacking,value:Value,preview:Option<Preview>,reason:St
     OpenOutcome::Preserved {source,outputs,preview:matched,reason}
 }
 pub fn open(source:ImmutableBacking,limits:crate::ProjectLimits,cancelled:&AtomicBool) -> Result<OpenOutcome,String> {
-    crate::memory::with_input(|| {
     active(cancelled)?;
-    let _work=crate::input_work::DECODERS.enter(cancelled)?;
-    crate::memory::images().collect()?;
     let mut reader=BackingReader::new(&source,cancelled);
     let directory=match Directory::read(&mut reader,262_144,limits.metadata_bytes) {
         Ok(directory)=>directory,
@@ -219,7 +216,6 @@ pub fn open(source:ImmutableBacking,limits:crate::ProjectLimits,cancelled:&Atomi
         Err(super::values::DecodeError::Unsupported(reason))=>Ok(OpenOutcome::Preserved {source,outputs:output_inventory(&manifest),preview:matching_preview(&manifest,preview),reason}),
         Err(super::values::DecodeError::Invalid(reason))=>Ok(failed(source,preview,reason)),
     }
-    })
 }
 
 pub fn copy_original(source:&ImmutableBacking,output:&mut impl Write,cancelled:&AtomicBool) -> Result<(),String> {

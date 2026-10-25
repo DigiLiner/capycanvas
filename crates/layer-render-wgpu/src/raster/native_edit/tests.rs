@@ -79,7 +79,7 @@ fn backing(root: &RasterRevision) -> BTreeMap<TileKey, Vec<u8>> {
         .unwrap()
         .tiles
         .iter()
-        .map(|(key, tile)| (*key, tile.wait_backing().unwrap().decode().unwrap().to_vec()))
+        .map(|(key, tile)| (*key, tile.wait_backing().unwrap().decode().unwrap()))
         .collect()
 }
 fn engine(

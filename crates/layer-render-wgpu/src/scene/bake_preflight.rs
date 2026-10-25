@@ -17,12 +17,9 @@ impl BakePreflight {
     fn complete(&self)->bool {self.failure.is_some() || self.next==self.inputs.len()}
     pub fn pending(&self)->bool {!self.complete()}
     pub fn projected_bytes(&self)->u64 {self.projected_bytes}
-    pub fn paused(&self)->bool {self.pending() && self.renderer.as_ref().is_some_and(|r|r.decode_pressure.blocks_background(layer_core::memory::generation(),r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())))}
-    pub fn memory_waiting(&self)->bool {self.renderer.as_ref().is_some_and(|r|r.memory_pressure_waiting())}
     pub fn waiting(&self)->bool {self.renderer.as_ref().is_some_and(|r|r.image_decode_waiting())}
-    pub fn poll_retry(&mut self)->bool {self.renderer.as_mut().is_some_and(|r|r.poll_memory_retry())}
     fn advance(&mut self,parent:&mut WgpuRasterizer,packet:FramePacket<'_>)->Result<(),GpuRasterError> {
-        if self.complete() || self.paused() {return Ok(());}
+        if self.complete() {return Ok(());}
         let input=&self.inputs[self.next];
         if self.source.is_none() {
             let required=crate::snapshot::capture_targets(input.snapshot.view().with_scope(&input.key.scope),&input.key.scope);

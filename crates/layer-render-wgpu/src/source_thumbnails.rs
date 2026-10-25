@@ -330,7 +330,7 @@ impl SourceThumbnails {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PageSurface, GpuRasterError> {
         if !self.prepare(r,layer,encoder,usize::MAX)? {
-            return Err(r.decode_pressure.error(layer_core::memory::generation(),r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())).unwrap_or(GpuRasterError::DeferredObjectWork));
+            return Err(GpuRasterError::DeferredObjectWork);
         }
         let pixels = self.prepared.back().unwrap().pixels.clone();
         self.display(r, &pixels, encoder)

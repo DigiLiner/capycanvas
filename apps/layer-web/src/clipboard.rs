@@ -105,7 +105,11 @@ async fn pixels(capture: &ClipboardCapture, gpu: &layer_render_wgpu::snapshot::S
     output::cancelled(&control)?;
     let result = result?;
     let parts: js_sys::Array = js_sys::Reflect::get(&result, &js("buffers"))?.dyn_into()?;
-    let png=js_sys::Reflect::get(&result,&js("png"))?.dyn_into::<js_sys::Uint8Array>().map_err(|_|js("Missing clipboard PNG"))?.to_vec();
+    let png_index = js_sys::Reflect::get(&result, &js("png"))?.as_f64().ok_or_else(|| js("Missing clipboard PNG"))?;
+    if parts.length().checked_sub(1).map(f64::from) != Some(png_index) {
+        return Err(js("Invalid clipboard PNG index"));
+    }
+    let png = js_sys::Uint8Array::new(&parts.pop()).to_vec();
     let source = match &capture.original {
         Some(original) => original.clone(),
         None => {

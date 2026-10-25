@@ -53,7 +53,7 @@ fn capture(
     .unwrap()
     .finish()
     .unwrap();
-    tile.wait_backing().unwrap().decode().unwrap().to_vec()
+    tile.wait_backing().unwrap().decode().unwrap()
 }
 fn code(bytes: &[u8], i: usize, depth: SampleDepth) -> u32 {
     if depth == SampleDepth::U8 {

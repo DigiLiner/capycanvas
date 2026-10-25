@@ -11,46 +11,8 @@ use wasm_bindgen_futures::JsFuture;
 thread_local! { static WORKER: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) }; }
 
 #[wasm_bindgen]
-pub fn raster_worker_capacity_released() {layer_core::memory::notify_capacity_released();}
-
-#[wasm_bindgen]
-pub fn configure_raster_worker(worker: js_sys::Function)->Result<(),JsValue> {
-    if let Ok(configure)=js_sys::Reflect::get(&worker,&js("configure"))?.dyn_into::<js_sys::Function>() {
-        let limits=layer_core::ProjectLimits::default();
-        configure.call1(&worker,&js_sys::JSON::parse(&serde_json::json!({"metadata":limits.metadata_bytes,"range":layer_core::package::MAX_RANGE_BYTES,"total":limits.raster_bytes,
-            "workers":layer_core::input_work::MAX_BROWSER_WORKERS,"requests":layer_core::input_work::MAX_BROWSER_REQUESTS,"decoders":layer_core::input_work::MAX_ACTIVE_DECODERS,
-            "payloads":layer_core::input_work::MAX_BROWSER_PAYLOAD_BYTES,"resultAge":layer_core::input_work::BROWSER_RESULT_LIFETIME_MS}).to_string())?)?;
-    }
-    WORKER.with(|slot| *slot.borrow_mut() = Some(worker));Ok(())
-}
-pub(super) async fn checked_buffers(kind:&str,metadata:&str,buffers:js_sys::Array)->Result<(String,js_sys::Array,bool),JsValue> {
-    if web_sys::window().is_none() {return Ok((metadata.into(),buffers,false));}
-    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
-    let consume=js_sys::Reflect::get(&worker,&js("consume"))?.dyn_into::<js_sys::Function>().map_err(|_|js("Worker validation receipts unavailable"))?;
-    let claim=|metadata:&str,buffers:&js_sys::Array|consume.call3(&worker,&js(kind),&js(metadata),buffers);
-    let mut receipt=claim(metadata,&buffers)?;
-    if receipt.is_null() {
-        let result=JsFuture::from(call(&format!("validate-{kind}"),metadata,&buffers)?).await?;
-        let metadata=js_sys::Reflect::get(&result,&js("metadata"))?.as_string().ok_or_else(||js("Missing validated metadata"))?;
-        let buffers=js_sys::Reflect::get(&result,&js("buffers"))?.dyn_into::<js_sys::Array>()?;
-        receipt=claim(&metadata,&buffers)?;
-    }
-    if receipt.is_null(){return Err(js("Unvalidated worker transfer"));}
-    let metadata=js_sys::Reflect::get(&receipt,&js("metadata"))?.as_string().ok_or_else(||js("Missing validated metadata"))?;
-    let buffers=js_sys::Reflect::get(&receipt,&js("buffers"))?.dyn_into::<js_sys::Array>()?;
-    Ok((metadata,buffers,true))
-}
-pub(super) async fn receive_artwork(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::transfer::PreparedTransfer,JsValue> {
-    let (metadata,buffers,validated)=checked_buffers("artwork",metadata,buffers).await?;
-    let transfer=artwork_transfer::receive(&metadata,buffers).await?;
-    if validated {unsafe {transfer.accept_validated_transport()};}
-    Ok(transfer)
-}
-pub(super) async fn receive_session(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::session_transfer::PreparedSessionTransfer,JsValue> {
-    let (metadata,buffers,validated)=checked_buffers("session",metadata,buffers).await?;
-    let transfer=session_restart::receive(&metadata,buffers).await?;
-    if validated {unsafe {transfer.accept_validated_transport()};}
-    Ok(transfer)
+pub fn configure_raster_worker(worker: js_sys::Function) {
+    WORKER.with(|slot| *slot.borrow_mut() = Some(worker));
 }
 
 #[wasm_bindgen]
@@ -67,15 +29,11 @@ pub(super) fn call(
     metadata: &str,
     buffers: &js_sys::Array,
 ) -> Result<js_sys::Promise, JsValue> {
-    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
-    call_worker(&worker,operation,metadata,buffers)
-}
-fn call_worker(worker:&js_sys::Function,operation:&str,metadata:&str,buffers:&js_sys::Array)->Result<js_sys::Promise,JsValue> {
     let request = js_sys::Object::new();
     js_sys::Reflect::set(&request, &js("operation"), &js(operation))?;
     js_sys::Reflect::set(&request, &js("metadata"), &js(metadata))?;
     js_sys::Reflect::set(&request, &js("buffers"), buffers)?;
-    worker.call1(&JsValue::NULL,&request)?.dyn_into()
+    self::request(&request)
 }
 
 pub(super) fn request(request:&JsValue)->Result<js_sys::Promise,JsValue> {
@@ -100,49 +58,6 @@ pub(super) async fn call_cancellable(
     result
 }
 
-pub(super) fn prepared_result(operation:&str,key:&JsValue)->Result<JsValue,JsValue> {
-    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
-    consume_result(&worker,operation,key)
-}
-fn consume_result(worker:&js_sys::Function,operation:&str,key:&JsValue)->Result<JsValue,JsValue> {
-    let consume=js_sys::Reflect::get(worker,&js("consumeResult"))?.dyn_into::<js_sys::Function>()?;
-    let result=consume.call2(worker,&js(operation),key)?;
-    if result.is_null(){return Err(js("Unvalidated worker result"));}Ok(result)
-}
-fn worker_busy(error:&JsValue)->bool {js_sys::Reflect::get(error,&js("worker_busy")).ok().and_then(|flag|flag.as_bool())==Some(true)}
-
-fn image_error(error:JsValue)->layer_core::raster::TileError {
-    if js_sys::Reflect::get(&error,&js("memory_error")).ok().and_then(|flag|flag.as_bool())==Some(true) {
-        layer_core::memory::MemoryError.into()
-    } else if worker_busy(&error) {
-        layer_core::raster::TileError::Busy
-    } else {format!("{error:?}").into()}
-}
-fn image_failure(error:layer_core::raster::TileError)->JsValue {
-    let value=js_sys::Error::new(&error.to_string());
-    if error.is_memory() {let _=js_sys::Reflect::set(&value,&js("memory_error"),&JsValue::TRUE);}
-    if matches!(error,layer_core::raster::TileError::Busy) {let _=js_sys::Reflect::set(&value,&js("worker_busy"),&JsValue::TRUE);}
-    value.into()
-}
-
-async fn image_request<F:std::future::Future<Output=Result<js_sys::Array,JsValue>>>(metadata:&str,mut buffers:impl FnMut()->F)->Result<JsValue,JsValue> {
-    let worker=WORKER.with(|slot|slot.borrow().clone()).ok_or_else(||js("Raster worker unavailable"))?;
-    let deadline=js_sys::Date::now()+180_000.;
-    loop {
-        let result=async {JsFuture::from(call_worker(&worker,"image-decode",metadata,&buffers().await?)?).await}.await;
-        match result {
-            Err(error) if worker_busy(&error)=>{
-                if js_sys::Date::now()>=deadline {return Err(error);}
-                let Some(wait)=js_sys::Reflect::get(&worker,&js("waitForCapacity")).ok().and_then(|value|value.dyn_into::<js_sys::Function>().ok()) else{return Err(error);};
-                JsFuture::from(wait.call3(&worker,&error,&JsValue::UNDEFINED,&JsValue::from_f64(deadline))?.dyn_into::<js_sys::Promise>()?).await?;
-                if js_sys::Date::now()>=deadline {return Err(error);}
-            },
-            Ok(key)=>return consume_result(&worker,"image-decode",&key),
-            Err(error)=>return Err(error),
-        }
-    }
-}
-
 pub(super) fn install(renderer: &mut WgpuRasterizer) {
     renderer.set_complete_display_allowance(artwork_transfer::photo_memory_budget().encode_bytes as u64);
     renderer.set_analysis_backing_waiter(Rc::new(|scene, control| Box::pin(async move {
@@ -152,59 +67,58 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
         Ok(())
     })));
     renderer.set_browser_image_decoder(Rc::new(|source, coordinate, destination| Box::pin(async move {
-        documents::yield_browser().await.map_err(image_error)?;
+        documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
         let tile=source.tiles.get(&coordinate).ok_or("Missing immutable image tile")?;
         let start=js_sys::Date::now();
         while !tile.compressed_ready()? {
             if js_sys::Date::now()-start>30_000. {return Err("Image backing timed out".into());}
-            documents::yield_browser().await.map_err(image_error)?;
+            documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
         }
         let mut profiles=Vec::new();
         let profile=layer_core::color::ProfileReference::detach(&source.interpretation.profile,&mut profiles);
         let interpretation=source.interpretation.clone().with_profile(profile);
-        let compressed=tile.compressed()?;
+        let buffers=js_sys::Array::new();
+        buffers.push(&js_sys::Uint8Array::from(tile.compressed()?.as_ref()));
         let mut chunks=Vec::new();
-        for profile in &profiles {chunks.push(profile.chunks(layer_core::package::MAX_RANGE_BYTES).len());}
+        for profile in profiles {
+            let mut count=0;
+            for block in profile.chunks(layer_core::package::MAX_RANGE_BYTES) {
+                buffers.push(&js_sys::Uint8Array::from(block));count+=1;
+                documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
+            }
+            chunks.push(count);
+        }
         let metadata=serde_json::to_string(&ImageDecode::Image {interpretation,destination,extent:source.extent,coordinate,profiles:chunks}).map_err(|e|e.to_string())?;
-        let native=matches!(source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_));
-        let expected=(TILE_SIZE*TILE_SIZE) as usize*if native {4*source.interpretation.depth.bytes()}else{16};
-        let mut bytes=layer_core::memory::DecodedBytes::zeroed(expected)?;
-        let result=image_request(&metadata,||async {
-            let buffers=js_sys::Array::new();buffers.push(&js_sys::Uint8Array::from(compressed.as_ref()));
-            for profile in &profiles {for block in profile.chunks(layer_core::package::MAX_RANGE_BYTES) {buffers.push(&js_sys::Uint8Array::from(block));documents::yield_browser().await?;}}
-            Ok(buffers)
-        }).await.map_err(image_error)?;
-        let incoming=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?;
-        if incoming.length() as usize!=expected {return Err("Invalid prepared source tile extent".into());}
-        incoming.copy_to(&mut bytes);
-        if native {
+        let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
+        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
+        if matches!(source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) {
+            if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*4*source.interpretation.depth.bytes() {return Err("Invalid prepared source tile extent".into());}
             Ok(layer_render_wgpu::PreparedImagePixels::NativeSamples(std::sync::Arc::new(bytes)))
         } else {
+            if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*16 {return Err("Invalid prepared working tile extent".into());}
             Ok(layer_render_wgpu::PreparedImagePixels::PremultipliedWorkingPixels(std::sync::Arc::new(bytes)))
         }
     })));
     renderer.set_browser_raster_decoder(Rc::new(|blob,space,_destination| Box::pin(async move {
-        documents::yield_browser().await.map_err(image_error)?;
+        documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
         let start=js_sys::Date::now();
         while !blob.compressed_ready()? {
             if js_sys::Date::now()-start>30_000. {return Err("Image backing timed out".into());}
-            documents::yield_browser().await.map_err(image_error)?;
+            documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
         }
-        let compressed=blob.compressed()?;
+        let buffers=js_sys::Array::new();
+        buffers.push(&js_sys::Uint8Array::from(blob.compressed()?.as_ref()));
         let metadata=serde_json::to_string(&ImageDecode::Raster {descriptor:blob.descriptor,space}).map_err(|e|e.to_string())?;
-        let expected=(TILE_SIZE*TILE_SIZE) as usize*4*blob.descriptor.depth().bytes();
-        let mut bytes=layer_core::memory::DecodedBytes::zeroed(expected)?;
-        let result=image_request(&metadata,||async {let buffers=js_sys::Array::new();buffers.push(&js_sys::Uint8Array::from(compressed.as_ref()));Ok(buffers)}).await.map_err(image_error)?;
-        let incoming=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?;
-        if incoming.length() as usize!=expected {return Err("Invalid prepared source tile extent".into());}
-        incoming.copy_to(&mut bytes);
+        let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
+        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
+        if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*4*blob.descriptor.depth().bytes() {return Err("Invalid prepared source tile extent".into());}
         Ok(layer_render_wgpu::PreparedImagePixels::NativeSamples(std::sync::Arc::new(bytes)))
     })));
     renderer.set_browser_nearest_coordinate_decoder(Rc::new(|inverse,size,first,count| Box::pin(async move {
         if count>65536 {return Err("Oversized Nearest coordinate request".into());}
         let metadata=serde_json::to_string(&NearestCoordinates {inverse,size,first,count}).map_err(|e|e.to_string())?;
         let result=JsFuture::from(call("nearest-coordinates",&metadata,&js_sys::Array::new()).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
-        let bytes=prepared_result("nearest-coordinates",&result).map_err(|e|format!("{e:?}"))?.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing Nearest coordinates")?;
+        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing Nearest coordinates")?;
         if bytes.length() as usize!=count as usize*8 {return Err("Invalid prepared Nearest coordinate extent".into());}
         Ok(std::sync::Arc::new(bytes.to_vec()))
     })));
@@ -230,12 +144,10 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
                 let task = SnapshotTask::TransformPixels {target:plan.target, map:plan.map.clone(), source:plan.source};
                 additional.extend(plan.paint.map(layer_core::SourceTarget::Paint).into_iter().chain(plan.coverage.map(layer_core::SourceTarget::Coverage)));
                 transform = Some((plan.output, plan.paint, plan.coverage));
-                #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
                 let scene=std::sync::Arc::new((*plan.scene).clone().with_scope(layer_core::SceneScope::Raw(plan.target)));
                 (scene, None, task)
             }
             layer_render::SnapshotRequest::Image(capture) => {
-                #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
                 let scene = std::sync::Arc::new((*capture.scene).clone().with_scope(capture.scope.clone()));
                 let selection = capture.selection.as_deref().cloned();
                 (scene, selection, SnapshotTask::Image {offset:capture.offset, extent:capture.extent, window:capture.window, trim:capture.trim})
@@ -243,7 +155,6 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
             layer_render::SnapshotRequest::Remap(plan) => {
                 additional.extend(plan.targets());
                 let first = *additional.first().ok_or("Missing moved layers")?;
-                #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
                 let scene = std::sync::Arc::new((*plan.scene).clone().with_scope(layer_core::SceneScope::Raw(first)));
                 (scene, None, SnapshotTask::Remap(plan.specs.to_vec()))
             }
@@ -312,8 +223,7 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
             let result = JsFuture::from(promise)
                 .await
                 .map_err(|e| format!("{e:?}"))?;
-            let result=prepared_result("encode",&result).map_err(|e|format!("{e:?}"))?;
-            let bytes = result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Invalid raster worker result")?.to_vec();
+            let bytes = js_sys::Uint8Array::new(&result).to_vec();
             let mut offset = 0;
             let mut blobs = Vec::with_capacity(descriptors.len());
             for descriptor in descriptors {
@@ -362,7 +272,7 @@ pub fn raster_worker_nearest_coordinates(metadata:&str)->Result<Vec<u8>,JsValue>
         .map(|bytes|bytes.as_ref().clone()).map_err(js)
 }
 #[wasm_bindgen]
-pub fn raster_worker_image_decode(metadata:&str,buffers:js_sys::Array)->Result<js_sys::Uint8Array,JsValue> {
+pub fn raster_worker_image_decode(metadata:&str,buffers:js_sys::Array)->Result<Vec<u8>,JsValue> {
     use layer_core::color::source::SourceImage;
     use std::sync::Arc;
     if metadata.len()>16*1024 {return Err(js("Oversized image preparation metadata"));}
@@ -373,8 +283,8 @@ pub fn raster_worker_image_decode(metadata:&str,buffers:js_sys::Array)->Result<j
             if buffers.length()!=1 {return Err(js("Invalid image preparation payloads"));}
             let compressed=buffers.get(0).dyn_into::<js_sys::Uint8Array>()?;
             if compressed.length() as usize>layer_core::package::MAX_RANGE_BYTES {return Err(js("Oversized image tile payload"));}
-            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),descriptor,compressed.to_vec().into()).map_err(image_failure)?);
-            layer_render_wgpu::prepare_raster_tile(&tile,space,&cache).map_err(image_failure)?
+            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),descriptor,compressed.to_vec().into()).map_err(js)?);
+            layer_render_wgpu::prepare_raster_tile(&tile,space,&cache).map_err(js)?
         },
         ImageDecode::Image {interpretation,destination,extent,coordinate,profiles:chunks} => {
             if chunks.len()>1 || buffers.length()==0 {return Err(js("Invalid image preparation payloads"));}
@@ -393,14 +303,14 @@ pub fn raster_worker_image_decode(metadata:&str,buffers:js_sys::Array)->Result<j
             let interpretation=interpretation.clone().with_profile(interpretation.profile.resolve(&profiles).map_err(js)?);
             let compressed=buffers.get(0).dyn_into::<js_sys::Uint8Array>()?;
             if compressed.length() as usize>layer_core::package::MAX_RANGE_BYTES {return Err(js("Oversized image tile payload"));}
-            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),interpretation.descriptor(),compressed.to_vec().into()).map_err(image_failure)?);
+            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),interpretation.descriptor(),compressed.to_vec().into()).map_err(js)?);
             let source=SourceImage {extent,resolution:None,interpretation,tiles:[(coordinate,tile)].into()};
             layer_render_wgpu::prepare_image_tile(&source,coordinate,destination,
-                &cache,None).map_err(image_failure)?
+                &cache,None).map_err(js)?
         },
     };
     match pixels {
-        layer_render_wgpu::PreparedImagePixels::NativeSamples(bytes)|layer_render_wgpu::PreparedImagePixels::PremultipliedWorkingPixels(bytes)=>Ok(js_sys::Uint8Array::from(bytes.as_slice())),
+        layer_render_wgpu::PreparedImagePixels::NativeSamples(bytes)|layer_render_wgpu::PreparedImagePixels::PremultipliedWorkingPixels(bytes)=>Ok(bytes.as_ref().clone()),
     }
 }
 
@@ -411,7 +321,7 @@ pub fn raster_worker_encode(metadata: &str, bytes: &[u8]) -> Result<Vec<u8>, JsV
     for tile in encode_tiles(bytes, descriptors).map_err(js)? {
         result.extend_from_slice(&(tile.compressed_len() as u32).to_le_bytes());
         result.extend_from_slice(&tile.encoded_fingerprint().ok_or_else(||js("Missing encoded raster fingerprint"))?);
-        result.extend_from_slice(&tile.compressed().map_err(image_failure)?);
+        result.extend_from_slice(&tile.compressed().map_err(js)?);
     }
     Ok(result)
 }
@@ -442,11 +352,7 @@ fn query_scene(query: &layer_core::ArtworkQuery) -> Result<(std::sync::Arc<layer
         Source(target) => (normalized,SnapshotSource::Source(target)),
         Objects(target) => (normalized,SnapshotSource::Objects(target)),
         EffectInput(target) => (normalized,SnapshotSource::EffectInput(target)),
-        EffectChannels(target) => {
-            #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
-            let scene=std::sync::Arc::new((*query.snapshot).clone().with_scope(normalized.scope.clone()));
-            (scene,SnapshotSource::EffectChannels(target))
-        },
+        EffectChannels(target) => (std::sync::Arc::new((*query.snapshot).clone().with_scope(normalized.scope.clone())),SnapshotSource::EffectChannels(target)),
         Reference | EffectBaseline(_) => (normalized,SnapshotSource::Visible),
     })
 }
@@ -493,9 +399,7 @@ impl FrozenScene {
             layer_core::EvaluationContext {elapsed:self.elapsed,phases:self.phases.into()});
         snapshot.scope = scope;
         snapshot.offset = self.offset;
-        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared scene ownership includes single-threaded Wasm Liquify fields"))]
-        let snapshot=std::sync::Arc::new(snapshot);
-        Ok(snapshot)
+        Ok(std::sync::Arc::new(snapshot))
     }
 }
 #[derive(Serialize, Deserialize)]

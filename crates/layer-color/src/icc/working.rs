@@ -220,7 +220,7 @@ impl WorkingDecoder {
         coordinate: [u32; 2],
         output: &mut [[f32; 4]],
         cache: &layer_core::raster::DecodedTileCache,
-    ) -> Result<(), layer_core::raster::TileError> {
+    ) -> Result<(), String> {
         if source.interpretation != self.source || output.len() != (TILE_SIZE * TILE_SIZE) as usize
         {
             return Err("Source interpretation changed during working conversion".into());

@@ -120,7 +120,8 @@ fn numeric_error(reason: layer_ui::NumericError, localizer: &layer_ui::Localizer
 }
 #[wasm_bindgen]
 pub fn automatic_tab_names(available: f32, widths: &[f32]) -> Vec<u8> {
-    layer_ui::TabStyle::automatic_names(available, widths.as_chunks::<2>().0)
+    let widths: Vec<[f32; 2]> = widths.chunks_exact(2).map(|w| [w[0], w[1]]).collect();
+    layer_ui::TabStyle::automatic_names(available, &widths)
         .into_iter()
         .map(u8::from)
         .collect()
@@ -738,12 +739,13 @@ impl WebApp {
                 if let Some(localization) = preparation.finish() { self.language_transition.prepared(request, localization); }
             }
         }
-        if let Some(localization) = self.language_transition.publish(input_busy || self.session.localization_input_busy())
-            && self.session.set_localization(localization.clone()) {
-            self.documents.set_localization(&localization);
-            if let Some(controller) = &mut self.workspaces { controller.set_localization(localization); }
-            self.preferences_cache = None;
-            return serialize(&layer_ui::UiChange { revision:self.session.state().revision, regions:layer_ui::regions::ALL, canvas_wake:false });
+        if let Some(localization) = self.language_transition.publish(input_busy || self.session.localization_input_busy()) {
+            if self.session.set_localization(localization.clone()) {
+                self.documents.set_localization(&localization);
+                if let Some(controller) = &mut self.workspaces { controller.set_localization(localization); }
+                self.preferences_cache = None;
+                return serialize(&layer_ui::UiChange { revision:self.session.state().revision, regions:layer_ui::regions::ALL, canvas_wake:false });
+            }
         }
         Ok(JsValue::NULL)
     }
@@ -1067,7 +1069,7 @@ impl WebApp {
         if !records.len().is_multiple_of(11) {
             return Err(js("Invalid pen batch length"));
         }
-        for item in records.as_chunks::<11>().0 {
+        for item in records.chunks_exact(11) {
             if !item[0].is_finite() || item[0]<0. || item[0].fract()!=0. || item[0]>=u64::MAX as f64 {continue;}
             let valid_phase=item[1].is_finite() && (0. ..=4.).contains(&item[1]) && item[1].fract()==0.;
             let valid_flags=item[9].is_finite() && (0. ..=u16::MAX as f64).contains(&item[9]) && item[9].fract()==0.;
@@ -1094,7 +1096,9 @@ impl WebApp {
                 },
             };
             let Some(event)=self.session.filter_pen(event) else {continue;};
-            if event.phase == PenPhase::Down && let Some(control) = self.tone.pending.take() { control.cancel(); }
+            if event.phase == PenPhase::Down {
+                if let Some(control) = self.tone.pending.take() { control.cancel(); }
+            }
             self.session.pen(event);
             self.sequence += 1;
         }

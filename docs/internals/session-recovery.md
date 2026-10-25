@@ -201,8 +201,7 @@ of their exact metadata bytes. Decode and cleanup verify these checksums before
 using metadata references. Interrupted publication leaves
 a complete old or new checkpoint; validated fallback after corruption is treated
 as recovery. Unsupported authored data remains unavailable until its requirements
-are satisfied. Selection memory pressure also preserves the current checkpoint
-for retry. Membership has no previous-generation fallback, which
+are satisfied. Membership has no previous-generation fallback, which
 would resurrect deliberately closed drawings.
 Publication errors retain whether rename completed. A close cannot be cancelled
 after its membership replacement became visible; a subsequent synchronization

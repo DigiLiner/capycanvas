@@ -30,32 +30,14 @@ The workspace store holds the painter's palettes and custom workspaces. Startup
 replaces it only when this build cannot read it, and keeps a copy of the old
 store first; see [workspace ownership](workspace-ownership.md#startup-always-adopts-a-workspace).
 
-App-managed settings, databases and generated caches are trusted local storage.
-They retain ordinary type, size, corruption and version checks; their reads do
-not use hostile-input SQL instruction counters, deadlines or shared JSON-node
-budgets. Native workspace connections keep SQLite defensive mode, disable trusted
-schema and bound rows to the shared 128 MiB workspace package budget plus 64 KiB.
-Borrowed text fields are checked for type, UTF-8 and field size before copying.
-Stored JSON deserializes directly into its destination type. Backups copy 128
-pages per step before atomically publishing the completed file.
+Native workspace connections enable SQLite defensive mode and disable trusted
+schema before reading stored records. SQLite limits values and complete rows to
+the 128 MiB workspace package size plus 64 KiB for row identity and framing, and
+SQL text to 64 KiB.
 
-Native windows share process-wide admission for at most 32 accepted storage jobs
-and 256 MiB of queued request ownership. The byte charge includes string and
-vector capacities, duplicated prepared JSON and component-map bookkeeping,
-without serializing or copying a request on the calling thread. Both the worker
-and reply retain one shared permit: abandoning a reply does not release a queued
-or running request, and an unread reply continues to consume a job slot. Accepted
-writes always deliver their result without a second admission decision. Saturation
-refuses new work without blocking the caller. Coalesced window retirement uses a
-separate control lane in the same FIFO, so accepted writes drain before their
-owner's locks are released. The byte charge covers request ownership, not the
-heap size of returned entities or SQLite's internal allocations.
-
-External workspace packages remain untrusted. Package acquisition and expanded
-content have separate 128 MiB allowances; component expansion shares one byte/node
-allowance across the imported writes. Prepared writes are validated before they
-enter storage. Stored component graphs retain their size, reference hash, depth
-and schema checks. Browser snapshot serialization remains bounded; schema
+External workspace packages remain untrusted. Packages are limited to 128 MiB,
+and prepared writes are validated before they enter storage. Stored component
+graphs retain their reference hash, depth and schema checks, and schema
 inspection preserves newer versions before allowing a reset. Imported ICC and
 effect source bytes remain untrusted when interpreted, even after storage in an
 app-owned container. Linux external photo decoding uses the isolated helper

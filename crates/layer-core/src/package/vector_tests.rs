@@ -5,12 +5,6 @@ use crate::color::RgbColor;
 use std::{collections::BTreeSet, sync::Arc};
 use crate::authored::Affine64;
 
-fn encode_chunk(chunk:&VectorChunk)->Vec<u8> {super::vector_records::encode_chunk(chunk).unwrap().to_vec()}
-fn encode_geometry(geometry:&PathGeometry)->Vec<u8> {super::vector_records::encode_geometry(geometry).unwrap().to_vec()}
-fn encode_style(style:&Style)->Vec<u8> {super::vector_records::encode_style(style).unwrap().to_vec()}
-fn encode_shape(shape:&LiveShape,print:[u8;16])->Vec<u8> {super::vector_records::encode_shape(shape,print).unwrap().to_vec()}
-fn fingerprint(path:&PathItem)->[u8;16] {super::vector_records::fingerprint(path).unwrap()}
-
 fn color(r: f32) -> Paint { Paint::color(RgbColor::new(Default::default(), [r, 0.25, 0.5, 1.]).unwrap()) }
 fn line(id: u64, points: &[[f64; 2]], width: f64) -> Record {
     let anchors: Vec<_> = points.iter().map(|p| Anchor::new(*p, [-1., 0.5], [1., -0.5], AnchorKind::SMOOTH)).collect();
@@ -263,16 +257,14 @@ fn chunk_edits_rewrite_only_touched_chunks() {
     assert!(before.chunks()[1..].iter().zip(&after.chunks()[after.chunks().len() - (before.chunks().len() - 1)..]).all(|(a, b)| a.same_owner(b)));
 }
 
-fn paths(count:u64)->VectorObject {
-    VectorObject::from_records((1..=count).map(|i| if i % 7 == 0 { shape(i) } else { line(i, &[[i as f64, 3.], [i as f64 + 20., 40.], [i as f64 + 5., 90.]], 2. + (i % 5) as f64) }).collect())
+fn document_with_paths(count: u64) -> (crate::Editor, crate::OccurrenceHandle) {
+    let artwork = crate::Artwork::new([640, 480]).unwrap();
+    let mut editor = crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
+    let records = (1..=count).map(|i| if i % 7 == 0 { shape(i) } else { line(i, &[[i as f64, 3.], [i as f64 + 20., 40.], [i as f64 + 5., 90.]], 2. + (i % 5) as f64) }).collect();
+    let (layer, edit) = editor.document().create_vector_layer_edit("Ink", VectorObject::from_records(records), None, 0).unwrap();
+    editor.perform(edit).unwrap();
+    (editor, layer)
 }
-fn document_with_vector(object:VectorObject)->(crate::Editor,crate::OccurrenceHandle) {
-    let artwork=crate::Artwork::new([640,480]).unwrap();
-    let mut editor=crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
-    let (layer,edit)=editor.document().create_vector_layer_edit("Ink",object,None,0).unwrap();
-    editor.perform(edit).unwrap();(editor,layer)
-}
-fn document_with_paths(count:u64)->(crate::Editor,crate::OccurrenceHandle) {document_with_vector(paths(count))}
 fn save(editor: &crate::Editor) -> Vec<u8> {
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let capture = editor.capture(1, Default::default()).unwrap();
@@ -381,17 +373,11 @@ fn vector_history_survives_sessions_and_worker_transfer() {
 #[test]
 fn session_history_shares_unchanged_runs_of_vector_chunk_lists() {
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let identified=|chunk:&crate::authored::Resource<VectorChunk>,id:u128|crate::authored::Resource::with_id(crate::authored::PortableId::from_bytes(id.to_be_bytes()),chunk.storage().clone());
-    let initial=paths(128*CHUNK_RECORDS as u64);
-    let chunks=initial.chunks().iter().enumerate().map(|(index,chunk)|identified(chunk,index as u128+1)).collect();
-    drop(initial);
-    let (mut editor,layer)=document_with_vector(VectorObject::from_chunks(chunks));
+    let (mut editor, layer) = document_with_paths(128 * CHUNK_RECORDS as u64);
     let first = editor.document().artwork.clone();
     let strokes = 40;
     for i in 0..strokes {
         let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![line(100_000 + i, &[[0., 0.], [50., i as f64]], 4.)]);
-        let mut chunks=object.chunks().to_vec();chunks[0]=identified(&chunks[0],1000+u128::from(i));
-        let object=VectorObject::from_chunks(chunks);
         editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
     }
     let chunks = vector(&editor.document().artwork).chunks().len();
@@ -1014,93 +1000,6 @@ fn opening_charges_the_records_that_decoded_vector_bytes_become() {
         let backing = super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(saved.clone()))).unwrap();
         super::codec::open(backing, crate::ProjectLimits { raster_bytes: budget, asset_bytes: 0, ..Default::default() }, &std::sync::atomic::AtomicBool::new(false)).unwrap()
     };
-    let mut reading=Reading::default();let allowance=reading.remaining_bytes();
-    for chunk in vector(&editor.document().artwork).chunks() {decode_chunk(&encode_chunk(chunk),chunk.records().len(),&mut reading).unwrap();}
-    let peak=(allowance-reading.remaining_bytes()) as u64;
-    assert!(matches!(outcome(decoded+resident/2),super::codec::OpenOutcome::Preserved {..}));
-    assert!(matches!(outcome(decoded+peak.max(resident)),super::codec::OpenOutcome::Candidate {..}));
-}
-
-
-#[test]
-fn vector_decode_allowance_covers_geometry_styles_and_unknown_copies() {
-    let base = record_bytes(PATH, 1, &[(GEOMETRY, geometry_bytes())]);
-    let mut measured = Reading::default();
-    let before = measured.remaining_bytes();
-    decode_chunk(&base, 1, &mut measured).unwrap();
-    let used = before - measured.remaining_bytes();
-    assert!(used > 0);
-    let anchors: Vec<_> = (0..128).map(|i| Anchor::corner([f64::from(i), 0.])).collect();
-    let geometry = PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap();
-    let style = Style::new((0..16).map(|_| PaintEntry::Fill(Fill { paint: color(0.3), unknown: None })).collect());
-    let unknown = tag_word(900, IGNORABLE | COPY_SAFE, ValueClass::Data);
-    let expanded = [
-        record_bytes(PATH, 1, &[(GEOMETRY, encode_geometry(&geometry))]),
-        record_bytes(PATH, 1, &[(GEOMETRY, geometry_bytes()), (STYLE, encode_style(&style))]),
-        record_bytes(PATH, 1, &[(GEOMETRY, geometry_bytes()), (unknown, vec![7; 4096])]),
-    ];
-    for bytes in expanded {
-        assert!(decode_chunk(&bytes, 1, &mut Reading::default()).is_ok());
-        let mut reading = Reading::default();
-        reading.limit_bytes(used + 1);
-        assert!(is_unsupported(decode_chunk(&bytes, 1, &mut reading)));
-        assert!(reading.remaining_bytes() <= used + 1);
-    }
-    let mut reading = Reading::default();
-    reading.limit_bytes(used * 2 - 1);
-    decode_chunk(&base, 1, &mut reading).unwrap();
-    assert!(is_unsupported(decode_chunk(&base, 1, &mut reading)));
-    reading.limit_bytes(0);
-    reading.limit_bytes(usize::MAX);
-    assert_eq!(reading.remaining_bytes(), 0, "clamping cannot replenish an exhausted allowance");
-}
-
-#[test]
-fn subpath_count_above_anchor_admission_is_unsupported_before_decoding_subpaths() {
-    let count = MAX_PATH_ANCHORS + 1;
-    let mut geometry = Vec::new();
-    put_varuint(&mut geometry, count as u64);
-    geometry.resize(geometry.len() + count * 2, 0);
-    let bytes = record_bytes(PATH, 1, &[(GEOMETRY, geometry)]);
-    assert!(is_unsupported(decode_chunk(&bytes, 1, &mut Reading::default())));
-}
-
-#[test]
-fn nested_opaque_records_share_the_framed_record_allowance() {
-    let leaf = record_bytes(kind_word(5) | IGNORABLE, 0, &[]);
-    let nested = leaf.repeat(MAX_RECORDS);
-    let property = tag_word(900, IGNORABLE | COPY_SAFE, ValueClass::Nested);
-    let bytes = record_bytes(kind_word(6) | IGNORABLE, 0, &[(property, nested)]);
-    assert!(bytes.len() < MAX_PROPERTY_BYTES);
-    assert!(is_unsupported(decode_chunk(&bytes, 1, &mut Reading::default())));
-}
-
-#[test]
-fn vector_footprint_charges_shared_unknown_payload_and_name_once() {
-    let payload: Arc<[u8]> = vec![19; 4096].into();
-    let unknown: Unknown = Some(vec![UnknownProperty {
-        tag: tag_word(900, IGNORABLE | COPY_SAFE, ValueClass::Data), value: payload.clone(),
-    }].into());
-    let geometry = Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.])], false)]).unwrap());
-    let name: Arc<str> = "Shared retained name".into();
-    let make = |unknown: Unknown, name: Option<Arc<str>>| {
-        let style = Arc::new(Style::new(vec![PaintEntry::Fill(Fill {
-            paint: Paint::Color { color: RgbColor::BLACK, unknown: unknown.clone() }, unknown: unknown.clone(),
-        })]));
-        let path = |id| {
-            let mut path = PathItem::new(ItemId(id), geometry.clone(), style.clone());
-            path.unknown = unknown.clone(); path.name = name.clone(); Record::Path(path)
-        };
-        (VectorObject::from_records(vec![path(1)]), VectorObject::from_records(vec![path(2)]))
-    };
-    let (plain, plain_shared) = make(None, None);
-    let (decorated, decorated_shared) = make(unknown, Some(name.clone()));
-    let mut plain_accounting = crate::history_budget::Accounting::default();
-    let mut decorated_accounting = crate::history_budget::Accounting::default();
-    let plain_first = plain_accounting.charge_vector(&plain);
-    let decorated_first = decorated_accounting.charge_vector(&decorated);
-    assert!(decorated_first >= plain_first + payload.len() + name.len());
-    let own=decorated_shared.chunks()[0].footprint().bytes-plain_shared.chunks()[0].footprint().bytes;
-    assert_eq!(decorated_accounting.charge_vector(&decorated_shared),plain_accounting.charge_vector(&plain_shared)+own,
-        "shared payloads add only independent chunk and footprint storage");
+    assert!(matches!(outcome(decoded + resident / 2), super::codec::OpenOutcome::Preserved { .. }));
+    assert!(matches!(outcome(decoded + resident), super::codec::OpenOutcome::Candidate { .. }));
 }

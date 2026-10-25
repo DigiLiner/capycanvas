@@ -10,7 +10,6 @@ fn now() -> u64 {
 }
 impl App {
     pub fn workspace(&mut self, request: Value) -> Result<Value, String> {
-        let memory_retry=self.host.poll_memory_retry();
         let time = now();
         if request["type"] == "start" && self.workspaces.is_none() {
                 let path = request["directory"]
@@ -47,6 +46,6 @@ impl App {
         let before = self.host.session.state().revision;
         let change = c.tick(&mut self.host.session, time);
         self.host.apply_change(before, change);
-        Ok(json!({"view": c.view, "wake": change.canvas_wake||memory_retry, "refresh": change.regions != 0}))
+        Ok(json!({"view": c.view, "wake": change.canvas_wake, "refresh": change.regions != 0}))
     }
 }

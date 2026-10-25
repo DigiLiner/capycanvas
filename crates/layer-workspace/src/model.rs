@@ -9,10 +9,6 @@ pub const HISTORY_BUDGET_BYTES: u64 = 100 * 1024 * 1024;
 pub const OWNER_LEASE_MS: u64 = 30_000;
 pub const OWNER_RENEW_MS: u64 = 10_000;
 pub const MAX_PACKAGE_BYTES: usize = 128 * 1024 * 1024;
-pub(crate) const MAX_ITEM_ID_BYTES:usize=128;
-pub(crate) const MAX_DESCRIPTION_BYTES:usize=16_384;
-pub(crate) const MAX_SWITCHER_IDS:usize=10_000;
-pub(crate) const MAX_SWITCHER_ID_BYTES:usize=512;
 /// Stable identities: included names are system-owned; workspace content is editable.
 pub const DEFAULT_WORKSPACES: [(&str, layer_ui::WorkspacePreset); 3] = [
     (
@@ -348,7 +344,7 @@ impl Metadata {
     }
     pub fn validate(&self) -> Result<(), StoreError> {
         validate_name(&self.name)?;
-        if self.description.len() > MAX_DESCRIPTION_BYTES {
+        if self.description.len() > 16_384 {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ItemMetadataExceedsSupportedLimits));
         }
         Ok(())
@@ -358,7 +354,7 @@ impl Metadata {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::IncludedWorkspacesCannotBeRenamed));
         }
         validate_name(name.trim())?;
-        if description.len() > MAX_DESCRIPTION_BYTES {
+        if description.len() > 16_384 {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ItemMetadataExceedsSupportedLimits));
         }
         if name.trim() == self.name && description == self.description {
@@ -531,7 +527,7 @@ impl Entity {
         }
     }
     pub fn validate(&self) -> Result<(), StoreError> {
-        if self.id.is_empty() || self.id.len() > MAX_ITEM_ID_BYTES {
+        if self.id.is_empty() || self.id.len() > 128 {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::InvalidItemIdentity));
         }
         self.metadata.validate()?;

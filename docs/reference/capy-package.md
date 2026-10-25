@@ -182,13 +182,7 @@ resource records. Project admission also bounds layers, dimensions, retained
 source bytes and raster bytes using the same units on reopen. Shared source
 owners and compressed tile allocations count once; editable raster capacity is
 charged per source. Opening charges vector items for both their decoded bytes
-and the path records they become. Vector decoding charges geometry, styles,
-width knots, preserved fields and temporary copies against the remaining project
-allowance before allocating them. Nested style and opaque streams share the
-1,048,576 framed-record limit; a subpath count cannot exceed the path's anchor
-limit before capacity is reserved. Retained accounting includes shared names,
-unknown properties and footprint metadata. Pending edits must resolve
-before final publication.
+and the path records they become. Pending edits must resolve before final publication.
 
 Current evaluator bounds include 1,024 rulers, 32 mesh cells per axis, 32 curve
 points or gradient stops and LUT cubes of side 65. Precision bounds on invertible
@@ -778,11 +772,6 @@ finish supplying those ranges on its worker before calling the synchronous codec
 through a tiny read. `PreparedResources` can enumerate or stream immutable blocks
 independently of `PreparedPackage` and its ZIP writer.
 
-Vector encoding applies the same property and chunk bounds before growing its
-leased output and property index buffers. Transfer chunk copies keep their
-shared memory reservation until the caller consumes or drops the returned
-`DecodedBytes`; copying them into a host buffer needs separate host admission.
-
 Native workers may use retained immutable file ranges. A mutable destination or
 revocable provider is spooled into private owned storage before adoption. Streams
 are copied in bounded chunks before random-access ZIP parsing. Browser workers
@@ -873,15 +862,11 @@ working selection. These execution fields are outside the portable manifest.
 Workers retain compact handle identity, including vacant slots, so returned
 results can be matched to the captured source targets.
 
-Payload chunks are bounded by `MAX_RANGE_BYTES`. `TransferReceiver` requires
-every byte to be initialized before producing immutable owners. Received
-descriptors do not establish validation: adoption checks compressed tiles,
-samples, LUT digests and admitted spaces, selection words and cached coverage,
-encoded caches and retained ancillary checksums. Cache bytes must decode to the
-same canonical resource. Coverage word storage is shared across aliases.
-Local capture and unchanged immutable payload reuse retain private validation
-state. Reuse requires every new binding of a payload to match its previous
-identity, descriptor, role and length.
+Payload chunks are bounded by `MAX_RANGE_BYTES`. `TransferReceiver` adopts
+complete verified payloads into immutable owners; incomplete transfers fail.
+Coverage word storage is shared across aliases. Worker admission verifies external
+bytes before this trusted internal transfer, so main-thread adoption does not
+repeat image decoding, color-profile preparation or decoded-content hashing.
 Tile receipts retain cached fingerprints of descriptors and encoded bytes.
 Worker color results intern the complete immutable image, tile and profile
 closure against the captured artwork; unchanged resources reuse their owners and
@@ -891,14 +876,6 @@ Unchanged encoding receipts and copy-safe ancillary payloads retain their exact
 bytes and resource identities.
 
 The Web host sends bounded transferable buffers and yields between chunks.
-An independent CPU worker checks received artwork, session and paper payloads.
-The controller holds the resulting immutable buffers behind private one-use
-receipts bound to the exact metadata; serialized fields cannot grant validation.
-Dedicated encoder, lookup and tile-preparation workers return private job receipts
-and do not share an arena with file decoders. Main-thread adoption consumes these
-receipts without repeating image decoding or sample scans. Parked browser chunks
-are bound to the original written length and SHA-256, checked asynchronously on
-each read. Checkpoint writes must match their begin descriptor and generations.
 `PreparedSessionTransfer` extends the trusted transport with working targets,
 bounded inverse edits, next edit/stroke identities and host session metadata.
 History uses the same per-record adapters; the UI owner does not replay complete

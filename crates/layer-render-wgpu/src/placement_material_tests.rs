@@ -503,7 +503,7 @@ fn snapshot_transform_enlargement_preserves_mask_defaults_and_finite_native_over
         assert_eq!(key.plane, RasterPlane::Mask);
         let bytes = tile.wait_backing().unwrap().decode().unwrap();
         zero_overrides += usize::from(bytes.iter().all(|value| *value == 0));
-        for (i, value) in bytes.iter().copied().enumerate() {
+        for (i, value) in bytes.into_iter().enumerate() {
             let world = Point {
                 x: (key.coordinate[0] * PAGE_SIZE + i as u32 % PAGE_SIZE) as f32 + 0.5 + origin.x,
                 y: (key.coordinate[1] * PAGE_SIZE + i as u32 / PAGE_SIZE) as f32 + 0.5 + origin.y,
@@ -990,7 +990,7 @@ fn independent_projective_group_mask_transform_preserves_owner_and_default_domai
     for (key,tile) in &mask.source.raster.wait_data().unwrap().tiles {
         assert_eq!(key.plane,RasterPlane::Mask);
         let bytes = tile.wait_backing().unwrap().decode().unwrap();
-        for (i,actual) in bytes.iter().copied().enumerate() {
+        for (i,actual) in bytes.into_iter().enumerate() {
             let world = [origin.x as f64+(key.coordinate[0]*PAGE_SIZE+i as u32%PAGE_SIZE) as f64+0.5,
                 origin.y as f64+(key.coordinate[1]*PAGE_SIZE+i as u32/PAGE_SIZE) as f64+0.5];
             let expected = crate::test_support::preimage(geometry,world).filter(|p| p.iter().all(|v| *v>=0. && *v<256.)).map_or_else(
@@ -1026,19 +1026,19 @@ fn linked_outer_mesh_mask_transform_uses_winning_owner_uv_and_preserves_no_hit_d
         let preview = render(&mut renderer,&owner,&[],false);
         renderer.set_transform_preview(None).unwrap();
         let source: Planes = paint(&owner).raster.wait_data().unwrap().tiles.iter().map(|(key,tile)|
-            (*key,tile.wait_backing().unwrap().decode().unwrap().to_vec())).collect();
+            (*key,tile.wait_backing().unwrap().decode().unwrap())).collect();
         let plan = document.layer_transform_plan(target(&owner),&placement, None,Default::default()).unwrap();
         assert_eq!(plan.target,target(&owner));
         assert_eq!(plan.scope,layer_core::TransformPixelsScope::Paint {linked_mask:true});
         let edit = pollster::block_on(renderer.snapshot_gpu().transform_pixels(plan,Default::default())).unwrap();
     let mut baked = document.clone(); baked.apply(edit).unwrap();
         let actual: Planes = paint(&baked).raster.wait_data().unwrap().tiles.iter().map(|(key,tile)|
-            (*key,tile.wait_backing().unwrap().decode().unwrap().to_vec())).collect();
+            (*key,tile.wait_backing().unwrap().decode().unwrap())).collect();
         check_raw_mapping(&source,&actual,&positions,"linked outer mesh bake");
         let baked_mask = mask_snapshot(&baked);
         assert_eq!(baked_mask.use_.inverted,inverted);
         let masks: Planes = baked_mask.source.raster.wait_data().unwrap().tiles.iter().map(|(key,tile)|
-            (*key,tile.wait_backing().unwrap().decode().unwrap().to_vec())).collect();
+            (*key,tile.wait_backing().unwrap().decode().unwrap())).collect();
         let mut no_hit = 0;
         for (i,sources) in positions.iter().enumerate() {
             let codes: Vec<u8> = sources.iter().map(|source| source.map(|[x,y]|

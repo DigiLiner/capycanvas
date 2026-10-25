@@ -67,23 +67,6 @@ fn sqlite_rejects_oversized_values_before_row_materialization() {
 }
 
 #[test]
-fn sqlite_field_limits_preserve_valid_escaped_metadata_and_preferences() {
-    let mut f=Fixture::new();let mut entity=workspace("Escaped metadata");
-    entity.metadata.description="\u{1}".repeat(16_384);
-    let id=entity.id.clone();
-    f.store.commit(CommitBatch::prepare(f.owner.clone(),vec![create(entity.clone())]).unwrap()).unwrap();
-    assert_eq!(f.store.load(&id).unwrap().entity.metadata.description,entity.metadata.description);
-    f.store.connection.execute("UPDATE items SET metadata=?2 WHERE id=?1",params![id,"x".repeat(MAX_METADATA_BYTES+1)]).unwrap();
-    assert_eq!(f.store.load(&id).unwrap_err().kind,ErrorKind::InvalidData);
-    assert!(f.store.list().unwrap().iter().find(|item|item.id==id).unwrap().error.is_some());
-    f.store.connection.execute("UPDATE items SET metadata=?2,metadata_generation='123456789012345678901' WHERE id=?1",params![id,serde_json::to_string(&entity.metadata).unwrap()]).unwrap();
-    assert_eq!(f.store.load(&id).unwrap_err().kind,ErrorKind::InvalidData);
-    let ids:Vec<String>=(0..10_000).map(|i|format!("{i:05}{}","\u{1}".repeat(507))).collect();
-    f.store.connection.execute("INSERT INTO workspace_switcher(id,workspace_ids) VALUES(1,?1)",[serde_json::to_string(&ids).unwrap()]).unwrap();
-    assert!(matches!(f.store.handle(StoreRequest::Switcher).unwrap(),StoreResponse::Switcher(Some(actual)) if actual==ids));
-}
-
-#[test]
 fn storage_enforces_included_workspace_name_and_delete_protection() {
     let mut f = Fixture::new();
     let mut browser = BrowserDatabase::default();

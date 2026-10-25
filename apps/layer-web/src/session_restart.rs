@@ -37,20 +37,9 @@ async fn pack_prepared(prepared:&PreparedSessionTransfer,indices:&[usize])->Resu
     }
     let result=js_sys::Object::new();
     js_sys::Reflect::set(&result,&js("metadata"),&js(serde_json::to_string(&Envelope{descriptor:prepared.descriptor().clone(),chunks}).map_err(js)?))?;
-    js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;js_sys::Reflect::set(&result,&js("transfer_kind"),&js("session"))?;Ok(result.into())
+    js_sys::Reflect::set(&result,&js("buffers"),&buffers)?;Ok(result.into())
 }
 async fn unpack(metadata:&str,buffers:js_sys::Array)->Result<layer_core::package::session::OpenSession,JsValue> {
-    raster_worker::receive_session(metadata,buffers).await?.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)
-}
-#[wasm_bindgen]
-pub async fn raster_worker_validate_session(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue>{
-    if web_sys::window().is_some(){return Err(js("Payload validation requires its worker"));}
-    let transfer=receive(metadata,buffers).await?;
-    transfer.validate_payloads(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)?;
-    let indices=(0..transfer.payload_count()).collect::<Vec<_>>();pack_prepared(&transfer,&indices).await
-}
-pub(super) async fn receive(metadata:&str,buffers:js_sys::Array)->Result<PreparedSessionTransfer,JsValue> {
-    if metadata.len()>ProjectLimits::default().metadata_bytes as usize{return Err(js("Oversized session metadata"));}
     let envelope:Envelope=serde_json::from_str(metadata).map_err(js)?;
     let mut receiver=SessionTransferReceiver::new(envelope.descriptor,ProjectLimits::default()).map_err(js)?;
     let count=envelope.chunks.iter().try_fold(0usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Session transfer count overflow"))?;
@@ -65,7 +54,7 @@ pub(super) async fn receive(metadata:&str,buffers:js_sys::Array)->Result<Prepare
             documents::yield_browser().await?;
         }
     }
-    receiver.finish().map_err(js)
+    receiver.finish().map_err(js)?.adopt_verified(ProjectLimits::default(),&AtomicBool::new(false)).map_err(js)
 }
 fn parts(value:&JsValue)->Result<(String,js_sys::Array),JsValue> {
     Ok((js_sys::Reflect::get(value,&js("metadata"))?.as_string().ok_or_else(||js("Missing session transfer metadata"))?,js_sys::Reflect::get(value,&js("buffers"))?.dyn_into()?))
@@ -82,7 +71,7 @@ impl WebSessionCapture {
             wait_capture(&capture.editor).await?;
             let prepared=PreparedSessionTransfer::capture(&capture.editor,capture.metadata().map_err(js)?,&AtomicBool::new(false)).map_err(js)?;
             let envelope=serde_json::to_string(&Envelope{descriptor:prepared.descriptor().clone(),chunks:Vec::new()}).map_err(js)?;
-            let beginning=serde_json::to_string(&serde_json::json!({"key":key,"generation":generation,"base_generation":base_generation,"project":envelope})).map_err(js)?;
+            let beginning=serde_json::to_string(&serde_json::json!({"key":key,"project":envelope})).map_err(js)?;
             let missing=JsFuture::from(raster_worker::call("restart-begin",&beginning,&js_sys::Array::new())?).await?;
             let missing:Vec<usize>=serde_wasm_bindgen::from_value(missing).map_err(js)?;
             let wire=pack_prepared(&prepared,&missing).await?;
@@ -126,7 +115,7 @@ impl WebApp {
             let observed=observe.call1(&JsValue::NULL,&serialize(&restore.state.location)?)?;
             let observed:Option<layer_ui::DestinationFingerprint>=serde_wasm_bindgen::from_value(JsFuture::from(js_sys::Promise::resolve(&observed)).await?).map_err(js)?;
             admission.admit(restore.document()).map_err(|reason|js(reason.message(&localization)))?;
-            let mut candidate=documents::prepare_session(restore.document().clone(),(adapter,device,queue),&brush,viewport,localization,None).await?;
+            let mut candidate=documents::prepare_session(restore.document().clone(),adapter,device,queue,&brush,viewport,localization,None).await?;
             candidate.restore_session(restore,recovered,observed).map_err(js)?;
             Ok(WebSessionProject{session:Some(Box::new(candidate)),lost}.into())
         }))
@@ -163,11 +152,10 @@ impl WebApp {
     }
 }
 
-struct PendingTransfer {receiver:SessionTransferReceiver,generation:u64,base_generation:u64}
 struct CachedTransfer {prepared:PreparedSessionTransfer,bytes:u64}
 thread_local! {
     static TRANSFERS:std::cell::RefCell<BTreeMap<String,CachedTransfer>>=const {std::cell::RefCell::new(BTreeMap::new())};
-    static PENDING_TRANSFER:std::cell::RefCell<BTreeMap<String,PendingTransfer>>=const {std::cell::RefCell::new(BTreeMap::new())};
+    static PENDING_TRANSFER:std::cell::RefCell<BTreeMap<String,SessionTransferReceiver>>=const {std::cell::RefCell::new(BTreeMap::new())};
 }
 fn trim_transfer_cache(current:&str) {
     TRANSFERS.with(|slot|{
@@ -183,7 +171,7 @@ fn trim_transfer_cache(current:&str) {
 }
 #[wasm_bindgen]
 pub fn raster_worker_restart_begin(metadata:&str)->Result<JsValue,JsValue> {
-    #[derive(Deserialize)]struct Begin {key:String,generation:u64,base_generation:u64,project:String}
+    #[derive(Deserialize)]struct Begin {key:String,project:String}
     let begin:Begin=serde_json::from_str(metadata).map_err(js)?;
     let envelope:Envelope=serde_json::from_str(&begin.project).map_err(js)?;
     let receiver=TRANSFERS.with(|cache|{
@@ -194,7 +182,7 @@ pub fn raster_worker_restart_begin(metadata:&str)->Result<JsValue,JsValue> {
         }
     }).map_err(js)?;
     let missing=receiver.missing_payloads();
-    PENDING_TRANSFER.with(|slot|{let mut pending=slot.borrow_mut();pending.clear();pending.insert(begin.key,PendingTransfer{receiver,generation:begin.generation,base_generation:begin.base_generation});});
+    PENDING_TRANSFER.with(|slot|{let mut pending=slot.borrow_mut();pending.clear();pending.insert(begin.key,receiver);});
     serialize(&missing)
 }
 #[wasm_bindgen]
@@ -209,11 +197,7 @@ struct WriteOptions {key:String,generation:u64,base_generation:u64,existing:Vec<
 pub async fn raster_worker_restart_write(metadata:&str,buffers:js_sys::Array)->Result<JsValue,JsValue> {
     let options:WriteOptions=serde_json::from_str(metadata).map_err(js)?;
     let envelope:Envelope=serde_json::from_str(&options.project).map_err(js)?;
-    let pending=PENDING_TRANSFER.with(|slot|slot.borrow_mut().remove(&options.key)).ok_or_else(||js("Checkpoint transfer expired"))?;
-    if pending.generation!=options.generation||pending.base_generation!=options.base_generation{return Err(js("Checkpoint generation changed"));}
-    let mut receiver=pending.receiver;receiver.check_descriptor(&envelope.descriptor).map_err(js)?;
-    let count=envelope.chunks.iter().try_fold(0usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Checkpoint block count overflow"))?;
-    if count!=buffers.length() as usize{return Err(js("Incomplete checkpoint resource blocks"));}
+    let mut receiver=PENDING_TRANSFER.with(|slot|slot.borrow_mut().remove(&options.key)).ok_or_else(||js("Checkpoint transfer expired"))?;
     let mut index=0;
     for (payload,count) in envelope.chunks.into_iter().enumerate() {
         for _ in 0..count {
@@ -259,17 +243,17 @@ struct Pack {segments:BTreeMap<u64,Vec<Arc<[u8]>>>,length:u64}
 impl ByteSource for Pack {
     fn byte_len(&self)->u64 {self.length}
     fn poll(&self,offset:u64,length:usize)->Result<RangeState,String> {
-        let mut output=layer_core::memory::DecodedBytes::zeroed(length)?;let mut written=0;let mut cursor=offset;
-        while written<length {
+        let mut output=Vec::with_capacity(length);let mut cursor=offset;
+        while output.len()<length {
             let (&start,blocks)=self.segments.range(..=cursor).next_back().ok_or("Missing session resource range")?;
             let relative=usize::try_from(cursor-start).map_err(|_|"Session offset exceeds admission")?;
             let block=blocks.get(relative/BLOCK).ok_or("Incomplete session resource range")?;
             let position=relative%BLOCK;
-            let count=(length-written).min(block.len().checked_sub(position).ok_or("Session resource range overflow")?);
+            let count=(length-output.len()).min(block.len().checked_sub(position).ok_or("Session resource range overflow")?);
             if count==0{return Err("Incomplete session resource range".into());}
-            output[written..written+count].copy_from_slice(&block[position..position+count]);written+=count;cursor+=count as u64;
+            output.extend_from_slice(&block[position..position+count]);cursor+=count as u64;
         }
-        Ok(RangeState::Ready(ByteRange::new(output.into_shared()?,0..length).map_err(str::to_string)?))
+        Ok(RangeState::Ready(ByteRange::new(output.into(),0..length).map_err(str::to_string)?))
     }
 }
 #[wasm_bindgen]
@@ -283,8 +267,7 @@ pub async fn raster_worker_restart_open(checkpoint:&str,buffers:js_sys::Array)->
         let bytes=buffers.get(index as u32).dyn_into::<js_sys::Uint8Array>().map_err(|_|js("Missing session resource block"))?;
         total=total.checked_add(bytes.length() as usize).filter(|n|*n<=1024*1024*1024).ok_or_else(||js("Session resources exceed admission"))?;
         if bytes.length() as usize>BLOCK{return Err(js("Oversized session resource block"));}
-        let mut owned=layer_core::memory::with_input(||layer_core::memory::DecodedBytes::zeroed(bytes.length() as usize)).map_err(js)?;bytes.copy_to(&mut owned);
-        if blocks.insert(id,owned.into_shared().map_err(js)?).is_some(){return Err(js("Duplicate session resource block"));}
+        if blocks.insert(id,Arc::<[u8]>::from(bytes.to_vec())).is_some(){return Err(js("Duplicate session resource block"));}
         buffers.set(index as u32,JsValue::UNDEFINED);documents::yield_browser().await?;
     }
     let metadata:serde_json::Value=serde_json::from_str(&checkpoint.metadata).map_err(js)?;

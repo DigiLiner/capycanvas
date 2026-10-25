@@ -94,10 +94,8 @@ fn package_owners_preserve_large_offsets_readiness_failures_and_snapshot_lifetim
     drop(backing);
     assert_eq!(snapshot.poll(offset, 3).unwrap_err(), "Corrupt package block");
     *source.failure.lock().unwrap() = None;
-    assert!(matches!(snapshot.poll(offset, 3).unwrap(), RangeState::Ready(_)));
-    assert_eq!(snapshot.fail("Corrupt package block".into()), "Corrupt package block");
     assert_eq!(snapshot.poll(offset, 3).unwrap_err(), "Corrupt package block");
-    assert!(matches!(snapshot.poll_original(offset, 3).unwrap(), RangeState::Ready(_)));
+    assert_eq!(snapshot.poll_original(offset, 3).unwrap_err(), "Corrupt package block");
     assert!(matches!(other_open.poll(offset, 3).unwrap(), RangeState::Ready(_)));
 }
 

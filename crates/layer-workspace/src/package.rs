@@ -79,7 +79,7 @@ pub fn import_package(bytes: &[u8], expected: PackageKind, now: u64) -> Result<E
             "The package exceeds the supported size.",
         ));
     }
-    let header=crate::input::InputBudget::default().json(std::str::from_utf8(bytes).map_err(|error|StoreError::invalid(error.to_string()))?)?;
+    let header: serde_json::Value = serde_json::from_slice(bytes)?;
     if header.get("format").and_then(|v| v.as_str()) != Some("capycanvas-workspace")
         || header.get("version").and_then(|v| v.as_u64()) != Some(3)
     {
@@ -101,9 +101,9 @@ pub fn import_package(bytes: &[u8], expected: PackageKind, now: u64) -> Result<E
         }
     }
     let mut used = std::collections::BTreeSet::new();
-    let mut content = protocol::unpack(&serde_json::to_string(&package.content)?, |id,remaining| {
+    let mut content = protocol::unpack(&serde_json::to_string(&package.content)?, |id| {
         used.insert(id.to_string());
-        package.components.get(id).ok_or_else(||StoreError::invalid("A required resource is missing. Obtain a complete export from the source application before importing.")).and_then(|text|crate::input::copy(text,remaining))
+        package.components.get(id).cloned().ok_or_else(||StoreError::invalid("A required resource is missing. Obtain a complete export from the source application before importing."))
     })?;
     if used.len() != package.components.len() {
         return Err(StoreError::invalid(

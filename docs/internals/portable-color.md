@@ -20,7 +20,8 @@ JPEG import/export supports RGB, gray and explicitly profiled Adobe CMYK/YCCK
 input. Original ICC bytes, integer source samples, alpha, orientation and print
 density retain their existing interpretation. The JPEG decoder buffers a whole
 image; its scanline facade does not provide bounded-memory streaming. PNG/TIFF
-delivery continues to consume rows.
+delivery continues to consume rows. JPEG-compressed TIFF with gray and alpha is
+refused because the TIFF decoder cannot read two-component JPEG.
 
 Camera JPEGs with an MPF directory containing a baseline primary photograph and
 only large thumbnails open the primary photograph. Unknown auxiliary image
@@ -81,35 +82,18 @@ let encode = JpegEncodeOptions::from_memory_budget(95, budget);
 ```
 
 JPEG preflight accounts for retained input capacity and the backend's estimated
-pixel/coefficient storage before allocating decoded pixels. Shared reservations
-cover input growth and metadata parsing, then the configured decoder estimate;
-gain-map decoding also includes its retained base image. The caller's codec
-ceiling and the shared foreground allowance both apply. Small concurrent JPEGs
-reserve their estimated work rather than their full caller allowances. Encoding
-estimates eight times the raw pixel buffer plus scratch and retained metadata.
-These are admission estimates, not allocator-enforced caps. The 32768 pixel
-dimension limit and address-space overflow checks also remain in force.
-
-The pinned JPEG backport keeps entropy output Vec-owned through growth and
-reports refusal of mainline pixel, coefficient, row and metadata allocations as
-errors. Its [provenance and scope](../../vendor/README.md#jpeg-allocation-ownership-and-refusal)
-are explicit; other codec APIs and unsafe internals remain separate qualification work.
-
-TIFF limits apply during the first directory parse, including both metadata
-value readers. JPEG-compressed strips and tiles use the bounded raw-plane JPEG
-path with exact container geometry, complete markers and padded-plane working
-memory admission. TIFF metadata controls sample interpretation; nested JPEG color
-labels do not convert ink or alpha samples. RGB, gray, straight alpha and CMYK
-keep their supported unsigned 8-bit JPEG layouts. The
-[vendor guide](../../vendor/README.md#tiff-directory-and-nested-jpeg-admission)
-describes the dependency correction. Lossless TIFF remains unsigned 8/16-bit.
+pixel/coefficient storage before allocating decoded pixels. Encoding estimates
+eight times the raw pixel buffer plus scratch and retained metadata. These are admission estimates,
+not allocator-enforced caps or reservations against concurrent jobs. The 32768
+pixel dimension limit and address-space overflow checks also remain in force.
 
 The policy leaves headroom for the editor, GPU, other apps and allocation
 overhead. It does not certify every 100 MP editing session: one 100 MP RGBA f32
 surface occupies about 1.49 GiB, and multiple surfaces/history can exceed a
 device's allowance. Over-budget files currently return a clear error. Automatic
-reduced-resolution import remains separate work. Shared input execution and
-retained-memory admission also apply across simultaneous native photo operations.
+reduced-resolution import and a shared editor-wide memory reservation manager
+are separate work. Hosts should serialize large photo operations or divide the
+available budget among simultaneous operations.
 
 ## ICC compatibility
 
@@ -184,13 +168,6 @@ The reference directory records the CMM version and profile/sample hashes.
 `tools/validation/jpeg_interchange.py` continues to generate and independently
 verify the optional CMYK/YCCK, progressive, orientation and 60 MP JPEG fixtures.
 Generated fixtures remain local under `artifacts/`.
-
-Independent JPEG-compressed TIFF tests accept `LAYER_TEST_TIFF_FIXTURES` and run
-with `cargo test --locked -p layer-color external_jpeg_tiff -- --include-ignored`.
-The base directory contains RGB/gray full-stream and separated-table references.
-`reference-extended.json` supplies independent libtiff fixtures and Pillow raw
-references for partial strips, padded edge tiles, straight alpha, CMYK ink and
-WhiteIsZero polarity.
 
 ## Interactive display residency
 

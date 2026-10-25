@@ -9,7 +9,6 @@ pub use prompts::*;
 mod history_presentation;
 pub use history_presentation::*;
 mod model;
-mod input;
 mod package;
 mod protocol;
 pub use package::*;

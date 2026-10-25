@@ -17,12 +17,15 @@ quick-xml = "=0.41.0"
 moxcms = { version = "=0.9.1", default-features = false, features = ["extended_range", "options"] }
 png = "=0.18.1"
 # Bilevel/fax TIFF is outside the supported unsigned 8/16-bit photo matrix.
-tiff = { version = "=0.11.3", default-features = false, features = ["deflate", "jpeg", "lzw"] }
+tiff = { version = "=0.10.3", default-features = false, features = ["deflate", "jpeg", "lzw"] }
 image = { version = "=0.25.9", default-features = false, features = ["bmp"] }
 gif = "=0.14.2"
 image-webp = "=0.2.4"
 # Sequential block IO keeps HDR interchange bounded on native and wasm.
 exr = { version = "=1.74.0", default-features = false }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))'.dependencies]
+sysinfo = { version = "=0.37.2", default-features = false, features = ["system", "apple-sandbox"] }
 
 [[example]]
 name = "portable_smoke"

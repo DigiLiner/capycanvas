@@ -244,10 +244,6 @@ impl NativeHost {
     pub fn take_service_changes(&mut self) -> u32 {
         std::mem::take(&mut self.service_changes)
     }
-    pub fn poll_memory_retry(&mut self)->bool {
-        let retry=self.session.renderer_mut().0.as_mut().is_some_and(|gpu|gpu.poll_memory_retry());
-        self.dirty|=retry;retry
-    }
     pub fn renderer_options(&self) -> RendererOptions {
         RendererOptions {
             ui_color: self.ui_color,

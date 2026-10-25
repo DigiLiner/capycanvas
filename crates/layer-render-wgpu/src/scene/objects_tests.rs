@@ -307,7 +307,7 @@ fn exact_interactive_objects_read_parked_samples_on_decode_workers() {
     struct Chunk {bytes:Arc<[u8]>,readers:Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>}
     impl TileChunk for Chunk {
         fn len(&self)->usize {self.bytes.len()}
-        fn poll(&self)->Result<Option<Arc<[u8]>>,layer_core::raster::TileError> {
+        fn poll(&self)->Result<Option<Arc<[u8]>>,String> {
             self.readers.lock().unwrap().push(std::thread::current().id());Ok(Some(self.bytes.clone()))
         }
         fn resident_bytes(&self)->usize {self.bytes.len()}
@@ -317,7 +317,7 @@ fn exact_interactive_objects_read_parked_samples_on_decode_workers() {
     let readers=Arc::new(std::sync::Mutex::new(Vec::new()));
     let spill=prepare_external_spill(&layer_core::Editor::new(doc.clone()).retained_tiles()).unwrap().unwrap();
     let bytes=Arc::from(spill.bytes.to_vec());spill.commit(Arc::new(Chunk {bytes,readers:readers.clone()})).unwrap();
-    let mut r=crate::test_support::private_sample_renderer(doc.composition().color);
+    let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     let mut compositor=Scene::new(&r).unwrap();compositor.object_spatial.prepare(doc.scene());
     let request=canonical_request(&r,&mut compositor,&doc,owner,ObjectWindow {origin:[0.;2],side:1.,size:[32;2]});
     assert!(!request.live && !r.snapshot_worker);
@@ -335,36 +335,6 @@ fn exact_interactive_objects_read_parked_samples_on_decode_workers() {
     let readers=readers.lock().unwrap();assert!(!readers.is_empty());
     assert!(readers.iter().all(|thread|*thread!=std::thread::current().id()),"the renderer owner must not read/decode parked source samples");
     assert!(float_pixels(&r,result.texture()).iter().all(|pixel|*pixel==[1.,0.,0.,1.]));
-}
-
-#[test]
-fn exact_queries_return_typed_worker_refusals_without_empty_submission_loops() {
-    use layer_core::{raster::TileError,raster_storage::{TileChunk,prepare_external_spill}};
-    struct Refused {length:usize,busy:bool}
-    impl TileChunk for Refused {
-        fn len(&self)->usize {self.length}
-        fn poll(&self)->Result<Option<Arc<[u8]>>,TileError> {Err(if self.busy {TileError::Busy}else {layer_core::memory::MemoryError.into()})}
-        fn resident_bytes(&self)->usize {0}
-        fn evict(&self) {}
-    }
-    for busy in [false,true] {
-        let (doc,owner,_)=document([32;2],vec![ImageObject::new(image([32;2],[255,0,0,255]))]);
-        let spill=prepare_external_spill(&layer_core::Editor::new(doc.clone()).retained_tiles()).unwrap().unwrap();
-        let length=spill.bytes.len();spill.commit(Arc::new(Refused {length,busy})).unwrap();
-        let mut r=crate::test_support::private_sample_renderer(doc.composition().color);
-        let mut compositor=Scene::new(&r).unwrap();compositor.object_spatial.prepare(doc.scene());
-        let request=canonical_request(&r,&mut compositor,&doc,owner,ObjectWindow {origin:[0.;2],side:1.,size:[32;2]});
-        assert!(!request.live && !r.snapshot_worker);
-        assert!(compositor.exact_object_results.resolve_collection(&r,doc.scene(),&request).unwrap().is_none());
-        let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));r.snapshot_cancelled=Some(cancelled.clone());
-        let (done,wait)=std::sync::mpsc::channel();
-        let watchdog=std::thread::spawn(move||if wait.recv_timeout(std::time::Duration::from_secs(5)).is_err() {cancelled.store(true,std::sync::atomic::Ordering::Release);});
-        let result=pollster::block_on(compositor.prepare_capture_work_async(&mut r));
-        let _=done.send(());watchdog.join().unwrap();
-        let expected=if busy {GpuRasterError::Busy}else {GpuRasterError::Memory(layer_core::memory::MemoryError)};
-        assert_eq!(result,Err(expected));assert!(r.metrics.object_drain_submissions<4);
-        assert!(r.failed_image_tiles.is_empty());
-    }
 }
 
 #[test]
@@ -521,7 +491,7 @@ fn live_object_read_defers_without_inline_decode_then_returns_canonical_pixels()
     let mut object = ImageObject::new(image([512; 2], [255, 0, 0, 255]));
     object.affine = Affine64([1. / 7., 0., 0., 1. / 7., 0., 0.]);
     let (doc, owner, _) = document([128; 2], vec![object]);
-    let mut r = crate::test_support::private_sample_renderer(doc.composition().color);
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [128; 2];
     let mut scene = Scene::new(&r).unwrap();
     let (target, _) = create_color_target(&r.device, [64; 2], "prepared reference read");
@@ -575,7 +545,7 @@ fn cold_object_reads_advance_every_finished_tile_and_the_idle_budget_per_attempt
 }
 
 fn cold_query_renderer(doc: &layer_core::Document) -> WgpuRasterizer {
-    let mut r = crate::test_support::private_sample_renderer(doc.composition().color);
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = doc.composition().size;
     r.artwork_frame = Some(Arc::new(crate::artwork::Frame::new(packet(doc.scene(), r.document_extent), Default::default())));
     r

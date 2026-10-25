@@ -2,8 +2,7 @@ use super::{IdBuild, ItemId, PathItem, Position, Resource, VectorChunk, VectorOb
 use std::{collections::{BTreeSet, HashMap}, sync::Arc};
 
 const CELL: f64 = 256.;
-const SPREAD:i64=64;
-const MAX_CELL_ENTRIES:usize=1<<18;
+const SPREAD: i64 = 64;
 
 #[derive(Clone, Copy)]
 struct Entry { chunk: usize, index: u32, bounds: [f64; 4] }
@@ -14,7 +13,6 @@ pub struct VectorIndex {
     order: HashMap<usize, u32, IdBuild>,
     cells: HashMap<[i32; 2], Vec<Entry>, IdBuild>,
     large: Vec<Entry>,
-    entries:usize,
     retired: HashMap<usize, Resource<VectorChunk>, IdBuild>,
 }
 
@@ -23,7 +21,7 @@ fn span(bounds: [f64; 4]) -> [i32; 4] {
     let cell = |v: f64| (v / CELL).floor().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32;
     [cell(bounds[0]), cell(bounds[1]), cell(bounds[2]), cell(bounds[3])]
 }
-fn spread([x0, y0, x1, y1]: [i32; 4]) -> i64 { (i64::from(x1)-i64::from(x0)+1).saturating_mul(i64::from(y1)-i64::from(y0)+1) }
+fn spread([x0, y0, x1, y1]: [i32; 4]) -> i64 { (i64::from(x1) - i64::from(x0) + 1) * (i64::from(y1) - i64::from(y0) + 1) }
 fn meets(a: [f64; 4], b: [f64; 4]) -> bool { a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3] }
 
 impl VectorIndex {
@@ -41,7 +39,6 @@ impl VectorIndex {
             let order = &self.order;
             self.cells.retain(|_, entries| { entries.retain(|entry| order.contains_key(&entry.chunk)); !entries.is_empty() });
             self.large.retain(|entry| order.contains_key(&entry.chunk));
-            self.entries=self.cells.values().map(Vec::len).sum();
             self.retired.clear();
         }
         self.root = Some(object.clone());
@@ -54,35 +51,27 @@ impl VectorIndex {
         for (index, bounds) in Self::visible(chunk) {
             let entry = Entry { chunk: chunk_key, index, bounds };
             let s = span(bounds);
-            let count=spread(s);
-            if count>SPREAD || count as usize>MAX_CELL_ENTRIES.saturating_sub(self.entries) {self.large.push(entry);continue;}
-            self.entries+=count as usize;
+            if spread(s) > SPREAD { self.large.push(entry); continue; }
             for y in s[1]..=s[3] { for x in s[0]..=s[2] { self.cells.entry([x, y]).or_default().push(entry); } }
         }
     }
     fn candidates(&self, area: [f64; 4]) -> Vec<(u32, u32)> {
         let s = span(area);
         let mut found: Vec<(u32, u32)> = Vec::new();
-        let mut take = |cell:Option<[i32;2]>,entries:&[Entry]| {
+        let mut take = |entries: &[Entry]| {
             let mut chunk = None;
             for entry in entries {
                 if chunk.is_none_or(|(key, _)| key != entry.chunk) { chunk = Some((entry.chunk, self.order.get(&entry.chunk).copied())); }
                 if let Some((_, Some(order))) = chunk
-                    && meets(entry.bounds,area) {
-                        if let Some(cell)=cell {
-                            let own=span(entry.bounds);
-                            if cell!=[s[0].max(own[0]),s[1].max(own[1])] {continue;}
-                        }
-                        found.push((order,entry.index));
-                    }
+                    && meets(entry.bounds, area) { found.push((order, entry.index)); }
             }
         };
         if spread(s) > self.cells.len() as i64 {
-            for (cell, entries) in &self.cells { if (s[0]..=s[2]).contains(&cell[0]) && (s[1]..=s[3]).contains(&cell[1]) { take(Some(*cell),entries); } }
+            for (cell, entries) in &self.cells { if (s[0]..=s[2]).contains(&cell[0]) && (s[1]..=s[3]).contains(&cell[1]) { take(entries); } }
         } else {
-            for y in s[1]..=s[3] { for x in s[0]..=s[2] { if let Some(entries) = self.cells.get(&[x, y]) { take(Some([x,y]),entries); } } }
+            for y in s[1]..=s[3] { for x in s[0]..=s[2] { if let Some(entries) = self.cells.get(&[x, y]) { take(entries); } } }
         }
-        take(None,&self.large);
+        take(&self.large);
         found.sort_unstable();
         found.dedup();
         found
@@ -197,30 +186,4 @@ mod tests {
         assert_eq!(index.within(&object, area), VectorIndex::default().within(&object, area), "undo to the first version finds what a fresh index finds");
         assert_eq!(index.within(&current, area), VectorIndex::default().within(&current, area));
     }
-
-    #[test]
-    fn bounded_cell_storage_and_extreme_queries_match_the_linear_oracle() {
-        assert_eq!(spread([i32::MIN, i32::MIN, i32::MAX, i32::MAX]), i64::MAX);
-        let count = MAX_CELL_ENTRIES / SPREAD as usize + 2;
-        let object = VectorObject::from_records((0..count).map(|i|
-            line(i as u64 + 1, [4., 4.], [2040., 2040.])).collect());
-        let first = object.paths().next().unwrap().1.bounds();
-        assert_eq!(spread(span(first)), SPREAD, "each path exercises all sixty-four admitted cells");
-        let mut index = VectorIndex::default();
-        index.update(&object);
-        assert!(index.cells.values().map(Vec::len).sum::<usize>() <= MAX_CELL_ENTRIES);
-        assert!(!index.large.is_empty(), "paths exceeding aggregate cell storage use the existing large-path list");
-        for area in [
-            [-f64::MAX, -f64::MAX, f64::MAX, f64::MAX],
-            [0., 0., 2048., 2048.], [250., 250., 260., 260.], [3000., 3000., 3010., 3010.],
-        ] {
-            let mut expected = Vec::new();
-            for (chunk_index, chunk) in object.chunks().iter().enumerate() {
-                expected.extend(VectorIndex::visible(chunk).filter(|(_, bounds)| meets(*bounds, area))
-                    .map(|(record_index, _)| (chunk_index as u32, record_index)));
-            }
-            assert_eq!(index.candidates(area), expected);
-        }
-    }
-
 }

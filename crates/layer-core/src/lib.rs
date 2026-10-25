@@ -11,8 +11,6 @@ pub use atomic_file::{atomic_write, atomic_write_checked};
 mod cancellable;
 pub use cancellable::Cancellable;
 pub mod temp_files;
-pub mod input_work;
-pub mod memory;
 
 use std::collections::BTreeSet;
 pub mod color;

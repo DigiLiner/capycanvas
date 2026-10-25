@@ -200,7 +200,6 @@ enum Command {
 struct FrameReport {
     context: std::sync::RwLock<EvaluationContext>,
     pending_work: AtomicBool,
-    preparation_paused: AtomicBool,
     retouch_miss: std::sync::atomic::AtomicU64,
     retouch_waiting: std::sync::atomic::AtomicU64,
     paper_drawn: std::sync::atomic::AtomicU64,
@@ -794,7 +793,6 @@ impl CanvasRenderer for RenderWorker {
     fn has_pending_work(&self) -> bool {
         self.report.pending_work.load(Ordering::Acquire)
     }
-    fn preparation_paused(&self)->bool {self.report.preparation_paused.load(Ordering::Acquire)}
     fn set_transform_preview(
         &mut self,
         preview: Option<&layer_render::TransformPreview>,
@@ -1258,7 +1256,6 @@ impl Worker {
                 .poll(wgpu::PollType::Poll)
                 .map_err(error)?;
             self.child.dispatch()?;
-            if self.renderer.poll_memory_retry() {self.report_frame(report);wake_canvas(&self.area);}
             let (revision, screen) = self.child.screen_color();
             if self.screen_reported != Some(revision) {
                 self.screen_reported = Some(revision);
@@ -1380,8 +1377,8 @@ impl Worker {
             // A small preview can wait through continuous drawing/navigation.
             // Batching bounds interruption when input resumes during idle work;
             // the quiet period keeps those batches from competing every frame.
-            let thumbnail_index=pending_thumbnails.iter().position(|(_,target)|!self.renderer.thumbnail_preparation_paused(*target));
-            let thumbnail_ready=thumbnail_index.is_some() && last_canvas_frame.elapsed()>=Duration::from_millis(50);
+            let thumbnail_ready = !pending_thumbnails.is_empty()
+                && last_canvas_frame.elapsed() >= Duration::from_millis(50);
             if context_capture.is_some() {
                 if pending_frames.is_empty() && !self.renderer.has_pending_submission() {
                     let request = context_capture.take().unwrap();
@@ -1394,14 +1391,14 @@ impl Worker {
             let next = if document_drawn && !deferred.is_empty() {
                 Ok(deferred.pop_front().unwrap())
             } else if !startup_progress.complete
-                || !pending_frames.is_empty() && !self.renderer.preparation_paused()
+                || !pending_frames.is_empty()
                 || self.renderer.has_pending_submission()
                 || self.renderer.effect_validation_pending()
                 || self.renderer.filter_previews_pending()
                 || self.pending_present
                 || stamp_flight || pending_stamp.is_some()
                 || self.renderer.thumbnails_pending()
-                || thumbnail_index.is_some()
+                || !pending_thumbnails.is_empty()
                 || self.renderer.color_sample_pending()
                 || self.renderer.selection_paint_pending()
                 || self.renderer.region_pending()
@@ -1409,8 +1406,6 @@ impl Worker {
                 || self.presenter.screen_check_busy()
             {
                 receiver.recv_timeout(Duration::from_millis(if thumbnail_ready || self.renderer.region_pending() { 1 } else { 8 }))
-            } else if self.renderer.memory_pressure_waiting() {
-                receiver.recv_timeout(SCREEN_CHECK_DELAY)
             } else if self.hdr_encoding.is_some() {
                 // Display changes arrive on Wayland even when artwork is idle.
                 receiver.recv_timeout(Duration::from_millis(100))
@@ -1446,8 +1441,7 @@ impl Worker {
                     // A whole-photo thumbnail scan used to block this owner for
                     // ~200 ms even though every camera frame rendered in <2 ms.
                     if thumbnail_ready && count.load(Ordering::Acquire) == 0
-                        && let Some(index)=thumbnail_index
-                        && let Some(&(id,target))=pending_thumbnails.get(index)
+                        && let Some(&(id, target)) = pending_thumbnails.front()
                     {
                         let result = self.renderer.prepare_thumbnail_batch(target).and_then(|ready| {
                             if ready { self.renderer.request_thumbnail(id, target).map(|_| true) } else { Ok(false) }
@@ -1455,9 +1449,9 @@ impl Worker {
                         self.report_frame(report);
                         match result {
                             Ok(false) => (),
-                            Ok(true) => {pending_thumbnails.remove(index);},
+                            Ok(true) => { pending_thumbnails.pop_front(); },
                             Err(layer_render_wgpu::GpuRasterError::ThumbnailUnavailable(_)) => {
-                                pending_thumbnails.remove(index);
+                                pending_thumbnails.pop_front();
                                 reply.send(Reply::ThumbnailCancelled(id)).map_err(error)?;
                                 wake_canvas(&self.area);
                             }
@@ -1847,7 +1841,6 @@ impl Worker {
     /// idle canvas when it newly does. A retouching stroke that missed its
     /// source is kept for the session to replay.
     fn report_frame(&mut self, report: &FrameReport) {
-        report.preparation_paused.store(self.renderer.preparation_paused(),Ordering::Release);
         if let Ok(mut context) = report.context.try_write() { *context = self.renderer.evaluation_context(); }
         if let Some(stroke) = self.renderer.take_retouch_miss() {
             report.retouch_miss.store(stroke.0, Ordering::Release);

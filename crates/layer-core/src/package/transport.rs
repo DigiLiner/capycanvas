@@ -47,7 +47,6 @@ impl ChunkedBytes {
             if chunk.is_empty() || chunk.len() > MAX_RANGE_BYTES || (index + 1 < chunks.len() && chunk.len() != MAX_RANGE_BYTES) {
                 return Err("Invalid package memory chunk");
             }
-            crate::memory::images().track(chunk).map_err(|_|"Package memory chunks exceed the shared memory budget")?;
             length = length.checked_add(chunk.len() as u64).ok_or("Package memory length overflow")?;
         }
         Ok(Self { chunks, length })
@@ -63,10 +62,10 @@ impl ByteSource for ChunkedBytes {
         let start = (offset % MAX_RANGE_BYTES as u64) as usize;
         let chunk = &self.chunks[index];
         if start + length <= chunk.len() { return Ok(RangeState::Ready(ByteRange::new(chunk.clone(), start..start + length)?)); }
-        let mut bytes=crate::memory::DecodedBytes::zeroed(length)?;
-        let first=chunk.len()-start;bytes[..first].copy_from_slice(&chunk[start..]);
-        bytes[first..].copy_from_slice(&self.chunks[index+1][..length-first]);
-        Ok(RangeState::Ready(ByteRange::new(bytes.into_shared()?, 0..length)?))
+        let mut bytes = Vec::with_capacity(length);
+        bytes.extend_from_slice(&chunk[start..]);
+        bytes.extend_from_slice(&self.chunks[index + 1][..length - bytes.len()]);
+        Ok(RangeState::Ready(ByteRange::new(bytes.into(), 0..length)?))
     }
 }
 
@@ -84,9 +83,9 @@ mod native {
             }
             let mut file = self.file.lock().map_err(|_| "Package file lock failed")?;
             file.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
-            let mut bytes=crate::memory::DecodedBytes::zeroed(length)?;
+            let mut bytes = vec![0; length];
             file.read_exact(&mut bytes).map_err(|e| e.to_string())?;
-            Ok(RangeState::Ready(ByteRange::new(bytes.into_shared()?, 0..length)?))
+            Ok(RangeState::Ready(ByteRange::new(bytes.into(), 0..length)?))
         }
     }
     pub fn spool(input: &mut impl Read, directory: &Path, limit: u64, cancelled: &AtomicBool) -> Result<ImmutableBacking, String> {

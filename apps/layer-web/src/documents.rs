@@ -17,8 +17,9 @@ pub(super) async fn yield_browser() -> Result<(), JsValue> {
 }
 
 pub(super) fn host_error_reason(error: &JsValue) -> Option<layer_ui::DocumentHostErrorCopy> {
-    if let Ok(reason) = js_sys::Reflect::get(error, &js("document_host_error"))
-        && let Ok(reason) = serde_wasm_bindgen::from_value(reason) { return Some(reason); }
+    if let Ok(reason) = js_sys::Reflect::get(error, &js("document_host_error")) {
+        if let Ok(reason) = serde_wasm_bindgen::from_value(reason) { return Some(reason); }
+    }
     js_sys::Reflect::has(error, &js("color_feature_error")).unwrap_or(false)
         .then(||layer_ui::DocumentHostErrorCopy::Color(color_preferences::color_feature_reason(error.clone())))
 }
@@ -70,7 +71,7 @@ impl WebApp {
         let localization = self.session.localization().clone();
         self.documents.admission(&self.session.retained_document_tiles()).admit(&project).map_err(|reason| js(reason.message(&localization)))?;
         Ok(future_to_promise(async move {
-            let candidate = prepare_session(project, (adapter, device, queue), &brush, viewport, localization, Some(&cancelled)).await?;
+            let candidate = prepare_session(project, adapter, device, queue, &brush, viewport, localization, Some(&cancelled)).await?;
             Ok(WebProject { session: Some(Box::new(candidate)), request: id, copy_owner: None, epoch, revision, source: layer_ui::ImportSource::Photo,
                 placed: None, source_name: String::new(), target: None, package: None, lost }.into())
         }))
@@ -84,7 +85,7 @@ impl WebApp {
         let buffers=js_sys::Array::of1(&bytes);
         let pending=raster_worker::call("lookup",&name,&buffers)?;
         Ok(future_to_promise(async move {
-            let result=raster_worker::prepared_result("lookup",&JsFuture::from(pending).await?)?;
+            let result=JsFuture::from(pending).await?;
             let metadata=js_sys::Reflect::get(&result,&js("metadata"))?.as_string().ok_or_else(||js("Invalid lookup metadata"))?;
             let (descriptor,spaces):(layer_core::Lut3d,u8)=serde_json::from_str(&metadata).map_err(js)?;
             let bytes=js_sys::Uint8Array::new(&js_sys::Reflect::get(&result,&js("bytes"))?).to_vec();
@@ -213,14 +214,13 @@ impl WebApp {
         Ok(future_to_promise(async move {
             output::cancelled(&control)?;
             let cancelled = wasm_bindgen::closure::Closure::<dyn Fn() -> bool>::new(move || control.is_cancelled());
-            let session = prepare_session(project, (adapter, device, queue), &brush, viewport, localization,
+            let session = prepare_session(project, adapter, device, queue, &brush, viewport, localization,
                 Some(cancelled.as_ref().unchecked_ref())).await?;
             Ok(WebProject { session: Some(Box::new(session)), request, copy_owner, epoch, revision,
                 source: layer_ui::ImportSource::Photo, placed: None, source_name: String::new(),
                 target: None, package: None, lost }.into())
         }))
     }
-    #[expect(clippy::too_many_arguments,reason="The exported browser preparation ABI keeps request identity and callbacks as separate arguments")]
     pub fn prepare_document(
         &self,
         id: u32,
@@ -290,7 +290,7 @@ impl WebApp {
         };
         Ok(future_to_promise(async move {
             let check_cancelled=||->Result<(),JsValue>{
-                if let Some(check)=&cancelled && check.call0(&JsValue::NULL)?.as_bool()==Some(true){let error=js_sys::Error::new("Opening cancelled");error.set_name("AbortError");return Err(error.into());}
+                if let Some(check)=&cancelled {if check.call0(&JsValue::NULL)?.as_bool()==Some(true){let error=js_sys::Error::new("Opening cancelled");error.set_name("AbortError");return Err(error.into());}}
                 Ok(())
             };
             check_cancelled()?;
@@ -324,12 +324,12 @@ impl WebApp {
                     let (texture, missing) = papers::texture(&order.paper, &retained, &localization).await;
                     let document = order.project(texture, &localization).map_err(js)?;
                     warning = missing;
-                    artwork_transfer::Opened::Editable {document:Box::new(layer_ui::ImportedDocument::new(document,layer_ui::ImportSource::Master)),fallback:None}
+                    artwork_transfer::Opened::Editable {document:layer_ui::ImportedDocument::new(document,layer_ui::ImportSource::Master),fallback:None}
                 }
             };
             check_cancelled()?;
             let (mut imported,fallback)=match imported {
-                artwork_transfer::Opened::Editable {document,fallback}=>(*document,fallback),
+                artwork_transfer::Opened::Editable {document,fallback}=>(document,fallback),
                 artwork_transfer::Opened::Package {presentation,preview}=>return Ok(WebProject{session:None,request:id,copy_owner:None,epoch,revision,source:layer_ui::ImportSource::Master,placed:None,source_name,target,lost,package:Some((presentation,preview))}.into()),
             };
             check_cancelled()?;
@@ -369,7 +369,7 @@ impl WebApp {
                 .into());
             }
             admission.admit(&project).map_err(|reason|js(reason.message(&localization)))?;
-            let prepared=prepare_session(project,(adapter,device,queue),&brush,viewport,localization,cancelled.as_ref()).await;
+            let prepared=prepare_session(project,adapter,device,queue,&brush,viewport,localization,cancelled.as_ref()).await;
             let mut candidate=match prepared {
                 Ok(candidate)=>candidate,
                 Err(error)=>{
@@ -486,11 +486,10 @@ pub fn raster_worker_properties(metadata: &str) -> Result<JsValue, JsValue> {
 }
 
 pub(super) async fn prepare_session(
-    project:layer_core::Document,gpu:(wgpu::Adapter,wgpu::Device,wgpu::Queue),
+    project:layer_core::Document,adapter:wgpu::Adapter,device:wgpu::Device,queue:wgpu::Queue,
     brush:&layer_core::BrushSnapshot,viewport:[u32;2],localization:std::sync::Arc<layer_ui::Localizer>,
     cancelled:Option<&js_sys::Function>,
 )->Result<UiSession<AttachedRenderer>,JsValue>{
-    let (adapter,device,queue)=gpu;
     hdr::admit_document(&project)?;
     let mut renderer = WgpuRasterizer::from_wgpu_native_staged(
         adapter,
@@ -512,11 +511,11 @@ pub(super) async fn prepare_session(
             .map_err(js)?;
     }
     renderer
-        .prepare_startup(&project, brush, false)
+        .prepare_startup(&project, &brush, false)
         .map_err(js)?;
     let start = js_sys::Date::now();
     loop {
-        if let Some(check)=cancelled && check.call0(&JsValue::NULL)?.as_bool()==Some(true){return Err(js("Opening cancelled"));}
+        if let Some(check)=cancelled {if check.call0(&JsValue::NULL)?.as_bool()==Some(true){return Err(js("Opening cancelled"));}}
         renderer.compile_startup_step(false).await.map_err(js)?;
         if validating && let Some(result) = renderer.take_effect_validation() {
             result.result.map_err(js)?;

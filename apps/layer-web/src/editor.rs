@@ -160,7 +160,7 @@ impl WebApp {
         let scale = self.viewport_scale;
         use layer_render_wgpu::BackdropRegion;
         self.glass = boxes
-            .as_chunks::<9>().0.iter()
+            .chunks_exact(9)
             .map(|b| BackdropRegion::rounded(
                 [b[0], b[1], b[2], b[3]].map(|v| v * scale),
                 [b[4], b[5], b[6], b[7]].map(|v| v * scale),

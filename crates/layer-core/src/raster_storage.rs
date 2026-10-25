@@ -13,7 +13,6 @@ pub(crate) struct Bytes {
     len: usize,
     value: Mutex<Value>,
     integrity: crate::authored::IntegrityCache,
-    _retirement:crate::memory::OwnerRetirement,
 }
 enum Value {
     Memory(Arc<[u8]>),
@@ -35,7 +34,7 @@ enum Value {
 pub trait TileChunk: Send + Sync {
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool { self.len() == 0 }
-    fn poll(&self) -> Result<Option<Arc<[u8]>>, crate::raster::TileError>;
+    fn poll(&self) -> Result<Option<Arc<[u8]>>, String>;
     fn resident_bytes(&self) -> usize;
     fn evict(&self);
 }
@@ -45,16 +44,15 @@ impl From<Arc<[u8]>> for Bytes {
             len: bytes.len(),
             value: Mutex::new(Value::Memory(bytes)),
             integrity: crate::authored::IntegrityCache::default(),
-            _retirement:Default::default(),
         }
     }
 }
 impl Bytes {
     pub(crate) fn integrity(&self, cancelled:&std::sync::atomic::AtomicBool) -> Result<crate::authored::EncodedIntegrity,String> {
-        self.integrity.get_or_compute(cancelled,||Ok(self.read()?))
+        self.integrity.get_or_compute(cancelled,||self.read())
     }
     pub(crate) fn digest(&self,cancelled:&std::sync::atomic::AtomicBool)->Result<[u8;32],String> {
-        self.integrity.digest(cancelled,||Ok(self.read()?))
+        self.integrity.digest(cancelled,||self.read())
     }
     pub(crate) fn set_integrity(&self,value:crate::authored::EncodedIntegrity)->Result<(),String> {
         if value.bytes!=self.len as u64 {return Err("Immutable tile integrity length mismatch".into());}
@@ -90,7 +88,7 @@ impl Bytes {
             Value::Disk { .. } => 0,
         }
     }
-    pub fn read(&self) -> Result<Arc<[u8]>, crate::raster::TileError> {
+    pub fn read(&self) -> Result<Arc<[u8]>, String> {
         match &*self.value.lock().map_err(|_| "Tile storage lock failed")? {
             Value::Memory(bytes) => Ok(bytes.clone()),
             Value::External {
@@ -100,14 +98,13 @@ impl Bytes {
             } => {
                 use sha2::{Digest, Sha256};
                 let bytes = chunk.poll()?.ok_or("Drawing tile is still loading")?;
-                crate::memory::images().track(&bytes)?;
                 let bytes = bytes
-                    .get(*offset..offset.checked_add(self.len).ok_or("Parked tile range overflow")?)
+                    .get(*offset..offset + self.len)
                     .ok_or("Incomplete parked drawing chunk")?;
                 if <[u8; 32]>::from(Sha256::digest(bytes)) != *digest {
                     return Err("Parked drawing tile integrity check failed".into());
                 }
-                Ok(crate::memory::DecodedBytes::copy_from(bytes)?.into_shared()?)
+                Ok(bytes.into())
             }
             #[cfg(not(target_arch = "wasm32"))]
             Value::Disk {
@@ -117,7 +114,7 @@ impl Bytes {
             } => {
                 use sha2::{Digest, Sha256};
                 use std::io::{Read, Seek, SeekFrom};
-                let mut bytes = crate::memory::DecodedBytes::zeroed(self.len)?;
+                let mut bytes = vec![0; self.len];
                 let mut file = file.lock().map_err(|_| "Tile file lock failed")?;
                 file.seek(SeekFrom::Start(*offset))
                     .map_err(|e| e.to_string())?;
@@ -126,17 +123,13 @@ impl Bytes {
                 if <[u8; 32]>::from(Sha256::digest(&bytes)) != *digest {
                     return Err("Parked drawing tile integrity check failed".into());
                 }
-                Ok(bytes.into_shared()?)
+                Ok(bytes.into())
             }
         }
     }
     pub fn ready(&self) -> Result<bool, String> {
         match &*self.value.lock().map_err(|_| "Tile storage lock failed")? {
-            Value::External { chunk, .. } => match chunk.poll() {
-                Ok(bytes)=>Ok(bytes.is_some()),
-                Err(crate::raster::TileError::Memory(_))=>Ok(true),
-                Err(error)=>Err(error.into()),
-            },
+            Value::External { chunk, .. } => Ok(chunk.poll()?.is_some()),
             _ => Ok(true),
         }
     }
@@ -146,7 +139,7 @@ impl Bytes {
 /// resident until the host has committed every byte. Failed writes just drop
 /// this ticket; they cannot change document/history handles.
 pub struct PreparedSpill {
-    pub bytes: crate::memory::DecodedBytes,
+    pub bytes: Vec<u8>,
     records: Vec<(Arc<TileBlob>, usize, [u8; 32])>,
 }
 impl PreparedSpill {
@@ -166,7 +159,6 @@ impl PreparedSpill {
                     offset,
                     digest,
                 };
-                drop(crate::memory::OwnerRetirement);
             }
         }
         Ok(())
@@ -181,7 +173,7 @@ pub fn prepare_external_spill(tiles: &RetainedTiles) -> Result<Option<PreparedSp
         .try_blobs()?
         .ok_or("Wait for drawing capture before parking")?;
     let mut spill = PreparedSpill {
-        bytes: crate::memory::DecodedBytes::zeroed(0)?,
+        bytes: Vec::new(),
         records: Vec::new(),
     };
     for blob in blobs {
@@ -197,7 +189,7 @@ pub fn prepare_external_spill(tiles: &RetainedTiles) -> Result<Option<PreparedSp
                     continue;
                 }
                 let offset = spill.bytes.len();
-                spill.bytes.extend_from_slice(bytes)?;
+                spill.bytes.extend_from_slice(bytes);
                 spill.records.push((
                     blob.clone(),
                     offset,
@@ -440,7 +432,6 @@ pub fn spill_tiles(blobs: &[Arc<TileBlob>], mut file: std::fs::File) -> Result<u
             offset,
             digest,
         };
-        drop(crate::memory::OwnerRetirement);
     }
     Ok(offset as usize)
 }
@@ -475,14 +466,6 @@ mod tests {
             )
             .unwrap(),
         )
-    }
-    #[test]
-    fn closing_the_last_tile_owner_signals_preparation_retry_after_payload_drop() {
-        let tile=blob(29);let bytes=tile.compressed().unwrap();let pending=Arc::downgrade(&bytes);drop(bytes);
-        let generation=crate::memory::generation();drop(tile);
-        assert_eq!(pending.strong_count(),0);
-        assert_ne!(crate::memory::generation(),generation);
-        crate::memory::images().collect().unwrap();
     }
     #[test]
     fn ancillary_resources_retain_and_charge_the_shared_package_owner_once() {
@@ -542,7 +525,7 @@ mod tests {
             fn len(&self) -> usize {
                 self.bytes.len()
             }
-            fn poll(&self) -> Result<Option<Arc<[u8]>>, crate::raster::TileError> {
+            fn poll(&self) -> Result<Option<Arc<[u8]>>, String> {
                 Ok(self
                     .ready
                     .load(Ordering::Relaxed)
@@ -578,7 +561,7 @@ mod tests {
         let spill = prepare_external_spill(&retained).unwrap().unwrap();
         let drops = Arc::new(AtomicUsize::new(0));
         let chunk = Arc::new(Chunk {
-            bytes: spill.bytes.to_vec().into(),
+            bytes: spill.bytes.clone().into(),
             ready: AtomicBool::new(false),
             drops: drops.clone(),
         });
@@ -727,7 +710,7 @@ mod tests {
         spill_tiles(std::slice::from_ref(&blob), file).unwrap();
         corrupt.seek(SeekFrom::Start(0)).unwrap();
         corrupt.write_all(b"bad").unwrap();
-        assert!(blob.compressed().unwrap_err().to_string().contains("integrity"));
+        assert!(blob.compressed().unwrap_err().contains("integrity"));
     }
     #[test]
     fn float_samples_survive_disk_without_precision_changes() {

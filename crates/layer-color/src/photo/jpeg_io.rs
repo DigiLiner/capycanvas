@@ -6,15 +6,14 @@ pub(super) fn read_jpeg_with_cancel(
     input: impl Read,
     limits: DecodeLimits,
     cancelled: &std::sync::atomic::AtomicBool,
-) -> Result<(SourceImage, layer_core::PhotoMetadata, layer_core::memory::Reservation<'static>), String> {
-    let mut input = jpeg_codec::read_bounded(input, limits.codec_bytes)?;
-    let bytes = &input.bytes;
-    let mut metadata = super::jpeg_markers::read_source(bytes)?;
+) -> Result<(SourceImage, layer_core::PhotoMetadata), String> {
+    let bytes = jpeg_codec::read_bounded(input, limits.codec_bytes)?;
+    let mut metadata = super::jpeg_markers::read_source(&bytes)?;
     let photo = std::mem::take(&mut metadata.photo);
     let source = if metadata.gain_map {
-        super::gainmap::read_jpeg(bytes, bytes.capacity(), limits, cancelled, &mut input.memory)?
+        super::gainmap::read_jpeg(&bytes, bytes.capacity(), limits, cancelled)?
     } else {
-        let mut decoder = jpeg_codec::decoder(bytes, bytes.capacity(), limits)?;
+        let mut decoder = jpeg_codec::decoder(&bytes, bytes.capacity(), limits)?;
         let extent = [
             u32::from(decoder.header().width),
             u32::from(decoder.header().height),
@@ -25,7 +24,9 @@ pub(super) fn read_jpeg_with_cancel(
         }
         let (channels, format) = jpeg_codec::channels(&decoder, metadata.adobe_transform)?;
         decoder.set_output_format(format);
-        jpeg_codec::reserve_decode(&decoder, bytes.capacity(), 0, limits.codec_bytes, &mut input.memory)?;
+        decoder
+            .output_buffer_size()
+            .map_err(|e| format!("{}: {e}", jpeg_codec::MEMORY_ERROR))?;
         let interpretation = interpretation(channels, SampleDepth::U8, metadata.profile)?;
         let mut builder = SourceBuilder::new(extent, interpretation, limits.source_bytes)?;
         let image = decoder.decode_image().map_err(err)?;
@@ -49,7 +50,7 @@ pub(super) fn read_jpeg_with_cancel(
         metadata.orientation.unwrap_or(1),
         limits.source_bytes,
     )?;
-    Ok((source, photo, input.into_memory()))
+    Ok((source, photo))
 }
 
 /// JPEG output admission settings. Hosts can pass their current process memory

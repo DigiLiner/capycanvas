@@ -365,7 +365,7 @@ impl WgpuRasterizer {
         self.initialize_native_from(color,None)
     }
     fn initialize_native_from(&mut self,color:DocumentColor,source:Option<&NativeEdit>)->Result<(),GpuRasterError> {
-        self.restore_preflight=None;self.bake_preflight=None;self.source_receipt=None;self.source_results.clear();self.decode_pressure.clear();self.moving_decode=None;
+        self.restore_preflight=None;self.bake_preflight=None;self.source_receipt=None;self.source_results.clear();self.moving_decode=None;
         #[cfg(target_arch="wasm32")]
         {self.browser_image_result=Default::default();self.browser_image_wake=Default::default();}
         self.document_color = color;

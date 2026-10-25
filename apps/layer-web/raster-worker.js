@@ -54,9 +54,6 @@ async function execute({id,request}) {
         result=await restart.publish(key,checkpoint,ids.map((id,index)=>({id,bytes:prepared.buffers[index]})),request.handles,base_generation);
         break;
       }
-      case "validate-paper": result=wasm.raster_worker_validate_paper(request.metadata,request.buffers);break;
-      case "validate-artwork": result=await wasm.raster_worker_validate_artwork(request.metadata,request.buffers);break;
-      case "validate-session": result=await wasm.raster_worker_validate_session(request.metadata,request.buffers);break;
       case "color-field": result = wasm.raster_worker_color_field(request.metadata); break;
       case "encode": result = wasm.raster_worker_encode(request.metadata,request.buffers[0]); break;
       case "image-decode": result = wasm.raster_worker_image_decode(request.metadata,request.buffers); break;
@@ -112,8 +109,8 @@ async function execute({id,request}) {
       case "write": { const output=await writePackage(request.metadata,request.buffers); result=output; break; }
       default: throw new Error("Unknown raster worker operation");
     }
-    self.postMessage({id,result,retire:retire()},result instanceof Uint8Array ? [result.buffer] : [...(result?.bytes instanceof Uint8Array ? [result.bytes] : result?.waveform_counts ? [result.waveform_counts] : result?.buffers || []),...(result?.preview instanceof Uint8Array ? [result.preview] : []),...(result?.png instanceof Uint8Array ? [result.png] : [])].map(bytes=>bytes.buffer));
-  } catch(error) { self.postMessage({id,error:String(error),color_feature_error:error?.color_feature_error,memory_error:error?.memory_error===true,worker_busy:error?.worker_busy===true,retire:retire()}); }
+    self.postMessage({id,result,retire:retire()},result instanceof Uint8Array ? [result.buffer] : [...(result?.bytes instanceof Uint8Array ? [result.bytes] : result?.waveform_counts ? [result.waveform_counts] : result?.buffers || []),...(result?.preview instanceof Uint8Array ? [result.preview] : [])].map(bytes=>bytes.buffer));
+  } catch(error) { self.postMessage({id,error:String(error),color_feature_error:error?.color_feature_error,retire:retire()}); }
 }
 
 const outputs=new Map();

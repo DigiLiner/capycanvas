@@ -1,5 +1,5 @@
 use super::*;
-use layer_core::{Document, authored::{Artwork, PaintBase, SourceTarget}, raster::TileError,
+use layer_core::{Document, authored::{Artwork, PaintBase, SourceTarget},
     raster_storage::{TileChunk,prepare_external_spill}};
 use std::sync::{Condvar,Mutex};
 use std::time::{Duration,Instant};
@@ -20,11 +20,11 @@ impl Drop for Release {fn drop(&mut self) {self.0.release();}}
 struct Chunk {bytes:Arc<[u8]>,gate:Arc<Gate>,fail:bool}
 impl TileChunk for Chunk {
     fn len(&self)->usize {self.bytes.len()}
-    fn poll(&self)->Result<Option<Arc<[u8]>>,TileError> {
+    fn poll(&self)->Result<Option<Arc<[u8]>>,String> {
         self.gate.reads.fetch_add(1,Ordering::Release);
         let mut open=self.gate.open.lock().unwrap();
         while !*open {open=self.gate.wake.wait(open).unwrap();}
-        if self.fail {Err(layer_core::memory::MemoryError.into())}else {Ok(Some(self.bytes.clone()))}
+        if self.fail {Err("Parked tile read failed".into())}else {Ok(Some(self.bytes.clone()))}
     }
     fn resident_bytes(&self)->usize {self.bytes.len()}
     fn evict(&self) {}
@@ -87,15 +87,13 @@ fn full_pool_retries_on_its_capacity_epoch_and_drops_cancelled_queued_and_active
     let dead_source=Arc::downgrade(&c);assert!(cancelled.request(PortableId::random(),c,[0;2]));
     let coordinates=Arc::new(Mutex::new(None));
     for first in 0..pool.capacity-2 {assert!(cancelled.request_coordinates([1.,0.,0.,1.,0.,0.],[1;2],first as u32,1,Arc::downgrade(&coordinates)));}
-    let epoch=pool.epoch.load(Ordering::Acquire);let memory=layer_core::memory::generation();let id=PortableId::random();
+    let epoch=pool.epoch.load(Ordering::Acquire);let id=PortableId::random();
     for _ in 0..32 {
         assert!(!waiting.request(id,d.clone(),[0;2]));assert!(waiting.pending());assert!(!waiting.ready());assert!(waiting.outstanding.is_empty());
         assert_eq!(waiting.waiting,Some(epoch));assert_eq!(pool.epoch.load(Ordering::Acquire),epoch);
     }
-    let refused_memory=layer_core::memory::generation();
     ga.release();gb.entered();
     assert_ne!(pool.epoch.load(Ordering::Acquire),epoch);assert!(!waiting.pending());
-    eprintln!("global memory epochs during pool wait: before={memory} refused={refused_memory} dequeued={}",layer_core::memory::generation());
     assert!(waiting.request(id,d.clone(),[0;2]));assert!(waiting.request(id,d.clone(),[0;2]));assert_eq!(waiting.outstanding.len(),1);
     drop(cancelled);assert!(cancelled_context.upgrade().is_none());gb.release();
     let (actual_id,actual_source,pixels)=image_pixels(result(&mut waiting));
@@ -104,7 +102,7 @@ fn full_pool_retries_on_its_capacity_epoch_and_drops_cancelled_queued_and_active
     assert!(cancelled_cache.upgrade().is_none());assert!(dead_source.upgrade().is_none());assert_eq!(gc.reads.load(Ordering::Acquire),0);
     assert_eq!(ga.reads.load(Ordering::Acquire),1);assert_eq!(gb.reads.load(Ordering::Acquire),1);
     let PreparedImageWork::Image(failed)=result(&mut active) else {panic!("gated image result")};
-    assert!(matches!(failed.pixels,Err(TileError::Memory(_))));assert!(!active.pending());
+    assert!(failed.pixels.is_err());assert!(!active.pending());
 }
 
 #[test]

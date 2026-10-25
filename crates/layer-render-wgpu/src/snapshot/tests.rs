@@ -521,7 +521,7 @@ fn raw_rows(source: &layer_core::color::source::SourceImage) -> Vec<u8> {
     all
 }
 fn frame(document: &Document) -> (WgpuRasterizer, Vec<[f32; 4]>) {
-    let mut r = crate::test_support::private_sample_renderer(document.composition().color);
+    let mut r = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
     let extent = document.composition().size;
     crate::test_support::submit_ready(&mut r, FramePacket {
         reset_layers: true,
@@ -1453,8 +1453,8 @@ fn sparse_transform_capture_keeps_filter_edges_and_watercolor_metadata_without_e
             capture.finish().unwrap();
             let expected = tiles[0].1.wait_backing().unwrap().decode().unwrap();
             let actual = output.tiles.get(&TileKey { plane: RasterPlane::Color, coordinate }).map(|tile| tile.wait_backing().unwrap().decode().unwrap())
-                .unwrap_or_else(|| layer_core::memory::DecodedBytes::zeroed(expected.len()).unwrap());
-            assert!(actual == expected, "{interpolation:?}: {coordinate:?}, first difference {:?}", actual.iter().zip(expected.iter()).position(|(a,b)| a != b));
+                .unwrap_or_else(|| vec![0; expected.len()]);
+            assert!(actual == expected, "{interpolation:?}: {coordinate:?}, first difference {:?}", actual.iter().zip(&expected).position(|(a,b)| a != b));
         }
     }
 }

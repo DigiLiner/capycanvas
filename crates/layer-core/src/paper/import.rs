@@ -122,11 +122,8 @@ fn make_seamless(heights: Vec<f32>, [width, height]: [usize; 2]) -> (Vec<f32>, [
 }
 
 pub fn paper_image(source: &SourceImage, cancelled: &dyn Fn() -> bool) -> Result<SourceImage, String> {
-    crate::memory::with_input(|| {
     let shrink = (f64::from(source.extent[0].max(source.extent[1])) / f64::from(MAX_PAPER_SIDE)).max(1.);
     let extent = source.extent.map(|v| ((f64::from(v) / shrink).round() as u32).max(1));
-    let window=((f64::from(source.extent[1])/f64::from(extent[1])*MAX_JITTER).ceil() as usize+2).min(source.extent[1] as usize);
-    let _scratch=crate::memory::images().reserve(extent[0] as usize*extent[1] as usize*8+window*source.extent[0] as usize*4+source.row_bytes())?;
     let heights = resample(source, extent, cancelled)?;
     let (heights, size) = make_seamless(heights, extent.map(|v| v as usize));
     let ppi = super::image_ppi(source.resolution).map(|v| v / shrink);
@@ -137,7 +134,6 @@ pub fn paper_image(source: &SourceImage, cancelled: &dyn Fn() -> bool) -> Result
     let mut image = builder.finish()?;
     image.resolution = Some(ImageResolution { unit: crate::ResolutionUnit::Inch, density: ppi.map(|v| [(v * 100.).round() as u32, 100]) });
     Ok(image)
-    })
 }
 
 pub fn image_preview(image: &SourceImage) -> Result<Vec<u8>, String> {
@@ -184,14 +180,7 @@ pub fn encode_png(image: &SourceImage) -> Result<Vec<u8>, String> {
 }
 
 pub fn decode_png(bytes: &[u8]) -> Result<SourceImage, String> {
-    crate::memory::with_input(|| {
-    let _work=crate::input_work::DECODERS.enter(&std::sync::atomic::AtomicBool::new(false))?;
-    crate::memory::images().collect()?;
-    let _scratch=crate::memory::images().reserve((MAX_PAPER_SIDE as usize).pow(2)+64*1024)?;
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_limits(png::Limits {bytes:(MAX_PAPER_SIDE as usize).pow(2)+64*1024});
-    decoder.set_ignore_text_chunk(true);
-    decoder.set_ignore_iccp_chunk(true);
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().map_err(|e| e.to_string())?;
     let info = reader.info();
     if info.color_type != png::ColorType::Grayscale || info.bit_depth != png::BitDepth::Eight
@@ -209,7 +198,6 @@ pub fn decode_png(bytes: &[u8]) -> Result<SourceImage, String> {
     let mut image = builder.finish()?;
     image.resolution = resolution;
     Ok(image)
-    })
 }
 
 #[cfg(test)]

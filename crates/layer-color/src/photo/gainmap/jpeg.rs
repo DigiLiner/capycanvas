@@ -21,13 +21,9 @@ fn decode(
     retained: usize,
     limits: DecodeLimits,
     cancel: &AtomicBool,
-    memory: &mut layer_core::memory::Reservation<'_>,
-    overlap: usize,
 ) -> Result<Image, String> {
     check_cancel(cancel)?;
-    let mut decoder_limits = limits;
-    decoder_limits.codec_bytes = limits.codec_bytes.checked_sub(overlap).ok_or(jpeg_codec::MEMORY_ERROR)?;
-    let mut decoder = jpeg_codec::decoder(bytes, retained, decoder_limits)?;
+    let mut decoder = jpeg_codec::decoder(bytes, retained, limits)?;
     if decoder.header().precision != 8
         || !matches!(
             decoder.jpeg_color_space(),
@@ -37,7 +33,7 @@ fn decode(
         return Err("Gain-map JPEG requires 8-bit RGB or grayscale samples".into());
     }
     decoder.set_output_format(PixelFormat::Rgb);
-    jpeg_codec::reserve_decode(&decoder, retained, overlap, limits.codec_bytes, memory)?;
+    decoder.output_buffer_size().map_err(err)?;
     let image = decoder.decode_image().map_err(err)?;
     check_cancel(cancel)?;
     Ok(image)
@@ -94,8 +90,7 @@ pub(super) fn encode(
         .encode_bytes
         .checked_sub(master.capacity() * 4)
         .ok_or(jpeg_codec::MEMORY_ERROR)?;
-    let mut encoded_base = jpeg_codec::Input::new(encoded_base, limits.codec_bytes)?;
-    let decoded_base = decode(&encoded_base.bytes, encoded_base.bytes.capacity(), limits, cancel, &mut encoded_base.memory, 0)?;
+    let decoded_base = decode(&encoded_base, encoded_base.capacity(), limits, cancel)?;
     let mut gains = LogGain::default();
     for (logs, codes) in master
         .chunks_mut(extent[0] as usize * 3)
@@ -133,7 +128,7 @@ pub(super) fn encode(
     .encode()
     .map_err(err)?;
     check_cancel(cancel)?;
-    let bytes = super::jpeg_container::assemble(&encoded_base.bytes, &gain, metadata, descriptions.as_deref())?;
+    let bytes = super::jpeg_container::assemble(&encoded_base, &gain, metadata, descriptions.as_deref())?;
     check_cancel(cancel)?;
     Ok((bytes, stats))
 }
@@ -150,7 +145,6 @@ impl Pair {
         retained: usize,
         limits: DecodeLimits,
         cancel: &AtomicBool,
-        memory: &mut layer_core::memory::Reservation<'_>,
     ) -> Result<Self, String> {
         check_cancel(cancel)?;
         let images = super::jpeg_container::parse(bytes)?;
@@ -183,8 +177,13 @@ impl Pair {
             ))
         };
         let color = crate::icc::GainMapColor::new(&base_profile, application_profile.as_ref())?;
-        let base = decode(images.base, retained, limits, cancel, memory, 0)?;
-        let gain = decode(images.gain, retained, limits, cancel, memory, base.data.capacity())?;
+        let base = decode(images.base, retained, limits, cancel)?;
+        let mut gain_limits = limits;
+        gain_limits.codec_bytes = limits
+            .codec_bytes
+            .checked_sub(base.data.capacity())
+            .ok_or(jpeg_codec::MEMORY_ERROR)?;
+        let gain = decode(images.gain, retained, gain_limits, cancel)?;
         Ok(Self {
             base,
             gain,
@@ -228,9 +227,8 @@ pub(in crate::photo) fn read(
     retained: usize,
     limits: DecodeLimits,
     cancel: &AtomicBool,
-    memory: &mut layer_core::memory::Reservation<'_>,
 ) -> Result<SourceImage, String> {
-    let pair = Pair::new(bytes, retained, limits, cancel, memory)?;
+    let pair = Pair::new(bytes, retained, limits, cancel)?;
     let extent = pair.extent();
     let mut builder = SourceBuilder::new(
         extent,
@@ -277,8 +275,7 @@ pub(super) fn preview(
     let scratch = u64::from(bounds[0]) * u64::from(bounds[1]) * 128 + 4 * 1024 * 1024;
     limits.codec_bytes = limits.codec_bytes.checked_sub(usize::try_from(scratch).map_err(err)?)
         .ok_or(jpeg_codec::MEMORY_ERROR)?;
-    let mut input = jpeg_codec::Input::new(bytes, limits.codec_bytes)?;
-    let pair = Pair::new(&input.bytes, input.bytes.capacity(), limits, cancel, &mut input.memory)?;
+    let pair = Pair::new(&bytes, bytes.capacity(), limits, cancel)?;
     let mut hdr_preview = crate::AreaPreview::new(extent, bounds)?;
     let mut sdr_preview = crate::AreaPreview::new(extent, bounds)?;
     let mut hdr = vec![[0.; 4]; extent[0] as usize];
@@ -424,10 +421,6 @@ mod tests {
                 .contains("cancelled")
         );
         assert!(admit([32768, 32768], 0, 512 * 1024 * 1024).is_err());
-        let read = |bytes: &[u8], retained, limits: DecodeLimits, cancel: &AtomicBool| {
-            let mut memory = jpeg_codec::reserve_input(layer_core::memory::images(), retained, limits.codec_bytes)?;
-            super::read(bytes, retained, limits, cancel, &mut memory)
-        };
         let bytes = encoded(90, 0.);
         let limits = DecodeLimits {
             codec_bytes: 1024,
@@ -466,14 +459,11 @@ mod tests {
                 .extent,
             [8, 12]
         );
-        let limits = DecodeLimits::default();
-        let mut memory = jpeg_codec::reserve_input(layer_core::memory::images(), bytes.capacity(), limits.codec_bytes).unwrap();
         let pair = Pair::new(
             &bytes,
             bytes.capacity(),
-            limits,
+            Default::default(),
             &AtomicBool::new(false),
-            &mut memory,
         )
         .unwrap();
         let mut hdr = vec![[0.; 4]; 12];

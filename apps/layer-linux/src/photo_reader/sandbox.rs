@@ -1,4 +1,3 @@
-use landlock::{Access,AccessFs,CompatLevel,Compatible,Ruleset,RulesetAttr,RulesetStatus,ABI};
 use seccompiler::{BpfProgram,SeccompAction,SeccompFilter};
 
 pub fn parent_death(parent:usize)->Result<(),String> {
@@ -19,10 +18,6 @@ pub fn restrict(bytes:usize)->Result<(),String> {
         if unsafe {libc::setrlimit(resource,&limit)}!=0 {return Err(std::io::Error::last_os_error().to_string());}
     }
     if unsafe {libc::close_range(3,u32::MAX,0)}!=0 {return Err(std::io::Error::last_os_error().to_string());}
-    let status=Ruleset::default().set_compatibility(CompatLevel::HardRequirement)
-        .handle_access(AccessFs::from_all(ABI::V1)).map_err(|e|e.to_string())?
-        .create().map_err(|e|e.to_string())?.restrict_self().map_err(|e|e.to_string())?;
-    if status.ruleset!=RulesetStatus::FullyEnforced || !status.no_new_privs {return Err("Photo decoder filesystem confinement is unavailable".into());}
     let calls=[libc::SYS_read,libc::SYS_write,libc::SYS_readv,libc::SYS_writev,libc::SYS_pread64,libc::SYS_lseek,
         libc::SYS_close,libc::SYS_fstat,libc::SYS_brk,libc::SYS_mmap,libc::SYS_munmap,libc::SYS_mremap,
         libc::SYS_mprotect,libc::SYS_madvise,libc::SYS_futex,libc::SYS_clock_gettime,libc::SYS_clock_nanosleep,

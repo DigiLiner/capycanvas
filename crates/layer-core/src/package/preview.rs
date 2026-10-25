@@ -3,15 +3,13 @@ use std::{io::Cursor, sync::Arc};
 pub const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PREVIEW_DIMENSION: u32 = 512;
 #[derive(Clone, Debug)]
-pub struct Preview { size: [u32; 2], encoded: Arc<[u8]>, pixels: Arc<[u8]>, _retirement:crate::memory::OwnerRetirement }
+pub struct Preview { size: [u32; 2], encoded: Arc<[u8]>, pixels: Arc<[u8]> }
 impl Preview {
     pub fn size(&self) -> [u32; 2] { self.size }
     pub fn encoded(&self) -> &Arc<[u8]> { &self.encoded }
     pub fn pixels(&self) -> &Arc<[u8]> { &self.pixels }
     pub fn decode(encoded: Arc<[u8]>) -> Result<Self, String> {
         if encoded.len() > MAX_PREVIEW_BYTES || !encoded.starts_with(b"\x89PNG\r\n\x1a\n") { return Err("Invalid preview envelope".into()); }
-        crate::memory::images().track(&encoded)?;
-        let _codec=crate::memory::images().reserve(MAX_PREVIEW_BYTES)?;
         let mut offset = 8usize;
         let mut end = false;
         while offset < encoded.len() {
@@ -36,21 +34,15 @@ impl Preview {
         if size.contains(&0) || size.iter().any(|n|*n>MAX_PREVIEW_DIMENSION) || info.bit_depth!=png::BitDepth::Eight || info.interlaced || info.srgb.is_none() {
             return Err("Unsupported preview representation".into());
         }
-        let mut samples=crate::memory::DecodedBytes::zeroed(size[0] as usize*size[1] as usize*channels)?;
+        let mut samples=vec![0;size[0] as usize*size[1] as usize*channels];
         let output=reader.next_frame(&mut samples).map_err(|e|e.to_string())?;
         if output.buffer_size()!=samples.len() {return Err("Invalid decoded preview length".into());}
         reader.finish().map_err(|e|e.to_string())?;
-        let pixels=if channels==3 {
-            let mut pixels=crate::memory::DecodedBytes::zeroed(size[0] as usize*size[1] as usize*4)?;
-            for (source,destination) in samples.as_chunks::<3>().0.iter().zip(pixels.as_chunks_mut::<4>().0) {destination.copy_from_slice(&[source[0],source[1],source[2],255]);}
-            pixels.into_shared()?
-        } else {samples.into_shared()?};
-        Ok(Self {size,encoded,pixels,_retirement:Default::default()})
+        let pixels=if channels==3 {samples.as_chunks::<3>().0.iter().flat_map(|[r,g,b]|[*r,*g,*b,255]).collect()} else {samples};
+        Ok(Self {size,encoded,pixels:pixels.into()})
     }
     pub fn from_rgba(size:[u32;2],pixels:Arc<[u8]>) -> Result<Self,String> {
         if size.contains(&0) || size.iter().any(|n|*n>MAX_PREVIEW_DIMENSION) || pixels.len()!=size[0] as usize*size[1] as usize*4 {return Err("Invalid preview pixels".into());}
-        crate::memory::images().track(&pixels)?;
-        let memory=crate::memory::images().reserve(MAX_PREVIEW_BYTES*2+pixels.len())?;
         let opaque=pixels.as_chunks::<4>().0.iter().all(|p|p[3]==255);
         let rgb:Vec<u8>=if opaque {pixels.as_chunks::<4>().0.iter().flat_map(|[r,g,b,_]|[*r,*g,*b]).collect()} else {Vec::new()};
         let mut bytes=Vec::new();
@@ -63,7 +55,7 @@ impl Preview {
             writer.finish().map_err(|e|e.to_string())?;
         }
         if bytes.len()>MAX_PREVIEW_BYTES {return Err("Preview exceeds encoded bound".into());}
-        Ok(Self {size,encoded:memory.retain(bytes.into())?,pixels,_retirement:Default::default()})
+        Ok(Self {size,encoded:bytes.into(),pixels})
     }
 }
 

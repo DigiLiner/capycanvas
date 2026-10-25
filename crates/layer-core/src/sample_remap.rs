@@ -86,14 +86,14 @@ fn tile_range(extent: u32) -> u32 {
     extent.div_ceil(TILE_SIZE)
 }
 
-type TileReader<'a> = dyn FnMut([u32; 2]) -> Result<Option<crate::memory::DecodedBytes>, String> + 'a;
+type TileReader<'a> = dyn FnMut([u32; 2]) -> Result<Option<Vec<u8>>, String> + 'a;
 
 struct Decoded<'a> {
-    tiles: Vec<([u32; 2], Arc<crate::memory::DecodedBytes>)>,
+    tiles: Vec<([u32; 2], Arc<Vec<u8>>)>,
     read: Box<TileReader<'a>>,
 }
 impl Decoded<'_> {
-    fn get(&mut self, coordinate: [u32; 2]) -> Result<Option<Arc<crate::memory::DecodedBytes>>, String> {
+    fn get(&mut self, coordinate: [u32; 2]) -> Result<Option<Arc<Vec<u8>>>, String> {
         if let Some((_, bytes)) = self.tiles.iter().find(|(c, _)| *c == coordinate) {
             return Ok(Some(bytes.clone()));
         }
@@ -135,7 +135,6 @@ fn fill_tile(
 /// `map`, in the source's own interpretation. Samples outside the source are
 /// zero. Unchanged whole tiles are shared with the source.
 pub fn remap_image(source: &SourceImage, extent: [u32; 2], map: GridMap, max_bytes: usize, cancelled: &AtomicBool) -> Result<SourceImage, String> {
-    crate::memory::with_input(|| {
     if !map.is_permutation() {
         return Err("Image samples can only be permuted exactly".into());
     }
@@ -167,7 +166,7 @@ pub fn remap_image(source: &SourceImage, extent: [u32; 2], map: GridMap, max_byt
             output.fill(0);
             let mut decoded = Decoded {
                 tiles: Vec::with_capacity(4),
-                read: Box::new(|coordinate| Ok(source.tiles.get(&coordinate).map(|tile| tile.decode()).transpose()?)),
+                read: Box::new(|coordinate| source.tiles.get(&coordinate).map(|tile| tile.decode()).transpose()),
             };
             let keep = [[0; 2], extent.map(i64::from)];
             fill_tile(&mut output, bpp, [tx, ty], keep, source_extent, map, &mut decoded)?;
@@ -181,7 +180,6 @@ pub fn remap_image(source: &SourceImage, extent: [u32; 2], map: GridMap, max_byt
     }
     result.validate()?;
     Ok(result)
-    })
 }
 
 /// Paint or coverage tiles moved through a tile-aligned `map` into a target of

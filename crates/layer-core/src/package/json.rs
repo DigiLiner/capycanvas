@@ -8,20 +8,20 @@ pub const MAX_JSON_DEPTH: usize = 128;
 pub const MAX_JSON_NODES: usize = 4_194_304;
 const NODE_LIMIT: &str = "Package JSON exceeds the node limit";
 
-struct Unique<'a,const RETAIN:bool>(&'a Cell<usize>,usize);
-impl<const RETAIN:bool> Unique<'_,RETAIN> {
+struct Unique<'a>(&'a Cell<usize>);
+impl Unique<'_> {
     fn node<E: Error>(&self) -> Result<(), E> {
         let count = self.0.get() + 1;
-        if count > self.1 { return Err(E::custom(NODE_LIMIT)); }
+        if count > MAX_JSON_NODES { return Err(E::custom(NODE_LIMIT)); }
         self.0.set(count);
         Ok(())
     }
 }
-impl<'de,const RETAIN:bool> DeserializeSeed<'de> for Unique<'_,RETAIN> {
+impl<'de> DeserializeSeed<'de> for Unique<'_> {
     type Value = Value;
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> { deserializer.deserialize_any(self) }
 }
-impl<'de,const RETAIN:bool> Visitor<'de> for Unique<'_,RETAIN> {
+impl<'de> Visitor<'de> for Unique<'_> {
     type Value = Value;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("JSON without duplicate keys") }
     fn visit_bool<E: Error>(self, v: bool) -> Result<Value, E> { self.node()?; Ok(Value::Bool(v)) }
@@ -31,25 +31,21 @@ impl<'de,const RETAIN:bool> Visitor<'de> for Unique<'_,RETAIN> {
         self.node()?;
         Number::from_f64(v).map(Value::Number).ok_or_else(|| E::custom("Non-finite JSON number"))
     }
-    fn visit_str<E: Error>(self, v: &str) -> Result<Value, E> { self.node()?; Ok(if RETAIN {Value::String(v.into())} else {Value::Null}) }
-    fn visit_string<E: Error>(self, v: String) -> Result<Value, E> { self.node()?; Ok(if RETAIN {Value::String(v)} else {Value::Null}) }
+    fn visit_str<E: Error>(self, v: &str) -> Result<Value, E> { self.node()?; Ok(Value::String(v.into())) }
+    fn visit_string<E: Error>(self, v: String) -> Result<Value, E> { self.node()?; Ok(Value::String(v)) }
     fn visit_unit<E: Error>(self) -> Result<Value, E> { self.node()?; Ok(Value::Null) }
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
         self.node()?;
         let mut values = Vec::new();
-        while let Some(value) = seq.next_element_seed(Unique::<RETAIN>(self.0,self.1))? { if RETAIN {values.push(value);} }
+        while let Some(value) = seq.next_element_seed(Unique(self.0))? { values.push(value); }
         Ok(Value::Array(values))
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
         self.node()?;
         let mut values = Map::new();
-        if !RETAIN {
-            while map.next_key::<serde::de::IgnoredAny>()?.is_some() {map.next_value_seed(Unique::<RETAIN>(self.0,self.1))?;}
-            return Ok(Value::Null);
-        }
         while let Some(key) = map.next_key::<String>()? {
             if values.contains_key(&key) { return Err(A::Error::custom("Duplicate JSON key")); }
-            let value = map.next_value_seed(Unique::<RETAIN>(self.0,self.1))?;
+            let value = map.next_value_seed(Unique(self.0))?;
             values.insert(key, value);
         }
         Ok(Value::Object(values))
@@ -57,17 +53,6 @@ impl<'de,const RETAIN:bool> Visitor<'de> for Unique<'_,RETAIN> {
 }
 
 pub fn parse_json(bytes: &[u8], limit: usize) -> DecodeResult<Value> {
-    let mut remaining=MAX_JSON_NODES;
-    parse_json_with_budget(bytes,limit,&mut remaining)
-}
-
-pub fn json_node_count(bytes:&[u8],limit:usize)->DecodeResult<usize> {
-    let mut remaining=MAX_JSON_NODES;parse::<false>(bytes,limit,&mut remaining)?;Ok(MAX_JSON_NODES-remaining)
-}
-pub fn parse_json_with_budget(bytes:&[u8],limit:usize,remaining_nodes:&mut usize)->DecodeResult<Value> {
-    parse::<true>(bytes,limit,remaining_nodes)
-}
-fn parse<const RETAIN:bool>(bytes:&[u8],limit:usize,remaining_nodes:&mut usize)->DecodeResult<Value> {
     if bytes.len() > limit { return Err(DecodeError::Unsupported("Package metadata exceeds limit".into())); }
     let (mut depth, mut quoted, mut escaped) = (0usize, false, false);
     for byte in bytes {
@@ -84,10 +69,8 @@ fn parse<const RETAIN:bool>(bytes:&[u8],limit:usize,remaining_nodes:&mut usize)-
     }
     let nodes = Cell::new(0);
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-    let allowance=(*remaining_nodes).min(MAX_JSON_NODES);
-    let parsed = Unique::<RETAIN>(&nodes,allowance).deserialize(&mut deserializer).and_then(|value| deserializer.end().map(|()| value));
-    *remaining_nodes=remaining_nodes.saturating_sub(nodes.get());
-    parsed.map_err(|error| if nodes.get() >= allowance && error.to_string().starts_with(NODE_LIMIT) {
+    let parsed = Unique(&nodes).deserialize(&mut deserializer).and_then(|value| deserializer.end().map(|()| value));
+    parsed.map_err(|error| if nodes.get() >= MAX_JSON_NODES && error.to_string().starts_with(NODE_LIMIT) {
         DecodeError::Unsupported(NODE_LIMIT.into())
     } else { DecodeError::Invalid(error.to_string()) })
 }
@@ -147,26 +130,6 @@ pub fn remap_references(value: &mut Value, identities: &BTreeMap<PortableId, Por
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn related_json_inputs_share_one_node_allowance() {
-        let mut remaining=5;
-        assert_eq!(parse_json_with_budget(b"[1,2]",128,&mut remaining).unwrap(),serde_json::json!([1,2]));
-        assert_eq!(remaining,2);
-        assert!(parse_json_with_budget(b"[3,4]",128,&mut remaining).is_err());
-        assert_eq!(remaining,0);
-        assert!(parse_json_with_budget(b"null",128,&mut remaining).is_err());
-    }
-
-    #[test]
-    fn counted_json_uses_the_same_value_node_and_depth_limits() {
-        let bytes=br#"{"a":[1,2],"b":"value"}"#;
-        assert_eq!(json_node_count(bytes,128).unwrap(),5);
-        let mut remaining=4;assert!(parse::<false>(bytes,128,&mut remaining).is_err());
-        assert_eq!(remaining,0);
-        assert!(json_node_count(b"[1] trailing",128).is_err());
-        assert!(json_node_count(&[vec![b'[';128],vec![b']';128]].concat(),1024).is_err());
-    }
 
     #[test]
     fn finite_double_values_round_trip_bitwise() {

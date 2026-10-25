@@ -72,7 +72,6 @@ impl CanvasRenderer for AttachedRenderer {
     fn has_pending_work(&self) -> bool {
         self.0.as_ref().is_some_and(|gpu| gpu.has_pending_work())
     }
-    fn preparation_paused(&self)->bool {self.0.as_ref().is_some_and(|gpu|gpu.preparation_paused())}
     fn prepare_moving_layer(&mut self, layer: Option<layer_core::authored::OccurrenceHandle>) {
         if let Some(gpu) = self.0.as_mut() {
             gpu.prepare_moving_layer(layer);

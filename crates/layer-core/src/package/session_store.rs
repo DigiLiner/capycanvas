@@ -500,7 +500,7 @@ impl ByteSource for ResourcePack {
     fn resident_bytes(&self) -> usize { 0 }
     fn poll(&self, offset: u64, length: usize) -> Result<RangeState, String> {
         if length > MAX_RANGE_BYTES || offset.checked_add(length as u64).is_none_or(|end| end > self.length) { return Err("Recovery read exceeds backing".into()); }
-        let mut bytes = crate::memory::DecodedBytes::zeroed(length)?;
+        let mut bytes = vec![0; length];
         let mut position = offset;
         let mut written = 0;
         let mut index = self.files.partition_point(|(start, _)| *start <= offset).saturating_sub(1);
@@ -515,7 +515,7 @@ impl ByteSource for ResourcePack {
             }
             index += 1;
         }
-        Ok(RangeState::Ready(ByteRange::new(bytes.into_shared()?, 0..length)?))
+        Ok(RangeState::Ready(ByteRange::new(bytes.into(), 0..length)?))
     }
 }
 

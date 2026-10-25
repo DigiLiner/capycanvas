@@ -1,4 +1,4 @@
-use crate::protocol::{PreparedWrite, unpack_stored as unpack};
+use crate::protocol::{PreparedWrite, unpack};
 use crate::store_rules::*;
 use crate::*;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
@@ -9,11 +9,6 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, StoreError>;
-#[path = "sqlite_rows.rs"]
-mod rows;
-use rows::{text,optional_text};
-const MAX_METADATA_BYTES:usize=MAX_DESCRIPTION_BYTES*8;
-const MAX_IDS_BYTES:usize=MAX_SWITCHER_IDS*(MAX_SWITCHER_ID_BYTES*6+3)+2;
 const MAX_ROW_BYTES: usize = MAX_PACKAGE_BYTES + 64 * 1024;
 #[path = "sqlite_ownership.rs"]
 pub(crate) mod ownership;
@@ -47,10 +42,9 @@ impl From<rusqlite::Error> for StoreError {
                 }
             }
             Some(rusqlite::ErrorCode::DiskFull) => ErrorKind::StorageFull,
-            Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::OperationInterrupted) => {
+            Some(rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) => {
                 ErrorKind::InvalidData
             }
-            _ if matches!(error,rusqlite::Error::FromSqlConversionFailure(..)|rusqlite::Error::InvalidColumnType(..))=>ErrorKind::InvalidData,
             _ => ErrorKind::FailedWrite,
         };
         Self::new(kind, format!("Workspace storage: {error}"))
@@ -158,7 +152,7 @@ impl SqliteStore {
                 Ok(StoreResponse::Done)
             }
             StoreRequest::Editing => {
-                let json: Option<String> = self.connection.query_row("SELECT json FROM editing WHERE id=1", [], |r| text(r,0,MAX_PACKAGE_BYTES)).optional()?;
+                let json: Option<String> = self.connection.query_row("SELECT json FROM editing WHERE id=1", [], |r| r.get(0)).optional()?;
                 Ok(StoreResponse::Editing(json))
             }
             StoreRequest::Switcher => self
@@ -224,7 +218,7 @@ impl SqliteStore {
             StoreRequest::Binding { key } => Ok(StoreResponse::Binding(
                 self.connection
                     .query_row("SELECT item_id FROM bindings WHERE key=?1", [key], |r| {
-                        text(r,0,MAX_ITEM_ID_BYTES)
+                        r.get(0)
                     })
                     .optional()?,
             )),
@@ -232,9 +226,15 @@ impl SqliteStore {
                 let mut statement = self
                     .connection
                     .prepare("SELECT payload FROM pending ORDER BY rowid")?;
-                let mut rows=statement.query([])?;let mut batches=Vec::new();
-                while let Some(row)=rows.next()? {batches.push(crate::input::stored_json(&text(row,0,MAX_PACKAGE_BYTES)?)?);}
-                Ok(StoreResponse::Pending(batches))
+                let texts = statement
+                    .query_map([], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(StoreResponse::Pending(
+                    texts
+                        .iter()
+                        .map(|v| serde_json::from_str(v).map_err(StoreError::from))
+                        .collect::<Result<_>>()?,
+                ))
             }
             StoreRequest::Reopen => {
                 self.connection
@@ -265,10 +265,10 @@ impl SqliteStore {
             .query_row(
                 &format!("SELECT workspace_ids FROM {table} WHERE id=1"),
                 [],
-                |r| text(r,0,MAX_IDS_BYTES),
+                |r| r.get(0),
             )
             .optional()?;
-        let current: Option<Vec<String>> = current.map(|s| crate::input::stored_json(&s)).transpose()?;
+        let current: Option<Vec<String>> = current.map(|s| serde_json::from_str(&s)).transpose()?;
         if update_preference(current.as_ref(), expected, &ids, |id| {
             Ok(header(&tx, id)?.kind == "workspace")
         })? {
@@ -283,10 +283,10 @@ impl SqliteStore {
             .query_row(
                 &format!("SELECT workspace_ids FROM {table} WHERE id=1"),
                 [],
-                |r| text(r,0,MAX_IDS_BYTES),
+                |r| r.get(0),
             )
             .optional()?;
-        let ids: Option<Vec<String>> = json.map(|s| crate::input::stored_json(&s)).transpose()?;
+        let ids: Option<Vec<String>> = json.map(|s| serde_json::from_str(&s)).transpose()?;
         if let Some(ids) = &ids {
             validate_switcher_ids(ids)?;
         }
@@ -300,22 +300,21 @@ impl SqliteStore {
         let ids = {
             let mut statement = tx.prepare("SELECT id FROM items ORDER BY name_key,id")?;
             statement
-                .query_map([], |r| text(r,0,MAX_ITEM_ID_BYTES))?
+                .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
         let values = ids
             .into_iter()
             .map(|id| {
-                let row=header(&tx,&id);
                 let result = (|| -> Result<ItemSummary> {
-                    let row=row.as_ref().map_err(Clone::clone)?;
-                    let metadata: Metadata = crate::input::stored_json(&row.metadata)?;
+                    let row = header(&tx, &id)?;
+                    let metadata: Metadata = serde_json::from_str(&row.metadata)?;
                     metadata.validate()?;
                     Ok(ItemSummary {
                         id: id.clone(),
                         metadata,
                         generations: row.generations,
-                        claim: row.claim.clone(),
+                        claim: row.claim,
                         error: None,
                         unavailable_name: false,
                     })
@@ -325,9 +324,9 @@ impl SqliteStore {
                     Err(error) => {
                         let (name, kind): (String, String) =
                             tx.query_row("SELECT name,kind FROM items WHERE id=?1", [&id], |r| {
-                                Ok((text(r,0,400)?,text(r,1,32)?))
+                                Ok((r.get(0)?, r.get(1)?))
                             })?;
-                        let row=row.ok();
+                        let row = header(&tx, &id).ok();
                         Ok(summary_fallback(
                             id,
                             Some(&kind),
@@ -426,7 +425,7 @@ impl SqliteStore {
                 ))
             };
         }
-        validate_payload(&batch, |id,remaining| component(&self.connection, id,remaining))?;
+        validate_payload(&batch, |id| component(&self.connection, id))?;
         // A pending delivery survives interruption until its receipt is acknowledged.
         self.connection.execute(
             "INSERT INTO pending(id,hash,payload) VALUES(?1,?2,?3) ON CONFLICT(id) DO NOTHING",
@@ -435,7 +434,7 @@ impl SqliteStore {
         let saved_hash: String = self.connection.query_row(
             "SELECT hash FROM pending WHERE id=?1",
             [&batch.operation_id],
-            |r| text(r,0,64),
+            |r| r.get(0),
         )?;
         if saved_hash != hash {
             return Err(StoreError::invalid(
@@ -484,11 +483,11 @@ impl SqliteStore {
             }
             let original: Option<String> = tx
                 .query_row("SELECT payload FROM pending WHERE id=?1", [id], |r| {
-                    text(r,0,MAX_PACKAGE_BYTES)
+                    r.get(0)
                 })
                 .optional()?;
             if let Some(original) = original {
-                let original: CommitBatch = crate::input::stored_json(&original)?;
+                let original: CommitBatch = serde_json::from_str(&original)?;
                 let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM items WHERE owner=?1 AND epoch=?2 AND CAST(lease_until AS INTEGER)>?3)",params![original.owner.id,original.owner.epoch,now as i64],|r|r.get(0))?;
                 if original.owner != batch.owner && live {
                     return Err(StoreError::new(
@@ -520,10 +519,10 @@ impl SqliteStore {
                 .query_row(
                     "SELECT workspace_ids FROM workspace_switcher WHERE id=1",
                     [],
-                    |row| text(row,0,MAX_IDS_BYTES),
+                    |row| row.get(0),
                 )
                 .optional()?;
-            let pins = pins.map(|s| crate::input::stored_json(&s)).transpose()?;
+            let pins = pins.map(|s| serde_json::from_str(&s)).transpose()?;
             let pins = with_created_pins(pins, &batch.pin_workspaces)?;
             tx.execute("INSERT INTO workspace_switcher(id,workspace_ids) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET workspace_ids=excluded.workspace_ids", [serde_json::to_string(&pins)?])?;
         }
@@ -591,7 +590,7 @@ fn preserve(path: &Path) -> Result<()> {
 fn table_names(connection: &Connection) -> Result<Vec<String>> {
     Ok(connection
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")?
-        .query_map([], |r| text(r,0,64*1024))?
+        .query_map([], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 fn create_schema(connection: &Connection) -> Result<()> {
@@ -625,9 +624,9 @@ struct Header {
 }
 fn header(connection: &Connection, id: &str) -> Result<Header> {
     let row = connection.query_row("SELECT metadata,kind,builtin,metadata_generation,layout_generation,working_generation,fence,owner,epoch,lease_until FROM items WHERE id=?1", [id], |r| Ok((
-        text(r,0,MAX_METADATA_BYTES)?,text(r,1,32)?,r.get::<_, bool>(2)?,
-        text(r,3,20)?,text(r,4,20)?,text(r,5,20)?,text(r,6,20)?,
-        optional_text(r,7,MAX_PACKAGE_BYTES)?,optional_text(r,8,MAX_PACKAGE_BYTES)?,optional_text(r,9,20)?,
+        r.get::<_, String>(0)?,r.get::<_, String>(1)?,r.get::<_, bool>(2)?,
+        r.get::<_, String>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,
+        r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, Option<String>>(9)?,
     ))).optional()?.ok_or_else(not_found)?;
     let fence = parse_counter(&row.6)?;
     let claim = match (row.7, row.8, row.9) {
@@ -652,10 +651,10 @@ fn header(connection: &Connection, id: &str) -> Result<Header> {
         claim,
     })
 }
-fn component(connection: &Connection, id: &str,remaining:usize) -> Result<String> {
+fn component(connection: &Connection, id: &str) -> Result<String> {
     connection
         .query_row("SELECT json FROM components WHERE id=?1", [id], |r| {
-            text(r,0,remaining)
+            r.get(0)
         })
         .optional()?
         .ok_or_else(missing_resource)
@@ -664,13 +663,13 @@ fn load(connection: &Connection, id: &str) -> Result<StoredEntity> {
     let row = header(connection, id)?;
     let (content, working): (String, Option<String>) =
         connection.query_row("SELECT content,working FROM items WHERE id=?1", [id], |r| {
-            Ok((text(r,0,MAX_PACKAGE_BYTES)?,optional_text(r,1,MAX_PACKAGE_BYTES)?))
+            Ok((r.get(0)?, r.get(1)?))
         })?;
     let entity = Entity {
         id: id.into(),
-        metadata: crate::input::stored_json(&row.metadata)?,
-        content: unpack(&content, |id,remaining| component(connection, id,remaining))?,
-        working: working.map(|v| crate::input::stored_json(&v)).transpose()?,
+        metadata: serde_json::from_str(&row.metadata)?,
+        content: unpack(&content, |id| component(connection, id))?,
+        working: working.map(|v| serde_json::from_str(&v)).transpose()?,
     };
     entity.validate()?;
     Ok(StoredEntity {
@@ -682,10 +681,10 @@ fn load(connection: &Connection, id: &str) -> Result<StoredEntity> {
 fn receipt(connection: &Connection, id: &str) -> Result<Option<(String, CommitReceipt)>> {
     connection
         .query_row("SELECT hash,receipt FROM receipts WHERE id=?1", [id], |r| {
-            Ok((text(r,0,64)?, text(r,1,MAX_PACKAGE_BYTES)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })
         .optional()?
-        .map(|(hash, text)| Ok((hash, crate::input::stored_json(&text)?)))
+        .map(|(hash, text)| Ok((hash, serde_json::from_str(&text)?)))
         .transpose()
 }
 fn apply_write(
@@ -723,7 +722,7 @@ fn apply_write(
     let row = header(connection, &write.id)?;
     check_claim(row.claim.as_ref(), owner, write.fence, now)?;
     check_update(
-        &crate::input::stored_json(&row.metadata)?,
+        &serde_json::from_str(&row.metadata)?,
         row.generations,
         write,
     )?;

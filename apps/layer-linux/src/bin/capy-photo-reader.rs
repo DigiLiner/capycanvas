@@ -9,7 +9,6 @@ fn run()->Result<(),String> {
     let limits=layer_color::photo::DecodeLimits {source_bytes:*source_bytes,codec_bytes:*codec_bytes,dimension:u32::try_from(*dimension).map_err(|e|e.to_string())?};
     let input=unsafe {std::fs::File::from_raw_fd(0)};
     if !input.metadata().map_err(|e|e.to_string())?.is_file() || unsafe {libc::fcntl(input.as_raw_fd(),libc::F_GETFL)}&libc::O_ACCMODE!=libc::O_RDONLY {return Err("Photo decoder requires read-only file input".into());}
-    let _=layer_core::memory::images();
     sandbox::restrict(*allowance)?;
     let cancel=AtomicBool::new(false);
     let photo=layer_color::photo::read_photo_detailed_with_cancel(BufReader::new(input),limits,&cancel)?;

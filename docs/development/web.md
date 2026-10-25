@@ -81,14 +81,8 @@ The session runs on the browser event loop without shared memory. File decoding,
 encoding and color work run in `raster-worker.js` through the shared
 `package::transfer` descriptor and bounded transferable payloads. The descriptor
 uses the final manifest adapters plus private runtime identity and verification
-receipts; Web has no second artwork schema. Serialized fingerprints and cache
-metadata grant no validation. A CPU worker validates received artwork, session
-and paper payloads; the controller binds the exact buffers and metadata to a
-private, one-use receipt. Main-thread adoption consumes these receipts without
-image decoding or sample scans. Dedicated encoding, lookup and tile preparation
-workers use separate arenas from file decoding and return private job receipts.
-Parked OPFS chunks retain their original length and SHA-256 and verify both on
-each read through asynchronous Web Crypto. Cold object tiles use a
+receipts; Web has no second artwork schema. Main-thread adoption consumes verified
+owners without image decoding or decoded-content hashing. Cold object tiles use a
 dedicated worker to decompress native samples or convert ICC samples into working
 pixels. Requests carry one tile and bounded profile chunks; completion wakes the
 canvas instead of polling while the worker is busy. Nearest placement uses the
@@ -107,8 +101,7 @@ finishes and the host closes the job.
 
 The host reads a selected document's four-byte prefix and asks shared Rust to
 admit its size against the package or photo input budget. It passes the original
-Blob to a file worker. That worker repeats admission and reads slices of at most
-8 MiB through FileReaderSync; opening, image placement and paper import never
+Blob to a file worker, which reads slices of at most 8 MiB through FileReaderSync; opening, image placement and paper import never
 materialize the entire encoded input on the page. Native packages use that
 backing directly instead of spooling a second copy. The worker owns the Blob
 registration until decoding and result transfer finish, and rejects stale or
@@ -116,42 +109,13 @@ cross-thread reads. Unsupported files retain the original Blob for Copy Original
 This relies on the browser's [immutable Blob contract](https://www.w3.org/TR/FileAPI/);
 it does not verify the browser implementation or impose an aggregate memory quota.
 
-Shared Rust supplies controller limits of eight raster workers, 32 outstanding
-requests, two concurrent input decoders and 256 MiB of logical transfer payloads
-per page. The payload charge
-includes the complete ArrayBuffers behind views and UTF-16 metadata. Producer
-and independent validator share one request charge; completed opaque results
-retain their slot and payload charge until consumption or a three-minute expiry.
-Admission precedes dispatch and validator creation. Idle arenas can be retired
-for new work, and one worker slot remains available for output cleanup. Read
-cancellation and output close bypass normal request saturation. Cancellation
-returns capacity after the worker/validation path stops, and late replies cannot
-return it twice. These limits cover coordinator-owned transfers and worker
-counts, not Wasm heap high-water marks, copied Rust results, editor/history assets,
-GPU allocations or other tabs. Each Wasm instance separately accounts immutable
-image owners and instrumented decode/preparation scratch with a ceiling below
-2 GiB; this is an address-space bound, not a measurement of available browser
-memory. Native decoder execution limits are separate. See the
-[shared memory policy](../architecture.md) for allocation lifetimes and limits.
 
-Temporary coordinator saturation returns a busy error bound to private capacity
-requirements. Image and raster tile preparation wait for usable request, decoder,
-payload and arena capacity, then rebuild transferred arrays from retained charged
-sources. Further contention waits again under the same absolute three-minute
-deadline; it cannot reset that deadline or spin on its own releases. Main-Wasm
-output bytes are charged before dispatch.
-Waiters are bounded by the request limit, honor cancellation and expire within
-three minutes. Releases are coalesced outside the initiating call; a failed
-attempt cannot signal its own retry capacity. Invalid or individually oversized
-inputs remain validation errors. `--worker-capacity` holds aggregate payload
-capacity through a real detached decode, then checks waiting, exact source-byte
-reconstruction and visible image pixels after release in both themes.
 Private document candidates drive their initial frame to the shared parking
 boundary before restoring session history or adopting the drawing.
 
 Clipboard output carries the full-depth source transfer and a separate PNG for
-other applications. The PNG is a separate reply field, so it cannot change the source transfer
-inventory or consume its validation receipt.
+other applications. The receiver separates the declared PNG trailer before
+validating and adopting the source transfer.
 
 Restart snapshots use the shared session codec, preserving every open drawing,
 tab order, selection, camera, undo/redo and manual-save checkpoint. Browser events
@@ -262,7 +226,7 @@ Pure unit tests need no browser or GPU:
 
 ```bash
 node --test apps/layer-web/{run,package,frame,bubbles,glass,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization}.test.mjs
-node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,document-storage,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
+node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
 The pointer harness runs the app's contact and release registrations in order,

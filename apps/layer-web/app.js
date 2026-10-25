@@ -1,6 +1,6 @@
 import { addScrollbar } from "./scrollbars.js";
 import { brushSizeGrid } from "./brush-sizes.js";
-import init, { WebApp, WebGpu, configure_raster_worker, configure_gpu_diagnostics, raster_worker_capacity_released, automatic_tab_names } from "./pkg/layer_web.js";
+import init, { WebApp, WebGpu, configure_raster_worker, configure_gpu_diagnostics, automatic_tab_names } from "./pkg/layer_web.js";
 import { createRasterWorker } from "./raster-worker-client.js";
 import { createPaintPairIcon } from './color-controls.js';
 import { chooseColor, configureColorEditor, refreshColorEditors } from './color-editor.js';
@@ -1784,12 +1784,11 @@ try {
   performance.mark("capy.startup.wasm");
   // Let the browser start the worker while the main thread builds controls.
   await new Promise(resolve => setTimeout(resolve, 0));
-  const fileWorker = createRasterWorker(wasmModule,event=>gpuDiagnostics.record(event),()=>{raster_worker_capacity_released();wake();}),documentStorage=createDocumentStorage();
+  const fileWorker = createRasterWorker(wasmModule,event=>gpuDiagnostics.record(event)),documentStorage=createDocumentStorage();
   const rasterWorker = async request=>{
     try{return await(request.operation.startsWith('tab-')?documentStorage(request):fileWorker(request));}
     finally{if(request.operation==='image-decode'||request.operation==='nearest-coordinates')wake();}
   };
-  Object.assign(rasterWorker,{configure:fileWorker.configure,consume:fileWorker.consume,consumeResult:fileWorker.consumeResult,waitForCapacity:fileWorker.waitForCapacity});
   configure_raster_worker(rasterWorker);
   canvas.width = 800;
   canvas.height = 600;
@@ -1848,8 +1847,8 @@ try {
     element,button,numberField,workspace,layout:()=>layout,bar:()=>canvasBar?.bounds()??null});
   canvasSizeUi = createCanvasSizeUi({state:()=>state,element,button,icon,numberField,resolve:request=>app.number_input(request),dispatch});
   imageSizeUi = createImageSizeUi({state:()=>state,element,button,numberField,resolve:request=>app.number_input(request),dispatch});
-  configureColorEditor({dispatch,icon,rasterWorker});
-  editor = createEditorPanels({selectionUi,app,rasterWorker,state:()=>state,workspace,canvas,element,button,icon,numberField,dispatch,asset,wake,applyChange,contentChanged:panelContentChanged});
+  configureColorEditor({dispatch,icon,wasmModule});
+  editor = createEditorPanels({selectionUi,app,wasmModule,state:()=>state,workspace,canvas,element,button,icon,numberField,dispatch,asset,wake,applyChange,contentChanged:panelContentChanged});
   palettes = createPalettes({ app, state: () => state, workspace, element, button, icon, panelFrame, applyChange, rasterWorker,
     dismissContext: () => customization?.dismissContext(), contentChanged: panelContentChanged });
   buildHeader();

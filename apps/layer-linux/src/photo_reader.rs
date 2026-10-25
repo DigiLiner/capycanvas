@@ -28,18 +28,9 @@ pub(crate) fn read(input:impl Read+Seek,limits:DecodeLimits,cancelled:&AtomicBoo
         .find(|path|path.is_file()).ok_or("Photo decoder is unavailable")?;
     decode(input,limits,cancelled,&helper,DEADLINE)
 }
-pub(crate) fn decode(mut input:impl Read+Seek,mut limits:DecodeLimits,cancelled:&AtomicBool,helper:&Path,timeout:Duration)->Result<DecodedPhoto,String> {
-    layer_core::memory::with_input(|| {
+pub(crate) fn decode(mut input:impl Read+Seek,limits:DecodeLimits,cancelled:&AtomicBool,helper:&Path,timeout:Duration)->Result<DecodedPhoto,String> {
     let deadline=Instant::now()+timeout;active(cancelled,deadline)?;
-    let work=layer_core::input_work::DECODERS.enter(cancelled)?;
-    let memory=layer_core::memory::images();memory.collect()?;
-    let mut allowance=memory.maximum()/2;
-    let reserved=loop {
-        if allowance==0 {return Err(layer_core::memory::MemoryError.into());}
-        match memory.reserve(allowance) {Ok(reserved)=>break reserved,Err(_)=>allowance/=2}
-    };
-    limits.source_bytes=limits.source_bytes.min(allowance/4);
-    limits.codec_bytes=limits.codec_bytes.min(allowance/4*3);
+    let allowance=limits.source_bytes.saturating_add(limits.codec_bytes);
     let directory=layer_core::temp_files::directory()?;
     let mut encoded=layer_core::temp_files::anonymous(directory,"photo-input").map_err(|e|e.to_string())?;
     let mut buffer=[0;64*1024];let mut length=0usize;
@@ -77,7 +68,7 @@ pub(crate) fn decode(mut input:impl Read+Seek,mut limits:DecodeLimits,cancelled:
         return Err(if detail.trim().is_empty() {"Photo decoder failed".into()}else {detail});
     }
     let (backing,project)=result?;
-    drop(job);drop(reserved);drop(work);
+    drop(job);
     let layer_core::package::codec::OpenOutcome::Candidate {artwork,..}=layer_core::package::codec::open(backing,project,cancelled)? else {return Err("Invalid photo decoder package".into());};
     let mut sources=artwork.paint.iter().filter_map(|(_,_,paint)|paint.base.as_ref().map(|base|base.image.storage().clone()));
     let source=sources.next().ok_or("Photo decoder returned no image")?;
@@ -85,5 +76,4 @@ pub(crate) fn decode(mut input:impl Read+Seek,mut limits:DecodeLimits,cancelled:
         || source.resident_bytes()>limits.source_bytes {return Err("Photo decoder image exceeds admission".into());}
     source.validate()?;
     Ok(DecodedPhoto {source:Arc::unwrap_or_clone(source),metadata:(*artwork.metadata).clone(),first_frame:flags[0]&1!=0,primary_image:flags[0]&2!=0})
-    })
 }

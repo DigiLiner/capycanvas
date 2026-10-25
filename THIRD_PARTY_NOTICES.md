@@ -7,25 +7,9 @@ The project-owned capybara mark is a separate exception under [BRANDING.md](BRAN
 
 ## Linux decoder confinement
 
-The unmodified crates.io `landlock` 0.4.7, `enumflags2` 0.7.12 and
-`enumflags2_derive` 0.7.12 use MIT OR Apache-2.0. The unmodified `seccompiler`
-0.5.0 uses Apache-2.0 OR BSD-3-Clause. Their original license texts and notices
-are included in the generated native dependency notices; their code is not
-vendored into this repository.
-
-## Rust JPEG codec — MIT OR Apache-2.0
-
-`libjpeg-turbo-rs` 0.8.0, Copyright (c) 2025 Yonghye Kwon, retains its original
-[MIT](vendor/libjpeg-turbo-rs/LICENSE-MIT) and
-[Apache-2.0](vendor/libjpeg-turbo-rs/LICENSE-APACHE) license texts. The local
-allocation/ownership correction and exact registry provenance are recorded in
-[the vendor guide](vendor/README.md#jpeg-allocation-ownership-and-refusal).
-
-## TIFF codec — MIT
-
-`tiff` 0.11.3 retains its original [MIT license](vendor/tiff/LICENSE).
-The directory and nested JPEG admission changes are recorded in
-[the vendor guide](vendor/README.md#tiff-directory-and-nested-jpeg-admission).
+The unmodified crates.io `seccompiler` 0.5.0 uses Apache-2.0 OR BSD-3-Clause.
+Its original license text and notices are included in the generated native
+dependency notices; its code is not vendored into this repository.
 
 ## Rust AV1 decoding — BSD-2-Clause
 

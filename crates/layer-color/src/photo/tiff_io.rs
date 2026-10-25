@@ -25,8 +25,10 @@ pub(super) fn read_tiff(
     let mut codec_limits = tiff::decoder::Limits::default();
     codec_limits.decoding_buffer_size = limits.codec_bytes;
     codec_limits.intermediate_buffer_size = limits.codec_bytes;
-    codec_limits.ifd_value_size = crate::MAX_ICC_BYTES.min(limits.codec_bytes);
-    let mut decoder = tiff::decoder::Decoder::new_with_limits(input, codec_limits).map_err(err)?;
+    codec_limits.ifd_value_size = crate::MAX_ICC_BYTES;
+    let mut decoder = tiff::decoder::Decoder::new(input)
+        .map_err(err)?
+        .with_limits(codec_limits);
     let (w, h) = decoder.dimensions().map_err(err)?;
     let extent = [w, h];
     limits.extent(extent)?;

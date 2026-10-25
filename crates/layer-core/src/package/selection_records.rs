@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn malformed_words_bounds_padding_and_compression_are_rejected() {
         fn load(raw: Vec<u8>, extent: [u32;2], bounds: [u32;4], bytes: bool) -> Result<SelectionPixels,String> {
-            Ok(SelectionPixels::from_package_chunks(extent,bounds,bytes,vec![Resource::from(lz4_flex::block::compress(&raw))])?)
+            SelectionPixels::from_package_chunks(extent,bounds,bytes,vec![Resource::from(lz4_flex::block::compress(&raw))])
         }
         let mut raw = vec![0; SELECTION_CHUNK_BYTES];
         raw[0] = 5;

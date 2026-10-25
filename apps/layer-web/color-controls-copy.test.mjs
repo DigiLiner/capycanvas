@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {FakeElement} from './fake-dom.mjs';
-import {chooseColor,configureColorEditor} from './color-editor.js';
-import {createRasterWorker} from './raster-worker-client.js';
+import {chooseColor} from './color-editor.js';
 import {colorDialogDom,fakeColorApp} from './color-dialog-fixture.mjs';
 import {createEffectPanels} from './effects.js';
 import {createEditorPanels} from './editor-panels.js';
@@ -71,51 +70,6 @@ test('Edit Color publishes the draft, its intensity and remembered formats only 
     h.apply().click();
     assert.deepEqual(await h.result,{color:{space:'Srgb',rgba:[.25,.5,.75,1]},intensity:hdr?1:null});
     assert.equal(h.doc.body.children.length,0,'closing removes the dialog and its strip');
-  }
-});
-
-test('rendered dialog and panel color wheels share the injected configured worker owner',async t=>{
-  const dom=colorDialogDom(t),{app}=fakeColorApp(),previous=Object.fromEntries(['Worker','window','getComputedStyle','setTimeout','clearTimeout'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
-  const workers=[],frames=new Map(),timers=new Map();let nextFrame=0,nextTimer=0;
-  globalThis.Worker=class{
-    constructor(){this.messages=[];workers.push(this);}
-    postMessage(message){this.messages.push(message);}
-    terminate(){}
-  };
-  globalThis.getComputedStyle=()=>({color:'black'});
-  globalThis.window={addEventListener(){}};
-  globalThis.setTimeout=(callback,delay)=>{const id=++nextTimer;timers.set(id,{callback,delay});return id;};
-  globalThis.clearTimeout=id=>timers.delete(id);
-  globalThis.requestAnimationFrame=callback=>{const id=++nextFrame;frames.set(id,callback);return id;};
-  globalThis.cancelAnimationFrame=id=>frames.delete(id);
-  t.after(()=>{for(const[key,descriptor]of Object.entries(previous))if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
-  const rasterWorker=createRasterWorker();rasterWorker.configure({metadata:65536,range:1048576,total:1048576,workers:8,requests:32,decoders:2,payloads:256*1024*1024,resultAge:180000});
-  const element=(...args)=>{const node=dom.element(...args);node.clientWidth=node.clientHeight=256;Object.defineProperty(node,'firstElementChild',{get:()=>node.children.find(child=>child.tagName)});return node;};
-  const button=(text,action,cls)=>{const node=element('button',cls,text);node.addEventListener('click',action);return node;};
-  const view={hdr:false,intensity:0,rgb_space:'Srgb',shape:'circle',rendition:null,geometry:{center:[.5,.5],inner:.4,outer:.5,disc_radius:.3},wheel_components:[0,0,0],wheel_hue_start_degrees:0,wheel_hue_marker:[.5,.5],wheel_hue_color:[1,0,0,1],wheel_marker:[.5,.5],marker_color:[0,0,0,1],front_swatch:'foreground',other_shapes:['square','triangle'],swatches:['background','foreground','transparent'].map(slot=>({slot,label:slot,rgba:[0,0,0,1],selected:slot==='foreground'})),readout_label:'RGB',readout:'rgb',readout_layout_text:[]};
-  const colorUi=app.color_ui.bind(app);
-  app.color_ui=request=>{
-    if(request.type==='layout'){const size=request.size;return {height:size,wheel:[0,0,size,size],foreground:[0,0,12,12],background:[0,0,12,12],transparent:[0,0,12,12],shapes:[[0,0,12,12],[0,0,12,12]],swap:[0,0,12,12],readout:[0,0,20,20],edit:[0,0,12,12],shape_rotations:[0,0],readout_radius:20};}
-    if(request.type==='hue_stops')return [];
-    const result=colorUi(request);result.view.panel={...result.view.panel,...view};return result;
-  };
-  app.color_preview=()=>({picker:{preview:null},view});app.color_field_request=side=>JSON.stringify({side,colors:'panel'});
-  configureColorEditor({dispatch:action=>dom.actions.push(action),icon:dom.icon,rasterWorker});
-  const selected=chooseColor({app,slot:'foreground',element,button});
-  const panels=createEditorPanels({app,rasterWorker,state:app.state,element,button,icon:dom.icon,dispatch(){},contentChanged(){}}),panel=panels.control('color_wheel');
-  dom.doc.body.append(panel);
-  try{
-    const scheduled=[...frames.values()];frames.clear();for(const callback of scheduled)callback();
-    assert.equal(workers.length,1,'Both visible presenters use one configured color-preview owner');
-    assert.equal(workers[0].messages.length,2);
-    assert.deepEqual(workers[0].messages.map(message=>message.request.operation),['color-field','color-field']);
-    const metadata=workers[0].messages.map(message=>JSON.parse(message.request.metadata));
-    assert.equal(metadata[0].colors.editor!=null,true);assert.equal(metadata[1].colors,'panel');
-  }finally{
-    panel.disposeEditor();dom.doc.body.descendants().find(node=>node.tagName==='DIALOG')?.close();
-    for(const worker of workers)for(const message of worker.messages)worker.onmessage({data:{id:message.id,result:new Uint8Array()}});
-    await selected;
-    assert.equal([...timers.values()].filter(timer=>timer.delay===180000).length,0);
   }
 });
 

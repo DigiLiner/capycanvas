@@ -168,7 +168,6 @@ impl WgpuRasterizer {
     pub(crate) fn prepare_transform_preview(&mut self,packet:FramePacket<'_>,preview:Option<&layer_render::TransformPreview>)->bool {
         if self.snapshot_worker {return true;}
         let Some(preview)=preview else {
-            if self.transforms.as_ref().is_some_and(|transforms|transforms.preparation_pending()) {self.decode_pressure.clear();}
             self.transforms.as_mut().unwrap().cancel_preparation();return true;
         };
         let request=match scene::scale::request(self,packet) {Ok(request)=>request,Err(_)=>return true};
@@ -208,17 +207,16 @@ impl WgpuRasterizer {
             }
             Ok(ready)
         })?;
-        if ready {Ok(())}else {Err(self.decode_pressure.error(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())).unwrap_or(GpuRasterError::DeferredObjectWork))}
+        if ready {Ok(())}else {Err(GpuRasterError::DeferredObjectWork)}
     }
     pub(crate) fn restore_preparation_pending(&self)->bool {self.restore_preflight.as_ref().is_some_and(|restore|!restore.complete())}
     fn replace_restore(&mut self,key:Key,requests:Vec<Request>) {
         if self.restore_preflight.as_ref().is_none_or(|restore|restore.key!=key || restore.consumed) {
-            self.decode_pressure.clear();self.restore_preflight=Some(RestorePreflight::new(self,key,requests));
+            self.restore_preflight=Some(RestorePreflight::new(self,key,requests));
         }
     }
     fn advance_restore(&mut self)->Result<bool,GpuRasterError> {
         if self.restore_preparation_pending() && !self.restore_pipelines_ready() {return Ok(false);}
-        if self.decode_pressure.blocks_background(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())) {return Ok(false);}
         let Some(mut restore)=self.restore_preflight.take() else {return Ok(true);};
         let result=self.record_restore_uploads(|r,encoder| {
             r.drain_image_decodes(encoder)?;
@@ -265,7 +263,7 @@ impl WgpuRasterizer {
         let key=Key::Frame {color:self.document_color(),extent:packet.document_extent,reset,roots,bases,
             required:required.iter().map(|(target,coordinates)|(*target,coordinates.iter().copied().collect())).collect()};
         if self.restore_preflight.as_ref().is_some_and(|restore|restore.key==key && !restore.consumed) {return self.advance_restore().unwrap_or(true);}
-        self.restore_preflight=None;self.decode_pressure.clear();
+        self.restore_preflight=None;
         let mut requests=Vec::new();
         for (target,scene) in retained {
             let Some(root)=scene.raster(target) else {continue;};
@@ -335,7 +333,7 @@ impl WgpuRasterizer {
                 required:BTreeSet::new(),base:None,replace:true}]);
         }
         if !self.advance_restore()? {
-            return Err(self.decode_pressure.error(layer_core::memory::generation(),self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())).unwrap_or(GpuRasterError::DeferredObjectWork));
+            return Err(GpuRasterError::DeferredObjectWork);
         }
         if let Some(error)=self.take_restore_failure() {return Err(error);}
         let data=self.restore_preflight.as_ref().unwrap().targets.iter().flatten().find(|entry|entry.target==target).unwrap().data.clone();

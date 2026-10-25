@@ -15,7 +15,6 @@ pub fn assume_source_profile(
     source.interpretation =
         crate::repair_source_interpretation(source.interpretation, RgbSpace::ProPhoto, profile)?;
     source.validate()?;
-    if let layer_core::color::ColorProfile::Icc(bytes)=&source.interpretation.profile {layer_core::memory::images().track(bytes.storage())?;}
     Ok(source)
 }
 

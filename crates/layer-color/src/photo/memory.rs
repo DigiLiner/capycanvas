@@ -26,18 +26,77 @@ impl PhotoMemoryBudget {
 
     /// Current process/system headroom when the host can measure it.
     pub fn available_memory() -> Option<u64> {
-        layer_core::memory::available_memory()
+        available_memory()
     }
 
     pub fn current() -> Self {
-        let _=layer_core::memory::images().collect();
-        Self::from_available_memory(Self::available_memory().unwrap_or(512 * 1024 * 1024))
+        Self::from_available_memory(available_memory().unwrap_or(512 * 1024 * 1024))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn available_memory() -> Option<u64> {
+    // Device RAM and JS heap limits are not available WASM process memory.
+    // A host with a trustworthy budget supplies it per operation instead.
+    None
+}
+
+#[cfg(all(not(target_arch = "wasm32"), target_os = "ios", not(target_env = "sim")))]
+fn available_memory() -> Option<u64> {
+    unsafe extern "C" {
+        fn os_proc_available_memory() -> usize;
+    }
+    // iOS 13+: remaining app allowance, including its memory-pressure limit.
+    Some(unsafe { os_proc_available_memory() } as u64)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
+fn available_memory() -> Option<u64> {
+    let mut system = sysinfo::System::new();
+    system.refresh_memory();
+    if system.total_memory() == 0 {
+        return None;
+    }
+    // sysinfo 0.37's Apple available-memory calculation subtracts compressed
+    // pages from free/inactive pages, even though they are already excluded.
+    // Use its total/used readings to count compression once. Do not invent a
+    // minimum: true exhaustion must still produce a zero admission budget.
+    #[cfg(any(target_os = "macos", all(target_os = "ios", target_env = "sim")))]
+    let headroom = system.total_memory().saturating_sub(system.used_memory());
+    #[cfg(not(any(target_os = "macos", all(target_os = "ios", target_env = "sim"))))]
+    let headroom = system.available_memory();
+    let available = process_allowance(
+        headroom,
+        system.total_memory(),
+        system
+            .cgroup_limits()
+            .map(|c| (c.total_memory, c.free_memory)),
+    );
+    // sysinfo reports an unlimited root cgroup as physical total minus current
+    // usage, including reclaimable cache. That is not a process limit; applying
+    // it would incorrectly replace Linux/Android MemAvailable with free pages.
+    Some(available)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
+fn process_allowance(available: u64, total: u64, cgroup: Option<(u64, u64)>) -> u64 {
+    match cgroup {
+        Some((limit, free)) if limit < total => available.min(free),
+        _ => available,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(all(not(target_arch = "wasm32"), any(not(target_os = "ios"), target_env = "sim")))]
+    fn unlimited_cgroup_does_not_discard_reclaimable_headroom() {
+        assert_eq!(process_allowance(3000, 12000, Some((12000, 1800))), 3000);
+        assert_eq!(process_allowance(3000, 12000, Some((4000, 1800))), 1800);
+        assert_eq!(process_allowance(3000, 12000, Some((4000, 0))), 0);
+        assert_eq!(process_allowance(0, 12000, None), 0);
+    }
     #[test]
     fn budgets_scale_with_headroom_and_never_invent_a_minimum() {
         for available in [0, 1, 1024, 128 << 20, 512 << 20, 4 << 30, 8 << 30, u64::MAX] {

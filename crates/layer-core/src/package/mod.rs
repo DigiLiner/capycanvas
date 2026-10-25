@@ -4,7 +4,7 @@ pub(crate) const SELECTION_CHUNK_BYTES: usize = 65536;
 mod backing;
 mod json;
 pub use backing::{ByteRange, ByteSource, ImmutableBacking, RangeState, MAX_RANGE_BYTES};
-pub use json::{parse_json,parse_json_with_budget,json_node_count,MAX_JSON_NODES, references, remap_references};
+pub use json::{parse_json, references, remap_references};
 
 #[cfg(test)]
 mod tests;

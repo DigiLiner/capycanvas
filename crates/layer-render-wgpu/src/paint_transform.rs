@@ -105,9 +105,6 @@ impl PaintTransforms {
     pub fn has_preview(&self) -> bool {
         self.0.iter().any(ImageTransformState::has_preview)
     }
-    pub fn preparation_pending(&self)->bool {
-        self.0.iter().any(|state|state.preparing.is_some() || state.reduced.as_ref().is_some_and(|input|input.pending.is_some()))
-    }
 
     pub fn discard_preview(&mut self) {
         for t in &mut self.0 {

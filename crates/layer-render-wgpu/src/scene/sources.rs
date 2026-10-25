@@ -94,7 +94,7 @@ enum Pixels {
     Raster(Arc<TileBlob>, RgbSpace,RgbSpace),
 }
 #[derive(Clone)]
-pub enum PreparedSourcePixels { NativeSamples(Arc<layer_core::memory::DecodedBytes>), PremultipliedWorkingPixels(Arc<layer_core::memory::DecodedBytes>) }
+pub enum PreparedSourcePixels { NativeSamples(Arc<Vec<u8>>), PremultipliedWorkingPixels(Arc<Vec<u8>>) }
 
 pub(crate) struct PendingTile {
     pixels: Pixels,
@@ -493,7 +493,7 @@ impl DecodedTiles {
             let decoded = match &prepared_pixels {
                 Some(PreparedSourcePixels::NativeSamples(samples)) => samples.clone(),
                 Some(PreparedSourcePixels::PremultipliedWorkingPixels(_)) => return Err(GpuRasterError::Color("Working source pixels have native decode settings".into())),
-                None => device.source_samples.decode(samples.tile).map_err(GpuRasterError::from)?,
+                None => device.source_samples.decode(samples.tile).map_err(GpuRasterError::Color)?,
             };
             let step = samples.depth.bytes();
             let prepared = prepared_pixels.is_some();
@@ -579,7 +579,7 @@ impl DecodedTiles {
         decoder
             .1
             .decode_tile_cached(source, coordinate, &mut self.pixels, &device.source_samples)
-            .map_err(GpuRasterError::from)?;
+            .map_err(GpuRasterError::Color)?;
         self.decoders.push_back(decoder);
         upload_working_pixels(uploads, encoder, texture, &self.pixels)
     }

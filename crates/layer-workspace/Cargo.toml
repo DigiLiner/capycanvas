@@ -9,7 +9,6 @@ description = "Shared workspace records, management policy and asynchronous pers
 native = ["dep:rusqlite", "dep:async-channel", "dep:libc"]
 
 [dependencies]
-layer-core = { path = "../layer-core" }
 layer-ui = { path = "../layer-ui" }
 layer-render = { path = "../layer-render" }
 serde = { version = "1", features = ["derive"] }

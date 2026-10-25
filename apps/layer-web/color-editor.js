@@ -1,9 +1,10 @@
 import {liveCopy,bindCopy} from './localization.js';
+import {createRasterWorker} from './raster-worker-client.js';
 import {wheelPainter,wheelPicker,hueStopCache,wheelHit,rgba,json} from './color-wheel.js';
 
-let services = null;
+let services = null, worker = null;
 const editors = new Set();
-const fieldWorker = request => services.rasterWorker(request);
+const fieldWorker = request => (worker ??= createRasterWorker(services.wasmModule))(request);
 
 export function configureColorEditor(next) { services = next; }
 export function refreshColorEditors() { for (const editor of [...editors]) editor(); }
