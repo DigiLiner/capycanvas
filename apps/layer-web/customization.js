@@ -590,12 +590,14 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
     for (const update of fields.values()) update();
     if (expanded) {
       const view = views.get(expanded.panel);
-      expanded.body.querySelector('h3').textContent = view.configuration_title;
-      expanded.body.querySelector('p').textContent = view.configuration_hint;
+      const title = expanded.body.querySelector('h3'), hint = expanded.body.querySelector('p');
+      if (title.textContent !== view.configuration_title) title.textContent = view.configuration_title;
+      if (hint.textContent !== view.configuration_hint) hint.textContent = view.configuration_hint;
       for (const check of expanded.body.querySelectorAll("[data-visible]")) {
         const control = view.controls.find(c => c.control === check.dataset.visible);
         check.checked = control?.visible_in_panel || false;
-        check.parentElement.lastChild.textContent = control?.label || '';
+        const label = check.parentElement.lastChild, text = control?.label || '';
+        if (label.textContent !== text) label.textContent = text;
       }
       const options = expanded.body.querySelector(".toolbar-options");
       if (options) renderToolbarOptions(options, view.toolbar_options);

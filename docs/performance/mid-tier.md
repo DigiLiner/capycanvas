@@ -115,7 +115,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Drawing between 16 photo layers, G-Pen 1024 px (17 visible layers) | 90 | **Not met.** BUILD32: 74.733–75.449 fresh updates/s; fresh gap p99 18.465–18.871 ms, Linear | [Current middle-layer comparison](#drawing-in-the-middle-of-sixteen-photo-layers); measured comparison bounds pass, 90/s remains missed |
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms; current Web candidate unmeasured | `cbfad9e5`, 2026-09-26; [Web collector limits](#web-navigator-resize-diagnostic), 2026-10-19 |
 | Android palette pill opening at the work-area edge | 90 | **FPS unqualified.** Instant clamp/short transition; 3–4 actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
-| Android tool bubble drag through four neighbours | 90 | **Not met.** Current parity fixes: 85.78–87.17 actual app-window presents/s; p99 up to 22.338077 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-23 |
+| Android tool bubble drag through four neighbours | 90 | **Not met.** Bubble release fixes: 85.784–89.064 actual app-window presents/s; p99 up to 22.339615 ms exceeds 22.2 ms, default glass, 24 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-24 |
 | Web tool bubble drag through four neighbours | 90 | **Not met.** Current parity fixes: 60.01–74.59 actual presents/s, p99 33.497–33.525 ms, default Low glass, 24 MP photo at Fit | [Tool bubbles](#web-tool-bubbles), 2026-10-23 |
 | Panel or column resize | 90 | Current Web candidate unmeasured. Web baseline diagnostic: 18.64–18.72 changing bounds/s, RAF gap p99 67.1–83.8 ms; presented FPS unqualified. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Web Navigator resize](#web-navigator-resize-diagnostic), 2026-10-19; [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
@@ -193,6 +193,19 @@ both-theme bounds/screenshots are in `artifacts/bubbles/android-palette-growth/`
 
 ## Native tool bubbles
 
+The bubble release fixes measured 2026-10-24 on the MovinkPad 11 use the same
+6000 × 4000 photo, Fit view, default glass and three six-second contacts below.
+The display runs at 90 Hz and thermal status stays at 0. The optimized arm64
+benchmark APK is `3482d5832154d74191cc8c315e9a9f7d16c4d02115f98c544b1b69d67c4a0789`,
+with test APK `529d2eb97ca16fdf5406da94b3ab61467ae98912db2bc42d78cc63bd43b43650`.
+The measured source is `59722d105` plus the release fixes, including the shared
+paper scheduling change. All contacts clear 85.5 presents/s; two exceed the
+22.2 ms p99 limit, so the target remains unmet. The app's Adaptive switch is
+restored to its original Off setting afterward. Raw presents, contact windows,
+photo/source hashes and binary provenance are in
+`artifacts/bubble-release/verification/android-mid-motion/` and
+`artifacts/bubble-release/verification/benchmark-provenance.json`.
+
 Measured 2026-10-23 on the MovinkPad 11, 6000 × 4000 prescribed photo at Fit,
 default glass, 90 Hz app policy and thermal status 0 throughout. Benchmark APK
 SHA-256 `5c2e4751ef908941013c5428a4e60fedba484423d515f53ecb5eb62d94dbee64`
@@ -210,13 +223,15 @@ OFF setting was restored after capture.
 
 | Build | Actual presents/s, three contacts | p99 interval, ms | Result |
 | --- | --- | --- | --- |
+| Bubble release fixes, APK `3482d583` | 85.784 / 89.064 / 86.820 | 22.339615 / 11.304000 / 22.329154 | Not met |
 | Before primitive glass transport, APK `f589c1fa` | 86.642 / 89.238 / 86.475 | 22.336615 / 11.310384 / 22.333308 | Not met |
 | Primitive glass transport, APK `5c2e4751` | 89.063 / 86.296 / 87.166 | 11.289538 / 22.330692 / 22.330384 | Not met |
 | Previous release Rust, APK `7014e78c` | 86.475 / 86.988 / 86.647 | 22.331154 / 22.328077 / 22.330769 | Not met |
 
-The first two builds meet the 85.5 presents/s floor but exceed the fixed 22.2 ms p99 limit in two
-contacts. The comparison does not establish a performance improvement. In the
-later capture, FrameMetrics animation p99 is 3.12–3.68 ms, layout ≤0.542 ms and
+Both primitive-glass comparison builds meet the 85.5 presents/s floor but exceed
+the fixed 22.2 ms p99 limit in two contacts. The comparison does not establish a
+performance improvement. In the primitive-glass capture, FrameMetrics animation
+p99 is 3.12–3.68 ms, layout ≤0.542 ms and
 draw ≤0.560 ms; command issue is 9.12–12.70 ms and GPU duration 12.61–18.54 ms.
 These are attribution proxies, not actual presents. Raw evidence is in
 `artifacts/bubbles/android-mid-final-reference/` and
