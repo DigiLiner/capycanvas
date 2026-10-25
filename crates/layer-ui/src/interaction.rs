@@ -68,6 +68,8 @@ impl Default for TouchPolicy {
 #[derive(Clone, Copy)]
 pub(crate) enum TouchGesture {
     Tap(u8),
+    Hold,
+    QuickPinch { outward: bool },
     Scrub,
 }
 
@@ -81,6 +83,12 @@ pub(crate) struct TouchGestures {
     failed: bool,
     tap_failed: bool,
     scrub: Option<TouchScrub>,
+    pinch: Option<([[f32; 2]; 2], u64)>,
+    quick_pinch: Option<bool>,
+    first_lift_ns: u64,
+    repeat_ns: Option<u64>,
+    repeated: bool,
+    pub indirect: bool,
     pub scrubbed: bool,
     pub camera: Option<crate::Camera>,
 }
@@ -92,7 +100,20 @@ impl TouchGestures {
         self.failed |= self.active();
     }
     pub fn suspends_navigation(&self) -> bool {
-        self.contacts.len() >= 3 || (self.scrubbed && self.active())
+        self.contacts.len() >= 3 || ((self.scrubbed || self.repeated) && self.active())
+    }
+    pub fn repeat_pending(&self) -> bool {
+        !self.indirect && !self.failed && !self.tap_failed && !self.lifted && (2..=3).contains(&self.contacts.len())
+    }
+    pub fn repeat_fingers(&self) -> usize { self.contacts.len() }
+    pub fn advance(&mut self, now_ns: u64, policy: TouchPolicy) -> Option<TouchGesture> {
+        if !self.repeat_pending() { self.repeat_ns = None; return None; }
+        let deadline = self.repeat_ns.get_or_insert(now_ns.saturating_add(u64::from(policy.tap_ms) * 1_000_000));
+        if now_ns < *deadline { return None; }
+        *deadline = now_ns.saturating_add(80_000_000);
+        self.repeated = true;
+        self.scrub = None;
+        Some(TouchGesture::Hold)
     }
     pub(crate) fn contact_position(&self,id:u64)->Option<[f32;2]> {self.contacts.get(&id).map(|(_,current)|*current)}
     pub fn contact(
@@ -105,15 +126,17 @@ impl TouchGestures {
         eligible: bool,
     ) -> Option<TouchGesture> {
         if phase == ContactPhase::Down && !self.active() {
-            *self = Self { first_ns: time_ns, camera: self.camera.take(), ..Self::default() };
+            *self = Self { first_ns: time_ns, camera: self.camera.take(), indirect: self.indirect, ..Self::default() };
         }
         self.failed |= !eligible || time_ns == 0 || time_ns < self.last_ns || !position.into_iter().all(f32::is_finite);
         self.last_ns = time_ns;
         match phase {
             ContactPhase::Down => {
+                self.repeat_ns = None;
                 self.failed |= self.lifted || self.contacts.contains_key(&id);
                 self.contacts.insert(id, (position, position));
                 self.peak = self.peak.max(self.contacts.len());
+                self.pinch = (self.peak == 2).then(|| ([self.positions()[0], self.positions()[1]], time_ns));
                 self.scrub = (self.peak == 3 && !self.failed && !self.tap_failed
                     && time_ns.saturating_sub(self.first_ns) <= u64::from(policy.tap_ms) * 1_000_000)
                     .then(|| TouchScrub::new(self.positions()));
@@ -123,11 +146,33 @@ impl TouchGestures {
                 *current = position;
                 self.tap_failed |= (position[0] - start[0]).hypot(position[1] - start[1]) > policy.slop;
                 if phase == ContactPhase::Up {
+                    if !self.lifted {
+                        self.first_lift_ns = time_ns;
+                        self.quick_pinch = self.pinch.and_then(|(origins, start)| {
+                            if self.peak != 2 || self.repeated || time_ns.saturating_sub(start) > 300_000_000 { return None; }
+                            let positions = self.positions();
+                            let vector = |p: [[f32; 2]; 2]| [p[1][0] - p[0][0], p[1][1] - p[0][1]];
+                            let before = vector(origins);
+                            let after = vector([positions[0], positions[1]]);
+                            let length = |p: [f32; 2]| p[0].hypot(p[1]);
+                            let [a, b] = [length(before), length(after)];
+                            let travel = (a - b).abs();
+                            if a < policy.slop * 4. || travel < policy.slop * 2. || (0.75..1.3333334).contains(&(b / a)) { return None; }
+                            let center_travel = length(std::array::from_fn(|i| (positions[0][i] + positions[1][i] - origins[0][i] - origins[1][i]) * 0.5));
+                            if center_travel > travel * 0.5 || (before[0] * after[1] - before[1] * after[0]).abs() > a * b * 0.45 { return None; }
+                            if (0..2).any(|i| length(std::array::from_fn(|axis| positions[i][axis] - origins[i][axis])) < policy.slop) { return None; }
+                            Some(b > a)
+                        });
+                    }
                     self.contacts.remove(&id);
                     self.scrub = None;
                     self.lifted = true;
                     self.tap_failed |= time_ns.saturating_sub(self.first_ns) > u64::from(policy.tap_ms) * 1_000_000;
-                    if !self.active() && !self.failed && !self.tap_failed && (2..=4).contains(&self.peak) {
+                    if !self.active() && !self.failed && time_ns.saturating_sub(self.first_lift_ns) <= 100_000_000
+                        && let Some(outward) = self.quick_pinch.take() {
+                        return Some(TouchGesture::QuickPinch { outward });
+                    }
+                    if !self.active() && !self.failed && !self.tap_failed && !self.repeated && (2..=4).contains(&self.peak) {
                         return Some(TouchGesture::Tap(self.peak as u8));
                     }
                 } else if !self.failed && time_ns.saturating_sub(self.first_ns) <= 2_000_000_000 {

@@ -25,6 +25,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let indirect = matches!(input, UiInput::TrackpadTouch { .. });
                 if phase == ContactPhase::Down && !self.interaction.gestures.active() {
                     self.interaction.gestures.camera = Some(self.state.camera.clone());
+                    self.interaction.gestures.indirect = indirect;
                 }
                 let eligible = !self.workspace_transition
                     && !self.workspace_read_only
@@ -52,10 +53,19 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub(super) fn perform_touch_gesture(&mut self, gesture: TouchGesture, reply: &mut InputReply) -> Result<(), String> {
+        if matches!(gesture, TouchGesture::QuickPinch { outward: true })
+            && !self.navigation.quick_fit.as_ref().is_some_and(|(_, fit)| self.interaction.gestures.camera.as_ref().is_some_and(|camera| camera.view() == *fit)) {
+            return Ok(());
+        }
         let action = match gesture {
             TouchGesture::Scrub => UiAction::Invoke { command: CommandId::ClearLayer },
+            TouchGesture::QuickPinch { .. } => UiAction::Invoke { command: CommandId::ResetView },
+            TouchGesture::Hold => {
+                let Some(command) = self.touch_repeat_command() else { return Ok(()); };
+                UiAction::Invoke { command }
+            }
             TouchGesture::Tap(fingers) => {
-                let trigger = format!("touch.tap.{fingers}");
+                let trigger = match fingers { 2 => "touch.tap.2", 3 => "touch.tap.3", 4 => "touch.tap.4", _ => return Ok(()) };
                 let Some(definition) = self.state.settings.gesture_definition(&trigger, self.state.platform) else { return Ok(()); };
                 let ShortcutAction::Action { action } = definition.action else { return Ok(()); };
                 *action
@@ -71,11 +81,50 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.sync_camera();
             reply.change = merge_change(reply.change, self.changed(regions::CAMERA, true));
         }
+        if let TouchGesture::QuickPinch { outward } = gesture {
+            if outward {
+                if let Some((previous, _)) = self.navigation.quick_fit.take() { previous.restore(&mut self.state.camera); }
+                self.initial_fit = false;
+                self.sync_camera();
+            } else {
+                let previous = super::navigation::ViewPosition::capture(&self.state.camera);
+                self.navigate_command(CommandId::ResetView)?;
+                self.navigation.quick_fit = Some((previous, self.state.camera.view()));
+            }
+            reply.change = merge_change(reply.change, self.changed(regions::CAMERA, true));
+            return Ok(());
+        }
         if !matches!(action, UiAction::Invoke { command } if !self.command(command).enabled) {
             let change = self.dispatch(action)?;
             reply.change = merge_change(reply.change, change);
         }
         Ok(())
+    }
+
+    pub(super) fn touch_repeat_pending(&self) -> bool {
+        self.interaction.gestures.repeat_pending() && self.touch_repeat_command().is_some()
+    }
+
+    fn touch_repeat_command(&self) -> Option<CommandId> {
+        let trigger = match self.interaction.gestures.repeat_fingers() { 2 => "touch.tap.2", 3 => "touch.tap.3", _ => return None };
+        match self.state.settings.gesture_binding(trigger) {
+            "command.Undo" => Some(CommandId::Undo),
+            "command.Redo" => Some(CommandId::Redo),
+            _ => None,
+        }
+    }
+
+    pub(super) fn advance_touch_gestures(&mut self, now_ns: u64) -> Result<u32, String> {
+        if self.state.settings_open || self.interaction.facts.popup_open || self.state.command_search.is_some()
+            || self.workspace_transition || self.workspace_read_only || !self.touch_canvas_idle() {
+            self.interaction.gestures.fail();
+        }
+        let mut reply = InputReply::default();
+        if !self.touch_repeat_pending() { return Ok(0); }
+        if let Some(gesture) = self.interaction.gestures.advance(now_ns, self.interaction.touch_policy) {
+            self.perform_touch_gesture(gesture, &mut reply)?;
+        }
+        Ok(reply.change.regions)
     }
 
     pub(super) fn pen_button(&mut self, button: PenButton, pressed: bool, reply: &mut InputReply) -> Result<(), String> {

@@ -27,6 +27,120 @@ fn painted_session() -> UiSession<Recorder> {
     s
 }
 
+fn quick_pinch(s: &mut UiSession<Recorder>, outward: bool, start: u64, duration: u64) {
+    let (from, to) = if outward { ([350., 450.], [300., 500.]) } else { ([300., 500.], [350., 450.]) };
+    for id in 0..2 { finger(s, 10 + id, ContactPhase::Down, [from[id as usize], 400.], start + id * 10); }
+    for id in 0..2 { finger(s, 10 + id, ContactPhase::Move, [to[id as usize], 400.], start + duration + id * 10); }
+    for id in 0..2 { finger(s, 10 + id, ContactPhase::Up, [to[id as usize], 400.], start + duration + 30 + id * 10); }
+}
+
+#[test]
+fn quick_pinch_fits_upright_and_reverse_restores_the_view_on_every_host() {
+    for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Mac, Platform::Ios, Platform::Windows] {
+        let mut s = painted_session();
+        s.state.platform = platform;
+        s.gesture([400., 300.], [350., 280.], 2., 0.7).unwrap();
+        s.state.camera.flipped = [true, false];
+        let before = s.state.camera.view();
+        let checkpoint = s.engine.checkpoint();
+        quick_pinch(&mut s, false, 0, 80);
+        assert_eq!(s.state.camera.rotation, 0., "{platform:?}");
+        assert_eq!(s.state.camera.flipped, [false; 2]);
+        let mut fitted = s.state.camera.clone();
+        fitted.fit(s.engine.document().composition().size);
+        assert_eq!(s.state.camera.view(), fitted.view());
+        quick_pinch(&mut s, true, 500, 80);
+        for (actual, expected) in s.state.camera.view().document_to_surface.into_iter().zip(before.document_to_surface) {
+            assert!((actual - expected).abs() < 0.001, "{platform:?}: {actual} != {expected}");
+        }
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+    }
+}
+
+#[test]
+fn slow_pinches_and_outward_pinches_without_a_fitted_view_keep_navigation() {
+    for (outward, duration) in [(false, 500), (true, 80)] {
+        let mut s = painted_session();
+        s.state.camera.rotate_to(0.7).unwrap();
+        let zoom = s.state.camera.zoom;
+        quick_pinch(&mut s, outward, 0, duration);
+        assert!((s.state.camera.rotation - 0.7).abs() < 0.001);
+        assert!((s.state.camera.zoom / zoom - if outward { 2. } else { 0.5 }).abs() < 0.001);
+    }
+    let mut s = painted_session();
+    quick_pinch(&mut s, false, 0, 80);
+    s.gesture([400., 300.], [450., 300.], 1., 0.).unwrap();
+    let zoom = s.state.camera.zoom;
+    quick_pinch(&mut s, true, 500, 80);
+    assert!((s.state.camera.zoom / zoom - 2.).abs() < 0.001, "navigation invalidates quick-fit restoration");
+}
+
+#[test]
+fn quick_pinch_rejects_cancellation_extra_contacts_pan_and_staggered_release() {
+    for case in 0..4 {
+        let mut s = painted_session();
+        s.state.camera.rotate_to(0.7).unwrap();
+        finger(&mut s, 10, ContactPhase::Down, [300., 400.], 0);
+        finger(&mut s, 11, ContactPhase::Down, [500., 400.], 10);
+        if case == 1 { finger(&mut s, 12, ContactPhase::Down, [600., 400.], 20); }
+        let delta = if case == 2 { 200. } else { 0. };
+        finger(&mut s, 10, ContactPhase::Move, [350. + delta, 400.], 80);
+        finger(&mut s, 11, ContactPhase::Move, [450. + delta, 400.], 90);
+        finger(&mut s, 10, if case == 0 { ContactPhase::Cancel } else { ContactPhase::Up }, [350. + delta, 400.], 110);
+        finger(&mut s, 11, ContactPhase::Up, [450. + delta, 400.], if case == 3 { 250 } else { 120 });
+        assert!((s.state.camera.rotation - 0.7).abs() < 0.001, "case {case}");
+    }
+}
+
+#[test]
+fn held_fingers_repeat_history_and_release_never_adds_a_tap() {
+    for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Mac, Platform::Ios, Platform::Windows] {
+        let mut s = session(platform);
+        invoke(&mut s, CommandId::AddLayer);
+        invoke(&mut s, CommandId::AddLayer);
+        let painted = s.engine.document().clone();
+        let count = s.state.layers.len();
+        finger(&mut s, 10, ContactPhase::Down, [300., 400.], 0);
+        let down = finger(&mut s, 11, ContactPhase::Down, [400., 400.], 10);
+        assert!(down.change.canvas_wake && s.wants_continuous_frames());
+        for time in [1_020_000_000, 1_519_999_999] { s.frame(time, time).unwrap(); }
+        assert_eq!(s.state.layers.len(), count);
+        s.frame(1_520_000_000, 1_520_000_000).unwrap();
+        assert_eq!(s.state.layers.len(), count - 1, "{platform:?}");
+        s.frame(1_600_000_000, 1_600_000_000).unwrap();
+        assert_eq!(s.state.layers.len(), count - 2);
+        finger(&mut s, 10, ContactPhase::Up, [300., 400.], 700);
+        finger(&mut s, 11, ContactPhase::Up, [400., 400.], 710);
+        let checkpoint = s.engine.checkpoint();
+        s.frame(1_900_000_000, 1_900_000_000).unwrap();
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+        for id in 0..3 { finger(&mut s, 10 + id, ContactPhase::Down, [300. + id as f32 * 80., 400.], 1000 + id * 10); }
+        for time in [2_030_000_000, 2_530_000_000, 2_610_000_000] { s.frame(time, time).unwrap(); }
+        for id in 0..3 { finger(&mut s, 10 + id, ContactPhase::Up, [300. + id as f32 * 80., 400.], 1700 + id * 10); }
+        assert_live_artwork_eq(s.engine.document(), &painted);
+    }
+}
+
+#[test]
+fn held_history_stops_for_motion_blur_and_custom_tap_actions() {
+    for case in 0..4 {
+        let mut s = painted_session();
+        if case == 3 { bind(&mut s, "touch.tap.2", "command.AddLayer"); }
+        let painted = s.engine.document().clone();
+        finger(&mut s, 10, ContactPhase::Down, [300., 400.], 0);
+        finger(&mut s, 11, ContactPhase::Down, [400., 400.], 10);
+        s.frame(1_020_000_000, 1_020_000_000).unwrap();
+        match case {
+            0 => { finger(&mut s, 11, ContactPhase::Move, [450., 400.], 100); }
+            1 => { s.input(UiInput::Blur).unwrap(); }
+            2 => { finger(&mut s, 11, ContactPhase::Cancel, [400., 400.], 100); }
+            _ => (),
+        }
+        s.frame(1_800_000_000, 1_800_000_000).unwrap();
+        assert_live_artwork_eq(s.engine.document(), &painted);
+    }
+}
+
 fn scrub_contacts(s: &mut UiSession<Recorder>, phase: ContactPhase, offset: [f32; 2], ms: u64, count: u64) {
     for id in 0..count {
         finger(s, 10 + id, phase, [300. + 80. * id as f32 + offset[0], 400. + offset[1]], ms);

@@ -226,8 +226,6 @@ pub const KEYMAP_PRESETS: &[KeymapPreset] = &[
             ("L and C", "Capy has no commands that open the Layers or Colors panel."),
             ("X", "Procreate swaps the current and previous color. Capy's swap uses foreground and background."),
             ("Ctrl+A", "Procreate copies everything visible. Capy selects all."),
-            ("Hold two or three fingers", "Capy does not repeat undo or redo while fingers are held."),
-            ("Quick pinch", "Fit the canvas with Ctrl+0."),
         ],
     },
     KeymapPreset {

@@ -1738,6 +1738,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let Some(gesture) = gesture {
             self.perform_touch_gesture(gesture, &mut reply)?;
         }
+        reply.change.canvas_wake |= self.touch_repeat_pending();
         self.settle_holds_into(&mut reply)?;
         if self.notices.publishing() {
             reply.change = merge_change(reply.change, self.changed(0, false));
@@ -4708,6 +4709,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn wants_continuous_frames(&self) -> bool {
         self.input_ui_pending() || self.effect_analyses.busy() || (self.histogram.demand && !self.histogram.settled) || (self.tonal_histogram.demand && !self.tonal_histogram.settled)
             || self.interaction.axes.active()
+            || self.touch_repeat_pending()
             || self.paper_preview.active()
             || (!self.rendering_suspended && self.papers.pending.as_ref().is_some_and(|pending| pending.image.is_some()))
             || self.engine.wants_continuous_frames()
@@ -4833,6 +4835,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         changed |= std::mem::take(&mut self.interaction.hold_regions);
         changed |= self.advance_axes(now_ns)?;
+        changed |= self.advance_touch_gestures(now_ns)?;
         let tonal_changed = std::mem::take(&mut self.tonal_tools.changed)
             | std::mem::take(&mut self.selection_masks.refine_changed);
         if tonal_changed {self.refresh_tools();changed |= regions::DOCUMENT | regions::BRUSH | regions::COMMANDS;}

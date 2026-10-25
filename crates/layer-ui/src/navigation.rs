@@ -9,12 +9,12 @@ pub(super) struct ViewPosition {
     center: [f32; 2],
 }
 impl ViewPosition {
-    fn capture(camera: &Camera) -> Self {
+    pub(super) fn capture(camera: &Camera) -> Self {
         let center = camera.work_area_center().map(f64::from);
         Self { zoom: camera.zoom, rotation: camera.rotation, flipped: camera.flipped,
             center: camera.surface_to_document64(center).map(|v| v as f32) }
     }
-    fn restore(self, camera: &mut Camera) {
+    pub(super) fn restore(self, camera: &mut Camera) {
         camera.zoom = self.zoom;
         camera.rotation = self.rotation;
         camera.flipped = self.flipped;
@@ -25,6 +25,7 @@ impl ViewPosition {
 pub(super) struct Navigation {
     pub previous: Option<ViewPosition>,
     pub saved: Option<ViewPosition>,
+    pub quick_fit: Option<(ViewPosition, layer_render::ViewState)>,
     pub rotation_snap: layer_core::RotationSnap,
 }
 

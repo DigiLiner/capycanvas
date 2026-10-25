@@ -273,6 +273,19 @@ turns a tap into an action only when all of these hold:
 A recognized tap restores any view jitter from its brief contacts. Hosts that
 cannot supply timestamps send `time_ns: 0`, which disables taps.
 
+Holding two or three fingers repeats the corresponding Undo or Redo binding
+after the platform's long-press time, once every 80 ms. Lifting any finger,
+moving beyond touch slop, cancellation, or opening a popup stops repetition.
+Releasing a repeated hold does not also invoke a tap. Other tap bindings do not
+repeat. Indirect trackpad contacts retain native navigation without history holds.
+
+A quick inward pinch followed by lifting both fingers fits the canvas upright.
+An outward quick pinch from that fitted view restores the preceding view,
+including zoom, rotation and reflection. Other navigation leaves outward pinches
+as ordinary zoom. Both fingers must move, finish the pinch within 300 ms and
+lift within 100 ms of each other; pans, cancellation and extra contacts cannot
+reset the view. Slow pinches retain ordinary navigation.
+
 Three fingers scrub to clear the active layer with one Undo step. Move all three
 fingers together in any direction, reverse, then reverse again without lifting.
 Each leg travels at least twice the host's touch slop; the gesture finishes within
