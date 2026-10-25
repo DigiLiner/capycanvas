@@ -144,9 +144,10 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await menu('Manage Workspaces…');
     for (const row of (await view()).rows.filter(r=>r.id.startsWith('builtin:workspace:'))) {
       assert.ok(!row.actions.some(button=>button.enabled&&['rename','delete'].includes(button.action.type)));
-      await click(`.workspace-row[data-id="${row.id}"] .workspace-options`);
+      assert.equal(await evaluate(`!!document.querySelector('.workspace-row[data-id="${row.id}"] .workspace-options')`),false);
+      await click(`.workspace-row[data-id="${row.id}"] .workspace-grip`);
       assert.equal(await evaluate(`!!document.querySelector('.workspace-row-menu [data-action="rename"]')`),false);
-      await click(`.workspace-row[data-id="${row.id}"] .workspace-options`);
+      await click(`.workspace-row[data-id="${row.id}"] .workspace-grip`);
     }
     await click(`.workspace-choice[data-id="${created}"]`); await click('.workspace-manager footer .suggested-action'); await idle();
     assert.deepEqual(normalized(await capture()),normalized(beforeRestart));

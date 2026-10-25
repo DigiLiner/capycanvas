@@ -145,7 +145,7 @@ export async function checkWorkspaceOptions({call, evaluate, settle}) {
       for (const row of original.switcher)await toggle(row.id);
       assert.equal(await evaluate("layerApp.app.workspace_capture()"),before,"pin changes preserve workspace and history");
       await click(dots);await click(`${menu} button:last-of-type`);assert.equal((await view()).page,"workspaces");
-      assert.equal(await evaluate("document.querySelector('.workspace-options svg').dataset.asset"),"more","full-height editor options retain the full icon");
+      assert.equal(await evaluate("document.querySelector('.workspace-options')"),null,"built-in rows have no extra options button");
       assert.ok(await evaluate("Array.from(document.querySelectorAll('.workspace-grip svg'),n=>n.getBoundingClientRect()).every(r=>r.width===16&&r.height===16)"),"editor grips retain the shared icon canvas");
       await shot(`${theme}-manage-workspaces`);
       await click(".workspace-manager footer button");assert.equal((await view()).page,null);
@@ -265,7 +265,6 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
   const layout = () => evaluate("layerApp.state().workspace.layout");
   const shown = () => evaluate("[...document.querySelectorAll('.workspace-switcher button[data-workspace-id]')].map(node=>node.dataset.workspaceId)");
   const togglePin = id => click(`${row(id)} .workspace-pin`);
-  const options = async (id, action) => { await click(`${row(id)} .workspace-options`); await click(`.workspace-row-menu [data-action="${action}"]`); };
   const drag = async (id, target, after, sourceDevice, handle=false, hold=false) => {
     device=sourceDevice;
     const start=await point(`${row(id)} ${handle?'.workspace-grip':'.workspace-choice'}`), end=await point(row(target), after?.85:.15);
@@ -346,7 +345,7 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
     await togglePin(p); assert.deepEqual(await pins(),[i,f]);
     assert.ok(await evaluate(`!!document.querySelector(${JSON.stringify(`${row(p)} .workspace-grip`)})`));
     await drag(p,f,true,"touch",true); assert.deepEqual((await order()).slice(0,3),[i,f,p]); assert.deepEqual(await pins(),[i,f]);
-    await click(`${row(p)} .workspace-options`); await evaluate("document.querySelector('.workspace-row-menu [data-action=up]').focus()"); assert.equal(await menuOpen(),true); assert.equal(await evaluate("document.activeElement.dataset.action"),"up"); await key("Enter");
+    await click(`${row(p)} .workspace-grip`); await evaluate("document.querySelector('.workspace-row-menu [data-action=up]').focus()"); assert.equal(await menuOpen(),true); assert.equal(await evaluate("document.activeElement.dataset.action"),"up"); await key("Enter");
     assert.deepEqual((await order()).slice(0,3),[i,p,f]);
     assert.deepEqual(await layout(),preview); assert.deepEqual(await durable(),original);
     await click(".workspace-manager footer button"); assert.deepEqual(await layout(),originalLayout);

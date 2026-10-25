@@ -122,7 +122,7 @@ try {
     if((Model $first).windows_workspace.switcher_revision -ne $firstRevision){throw 'External refresh rebroadcast the preference edit'}
     $moveId=@((Model).windows_workspace.order)[-1]
     $before=@((Model).windows_workspace.order) -join '|'
-    Invoke ('workspace-manager-options-'+$moveId)
+    Invoke ('workspace-manager-grip-'+$moveId)
     Invoke 'workspace-manager-move-up'
     Wait-Until {
         $source=@((Model $second).windows_workspace.order) -join '|'

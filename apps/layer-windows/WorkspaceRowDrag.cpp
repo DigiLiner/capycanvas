@@ -218,11 +218,19 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             {L"canceled",B(e.GetCurrentPoint(surface).Properties().IsCanceled())},
             {L"before",before?S(*before):JsonValue::CreateNullValue()},
             {L"position",O({{L"x",N(position.X)},{L"y",N(position.Y)}})}});
+        auto menuRow=*source;
+        auto menuPoint=surface.TransformToVisual(source->item.get()).TransformPoint(position);
+        bool open=grip&&!held&&!dragging&&current();
+        if(auto button=source->grip.get();open&&button){
+            auto point=surface.TransformToVisual(button).TransformPoint(position);
+            open=point.X>=0&&point.Y>=0&&point.X<button.ActualWidth()&&point.Y<button.ActualHeight();
+        }
         bool handled=held||dragging||grip;
         ignoreClick=ignoreClick||handled;
         // A held release keeps its menu; dragging/cancellation closes it.
         clear(dragging);
         if(handled)e.Handled(true);
+        if(open)menuAt(menuRow,menuPoint,false);
         if(commit)move(id,destination);
     }
     void tick(){

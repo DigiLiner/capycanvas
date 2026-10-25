@@ -234,9 +234,12 @@ five others, then New Workspace… and Manage Workspaces…; Layout History… a
 Restore Starting Layout…; and Reset All Brushes…. Captions come from
 [`workspace_manager_ui.rs`](../../crates/layer-ui/src/workspace_manager_ui.rs).
 
-- **Manage Workspaces** is a compact selectable list with a square **+** (New
-  Workspace) at the top right and Cancel / Switch to Workspace below. Each row's
-  **⋮** menu has Rename, Delete and Move Up / Move Down. A separate pin button
+- **Manage Workspaces** is a compact selectable list with a labeled **New
+  Workspace** button above the list on the right and Cancel / Switch to
+  Workspace below. Each row's
+  grip opens Move Up / Move Down when clicked, tapped or activated with the
+  keyboard, and drags immediately after movement slop. Custom rows also have a
+  **⋮** menu for Rename and Delete; built-in rows have no dots. A separate pin
   shows or hides the workspace in the top bar.
   The current workspace starts selected with Switch disabled; a workspace owned
   by another window offers Switch to Window.
@@ -336,7 +339,13 @@ previews do not change this entry.
 
 Rows reorder by the list-row and grip rules of the
 [drag convention](drag-and-reorder.md), with an insertion line; Escape cancels.
-Moving a row never changes its pin. Move Up / Move Down gives keyboard access.
+Moving a row never changes its pin. Clicking or tapping the grip opens only
+Move Up / Move Down. Enter or Space on the focused grip opens the same menu;
+Escape closes it and restores focus. Dragging the grip does not open a menu
+or select a preview. Row context menus offer the same reorder commands.
+Custom rows keep a separate **⋮** for Rename and Delete. Shared Rust supplies
+these options; built-in rows and rows owned by another window have none. The
+empty options column keeps pins aligned without an extra focus stop.
 Clicking still previews; menus, scrolling and dragging keep the selected row and
 its preview. Pinning and ordering save immediately as app preferences shared by
 all workspaces and windows; Cancel does not undo them.
@@ -372,6 +381,7 @@ and shows a notice; see
 
 ```sh
 bash tools/performance/workspace-motion.sh gtk --workspace-switcher
+bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_grip_menus --native-storage
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_options
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_pending_menu
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_compact_switcher_input
@@ -383,6 +393,7 @@ bash tools/performance/workspace-motion.sh gtk --native-test=native_paint_fitted
 bash tools/performance/workspace-motion.sh gtk --native-test=native_brush_drawer_input
 bash tools/performance/workspace-motion.sh gtk --native-test=native_unreadable_workspace_storage_input --native-storage
 node apps/layer-web/test.mjs --workspace-switcher
+node apps/layer-web/test.mjs --workspace-grips
 node apps/layer-web/test.mjs --workspace-options
 node apps/layer-web/test.mjs --workspace-options-refresh
 node apps/layer-web/device.test.mjs --workspace-options

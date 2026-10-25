@@ -70,6 +70,67 @@ impl WorkspaceStore for Store {
     }
 }
 #[test]
+fn manager_workspace_options_contain_only_available_localized_metadata_actions() {
+    let mut f = Fixture::new();
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    assert!(f.controller.manager.items().iter().any(|item| !item.metadata.builtin));
+    for language in [UiLanguage::English, UiLanguage::Japanese] {
+        let localization = Localizer::shared(language);
+        f.controller.set_localization(localization.clone());
+        f.pump();
+        for row in &f.controller.view.rows {
+            let item = f.controller.manager.items().into_iter().find(|item| item.id == row.id).unwrap();
+            let pin = row.pin.as_ref().unwrap();
+            assert!(pin.enabled);
+            assert!(matches!(&pin.edit, SwitcherEdit::Toggle { id } if id == &row.id));
+            assert_eq!(pin.selected, f.controller.manager.switcher_ids().contains(&row.id));
+            if item.metadata.builtin {
+                assert!(row.options.is_empty());
+            } else {
+                assert_eq!(row.options.iter().map(|button| button.action.clone()).collect::<Vec<_>>(),
+                    [ManagerAction::Rename(row.id.clone()), ManagerAction::Delete(row.id.clone())]);
+                for button in &row.options {
+                    assert!(button.enabled && !button.primary);
+                    assert_eq!(button.label, localization.text(match button.action {
+                        ManagerAction::Rename(_) => layer_ui::MessageId::WORKSPACE_ACTION_RENAME,
+                        ManagerAction::Delete(_) => layer_ui::MessageId::WORKSPACE_ACTION_DELETE,
+                        _ => unreachable!(),
+                    }).as_ref());
+                }
+            }
+        }
+    }
+    f.input(serde_json::json!({"type":"open","page":"this_workspace"}));
+    let row = f.controller.view.rows[0].clone();
+    let panel: layer_ui::Panel = serde_json::from_str(&row.id).unwrap();
+    f.input(serde_json::json!({"type":"select","id":row.id}));
+    f.input(action(ManagerAction::SaveToolbar(panel)));
+    f.input(serde_json::json!({"type":"submit","name":"Saved Ink"}));
+    for page in ["history", "this_workspace", "toolbar_library"] {
+        f.input(serde_json::json!({"type":"open","page":page}));
+        assert!(!f.controller.view.rows.is_empty(), "{page}");
+        assert!(f.controller.view.rows.iter().all(|row| row.options.is_empty() && row.pin.is_none()), "{page}");
+    }
+}
+
+#[test]
+fn manager_workspace_options_exclude_actions_owned_by_another_window() {
+    let mut f = Fixture::new();
+    f.input(serde_json::json!({"type":"switch","id":DEFAULT_WORKSPACES[0].0}));
+    let id = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+    let other = WorkspaceManager::new(Store(f.backend.clone()), Platform::Web);
+    let claimed = pollster::block_on(other.prepare_switch(&id, f.backend.now.get())).unwrap();
+    other.activate(claimed);
+    f.input(serde_json::json!({"type":"refresh_switcher"}));
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    let row = f.controller.view.rows.iter().find(|row| row.id == id).unwrap();
+    assert!(row.options.is_empty());
+    assert!(row.pin.as_ref().unwrap().enabled);
+    assert!(row.actions.iter().any(|button| button.enabled && matches!(&button.action,
+        ManagerAction::SwitchToWindow(target) if target == &id)));
+}
+
+#[test]
 fn manager_pin_activations_preserve_preview_and_compose_while_preferences_save() {
     let mut f = Fixture::new();
     let active = f.controller.view.switcher[0].id.clone();

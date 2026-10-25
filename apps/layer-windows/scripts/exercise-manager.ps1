@@ -149,7 +149,8 @@ try {
         Wait-Until {$row=@((Manager).rows|Where-Object id -eq $original)[0];$row.pin.selected -eq $expected -and !(Manager).switcher_busy -and ((Control $pinId).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq $(if($expected){[System.Windows.Automation.ToggleState]::On}else{[System.Windows.Automation.ToggleState]::Off}))} 'Workspace pin did not acknowledge its shared visibility state'
     }
     if((Layout) -ne $pinLayout -or (Model).windows_workspace.id -ne $pinWorkspace){throw 'Pinning changed workspace selection or layout'}
-    Invoke ('workspace-manager-options-'+$original)
+    if(Find ('workspace-manager-options-'+$original) -Visible){throw 'Included workspace still has a row options button'}
+    Invoke ('workspace-manager-grip-'+$original)
     $null=Control 'workspace-manager-move-up'
     foreach($id in @('workspace-manager-rename','workspace-manager-delete')){
         $action=Find $id
@@ -213,7 +214,9 @@ try {
     Choose 'Cancel';Closed
     if(!$WorkflowOnly){
     Menu 'Manage Workspaces…'
-    Invoke ('workspace-manager-options-'+$painting);Invoke 'workspace-manager-rename'
+    Invoke ('workspace-manager-options-'+$painting)
+    if((Find 'workspace-manager-move-up') -or (Find 'workspace-manager-move-down')){throw 'Custom row options contain reorder actions'}
+    Invoke 'workspace-manager-rename'
     Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Rename prompt did not open'
     Edit 'workspace-manager-name' 'Inking'
     Choose 'Rename'

@@ -72,7 +72,6 @@ class AndroidWorkspaceSwitcherTest {
     }
     private fun key(code: Int, meta: Int = 0) { pressKey(code, meta); SystemClock.sleep(220) }
     private fun open() { send(obj("type" to "open", "page" to "workspaces")); waitFor("dialog focus") { node("workspace-manager")?.first?.view?.hasWindowFocus() == true } }
-    private fun options(id: String, action: String) { tap("workspace-options-$id"); tap("workspace-$action") }
     private fun newWorkspace(name: String): String {
         send(obj("type" to "form", "action" to obj("type" to "new"))); send(obj("type" to "submit", "name" to name))
         return view().getString("id")
@@ -99,6 +98,43 @@ class AndroidWorkspaceSwitcherTest {
     @After fun cleanup() {
         if (pressed != null) event(MotionEvent.ACTION_CANCEL)
         if (::scenario.isInitialized) scenario.close()
+    }
+
+    @Test fun labeledNewWorkspaceButtonCreatesAndRestoresAcrossThemes() {
+        for (theme in listOf("light", "dark")) {
+            waitFor("restored document accepts input") { !host.documentInputBlocked }
+            host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+            waitFor("requested button theme") { host.snapshot!!.getJSONObject("state").getString("theme") == theme }
+            val before = order()
+            val name = "New workspace $theme"
+            open()
+            val button = bounds("new-workspace")
+            val rows = bounds("workspace-rows")
+            assertTrue("New Workspace appears above the list", button.bottom <= rows.top)
+            assertEquals("New Workspace aligns with the list's right edge", rows.right, button.right, density)
+            instrumentation.runOnMainSync {
+                val caption = host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("new_workspace")
+                assertEquals(listOf(caption), texts(node("new-workspace")!!.second))
+                fun count(current: SemanticsNode): Int = (if (hasTag("new-workspace")(current)) 1 else 0) + current.children.sumOf(::count)
+                assertEquals(1, semanticsRoots().sumOf { count(it.semanticsOwner.unmergedRootSemanticsNode) })
+            }
+            shot("new-workspace-$theme")
+            tap("new-workspace")
+            waitFor("new workspace name form") { node("workspace-name") != null && view().getJSONObject("prompt_action").getString("type") == "new" }
+            instrumentation.runOnMainSync {
+                val input = node("workspace-name")!!.second.find { it.config.getOrNull(SemanticsActions.SetText) != null }!!
+                assertTrue(input.config[SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString(name)))
+            }
+            tap("workspace-submit")
+            waitFor("created workspace selected") { view().getString("name") == name && view().isNull("prompt") }
+            val created = view().getString("id")
+            assertFalse(created in before)
+            assertEquals(before.toSet() + created, order().toSet())
+            assertTrue(created in ids("switcher"))
+            scenario.close(); SystemClock.sleep(300); launch()
+            assertEquals(created, view().getString("id")); assertEquals(name, view().getString("name"))
+            assertTrue(created in ids("switcher"))
+        }
     }
 
     @Test fun pinsOrderingPreviewKeyboardAndRestart() {
@@ -138,7 +174,7 @@ class AndroidWorkspaceSwitcherTest {
         assertNotNull(node("workspace-pin-$current"))
         assertEquals(ToggleableState.Off, node("workspace-pin-$current")!!.second.config[SemanticsProperties.ToggleableState])
         val previous = order().indexOf(current)
-        tap("workspace-options-$current")
+        tap("workspace-grip-$current")
         shot("options")
         waitFor("menu keyboard focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
         key(KeyEvent.KEYCODE_TAB) // Leave native touch mode before requesting focus.
@@ -461,6 +497,85 @@ class AndroidWorkspaceSwitcherTest {
         SystemClock.sleep(ViewConfiguration.getLongPressTimeout().toLong() + 300)
         instrumentation.runOnMainSync { assertNull("Mouse holds never open menus", node("workspace-row-menu")) }
     }
+
+    @Test fun gripMenusKeepPreviewAndSeparateCustomOptionsAcrossThemesAndInputs() {
+        val custom = newWorkspace("Grip options")
+        val durable = capture()
+        val originalOrder = order()
+        val source = defaults[1]
+        val target = defaults.last()
+        val moved = originalOrder.toMutableList().apply { remove(source); add(indexOf(target) + 1, source) }
+        fun reset() = send(obj("type" to "edit_switcher", "edit" to obj("type" to "move", "id" to source, "before" to target)))
+        fun closeMenu() {
+            key(KeyEvent.KEYCODE_ESCAPE)
+            waitFor("row menu dismissed") { node("workspace-row-menu") == null && node("workspace-manager")?.first?.view?.hasWindowFocus() == true }
+        }
+        for (theme in listOf("light", "dark")) {
+            host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+            open(); tap("workspace-row-$target")
+            val preview = layout()
+            val pins = ids("switcher")
+            fun unchanged() {
+                assertEquals(target, view().getString("selected"))
+                assertEquals(custom, view().getString("id"))
+                assertEquals(preview, layout()); assertEquals(durable, capture())
+                assertEquals(pins.toSet(), ids("switcher").toSet())
+            }
+            fun moveMenu() {
+                waitFor("grip menu native focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
+                instrumentation.runOnMainSync {
+                    val copy = host.catalog.getJSONObject("native_copy").getJSONObject("header")
+                    assertEquals(listOf(copy.getString("move_up"), copy.getString("move_down")), texts(node("workspace-row-menu")!!.second))
+                    assertNotNull(node("workspace-up")); assertNotNull(node("workspace-down"))
+                    assertNull(node("workspace-rename")); assertNull(node("workspace-delete"))
+                }
+                assertEquals(originalOrder, order()); unchanged()
+            }
+            instrumentation.runOnMainSync {
+                for (id in defaults) {
+                    assertNull("Built-in rows have no options button", node("workspace-options-$id"))
+                    assertEquals(0, view().array("rows").objects().first { it.getString("id") == id }.array("options").length())
+                }
+                assertNotNull(node("workspace-options-$custom"))
+            }
+            for (pointer in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+                tool = pointer
+                tap("workspace-grip-$source"); moveMenu(); closeMenu()
+                val destination = bounds("workspace-row-$target").let { Offset(it.center.x, it.bottom - 5 * density) }
+                down("workspace-grip-$source")
+                event(MotionEvent.ACTION_MOVE, destination)
+                waitFor("grip drag starts immediately") { node("workspace-row-drop-hint") != null && node("workspace-row-menu") == null }
+                event(MotionEvent.ACTION_UP); idle()
+                assertEquals(moved, order()); assertNull(node("workspace-row-menu")); unchanged(); reset()
+                val pinned = source in ids("switcher")
+                tap("workspace-pin-$source"); assertEquals(!pinned, source in ids("switcher"))
+                assertEquals(target, view().getString("selected")); assertNull(node("workspace-row-menu"))
+                tap("workspace-pin-$source"); unchanged()
+            }
+            tool = MotionEvent.TOOL_TYPE_FINGER
+            for (code in listOf(KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_SPACE)) {
+                focus("workspace-grip-$source"); key(code); idle(); moveMenu(); closeMenu()
+            }
+            focus("workspace-grip-$source"); key(KeyEvent.KEYCODE_ENTER); moveMenu()
+            focus("workspace-up"); key(KeyEvent.KEYCODE_ENTER); idle()
+            assertEquals(originalOrder.toMutableList().apply { remove(source); add(0, source) }, order())
+            unchanged(); reset()
+            tap("workspace-grip-$source"); moveMenu(); shot("grip-menu-$theme"); closeMenu()
+            tap("workspace-options-$custom")
+            waitFor("custom options native focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
+            instrumentation.runOnMainSync {
+                val options = view().array("rows").objects().first { it.getString("id") == custom }.array("options").objects()
+                assertEquals(listOf("rename", "delete"), options.map { it.getJSONObject("action").getString("type") })
+                assertTrue(options.all { it.getBoolean("enabled") })
+                assertEquals(options.map { it.getString("label") }, texts(node("workspace-row-menu")!!.second))
+                assertNotNull(node("workspace-rename")); assertNotNull(node("workspace-delete"))
+                assertNull(node("workspace-up")); assertNull(node("workspace-down"))
+            }
+            unchanged(); shot("custom-options-$theme"); closeMenu()
+            tap("workspace-cancel"); assertEquals(durable, capture())
+        }
+    }
+
     @Test fun nativeRowPickupScrollingMenusAndCancellation() {
         open()
         val originalOrder = order()

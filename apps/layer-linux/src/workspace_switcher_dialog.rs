@@ -5,9 +5,10 @@ use layer_workspace::SwitcherEdit;
 fn picked(row: &adw::ActionRow, x: f64, y: f64) -> (bool, bool) {
     let mut widget = row.pick(x, y, gtk::PickFlags::DEFAULT);
     let mut handle = false;
+    let mut button = false;
     while let Some(w) = widget {
         if w.is::<gtk::Button>() || w.is::<gtk::MenuButton>() || w.is::<gtk::CheckButton>() {
-            return (true, false);
+            button = true;
         }
         handle |= w.has_css_class("workspace-reorder-handle");
         if w == *row.upcast_ref::<gtk::Widget>() {
@@ -15,7 +16,7 @@ fn picked(row: &adw::ActionRow, x: f64, y: f64) -> (bool, bool) {
         }
         widget = w.parent();
     }
-    (false, handle)
+    (button && !handle, handle)
 }
 
 impl ManagerUi {
@@ -33,50 +34,33 @@ impl ManagerUi {
     ) {
         let popup = menu.popover().unwrap();
         let content = popup.child().and_downcast::<gtk::Box>().unwrap();
-        let controls = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let id = id.to_string();
-        let order = self.order.borrow().clone();
-        if let Some(index) = order.iter().position(|i| i == &id) {
-            for (label, enabled, before) in [
-                (
-                    "Move Up",
-                    index > 0,
-                    index.checked_sub(1).and_then(|i| order.get(i)).cloned(),
-                ),
-                (
-                    "Move Down",
-                    index + 1 < order.len(),
-                    order.get(index + 2).cloned(),
-                ),
-            ] {
-                let button = gtk::Button::with_label(label);
-                button.add_css_class("flat");
-                button.set_sensitive(enabled);
-                button.connect_clicked(glib::clone!(
-                    #[weak]
-                    w,
-                    #[weak]
-                    popup,
-                    #[strong]
-                    id,
-                    move |_| {
-                        popup.popdown();
-                        w.workspaces.ui.edit_switcher(
-                            &w,
-                            SwitcherEdit::Move {
-                                id: id.clone(),
-                                before: before.clone(),
-                            },
-                        );
-                    }
-                ));
-                controls.append(&button);
-            }
+        for (label, up) in [
+            (layer_ui::MessageId::NATIVE_HEADER_MOVE_UP, true),
+            (layer_ui::MessageId::NATIVE_HEADER_MOVE_DOWN, false),
+        ] {
+            let button = gtk::Button::with_label(&w.localization().text(label));
+            button.add_css_class("flat");
+            let id = id.to_string();
+            popup.connect_show(glib::clone!(#[weak] w, #[weak] button, #[strong] id, move |_| {
+                let order = w.workspaces.view().order;
+                button.set_sensitive(!w.workspaces.ui.switcher_pending.get() && order.iter().position(|row| row == &id)
+                    .is_some_and(|index| if up { index > 0 } else { index + 1 < order.len() }));
+            }));
+            button.connect_clicked(glib::clone!(#[weak] w, #[weak] popup, #[strong] id, move |_| {
+                popup.popdown();
+                let order = w.workspaces.view().order;
+                let Some(index) = order.iter().position(|row| row == &id) else { return; };
+                let before = if up {
+                    if index == 0 { return; }
+                    order.get(index - 1).cloned()
+                } else {
+                    if index + 1 >= order.len() { return; }
+                    order.get(index + 2).cloned()
+                };
+                w.workspaces.ui.edit_switcher(&w, SwitcherEdit::Move { id: id.clone(), before });
+            }));
+            content.append(&button);
         }
-        if content.first_child().is_some() {
-            controls.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        }
-        content.prepend(&controls);
     }
 
     pub(super) fn bind_reorder_row(
@@ -233,6 +217,8 @@ impl ManagerUi {
             w,
             #[weak]
             row,
+            #[weak]
+            menu,
             #[strong]
             moved,
             #[strong]
@@ -245,7 +231,11 @@ impl ManagerUi {
                     && x < row.width() as f64
                     && y < row.height() as f64
                 {
-                    w.workspaces.ui.list.select_row(Some(&row));
+                    if picked(&row, x, y).1 {
+                        row_menu(&row, &menu, x, y, true);
+                    } else {
+                        w.workspaces.ui.list.select_row(Some(&row));
+                    }
                 }
             }
         ));

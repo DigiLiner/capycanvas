@@ -32,16 +32,6 @@ function Open-Manager {
     Wait-Until {$null -ne (Find 'workspace-manager')} 'Manager did not open'
     Settled
 }
-function Preference([string]$Id,[string]$Action){
-    Settled
-    $revision=(Storage).switcher_revision
-    Invoke ('workspace-manager-options-'+$Id)
-    $item=Control ('workspace-manager-'+$Action)
-    if($Action -eq 'show'){$item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()}
-    else{$item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
-    Wait-Until {(Storage).switcher_revision -gt $revision -or (Storage).switcher_error} 'Preference was not acknowledged'
-    Settled
-}
 function Launch([string]$Label){
     $script:stderr=Join-Path $run ($Label+'-stderr.log')
     $script:review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
@@ -146,6 +136,64 @@ function Preview-Select {
 }
 function Source-Id {@((Storage).order|Where-Object {$_ -ne $preview})[-1]}
 
+function Pin-Buttons {
+    $id=(Storage).id;$before=@((Storage).switcher.id) -contains $id;$saved=@((Storage).order)
+    foreach($expected in @((!$before),$before)){
+        $revision=(Storage).switcher_revision
+        $trace=Native-TapAt (Control ('workspace-manager-pin-'+$id) -Arranged) 1;$trace.case='pin-with-grip-menu'
+        Wait-Until {(Storage).switcher_revision -gt $revision -and !(Storage).switcher_busy} 'Native pin input was not acknowledged'
+        if((@((Storage).switcher.id) -contains $id) -ne $expected){throw 'Native pin did not retain its visibility action'}
+        if(((Storage).order -join '|') -ne ($saved -join '|') -or (Find 'workspace-manager-move-up')){throw 'Pin input reordered rows or opened the grip menu'}
+        Preview-Intact
+        $trace.passed=$true;$taps.Add($trace);$taps|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'native-taps.json')
+    }
+}
+
+function New-WorkspaceButton {
+    $control=Control 'workspace-manager-create' -Arranged
+    $bounds=$control.Current.BoundingRectangle;$items=(Control 'workspace-manager-items' -Arranged).Current.BoundingRectangle
+    if($control.Current.Name -notlike 'New Workspace*' -or $bounds.Width -lt 64*$scale){throw 'New Workspace action is not a labeled button'}
+    if($bounds.Bottom -gt $items.Top+1 -or $bounds.X+$bounds.Width/2 -le $items.X+$items.Width/2 -or $bounds.Right -gt $items.Right+1){throw 'New Workspace button is not above the right side of the list'}
+    $control
+}
+
+function Custom-Options {
+    (New-WorkspaceButton).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Custom options fixture did not open naming'
+    (Control 'workspace-manager-name').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Grip options custom workspace')
+    Wait-Until {(Control 'Create and Switch' -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button)).Current.IsEnabled} 'Custom workspace name did not enable confirmation'
+    Choose 'Create and Switch';Closed
+    Wait-Until {(Storage).ready -and !(Storage).busy -and !(Storage).switcher_busy} 'Custom options workspace did not settle'
+    $custom=(Storage).id
+    Open-Manager
+    (Control ('workspace-manager-row-'+$active)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Wait-Until {(Manager).selected -eq $active -and !(Manager).loading} 'Original workspace selection did not settle'
+    Settled;Choose (Manager).primary;Closed
+    Wait-Until {(Storage).id -eq $active -and !(Storage).busy} 'Original workspace did not return'
+    Open-Manager;Preview-Select
+    $saved=@((Storage).order);$revision=(Storage).switcher_revision
+    $trace=Native-TapAt (Control ('workspace-manager-options-'+$custom) -Arranged) 1;$trace.case='custom-row-options'
+    Wait-Until {$null -ne (Find 'workspace-manager-rename') -and $null -ne (Find 'workspace-manager-delete')} 'Custom row options did not retain Rename and Delete'
+    if((Find 'workspace-manager-move-up') -or (Find 'workspace-manager-move-down')){throw 'Custom row options contain reorder actions'}
+    Preview-Intact;Order-Intact $saved $revision
+    $trace.passed=$true;$taps.Add($trace);$taps|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'native-taps.json')
+    Invoke 'workspace-manager-rename'
+    Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Custom row Rename did not open'
+    Choose 'Cancel';Settled
+    Wait-Until {$null -eq (Manager).prompt} 'Cancel did not return from Rename'
+    Invoke ('workspace-manager-options-'+$custom);Invoke 'workspace-manager-delete'
+    Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Custom row Delete did not open'
+    Choose 'Cancel';Settled
+    Wait-Until {$null -eq (Manager).prompt} 'Cancel did not return from Delete'
+    Preview-Intact;Order-Intact $saved $revision
+    Capture ($Device+'-custom-options') -Composed
+    Invoke ('workspace-manager-options-'+$custom);Invoke 'workspace-manager-delete'
+    Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Custom cleanup did not open Delete'
+    Choose 'Delete';Settled
+    Wait-Until {@((Manager).rows|Where-Object id -eq $custom).Count -eq 0} 'Custom fixture workspace was not removed'
+    Preview-Intact
+}
+
 function Middle-RowDrag([switch]$Grip){
     $script:gestureCase=if($Grip){'middle-grip-rejected'}else{'middle-body-rejected'}
     $saved=@((Storage).order);$revision=(Storage).switcher_revision;$source=Source-Id
@@ -200,6 +248,7 @@ function No-Drop([switch]$Outside){
     [CapyRowPointer]::Up()
     Wait-Until {(Gesture).phase -eq 'idle'} 'Rejected drop did not release its state'
     Preview-Intact;Order-Intact $saved $revision
+    if(Find 'workspace-manager-move-up'){throw 'Rejected grip drop opened its click menu'}
 }
 
 function Drag([switch]$Grip,[switch]$Hold,[switch]$Cancel){
@@ -240,6 +289,7 @@ function Drag([switch]$Grip,[switch]$Hold,[switch]$Cancel){
         Settled;Preview-Intact
         if((Storage).switcher_revision -ne $revision+1 -or (Storage).order[0] -ne $source){throw 'Drop did not commit one reorder'}
     }
+    if(Find 'workspace-manager-move-up'){throw 'Finished drag opened the grip click menu'}
 }
 try {
     Enter-CapyEnvironment
@@ -258,6 +308,7 @@ try {
     if(!(Find ('workspace-manager-current-'+$active))){throw 'Current workspace checkmark is missing'}
     $wrong=Find ('workspace-manager-current-'+$preview)
     if($wrong -and !$wrong.Current.IsOffscreen){throw 'Dialog preview moved the current workspace checkmark'}
+    $null=New-WorkspaceButton
     $taps=[Collections.Generic.List[object]]::new()
     $secondaryContacts=[Collections.Generic.List[object]]::new()
     if($Device -eq 'mouse'){Middle-RowDrag;Middle-RowDrag -Grip}
@@ -274,11 +325,14 @@ try {
       }
     }
     Write-Output "$Device short click passed"
-    foreach($drift in @(0,1,3)){
-        $source=Source-Id;$trace=Native-TapAt (Control ('workspace-manager-options-'+$source) -Arranged) $drift;$trace.case='row-options-'+$drift
-        try{Wait-Until {$null -ne (Find 'workspace-manager-move-up')} "$Device options $drift DIP tap did not open its menu";Preview-Intact;$trace.passed=$true}
+    foreach($row in (Manager).rows){if(Find ('workspace-manager-options-'+$row.id) -Visible){throw 'Included workspace still has a row options button'}}
+    foreach($drift in @(0,1)){
+        $saved=@((Storage).order);$revision=(Storage).switcher_revision
+        $source=Source-Id;$trace=Native-TapAt (Control ('workspace-manager-grip-'+$source) -Arranged) $drift;$trace.case='grip-menu-'+$drift
+        try{Wait-Until {$null -ne (Find 'workspace-manager-move-up')} "$Device grip $drift DIP tap did not open its menu";Preview-Intact;Order-Intact $saved $revision;if((Find 'workspace-manager-rename') -or (Find 'workspace-manager-delete')){throw 'Grip menu contains protected row actions'};$trace.passed=$true}
         finally{$trace.gesture_final=Gesture;$taps.Add($trace);$taps|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'native-taps.json')}
-        [CapyRowPointer]::Key(27);Wait-Until {!(Find 'workspace-manager-move-up')} 'Acknowledged row options did not dismiss'
+        if($drift -eq 0){Capture ($Device+'-grip-menu') -Composed}
+        [CapyRowPointer]::Key(27);Wait-Until {!(Find 'workspace-manager-move-up')} 'Acknowledged grip menu did not dismiss'
     }
     if($Device -ne 'mouse'){
         $script:gestureCase='motion-before-hold-outside'
@@ -320,6 +374,24 @@ try {
     Write-Output "$Device cancellation passed"
     No-Drop;No-Drop -Outside
     Write-Output "$Device no-op and outside drops passed"
+    foreach($key in @(13,32)){
+        $source=$preview;$saved=@((Storage).order);$revision=(Storage).switcher_revision
+        $control=Control ('workspace-manager-grip-'+$source)
+        Focus-Keyboard $control
+        $trace=@{case='grip-key-'+$key;key=$key;source=$source;focus_before=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FocusedElement));passed=$false}
+        try{
+            [CapyRowPointer]::Key([uint32]$review.Id,[uint16]$key)
+            Wait-Until {$null -ne (Find 'workspace-manager-move-up')} 'Keyboard grip activation did not open the move menu'
+            Preview-Intact;Order-Intact $saved $revision
+            if((Find 'workspace-manager-rename') -or (Find 'workspace-manager-delete')){throw 'Keyboard grip menu contains protected row actions'}
+            $trace.passed=$true
+        }finally{
+            $trace.gesture_final=Gesture;$trace.focus_after=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FocusedElement))
+            $taps.Add($trace);$taps|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'native-taps.json')
+        }
+        [CapyRowPointer]::Key(27)
+        Wait-Until {$null -eq (Find 'workspace-manager-move-up')} 'Keyboard grip menu did not dismiss'
+    }
     $source=Source-Id;$revision=(Storage).switcher_revision
     Invoke ('workspace-manager-grip-'+$source)
     Invoke 'workspace-manager-move-up'
@@ -345,7 +417,12 @@ try {
     [CapyRowPointer]::Key(27)
     Wait-Until {$null -eq (Find 'workspace-manager-move-up')} 'Keyboard menu did not dismiss'
     Write-Output "$Device secondary and keyboard menus passed"
-    Capture ($Device+'-rows')
+    Pin-Buttons
+    Custom-Options
+    Capture ($Device+'-rows') -Composed
+    Choose 'Cancel';Closed
+    Open-Manager;Preview-Select
+    foreach($row in (Manager).rows){if(Find ('workspace-manager-options-'+$row.id) -Visible){throw 'Reopened included workspace still has a row options button'}}
     Choose 'Cancel';Closed
     if((Storage).id -ne $active){throw 'Cancel changed the active workspace'}
 
@@ -424,11 +501,12 @@ try {
     }
     Close
     @{device=$Device;theme=$Theme;short_click='passed';pickup_and_menu='passed';grip_and_body_drop='passed';preview_preserved='passed';
-        single_reorder_commit='passed';cancellation='passed';no_op_and_outside_drops='passed';accessible_grip_and_keyboard='passed';secondary_and_keyboard_menus='passed';secondary_mouse_drags=@{cases=$secondaryContacts.Count;passed=@($secondaryContacts|Where-Object passed).Count};overflow_source_invalidation_and_blur=[bool]$Overflow;zero_exit='passed';
+        single_reorder_commit='passed';grip_short_tap_and_keyboard_menu='passed';builtin_dots_absent='passed';custom_rename_delete_options='passed';cancel_and_reopen='passed';cancellation='passed';no_op_and_outside_drops='passed';accessible_grip_and_keyboard='passed';secondary_and_keyboard_menus='passed';secondary_mouse_drags=@{cases=$secondaryContacts.Count;passed=@($secondaryContacts|Where-Object passed).Count};overflow_source_invalidation_and_blur=[bool]$Overflow;zero_exit='passed';
         scope='OS-injected native input; physical digitizers and performance require separate acceptance'}|
         ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
     Get-Content (Join-Path $run 'results.json')
 }catch{
+    try{Capture 'failure' -Composed}catch{}
     try{@{case=$script:gestureCase;gesture=(Gesture);model=(Model)}|ConvertTo-Json -Depth 90|Set-Content (Join-Path $run 'failure-state.json')}catch{}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace)
     throw

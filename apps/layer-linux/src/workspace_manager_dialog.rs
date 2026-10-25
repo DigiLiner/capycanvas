@@ -18,7 +18,6 @@ pub(crate) struct ManagerUi {
     rows: RefCell<Vec<String>>,
     rows_key: RefCell<String>,
     pin_buttons: RefCell<std::collections::BTreeMap<String, gtk::ToggleButton>>,
-    row_captions: RefCell<std::collections::BTreeMap<String, (String, String)>>,
     details_key: RefCell<String>,
     rebuilding: Cell<bool>,
     actions: gtk::Box,
@@ -48,11 +47,11 @@ impl ManagerUi {
         dialog.set_widget_name("workspace-manager");
         let view = adw::ToolbarView::new();
         let header = adw::HeaderBar::new();
-        let create = crate::icons::button("layer-plus-symbolic");
+        let create = gtk::Button::with_label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE));
         create.set_widget_name("workspace-manager-new");
         create.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE)));
         create.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE))]);
-        header.pack_end(&create);
+        create.set_halign(gtk::Align::End);
         view.add_top_bar(&header);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
         margins(&body, 18);
@@ -80,6 +79,7 @@ impl ManagerUi {
         sidebar.append(&search);
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 6);
         sidebar.append(&actions);
+        sidebar.append(&create);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
         list.add_css_class("boxed-list");
@@ -136,7 +136,6 @@ impl ManagerUi {
             rows: RefCell::new(Vec::new()),
             rows_key: RefCell::new(String::new()),
             pin_buttons: RefCell::default(),
-            row_captions: RefCell::new(std::collections::BTreeMap::new()),
             details_key: RefCell::new(String::new()),
             rebuilding: Cell::new(false),
             actions,
@@ -201,6 +200,13 @@ impl ManagerUi {
                 }
             }
         ));
+        self.list.set_sort_func(glib::clone!(#[weak] w, #[upgrade_or] gtk::Ordering::Equal, move |a, b| {
+            let ui = &w.workspaces.ui;
+            let ids = ui.rows.borrow();
+            let rank = |row: &gtk::ListBoxRow| row.widget_name().strip_prefix("workspace-row-")
+                .and_then(|name| ids.iter().position(|id| id == name)).unwrap_or(usize::MAX);
+            rank(a).cmp(&rank(b)).into()
+        }));
         self.list.connect_row_selected(glib::clone!(
             #[weak]
             w,
@@ -209,7 +215,8 @@ impl ManagerUi {
                 if ui.rebuilding.get() {
                     return;
                 }
-                let id = row.and_then(|row| ui.rows.borrow().get(row.index() as usize).cloned());
+                let id = row.and_then(|row| row.widget_name().strip_prefix("workspace-row-").map(str::to_owned))
+                    .filter(|id| ui.rows.borrow().contains(id));
                 w.workspaces.send(&w, WorkspaceInput::Select { id });
             }
         ));
@@ -241,7 +248,6 @@ impl ManagerUi {
         w.workspaces.send(w, WorkspaceInput::Dismiss);
     }
     pub(crate) fn invalidate_localization(&self) {
-        self.row_captions.borrow_mut().clear();
         self.rows_key.borrow_mut().clear();
         self.details_key.borrow_mut().clear();
         self.page.set(None);
@@ -250,6 +256,7 @@ impl ManagerUi {
     pub fn render(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
         let localization = w.localization();
         self.search.set_placeholder_text(Some(&localization.text(layer_ui::MessageId::COLOR_FEATURES_PROFILE_SEARCH)));
+        self.create.set_label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE));
         self.create.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE)));
         self.create.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE))]);
         if let Some(cancel) = self.footer.first_child().and_downcast::<gtk::Button>() { cancel.set_label(&localization.text(layer_ui::MessageId::COMMON_CANCEL)); }
@@ -258,7 +265,6 @@ impl ManagerUi {
         let Some(page) = view.page else {
             self.page.set(None);
             self.rows_key.borrow_mut().clear();
-            self.row_captions.borrow_mut().clear();
             if self.presented.get() {
                 self.closing.set(true);
                 self.dialog.close();
@@ -352,11 +358,12 @@ impl ManagerUi {
         self.rebuilding.set(false);
     }
     fn rows(&self, w: &Rc<Workspace>, view: &WorkspaceView, page: ManagerPage) {
-        let key = serde_json::to_string(&(page, view.rows.iter().map(|row| (&row.id, &row.title, &row.subtitle, row.current, &row.actions)).collect::<Vec<_>>())).unwrap_or_default();
+        let mut content: Vec<_> = view.rows.iter().collect();
+        content.sort_by(|a, b| a.id.cmp(&b.id));
+        let key = serde_json::to_string(&(page, content.iter().map(|row| (&row.id, &row.title, &row.subtitle, row.current, &row.actions)).collect::<Vec<_>>())).unwrap_or_default();
         self.rebuilding.set(true);
         if *self.rows_key.borrow() != key && self.dragged.borrow().is_none() {
             *self.rows_key.borrow_mut() = key;
-            self.row_captions.borrow_mut().retain(|id, _| page == ManagerPage::Workspaces && view.rows.iter().any(|row| &row.id == id));
             let scroll = self
                 .list
                 .ancestor(gtk::ScrolledWindow::static_type())
@@ -383,6 +390,9 @@ impl ManagerUi {
             if let (Some(scroll), Some(position)) = (scroll, position) {
                 scroll.vadjustment().set_value(position);
             }
+        } else if self.dragged.borrow().is_none() && self.rows.borrow().iter().ne(view.rows.iter().map(|row| &row.id)) {
+            *self.rows.borrow_mut() = view.rows.iter().map(|row| row.id.clone()).collect();
+            self.list.invalidate_sort();
         }
         for item in &view.rows {
             if let Some(pin) = &item.pin
@@ -413,14 +423,15 @@ impl ManagerUi {
         item: &layer_workspace::WorkspaceRow,
     ) {
         row.add_css_class("workspace-manager-row");
-        let handle = crate::icons::image("layer-grip-symbolic");
+        let reorder_label = layer_ui::NativeCaption::Reorder { title: item.title.clone() }.message(&w.localization());
+        let handle = actions_menu(w, &reorder_label, Vec::new());
+        handle.set_child(Some(&crate::icons::image("layer-grip-symbolic")));
+        handle.update_property(&[gtk::accessible::Property::Label(&reorder_label)]);
+        self.add_switcher_actions(w, &handle, &item.id);
         handle.set_widget_name(&format!("workspace-reorder-handle-{}", item.id));
         handle.add_css_class("workspace-reorder-handle");
-        handle.add_css_class("dim-label");
         handle.set_size_request(16, 44);
         handle.set_cursor_from_name(Some("grab"));
-        handle.set_tooltip_text(Some(&w.localization().text(layer_ui::MessageId::WORKSPACE_HEADER_DRAG_ITEM)));
-        handle.update_property(&[gtk::accessible::Property::Label(&w.localization().text(layer_ui::MessageId::WORKSPACE_HEADER_DRAG_ITEM))]);
         row.add_prefix(&handle);
         if item.current {
             row.add_suffix(&crate::icons::image("layer-check-symbolic"));
@@ -443,29 +454,17 @@ impl ManagerUi {
         }));
         self.pin_buttons.borrow_mut().insert(item.id.clone(), pin.clone());
         row.add_suffix(&pin);
-        let actions = item
-            .actions
-            .iter()
-            .filter(|b| {
-                b.enabled
-                    && !b.primary
-                    && matches!(
-                        b.action,
-                        ManagerAction::Rename(_) | ManagerAction::Delete(_)
-                    )
-            })
-            .cloned()
-            .collect();
-        let mut captions = self.row_captions.borrow_mut();
-        let caption = captions.entry(item.id.clone()).or_insert_with(|| (item.title.clone(), layer_ui::NativeCaption::OptionsFor { title: item.title.clone() }.message(&w.localization())));
-        if caption.0 != item.title {
-            *caption = (item.title.clone(), layer_ui::NativeCaption::OptionsFor { title: item.title.clone() }.message(&w.localization()));
+        let trailing = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        trailing.set_size_request(34, -1);
+        if !item.options.is_empty() {
+            let caption = layer_ui::NativeCaption::OptionsFor { title: item.title.clone() }.message(&w.localization());
+            let more = actions_menu(w, &caption, item.options.clone());
+            more.set_widget_name(&format!("workspace-options-{}", item.id));
+            more.set_valign(gtk::Align::Center);
+            trailing.append(&more);
         }
-        let more = actions_menu(w, &caption.1, actions);
-        self.add_switcher_actions(w, &more, &item.id);
-        more.set_valign(gtk::Align::Center);
-        row.add_suffix(&more);
-        self.bind_reorder_row(w, row, &item.id, &more);
+        row.add_suffix(&trailing);
+        self.bind_reorder_row(w, row, &item.id, &handle);
     }
     fn render_details(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
         let key = serde_json::to_string(&(&view.details, view.busy, view.rows.is_empty()))

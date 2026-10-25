@@ -105,6 +105,7 @@ pub struct WorkspaceRow {
     pub subtitle: String,
     pub current: bool,
     pub actions: Vec<ManagerButton>,
+    pub options: Vec<ManagerButton>,
     pub pin: Option<WorkspacePin>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -164,6 +165,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                     },
                     current: false,
                     actions: Vec::new(),
+                    options: Vec::new(),
                     pin: None,
                 })
                 .collect();
@@ -220,6 +222,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                     subtitle,
                     current: false,
                     actions: Vec::new(),
+                    options: Vec::new(),
                     pin: None,
                 }
             })

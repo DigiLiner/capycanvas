@@ -56,10 +56,13 @@ struct WorkspaceSwitcherRows: View {
             ForEach(rows, id: \.workspaceRowID) { row in
                 let id = row["id"].string
                 HStack(spacing: 6) {
-                    Button {} label: { SharedIcon(name: "grip").frame(width: 16, height: rowHeight).contentShape(Rectangle()) }
+                    Button {
+                        if !interaction.contact.consumeClick() { interaction.showMenu(id) }
+                    } label: { SharedIcon(name: "grip").frame(width: 16, height: rowHeight).contentShape(Rectangle()) }
                         .buttonStyle(.plain).foregroundStyle(.secondary)
                         .help(nativeCopy["header"]["drag_to_reorder"].string).accessibilityLabel(reorderCaptions[id] ?? "")
-                        .accessibilityIdentifier("workspace-grip-" + id)
+                        .accessibilityIdentifier("workspace-grip-" + id).disabled(!available)
+                        .focusable().focused($focus, equals: "grip-" + id)
                         .modifier(WorkspaceRowMeasurement(id: id, part: \.grip))
                     Button {
                         if !interaction.contact.consumeClick() { workspaces.select(id) }
@@ -88,12 +91,16 @@ struct WorkspaceSwitcherRows: View {
                         .accessibilityAddTraits(pin["selected"].bool ? .isSelected : [])
                         .accessibilityIdentifier("workspace-pin-" + id).focusable().focused($focus, equals: "pin-" + id)
                         .modifier(WorkspaceRowMeasurement(id: id, part: \.pin))
-                    Button {
-                        if interaction.menu == id { interaction.closeMenu() } else { interaction.showMenu(id) }
-                    } label: { Text("⋮").frame(width: 34, height: rowHeight).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).accessibilityLabel(optionCaptions[id] ?? "")
-                        .accessibilityIdentifier("workspace-options-" + id).focusable().focused($focus, equals: "options-" + id)
-                        .modifier(WorkspaceRowMeasurement(id: id, part: \.options))
+                    if !row["options"].array.isEmpty {
+                        Button {
+                            if interaction.menu == id { interaction.closeMenu() } else { interaction.showMenu(id, reordering: false) }
+                        } label: { Text("⋮").frame(width: 34, height: rowHeight).contentShape(Rectangle()) }
+                            .buttonStyle(.plain).accessibilityLabel(optionCaptions[id] ?? "").disabled(!available)
+                            .accessibilityIdentifier("workspace-options-" + id).focusable().focused($focus, equals: "options-" + id)
+                            .modifier(WorkspaceRowMeasurement(id: id, part: \.options))
+                    } else {
+                        Color.clear.frame(width: 34, height: rowHeight).accessibilityHidden(true)
+                    }
                 }.padding(.horizontal, 6)
                     .background(workspaces.view["selected"].string == id ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
                     .opacity(interaction.drag?.id == id ? 0.35 : 1)
@@ -114,7 +121,7 @@ struct WorkspaceSwitcherRows: View {
             .onKeyPress(.escape) {
                 guard interaction.menu != nil || interaction.contact.target != nil else { return .ignored }
                 let id = interaction.menu ?? interaction.contact.target?.id
-                interaction.cancel(); if let id { focus = "options-" + id }; return .handled
+                interaction.cancel(); if let id { focus = (interaction.reordering ? "grip-" : "options-") + id }; return .handled
             }
     }
     private func update() {
@@ -147,10 +154,10 @@ struct WorkspaceSwitcherRows: View {
             ["label": nativeCopy["header"]["move_down"].string, "enabled": available && index.map { $0 + 1 < order.count } == true,
              "action": edit(["type": "move", "id": id, "before": index.flatMap { $0 + 2 < order.count ? order[$0 + 2] : nil } as Any? ?? NSNull()])],
         ]
-        let actions = row["actions"].array.filter { !$0["primary"].bool && $0["enabled"].bool }.map { item -> [String: Any] in
+        let actions = row["options"].array.map { item -> [String: Any] in
             ["label": item["label"].raw, "enabled": available, "action": item["action"].raw]
         }
-        return EditorActionMenu(model: AppleContextMenu(JSON(["sections": [preferences, actions]])) { workspaces.activate($0) },
+        return EditorActionMenu(model: AppleContextMenu(JSON(["sections": interaction.reordering ? [preferences] : [actions]])) { workspaces.activate($0) },
             width: 260, identifier: "workspace-row-menu") { interaction.closeMenu() }
     }
 }

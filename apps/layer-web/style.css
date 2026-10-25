@@ -21,10 +21,10 @@ body[data-theme="light"] .workspace-manager { --workspace-shade:#000; --workspac
 body .workspace-manager::backdrop { background:rgb(0 0 0 / 12%); }
 .workspace-form::backdrop { background:#0003; }
 .workspace-manager .workspace-intro { flex:none; margin:18px 18px 22px; line-height:normal; }
-.workspace-manager .workspace-add, .workspace-manager .dialog-close { position:absolute; top:6px; width:34px; height:34px; min-height:34px; padding:0; border-radius:var(--control-radius); background:transparent; }
-.workspace-manager .workspace-add { right:46px; }
-.workspace-manager .workspace-add::before, .workspace-manager .workspace-add::after { content:""; position:absolute; width:14px; height:2px; left:10px; top:16px; background:currentColor; }
-.workspace-manager .workspace-add::after { transform:rotate(90deg); }
+.workspace-list-actions { display:flex; flex:none; justify-content:flex-end; align-items:center; gap:8px; margin:0 18px 10px; }
+.workspace-list-actions .workspace-search { flex:1; width:auto; margin:0; }
+.workspace-manager .workspace-add { flex:none; height:34px; min-height:34px; padding:6px 12px; font-weight:600; background:var(--workspace-button-bg); }
+.workspace-manager .dialog-close { position:absolute; top:6px; width:34px; height:34px; min-height:34px; padding:0; border-radius:var(--control-radius); background:transparent; }
 .workspace-manager .dialog-close { right:6px; border-radius:50%; }
 .workspace-manager .dialog-close::before { content:""; position:absolute; inset:5px; border-radius:50%; background:color-mix(in srgb,var(--workspace-shade) 10%,transparent); }
 .workspace-manager .dialog-close > span { display:block; position:relative; width:10px; height:10px; margin:auto; }
@@ -43,6 +43,7 @@ body .workspace-manager::backdrop { background:rgb(0 0 0 / 12%); }
 .workspace-options svg, .workspace-pin svg { width:16px; height:16px; }
 .workspace-grip { flex:none; display:flex; align-items:center; justify-content:center; width:16px; padding:0; margin-left:8px; opacity:.55; cursor:grab; touch-action:none; }
 .workspace-grip svg { width:16px; height:16px; }
+.workspace-options-slot { flex:none; width:40px; display:flex; align-items:center; }
 .workspace-grip + .workspace-choice { padding-left:6px; }
 .workspace-row-mark { display:flex; align-items:center; flex:none; margin-left:6px; transform:translateY(-.5px); }
 .workspace-row-mark svg { width:16px; height:16px; }

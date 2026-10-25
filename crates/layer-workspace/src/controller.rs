@@ -624,6 +624,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                         title: m.summary_display_name(item),
                         subtitle: String::new(),
                         actions: Vec::new(),
+                        options: Vec::new(),
                         pin: None,
                         id,
                     })
@@ -672,6 +673,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                             id: r.id,
                             title: r.description.display(&self.localization),
                             actions: Vec::new(),
+                            options: Vec::new(),
                             pin: None,
                         }
                     })
@@ -714,7 +716,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                 .collect(),
         };
         let pins = self.requested_pin_ids();
-        self.view.present_manager_pins(&self.localization, &pins);
+        self.view.present_manager_rows(&self.localization, &pins);
         let selected = self
             .view
             .selected

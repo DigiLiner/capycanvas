@@ -12,19 +12,19 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
   const buttons = new Map();
   const menu = element("div", "workspace-row-menu");
   menu.popover = "manual"; menu.setAttribute("role", "menu"); dialog.append(menu);
-  let contact, suppressClick = false, menuOwner, animation;
+  let contact, suppressClick = false, menuOwner, menuAnchor, animation;
   const unavailable = () => !getView()?.ready || getView().busy || getView().switcher_busy;
   const edit = value => send({type:"edit_switcher", edit:value});
   const menuOpen = () => menu.matches(":popover-open");
   function closeMenu(focus = false) {
     if (menuOpen()) menu.hidePopover();
-    menuOwner?.querySelector(".workspace-options")?.setAttribute("aria-expanded", "false");
-    if (focus && menuOwner?.isConnected) menuOwner.querySelector(".workspace-options")?.focus({preventScroll:true});
+    menuAnchor?.setAttribute("aria-expanded", "false");
+    if (focus && menuAnchor?.isConnected) menuAnchor.focus({preventScroll:true});
   }
-  function showMenu(row, point, focus = false) {
+  function showMenu(row, point, focus = false, reorder = true, anchor = row.querySelector(".workspace-grip")) {
     const view = getView(), item = view.rows.find(item => item.id === row.dataset.id);
     if (!item || view.page !== "workspaces" || unavailable()) return;
-    closeMenu(); menuOwner = row; menu.replaceChildren(); menu.dataset.id = item.id;
+    closeMenu(); menuOwner = row; menuAnchor = anchor; menu.replaceChildren(); menu.dataset.id = item.id;
     bindCopy(menu,()=>app.native_caption({type:"options_for",title:getView()?.rows.find(row=>row.id===menuOwner?.dataset.id)?.title??""}),"ariaLabel");
     const action = (label, kind, run, enabled = true) => {
       const node = button("", () => { closeMenu(true); run(); });
@@ -32,15 +32,15 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
       node.setAttribute("role", "menuitem");
       const caption=element("span");bindCopy(caption,label);node.append(caption);menu.append(node);
     };
-    const index = view.order.indexOf(item.id);
-    action(()=>copy.move_up, "up", () => edit({type:"move", id:item.id, before:view.order[index-1]}), index > 0);
-    action(()=>copy.move_down, "down", () => edit({type:"move", id:item.id, before:view.order[index+2] ?? null}), index < view.order.length-1);
-    const offered = type => item.actions.some(button => button.enabled && button.action.type === type);
-    const rename = offered("rename"), remove = offered("delete");
-    if (rename || remove) menu.append(element("hr"));
-    if (rename) action(()=>JSON.parse(app.workspace_view()).rows.find(row=>row.id===item.id)?.actions.find(value=>value.action.type==="rename")?.label??"", "rename", () => send({type:"form", action:{type:"rename", value:item.id}}));
-    if (remove) action(()=>JSON.parse(app.workspace_view()).rows.find(row=>row.id===item.id)?.actions.find(value=>value.action.type==="delete")?.label??"", "delete", () => send({type:"form", action:{type:"delete", value:item.id}}));
-    row.querySelector(".workspace-options").setAttribute("aria-expanded", "true");
+    if (reorder) {
+      const index = view.order.indexOf(item.id);
+      action(()=>copy.move_up, "up", () => edit({type:"move", id:item.id, before:view.order[index-1]}), index > 0);
+      action(()=>copy.move_down, "down", () => edit({type:"move", id:item.id, before:view.order[index+2] ?? null}), index < view.order.length-1);
+    } else for (const offered of item.options) {
+      action(()=>getView()?.rows.find(row=>row.id===item.id)?.options.find(value=>value.action.type===offered.action.type)?.label??"", offered.action.type,
+        () => send({type:"action",action:offered.action}));
+    }
+    menuAnchor?.setAttribute("aria-expanded", "true");
     menu.showPopover();
     const r = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(6, Math.min(point.x, innerWidth-r.width-6))}px`;
@@ -51,8 +51,13 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     row.dataset.id = item.id;
     // Keep a button hit target: Chrome can redirect touches on a narrow passive
     // icon to the neighboring row button, which would require a hold to drag.
-    const handle = button("", e => e.preventDefault(), "workspace-grip"); handle.append(icon("grip")); handle.tabIndex = -1;
-    bindCopy(handle,()=>copy.drag_to_reorder,"title");bindCopy(handle,()=>copy.drag_to_reorder,"ariaLabel");
+    const handle = button("", () => {
+      if (menuOpen() && menuAnchor === handle) { closeMenu(true); return; }
+      const r = handle.getBoundingClientRect(); showMenu(row, {x:r.left, y:r.bottom}, true);
+    }, "workspace-grip"); handle.append(icon("grip"));
+    const reorderCaption=()=>app.native_caption({type:"reorder",title:getView()?.rows.find(row=>row.id===item.id)?.title??item.title});
+    bindCopy(handle,reorderCaption,"title");bindCopy(handle,reorderCaption,"ariaLabel");
+    handle.setAttribute("aria-haspopup", "menu"); handle.setAttribute("aria-expanded", "false");
     row.prepend(handle);
     if (view.id === item.id) {
       const mark = element("span", "workspace-row-mark workspace-check"); mark.append(icon("check"));
@@ -65,15 +70,18 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     bindCopy(pin,()=>getView()?.rows.find(row=>row.id===item.id)?.pin?.label??"","title");
     bindCopy(pin,()=>getView()?.rows.find(row=>row.id===item.id)?.pin?.label??"","ariaLabel");
     row.append(pin); updatePin(row, item.pin);
-    const more = button("", () => {
-      if (menuOpen() && menuOwner === row) { closeMenu(true); return; }
-      const r = more.getBoundingClientRect(); showMenu(row, {x:r.left, y:r.bottom}, true);
-    }, "workspace-options");
-    more.append(icon("more"));
-    bindCopy(more,()=>app.native_caption({type:"options_for",title:getView()?.rows.find(row=>row.id===item.id)?.title??item.title}),"ariaLabel"); more.setAttribute("aria-haspopup", "menu"); more.setAttribute("aria-expanded", "false");
-    row.append(more);
+    const slot = element("div", "workspace-options-slot"); row.append(slot);
+    if (item.options.length) {
+      const more = button("", () => {
+        if (menuOpen() && menuAnchor === more) { closeMenu(true); return; }
+        const r = more.getBoundingClientRect(); showMenu(row, {x:r.left, y:r.bottom}, true, false, more);
+      }, "workspace-options");
+      more.append(icon("more"));
+      bindCopy(more,()=>app.native_caption({type:"options_for",title:getView()?.rows.find(row=>row.id===item.id)?.title??item.title}),"ariaLabel");
+      more.setAttribute("aria-haspopup", "menu"); more.setAttribute("aria-expanded", "false"); slot.append(more);
+    }
     row.addEventListener("click", e => {
-      if (!e.target.closest(".workspace-choice,.workspace-options,.workspace-pin") && !unavailable()) choice.click();
+      if (!e.target.closest(".workspace-choice,.workspace-options,.workspace-pin,.workspace-grip") && !unavailable()) choice.click();
     });
     choice.addEventListener("keydown", e => {
       if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
@@ -164,8 +172,9 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     e.preventDefault(); if (!contact?.ghost) showMenu(row, {x:e.clientX,y:e.clientY}, !contact);
   });
   list.addEventListener("scroll", () => { if (!contact?.ghost && !contact?.held) { finish(); closeMenu(); } });
-  window.addEventListener("pointerdown", e => { if (menuOpen() && !menu.contains(e.target)) closeMenu(); }, true);
+  window.addEventListener("pointerdown", e => { if (menuOpen() && !menu.contains(e.target) && !menuAnchor?.contains(e.target)) closeMenu(); }, true);
   window.addEventListener("keydown", e => {
+    if (!contact) suppressClick = false;
     if (e.key === "Escape" && (contact || menuOpen())) { finish(); closeMenu(true); e.preventDefault(); e.stopImmediatePropagation(); }
   }, true);
   window.addEventListener("blur", () => { finish(); closeMenu(); });
@@ -197,7 +206,7 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     root.hidden = !ids.size;
     if (view.id !== previousFirst && view.switcher_display[0]?.id === view.id) choices.scrollLeft = 0;
     if (!view.page || view.prompt || (contact && !view.order.includes(contact.row.dataset.id))) { finish(); closeMenu(); }
-    for (const more of list.querySelectorAll(".workspace-options")) more.disabled = unavailable();
+    for (const control of list.querySelectorAll(".workspace-options,.workspace-grip")) control.disabled = unavailable();
     for (const row of list.children) updatePin(row, view.rows.find(item => item.id === row.dataset.id)?.pin);
   }
   return {root, render, decorate, closeMenu, dragging:() => !!contact, cancel:() => { finish(); closeMenu(); }};

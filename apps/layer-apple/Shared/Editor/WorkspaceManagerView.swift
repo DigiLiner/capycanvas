@@ -63,14 +63,7 @@ struct WorkspaceManagerView: View {
                 Text(view["prompt"]["title"].isNull ? view["title"].string : view["prompt"]["title"].string)
                     .font(.title2).fontWeight(.semibold)
                 Spacer()
-                if view["prompt"].isNull && workspaces.page == "workspaces" {
-                    Button {
-                        workspaces.form(["type": "new"])
-                    } label: { SharedIcon(name: "plus").frame(width: 24, height: 24) }
-                        .accessibilityLabel(header["new_workspace"].string)
-                        .accessibilityIdentifier("workspace-action-new")
-                        .disabled(workspaces.busy)
-                } else if view["prompt"].isNull && toolbarMode {
+                if view["prompt"].isNull && toolbarMode {
                     Button(common["close"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                         .disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
@@ -117,6 +110,13 @@ struct WorkspaceManagerView: View {
                 }
             } }
             if workspaces.page == "workspaces" {
+                HStack {
+                    Spacer()
+                    Button(header["new_workspace"].string) { workspaces.form(["type": "new"]) }
+                        .buttonStyle(WorkspaceManagerButtonStyle()).fixedSize(horizontal: true, vertical: false)
+                        .disabled(workspaces.busy)
+                        .accessibilityIdentifier("workspace-action-new")
+                }
                 WorkspaceSwitcherRows(workspaces: workspaces)
             } else { EditorScrollView {
                 LazyVStack(spacing: 8) {

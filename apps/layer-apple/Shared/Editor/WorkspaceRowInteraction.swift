@@ -36,6 +36,7 @@ struct WorkspaceRowMeasurement: ViewModifier {
     struct Hint { let before: String?; let y: CGFloat }
     let contact = ReorderContact()
     @Published private(set) var menu: String?
+    @Published private(set) var reordering = true
     @Published private(set) var drag: Drag?
     @Published private(set) var hint: Hint?
     var frames: [String: WorkspaceRowFrame] = [:]
@@ -48,9 +49,9 @@ struct WorkspaceRowMeasurement: ViewModifier {
         if contact.target != nil { _ = contact.validate() }
         if let menu, !enabled || !items.contains(where: { $0["id"].string == menu }) { closeMenu() }
     }
-    func showMenu(_ id: String) {
+    func showMenu(_ id: String, reordering: Bool = true) {
         guard enabled, items.contains(where: { $0["id"].string == id }) else { return }
-        menu = id
+        self.reordering = reordering; menu = id
     }
     func closeMenu() { if menu != nil { menu = nil } }
     func cancel() {

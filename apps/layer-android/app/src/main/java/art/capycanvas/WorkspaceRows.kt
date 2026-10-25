@@ -45,6 +45,7 @@ internal class WorkspaceRowInteraction {
     var enabled = false
     var contact by mutableStateOf(false)
     var menu by mutableStateOf<String?>(null)
+    var reorderMenu by mutableStateOf(true)
     var active by mutableStateOf<String?>(null)
     var hint by mutableStateOf<Float?>(null)
     var point = Offset.Zero
@@ -82,7 +83,7 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
         var released = false
         var remaining = viewConfiguration.longPressTimeoutMillis
         var eventTime = down.uptimeMillis
-        drag.contact = true; drag.menu = if (secondary) id else null
+        drag.contact = true; drag.reorderMenu = true; drag.menu = if (secondary) id else null
         if (secondary) down.consume()
         try {
             while (true) {
@@ -165,21 +166,34 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                 val title = row.getString("title")
                 val switchCaption=remember(title, workspaces, host.languageTag) { if (workspaces) JSONObject(Native.nativeCaption(obj("type" to "switch_workspace", "title" to title).toString(), host.languageTag)).getString("text") else title }
                 val optionsCaption=remember(title, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "options_for", "title" to title).toString(), host.languageTag)).getString("text") }
+                val reorderCaption=remember(title, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "reorder", "title" to title).toString(), host.languageTag)).getString("text") }
                 val selected = view.optString("selected") == id
                 DisposableEffect(id) { onDispose { drag.rows.remove(id); drag.grips.remove(id); drag.options.remove(id); drag.pins.remove(id) } }
                 if (index > 0) HorizontalDivider(color = colors.divider)
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rowBounds(drag.rows, id)
                     .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard),
                     verticalAlignment = Alignment.CenterVertically) {
-                    if (workspaces) Box(Modifier.width(24.dp).height(56.dp).rowBounds(drag.grips, id)
-                        .testTag("workspace-grip-$id"), contentAlignment = Alignment.Center) {
-                        SharedIcon("grip", host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("drag_to_reorder"), Modifier.size(16.dp).alpha(.45f))
+                    if (workspaces) Box(Modifier.width(24.dp).height(56.dp), contentAlignment = Alignment.Center) {
+                        IconButton({ drag.reorderMenu = true; drag.menu = id }, enabled = enabled,
+                            modifier = Modifier.fillMaxSize().rowBounds(drag.grips, id).testTag("workspace-grip-$id")
+                                .semantics { contentDescription = reorderCaption }) {
+                            SharedIcon("grip", null, Modifier.size(16.dp).alpha(.45f))
+                        }
+                        DropdownMenu(drag.menu == id && drag.reorderMenu, { drag.menu = null }, properties = PopupProperties(focusable = !drag.contact),
+                            modifier = Modifier.testTag("workspace-row-menu")) {
+                                fun closeEdit(value: JSONObject) { drag.menu = null; edit(value) }
+                                val position = order.indexOf(id)
+                                DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_up")) }, enabled = enabled && position > 0, modifier = Modifier.testTag("workspace-up"),
+                                    onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position - 1))) })
+                                DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_down")) }, enabled = enabled && position >= 0 && position < order.lastIndex, modifier = Modifier.testTag("workspace-down"),
+                                    onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position + 2))) })
+                        }
                     }
                     Column(Modifier.weight(1f).onPreviewKeyEvent { event ->
                         val key = event.nativeKeyEvent
                         if (workspaces && enabled && key.action == KeyEvent.ACTION_DOWN &&
                             (key.keyCode == KeyEvent.KEYCODE_MENU || (key.keyCode == KeyEvent.KEYCODE_F10 && key.isShiftPressed))) {
-                            drag.menu = id; true
+                            drag.reorderMenu = true; drag.menu = id; true
                         } else false
                     }.selectable(selected, enabled = enabled, role = Role.RadioButton) {
                         host.workspaceInput(obj("type" to "select", "id" to id))
@@ -198,26 +212,22 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                                 .testTag("workspace-pin-$id").semantics { contentDescription = pin.getString("label") }) {
                             SharedIcon(pin.getString("icon"), null, Modifier.size(16.dp))
                         }
-                        Box(Modifier.rowBounds(drag.options, id)) {
-                            IconButton({ drag.menu = id }, enabled = enabled,
-                                modifier = Modifier.size(36.dp).testTag("workspace-options-$id").semantics { contentDescription = optionsCaption }) { SharedIcon("more", null) }
-                            DropdownMenu(drag.menu == id, { drag.menu = null }, properties = PopupProperties(focusable = !drag.contact),
-                                modifier = Modifier.testTag("workspace-row-menu")) {
-                                fun closeEdit(value: JSONObject) { drag.menu = null; edit(value) }
-                                val position = order.indexOf(id)
-                                DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_up")) }, enabled = enabled && position > 0, modifier = Modifier.testTag("workspace-up"),
-                                    onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position - 1))) })
-                                DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_down")) }, enabled = enabled && position >= 0 && position < order.lastIndex, modifier = Modifier.testTag("workspace-down"),
-                                    onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position + 2))) })
-                                val offered = row.array("actions").objects().filter { it.getJSONObject("action").getString("type") in listOf("rename", "delete") }
-                                if (offered.isNotEmpty()) HorizontalDivider()
-                                for (button in offered) {
-                                    val action = button.getJSONObject("action")
-                                    val kind = action.getString("type")
-                                    DropdownMenuItem(text = { Text(button.getString("label")) },
-                                        enabled = enabled, modifier = Modifier.testTag("workspace-$kind"), onClick = {
-                                            drag.menu = null; host.workspaceInput(obj("type" to "action", "action" to action))
-                                        })
+                        val offered = row.array("options").objects()
+                        if (offered.isEmpty()) SideEffect { drag.options.remove(id) }
+                        Box(Modifier.size(36.dp)) {
+                            if (offered.isNotEmpty()) {
+                                IconButton({ drag.reorderMenu = false; drag.menu = id }, enabled = enabled,
+                                    modifier = Modifier.fillMaxSize().rowBounds(drag.options, id).testTag("workspace-options-$id").semantics { contentDescription = optionsCaption }) { SharedIcon("more", null) }
+                                DropdownMenu(drag.menu == id && !drag.reorderMenu, { drag.menu = null }, properties = PopupProperties(focusable = !drag.contact),
+                                    modifier = Modifier.testTag("workspace-row-menu")) {
+                                    for (button in offered) {
+                                        val action = button.getJSONObject("action")
+                                        val kind = action.getString("type")
+                                        DropdownMenuItem(text = { Text(button.getString("label")) },
+                                            enabled = enabled && button.optBoolean("enabled"), modifier = Modifier.testTag("workspace-$kind"), onClick = {
+                                                drag.menu = null; host.workspaceInput(obj("type" to "action", "action" to action))
+                                            })
+                                    }
                                 }
                             }
                         }

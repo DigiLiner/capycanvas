@@ -57,8 +57,6 @@ import org.json.JSONArray
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(view.getString("title"), Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    if (page == "workspaces") FilledTonalIconButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new"))) },
-                        enabled = !busy, modifier = Modifier.size(32.dp).testTag("new-workspace").semantics { contentDescription = copy.getString("new_workspace") }, shape = RoundedCornerShape(6.dp)) { SharedIcon("plus", null) }
                     IconButton(cancel, Modifier.size(32.dp).semantics { contentDescription = host.bootstrap!!.getJSONObject("common").getString("close") }) { SharedIcon("close", null) }
                 }
                 view.getString("intro").takeIf { it.isNotEmpty() }?.let { Text(it, color = colors.settingsSecondary) }
@@ -67,6 +65,12 @@ import org.json.JSONArray
                 }
                 if (page != "history" && (toolbarMode || view.array("rows").length() > 7 || view.optString("query").isNotEmpty())) CoreTextField(view.optString("query"), { host.workspaceInput(obj("type" to "search", "query" to it)) }, Modifier.fillMaxWidth().testTag("workspace-search"), placeholder = { Text(copy.getString("search")) })
                 if (page == "this_workspace") TextButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new_toolbar", "value" to null))) }, enabled = !busy, modifier = Modifier.testTag("new-toolbar")) { Text(copy.getString("new_toolbar_action")) }
+                if (page == "workspaces") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    FilledTonalButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new"))) },
+                        enabled = !busy, modifier = Modifier.testTag("new-workspace"), shape = RoundedCornerShape(6.dp)) {
+                        Text(copy.getString("new_workspace"))
+                    }
+                }
                 WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill = false).height(315.dp).fillMaxWidth())
                 if (toolbarMode) view.objectOrNull("details")?.let { details ->
                     Text(details.getString("title"), fontWeight = FontWeight.Bold)

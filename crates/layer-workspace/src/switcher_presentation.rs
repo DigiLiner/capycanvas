@@ -1,4 +1,4 @@
-use crate::{ManagerPage, SwitcherEdit, WorkspacePin, WorkspaceRow, WorkspaceView};
+use crate::{ManagerAction, ManagerPage, SwitcherEdit, WorkspacePin, WorkspaceRow, WorkspaceView};
 use layer_ui::{ContextMenu, ContextMenuItem, Localizer, MessageId, UiAction, WorkspaceCommand};
 
 fn command(label: String, command: WorkspaceCommand, selected: Option<bool>) -> ContextMenuItem {
@@ -8,9 +8,10 @@ fn command(label: String, command: WorkspaceCommand, selected: Option<bool>) -> 
 }
 
 impl WorkspaceView {
-    pub(crate) fn present_manager_pins(&mut self, localization: &Localizer, pins: &[String]) {
+    pub(crate) fn present_manager_rows(&mut self, localization: &Localizer, pins: &[String]) {
         if self.page != Some(ManagerPage::Workspaces) { return; }
         for row in &mut self.rows {
+            row.options = row.actions.iter().filter(|button| button.enabled && matches!(button.action, ManagerAction::Rename(_) | ManagerAction::Delete(_))).cloned().collect();
             let selected = pins.contains(&row.id);
             row.pin = Some(WorkspacePin {
                 label: localization.text(if selected { MessageId::WORKSPACE_HIDE_FROM_TOP_BAR } else { MessageId::WORKSPACE_SHOW_IN_TOP_BAR }).to_string(),

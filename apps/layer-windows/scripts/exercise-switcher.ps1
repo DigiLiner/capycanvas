@@ -153,8 +153,8 @@ function Preference([string]$Id,[string]$Action){
         $item=Control ('workspace-manager-pin-'+$Id) -Arranged
         $item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     }else{
-        $null=Control ('workspace-manager-options-'+$Id) -Arranged
-        Invoke ('workspace-manager-options-'+$Id)
+        $null=Control ('workspace-manager-grip-'+$Id) -Arranged
+        Invoke ('workspace-manager-grip-'+$Id)
         (Control ('workspace-manager-'+$Action)).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     }
     Wait-Until {(Storage).switcher_revision -gt $revision -or (Storage).switcher_error} 'Preference was not acknowledged'

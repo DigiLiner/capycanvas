@@ -216,17 +216,13 @@ fn native_workspace_manager_visual() {
             &format!("workspace-reorder-handle-{}", DEFAULT_WORKSPACES[0].0),
         )
         .unwrap();
-        let more = menu_button(&painter).unwrap();
+        assert!(descendants::<gtk::Image>(&painter).iter().all(|image| crate::icons::name(image).as_deref() != Some("layer-more-symbolic")), "built-in rows have no options dots");
         let add = find_named(w.window.upcast_ref(), "workspace-manager-new").unwrap();
         let cancel = find_button(w.window.upcast_ref(), "Cancel").unwrap();
         for (state, point) in [
             ("normal", [10., 10.]),
             ("row", screen_point(&painter, &w.window, [0.4, 0.5])),
             ("grip", screen_point(&grip, &w.window, [0.5, 0.5])),
-            (
-                "options",
-                screen_point(more.upcast_ref(), &w.window, [0.5, 0.5]),
-            ),
             ("current", screen_point(&current, &w.window, [0.4, 0.5])),
             ("new", screen_point(&add, &w.window, [0.5, 0.5])),
             (
@@ -450,7 +446,7 @@ fn check_active_workspace_delete(occupied_default: bool) {
     for confirm in [false, true] {
         w.workspaces.ui.show(&w, ManagerPage::Workspaces);
         pump(400);
-        let more = menu_button(&row(&w, &deleted)).unwrap();
+        let more = named::<gtk::MenuButton>(&row(&w, &deleted), &format!("workspace-options-{deleted}"));
         more.popup();
         pump(100);
         find_button(more.popover().unwrap().upcast_ref(), "Delete…")
@@ -547,6 +543,153 @@ fn check_active_workspace_delete(occupied_default: bool) {
 fn switcher_input() -> RemoteInput {
     RemoteInput::new().settle_ms(200).timeout_secs(8)
 }
+
+#[test]
+#[ignore = "isolated native input and SQLite; workspace-motion.sh gtk --native-test=native_workspace_grip_menus --native-storage"]
+fn native_workspace_grip_menus() {
+    let mut input = switcher_input();
+    let app = native_test_app("art.capycanvas.WorkspaceGripMenus");
+    gtk::Settings::default().unwrap().set_gtk_enable_animations(false);
+    let w = Workspace::new(&app);
+    w.window.maximize();
+    w.window.present();
+    wait_workspaces(&w);
+    pump(300);
+    input.ready();
+    let output = std::path::PathBuf::from(std::env::var_os("LAYER_TEST_ARTIFACTS").unwrap_or_else(|| input.dir.clone().into_os_string()));
+    std::fs::create_dir_all(&output).unwrap();
+    let manager = w.workspaces.manager().unwrap();
+    let original = manager.current().unwrap().capture().unwrap();
+    let [p, i, f] = DEFAULT_WORKSPACES.map(|(id, _)| id.to_string());
+    let grip = |id: &str| find_named(&row(&w, id), &format!("workspace-reorder-handle-{id}")).unwrap();
+    let popup = |id: &str| grip(id).downcast::<gtk::MenuButton>().unwrap().popover().unwrap();
+    let dots = |id: &str| descendants::<gtk::Image>(&row(&w, id)).into_iter().find(|image| crate::icons::name(image).as_deref() == Some("layer-more-symbolic"));
+    let devices = if std::env::var("WAYLAND_DISPLAY").is_ok_and(|display| display.ends_with("-tablet")) { &["mouse", "touch", "pen"][..] } else { &["mouse", "touch"][..] };
+    let grip_drag = |input: &mut RemoteInput, target: &str, after: bool, device: &str| {
+        wait_switcher(&w);
+        let start = screen_point(&grip(&p), &w.window, [0.5, 0.5]);
+        let end = screen_point(&row(&w, target), &w.window, [0.35, if after { 0.85 } else { 0.15 }]);
+        let mut events = vec![contact(device, "down", start)];
+        for t in [0.2, 0.5, 0.8, 1.] { events.push(contact(device, "move", [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t])); }
+        events.push(contact(device, "up", end));
+        input.perform(serde_json::Value::Array(events));
+    };
+    for (theme, name) in [(Theme::Dark, "dark"), (Theme::Light, "light")] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        let entity = layer_workspace::Entity::workspace(&format!("Grip study {name}"), original.clone(), original.history.layout().clone(), now_ms());
+        let custom = entity.id.clone();
+        glib::MainContext::default().block_on(async {
+            manager.store.request(layer_workspace::StoreRequest::Commit { batch: layer_workspace::CommitBatch::prepare(manager.owner.clone(), vec![layer_workspace::Mutation::Create { entity, claim: false, name_policy: layer_workspace::NamePolicy::Exact }]).unwrap() }).await.unwrap();
+            manager.refresh().await.unwrap();
+        });
+        w.workspaces.ui.show(&w, ManagerPage::Workspaces);
+        pump(400);
+        let create = named::<gtk::Button>(w.window.upcast_ref(), "workspace-manager-new");
+        assert!(create.label().unwrap().to_lowercase().contains("new workspace"));
+        let create_bounds = create.compute_bounds(&w.window).unwrap();
+        let list_bounds = find_named(w.window.upcast_ref(), "workspace-manager-items").unwrap().compute_bounds(&w.window).unwrap();
+        assert!((create_bounds.x() + create_bounds.width() - list_bounds.x() - list_bounds.width()).abs() < 0.5, "New Workspace aligns with the list's right edge");
+        assert!(create_bounds.y() + create_bounds.height() <= list_bounds.y(), "New Workspace sits above the list");
+        click(&w, &mut input, &row(&w, &f));
+        until(|| !w.workspaces.view().loading && durable_layout(&state(&w).workspace.layout) == layer_ui::WorkspacePreset::Photographer.layout(Platform::Gtk), "settled Photo preview");
+        let preview = durable_layout(&state(&w).workspace.layout);
+        std::fs::write(output.join(format!("initial-{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"view":w.workspaces.view(),"layout":preview})).unwrap()).unwrap();
+        let pins: std::collections::BTreeSet<_> = manager.switcher_ids().into_iter().collect();
+        let order = manager.workspace_ids();
+        for id in [&p, &i, &f] { assert!(dots(id).is_none(), "built-in rows omit options dots"); }
+        assert!(dots(&custom).is_some(), "custom rows retain options dots");
+        let unchanged = |phase: &str| {
+            assert_eq!(manager.active_id().as_deref(), Some(i.as_str()));
+            assert_eq!(w.workspaces.view().selected.as_deref(), Some(f.as_str()));
+            let actual = durable_layout(&state(&w).workspace.layout);
+            if actual != preview { std::fs::write(output.join(format!("failure-{name}.json")), serde_json::to_vec_pretty(&serde_json::json!({"phase":phase,"view":w.workspaces.view(),"actual":actual,"expected":preview})).unwrap()).unwrap(); }
+            assert_eq!(actual, preview, "{name}: {phase}; loading={}", w.workspaces.view().loading);
+            assert_eq!(manager.switcher_ids().into_iter().collect::<std::collections::BTreeSet<_>>(), pins);
+        };
+        click(&w, &mut input, create.upcast_ref());
+        until(|| w.workspaces.view().prompt.as_ref().is_some_and(|prompt| prompt.name.is_some()) && find_named(w.window.upcast_ref(), "workspace-item-name").is_some_and(|entry| entry.is_mapped()), "New Workspace name form");
+        click(&w, &mut input, dialog_button(&w, "Cancel").unwrap().upcast_ref());
+        until(|| w.workspaces.view().prompt.is_none() && !w.workspaces.view().loading, "cancelled New Workspace form");
+        unchanged("cancelled New Workspace form");
+        for device in devices {
+            let point = screen_point(&grip(&p), &w.window, [0.5, 0.5]);
+            input.perform(serde_json::json!([contact(device, "down", point), contact(device, "up", point)]));
+            assert!(popup(&p).is_visible(), "{device}: a grip tap opens the menu");
+            assert!(find_button(popup(&p).upcast_ref(), "Rename…").is_none());
+            assert!(find_button(popup(&p).upcast_ref(), "Delete…").is_none());
+            unchanged("grip tap");
+            let down = find_button(popup(&p).upcast_ref(), "Move Down").unwrap();
+            click(&w, &mut input, down.upcast_ref());
+            wait_switcher(&w);
+            let mut moved = order.clone();moved.swap(0, 1);
+            assert_eq!(manager.workspace_ids(), moved);
+            unchanged("menu move down");
+            let point = screen_point(&grip(&p), &w.window, [0.5, 0.5]);
+            input.perform(serde_json::json!([contact(device, "down", point), contact(device, "up", point)]));
+            let up = find_button(popup(&p).upcast_ref(), "Move Up").unwrap();
+            assert!(up.is_sensitive(), "reopened grip menu updates ordering availability");
+            click(&w, &mut input, up.upcast_ref());
+            wait_switcher(&w);
+            assert_eq!(manager.workspace_ids(), order);
+            grip_drag(&mut input, &f, true, device);
+            assert!(!popup(&p).is_visible(), "immediate grip drag does not leave a menu");
+            assert_eq!(&manager.workspace_ids()[..3], &[i.clone(), f.clone(), p.clone()]);
+            unchanged("immediate grip drag");
+            grip_drag(&mut input, &i, false, device);
+            assert_eq!(manager.workspace_ids(), order);
+            unchanged("return grip drag");
+        }
+        wait_switcher(&w);
+        assert!(grip(&p).is_sensitive(), "grip is available before the cancellation probe");
+        let cancelled_start = screen_point(&grip(&p), &w.window, [0.5, 0.5]);
+        let cancelled_end = screen_point(&row(&w, &f), &w.window, [0.35, 0.85]);
+        input.perform(serde_json::json!([contact("touch", "down", cancelled_start), contact("touch", "move", [cancelled_start[0], cancelled_start[1] + 18.]), contact("touch", "move", cancelled_end), contact("touch", "move", cancelled_end)]));
+        assert!(row(&w, &p).has_css_class("workspace-row-dragging"), "touch drag is admitted before cancellation");
+        input.perform(serde_json::json!([{"key":0xff1b,"down":true}, {"key":0xff1b,"down":false}, contact("touch", "up", cancelled_end)]));
+        assert!(w.workspaces.ui.dialog.is_visible(), "cancelling a grip drag keeps its manager open");
+        assert!(!popup(&p).is_visible());
+        assert_eq!(manager.workspace_ids(), order);
+        unchanged("cancelled touch drag");
+        for key in [0xff0d, 0x20] {
+            assert!(grip(&p).grab_focus());
+            input.key(key);
+            assert!(popup(&p).is_visible(), "keyboard activation opens the grip menu");
+            unchanged("keyboard grip menu");
+            input.key(0xff1b);
+            let focused = gtk::prelude::GtkWindowExt::focus(&w.window).unwrap();
+            assert!(focused == grip(&p) || focused.is_ancestor(&grip(&p)), "Escape returns focus to the grip");
+        }
+        let custom_menu = named::<gtk::MenuButton>(&row(&w, &custom), &format!("workspace-options-{custom}"));
+        click(&w, &mut input, custom_menu.upcast_ref());
+        let custom_popup = custom_menu.popover().unwrap();
+        let rename = find_button(custom_popup.upcast_ref(), "Rename…").unwrap();
+        assert!(find_button(custom_popup.upcast_ref(), "Delete…").unwrap().is_sensitive());
+        click(&w, &mut input, rename.upcast_ref());
+        let entry = named::<gtk::Entry>(w.window.upcast_ref(), "workspace-item-name");
+        entry.set_text(&format!("Renamed grip study {name}"));
+        let confirm = w.workspaces.view().prompt.unwrap().confirm;
+        click(&w, &mut input, dialog_button(&w, &confirm).unwrap().upcast_ref());
+        until(|| w.workspaces.view().prompt.is_none() && !w.workspaces.busy(), "custom workspace rename");
+        assert_eq!(w.workspaces.view().rows.iter().find(|item| item.id == custom).unwrap().title, format!("Renamed grip study {name}"));
+        unchanged("custom rename");
+        capture_reference(&w, input.dir.join(format!("workspace-grips-{name}.png")).to_str().unwrap(), 1.);
+        let custom_menu = named::<gtk::MenuButton>(&row(&w, &custom), &format!("workspace-options-{custom}"));
+        click(&w, &mut input, custom_menu.upcast_ref());
+        let delete = find_button(custom_menu.popover().unwrap().upcast_ref(), "Delete…").unwrap();
+        click(&w, &mut input, delete.upcast_ref());
+        let confirm = w.workspaces.view().prompt.unwrap().confirm;
+        click(&w, &mut input, dialog_button(&w, &confirm).unwrap().upcast_ref());
+        until(|| w.workspaces.view().prompt.is_none() && !w.workspaces.busy(), "custom workspace delete");
+        assert!(!manager.workspace_ids().contains(&custom));
+        unchanged("custom delete");
+        w.workspaces.ui.close(&w);
+        pump(250);
+    }
+    input.finish();
+    w.window.close();
+    until(|| !w.window.is_visible(), "workspace grip test close");
+}
+
 fn row(w: &Workspace, id: &str) -> gtk::Widget {
     find_named(w.window.upcast_ref(), &format!("workspace-row-{id}")).unwrap()
 }
@@ -803,13 +946,12 @@ fn native_workspace_switcher_options() {
         until(|| !w.workspaces.busy() && !w.workspaces.view().rows.is_empty(), "workspace manager rows");
         pump(200);
         let grips: Vec<_> = descendants::<gtk::Image>(dialog.upcast_ref()).into_iter()
-            .filter(|image| image.has_css_class("workspace-reorder-handle")).collect();
+            .filter(|image| crate::icons::name(image).as_deref() == Some("layer-grip-symbolic")).collect();
         assert!(!grips.is_empty());
         assert!(grips.iter().all(|image| image.pixel_size() == 16));
         let full_more: Vec<_> = descendants::<gtk::Image>(dialog.upcast_ref()).into_iter()
             .filter(|image| crate::icons::name(image).as_deref() == Some("layer-more-symbolic")).collect();
-        assert!(!full_more.is_empty());
-        assert!(full_more.iter().all(|image| image.pixel_size() == 16));
+        assert!(full_more.is_empty(), "built-in workspace rows omit options dots");
         crate::capture(&w, input.dir.join(format!("workspace-manager-{theme:?}.png")).to_str().unwrap());
         w.workspaces.ui.close(&w);
         pump(200);

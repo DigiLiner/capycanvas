@@ -81,6 +81,8 @@ window, label, text { font-size: var(--ui-text-size); }
 .workspace-manager-row > box.header:dir(ltr) { margin-left: 6px; }
 .workspace-manager-row > box.header:dir(rtl) { margin-right: 6px; }
 .workspace-manager-row .prefixes { margin-left: 0; margin-right: 0; }
+.workspace-manager-row menubutton.workspace-reorder-handle > button { padding: 0; min-width: 16px; background: transparent; box-shadow: none; }
+.workspace-manager-row menubutton.workspace-reorder-handle > button image { opacity: .55; }
 .workspace-manager-row button.workspace-pin { background: transparent; border: 0; box-shadow: none; color: var(--window-fg-color); }
 .workspace-manager-row button.workspace-pin:checked { color: var(--accent-color); }
 .workspace-manager-row button.workspace-pin:active { opacity: .65; }

@@ -1637,7 +1637,8 @@ window.addEventListener(
 );
 function keyInput(e, pressed, divider = null) {
   if (pressed && (e.defaultPrevented || composingKey(e))) return;
-  if (pressed && e.target instanceof Element && e.target.closest("dialog[open]:not(#settings, #shortcut-editor, #modifier-key)")) return;
+  const nativeDialog=e.target instanceof Element && e.target.closest("dialog[open]:not(#settings, #shortcut-editor, #modifier-key)");
+  if (pressed && nativeDialog) return;
   updateZen();
   const reply = input({
     type: "key",
@@ -1656,7 +1657,7 @@ function keyInput(e, pressed, divider = null) {
           (!!e.target.closest("button,summary") && app.control_takes_key(e.key, e.ctrlKey || e.metaKey, e.altKey, keyboardFocused.has(e.target))))),
     divider,
   });
-  if (reply.handled) {
+  if (reply.handled && !nativeDialog) {
     if(!documents?.allowNativePaste())e.preventDefault();
     e.stopPropagation();
   }

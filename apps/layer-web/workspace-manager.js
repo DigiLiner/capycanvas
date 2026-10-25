@@ -13,12 +13,13 @@ export function createWorkspaceManager({ app, store, applyChange, element, butto
   const close = button("", cancel, "dialog-close"); bindCopy(close,()=>common.close,"ariaLabel");
   close.append(element("span"));
   dialog.tabIndex = -1;
-  header.append(heading, add, close);
+  header.append(heading, close);
   const intro = element("p", "workspace-intro");bindCopy(intro,()=>view?.intro??"");
   const list = element("div", "workspace-list"); list.setAttribute("role", "listbox");
   const search=element("input","workspace-search");search.type="search";search.id="workspace-manager-search";
   bindCopy(search,()=>copy.search,"placeholder");bindCopy(search,()=>copy.search,"ariaLabel");
   search.addEventListener("input",()=>send({type:"search",query:search.value}));
+  const listActions=element("div","workspace-list-actions");listActions.append(search,add);
   const tabs=element("div","workspace-manager-tabs");
   for(const [page,label]of [["this_workspace",()=>copy.this_workspace],["toolbar_library",()=>copy.saved_toolbars]]){
     const tab=localizedButton(label,()=>send({type:"open",page}));tab.dataset.page=page;tabs.append(tab);
@@ -27,7 +28,7 @@ export function createWorkspaceManager({ app, store, applyChange, element, butto
   const error = element("p", "workspace-error"), footer = element("footer");
   const primary = localizedButton(()=>view?.primary??"", () => send({ type: "confirm" }), "suggested-action");
   const retry = localizedButton(()=>copy.retry, () => send({type:"retry"})); retry.hidden = true;
-  footer.append(localizedButton(()=>common.cancel,cancel), retry, primary); dialog.append(header, intro, tabs, search, list, details, error, footer);
+  footer.append(localizedButton(()=>common.cancel,cancel), retry, primary); dialog.append(header, intro, tabs, listActions, list, details, error, footer);
   document.body.append(dialog, formDialog);
   const switcher = createWorkspaceSwitcher({app,dialog, list, element, button, icon, send, getView:() => view,
     redraw:() => { lastView = null; render(); }});
@@ -76,6 +77,8 @@ export function createWorkspaceManager({ app, store, applyChange, element, butto
     search.hidden=view.page==="history"||(!toolbar&&view.rows.length<=7&&!view.query);
     if(search.value!==(view.query??""))search.value=view.query??"";search.disabled=view.busy;
     add.hidden = !["workspaces","this_workspace"].includes(view.page); add.disabled = view.busy || view.switcher_busy;
+    bindCopy(add,()=>view?.page==="this_workspace"?copy.new_toolbar:copy.new_workspace);
+    listActions.hidden=search.hidden&&add.hidden;
     bindCopy(add,()=>view?.page==="this_workspace"?copy.new_toolbar:copy.new_workspace,"ariaLabel");
     bindCopy(primary,()=>view?.primary??""); primary.disabled = view.busy || view.switcher_busy || !view.enabled;
     retry.hidden = !view.retry; retry.disabled = view.busy;
