@@ -5,6 +5,12 @@ use crate::color::RgbColor;
 use std::{collections::BTreeSet, sync::Arc};
 use crate::authored::Affine64;
 
+fn encode_chunk(chunk:&VectorChunk)->Vec<u8> {super::vector_records::encode_chunk(chunk).unwrap().to_vec()}
+fn encode_geometry(geometry:&PathGeometry)->Vec<u8> {super::vector_records::encode_geometry(geometry).unwrap().to_vec()}
+fn encode_style(style:&Style)->Vec<u8> {super::vector_records::encode_style(style).unwrap().to_vec()}
+fn encode_shape(shape:&LiveShape,print:[u8;16])->Vec<u8> {super::vector_records::encode_shape(shape,print).unwrap().to_vec()}
+fn fingerprint(path:&PathItem)->[u8;16] {super::vector_records::fingerprint(path).unwrap()}
+
 fn color(r: f32) -> Paint { Paint::color(RgbColor::new(Default::default(), [r, 0.25, 0.5, 1.]).unwrap()) }
 fn line(id: u64, points: &[[f64; 2]], width: f64) -> Record {
     let anchors: Vec<_> = points.iter().map(|p| Anchor::new(*p, [-1., 0.5], [1., -0.5], AnchorKind::SMOOTH)).collect();
@@ -257,14 +263,16 @@ fn chunk_edits_rewrite_only_touched_chunks() {
     assert!(before.chunks()[1..].iter().zip(&after.chunks()[after.chunks().len() - (before.chunks().len() - 1)..]).all(|(a, b)| a.same_owner(b)));
 }
 
-fn document_with_paths(count: u64) -> (crate::Editor, crate::OccurrenceHandle) {
-    let artwork = crate::Artwork::new([640, 480]).unwrap();
-    let mut editor = crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
-    let records = (1..=count).map(|i| if i % 7 == 0 { shape(i) } else { line(i, &[[i as f64, 3.], [i as f64 + 20., 40.], [i as f64 + 5., 90.]], 2. + (i % 5) as f64) }).collect();
-    let (layer, edit) = editor.document().create_vector_layer_edit("Ink", VectorObject::from_records(records), None, 0).unwrap();
-    editor.perform(edit).unwrap();
-    (editor, layer)
+fn paths(count:u64)->VectorObject {
+    VectorObject::from_records((1..=count).map(|i| if i % 7 == 0 { shape(i) } else { line(i, &[[i as f64, 3.], [i as f64 + 20., 40.], [i as f64 + 5., 90.]], 2. + (i % 5) as f64) }).collect())
 }
+fn document_with_vector(object:VectorObject)->(crate::Editor,crate::OccurrenceHandle) {
+    let artwork=crate::Artwork::new([640,480]).unwrap();
+    let mut editor=crate::Editor::new(crate::Document::from_artwork(artwork).unwrap());
+    let (layer,edit)=editor.document().create_vector_layer_edit("Ink",object,None,0).unwrap();
+    editor.perform(edit).unwrap();(editor,layer)
+}
+fn document_with_paths(count:u64)->(crate::Editor,crate::OccurrenceHandle) {document_with_vector(paths(count))}
 fn save(editor: &crate::Editor) -> Vec<u8> {
     let cancel = std::sync::atomic::AtomicBool::new(false);
     let capture = editor.capture(1, Default::default()).unwrap();
@@ -373,11 +381,17 @@ fn vector_history_survives_sessions_and_worker_transfer() {
 #[test]
 fn session_history_shares_unchanged_runs_of_vector_chunk_lists() {
     let cancel = std::sync::atomic::AtomicBool::new(false);
-    let (mut editor, layer) = document_with_paths(128 * CHUNK_RECORDS as u64);
+    let identified=|chunk:&crate::authored::Resource<VectorChunk>,id:u128|crate::authored::Resource::with_id(crate::authored::PortableId::from_bytes(id.to_be_bytes()),chunk.storage().clone());
+    let initial=paths(128*CHUNK_RECORDS as u64);
+    let chunks=initial.chunks().iter().enumerate().map(|(index,chunk)|identified(chunk,index as u128+1)).collect();
+    drop(initial);
+    let (mut editor,layer)=document_with_vector(VectorObject::from_chunks(chunks));
     let first = editor.document().artwork.clone();
     let strokes = 40;
     for i in 0..strokes {
         let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![line(100_000 + i, &[[0., 0.], [50., i as f64]], 4.)]);
+        let mut chunks=object.chunks().to_vec();chunks[0]=identified(&chunks[0],1000+u128::from(i));
+        let object=VectorObject::from_chunks(chunks);
         editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
     }
     let chunks = vector(&editor.document().artwork).chunks().len();

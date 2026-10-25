@@ -160,7 +160,7 @@ fn equal_tile_payloads_keep_ids_but_read_validate_and_charge_one_physical_range(
     let reads=Arc::new(AtomicUsize::new(0));
     let backing=ImmutableBacking::new(Arc::new(Counted {bytes:packed.into(),reads:reads.clone()})).unwrap();
     let decoded=crate::color::DocumentColor::default().paint_descriptor().byte_len([TILE_SIZE;2]).unwrap() as u64;
-    let mut limits=crate::ProjectLimits::default();limits.raster_bytes=decoded;
+    let limits=crate::ProjectLimits{raster_bytes:decoded,..Default::default()};
     let mut reader=ResourceReader::new(&manifest,&backing,&cancelled,limits);
     let first=reader.tile(&references[0]).unwrap();let second=reader.tile(&references[1]).unwrap();
     assert_eq!(reads.load(Ordering::Relaxed),1);
@@ -272,7 +272,7 @@ fn aliased_selection_chunks_retain_ids_and_share_validated_words() {
     let prepared=inventory.prepare(&cancelled).unwrap();assert_eq!(prepared.entries.len(),2);assert_eq!(prepared.entries.iter().filter(|entry|entry.physical).count(),1);
     let mut packed=Vec::new();prepared.reader(&cancelled).read_to_end(&mut packed).unwrap();
     let (manifest,backing)=loaded(&prepared,packed.into());
-    let mut limits=crate::ProjectLimits::default();limits.raster_bytes=32;
+    let limits=crate::ProjectLimits{raster_bytes:32,..Default::default()};
     let mut reader=ResourceReader::new(&manifest,&backing,&cancelled,limits);
     let selections=records.each_ref().map(|record|decode_selection(record,&mut reader).unwrap());
     let pixels=selections.each_ref().map(|selection|match &selection.shape {crate::SelectionShape::Pixels(pixels)=>pixels,_=>panic!()});

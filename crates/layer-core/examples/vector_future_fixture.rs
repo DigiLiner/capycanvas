@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let current = VectorObject::with_slots(VectorObject::from_records(vec![Record::Path(readable)]).chunks().to_vec(),
         Arc::from([Slot::Image(texture.clone()), Slot::Resource(resource.clone())]));
     let required = line(2, &[[20., 100.], [200., 150.]], UnknownProperty { tag: tag_word(1001, 0, ValueClass::Slots), value: Arc::from([1u8].as_slice()) });
-    let items: Arc<[u8]> = encode_chunk(&VectorChunk::new(vec![Record::Path(required)])).into();
+    let items: Arc<[u8]> = encode_chunk(&VectorChunk::new(vec![Record::Path(required)]))?.into_shared()?;
     let mut newer = ImageObject::new(fallback);
     newer.affine = layer_core::authored::Affine64([2., 0., 0., 2., 30., 20.]);
     newer.vector = Some(PreservedVector(Arc::from([(serde_json::json!({"records": 1}), Resource::new(items))]),

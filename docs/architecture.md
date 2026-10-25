@@ -68,8 +68,9 @@ drop; the worker reclaims dead ledger entries before admitting the next allocati
 The render owner reads that generation without scanning owners or querying memory.
 
 These limits cover instrumented payloads and scratch, including imported
-selections, profiles, lookup tables and previews. They are not an allocator or
-whole-process quota: codec internals, nested vector encoding scratch, object
+selections, profiles, lookup tables, previews, vector encoding buffers and
+transfer chunk copies. They are not an allocator or whole-process quota:
+codec internals, decoded vector structures and unknown-field copies, object
 metadata, host copies, Wasm heap high-water marks and GPU/driver allocations
 need separate limits or process isolation. Small fixed built-in lookup tables
 remain available independently of input admission.

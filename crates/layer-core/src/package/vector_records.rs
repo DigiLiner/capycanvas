@@ -94,10 +94,12 @@ impl Reading {
 fn invalid(message: &str) -> DecodeError { DecodeError::Invalid(format!("Invalid vector data: {message}")) }
 fn unsupported(message: &str) -> DecodeError { DecodeError::Unsupported(format!("Unsupported vector data: {message}")) }
 
-pub fn put_varuint(out: &mut Vec<u8>, mut value: u64) {
-    while value >= 0x80 { out.push(value as u8 | 0x80); value >>= 7; }
-    out.push(value as u8);
+fn varuint(mut value:u64)->([u8;10],usize) {
+    let mut bytes=[0;10];let mut length=0;
+    while value>=0x80 {bytes[length]=value as u8|0x80;length+=1;value>>=7;}
+    bytes[length]=value as u8;(bytes,length+1)
 }
+pub fn put_varuint(out:&mut Vec<u8>,value:u64) {let (bytes,length)=varuint(value);out.extend_from_slice(&bytes[..length]);}
 struct Bytes<'a> { data: &'a [u8], at: usize }
 impl<'a> Bytes<'a> {
     fn new(data: &'a [u8]) -> Self { Self { data, at: 0 } }
@@ -391,7 +393,7 @@ fn decode_path(record: &Framed, reading: &mut Reading) -> DecodeResult<PathItem>
     }
     let mut path = PathItem::new(ItemId(record.id), Arc::new(geometry.ok_or_else(|| invalid("path requires geometry"))?), style.unwrap_or_default());
     (path.fill_rule, path.hidden, path.locked, path.name) = (fill_rule, hidden, locked, name);
-    path.shape = shape.filter(|(_, print)| *print == fingerprint(&path)).map(|(shape, _)| Arc::new(shape));
+    if let Some((shape,print))=shape && print==fingerprint(&path)? {path.shape=Some(Arc::new(shape));}
     path.unknown = finish(unknown);
     path.validate().map_err(invalid)?;
     Ok(path)
@@ -439,138 +441,153 @@ pub fn decode_object(chunks: &[(&[u8], usize)], reading: &mut Reading) -> Decode
     Ok(decoded)
 }
 
-fn put_property(out: &mut Vec<u8>, tag: u64, value: &[u8]) {
-    put_varuint(out, tag);
-    put_varuint(out, value.len() as u64);
-    out.extend_from_slice(value);
+trait Sink {fn write(&mut self,bytes:&[u8])->DecodeResult<()>;}
+struct Output {bytes:crate::memory::DecodedBytes,limit:usize}
+impl Output {
+    fn new(limit:usize)->DecodeResult<Self> {Ok(Self {bytes:crate::memory::DecodedBytes::zeroed(0)?,limit})}
+    fn push(&mut self,byte:u8)->DecodeResult<()> {self.write(&[byte])}
+    fn finish(self)->crate::memory::DecodedBytes {self.bytes}
 }
-fn put_record(out: &mut Vec<u8>, kind: u64, id: u64, properties: &[u8]) {
-    put_varuint(out, kind);
-    if kind == 0 { return; }
-    put_varuint(out, id);
-    put_varuint(out, properties.len() as u64);
-    out.extend_from_slice(properties);
-}
-pub fn put_zigzag(out: &mut Vec<u8>, value: i64) { put_varuint(out, ((value << 1) ^ (value >> 63)) as u64); }
-struct Properties { list: Vec<(u64, Vec<u8>)> }
-impl Properties {
-    fn new() -> Self { Self { list: Vec::new() } }
-    fn put(&mut self, tag: u64, value: Vec<u8>) { self.list.push((tag, value)); }
-    fn unknown(&mut self, unknown: &Unknown) { for p in unknown.iter().flat_map(|u| u.iter()) { self.list.push((p.tag, p.value.to_vec())); } }
-    fn bytes(mut self) -> Vec<u8> {
-        self.list.sort_by_key(|(tag, _)| tag >> TAG_FLAGS);
-        let mut out = Vec::new();
-        for (tag, value) in &self.list { put_property(&mut out, *tag, value); }
-        out
+impl Sink for Output {
+    fn write(&mut self,bytes:&[u8])->DecodeResult<()> {
+        if self.bytes.len().checked_add(bytes.len()).is_none_or(|length|length>self.limit) {return Err(unsupported("encoding exceeds the admitted byte count"));}
+        self.bytes.extend_from_slice(bytes)?;Ok(())
     }
 }
-pub fn encode_geometry(geometry: &PathGeometry) -> Vec<u8> {
-    let mut out = Vec::with_capacity(4 + geometry.anchor_count() * ANCHOR_BYTES * 3);
-    put_varuint(&mut out, geometry.subpaths().len() as u64);
-    let mut previous = [0i64; 2];
+impl Sink for sha2::Sha256 {
+    fn write(&mut self,bytes:&[u8])->DecodeResult<()> {sha2::Digest::update(self,bytes);Ok(())}
+}
+fn write_varuint(out:&mut impl Sink,value:u64)->DecodeResult<()> {let (bytes,length)=varuint(value);out.write(&bytes[..length])}
+fn put_property(out:&mut impl Sink,tag:u64,value:&[u8])->DecodeResult<()> {
+    write_varuint(out,tag)?;write_varuint(out,value.len() as u64)?;out.write(value)
+}
+fn put_record(out:&mut impl Sink,kind:u64,id:u64,properties:&[u8])->DecodeResult<()> {
+    if properties.len()>MAX_PROPERTY_BYTES {return Err(unsupported("record properties exceed the admitted byte count"));}
+    write_varuint(out,kind)?;
+    if kind!=0 {write_varuint(out,id)?;write_varuint(out,properties.len() as u64)?;out.write(properties)?;}
+    Ok(())
+}
+pub fn put_zigzag(out:&mut Vec<u8>,value:i64) {put_varuint(out,((value<<1)^(value>>63)) as u64);}
+fn write_zigzag(out:&mut impl Sink,value:i64)->DecodeResult<()> {write_varuint(out,((value<<1)^(value>>63)) as u64)}
+enum Property<'a> {Owned(crate::memory::DecodedBytes),Borrowed(&'a [u8])}
+impl Property<'_> {fn bytes(&self)->&[u8] {match self {Self::Owned(bytes)=>bytes,Self::Borrowed(bytes)=>bytes}}}
+struct Properties<'a> {list:Vec<(u64,usize,Property<'a>)>,memory:crate::memory::Reservation<'static>,length:usize}
+impl<'a> Properties<'a> {
+    fn new()->DecodeResult<Self> {Ok(Self {list:Vec::new(),memory:crate::memory::images().reserve(0)?,length:0})}
+    fn insert(&mut self,tag:u64,value:Property<'a>)->DecodeResult<()> {
+        let length=value.bytes().len();
+        let length=self.length.checked_add(varuint(tag).1).and_then(|n|n.checked_add(varuint(length as u64).1)).and_then(|n|n.checked_add(length))
+            .filter(|length|*length<=MAX_PROPERTY_BYTES).ok_or_else(||unsupported("properties exceed the admitted byte count"))?;
+        if self.list.len()==self.list.capacity() {
+            let capacity=self.list.capacity().saturating_mul(2).clamp(4,MAX_PROPERTY_BYTES/2);
+            let bytes=capacity.checked_mul(std::mem::size_of::<(u64,usize,Property<'a>)>()).ok_or(crate::memory::MemoryError)?;
+            self.memory.resize(self.list.capacity().checked_mul(std::mem::size_of::<(u64,usize,Property<'a>)>()).and_then(|old|old.checked_add(bytes)).ok_or(crate::memory::MemoryError)?)?;
+            self.list.try_reserve_exact(capacity-self.list.len()).map_err(|_|crate::memory::MemoryError)?;
+            self.memory.resize(self.list.capacity().checked_mul(std::mem::size_of::<(u64,usize,Property<'a>)>()).ok_or(crate::memory::MemoryError)?)?;
+        }
+        self.list.push((tag,self.list.len(),value));self.length=length;Ok(())
+    }
+    fn put(&mut self,tag:u64,value:crate::memory::DecodedBytes)->DecodeResult<()> {self.insert(tag,Property::Owned(value))}
+    fn fixed(&mut self,tag:u64,value:&[u8])->DecodeResult<()> {self.put(tag,crate::memory::DecodedBytes::copy_from(value)?)}
+    fn borrowed(&mut self,tag:u64,value:&'a [u8])->DecodeResult<()> {self.insert(tag,Property::Borrowed(value))}
+    fn unknown(&mut self,unknown:&'a Unknown)->DecodeResult<()> {for p in unknown.iter().flat_map(|u|u.iter()) {self.borrowed(p.tag,&p.value)?;}Ok(())}
+    fn write(&mut self,out:&mut impl Sink)->DecodeResult<()> {
+        self.list.sort_unstable_by_key(|(tag,position,_)|(*tag>>TAG_FLAGS,*position));
+        for (tag,_,value) in &self.list {put_property(out,*tag,value.bytes())?;}Ok(())
+    }
+    fn bytes(&mut self)->DecodeResult<crate::memory::DecodedBytes> {let mut out=Output::new(MAX_PROPERTY_BYTES)?;self.write(&mut out)?;Ok(out.finish())}
+    fn fingerprint(&mut self)->DecodeResult<[u8;16]> {
+        use sha2::Digest;
+        let mut hash=sha2::Sha256::new();write_varuint(&mut hash,PATH)?;self.write(&mut hash)?;
+        Ok(hash.finalize()[..16].try_into().unwrap())
+    }
+}
+pub fn encode_geometry(geometry:&PathGeometry)->DecodeResult<crate::memory::DecodedBytes> {
+    if geometry.anchor_count()>MAX_PATH_ANCHORS {return Err(unsupported("too many path anchors"));}
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;
+    write_varuint(&mut out,geometry.subpaths().len() as u64)?;
+    let mut previous=[0i64;2];
     for subpath in geometry.subpaths() {
-        put_varuint(&mut out, subpath.len() as u64);
-        out.push(u8::from(subpath.closed));
+        write_varuint(&mut out,subpath.len() as u64)?;out.push(u8::from(subpath.closed))?;
         for a in subpath.anchors() {
-            let [px, py, ix, iy, ox, oy] = a.units();
-            let (point, incoming, outgoing) = ([px, py], [ix, iy], [ox, oy]);
-            let implied = if a.kind == AnchorKind::SYMMETRIC { [-outgoing[0], -outgoing[1]] } else { [0; 2] };
-            let (has_in, has_out) = (incoming != implied, outgoing != [0; 2]);
-            out.push(a.kind.0 << 2 | u8::from(has_in) << 1 | u8::from(has_out));
-            for axis in 0..2 { put_zigzag(&mut out, point[axis] - previous[axis]); }
-            for handle in [incoming].into_iter().filter(|_| has_in).chain([outgoing].into_iter().filter(|_| has_out)) {
-                for value in handle { put_zigzag(&mut out, value); }
+            let [px,py,ix,iy,ox,oy]=a.units();
+            let (point,incoming,outgoing)=([px,py],[ix,iy],[ox,oy]);
+            let implied=if a.kind==AnchorKind::SYMMETRIC {[-outgoing[0],-outgoing[1]]}else{[0;2]};
+            let (has_in,has_out)=(incoming!=implied,outgoing!=[0;2]);
+            out.push(a.kind.0<<2|u8::from(has_in)<<1|u8::from(has_out))?;
+            for axis in 0..2 {write_zigzag(&mut out,point[axis]-previous[axis])?;}
+            for handle in [incoming].into_iter().filter(|_|has_in).chain([outgoing].into_iter().filter(|_|has_out)) {
+                for value in handle {write_zigzag(&mut out,value)?;}
             }
-            previous = point;
+            previous=point;
         }
     }
-    out
+    Ok(out.finish())
 }
-fn encode_profile(profile: &WidthProfile) -> Vec<u8> {
-    let mut out = Vec::with_capacity(2 + profile.knots().len() * KNOT_BYTES * 2);
-    put_varuint(&mut out, profile.knots().len() as u64);
-    let mut segment = 0;
+fn encode_profile(profile:&WidthProfile)->DecodeResult<crate::memory::DecodedBytes> {
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;write_varuint(&mut out,profile.knots().len() as u64)?;
+    let mut segment=0;
     for k in profile.knots() {
-        put_varuint(&mut out, u64::from(k.segment() - segment));
-        segment = k.segment();
-        let [t, left, right] = k.bits();
-        let place = if t.to_bits() == 0f32.to_bits() { KNOT_START } else if t.to_bits() == 1f32.to_bits() { KNOT_END } else { 0 };
-        let even = left.to_bits() == right.to_bits();
-        out.push(place | if even { KNOT_EVEN } else { 0 });
-        if place == 0 { out.extend_from_slice(&t.to_le_bytes()); }
-        out.extend_from_slice(&left.to_le_bytes());
-        if !even { out.extend_from_slice(&right.to_le_bytes()); }
+        write_varuint(&mut out,u64::from(k.segment()-segment))?;segment=k.segment();
+        let [t,left,right]=k.bits();
+        let place=if t.to_bits()==0f32.to_bits() {KNOT_START}else if t.to_bits()==1f32.to_bits() {KNOT_END}else{0};
+        let even=left.to_bits()==right.to_bits();out.push(place|if even {KNOT_EVEN}else{0})?;
+        if place==0 {out.write(&t.to_le_bytes())?;}
+        out.write(&left.to_le_bytes())?;if !even {out.write(&right.to_le_bytes())?;}
     }
-    out
+    Ok(out.finish())
 }
-fn encode_color(color: &RgbColor) -> Vec<u8> {
-    let space = code(&SPACES, &color.space);
-    let (form, rgba) = match color.linear_rgb { Some([r, g, b]) => (1, [r, g, b, color.rgba[3]]), None => (0, color.rgba) };
-    let mut out = vec![space, form];
-    for v in rgba { out.extend_from_slice(&v.to_le_bytes()); }
-    out
+fn encode_color(color:&RgbColor)->DecodeResult<crate::memory::DecodedBytes> {
+    let space=code(&SPACES,&color.space);
+    let (form,rgba)=match color.linear_rgb {Some([r,g,b])=>(1,[r,g,b,color.rgba[3]]),None=>(0,color.rgba)};
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;out.write(&[space,form])?;
+    for v in rgba {out.write(&v.to_le_bytes())?;}Ok(out.finish())
 }
-fn encode_opaque(out: &mut Vec<u8>, record: &OpaqueRecord) { put_record(out, record.kind, record.id, &record.properties); }
-fn encode_paint(paint: &Paint) -> Vec<u8> {
-    let mut out = Vec::new();
+fn encode_opaque(out:&mut impl Sink,record:&OpaqueRecord)->DecodeResult<()> {put_record(out,record.kind,record.id,&record.properties)}
+fn encode_paint(paint:&Paint)->DecodeResult<crate::memory::DecodedBytes> {
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;
     match paint {
-        Paint::Color { color, unknown } => { let mut p = Properties::new(); p.put(COLOR_VALUE, encode_color(color)); p.unknown(unknown); put_record(&mut out, COLOR, 0, &p.bytes()); }
-        Paint::Opaque(record) => encode_opaque(&mut out, record),
+        Paint::Color {color,unknown}=>{let mut p=Properties::new()?;p.put(COLOR_VALUE,encode_color(color)?)?;p.unknown(unknown)?;put_record(&mut out,COLOR,0,&p.bytes()?)?;},
+        Paint::Opaque(record)=>encode_opaque(&mut out,record)?,
     }
-    out
+    Ok(out.finish())
 }
-pub(super) fn encode_style(style: &Style) -> Vec<u8> {
-    let mut out = Vec::new();
+pub(super) fn encode_style(style:&Style)->DecodeResult<crate::memory::DecodedBytes> {
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;
     for entry in style.entries.iter() {
         match entry {
-            PaintEntry::Fill(fill) => {
-                let mut p = Properties::new();
-                p.put(PAINT, encode_paint(&fill.paint));
-                p.unknown(&fill.unknown);
-                put_record(&mut out, FILL, 0, &p.bytes());
-            }
-            PaintEntry::Stroke(s) => {
-                let mut p = Properties::new();
-                p.put(PAINT, encode_paint(&s.paint));
-                if s.width != Stroke::DEFAULT_WIDTH { let mut width = Vec::new(); put_varuint(&mut width, (s.width * UNITS).round() as u64); p.put(WIDTH, width); }
-                if s.cap != Cap::Butt { p.put(CAP, vec![code(&CAPS, &s.cap)]); }
-                if s.join != Join::Miter { p.put(JOIN, vec![code(&JOINS, &s.join)]); }
-                if s.miter_limit != Stroke::DEFAULT_MITER_LIMIT { p.put(MITER_LIMIT, s.miter_limit.to_le_bytes().to_vec()); }
-                if let Some(profile) = &s.profile { p.put(PROFILE, encode_profile(profile)); }
-                p.unknown(&s.unknown);
-                put_record(&mut out, STROKE, 0, &p.bytes());
-            }
-            PaintEntry::Opaque(record) => encode_opaque(&mut out, record),
+            PaintEntry::Fill(fill)=>{let mut p=Properties::new()?;p.put(PAINT,encode_paint(&fill.paint)?)?;p.unknown(&fill.unknown)?;put_record(&mut out,FILL,0,&p.bytes()?)?;},
+            PaintEntry::Stroke(s)=>{
+                let mut p=Properties::new()?;p.put(PAINT,encode_paint(&s.paint)?)?;
+                if s.width!=Stroke::DEFAULT_WIDTH {let mut width=Output::new(MAX_PROPERTY_BYTES)?;write_varuint(&mut width,(s.width*UNITS).round() as u64)?;p.put(WIDTH,width.finish())?;}
+                if s.cap!=Cap::Butt {p.fixed(CAP,&[code(&CAPS,&s.cap)])?;}
+                if s.join!=Join::Miter {p.fixed(JOIN,&[code(&JOINS,&s.join)])?;}
+                if s.miter_limit!=Stroke::DEFAULT_MITER_LIMIT {p.fixed(MITER_LIMIT,&s.miter_limit.to_le_bytes())?;}
+                if let Some(profile)=&s.profile {p.put(PROFILE,encode_profile(profile)?)?;}
+                p.unknown(&s.unknown)?;put_record(&mut out,STROKE,0,&p.bytes()?)?;
+            },
+            PaintEntry::Opaque(record)=>encode_opaque(&mut out,record)?,
         }
     }
-    out
+    Ok(out.finish())
 }
-fn required(path: &PathItem) -> Properties {
-    let mut p = Properties::new();
-    p.put(GEOMETRY, encode_geometry(&path.geometry));
-    if path.fill_rule != FillRule::NonZero { p.put(FILL_RULE, vec![1]); }
-    if !path.style.entries.is_empty() { p.put(STYLE, encode_style(&path.style)); }
-    if path.hidden { p.put(HIDDEN, vec![1]); }
-    p
+fn required(path:&PathItem)->DecodeResult<Properties<'_>> {
+    let mut p=Properties::new()?;p.put(GEOMETRY,encode_geometry(&path.geometry)?)?;
+    if path.fill_rule!=FillRule::NonZero {p.fixed(FILL_RULE,&[1])?;}
+    if !path.style.entries.is_empty() {p.put(STYLE,encode_style(&path.style)?)?;}
+    if path.hidden {p.fixed(HIDDEN,&[1])?;}Ok(p)
 }
-pub(super) fn fingerprint(path: &PathItem) -> [u8; 16] {
-    use sha2::Digest;
-    let mut bytes = Vec::new();
-    put_varuint(&mut bytes, PATH);
-    bytes.extend(required(path).bytes());
-    sha2::Sha256::digest(&bytes)[..16].try_into().unwrap()
-}
-pub(super) fn encode_shape(shape: &LiveShape, print: [u8; 16]) -> Vec<u8> {
-    let (kind, extra) = match shape.kind {
-        ShapeKind::Rectangle { radii } => (1, radii.to_vec()),
-        ShapeKind::Ellipse => (2, Vec::new()),
-        ShapeKind::Polygon { corners } => (3, vec![f64::from(corners)]),
-        ShapeKind::Star { points, inner } => (4, vec![f64::from(points), inner]),
+pub(super) fn fingerprint(path:&PathItem)->DecodeResult<[u8;16]> {required(path)?.fingerprint()}
+pub(super) fn encode_shape(shape:&LiveShape,print:[u8;16])->DecodeResult<crate::memory::DecodedBytes> {
+    let (kind,extra,length)=match shape.kind {
+        ShapeKind::Rectangle {radii}=>(1,radii,4),
+        ShapeKind::Ellipse=>(2,[0.;4],0),
+        ShapeKind::Polygon {corners}=>(3,[f64::from(corners),0.,0.,0.],1),
+        ShapeKind::Star {points,inner}=>(4,[f64::from(points),inner,0.,0.],2),
     };
-    let mut out = vec![kind];
-    for v in [shape.center[0], shape.center[1], shape.size[0], shape.size[1], shape.rotation].into_iter().chain(extra) { out.extend_from_slice(&v.to_le_bytes()); }
-    out.extend_from_slice(&print);
-    out
+    let mut out=Output::new(MAX_PROPERTY_BYTES)?;out.push(kind)?;
+    for v in [shape.center[0],shape.center[1],shape.size[0],shape.size[1],shape.rotation].into_iter().chain(extra[..length].iter().copied()) {out.write(&v.to_le_bytes())?;}
+    out.write(&print)?;Ok(out.finish())
 }
 fn decode_shape(value: &[u8]) -> Option<(LiveShape, [u8; 16])> {
     let (&kind, rest) = value.split_first()?;
@@ -588,27 +605,47 @@ fn decode_shape(value: &[u8]) -> Option<(LiveShape, [u8; 16])> {
     if !kind.valid() { return None; }
     Some((LiveShape { kind, center: [v[0], v[1]], size: [v[2], v[3]], rotation: v[4] }, rest[numbers * 8..].try_into().unwrap()))
 }
-fn encode_path(out: &mut Vec<u8>, path: &PathItem) {
-    let mut p = required(path);
-    if let Some(shape) = &path.shape { p.put(LIVE_SHAPE, encode_shape(shape, fingerprint(path))); }
-    if let Some(name) = path.name.as_deref().filter(|n| !n.is_empty()) { p.put(NAME, name.as_bytes().to_vec()); }
-    if path.locked { p.put(LOCKED, vec![1]); }
-    p.unknown(&path.unknown);
-    put_record(out, PATH, path.id.0, &p.bytes());
+fn encode_path(out:&mut impl Sink,path:&PathItem)->DecodeResult<()> {
+    let mut p=required(path)?;
+    if let Some(shape)=&path.shape {let print=p.fingerprint()?;p.put(LIVE_SHAPE,encode_shape(shape,print)?)?;}
+    if let Some(name)=path.name.as_deref().filter(|n|!n.is_empty()) {p.borrowed(NAME,name.as_bytes())?;}
+    if path.locked {p.fixed(LOCKED,&[1])?;}p.unknown(&path.unknown)?;
+    put_record(out,PATH,path.id.0,&p.bytes()?)
 }
-pub fn encode_chunk(chunk: &VectorChunk) -> Vec<u8> {
-    let out = encode_records(chunk);
-    chunk.note_encoded_len(out.len());
-    out
-}
-fn encode_records(chunk: &VectorChunk) -> Vec<u8> {
-    let mut out = Vec::new();
+pub fn encode_chunk(chunk:&VectorChunk)->DecodeResult<crate::memory::DecodedBytes> {
+    if chunk.records().len()>MAX_RECORDS {return Err(unsupported("too many records"));}
+    let mut out=Output::new(MAX_CHUNK_BYTES)?;
     for record in chunk.records() {
         match record {
-            Record::Path(path) => encode_path(&mut out, path),
-            Record::Opaque(record) => encode_opaque(&mut out, record),
-            Record::End => out.push(0),
+            Record::Path(path)=>encode_path(&mut out,path)?,
+            Record::Opaque(record)=>encode_opaque(&mut out,record)?,
+            Record::End=>out.push(0)?,
         }
     }
-    out
+    let out=out.finish();chunk.note_encoded_len(out.len());Ok(out)
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::*;
+
+    #[test]
+    fn output_refuses_a_whole_write_before_growth_and_remains_usable() {
+        let mut out=Output::new(4).unwrap();out.write(&[1,2,3]).unwrap();
+        let capacity=out.bytes.capacity();
+        assert!(matches!(out.write(&[4,5]),Err(DecodeError::Unsupported(_))));
+        assert_eq!(out.bytes.as_slice(),[1,2,3]);assert_eq!(out.bytes.capacity(),capacity);
+        out.push(4).unwrap();assert_eq!(out.finish().as_slice(),[1,2,3,4]);
+    }
+    #[test]
+    fn first_encoding_rejects_oversized_properties_before_copying_or_caching() {
+        let bytes:Arc<[u8]>=vec![0;MAX_PROPERTY_BYTES+1].into();
+        let mut properties=Properties::new().unwrap();
+        assert!(matches!(properties.borrowed(GEOMETRY,&bytes),Err(DecodeError::Unsupported(_))));
+        assert!(properties.list.is_empty());assert_eq!(properties.list.capacity(),0);assert_eq!(properties.length,0);
+        let chunk=VectorChunk::new(vec![Record::Opaque(OpaqueRecord {kind:kind_word(99)|IGNORABLE|COPY_SAFE,id:1,properties:bytes})]);
+        assert!(chunk.encoded_len().is_none());
+        assert!(matches!(encode_chunk(&chunk),Err(DecodeError::Unsupported(_))));
+        assert!(chunk.encoded_len().is_none());
+    }
 }

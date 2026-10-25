@@ -54,14 +54,18 @@ pub struct TransferDescriptor {
 enum TransferPayload {Bytes(Arc<[u8]>),Tile(Arc<crate::raster::TileBlob>),Code(Resource<str>),Words(Arc<[u32]>),Vector(Resource<vector::VectorChunk>,Arc<[u8]>),Opaque(Arc<OpaqueResource>)}
 impl TransferPayload {
     fn len(&self)->u64 {match self {Self::Bytes(v)=>v.len() as u64,Self::Tile(v)=>v.compressed_len() as u64,Self::Code(v)=>v.len() as u64,Self::Words(v)=>v.len() as u64*4,Self::Vector(_,v)=>v.len() as u64,Self::Opaque(v)=>v.length}}
-    fn chunk(&self,offset:u64,length:usize)->Result<Vec<u8>,String>{
+    fn chunk(&self,offset:u64,length:usize)->Result<crate::memory::DecodedBytes,String>{
         if length>MAX_RANGE_BYTES||offset.checked_add(length as u64).is_none_or(|end|end>self.len()){return Err("Transfer chunk exceeds payload".into());}
         let start=usize::try_from(offset).map_err(|_|"Transfer offset overflow")?;
-        Ok(match self {
-            Self::Bytes(v)|Self::Vector(_,v)=>v[start..start+length].to_vec(),Self::Tile(v)=>v.compressed()?[start..start+length].to_vec(),Self::Code(v)=>v.as_bytes()[start..start+length].to_vec(),
-            Self::Words(v)=>(start..start+length).map(|i|v[i/4].to_le_bytes()[i%4]).collect(),
-            Self::Opaque(v)=>v.read_chunk(offset,length,&AtomicBool::new(false))?.to_vec(),
-        })
+        let mut bytes=crate::memory::DecodedBytes::zeroed(length)?;
+        match self {
+            Self::Bytes(v)|Self::Vector(_,v)=>bytes.copy_from_slice(&v[start..start+length]),
+            Self::Tile(v)=>bytes.copy_from_slice(&v.compressed()?[start..start+length]),
+            Self::Code(v)=>bytes.copy_from_slice(&v.as_bytes()[start..start+length]),
+            Self::Words(v)=>{for (i,out) in bytes.iter_mut().enumerate() {*out=v[(start+i)/4].to_le_bytes()[(start+i)%4];}},
+            Self::Opaque(v)=>bytes.copy_from_slice(&v.read_chunk(offset,length,&AtomicBool::new(false))?),
+        }
+        Ok(bytes)
     }
 }
 pub struct PreparedTransfer {descriptor:TransferDescriptor,payloads:Vec<TransferPayload>,pub(crate) trusted_programs:super::TrustedPrograms,payload_trust:Vec<bool>,validated:AtomicBool,_retirement:crate::memory::OwnerRetirement}
@@ -212,7 +216,7 @@ impl PreparedTransfer {
     pub fn descriptor(&self)->&TransferDescriptor{&self.descriptor}
     pub fn payload_count(&self)->usize{self.payloads.len()}
     pub fn payload_len(&self,index:usize)->Result<u64,String>{self.payloads.get(index).map(TransferPayload::len).ok_or_else(||"Missing transfer payload".into())}
-    pub fn read_chunk(&self,index:usize,offset:u64,length:usize)->Result<Vec<u8>,String>{self.payloads.get(index).ok_or("Missing transfer payload")?.chunk(offset,length)}
+    pub fn read_chunk(&self,index:usize,offset:u64,length:usize)->Result<crate::memory::DecodedBytes,String>{self.payloads.get(index).ok_or("Missing transfer payload")?.chunk(offset,length)}
     pub fn from_chunks(descriptor:TransferDescriptor,chunks:Vec<Vec<Arc<[u8]>>>)->Result<Self,String>{
         let mut receiver=TransferReceiver::new(descriptor,ProjectLimits::default())?;
         if chunks.len()!=receiver.buffers.len(){return Err("Transfer payload count mismatch".into());}
@@ -297,7 +301,9 @@ impl PreparedTransfer {
         crate::Document::from_artwork(artwork.clone()).map_err(|e|e.to_string())?.validate(limits)?;
         let extra=additional(&artwork,&mut reader)?;
         active(cancel)?;
-        Ok((ArtworkCapture{artwork:Arc::new(artwork),checkpoint:self.descriptor.checkpoint},working_selection,extra))
+        #[cfg_attr(target_arch="wasm32",expect(clippy::arc_with_non_send_sync,reason="Shared artwork ownership includes single-threaded Wasm Liquify fields"))]
+        let artwork=Arc::new(artwork);
+        Ok((ArtworkCapture{artwork,checkpoint:self.descriptor.checkpoint},working_selection,extra))
     }
     /// # Safety
     /// These exact immutable payloads and all descriptor/cache relations were validated.
@@ -466,6 +472,14 @@ mod tests {
     use super::*;
     use crate::{Document, Editor, Selection, SelectionShape, EffectInstance, EffectValue};
     use super::super::codec::{PreparedPackage, OpenOutcome};
+    #[test]
+    fn leased_chunks_keep_exact_little_endian_bytes_after_payload_retirement() {
+        let words=TransferPayload::Words(Arc::from([0x44332211,0x88776655]));
+        let chunk:crate::memory::DecodedBytes=words.chunk(1,6).unwrap();drop(words);
+        assert_eq!(chunk.as_slice(),[0x22,0x33,0x44,0x55,0x66,0x77]);
+        let generation=crate::memory::images().generation();drop(chunk);
+        assert_ne!(crate::memory::images().generation(),generation);
+    }
     fn capture()->ArtworkCapture {
         let mut document=Document::new(PortableId::random(),19,11,crate::DocumentNames{paint:"ink".into(),paper:"paper".into()});
         document.artwork.paint.reserve(PortableId::random()).unwrap();
@@ -560,7 +574,7 @@ mod tests {
         ready.store(true,Ordering::Relaxed);
         let mut copied=Vec::new();
         for offset in (0..expected.len()).step_by(37) {
-            copied.extend(prepared.read_chunk(payload,offset as u64,(expected.len()-offset).min(37)).unwrap());
+            copied.extend_from_slice(&prepared.read_chunk(payload,offset as u64,(expected.len()-offset).min(37)).unwrap());
         }
         assert_eq!(copied.as_slice(),expected.as_ref());
         for transfer in [&prepared,&receive(&prepared)] {

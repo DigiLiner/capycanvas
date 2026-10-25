@@ -28,7 +28,7 @@ fn boundary_parts(length: usize, unit: usize, mask: usize) -> Vec<std::ops::Rang
 }
 fn boundary_assert_payloads(prepared: &PreparedTransfer, expected: &[&[u8]]) {
     for (index,bytes) in expected.iter().enumerate() {
-        assert_eq!(prepared.read_chunk(index,0,bytes.len()).unwrap(),*bytes);
+        assert_eq!(prepared.read_chunk(index,0,bytes.len()).unwrap().as_slice(),*bytes);
     }
 }
 
@@ -111,7 +111,7 @@ fn boundary_wire(prepared:&PreparedTransfer)->(TransferDescriptor,Vec<Vec<u8>>) 
     let payloads=(0..prepared.payload_count()).map(|index| {
         let length=prepared.payload_len(index).unwrap() as usize;
         assert!(length<=MAX_RANGE_BYTES);
-        prepared.read_chunk(index,0,length).unwrap()
+        prepared.read_chunk(index,0,length).unwrap().to_vec()
     }).collect();
     (descriptor,payloads)
 }
@@ -408,7 +408,7 @@ fn transfer_boundary_reuse_merged_byte_bindings_require_receive_and_check_both_c
     let raw=|id|match descriptor.resources[&id] {VerifiedResource::Bytes{payload,..}=>payload,_=>panic!("byte resource")};
     let first=raw(boundary_id(190));let second=raw(boundary_id(191));assert_ne!(first,second);
     let merged=boundary_merge_byte_payloads(&mut descriptor,&mut payloads,first,second);
-    for byte in [b'A',b'B'] {
+    for byte in *b"AB" {
         let mut supplied=payloads.clone();supplied[merged]=vec![byte;64];
         let receiver=TransferReceiver::new_reusing(descriptor.clone(),ProjectLimits::default(),&previous).unwrap();
         assert_eq!(receiver.missing_payloads(),vec![merged],"two distinct prior owners cannot supply one merged payload");
@@ -432,7 +432,7 @@ fn transfer_boundary_reuse_existing_binding_with_new_private_role_requires_each_
     let raw=*raw;let cache=encoded.payload;let private=boundary_id(192);
     descriptor.private_resources.insert(private,(json!({"id":private,"type":"future.bytes/1","data":{},"encoding":"future.raw/1",
         "bytes":"64","crc32":format!("{:08x}",crc32fast::hash(&[b'B';64]))}),raw));
-    for byte in [b'A',b'B'] {
+    for byte in *b"AB" {
         let mut supplied=payloads.clone();supplied[raw]=vec![byte;64];
         let receiver=TransferReceiver::new_reusing(descriptor.clone(),ProjectLimits::default(),&previous).unwrap();
         assert_eq!(receiver.missing_payloads(),vec![raw],"the new private role cannot inherit existing raw approval");

@@ -20,9 +20,7 @@ fn encode_vector(chunk: &Resource<VectorChunk>) -> Result<&EncodedBytes,String> 
     cached_encoding(chunk,|| {let raw=vector_bytes(chunk)?;compress(&raw,||Ok(raw.clone()))})
 }
 pub(crate) fn vector_bytes(chunk:&VectorChunk)->Result<Arc<[u8]>,String> {
-    let memory=crate::memory::images().reserve(chunk.encoded_len().unwrap_or(0))?;
-    let bytes=super::vector_records::encode_chunk(chunk);
-    Ok(crate::memory::DecodedBytes::from_reserved(bytes,memory)?.into_shared()?)
+    Ok(super::vector_records::encode_chunk(chunk).map_err(String::from)?.into_shared()?)
 }
 fn compress(bytes: &[u8], raw: impl FnOnce() -> Result<Arc<[u8]>,String>) -> Result<EncodedBytes,String> {
     let maximum=lz4_flex::block::get_maximum_output_size(bytes.len());
@@ -529,6 +527,7 @@ impl<'a> ResourceReader<'a> {
     fn tile_error(&self,error:crate::raster::TileError)->DecodeError {
         match error {
             crate::raster::TileError::Memory(error)=>error.into(),
+            crate::raster::TileError::Busy=>DecodeError::Unsupported(error.to_string()),
             crate::raster::TileError::Invalid(error)=>self.backing.fail(error).into(),
         }
     }

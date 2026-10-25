@@ -182,9 +182,12 @@ fn unshuffle_samples(descriptor: PixelDescriptor, bytes: &[u8]) -> Vec<u8> {
 }
 
 #[derive(Debug)]
-pub enum TileError {Invalid(String),Memory(crate::memory::MemoryError)}
-impl TileError {pub fn is_memory(&self)->bool {matches!(self,Self::Memory(_))}}
-impl std::fmt::Display for TileError {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {match self {Self::Invalid(message)=>f.write_str(message),Self::Memory(error)=>error.fmt(f)}}}
+pub enum TileError {Invalid(String),Memory(crate::memory::MemoryError),Busy}
+impl TileError {
+    pub fn is_memory(&self)->bool {matches!(self,Self::Memory(_))}
+    pub fn is_retryable(&self)->bool {matches!(self,Self::Memory(_)|Self::Busy)}
+}
+impl std::fmt::Display for TileError {fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {match self {Self::Invalid(message)=>f.write_str(message),Self::Memory(error)=>error.fmt(f),Self::Busy=>f.write_str("Raster workers are busy. Try again after the current operation finishes")}}}
 impl std::error::Error for TileError {}
 impl From<String> for TileError {fn from(error:String)->Self {Self::Invalid(error)}}
 impl From<&str> for TileError {fn from(error:&str)->Self {Self::Invalid(error.into())}}

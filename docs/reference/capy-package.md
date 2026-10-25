@@ -772,6 +772,11 @@ finish supplying those ranges on its worker before calling the synchronous codec
 through a tiny read. `PreparedResources` can enumerate or stream immutable blocks
 independently of `PreparedPackage` and its ZIP writer.
 
+Vector encoding applies the same property and chunk bounds before growing its
+leased output and property index buffers. Transfer chunk copies keep their
+shared memory reservation until the caller consumes or drops the returned
+`DecodedBytes`; copying them into a host buffer needs separate host admission.
+
 Native workers may use retained immutable file ranges. A mutable destination or
 revocable provider is spooled into private owned storage before adoption. Streams
 are copied in bounded chunks before random-access ZIP parsing. Browser workers

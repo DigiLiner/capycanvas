@@ -98,9 +98,10 @@ pub fn images()->&'static Budget {
     BUDGET.get_or_init(||Budget::new(capacity()))
 }
 pub fn generation()->u64 {BUDGET.get().map_or(0,Budget::generation)}
+pub fn notify_capacity_released() {if let Some(budget)=BUDGET.get() {budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}}
 #[derive(Clone,Debug,Default)]
 pub struct OwnerRetirement;
-impl Drop for OwnerRetirement {fn drop(&mut self) {if let Some(budget)=BUDGET.get() {budget.released.fetch_add(1,std::sync::atomic::Ordering::Release);}}}
+impl Drop for OwnerRetirement {fn drop(&mut self) {notify_capacity_released();}}
 pub struct DecodedBytes {bytes:Vec<u8>,_memory:Reservation<'static>}
 impl DecodedBytes {
     pub fn zeroed(length:usize)->Result<Self,MemoryError> {
@@ -117,18 +118,24 @@ impl DecodedBytes {
     pub fn as_slice(&self)->&[u8] {&self.bytes}
     pub fn capacity(&self)->usize {self.bytes.capacity()}
     pub(crate) fn extend_from_slice(&mut self,bytes:&[u8])->Result<(),MemoryError> {
-        let length=self.bytes.len().checked_add(bytes.len()).ok_or_else(exhausted)?;
-        if length>self.bytes.capacity() {
-            self._memory.resize(self.bytes.capacity().checked_add(length).ok_or_else(exhausted)?)?;
-            self.bytes.try_reserve_exact(length-self.bytes.len()).map_err(|_|exhausted())?;
-        }
-        self.bytes.extend_from_slice(bytes);self._memory.resize(self.bytes.capacity())
+        extend_bytes(&mut self.bytes,&mut self._memory,bytes)
     }
     pub fn into_shared(self)->Result<Arc<[u8]>,MemoryError> {
         let Self {bytes,_memory:mut memory}=self;
         memory.resize(bytes.capacity().checked_add(bytes.len()).and_then(|bytes|bytes.checked_add(OWNER_CHARGE)).ok_or_else(exhausted)?)?;
         memory.retain(Arc::<[u8]>::from(bytes))
     }
+}
+fn extend_bytes(bytes:&mut Vec<u8>,memory:&mut Reservation<'_>,additional:&[u8])->Result<(),MemoryError> {
+    let length=bytes.len().checked_add(additional.len()).ok_or_else(exhausted)?;
+    if length>bytes.capacity() {
+        let previous=bytes.capacity();
+        let capacity=previous.saturating_mul(2).max(64).max(length).min(isize::MAX as usize);
+        memory.resize(previous.checked_add(capacity).ok_or_else(exhausted)?)?;
+        if bytes.try_reserve_exact(capacity-bytes.len()).is_err() {memory.resize(previous)?;return Err(exhausted());}
+        memory.resize(bytes.capacity())?;
+    }
+    bytes.extend_from_slice(additional);Ok(())
 }
 impl std::ops::Deref for DecodedBytes {type Target=[u8];fn deref(&self)->&[u8] {&self.bytes}}
 impl std::ops::DerefMut for DecodedBytes {fn deref_mut(&mut self)->&mut[u8] {&mut self.bytes}}
@@ -270,5 +277,24 @@ mod tests {
         let bytes:Arc<[u8]>=vec![1;128].into();let bytes=memory.retain(bytes).unwrap();
         let retained=budget.generation();budget.track(&bytes).unwrap();assert_eq!(budget.generation(),retained);
         drop(bytes);budget.collect().unwrap();assert_ne!(budget.generation(),retained);
+    }
+    #[test]
+    fn decoded_byte_growth_reserves_overlap_and_preserves_failed_appends() {
+        let budget=Budget::new(192);let mut bytes=Vec::with_capacity(64);bytes.extend_from_slice(&[7;64]);
+        let mut memory=budget.reserve(bytes.capacity()).unwrap();let other=budget.reserve(1).unwrap();
+        assert_eq!(extend_bytes(&mut bytes,&mut memory,&[8]),Err(MemoryError));
+        assert_eq!(bytes,&[7;64]);assert_eq!(bytes.capacity(),64);assert_eq!(memory.bytes,64);
+        assert_eq!(budget.state.lock().unwrap().used,65);
+        drop(other);extend_bytes(&mut bytes,&mut memory,&[8]).unwrap();
+        assert_eq!(bytes.len(),65);assert_eq!(bytes[64],8);assert_eq!(bytes.capacity(),128);
+        assert_eq!(memory.bytes,128);assert_eq!(budget.state.lock().unwrap().used,128);
+        let remaining=budget.reserve(64).unwrap();let generation=budget.generation();
+        extend_bytes(&mut bytes,&mut memory,&[9;63]).unwrap();
+        extend_bytes(&mut bytes,&mut memory,&[]).unwrap();
+        assert_eq!(bytes.len(),128);assert_eq!(&bytes[65..],&[9;63]);
+        assert_eq!(memory.bytes,128);assert_eq!(budget.generation(),generation);
+        assert_eq!(extend_bytes(&mut bytes,&mut memory,&[10]),Err(MemoryError));
+        assert_eq!(bytes.len(),128);assert_eq!(memory.bytes,128);drop(remaining);drop(memory);
+        assert!(budget.reserve(192).is_ok());
     }
 }

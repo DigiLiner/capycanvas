@@ -99,7 +99,7 @@ impl PreparedSessionTransfer {
     pub fn descriptor(&self)->&SessionTransferDescriptor {&self.descriptor}
     pub fn payload_count(&self)->usize {self.artwork.payload_count()}
     pub fn payload_len(&self,index:usize)->Result<u64,String> {self.artwork.payload_len(index)}
-    pub fn read_chunk(&self,index:usize,offset:u64,length:usize)->Result<Vec<u8>,String> {self.artwork.read_chunk(index,offset,length)}
+    pub fn read_chunk(&self,index:usize,offset:u64,length:usize)->Result<crate::memory::DecodedBytes,String> {self.artwork.read_chunk(index,offset,length)}
     pub fn adopt_verified(&self,limits:ProjectLimits,cancel:&AtomicBool)->Result<OpenSession,String> {
         self.adopt_with_programs(limits,cancel,&self.artwork.trusted_programs)
     }
