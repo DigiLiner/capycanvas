@@ -49,6 +49,19 @@ the frame after a drag is released and a frame waiting on a click. The exception
 is a still frame that delays the start of the next motion. Start and release
 latencies have their own limits under [Responsiveness](responsiveness.md).
 
+**Navigation regression gate.** Submission and presentation changes must preserve
+overlapping viewport frames; do not wait for each viewport's GPU completion
+before queuing its presentation. Fence unfinished artwork dependencies separately. Before
+acceptance, compare baseline and candidate on affected reference tiers at factory
+settings: default canvas and paper, plus the tier photo at Fit with Navigator
+closed/open. Reject changes that turn a passing rate or p99 target into a miss,
+even when CPU/GPU timings pass. Apply the existing 95% display-rate floor.
+
+Report full-contact canvas presentation counts/duration, onset and longest gaps
+alongside moving-only rates; first-to-last cadence can hide stalls. Browser
+content-surface cadence without camera-to-presentation attribution and renderer
+submissions remain diagnostics, not acceptance evidence.
+
 **The target document.**
 
 - It is the tier's photo as the bottom layer plus one empty paint layer at Fit
