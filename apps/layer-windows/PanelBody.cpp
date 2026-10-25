@@ -62,11 +62,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                 }
                 if(kind==L"divider"){
                     auto bounds=rects.GetObjectAt(i);auto slot=button(data,str(tile,L"label"),[]{});place(slot,bounds);
-                    Border line;line.Background(data->brush(L"settings_secondary"));line.Opacity(.3);
-                    bool horizontal=num(bounds,L"width")>num(bounds,L"height");
-                    line.Width(horizontal?std::max(0.,num(bounds,L"width")-8):1);
-                    line.Height(horizontal?1:std::max(0.,num(bounds,L"height")-8));
-                    line.HorizontalAlignment(HorizontalAlignment::Center);line.VerticalAlignment(VerticalAlignment::Center);
+                    auto line=dividerLine(data,num(bounds,L"width")>num(bounds,L"height"));
                     slot.Content(line);dividers.emplace(uint32_t(id),line);tiles.Children().Append(slot);attach(slot);
                     tileControls.emplace(uint32_t(id),slot);
                     AutomationProperties::SetAutomationId(slot,L"tile-"+panelId+L"-"+to_hstring(uint32_t(id)));
@@ -244,11 +240,7 @@ void PanelBody::Layout(J const& geometry){
         if(!shown)continue;
         place(element,box);
         if(auto found=components.find(tileOrder[i]);found!=components.end())found->second->Layout(box,vertical);
-        if(auto found=dividers.find(tileOrder[i]);found!=dividers.end()){
-            bool horizontal=num(box,L"width")>num(box,L"height");
-            found->second.Width(horizontal?std::max(0.,num(box,L"width")-8):1);
-            found->second.Height(horizontal?1:std::max(0.,num(box,L"height")-8));
-        }
+        if(auto found=dividers.find(tileOrder[i]);found!=dividers.end())orientDivider(found->second,num(box,L"width")>num(box,L"height"));
     }
     if(tileGrip){
         auto grip=object(layout,L"grip");tileGrip.Visibility(grip.Size()?Visibility::Visible:Visibility::Collapsed);

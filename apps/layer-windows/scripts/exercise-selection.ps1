@@ -87,7 +87,7 @@ function Check-Modes([string[]]$Expected){
         $button=Control ('tool-action-'+$id) -Type $ControlType::Button
         $command=Command $id
         if($button.Current.Name -ne $command.label){throw "Mode $id is not named by the shared label"}
-        $height=Dip $button;$want=24
+        $height=Dip $button;$want=26
         if([Math]::Abs($height-$want) -gt 1.5){throw "Mode $id is $height px, expected $want"}
         $tops+=$button.Current.BoundingRectangle.Y
         $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()

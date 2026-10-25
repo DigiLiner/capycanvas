@@ -60,6 +60,11 @@ including older gaps; a port does not require an unrestricted historical audit.
   Remove unnecessary compatibility code; add no old-format readers unless asked.
   Preserve the replaced tests' useful assertions. Review the final diff for
   duplicate logic and dead code; explain growth in refactors.
+- Size controls from shared metrics, not literal pixels: panel controls from the
+  catalog's `panel_metrics` (`panelMetric`, `controlHeight`, `controlCorner`),
+  toolbar tiles, gaps and icons from the `style` toolbar query, and dividers with
+  `dividerLine`. A shared metric change then reaches Windows without a port;
+  window chrome keeps its own sizes.
 - Enable platform gates with their native presentation and shared platform tests.
   Do not hide a feature to claim parity. Follow the
   [drag convention](ui/drag-and-reorder.md) for mouse, touch and pen, including

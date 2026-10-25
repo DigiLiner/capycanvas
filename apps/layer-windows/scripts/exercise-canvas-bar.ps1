@@ -24,6 +24,7 @@ function Choice([string]$Id){@((Model).state.canvas_bar.items|Where-Object {$_.o
 function MenuOpen{
  $condition=[System.Windows.Automation.AndCondition]::new(
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id),
+  [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::FrameworkIdProperty,'XAML'),
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
  $null -ne [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
 }
@@ -37,6 +38,20 @@ function Tap([string]$Id,[string]$Device){
 function Subtool([string]$Command){
  $choice=Tool-Choice $Command;Invoke-Id $choice.id
  Wait-Until {@((Model).state.tool_set.($choice.list))[$choice.index].selected} "$Command did not activate"
+}
+function Check-BarGeometry([string]$Context){
+ $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+ $bar=(Bar).Current.BoundingRectangle
+ if([Math]::Abs($bar.Height/$scale-36) -gt 1){throw "The $Context bar is not one 36-point tile tall: $($bar.Height/$scale)"}
+ foreach($item in @((Model).state.canvas_bar.items)+@((Model).state.canvas_bar.completion)){
+  if($item.menu){$id="canvas-bar-menu-$($item.menu)"}elseif($item.option.Action){$id="canvas-bar-$($item.option.Action.state.id)"}else{continue}
+  $control=Find $id;if(!$control -or $control.Current.IsOffscreen){continue}
+  $r=$control.Current.BoundingRectangle;$want=if($item.icon_only){36}else{26}
+  if([Math]::Abs($r.Height/$scale-$want) -gt 1){throw "$id in the $Context bar is $($r.Height/$scale) points tall, not $want"}
+  if($item.icon_only -and [Math]::Abs($r.Width/$scale-36) -gt 1){throw "$id in the $Context bar is not a square tile"}
+  if(!$item.icon_only -and ([Math]::Abs(($r.Top-$bar.Top)/$scale-5) -gt 1 -or [Math]::Abs(($bar.Bottom-$r.Bottom)/$scale-5) -gt 1)){throw "$id in the $Context bar does not keep five points clear"}
+ }
+ $checks["${Context}_bar_geometry"]='passed'
 }
 function Drag([string]$Device,[int[]]$From,[int[]]$To){
  [CapyRowPointer]::Down($Device,$From[0],$From[1])
@@ -100,14 +115,15 @@ try {
   Wait-Until {!(MenuOpen)} "Escape did not close the Refine menu" 5
  }
  $layers=@((Model).state.layers).Count
- Tap 'canvas-bar-menu-copy_to_layer' 'touch'
- Wait-Until {$null -ne (Owned 'Copy Selection to New Layer' -Name)} 'The Copy to Layer menu has no Copy Selection to New Layer' 5
+ Tap 'canvas-bar-menu-copy' 'touch'
+ Wait-Until {$null -ne (Owned 'Copy Selection to New Layer' -Name)} 'The Copy menu has no Copy Selection to New Layer' 5
  (Owned 'Copy Selection to New Layer' -Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {@((Model).state.layers).Count -eq $layers+1 -and !(MenuOpen)} 'Copy Selection to New Layer did not add a layer through the bar menu' 5
  (Find 'drawing-canvas').SetFocus()
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),[uint16]0x5A)
  Wait-Until {@((Model).state.layers).Count -eq $layers -and (Paint) -eq $paint} 'One Undo did not remove the copied layer' 5
  $checks.selection_menus_copy_to_layer_one_undo_step='passed'
+ Check-BarGeometry 'selection'
 
  Tap 'canvas-bar-scale_rotate' 'mouse'
  Wait-Until {(Kind) -eq 'transform' -and (Bar) -and (Find 'canvas-bar-apply_transform') -and (Find 'canvas-bar-cancel_transform')} 'Transform from the bar did not open the transform bar' 10
@@ -134,6 +150,7 @@ try {
   Wait-Until {!(MenuOpen)} "Escape did not close the $($dropdown.label) menu" 5
  }
  $checks.transform_mode_choices='passed'
+ Check-BarGeometry 'transform'
  $x=Value 'transform_x'
  $inside=AnchorQuadrant
  Drag 'touch' $inside @(($inside[0]+80),$inside[1])
@@ -204,6 +221,31 @@ try {
  Tap 'canvas-bar-complete_selection' 'pen'
  Wait-Until {(Kind) -eq 'selection' -and (Model).state.layer_tools.has_selection} 'Finish on the bar did not complete the polygon' 5
  $checks.polygon_bar='passed'
+
+ $openColumns={@((Model).state.workspace.layout.column_stacks|Where-Object {$null -ne $_.open_column}).Count}
+ $columnsBefore=& $openColumns
+ $quickMask=((Model).state.commands|Where-Object id -eq 'quick_mask').label
+ Tap 'canvas-bar-menu-mask' 'mouse'
+ Wait-Until {$null -ne (Owned $quickMask -Name)} 'The Mask menu has no Quick Mask' 5
+ (Owned $quickMask -Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+ Wait-Until {(Kind) -eq 'quick_mask' -and (Bar) -and !(MenuOpen)} 'Quick Mask from the Mask menu did not show its bar' 5
+ Start-Sleep -Milliseconds 300
+ Capture ('quick-mask-'+$Theme)
+ Check-BarGeometry 'quick_mask'
+ Tap 'canvas-bar-more' 'mouse'
+ Wait-Until {MenuOpen} 'More did not open in Quick Mask' 5
+ [CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+ Wait-Until {!(MenuOpen)} 'Escape did not close More in Quick Mask' 5
+ if((Kind) -ne 'quick_mask'){throw 'Escape with a menu open also left Quick Mask'}
+ (Find 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+ Wait-Until {(Kind) -eq 'selection'} 'Escape did not leave Quick Mask for the selection' 5
+ if((& $openColumns) -ne $columnsBefore){throw 'The Escape that left Quick Mask also changed the open columns'}
+ if($columnsBefore -gt 0){
+  (Find 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+  Wait-Until {(& $openColumns) -eq 0} 'A second Escape did not close the open column' 5
+  if((Kind) -ne 'selection'){throw 'Closing the column with Escape dropped the selection bar'}
+ }
+ $checks.escape_leaves_quick_mask_before_open_columns='passed'
 
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Edit'
  Invoke-Id 'settings'

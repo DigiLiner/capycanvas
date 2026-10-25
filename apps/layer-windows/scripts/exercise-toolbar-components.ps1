@@ -199,7 +199,7 @@ try {
     Wait-Until {(& $gradient) -and (Find 'toolbar-gradient')} 'Gradient Tool Options did not show the gradient button'
     $original=& $gradient;$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $box=(Control 'toolbar-gradient').Current.BoundingRectangle
-    if([Math]::Abs($box.Height-24*$scale) -gt 1.5){throw 'The Tool Options gradient button is not 24 DIP tall'}
+    if([Math]::Abs($box.Height-26*$scale) -gt 1.5){throw 'The Tool Options gradient button is not 26 DIP tall'}
     $face=@{x=[int]($box.X+$box.Width/2);y=[int]($box.Y+$box.Height/2)}
     foreach($device in @('mouse','touch','pen')){
         Focus-Review;Press $device $face;Release
@@ -228,7 +228,7 @@ try {
         for($i=0;$i -lt $spec.items.Count;$i++){
             $button=Control "toolbar-segment-$id-$i";$bounds=Box "toolbar-segment-$id-$i"
             if($button.Current.Name -ne $spec.items[$i].label){throw "Tool Options $id/$i accessible label differs from shared copy"}
-            if([Math]::Abs($bounds.Width/$scale-36) -gt 1 -or [Math]::Abs($bounds.Height/$scale-36) -gt 1){throw "Tool Options $id/$i is not a Small square"}
+            if([Math]::Abs($bounds.Width/$scale-36) -gt 1 -or [Math]::Abs($bounds.Height/$scale-26) -gt 1){throw "Tool Options $id/$i is not one Small tile wide and 26 points tall"}
             $glyph=Control ('icon-'+$spec.items[$i].icon) -Within $button;$image=$glyph.Current.BoundingRectangle
             if([Math]::Abs($image.Width/$scale-16) -gt 1 -or [Math]::Abs($image.Height/$scale-16) -gt 1){throw "Tool Options $id/$i has the wrong icon size"}
             if($previous -and [Math]::Abs($bounds.Left-$previous.Right) -gt 1){throw "Tool Options $id is not a contiguous bar"}

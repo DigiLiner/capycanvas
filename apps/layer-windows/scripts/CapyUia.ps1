@@ -517,7 +517,7 @@ function Workspace-Root{
         }
     }
 }
-function Compact-Choice([string]$Id,[double]$Scale,[double]$Height=24){
+function Compact-Choice([string]$Id,[double]$Scale,[double]$Height=26){
     $box=Control $Id -Arranged
     $bounds=Native-Bounds $Id $Scale
     $selected=$box.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()

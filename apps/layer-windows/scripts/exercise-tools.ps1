@@ -188,11 +188,11 @@ function Check-Geometry([string]$Tool){
         $field=Find ('number-root-tool-setting-'+$setting.id) $null -Id
         $entry=Find ('tool-setting-'+$setting.id) ([System.Windows.Automation.ControlType]::Edit) -Id
         if(!$field -or !$entry){continue}
-        $expected=if($setting.numeric.kind -ne 'slider' -or $tonal -or $setting.id -in @('transform_x','transform_y')){24}else{36}
+        $expected=if($setting.numeric.kind -ne 'slider' -or $tonal -or $setting.id -in @('transform_x','transform_y')){26}else{36}
         $field=Reveal-Number $setting.id $expected $scale
         $entry=Arranged ('tool-setting-'+$setting.id) ([System.Windows.Automation.ControlType]::Edit)
         $bounds=Native-Bounds ('number-root-tool-setting-'+$setting.id) $scale;$value=Native-Bounds ('tool-setting-'+$setting.id) $scale
-        if([Math]::Abs($bounds.Height/$scale-$expected) -gt 1 -or [Math]::Abs($value.Height/$scale-24) -gt 1){throw "Tool $Tool field $($setting.id) does not use compact dimensions: root=$bounds entry=$value expected=$expected"}
+        if([Math]::Abs($bounds.Height/$scale-$expected) -gt 1 -or [Math]::Abs($value.Height/$scale-26) -gt 1){throw "Tool $Tool field $($setting.id) does not use compact dimensions: root=$bounds entry=$value expected=$expected"}
         if($expected -eq 36 -and ([Math]::Abs($value.Width/$scale-68) -gt 1 -or [Math]::Abs($value.Bottom-$bounds.Bottom) -gt 1 -or [Math]::Abs($value.Right-$bounds.Right) -gt 1)){throw "Tool $Tool field $($setting.id) does not retain its editor width and bottom/trailing alignment"}
         $captions=$field.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))
         $caption=@($captions|Where-Object {$_.Current.Name -eq $setting.label})[0]
@@ -205,14 +205,14 @@ function Check-Geometry([string]$Tool){
         foreach($action in $group.Group){
             $button=Find ('tool-action-'+$action.command) ([System.Windows.Automation.ControlType]::Button) -Id
             if($button){
-                $button=Reveal-Control ('tool-action-'+$action.command) ('tool-action-'+$action.command) ([System.Windows.Automation.ControlType]::Button) 24 $scale
+                $button=Reveal-Control ('tool-action-'+$action.command) ('tool-action-'+$action.command) ([System.Windows.Automation.ControlType]::Button) 26 $scale
                 $buttons+=@{id=$action.command;bounds=(Native-Bounds ('tool-action-'+$action.command) $scale)}
             }
         }
         if($buttons.Count -lt 2){continue}
         for($index=0;$index -lt $buttons.Count;$index++){
             $bounds=$buttons[$index].bounds
-            if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw "Tool $Tool action $($buttons[$index].id) is not compact"}
+            if([Math]::Abs($bounds.Height/$scale-26) -gt 1){throw "Tool $Tool action $($buttons[$index].id) is not compact"}
             if($index -and ([Math]::Abs(($bounds.Left-$buttons[$index-1].bounds.Right)/$scale-4) -gt 1 -or [Math]::Abs($bounds.Top-$buttons[$index-1].bounds.Top) -gt 1)){throw "Tool $Tool row $($group.Name) does not use matching horizontal spacing"}
         }
         $actionRows+=@{id=$group.Name;icon_only=$group.Group[0].icon_only;buttons=$buttons}

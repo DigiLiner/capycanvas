@@ -71,7 +71,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         std::function<void()> orient;
         std::function<winrt::Windows::Foundation::Size()> natural;
         std::function<void()> dispose;
-        int segmented=0;bool action=false,intrinsic=false,slim=false;
+        int segmented=0;bool action=false,intrinsic=false,worded=false;double across=0;
     };
     struct Contact {uint32_t id;Point start;bool moved=false;};
     std::shared_ptr<WorkspaceData> data;
@@ -240,13 +240,14 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             A pair;
             if(f.segmented){
                 bool stacked=vertical&&width<tileW*f.segmented;
-                pair.Append(N(vertical?width:tileW*f.segmented));pair.Append(N(vertical?tileH*(stacked?f.segmented:1):24));
-            }else if(!f.intrinsic&&(vertical||f.action)){pair.Append(N(tileW));pair.Append(N(tileH));}
+                pair.Append(N(vertical?width:tileW*f.segmented));pair.Append(N(vertical?tileH*(stacked?f.segmented:1):tileH));
+            }else if(!vertical&&f.worded){pair.Append(N(f.natural().Width+2*ControlClearance));pair.Append(N(tileH));}
+            else if(!f.intrinsic&&(vertical||f.action)){pair.Append(N(tileW));pair.Append(N(tileH));}
             else{auto extent=f.natural();pair.Append(N(extent.Width));pair.Append(N(extent.Height));}
             sizes.Append(pair);
         }
         auto geometry=toolbarUi(data->localization.get(),O({{L"type",S(L"options_layout")},{L"width",N(width)},{L"height",N(height)},
-            {L"axis",S(vertical?L"vertical":L"horizontal")},{L"sizes",sizes},{L"button",size},{L"gap",N(vertical?num(style,L"gap",2):10)}})).GetObject();
+            {L"axis",S(vertical?L"vertical":L"horizontal")},{L"sizes",sizes},{L"button",size},{L"gap",N(num(style,L"gap",2))}})).GetObject();
         place(more,object(geometry,L"more"));
         auto placed=array(geometry,L"fields");
         for(size_t i=0;i<fields.size();++i){
@@ -257,7 +258,11 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             fields[i].row.Visibility(shown?Visibility::Visible:Visibility::Collapsed);
             if(!shown)continue;
             auto bounds=value.GetObject();
-            if((fields[i].segmented||fields[i].slim)&&!vertical)bounds=O({{L"x",N(num(bounds,L"x"))},{L"y",N(num(bounds,L"y")+(num(bounds,L"height")-24)/2)},{L"width",N(num(bounds,L"width"))},{L"height",N(24)}});
+            if(fields[i].worded&&!vertical){
+                double across=fields[i].across>0?fields[i].across:data->controlHeight();
+                bounds=O({{L"x",N(num(bounds,L"x")+ControlClearance)},{L"y",N(num(bounds,L"y")+(num(bounds,L"height")-across)/2)},
+                    {L"width",N(std::max(0.,num(bounds,L"width")-2*ControlClearance))},{L"height",N(across)}});
+            }
             place(fields[i].row,bounds);
         }
     }
@@ -484,7 +489,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto shown=std::make_shared<J>(option);auto bindings=std::make_shared<Bindings>();auto popup=std::make_shared<std::shared_ptr<Bindings>>();
         auto face=button(data,str(option,L"label"),[]{});face.Padding({0});face.Background(clear());
         face.HorizontalContentAlignment(HorizontalAlignment::Stretch);face.VerticalContentAlignment(VerticalAlignment::Stretch);
-        face.Content(CapyEffects::GradientRamp(data,[shown]{return object(object(*shown,L"value"),L"value");},24,*bindings));
+        face.Content(CapyEffects::GradientRamp(data,[shown]{return object(object(*shown,L"value"),L"value");},data->panelMetric(L"control_height"),*bindings));
         AutomationProperties::SetAutomationId(face,L"toolbar-gradient");
         face.Click([weak,shown,popup](winrt::Windows::Foundation::IInspectable const& sender,auto&&){
             auto self=weak.lock();if(!self)return;
@@ -498,13 +503,13 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             self->editor.Closed([popup](auto&&,auto&&){popup->reset();});
             self->editor.ShowAt(sender.as<FrameworkElement>());
         });
-        Field result;result.row=face;result.intrinsic=true;result.slim=true;
+        Field result;result.row=face;result.intrinsic=true;result.worded=true;
         result.update=[shown,bindings,popup,face](J const& entry){
             *shown=object(entry,L"Gradient");auto title=str(*shown,L"label");AutomationProperties::SetName(face,title);tooltip(face,title);
             for(auto const& bind:*bindings)bind();
             if(auto open=*popup)for(auto const& bind:*open)bind();
         };
-        result.natural=[weak]{auto self=weak.lock();return winrt::Windows::Foundation::Size{float(self&&self->vertical?self->width:120),24};};
+        result.natural=[weak]{auto self=weak.lock();return winrt::Windows::Foundation::Size{float(self&&self->vertical?self->width:120),float(self?self->data->controlHeight():0)};};
         return result;
     }
     Field numericField(J const& option){
@@ -600,7 +605,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             auto next=numeric(data->localization.get(),settingSpec,state->value,O({{L"type",S(L"step")},{L"steps",N(delta>0?1:-1)}}));
             if(num(next,L"value")!=state->value)set(num(next,L"value"));
         });
-        Field result;result.row=cell;
+        Field result;result.row=cell;result.worded=true;
         result.update=[state,updateFace,bindings,name,glyph,face,faceLabel,numberView,data=data](J const& option){
             auto title=str(object(option,L"Numeric"),L"label");name.Text(title);faceLabel.Text(title);tooltip(glyph,title);AutomationProperties::SetName(face,title);
             AutomationProperties::SetName(numberView,title);
@@ -636,7 +641,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             auto self=weak.lock();if(!self)return winrt::Windows::Foundation::Size{};
             double value=0;for(auto sample:array(info,L"samples"))value=std::max(value,textWidth(self->data,eights(sample.GetString())));
             double lead=self->text?textWidth(self->data,currentTitle()):16;
-            return winrt::Windows::Foundation::Size{float(lead+4+value+14+(self->sliders?60:0)),24.f};
+            return winrt::Windows::Foundation::Size{float(lead+4+value+14+(self->sliders?60:0)),float(self->data->controlHeight())};
         };
         return result;
     }
@@ -646,7 +651,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto range=RangeControl::Create(data,bounds.GetObjectAt(0),bounds.GetObjectAt(1),str(interval,L"label"),L"toolbar",sliders,
             [weak,ids](int index,double value){if(auto self=weak.lock())
                 self->send(O({{L"type",S(L"set_tool_setting")},{L"id",S(ids[index])},{L"value",N(value)}}));});
-        Field result;result.row=range->root;result.intrinsic=true;
+        Field result;result.row=range->root;result.intrinsic=true;result.worded=true;result.across=range->root.Height();
         result.update=[range](J const& option){
             auto interval=object(option,L"Range");auto current=array(interval,L"bounds");
             range->Relabel(current.GetObjectAt(0),current.GetObjectAt(1),str(interval,L"label"));
@@ -657,7 +662,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             auto self=weak.lock();if(!self)return winrt::Windows::Foundation::Size{};
             range->root.Measure({std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity()});
             auto desired=range->root.DesiredSize();
-            return winrt::Windows::Foundation::Size{std::max(desired.Width,self->sliders?280.f:0.f),std::max(desired.Height,24.f)};
+            return winrt::Windows::Foundation::Size{std::max(desired.Width,self->sliders?280.f:0.f),std::max(desired.Height,float(self->data->controlHeight()))};
         };
         return result;
     }
@@ -673,7 +678,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             return result;
         }
         if(segmented){
-            Grid row;row.Background(data->brush(L"input"));row.CornerRadius({6,6,6,6});
+            Grid row;row.Background(data->brush(L"input"));
             AutomationProperties::SetName(row,str(choice,L"label"));AutomationProperties::SetAutomationId(row,L"toolbar-choice-"+id);
             std::vector<Button> buttons;std::vector<hstring> glyphs;
             for(uint32_t i=0;i<items.Size();++i){
@@ -694,10 +699,10 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
                 ColumnDefinition title;title.Width({1,GridUnitType::Auto});form.ColumnDefinitions().Append(title);
                 ColumnDefinition choiceColumn;choiceColumn.Width({1,GridUnitType::Star});form.ColumnDefinitions().Append(choiceColumn);
                 choiceCaption.VerticalAlignment(VerticalAlignment::Center);form.Children().Append(choiceCaption);
-                Grid::SetColumn(row,1);form.Children().Append(row);result.row=form;result.intrinsic=true;
+                Grid::SetColumn(row,1);form.Children().Append(row);result.row=form;result.intrinsic=true;result.worded=true;
                 result.natural=[data=data,choiceCaption,items,choiceSize]{return winrt::Windows::Foundation::Size{
                     float(textWidth(data,choiceCaption.Text())+8+items.Size()*choiceSize.GetNumberAt(0)),float(choiceSize.GetNumberAt(1))};};
-            }else{result.row=row;result.segmented=int(items.Size());}
+            }else{result.row=row;result.segmented=int(items.Size());result.worded=true;}
             result.update=[weak,row,buttons,choiceCaption,labeled,data=data](J const& option){
                 auto spec=object(option,L"Choice");AutomationProperties::SetName(row,str(spec,L"label"));
                 if(choiceCaption.Text()!=str(spec,L"label")){choiceCaption.Text(str(spec,L"label"));if(auto self=weak.lock())self->measured=false;}
@@ -712,14 +717,16 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
                 auto self=weak.lock();if(!self)return;
                 double tileW=array(self->style,L"size").GetNumberAt(0);
                 bool stacked=!labeled&&self->vertical&&self->width<tileW*double(buttons.size());
-                row.RowDefinitions().Clear();row.ColumnDefinitions().Clear();
+                double radius=self->vertical?6:self->data->panelMetric(L"control_radius")*CornerFit,across=self->vertical?choiceSize.GetNumberAt(1):self->data->controlHeight();
+                row.RowDefinitions().Clear();row.ColumnDefinitions().Clear();row.CornerRadius({radius,radius,radius,radius});
+                if(labeled)row.Height(across);
                 for(size_t i=0;i<buttons.size();++i){
                     if(stacked){RowDefinition line;line.Height({1,GridUnitType::Star});row.RowDefinitions().Append(line);Grid::SetRow(buttons[i],int(i));Grid::SetColumn(buttons[i],0);}
                     else{ColumnDefinition cell;cell.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(cell);Grid::SetColumn(buttons[i],int(i));Grid::SetRow(buttons[i],0);}
-                    double first=i==0?6:0,last=i+1==buttons.size()?6:0;
+                    double first=i==0?radius:0,last=i+1==buttons.size()?radius:0;
                     buttons[i].CornerRadius(stacked?CornerRadius{first,first,last,last}:CornerRadius{first,last,last,first});
                     auto glyph=icon(glyphs[i],self->data->theme(),labeled?num(choiceStyle,L"icon"):self->vertical?self->iconSize:16);
-                    if(labeled){AutomationProperties::SetAutomationId(glyph,L"icon-"+glyphs[i]);buttons[i].Width(choiceSize.GetNumberAt(0));buttons[i].Height(choiceSize.GetNumberAt(1));}
+                    if(labeled){AutomationProperties::SetAutomationId(glyph,L"icon-"+glyphs[i]);buttons[i].Width(choiceSize.GetNumberAt(0));buttons[i].Height(across);}
                     buttons[i].Content(glyph);
                 }
             };
@@ -751,7 +758,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             }
             menu.ShowAt(sender.as<FrameworkElement>());
         });
-        result.row=pick;result.slim=true;
+        result.row=pick;result.worded=true;
         result.update=[weak,pick,labelText,shown,glyph,name](J const& option){
             auto self=weak.lock();if(!self)return;
             *labelText=object(option,L"Choice");auto current=array(*labelText,L"items");
@@ -771,7 +778,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             pick.Background(self->vertical?clear():self->data->brush(L"input"));
             pick.HorizontalContentAlignment(compact?HorizontalAlignment::Center:HorizontalAlignment::Stretch);
         };
-        result.natural=[]{return winrt::Windows::Foundation::Size{168,24};};
+        result.natural=[data=data]{return winrt::Windows::Foundation::Size{168,float(data->controlHeight())};};
         return result;
     }
     Field actionField(J const& action){
@@ -781,7 +788,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             CheckBox check;check.MinWidth(0);check.MinHeight(0);check.Padding({0,0,0,0});auto checkboxLabel=label(data,str(state,L"label"),false);checkboxLabel.Margin({6,0,0,0});check.Content(checkboxLabel);
             AutomationProperties::SetAutomationId(check,L"toolbar-action-"+command);
             check.Click([weak,command](auto&&,auto&&){if(auto self=weak.lock())self->send(O({{L"type",S(L"invoke")},{L"command",S(command)}}));});
-            auto host=explainable(check);Field result;result.row=host;result.action=true;result.intrinsic=true;
+            auto host=explainable(check);Field result;result.row=host;result.action=true;result.intrinsic=true;result.worded=true;
             auto choiceStyle=toolbarUi(data->localization.get(),O({{L"type",S(L"choice_style")},{L"labeled",B(true)},{L"style",S(tileStyle)}})).GetObject();
             result.natural=[data=data,check,choiceStyle]{return winrt::Windows::Foundation::Size{float(textWidth(data,check.Content().as<TextBlock>().Text())+32),float(array(choiceStyle,L"size").GetNumberAt(1))};};
             result.update=[weak,host,check,data=data](J const& option){
@@ -793,10 +800,12 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto pick=button(data,str(state,L"label"),[weak,command]{
             if(auto self=weak.lock())self->send(O({{L"type",S(L"invoke")},{L"command",S(command)}}));
         });
-        auto glyph=str(state,L"icon");if(glyph.empty())pick.Content(label(data,str(state,L"label")));else pick.Content(icon(glyph,data->theme(),iconSize));
+        auto glyph=str(state,L"icon");
+        if(glyph.empty())pick.Content(label(data,str(state,L"label")));
+        else{pick.Content(icon(glyph,data->theme(),iconSize));double r=tileRadius*CornerFit;pick.CornerRadius({r,r,r,r});}
         AutomationProperties::SetAutomationId(pick,L"toolbar-action-"+command);
         auto host=explainable(pick);
-        Field result;result.row=host;result.action=true;result.intrinsic=glyph.empty();
+        Field result;result.row=host;result.action=true;result.intrinsic=glyph.empty();result.worded=glyph.empty();
         if(result.intrinsic)result.natural=[data=data,pick,metrics=style]{return winrt::Windows::Foundation::Size{float(textWidth(data,pick.Content().as<TextBlock>().Text())+12),float(array(metrics,L"size").GetNumberAt(1))};};
         result.update=[weak,host,pick,checkable,data=data](J const& option){
             auto current=object(object(option,L"Action"),L"state");bool enabled=flag(current,L"enabled");

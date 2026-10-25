@@ -125,6 +125,15 @@ inline PathGeometry roundedRectangle(float width,float height,std::array<float,4
     PathGeometry geometry;geometry.Figures().Append(figure);return geometry;
 }
 constexpr float SurfaceRadius=18;
+constexpr double DividerSlot=8,DividerLength=18,ControlClearance=5;
+inline void orientDivider(FrameworkElement const& line,bool horizontal){
+    line.Width(horizontal?DividerLength:1);line.Height(horizontal?1:DividerLength);
+}
+inline Border dividerLine(std::shared_ptr<WorkspaceData> const& data,bool horizontal){
+    Border line;line.Background(data->brush(L"settings_secondary"));line.Opacity(.3);line.IsHitTestVisible(false);
+    line.HorizontalAlignment(HorizontalAlignment::Center);line.VerticalAlignment(VerticalAlignment::Center);
+    orientDivider(line,horizontal);return line;
+}
 inline void squircleCorner(PointCollection const& points,Point center,Point start,Point end){
     for(int i=0;i<=24;++i){
         double angle=i*3.14159265358979/48,along=std::sqrt(std::cos(angle)),across=std::sqrt(std::sin(angle));

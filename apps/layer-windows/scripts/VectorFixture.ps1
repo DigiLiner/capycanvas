@@ -204,7 +204,7 @@ function Footer-Check([string]$Name){
   $b=$button.Current.BoundingRectangle
   $record.buttons+=[ordered]@{id=$id;shown=$true;name=$button.Current.Name;enabled=$button.Current.IsEnabled;bounds=@($b.X,$b.Y,$b.Width,$b.Height)}
   if(!$button.Current.Name){$findings.Add("The Layers footer button $id has no accessible name")}
-  if(!$inside.Contains($b) -or [Math]::Abs($b.Width-24*$scale) -gt 2 -or [Math]::Abs($b.Height-24*$scale) -gt 2){
+  if(!$inside.Contains($b) -or [Math]::Abs($b.Width-26*$scale) -gt 2 -or [Math]::Abs($b.Height-26*$scale) -gt 2){
    $findings.Add("The Layers footer clips $id at $([Math]::Round($b.X)),$([Math]::Round($b.Y)) $([Math]::Round($b.Width))x$([Math]::Round($b.Height)) within $([Math]::Round($frame.X)),$([Math]::Round($frame.Y)) $([Math]::Round($frame.Width))x$([Math]::Round($frame.Height))")
   }
   if($previous -and $b.Left -lt $previous.Right-1){$findings.Add("The Layers footer overlaps $id with the button before it")}

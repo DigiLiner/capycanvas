@@ -111,7 +111,8 @@ void LayerRow::init(){
     }});
     // Include the two-DIP gaps only beside visible flex items. Empty mask and
     // indentation columns must not add their own gaps.
-    for(auto width:{26.,26.,0.,5.,32.,0.,12.,32.,0.,-1.,0.,14.,16.}){
+    auto slot=data->panelMetric(L"control_height"),gap=data->panelMetric(L"compound_spacing");
+    for(auto width:{slot+gap,slot+gap,0.,5.,32.,0.,12.,32.,0.,-1.,0.,14.,16.}){
         ColumnDefinition column;column.Width({width<0?1:width,width<0?GridUnitType::Star:GridUnitType::Pixel});
         body.ColumnDefinitions().Append(column);
     }
@@ -119,13 +120,13 @@ void LayerRow::init(){
         auto control=button(data,title,[weak,action=std::move(action)]{
             auto self=weak.lock();auto view=self?self->owner.lock():nullptr;
             if(view&&(!view->pickup||!view->pickup->SuppressClick()))action();
-        });control.Width(column==4||column==5||column==7||column==8?30:column==6?10:column==12?16:24);
+        });control.Width(column==4||column==5||column==7||column==8?30:column==6?10:column==12?16:slot);
         control.Height(30);control.HorizontalAlignment(HorizontalAlignment::Left);Grid::SetColumn(control,column);body.Children().Append(control);return control;
     };
     eye=pick(data->caption(L"layers",L"visibility"),0,[weak]{if(auto self=weak.lock())self->action(O({{L"op",S(L"visibility")},{L"id",N(self->id)},{L"value",B(!flag(self->model(),L"visible"))}}));});
     check=pick(L"",1,[weak]{if(auto self=weak.lock())self->action(rowSelection(self->id,true));});
     copyName(data,check,data->copyCaption(L"layers",L"select_row_help"));
-    for(auto control:{eye,check}){control.ClearValue(FrameworkElement::HeightProperty());control.MinHeight(24);control.VerticalAlignment(VerticalAlignment::Stretch);}
+    for(auto control:{eye,check}){control.ClearValue(FrameworkElement::HeightProperty());control.MinHeight(slot);control.VerticalAlignment(VerticalAlignment::Stretch);}
     Grid::SetColumn(indent,2);body.Children().Append(indent);
     content=pick(data->caption(L"layers",L"edit_content"),4,[weak]{if(auto self=weak.lock();self&&!self->loadThumbnail(false)){
         auto layer=self->model();self->action(flag(layer,L"group")?O({{L"op",S(L"collapse")},{L"id",N(self->id)}}):
@@ -179,7 +180,7 @@ void LayerRow::init(){
     AutomationProperties::SetAutomationId(meta,L"layer-"+to_hstring(uint64_t(id))+L"-meta");
     meta.TextTrimming(TextTrimming::CharacterEllipsis);caption.Children().Append(meta);name.Content(caption);
     Grid::SetColumn(name,9);body.Children().Append(name);
-    rename.MinWidth(0);rename.MinHeight(24);rename.Height(24);rename.Padding({2,0,2,0});rename.Margin({6,0,2,0});rename.FontSize(data->textSize());
+    rename.MinWidth(0);rename.MinHeight(data->controlHeight());rename.Height(data->controlHeight());rename.Padding({2,0,2,0});rename.Margin({6,0,2,0});rename.FontSize(data->textSize());
     rename.MaxLength(128);rename.Background(data->brush(L"input"));rename.Visibility(Visibility::Collapsed);
     copyName(data,rename,data->copyCaption(L"layers",L"name"));Grid::SetColumn(rename,9);body.Children().Append(rename);
     rename.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
@@ -266,7 +267,7 @@ void LayerRow::highlight(int position, bool attachment){
 }
 void LayerRow::refresh(){
     if(!current())return;auto layer=model();auto view=owner.lock();bool full=!view||view->full;
-    check.Visibility(full?Visibility::Visible:Visibility::Collapsed);body.ColumnDefinitions().GetAt(1).Width({full?26.:0.,GridUnitType::Pixel});
+    check.Visibility(full?Visibility::Visible:Visibility::Collapsed);body.ColumnDefinitions().GetAt(1).Width({full?data->panelMetric(L"control_height")+data->panelMetric(L"compound_spacing"):0.,GridUnitType::Pixel});
     body.Background(flag(layer,L"selected")?selected(data):clear());swipeActions.Background(data->brush(L"bg"));
     auto actions=array(layer,L"swipe_actions");
     auto key=actions.Stringify()+L":"+to_hstring(data->textSize());

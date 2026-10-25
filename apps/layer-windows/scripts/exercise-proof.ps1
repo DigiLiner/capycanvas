@@ -128,7 +128,7 @@ try {
  $modeBounds=@('off','print'|ForEach-Object {Native-Bounds ('proof-panel-mode-'+$_) $scale})
  $profileBounds=Native-Bounds 'proof-panel-profile' $scale
  $gamutBounds=Native-Bounds 'proof-panel-gamut' $scale
- foreach($bounds in $modeBounds+@($gamutBounds)){if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw 'Proof panel controls do not use compact height'}}
+ foreach($bounds in $modeBounds+@($gamutBounds)){if([Math]::Abs($bounds.Height/$scale-26) -gt 1){throw 'Proof panel controls do not use compact height'}}
  if([Math]::Abs(($modeBounds[1].Left-$modeBounds[0].Right)/$scale-4) -gt 1 -or [Math]::Abs($gamutBounds.Left-$profileBounds.Left) -gt 1){throw 'Proof panel controls do not use consistent peer gaps and side alignment'}
  @{theme=$Theme;dpi=96*$scale;modes=$modeBounds;profile=$profileBounds;gamut=$gamutBounds}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'proof-panel-geometry.json')
  Capture ('proof-panel-'+$Theme)

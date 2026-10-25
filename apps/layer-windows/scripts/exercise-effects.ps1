@@ -232,7 +232,7 @@ function Property-Row([string]$Key,[string]$Case){
     Capture ($Case+'-editing') -Composed
     $outer=[Windows.Rect]::new($bounds.panel.X-1,$bounds.panel.Y-1,$bounds.panel.Width+2,$bounds.panel.Height+2);$inner=[Windows.Rect]::new($bounds.field.X-1,$bounds.field.Y-1,$bounds.field.Width+2,$bounds.field.Height+2)
     if(!$outer.Contains($bounds.caption) -or !$outer.Contains($bounds.field) -or !$inner.Contains($bounds.entry) -or !$inner.Contains($bounds.track) -or !$inner.Contains($readout)){throw "Property controls are outside their visible panel: $Key"}
-    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-68*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-24*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
+    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-68*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-26*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
     if([Math]::Abs($bounds.caption.Left-$bounds.field.Left) -gt 1 -or [Math]::Abs($bounds.entry.Right-$bounds.field.Right) -gt 1){throw "Compact property label or value has an extra inset: $Key"}
     if([Math]::Abs($bounds.entry.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.track.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($readout.Right-$bounds.entry.Right) -gt 1 -or [Math]::Abs($readout.Bottom-$bounds.entry.Bottom) -gt 1 -or [Math]::Abs($readout.Height-$bounds.entry.Height) -gt 1){throw "Compact property readout/editor bottom or right alignment differs: $Key"}
     $controls=@((Model).state.layer_properties.controls)

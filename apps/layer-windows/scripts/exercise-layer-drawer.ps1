@@ -121,8 +121,13 @@ function Check-Footer {
  $footer=Bounds 'layer-footer';$first=Bounds 'layer-new';$last=Bounds 'layer-actions'
  $drawer=Visible-DrawerBounds
  $panel=Bounds 'drawer-panel-layers'
- if([Math]::Abs(($panel.Left-$drawer.Left)/$scale-8) -gt 1 -or [Math]::Abs(($drawer.Right-$panel.Right)/$scale-8) -gt 1){throw 'Layers inspector does not keep its eight-point outer inset'}
- if([Math]::Abs(($first.Left-$footer.Left)-($footer.Right-$last.Right)) -gt 1 -or [Math]::Abs(($first.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($panel.Right-$last.Right)/$scale-8) -gt 1){throw 'Layers footer actions do not keep their eight-point inner inset and alignment'}
+ if([Math]::Abs($panel.Left-$drawer.Left)/$scale -gt 1 -or [Math]::Abs($drawer.Right-$panel.Right)/$scale -gt 1){throw 'Layers rows do not run edge to edge in the drawer'}
+ if([Math]::Abs(($first.Left-$footer.Left)-($footer.Right-$last.Right)) -gt 1 -or [Math]::Abs(($first.Left-$panel.Left)/$scale-6) -gt 1 -or [Math]::Abs(($panel.Right-$last.Right)/$scale-6) -gt 1){throw 'Layers footer actions do not keep their six-point inset and alignment'}
+ $row=@((Model).state.layers)[0].id
+ $properties=Bounds 'layer-properties-icon';$chevron=Bounds 'layer-properties-chevron'
+ $aligned=[ordered]@{eye=(Bounds "layer-$row-visibility").Left;alpha_lock=(Bounds 'layer-alpha_lock').Left;new_layer=$first.Left;properties=$properties.Left+($properties.Width-26*$scale)/2}
+ foreach($key in $aligned.Keys){if([Math]::Abs(($aligned[$key]-$panel.Left)/$scale-6) -gt 1){throw "The Layers $key icon slot does not start six points in: $(($aligned[$key]-$panel.Left)/$scale)"}}
+ if([Math]::Abs(($drawer.Right-($chevron.Right-($chevron.Width-26*$scale)/2))/$scale-6) -gt 1){throw 'The Layer properties chevron does not mirror the six-point inset'}
  $ids=@{new_layer='layer-new';new_vector_layer='layer-new-vector';new_group='layer-new-group';new_selection_layer='layer-new-selection';add_mask='layer-add-mask';add_filter='layer-add-filter';import_image='layer-import';delete='layer-delete'}
  $width=$panel.Width/$scale;$previous=$null;$hidden=@()
  foreach($slot in @((Model).state.layer_tools.footer)){
@@ -133,8 +138,8 @@ function Check-Footer {
   }
   if(!$button){throw "Footer hides $id at $width points"}
   $r=$button.Current.BoundingRectangle
-  if([Math]::Abs($r.Width/$scale-24) -gt .5 -or [Math]::Abs($r.Height/$scale-24) -gt .5){throw "Footer action does not occupy a 24-point slot: $id"}
-  if($previous -and [Math]::Abs(($r.Left-$previous.Right)/$scale-4) -gt .5){throw "Footer action gap differs from four-point panel control spacing: $id"}
+  if([Math]::Abs($r.Width/$scale-26) -gt .5 -or [Math]::Abs($r.Height/$scale-26) -gt .5){throw "Footer action does not occupy a 26-point slot: $id"}
+  if($previous -and [Math]::Abs(($r.Left-$previous.Right)/$scale-2) -gt .5){throw "Footer action gap differs from the two-point compound spacing: $id"}
   $previous=$r
  }
  if($hidden.Count){
@@ -145,7 +150,7 @@ function Check-Footer {
  }
  $disclosure=Control 'layer-properties-disclosure' -Arranged;$label=Bounds 'layer-properties-disclosure-label';$r=$disclosure.Current.BoundingRectangle
  $labelInset=($label.Left-$r.Left)/$scale
- if([Math]::Abs($labelInset-38) -gt .5){throw 'Properties disclosure does not keep its 24-point icon slot and six-point gap'}
+ if([Math]::Abs($labelInset-38) -gt .5){throw 'Properties disclosure does not keep its six-point inset, 26-point icon slot and six-point gap'}
  $records=@($disclosure.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|ForEach-Object {@{name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle}})
  @{disclosure=$r;label=$label;label_inset=$labelInset;descendants=$records}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'disclosure-geometry.json')
  $text=Control 'layer-properties-disclosure-label';$pattern=$null

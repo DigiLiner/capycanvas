@@ -509,11 +509,12 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         chooser.RowSpacing(6);chooser.Visibility(Visibility::Collapsed);AutomationProperties::SetAutomationId(chooser,L"palette-chooser");
         for(auto star:{false,true}){RowDefinition row;row.Height(star?GridLength{1,GridUnitType::Star}:GridLength{1,GridUnitType::Auto});chooser.RowDefinitions().Append(row);}
         Grid searchRow;searchRow.ColumnSpacing(4);ColumnDefinition field;field.Width({1,GridUnitType::Star});searchRow.ColumnDefinitions().Append(field);
-        ColumnDefinition square;square.Width({24,GridUnitType::Pixel});searchRow.ColumnDefinitions().Append(square);
-        search.PlaceholderText(data->caption(L"palettes",L"find"));search.Height(24);search.MinHeight(24);search.Padding({6,2,6,2});search.Background(data->brush(L"input"));search.BorderThickness({0,0,0,0});
+        auto slot=data->panelMetric(L"control_height"),entryHeight=data->controlHeight();
+        ColumnDefinition square;square.Width({slot,GridUnitType::Pixel});searchRow.ColumnDefinitions().Append(square);
+        search.PlaceholderText(data->caption(L"palettes",L"find"));search.Height(entryHeight);search.MinHeight(entryHeight);search.Padding({6,2,6,2});search.Background(data->brush(L"input"));search.BorderThickness({0,0,0,0});
         search.FontSize(data->textSize());AutomationProperties::SetName(search,data->caption(L"palettes",L"find"));AutomationProperties::SetAutomationId(search,L"palette-search");
         search.TextChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->filter();});searchRow.Children().Append(search);
-        more=button(data,data->copyCaption(L"palettes",L"new_import"),[]{});more.Width(24);more.Height(24);more.Padding({0,0,0,0});more.Content(icon(L"plus",data->theme()));
+        more=button(data,data->copyCaption(L"palettes",L"new_import"),[]{});more.Width(slot);more.Height(slot);more.Padding({0,0,0,0});more.Content(icon(L"plus",data->theme()));
         tooltip(more,data->caption(L"palettes",L"new_import"));AutomationProperties::SetAutomationId(more,L"palette-library-add");
         more.Click([weak](auto&&,auto&&){if(auto self=weak.lock())self->menu(O({{L"kind",S(L"library")}}),self->more,self->data->caption(L"palettes",L"title"));});
         Grid::SetColumn(more,1);searchRow.Children().Append(more);chooser.Children().Append(searchRow);
@@ -524,7 +525,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         overlays.Children().Append(chooser);root.Children().Append(body);
         auto footerLine=divider();Grid::SetRow(footerLine,1);root.Children().Append(footerLine);
         footer.ColumnSpacing(4);ColumnDefinition left;left.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(left);ColumnDefinition right;right.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(right);
-        selector=button(data,data->copyCaption(L"palettes",L"choose"),[]{});selector.Height(24);selector.MinHeight(24);selector.Padding({6,0,6,0});selector.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());
+        selector=button(data,data->copyCaption(L"palettes",L"choose"),[]{});selector.Height(entryHeight);selector.MinHeight(entryHeight);selector.Padding({6,0,6,0});selector.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());
         Grid selectorContent;selectorContent.ColumnSpacing(4);ColumnDefinition textColumn;textColumn.Width({1,GridUnitType::Star});selectorContent.ColumnDefinitions().Append(textColumn);ColumnDefinition arrowColumn;arrowColumn.Width({1,GridUnitType::Auto});selectorContent.ColumnDefinitions().Append(arrowColumn);selectorLabel=label(data,L"");selectorLabel.TextTrimming(TextTrimming::CharacterEllipsis);
         selectorLabel.VerticalAlignment(VerticalAlignment::Center);selectorContent.Children().Append(selectorLabel);auto up=icon(L"chevron-down",data->theme(),12);up.RenderTransformOrigin({.5f,.5f});
         RotateTransform flip;flip.Angle(180);up.RenderTransform(flip);up.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(up,1);selectorContent.Children().Append(up);selector.Content(selectorContent);
@@ -534,10 +535,10 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         selector.Click([weak](auto&&,auto&&){if(auto self=weak.lock()){bool touch=self->openerTouch;self->openerTouch=false;self->browse(self->chooser.Visibility()!=Visibility::Visible,!touch);}});
         footer.Children().Append(selector);
         info.HorizontalAlignment(HorizontalAlignment::Right);info.MinWidth(0);
-        name=button(data,data->copyCaption(L"palettes",L"name"),[weak]{if(auto self=weak.lock())self->editName();});name.Height(24);name.MinHeight(24);name.Padding({6,0,6,0});
+        name=button(data,data->copyCaption(L"palettes",L"name"),[weak]{if(auto self=weak.lock())self->editName();});name.Height(entryHeight);name.MinHeight(entryHeight);name.Padding({6,0,6,0});
         name.HorizontalAlignment(HorizontalAlignment::Right);name.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());nameLabel=label(data,L"");nameLabel.TextTrimming(TextTrimming::CharacterEllipsis);name.Content(nameLabel);
         AutomationProperties::SetAutomationId(name,L"palette-name");info.Children().Append(name);
-        editor.MaxLength(64);editor.Height(24);editor.MinHeight(24);editor.Padding({6,2,6,2});editor.TextAlignment(TextAlignment::Right);editor.Background(data->brush(L"input"));editor.BorderThickness({0,0,0,0});
+        editor.MaxLength(64);editor.Height(entryHeight);editor.MinHeight(entryHeight);editor.Padding({6,2,6,2});editor.TextAlignment(TextAlignment::Right);editor.Background(data->brush(L"input"));editor.BorderThickness({0,0,0,0});
         editor.FontSize(data->textSize());editor.Visibility(Visibility::Collapsed);AutomationProperties::SetName(editor,data->caption(L"palettes",L"name"));AutomationProperties::SetAutomationId(editor,L"palette-name-editor");
         editor.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(composingKey(e))return;if(e.Key()==winrt::Windows::System::VirtualKey::Enter)if(auto self=weak.lock()){e.Handled(true);self->commitName();if(!self->editing)self->name.Focus(FocusState::Programmatic);}});
         editor.LostFocus([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->editing&&self->editor.Visibility()==Visibility::Visible)self->commitName();});

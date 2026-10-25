@@ -100,7 +100,7 @@ try{
    if($button.Current.Name -ne $label){throw "Zoom segment $id/$i has the wrong accessible label"}
    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
    $bounds=Native-Bounds ("tool-choice-$id-$i") $scale
-   if([Math]::Abs($bounds.Width/$scale-24) -gt 1 -or [Math]::Abs($bounds.Height/$scale-24) -gt 1){throw "Zoom segment $id/$i is not a compact square"}
+   if([Math]::Abs($bounds.Width/$scale-26) -gt 1 -or [Math]::Abs($bounds.Height/$scale-26) -gt 1){throw "Zoom segment $id/$i is not a compact square"}
    $glyph=Control ('icon-'+$spec.items[$i].icon) -Within $button -Arranged
    $image=$glyph.Current.BoundingRectangle
    if([Math]::Abs($image.Width/$scale-16) -gt 1 -or [Math]::Abs($image.Height/$scale-16) -gt 1){throw "Zoom segment $id/$i has the wrong icon size"}
@@ -117,7 +117,7 @@ try{
  if([Math]::Abs(($zoomRows['zoom-click'].row.Left-$zoomPanel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($zoomPanel.Right-$zoomRows['zoom-click'].bar.Right)/$scale-8) -gt 1){throw 'Zoom controls do not share the panel content inset'}
  if([Math]::Abs(($zoomRows['zoom-drag'].row.Top-$zoomRows['zoom-click'].row.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($zoomRows['zoom-click'].bar.Right-$zoomRows['zoom-drag'].bar.Right) -gt 1){throw 'Zoom Click and Drag rows do not share the compact gap and trailing edge'}
  $center=Native-Bounds 'tool-action-center_zoom_clicks' $scale
- if([Math]::Abs(($center.Top-$zoomRows['zoom-drag'].row.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($center.Left-$zoomRows['zoom-drag'].row.Left) -gt 1 -or [Math]::Abs($center.Height/$scale-24) -gt 1){throw 'Zoom Center does not share the compact row gap, leading edge and height'}
+ if([Math]::Abs(($center.Top-$zoomRows['zoom-drag'].row.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($center.Left-$zoomRows['zoom-drag'].row.Left) -gt 1 -or [Math]::Abs($center.Height/$scale-26) -gt 1){throw 'Zoom Center does not share the compact row gap, leading edge and height'}
  Pick 'zoom-click' 0;Pick 'zoom-drag' 3
  foreach($device in 'mouse','pen','touch'){
   Reset-Zoom

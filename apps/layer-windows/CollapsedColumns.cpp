@@ -89,9 +89,11 @@ struct Column:std::enable_shared_from_this<Column>{
             if(num(separator,L"height")>0){
                 auto key=uint32_t(num(group,L"group"));currentDividers.insert(key);
                 auto [line,added]=dividers.try_emplace(key);
-                if(added){line->second.Background(data->brush(L"tabbar"));line->second.IsHitTestVisible(false);icons.Children().Append(line->second);
+                if(added){line->second=dividerLine(data,true);icons.Children().Append(line->second);
                     AutomationProperties::SetAutomationId(line->second,L"column-divider-"+to_hstring(key));}
-                place(line->second,local(separator,content,offset));
+                auto at=local(separator,content,offset);
+                at.SetNamedValue(L"x",N(num(at,L"x")+(num(at,L"width")-DividerLength)/2));at.SetNamedValue(L"width",N(DividerLength));
+                place(line->second,at);
             }
             bottom=std::max(bottom,num(groupBounds,L"y")+num(groupBounds,L"height")-num(content,L"y")+offset);
             for(auto iconValue:array(group,L"icons")){

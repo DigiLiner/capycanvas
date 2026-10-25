@@ -23,6 +23,7 @@ function Idle {Wait-Until {$m=Model;$m -and $m.brush_ready -and !$m.state.docume
 function MenuOpen{
  $condition=[System.Windows.Automation.AndCondition]::new(
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id),
+  [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::FrameworkIdProperty,'XAML'),
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
  $null -ne [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
 }
@@ -186,7 +187,7 @@ try {
  Drag 'mouse' @(($center[0]-260),($center[1]-200)) @(($center[0]+260),($center[1]+200))
  Wait-Until {(Model).state.layer_tools.has_selection -and (Kind) -eq 'selection'} 'The selection did not finish'
  $null=Tool 'move'
- Wait-Until {(Model).state.layer_tools.tool -eq 'move' -and (Find 'canvas-bar-move_leave_copy')} 'Leave Copy did not join the selection bar under Move'
+ Wait-Until {(Model).state.layer_tools.tool -eq 'move' -and (Kind) -eq 'selection' -and (Bar)} 'The selection bar did not stay under Move'
  $before=Paint;$layers=@(Layers).Count
  [CapyRowPointer]::Hover($center[0],$center[1]);Start-Sleep -Milliseconds 200
  Drag 'mouse' $center @(($center[0]+90),($center[1]+40))
@@ -195,10 +196,12 @@ try {
  if(@(Layers).Count -ne $layers){throw 'Moving selected pixels changed the layer count'}
  Undo
  Wait-Until {(Paint) -eq $before} 'One Undo did not return the moved pixels'
- Tap 'canvas-bar-move_leave_copy' 'touch'
- Wait-Until {(Command 'move_leave_copy').selected} 'Leave Copy did not turn on from the bar'
- Tap 'canvas-bar-move_leave_copy' 'pen'
- Wait-Until {!(Command 'move_leave_copy').selected} 'Leave Copy did not turn off from the bar'
+ foreach($step in @(@('touch',$true),@('pen',$false))){
+  Tap 'canvas-bar-more' $step[0]
+  Wait-Until {MenuOpen} "More did not open from $($step[0])" 5
+  Pick (Command 'move_leave_copy').label
+  Wait-Until {[bool](Command 'move_leave_copy').selected -eq $step[1] -and !(MenuOpen)} "Leave Copy in More did not turn $(if($step[1]){'on'}else{'off'})"
+ }
  Shortcut @(0x11) 0x44
  Wait-Until {!(Model).state.layer_tools.has_selection} 'Deselect did not clear the selection'
  $checks.move_selected_pixels_and_leave_copy='passed'
@@ -254,12 +257,12 @@ try {
  $modeId=@((Model).state.canvas_bar.items|Where-Object {$_.option.Choice.segmented})[0].option.Choice.id
  $warp=[array]::IndexOf(@((Choice $modeId).items|ForEach-Object label),'Warp')
  Tap ("canvas-bar-choice-$modeId-$warp") 'touch'
- Wait-Until {@((Choice $modeId).items)[$warp].selected -and (Visible 'canvas-bar-choice-transform-warp-split')} 'Warp did not offer its split choice' 10
- $split=Find 'canvas-bar-choice-transform-warp-split'
- $text=$split.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))
- if(!$text -or !$text.Current.Name){throw 'The Warp split choice is blank'}
- Tap 'canvas-bar-choice-transform-warp-split' 'mouse'
- Wait-Until {MenuOpen} 'The Warp split choice did not open its menu' 5
+ Wait-Until {@((Choice $modeId).items)[$warp].selected -and (Visible 'canvas-bar-menu-warp_grid')} 'Warp did not offer its Grid menu' 10
+ $grid=Find 'canvas-bar-menu-warp_grid'
+ $text=$grid.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))
+ if(!$text -or !$text.Current.Name){throw 'The Warp Grid menu does not show its grid'}
+ Tap 'canvas-bar-menu-warp_grid' 'mouse'
+ Wait-Until {MenuOpen} 'The Warp Grid menu did not open' 5
  Pick (Command 'warp_split_vertical').label
  Wait-Until {(Command 'warp_split_vertical').selected} 'Split Vertically did not arm'
  Capture 'warp-split'

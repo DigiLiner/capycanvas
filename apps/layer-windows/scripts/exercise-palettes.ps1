@@ -193,7 +193,7 @@ try {
     $first=Native-Bounds ('palette-swatch-'+(Swatches)[0]) $scale
     @{theme=$Theme;dpi=96*$scale;panel=$panel;selector=$selector;name=$name;first_swatch=$first}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $run 'palette-geometry.json')
     if([Math]::Abs(($selector.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($first.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($panel.Right-$name.Right)/$scale-8) -gt 1){throw 'Palette content does not use equal eight-pixel side insets'}
-    if([Math]::Abs($selector.Height/$scale-24) -gt 1 -or [Math]::Abs($name.Height/$scale-24) -gt 1){throw 'Palette footer controls are not compact'}
+    if([Math]::Abs($selector.Height/$scale-26) -gt 1 -or [Math]::Abs($name.Height/$scale-26) -gt 1){throw 'Palette footer controls are not compact'}
     Capture 'paint-palettes'
 
     $count=@(Swatches).Count
@@ -204,7 +204,7 @@ try {
     Invoke 'palette-name'
     $editor=Control 'palette-name-editor' -Type $ControlType::Edit
     $editBounds=Native-Bounds 'palette-name-editor' $scale
-    if([Math]::Abs($editBounds.Right-$name.Right) -gt 1 -or [Math]::Abs($editBounds.Height/$scale-24) -gt 1){throw 'Palette name editor does not retain the readout trailing edge and compact height'}
+    if([Math]::Abs($editBounds.Right-$name.Right) -gt 1 -or [Math]::Abs($editBounds.Height/$scale-26) -gt 1){throw 'Palette name editor does not retain the readout trailing edge and compact height'}
     Capture 'palette-name-editor'
     $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Fixture ink')
     $editor.SetFocus();[CapyRowPointer]::Key([uint16]0x0D)

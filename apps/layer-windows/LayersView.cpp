@@ -43,7 +43,8 @@ void LayersView::init(){
     for(auto unit:{GridUnitType::Auto,GridUnitType::Star,GridUnitType::Auto}){
         RowDefinition row;row.Height({1,unit});root.RowDefinitions().Append(row);
     }
-    header.Padding({8,4,8,4});header.Spacing(data->panelMetric(L"control_spacing"));values.ColumnSpacing(data->panelMetric(L"control_spacing"));
+    auto iconSlot=data->panelMetric(L"control_height"),compound=data->panelMetric(L"compound_spacing");
+    header.Padding({6,4,6,4});header.Spacing(compound);values.ColumnSpacing(data->panelMetric(L"group_spacing"));
     for(int i=0;i<2;i++){ColumnDefinition column;column.Width({1,GridUnitType::Star});values.ColumnDefinitions().Append(column);}
     blend=button(data,L"",[weak]{if(auto self=weak.lock();self&&!self->data->updating){auto layer=self->editing();if(layer.Size())self->context(num(layer,L"id"),false,self->blend,{},false,true);}});
     blendLabel=label(data,L"",true);blendLabel.TextTrimming(TextTrimming::CharacterEllipsis);blendLabel.VerticalAlignment(VerticalAlignment::Center);
@@ -51,7 +52,7 @@ void LayersView::init(){
         content.ColumnDefinitions().Append(text);content.ColumnDefinitions().Append(arrow);content.ColumnSpacing(4);content.Children().Append(blendLabel);
         ContentControl chevron;chevron.IsTabStop(false);chevron.IsHitTestVisible(false);Grid::SetColumn(chevron,1);content.Children().Append(chevron);
         controls.emplace_back([data=data,chevron,theme=std::make_shared<hstring>()](J,J){if(*theme!=data->theme()){*theme=data->theme();chevron.Content(icon(L"chevron-down",*theme,12));}});blend.Content(content);}
-    blend.MinWidth(0);blend.MinHeight(24);blend.Height(24);blend.Padding({6,0,6,0});blend.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+    blend.MinWidth(0);blend.MinHeight(data->controlHeight());blend.Height(data->controlHeight());blend.Padding({6,0,6,0});blend.HorizontalContentAlignment(HorizontalAlignment::Stretch);
     copyName(data,header,data->copyCaption(L"layers",L"controls"));copyName(data,values,data->copyCaption(L"layers",L"blend_opacity"));
     copyName(data,tools,data->copyCaption(L"layers",L"flags"));copyName(data,footerFrame,data->copyCaption(L"layers",L"actions"));
     AutomationProperties::SetAutomationId(header,L"layer-controls");
@@ -64,7 +65,7 @@ void LayersView::init(){
     copyName(data,blend,data->copyCaption(L"layers",L"blend"));AutomationProperties::SetAutomationId(blend,L"layer-blend");
     opacityGate.HorizontalContentAlignment(HorizontalAlignment::Stretch);
     values.Children().Append(blend);Grid::SetColumn(opacityGate,1);values.Children().Append(opacityGate);header.Children().Append(values);
-    tools.Orientation(Orientation::Horizontal);tools.Spacing(data->panelMetric(L"control_spacing"));
+    tools.Orientation(Orientation::Horizontal);tools.Spacing(compound);
     struct Toggle {wchar_t const* icon;LocalizedCopy label;wchar_t const* property;wchar_t const* op;wchar_t const* capability;};
     for(auto spec:{Toggle{L"alpha-lock",data->copyCaption(L"layers",L"alpha_lock"),L"alpha_locked",L"alpha_lock",L"alpha_lock"},
         Toggle{L"lock",data->copyCaption(L"layers",L"lock_editing"),L"locked",L"lock",L"edit_lock"}}){
@@ -72,7 +73,7 @@ void LayersView::init(){
             auto layer=self->editing();if(layer.Size())self->action(O({{L"op",S(spec.op)},
                 {L"id",layer.GetNamedValue(L"id")},{L"value",B(!flag(layer,spec.property))}}));
         }});
-        pick.Width(24);pick.Height(24);pick.Content(icon(spec.icon,data->theme()));
+        pick.Width(iconSlot);pick.Height(iconSlot);pick.Content(icon(spec.icon,data->theme()));
         AutomationProperties::SetAutomationId(pick,L"layer-"+hstring(spec.op));
         actionTooltip(data,pick,[weak,spec]{auto self=weak.lock();auto layer=self?self->editing():J{};if(!layer.Size())return J{};
             return O({{L"type",S(L"layer")},{L"action",O({{L"op",S(spec.op)},{L"id",layer.GetNamedValue(L"id")},{L"value",B(!flag(layer,spec.property))}})}});});
@@ -83,7 +84,7 @@ void LayersView::init(){
     auto attachment=button<Primitives::ToggleButton>(data,L"",[weak]{if(auto self=weak.lock()){
         auto operation=object(object(self->view(),L"attachment"),L"action");if(operation.Size())self->action(operation);
     }});
-    attachment.Width(24);attachment.Height(24);AutomationProperties::SetAutomationId(attachment,L"layer-attachment");tools.Children().Append(attachment);
+    attachment.Width(iconSlot);attachment.Height(iconSlot);AutomationProperties::SetAutomationId(attachment,L"layer-attachment");tools.Children().Append(attachment);
     controls.emplace_back([weak,attachment,key=std::make_shared<hstring>()](J,J){if(auto self=weak.lock()){
         auto state=object(self->view(),L"attachment");auto next=self->data->theme()+L":"+str(state,L"icon");
         if(*key!=next){*key=next;attachment.Content(icon(str(state,L"icon"),self->data->theme()));}
@@ -93,7 +94,7 @@ void LayersView::init(){
         CapyUi::tooltip(attachment,str(state,L"description"));
     }});
     auto reference=button<Primitives::ToggleButton>(data,L"",[weak]{if(auto self=weak.lock())self->action(O({{L"op",S(L"reference_selection")}}));});
-    reference.Width(24);reference.Height(24);reference.Content(icon(L"reference",data->theme()));
+    reference.Width(iconSlot);reference.Height(iconSlot);reference.Content(icon(L"reference",data->theme()));
     for(auto role:{L"ToggleButtonBackgroundChecked",L"ToggleButtonBackgroundCheckedPointerOver",L"ToggleButtonBackgroundCheckedPressed"})
         reference.Resources().Insert(box_value(role),data->tint(L"text",31));
     AutomationProperties::SetAutomationId(reference,L"layer-reference");actionTooltip(data,reference,[]{return O({{L"type",S(L"layer")},{L"action",O({{L"op",S(L"reference_selection")}})}});});tools.Children().Append(reference);
@@ -123,9 +124,9 @@ void LayersView::init(){
         RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->connectionOverlay.Clip(clip);self->connections();
     }});
     repeater.LayoutUpdated([weak](auto&&,auto&&){if(auto self=weak.lock())self->connections();});
-    footer.Orientation(Orientation::Horizontal);footer.Spacing(data->panelMetric(L"control_spacing"));footer.Padding({8,4,8,4});
+    footer.Orientation(Orientation::Horizontal);footer.Spacing(compound);
     auto footerButton=[&](hstring const& iconName,LocalizedCopy const& text,hstring const& id,std::function<void()> action,hstring const& slot=L""){
-        auto pick=button(data,L"",std::move(action));pick.Width(24);pick.Height(24);pick.Content(icon(iconName,data->theme()));
+        auto pick=button(data,L"",std::move(action));pick.Width(iconSlot);pick.Height(iconSlot);pick.Content(icon(iconName,data->theme()));
         AutomationProperties::SetAutomationId(pick,id);copyName(data,pick,text,true);footer.Children().Append(pick);
         if(!slot.empty())footerButtons.emplace_back(slot,pick);
         return pick;
@@ -173,11 +174,11 @@ void LayersView::init(){
         auto self=weak.lock();if(!self)return;
         self->fitFooter();more.IsEnabled(layer.Size()!=0);more.Opacity(more.IsEnabled()?1.:.36);
     });
-    footer.Children().RemoveAtEnd();footer.Padding({0});
-    footerFrame.Padding({8,4,8,4});
+    footer.Children().RemoveAtEnd();
+    footerFrame.Padding({6,4,6,4});
     footerFrame.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->fitFooter();});
     ColumnDefinition actionsColumn;actionsColumn.Width({1,GridUnitType::Star});footerFrame.ColumnDefinitions().Append(actionsColumn);
-    ColumnDefinition moreColumn;moreColumn.Width({24,GridUnitType::Pixel});footerFrame.ColumnDefinitions().Append(moreColumn);
+    ColumnDefinition moreColumn;moreColumn.Width({iconSlot,GridUnitType::Pixel});footerFrame.ColumnDefinitions().Append(moreColumn);
     footerFrame.Children().Append(footer);Grid::SetColumn(more,1);footerFrame.Children().Append(more);
     Grid::SetRow(footerFrame,2);root.Children().Append(footerFrame);
     pickup=std::make_unique<LayerRowDrag>(shared_from_this());

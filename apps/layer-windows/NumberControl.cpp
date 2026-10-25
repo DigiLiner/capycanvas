@@ -572,7 +572,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         // Compact layer controls retain the same shared value/expression rules
         // and target guards as full numeric controls.
         header.Children().RemoveAt(0);header.Children().InsertAt(0,sliderHost);
-        header.ColumnSpacing(4);header.Height(24);
+        header.ColumnSpacing(4);header.Height(data->controlHeight());
         auto low=str(local->resolve(spec,num(spec,L"min"),O({{L"type",S(L"format")}})),L"text");
         auto high=str(local->resolve(spec,num(spec,L"max"),O({{L"type",S(L"format")}})),L"text");
         std::wstring measure(low.size()>high.size()?low.c_str():high.c_str());

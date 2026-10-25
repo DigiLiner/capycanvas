@@ -335,6 +335,10 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 }else if(panelId==L"layers"||panelId==L"adjustments"||body.view->navigator){
                     body.view->Root().Height(body.view->navigator?272.:480.);
                 }
+                if(panelId==L"layers"){
+                    auto inset=model.HasKey(L"layer_properties")?0.:data->panelMetric(L"inset");
+                    body.view->Root().Margin({0,inset,0,inset});
+                }
             }
             if(inspector&&model.HasKey(L"layer_properties")){
                 inspector->place(bodies.at(L"layers").view->Root(),width,num(placement,L"height"),num(inspector->sizes,L"footer_height",49.),flag(model,L"layer_properties"));

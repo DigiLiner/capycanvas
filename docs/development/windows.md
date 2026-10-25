@@ -398,7 +398,9 @@ parent without changing layer state or history.
 The default layers fixture closes with a focused opacity draft, reopens the same
 private profile, and verifies the saved draft and its clean Undo checkpoint.
 `exercise-layer-drawer.ps1 -Theme dark|light` checks the combined header drawer,
-the six-row floor and seventh-row growth, compact Properties, footer alignment,
+the six-row floor and seventh-row growth, compact Properties, edge-to-edge rows
+with the eye, alpha lock, New layer and Layer properties slots six points in,
+26-point footer slots two points apart,
 Lock/Unlock, Duplicate, Delete and Undo. When Paper is absent, the Layers list
 presents the shared Add paper action after its last row. Its native button keeps
 row sizing, pointer cancellation and keyboard activation. Adding Paper opens its

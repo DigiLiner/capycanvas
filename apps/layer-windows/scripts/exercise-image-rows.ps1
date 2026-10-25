@@ -238,7 +238,8 @@ try{
  }
  $authored=Author-Image 'rotate' $authored {
   Set-CanvasBarVisible $true
-  Invoke-Id 'canvas-bar-transform_rotate_right'
+  Invoke-Id 'canvas-bar-more'
+  Invoke-Id 'transform_rotate_right'
   Set-CanvasBarVisible $false
  }
  $checks.image_affine_authoring='passed'

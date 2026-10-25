@@ -7,7 +7,8 @@
 
 namespace CapyUi {
 struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
-    static constexpr double Gap=4,Inset=6,Offscreen=-100000;
+    static constexpr double Offscreen=-100000;
+    struct Field {FrameworkElement slot{nullptr},element{nullptr};};
     std::shared_ptr<WorkspaceData> data;
     std::function<void()> changed;
     Canvas host{nullptr};
@@ -20,21 +21,23 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     MenuFlyout menu{nullptr};
     OwnedPopup menuOwner;
     WorkspaceShadow shadow;
-    std::vector<FrameworkElement> fields;
+    std::vector<Field> fields;
     Microsoft::UI::Dispatching::DispatcherQueueTimer reappear{nullptr};
     J view,bounds,sizes;
     hstring schema,theme,placement;
     uint64_t request=0;
     size_t shown=0;
+    double tile=36,gap=2,glyph=16;
     bool contact=false,dragging=false,suppressed=false;
 
     void init(Canvas const& root){
         host=root;auto weak=weak_from_this();
-        row.Orientation(Orientation::Horizontal);row.Spacing(Gap);row.Padding({Inset,Inset,Inset,Inset});
-        for(auto panel:{items,completion}){panel.Orientation(Orientation::Horizontal);panel.Spacing(Gap);}
-        caption=label(data,L"");caption.VerticalAlignment(VerticalAlignment::Center);caption.Margin({8,0,8,0});caption.Opacity(.8);
-        more=button(data,L"",[weak]{if(auto self=weak.lock())self->openMenu();});
-        more.MinHeight(40);more.Width(40);more.AllowFocusOnInteraction(false);more.IsTabStop(false);
+        auto style=toolbarUi(data->localization.get(),O({{L"type",S(L"style")},{L"style",S(L"small")}})).GetObject();
+        tile=array(style,L"size").GetNumberAt(1);gap=num(style,L"gap",gap);glyph=num(style,L"icon",glyph);
+        row.Orientation(Orientation::Horizontal);row.Spacing(gap);
+        for(auto panel:{items,completion}){panel.Orientation(Orientation::Horizontal);panel.Spacing(gap);}
+        caption=label(data,L"");caption.VerticalAlignment(VerticalAlignment::Center);caption.Margin({12,0,8,0});caption.Opacity(.8);
+        more=button(data,L"",[weak]{if(auto self=weak.lock())self->openMenu();});tiled(more);
         AutomationProperties::SetAutomationId(more,L"canvas-bar-more");copyName(data,more,data->copyCommon(L"more"),true);
         row.Children().Append(caption);row.Children().Append(items);row.Children().Append(more);row.Children().Append(completion);
         surface.IsHitTestVisible(false);content.Children().Append(surface);content.Children().Append(row);
@@ -58,69 +61,97 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     }
     static J command(J const& item){return object(object(object(item,L"option"),L"Action"),L"state");}
     static J choice(J const& item){return object(object(item,L"option"),L"Choice");}
-    StackPanel labelled(hstring const& glyph,hstring const& text,bool menu=false){
+    hstring accentTheme()const{
+        auto ink=data->brush(L"accent_foreground").Color();
+        return 299*ink.R+587*ink.G+114*ink.B>128000?L"dark":L"light";
+    }
+    void quiet(Control const& control){control.AllowFocusOnInteraction(false);control.IsTabStop(false);}
+    void tiled(Control const& control){
+        double r=tile*.5*CornerFit;
+        control.Width(tile);control.Height(tile);control.Padding({0});control.CornerRadius({r,r,r,r});
+        control.HorizontalContentAlignment(HorizontalAlignment::Stretch);control.VerticalContentAlignment(VerticalAlignment::Stretch);quiet(control);
+    }
+    void worded(Control const& control,double padding=10){
+        control.Height(data->controlHeight());control.Padding({padding,0,padding,0});control.CornerRadius(data->controlCorner());
+        control.VerticalAlignment(VerticalAlignment::Center);quiet(control);
+    }
+    FrameworkElement face(hstring const& name,hstring const& iconTheme,bool group){
+        Grid result;auto image=icon(name,iconTheme,glyph);
+        image.HorizontalAlignment(HorizontalAlignment::Center);image.VerticalAlignment(VerticalAlignment::Center);result.Children().Append(image);
+        if(group)result.Children().Append(ToolGroupMarker(data));
+        return result;
+    }
+    StackPanel labelled(hstring const& name,hstring const& text,bool menu=false,hstring const& iconTheme={}){
         StackPanel inner;inner.Orientation(Orientation::Horizontal);inner.Spacing(6);
-        if(!glyph.empty())inner.Children().Append(icon(glyph,data->theme()));
-        auto caption=label(data,text);caption.VerticalAlignment(VerticalAlignment::Center);caption.FontWeight(Windows::UI::Text::FontWeights::Normal());
-        inner.Children().Append(caption);
+        if(!name.empty())inner.Children().Append(icon(name,iconTheme.empty()?data->theme():iconTheme,glyph));
+        auto words=label(data,text,true);words.VerticalAlignment(VerticalAlignment::Center);
+        inner.Children().Append(words);
         if(menu)inner.Children().Append(icon(L"chevron-down",data->theme(),12));
         return inner;
     }
-    template<typename T> void compact(T const& control,hstring const& id,hstring const& name){
-        control.MinHeight(40);control.Padding({12,0,12,0});control.AllowFocusOnInteraction(false);control.IsTabStop(false);
-        AutomationProperties::SetAutomationId(control,id);AutomationProperties::SetName(control,name);tooltip(control,name);
-    }
+    FrameworkElement spaced(FrameworkElement const& element){element.Margin({ControlClearance,ControlClearance,ControlClearance,ControlClearance});return element;}
     FrameworkElement segments(J const& spec){
         auto id=str(spec,L"id");auto list=array(spec,L"items");auto weak=weak_from_this();
-        StackPanel group;group.Orientation(Orientation::Horizontal);
+        StackPanel group;group.Orientation(Orientation::Horizontal);group.VerticalAlignment(VerticalAlignment::Center);
         AutomationProperties::SetAutomationId(group,L"canvas-bar-choice-"+id);AutomationProperties::SetName(group,str(spec,L"label"));
+        double r=data->panelMetric(L"control_radius")*CornerFit;
         for(uint32_t i=0;i<list.Size();++i){
             auto entry=list.GetObjectAt(i);auto action=object(entry,L"action");
             auto toggle=button<Primitives::ToggleButton>(data,L"",[weak,action]{if(auto self=weak.lock()){self->send(action);self->restore();}});
-            toggle.Content(labelled(str(entry,L"icon"),str(entry,L"label")));
-            compact(toggle,L"canvas-bar-choice-"+id+L"-"+to_hstring(i),str(entry,L"label"));
-            double left=i==0?6:0,right=i+1==list.Size()?6:0;toggle.CornerRadius({left,right,right,left});
+            toggle.Content(labelled(str(entry,L"icon"),str(entry,L"label")));worded(toggle,8);toggle.Background(data->brush(L"input"));
+            AutomationProperties::SetAutomationId(toggle,L"canvas-bar-choice-"+id+L"-"+to_hstring(i));AutomationProperties::SetName(toggle,str(entry,L"label"));tooltip(toggle,str(entry,L"label"));
+            double left=i==0?r:0,right=i+1==list.Size()?r:0;toggle.CornerRadius({left,right,right,left});
             group.Children().Append(toggle);
         }
-        return group;
+        return spaced(group);
     }
     FrameworkElement dropdown(J const& spec){
         auto id=str(spec,L"id");auto weak=weak_from_this();
-        Button result=button(data,L"",[weak,id]{if(auto self=weak.lock())self->openChoice(id);});
-        compact(result,L"canvas-bar-choice-"+id,str(spec,L"label"));
-        return result;
+        Button result=button(data,L"",[weak,id]{if(auto self=weak.lock())self->openChoice(id);});worded(result);
+        AutomationProperties::SetAutomationId(result,L"canvas-bar-choice-"+id);AutomationProperties::SetName(result,str(spec,L"label"));tooltip(result,str(spec,L"label"));
+        return spaced(result);
     }
     FrameworkElement menuField(J const& item){
-        auto id=str(item,L"menu");auto weak=weak_from_this();
+        auto id=str(item,L"menu");auto weak=weak_from_this();bool iconOnly=flag(item,L"icon_only");
         Button result=button(data,L"",[weak,id]{if(auto self=weak.lock())self->openChoice(id);});
-        result.Content(labelled(str(item,L"icon"),str(item,L"label"),true));result.MinHeight(40);result.Padding({12,0,12,0});
-        result.AllowFocusOnInteraction(false);result.IsTabStop(false);
+        if(iconOnly){tiled(result);result.Content(face(str(item,L"icon"),data->theme(),true));}
+        else{worded(result);result.Content(labelled(str(item,L"icon"),str(item,L"label"),true));}
         AutomationProperties::SetAutomationId(result,L"canvas-bar-menu-"+id);AutomationProperties::SetName(result,str(item,L"label"));
-        return explainable(result);
+        auto shell=explainable(result);
+        return iconOnly?FrameworkElement(shell):spaced(shell);
     }
     FrameworkElement field(J const& item){
         if(!str(item,L"menu").empty())return menuField(item);
         if(auto spec=choice(item);spec.Size())return flag(spec,L"segmented")?segments(spec):dropdown(spec);
         auto option=object(object(item,L"option"),L"Action");auto state=object(option,L"state");auto id=str(state,L"id");
+        bool iconOnly=flag(item,L"icon_only"),accented=flag(item,L"accent");
         auto weak=weak_from_this();
         auto activate=[weak,id]{if(auto self=weak.lock()){self->send(O({{L"type",S(L"invoke")},{L"command",S(id)}}));self->restore();}};
         Primitives::ButtonBase result=flag(option,L"checkable")?Primitives::ButtonBase(button<Primitives::ToggleButton>(data,L"",activate)):Primitives::ButtonBase(button(data,L"",activate));
-        StackPanel inner;inner.Orientation(Orientation::Horizontal);inner.Spacing(6);
-        if(auto name=str(state,L"icon");!name.empty())inner.Children().Append(icon(name,data->theme()));
-        auto text=label(data,str(item,L"label"));text.VerticalAlignment(VerticalAlignment::Center);text.FontWeight(Windows::UI::Text::FontWeights::Normal());inner.Children().Append(text);
-        result.Content(inner);result.MinHeight(40);result.Padding({12,0,12,0});
-        result.AllowFocusOnInteraction(false);result.IsTabStop(false);
-        if(flag(item,L"accent")){
-            result.Background(accent(data));result.Resources().Insert(box_value(L"ButtonBackgroundDisabled"),accent(data));text.Foreground(data->brush(L"accent_foreground"));
-            text.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+        auto iconTheme=accented?accentTheme():data->theme();
+        if(iconOnly){tiled(result);result.Content(face(str(state,L"icon"),iconTheme,false));}
+        else{
+            worded(result);auto inner=labelled(str(state,L"icon"),str(item,L"label"),false,iconTheme);result.Content(inner);
+            if(accented)inner.Children().GetAt(inner.Children().Size()-1).as<TextBlock>().Foreground(data->brush(L"accent_foreground"));
+        }
+        if(accented){
+            result.Background(accent(data));
+            for(auto role:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed",L"ButtonBackgroundDisabled"})result.Resources().Insert(box_value(role),accent(data));
         }
         AutomationProperties::SetAutomationId(result,L"canvas-bar-"+id);AutomationProperties::SetName(result,str(state,L"label"));
-        return explainable(result);
+        auto shell=explainable(result);
+        return iconOnly?FrameworkElement(shell):spaced(shell);
+    }
+    FrameworkElement divided(FrameworkElement const& element){
+        StackPanel group;group.Orientation(Orientation::Horizontal);group.Spacing(gap);
+        Border slot;slot.Width(DividerSlot);slot.Height(tile);slot.Child(dividerLine(data,false));
+        group.Children().Append(slot);group.Children().Append(element);
+        return group;
     }
     void update(FrameworkElement const& element,J const& item){
         if(!str(item,L"menu").empty()){
             auto state=command(item);bool enabled=!state.Size()||flag(state,L"enabled");auto button=explained(element);
-            explain(element.as<Grid>(),button,enabled,state.Size()?str(state,L"tooltip"):str(item,L"label"),str(state,L"disabled_reason"));
+            explain(element.as<Grid>(),button,enabled,str(item,L"label"),str(state,L"disabled_reason"));
             button.Opacity(enabled?1:.36);
             return;
         }
@@ -143,13 +174,14 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
     }
     void restore(){
         uint32_t index=0;
-        for(auto list:{L"items",L"completion"})for(auto item:array(view,list))if(index<fields.size())update(fields[index++],item.GetObject());
+        for(auto list:{L"items",L"completion"})for(auto item:array(view,list))if(index<fields.size())update(fields[index++].element,item.GetObject());
     }
     hstring signature(J const& next)const{
         std::wstring key=std::wstring(object(next,L"context").Stringify())+L"|"+std::wstring(str(next,L"label"));
         for(auto list:{L"items",L"completion"})for(auto value:array(next,list)){
             auto item=value.GetObject();key+=L"|"+std::wstring(str(item,L"label"))+L":"+std::wstring(str(command(item),L"id"))
-                +L":"+std::wstring(str(item,L"menu"))+L":"+std::wstring(str(item,L"icon"))+(flag(item,L"accent")?L":a":L"");
+                +L":"+std::wstring(str(item,L"menu"))+L":"+std::wstring(str(item,L"icon"))+(flag(item,L"accent")?L":a":L"")
+                +(flag(item,L"icon_only")?L":i":L"")+(flag(item,L"separated")?L":s":L"");
             if(auto spec=choice(item);spec.Size()){
                 key+=L":"+std::wstring(str(spec,L"id"))+(flag(spec,L"segmented")?L":s":L":d");
                 for(auto entry:array(spec,L"items"))key+=L","+std::wstring(str(entry.GetObject(),L"label"));
@@ -162,9 +194,13 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         items.Children().Clear();completion.Children().Clear();fields.clear();sizes=J{};placement=L"";
         caption.Text(str(view,L"label"));caption.Visibility(str(view,L"label").empty()?Visibility::Collapsed:Visibility::Visible);
         for(auto [list,panel]:{std::pair{L"items",items},std::pair{L"completion",completion}})
-            for(auto value:array(view,list)){auto made=field(value.GetObject());panel.Children().Append(made);fields.push_back(made);}
+            for(auto value:array(view,list)){
+                auto item=value.GetObject();auto made=field(item);
+                Field entry{flag(item,L"separated")?divided(made):made,made};
+                panel.Children().Append(entry.slot);fields.push_back(entry);
+            }
         surface.Fill(data->glass(L"panel"));
-        more.Content(icon(L"more",data->theme()));
+        more.Content(face(L"more",data->theme(),false));
     }
     void Apply(J const& state){
         auto value=state.GetNamedValue(L"canvas_bar",JsonValue::CreateNullValue());
@@ -183,13 +219,13 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         std::vector<double> widths;
         double height=0;
         auto extent=[&](FrameworkElement const& element){element.Measure({INFINITY,INFINITY});height=std::max(height,double(element.DesiredSize().Height));return double(element.DesiredSize().Width);};
-        for(auto const& item:fields){item.Visibility(Visibility::Visible);widths.push_back(extent(item));}
+        for(auto const& item:fields){item.slot.Visibility(Visibility::Visible);widths.push_back(extent(item.slot));}
         auto count=array(view,L"items").Size();
         A itemWidths,completionWidths;
         for(size_t i=0;i<widths.size();++i)(i<count?itemWidths:completionWidths).Append(N(widths[i]));
-        return O({{L"label",N(caption.Visibility()==Visibility::Visible?extent(caption)+16:0)},
+        return O({{L"label",N(caption.Visibility()==Visibility::Visible?extent(caption):0)},
             {L"items",itemWidths},{L"completion",completionWidths},{L"more",N(extent(more))},
-            {L"height",N(height+2*Inset)},{L"gap",N(Gap)},{L"padding",N(Inset)}});
+            {L"height",N(std::max(height,tile))},{L"gap",N(gap)},{L"padding",N(0)}});
     }
     void place(){
         if(!view.Size()){present(false);return;}
@@ -202,7 +238,7 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
             auto result=object(reply,L"result");
             self->bounds=object(result,L"bounds");self->shown=size_t(num(result,L"items"));
             for(size_t i=0;i<self->fields.size()&&i<array(self->view,L"items").Size();++i)
-                self->fields[i].Visibility(i<self->shown?Visibility::Visible:Visibility::Collapsed);
+                self->fields[i].slot.Visibility(i<self->shown?Visibility::Visible:Visibility::Collapsed);
             self->present(self->bounds.Size()!=0);
         });
     }
@@ -243,7 +279,8 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         appendGlass(regions,frame,reference,{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius},true);
     }
     FrameworkElement anchorFor(hstring const& id)const{
-        for(auto const& element:fields){
+        for(auto const& entry:fields){
+            auto const& element=entry.element;
             if(AutomationProperties::GetAutomationId(element)==L"canvas-bar-choice-"+id)return element;
             if(auto shell=element.try_as<Grid>();shell&&AutomationProperties::GetAutomationId(explained(shell))==L"canvas-bar-menu-"+id)return shell;
         }
