@@ -29,6 +29,64 @@ fn scene_captures_reject_nonfinite_effect_phases_before_preparing_pixels() {
     }
 }
 
+#[cfg(not(target_arch="wasm32"))]
+fn assert_constant_capture_prepared(snapshot:&mut SnapshotRenderer,paper:OccurrenceHandle) {
+    let scene=snapshot.scene.clone();let scope=snapshot.scope.clone();
+    let view=scene.view().with_scope(&scope).with_offset(snapshot.offset);
+    assert!(snapshot.renderer.startup.is_some(),"the capture must start with native staged recipes");
+    assert!(!snapshot.scene_pipelines_ready);
+    let mut display=snapshot.renderer.scene_pipelines.effects(&snapshot.renderer);
+    for (layers,execution) in scene::effect_chains(view,scene::EffectPreparation::Display) {
+        display.prepare(&snapshot.renderer,view,&layers,execution,snapshot.time,0,snapshot.blend_space).unwrap();
+    }
+    display.compile();
+    assert!(!display.chain_ready(view,&[paper],effects::Execution::Fused,snapshot.blend_space),
+        "the old display-only policy must omit this constant fallback recipe");
+    pollster::block_on(snapshot.prepare_scene_pipelines()).unwrap();
+    assert!(snapshot.renderer.scene.as_ref().unwrap().effects.chain_ready(view,&[paper],effects::Execution::Fused,snapshot.blend_space),
+        "constant Paper Fused must be ready before capture encoding");
+}
+
+#[cfg(not(target_arch="wasm32"))]
+#[test]
+fn staged_off_canvas_captures_prepare_constant_paper_and_keep_its_frame_extent() {
+    use layer_core::{ContentBoundsRequest,ContentScope,Rect};
+    let extent=[129,97];
+    let reference=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    assert_ne!(reference.adapter().get_info().device_type,wgpu::DeviceType::Cpu);
+    for (origin,paint_offset) in [([-17,-13],[-17,-13]),([0,0],[17,13])] {
+        let mut document=Document::new(PortableId::random(),extent[0],extent[1],
+            layer_core::DocumentNames {paint:"Empty off-canvas paint".into(),paper:"Paper".into()});
+        let paper=document.scene().order().iter().copied().find(|&handle|document.scene().effect(handle)
+            .is_some_and(|effect|layer_core::paper::is_paper(effect.program))).unwrap();
+        let color=document.scene().effect(paper).unwrap().constant_color().unwrap().linear_in(document.composition().color.space).unwrap();
+        let descriptor=document.composition().color.paint_descriptor();
+        paint_mut(&mut document).raster=RasterRevision::backed(RasterData {tiles:[(TileKey {plane:RasterPlane::Color,coordinate:[0;2]},
+            RasterTile::backed(TileBlob::encode(descriptor,&vec![0;descriptor.byte_len([PAGE_SIZE;2]).unwrap()]).unwrap()))].into(),..Default::default()});
+        let paint=paint_occurrence(&document);document.artwork.occurrences.get_mut(paint).unwrap().offset=paint_offset;
+        refresh(&mut document);
+        let staged=crate::test_support::staged_renderer(&reference,document.composition().color);
+        let gpu=staged.snapshot_gpu();
+        let mut capture=gpu.capture_scene(document.snapshot(),SceneScope::All,Default::default()).unwrap();
+        capture.renderer=staged;
+        let output=[173,139];capture.capture_window(origin,output).unwrap();
+        assert_constant_capture_prepared(&mut capture,paper);
+        assert_eq!(capture.extent(),output);
+        let pixels=capture.read_region([0,0,output[0],output[1]]).unwrap();
+        assert_eq!(pixels.len(),(output[0]*output[1]) as usize);
+        for (index,actual) in pixels.iter().enumerate() {
+            let point=[origin[0]+(index as u32%output[0]) as i64,origin[1]+(index as u32/output[0]) as i64];
+            let inside=(0..2).all(|axis|point[axis]>=0&&point[axis]<i64::from(extent[axis]));
+            let expected=if inside {color}else{[0.;4]};
+            for channel in 0..4 {assert!((actual[channel]-expected[channel]).abs()<1e-6,
+                "origin={origin:?}, point={point:?}, actual={actual:?}, expected={expected:?}");}
+        }
+        let request=ContentBoundsRequest::new(&document,ContentScope::Visible);
+        assert_eq!(request.known_bounds(),None);
+        assert_eq!(pollster::block_on(gpu.content_bounds(request,Default::default())).unwrap(),Rect::from_extent(extent));
+    }
+}
+
 fn hide_paper(document:&mut Document) {
     let paper=document.scene().children(None)[1];document.artwork.occurrences.get_mut(paper).unwrap().visible=false;
 }

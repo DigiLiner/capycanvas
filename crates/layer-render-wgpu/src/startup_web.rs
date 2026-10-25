@@ -21,6 +21,7 @@ struct Queue {
     busy: Option<(u8, bool)>,
     error: Option<String>,
 }
+#[derive(Clone)]
 pub(crate) struct Compiler {
     queue: Rc<RefCell<Queue>>,
     device: PipelineDevice,

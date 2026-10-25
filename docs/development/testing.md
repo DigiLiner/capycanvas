@@ -93,6 +93,16 @@ sampling math and borders. Snapshot tests compare sparse capture with full-page
 capture and preserve default-one mask deviations. The cold default-one mask
 capture uses a fresh device and requires the scene-composition pipelines to
 remain unused; a warm native device can otherwise conceal missing preparation.
+Cold effect captures run `scene::capture_readiness_tests` and
+`staged_off_canvas_captures_prepare_constant_paper_and_keep_its_frame_extent`.
+They require actual fused jobs to defer before encoding, preserve ordered jobs
+and source ranges, then resume with the expected pixels. The Web journey
+`node apps/layer-web/test.mjs --capture-readiness` covers hidden separators,
+Merge Visible and Undo, channel-input prefixes, and GPU lookup preparation.
+It records asynchronous pipeline creation and dispatch in the page and workers;
+run both themes on hardware WebGPU. Crop followed by Reveal All also runs in
+`--image-commands` to exercise constant-generator fallbacks outside the canvas.
+
 GTK's `native_late_shader_failure_after_startup` completes startup, then queues
 a compiler failure and requires the render owner to return its recorded cause
 without another startup request. Run it on the private hardware test display.

@@ -300,7 +300,7 @@ impl SnapshotRenderer {
         let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
         let prepared = (|| {
             if !matches!(self.scope, SceneScope::Raw(_)) {
-                for (layers, execution) in scene::startup_effect_chains(view) {
+                for (layers, execution) in scene::effect_chains(view,scene::EffectPreparation::Capture) {
                     scene.effects.prepare(r, view, &layers, execution, self.time, 0, self.blend_space)?;
                 }
             }
@@ -599,7 +599,7 @@ impl SnapshotRenderer {
                 Err(GpuRasterError::DeferredObjectWork)=> {
                     let r=&mut self.renderer;
                     let mut scene=r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
-                    let result=scene.drain_exact_objects_async(r).await;
+                    let result=scene.prepare_capture_work_async(r).await;
                     r.scene=Some(scene);
                     result?;
                     self.control.check()?;

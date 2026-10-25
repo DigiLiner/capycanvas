@@ -156,7 +156,7 @@ pub(super) enum Pipeline {
     Compute(Deferred<wgpu::ComputePipeline>),
 }
 impl Pipeline {
-    fn ready(&self) -> bool { match self { Self::Render(p)=>p.ready(),Self::Compute(p)=>p.ready() } }
+    pub(super) fn ready(&self) -> bool { match self { Self::Render(p)=>p.ready(),Self::Compute(p)=>p.ready() } }
     #[cfg(not(target_arch="wasm32"))]
     fn compile(&self) { match self {Self::Render(p)=>{p.compile();},Self::Compute(p)=>{p.compile();}} }
     #[cfg(target_arch="wasm32")]
@@ -317,6 +317,12 @@ impl Effects {
     }
     pub fn encode_preparation(&mut self, encoder: &mut crate::submission::CommandEncoder) {
         self.preparation.encode(encoder);
+    }
+    pub(super) fn preparation_ready(&self)->bool {
+        self.preparation.pending.iter().all(|work|match work {
+            preparation::Work::Dispatch(dispatch)=>dispatch.pipeline.ready(),
+            preparation::Work::Copy {..}=>true,
+        })
     }
     #[cfg(test)]
     pub fn preparation_count(&self) -> u64 {

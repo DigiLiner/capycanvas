@@ -69,7 +69,7 @@ fn cancelled_object_captures_keep_output_unpublished() {
     let mut encoder = submission::CommandEncoder::new(&live.device, &Default::default());
     assert!(matches!(scene.capture_region(&mut live, packet(doc.scene(), [32; 2]), &texture, PixelRect::full([32; 2]), scene::Output::Artwork(None), &mut encoder), Err(GpuRasterError::DeferredObjectWork)));
     live.snapshot_cancelled = Some(Arc::new(AtomicBool::new(true)));
-    assert!(matches!(pollster::block_on(scene.drain_exact_objects_async(&mut live)), Err(GpuRasterError::Color(message)) if message == "Snapshot capture cancelled"));
+    assert!(matches!(pollster::block_on(scene.prepare_capture_work_async(&mut live)), Err(GpuRasterError::Color(message)) if message == "Snapshot capture cancelled"));
     let mut reader = capture(doc).unwrap();
     reader.control().cancel();
     assert!(reader.read_region([0, 0, 32, 32]).is_err());

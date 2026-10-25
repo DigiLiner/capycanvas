@@ -139,7 +139,7 @@ export async function checkImageCommands({call,evaluate,settle,device=false}) {
       let v=await view();
       assert.deepEqual([v.values,v.constrain,v.unit],[[width,height],true,'pixels'],`${kind}: the dialog starts at the current size with Constrain proportions`);
       assert.equal(await evaluate(`document.querySelector('${dialog} footer .suggested-action').disabled`),true,`${kind}: Apply is disabled at the current size`);
-      const half=[width/2,height/2];
+      const half=[width/2,height/2].map(Math.round);
       if(kind==='touch') {
         await tap(await middle(`${dialog} .size-dialog-check input`),kind);
         await wait('!layerApp.state().layer_tools.image_size.constrain');
@@ -225,7 +225,7 @@ export async function checkImageCommands({call,evaluate,settle,device=false}) {
 
       await invoke('fit_canvas');await invoke('zoom_out');
       await openCrop(kind);
-      assert.equal(await evaluate(`document.querySelector('${bar} [data-command="crop_fit_content"]')?.textContent.trim()`),'Fit Crop to Content',`${kind}: the crop bar offers Fit Crop to Content`);
+      assert.equal(await evaluate(`document.querySelector('${bar} [data-command="crop_fit_content"]')?.textContent.trim()`),'Fit Content',`${kind}: the crop bar offers Fit Crop to Content`);
       if(await pressBar('crop_fit_content',kind)==='more')console.log(`${kind}: Fit Content is in More at this window width`);
       await wait(`layerApp.state().tool_settings.find(s=>s.id==='crop_width').value<${width*.7}`);
       near(await setting('crop_width'),fill[0],3,`${kind}: Fit Content frames the fill's width`);

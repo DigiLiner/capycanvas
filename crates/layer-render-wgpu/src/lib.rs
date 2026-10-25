@@ -997,6 +997,8 @@ pub struct WgpuRasterizer {
     #[cfg(target_arch = "wasm32")]
     snapshot_decode_wake: Option<Arc<std::sync::Mutex<Option<std::task::Waker>>>>,
     transforms: Option<paint_transform::PaintTransforms>,
+    #[cfg(target_arch="wasm32")]
+    preparation_compiler: Option<startup::Compiler>,
     transform_preview: Option<layer_render::TransformPreview>,
     transform_damage: Vec<(SourceTarget, PixelRect)>,
     /// Document regions to recompose whose layers' own pixels are unchanged.
@@ -1401,6 +1403,8 @@ impl WgpuRasterizer {
             #[cfg(target_arch = "wasm32")]
             snapshot_decode_wake: None,
             transforms,
+            #[cfg(target_arch="wasm32")]
+            preparation_compiler: None,
             transform_preview: None,
             transform_damage: Vec::with_capacity(2),
             document_damage: Vec::new(),

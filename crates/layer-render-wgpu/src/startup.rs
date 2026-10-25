@@ -91,7 +91,7 @@ impl DocumentKey {
             gray: scene.targets().any(|t|scene.color_mode(t)!=layer_core::color::LayerColorMode::FullColor),
             watercolor: scene.targets().any(|t|scene.raster(t).is_some_and(|r|r.try_data().is_none_or(|data|data.is_ok_and(|data|data.watercolor.is_some())))),
             blend_space: document.composition().blend,
-            chains: scene::startup_effect_chains(scene).into_iter().map(|(handles, execution)| {
+            chains: scene::effect_chains(scene,scene::EffectPreparation::Display).into_iter().map(|(handles, execution)| {
                 let identity=effects::identity_chain(scene,&handles);
                 let normal=effects::normal_chain(scene,&handles);
                 (handles.into_iter().filter_map(|h| {
@@ -403,7 +403,7 @@ impl WgpuRasterizer {
             required.enqueue(&startup.compiler, DOCUMENT);
             startup.document = required;
             startup.document_key = Some(shader);
-            let chains = scene::startup_effect_chains(document.scene());
+            let chains = scene::effect_chains(document.scene(),scene::EffectPreparation::Display);
             let cached = self.scene.as_ref().map(|s| &s.effects).or(self.validated_effects.as_ref());
             let blend_space = document.composition().blend;
             if !chains.iter().all(|(layers, execution)| cached.is_some_and(|cache| cache.chain_ready(document.scene(), layers, *execution, blend_space))) {

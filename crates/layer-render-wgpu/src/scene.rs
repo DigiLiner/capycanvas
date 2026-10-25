@@ -1633,7 +1633,11 @@ impl Scene {
         self.exact_object_results.flush_retired(encoder);
     }
 
-    pub(crate) async fn drain_exact_objects_async(&mut self,r:&mut WgpuRasterizer)->Result<(),GpuRasterError> {
+    pub(crate) async fn prepare_capture_work_async(&mut self,r:&mut WgpuRasterizer)->Result<(),GpuRasterError> {
+        #[cfg(not(target_arch="wasm32"))]
+        self.effects.compile();
+        #[cfg(target_arch="wasm32")]
+        self.effects.compile_async().await.map_err(GpuRasterError::Effect)?;
         while self.exact_object_results.pending() || r.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending()) {
             if r.snapshot_cancelled.as_ref().is_some_and(|cancelled|cancelled.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(GpuRasterError::Color("Snapshot capture cancelled".into()));
@@ -1672,7 +1676,7 @@ impl Scene {
                     r.uploads.finish(encoder);
                     std::mem::replace(encoder,crate::submission::CommandEncoder::new(&r.device,&Default::default())).submit(&r.queue);
                     crate::local_tone::wait_async(&r.device,&r.queue).await.map_err(GpuRasterError::Color)?;
-                    self.drain_exact_objects_async(r).await?;
+                    self.prepare_capture_work_async(r).await?;
                 },
                 result=> {result?;break;},
             }
@@ -1690,7 +1694,7 @@ impl Scene {
                         r.uploads.finish(encoder);
                         std::mem::replace(encoder,crate::submission::CommandEncoder::new(&r.device,&Default::default())).submit(&r.queue);
                         crate::local_tone::wait_async(&r.device,&r.queue).await.map_err(GpuRasterError::Color)?;
-                        self.drain_exact_objects_async(r).await?;
+                        self.prepare_capture_work_async(r).await?;
                     },
                     result=> {result?;break;},
                 }
@@ -1952,21 +1956,39 @@ impl Scene {
         self.encode_query_jobs(r, encoder, None)
     }
 
+    fn effect_jobs_ready(&self,r:&WgpuRasterizer)->bool {
+        if self.effects.preparation_ready() && self.jobs.iter().all(|job|!matches!(job,
+            Job::Effect {prepared,..} if !prepared.pipeline.ready())) {return true;}
+        let compiler=r.startup.as_ref().map(|startup|&startup.compiler);
+        #[cfg(target_arch="wasm32")]
+        let compiler=compiler.or(r.preparation_compiler.as_ref());
+        if let Some(compiler)=compiler {
+            self.effects.enqueue(compiler,startup::DOCUMENT);
+            compiler.start();
+            return false;
+        }
+        #[cfg(not(target_arch="wasm32"))]
+        {self.effects.compile();true}
+        #[cfg(target_arch="wasm32")]
+        {false}
+    }
     fn encode_query_jobs(&mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, grid: Option<[u32;4]>) -> Result<(), GpuRasterError> {
         if self.ordered {return self.encode_ordered_jobs(r,encoder).and_then(|ready|if ready {Ok(())}else {Err(GpuRasterError::DeferredObjectWork)});}
+        if !self.effect_jobs_ready(r) {self.discard_unencoded_jobs();return Err(GpuRasterError::DeferredObjectWork);}
         let result = self.encode_jobs_inner(r, encoder, grid);
         if result.is_err() {self.discard_unencoded_jobs();}
         result
     }
 
     fn encode_ordered_jobs(&mut self,r:&mut WgpuRasterizer,encoder:&mut submission::CommandEncoder)->Result<bool,GpuRasterError> {
+        if !self.effect_jobs_ready(r) {return Ok(false);}
         let end=self.jobs.iter().position(|job|matches!(job,Job::DecodedTile(source) if source.prepared().is_none())).unwrap_or(self.jobs.len());
         let remaining=self.jobs.split_off(end);
         let ranges=std::mem::take(&mut self.source_jobs);
         self.source_jobs=ranges.iter().filter_map(|range|{let end=range.end.min(end);(range.start<end).then_some(range.start..end)}).collect();
         let result=self.encode_jobs_inner(r,encoder,None);
         self.jobs=remaining;
-        self.source_jobs=ranges.into_iter().filter_map(|range|{let start=range.start.max(end);(start<range.end).then_some(start-end..range.end-end)}).collect();
+        self.source_jobs=ranges.into_iter().filter_map(|range|{let start=range.start.max(end);(start<range.end).then(||start-end..range.end-end)}).collect();
         result?;
         if let Some(Job::DecodedTile(source))=self.jobs.first() {
             r.source_receipt=Some(Arc::downgrade(source));source.prepare(r)?;return Ok(false);
@@ -2536,13 +2558,16 @@ fn fuses_after(scene: SceneView<'_>, head: OccurrenceHandle, next: OccurrenceHan
         && !(chain >= effects::MASK_SLOTS && occurrence.mask.as_ref().is_some_and(|mask| mask.enabled))
         && fusable_adjustment(scene, next)
 }
-pub(super) fn startup_effect_chains(scene: SceneView<'_>) -> Vec<(Vec<OccurrenceHandle>, effects::Execution)> {
+pub(super) enum EffectPreparation { Display, Capture }
+
+pub(super) fn effect_chains(scene: SceneView<'_>, preparation:EffectPreparation) -> Vec<(Vec<OccurrenceHandle>, effects::Execution)> {
     let mut result = Vec::new();
     let mut parents = std::collections::BTreeSet::new();
     for &handle in scene.order() {
         parents.insert(scene.evaluation_parent(handle));
         if !scene.visible(handle) { continue; }
-        if let Some(effect) = scene.effect(handle).filter(|effect| effect.constant_color().is_none() || stack::support(scene,0)!=Some(0)) {
+        if let Some(effect) = scene.effect(handle).filter(|effect| effect.constant_color().is_none()
+            || matches!(preparation,EffectPreparation::Capture) || stack::support(scene,0)!=Some(0)) {
             if effect.program.image_boundary() {
                 for pass in 0..effect.program.passes.len().max(1) { result.push((vec![handle], effects::Execution::Image(pass))); }
                 if effect.program.passes.is_empty() && effect.program.resolution==layer_core::EffectResolution::Display {
@@ -2633,3 +2658,6 @@ fn query_grid_size([x,y,w,h]:[u32;4])->[u32;2] {
 #[cfg(test)]
 #[path="scene/display_backup_tests.rs"]
 mod display_backup_tests;
+
+#[cfg(test)]
+mod capture_readiness_tests;

@@ -205,6 +205,16 @@ work; its separate diagnostics accessor records only bounded timestamp work.
 Empty or diagnostic submissions can overlap viewport frames without hiding real
 artwork dependencies from native presentation.
 
+Capture preparation includes constant-generator shader fallbacks. Exact bounds
+and image captures can extend outside the composition after a crop or offset;
+boundary tiles cannot always use a constant fill. Display startup retains its
+in-frame constant folding, while captures prepare the complete effect recipes
+before encoding on their private renderer.
+Scene encoding also checks each actual effect job and pending lookup dispatch.
+A missing recipe queues compilation and defers encoding; capture workers prepare
+the discovered recipes before retrying. Startup enumeration prefetches recipes
+and does not establish readiness for a different effect chain or capture output.
+
 Dab and style upload growth checks the device's buffer, storage-binding and
 dynamic-offset limits before replacing either GPU buffer. The preflight includes
 reordered duplicate dabs and validates batch ranges and source indices before

@@ -359,7 +359,7 @@ fn exact_queries_return_typed_worker_refusals_without_empty_submission_loops() {
         let cancelled=Arc::new(std::sync::atomic::AtomicBool::new(false));r.snapshot_cancelled=Some(cancelled.clone());
         let (done,wait)=std::sync::mpsc::channel();
         let watchdog=std::thread::spawn(move||if wait.recv_timeout(std::time::Duration::from_secs(5)).is_err() {cancelled.store(true,std::sync::atomic::Ordering::Release);});
-        let result=pollster::block_on(compositor.drain_exact_objects_async(&mut r));
+        let result=pollster::block_on(compositor.prepare_capture_work_async(&mut r));
         let _=done.send(());watchdog.join().unwrap();
         let expected=if busy {GpuRasterError::Busy}else {GpuRasterError::Memory(layer_core::memory::MemoryError)};
         assert_eq!(result,Err(expected));assert!(r.metrics.object_drain_submissions<4);

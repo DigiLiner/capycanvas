@@ -342,10 +342,10 @@ fn auxiliary_lookup_is_pointwise_and_stays_out_of_neighbor_fusion_chains() {
     assert!(!lut.program.image_boundary());assert!(lut.program.fusion_boundary());
     let exposure=EffectInstance::new(fixture("exposure").program());let invert=EffectInstance::new(fixture("invert").program());let source=pattern(&[[0.2,0.4,0.6,1.]]);
     let document=effect_document(&[exposure.clone(),lut.clone(),invert.clone(),source.clone()],[256;2],Default::default());let lut_h=document.scene().order()[1];
-    let chains=scene::startup_effect_chains(document.scene());
+    let chains=scene::effect_chains(document.scene(),scene::EffectPreparation::Display);
     assert!(chains.iter().any(|(chain,execution)|chain[0]==lut_h && chain.len()==1 && *execution==crate::effects::Execution::Fused));
     assert!(chains.iter().all(|(chain,_)|chain.len()==1 || chain.iter().all(|h|*h!=lut_h)));
-    let ordinary=effect_document(&[exposure.clone(),invert,source],[256;2],Default::default());assert!(scene::startup_effect_chains(ordinary.scene()).iter().any(|(chain,_)|chain.len()==2));
+    let ordinary=effect_document(&[exposure.clone(),invert,source],[256;2],Default::default());assert!(scene::effect_chains(ordinary.scene(),scene::EffectPreparation::Display).iter().any(|(chain,_)|chain.len()==2));
     let invalid=effect_document(&[lut,exposure],[256;2],Default::default());let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();let mut scene=scene::Scene::new(&r).unwrap();
     assert!(scene.effects.prepare(&r,invalid.scene(),invalid.scene().order(),crate::effects::Execution::Fused,0.,0,Default::default()).is_err());
 }
