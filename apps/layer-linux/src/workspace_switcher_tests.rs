@@ -1079,6 +1079,114 @@ fn native_workspace_manager_lifecycle() {
 }
 
 #[test]
+#[ignore = "private GTK input and storage; --native-test=native_workspace_inline_name_geometry --native-storage"]
+fn native_workspace_inline_name_geometry() {
+    let (_app,w,mut input,ids)=workspace_audit_fixture("art.capycanvas.WorkspaceInlineNameGeometry",1);
+    let id=&ids[0];
+    workspace_audit_theme(&w,&input,Theme::Dark);
+    click(&w,&mut input,&row(&w,id));
+    until(|| w.workspaces.view().selected.as_deref()==Some(id.as_str()) && !w.workspaces.view().loading,"geometry fixture preview");
+    let apply=named::<gtk::Button>(w.window.upcast_ref(),"workspace-manager-apply");
+    click(&w,&mut input,apply.upcast_ref());
+    until(|| w.workspaces.manager().unwrap().active_id().as_ref()==Some(id) && !w.workspaces.busy() && !w.workspaces.view().loading && !w.workspaces.ui.dialog.is_mapped(),"geometry fixture current workspace");
+    let paint=|| {
+        let frames=Rc::new(Cell::new(0));
+        let clock=w.window.frame_clock().unwrap();
+        let handler=clock.connect_after_paint(glib::clone!(#[weak] w, #[strong] frames, move |_| {frames.set(frames.get()+1);if frames.get()<2 {w.window.queue_draw();}}));
+        w.window.queue_draw();until(||frames.get()>=2,"inline geometry native frames committed");clock.disconnect(handler);
+    };
+    let bounds=|widget:&gtk::Widget| {let bounds=widget.compute_bounds(&w.window).unwrap();[bounds.x(),bounds.y(),bounds.width(),bounds.height()]};
+    let mut results=Vec::new();
+    let mut normal_line_height=0;
+    for (font,large) in [("normal",false),("large",true)] {
+        let provider=gtk::CssProvider::new();
+        if large {provider.load_from_string("window.capy-workspace { --ui-text-size: 18pt; }");gtk::style_context_add_provider_for_display(&w.surface.display(),&provider,gtk::STYLE_PROVIDER_PRIORITY_APPLICATION+1);}
+        for (theme,name) in [(Theme::Dark,"dark"),(Theme::Light,"light")] {
+            workspace_audit_theme(&w,&input,theme);
+            let target=row(&w,id);
+            let title=named::<gtk::Label>(&target,&format!("workspace-name-{id}"));
+            let entry=named::<gtk::Entry>(&target,&format!("workspace-rename-{id}"));
+            let subtitle=descendants::<gtk::Label>(&target).into_iter().find(|label|label.has_css_class("subtitle")).unwrap();
+            assert!(subtitle.is_mapped() && !subtitle.text().is_empty(),"current workspace provides visible subtitle");
+            paint();
+            let reference=descendants::<gtk::Entry>(w.window.upcast_ref()).into_iter().find(|entry|entry.has_css_class("number-entry") && entry.ancestor(gtk::Stack::static_type()).is_some_and(|stack|stack.is_mapped()) && std::iter::successors(entry.parent(),|widget|widget.parent()).any(|widget|widget.has_css_class("dock-panel"))).unwrap();
+            let reference_stack=reference.ancestor(gtk::Stack::static_type()).unwrap().downcast::<gtk::Stack>().unwrap();
+            let reference_page=reference_stack.visible_child_name();
+            reference_stack.set_visible_child_name("entry");
+            paint();
+            assert!(reference.is_mapped(),"real existing compact numeric input is visible");
+            let line_height=title.layout().pixel_size().1;
+            if large {assert!(line_height>normal_line_height,"larger case changes actual Pango text metrics");} else {normal_line_height=line_height;}
+            let before=[bounds(target.upcast_ref()),bounds(title.upcast_ref()),bounds(subtitle.upcast_ref())];
+            let layout=title.layout();
+            let offsets=title.layout_offsets();
+            let label_cursor=layout.cursor_pos(0).0;
+            let unit=gtk::pango::SCALE as f32;
+            let label_origin=title.compute_point(&w.window,&gtk::graphene::Point::new(offsets.0 as f32+label_cursor.x() as f32/unit,offsets.1 as f32+label_cursor.y() as f32/unit)).unwrap();
+            let label_baseline=title.compute_point(&w.window,&gtk::graphene::Point::new(0.,offsets.1 as f32+layout.baseline() as f32/unit)).unwrap();
+            let label_text=[label_origin.x(),label_origin.y(),label_cursor.height() as f32/unit,label_baseline.y()];
+            capture_reference(&w,input.dir.join(format!("inline-geometry-{font}-{name}-before.png")).to_str().unwrap(),1.);
+            let list=named::<gtk::ListBox>(w.window.upcast_ref(),"workspace-manager-items");
+            let scroll=list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+            let list_bounds=bounds(scroll.upcast_ref());
+            let mut actions=Vec::new();
+            for action in ["new","delete"] {
+                let button=named::<gtk::Button>(w.window.upcast_ref(),&format!("workspace-manager-{action}"));
+                let rect=bounds(button.upcast_ref());
+                assert!((rect[1]-list_bounds[1]-list_bounds[3]-6.).abs()<=0.5,"workspace footer action has 6px gap: {font}/{name}/{action}");
+                if large {assert!(rect[3]>=34.,"large text footer action fits naturally");} else {assert!((rect[3]-34.).abs()<=0.5,"normal footer action is34px high");}
+                actions.push(serde_json::json!({"action":action,"bounds":rect,"list":list_bounds}));
+                input.perform(serde_json::json!([{"point":screen_point(button.upcast_ref(),&w.window,[0.5,0.5])}]));
+                paint();
+                capture_reference(&w,input.dir.join(format!("inline-geometry-{font}-{name}-{action}-hover.png")).to_str().unwrap(),1.);
+            }
+            let point=screen_point(title.upcast_ref(),&w.window,[0.5,0.5]);
+            input.perform(serde_json::json!([{"point":point},{"down":true},{"down":false},{"down":true},{"down":false}]));
+            until(||entry.is_mapped(),"native doubleclick starts inline geometry editor");
+            paint();
+            let during=[bounds(target.upcast_ref()),bounds(entry.upcast_ref()),bounds(subtitle.upcast_ref())];
+            let text=descendant::<gtk::Text>(&entry).unwrap();
+            let text_bounds=bounds(text.upcast_ref());
+            #[allow(deprecated)]
+            let insets=|widget:&gtk::Widget| {let padding=widget.style_context().padding();let border=widget.style_context().border();serde_json::json!({"padding":[padding.left(),padding.top(),padding.right(),padding.bottom()],"border":[border.left(),border.top(),border.right(),border.bottom()],"vertical_measure":widget.measure(gtk::Orientation::Vertical,-1),"baseline":widget.baseline(),"font":widget.pango_context().font_description().map(|font|font.to_string().to_string())})};
+            let render=|widget:&gtk::Widget,kind:&str| {
+                let snapshot=gtk::Snapshot::new();widget.parent().unwrap().snapshot_child(widget,&snapshot);let node=snapshot.to_node().unwrap();
+                std::fs::write(input.dir.join(format!("inline-{font}-{name}-{kind}.node")),node.serialize().as_ref()).unwrap();
+                w.window.renderer().unwrap().render_texture(&node,None).save_to_png(input.dir.join(format!("inline-{font}-{name}-{kind}.png"))).unwrap();
+            };
+            let editor=serde_json::json!({"entry":insets(entry.upcast_ref()),"text":insets(text.upcast_ref()),"text_bounds":text_bounds,"label":insets(title.upcast_ref()),"label_line_height":line_height,"reference":insets(reference.upcast_ref())});
+            assert_eq!(editor["entry"]["padding"][0],editor["reference"]["padding"][0],"workspace and existing compact input share horizontal inset");
+            render(entry.upcast_ref(),"workspace-input");render(reference.upcast_ref(),"reference-number-input");
+            capture_reference(&w,input.dir.join(format!("inline-geometry-{font}-{name}-during.png")).to_str().unwrap(),1.);
+            input.key(0xff50);
+            paint();
+            assert_eq!(entry.selection_bounds(),None,"Home leaves an unselected insertion cursor");
+            let cursor=text.compute_cursor_extents(0).0;
+            let origin=text.compute_point(&w.window,&gtk::graphene::Point::new(cursor.x(),cursor.y())).unwrap();
+            let text_layout=text.create_pango_layout(Some(entry.text().as_str()));
+            let text_cursor=text_layout.cursor_pos(0).0;
+            let editor_text=[origin.x(),origin.y(),cursor.height(),origin.y()+(text_layout.baseline()-text_cursor.y()) as f32/unit];
+            capture_reference(&w,input.dir.join(format!("inline-geometry-{font}-{name}-cursor.png")).to_str().unwrap(),1.);
+            input.key(0xff1b);
+            until(||!entry.is_mapped() && w.workspaces.view().prompt.is_none(),"Escape restores workspace title");
+            paint();
+            let after=[bounds(target.upcast_ref()),bounds(title.upcast_ref()),bounds(subtitle.upcast_ref())];
+            capture_reference(&w,input.dir.join(format!("inline-geometry-{font}-{name}-after.png")).to_str().unwrap(),1.);
+            let stable=[0,2].iter().all(|index|before[*index].iter().zip(during[*index].iter()).all(|(a,b)|(a-b).abs()<=0.5)) && before.iter().flatten().zip(after.iter().flatten()).all(|(a,b)|(a-b).abs()<=0.5) && label_text.iter().zip(editor_text.iter()).all(|(a,b)|(a-b).abs()<=1.);
+            let value=serde_json::json!({"font":font,"theme":name,"before":before,"during":during,"after":after,"label_text_origin_height_baseline":label_text,"editor_cursor_origin_height_baseline":editor_text,"editor":editor,"actions":actions,"stable":stable});
+            reference_stack.set_visible_child_name(reference_page.as_deref().unwrap());
+            std::fs::write(input.dir.join(format!("inline-geometry-{font}-{name}.json")),serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+            results.push(value);
+        }
+        w.workspaces.ui.close(&w);until(||!w.workspaces.ui.dialog.is_mapped() && !w.workspaces.busy(),"geometry manager closed");
+        if large {gtk::style_context_remove_provider_for_display(&w.surface.display(),&provider);}
+    }
+    std::fs::write(input.dir.join("inline-geometry-results.json"),serde_json::to_vec_pretty(&results).unwrap()).unwrap();
+    assert!(results.iter().all(|result|result["stable"]==true),"native inline rename must preserve text origin, baseline, row and subtitle: {results:?}");
+    input.finish();w.window.close();
+}
+
+#[test]
 #[ignore = "isolated native input and SQLite; --native-test=native_workspace_rename_pin_capture --native-storage"]
 fn native_workspace_rename_pin_capture() {
     use std::io::Write;

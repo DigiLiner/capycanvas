@@ -85,9 +85,11 @@ window, label, text { font-size: var(--ui-text-size); }
 .workspace-manager-items { border-radius: 0; box-shadow: none; }
 .workspace-manager-items > row { border: 0; border-radius: 0; }
 .workspace-manager-items > row + row { box-shadow: inset 0 1px var(--card-shade-color); }
-.workspace-row-content { min-height: 56px; padding: 0 12px; }
+.workspace-row-content { min-height: 56px; padding: 0 12px 0 calc(12px - var(--panel-field-padding)); }
+.workspace-name, .workspace-manager-row label.subtitle { padding: 0 var(--panel-field-padding); }
+.workspace-name-entry { min-width: 0; min-height: var(--panel-control-height); padding: 0 var(--panel-field-padding); border: 0; border-radius: var(--control-radius); background: var(--input-bg); box-shadow: none; }
 .workspace-manager-row label.subtitle { font-size: smaller; }
-.workspace-list-actions { padding: 0; }
+.workspace-list-actions { padding: 6px 0 0; }
 .workspace-list-actions button { min-width: 34px; min-height: 34px; padding: 0; border-radius: var(--control-radius); }
 .dialog-footer.workspace-manager-footer { padding-top: 0; }
 .workspace-manager-row menubutton.workspace-reorder-handle > button image { opacity: .55; }

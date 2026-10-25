@@ -64,14 +64,14 @@ impl ManagerUi {
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.set_width_chars(1);
         let entry = gtk::Entry::builder().has_frame(false).width_chars(1).build();
-        entry.add_css_class("layer-name-entry");
+        entry.add_css_class("workspace-name-entry");
         entry.set_placeholder_text(Some(&w.localization().text(layer_ui::MessageId::COMMON_NAME)));
         entry.update_property(&[gtk::accessible::Property::Label(&w.localization().text(layer_ui::MessageId::COMMON_NAME))]);
         entry.set_widget_name(&format!("workspace-rename-{}", item.id));
         let composition = crate::input::guard_entry_activation(&entry);
         let name = gtk::Stack::new();
         name.set_hhomogeneous(false);
-        name.set_vhomogeneous(false);
+        name.set_vhomogeneous(true);
         name.add_named(&title, Some("name"));
         name.add_named(&entry, Some("edit"));
         text.append(&name);
