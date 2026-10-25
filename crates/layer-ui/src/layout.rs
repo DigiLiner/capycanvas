@@ -28,6 +28,7 @@ pub const SURFACE_RADIUS: f32 = TILE_SIZE / 2.0;
 /// Six standard toolbar tiles, including their five gaps.
 pub const LAYERS_MIN_WIDTH: f32 = 6.0 * TILE_SIZE + 5.0 * TILE_GAP;
 pub const PANEL_CONTENT_INSET: f32 = 8.0;
+pub const LAYER_EDGE_INSET: f32 = 6.0;
 pub const PANEL_CONTROL_SPACING: f32 = 4.0;
 pub const PANEL_GROUP_SPACING: f32 = 6.0;
 pub const PANEL_COMPOUND_SPACING: f32 = 2.0;

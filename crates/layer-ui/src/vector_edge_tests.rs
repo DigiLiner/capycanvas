@@ -103,7 +103,7 @@ fn the_layers_footer_lists_its_lowest_buttons_in_the_actions_menu_when_narrow() 
     let footer = s.state.layer_tools.footer.clone();
     assert_eq!(footer.iter().map(|slot| slot.button).collect::<Vec<_>>(), LayerFooterButton::ORDER);
     let m = crate::PANEL_CONTROL_METRICS;
-    let need = |count: usize| 2. * m.inset + (count + 1) as f32 * m.control_height + count as f32 * m.compound_spacing;
+    let need = |count: usize| 2. * crate::LAYER_EDGE_INSET + (count + 1) as f32 * m.control_height + count as f32 * m.compound_spacing;
     for viewport in [1600., 1440., 1280., 640.] {
         let width = Panel::Layers.default_width(viewport);
         let shown: Vec<_> = footer.iter().filter(|slot| slot.shown(width)).map(|slot| slot.button).collect();

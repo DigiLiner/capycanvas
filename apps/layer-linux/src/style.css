@@ -176,7 +176,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .navigator-overview { color: var(--accent-color); }
 .number-control { font-size: var(--ui-text-size); }
 .layers-panel { padding: 0; }
-.layer-header, .layer-footer { padding: 4px 6px; }
+.layer-header, .layer-footer { padding: 4px var(--layer-edge-inset); }
 .layer-header menubutton > button { min-height: var(--panel-control-height); padding: 0 6px; }
 .layers-panel button.layer-icon, .layers-panel menubutton.layer-icon > button { min-width: var(--panel-control-height); min-height: var(--panel-control-height); padding: 0; }
 .layer-icon image { -gtk-icon-size: 16px; }
@@ -185,7 +185,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-swipe-actions button { min-width: 0; border-radius: 0; padding: 0 4px; background: mix(@window_bg_color, @window_fg_color, 0.16); }
 .layer-swipe-actions button.layer-swipe-duplicate { background: mix(@window_bg_color, @window_fg_color, 0.24); }
 .layer-swipe-actions button.layer-swipe-delete { background: #c01c28; color: white; }
-.layer-row { min-height: 36px; padding: 2px 6px; border-radius: 0; }
+.layer-row { min-height: 36px; padding: 2px var(--layer-edge-inset); border-radius: 0; }
 .layer-row.selected { background: var(--selection-bg); }
 .layers-panel button.layer-column { min-width: var(--panel-control-height); }
 .layers-panel button.layer-reference:checked { background: alpha(var(--window-fg-color), .12); color: var(--window-fg-color); }
@@ -446,7 +446,7 @@ window.capy-workspace.glass .workspace-switcher button:checked { background: var
 window.capy-workspace.glass .document-tab.selected { background-color: var(--glass-document-tab); }
 window.capy-workspace.glass .palette-cover { background: transparent; }
 .palette-panel { padding: 8px; }
-button.flat.layer-properties-disclosure { padding: 0 6px; font-weight: 400; border-top-left-radius: 0; border-top-right-radius: 0; }
+button.flat.layer-properties-disclosure { padding: 0 var(--layer-edge-inset); font-weight: 400; border-top-left-radius: 0; border-top-right-radius: 0; }
 .layer-properties-disclosure image { -gtk-icon-size: 16px; }
 .layer-properties-disclosure image.layer-properties-chevron { -gtk-icon-transform: rotate(180deg); }
 .layer-properties-disclosure.open image.layer-properties-chevron { -gtk-icon-transform: none; }

@@ -168,7 +168,7 @@ impl LayerFooterButton {
     pub fn min_width(self) -> f32 {
         let rank = Self::PRIORITY.iter().position(|button| *button == self).unwrap_or(Self::PRIORITY.len()) as f32 + 1.;
         let m = crate::PANEL_CONTROL_METRICS;
-        2. * m.inset + (rank + 1.) * m.control_height + rank * m.compound_spacing
+        2. * crate::LAYER_EDGE_INSET + (rank + 1.) * m.control_height + rank * m.compound_spacing
     }
 }
 
