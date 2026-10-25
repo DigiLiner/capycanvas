@@ -31,20 +31,24 @@ pub(super) fn tool_button_content(button: &gtk::Button) -> Option<gtk::Widget> {
 }
 
 pub(super) fn tool_group_marker(button: &gtk::Button) {
-    let overlay = gtk::Overlay::new();
     let content = button.child();
     button.set_child(gtk::Widget::NONE);
-    overlay.set_child(content.as_ref());
+    button.set_child(Some(&tool_group_overlay(content.as_ref())));
+    button.update_property(&[gtk::accessible::Property::HasPopup(true)]);
+}
+
+pub(crate) fn tool_group_overlay(content: Option<&gtk::Widget>) -> gtk::Overlay {
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(content);
     let indicator = crate::icons::image("layer-tool-group-symbolic");
-    if let Some(label) = content.as_ref().and_then(|content| content.downcast_ref::<gtk::Label>()) {
+    if let Some(label) = content.and_then(|content| content.downcast_ref::<gtk::Label>()) {
         label.set_margin_end(indicator.measure(gtk::Orientation::Horizontal, -1).0);
     }
     indicator.set_halign(gtk::Align::End);
     indicator.set_valign(gtk::Align::End);
     indicator.set_can_target(false);
     overlay.add_overlay(&indicator);
-    button.set_child(Some(&overlay));
-    button.update_property(&[gtk::accessible::Property::HasPopup(true)]);
+    overlay
 }
 
 pub(super) fn tool_double_click(button: &gtk::Button, control: ToolbarControl) -> Rc<Cell<bool>> {

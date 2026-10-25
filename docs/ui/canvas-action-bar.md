@@ -4,7 +4,7 @@
 
 The canvas action bar shows the next steps for the object being edited, beside it. It is an accelerator: every item is an ordinary command, so the menus, Tool Options and command search stay complete, and each item keeps its shared validation and one-step history.
 
-Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, macOS and iPadOS. GTK draws dividers and icon-only menu buttons; Web, Android, Windows, macOS and iPadOS still caption menu buttons and draw no dividers. The mode and guide bars need no host code of their own. Transform Outline and the Refine dialog's label and live preview are implemented in the shared model, GTK, Web and Android; the macOS and iPadOS Refine dialogs still label the value "Distance".
+Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, macOS and iPadOS. GTK draws the bar as toolbar tiles with dividers and corner triangles; Web, Android, Windows, macOS and iPadOS still use their own button sizes, caption menu buttons and draw no dividers. The mode and guide bars need no host code of their own. Transform Outline and the Refine dialog's label and live preview are implemented in the shared model, GTK, Web and Android; the macOS and iPadOS Refine dialogs still label the value "Distance".
 
 ## Contexts
 
@@ -36,7 +36,8 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
   - Undo and Redo that restore a selection do not bring it back.
   - A tool change ends the visibility that a selection command started.
 - **Bottom-edge placement:** inverted, tonal and painted selections use the bottom edge.
-- **Compact items:** an item with `icon_only` shows its icon alone, and a menu button its icon and arrow; names are in tooltips, accessibility labels and More. Transform modes keep their icons and words; Warp's grid and the crop choices show their current value. An item with `separated` follows a divider: the selection bar separates what uses the selection from what changes it, the transform bar separates its modes from the rest, and the exits always follow a divider.
+- **Tiles:** the bar is a strip of Small toolbar tiles, like a standalone toolbar without its grip: 36 logical pixels tall with no padding, 2-pixel gaps, 8-pixel dividers, the tile radius, 16-pixel icons and the toolbar's selected background.
+- **Compact items:** an item with `icon_only` is one square tile showing its icon alone; a menu item carries the toolbar's tool-group corner triangle instead of an arrow. Names are in tooltips, accessibility labels and More. Transform modes keep their icons and words, and dropdowns that show a value (the modes on a narrow work area, Warp's grid and the crop choices) keep their caption and arrow, at tile height. An item with `separated` follows a divider: the selection bar separates what uses the selection from what changes it, the transform bar separates its modes from the rest, and the exits always follow a divider.
 - **Accent:** Apply and Finish are drawn in the accent color.
 - **Dropdowns:** a choice that is not segmented, such as the crop ratio, opens its items from the bar. Where the work area is narrower than 600 logical pixels the transform modes become a dropdown too.
 - **Menu items:** an item can carry a menu. It opens from the bar as a dropdown, and in More it is a submenu.

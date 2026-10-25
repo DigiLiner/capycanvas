@@ -15,8 +15,7 @@ use std::{
     rc::Rc,
 };
 
-const GAP: i32 = 4;
-const PADDING: i32 = 6;
+const GAP: i32 = layer_ui::TILE_GAP as i32;
 
 pub struct CanvasBar {
     pub root: gtk::Box,
@@ -231,9 +230,9 @@ impl CanvasBar {
             items: items.iter().map(|(w, _)| width(w)).collect(),
             completion: completion.iter().map(|(w, _)| width(w)).collect(),
             more: width(self.more.upcast_ref()),
-            height: height + 2. * PADDING as f32,
+            height,
             gap: GAP as f32,
-            padding: PADDING as f32,
+            padding: 0.,
         };
         let layout = workspace
             .gpu
@@ -302,7 +301,7 @@ fn build(
         widget.set_can_focus(false);
     };
     if let Some(menu) = item.menu {
-        let (button, image, text) = menu_button(workspace, context, menu.id(), &item.label);
+        let (button, image, text) = menu_button(workspace, context, menu.id(), &item.label, item.icon_only);
         button.set_widget_name(&format!("canvas-bar-menu-{}", menu.id()));
         unfocused(button.upcast_ref());
         crate::icons::set(&image, Some(&format!("layer-{}-symbolic", menu.icon())));
@@ -312,10 +311,13 @@ fn build(
     }
     match &item.option {
         ToolOption::Action { state, checkable } => {
-            let button = action_button(state, *checkable, Some(&item.label), send);
+            let button = action_button(state, *checkable, (!item.icon_only).then_some(&*item.label), send);
             button.set_widget_name(&format!("canvas-bar-{:?}", state.id));
             unfocused(button.upcast_ref());
             button.add_css_class(if item.accent { "suggested-action" } else { "flat" });
+            if !item.icon_only {
+                button.add_css_class("text-tile");
+            }
             (button.clone().upcast(), Some(Field::Action(button)))
         }
         ToolOption::Choice { id, label, segmented: true, items, .. } => {
@@ -326,7 +328,7 @@ fn build(
             (segments.upcast(), Some(Field::Segments(buttons)))
         }
         ToolOption::Choice { id, label, .. } => {
-            let (button, image, text) = menu_button(workspace, context, id, label);
+            let (button, image, text) = menu_button(workspace, context, id, label, false);
             button.set_widget_name(&format!("canvas-bar-choice-{id}"));
             unfocused(button.upcast_ref());
             (button.clone().upcast(), Some(Field::Menu(button, image, text)))
@@ -341,17 +343,24 @@ fn menu_button(
     context: layer_ui::CanvasBarContext,
     id: &'static str,
     label: &str,
+    tile: bool,
 ) -> (gtk::MenuButton, gtk::Image, gtk::Label) {
     let button = gtk::MenuButton::new();
     button.update_property(&[gtk::accessible::Property::Label(label)]);
     button.set_tooltip_text(Some(label));
-    button.set_always_show_arrow(true);
+    button.set_always_show_arrow(!tile);
     button.add_css_class("flat");
     let (image, text) = (gtk::Image::new(), gtk::Label::new(None));
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     content.append(&image);
     content.append(&text);
-    button.set_child(Some(&content));
+    if tile {
+        content.set_halign(gtk::Align::Center);
+        button.set_child(Some(&crate::workspace::tool_group_overlay(Some(content.upcast_ref()))));
+    } else {
+        button.add_css_class("text-tile");
+        button.set_child(Some(&content));
+    }
     let popover = gtk::PopoverMenu::from_model(None::<&gtk::gio::MenuModel>);
     button.set_popover(Some(&popover));
     workspace.watch_popover(popover.upcast_ref());

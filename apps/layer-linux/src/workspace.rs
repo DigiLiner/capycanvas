@@ -21,6 +21,7 @@ mod bubbles;
 mod columns;
 #[path = "workspace_customization.rs"]
 mod customization;
+pub(crate) use customization::tool_group_overlay;
 #[path = "toolbar_components.rs"]
 pub(crate) mod toolbar_components;
 #[path = "workspace_drawer.rs"]
