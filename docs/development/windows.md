@@ -1044,6 +1044,9 @@ HDR arc, intensity, proof and screen-status controls in both themes; choose
 `-Depth F16` or `-Depth F32` explicitly. These focused selections reuse the full
 journeys' assertions and disposable profiles. Software-adapter checks establish
 functional behavior; HDR output and presentation timing require hardware.
+The HDR geometry helper matches the reviewed executable and Rust DLL: native
+Windows PowerShell and .NET Framework on ARM64, a compiled x64 helper on x64.
+Both check the loaded CLR architecture before calling the current Rust geometry export.
 The VM selections `manager:default`, `localization:profiles-dark` and
 `localization:profiles-light` cover the workspace manager in both themes and
 profile-library search in English and Japanese without the unrelated document

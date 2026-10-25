@@ -5,6 +5,7 @@ if($ControlsOnly -and !$PSBoundParameters.ContainsKey('Theme')){
  return
 }
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
+. (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
 $capyControl=${function:Control}
 $CapyWaitSeconds=15;$CapyFind='visible';$CapyPopups=$true
 Add-Type -AssemblyName System.Drawing
@@ -16,7 +17,19 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class CapyHdrPicker {
- public static int Main(string[] args) {try {Console.Write(Arc(args[0],System.IO.File.ReadAllText(args[1])));return 0;}catch(Exception error){Console.Error.Write(error);return 1;}}
+ public static int Main(string[] args) {try {RequireArchitecture(args[2]);Console.Write(Arc(args[0],System.IO.File.ReadAllText(args[1])));return 0;}catch(Exception error){Console.Error.Write(error);return 1;}}
+ static void RequireArchitecture(string architecture) {
+  int expected=architecture=="arm64"?0xAA64:architecture=="x64"?0x8664:0;
+  foreach(System.Diagnostics.ProcessModule module in System.Diagnostics.Process.GetCurrentProcess().Modules) {
+   if(!string.Equals(module.ModuleName,"clr.dll",StringComparison.OrdinalIgnoreCase))continue;
+   using(var reader=new System.IO.BinaryReader(System.IO.File.OpenRead(module.FileName))) {
+    reader.BaseStream.Position=0x3C;int pe=reader.ReadInt32();reader.BaseStream.Position=pe+4;int actual=reader.ReadUInt16();
+    if(expected==0||actual!=expected)throw new Exception("HDR geometry helper expected "+architecture+" but CLR machine is 0x"+actual.ToString("X4"));
+    return;
+   }
+  }
+  throw new Exception("HDR geometry helper CLR architecture is unavailable");
+ }
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr LoadLibraryEx(string path,IntPtr file,uint flags);
  [DllImport("kernel32.dll")] static extern IntPtr GetProcAddress(IntPtr module,string name);
  [DllImport("kernel32.dll")] static extern bool FreeLibrary(IntPtr module);
@@ -54,21 +67,41 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/hdr-ui/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory((Join-Path $run 'profile'))|Out-Null
 $directory=$run;$CapyTraceDirectory=$run
-function New-ArcHelper([string]$Directory){
- $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
- $source=Join-Path $Directory 'hdr-geometry.cs';$output=Join-Path $Directory 'hdr-geometry.exe'
+function New-ArcHelper([string]$Directory,[string]$Dll){
+ $architecture=if(Test-WindowsBinaryArchitecture $Dll arm64){'arm64'}elseif(Test-WindowsBinaryArchitecture $Dll x64){'x64'}else{throw 'HDR geometry DLL has an unsupported architecture'}
+ $build=Resolve-WindowsArchitecture $architecture
+ if(!(Test-WindowsBinaryArchitecture $Executable $build.architecture)){throw 'HDR geometry DLL and reviewed executable have different architectures'}
+ $source=Join-Path $Directory 'hdr-geometry.cs'
  [IO.File]::WriteAllText($source,$hdrNativeSource)
- & $compiler /nologo /target:exe /platform:x64 "/out:$output" $source
- if($LASTEXITCODE -ne 0){throw 'HDR geometry helper compilation failed'}
- $bytes=[IO.File]::ReadAllBytes($output);$pe=[BitConverter]::ToInt32($bytes,60)
- if([BitConverter]::ToUInt16($bytes,$pe+4) -ne 0x8664){throw 'HDR geometry helper is not x64'}
- $output
+ if($build.architecture -eq 'arm64'){
+  $launcher=Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+  if(!(Test-WindowsBinaryArchitecture $launcher arm64)){throw 'A native ARM64 Windows PowerShell host is required for HDR geometry checks'}
+  $output=Join-Path $Directory 'hdr-geometry.ps1'
+  [IO.File]::WriteAllText($output,@'
+param([string]$Dll,[string]$InputPath,[string]$Architecture)
+$ErrorActionPreference='Stop'
+Add-Type -Path (Join-Path $PSScriptRoot 'hdr-geometry.cs')
+exit ([CapyHdrPicker]::Main(@($Dll,$InputPath,$Architecture)))
+'@)
+  $arguments=@('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',('"'+$output+'"'))
+ }else{
+  $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+  $output=Join-Path $Directory 'hdr-geometry.exe'
+  & $compiler /nologo /target:exe /platform:x64 "/out:$output" $source
+  if($LASTEXITCODE -ne 0){throw 'HDR geometry helper compilation failed'}
+  if(!(Test-WindowsBinaryArchitecture $output x64)){throw 'HDR geometry helper is not x64'}
+  $launcher=$output;$arguments=@()
+ }
+ $helper=@{path=$launcher;arguments=$arguments;architecture=$build.architecture;source=$output;sha256=(Get-FileHash -LiteralPath $output).Hash;dll_sha256=(Get-FileHash -LiteralPath $Dll).Hash}
+ $helper|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $Directory 'hdr-geometry-build.json')
+ $helper
 }
 function Arc-Geometry([string]$Dll,[string]$Json){
- if(!$script:arcHelper){$script:arcHelper=New-ArcHelper $run}
+ if(!$script:arcHelper){$script:arcHelper=New-ArcHelper $run $Dll}
  $call=Join-Path $run ('geometry-'+[Guid]::NewGuid().ToString('N'));$inputPath=$call+'.json'
  [IO.File]::WriteAllText($inputPath,$Json)
- $process=Start-Process -FilePath $script:arcHelper -ArgumentList @(('"'+$Dll+'"'),('"'+$inputPath+'"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput ($call+'.out.json') -RedirectStandardError ($call+'.stderr')
+ $arguments=@($script:arcHelper.arguments)+@( ('"'+$Dll+'"'),('"'+$inputPath+'"'),$script:arcHelper.architecture )
+ $process=Start-Process -FilePath $script:arcHelper.path -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput ($call+'.out.json') -RedirectStandardError ($call+'.stderr')
  $null=$process.Handle
  try{
   if(!$process.WaitForExit(10000)){$process.Kill();$process.WaitForExit();throw 'Owned HDR geometry helper timed out'}
