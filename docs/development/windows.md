@@ -623,6 +623,16 @@ code page. Scripts containing Unicode captions or test input use a UTF-8 BOM.
 It also checks that capture manifests, models, layout and localized caption
 evidence retain Unicode in UTF-8 JSON without a BOM.
 
+`tests/renderer-health.ps1` checks the shared fixture assertion against native
+renderer failures and foreign window ownership in a fresh same-version PowerShell
+process, keeping its mock native API out of later fixtures. A failing child stops
+the checks. The window exercise helper checks
+the owned visible `canvas-status` before Close; the layout journey also checks it
+before capturing Diagnostics and reporting success. A native renderer failure
+fails the fixture even when the window answers and the process exits normally.
+Recovery fixtures keep their explicit recovery and save-only status assertions;
+the shared check does not reject those messages or provide a blanket exception.
+
 Run `pwsh -NoProfile -File ./apps/layer-windows/tests/model-snapshot-reader.ps1`
 to check the UI fixture model reader during concurrent atomic snapshot publication.
 This windowless test needs no GPU and writes its results under `artifacts/windows`.

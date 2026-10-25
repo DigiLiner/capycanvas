@@ -98,12 +98,14 @@ try{
     if(((Control 'renderer-stat-0').GetRuntimeId() -join ':') -ne $cpuIdentity){throw 'Stats updates replaced native metric rows'}
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Resize -Width 1500 -Height 1000
     Wait-Until {$null -ne (Find 'renderer-stat-6')} 'Resize removed Diagnostics content'
+    Assert-RendererHealthy $review.Id $drawing
     & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Output (Join-Path $run 'diagnostics.png') -ClientOnly *> (Join-Path $run 'diagnostics.json')
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
     (Control (Panel-Menu 'stats').label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {$null -eq (Find 'renderer-stat-0')} 'Hidden Diagnostics retained visible widgets'
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window';Invoke 'undo_workspace'
     Wait-Until {$null -ne (Find 'renderer-stat-6')} 'Workspace Undo did not restore Diagnostics'
+    Assert-RendererHealthy $review.Id $drawing
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [pscustomobject]@{shared_menus='passed';compact_and_expanded_header='passed';responsive_menu_focus='passed';selection_commands='passed';about_page='passed';diagnostics_query_and_row_retention='passed';diagnostics_visibility_and_workspace_undo='passed';native_resize='passed';zero_exit='passed';scope='native UI Automation; physical docking, drawers, full layout parity and presentation remain separate'}|ConvertTo-Json

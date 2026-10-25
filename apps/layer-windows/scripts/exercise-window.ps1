@@ -47,6 +47,7 @@ if($windowOwner -ne $ProcessId){throw 'The drawing window does not belong to the
 $rect=New-Object CapyWindowExercise+Rect
 [CapyWindowExercise]::GetWindowRect($handle,[ref]$rect)|Out-Null
 if($Action -eq 'Close') {
+    Assert-RendererHealthy $ProcessId $drawing
     $dirty=$false
     $windowOnly=$false
     if($DiscardUnsaved){

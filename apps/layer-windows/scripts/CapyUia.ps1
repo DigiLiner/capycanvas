@@ -134,6 +134,16 @@ function Clear-CanvasPoint([string]$Utility,[int]$Dx=0,[int]$Dy=0){
     }}
     throw 'No clear visible paper sample fits outside the utility'
 }
+function Assert-RendererHealthy([int]$ProcessId,$Drawing){
+    $owner=[uint32]0
+    [CapyWindowApi]::GetWindowThreadProcessId($Drawing.Handle,[ref]$owner)|Out-Null
+    if($Drawing.Handle -eq [IntPtr]::Zero -or $owner -ne $ProcessId -or $Drawing.Root.Current.ProcessId -ne $ProcessId){throw 'Renderer health requires the owned drawing window'}
+    $status=$Drawing.Root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'canvas-status'))
+    if($status){
+        if($status.Current.ProcessId -ne $ProcessId){throw 'Renderer status belongs to another process'}
+        if(!$status.Current.IsOffscreen -and $status.Current.Name -match '^(canvas renderer failed:|Unexpected render worker failure$)'){throw $status.Current.Name}
+    }
+}
 function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
     $bitmap=[Drawing.Bitmap]::new(96,96)
     $graphics=[Drawing.Graphics]::FromImage($bitmap)
