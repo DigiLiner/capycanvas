@@ -174,3 +174,38 @@ fn footer_anchor_and_small_viewports_are_fitted() {
         }
     }
 }
+
+#[test]
+fn group_drop_fits_every_tab_whichever_is_active() {
+    let viewport = [1200., 1000.];
+    let compact = |panel, content_height| PanelMeasurement { panel, tab_width: 100., content_height, scroll: None };
+    let layers = PanelMeasurement {
+        panel: Panel::Layers,
+        tab_width: 100.,
+        content_height: 900.,
+        scroll: Some(PanelScrollMeasurement { fixed_height: 72., unit_height: 40. }),
+    };
+    for platform in crate::Platform::ALL {
+        for merged in [None, Some(Panel::Layers)] {
+            let mut layout = crate::WorkspacePreset::Photographer.layout(platform);
+            layout.open_default_columns(platform);
+            let group = layout.panel_group(Panel::Histogram).unwrap();
+            if let Some(panel) = merged {
+                layout.move_panel(viewport, panel, DockTarget::Tab { group, index: None }).unwrap();
+            }
+            layout.measurements = vec![compact(Panel::Histogram, 320.), compact(Panel::Waveform, 220.), layers];
+            let placements: Vec<_> = layout.group_panels(group).unwrap().iter().map(|&active| {
+                let mut layout = layout.clone();
+                layout.select_tab(group, active).unwrap();
+                let source = layout.resolved(viewport).groups.into_iter().find(|g| g.id == group).unwrap().bounds;
+                layout.move_item(viewport, DockItem::Group { group }, DockTarget::Float { position: [600., 300.] }).unwrap();
+                let preview = Bounds { x: 400., y: 200., ..source };
+                layout.settle_floating_drop(group, viewport, preview, Some(source.height), true).unwrap();
+                let placed = layout.resolved(viewport).groups.into_iter().find(|g| g.id == group && g.floating).unwrap();
+                assert!(placed.body().height + 0.01 >= placed.min_body_height, "{platform:?} {active:?}: {placed:?}");
+                placed.bounds
+            }).collect();
+            assert!(placements.windows(2).all(|p| p[0] == p[1]), "{platform:?} {merged:?}: {placements:?}");
+        }
+    }
+}

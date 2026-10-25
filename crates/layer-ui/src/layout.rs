@@ -3580,23 +3580,25 @@ impl DockLayout {
         } else {
             PANEL_GRIP_HEIGHT
         };
-        let measurement = self
-            .measurements
-            .iter()
-            .find(|m| m.panel == placement.active);
-        let natural = measurement
-            .filter(|m| m.content_height > 0.0)
-            .map_or(preview.height, |m| m.content_height + chrome)
+        let measured = || {
+            self.measurements
+                .iter()
+                .filter(|m| placement.panels.contains(&m.panel) && m.content_height > 0.0)
+        };
+        let natural = measured()
+            .map(|m| m.content_height + chrome)
+            .reduce(f32::max)
+            .unwrap_or(preview.height)
             .max(TAB_BAR_HEIGHT)
             .min(usable);
-        let scroll = measurement.and_then(|m| m.scroll);
-        let minimum = scroll.map_or(natural, |_| {
-            (chrome + measurement.unwrap().content_height_for_rows(4.)).min(natural)
-        });
+        let scroll = measured().any(|m| m.scroll.is_some());
+        let minimum = self
+            .group_content_height(&placement.panels)
+            .map_or(natural, |content| (chrome + content).min(natural));
         let budget = 400.0_f32.min(usable * 0.5).max(minimum).min(usable);
         let preferred = if !newly_floating {
             preview.height.min(usable)
-        } else if scroll.is_none() || natural <= budget {
+        } else if !scroll || natural <= budget {
             natural
         } else {
             source_height
@@ -3605,7 +3607,7 @@ impl DockLayout {
         };
         // Compact controls stay whole. Scrollable content can lose rows, down to
         // four (or all rows if fewer exist), before its grab edge moves inward.
-        let minimum = if !newly_floating && scroll.is_none() {
+        let minimum = if !newly_floating && !scroll {
             preferred
         } else {
             minimum.min(preferred)

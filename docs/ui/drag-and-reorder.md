@@ -217,7 +217,9 @@ preview at the application surface. A collapsed icon has no visible body to
 preserve, so its preview uses the measured/default floating size. Toolbars keep
 their compact grid layout.
 
-On a floating release, Rust uses native content measurements at the final width:
+On a floating release, Rust uses native content measurements at the final width.
+A tab group sizes for all of its tabs, so its height does not depend on the
+active tab and switching tabs never clips a page:
 
 - Compact content (such as the Color square) and short lists fit their content.
 - Long scrollable content uses a budget of 400 logical pixels or half the usable
