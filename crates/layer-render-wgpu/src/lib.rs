@@ -1006,6 +1006,7 @@ pub struct WgpuRasterizer {
     preparation_compiler: Option<startup::Compiler>,
     transform_preview: Option<layer_render::TransformPreview>,
     refused_transform: Option<layer_render::TransformPreview>,
+    transform_sources_pending: bool,
     transform_damage: Vec<(SourceTarget, PixelRect)>,
     /// Document regions to recompose whose layers' own pixels are unchanged.
     document_damage: Vec<PixelRect>,
@@ -1413,6 +1414,7 @@ impl WgpuRasterizer {
             preparation_compiler: None,
             transform_preview: None,
             refused_transform: None,
+            transform_sources_pending: false,
             transform_damage: Vec::with_capacity(2),
             document_damage: Vec::new(),
             background_ready: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -3776,6 +3778,7 @@ impl CanvasRenderer for WgpuRasterizer {
         }
         self.held_result_ready() || self.bake_preflight.as_ref().is_some_and(|state|state.pending() && (!cfg!(target_arch="wasm32") || !state.waiting())) || self.restore_preparation_pending() || self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() || self.settling.is_some() || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
             || self.navigator.pending()
+            || self.transform_sources_pending && self.transform_preview.is_some() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting())
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
                 && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting())
@@ -4940,16 +4943,19 @@ impl WgpuRasterizer {
         self.preview_layer_id = new_preview_layer;
         self.preview_requires_base = new_preview_requires_base;
 
+        self.transform_sources_pending = false;
         if let Some(preview) = self.transform_preview.clone().filter(|preview| self.refused_transform.as_ref() != Some(preview)) {
             let level = self.scale_display.as_ref().filter(|cache| cache.evaluation != scene::scale::Evaluation::Native).map(|cache| cache.plan.level).filter(|level| *level > 0);
             let mut transforms = self.transforms.take().expect("retained transform renderer");
             let result = transforms.update_preview(self, &mut encoder, &preview, packet.scene, level);
             self.transforms = Some(transforms);
+            self.transform_sources_pending = matches!(&result, Err(error) if error.is_preparation_pending());
             match result {
                 Err(GpuRasterError::TransformReach) => {
                     self.metrics.transform_reach_refusals += 1;
                     self.refused_transform = Some(preview);
                 }
+                Err(error) if error.is_preparation_pending() => {}
                 result => self.transform_damage.extend(result?),
             }
         }

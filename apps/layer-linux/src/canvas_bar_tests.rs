@@ -1200,6 +1200,7 @@ fn native_distort_near_collinear_corner_recovery() {
         assert!(!w.status.is_visible(),"near-line Distort must leave renderer usable: {}",w.status.text());
         let before_apply=ui_session(&w).engine().checkpoint();
         w.dispatch(UiAction::Invoke {command:CommandId::ApplyTransform});
+        until(|| ui_session(&w).engine().checkpoint()!=before_apply,"backed-out Distort must Apply");
         super::new_photo::ready(&w);
         assert_ne!(ui_session(&w).engine().checkpoint(),before_apply,"backed-out Distort must Apply");
         assert!(ui_session(&w).engine().transform_preview().is_none());

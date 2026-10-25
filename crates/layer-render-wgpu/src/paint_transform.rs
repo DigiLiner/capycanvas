@@ -434,6 +434,7 @@ struct SourcePlan {
     coordinates: std::collections::BTreeSet<[u32; 2]>,
     initialize: std::collections::BTreeSet<[u32; 2]>,
     channels: Vec<ChannelPlan>,
+    leases: Vec<Arc<()>>,
 }
 struct ChannelPlan {
     pages: Vec<[u32; 2]>,
@@ -932,7 +933,18 @@ impl ImageTransformState {
             }).collect();
             self.plan_windows(r, channel, transform, mesh.as_ref(), targets, read)
         }).collect::<Result<Vec<_>, _>>()?;
-        Ok(Some(SourcePlan { index, mesh, support, coordinates, initialize, channels: channel_pages.into_iter().zip(plans).map(|(pages, windows)| ChannelPlan { pages, windows }).collect() }))
+        Ok(Some(SourcePlan { index, mesh, support, coordinates, initialize, leases: Vec::new(),
+            channels: channel_pages.into_iter().zip(plans).map(|(pages, windows)| ChannelPlan { pages, windows }).collect() }))
+    }
+    /// Decode every original page the plan's jobs read before any page changes,
+    /// where browser decoding cannot finish within the frame.
+    fn prepare_sources(&self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder, plan: &mut SourcePlan) -> Result<(), GpuRasterError> {
+        for (snapshot, channel) in self.sources.iter().zip(&plan.channels) {
+            let Some(snapshot) = snapshot else { continue };
+            let read: std::collections::BTreeSet<_> = channel.windows.iter().flat_map(|window| &window.jobs).flat_map(|(job, _)| job.sources.iter().copied()).collect();
+            plan.leases.extend(snapshot.prepare_pages(r, &read.into_iter().collect::<Vec<_>>(), encoder)?);
+        }
+        Ok(())
     }
     fn draw_source(
         &mut self,
@@ -943,7 +955,7 @@ impl ImageTransformState {
         taps: u32,
         plan: Option<SourcePlan>,
     ) -> Result<(), GpuRasterError> {
-        let Some(SourcePlan { index, mesh, support, coordinates, initialize, channels }) = plan else { return Ok(()) };
+        let Some(SourcePlan { index, mesh, support, coordinates, initialize, channels, leases: _leases }) = plan else { return Ok(()) };
         let watercolor = self.sources[1].is_some();
         if let Some(geometry) = &mesh { self.positions.upload(r, encoder, geometry)?; }
         for c in coordinates {
@@ -1488,12 +1500,13 @@ impl ImageTransformState {
             self.preview_regions[0].union(regions[0])
         } else { PixelRect::EMPTY };
         let affected = [cut, self.preview_regions[1], regions[1]];
-        let source = if native {
+        let mut source = if native {
             self.plan_source(r, next.target, &next.drawn(), &affected)?
         } else if self.native_preview || !self.queried.is_empty() {
             let restored: Vec<_> = if self.native_preview { self.preview_regions.to_vec() } else { self.queried.iter().copied().map(page_rect).collect() };
             self.plan_source(r, next.target, &Default::default(), &restored)?
         } else { None };
+        if cfg!(target_arch = "wasm32") && let Some(plan) = &mut source { self.prepare_sources(r, encoder, plan)?; }
         Ok(PreviewUpdate { damage, draw: Some(PreviewDraw { regions, affected, source }) })
     }
     fn draw_preview(

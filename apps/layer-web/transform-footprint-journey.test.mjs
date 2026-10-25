@@ -20,11 +20,11 @@ export async function checkTransformFootprint({call,evaluate,settle}) {
     const result=[];
     for(const index of [0,2,8,6]){
       await evaluate(`layerApp.dispatch(layerApp.state().tool_extra.find(c=>c.Choice?.id==='transform-reference').Choice.items[${index}].action);null`);
-      await settle();result.push(await evaluate("['transform_x','transform_y'].map(id=>layerApp.state().tool_settings.find(s=>s.id===id).value)"));
+      await poll(`layerApp.state().tool_extra.find(c=>c.Choice?.id==='transform-reference').Choice.items[${index}].selected`);result.push(await evaluate("['transform_x','transform_y'].map(id=>layerApp.state().tool_settings.find(s=>s.id===id).value)"));
     }
     await settle();return result;
   };
-  const snapshot=()=>json(`({error:layerApp.state().host_error,notice:layerApp.state().notice,tool:layerApp.state().layer_tools.tool,canvas_bar:layerApp.state().canvas_bar,camera:layerApp.app.camera(),gpu:layerApp.app.gpu_diagnostics(),file:layerApp.state().document_file})`);
+  const snapshot=()=>json(`({error:layerApp.state().host_error??null,notice:layerApp.state().notice,tool:layerApp.state().layer_tools.tool,canvas_bar:layerApp.state().canvas_bar,camera:layerApp.app.camera(),gpu:layerApp.app.gpu_diagnostics(),file:layerApp.state().document_file})`);
   const pixels=async points=>{await fixture.idle();const screen=await Promise.all(points.map(documentPoint)),{data}=await call('Page.captureScreenshot',{format:'png'});return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,'+${JSON.stringify(data)};await image.decode();const c=new OffscreenCanvas(image.width,image.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(image,0,0);return ${JSON.stringify(screen)}.map(p=>Array.from(x.getImageData(Math.round(p.x),Math.round(p.y),1,1).data))})()`)};
   try {
     await call('Emulation.setDeviceMetricsOverride',{width:3000,height:2600,deviceScaleFactor:1,mobile:false});
