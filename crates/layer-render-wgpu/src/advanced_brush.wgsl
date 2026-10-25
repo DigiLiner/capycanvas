@@ -145,8 +145,9 @@ fn advanced_color(input: VertexOutput, opacity: f32) -> vec4<f32> {
     }
 
     let edge_width = clamp(style.edges.z, 0.0001, 1.0);
-    let edge_band = smoothstep(0.0, edge_width, coverage)
-        * (1.0 - smoothstep(edge_width, min(edge_width * 2.0, 1.0), coverage));
+    let outer = min(edge_width * 2.0, 1.0);
+    let inner = select(1.0 - smoothstep(edge_width, outer, coverage), 1.0 - step(edge_width, coverage), outer <= edge_width);
+    let edge_band = smoothstep(0.0, edge_width, coverage) * inner;
     coverage = clamp(coverage + edge_band * style.edges.x, 0.0, 1.0);
     if coverage < style.edges.w {
         discard;
