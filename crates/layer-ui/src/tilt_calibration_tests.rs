@@ -1,5 +1,6 @@
 use super::{test_support::*, *};
 use layer_core::TiltAxes;
+use layer_engine::{SampleFlags,ToolKind};
 
 fn device(id:u64,key:&str,turn:u8)->PenDeviceInfo {
     PenDeviceInfo{id,key:key.into(),label:format!("Pen {key}"),native_to_surface:TiltAxes::quarter_turns(turn)}
@@ -174,4 +175,216 @@ fn hidden_cursor_still_requests_a_frame_for_pen_binding_and_live_tilt() {
     hover(&mut s,2,[0.4,0.]);assert!(s.input_ui_pending());assert!(s.wants_continuous_frames());assert!(view(&s).ready);
     let change=s.frame(3,3).unwrap();assert_ne!(change.regions & regions::TILT_CALIBRATION,0);assert!(!s.input_ui_pending());
     hover(&mut s,2,[0.6,0.]);assert!(s.input_ui_pending());
+}
+
+#[test]
+fn tilt_first_pen_binding_preserves_measured_and_moved_geometry_for_every_canvas_tool() {
+    let viewport=[1600.,1000.];
+    for command in [CommandId::Lasso,CommandId::Pencil,CommandId::Hand] {
+        for phase in [PenPhase::Hover,PenPhase::Down] {
+            for moved in [false,true] {
+                let mut s=session(Platform::Gtk);invoke(&mut s,command);open(&mut s);
+                panel(&mut s,PressureCalibrationAction::Measure{extent:[384.,622.],viewport});
+                let initial=view(&s).panel.bounds;
+                if moved {
+                    let press=[initial.x+20.,initial.y+20.];
+                    for (phase,position) in [(ContactPhase::Down,press),
+                        (ContactPhase::Move,[press[0]-60.,press[1]+40.]),
+                        (ContactPhase::Up,[press[0]-60.,press[1]+40.])] {
+                        panel(&mut s,PressureCalibrationAction::Drag{phase,position,viewport});
+                    }
+                }
+                let bounds=view(&s).panel.bounds;
+                assert!(!view(&s).ready);
+                s.register_pen_device(&device(2,"pen",0));
+                let sample=PenEvent{device_id:2,tilt_radians:[0.4,0.2],..event(&s,1,phase,0.5)};
+                if phase==PenPhase::Hover {s.cursor_input(Some(sample));} else {s.pen(sample);}
+                assert!(s.state.tilt_calibration.is_some(),"{command:?} {phase:?}, moved={moved}");
+                assert!(view(&s).ready,"{command:?} {phase:?}");
+                assert_eq!(view(&s).panel.bounds,bounds,"{command:?} {phase:?}, moved={moved}");
+            }
+        }
+    }
+}
+
+#[test]
+fn tilt_first_pen_binding_preserves_an_active_frame_drag_and_its_cancel_origin() {
+    let viewport=[1600.,1000.];
+    for phase in [PenPhase::Hover,PenPhase::Down] {
+        let mut s=session(Platform::Gtk);open(&mut s);
+        panel(&mut s,PressureCalibrationAction::Measure{extent:[384.,622.],viewport});
+        let initial=view(&s).panel.bounds;let press=[initial.x+20.,initial.y+20.];
+        panel(&mut s,PressureCalibrationAction::Drag{phase:ContactPhase::Down,position:press,viewport});
+        panel(&mut s,PressureCalibrationAction::Drag{phase:ContactPhase::Move,position:[press[0]-60.,press[1]+40.],viewport});
+        let dragged=view(&s).panel.bounds;
+        s.register_pen_device(&device(2,"pen",0));
+        let sample=PenEvent{device_id:2,tilt_radians:[0.4,0.2],..event(&s,1,phase,0.5)};
+        if phase==PenPhase::Hover {s.cursor_input(Some(sample));} else {s.pen(sample);}
+        assert_eq!(view(&s).panel.bounds,dragged,"{phase:?} preserves the current frame");
+        panel(&mut s,PressureCalibrationAction::Drag{phase:ContactPhase::Move,position:[press[0]-90.,press[1]+60.],viewport});
+        let moved=view(&s).panel.bounds;
+        assert_eq!([moved.x,moved.y],[initial.x-90.,initial.y+60.]);
+        assert_eq!([moved.width,moved.height],[initial.width,initial.height]);
+        panel(&mut s,PressureCalibrationAction::Drag{phase:ContactPhase::Cancel,position:[0.;2],viewport});
+        assert_eq!(view(&s).panel.bounds,initial,"{phase:?} preserves the drag's rollback frame");
+    }
+}
+
+#[test]
+fn tilt_cancelled_unbound_curve_gestures_restore_saved_response_and_prior_edit_intent() {
+    for cancellation in 0..3 {
+        for prior in 0..3 {
+            let mut s=session(Platform::Gtk);let mut saved=layer_core::TiltCalibration::default();
+            saved.response.sensitivity(false);saved.axes.swap=true;
+            let mut settings=s.state.settings.clone();settings.tilt_calibrations.insert("pen".into(),saved.clone());
+            s.apply_settings(settings).unwrap();open(&mut s);
+            match prior {
+                1=>panel(&mut s,PressureCalibrationAction::Sensitivity{lighter:true}),
+                2=>edit(&mut s,CurveEditorAction::Reset),
+                _=>{},
+            }
+            let before=view(&s).panel.editor.points.clone();let epoch=view(&s).panel.editor.controls.epoch;
+            for (phase,point) in [(ContactPhase::Down,[50.,50.]),(ContactPhase::Move,[40.,25.])] {
+                edit(&mut s,CurveEditorAction::Contact{epoch,phase,point,extent:[100.,100.]});
+            }
+            assert_ne!(view(&s).panel.editor.points,before);
+            match cancellation {
+                0=>edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Cancel,point:[0.;2],extent:[100.,100.]}),
+                1=>edit(&mut s,CurveEditorAction::Key{epoch,key_event:"Escape".into(),pressed:true,repeat:false,modifiers:Modifiers::default()}),
+                _=>edit(&mut s,CurveEditorAction::RemoveAt{epoch,point:[40.,25.],extent:[100.,100.],point_count:Some(before.len())}),
+            }
+            assert_eq!(view(&s).panel.editor.points,before);
+            s.register_pen_device(&device(2,"pen",0));hover(&mut s,2,[0.4,0.2]);
+            let expected=if prior==0 {saved.response.points()} else {before};
+            assert_eq!(view(&s).panel.editor.points,expected,"cancellation={cancellation}, prior={prior}");
+            let expected_axes=if prior==2 {TiltAxes::default()} else {saved.axes};
+            assert_eq!(view(&s).axes,expected_axes);
+            panel(&mut s,PressureCalibrationAction::Apply);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"].response.points(),expected);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"].axes,expected_axes);
+        }
+    }
+}
+
+#[test]
+fn tilt_first_pen_binding_waits_for_an_unbound_curve_gesture_to_commit_or_rollback() {
+    for ending in 0..3 {
+        for prior in 0..3 {
+            let mut s=session(Platform::Gtk);let mut saved=layer_core::TiltCalibration::default();
+            saved.response.sensitivity(false);saved.axes.swap=true;
+            let mut settings=s.state.settings.clone();settings.tilt_calibrations.insert("pen".into(),saved.clone());
+            s.apply_settings(settings).unwrap();open(&mut s);
+            match prior {
+                1=>panel(&mut s,PressureCalibrationAction::Sensitivity{lighter:true}),
+                2=>edit(&mut s,CurveEditorAction::Reset),
+                _=>{},
+            }
+            let baseline=view(&s).panel.editor.points.clone();let epoch=view(&s).panel.editor.controls.epoch;
+            for (phase,point) in [(ContactPhase::Down,[50.,50.]),(ContactPhase::Move,[40.,25.])] {
+                edit(&mut s,CurveEditorAction::Contact{epoch,phase,point,extent:[100.,100.]});
+            }
+            let draft=view(&s).panel.editor.points.clone();
+            s.register_pen_device(&device(2,"pen",0));hover(&mut s,2,[0.4,0.2]);
+            assert!(!view(&s).ready,"ending={ending}, prior={prior}");
+            assert_eq!(view(&s).panel.editor.points,draft);
+            assert_eq!(view(&s).panel.editor.controls.epoch,epoch);
+            match ending {
+                0=>edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Cancel,point:[0.;2],extent:[100.,100.]}),
+                1=>edit(&mut s,CurveEditorAction::Key{epoch,key_event:"Escape".into(),pressed:true,repeat:false,modifiers:Modifiers::default()}),
+                _=>edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Up,point:[40.,25.],extent:[100.,100.]}),
+            }
+            assert!(view(&s).ready,"ending={ending}, prior={prior}");
+            let expected=if ending==2 {draft} else if prior==0 {saved.response.points()} else {baseline};
+            let expected_axes=if prior==2 {TiltAxes::default()} else {saved.axes};
+            assert_eq!(view(&s).panel.editor.points,expected,"ending={ending}, prior={prior}");
+            assert_eq!(view(&s).axes,expected_axes);
+            panel(&mut s,PressureCalibrationAction::Apply);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"].response.points(),expected);
+            assert_eq!(s.state.settings.tilt_calibrations["pen"].axes,expected_axes);
+        }
+    }
+}
+
+#[test]
+fn tilt_stale_curve_cancellation_cannot_discard_a_newer_unbound_edit() {
+    let mut s=session(Platform::Gtk);open(&mut s);
+    let stale=view(&s).panel.editor.controls.epoch;
+    edit(&mut s,CurveEditorAction::Contact{epoch:stale,phase:ContactPhase::Down,point:[50.,50.],extent:[100.,100.]});
+    panel(&mut s,PressureCalibrationAction::Cancel);open(&mut s);
+    let epoch=view(&s).panel.editor.controls.epoch;assert_ne!(epoch,stale);
+    for (phase,point) in [(ContactPhase::Down,[50.,50.]),(ContactPhase::Move,[40.,25.])] {
+        edit(&mut s,CurveEditorAction::Contact{epoch,phase,point,extent:[100.,100.]});
+    }
+    let draft=view(&s).panel.editor.points.clone();
+    edit(&mut s,CurveEditorAction::Contact{epoch:stale,phase:ContactPhase::Cancel,point:[0.;2],extent:[100.,100.]});
+    assert_eq!(view(&s).panel.editor.points,draft);
+    edit(&mut s,CurveEditorAction::Contact{epoch,phase:ContactPhase::Up,point:[40.,25.],extent:[100.,100.]});
+    s.register_pen_device(&device(2,"pen",0));hover(&mut s,2,[0.4,0.2]);
+    assert_eq!(view(&s).panel.editor.points,draft);
+    panel(&mut s,PressureCalibrationAction::Apply);
+    assert_eq!(s.state.settings.tilt_calibrations["pen"].response.points(),draft);
+}
+
+#[test]
+fn calibration_input_updates_both_response_previews_without_canvas_input_or_cursor_changes() {
+    for command in [CommandId::PenPressure,CommandId::PenTilt] {
+        for tool in [CommandId::Lasso,CommandId::Pencil,CommandId::Hand] {
+            for cursor_present in [false,true] {
+                let mut s=session(Platform::Gtk);invoke(&mut s,tool);invoke(&mut s,CommandId::SelectAll);
+                s.frame(1,1).unwrap();
+                if cursor_present {s.cursor_input(Some(event(&s,1,PenPhase::Hover,0.3)));}
+                invoke(&mut s,command);s.register_pen_device(&device(2,"pen",0));
+                let document=s.engine.document().clone();let checkpoint=s.engine.checkpoint();
+                let camera=s.state.camera.clone();let cursor=s.cursor.event;
+                let dabs=s.renderer_mut().recorded_dabs.clone();let selection_updates=s.renderer_mut().selection_updates.len();
+                for (index,phase) in [PenPhase::Hover,PenPhase::Down,PenPhase::Move,PenPhase::Up,PenPhase::Cancel].into_iter().enumerate() {
+                    let sample=PenEvent{device_id:2,tilt_radians:[0.4+index as f32*0.02,0.2],
+                        ..event(&s,10+index as u64,phase,0.3+index as f32*0.1)};
+                    s.calibration_input(sample);
+                    if matches!(phase,PenPhase::Hover|PenPhase::Down|PenPhase::Move) {
+                        if command==CommandId::PenTilt {
+                            assert!(view(&s).ready);assert!(view(&s).panel.editor.marker.is_some());
+                            assert!(view(&s).input_direction.is_some());
+                        } else {assert!(s.state.pressure_calibration.as_ref().unwrap().editor.marker.is_some());}
+                        assert!(s.input_ui_pending());
+                    }
+                    s.frame(sample.timestamp_ns,sample.timestamp_ns).unwrap();
+                    assert_eq!(s.engine.document(),&document,"{command:?} {tool:?} {phase:?}");
+                    assert_eq!(s.engine.checkpoint(),checkpoint);
+                    assert_eq!(s.state.camera,camera);assert_eq!(s.cursor.event,cursor);
+                    assert!(!s.engine.has_active_stroke());
+                    assert_eq!(s.renderer_mut().recorded_dabs,dabs);
+                    assert_eq!(s.renderer_mut().selection_updates.len(),selection_updates);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn calibration_input_rejects_predicted_corrected_nonpen_and_nonfinite_samples() {
+    for command in [CommandId::PenPressure,CommandId::PenTilt] {
+      for already_bound in [false,true] {
+        let mut s=session(Platform::Gtk);invoke(&mut s,command);s.register_pen_device(&device(2,"pen",0));
+        let valid=PenEvent{device_id:2,tilt_radians:[0.4,0.2],..event(&s,2,PenPhase::Hover,0.4)};
+        if already_bound {s.calibration_input(valid);}
+        s.frame(1,1).unwrap();
+        let original_tilt=s.state.tilt_calibration.clone();let original_pressure=s.state.pressure_calibration.clone();
+        for sample in [PenEvent{flags:SampleFlags::PREDICTED,..valid},PenEvent{flags:SampleFlags::CORRECTION,..valid},
+            PenEvent{tool:ToolKind::Mouse,..valid},PenEvent{tool:ToolKind::Finger,..valid},
+            PenEvent{pressure:f32::NAN,..valid},PenEvent{tilt_radians:[f32::NAN,0.2],..valid},
+            PenEvent{tilt_radians:[0.4,f32::INFINITY],..valid},PenEvent{twist_radians:f32::NAN,..valid},
+            PenEvent{surface_position:layer_core::Point{x:f32::NAN,y:300.},..valid},
+            PenEvent{surface_position:layer_core::Point{x:250.,y:f32::INFINITY},..valid}] {
+            s.calibration_input(sample);
+            assert!(s.state.tilt_calibration==original_tilt,"{command:?}: {sample:?}");
+            assert!(s.state.pressure_calibration==original_pressure,"{command:?}: {sample:?}");
+            assert!(!s.input_ui_pending(),"{command:?}: {sample:?}");
+            assert!(s.cursor.event.is_none());
+        }
+        s.calibration_input(PenEvent{pressure:0.6,tilt_radians:[0.6,0.3],..valid});
+        if command==CommandId::PenTilt {assert!(view(&s).ready);} else {assert!(s.state.pressure_calibration.as_ref().unwrap().editor.marker.is_some());}
+        assert!(s.input_ui_pending());
+      }
+    }
 }

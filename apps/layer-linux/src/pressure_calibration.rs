@@ -66,7 +66,7 @@ impl PressurePanel {
         let axis_bar=gtk::Box::new(gtk::Orientation::Horizontal,0);axis_bar.add_css_class("linked");axis_bar.add_css_class("selection-modes");axis_bar.set_homogeneous(true);axis_bar.set_halign(gtk::Align::Center);
         axis_bar.set_widget_name("pen-tilt-axes");axis_bar.set_valign(gtk::Align::Center);
         let axes = ["layer-flip-horizontal-symbolic","layer-flip-vertical-symbolic","layer-swap-orientation-symbolic"].map(|icon|{
-            let button=gtk::ToggleButton::new();button.set_size_request(24,24);button.set_child(Some(&crate::icons::image(icon)));axis_bar.append(&button);button
+            let button=gtk::ToggleButton::new();button.set_size_request(layer_ui::TILE_SIZE as i32,layer_ui::TILE_SIZE as i32);button.set_child(Some(&crate::icons::image(icon)));axis_bar.append(&button);button
         });
         direction_controls.append(&axis_bar);direction.append(&direction_controls);body.append(&direction);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -75,6 +75,7 @@ impl PressurePanel {
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0); spacer.set_hexpand(true);
         let cancel = gtk::Button::new(); cancel.set_widget_name("pen-pressure-cancel");
         let apply = gtk::Button::new(); apply.set_widget_name("pen-pressure-apply"); apply.add_css_class("suggested-action");
+        for button in [&firmer,&lighter,&reset,&cancel,&apply] {button.set_height_request(layer_ui::TILE_SIZE as i32);}
         footer.append(&reset); footer.append(&spacer); footer.append(&cancel); footer.append(&apply); column.append(&footer);
         Rc::new(Self { root, column, title, heading, close, body, device, direction, direction_title, arrows, axes,
             tilt:Cell::new(false), projecting:Cell::new(false), tilt_view:RefCell::new(None), firmer, lighter, reset, cancel, apply,
@@ -92,6 +93,7 @@ impl PressurePanel {
             (&self.lighter, PressureCalibrationAction::Sensitivity { lighter: true })] {
             button.connect_clicked(glib::clone!(#[weak] w, move |_| { w.dispatch(w.pressure_calibration.panel_action(action.clone())); }));
         }
+        crate::input::observe_calibration(w,&self.root);
         self.reset.connect_clicked(glib::clone!(#[weak] w, move |_| {
             w.dispatch(UiAction::CurveEditor { target: w.pressure_calibration.target(), action: CurveEditorAction::Reset });
         }));
@@ -161,10 +163,11 @@ impl PressurePanel {
         let moved = self.bounds.replace(Some(view.bounds)) != Some(view.bounds);
         if moved { self.pending_bounds.set(Some(view.bounds)); w.queue_workspace_frame(); w.surface.queue_draw(); }
         let viewport = [w.surface.width() as f32, w.surface.height() as f32];
+        let fits=|extent:[f32;2]|(view.bounds.width-extent[0]).abs()<0.5 && (view.bounds.height-extent[1]).abs()<0.5;
         {
             let mut presented = self.presented.borrow_mut();
             if let Some(previous) = &mut *presented { previous.bounds = view.bounds; }
-            if self.root.is_visible() && !tilt_changed && presented.as_ref() == Some(view) && self.measured.get().is_some_and(|(_, previous)| previous == viewport) { return; }
+            if self.root.is_visible() && !tilt_changed && presented.as_ref() == Some(view) && self.measured.get().is_some_and(|(extent, previous)| previous == viewport && fits(extent)) { return; }
             *presented = Some(view.clone());
         }
         let prefix=if self.tilt.get(){"pen-tilt"}else{"pen-pressure"};
@@ -196,12 +199,12 @@ impl PressurePanel {
         self.editor.borrow().as_ref().unwrap().update(&view.editor, &w.localization());
         let width = 384f32.max(self.column.measure(gtk::Orientation::Horizontal,-1).0 as f32).min(viewport[0]);
         let extent = [width,360f32.max(self.column.measure(gtk::Orientation::Vertical,width as i32).1 as f32).min(viewport[1])];
-        if self.measured.get() != Some((extent, viewport)) {
+        let fitted=fits(extent);
+        if !fitted || self.measured.get() != Some((extent, viewport)) {
             self.measured.set(Some((extent, viewport)));
             let action=self.panel_action(PressureCalibrationAction::Measure{extent,viewport});
             glib::idle_add_local_once(glib::clone!(#[weak] w, move || {w.dispatch(action);}));
         }
-        let fitted=(view.bounds.width-extent[0]).abs()<0.5 && (view.bounds.height-extent[1]).abs()<0.5;
         self.root.set_visible(fitted);
         if !fitted {self.bounds.set(None);self.pending_bounds.set(None);}
     }

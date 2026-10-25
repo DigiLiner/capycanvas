@@ -1,4 +1,5 @@
 use crate::{Bounds, ContactPhase, CurveDomain, CurveEditorAction, CurveEditorView, Localizer, MessageId, UiSession};
+use layer_engine::{PenEvent,PenPhase,SampleFlags,ToolKind};
 use layer_core::PressureResponse;
 use layer_render::CanvasRenderer;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,21 @@ impl Calibration {
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
+    pub fn calibration_input(&mut self,event:PenEvent) {
+        if ![event.surface_position.x,event.surface_position.y,event.pressure,event.tilt_radians[0],event.tilt_radians[1],event.twist_radians]
+            .into_iter().all(f32::is_finite) {return;}
+        self.prepare_tilt_input(event);
+        self.prepare_pressure_input(event);
+    }
+    pub(crate) fn prepare_pressure_input(&mut self,event:PenEvent) {
+        if let Some(view)=&mut self.state.pressure_calibration
+            && !event.flags.contains(SampleFlags::PREDICTED) && !event.flags.contains(SampleFlags::CORRECTION)
+            && matches!(event.tool,ToolKind::Pen|ToolKind::Eraser|ToolKind::Pencil|ToolKind::Brush|ToolKind::Airbrush) {
+            let marker=if !event.pressure.is_finite() || matches!(event.phase,PenPhase::Up|PenPhase::Cancel) {None}
+                else {let raw=event.pressure.clamp(0.,1.);Some([raw,self.pressure_calibration.curve().map(raw)])};
+            if view.editor.marker!=marker {view.editor.marker=marker;self.pressure_meter_changed=true;}
+        }
+    }
     pub(crate) fn refresh_pressure_calibration(&mut self) {
         let marker = self.state.pressure_calibration.as_ref().and_then(|v| v.editor.marker);
         self.state.pressure_calibration = self.pressure_calibration.view(&self.state.localization);

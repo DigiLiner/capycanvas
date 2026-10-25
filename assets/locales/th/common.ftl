@@ -386,4 +386,4 @@ tilt-direction = ทิศทาง
 tilt-reverse-horizontal = กลับแนวนอน
 tilt-reverse-vertical = กลับแนวตั้ง
 tilt-swap-axes = สลับแกน
-tilt-use-pen = ใช้ปากกาบนผืนผ้าใบ
+tilt-use-pen = ใช้ปากกาที่นี่

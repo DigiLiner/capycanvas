@@ -617,4 +617,4 @@ tilt-direction = Richtung
 tilt-reverse-horizontal = Horizontal umkehren
 tilt-reverse-vertical = Vertikal umkehren
 tilt-swap-axes = Achsen tauschen
-tilt-use-pen = Stift auf der Leinwand verwenden
+tilt-use-pen = Stift hier verwenden

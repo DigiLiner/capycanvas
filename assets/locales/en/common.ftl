@@ -616,4 +616,4 @@ tilt-direction = Direction
 tilt-reverse-horizontal = Reverse horizontal
 tilt-reverse-vertical = Reverse vertical
 tilt-swap-axes = Swap axes
-tilt-use-pen = Use your pen on the canvas
+tilt-use-pen = Use your pen here

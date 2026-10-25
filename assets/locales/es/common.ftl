@@ -619,4 +619,4 @@ tilt-direction = Dirección
 tilt-reverse-horizontal = Invertir horizontal
 tilt-reverse-vertical = Invertir vertical
 tilt-swap-axes = Intercambiar ejes
-tilt-use-pen = Usa el lápiz en el lienzo
+tilt-use-pen = Usa el lápiz aquí

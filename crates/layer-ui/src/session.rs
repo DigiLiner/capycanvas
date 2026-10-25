@@ -4263,14 +4263,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.state.platform, self.platform_prediction_available(), event,
             )).expect("stored feedback settings are valid");
         }
-        if let Some(view) = &mut self.state.pressure_calibration
-            && !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
-            && matches!(event.tool, layer_engine::ToolKind::Pen | layer_engine::ToolKind::Eraser | layer_engine::ToolKind::Pencil | layer_engine::ToolKind::Brush | layer_engine::ToolKind::Airbrush) {
-            let marker = if !event.pressure.is_finite() || matches!(event.phase, PenPhase::Up | PenPhase::Cancel) { None } else {
-                let raw = event.pressure.clamp(0., 1.); Some([raw, self.pressure_calibration.curve().map(raw)])
-            };
-            if view.editor.marker != marker { view.editor.marker = marker; self.pressure_meter_changed = true; }
-        }
+        self.prepare_pressure_input(event);
         if event.phase == PenPhase::Down
             && let Some(spring) = &mut self.interaction.spring
         {

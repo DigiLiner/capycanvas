@@ -610,4 +610,4 @@ tilt-direction = Направление
 tilt-reverse-horizontal = Отразить по горизонтали
 tilt-reverse-vertical = Отразить по вертикали
 tilt-swap-axes = Поменять оси
-tilt-use-pen = Используйте перо на холсте
+tilt-use-pen = Используйте перо здесь

@@ -393,4 +393,4 @@ tilt-direction = Direzione
 tilt-reverse-horizontal = Inverti orizzontale
 tilt-reverse-vertical = Inverti verticale
 tilt-swap-axes = Scambia assi
-tilt-use-pen = Usa la penna sulla tela
+tilt-use-pen = Usa la penna qui

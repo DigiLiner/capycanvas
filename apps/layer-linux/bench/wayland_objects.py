@@ -34,6 +34,10 @@ class Objects:
         kind = self.kinds.get(visible)
         mapping = self.client_id if incoming else self.server_id
         struct.pack_into("=I", result, 0, mapping(obj))
+        if incoming and kind == "wl_display" and header & 0xFFFF == 1:
+            deleted = self.client_id(struct.unpack_from("=I", result, 8)[0])
+            self.kinds.pop(deleted, None)
+            struct.pack_into("=I", result, 8, deleted)
         definition = self.interfaces.get(kind)
         if definition is None:
             return bytes(result)

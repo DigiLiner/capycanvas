@@ -2052,6 +2052,18 @@ impl Workspace {
         }
     }
 
+    pub fn calibration_input(&self,event:layer_engine::PenEvent) {
+        let bound=self.gpu.borrow_mut().as_mut().is_some_and(|g| {
+            let ready=g.session.state().tilt_calibration.as_ref().is_some_and(|v|v.ready);
+            g.session.calibration_input(event);
+            ready!=g.session.state().tilt_calibration.as_ref().is_some_and(|v|v.ready)
+        });
+        self.refresh_cursor();
+        if bound && let Some(owner)=self.surface.imp().owner.borrow().upgrade() {
+            owner.refresh(regions::PRESSURE_CALIBRATION|regions::TILT_CALIBRATION);
+        }
+    }
+
     pub fn refresh_cursor(&self) {
         let changed = self
             .gpu

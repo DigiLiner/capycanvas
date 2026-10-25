@@ -619,4 +619,4 @@ tilt-direction = Direction
 tilt-reverse-horizontal = Inverser horizontalement
 tilt-reverse-vertical = Inverser verticalement
 tilt-swap-axes = Permuter les axes
-tilt-use-pen = Utilisez le stylet sur la toile
+tilt-use-pen = Utilisez votre stylet ici

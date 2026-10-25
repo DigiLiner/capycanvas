@@ -27,6 +27,20 @@ fn native_pressure_calibration() {
         until(|| !w.preferences.dialog.is_mapped(),"preferences closes before calibration");pump(250);
         let panel = w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
         assert!(panel.is_mapped()); assert!(!state(&w).settings_open);
+        if device=="mouse" {
+            let bounds=panel.compute_bounds(&w.surface).unwrap();let draft=response_view(&w,false).editor.points;
+            w.dispatch(UiAction::Invoke {command:CommandId::Lasso});pump(100);
+            native.perform(json!([{"pen":"down","point":window_point(&w,[40.,180.]),"tilt":[30.,0.]},{"pen":"up"},{"pen":"leave"}]));
+            assert!(panel.is_mapped(),"first Lasso pen contact keeps pressure visible");
+            assert_eq!(panel.compute_bounds(&w.surface).unwrap(),bounds);
+            assert_eq!(response_view(&w,false).editor.points,draft);
+            w.dispatch(UiAction::Invoke {command:CommandId::Pencil});pump(100);
+            let before=artwork_history(&w);
+            let title=find_named(panel,"pen-pressure-title").unwrap();let at=screen_point(&title,&w.window,[0.5,0.5]);
+            native.perform(json!([{"pen":"move","point":at,"tilt":[30.,0.]},{"pen":"down","point":at,"tilt":[0.,40.]},{"pen":"up"},{"pen":"leave"}]));
+            assert_eq!(artwork_history(&w),before,"pressure dialog contacts never paint or add history");
+            measured_extent_recovers(&w,false);
+        }
         assert_eq!(state(&w).pressure_calibration.unwrap().editor.points.len(),3);
         let snapshot=gtk::Snapshot::new();w.surface.snapshot_child(panel,&snapshot);
         let mut glass=Vec::new();crate::glass::collect(&snapshot.to_node().unwrap(),&state(&w).palette.glass.surfaces(),&mut glass);
@@ -259,11 +273,13 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
 #[ignore="private Mutter display and tablet proxy; workspace-motion.sh gtk --native-test=native_tilt_calibration --tablet"]
 fn native_tilt_calibration() {
     let app=native_test_app("art.capycanvas.TiltCalibration");
+    let mut native=RemoteInput::new();
+    untouched_tilt_first_contact(&app,&mut native,&std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap()));
     let w=Workspace::with_project(&app,Some((new_drawing_at(256,256,SampleDepth::F32),None)));
     w.window.set_default_size(1100,800);w.window.maximize();w.window.present();ready(&w);
     let theme=if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|v|v=="dark"){Theme::Dark}else{Theme::Light};
     w.dispatch(UiAction::SetTheme{theme:Some(theme)});
-    let mut native=RemoteInput::new();native.ready();
+    native.ready();
     let output=std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap());std::fs::create_dir_all(&output).unwrap();
     let mut settings=state(&w).settings;settings.cursor=layer_ui::CursorMode::None;
     w.dispatch(UiAction::RestoreSettings{settings:Box::new(settings)});
@@ -289,12 +305,22 @@ fn native_tilt_calibration() {
     crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-before-pen.png"))).unwrap();
     pump(500);
     let canvas=window_point(&w,[60.,140.]);
-    native.perform(json!([{"pen":"move","point":canvas,"tilt":[30.,0.]}]));
-    assert!(apply.is_sensitive(),"hover identifies the pen with the brush cursor hidden");
-    assert_eq!(response_view(&w,true).editor.points,before,"first hover keeps the edited curve");
+    w.dispatch(UiAction::Invoke {command:CommandId::Lasso});pump(100);
+    let bounds=panel.compute_bounds(&w.surface).unwrap();
+    native.perform(json!([{"pen":"down","point":canvas,"tilt":[30.,0.]}]));
+    crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-first-lasso-down.png"))).unwrap();
+    assert!(panel.is_mapped(),"first Lasso canvas penDown keeps the tilt utility visible");
+    assert_eq!(panel.compute_bounds(&w.surface).unwrap(),bounds,"first pen identification preserves native utility bounds");
+    assert_eq!(response_view(&w,true).editor.points,before,"first Lasso penDown keeps the edited curve");
+    native.perform(json!([{"pen":"up"},{"pen":"leave"}]));
+    assert!(panel.is_mapped(),"first Lasso pen release keeps the tilt utility visible");
+    assert!(apply.is_sensitive(),"first pen contact identifies the pen with the brush cursor hidden");
     assert_eq!(ui_session(&w).engine().metrics().committed_strokes,0,"no stroke is needed to activate the editor");
+    native.click(screen_point(&more,&w.window,[0.5,0.5]));
+    assert_ne!(response_view(&w,true).editor.points,before,"controls remain usable after first canvas contact");
     let cancel=find_named(panel,"pen-tilt-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
     assert!(state(&w).tilt_calibration.is_none());
+    w.dispatch(UiAction::Invoke {command:CommandId::Pencil});pump(100);
 
     for device in ["mouse","touch","pen"] {
         w.dispatch(UiAction::OpenSettings{page:SettingsPage::Input});pump(200);
@@ -303,6 +329,7 @@ fn native_tilt_calibration() {
         until(||!w.preferences.dialog.is_mapped(),"tilt closes preferences");pump(200);
         let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();assert!(panel.is_mapped());
         assert!(state(&w).tilt_calibration.as_ref().unwrap().ready,"native tablet identity binds the editor");
+        if device=="mouse" {measured_extent_recovers(&w,true);}
         assert_dialog_footer(panel,"pen-tilt");
         assert_axis_bar(panel,&w);
         let graph=find_named(panel,"pen-tilt-graph").unwrap();
@@ -357,6 +384,7 @@ fn native_tilt_calibration() {
         }
         pump(200);native.settle_ms=0;native.timeout=Duration::from_secs(30);measure_motion(&w,&mut native,&output,true);
     }
+    tilt_dialog_preview(&app,&mut native,&output,theme);
     native.finish();w.window.close();
 }
 
@@ -378,7 +406,7 @@ fn assert_dialog_footer(panel:&gtk::Widget,prefix:&str) {
     assert!((title.y()+title.height()*0.5-close.y()-close.height()*0.5).abs()<1.,"title and Close share a vertical center");
     assert!((sensitivity.height()-reset_bounds.height()).abs()<1.,"editing and footer actions use the same height");
     let bounds=buttons.each_ref().map(|button|button.compute_bounds(&footer).unwrap());
-    assert!(bounds.iter().all(|b|b.height()>=34.),"standard dialog button height: {bounds:?}");
+    assert!(bounds.iter().all(|b|b.height()==TILE_SIZE),"tile-height dialog buttons: {bounds:?}");
     assert!(bounds.iter().all(|b|(b.y()-bounds[0].y()).abs()<1.));
     assert!((bounds[2].x()-bounds[1].x()-bounds[1].width()-8.).abs()<1.);
     let reset=buttons[0].clone().downcast::<gtk::Button>().unwrap();assert!(reset.child().is_some_and(|c|c.is::<gtk::Label>()));
@@ -391,6 +419,7 @@ fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
     let view=state(w).tilt_calibration.unwrap();
     for (button,label) in buttons.iter().zip([view.reverse_horizontal,view.reverse_vertical,view.swap_axes]) {
         assert!(button.child().is_some_and(|c|c.is::<gtk::Image>()));assert_eq!(button.tooltip_text().as_deref(),Some(label.as_str()));
+        assert_eq!(button.child().unwrap().downcast::<gtk::Image>().unwrap().pixel_size(),16);
     }
     let preview=find_named(panel,"pen-tilt-direction").unwrap();
     let preview_bounds=preview.compute_bounds(panel).unwrap();let bar_bounds=bar.compute_bounds(panel).unwrap();
@@ -399,9 +428,96 @@ fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
     assert!((preview_bounds.x()+preview_bounds.width()*0.5-center).abs()<1.);
     assert!((bar_bounds.x()+bar_bounds.width()*0.5-center).abs()<1.,"plot, preview and icon bar share one centerline");
     assert!((bar_bounds.y()-preview_bounds.y()-preview_bounds.height()-8.).abs()<1.,"consistent preview/control gap");
-    assert!(buttons.iter().all(|button|button.width()==24 && button.height()==24));
+    assert!(buttons.iter().all(|button|button.width()==TILE_SIZE as i32 && button.height()==TILE_SIZE as i32));
     let bounds=buttons.each_ref().map(|button|button.compute_bounds(&bar).unwrap());
     assert!(bounds.windows(2).all(|pair|(pair[0].x()+pair[0].width()-pair[1].x()).abs()<1.));
+}
+
+fn artwork_history(w:&Workspace)->(u64,bool,bool,u64) {
+    let session=ui_session(w);let engine=session.engine();
+    (engine.document().revision,engine.can_undo(),engine.can_redo(),engine.metrics().committed_strokes)
+}
+
+fn measured_extent_recovers(w:&Rc<Workspace>,tilt:bool) {
+    let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+    let native=panel.compute_bounds(&w.surface).unwrap();let view=response_view(w,tilt);
+    let action=layer_ui::PressureCalibrationAction::Measure {
+        extent:[native.width()-8.,native.height()-8.],viewport:[w.surface.width() as f32,w.surface.height() as f32],
+    };
+    w.dispatch(if tilt {UiAction::TiltCalibration {action:layer_ui::TiltCalibrationAction::Panel {action}}}else{UiAction::PressureCalibration {action}});
+    pump(300);
+    assert!(panel.is_mapped(),"cached native extent heals a mismatched shared measurement");
+    assert_eq!(panel.compute_bounds(&w.surface).unwrap(),native,"healing preserves native extent and placement");
+    assert_eq!(response_view(w,tilt).bounds,view.bounds,"native remeasurement restores the actual shared extent");
+    assert_eq!(response_view(w,tilt).editor.points,view.editor.points);
+}
+
+fn untouched_tilt_first_contact(app:&NativeTestApp,native:&mut RemoteInput,output:&std::path::Path) {
+    let w=Workspace::with_project(app,Some((new_drawing_at(256,256,SampleDepth::F32),None)));
+    w.window.maximize();w.window.present();ready(&w);native.ready();
+    let theme=if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|v|v=="dark"){Theme::Dark}else{Theme::Light};
+    w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+    let mut settings=state(&w).settings;settings.cursor=layer_ui::CursorMode::None;
+    w.dispatch(UiAction::RestoreSettings {settings:Box::new(settings)});
+    w.dispatch(UiAction::Invoke {command:CommandId::Lasso});
+    w.dispatch(UiAction::Invoke {command:CommandId::PenTilt});pump(250);
+    let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+    let title=find_named(panel,"pen-tilt-title").unwrap();let at=screen_point(&title,&w.window,[0.5,0.5]);
+    native.perform(json!([{"point":at,"down":true},{"point":[at[0]-80.,at[1]+20.]},{"down":false}]));
+    let native_bounds=panel.compute_bounds(&w.surface).unwrap();let view=response_view(&w,true);
+    assert!(!state(&w).tilt_calibration.unwrap().ready);
+    native.perform(json!([{"pen":"down","point":window_point(&w,[40.,180.]),"tilt":[30.,0.]}]));
+    std::fs::create_dir_all(output).unwrap();
+    crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-untouched-first-lasso-down.png"))).unwrap();
+    assert!(panel.is_mapped(),"untouched tilt utility survives first Lasso canvas penDown");
+    assert_eq!(panel.compute_bounds(&w.surface).unwrap(),native_bounds,"first device identification keeps measured native placement");
+    assert_eq!(response_view(&w,true).bounds,view.bounds,"first device identification keeps shared placement");
+    assert_eq!(response_view(&w,true).editor.points,view.editor.points);
+    native.perform(json!([{"pen":"up"},{"pen":"leave"}]));
+    let more=find_named(panel,"pen-tilt-lighter").unwrap();native.click(screen_point(&more,&w.window,[0.5,0.5]));
+    assert_ne!(response_view(&w,true).editor.points,view.editor.points,"surviving utility remains editable");
+    let cancel=find_named(panel,"pen-tilt-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
+    w.dispatch(UiAction::Invoke {command:CommandId::PenTilt});pump(250);
+    assert!(panel.is_mapped() && state(&w).tilt_calibration.as_ref().unwrap().ready,"utility reopens after first canvas contact");
+    assert_eq!(ui_session(&w).engine().metrics().committed_strokes,0);
+    w.window.close();pump(100);
+}
+
+fn tilt_dialog_preview(app:&NativeTestApp,native:&mut RemoteInput,output:&std::path::Path,theme:Theme) {
+    native.settle_ms=100;native.timeout=Duration::from_secs(5);
+    let w=Workspace::with_project(app,Some((new_drawing_at(256,256,SampleDepth::F32),None)));
+    w.window.maximize();w.window.present();ready(&w);w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+    let mut settings=state(&w).settings;settings.cursor=layer_ui::CursorMode::None;settings.tilt_calibrations.clear();
+    w.dispatch(UiAction::RestoreSettings {settings:Box::new(settings)});
+    for bound in [false,true] {
+        w.dispatch(UiAction::Invoke {command:CommandId::PenTilt});pump(250);
+        let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+        assert_eq!(state(&w).tilt_calibration.as_ref().unwrap().ready,bound);
+        let bounds=panel.compute_bounds(&w.surface).unwrap();let history=artwork_history(&w);
+        let draft=response_view(&w,true).editor.points;
+        let circle=find_named(panel,"pen-tilt-direction").unwrap();
+        let at=screen_point(&circle,&w.window,[0.5,0.5]);
+        native.perform(json!([{"pen":"move","point":at,"tilt":[30.,0.]}]));
+        assert!(panel.is_mapped(),"dialog hover keeps tilt mapped");
+        assert_eq!(panel.compute_bounds(&w.surface).unwrap(),bounds,"dialog identification preserves placement");
+        let view=state(&w).tilt_calibration.unwrap();assert!(view.ready);
+        assert!((view.input_direction.unwrap()[0]-1./3.).abs()<1e-5,"circle hover senses native tilt");
+        native.perform(json!([{"pen":"down","point":at,"tilt":[0.,40.]},{"pen":"move","point":[at[0]+4.,at[1]+4.],"tilt":[0.,60.]}]));
+        let view=state(&w).tilt_calibration.unwrap();
+        assert!((view.input_direction.unwrap()[1]-2./3.).abs()<1e-5,"circle contact updates native tilt");
+        assert!(view.adjusted_direction.is_some() && view.panel.editor.marker.is_some());
+        crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-dialog-preview-bound-{bound}.png"))).unwrap();
+        native.perform(json!([{"pen":"up"},{"pen":"leave"}]));
+        let title=find_named(panel,"pen-tilt-title").unwrap();let at=screen_point(&title,&w.window,[0.5,0.5]);
+        native.perform(json!([{"pen":"move","point":at,"tilt":[-30.,0.]}]));
+        assert!((state(&w).tilt_calibration.unwrap().input_direction.unwrap()[0]+1./3.).abs()<1e-5,"dialog header hover senses tilt");
+        native.perform(json!([{"pen":"leave"}]));
+        assert_eq!(response_view(&w,true).editor.points,draft,"sensing keeps the response draft");
+        assert_eq!(artwork_history(&w),history,"dialog tilt preview never paints or changes document history");
+        let apply=find_named(panel,"pen-tilt-apply").unwrap();assert!(apply.is_sensitive());native.click(screen_point(&apply,&w.window,[0.5,0.5]));
+        assert!(state(&w).tilt_calibration.is_none());
+    }
+    w.window.close();pump(100);
 }
 
 fn utility_over_column(w:&Rc<Workspace>,native:&mut RemoteInput,output:&std::path::Path,theme:Theme,tilt:bool) {

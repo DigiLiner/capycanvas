@@ -4829,3 +4829,43 @@ were changed, runs repeated for better results, or external processes stopped.
 Reports, screenshots, geometry, warnings and load observations are under
 `artifacts/calibration-layering/`; shared placement and full UI results are under
 `artifacts/pen-response-placement/`.
+
+### First pen identification and dialog sensor input
+
+Measured on 2026-10-25 UTC on the `e1460e2e5` working tree with preserved
+first-contact geometry, corrected measurement recovery, sensor input over the
+GTK utilities and 36-pixel controls. Final release test SHA-256 is
+`f3bee058deff1ea364f63a587a92006cef7aa310959a8b49caa28e1b7bf3fb0c`.
+The private 1600 × 1000/120 Hz display, 256 × 256 F32 drawing, RTX PRO 6000
+at `F1:00.0`, driver `615.71.09` and six-gesture protocol remain the same.
+The four native functional cases and existing canvas pen-button journey pass.
+They verify untouched first Lasso contact, retained manual placement, recovery
+from mismatched measurements, native sensor previews over the dialog and circle
+without artwork/history changes, and matching 36-pixel actions in both themes.
+The utilities retain matching 262-pixel square plots.
+
+| Case | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Tilt: Frame | 99.27–117.61 / 41.683 ms | 105.85–119.61 / 25.045 ms |
+| Tilt: Curve | 117.81–119.21 / 16.662 ms | 117.81–118.61 / 16.674 ms |
+| Pressure: Frame | 116.02–118.61 / 16.814 ms | 116.63–118.21 / 16.687 ms |
+| Pressure: Curve | 108.05–117.81 / 25.131 ms | 109.84–118.41 / 24.994 ms |
+
+Nineteen of 24 gestures meet the unchanged 114 presents/s floor; ten meet both
+that floor and the strict 2000/120 ms p99 limit. GPU utilization was 15% before
+motion; two other private native/compositor jobs and external Rust builds were
+active. These desktop diagnostics leave reference-tablet qualification open and
+do not establish an isolated speed change. The dark pressure run reports one
+GDK duplicate-presentation warning with an 8.611 ms timestamp difference.
+Other cases have no GTK/GDK warnings; existing portal/a11y/secret-proxy warnings
+remain in the logs. Every motion case ran once after functional validation,
+without changing thresholds or stopping external processes.
+
+Fresh-window input coverage also exposed two test-proxy faults: tablet events
+targeted the first window, and recycled GTK protocol IDs retained an unrelated
+old interface. Both are fixed and covered by wire/target regressions. The
+corrected functional journeys pass, while their earlier failures remain recorded.
+Reports, exact hashes, screenshots, regression failures and all motion samples
+are under `artifacts/calibration-first-pen/`. The shared release suite passes
+1,850 tests with two ignored cases; the 17 focused tilt tests and six Python
+proxy tests pass. Physical pen input and other native hosts were not exercised.

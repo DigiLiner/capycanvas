@@ -226,6 +226,27 @@ pub(crate) fn pen_scroller(scroll: gtk::ScrolledWindow) -> gtk::ScrolledWindow {
 
 const TOUCH_DEVICES: u64 = 1 << 40;
 
+pub fn observe_calibration(workspace:&Rc<Workspace>,widget:&impl IsA<gtk::Widget>) {
+    let observer=gtk::EventControllerLegacy::new();observer.set_propagation_phase(gtk::PropagationPhase::Capture);
+    observer.connect_event(glib::clone!(#[weak] workspace,#[upgrade_or] glib::Propagation::Proceed,move |_,event| {
+        if event.device_tool().is_none() {return glib::Propagation::Proceed;}
+        let phase=match event.event_type() {
+            gdk::EventType::ProximityIn=>PenPhase::Hover,
+            gdk::EventType::ProximityOut=>PenPhase::Cancel,
+            gdk::EventType::MotionNotify=>if event.modifier_state().contains(gdk::ModifierType::BUTTON1_MASK) {PenPhase::Move}else{PenPhase::Hover},
+            gdk::EventType::ButtonPress|gdk::EventType::ButtonRelease
+                if event.downcast_ref::<gdk::ButtonEvent>().is_some_and(|e|e.button()==1)=>{
+                    if event.event_type()==gdk::EventType::ButtonPress {PenPhase::Down}else{PenPhase::Up}
+                },
+            _=>return glib::Propagation::Proceed,
+        };
+        let (x,y)=event.position().unwrap_or_default();
+        if let Some(sample)=workspace.input.sample(&workspace,Some(event),phase,x,y) {workspace.calibration_input(sample);}
+        glib::Propagation::Proceed
+    }));
+    widget.add_controller(observer);
+}
+
 #[derive(Default)]
 pub struct Input {
     sequence: Cell<u64>,
@@ -770,23 +791,21 @@ impl Input {
             mapped
         }
     }
-    fn stylus(
+    fn sample(
         &self,
         workspace: &Rc<Workspace>,
-        gesture: &gtk::GestureStylus,
+        native: Option<&gdk::Event>,
         phase: PenPhase,
         x: f64,
         y: f64,
-    ) {
+    ) -> Option<PenEvent> {
         let revision = workspace
             .gpu
             .borrow()
             .as_ref()
             .map(|g| g.session.state().camera.revision);
-        let Some(view_revision) = revision else {
-            return;
-        };
-        let tool = gesture.device_tool();
+        let view_revision=revision?;
+        let tool = native.and_then(|event|event.device_tool());
         let tool_kind = if tool
             .as_ref()
             .is_some_and(|t| t.tool_type() == gdk::DeviceToolType::Eraser)
@@ -797,17 +816,17 @@ impl Input {
         } else {
             ToolKind::Mouse
         };
-        let timestamp_ns = self.timestamp(gesture.current_event_time());
-        let tablet_flags = gesture.current_event().and_then(|event| event.device())
+        let timestamp_ns = self.timestamp(native.map_or(0,|event|event.time()));
+        let tablet_flags = native.and_then(|event| event.device())
             .map_or(SampleFlags::NONE, |device| self.tablets.flags(&device, tool.as_ref()));
-        let pen=gesture.current_event().and_then(|event|event.device()).zip(tool.as_ref())
+        let pen=native.and_then(|event|event.device()).zip(tool.as_ref())
             .map(|(device,tool)|self.tablets.pen(&device,tool));
         if let Some(pen)=&pen {
             if let Some(gpu)=workspace.gpu.borrow_mut().as_mut(){gpu.session.register_pen_device(pen);}
         }
         let dpi = workspace.area.scale_factor() as f32;
-        let axis = |a| gesture.axis(a).unwrap_or(0.0) as f32;
-        let event = PenEvent {
+        let axis = |a| native.and_then(|event|event.axis(a)).unwrap_or(0.0) as f32;
+        Some(PenEvent {
             device_id: pen.as_ref().map_or(1,|pen|pen.id),
             sequence: 0,
             timestamp_ns,
@@ -831,7 +850,13 @@ impl Input {
             phase,
             tool: tool_kind,
             flags: SampleFlags(SampleFlags::PRIMARY.0 | tablet_flags.0),
-        };
+        })
+    }
+    fn stylus(&self,workspace:&Rc<Workspace>,gesture:&gtk::GestureStylus,phase:PenPhase,x:f64,y:f64) {
+        let native=gesture.current_event();
+        let Some(event)=self.sample(workspace,native.as_ref(),phase,x,y) else{return;};
+        let tool_kind=event.tool;
+        let dpi=workspace.area.scale_factor() as f32;
         workspace.cursor_input(Some(event));
         if phase == PenPhase::Hover {
             return;
@@ -851,7 +876,7 @@ impl Input {
         #[cfg(test)]
         if let Some(gpu) = workspace.gpu.borrow().as_ref() {
             gpu.session.engine().backend().stats.lock().unwrap().pen_routes.push((
-                timestamp_ns, format!("{phase:?}"), if reply.paint { "paint" } else { "interaction" }));
+                event.timestamp_ns, format!("{phase:?}"), if reply.paint { "paint" } else { "interaction" }));
         }
         if !reply.paint {
             return;

@@ -694,4 +694,4 @@ tilt-direction = Arah
 tilt-reverse-horizontal = Balik horizontal
 tilt-reverse-vertical = Balik vertikal
 tilt-swap-axes = Tukar sumbu
-tilt-use-pen = Gunakan pena di kanvas
+tilt-use-pen = Gunakan pena di sini

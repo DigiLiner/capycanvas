@@ -46,6 +46,26 @@ class ObjectTranslationTests(unittest.TestCase):
         attach = message(50, 1, words(SERVER_BASE + 2, SERVER_BASE, SERVER_BASE))
         self.assertEqual(self.objects.translate(attach, False), message(50, 1, words(SERVER_BASE, SERVER_BASE, SERVER_BASE)))
 
+    def test_retired_buffer_params_ids_can_be_reused_by_private_gtk_surface_objects(self):
+        self.objects.kinds[39] = "zwp_linux_dmabuf_v1"
+        self.objects.translate(message(39, 1, words(379)), False)
+        self.assertEqual(self.objects.kinds[379], "zwp_linux_buffer_params_v1")
+        self.objects.translate(message(379, 0), False)
+        deleted = message(1, 1, words(379))
+        self.assertEqual(self.objects.translate(deleted, True), deleted)
+        self.assertNotIn(379, self.objects.kinds)
+        self.objects.kinds[14] = "gtk_shell1"
+        created = message(14, 0, words(379, 406))
+        self.assertEqual(self.objects.translate(created, False), created)
+        released = message(379, 5)
+        self.assertEqual(self.objects.translate(released, False), released)
+
+    def test_deleted_server_ids_release_the_translated_identity(self):
+        visible = SERVER_BASE + self.objects.reserved
+        self.objects.kinds[visible] = "zwp_primary_selection_offer_v1"
+        self.assertEqual(self.objects.translate(message(1, 1, words(SERVER_BASE)), True), message(1, 1, words(visible)))
+        self.assertNotIn(visible, self.objects.kinds)
+
 
 if __name__ == "__main__":
     unittest.main()

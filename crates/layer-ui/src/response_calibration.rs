@@ -88,7 +88,11 @@ impl<R: EditableResponse> Calibration<R> {
     pub fn open(&mut self, current: &R) {
         if self.draft.is_some() { return; }
         self.placement=None;
+        self.replace_response(current);
+    }
+    pub fn replace_response(&mut self,current:&R) {
         self.draft = Some(current.clone()); self.compiled = current.compile(); self.selected = Some(0);
+        self.point_drag=None;
         self.epoch = self.epoch.wrapping_add(1);
     }
     pub fn close(&mut self) -> Option<R> {
@@ -103,14 +107,15 @@ impl<R: EditableResponse> Calibration<R> {
         b.x = b.x.clamp(0., viewport[0] - b.width); b.y = b.y.clamp(0., viewport[1] - b.height);
         self.placement = Some(b);
     }
-    pub fn action(&mut self, action: CurveEditorAction) {
-        let Some(draft) = &mut self.draft else { return; };
+    pub fn action(&mut self, action: CurveEditorAction) -> bool {
+        let Some(draft) = &mut self.draft else { return false; };
+        let mut cancelled=false;
         match action {
             CurveEditorAction::Contact { epoch, phase, point, extent } => {
-                if epoch != self.epoch || point.iter().any(|v| !v.is_finite()) { return; }
+                if epoch != self.epoch || point.iter().any(|v| !v.is_finite()) { return false; }
                 match phase {
                     ContactPhase::Down => {
-                        if extent.iter().any(|v| !v.is_finite() || *v <= 0.) { return; }
+                        if extent.iter().any(|v| !v.is_finite() || *v <= 0.) { return false; }
                         let baseline = draft.clone();
                         let index = super::effects::curves::hit(&draft.points(), point, extent)
                             .or_else(|| draft.insert([point[0] / extent[0], 1. - point[1] / extent[1]]));
@@ -130,22 +135,22 @@ impl<R: EditableResponse> Calibration<R> {
                         }
                         if phase == ContactPhase::Up { self.point_drag = None; }
                     }
-                    ContactPhase::Cancel => if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; self.selected = None; },
+                    ContactPhase::Cancel => if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; self.selected = None; cancelled=true; },
                 }
             }
             CurveEditorAction::RemoveAt { epoch, point, extent, point_count } => {
-                if epoch != self.epoch { return; }
+                if epoch != self.epoch { return false; }
                 if point_count.is_some_and(|count| count != draft.points().len()) {
-                    if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; }
+                    if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; cancelled=true; }
                     self.selected = None;
                 } else if let Some(index) = super::effects::curves::hit(&draft.points(), point, extent) && draft.remove(index) {
                     self.selected = None; self.point_drag = None;
                 }
             }
             CurveEditorAction::Key { epoch, key_event, pressed, modifiers, .. } => {
-                if epoch != self.epoch || !pressed { return; }
+                if epoch != self.epoch || !pressed { return false; }
                 if key_event == "Escape" {
-                    if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; self.selected = None; }
+                    if let Some(drag) = self.point_drag.take() { *draft = drag.baseline; self.selected = None; cancelled=true; }
                     else if let Some((bounds,_))=self.frame_drag.take() { self.placement=Some(bounds); }
                 } else if let Some(index) = self.selected.filter(|i| *i < draft.points().len()) {
                     if key_event == "Delete" || key_event == "Backspace" { if draft.remove(index) { self.selected = None; } }
@@ -153,7 +158,7 @@ impl<R: EditableResponse> Calibration<R> {
                         let step = if modifiers.shift { 0.05 } else { 0.005 };
                         let mut point = draft.points()[index];
                         match key_event.as_str() { "ArrowLeft" => point[0] -= step, "ArrowRight" => point[0] += step,
-                            "ArrowUp" => point[1] += step, "ArrowDown" => point[1] -= step, _ => return }
+                            "ArrowUp" => point[1] += step, "ArrowDown" => point[1] -= step, _ => return false }
                         draft.set_point(index, point);
                     }
                 }
@@ -161,6 +166,7 @@ impl<R: EditableResponse> Calibration<R> {
             CurveEditorAction::Reset => { *draft = R::default(); self.selected = Some(0); self.point_drag = None; },
             CurveEditorAction::Number { .. } | CurveEditorAction::Gesture { .. } => {},
         }
+        cancelled
     }
     pub fn compile(&mut self) { if let Some(draft) = &self.draft { self.compiled = draft.compile(); } }
 }

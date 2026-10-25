@@ -42,6 +42,7 @@ pub(crate) struct Calibration {
     last:Option<u64>,
     target:Option<u64>,
     unbound_response:bool,
+    unbound_drag:Option<bool>,
     unbound_axes:bool,
     current:Option<u64>,
     neutral:TiltCurve,
@@ -67,9 +68,8 @@ impl<R:CanvasRenderer> UiSession<R> {
             self.tilt_calibration.axes=self.tilt_calibration.axes.in_frame(frame.inverse());
         } else {self.tilt_calibration.axes=calibration.axes;}
         if !self.tilt_calibration.unbound_response {
-            let drag=self.tilt_calibration.editor.frame_drag.take();
-            self.tilt_calibration.editor.close();self.tilt_calibration.editor.open(&calibration.response);
-            self.tilt_calibration.editor.frame_drag=drag;
+            self.tilt_calibration.editor.replace_response(&calibration.response);
+            self.tilt_calibration.unbound_drag=None;
             self.tilt_calibration.editor.selected=Some(calibration.response.points().len()-1);
         }
         self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.sync_tilt_curves();
@@ -78,7 +78,7 @@ impl<R:CanvasRenderer> UiSession<R> {
         self.state.settings_open=false;self.state.preferences=PreferencesState::default();
         if self.tilt_calibration.editor.source().is_some(){return;}
         if self.pressure_calibration.source().is_some() {self.pressure_action(PressureCalibrationAction::Cancel);}
-        self.tilt_calibration.axes=TiltAxes::default();self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;
+        self.tilt_calibration.axes=TiltAxes::default();self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.tilt_calibration.unbound_drag=None;
         self.tilt_calibration.editor.open(&TiltResponse::default());
         if let Some(id)=self.tilt_calibration.last {self.bind_tilt_target(id);}
         self.refresh_tilt_calibration();
@@ -105,7 +105,7 @@ impl<R:CanvasRenderer> UiSession<R> {
             || event.flags.contains(SampleFlags::PREDICTED) || event.flags.contains(SampleFlags::CORRECTION) { return; }
         if self.tilt_calibration.devices.contains_key(&event.device_id) {
             self.tilt_calibration.last=Some(event.device_id);
-            if self.tilt_calibration.editor.source().is_some() && self.tilt_calibration.target.is_none() {
+            if self.tilt_calibration.editor.source().is_some() && self.tilt_calibration.target.is_none() && self.tilt_calibration.editor.point_drag.is_none() {
                 self.bind_tilt_target(event.device_id);self.refresh_tilt_calibration();
             }
         }
@@ -156,13 +156,21 @@ impl<R:CanvasRenderer> UiSession<R> {
             self.tilt_action(TiltCalibrationAction::Panel{action:PressureCalibrationAction::Cancel});return;
         }
         let old=self.tilt_calibration.editor.source().cloned();let reset=matches!(action,CurveEditorAction::Reset);
-        self.tilt_calibration.editor.action(action);
+        let dragging=self.tilt_calibration.editor.point_drag.is_some();
+        let unbound_response=self.tilt_calibration.unbound_response;
+        let cancelled=self.tilt_calibration.editor.action(action);
+        if !dragging && self.tilt_calibration.editor.point_drag.is_some() {self.tilt_calibration.unbound_drag=Some(unbound_response);}
         if reset {self.tilt_calibration.axes=TiltAxes::default();}
         if reset || self.tilt_calibration.editor.source()!=old.as_ref() {
             self.tilt_calibration.unbound_response|=self.tilt_calibration.target.is_none();
             self.tilt_calibration.unbound_axes|=reset && self.tilt_calibration.target.is_none();
             self.tilt_calibration.editor.compile();self.sync_tilt_curves();
         }
+        if self.tilt_calibration.editor.point_drag.is_none()
+            && let Some(previous)=self.tilt_calibration.unbound_drag.take()
+            && dragging && cancelled && self.tilt_calibration.target.is_none() {self.tilt_calibration.unbound_response=previous;}
+        if self.tilt_calibration.target.is_none() && self.tilt_calibration.editor.source().is_some()
+            && self.tilt_calibration.editor.point_drag.is_none() && let Some(id)=self.tilt_calibration.last {self.bind_tilt_target(id);}
         self.refresh_tilt_calibration();
     }
     pub(crate) fn tilt_action(&mut self,action:TiltCalibrationAction)->bool {
@@ -184,7 +192,7 @@ impl<R:CanvasRenderer> UiSession<R> {
                         let device=self.tilt_calibration.devices.get(&self.tilt_calibration.target.unwrap()).unwrap();
                         self.state.settings.tilt_calibrations.insert(device.info.key.clone(),TiltCalibration{response,axes:self.tilt_calibration.axes});save=true;
                     }
-                    self.tilt_calibration.target=None;self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.sync_tilt_curves();
+                    self.tilt_calibration.target=None;self.tilt_calibration.unbound_response=false;self.tilt_calibration.unbound_axes=false;self.tilt_calibration.unbound_drag=None;self.sync_tilt_curves();
                 }
                 PressureCalibrationAction::Sensitivity{lighter}=>{
                     self.tilt_calibration.unbound_response|=self.tilt_calibration.target.is_none();

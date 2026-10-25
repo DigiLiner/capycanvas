@@ -434,4 +434,4 @@ tilt-direction = 방향
 tilt-reverse-horizontal = 좌우 반전
 tilt-reverse-vertical = 상하 반전
 tilt-swap-axes = 축 바꾸기
-tilt-use-pen = 캔버스에서 펜을 사용하세요
+tilt-use-pen = 여기에서 펜을 사용하세요

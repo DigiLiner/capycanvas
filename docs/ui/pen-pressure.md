@@ -37,7 +37,7 @@ without saving settings. **Apply** saves and closes; **Cancel** and Close discar
 the preview. Escape cancels an active editor or panel drag before closing the
 panel. GTK uses standard dialog actions for Reset, Cancel and Apply. The
 384-pixel utility has 16-pixel content margins, a centered square plot, and matching
-34-pixel sensitivity and footer actions. Its font-measured axis gutters match Pen
+36-pixel sensitivity and footer actions, matching toolbar tile height. Its font-measured axis gutters match Pen
 tilt so both plots have the same size. The title and Close share a vertical center.
 
 Draw on the ordinary canvas to test the response. Test strokes use normal
@@ -46,6 +46,8 @@ captures the curve when each contact starts, including queued contacts. Real
 samples, native predictions, corrections and the contact cursor retain that
 curve until the contact ends. Changes affect subsequent contacts. Prediction
 pressure observations retain the raw sensor pressure.
+On GTK, hovering or pressing over the dialog also updates the pressure marker
+without sending a painting or selection gesture to the canvas.
 
 ## Shared model and editor
 
@@ -103,6 +105,9 @@ journey after changing the shared widget.
 Both calibration journeys open over an expanded collapsed column, check the
 default clear-canvas placement, then drag across it and verify native clicks and
 opaque pixels above the column and its connector.
+They also exercise native measurement recovery, untouched first-pen identification
+with Lasso, retained manual placement and pen sensing over the dialog without
+artwork changes.
 
 Set `LAYER_PRESSURE_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8` for three sustained
 panel drags and three curve drags. Panel motion follows a 200 × 100 logical-pixel

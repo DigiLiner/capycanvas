@@ -16,6 +16,7 @@ import sys
 import time
 from pathlib import Path
 from wayland_objects import Objects
+from tablet_target import TabletTarget
 
 runtime = Path(os.environ["XDG_RUNTIME_DIR"])
 display = os.environ["WAYLAND_DISPLAY"]
@@ -25,11 +26,11 @@ path = runtime / "layer-bench-tablet"
 events = Path(os.environ["LAYER_NATIVE_INPUT_DIR"])
 tablet, pen, eraser = 0xFF000000, 0xFF000001, 0xFF000002
 objects = Objects(3)
-surfaces = {}
-target = None
+target = TabletTarget()
 seat = None
 introduced = False
 near = None
+near_surface = None
 serial = 10000
 
 
@@ -47,20 +48,16 @@ def event(obj, opcode, payload=b""):
 
 
 def request(message):
-    global seat, target
+    global seat
     obj, header = struct.unpack_from("=II", message)
     opcode = header & 0xFFFF
     args = message[8:]
     if obj in (tablet, pen, eraser):
         return False  # Gtk's cursor/destroy requests for our synthetic objects.
     kind = objects.kinds.get(obj)
+    target.request(kind, obj, opcode, args)
     if kind == "zwp_tablet_manager_v2" and opcode == 0:
         seat = struct.unpack_from("=I", args)[0]
-    elif kind == "xdg_wm_base" and opcode == 2:
-        new_id, surface = struct.unpack_from("=II", args)
-        surfaces[new_id] = surface
-    elif kind == "xdg_surface" and opcode == 1 and target is None:
-        target = surfaces[obj]
     return True
 
 
@@ -116,6 +113,8 @@ try:
                     message = bytes(buffer[:size])
                     del buffer[:size]
                     obj, header = struct.unpack_from("=II", message)
+                    if source is server:
+                        target.event(objects.kinds.get(objects.client_id(obj)), obj, header & 0xFFFF, message[8:])
                     # The compositor does not own the injected tool. Let GTK
                     # use tool.set_cursor rather than asking cursor-shape to
                     # create a compositor object referring to that tool.
@@ -147,17 +146,18 @@ try:
                 event(tool, 4)
             introduced = True
         file = events / f"pen-{index}.json"
-        if introduced and target and file.exists():
+        if introduced and target.current and file.exists():
             contact = json.loads(file.read_text())
             serial += 1
             tool = near if contact["pen"] == "leave" and near else eraser if contact.get("tool") == "eraser" else pen
-            if near not in (None, tool):
+            if near is not None and (near != tool or near_surface != target.current):
                 event(near, 7)
                 event(near, 18, words(int(time.monotonic() * 1000) & 0xFFFFFFFF))
                 near = None
             if near is None:
-                event(tool, 6, words(serial, tablet, target))
+                event(tool, 6, words(serial, tablet, target.current))
                 near = tool
+                near_surface = target.current
             if "point" in contact:
                 event(tool, 10, struct.pack("=ii", *(int(v * 256) for v in contact["point"])))
             if "tilt" in contact:

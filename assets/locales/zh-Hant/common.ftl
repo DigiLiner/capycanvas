@@ -434,4 +434,4 @@ tilt-direction = 方向
 tilt-reverse-horizontal = 水平反轉
 tilt-reverse-vertical = 垂直反轉
 tilt-swap-axes = 交換座標軸
-tilt-use-pen = 在畫布上使用筆
+tilt-use-pen = 在這裡使用筆

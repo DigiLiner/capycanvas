@@ -414,9 +414,13 @@ Pen pressure changes use `native_pressure_calibration --tablet` in both themes,
 then `native_curve_graph_numbers_pages_and_history` for the shared widget.
 See [pen pressure](../ui/pen-pressure.md) for sustained-motion measurement.
 The tablet proxy reserves its injected object IDs and translates compositor
-object IDs using the installed Wayland protocol XML. It also announces an eraser
+object IDs using the installed Wayland protocol XML. Pen input follows the active
+toplevel, retires destroyed surfaces and reenters when a journey changes windows.
+Deleted protocol IDs lose their old type before GTK reuses them, including for
+private interfaces absent from the installed XML.
+It also announces an eraser
 tool; a pen contact with `"tool":"eraser"` uses it, so journeys can draw with the
-pen's eraser end. Run its clipboard/offer
+pen's eraser end. Run its clipboard/offer and window-target
 regressions with `python3 -m unittest discover -s apps/layer-linux/bench -p 'test_*.py'`.
 
 Numeric widget changes use `native_number_controls`, `native_slider_feedback`

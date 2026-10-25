@@ -8,12 +8,19 @@ utility used for pressure. Only one pen response editor opens at a time; switchi
 editors discards the previous draft. Other hosts do not expose this editor yet.
 
 Curve, sensitivity, direction and Reset controls work immediately, including
-before any pen has been used. Hover the pen over the canvas to identify the input
-device and enable Apply; no stroke is required, even with the brush cursor hidden.
+before any pen has been used. Hover or press the pen anywhere over the GTK
+dialog, including the direction circle, to identify the device and enable Apply.
+The circle and graph preview the sensor without painting, changing a selection
+or moving the canvas. Canvas input also identifies the pen; no stroke is required,
+even with the brush cursor hidden.
 The caption identifies the pen being adjusted. Edits made before identification
 are retained; saved response or direction settings that were not edited remain
 intact. An open editor keeps its target when another pen is used; close and reopen
 it to adjust the last pen used. Drawing stays available.
+First identification preserves the measured window and any active window drag.
+When a curve gesture began before identification, binding waits until that
+gesture ends. Cancelling restores the pen's saved response unless earlier
+explicit edits are still pending.
 
 The graph maps physical lean from upright, with Input and Output axes from 0° to
 90°. The neutral response is a straight line. The origin stays at zero; interior
@@ -26,7 +33,7 @@ reduce output even from the neutral response. Each step changes an endpoint
 coordinate by 2.5 percentage points; its minimum is 2.25°.
 
 The direction preview shows input in gray and adjusted tilt in blue. It sits above
-the compact segmented icon bar used by Tool Options, on the same centerline as
+the joined segmented icon bar used by Tool Options, on the same centerline as
 the graph. Its independent **Reverse horizontal**, **Reverse vertical** and
 **Swap axes** toggles retain their text in tooltips and accessible labels. They
 can be combined to represent all eight signed axis mappings.
@@ -37,8 +44,9 @@ GTK gives both calibration utilities a 384-pixel minimum width and 16-pixel
 content margins. The pen name sits below the title; the title and Close share a
 vertical center. Both units use the same square plot size, with equal side gutters
 measured from the common maximum-label width in the current font. Sensitivity
-and footer actions share 34-pixel heights. Direction segments have 24-pixel
-targets and 16-pixel icons, joined outer corners and the normal selection fill.
+and footer actions share the 36-pixel toolbar tile height. Direction segments
+have 36-pixel square targets and 16-pixel icons, joined outer corners and the
+normal selection fill.
 Body groups have 12-pixel gaps; sections and the footer have 16-pixel separation.
 Joined direction controls touch, and other adjacent actions have 8-pixel gaps.
 Apply is the suggested action.
@@ -95,6 +103,9 @@ contact and localization tests. Run `native_tilt_calibration` through
 `tools/performance/workspace-motion.sh gtk --native-test=native_tilt_calibration --tablet`
 in both themes. It covers Preferences, mouse/touch/pen controls, native tilt
 metadata, editing before first pen input, hover with a hidden cursor, retained
+window geometry on first input with Lasso, Pencil and Hand, cancelled unbound
+curve gestures, deferred identification during a curve drag, preview-only input
+over the dialog and circle, native measurement recovery, retained
 drafts, independent icon toggles, tooltips, matched square plots, header alignment,
 footer geometry, clear-canvas placement, stacking and opaque pixels above an
 expanded column and connector, live arrows, graph and
