@@ -84,8 +84,8 @@ impl WorkingRecord {
         Ok(Self {generation:*generation,selection:selection.as_ref().map(|s|selection_records::encode_selection(s,resources)).transpose()?,
             selection_overlays:selection_overlays.clone(),layer_selection:layer_selection.clone(),layer_anchor:*layer_anchor,solo_visibility:solo_visibility.clone(),occurrence:*occurrence,target:*target,inspect_mask:*inspect_mask,view_origin:*view_origin})
     }
-    pub(crate) fn decode(&self,reader:&mut ResourceReader<'_>)->Result<WorkingState,String> {
-        Ok(WorkingState {generation:self.generation,selection:self.selection.as_ref().map(|s|selection_records::decode_selection(s,reader)).transpose().map_err(|e|e.to_string())?,
+    pub(crate) fn decode(&self,reader:&mut impl selection_records::SelectionResourceReader)->super::values::DecodeResult<WorkingState> {
+        Ok(WorkingState {generation:self.generation,selection:self.selection.as_ref().map(|s|selection_records::decode_selection(s,reader)).transpose()?,
             selection_overlays:self.selection_overlays.clone(),layer_selection:self.layer_selection.clone(),layer_anchor:self.layer_anchor,solo_visibility:self.solo_visibility.clone(),occurrence:self.occurrence,target:self.target,inspect_mask:self.inspect_mask,view_origin:self.view_origin,vector_items:None})
     }
 }
@@ -499,6 +499,22 @@ mod tests {
     fn reopen(prepared:&PreparedSession)->OpenSession {
         let mut bytes=Vec::new();prepared.write(&mut bytes,&AtomicBool::new(false)).unwrap();
         open_with_programs(ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap(),ProjectLimits::default(),&AtomicBool::new(false),prepared.trusted_programs()).unwrap()
+    }
+    #[test]
+    fn working_selection_quota_keeps_recovery_unsupported() {
+        struct Refused {budget:crate::memory::Budget,reads:usize}
+        impl selection_records::SelectionResourceReader for Refused {
+            fn chunk(&mut self,_:&Value,_:&Value)->super::super::values::DecodeResult<crate::authored::Resource<[u8]>> {
+                self.reads+=1;let _memory=self.budget.reserve(1)?;unreachable!()
+            }
+        }
+        let original=editor();let mut working=original.document.working.clone();
+        working.selection=Some(Selection::pixels(Arc::new(SelectionPixels::new([8,1],[0,0,8,1],vec![4]).unwrap())));
+        let record=WorkingRecord::capture(&working,&mut ResourceInventory::default()).unwrap();
+        let mut reader=Refused {budget:crate::memory::Budget::new(0),reads:0};
+        let error=record.decode(&mut reader).unwrap_err();
+        assert_eq!(reader.reads,1);
+        assert!(matches!(OpenFailure::from(error),OpenFailure::Unsupported(_)));
     }
     #[test]
     fn history_roundtrip_preserves_undo_redo_checkpoint_and_branch_identity() {

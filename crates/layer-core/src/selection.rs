@@ -122,17 +122,19 @@ impl PackageWindow {
     pub(crate) fn words(&self) -> usize { self.rows.len() * self.columns.len() }
     pub(crate) fn chunks(&self) -> usize { (self.words() * 4).div_ceil(SELECTION_CHUNK_BYTES) }
 }
-fn visit_package_words(window:&PackageWindow,chunks:&[Resource<[u8]>],mut visit:impl FnMut(usize,u32)->Result<(),String>)->Result<(),String> {
+fn visit_package_words_in(budget:&crate::memory::Budget,window:&PackageWindow,chunks:&[Resource<[u8]>],mut visit:impl FnMut(usize,u32)->Result<(),String>)->Result<(),crate::raster::TileError> {
     if window.chunks()!=chunks.len() {return Err("Invalid selection chunk index".into());}
     if chunks.is_empty() {return Ok(());}
         let mut stored = window.rows.clone().flat_map(|y| (window.columns.start..window.columns.end).map(move |x| y * window.stride + x));
         let mut remaining = window.words();
-        let mut decoded = crate::memory::DecodedBytes::zeroed(SELECTION_CHUNK_BYTES)?;
+        let mut memory=budget.reserve(SELECTION_CHUNK_BYTES)?;
+        let mut decoded=Vec::new();decoded.try_reserve_exact(SELECTION_CHUNK_BYTES).map_err(|_|crate::memory::MemoryError)?;
+        memory.resize(decoded.capacity())?;decoded.resize(SELECTION_CHUNK_BYTES,0);
         for chunk in chunks {
             if chunk.len() > lz4_flex::block::get_maximum_output_size(SELECTION_CHUNK_BYTES) {
                 return Err("Oversized selection chunk".into());
             }
-            crate::memory::images().track(chunk.storage())?;
+            budget.track(chunk.storage())?;
             let length = lz4_flex::block::decompress_into(chunk, &mut decoded).map_err(|e| e.to_string())?;
             if length != SELECTION_CHUNK_BYTES { return Err("Invalid selection chunk length".into()); }
             let used = remaining.min(SELECTION_CHUNK_BYTES / 4) * 4;
@@ -149,21 +151,21 @@ impl SelectionPixels {
         bounds: [u32; 4],
         words: impl Into<Arc<[u32]>>,
     ) -> Result<Self, DocumentError> {
-        Self::with_coverage(extent, bounds, words.into(), false)
+        Self::with_coverage(extent, bounds, words.into(), false).map_err(Self::document_error)
     }
     pub fn bytes(
         extent: [u32; 2],
         bounds: [u32; 4],
         words: impl Into<Arc<[u32]>>,
     ) -> Result<Self, DocumentError> {
-        Self::with_coverage(extent, bounds, words.into(), true)
+        Self::with_coverage(extent, bounds, words.into(), true).map_err(Self::document_error)
     }
     fn with_coverage(
         extent: [u32; 2],
         bounds: [u32; 4],
         words: Arc<[u32]>,
         byte_coverage: bool,
-    ) -> Result<Self, DocumentError> {
+    ) -> Result<Self, crate::raster::TileError> {
         let value = Self {
             extent,
             bounds,
@@ -175,10 +177,14 @@ impl SelectionPixels {
             package_validated: Arc::default(),
             _retirement:Default::default(),
         };
-        value.validate()?;
+        value.validate_coverage()?;
         Ok(value)
     }
-    pub(crate) fn validate(&self) -> Result<(), DocumentError> {
+    fn document_error(error:crate::raster::TileError)->DocumentError {
+        DocumentError::InvalidLayerOperation(if error.is_memory() {"Selection coverage exceeds the shared memory budget"}else {"Invalid selection coverage"})
+    }
+    pub(crate) fn validate(&self) -> Result<(), DocumentError> {self.validate_coverage().map_err(Self::document_error)}
+    fn validate_coverage(&self) -> Result<(), crate::raster::TileError> {
         let [w, h] = self.extent;
         let [x0, y0, x1, y1] = self.bounds;
         let words = &self.words;
@@ -187,17 +193,15 @@ impl SelectionPixels {
             // Reject values >4 with eight parallel nibble comparisons.
             || (!self.byte_coverage && self.words_validated.get().is_none() && words.iter().any(|v| v & 0x88888888 != 0 || ((v >> 2) & (v | (v >> 1)) & 0x11111111) != 0))
         {
-            return Err(DocumentError::InvalidLayerOperation(
-                "Invalid selection coverage",
-            ));
+            return Err("Invalid selection coverage".into());
         }
-        crate::memory::images().track(words).map_err(|_|DocumentError::InvalidLayerOperation("Selection coverage exceeds the shared memory budget"))?;
+        crate::memory::images().track(words)?;
         self.words_validated.get_or_init(|| ());
         Ok(())
     }
-    pub(crate) fn validate_package(&self) -> Result<(), String> {
+    pub(crate) fn validate_package(&self) -> Result<(), crate::raster::TileError> {
         if self.package_validated.get().is_some() { return Ok(()); }
-        self.validate().map_err(|e| e.to_string())?;
+        self.validate_coverage()?;
         if self.extent.iter().any(|v| *v > crate::MAX_EXTENT) { return Err("Oversized selection coverage".into()); }
         let count = self.pixels_per_word();
         let bits = 32 / count;
@@ -241,7 +245,12 @@ impl SelectionPixels {
     }
     pub(crate) fn from_package_chunks(
         extent: [u32; 2], bounds: [u32; 4], byte_coverage: bool, chunks: Vec<Resource<[u8]>>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::raster::TileError> {
+        Self::from_package_chunks_in(crate::memory::images(),extent,bounds,byte_coverage,chunks)
+    }
+    fn from_package_chunks_in(
+        budget:&crate::memory::Budget,extent:[u32;2],bounds:[u32;4],byte_coverage:bool,chunks:Vec<Resource<[u8]>>,
+    )->Result<Self,crate::raster::TileError> {
         let [x0, y0, x1, y1] = bounds;
         if extent.contains(&0) || extent.iter().any(|v| *v > crate::MAX_EXTENT)
             || x0 > x1 || y0 > y1 || x1 > extent[0] || y1 > extent[1] {
@@ -250,13 +259,13 @@ impl SelectionPixels {
         let window = PackageWindow::new(extent, bounds, byte_coverage);
         if window.chunks() != chunks.len() { return Err("Invalid selection chunk index".into()); }
         let count = usize::try_from(window.stride as u64 * u64::from(extent[1])).map_err(|_| "Oversized selection coverage")?;
-        let memory=crate::memory::images().reserve_payload(count.checked_mul(8).ok_or("Oversized selection coverage")?)?;
+        let memory=budget.reserve_payload(count.checked_mul(8).ok_or("Oversized selection coverage")?)?;
         let mut words = Vec::new();
-        words.try_reserve_exact(count).map_err(|_| "Selection allocation failed")?;
+        words.try_reserve_exact(count).map_err(|_|crate::memory::MemoryError)?;
         words.resize(count, 0);
-        visit_package_words(&window,&chunks,|index,value| {words[index]=value;Ok(())})?;
+        visit_package_words_in(budget,&window,&chunks,|index,value| {words[index]=value;Ok(())})?;
         let words=memory.retain(Arc::<[u32]>::from(words))?;
-        let value = Self::with_coverage(extent, bounds, words, byte_coverage).map_err(|e| e.to_string())?;
+        let value = Self::with_coverage(extent, bounds, words, byte_coverage)?;
         value.validate_package()?;
         value.package_chunks.set(chunks.into()).map_err(|_| "Selection chunk cache already initialized")?;
         Ok(value)
@@ -272,11 +281,11 @@ impl SelectionPixels {
     pub(crate) fn from_received_words(
         extent:[u32;2],bounds:[u32;4],byte_coverage:bool,words:Arc<[u32]>,
         ids:Vec<crate::authored::PortableId>,chunks:Option<Vec<Resource<[u8]>>>,
-    )->Result<Self,String> {
-        let value=Self::with_coverage(extent,bounds,words.clone(),byte_coverage).map_err(|error|error.to_string())?;
+    )->Result<Self,crate::raster::TileError> {
+        let value=Self::with_coverage(extent,bounds,words.clone(),byte_coverage)?;
         value.validate_package()?;
         if let Some(chunks)=&chunks {
-            visit_package_words(&PackageWindow::new(extent,bounds,byte_coverage),chunks,|index,stored| {
+            visit_package_words_in(crate::memory::images(),&PackageWindow::new(extent,bounds,byte_coverage),chunks,|index,stored| {
                 if words[index]!=stored {return Err("Selection cache disagrees with coverage words".into());}Ok(())
             })?;
         }
@@ -285,7 +294,7 @@ impl SelectionPixels {
     pub(crate) fn from_verified_words(
         extent: [u32; 2], bounds: [u32; 4], byte_coverage: bool, words: Arc<[u32]>,
         ids: Vec<crate::authored::PortableId>, chunks: Option<Vec<Resource<[u8]>>>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, crate::raster::TileError> {
         let count = u64::from(extent[0].div_ceil(if byte_coverage { 4 } else { 8 })) * u64::from(extent[1]);
         let [x0, y0, x1, y1] = bounds;
         if extent.contains(&0) || extent.iter().any(|v| *v > crate::MAX_EXTENT)
@@ -664,6 +673,47 @@ mod selection_tests {
                 max: Point { x: 16., y: 2. }
             }
         );
+    }
+
+    fn selection_memory_unsupported(error:impl Into<crate::package::values::DecodeError>) {
+        let error=error.into();
+        assert!(matches!(&error,crate::package::values::DecodeError::Unsupported(_)),"{error:?}");
+        assert!(matches!(crate::package::session::OpenFailure::from(error),crate::package::session::OpenFailure::Unsupported(_)));
+    }
+    fn quota_selection_chunk()->Resource<[u8]> {
+        Resource::from(lz4_flex::block::compress(&vec![0;SELECTION_CHUNK_BYTES]))
+    }
+    #[test]
+    fn selection_constructor_quota_keeps_decode_and_recovery_unsupported() {
+        let budget=crate::memory::Budget::new(0);
+        let error=SelectionPixels::from_package_chunks_in(&budget,[8,1],[0;4],false,vec![]).unwrap_err();
+        selection_memory_unsupported(error);
+        let retry=SelectionPixels::from_package_chunks([8,1],[0;4],false,vec![]).unwrap();
+        assert!(retry.words().iter().all(|word|*word==0));
+    }
+    #[test]
+    fn selection_chunk_scratch_quota_keeps_decode_and_recovery_unsupported() {
+        let budget=crate::memory::Budget::new(0);
+        let window=PackageWindow::new([8,1],[0,0,8,1],false);
+        let error=visit_package_words_in(&budget,&window,&[quota_selection_chunk()],|_,_|Ok(())).unwrap_err();
+        selection_memory_unsupported(error);
+    }
+    #[test]
+    fn selection_chunk_owner_quota_keeps_decode_and_recovery_unsupported() {
+        let budget=crate::memory::Budget::new(SELECTION_CHUNK_BYTES);
+        let window=PackageWindow::new([8,1],[0,0,8,1],false);
+        let error=visit_package_words_in(&budget,&window,&[quota_selection_chunk()],|_,_|Ok(())).unwrap_err();
+        selection_memory_unsupported(error);
+        assert!(budget.reserve(budget.maximum()).is_ok(),"failed chunk tracking releases scratch");
+    }
+    #[test]
+    fn selection_chunk_malformed_bytes_stay_invalid() {
+        let budget=crate::memory::Budget::new(SELECTION_CHUNK_BYTES+4096);
+        let window=PackageWindow::new([8,1],[0,0,8,1],false);
+        let error=visit_package_words_in(&budget,&window,&[Resource::from(vec![0])],|_,_|Ok(())).unwrap_err();
+        let error:crate::package::values::DecodeError=error.into();
+        assert!(matches!(&error,crate::package::values::DecodeError::Invalid(_)));
+        assert!(matches!(crate::package::session::OpenFailure::from(error),crate::package::session::OpenFailure::Invalid(_)));
     }
     #[test]
     fn selection_construction_and_validation_track_shared_word_owners_once() {
