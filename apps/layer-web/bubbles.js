@@ -87,7 +87,8 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
     } else if(v.kind==='history') {
       r.halves.forEach((node,i)=>{const b=v.buttons[i];glyph(node,b.icon);node.disabled=!b.enabled;node.title=b.label;node.setAttribute('aria-label',b.label);place(node,[v.face[0]/2+packet.history[i][0],v.face[1]/2],[v.face[1],v.face[1]]);});
     } else {
-      const key=json([v.icon,v.preview,v.variants,v.dots,state().theme,v.layer,v.layers]);
+      const thumbnailOwner=v.kind==='layers'?json([state().document_file.epoch,v.layer]):null;
+      const key=json([v.icon,v.preview,v.variants,v.dots,state().theme,thumbnailOwner,v.layers]);
       if(r.faceKey!==key) {
         r.faceKey=key;r.face.replaceChildren();
         if(v.preview!=null){const img=element('img','bubble-brush-preview');img.src=asset(`brush-previews/${v.preview}-${state().theme}.png`);img.alt='';img.draggable=false;r.face.append(img);}
@@ -95,7 +96,7 @@ export function createBubbles({app,workspace,element,button,icon,state,dispatch,
         if(v.variants)r.face.append(customization.variationMarker());
         for(const[center,i]of packet.dots.map((center,i)=>[center,i])){const dot=element('i',`bubble-dot${v.dots[i]?' selected':''}`);place(dot,center.map(x=>x+v.face[0]/2),[3.5,3.5]);r.face.append(dot);}
         if(v.kind==='layers') {
-          if(!r.thumbnail){r.thumbnail=element('canvas','bubble-layer-thumbnail');r.thumbnail.width=r.thumbnail.height=64;}
+          if(r.thumbnailOwner!==thumbnailOwner){r.thumbnailOwner=thumbnailOwner;r.thumbnail=element('canvas','bubble-layer-thumbnail');r.thumbnail.width=r.thumbnail.height=64;}
           r.face.replaceChildren(r.thumbnail);
           const badge=element('span','bubble-count bubble-surface');badge.append(element('span','',String(v.layers)));r.face.append(badge);
           r.badge=badge;

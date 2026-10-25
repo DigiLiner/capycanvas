@@ -89,6 +89,27 @@ export async function checkBubbleRelease({call,evaluate,settle}) {
         await wait(`!!document.querySelector(${JSON.stringify(selector)})?.dataset.previewRevision`);
         await shot(`${theme}-folded-layers-${selectedTheme}`);
       }
+      const paint=await evaluate('Number(layerApp.state().layer_tools.editing_layer.id)');
+      await send({type:'layer',action:{op:'new',group:true,clipped:false}});
+      const group=await evaluate('Number(layerApp.state().layer_tools.editing_layer.id)');
+      assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${group}).has_thumbnail`),false,'the selected group has no authored thumbnail');
+      assert.ok(await evaluate(`document.querySelector(${JSON.stringify(selector)})!==releaseFoldedCanvas`),'changing layer owners retires the previous paint canvas');
+      await evaluate('new Promise(resolve=>setTimeout(resolve,250))');
+      const empty=await pixels(selector);assert.ok(!empty.revision&&empty.quadrants.every(n=>n===0),'a group face cannot retain the previous paint pixels or revision');
+      await shot(`${theme}-folded-layers-empty-group`);
+      await evaluate(`window.releaseGroupCanvas=document.querySelector(${JSON.stringify(selector)})`);
+      await send({type:'layer',action:{op:'select',id:paint,mask:false}});
+      assert.ok(await evaluate(`document.querySelector(${JSON.stringify(selector)})!==releaseGroupCanvas`),'returning to paint creates a canvas for that owner');
+      await wait(`document.querySelector(${JSON.stringify(selector)})?.dataset.previewRevision?.startsWith(String(layerApp.state().document_file.epoch)+':${paint}:')`);
+      const epoch=await evaluate('String(layerApp.state().document_file.epoch)');
+      await evaluate(`window.releaseReturnedCanvas=document.querySelector(${JSON.stringify(selector)})`);
+      await send({type:'invoke',command:'new_document'});await wait("!!document.querySelector('#new-drawing-dialog[open]')");
+      await evaluate(createDrawing({width:320,height:240}));
+      await wait(`!(${busy})&&String(layerApp.state().document_file.epoch)!==${JSON.stringify(epoch)}`);
+      assert.equal(await evaluate('Number(layerApp.state().layer_tools.editing_layer.id)'),paint,'the next drawing reuses the numeric layer identity');
+      assert.ok(await evaluate(`document.querySelector(${JSON.stringify(selector)})!==releaseReturnedCanvas`),'a new document epoch retires pixels even when its layer number matches');
+      await wait(`document.querySelector(${JSON.stringify(selector)})?.dataset.previewRevision?.startsWith(String(layerApp.state().document_file.epoch)+':${paint}:')`);
+      await shot(`${theme}-folded-layers-next-drawing`);
       await send({type:'bubble',action:{type:'put_back',id}});
     });
     await check(`${theme}-zen-toolbar-and-edge-peek`,async()=>{

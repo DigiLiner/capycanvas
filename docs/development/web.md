@@ -188,6 +188,8 @@ shared actions and the existing canvas pointer path.
 
 Tool bubbles use the shared Rust presentations and hit testing. The host retains
 the wheel, swatches, layer thumbnails and the Layers inspector used by drawers.
+The folded Layers canvas retains pixels across themes for the same document and
+layer; changing either replaces the canvas before requesting its preview.
 Bubble motion updates glass regions without measuring stationary toolbars again.
 Each bubble requests its own compositor layer so moving it reuses its rendered
 contents. Keep the hint on the bubble container; promoting every bead adds
