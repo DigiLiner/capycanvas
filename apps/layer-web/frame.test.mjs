@@ -6,6 +6,32 @@ import {presentCapy} from './header.js';
 import {colorDialogDom} from './color-dialog-fixture.mjs';
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
+test('compiler input hooks wait for app publication and retain contact and resume timing', () => {
+  const listeners=new Map(),timers=[];
+  let inputs=0,wait=3.2,wakes=0;
+  const events=owner=>({addEventListener(type,listener){listeners.set(`${owner}:${type}`,listener);}});
+  const context={window:events('window'),document:{...events('document'),hidden:false,querySelector:()=>null},
+    app:undefined,gpuReady:false,compilerResumeTimer:undefined,pending:[],documents:{busy:()=>false},
+    setTimeout(callback,delay){timers.push({callback,delay});return timers.length;},wake(){wakes++;}};
+  const contacts=source.slice(source.indexOf('const compilerContacts = new Set();'),source.indexOf('for (const type of ["pointerdown", "pointermove"])'));
+  const compiler=source.slice(source.indexOf('function deferOptionalCompiler()'),source.indexOf('function scheduleCompiler()'));
+  runInNewContext(contacts+compiler+'\nglobalThis.contactCount=()=>compilerContacts.size;',context);
+  const emit=(owner,type)=>listeners.get(`${owner}:${type}`)({isTrusted:true,pointerId:42});
+  for(const type of ['pointerdown','pointermove','pointerup','pointercancel','keydown','wheel','blur'])emit('window',type);
+  for(const type of ['visibilitychange','toggle','close'])emit('document',type);
+  assert.equal(timers.length,0,'Pre-publication input does not schedule a compiler timer');
+  emit('window','pointerdown');assert.equal(context.contactCount(),1);
+  context.app={shader_input(){inputs++;},shader_wait_ms(){return wait;}};
+  assert.equal(context.optionalCompilerReady(),false,'A contact begun before publication remains held');
+  emit('window','pointerup');emit('window','pointermove');
+  assert.equal(inputs,2,'A published app receives input even before GPU attachment');
+  assert.equal(context.contactCount(),0);
+  assert.equal(timers.length,1,'Repeated input retains one resume timer');
+  assert.equal(timers[0].delay,4);
+  wait=2.1;timers[0].callback();assert.equal(timers[1].delay,3);assert.equal(wakes,0);
+  wait=0;timers[1].callback();assert.equal(context.compilerResumeTimer,null);assert.equal(wakes,1);
+});
+
 test('live preferences publish while document dialogs retain exclusive editing input', () => {
   let busy=true;
   const received=[],published=[],change={regions:128};

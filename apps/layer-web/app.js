@@ -454,6 +454,7 @@ function refreshStartup() {
 // Host timing and contacts govern admission; Rust also checks queued input,
 // strokes, gestures and unfinished edits. Required jobs always retain priority.
 function deferOptionalCompiler() {
+  if (!app) return;
   app.shader_input();
   compilerResumeTimer ??= setTimeout(resumeOptionalCompiler, Math.ceil(app.shader_wait_ms()));
 }
