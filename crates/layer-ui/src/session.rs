@@ -1515,6 +1515,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled = true; return Ok(reply);
                     }
                     if key == "escape" && !editing {
+                        if self.interaction.facts.popup_open {
+                            reply.dismiss_popups = true;
+                            reply.handled = true;
+                            return Ok(reply);
+                        }
                         let cancelled = self.cancel_layer_gesture()? | self.cancel_vector_stroke();
                         if cancelled || !self.canvas_contact_idle() {
                             if cancelled {
@@ -1525,64 +1530,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                             reply.handled = true;
                             return Ok(reply);
                         }
-                        if !self.interaction.facts.popup_open && self.state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true)) {
-                            reply.change = self.dispatch(UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties })?;
+                        reply.dismiss_popups = true;
+                        if let Some(change) = self.escape_one(modifiers)? {
+                            reply.change = change;
                             reply.handled = true;
                             return Ok(reply);
                         }
-                        reply.dismiss_popups = true;
-                        if self.clear_object_selection()? {
-                            reply.change = self.changed(regions::DOCUMENT | regions::COMMANDS, true);
-                            reply.handled = true;
-                        } else if self.selection_masks.target().is_some()
-                            && self.command_flags(CommandId::ReturnToArtwork).0
-                        {
-                            reply.change = self.dispatch(UiAction::Invoke { command: CommandId::ReturnToArtwork })?;
-                            reply.handled = true;
-                        } else if self.escape_edits_layer_content(modifiers) {
-                            reply.change = self.dispatch(UiAction::Invoke { command: CommandId::EditLayerContent })?;
-                            reply.handled = true;
-                        }
-                    }
-                    if key == "escape" && !editing
-                        && !self.interaction.facts.popup_open
-                        && self.divider_drag.is_none()
-                    {
-                        let columns: Vec<_> = self
-                            .state
-                            .customization
-                            .column_drawers
-                            .iter()
-                            .filter_map(|d| match d.anchor {
-                                DrawerAnchor::Column { column, .. } => Some(column),
-                                _ => None,
-                            })
-                            .chain(self.state.workspace.layout.column_stacks.iter()
-                                .filter(|s| s.open_column.is_some()).map(|s| s.column))
-                            .filter(|column| !self.interaction.hidden || {
-                                let open = self.state.workspace.layout.column_stack(*column)
-                                    .open_column.unwrap_or(*column);
-                                self.state.workspace.layout.panels.iter()
-                                    .filter_map(|panel| self.state.workspace.layout.panel_group(panel.id))
-                                    .any(|group| self.state.workspace.layout.collapsed_column_for_group(group) == Some(open)
-                                        && self.zen_keeps(group))
-                            })
-                            .collect();
-                        for column in columns {
-                            reply.change = self.dispatch(UiAction::Customize {
-                                action: CustomizationAction::CloseColumn { column },
-                            })?;
-                            reply.handled = true;
-                        }
-                    }
-                    if key == "escape" && !editing
-                        && self.state.customization.has_drawer()
-                        && !self.interaction.facts.popup_open
-                    {
-                        reply.change = self.dispatch(UiAction::Customize {
-                            action: CustomizationAction::CloseExpanded,
-                        })?;
-                        reply.handled = true;
                     }
                     let blocked = self.shortcut_input_blocked(editing, modifiers.command);
                     // Explicit application chords can open search from a
@@ -2456,19 +2409,48 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => self.tools.command_preset_in(id, &self.state.brush, self.layer_interaction.tool).map(tools::icon).or_else(||id.icon()),
         }
     }
-    /// Escape leaves layer-mask editing only when it has nothing else to close
-    /// and no enabled binding claims it.
-    fn escape_edits_layer_content(&self, modifiers: Modifiers) -> bool {
-        self.command_flags(CommandId::EditLayerContent).0
-            && !self.interaction.facts.popup_open
-            && !self.state.settings_open
-            && !self.state.customization.is_open()
-            && !self.state.customization.header_editing
-            && self.state.workspace.layout.column_stacks.iter().all(|s| s.open_column.is_none())
-            && !self
-                .held_shortcut_matches("escape", modifiers, true)
-                .iter()
-                .any(|b| self.binding_enabled(&b.action))
+    /// Zen keeps a column open unless it shows a panel Zen keeps visible.
+    fn escape_closes_column(&self, column: u32) -> bool {
+        let layout = &self.state.workspace.layout;
+        self.divider_drag.is_none() && (!self.interaction.hidden || {
+            let open = layout.column_stack(column).open_column.unwrap_or(column);
+            layout.panels.iter()
+                .filter_map(|panel| layout.panel_group(panel.id))
+                .any(|group| layout.collapsed_column_for_group(group) == Some(open) && self.zen_keeps(group))
+        })
+    }
+    /// One Escape closes one thing: the Layers drawer's properties, then
+    /// drawers, then what the canvas bar edits or an enabled Escape binding,
+    /// then open columns.
+    fn escape_one(&mut self, modifiers: Modifiers) -> Result<Option<UiChange>, String> {
+        if self.state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true)) {
+            return self.dispatch(UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties }).map(Some);
+        }
+        if self.state.customization.has_drawer() {
+            let columns: Vec<_> = self.state.customization.column_drawers.iter()
+                .filter_map(|d| match d.anchor { DrawerAnchor::Column { column, .. } => Some(column), _ => None })
+                .filter(|column| self.escape_closes_column(*column))
+                .collect();
+            for column in columns {
+                self.dispatch(UiAction::Customize { action: CustomizationAction::CloseColumn { column } })?;
+            }
+            return self.dispatch(UiAction::Customize { action: CustomizationAction::CloseExpanded }).map(Some);
+        }
+        if let Some(change) = self.escape_canvas_bar(modifiers)? {
+            return Ok(Some(change));
+        }
+        if self.held_shortcut_matches("escape", modifiers, true).iter().any(|b| self.binding_enabled(&b.action)) {
+            return Ok(None);
+        }
+        let columns: Vec<_> = self.state.workspace.layout.column_stacks.iter()
+            .filter(|s| s.open_column.is_some() && self.escape_closes_column(s.column))
+            .map(|s| s.column)
+            .collect();
+        let mut change = None;
+        for column in columns {
+            change = Some(self.dispatch(UiAction::Customize { action: CustomizationAction::CloseColumn { column } })?);
+        }
+        Ok(change)
     }
     fn command_flags(&self, id: CommandId) -> (bool, bool) {
         if self.workspace_read_only

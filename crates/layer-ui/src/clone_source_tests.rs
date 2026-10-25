@@ -194,6 +194,12 @@ fn the_source_disc_drags_at_once_with_every_device_and_a_tap_shows_its_bar() {
     contact(&mut s, 24, PointerKind::Mouse, ContactPhase::Down, at);
     contact(&mut s, 24, PointerKind::Mouse, ContactPhase::Up, at);
     assert!(s.state.canvas_bar.is_some());
+    assert!(key(&mut s, "Escape", true, false, false).handled);
+    key(&mut s, "Escape", false, false, false);
+    assert!(s.state.canvas_bar.is_none(), "Escape hides the disc's bar");
+    contact(&mut s, 25, PointerKind::Mouse, ContactPhase::Down, at);
+    contact(&mut s, 25, PointerKind::Mouse, ContactPhase::Up, at);
+    assert!(s.state.canvas_bar.is_some());
     invoke(&mut s, CommandId::Brush);
     assert!(s.state.canvas_bar.is_none(), "leaving the tool closes the bar");
     let mut segments = Vec::new();

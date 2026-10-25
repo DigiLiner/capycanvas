@@ -1361,6 +1361,68 @@ fn escape_leaves_selection_layers_and_masks_after_cancelling_a_gesture() {
     assert!(!matches!(s.engine.document().working.target, Some(layer_core::authored::SourceTarget::Coverage(_))), "Escape returns to the layer content");
 }
 
+fn escape(s: &mut UiSession<Recorder>) -> InputReply {
+    let reply = key(s, "Escape", true, false, false);
+    key(s, "Escape", false, false, false);
+    reply
+}
+
+#[test]
+fn escape_does_one_thing_and_leaves_a_mode_before_closing_open_columns() {
+    let mut s = mode_session();
+    let group = s.state.workspace.layout.panel_group(Panel::Layers).unwrap();
+    customize(&mut s, CustomizationAction::SetColumnCollapsed { group, collapsed: true });
+    let column = s.state.workspace.layout.collapsed_column_for_group(group).unwrap();
+    customize(&mut s, CustomizationAction::ToggleColumnDrawer { group, panel: Panel::Layers });
+    let open = |s: &UiSession<Recorder>| s.state.workspace.layout.column_stack(column).open_column == Some(column);
+    let kind = |s: &UiSession<Recorder>| s.state.canvas_bar.as_ref().map(|b| b.context.kind);
+    assert!(open(&s));
+    invoke(&mut s, CommandId::RectangleSelect);
+
+    invoke(&mut s, CommandId::QuickMask);
+    assert!(escape(&mut s).handled);
+    assert_eq!(kind(&s), Some(CanvasBarKind::Selection), "Escape leaves Quick Mask");
+    assert!(open(&s), "and keeps the Layers column open");
+
+    invoke(&mut s, CommandId::SaveSelectionLayer);
+    assert_eq!(kind(&s), Some(CanvasBarKind::SelectionLayer));
+    escape(&mut s);
+    assert!(s.selection_masks.target().is_none() && open(&s), "Escape leaves Selection Layer editing alone");
+
+    invoke(&mut s, CommandId::MaskSelection);
+    assert_eq!(kind(&s), Some(CanvasBarKind::LayerMask));
+    let cancel = UiAction::Invoke { command: CommandId::CancelTransform };
+    assert!(s.defers(&cancel), "the new mask is still being written");
+    escape(&mut s);
+    assert!(open(&s) && kind(&s) == Some(CanvasBarKind::LayerMask), "the waiting Cancel binding takes Escape, not the column");
+    s.frame(5, 5).unwrap();
+    assert!(!s.defers(&cancel));
+    escape(&mut s);
+    assert_ne!(kind(&s), Some(CanvasBarKind::LayerMask), "Escape returns to the layer content");
+    assert!(open(&s), "with the column still open");
+
+    rectangle_selection(&mut s, [100., 100., 300., 250.]);
+    invoke(&mut s, CommandId::RectangleSelect);
+    invoke(&mut s, CommandId::QuickMask);
+    s.interaction.facts.popup_open = true;
+    let reply = escape(&mut s);
+    assert!(reply.handled && reply.dismiss_popups);
+    assert_eq!(kind(&s), Some(CanvasBarKind::QuickMask), "an open popup takes Escape alone");
+    s.interaction.facts.popup_open = false;
+    open_column_drawer(&mut s);
+    escape(&mut s);
+    assert!(!s.state.customization.has_drawer(), "a drawer closes first");
+    assert_eq!(kind(&s), Some(CanvasBarKind::QuickMask), "without leaving Quick Mask");
+    assert!(open(&s));
+    escape(&mut s);
+    assert_eq!(kind(&s), Some(CanvasBarKind::Selection));
+    assert!(open(&s));
+
+    assert!(escape(&mut s).handled);
+    assert!(!open(&s), "with nothing left to dismiss, Escape closes the column");
+    assert_eq!(kind(&s), Some(CanvasBarKind::Selection), "and keeps the selection");
+}
+
 fn guide_pen(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, [x, y]: [f32; 2]) {
     let m = s.state.camera.document_to_surface();
     let mut e = event(s, sequence, phase, 1.);
@@ -1413,6 +1475,13 @@ fn guide_bar_anchors_to_the_selected_guide_under_ruler_and_move() {
         segments.iter().filter(|segment| segment.marker == 1.).count()
     };
     assert!(overlay(&s) > 0, "Move highlights the selected guide");
+
+    let selected = s.rulers.selected;
+    assert!(key(&mut s, "Escape", true, false, false).handled);
+    key(&mut s, "Escape", false, false, false);
+    assert!(s.rulers.selected.is_none() && s.state.canvas_bar.as_ref().map(|b| b.context.kind) == Some(CanvasBarKind::Selection), "Escape deselects the guide");
+    s.rulers.selected = selected;
+    s.refresh_tools();
 
     guide_pen(&mut s, 4, PenPhase::Down, [700., 150.]);
     guide_pen(&mut s, 5, PenPhase::Up, [700., 150.]);

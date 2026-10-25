@@ -77,7 +77,7 @@ Every host presents the bar. Bar item menus open on GTK, Web, Android, Windows, 
 - **Focus:** its controls do not take keyboard focus, and it never opens a window of its own. Losing window focus leaves an open transform intact.
 - **Availability:** item availability holds its previous value while the canvas is busy, as Tool Options does. Polygon construction commands follow the path live.
 - **Toggle:** **View → Show canvas action bar** is a workspace layout preference. While it is off, crops, transforms, placements and polygons keep their completion items at the bottom edge; mode, guide and selection bars hide.
-- **Escape** cancels a gesture first. Otherwise it leaves Quick Mask and Selection Layer editing, and leaves layer-mask editing when no popup, drawer, title-bar edit or enabled Escape binding claims it.
+- **Escape** does one thing per press: it cancels a gesture, else closes a popup, else closes drawers, else dismisses what the bar edits (deselects an object or guide, hides the Clone source bar, or leaves Quick Mask, Selection Layer or layer-mask editing) or runs an enabled Escape binding such as Cancel, and only then closes open columns. Title-bar editing, customization and Settings keep Escape from the bar.
 
 ## Transform modes
 

@@ -645,6 +645,35 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.commands.iter().find(|c| c.id == id).cloned().unwrap_or_else(|| self.command(id))
     }
 
+    /// Escape dismisses what the bar edits: a selected object, guide or Clone
+    /// source, Quick Mask, a Selection Layer or a layer mask.
+    pub(super) fn escape_canvas_bar(&mut self, modifiers: Modifiers) -> Result<Option<UiChange>, String> {
+        if self.state.settings_open || self.state.customization.is_open() || self.state.customization.header_editing {
+            return Ok(None);
+        }
+        if self.clear_object_selection()? {
+            return Ok(Some(self.changed(regions::DOCUMENT | regions::COMMANDS, true)));
+        }
+        if self.clone_source_plan().is_some() {
+            self.retouch.bar = false;
+            self.refresh_commands();
+            return Ok(Some(self.changed(regions::COMMANDS, true)));
+        }
+        if self.guide_plan().is_some() {
+            self.rulers.selected = None;
+            self.refresh_tools();
+            self.layer_interaction.changed = true;
+            return Ok(Some(self.changed(regions::DOCUMENT | regions::COMMANDS, true)));
+        }
+        let command = if self.selection_masks.target().is_some() { CommandId::ReturnToArtwork } else { CommandId::EditLayerContent };
+        if !self.command_flags(command).0
+            || self.held_shortcut_matches("escape", modifiers, true).iter().any(|b| self.binding_enabled(&b.action))
+        {
+            return Ok(None);
+        }
+        self.dispatch(UiAction::Invoke { command }).map(Some)
+    }
+
     pub(super) fn update_canvas_bar(&mut self) -> bool {
         if self.canvas_bar_contact() || self.operation.dragging() {
             return false;
