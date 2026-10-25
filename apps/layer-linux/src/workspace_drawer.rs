@@ -576,6 +576,11 @@ pub(crate) struct Drawer {
     generation: Cell<u64>,
 }
 impl Drawer {
+    pub fn refresh_theme(&self) {
+        if let Some(tabs) = self.view.borrow().as_ref().and_then(|view| view.tab_strip.as_ref()) {
+            tabs.queue_draw();
+        }
+    }
     pub fn new(id: u32) -> Rc<Self> {
         Rc::new(Self {
             id,

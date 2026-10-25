@@ -96,41 +96,52 @@ mod imp {
             let Some([strip, foot]) = self.tints.borrow().clone() else { return };
             let selected = buttons.iter().find(|b| b.has_css_class("selected-tool") && b.opacity() > 0.);
             let active = selected.and_then(|tab| tab.compute_bounds(&*obj));
-            let draw_feet = |color: &gtk::gdk::RGBA| {
-                if let Some(tab) = active {
-                    let cr = snapshot.append_cairo(&bounds);
-                    cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), color.alpha().into());
-                    super::feet(&cr, &tab, bounds.height());
-                    let _ = cr.fill();
-                }
-            };
-            snapshot.push_mask(gtk::gsk::MaskMode::InvertedAlpha);
-            if let Some(tab) = active {
-                let radius = gtk::graphene::Size::new(TAB_RADIUS, TAB_RADIUS);
-                let square = gtk::graphene::Size::new(0., 0.);
-                snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::new(tab, radius, radius, square, square));
-                snapshot.append_color(&gtk::gdk::RGBA::BLACK, &tab);
-                snapshot.pop();
-            }
-            draw_feet(&gtk::gdk::RGBA::BLACK);
-            snapshot.pop();
-            snapshot.append_color(&strip.color(), &bounds);
+            let background = gtk::Snapshot::new();
+            background.append_color(&strip.color(), &bounds);
             let corners = self.hover_bottom.borrow();
             for (i, button) in buttons.iter().enumerate().filter(|(_, button)| Some(*button) != selected) {
                 if button.is_sensitive() && button.opacity() > 0. && !button.has_css_class("selected-tool")
                     && button.state_flags().contains(gtk::StateFlags::PRELIGHT) {
                     if let Some(tab) = button.compute_bounds(&*obj) {
-                        let cr = snapshot.append_cairo(&bounds);
+                        let cr = background.append_cairo(&bounds);
                         let color = button.color();
                         cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), f64::from(color.alpha()) * 0.08 * button.opacity());
                         super::hover(&cr, &tab, corners.get(i).copied().unwrap_or_default());
                         let _ = cr.fill();
                     }
                 }
+            }
+            let Some(mut node) = background.to_node() else { return };
+            if let Some(tab) = active {
+                let mask = gtk::Snapshot::new();
+                let cr = mask.append_cairo(&bounds);
+                let radius = gtk::graphene::Size::new(layer_ui::SURFACE_RADIUS, layer_ui::SURFACE_RADIUS);
+                let square = gtk::graphene::Size::new(0., 0.);
+                let mut shape = gtk::gsk::RoundedRect::new(tab, radius, radius, square, square);
+                shape.normalize();
+                crate::squircle::rounded_rect(&cr, &shape);
+                super::feet(&cr, &tab, bounds.height());
+                cr.set_source_rgba(1., 1., 1., 1.);
+                let _ = cr.fill();
+                drop(cr);
+                let mask = mask.to_node().unwrap();
+                let strip = gtk::gsk::MaskNode::new(node, &mask, gtk::gsk::MaskMode::InvertedAlpha);
+                let tab = gtk::gsk::MaskNode::new(gtk::gsk::ColorNode::new(&foot.color(), &bounds), mask, gtk::gsk::MaskMode::Alpha);
+                let average = gtk::gsk::CrossFadeNode::new(strip, tab, 0.5);
+                let restore_alpha = gtk::graphene::Matrix::from_float([
+                    1., 0., 0., 0.,
+                    0., 1., 0., 0.,
+                    0., 0., 1., 0.,
+                    0., 0., 0., 2.,
+                ]);
+                node = gtk::gsk::ColorMatrixNode::new(average, &restore_alpha, &gtk::graphene::Vec4::zero()).upcast();
+            }
+            snapshot.append_node(if strip.color().alpha() < 1. || foot.color().alpha() < 1. {
+                crate::glass::surface(node)
+            } else { node });
+            for button in buttons.iter().filter(|button| Some(*button) != selected) {
                 obj.snapshot_child(button, snapshot);
             }
-            snapshot.pop();
-            draw_feet(&foot.color());
             if let Some(button) = selected {
                 obj.snapshot_child(button, snapshot);
             }

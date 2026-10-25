@@ -49,6 +49,76 @@ fn contour_pixels(texture: &gdk::Texture) -> Vec<u8> {
 }
 
 #[test]
+#[ignore = "isolated Mutter native-input.js --native-test=native_panel_tab_contours_are_continuous"]
+fn native_panel_tab_contours_are_continuous() {
+    let output = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").expect("contour artifacts"));
+    std::fs::create_dir_all(&output).unwrap();
+    let app = native_test_app("art.capycanvas.PanelTabContinuity");
+    let w = fixture_workspace(&app);
+    w.window.maximize();
+    w.window.present();
+    pump(1600);
+    let fixture = layer_ui::WorkspaceState::default();
+    let group = fixture.layout.panel_group(Panel::Layers).unwrap();
+    let viewport = [w.surface.width() as f32, w.surface.height() as f32];
+    let input = RemoteInput::new();
+    input.ready();
+    let mut gaps = Vec::new();
+    for drawer in [false, true] {
+        w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(fixture.clone()) });
+        if drawer {
+            w.dispatch(UiAction::DoubleClickPanelHandle { group, viewport });
+            enable_individual_column_panels(&w, group);
+            w.dispatch(UiAction::Customize { action: CustomizationAction::ToggleColumnDrawer { group, panel: Panel::Layers } });
+        }
+        for theme in [Theme::Dark, Theme::Light] {
+            w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+            for level in [layer_ui::Transparency::Off, layer_ui::Transparency::Low, layer_ui::Transparency::Medium, layer_ui::Transparency::High] {
+                use_transparency(&w, level);
+                for style in [TabStyle::Icon, TabStyle::IconName] {
+                    w.dispatch(UiAction::Customize { action: CustomizationAction::SetTabStyle { group, style } });
+                    for panel in [Panel::Layers, Panel::Adjustments, Panel::Properties] {
+                        w.dispatch(UiAction::SelectPanelTab { group, panel });
+                        pump(80);
+                        let tab = if drawer { named::<gtk::Button>(w.window.upcast_ref(), &format!("column-drawer-tab-{panel:?}")) }
+                            else { w.groups.borrow().iter().find(|g| g.id == group).unwrap().tabs.iter().find(|(p, _)| *p == panel).unwrap().1.clone() };
+                        let strip = tab.parent().unwrap();
+                        let bounds = tab.compute_bounds(&strip).unwrap();
+                        assert_eq!(bounds.y(), 0.);
+                        assert_eq!(bounds.height(), strip.height() as f32);
+                        let floor = ["tab-strip-tint", "tab-foot-tint"].map(|class| find_css(&strip, class).unwrap().color().alpha())
+                            .into_iter().fold(1f32, f32::min) * 255.;
+                        let scale = strip.scale_factor() as f32;
+                        let snapshot = gtk::Snapshot::new();
+                        snapshot.scale(scale, scale);
+                        gtk::WidgetPaintable::new(Some(&strip)).snapshot(&snapshot, strip.width() as f64, strip.height() as f64);
+                        let node = snapshot.to_node().unwrap();
+                        if level.enabled() {
+                            let mut regions = Vec::new();
+                            crate::glass::collect(&node, &w.palette.get().unwrap().glass.surfaces(), &mut regions);
+                            assert!(regions.iter().any(|region| region.bounds == [0., 0., strip.width() as f32 * scale, strip.height() as f32 * scale]), "tab strip retains its complete blurred backdrop");
+                        }
+                        let node = crate::squircle::converted(&node, scale.into());
+                        let texture = w.window.renderer().unwrap().render_texture(&node, Some(&gtk::graphene::Rect::new(0., 0., strip.width() as f32 * scale, strip.height() as f32 * scale)));
+                        let pixels = contour_pixels(&texture);
+                        let gap = pixels.chunks_exact(4).enumerate().find(|(_, pixel)| f32::from(pixel[3]) + 2. < floor);
+                        let name = format!("{}-{theme:?}-{level:?}-{style:?}-{panel:?}", if drawer { "drawer" } else { "docked" }).to_lowercase();
+                        if gap.is_some() || panel == Panel::Adjustments {
+                            texture.save_to_png(output.join(format!("{name}.png"))).unwrap();
+                        }
+                        if let Some((i, pixel)) = gap {
+                            gaps.push(format!("{name}: alpha {} below {floor:.1} at ({}, {})", pixel[3], i % texture.width() as usize, i / texture.width() as usize));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    input.finish();
+    assert!(gaps.is_empty(), "tab contours expose the backdrop:\n{}", gaps.join("\n"));
+}
+
+#[test]
 #[ignore = "isolated Mutter native-input.js --native-test=native_panel_tab_lower_contours"]
 fn native_panel_tab_lower_contours() {
     let output = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").expect("contour artifacts"));
@@ -166,7 +236,7 @@ fn native_panel_tab_lower_contours() {
                                 let hover_boundary = lower_boundary(&tab, corners, x, y, scale);
                                 let foot_boundary = lower_boundary(&active_tab, [-6, -6], x, y, scale);
                                 let i = y * stride + x * 4;
-                                if in_clip && foot == 1. && !foot_boundary && ((x as f64 + 0.5) / scale < active_tab.x() as f64
+                                if in_clip && foot == 1. && ((x as f64 + 0.5) / scale < active_tab.x() as f64
                                     || (x as f64 + 0.5) / scale > (active_tab.x() + active_tab.width()) as f64) {
                                     foot_pixels += 1;
                                     let face_x = (((x as f64 + 0.5) / scale).clamp(active_tab.x() as f64 + 2., (active_tab.x() + active_tab.width()) as f64 - 2.) * scale).floor() as usize;

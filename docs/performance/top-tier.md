@@ -190,7 +190,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
-| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
+| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; current short tab probe gives 110.79–120.02 presents/s, with one touch trial below that floor. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-24 |
 | Android palette pill opening at the work-area edge | 120 | **FPS unqualified.** Instant clamp; two actual presents per opening, all neighbors stationary in the diagnostic | [Native palette opening](#native-palette-opening), 2026-10-23 |
 | Android tool bubble drag through four neighbours | 120 | **Unqualified after the bubble release fixes.** Previous parity build: 115.00–116.55 actual app-window presents/s; p99 ≤16.667447 ms, default glass, 61 MP photo at Fit | [Native tool bubbles](#native-tool-bubbles), 2026-10-24 |
 | Web tool bubble drag through four neighbours | 120 | Unmeasured after the bubble release fixes; desktop browser journeys do not qualify the reference tablet | [Web checks](../development/web.md#tests), 2026-10-24 |
@@ -4423,6 +4423,29 @@ comparison.
 [build metadata](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected-build.json)
 and the [run log](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected.log)
 identify the frozen executable, source hashes and successful gates.
+
+The continuous tab-contour change based on `b25c628ec` was checked on
+2026-10-24 with release Rust, system GTK 4.22.5/libadwaita 1.9.4, Mutter 50.5,
+the same workstation GPU and driver, and a private 1600 × 1000 display at
+120 Hz and scale 1. Medium glass and the blank fixture drawing remain enabled.
+Three independent scoped tab-motion invocations record one 2.2-second contact
+per input type, with no builds or other tests from this task running:
+
+| Input | Native samples | Presents/s range | Worst presentation gap p99, ms | Pickup command to first present, ms |
+| --- | ---: | ---: | ---: | ---: |
+| Mouse | 267–268 | 119.999–120.011 | 8.635 | 8.043–10.913 |
+| Touch | 550 | 110.785–120.023 | 9.409 | 15.261–25.248 |
+
+All contacts pass the native-input gate, with zero model refreshes and no canvas
+or backdrop frames during motion. The first touch trial fails the unchanged
+114 Hz gate; the next two pass. The initial baseline invocation fails drag
+pickup before measurement. Its retry gives 119.558/119.576 presents/s for
+mouse/touch, with p99 gaps 9.299/8.583 ms. These short, uneven trials do not
+establish a sustained before/after comparison or qualify reference hardware.
+[All three trial summaries](../../artifacts/tab-gap-candidate/motion/summary.json),
+[source and executable hashes](../../artifacts/tab-gap-candidate/source-binary.sha256)
+and [the failed trial log](../../artifacts/tab-gap-candidate/motion/trial-1-test.log)
+identify the measured build and retained failure.
 
 ## Web Navigator layout
 

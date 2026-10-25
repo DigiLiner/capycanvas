@@ -2966,6 +2966,12 @@ impl Workspace {
         } else {
             self.window.remove_css_class("glass");
         }
+        for group in self.groups.borrow().iter() {
+            group.tab_strip.queue_draw();
+        }
+        for drawer in self.drawers() {
+            drawer.refresh_theme();
+        }
         self.update_backdrop();
     }
 

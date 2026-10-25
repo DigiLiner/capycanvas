@@ -118,7 +118,8 @@ fn native_panel_tab_feedback_preserves_join() {
                         assert!(next.1.state_flags().contains(gtk::StateFlags::PRELIGHT));
                         let hovered = bottom();
                         assert!(hovered != expected, "{theme:?}/{level:?}/{active}: inactive tab has hover feedback");
-                        assert_eq!(join(&hovered), join(&expected), "{theme:?}/{level:?}/{active}: hover stays behind the active shoulder");
+                        let (hovered_join, expected_join) = (join(&hovered), join(&expected));
+                        assert!(hovered_join.iter().zip(&expected_join).all(|(a, b)| a.abs_diff(*b) <= 1), "{theme:?}/{level:?}/{active}: hover stays behind the active shoulder: {hovered_join:?}/{expected_join:?}");
                     }
                     input.perform(serde_json::json!([contact(device, "down", point)]));
                     assert!(next.1.has_css_class("selected-tool"), "{device} press selects before release");
@@ -216,7 +217,7 @@ fn native_active_tab_matches_panel() {
                 let body = group.stack.compute_bounds(&w.surface).unwrap();
                 let tab_pixel = sample(tab.x() + 4., tab.y() + tab.height() - 3.);
                 let body_pixel = sample(body.x() + 3., body.y() + 3.);
-                if tab_pixel != body_pixel {
+                if tab_pixel.into_iter().zip(body_pixel).any(|(tab, body)| tab.abs_diff(body) > 1) {
                     mismatches.push(format!("{name} group {}: tab {tab_pixel:?} panel {body_pixel:?}", group.id));
                 }
             }

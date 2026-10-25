@@ -63,6 +63,11 @@ impl Clip {
 
 const GLASS_ARC: &str = "glass-arc";
 const GLASS_BUBBLE: &str = "glass-color-bubble";
+const GLASS_SURFACE: &str = "glass-surface";
+
+pub fn surface(node: gsk::RenderNode) -> gsk::RenderNode {
+    gsk::DebugNode::new(node, GLASS_SURFACE.into()).upcast()
+}
 
 pub fn color_bubble(node: gsk::RenderNode, layout: layer_ui::ColorBubbleLayout) -> gsk::RenderNode {
     gsk::DebugNode::new(node, format!("{GLASS_BUBBLE} {}", layout.diameter).into()).upcast()
@@ -153,21 +158,25 @@ fn visit(
         let rect = at.place.rect(&n.clip());
         let cut = at.cut.map_or(Some(rect), |c| intersect(c, rect))?;
         visit(&n.child(), Context { cut: Some(cut), ..at }, surfaces, out)
-    } else if let Some(n) = node.downcast_ref::<gsk::ColorNode>() {
-        let color = n.color();
-        if color.alpha() * at.opacity == 1. { return Some(n.bounds()); }
-        let rgba = [color.red(), color.green(), color.blue(), color.alpha()];
-        if !surfaces.iter().any(|s| s.matches(rgba)) {
-            return None;
+    } else if node.is::<gsk::ColorNode>()
+        || node.downcast_ref::<gsk::DebugNode>().is_some_and(|n| n.message() == GLASS_SURFACE)
+    {
+        if let Some(n) = node.downcast_ref::<gsk::ColorNode>() {
+            let color = n.color();
+            if color.alpha() * at.opacity == 1. { return Some(n.bounds()); }
+            let rgba = [color.red(), color.green(), color.blue(), color.alpha()];
+            if !surfaces.iter().any(|s| s.matches(rgba)) {
+                return None;
+            }
         }
-        let rect = at.place.rect(&n.bounds());
+        let rect = at.place.rect(&node.bounds());
         let rect = at.cut.map_or(Some(rect), |c| intersect(c, rect))?;
         let region = match at.clip {
             Some(c) => c.region(rect),
             None => Some(BackdropRegion { bounds: rect, radii: [0.; 4], shape: BackdropRegion::SQUIRCLE }),
         };
         out.extend(region.map(|r| r.with_strength(at.opacity)));
-        Some(n.bounds())
+        Some(node.bounds())
     } else if let Some(n) = node.downcast_ref::<gsk::DebugNode>()
         && let Some(size) = n.message().strip_prefix(GLASS_BUBBLE).and_then(|s| s.trim().parse::<f32>().ok())
     {
@@ -260,13 +269,20 @@ mod tests {
         path.add_circle(&gtk::graphene::Point::new(100., 100.), 50.);
         let band = gsk::StrokeNode::new(gsk::ColorNode::new(&tint, &gtk::graphene::Rect::new(36., 36., 128., 128.)), &path.to_path(), &gsk::Stroke::new(28.));
         let moved = gsk::TransformNode::new(arc(band.upcast(), [100., 100.], 50., 28., [-90., 180.]), Some(&gsk::Transform::new().translate(&gtk::graphene::Point::new(5., 0.))));
-        let root = gsk::ContainerNode::new(&[faded.upcast(), moved.upcast()]);
+        let native = gsk::CairoNode::new(&gtk::graphene::Rect::new(150., 10., 40., 40.));
+        let cr = native.draw_context();
+        cr.set_source_rgba(0.9, 0.9, 0.9, 0.6);
+        cr.paint().unwrap();
+        drop(cr);
+        let panel = gsk::OpacityNode::new(surface(native.upcast()), 0.5);
+        let root = gsk::ContainerNode::new(&[faded.upcast(), moved.upcast(), panel.upcast()]);
         let mut out = Vec::new();
         collect(&root.upcast(), &[glass], &mut out);
-        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out.len(), 3, "{out:?}");
         assert_eq!(out[0].shape[1], 0.25, "a faded glass fill blurs as faintly as it is drawn");
         let expected = BackdropRegion::arc([105., 100.], 50., 28., -std::f32::consts::FRAC_PI_2, std::f32::consts::PI);
         assert_eq!(out[1], expected, "a glass arc keeps its own shape");
+        assert_eq!(out[2], BackdropRegion::rounded([150., 10., 40., 40.], [0.; 4], BackdropRegion::SQUIRCLE).with_strength(0.5), "native surface paint retains its rectangular backdrop and fade");
     }
 
     #[test]

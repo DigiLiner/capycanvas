@@ -246,7 +246,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-tabs button { background: transparent; border-radius: var(--surface-radius) var(--surface-radius) 0 0; min-height: 28px; padding: 4px 8px; }
 .dock-tabs button:not(.selected-tool):hover { background: transparent; }
 .dock-tabs button.icon-only-tab { min-width: 20px; }
-.dock-tabs button.selected-tool { background: var(--panel-bg); }
+.dock-tabs button.selected-tool { background: transparent; }
 .dock-panel entry, .dock-panel dropdown > button, .dock-panel menubutton.panel-choice > button { background: var(--input-bg); }
 .dock-panel .panel-control-row > button,
 .dock-panel .panel-control-row > dropdown > button,
@@ -415,7 +415,7 @@ window.capy-workspace.glass .dock-panel.tabbed:not(.expanded-panel) .panel-body,
 window.capy-workspace.glass .tab-strip-tint { color: var(--glass-strip); }
 window.capy-workspace.glass .tab-strip-end { background: var(--glass-strip); }
 window.capy-workspace.glass .tab-foot-tint { color: var(--glass-panel); }
-window.capy-workspace.glass .dock-tabs button.selected-tool { background: var(--glass-panel); }
+window.capy-workspace.glass .dock-tabs button.selected-tool { background: transparent; }
 window.capy-workspace.glass .drawer-connection { color: var(--glass-panel); }
 window.capy-workspace.glass .selected-tool:not(.color-swatch), window.capy-workspace.glass .layer-row.selected, window.capy-workspace.glass .selection-modes button:checked, window.capy-workspace.glass .toolbar-component .option-action button:checked { background: var(--glass-selection); }
 window.capy-workspace.glass .toolbar-controls.drawer-source { background: var(--glass-source); }
