@@ -365,6 +365,12 @@ Accessibility assertions need GTK's test backend at process startup. Run
 Both private-display runners preserve this variable; other runs default to
 `GTK_A11Y=none`. Tests never mutate the process environment after startup.
 
+`native_dialog_lines_match_the_palette` opens Preferences, Workspaces, Export,
+New Drawing, the color editor and an alert at four base colors in each theme
+(`--native-storage`), saves the captures, and checks each dialog's background,
+the sidebar edge and row dividers against the palette
+([theme colors](../ui/theme-colors.md#lines)).
+
 `native_three_finger_scrub --tablet` sends three native touch contacts horizontally,
 vertically and diagonally in both themes. It checks clearing before release,
 one clear per scrub, unchanged camera and exact document pixels through Undo/Redo:

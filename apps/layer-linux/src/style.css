@@ -5,7 +5,19 @@ window.background.capy-workspace.native-canvas-background { background: transpar
 /* Pen fallback for GTK's mouse-position tooltip query; match native Adwaita. */
 popover.pen-tooltip { padding:0; margin:0; }
 popover.pen-tooltip > contents { padding:6px 10px; border-radius:9px; background:rgba(0,0,6,.8); border:1px solid rgba(255,255,255,.1); color:white; box-shadow:none; }
-window.capy-workspace { --window-bg-color: var(--capy-bg); --window-fg-color: var(--capy-text); --headerbar-bg-color: var(--capy-panel); --headerbar-backdrop-color: var(--capy-panel); --view-bg-color: var(--capy-view); --popover-bg-color: var(--capy-panel); --panel-bg: var(--capy-panel); --tabbar-bg: var(--capy-tabbar); --input-bg: var(--capy-input); --sidebar-bg-color: var(--capy-sidebar); --sidebar-backdrop-color: var(--capy-sidebar-backdrop); --dialog-bg-color: var(--capy-dialog); --corner-fit: .54; --surface-radius: calc(18px * var(--corner-fit)); --control-radius: calc(var(--panel-control-radius) * var(--corner-fit)); --tile-radius: 18px; --accent-bg-color: var(--capy-accent); --accent-fg-color: var(--capy-accent-foreground); --selection-bg: var(--capy-selection); --header-selection: var(--capy-header-selection); --header-selection-hover: var(--capy-header-selection-hover); }
+window.capy-workspace { --window-bg-color: var(--capy-bg); --window-fg-color: var(--capy-text); --headerbar-bg-color: var(--capy-panel); --headerbar-backdrop-color: var(--capy-panel); --view-bg-color: var(--capy-view); --popover-bg-color: var(--capy-panel); --panel-bg: var(--capy-panel); --tabbar-bg: var(--capy-tabbar); --input-bg: var(--capy-input); --sidebar-bg-color: var(--capy-sidebar); --sidebar-backdrop-color: var(--capy-sidebar-backdrop); --dialog-bg-color: var(--capy-settings); --corner-fit: .54; --surface-radius: calc(18px * var(--corner-fit)); --control-radius: calc(var(--panel-control-radius) * var(--corner-fit)); --tile-radius: 18px; --accent-bg-color: var(--capy-accent); --accent-fg-color: var(--capy-accent-foreground); --selection-bg: var(--capy-selection); --header-selection: var(--capy-header-selection); --header-selection-hover: var(--capy-header-selection-hover); --line-card-ring: var(--line-surround-card-ring); --line-card-shadow: var(--line-surround-card-shadow); --line-card-far-shadow: var(--line-surround-card-far-shadow); }
+/* libadwaita's line colors, matched to the background each dialog sits on (theme.rs Lines). */
+window.capy-workspace dialog { --window-bg-color: var(--dialog-bg-color); --headerbar-bg-color: var(--dialog-bg-color); --headerbar-backdrop-color: var(--dialog-bg-color); }
+window.capy-workspace dialog sheet { --card-shade-color: var(--line-settings-card-shade); --line-card-ring: var(--line-settings-card-ring); --line-card-shadow: var(--line-settings-card-shadow); --line-card-far-shadow: var(--line-settings-card-far-shadow); --shade-color: var(--line-settings-shade); --border-opacity: var(--line-settings-border-opacity); --line-highlight: var(--line-settings-highlight); --sidebar-border-color: var(--line-sidebar-border); --sidebar-shade-color: var(--line-sidebar-shade); }
+window.capy-workspace popover { --border-opacity: var(--line-panel-border-opacity); --popover-shade-color: var(--line-panel-shade); }
+.panel-configuration { --card-shade-color: var(--line-panel-card-shade); --line-card-ring: var(--line-panel-card-ring); --line-card-shadow: var(--line-panel-card-shadow); --line-card-far-shadow: var(--line-panel-card-far-shadow); }
+list.boxed-list, list.content, list.boxed-list-separate > row, .card { box-shadow: 0 0 0 1px var(--line-card-ring, rgb(0 0 6 / 3%)), 0 1px 3px 1px var(--line-card-shadow, rgb(0 0 6 / 7%)), 0 2px 6px 2px var(--line-card-far-shadow, rgb(0 0 6 / 3%)); }
+popover > contents, popover > arrow { border-color: var(--line-popover-border, rgb(0 0 0 / 14%)); }
+floating-sheet > sheet { outline-color: var(--line-highlight, rgb(255 255 255 / 7%)); }
+bottom-sheet > sheet > outline, dialog.bottom-sheet:not(.narrow) sheet.flush-left > outline, dialog.bottom-sheet:not(.narrow) sheet.flush-right > outline { box-shadow: inset 1px 0 var(--line-highlight, rgb(255 255 255 / 7%)), inset -1px 0 var(--line-highlight, rgb(255 255 255 / 7%)), inset 0 1px var(--line-highlight, rgb(255 255 255 / 7%)); }
+bottom-sheet > sheet.flush-left > outline { box-shadow: inset -1px 0 var(--line-highlight, rgb(255 255 255 / 7%)), inset 0 1px var(--line-highlight, rgb(255 255 255 / 7%)); }
+bottom-sheet > sheet.flush-right > outline { box-shadow: inset 1px 0 var(--line-highlight, rgb(255 255 255 / 7%)), inset 0 1px var(--line-highlight, rgb(255 255 255 / 7%)); }
+bottom-sheet > sheet.flush-left.flush-right > outline { box-shadow: inset 0 1px var(--line-highlight, rgb(255 255 255 / 7%)); }
 /* Shared 6px workspace gaps; retain native close-circle padding/placement. */
 window, label, text { font-size: var(--ui-text-size); }
 .window-bar { background: transparent; }
@@ -78,11 +90,10 @@ window, label, text { font-size: var(--ui-text-size); }
 .choice-well button:checked { background: var(--header-selection); color: var(--window-fg-color); }
 .choice-well button:checked:hover { background: var(--header-selection-hover); }
 .workspace-switcher .workspace-options > button { min-width: 20px; min-height: 26px; padding: 0; color: alpha(var(--window-fg-color), .7); }
-.workspace-manager { --window-bg-color: var(--dialog-bg-color); --headerbar-bg-color: var(--dialog-bg-color); --headerbar-backdrop-color: var(--dialog-bg-color); }
 .workspace-manager-row menubutton.workspace-reorder-handle > button { padding: 0; min-width: 16px; background: transparent; box-shadow: none; }
 .workspace-manager-row { padding: 0; }
 .workspace-manager-list { border-radius: var(--control-radius); }
-.workspace-manager-items { border-radius: 0; box-shadow: none; }
+list.workspace-manager-items { border-radius: 0; box-shadow: none; }
 .workspace-manager-items > row { border: 0; border-radius: 0; }
 .workspace-manager-items > row + row { box-shadow: inset 0 1px var(--card-shade-color); }
 .workspace-row-content { min-height: 56px; padding: 0 12px 0 calc(12px - var(--panel-field-padding)); }
@@ -342,8 +353,6 @@ button.flat.unavailable-tool > * { filter: opacity(30%); }
 .window-bar > *, .workspace-status, .dock-panel { transition: opacity 180ms ease-out; }
 .zen-hidden:not(.window-bar), .window-bar.zen-hidden > * { opacity: 0; }
 .zen-capy { min-width: 36px; min-height: 36px; padding: 0; background: var(--glass-chip); border-radius: var(--header-radius); }
-/* Preferences are a native surface, not the canvas surround (especially light). */
-.layer-preferences { --window-bg-color: var(--capy-settings); --headerbar-bg-color: var(--capy-settings); --headerbar-backdrop-color: var(--capy-settings); }
 /* Match libadwaita's ActionRow subtitles despite our global label font rule. */
 .layer-preferences row label.subtitle { font-size: smaller; }
 .layer-preferences label.title-2 { font-size: calc(var(--ui-text-size) * 1.36); }

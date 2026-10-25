@@ -34,12 +34,12 @@ in the table is transformed per channel using the same rule as a grey.
 | Selected drawing tab | Panel body, opaque | Same | Matches selected panel tabs |
 | Panel input backgrounds, inactive compact slider track | `#333333` = B | `#fafafa` = mix(B,W,66/71) | Regenerate |
 | Native GTK view background | `#2b2b2b` = mix(B,K,8/51) | `#e4e4e4` = mix(B,W,44/71) | Regenerate |
-| Preferences and web dialog background | `#333333` = B | `#fafafb`: white mix 66/71 for R,G, 67/71 for B | Regenerate |
+| Every GTK and web dialog, sheet and alert (`settings`) | `#333333` = B | `#fafafb`: white mix 66/71 for R,G, 67/71 for B | Regenerate |
 | Android settings background | Same as dark preferences | `#fafafa` = mix(B,W,66/71) | Regenerate; retain platform default |
 | GTK/web settings sidebar | `#2e2e32`: black mix 5/51 for R,G, 1/51 for B | `#ebebed`: white mix 51/71 for R,G, 53/71 for B | Regenerate |
 | GTK unfocused sidebar | `#28282c`: black mix 11/51 for R,G, 7/51 for B | `#f2f2f4`: white mix 58/71 for R,G, 60/71 for B | Regenerate |
 | Android settings sidebar | Tab bar | Panel body | Reuse palette roles |
-| Native GTK alert dialog | `#36363a`: white mix 3/204 for R,G, 7/204 for B | `#fafafb`, as preferences | Regenerate |
+| Windows New Drawing panel (`dialog`) | `#36363a`: white mix 3/204 for R,G, 7/204 for B | `#fafafb`, as preferences | Regenerate; GTK and web dialogs use `settings` |
 | GTK/web settings cards | White at 8% in GTK; text at 8% in web, over the settings surface | White | Existing compositing already follows the new surface; white stays white |
 | Android settings cards | `#414141`, same as panel | White | Reuse panel / keep white |
 | Slider thumb | `#d3d3d3` = mix(B,W,160/204) in web/Android | `#fafafa` = mix(B,W,66/71) | Regenerate; GTK numeric slider uses this role too |
@@ -51,14 +51,14 @@ in the table is transformed per channel using the same rule as a grey.
 | Plain button fill | White at 13/255 alpha | Black at 13/255 alpha | Keep overlay |
 | Hover / pressed controls | Text at 8% / 16% over local surface | Same | Keep overlay, recomposite |
 | Search field / selected preferences category / dialog close background | Text at 10% | Same | Keep overlay |
-| Checkbox/radio outlines, separators, scroll thumbs, disabled controls | Foreground overlays, usually 10–35%; disabled opacity 36–50% | Same pattern | Keep opacity, recomposite |
-| Web preference row divider | `#80808026` | Same | Keep translucent neutral |
+| Checkbox/radio outlines, editor separators, scroll thumbs, disabled controls | Foreground overlays, usually 10–35%; disabled opacity 36–50% | Same pattern | Keep opacity, recomposite |
+| Dialog and popover lines: row dividers, settings sidebar edge, card outline and shadow, scroll shades, separators and split handles, popover outline, dialog edge | libadwaita's contrast against the surfaces each line touches | Same | `palette.lines`; see [Lines](#lines). Web and native hosts still use libadwaita's fixed opacities |
 | Settings slider inactive track / inactive switch | Text at 12% / 20% | Same | Keep overlay |
 | Accent, focus, links, checked controls, drop indicators | Resolved accent: saved, else system (GTK, Android 12+), else `#3584e4` (drop hint currently separate blue) | Same | Not derived from the base |
 | Layer clipping rail (`relationship`) | Accent with OKLCH lightness reduced by 0.06, clamped at zero | Same | Preserve hue; reduce chroma only to stay in gamut. FX connectors use ordinary neutral link ink. |
 | Panel and toolbar selection | Accent tint of reference grey 82, same as the title bar | Accent tint of reference grey 213 (`#c0d7f6`) | See [Accent color](#accent-color) |
 | Error / warning text, invalid numeric border | Web `#ff7b63` / `#e5a50a`, border `#ee5555`; native semantic roles | Web `#c01c28` / `#9c5700`, same border; native semantic roles | Fixed semantic colors per mode |
-| Shadows, inset shades, modal dimming | Black with existing opacities; panel 16%, expanded drawer 40%, web modal 8/15 | Same shadows; web modal 2/15 | Keep; already blends over new surfaces |
+| Other shadows, inset shades, modal dimming | Black with existing opacities; panel 16%, expanded drawer 40%, web modal 8/15 | Same shadows; web modal 2/15 | Keep; already blends over new surfaces |
 | Cursor outline, marker and dash contrast | Black + white | Black + white | Unchanged: must contrast against artwork, not UI |
 | Brush/color swatches, layer thumbnails, document white, painted pixels, imported/AI images | Artwork colors | Artwork colors | Never transform |
 | Brush preview PNGs | Existing light-stroke variant, transparent background | Existing dark-stroke variant, transparent background | Keep; no baked panel background to regenerate |
@@ -80,6 +80,52 @@ level: opaque at Off, frosted glass blurred in the canvas renderer otherwise.
 Joined bars and Menu Labels share one surface behind their members; standalone
 controls carry their own. Hover, press and selection feedback composite over
 this surface. Header text has no outline; no host adds a toolkit backdrop blur.
+
+## Lines
+
+libadwaita draws dividers and outlines at fixed opacities tuned for its own
+surfaces. Ours are lighter in dark mode and follow the chosen base, and a fixed
+black opacity removes more lightness from a lighter surface, so it draws a
+stronger line. [`theme.rs`](../../crates/layer-ui/src/theme.rs) publishes
+`palette.lines` instead: every line keeps libadwaita's contrast against the
+surfaces it touches.
+
+For each line, take libadwaita 1.9's ink, opacity and the surface it is painted
+on, and measure the smallest OKLab lightness step from the blended line to any
+surface it touches. On our surfaces, solve the opacity that gives the same
+smallest step on the same side. Blending is encoded sRGB, as GTK and browsers
+composite.
+
+In dark mode, row dividers are instead the background their card sits on, 5%
+darker: each sRGB channel × 0.95, so `#303030` on `#333333`. In light mode they
+follow the rule above. The Preferences sidebar edge touches the
+sidebar and the content. In dark mode our sidebar is darker than its content,
+the reverse of libadwaita, so the edge keeps libadwaita's step against the
+sidebar and differs a little more from the content. As in libadwaita, the edge
+keeps its color when the window is unfocused.
+
+Each set has the same roles: `card_shade` (row dividers, opaque in dark mode), `card_ring`,
+`card_shadow` and `card_far_shadow` (the card's 1px outline and two shadows),
+`shade` (scroll edges, drawn at 75%), `border` (separators and split handles in
+the text color; GTK binds its opacity to `--border-opacity`) and `highlight`
+(the dialog sheet's inner outline). `sidebar_border`, `sidebar_shade` and
+`popover_border` (over the canvas surround) complete the set.
+
+| Background | Used by |
+| --- | --- |
+| `settings` | Every dialog, sheet and alert |
+| `surround` | Cards over the canvas, such as the image drop label, and the popover outline |
+| `panel` | Popover menus and scroll shades, the panel configuration list; libadwaita's popover is its reference |
+
+GTK sets the roles on each dialog's `sheet`, so modal dimming, which libadwaita
+derives from `--shade-color`, keeps its strength. Values other than dark row
+dividers stay translucent because libadwaita derives other colors from them. Lines the app draws on editor
+chrome (toolbar and column dividers, drawer splits, thumbnail borders) keep their
+own colors.
+
+At the default light base, dialogs already use libadwaita's surfaces, so their
+lines equal libadwaita's. At the default dark base, the
+sidebar edge drops from 36% to 10%.
 
 ## Accent color
 
@@ -155,7 +201,7 @@ hex value.
 ## Ownership and cost
 
 - `layer-ui::Settings` owns the two validated base colors, the optional accent
-  and their preference schemas. `theme.rs` is the only source of surface and
+  and their preference schemas. `theme.rs` is the only source of surface, line and
   accent-tint calibration.
 - `UiState.palette` contains resolved colors. Hosts bind them to GTK variables,
   DOM variables, or Compose colors, with no copies of the transformation.

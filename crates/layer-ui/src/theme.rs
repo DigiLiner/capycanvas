@@ -143,6 +143,163 @@ impl HexColor {
     }
 }
 
+type Rgb = [f64; 3];
+const WHITE: Rgb = [255.; 3];
+const BLACK: Rgb = [0.; 3];
+const SHADE: Rgb = [0., 0., 6.];
+const CARD_FILL: f64 = 0.08;
+const CARD_RING: f64 = 0.03;
+const CARD_SHADOW: f64 = 0.07;
+const CARD_FAR_SHADOW: f64 = 0.03;
+const SCROLL_LINE: f64 = 0.75;
+const BORDER_OPACITY: f64 = 0.15;
+const HIGHLIGHT: f64 = 0.07;
+const POPOVER_BORDER: f64 = 0.14;
+const DARK_ROW_DIVIDER: f64 = 0.05;
+
+/// libadwaita 1.9's surfaces and line opacities, the reference our lines match.
+struct Adwaita {
+    dark: bool,
+    window: Rgb,
+    sidebar: Rgb,
+    popover: Rgb,
+    text: Rgb,
+    text_alpha: f64,
+    card_shade: f64,
+    sidebar_border: f64,
+    shade: f64,
+}
+const ADWAITA_DARK: Adwaita = Adwaita {
+    dark: true,
+    window: [34., 34., 38.],
+    sidebar: [46., 46., 50.],
+    popover: [54., 54., 58.],
+    text: WHITE,
+    text_alpha: 1.,
+    card_shade: 0.36,
+    sidebar_border: 0.36,
+    shade: 0.25,
+};
+const ADWAITA_LIGHT: Adwaita = Adwaita {
+    dark: false,
+    window: [250., 250., 251.],
+    sidebar: [235., 235., 237.],
+    popover: WHITE,
+    text: SHADE,
+    text_alpha: 0.8,
+    card_shade: 0.07,
+    sidebar_border: 0.07,
+    shade: 0.07,
+};
+
+fn over(ink: Rgb, alpha: f64, ground: Rgb) -> Rgb {
+    std::array::from_fn(|i| ink[i] * alpha + ground[i] * (1. - alpha))
+}
+fn lightness(color: Rgb) -> f64 {
+    layer_core::color::oklab::to_lab(
+        color.map(|v| layer_core::color::RgbSpace::Srgb.decode(v / 255.)),
+    )[0]
+}
+fn card(dark: bool, ground: Rgb) -> Rgb {
+    if dark { over(WHITE, CARD_FILL, ground) } else { WHITE }
+}
+fn line(ink: Rgb, alpha: f64) -> crate::GlassColor {
+    let [r, g, b] = ink.map(|v| (v / 255.) as f32);
+    crate::GlassColor([r, g, b, alpha.min(1.) as f32])
+}
+
+/// Opacity of `ink` over `ground` whose smallest OKLab lightness step to any of
+/// `touches` equals the step from libadwaita's composited `reference` line to the
+/// nearest of `reference_touches`, on the same side. Blends in encoded sRGB, as GTK
+/// and browsers composite.
+fn matched_alpha(reference: Rgb, reference_touches: &[Rgb], ink: Rgb, ground: Rgb, touches: &[Rgb]) -> f64 {
+    let reference = lightness(reference);
+    let step = reference_touches
+        .iter()
+        .map(|&surface| (reference - lightness(surface)).abs())
+        .fold(f64::INFINITY, f64::min);
+    let darker = lightness(ink) < lightness(ground);
+    let levels = touches.iter().map(|&surface| lightness(surface));
+    let target = if darker {
+        levels.fold(f64::INFINITY, f64::min) - step
+    } else {
+        levels.fold(f64::NEG_INFINITY, f64::max) + step
+    };
+    let (mut low, mut high) = (0., 1.);
+    for _ in 0..30 {
+        let mid = (low + high) / 2.;
+        if (lightness(over(ink, mid, ground)) > target) == darker {
+            low = mid
+        } else {
+            high = mid
+        }
+    }
+    (low + high) / 2.
+}
+fn same_step(ink: Rgb, alpha: f64, reference: Rgb, our_ink: Rgb, ground: Rgb) -> f64 {
+    matched_alpha(over(ink, alpha, reference), &[reference], our_ink, ground, &[ground])
+}
+
+/// libadwaita's lines for one background: shades use near-black ink, `border` uses
+/// the text color and binds as libadwaita's `--border-opacity`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct SurfaceLines {
+    pub card_shade: crate::GlassColor,
+    pub card_ring: crate::GlassColor,
+    pub card_shadow: crate::GlassColor,
+    pub card_far_shadow: crate::GlassColor,
+    pub shade: crate::GlassColor,
+    pub border: crate::GlassColor,
+    pub highlight: crate::GlassColor,
+}
+impl SurfaceLines {
+    fn new(adwaita: &Adwaita, reference: Rgb, ground: Rgb, text: Rgb) -> Self {
+        let shade = |alpha, reference, ground| line(SHADE, same_step(SHADE, alpha, reference, SHADE, ground));
+        let dark = adwaita.dark;
+        Self {
+            card_shade: if dark {
+                line(over(BLACK, DARK_ROW_DIVIDER, ground), 1.)
+            } else {
+                shade(adwaita.card_shade, card(dark, reference), card(dark, ground))
+            },
+            card_ring: shade(CARD_RING, reference, ground),
+            card_shadow: shade(CARD_SHADOW, reference, ground),
+            card_far_shadow: shade(CARD_FAR_SHADOW, reference, ground),
+            shade: line(SHADE, same_step(SHADE, adwaita.shade * SCROLL_LINE, reference, SHADE, ground) / SCROLL_LINE),
+            border: line(text, same_step(adwaita.text, BORDER_OPACITY * adwaita.text_alpha, reference, text, ground)),
+            highlight: line(WHITE, same_step(WHITE, HIGHLIGHT, reference, WHITE, ground)),
+        }
+    }
+}
+
+/// Lines keep libadwaita's contrast against our surfaces for any base color.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Lines {
+    pub settings: SurfaceLines,
+    pub surround: SurfaceLines,
+    pub panel: SurfaceLines,
+    pub sidebar_border: crate::GlassColor,
+    pub sidebar_shade: crate::GlassColor,
+    pub popover_border: crate::GlassColor,
+}
+impl Lines {
+    fn new(dark: bool, [settings, surround, panel, sidebar]: [HexColor; 4], text: HexColor) -> Self {
+        let adwaita = if dark { &ADWAITA_DARK } else { &ADWAITA_LIGHT };
+        let rgb = |color: HexColor| color.0.map(f64::from);
+        let [settings, surround, panel, sidebar, text] = [settings, surround, panel, sidebar, text].map(rgb);
+        let edge = over(SHADE, adwaita.sidebar_border, adwaita.sidebar);
+        let sidebar_shade = same_step(SHADE, adwaita.shade * SCROLL_LINE, adwaita.sidebar, SHADE, sidebar);
+        Self {
+            settings: SurfaceLines::new(adwaita, adwaita.window, settings, text),
+            surround: SurfaceLines::new(adwaita, adwaita.window, surround, text),
+            panel: SurfaceLines::new(adwaita, adwaita.popover, panel, text),
+            sidebar_border: line(SHADE, matched_alpha(edge, &[adwaita.sidebar, adwaita.window], SHADE, sidebar, &[sidebar, settings])),
+            sidebar_shade: line(SHADE, sidebar_shade / SCROLL_LINE),
+            popover_border: line(BLACK, same_step(BLACK, POPOVER_BORDER, adwaita.window, BLACK, surround)),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct ThemePalette {
     pub bg: HexColor,
@@ -167,6 +324,7 @@ pub struct ThemePalette {
     pub header_selection_hover: HexColor,
     pub checker_light: HexColor,
     pub checker_dark: HexColor,
+    pub lines: Lines,
     /// Prepared once when settings/theme change, not converted per frame.
     pub surround_linear: [f32; 4],
     pub glass: crate::GlassPalette,
@@ -204,22 +362,25 @@ impl Settings {
         let tabbar = surface([46; 3], [210; 3]);
         let selection = surface([82; 3], [213; 3]).tint(accent, 0.0);
         let header_selection = header.tint(accent, 0.0);
+        let settings = surface([51; 3], if android { [250; 3] } else { [250, 250, 251] });
+        let sidebar = surface(
+            if android { [46; 3] } else { [46, 46, 50] },
+            if android { [237; 3] } else { [235, 235, 237] },
+        );
+        let text = HexColor(if dark { [250, 250, 251] } else { [46, 46, 50] });
         ThemePalette {
             bg,
             panel,
             tabbar,
             input,
             view,
-            settings: surface([51; 3], if android { [250; 3] } else { [250, 250, 251] }),
-            sidebar: surface(
-                if android { [46; 3] } else { [46, 46, 50] },
-                if android { [237; 3] } else { [235, 235, 237] },
-            ),
+            settings,
+            sidebar,
             sidebar_backdrop: surface([40, 40, 44], [242, 242, 244]),
             dialog: surface([54, 54, 58], [250, 250, 251]),
             card: surface([65; 3], [255; 3]),
             thumb: surface([211; 3], [250; 3]),
-            text: HexColor(if dark { [250, 250, 251] } else { [46, 46, 50] }),
+            text,
             settings_secondary: HexColor(if dark { [188; 3] } else { [102; 3] }),
             button: HexColor([if dark { 255 } else { 0 }; 3]),
             accent,
@@ -230,6 +391,7 @@ impl Settings {
             header_selection_hover: header.tint(accent, if dark { 0.03 } else { -0.03 }),
             checker_light: TRANSPARENCY_CHECKER[0],
             checker_dark: TRANSPARENCY_CHECKER[1],
+            lines: Lines::new(dark, [settings, bg, panel, sidebar], text),
             surround_linear: bg.linear(),
             glass: crate::GlassPalette::new(self.transparency, dark, bg, panel, tabbar, selection, header_selection),
         }
@@ -452,5 +614,85 @@ mod tests {
         let old = Settings::default().palette(Theme::Light, Platform::Gtk, None);
         assert!(p.header_selection.oklab()[0] < old.header_selection.oklab()[0] - 0.05);
         assert!(p.selection.oklab()[0] > p.header_selection.oklab()[0]);
+    }
+
+    fn rgb(color: HexColor) -> Rgb {
+        color.0.map(f64::from)
+    }
+    fn drawn(line: crate::GlassColor, ground: Rgb) -> Rgb {
+        let [r, g, b, a] = line.0.map(f64::from);
+        over([r * 255., g * 255., b * 255.], a, ground)
+    }
+    fn steps(line: crate::GlassColor, ground: Rgb, touches: &[Rgb]) -> Vec<f64> {
+        let level = lightness(drawn(line, ground));
+        touches.iter().map(|&surface| level - lightness(surface)).collect()
+    }
+
+    #[test]
+    fn default_light_lines_are_libadwaitas() {
+        let p = Settings::default().palette(Theme::Light, Platform::Gtk, None);
+        for set in [p.lines.settings] {
+            for (line, alpha) in [
+                (set.card_shade, 0.07),
+                (set.card_ring, 0.03),
+                (set.card_shadow, 0.07),
+                (set.card_far_shadow, 0.03),
+                (set.shade, 0.07),
+            ] {
+                assert!((f64::from(line.0[3]) - alpha).abs() < 0.002, "{line} is not {alpha}");
+            }
+        }
+        assert!((f64::from(p.lines.sidebar_border.0[3]) - 0.07).abs() < 0.002);
+    }
+
+    #[test]
+    fn default_dark_dividers_are_no_stronger_than_libadwaitas() {
+        let p = Settings::default().palette(Theme::Dark, Platform::Gtk, None);
+        let (settings, sidebar) = (rgb(p.settings), rgb(p.sidebar));
+        let edge = steps(p.lines.sidebar_border, sidebar, &[sidebar, settings]);
+        assert!(edge.iter().all(|&step| step < -0.018), "sidebar edge {edge:?}");
+        assert!(edge[1] > -0.040, "sidebar edge against the content {edge:?}");
+        let rows = drawn(p.lines.settings.card_shade, card(true, settings));
+        assert!(rows.iter().all(|&v| (v - 51. * 0.95).abs() < 0.5), "row divider {rows:?} is the background 5% darker");
+    }
+
+    #[test]
+    fn lines_keep_libadwaitas_contrast_on_every_base() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let dark = theme == Theme::Dark;
+            let adwaita = if dark { &ADWAITA_DARK } else { &ADWAITA_LIGHT };
+            let window = adwaita.window;
+            let reference = |ink, alpha, ground: Rgb, touches: &[Rgb]| {
+                let level = lightness(over(ink, alpha, ground));
+                touches.iter().map(|&s| (level - lightness(s)).abs()).fold(f64::INFINITY, f64::min)
+            };
+            let row = reference(SHADE, adwaita.card_shade, card(dark, window), &[card(dark, window)]);
+            let edge = reference(SHADE, adwaita.sidebar_border, adwaita.sidebar, &[adwaita.sidebar, window]);
+            let separator = reference(adwaita.text, BORDER_OPACITY * adwaita.text_alpha, window, &[window]);
+            let colored = HexColor(if dark { [28, 44, 60] } else { [192, 180, 156] });
+            for base in theme.base_choices().into_iter().chain([colored]) {
+                let p = Settings { dark_base: base, light_base: base, ..Settings::default() }
+                    .palette(theme, Platform::Gtk, None);
+                let (settings, sidebar) = (rgb(p.settings), rgb(p.sidebar));
+                let near = |line, ground: Rgb, touches: &[Rgb]| {
+                    steps(line, ground, touches).into_iter().map(f64::abs).fold(f64::INFINITY, f64::min)
+                };
+                for (set, ground) in [(p.lines.settings, p.settings), (p.lines.surround, p.bg)] {
+                    let (ground, card) = (rgb(ground), card(dark, rgb(ground)));
+                    if dark {
+                        let rows = drawn(set.card_shade, card);
+                        let darker = over(BLACK, DARK_ROW_DIVIDER, ground);
+                        assert!(rows.iter().zip(darker).all(|(a, b)| (a - b).abs() < 0.5), "{theme:?} {base} rows");
+                    } else {
+                        assert!((near(set.card_shade, card, &[card]) - row).abs() < 0.002, "{theme:?} {base} rows");
+                    }
+                    assert!((near(set.border, ground, &[ground]) - separator).abs() < 0.002, "{theme:?} {base} separator");
+                    assert!(steps(set.card_shade, card, &[card])[0] < 0., "{theme:?} {base} rows stay darker");
+                }
+                let sides = steps(p.lines.sidebar_border, sidebar, &[sidebar, settings]);
+                assert!(sides.iter().all(|&step| step < 0.), "{theme:?} {base} edge {sides:?}");
+                assert!((near(p.lines.sidebar_border, sidebar, &[sidebar, settings]) - edge).abs() < 0.002, "{theme:?} {base} edge {sides:?}");
+            }
+        }
     }
 }

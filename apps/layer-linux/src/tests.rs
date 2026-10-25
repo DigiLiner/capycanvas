@@ -12593,6 +12593,9 @@ fn assert_stroke_positions(w: &Workspace, texture: &gdk::Texture, points: &[Poin
 #[path = "workspace_switcher_tests.rs"]
 mod workspace_switcher_tests;
 
+#[path = "dialog_line_tests.rs"]
+mod dialog_line_tests;
+
 fn widgets(root: &gtk::Widget) -> impl Iterator<Item = gtk::Widget> {
     let mut pending = vec![root.clone()];
     std::iter::from_fn(move || {

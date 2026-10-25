@@ -2943,7 +2943,6 @@ impl Workspace {
             ("settings", palette.settings),
             ("sidebar", palette.sidebar),
             ("sidebar-backdrop", palette.sidebar_backdrop),
-            ("dialog", palette.dialog),
             ("thumb", palette.thumb),
             ("text", palette.text),
             ("accent", palette.accent),
@@ -2973,6 +2972,33 @@ impl Workspace {
         ] {
             use std::fmt::Write;
             write!(css, "--glass-{name}: {color};").unwrap();
+        }
+        let lines = palette.lines;
+        for (scope, set) in [
+            ("settings", lines.settings),
+            ("surround", lines.surround),
+            ("panel", lines.panel),
+        ] {
+            use std::fmt::Write;
+            for (role, color) in [
+                ("card-shade", set.card_shade),
+                ("card-ring", set.card_ring),
+                ("card-shadow", set.card_shadow),
+                ("card-far-shadow", set.card_far_shadow),
+                ("shade", set.shade),
+                ("highlight", set.highlight),
+            ] {
+                write!(css, "--line-{scope}-{role}: {color};").unwrap();
+            }
+            write!(css, "--line-{scope}-border-opacity: {:.2}%;", set.border.0[3] * 100.).unwrap();
+        }
+        for (role, color) in [
+            ("sidebar-border", lines.sidebar_border),
+            ("sidebar-shade", lines.sidebar_shade),
+            ("popover-border", lines.popover_border),
+        ] {
+            use std::fmt::Write;
+            write!(css, "--line-{role}: {color};").unwrap();
         }
         css.push('}');
         self.palette_css.load_from_string(&css);
