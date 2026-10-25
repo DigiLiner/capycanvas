@@ -4565,3 +4565,47 @@ Artwork and preview revisions remain unchanged, and presentation stops at idle.
 This desktop diagnostic uses 1.6-second workload phases and a generated source;
 it does not qualify sustained five-second gestures, the reference photo or
 reference tablet hardware. Evidence is under `artifacts/rotation-snap/gtk/`.
+
+## GTK navigation cache comparison
+
+Measured 2026-10-25 on the local NVIDIA RTX PRO 6000 Blackwell Max-Q hardware
+GPU, driver 615.71.09, GTK 4.22.5 and Mutter 50.5. The private Wayland display
+is 1600 × 1000 at 120 Hz, scale 1; both compositor and canvas use the same GPU.
+Baseline `e27a493fb` and fix checkpoint `d8ac988f0` use identical release fixtures.
+The later rebase preserves these navigation paths; source/build hashes remain
+in the evidence. Each row has three eight-second contacts after priming.
+
+These rates count changed-camera canvas frames joined to `wp_presentation`,
+divided by the entire contact duration. Rotation snapping is enabled, so
+intentional stationary holds remain in that denominator. Raw gaps across those
+holds are not moving-only gap qualification. The software pointer sends about
+200 events/s; GTK delivery/coalescing also limits the observed rate. These are
+interactive diagnostics on a virtual display, not reference-tier or physical
+input qualification. CPU medians below use the frames joined to moving
+presentations.
+
+| Workload | Baseline changed presents/s | Fixed changed presents/s | Change | Worker wall p50, ms, baseline → fix |
+| --- | --- | --- | --- | --- |
+| default-startup-rotate | 64.11 | 65.73 | +2.52% | 0.441 → 0.385 |
+| default-startup-zoom | 80.11 | 80.86 | +0.94% | 0.380 → 0.371 |
+| photo-closed-pan | 61.73 | 61.73 | -0.01% | 0.624 → 0.584 |
+| photo-closed-rotate | 65.60 | 66.36 | +1.15% | 0.603 → 0.556 |
+| photo-closed-zoom | 63.49 | 63.86 | +0.58% | 0.705 → 0.561 |
+| photo-open-pan | 59.86 | 59.86 | -0.01% | 0.589 → 0.559 |
+| photo-open-rotate | 66.11 | 64.99 | -1.69% | 0.500 → 0.589 |
+| photo-open-zoom | 62.86 | 62.86 | +0.01% | 0.569 → 0.533 |
+
+All three-contact rate ranges overlap; no substantial interactive speedup is
+established. The actual GTK startup document is 1333 × 1000 with its default
+Classic layout and visible Navigator, Coldpress Naturalwhite and relief 100.
+Photo rows use the exact 9504 × 6336 tier JPEG plus an empty paint layer at Fit,
+with Navigator explicitly closed/open. Camera, extent, display and material
+match within each pair. An initial default-zoom pair with a 14 px camera offset
+is excluded; the accepted retry matches exactly.
+
+Fourteen existing functional invocations pass across baseline/fix: navigation
+controls cover both themes, and GPU recovery, background-tab surfaces and
+pending-stroke Undo/Redo run in light and dark. Initial fixture compilation and
+private-socket setup failures remain in the logs. Raw joined frame IDs, pointer
+cadence, CPU/GPU distributions, variance, snap-hold reconstruction limits and
+provenance are under `artifacts/nav-rebase-qualification-20261025/gtk/`.
