@@ -19,7 +19,11 @@ export function createZoomReadout({ root, workspace, canvas, element, button, ic
   bindCopy(root, () => copy.zoom, "title");
   root.setAttribute("aria-haspopup", "menu"); root.setAttribute("aria-expanded", "false");
   const field = numberField(catalog.zoom, () => copy.zoom, zoom => dispatch({ type: "set_zoom", zoom }), true);
-  const rotation = numberField(catalog.rotation, () => copy.rotation, rotation => dispatch({ type: "set_rotation", rotation }), true);
+  let rotationKeys = false;
+  const rotation = numberField(catalog.rotation, () => copy.rotation, (rotation, operation) =>
+    dispatch({ type: operation?.type === "position" && !rotationKeys ? "set_rotation_from_slider" : "set_rotation", rotation }), true);
+  rotation.slider.addEventListener("keydown", () => { rotationKeys = true; });
+  for (const name of ["keyup", "blur", "pointerdown"]) rotation.slider.addEventListener(name, () => { rotationKeys = false; });
   rotation.classList.add("rotation-field");
   const popup = element("div", "zoom-menu");
   popup.popover = "auto";

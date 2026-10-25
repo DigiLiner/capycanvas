@@ -67,10 +67,12 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     registerCommit: (Any, ((Boolean) -> Boolean)?) -> Unit = { _, _ -> },
     onEditPhase: ((String) -> Unit)? = null,
     onReset: (() -> Unit)? = null,
+    onPositionChange: ((Float) -> Unit)? = null,
     onChange: (Float) -> Unit) {
     NumericSetting(label, value.toDouble(), control, modifier, enabled, description, settings, id, inline,
         toolbar, showUnits, showSlider, valueOnly, limits?.let { it.start.toDouble()..it.endInclusive.toDouble() },
-        onTyping, onText, registerCommit, onEditPhase = onEditPhase, onReset = onReset, onChange = { onChange(it.toFloat()) })
+        onTyping, onText, registerCommit, onEditPhase = onEditPhase, onReset = onReset,
+        onPositionChange = onPositionChange?.let { change -> { change(it.toFloat()) } }, onChange = { onChange(it.toFloat()) })
 }
 
 @Composable internal fun NumericSetting(label: String, value: Double, control: JSONObject,
@@ -81,6 +83,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     registerCommit: (Any, ((Boolean) -> Boolean)?) -> Unit = { _, _ -> },
     presentedText: String? = null, onEditPhase: ((String) -> Unit)? = null,
     onReset: (() -> Unit)? = null,
+    onPositionChange: ((Double) -> Unit)? = null,
     onChange: (Double) -> Unit) {
     val host = LocalCanvasHost.current
     val captions = remember(label, host.languageTag) { JSONObject(Native.numericLabels(label, host.languageTag)) }
@@ -91,6 +94,10 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     val ranged = control.getString("kind") == "slider"
     val dial = control.getString("kind") == "dial"
     val panel = (ranged || dial) && !settings && !inline && !toolbar && !valueOnly
+    var positionKeys by remember { mutableStateOf(false) }
+    val positionInput = if (onPositionChange == null) Modifier else Modifier.onPreviewKeyEvent { positionKeys = it.type == KeyEventType.KeyDown; false }
+        .onFocusChanged { if (!it.isFocused) positionKeys = false }
+        .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); positionKeys = false } }
     val displayKey = if (ranged) "edit" else "text"
     fun resolve(value: Double, op: JSONObject): JSONObject {
         val request = obj("control" to control, "value" to value, "operation" to op)
@@ -137,8 +144,13 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
             if (bounded != next.getDouble("value")) next = resolve(bounded, obj("type" to "format"))
         }
         val changed = next.getDouble("value") != shown.getDouble("value")
-        shown = next; error = null
-        if (changed) onChange(next.getDouble("value"))
+        error = null
+        if (op.optString("type") == "position" && onPositionChange != null && !positionKeys) {
+            if (changed) onPositionChange(next.getDouble("value"))
+        } else {
+            shown = next
+            if (changed) onChange(next.getDouble("value"))
+        }
         true
         } catch (e: Exception) { error = e; false }
     }
@@ -363,7 +375,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     if (inline) {
         Column(modifier) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (showSlider) EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) }, Modifier.weight(1f).then(contact).testTag(if (settings) "setting-slider-$id" else "number-slider-$label"),
+                if (showSlider) EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) }, Modifier.weight(1f).then(contact).then(positionInput).testTag(if (settings) "setting-slider-$id" else "number-slider-$label"),
                     enabled = enabled, label = label, height = height, inactiveTrackColor = colors.input, showThumb = false, activeTrackColor = colors.sliderFill)
                 valueControl()
             }

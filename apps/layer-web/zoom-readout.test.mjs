@@ -47,8 +47,9 @@ function harness() {
     label = typeof label === "function" ? label() : label;
     const field = element("div", "number-control");
     const entry = element("input", "number-entry"), valueButton = element("button", "number-value");
-    field.append(valueButton, entry);
-    Object.assign(field, { control, label, inline, entry, valueButton, values: [], onChange, update(value) { this.values.push(value); } });
+    const slider = element("input", "number-slider");
+    field.append(valueButton, entry, slider);
+    Object.assign(field, { control, label, inline, entry, valueButton, slider, values: [], onChange, update(value) { this.values.push(value); } });
     return field;
   };
   const renderMenu = (container, model, close) => {
@@ -213,4 +214,29 @@ test("rotation and navigation buttons follow the open menu and keep it open", ()
   h.readout.close();
   h.readout.refresh({ zoom: 4, rotation: 0 });
   assert.deepEqual(h.readout.rotation.values, [Math.PI / 2, Math.PI / 4]);
+});
+
+test("rotation slider input has its own shared action while exact edits keep theirs", () => {
+  const h = harness();
+  h.root.click();
+  const rotation = 88 * Math.PI / 180;
+  h.readout.rotation.onChange(rotation, { type: "position", position: (88 + 180) / 360 });
+  h.readout.rotation.onChange(89 * Math.PI / 180, { type: "expression", text: "89" });
+  h.readout.rotation.onChange(Math.PI / 2, { type: "step", steps: 1 });
+  assert.deepEqual(h.dispatched, [
+    { type: "set_rotation_from_slider", rotation },
+    { type: "set_rotation", rotation: 89 * Math.PI / 180 },
+    { type: "set_rotation", rotation: Math.PI / 2 },
+  ]);
+});
+
+
+test("rotation range keys stay exact and pointer input restores snapping", () => {
+  const h = harness(), rotation = Math.PI / 180;
+  h.readout.rotation.slider.dispatch("keydown", { key: "ArrowRight" });
+  h.readout.rotation.onChange(rotation, { type: "position", position: 181 / 360 });
+  assert.deepEqual(h.dispatched.at(-1), { type: "set_rotation", rotation });
+  h.readout.rotation.slider.dispatch("pointerdown");
+  h.readout.rotation.onChange(rotation, { type: "position", position: 181 / 360 });
+  assert.deepEqual(h.dispatched.at(-1), { type: "set_rotation_from_slider", rotation });
 });

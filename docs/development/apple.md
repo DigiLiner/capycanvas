@@ -451,7 +451,8 @@ hardware GPU, comparing exact document pixels through Undo and Redo.
 `native_rotation_snapping_menu_and_gestures_follow_both_platform_policies`
 checks the shared menu action and native gesture bridge without a GPU.
 `testZoomReadout` and `testZoomReadoutDark` check the native Snap rotation
-checkbox and unchanged view when toggling it on both Apple clients.
+checkbox, unchanged view when toggling it, slider snapping and exact typed
+angles and button steps on both Apple clients.
 `apple_fill_selection_survives_background_checkpoint_undo_redo_and_restart`
 checks recovery history and the first presentation. It reads viewport output
 as well as authored pixels, so a correct export cannot hide a blank canvas.

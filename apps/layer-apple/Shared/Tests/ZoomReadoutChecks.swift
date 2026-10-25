@@ -53,8 +53,44 @@ extension XCTestCase {
             XCTAssertTrue(snapping.waitForExistence(timeout: 10))
             XCTAssertEqual(snapping.isSelected, enabled)
         }
+        let rotationEntry = app.textFields["number-entry-rotation"]
+        let rotationTrack = app.descendants(matching: .any)["number-track-rotation"].firstMatch
+        for enabled in [true, false] {
+            if !enabled {
+                workspaceActivate(snapping)
+                XCTAssertTrue(menu.waitForNonExistence(timeout: 5))
+                workspaceActivate(status)
+            }
+            workspaceActivate(rotation)
+            XCTAssertTrue(rotationEntry.waitForExistence(timeout: 5))
+            rotationEntry.typeKey("a", modifierFlags: .command); rotationEntry.typeText("89\n")
+            expectation(for: NSPredicate { _, _ in readout().hasSuffix(" 89°") }, evaluatedWith: status)
+            waitForExpectations(timeout: 10)
+            XCTAssertTrue(rotationTrack.waitForExistence(timeout: 5))
+            rotationTrack.coordinate(withNormalizedOffset: CGVector(dx: 268.0 / 360, dy: 0.5)).clickOrTap()
+            expectation(for: NSPredicate { _, _ in
+                guard let angle = readout().split(separator: " ").last,
+                    let degrees = Double(angle.dropLast()) else { return false }
+                return enabled ? abs(degrees - 90) < 0.001 : degrees > 86 && degrees < 89.5
+            }, evaluatedWith: status)
+            waitForExpectations(timeout: 10)
+        }
+        workspaceActivate(snapping)
+        XCTAssertTrue(menu.waitForNonExistence(timeout: 5))
+        workspaceActivate(status)
+        workspaceActivate(app.buttons["command-reset_rotation"])
+        workspaceActivate(status)
+        let zeroText = rotation.value as? String
+        let zeroTrack = rotationTrack.value as? String
+        XCTAssertNotNil(zeroText)
+        XCTAssertNotNil(zeroTrack)
+        rotationTrack.coordinate(withNormalizedOffset: CGVector(dx: 182.0 / 360, dy: 0.5)).clickOrTap()
+        expectation(for: NSPredicate { _, _ in
+            readout().hasSuffix(" 0°") && (rotation.value as? String) == zeroText && (rotationTrack.value as? String) == zeroTrack
+        }, evaluatedWith: status)
+        waitForExpectations(timeout: 10)
         workspaceActivate(rotate)
-        expectation(for: NSPredicate { _, _ in !readout().hasSuffix(" 0°") }, evaluatedWith: status)
+        expectation(for: NSPredicate { _, _ in readout().hasSuffix(" 5°") }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(menu.exists, "Navigation buttons keep the menu open")
         let lock = app.buttons["menu-action-Lock rotation"]

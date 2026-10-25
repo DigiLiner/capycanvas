@@ -135,7 +135,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     try {
       const next = resolve({ control, value, operation });
       clearError();
-      const changed = next.value !== value; show(next); if (changed) onChange(next.value);
+      const changed = next.value !== value; show(next); if (changed) onChange(next.value, operation);
       return true;
     } catch (error) {
       const known = error && typeof error === "object" && error.numeric_error != null && typeof error.message === "string";

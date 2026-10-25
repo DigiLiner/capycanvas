@@ -6,6 +6,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.FocusInteraction
@@ -36,6 +38,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -247,8 +253,12 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     onValueChangeFinished: (() -> Unit)? = null) {
     val colors = LocalPalette.current
     val focus = LocalFocusManager.current
+    var keyInput by remember { mutableStateOf(false) }
+    val input = modifier.onPreviewKeyEvent { keyInput = it.type == KeyEventType.KeyDown; false }
+        .onFocusChanged { if (!it.isFocused) keyInput = false }
+        .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false); keyInput = false } }
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        Slider(value.coerceIn(range), { focus.clearFocus(); onChange(it) }, modifier.height(height).semantics { contentDescription = label },
+        Slider(value.coerceIn(range), { if (!keyInput) focus.clearFocus(); onChange(it) }, input.height(height).semantics { contentDescription = label },
             enabled = enabled, valueRange = range, onValueChangeFinished = onValueChangeFinished,
             thumb = {
                 // Material measures the slider from its thumb/track, so reserve

@@ -3187,8 +3187,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.sync_camera();
                 (CAMERA, true)
             }
-            UiAction::SetRotation { rotation } => {
+            UiAction::SetRotation { rotation } | UiAction::SetRotationFromSlider { rotation } => {
                 self.require_navigation_idle()?;
+                let rotation = if matches!(action, UiAction::SetRotationFromSlider { .. }) && self.state.settings.snap_rotation {
+                    layer_core::RotationSnap::snap(f64::from(rotation)) as f32
+                } else { rotation };
                 self.remember_view();
                 self.state.camera.rotate_to(rotation)?;
                 self.initial_fit = false;

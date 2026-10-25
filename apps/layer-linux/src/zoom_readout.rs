@@ -96,7 +96,9 @@ impl ZoomReadout {
             move |field| workspace.dispatch(UiAction::SetZoom { zoom: field.value() as f32 })
         ));
         self.rotation.connect_value_changed(glib::clone!(#[weak] workspace,
-            move |field| workspace.dispatch(UiAction::SetRotation { rotation: field.value() as f32 })));
+            move |field| workspace.dispatch(if field.slider_input() {
+                UiAction::SetRotationFromSlider { rotation: field.value() as f32 }
+            } else { UiAction::SetRotation { rotation: field.value() as f32 } })));
     }
 
     fn open(self: &Rc<Self>, workspace: &Rc<Workspace>) {

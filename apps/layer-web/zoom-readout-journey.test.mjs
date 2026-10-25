@@ -251,6 +251,45 @@ export async function checkZoomReadout({call,evaluate,settle,device=false}) {
         if(recovered.zoom_locked||recovered.rotation_locked)console.log(`${theme}: recovered view locks before gesture fixture: ${JSON.stringify(recovered)}`);
         if(recovered.zoom_locked)await send({type:'set_zoom_locked',locked:false});
         if(recovered.rotation_locked)await send({type:'set_rotation_locked',locked:false});
+        await send({type:'set_rotation',rotation:89*Math.PI/180});
+        const beforeToggle=await camera();
+        await send({type:'set_rotation_snapping',enabled:!enabled});
+        assert.deepEqual(await camera(),beforeToggle,`${theme}: changing snapping preserves an exact angle`);
+        await send({type:'set_rotation_snapping',enabled});
+        await openWith('mouse');
+        if(enabled) {
+          await send({type:'set_rotation',rotation:0});
+          await evaluate(`document.querySelector('${menu} .rotation-field input.number-slider').focus()`);
+          for(let i=0;i<10;i++)await key('ArrowRight','ArrowRight',39);
+          const keyboard=(await camera()).rotation*180/Math.PI;
+          assert.ok(keyboard>0.1&&keyboard<80,`${theme}: range arrow keys escape the cardinal exactly: ${keyboard}`);
+        }
+        await send({type:'set_rotation',rotation:75*Math.PI/180});
+        const sliderBounds=await rect(`${menu} .rotation-field input.number-slider`);
+        const sliderPoint=degrees=>({x:sliderBounds.x+8+(sliderBounds.width-16)*(degrees+180)/360,y:sliderBounds.y+sliderBounds.height/2});
+        await pointer('mousePressed',sliderPoint(75),'mouse');
+        for(const degrees of [80,85,88])await pointer('mouseMoved',sliderPoint(degrees),'mouse');
+        await pointer('mouseReleased',sliderPoint(88),'mouse');await settle();
+        const dragged=(await camera()).rotation*180/Math.PI;
+        assert.ok(Math.abs(dragged-(enabled?90:88))<(enabled?.001:1),`${theme}: native slider drag follows snapping ${enabled}: ${dragged}`);
+        for(const degrees of [88,92,-92,-88,-2,2,-178,178]) {
+          await evaluate(`(()=>{const slider=document.querySelector('${menu} .rotation-field input.number-slider');slider.value=0.5 + ${degrees} / 360;slider.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+          await settle();
+          const expected=(enabled?Math.round(degrees/90)*90:degrees)*Math.PI/180;
+          assert.ok(Math.abs((await camera()).rotation-expected)<.00001,`${theme}: slider ${degrees}° with snapping ${enabled}`);
+          const field=await evaluate(`(()=>{const root=document.querySelector('${menu} .rotation-field');return{angle:root.querySelector('.number-value').textContent,fill:Number(root.querySelector('input.number-slider').value)}})()`);
+          assert.equal(field.angle.replace(/\s/g,''),`${Math.round(expected*180/Math.PI)}°`,`${theme}: field follows published rotation`);
+          assert.ok(Math.abs(field.fill-(expected/Math.PI+1)/2)<.00001,`${theme}: thumb follows published rotation`);
+        }
+        await tap(await middle(`${menu} .rotation-field .number-value`),'mouse');
+        await call('Input.insertText',{text:'89'});await key('Enter','Enter',13);
+        await wait('Math.abs(layerApp.state().camera.rotation-89*Math.PI/180)<.00001');
+        const step=await evaluate('layerApp.state().settings.keymap?.id==="krita"?15:5');
+        await tap(await middle('#zoom-rotate_right'),'mouse');
+        await wait(`Math.abs(layerApp.state().camera.rotation-${89+step}*Math.PI/180)<.00001`);
+        await tap(await middle('#zoom-rotate_left'),'mouse');
+        await wait('Math.abs(layerApp.state().camera.rotation-89*Math.PI/180)<.00001');
+        await key('Escape','Escape',27);
         await send({type:'set_rotation',rotation:0});
         const point=await middle('#canvas');
         const gesture=async(type,rotation,scale=1,offset=0)=>{await evaluate(`(()=>{const event=new Event(${JSON.stringify(type)},{bubbles:true,cancelable:true});Object.assign(event,{clientX:${point.x+offset},clientY:${point.y+offset/2},scale:${scale},rotation:${rotation}});layerApp.canvas.dispatchEvent(event);})()`);await settle();};

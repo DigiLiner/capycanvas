@@ -1612,6 +1612,9 @@ pub enum UiAction {
     SetRotation {
         rotation: f32,
     },
+    SetRotationFromSlider {
+        rotation: f32,
+    },
     SetZoomLocked {
         locked: bool,
     },

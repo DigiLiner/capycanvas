@@ -244,8 +244,16 @@ impl Camera {
         if !rotation.is_finite() {
             return Err("Invalid rotation".into());
         }
+        let rotation = if rotation.abs() <= std::f32::consts::PI { rotation } else {
+            let turn = rotation.rem_euclid(std::f32::consts::TAU);
+            if turn > std::f32::consts::PI { turn - std::f32::consts::TAU } else { turn }
+        };
         let center = self.work_area_center();
-        self.transform(center, center, 1.0, rotation.rem_euclid(std::f32::consts::TAU) - self.rotation)
+        let delta = rotation - self.rotation;
+        let delta = if delta.abs() > std::f32::consts::PI { delta - delta.signum() * std::f32::consts::TAU } else { delta };
+        self.transform(center, center, 1.0, delta)?;
+        self.rotation = rotation;
+        Ok(())
     }
 
     pub fn view(&self) -> ViewState {

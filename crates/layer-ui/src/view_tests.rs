@@ -183,7 +183,7 @@ fn rotation_field_preserves_the_center_and_refuses_invalid_or_busy_edits() {
         assert_eq!(s.state.camera, camera);
     }
     s.pen(event(&s, 1, PenPhase::Down, 1.));
-    for action in [UiAction::SetRotation { rotation: 0.0 }, UiAction::SetZoomLocked { locked: true }, UiAction::SetRotationLocked { locked: true }, UiAction::SetRotationSnapping { enabled: false }] {
+    for action in [UiAction::SetRotation { rotation: 0.0 }, UiAction::SetRotationFromSlider { rotation: 0.0 }, UiAction::SetZoomLocked { locked: true }, UiAction::SetRotationLocked { locked: true }, UiAction::SetRotationSnapping { enabled: false }] {
         assert!(s.dispatch(action).is_err());
         assert_eq!(s.state.camera, camera);
     }

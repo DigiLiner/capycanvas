@@ -17,11 +17,15 @@ impl RotationSnap {
         if delta == 0. { return Some(rotation); }
         let input = if self.output == Some(rotation) { self.input } else { unsnap(f64::from(rotation)) };
         self.input = wrap(input + wrap(f64::from(delta)));
-        let target = (self.input / FRAC_PI_2).round() * FRAC_PI_2;
-        let offset = self.input - target;
-        let rotation = wrap(target + offset.signum() * response(offset.abs())) as f32;
+        let rotation = wrap(Self::snap(self.input)) as f32;
         self.output = Some(rotation);
         Some(rotation)
+    }
+
+    pub fn snap(rotation: f64) -> f64 {
+        let target = (rotation / FRAC_PI_2).round() * FRAC_PI_2;
+        let offset = rotation - target;
+        target + offset.signum() * response(offset.abs())
     }
 }
 
@@ -50,6 +54,29 @@ fn unsnap(rotation: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absolute_angles_share_the_gesture_response_without_wrapping_slider_endpoints() {
+        for quarter in -2..=2 {
+            let cardinal = quarter as f64 * FRAC_PI_2;
+            assert_eq!(RotationSnap::snap(cardinal), cardinal);
+            for direction in [-1., 1.] {
+                assert_eq!(RotationSnap::snap(cardinal + direction * 2_f64.to_radians()), cardinal);
+                let free = cardinal + direction * 12_f64.to_radians();
+                assert!((RotationSnap::snap(free) - free).abs() < 1e-12);
+                let mut snap = RotationSnap::default();
+                for step in 0..=120 {
+                    let distance = direction * step as f64 * 0.1_f64.to_radians();
+                    let absolute = RotationSnap::snap(cardinal + distance);
+                    let gesture = snap.rotate(wrap(cardinal) as f32, distance as f32).unwrap();
+                    assert!(wrap(f64::from(gesture) - absolute).abs() < 1e-6);
+                    snap.reset();
+                }
+            }
+        }
+        assert_eq!(RotationSnap::snap(PI), PI);
+        assert_eq!(RotationSnap::snap(-PI), -PI);
+    }
 
     #[test]
     fn small_turns_hold_every_cardinal_and_eventually_escape() {

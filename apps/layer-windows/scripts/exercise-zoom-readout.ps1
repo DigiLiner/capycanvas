@@ -270,10 +270,66 @@ function Check-RotationSnapping{
  [CapyRowPointer]::Key([uint32]$review.Id,0x0D)
  Wait-Until {Near (Camera).rotation (2*[Math]::PI/180)} 'Explicit rotation was snapped to a cardinal'
  Close-Menu
- Toggle-RotationSnapping $false
+ foreach($enabled in @($true,$false)){
+  if(!$enabled){Toggle-RotationSnapping $false}
+  Open-Readout $Device
+  $field=Item 'rotation-field';$field.SetFocus()
+  $field.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('89')
+  [CapyRowPointer]::Key([uint32]$review.Id,0x0D)
+  Wait-Until {Near (Camera).rotation (89*[Math]::PI/180)} 'Typed 89 degrees did not remain exact'
+  $slider=(Item 'rotation-field-slider').Current.BoundingRectangle
+  [CapyRowPointer]::Down($Device,[int]($slider.X+$slider.Width*(268.0/360)),[int]($slider.Y+$slider.Height/2))
+  [CapyRowPointer]::Up()
+  Wait-Until {
+   $degrees=(Camera).rotation*180/[Math]::PI
+   if($enabled){Near $degrees 90}else{$degrees -gt 86 -and $degrees -lt 89.5}
+  } "Rotation slider did not follow Snap rotation=$enabled"
+  $checks["rotation_slider_snap_$enabled"]=(Camera).rotation
+  Close-Menu
+ }
  Toggle-RotationSnapping $true
  Navigation-Command 'reset_rotation'
  Wait-Until {Near (Camera).rotation 0} 'Snap rotation preparation did not reset the view'
+ Open-Readout $Device
+ $zeroText=(Item 'rotation-field').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+ $slider=(Item 'rotation-field-slider').Current.BoundingRectangle
+ [CapyRowPointer]::Down($Device,[int]($slider.X+$slider.Width*(182.0/360)),[int]($slider.Y+$slider.Height/2))
+ [CapyRowPointer]::Up()
+ Wait-Until {
+  (Near (Camera).rotation 0) -and (Item 'rotation-field').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $zeroText -and
+   (Near (Item 'rotation-field-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value .5)
+ } 'Rotation slider hold did not retain the zero field and centered slider'
+ Close-Menu
+ $keyboardAngle=$null
+ foreach($enabled in @($false,$true)){
+  Toggle-RotationSnapping $enabled
+  Navigation-Command 'reset_rotation';Wait-Until {Near (Camera).rotation 0} 'Keyboard rotation preparation did not reset'
+  Open-Readout $Device
+  (Item 'rotation-field-slider').SetFocus()
+  foreach($step in 1..10){[CapyRowPointer]::Key([uint32]$review.Id,0x27);Start-Sleep -Milliseconds 40}
+  if(!$enabled){
+   Wait-Until {[Math]::Abs((Camera).rotation) -gt .1*[Math]::PI/180} 'Slider keyboard input did not move the unsnapped view'
+   $keyboardAngle=(Camera).rotation
+  }else{
+   Wait-Until {[Math]::Abs([Math]::Atan2([Math]::Sin((Camera).rotation-$keyboardAngle),[Math]::Cos((Camera).rotation-$keyboardAngle))) -lt .001} 'Snap rotation changed the native slider keyboard steps'
+  }
+  if(!(Item 'rotation-field-slider').Current.HasKeyboardFocus){throw 'Rotation slider lost keyboard focus after native keys'}
+  Close-Menu
+ }
+ $checks.rotation_slider_keyboard=$keyboardAngle
+ Open-Readout $Device
+ foreach($direction in @(1,-1)){
+  $position=if($direction -gt 0){358.0/360}else{2.0/360}
+  (Item 'rotation-field-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).SetValue($position)
+  Wait-Until {
+   $field=(Item 'rotation-field').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+   $edge=(Item 'rotation-field-slider').GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value
+   (Near (Camera).rotation ($direction*[Math]::PI)) -and (Near ([double]($field -replace '[°\s]','' -replace '−','-')) ($direction*180)) -and (Near $edge $(if($direction -gt 0){1}else{0}))
+  } 'Signed rotation endpoint did not retain its field and slider edge'
+ }
+ Close-Menu
+ $checks.rotation_slider_endpoints='signed camera, field and track edges preserved'
+ Navigation-Command 'reset_rotation';Wait-Until {Near (Camera).rotation 0} 'Keyboard rotation did not reset'
  Navigation-Command 'rotate_view';Wait-Until {Navigation-Selected 'rotate_view'} 'Rotate View did not select for snapping'
  $artwork=Navigation-PaintState
  foreach($enabled in @($true,$false)){

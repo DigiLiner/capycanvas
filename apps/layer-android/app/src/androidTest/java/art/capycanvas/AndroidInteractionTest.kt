@@ -3079,7 +3079,16 @@ class AndroidInteractionTest {
     @Test fun zoomReadoutMenuAndFieldAcrossDevices() {
         fun choose(text: String) {
             revealInMenu(hasLabel(text), "zoom-menu")
-            tap(zoomItem(text)!!.center)
+            var row = zoomItem(text)!!
+            var since = SystemClock.uptimeMillis()
+            val until = since + 5_000
+            while (SystemClock.uptimeMillis() - since < 300) {
+                SystemClock.sleep(40)
+                val next = zoomItem(text)!!
+                if (next != row) { row = next; since = SystemClock.uptimeMillis() }
+                check(SystemClock.uptimeMillis() < until) { "$text finishes moving before activation" }
+            }
+            tap(row.center)
         }
         fun invoke(command: String) = action(obj("type" to "invoke", "command" to command))
         fun camera() = state().getJSONObject("camera")
@@ -3143,7 +3152,8 @@ class AndroidInteractionTest {
                     waitFor("$name $id works while locked", 5_000) { camera().getLong("revision") > before.getLong("revision") }
                     val after = camera()
                     if (id.startsWith("zoom_")) assertNotEquals(before.getDouble("zoom"), after.getDouble("zoom"))
-                    else if (id.startsWith("rotate_")) assertNotEquals(before.getDouble("rotation"), after.getDouble("rotation"))
+                    else if (id.startsWith("rotate_")) assertEquals("$name rotation button keeps its configured step",
+                        before.getDouble("rotation") + Math.toRadians((if (state().getJSONObject("settings").optJSONObject("keymap")?.optString("id") == "krita") 15.0 else 5.0) * if (id == "rotate_right") 1.0 else -1.0), after.getDouble("rotation"), .00001)
                     else assertNotEquals(before.getJSONArray("flipped").toString(), after.getJSONArray("flipped").toString())
                     assertTrue("$name navigation buttons keep the menu open", zoomMenuShown())
                 }
@@ -3154,14 +3164,112 @@ class AndroidInteractionTest {
                     onMain { typing = zoomMenuRoot()?.let { it.view.hasWindowFocus() && it.find(hasTag("number-Rotation")) != null } == true }
                     typing
                 }
-                instrumentation.sendStringSync("45")
+                instrumentation.sendStringSync("89")
                 instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
-                waitFor("$name typed rotation works while locked", 5_000) { kotlin.math.abs(camera().getDouble("rotation") - Math.PI / 4) < .00001 }
+                waitFor("$name typed rotation remains exact while locked", 5_000) { kotlin.math.abs(camera().getDouble("rotation") - Math.toRadians(89.0)) < .00001 }
                 revealInMenu(hasTag("rotation-field"), "zoom-menu")
-                val slider = settledBounds("rotation-field")
-                val value = bounds("number-value-Rotation")
-                tap(Offset(slider.left + (value.left - slider.left) * .3f, slider.center.y))
-                waitFor("$name rotation slider works while locked", 5_000) { kotlin.math.abs(camera().getDouble("rotation") - Math.PI / 4) > .01 }
+                choose("Snap rotation")
+                waitFor("$name Snap rotation preference applies", 5_000) { state().getJSONObject("settings").getBoolean("snap_rotation") == false }
+                open(name)
+                var target = 268f / 360f
+                repeat(4) { attempt ->
+                    revealInMenu(hasTag("number-slider-Rotation"), "zoom-menu")
+                    val slider = settledBounds("number-slider-Rotation")
+                    drag(Offset(slider.left + slider.width * .6f, slider.center.y), Offset(slider.left + slider.width * target, slider.center.y), 20)
+                    settle()
+                    val degrees = Math.toDegrees(camera().getDouble("rotation"))
+                    if (attempt < 3 && kotlin.math.abs(degrees - 88.0) > .5) target += ((88.0 - degrees) / 360).toFloat()
+                }
+                val freeRotation = camera().getDouble("rotation")
+                assertTrue("$name disabled snapping preserves a noncardinal slider angle inside the hold", (Math.toDegrees(freeRotation) - 90.0).let { kotlin.math.abs(it) > .1 && kotlin.math.abs(it) < 3.0001 })
+                choose("Snap rotation")
+                waitFor("$name Snap rotation preference applies", 5_000) { state().getJSONObject("settings").getBoolean("snap_rotation") == true }
+                open(name)
+                revealInMenu(hasTag("number-slider-Rotation"), "zoom-menu")
+                val snapSlider = settledBounds("number-slider-Rotation")
+                drag(Offset(snapSlider.left + snapSlider.width * .6f, snapSlider.center.y), Offset(snapSlider.left + snapSlider.width * target, snapSlider.center.y), 20)
+                waitFor("$name same native slider position snaps to the quarter turn", 5_000) { kotlin.math.abs(camera().getDouble("rotation") - Math.PI / 2) < .00001 }
+                choose("Snap rotation")
+                waitFor("$name Snap rotation preference applies", 5_000) { state().getJSONObject("settings").getBoolean("snap_rotation") == false }
+                open(name)
+                var zeroTarget = 182f / 360f
+                repeat(4) { attempt ->
+                    action(obj("type" to "set_rotation", "rotation" to 0))
+                    revealInMenu(hasTag("number-slider-Rotation"), "zoom-menu")
+                    val slider = settledBounds("number-slider-Rotation")
+                    drag(Offset(slider.left + slider.width * .45f, slider.center.y), Offset(slider.left + slider.width * zeroTarget, slider.center.y), 20)
+                    settle()
+                    val degrees = Math.toDegrees(camera().getDouble("rotation"))
+                    if (attempt < 3 && kotlin.math.abs(degrees - 2.0) > .5) zeroTarget += ((2.0 - degrees) / 360).toFloat()
+                }
+                assertTrue("$name disabled snapping preserves a nonzero slider angle inside the hold", Math.toDegrees(camera().getDouble("rotation")).let { it > .1 && it < 3.0001 })
+                choose("Snap rotation")
+                waitFor("$name Snap rotation preference applies", 5_000) { state().getJSONObject("settings").getBoolean("snap_rotation") == true }
+                open(name)
+                action(obj("type" to "set_rotation", "rotation" to 0))
+                var zeroText: String? = null
+                fun rotationText(): String? = zoomMenuRoot()?.find(hasTag("number-value-Rotation"))
+                    ?.find { it.config.getOrNull(SemanticsProperties.Text) != null }?.config?.getOrNull(SemanticsProperties.Text)?.toString()
+                onMain { zeroText = rotationText(); assertNotNull(zeroText) }
+                revealInMenu(hasTag("number-slider-Rotation"), "zoom-menu")
+                val heldSlider = settledBounds("number-slider-Rotation")
+                drag(Offset(heldSlider.left + heldSlider.width * .45f, heldSlider.center.y), Offset(heldSlider.left + heldSlider.width * zeroTarget, heldSlider.center.y), 20)
+                waitFor("$name slider hold keeps the displayed rotation at zero: camera=${camera()}", 5_000) {
+                    var unchanged = false
+                    onMain {
+                        val slider = zoomMenuRoot()?.find(hasTag("number-slider-Rotation"))
+                        unchanged = rotationText() == zeroText && slider?.config?.getOrNull(SemanticsProperties.ProgressBarRangeInfo)?.current == .5f
+                    }
+                    kotlin.math.abs(camera().getDouble("rotation")) < .00001 && unchanged
+                }
+                if (device == MotionEvent.TOOL_TYPE_MOUSE) {
+                    tap(bounds("number-value-Rotation").center)
+                    waitFor("$name rotation entry owns native keyboard focus", 5_000) {
+                        var focused = false
+                        onMain { focused = zoomMenuRoot()?.let { it.view.hasWindowFocus() && it.find(hasTag("number-Rotation")) != null } == true }
+                        focused
+                    }
+                    instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
+                    waitFor("$name rotation entry finishes", 5_000) { exists("number-value-Rotation") }
+                    onMain {
+                        val slider = zoomMenuRoot()?.find(hasTag("number-slider-Rotation"))
+                        assertTrue("$name slider takes keyboard focus", slider?.config?.getOrNull(SemanticsActions.RequestFocus)?.action?.invoke() == true)
+                    }
+                    repeat(4) { step ->
+                        val before = camera().getDouble("rotation")
+                        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_RIGHT)
+                        settle()
+                        println("Rotation keyboard $theme $name step=$step before=$before after=${camera()}")
+                        waitFor("$name keyboard arrow $step advances rotation from $before", 5_000) {
+                            val delta = camera().getDouble("rotation") - before
+                            kotlin.math.abs(kotlin.math.atan2(kotlin.math.sin(delta), kotlin.math.cos(delta))) > .00001
+                        }
+                        onMain {
+                            val slider = zoomMenuRoot()?.find(hasTag("number-slider-Rotation"))
+                            assertEquals("$name keyboard arrow retains slider focus", true, slider?.config?.getOrNull(SemanticsProperties.Focused))
+                        assertTrue("$name keyboard arrow retains native window focus", zoomMenuRoot()?.view?.hasWindowFocus() == true)
+                        }
+                    }
+                    assertTrue("$name keyboard arrows advance inside the rotation hold", camera().getDouble("rotation") > Math.toRadians(.1))
+                    for (direction in listOf(1, -1)) {
+                        val position = if (direction > 0) 358f / 360f else 2f / 360f
+                        onMain {
+                            val slider = zoomMenuRoot()?.find(hasTag("number-slider-Rotation"))
+                            assertTrue("$name endpoint accepts native accessibility input", slider?.config?.getOrNull(SemanticsActions.SetProgress)?.action?.invoke(position) == true)
+                        }
+                        val expected = JSONObject(Native.number(obj("control" to host.catalog.getJSONObject("rotation"),
+                            "value" to direction * Math.PI, "operation" to obj("type" to "format")).toString(), host.languageTag)).getString("text")
+                        waitFor("$name signed endpoint retains the matching field and slider edge", 5_000) {
+                            var projected = false
+                            onMain {
+                                val slider = zoomMenuRoot()?.find(hasTag("number-slider-Rotation"))
+                                projected = rotationText()?.contains(expected) == true &&
+                                    slider?.config?.getOrNull(SemanticsProperties.ProgressBarRangeInfo)?.current == if (direction > 0) 1f else 0f
+                            }
+                            kotlin.math.abs(camera().getDouble("rotation") - direction * Math.PI) < .00001 && projected
+                        }
+                    }
+                }
                 choose("Reset rotation")
                 waitFor("$name reset rotation applies", 5_000) { kotlin.math.abs(camera().getDouble("rotation")) < .00001 && !zoomMenuShown() }
                 open(name); choose("Lock rotation")
@@ -3686,7 +3794,7 @@ class AndroidInteractionTest {
     }
     private fun scrollMenuTo(text: String): Boolean = scrollMenuTo(hasLabel(text), "workspace-menu")
     private fun scrollMenuTo(match: (SemanticsNode) -> Boolean, menuTag: String): Boolean =
-        semanticsRoots().filter { it !== owner && it.find(hasTag(menuTag)) != null }
+        semanticsRoots().filter { it.find(hasTag(menuTag)) != null }
             .firstNotNullOfOrNull { root -> root.find(match)?.let { root to it } }?.let { (root, item) ->
                 generateSequence(item.parent) { it.parent }.firstOrNull { it.config.getOrNull(SemanticsActions.ScrollBy) != null }?.let { list ->
                     val margin = item.size.height.toFloat()

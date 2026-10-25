@@ -239,7 +239,10 @@ private struct CameraStatus: View {
                             rootFocusesSelection: false, capturesKeys: false) { menu = nil }.fixedSize(horizontal: false, vertical: true)
                         Divider()
                         NumberControl(store: store, label: copy["rotation"].string, value: camera.value["rotation"].number,
-                            control: store.catalog["rotation"], identifier: "rotation", inline: true) { value, completion in
+                            control: store.catalog["rotation"], identifier: "rotation", inline: true,
+                            positionChange: { value, completion in
+                                store.edit(["type": "set_rotation_from_slider", "rotation": value], completion: completion)
+                            }) { value, completion in
                             store.edit(["type": "set_rotation", "rotation": value], completion: completion)
                         }.padding(.horizontal, 10)
                         Divider()

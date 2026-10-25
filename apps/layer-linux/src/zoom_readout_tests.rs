@@ -80,6 +80,67 @@ fn native_zoom_readout_menu_and_field() {
             let model = w.gpu.borrow().as_ref().unwrap().session.zoom_menu();
             assert_eq!(model.menu.sections[model.rotation_section][1].selected, Some(enabled));
         }
+        let slider = descendants::<gtk::Scale>(w.view_info.rotation.upcast_ref()).into_iter().find(|s| s.is_mapped()).unwrap();
+        let mut drag_degrees = 88.;
+        for enabled in [false, true] {
+            w.dispatch(UiAction::SetRotation { rotation: 89_f32.to_radians() });
+            let before = state(&w).camera;
+            w.dispatch(UiAction::SetRotationSnapping { enabled });
+            assert_eq!(state(&w).camera, before, "changing snapping preserves an exact angle");
+            if enabled {
+                w.dispatch(UiAction::SetRotation { rotation: 0. });
+                assert!(slider.grab_focus());
+                for _ in 0..10 { input.key(0xff53); }
+                let angle = state(&w).camera.rotation.to_degrees();
+                assert!(angle > 0.1 && angle < 80., "range arrow keys escape the cardinal exactly: {angle}");
+                assert!((w.view_info.rotation.value() as f32 - state(&w).camera.rotation).abs() < 1e-5);
+            }
+            let mut observed = 0.;
+            for _ in 0..8 {
+                w.dispatch(UiAction::SetRotation { rotation: 0. });
+                pump(100);
+                let (start, end) = slider.slider_range();
+                let point = |degrees: f64| screen_point(slider.upcast_ref(), &w.window,
+                    [((start + end) as f64 / 2. / slider.width() as f64 + degrees / 360.) as f32, 0.5]);
+                input.perform(serde_json::json!([
+                    {"point":point(0.),"down":true},{"wait_ms":100},{"point":point(drag_degrees / 3.)},{"wait_ms":100},
+                    {"point":point(drag_degrees * 2. / 3.)},{"wait_ms":100},{"point":point(drag_degrees)},{"wait_ms":100},{"down":false}
+                ]));
+                observed = state(&w).camera.rotation.to_degrees();
+                if enabled || ((observed - 90.).abs() < 3.001 && (observed - 90.).abs() > 0.1) { break; }
+                drag_degrees += 88. - f64::from(observed);
+            }
+            if enabled {
+                assert!((observed - 90.).abs() < 0.001, "the same native drag holds at the cardinal: {observed}");
+            } else {
+                assert!((observed - 90.).abs() < 3.001 && (observed - 90.).abs() > 0.1,
+                    "the native drag reaches an unsnapped angle near the cardinal: {observed}");
+            }
+            for degrees in [88_f64, 92., -92., -88., -2., 2., -178., 178.] {
+                slider.set_value((degrees + 180.) / 360.);
+                let expected = if enabled { (degrees / 90.).round() * 90. } else { degrees };
+                until(|| (state(&w).camera.rotation - expected.to_radians() as f32).abs() < 1e-5,
+                    "the slider holds cardinals only when snapping is enabled");
+                assert!((w.view_info.rotation.value() - expected.to_radians()).abs() < 1e-5,
+                    "the numeric field follows the published rotation");
+                assert!((slider.value() - (expected + 180.) / 360.).abs() < 1e-5,
+                    "the slider thumb follows the published rotation");
+            }
+            let value = descendants::<gtk::Button>(w.view_info.rotation.upcast_ref()).into_iter()
+                .find(|b| b.is_mapped() && b.has_css_class("number-value")).unwrap();
+            input.click(screen_point(value.upcast_ref(), &w.window, [0.5, 0.5]));
+            let entry = descendants::<gtk::Entry>(w.view_info.rotation.upcast_ref()).into_iter().next().unwrap();
+            until(|| entry.is_mapped(), "the rotation editor opens");
+            for key in ['8' as u32, '9' as u32, 0xff0d] { input.key(key); }
+            until(|| (state(&w).camera.rotation - 89_f32.to_radians()).abs() < 1e-5, "typed angles stay exact with either snapping setting");
+            let step = if state(&w).settings.keymap.as_ref().is_some_and(|p| p.id == "krita") { 15. } else { 5. };
+            for (name, degrees) in [("zoom-RotateRight", 89_f32 + step), ("zoom-RotateLeft", 89.)] {
+                let button = descendants::<gtk::Button>(w.view_info.menu.upcast_ref()).into_iter()
+                    .find(|b| b.widget_name() == name && b.is_mapped()).unwrap();
+                input.click(screen_point(button.upcast_ref(), &w.window, [0.5, 0.5]));
+                until(|| (state(&w).camera.rotation - degrees.to_radians()).abs() < 1e-5, "fixed rotation steps stay exact");
+            }
+        }
         choose(&w, &mut input, "Lock rotation");
         until(|| state(&w).camera.rotation_locked && !w.view_info.menu.is_visible(), "rotation lock applies");
         open(&w, &mut input);

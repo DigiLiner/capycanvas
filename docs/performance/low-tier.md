@@ -151,7 +151,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Rotation snapping: two fingers and Rotate View | 60 | Unmeasured on the reference tablet | [Shared snapping behavior](../ui/shared-ui.md#drawing-and-navigation) |
 | Smooth Zoom tool, left/right | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.33–43.82 presented fps, p99 99.95–99.96 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
 | Smooth Zoom tool, up/down | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.43–43.56 presented fps, p99 99.96–116.21 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
-| Footer zoom and rotation sliders | 60 | Unmeasured on the reference tablet | |
+| Footer zoom and rotation sliders | 60 | Unmeasured on the reference tablet with slider snapping enabled | [Shared slider behavior](../ui/shared-ui.md#drawing-and-navigation) |
 | Navigator drag | 60 | | |
 | Pan with Navigator open, checkerboard shader | 60 | Diagnostic: 59.71–59.91 renderer submissions/s; submission interval p99 18.81–19.55 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 12 MP tier photo, thermal 0; release APK `e38cf984`, base `5cee14be0` plus shared white/gray checker colors; `artifacts/checker-android/low/` |
 | Brush-cursor hover | 60 | | |

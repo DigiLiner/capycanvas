@@ -26,6 +26,7 @@ struct ZoomReadout:std::enable_shared_from_this<ZoomReadout>{
     void separator(){Border line;line.Height(1);line.Background(data->tint(L"text",36));body.Children().Append(line);}
     void field(LocalizedCopy const& name,wchar_t const* spec,hstring const& id,double ZoomReadout::* value,std::function<J(double)> action){
         auto weak=weak_from_this();NumberPresentation presentation;presentation.title=name.current;
+        if(std::wstring_view(spec)==L"rotation")presentation.position=[weak](double rotation){if(auto self=weak.lock())self->data->dispatch(O({{L"type",S(L"set_rotation_from_slider")},{L"rotation",N(rotation)}}));};
         auto control=number(data,name,object(data->catalog,spec),[weak,value]{auto self=weak.lock();return self?(*self).*value:0.;},
             [weak,action](double next){if(auto self=weak.lock())self->data->dispatch(action(next));},fields,nullptr,false,id,true,presentation);
         if(auto entry=numberEntry(control))entry.AddHandler(UIElement::KeyDownEvent(),box_value(KeyEventHandler([weak](auto&&,KeyRoutedEventArgs const& e){

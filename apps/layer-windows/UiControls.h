@@ -535,6 +535,7 @@ struct NumberPresentation {
     bool preference=false;hstring description;std::function<hstring()> identity;std::function<void()> reset;
     std::vector<hstring> widthSamples;std::function<J(J const&,double,J const&)> resolve;std::function<hstring()> title,text,descriptionText;
     std::function<void(hstring const&,double)> phase;
+    std::function<void(double)> position;
     bool compact=true;
 };
 StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& title,J const& spec,

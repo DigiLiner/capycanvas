@@ -267,6 +267,10 @@ footer menu's Snap rotation checkbox, settings restoration, live menu refresh,
 and native two-finger and Rotate View contacts in both themes. It covers the
 3° hold, escape beyond the 10° attraction range, and exact explicit angles.
 
+`AndroidInteractionTest#zoomReadoutMenuAndFieldAcrossDevices` checks rotation
+slider snapping with mouse, touch and pen in both themes, including the displayed
+angle during a stationary hold, exact typed angles, keyboard steps and configured button steps.
+
 `AndroidHostTest#threeFingerDiagonalScrubClearsOnlyTheSelectedLayer` sends native
 three-finger diagonal motion in both themes. It checks clearing before release,
 exact pixel restoration with one Undo, an unchanged lower layer and camera,

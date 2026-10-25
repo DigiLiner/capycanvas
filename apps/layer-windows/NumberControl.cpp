@@ -13,7 +13,7 @@ namespace Peers=Microsoft::UI::Xaml::Automation::Peers;
 namespace Provider=Microsoft::UI::Xaml::Automation::Provider;
 struct NumericCaption {hstring title,language,errorLanguage;J labels,errorReason;};
 struct NumberState {
-    double value=0;bool editing=false,dragging=false,formatting=false,gesture=false;
+    double value=0;bool editing=false,dragging=false,formatting=false,gesture=false,sliderKeyboard=false;
     bool scrubbing=false,turning=false,fine=false;std::optional<uint32_t> pointer,sliderPointer;double origin=0,originY=0;
     double scrubOrigin=0,scrubBase=0,scrubPixels=0,dialShown=0,sliderOrigin=0;
     uint64_t contactGeneration=0;
@@ -84,6 +84,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     if(presentation.identity)local->identity=presentation.identity();
     local->resolve=presentation.resolve?presentation.resolve:decltype(local->resolve)([data](J const& spec,double value,J const& operation){return numeric(data->localization.get(),spec,value,operation);});
     auto phase=presentation.phase;auto presented=presentation.text;
+    auto setPosition=presentation.position;
     auto finish=[local,phase](hstring const& name){if(local->gesture){local->gesture=false;phase(name,local->value);}};
     auto showText=[local,spec,presented](wchar_t const* field){return presented?presented():str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),field);};
     bool preference=presentation.preference,compact=presentation.compact&&!preference;
@@ -200,6 +201,9 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         header.Children().Append(dialView);
     }
     Slider slider;
+    slider.PreviewKeyDown([local](auto&&,auto&&){local->sliderKeyboard=true;});
+    slider.KeyUp([local](auto&&,auto&&){local->sliderKeyboard=false;});
+    slider.LostFocus([local](auto&&,auto&&){local->sliderKeyboard=false;});
     Grid sliderFrame;Border sliderInput;
     sliderInput.Background(clear());sliderInput.ManipulationMode(ManipulationModes::None);
     AutomationProperties::SetAccessibilityView(sliderInput,Peers::AccessibilityView::Raw);
@@ -325,7 +329,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(active){bool transaction=local->gesture;finish(L"cancel");local->value=local->origin;if(!transaction)set(local->value);}
             setText(str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text"));
         };
-        auto move=[local,spec,set,setText,phase,panel](double y,bool fine){
+        auto move=[local,spec,set,setPosition,setText,phase,panel](double y,bool fine){
             double pixels=local->originY-y;
             if(panel&&fine!=local->fine){local->fine=fine;local->scrubOrigin=local->value;local->scrubBase=local->scrubPixels;}
             local->scrubPixels=pixels;
@@ -334,7 +338,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(!std::exchange(local->scrubbing,true)&&phase){local->gesture=true;phase(L"down",local->origin);}
             auto operation=panel?O({{L"type",S(L"scrub")},{L"origin",N(local->scrubOrigin)},{L"pixels",N(pixels-local->scrubBase)},{L"fine",B(fine)}}):O({{L"type",S(L"position")},{L"position",N(local->scrubOrigin+pixels/200.)}});
             auto next=local->resolve(spec,local->value,operation);
-            local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);
+            if(!panel&&setPosition)setPosition(num(next,L"value"));
+            else{local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);}
         };
         valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,commit,restore,surfaceY,panel,spec,editor=make_weak(entry),weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(data->claimBubbleContact(e))return;
@@ -500,6 +505,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         slider.Value(fill);
     };
     sliderContact.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,phase,get,commit,completeSlider,moveSlider,preference,weak=make_weak(slider)](auto&& sender,PointerRoutedEventArgs const& e){
+        local->sliderKeyboard=false;
         if(data->claimBubbleContact(e))return;
         auto slider=weak.get();auto target=sender.template as<UIElement>();
         if(!slider||!slider.IsEnabled()||local->sliderPointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr)))return;
@@ -520,9 +526,16 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     PointerGesture::OnCompleted(sliderContact,[local,completeSlider,moveSlider,preference](PointerRoutedEventArgs const& e,bool cancel){
         if(local->sliderPointer==e.Pointer().PointerId()){if(!cancel&&!preference)moveSlider(e);completeSlider(cancel);if(!preference)e.Handled(true);}
     },PointerCaptureLoss::CompleteLift);
-    slider.ValueChanged([data,local,caption,spec,set,setText,phase,weak=make_weak(entry)](auto&&,Primitives::RangeBaseValueChangedEventArgs const& e){
+    slider.ValueChanged([data,local,caption,spec,set,setPosition,setText,phase,range=make_weak(slider),weak=make_weak(entry)](auto&&,Primitives::RangeBaseValueChangedEventArgs const& e){
         if(data->updating||local->formatting)return;
         auto next=local->resolve(spec,local->value,O({{L"type",S(L"position")},{L"position",N(e.NewValue())}}));
+        if(setPosition&&!local->sliderKeyboard){
+            auto value=num(next,L"value");
+            auto shown=local->resolve(spec,local->value,O({{L"type",S(L"format")}}));
+            if(auto slider=range.get()){local->formatting=true;slider.Value(num(shown,L"fill"));local->formatting=false;}
+            if(value!=local->value)setPosition(value);
+            return;
+        }
         if(num(next,L"value")==local->value)return;
         local->value=num(next,L"value");local->editing=false;
         if(auto entry=weak.get()){
@@ -537,7 +550,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         auto panel=color(str(palette,L"panel")),ink=color(str(palette,L"text"));
         track.Color({255,uint8_t((int(panel.R)+ink.R)/2),uint8_t((int(panel.G)+ink.G)/2),uint8_t((int(panel.B)+ink.B)/2)});
     });
-    bindings.emplace_back([data,local,caption,spec,get,entry,slider,setText,presented,finish,surface=make_weak(sliderContact),identity=presentation.identity]{
+    bindings.emplace_back([data,local,caption,spec,get,entry,slider,setText,setPosition,presented,finish,surface=make_weak(sliderContact),identity=presentation.identity]{
         if(identity && local->identity!=identity()){
             ++local->contactGeneration;if(local->sliderPointer)data->pointerCancels.Forget(*local->sliderPointer,local.get());if(local->pointer)data->pointerCancels.Forget(*local->pointer,local.get());
             local->sliderPointer.reset();
@@ -546,7 +559,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             local->identity=identity();local->editing=false;local->dragging=false;local->pointer.reset();local->scrubbing=false;local->turning=false;
             showNumericError(entry,L"");caption->errorReason=J{};
         }
-        if(local->editing||local->dragging)return;
+        if(local->editing||(local->dragging&&!setPosition))return;
         bool previous=std::exchange(local->formatting,true);
         struct Reset{bool& value;bool previous;~Reset(){value=previous;}} reset{local->formatting,previous};
         local->value=get();auto shown=local->resolve(spec,local->value,O({{L"type",S(L"format")}}));

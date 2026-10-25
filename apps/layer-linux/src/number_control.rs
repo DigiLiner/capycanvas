@@ -14,6 +14,8 @@ mod imp {
         pub value: Cell<f64>,
         pub presented_text: RefCell<Option<String>>,
         pub updating: Cell<bool>,
+        pub slider_input: Cell<bool>,
+        pub slider_keyboard: Cell<bool>,
         pub composing: Cell<bool>,
         pub(super) composition_keys: crate::input::CompositionKeys,
         pub error: RefCell<Option<layer_ui::NumericError>>,
@@ -823,6 +825,13 @@ impl NumberControl {
             let slider = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.001);
             slider.set_draw_value(false);
             slider.set_hexpand(true);
+            let source = gtk::EventControllerLegacy::new();
+            source.set_propagation_phase(gtk::PropagationPhase::Capture);
+            source.connect_event(glib::clone!(#[weak] control, #[upgrade_or] glib::Propagation::Proceed, move |_, event| {
+                control.imp().slider_keyboard.set(event.event_type() == gtk::gdk::EventType::KeyPress);
+                glib::Propagation::Proceed
+            }));
+            slider.add_controller(source);
             slider.connect_value_changed(glib::clone!(
                 #[weak]
                 control,
@@ -1126,6 +1135,8 @@ impl NumberControl {
     pub fn value(&self) -> f64 {
         self.imp().value.get()
     }
+
+    pub fn slider_input(&self) -> bool { self.imp().slider_input.get() }
     /// Project model state without emitting a user edit back to the core.
     pub fn set_value(&self, value: f64) { self.present_value(value, None); }
     pub fn set_presented_value(&self, value: f64, text: &str) {
@@ -1405,12 +1416,15 @@ impl NumberControl {
             self.feedback(None);
             return true;
         }
+        let slider_input = matches!(op, NumericOperation::Position { .. }) && !self.imp().slider_keyboard.get();
         match self.spec().resolve(self.value(), op) {
             Ok(v) => {
                 self.feedback(None);
                 if !self.spec().values_equal(v.value, self.value()) {
                     self.set_value(v.value);
+                    self.imp().slider_input.set(slider_input);
                     self.emit_by_name::<()>("value-changed", &[]);
+                    self.imp().slider_input.set(false);
                 }
                 true
             }

@@ -1630,7 +1630,7 @@ capture, preserving exact physical pixels at the actual display scale.
 
 The Zoom readout journey checks that opening and closing the readout preserves
 the exact camera, artwork and undo history. It also checks the saved Snap
-rotation checkbox and native Rotate View drags with snapping enabled and disabled,
+rotation checkbox, rotation slider and native Rotate View drags with snapping enabled and disabled,
 including the 3° hold and smooth transition back to free rotation by 10°.
 For the focused preference and gesture journey, pass `-RotationSnapping` with
 one of `dark-mouse`, `light-mouse`, `dark-pen` or `dark-touch`. It uses an owned

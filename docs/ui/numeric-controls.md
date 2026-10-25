@@ -117,6 +117,11 @@ Pixel, percentage and angle sliders snap in displayed units. Pixels keep tenths
 through 32 px, matching the brush-size threshold, then snap to whole pixels.
 Percentages keep tenths within five percentage points of either soft-range edge
 and snap to whole percentages elsewhere. Angles snap to whole degrees.
+The canvas rotation slider also follows Snap rotation from its menu: its
+slider-origin action applies the shared quarter-turn attraction curve, while
+text and step inputs keep their exact values. Native controls with a separate
+position handler display the published model value during motion, so a stationary
+snap holds both the thumb and the readout at the canvas angle.
 Other units retain their declared resolution; whole-count fields stay integers.
 Text entry retains fractional values independently of slider snapping. Value
 scrubs snap like the slider unless the field declares a `scrub_snap` increment.

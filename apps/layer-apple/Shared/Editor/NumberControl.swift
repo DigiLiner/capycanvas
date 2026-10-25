@@ -16,6 +16,7 @@ struct NumberControl: View {
     var toolbar: Toolbar? = nil
     var registerAdmission: ((String, ((Bool) -> Bool)?) -> Void)? = nil
     var gestureChange: ((String, Double, @escaping @MainActor (String?) -> Void) -> Void)? = nil
+    var positionChange: ((Double, @escaping @MainActor (String?) -> Void) -> Void)? = nil
     var reset: (() -> Void)? = nil
     let change: (Double, @escaping @MainActor (String?) -> Void) -> Void
     @State private var field = NumericEditState()
@@ -423,8 +424,12 @@ struct NumberControl: View {
                 // discrete edits need optimistic receipt/acknowledgment state.
                 gestureChange(phase, next) { error in field.error = error }
             } else if Float(next) != Float(field.value) {
-                let token = field.submit(next)
-                change(next) { error in field.complete(token, error: error); format() }
+                if (operation["type"] as? String) == "position", let positionChange {
+                    positionChange(next) { error in field.error = error; format() }
+                } else {
+                    let token = field.submit(next)
+                    change(next) { error in field.complete(token, error: error); format() }
+                }
             }
             format()
             return next

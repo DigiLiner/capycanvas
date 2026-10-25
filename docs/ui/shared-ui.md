@@ -541,8 +541,9 @@ The menu also shows a rotation slider from
 value, without a visible label or step buttons. Zoom controls and percentages
 precede Lock zoom; the rotation slider, Reset rotation, Snap rotation and Lock
 rotation follow together. The locks and Snap rotation show checkmarks.
-`SetRotation` rotates about the work-area
-centre without changing the artwork. The locks belong to the camera and stop
+`SetRotation` rotates about the work-area centre without changing the artwork.
+Slider and inline value drags send `SetRotationFromSlider`, which applies the
+current Snap rotation preference in shared Rust. The locks belong to the camera and stop
 canvas navigation gestures, including touch, wheel and continuous zoom input;
 pan remains available. Explicit sliders, percentages, commands and shortcuts
 remain usable while locked. The bottom row uses the same shared
@@ -553,8 +554,12 @@ availability.
 Snap rotation is on by default and saved in application settings across drawings.
 It applies to two-finger and trackpad rotation and Rotate View drags with mouse,
 pen or one finger, including temporary rotation with held R or Shift+Space.
-Turning it on or off leaves the current view still. Explicit angles and rotation
-commands keep their requested values. A shared `layer-core::RotationSnap` retains the raw
+The rotation slider uses the same attraction curve for its absolute angle;
+its thumb and readout follow the displayed canvas angle, including stationary holds.
+The slider keeps −180° at its left end and +180° at its right end when snapping.
+Turning snapping on or off leaves the current view still. Typed angles, keyboard
+steps and rotation commands keep their requested values.
+A shared `layer-core::RotationSnap` retains the raw
 angle while holding exactly at quarter turns within 3°. Between 3° and 10°,
 a continuous cubic response eases back to free rotation with matching endpoint
 slopes. Pan and pinch retain their midpoint anchor. Gesture starts rebase to the

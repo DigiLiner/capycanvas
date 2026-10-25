@@ -109,6 +109,58 @@ mod navigation_controls {
     }
 
     #[test]
+    fn rotation_slider_snaps_only_dragged_angles_and_uses_the_current_preference() {
+        let difference = |a: f32, b: f32| (a - b + std::f32::consts::PI)
+            .rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            let checkpoint = s.engine.checkpoint();
+            let center = s.state.camera.work_area_center();
+            let point = anchor(&s, center);
+            s.dispatch(UiAction::SetRotationLocked { locked: true }).unwrap();
+            for enabled in [true, false, true] {
+                let before = s.state.camera.clone();
+                s.dispatch(UiAction::SetRotationSnapping { enabled }).unwrap();
+                assert_eq!(s.state.camera, before);
+                for quarter in -2..=2 {
+                    let cardinal = quarter as f32 * std::f32::consts::FRAC_PI_2;
+                    for degrees in [-12_f32, -2., 2., 12.] {
+                        let rotation = cardinal + degrees.to_radians();
+                        let action: UiAction = serde_json::from_value(serde_json::json!({
+                            "type": "set_rotation_from_slider", "rotation": rotation,
+                        })).unwrap();
+                        s.dispatch(action).unwrap();
+                        let expected = if enabled && degrees.abs() == 2. { cardinal } else { rotation };
+                        assert!(difference(s.state.camera.rotation, expected).abs() < 1e-6,
+                            "{platform:?} snapping={enabled} quarter={quarter} degrees={degrees}");
+                        same_point(anchor(&s, center), point);
+                    }
+                }
+                if enabled {
+                    for direction in [-1_f32, 1.] {
+                        s.dispatch(UiAction::SetRotationFromSlider { rotation: direction * 178_f32.to_radians() }).unwrap();
+                        assert_eq!(s.state.camera.rotation, direction * std::f32::consts::PI,
+                            "the slider must keep its requested endpoint");
+                        same_point(anchor(&s, center), point);
+                    }
+                }
+                s.dispatch(UiAction::SetRotation { rotation: 89_f32.to_radians() }).unwrap();
+                assert!((s.state.camera.rotation.to_degrees() - 89.).abs() < 0.001);
+                invoke(&mut s, CommandId::RotateRight);
+                assert!((s.state.camera.rotation.to_degrees() - 94.).abs() < 0.001);
+                invoke(&mut s, CommandId::RotateLeft);
+                assert!((s.state.camera.rotation.to_degrees() - 89.).abs() < 0.001);
+            }
+            let before = s.state.camera.clone();
+            for rotation in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                assert!(s.dispatch(UiAction::SetRotationFromSlider { rotation }).is_err());
+                assert_eq!(s.state.camera, before);
+            }
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+        }
+    }
+
+    #[test]
     fn rotate_tool_uses_snapping_and_rebases_between_contacts() {
         for platform in Platform::ALL {
             for kind in [PointerKind::Mouse, PointerKind::Pen, PointerKind::Touch] {
