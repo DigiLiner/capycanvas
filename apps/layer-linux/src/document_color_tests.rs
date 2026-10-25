@@ -5,7 +5,7 @@ use layer_color::DocumentColorChange;
 use layer_core::{Document, color::*};
 
 fn document(w: &Rc<Workspace>) -> Document {
-    ui_session(&w)
+    ui_session(w)
         .engine()
         .document()
         .clone()

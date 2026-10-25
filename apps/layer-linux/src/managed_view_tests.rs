@@ -11,7 +11,7 @@ fn download(texture: &gdk::Texture, state: &gdk::ColorState) -> Vec<[f32; 4]> {
     let (bytes, stride) = downloader.download_bytes();
     let mut output = vec![];
     for y in 0..texture.height() as usize {
-        for pixel in bytes[y * stride..][..texture.width() as usize * 16].chunks_exact(16) {
+        for pixel in bytes[y * stride..][..texture.width() as usize * 16].as_chunks::<16>().0 {
             output.push(std::array::from_fn(|c| {
                 f32::from_ne_bytes(pixel[c * 4..c * 4 + 4].try_into().unwrap())
             }));

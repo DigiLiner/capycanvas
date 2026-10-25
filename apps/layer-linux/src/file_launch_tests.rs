@@ -115,12 +115,14 @@ fn native_application_file_launch() {
     let settings_path = crate::storage::roots().unwrap().settings();
     assert!(settings_path.starts_with(std::env::temp_dir()));
     std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
-    let mut settings = layer_ui::Settings::default();
-    settings.theme = match std::env::var("CAPY_NATIVE_TEST_THEME").as_deref() {
-        Ok("light") => Some(Theme::Light),
-        Ok("dark") => Some(Theme::Dark),
-        Ok(_) => panic!("CAPY_NATIVE_TEST_THEME must be light or dark"),
-        Err(_) => None,
+    let mut settings = layer_ui::Settings {
+        theme: match std::env::var("CAPY_NATIVE_TEST_THEME").as_deref() {
+            Ok("light") => Some(Theme::Light),
+            Ok("dark") => Some(Theme::Dark),
+            Ok(_) => panic!("CAPY_NATIVE_TEST_THEME must be light or dark"),
+            Err(_) => None,
+        },
+        ..Default::default()
     };
     settings.photo_open.promote_to_16 = true;
     settings.photo_open.missing_profile = layer_ui::MissingProfilePolicy::Ask;

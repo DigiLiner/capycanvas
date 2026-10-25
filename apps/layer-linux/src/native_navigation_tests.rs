@@ -34,9 +34,9 @@ fn native_scroll_wheel_input() {
             assert!(zoomed.zoom > horizontal.zoom, "{theme:?} {button:?}: Ctrl-wheel zooms");
             assert_eq!(zoomed.rotation, horizontal.rotation);
             let anchor = [w.area.width(), w.area.height()].map(|v| v as f32 * w.area.scale_factor() as f32 * 0.5);
-            for axis in 0..2 {
-                assert!(((anchor[axis] - horizontal.translation[axis]) / horizontal.zoom
-                    - (anchor[axis] - zoomed.translation[axis]) / zoomed.zoom).abs() < 0.001, "zoom stays anchored");
+            for (axis, anchor) in anchor.into_iter().enumerate() {
+                assert!(((anchor - horizontal.translation[axis]) / horizontal.zoom
+                    - (anchor - zoomed.translation[axis]) / zoomed.zoom).abs() < 0.001, "zoom stays anchored");
             }
             input.perform(serde_json::json!([{ "key": 65505, "down": true }, { "wheel": [0, 1] },
                 { "key": 65505, "down": false }, { "key": 65507, "down": false }]));

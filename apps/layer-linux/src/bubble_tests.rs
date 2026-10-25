@@ -141,7 +141,7 @@ fn chooser(d: &mut Driver, device: &str, name: &str, id: u32) {
     d.input.perform(serde_json::Value::Array(events));
     pump(300);
     let fanned = find_id(d, id).unwrap();
-    let target = fanned.chooser.iter().filter(|i| i.kind == ChooserKind::Brush).last().cloned();
+    let target = fanned.chooser.iter().rfind(|i| i.kind == ChooserKind::Brush).cloned();
     let finish = target.as_ref().map_or(via, |t| item_point(d, id, t));
     let mut events = Vec::new();
     for step in 1..=6 {

@@ -20,7 +20,7 @@ pub(super) fn start(id: &str) -> (NativeTestApp, Rc<Workspace>, RemoteInput) {
 }
 
 pub(super) fn document(w: &Workspace) -> Document {
-    ui_session(&w).engine().document().clone()
+    ui_session(w).engine().document().clone()
 }
 
 pub(super) fn window_point(w: &Workspace, [x, y]: [f32; 2]) -> [f32; 2] {

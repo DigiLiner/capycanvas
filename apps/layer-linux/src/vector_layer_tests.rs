@@ -180,7 +180,7 @@ pub(super) fn add_vector_layer(d: &mut Driver) {
     d.click(&footer);
     wait_for("a vector layer from the footer button", || active_vector(d));
     d.capture_canvas("footer-new-vector-layer.png");
-    if let Some(opener) = opener { if state(&d.w).customization.drawer.is_some() { d.click_name(&opener); } }
+    if let Some(opener) = opener && state(&d.w).customization.drawer.is_some() { d.click_name(&opener); }
     pump(150);
 }
 pub(super) fn press_notice(d: &mut Driver, action: layer_ui::NoticeActionId) {

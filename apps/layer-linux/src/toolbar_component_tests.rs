@@ -69,7 +69,7 @@ fn painted_group_point(d: &Driver, button: &gtk::Widget) -> [f32; 2] {
     let height = texture.height() as usize;
     let mut pixels = vec![0; width * height * 4];
     texture.download(&mut pixels, width * 4);
-    let painted = pixels.chunks_exact(4).enumerate().filter(|(_, pixel)| pixel[3] > 8)
+    let painted = pixels.as_chunks::<4>().0.iter().enumerate().filter(|(_, pixel)| pixel[3] > 8)
         .map(|(i, _)| [i % width, i / width]).collect::<Vec<_>>();
     assert!(!painted.is_empty());
     let right = painted.iter().map(|point| point[0]).max().unwrap() + 1;
@@ -502,9 +502,9 @@ fn variant_context(d: &Driver) -> gtk::Popover {
 fn choose_variant(d: &mut Driver, anchor: DrawerAnchor, index: usize) {
     let menu = ui_session(&d.w).context_menu(ContextTarget::ToolVariants { anchor }).unwrap();
     let label = menu.sections.iter().flatten().nth(index).unwrap().label.clone();
-    let item = find_menu_item(variant_context(&d).upcast_ref(), &label).unwrap();
+    let item = find_menu_item(variant_context(d).upcast_ref(), &label).unwrap();
     d.click(&item);
-    assert!(!variant_context(&d).is_visible());
+    assert!(!variant_context(d).is_visible());
 }
 
 #[test]
@@ -2561,5 +2561,5 @@ fn slider_stamp_pixels(area:&gtk::Widget)->Vec<u8> {
     let snapshot=gtk::Snapshot::new();let parent=area.parent().unwrap();parent.snapshot_child(area,&snapshot);
     let Some(node)=snapshot.to_node() else {return vec![0;width*height];};
     let texture=area.native().unwrap().renderer().unwrap().render_texture(node,Some(&gtk::graphene::Rect::new(0.,0.,width as f32,height as f32)));
-    let mut bytes=vec![0;width*height*4];texture.download(&mut bytes,width*4);bytes.chunks_exact(4).map(|p|p[3]).collect()
+    let mut bytes=vec![0;width*height*4];texture.download(&mut bytes,width*4);bytes.as_chunks::<4>().0.iter().map(|p|p[3]).collect()
 }

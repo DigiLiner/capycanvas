@@ -83,12 +83,11 @@ fn resize_input(scenarios: &[&str]) {
                     .unwrap();
                 band.extent = if left { 252. } else { 310. };
                 let divider = band.id;
-                if scenario == "navigator" {
-                    if let DockNode::Tabs { panels, active, .. } = &mut band.root {
+                if scenario == "navigator"
+                    && let DockNode::Tabs { panels, active, .. } = &mut band.root {
                         panels.push(Panel::Navigator);
                         *active = Panel::Navigator;
                     }
-                }
                 if scenario == "sizes" {
                     let group = fixture.layout.panel_group(Panel::Sizes).unwrap();
                     fixture.layout.select_tab(group, Panel::Sizes).unwrap();
@@ -171,11 +170,10 @@ fn resize_input(scenarios: &[&str]) {
                     paint_start,
                     move |clock| {
                         let width = view.width();
-                        if last.replace(width) != width {
-                            if let Some(timing) = clock.current_timings() {
+                        if last.replace(width) != width
+                            && let Some(timing) = clock.current_timings() {
                                 geometry.borrow_mut().push((timing, width, paint_start.get().elapsed().as_secs_f64() * 1000.));
                             }
-                        }
                     }
                 ));
                 let events: Vec<_> = (0..if color { 1650 } else { 1250 })

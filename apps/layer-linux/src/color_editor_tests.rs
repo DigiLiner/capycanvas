@@ -341,7 +341,7 @@ fn native_fill_thumbnail_edits_its_color() {
         let mut downloader = gtk::gdk::TextureDownloader::new(&texture);
         downloader.set_format(gtk::gdk::MemoryFormat::R8g8b8a8);
         let (bytes, _) = downloader.download_bytes();
-        bytes.chunks_exact(4).all(|pixel| pixel[..3].iter().zip(hex).all(|(a, b)| a.abs_diff(b) <= 2))
+        bytes.as_chunks::<4>().0.iter().all(|pixel| pixel[..3].iter().zip(hex).all(|(a, b)| a.abs_diff(b) <= 2))
     };
     until(|| pixels([51, 102, 204]), "the fill thumbnail is a full square of its color");
     thumbnail().unwrap().downcast::<gtk::Button>().unwrap().emit_clicked();

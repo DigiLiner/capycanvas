@@ -29,7 +29,7 @@ fn native_layer_thumbnail_squircles() {
         let snapshot = gtk::Snapshot::new();
         gtk::WidgetPaintable::new(Some(widget)).snapshot(&snapshot, widget.width() as f64, widget.height() as f64);
         w.window.renderer().unwrap().render_texture(
-            &crate::squircle::converted(&snapshot.to_node().unwrap(), 1.),
+            crate::squircle::converted(&snapshot.to_node().unwrap(), 1.),
             Some(&gtk::graphene::Rect::new(0., 0., widget.width() as f32, widget.height() as f32)),
         )
     };
@@ -97,7 +97,7 @@ fn native_layer_thumbnail_squircles() {
         let preview = crate::layers::drag_preview(&row, state(&w).palette.panel).unwrap();
         let snapshot = gtk::Snapshot::new();
         preview.snapshot(&snapshot, row.width() as f64, row.height() as f64);
-        let texture = w.window.renderer().unwrap().render_texture(&snapshot.to_node().unwrap(), None);
+        let texture = w.window.renderer().unwrap().render_texture(snapshot.to_node().unwrap(), None);
         if let Some(directory) = std::env::var_os("LAYER_TEST_ARTIFACTS") {
             texture.save_to_png(std::path::PathBuf::from(directory).join(format!("drag-{}.png", format!("{theme:?}").to_lowercase()))).unwrap();
         }
@@ -161,9 +161,9 @@ fn native_squircle_corners() {
         let mut download = gdk::TextureDownloader::new(&texture);
         download.set_format(gdk::MemoryFormat::R32g32b32a32Float);
         let (pixels, _) = download.download_bytes();
-        let values: Vec<f32> = pixels.chunks_exact(4).map(|c| f32::from_ne_bytes(c.try_into().unwrap())).collect();
+        let values: Vec<f32> = pixels.as_chunks::<4>().0.iter().map(|c| f32::from_ne_bytes(*c)).collect();
         assert!(values.iter().all(|v| v.is_finite()), "{width}x{height} drawer shadow pixels stay finite");
-        assert!(values.chunks_exact(4).any(|p| p[3] > 0.1), "{width}x{height} drawer shadow is painted");
+        assert!(values.as_chunks::<4>().0.iter().any(|p| p[3] > 0.1), "{width}x{height} drawer shadow is painted");
     }
     w.window.destroy();
     pump(100);

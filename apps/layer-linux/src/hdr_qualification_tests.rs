@@ -80,7 +80,7 @@ fn native_local_tone_sustained_qualification() {
                 let mut peak = 0f32; let mut pixels = 0u64;
                 for y in 0..extent[1] {
                     rows.read(y, &mut row).unwrap();
-                    for pixel in row.chunks_exact(8) {
+                    for pixel in row.as_chunks::<8>().0 {
                         let value = layer_core::color::hdr::decode_pixel(std::array::from_fn(|c| u16::from_le_bytes([pixel[c*2], pixel[c*2+1]]))).unwrap();
                         assert!(value.iter().all(|v| v.is_finite()));
                         peak = peak.max(value[0]).max(value[1]).max(value[2]); pixels += 1;

@@ -228,7 +228,7 @@ pub(super) fn benchmark_proof(w: &Rc<Workspace>) -> Option<serde_json::Value> {
     }
     let before = process_memory();
     let start = Instant::now();
-    let change = ui_session_mut(&w)
+    let change = ui_session_mut(w)
         .set_proof_recipe(Some(recipe)).unwrap();
     w.changed(Ok(change));
     wait_proof(w, "Proof:");

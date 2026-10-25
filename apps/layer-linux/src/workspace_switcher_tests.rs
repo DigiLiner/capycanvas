@@ -982,8 +982,7 @@ fn menu_button(widget: &gtk::Widget) -> Option<gtk::MenuButton> {
 fn drag(
     w: &Workspace,
     input: &mut RemoteInput,
-    id: &str,
-    target: &str,
+    (id, target): (&str, &str),
     after: bool,
     touch: bool,
     handle: bool,
@@ -1119,7 +1118,7 @@ fn native_workspace_switcher_input() {
         );
     }
     // Dragging any row must preserve the selected Photographer preview.
-    drag(&w, &mut input, &p, &f, true, false, false, false);
+    drag(&w, &mut input, (&p, &f), true, false, false, false);
     assert_eq!(
         manager.switcher_ids(),
         [i.clone(), f.clone(), p.clone()],
@@ -1127,26 +1126,26 @@ fn native_workspace_switcher_input() {
     );
     assert_eq!(durable_layout(&state(&w).workspace.layout), preview);
     assert_eq!(manager.current().unwrap().capture().unwrap(), original);
-    drag(&w, &mut input, &p, &i, false, false, true, false);
+    drag(&w, &mut input, (&p, &i), false, false, true, false);
     assert_eq!(
         manager.switcher_ids(),
         [p.clone(), i.clone(), f.clone()],
         "mouse handle drag"
     );
-    drag(&w, &mut input, &p, &f, true, true, true, false);
+    drag(&w, &mut input, (&p, &f), true, true, true, false);
     assert_eq!(
         manager.switcher_ids(),
         [i.clone(), f.clone(), p.clone()],
         "touch handle without hold"
     );
-    drag(&w, &mut input, &p, &i, false, true, false, false);
+    drag(&w, &mut input, (&p, &i), false, true, false, false);
     assert_eq!(
         manager.switcher_ids(),
         [i.clone(), f.clone(), p.clone()],
         "ordinary touch swipe must not reorder"
     );
     let held_popup = menu_button(&row(&w, &p)).unwrap().popover().unwrap();
-    drag(&w, &mut input, &p, &i, false, true, false, true);
+    drag(&w, &mut input, (&p, &i), false, true, false, true);
     assert!(
         !held_popup.is_visible(),
         "same-contact drag closes the hold menu"
@@ -1187,14 +1186,14 @@ fn native_workspace_switcher_input() {
         )
         .is_some()
     );
-    drag(&w, &mut input, &p, &f, true, true, true, false);
+    drag(&w, &mut input, (&p, &f), true, true, true, false);
     assert_eq!(manager.workspace_ids(), [i.clone(), f.clone(), p.clone()]);
     assert_eq!(
         manager.switcher_ids(),
         [i.clone(), f.clone()],
         "reordering a hidden row never pins it"
     );
-    drag(&w, &mut input, &p, &i, false, false, true, false);
+    drag(&w, &mut input, (&p, &i), false, false, true, false);
     assert_eq!(manager.workspace_ids(), [p.clone(), i.clone(), f.clone()]);
     assert_eq!(durable_layout(&state(&w).workspace.layout), preview);
     capture_reference(
@@ -1274,7 +1273,7 @@ fn native_workspace_switcher_input() {
     assert_eq!(switcher_names(&w), ["workspace-switch-illustrator"]);
     assert!(switcher_buttons(&w)[0].is_active());
     // All hidden rows still have grips and can move before being shown again.
-    drag(&w, &mut input, &custom, &p, false, false, true, false);
+    drag(&w, &mut input, (&custom, &p), false, false, true, false);
     assert_eq!(manager.workspace_ids()[0], custom);
     assert!(manager.switcher_ids().is_empty());
     let hidden_menu = menu_button(&row(&w, &custom)).unwrap();
@@ -1319,7 +1318,7 @@ fn native_workspace_switcher_input() {
         .unwrap();
     scroll.vadjustment().set_value(0.);
     pump(100);
-    drag(&w, &mut input, &custom, &p, false, true, false, false);
+    drag(&w, &mut input, (&custom, &p), false, true, false, false);
     assert!(
         scroll.vadjustment().value() > 10.,
         "touch body swipe should scroll a long list"

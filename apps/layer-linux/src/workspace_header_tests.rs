@@ -379,11 +379,10 @@ fn layer_footer_alignment(d:&Driver) {
     if stack.visible_child_name().as_deref()==Some("layers") {
         let first=find_named(&layers,"layer-add-layer-symbolic").unwrap();
         let last=find_named(&layers,"layer-actions").unwrap();
-        if (center(left)[0]-center(bounds(&first))[0]).abs()>1. {
-            if let Some(output)=std::env::var_os("LAYER_TEST_ARTIFACTS") {
+        if (center(left)[0]-center(bounds(&first))[0]).abs()>1.
+            && let Some(output)=std::env::var_os("LAYER_TEST_ARTIFACTS") {
                 crate::snapshot(&d.w).save_to_png(std::path::PathBuf::from(output).join("footer-alignment-failure.png")).unwrap();
             }
-        }
         assert!((center(left)[0]-center(bounds(&first))[0]).abs()<=1.,"disclosure leading icon aligns with Layers action bar: slot={left:?} action={:?} footer={:?}",bounds(&first),bounds(&footer));
         assert!((center(right)[0]-center(bounds(&last))[0]).abs()<=1.,"disclosure chevron aligns with Layers action bar: slot={right:?} action={:?} footer={:?}",bounds(&last),bounds(&footer));
     }
@@ -3130,7 +3129,7 @@ fn native_header_editor_controls_input() {
     {
         let zone = HeaderZone::ALL[i % 3];
         let name = item.id();
-        d.drop_component(&name, zone);
+        d.drop_component(name, zone);
         let model = state(&d.w).workspace.layout.header;
         let id = model.entries().find(|e| e.item == item).unwrap().id;
         assert_eq!(model.location(id).unwrap().0, zone);
@@ -4174,9 +4173,8 @@ fn native_sketch_layer_swipe_motion() {
                     let timings=Rc::new(RefCell::new(Vec::new()));
                     let clock=d.w.surface.frame_clock().unwrap();
                     let capture=clock.connect_after_paint(glib::clone!(#[strong] timings,#[strong] x,#[weak] content,#[weak] row,move |clock| {
-                        if let Some(bounds)=content.compute_bounds(&row) {
-                            if x.replace(bounds.x())!=bounds.x() && let Some(timing)=clock.current_timings() {timings.borrow_mut().push(timing);}
-                        }
+                        if let Some(bounds)=content.compute_bounds(&row)
+                            && x.replace(bounds.x())!=bounds.x() && let Some(timing)=clock.current_timings() {timings.borrow_mut().push(timing);}
                     }));
                     let p=d.point(row.upcast_ref());
                     let distance=if open {-240.} else {72.};

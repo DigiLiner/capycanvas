@@ -74,7 +74,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
         .collect::<Vec<_>>();
     let mut perform = |events: serde_json::Value| {
         let ready_deadline = Instant::now() + Duration::from_secs(5);
-        while !w.workspaces.accepts_input(&w) {
+        while !w.workspaces.accepts_input(w) {
             assert!(
                 Instant::now() < ready_deadline,
                 "workspace ownership did not settle"
@@ -144,15 +144,15 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
             perform(
                 serde_json::json!([{"point":p},{"down":true},{"down":false},{"point":[800,700]}]),
             );
-            let drawer = state(&w).customization.drawer.unwrap_or_else(|| panic!(
+            let drawer = state(w).customization.drawer.unwrap_or_else(|| panic!(
                 "{theme:?}/{edge:?}/{id}: drawer did not open; ready={}, busy={}, sensitive={}, error={:?}",
-                w.workspaces.ready(), w.workspaces.busy(), w.surface.is_sensitive(), state(&w).host_error
+                w.workspaces.ready(), w.workspaces.busy(), w.surface.is_sensitive(), state(w).host_error
             ));
             assert!(
                 synchronous_origin.get(),
                 "{theme:?}/{edge:?}/{id}: opener styling changes before the click returns"
             );
-            if let Some(control) = state(&w)
+            if let Some(control) = state(w)
                 .workspace
                 .layout
                 .panel(Panel::Toolbar)
@@ -164,7 +164,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
                 && let ToolbarControl::Command { command } = control
             {
                 assert!(
-                    state(&w)
+                    state(w)
                         .commands
                         .iter()
                         .find(|c| c.id == command)
@@ -203,7 +203,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
                     );
                 }
             }
-            let texture = crate::snapshot(&w);
+            let texture = crate::snapshot(w);
             let mut download = gdk::TextureDownloader::new(&texture);
             download.set_format(gdk::MemoryFormat::R8g8b8a8);
             let (pixels, stride) = download.download_bytes();
@@ -226,15 +226,15 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
         }
         // A press on another eligible tool preserves the drawer until
         // activation. Releasing outside the button cancels that switch.
-        let before = state(&w).customization.drawer;
+        let before = state(w).customization.drawer;
         let p = center(button(ids[5]).upcast_ref());
         perform(serde_json::json!([{"point":p},{"down":true}]));
-        assert_eq!(state(&w).customization.drawer, before);
+        assert_eq!(state(w).customization.drawer, before);
         perform(serde_json::json!([{"point":[800,20]},{"down":false}]));
-        assert_eq!(state(&w).customization.drawer, before);
+        assert_eq!(state(w).customization.drawer, before);
         let p = center(button(ids[0]).upcast_ref());
         perform(serde_json::json!([{"point":p},{"down":true},{"down":false},{"point":[800,700]}]));
-        assert!(state(&w).customization.drawer.is_none());
+        assert!(state(w).customization.drawer.is_none());
         for id in &ids[..3] {
             for class in classes {
                 assert!(!button(*id).has_css_class(class));
@@ -248,7 +248,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
     w.dispatch(UiAction::DoubleClickPanelHandle { group: 8, viewport });
     pump(300);
     capture_reference(
-        &w,
+        w,
         &output
             .join(format!("collapsed-idle-{theme:?}.png"))
             .to_string_lossy(),
@@ -287,7 +287,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
                 "separator spacing preserves shared hit slots"
             );
         }
-        enable_individual_column_panels(&w, column.groups[0].group);
+        enable_individual_column_panels(w, column.groups[0].group);
         let opener = w
             .columns
             .button(column.id, column.groups[0].icons[0].panel)
@@ -301,7 +301,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
         );
         let drawer = w.drawers().into_iter().find(|d| d.id == column.id).unwrap();
         check_connected_pixels(
-            &w,
+            w,
             &drawer,
             &opener,
             &output.join(format!("{theme:?}-column-{}.png", column.id)),
@@ -320,7 +320,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
             assert!(!opener.has_css_class("selected-tool"));
             assert!(next.has_css_class("selected-tool"));
             check_connected_pixels(
-                &w,
+                w,
                 &drawer,
                 &next,
                 &output.join(format!("{theme:?}-column-{}-tab-switch.png", column.id)),
@@ -331,7 +331,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
             );
             assert!(opener.has_css_class("selected-tool"));
             check_connected_pixels(
-                &w,
+                w,
                 &drawer,
                 &opener,
                 &output.join(format!("{theme:?}-column-{}-switch-back.png", column.id)),
@@ -350,7 +350,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
         viewport,
     });
     pump(300);
-    let column = state(&w).workspace.layout.column_for_group(5).unwrap();
+    let column = state(w).workspace.layout.column_for_group(5).unwrap();
     let opener = w.columns.button(column, Panel::Toolbar).unwrap();
     let p = center(opener.upcast_ref());
     perform(serde_json::json!([{"point":p},{"down":true},{"down":false},{"point":[800,700]}]));
@@ -368,7 +368,7 @@ fn check_theme(w: &Rc<Workspace>, theme: Theme, output: &std::path::Path, input:
         let p = center(opener.upcast_ref());
         perform(serde_json::json!([{"point":p},{"down":true},{"down":false},{"point":[800,700]}]));
         check_connected_pixels(
-            &w,
+            w,
             &w.drawer,
             &opener,
             &output.join(format!("{theme:?}-nested-{id}.png")),

@@ -145,7 +145,7 @@ fn native_composite_histogram_updates_without_changing_the_drawing() {
     }
     w.dispatch(UiAction::Customize { action: CustomizationAction::CloseExpanded });
     let output = artifact_dir("../../artifacts/photo-editing-color/compact-ui/gtk");
-    std::fs::create_dir_all(&output).unwrap();
+    std::fs::create_dir_all(output).unwrap();
     let mut before = super::place_source::snapshot(&w);
     for theme in [Theme::Light, Theme::Dark] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
@@ -293,7 +293,7 @@ fn native_curves_histogram_preserves_numeric_focus() {
     let set = |key: &str, value| w.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: key.into(), value } });
     set("rgb", EffectValue::Curve(vec![[0., 0.], [0.5, 0.5], [1., 1.]]));
     let output = artifact_dir("../../artifacts/photo-editing-color/compact-ui/gtk");
-    std::fs::create_dir_all(&output).unwrap();
+    std::fs::create_dir_all(output).unwrap();
     for theme in [Theme::Light, Theme::Dark] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         choose(&w, &mut input, "properties-page", 0);
@@ -528,7 +528,7 @@ fn native_localized_photo_histogram_bounds() {
                     assert_eq!(plot.iter().flat_map(|(_, bins)| bins.iter()).copied().fold(0_f32, f32::max), 1.);
                 } else {
                     let (_, pixels) = monitor.waveform_premultiplied_rgba(view.palette.histogram_colors().map(|color| color.0)).unwrap();
-                    assert!(pixels.chunks_exact(4).any(|pixel| pixel[3] > 0));
+                    assert!(pixels.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0));
                 }
                 let prefix = if panel == Panel::Histogram {"histogram"} else {"waveform"};
                 let logarithmic = histogram_widget::<gtk::CheckButton>(&w, &format!("{prefix}-log"));

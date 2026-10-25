@@ -117,7 +117,8 @@ fn native_vector_input_kinds() {
     d.w.dispatch(UiAction::SetBrushSize { value: 14. });
 
     let empty = [1400., 850.];
-    let cursors: [(&str, Box<dyn Fn(&Driver)>, bool); 13] = [
+    type CursorCase = (&'static str, Box<dyn Fn(&Driver)>, bool);
+    let cursors: [CursorCase; 13] = [
         ("G-Pen", Box::new(|d| d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::GPen as u32 })), false),
         ("Monoline", Box::new(|d| d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Monoline as u32 })), false),
         ("Pencil", Box::new(|d| d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Pencil as u32 })), true),

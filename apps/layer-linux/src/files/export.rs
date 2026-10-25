@@ -1334,23 +1334,23 @@ mod numeric_tests {
                 let stack = descendant::<gtk::Stack>(row.upcast_ref()).unwrap();
                 stack.set_visible_child_name("entry");
                 input.set_text(valid);
-                assert!(numeric_inputs_ready(&[row.clone()], true));
+                assert!(numeric_inputs_ready(std::slice::from_ref(&row), true));
                 let accepted = row.value();
                 stack.set_visible_child_name("entry");
                 input.set_text("１２３");
-                assert!(!numeric_inputs_ready(&[row.clone()], true));
+                assert!(!numeric_inputs_ready(std::slice::from_ref(&row), true));
                 assert_eq!(row.value(), accepted);
                 stack.set_visible_child_name("entry");
                 input.set_text(invalid);
-                assert!(!numeric_inputs_ready(&[row.clone()], true));
+                assert!(!numeric_inputs_ready(std::slice::from_ref(&row), true));
                 assert_eq!(row.value(), accepted);
                 row.set_visible(false);
-                assert!(numeric_inputs_ready(&[row.clone()], false));
+                assert!(numeric_inputs_ready(std::slice::from_ref(&row), false));
                 row.set_visible(true);
                 stack.set_visible_child_name("entry");
                 input.set_text(valid);
                 input.delegate().and_downcast::<gtk::Text>().unwrap().emit_preedit_changed("にほんご");
-                assert!(!numeric_inputs_ready(&[row.clone()], true));
+                assert!(!numeric_inputs_ready(std::slice::from_ref(&row), true));
                 assert_eq!(row.value(), accepted);
                 window.close();
             }

@@ -65,8 +65,8 @@ fn native_enclose_fill_pointer_workflow() {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         let source = layer_core::color::source::rgba8_source([384, 256], |x, y| {
             let ink = [40, 150, 270].into_iter().any(|left|
-                x >= left && x < left + 90 && y >= 50 && y < 170
-                    && (x < left + 6 || x >= left + 84 || y < 56 || y >= 164));
+                x >= left && x < left + 90 && (50..170).contains(&y)
+                    && (x < left + 6 || x >= left + 84 || !(56..164).contains(&y)));
             if ink { [0, 0, 0, 255] } else { [0; 4] }
         });
         ui_session_mut(&w).import_layer_source("Reference ink", std::sync::Arc::unwrap_or_clone(source)).unwrap();

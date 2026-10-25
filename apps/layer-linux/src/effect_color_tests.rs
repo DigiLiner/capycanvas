@@ -116,7 +116,7 @@ fn assert_gradient_pixels(w: &Rc<Workspace>, bar: &gtk::Widget, stops: &[Gradien
         .window
         .renderer()
         .unwrap()
-        .render_texture(&snapshot.to_node().unwrap(), None);
+        .render_texture(snapshot.to_node().unwrap(), None);
     let mut download = gdk::TextureDownloader::new(&texture);
     download.set_color_state(&w.view_color().state());
     download.set_format(gdk::MemoryFormat::R32g32b32a32Float);
@@ -732,7 +732,8 @@ fn native_gradient_tool_editor_shapes_and_reverse() {
         for (index,gray) in [(0,1.),(1,0.)] {
             w.dispatch(UiAction::Effect {action:EffectAction::Gradient {target:target.clone(),edit:layer_ui::GradientEdit::Stop {index:Some(index),position:index as f32,color:Some(RgbColor::new(RgbSpace::Srgb,[gray,gray,gray,1.]).unwrap()),remove:false}}});
         }
-        for edit in [layer_ui::GradientEdit::Interpolation {value:layer_core::ColorMixSpace::LinearRgb}] {
+        {
+            let edit = layer_ui::GradientEdit::Interpolation {value:layer_core::ColorMixSpace::LinearRgb};
             w.dispatch(UiAction::Effect {action:EffectAction::Gradient {target:target.clone(),edit}});
         }
         w.dispatch(UiAction::SetBrushOpacity {value:0.6});ready(&w);

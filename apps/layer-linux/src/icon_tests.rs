@@ -634,8 +634,8 @@ fn controls(app: &adw::Application, output: &Path) {
             w.dispatch(UiAction::Invoke { command });
             pump(100);
             for group in state(&w).tool_set.groups {
-                if let UiAction::Invoke { command: action } = group.action {
-                    if !state(&w)
+                if let UiAction::Invoke { command: action } = group.action
+                    && !state(&w)
                         .commands
                         .iter()
                         .find(|c| c.id == action)
@@ -646,7 +646,6 @@ fn controls(app: &adw::Application, output: &Path) {
                         check_tool_set(&w, &mut records, label);
                         continue;
                     }
-                }
                 let index = state(&w)
                     .tool_set
                     .groups
@@ -757,13 +756,13 @@ fn controls(app: &adw::Application, output: &Path) {
                     state(&w).colors.preview(state(&w).colors.background),
                 ),
             ] {
-                for c in 0..3 {
+                for (c, expected) in expected.into_iter().take(3).enumerate() {
                     let at = (top + y * size / 16) * stride + (left + x * size / 16) * 4 + c;
                     assert!(
-                        pixels[at].abs_diff((expected[c] * 255.).round() as u8) <= 2,
+                        pixels[at].abs_diff((expected * 255.).round() as u8) <= 2,
                         "live color tile follows both color slots: {style:?} x={x} y={y} channel={c} actual={} expected={} size={size}",
                         pixels[at],
-                        (expected[c] * 255.).round()
+                        (expected * 255.).round()
                     );
                 }
             }

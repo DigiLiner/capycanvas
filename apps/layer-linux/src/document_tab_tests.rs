@@ -998,7 +998,7 @@ fn native_document_tabs_immediate_stroke_and_undo() {
                 .unwrap()
                 .decode()
                 .unwrap()
-                .chunks_exact(4)
+                .as_chunks::<4>().0.iter()
                 .any(|pixel| pixel[3] > 0)
         }));
     }
@@ -1123,7 +1123,7 @@ fn native_import_admission_failure_preserves_package_and_current_drawing() {
         let mut renderer = gpu.capture(capture.clone(),CaptureControl::default()).unwrap();
         let pixels = renderer.read_region([0,0,80,60]).unwrap();
         let image = SnapshotPreview {extent:[80,60],space:renderer.color().space,pixels}.srgb_bytes().unwrap();
-        assert!(image.chunks_exact(4).all(|pixel|pixel==[255,255,255,255]));
+        assert!(image.as_chunks::<4>().0.iter().all(|pixel|*pixel==[255,255,255,255]));
         let preview = Preview::from_rgba([80,60],image.into()).unwrap();
         let paired = CapturedPreview {checkpoint:capture.checkpoint,context:capture.output().context.clone(),preview:preview.clone()};
         let cancelled = std::sync::atomic::AtomicBool::new(false);
@@ -1157,7 +1157,7 @@ fn native_import_admission_failure_preserves_package_and_current_drawing() {
         assert_eq!([texture.width(),texture.height()],[80,60]);
         let mut shown = vec![0;80*60*4];
         texture.download(&mut shown,80*4);
-        assert!(shown.chunks_exact(4).all(|pixel|pixel==[255,255,255,255]));
+        assert!(shown.as_chunks::<4>().0.iter().all(|pixel|*pixel==[255,255,255,255]));
         assert_eq!(w.documents.selected(),selected);
         assert_eq!(w.documents.len(),1);
         assert_eq!(ui_session(&w).engine().document(),&original);
@@ -1182,7 +1182,7 @@ fn native_import_admission_failure_preserves_package_and_current_drawing() {
         assert_eq!(encoded.as_slice(),preview.encoded().as_ref());
         let decoded = Preview::decode(encoded.into()).unwrap();
         assert_eq!(decoded.size(),[80,60]);
-        assert!(decoded.pixels().chunks_exact(4).all(|pixel|pixel==[255,255,255,255]));
+        assert!(decoded.pixels().as_chunks::<4>().0.iter().all(|pixel|*pixel==[255,255,255,255]));
         new_photo::response(&w,"close");
         until(||completed.borrow().is_some(),"preserved view closes without adoption");
         assert_eq!(completed.borrow_mut().take().unwrap(),Ok(()));

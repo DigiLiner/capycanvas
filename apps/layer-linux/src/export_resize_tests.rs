@@ -787,7 +787,7 @@ fn native_export_webp_to_a_prechosen_file() {
     let mut row = vec![0; result.row_bytes()];
     for y in 0..128 {
         rows.read(y, &mut row).unwrap();
-        for (x, actual) in row.chunks_exact(4).enumerate() {
+        for (x, actual) in row.as_chunks::<4>().0.iter().enumerate() {
             let expected = pixel(x as u32, y);
             assert_eq!(actual[3], expected[3], "({x},{y}) alpha");
             if expected[3] == 255 {
@@ -881,7 +881,7 @@ fn native_export_keeps_camera_lens_and_copyright_without_location() {
     layer_color::photo::write_jpeg_rows(
         std::fs::File::create(&camera).unwrap(), [160, 120], &rgb, &taken,
         layer_color::photo::JpegEncodeOptions::from_memory_budget(92, layer_color::photo::PhotoMemoryBudget::current()),
-        |y, row| { for (x, p) in row.chunks_exact_mut(3).enumerate() { p.copy_from_slice(&[x as u8, y as u8 * 2, 90]); } Ok(()) },
+        |y, row| { for (x, p) in row.as_chunks_mut::<3>().0.iter_mut().enumerate() { p.copy_from_slice(&[x as u8, y as u8 * 2, 90]); } Ok(()) },
     )
     .unwrap();
     let camera_bytes = std::fs::read(&camera).unwrap();

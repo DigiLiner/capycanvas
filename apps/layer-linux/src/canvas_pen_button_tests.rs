@@ -286,7 +286,7 @@ fn native_three_finger_scrub() {
 #[ignore = "isolated native-input.js --native-test=native_remote_keys"]
 fn native_remote_keys() {
     let mut d = Driver::new("art.capycanvas.RemoteKeys");
-    let enabled = |w: &Workspace, command| ui_session(&w).command(command).enabled;
+    let enabled = |w: &Workspace, command| ui_session(w).command(command).enabled;
     d.w.dispatch(UiAction::Invoke { command: CommandId::KeyboardShortcuts });
     d.w.dispatch(UiAction::Preferences {
         action: PreferenceAction::BeginShortcut { id: CommandId::Undo.shortcut_id() },

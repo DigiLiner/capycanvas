@@ -181,7 +181,7 @@ mod tests {
         let mut bytes =
             layer_color::profile_bytes(&ColorProfile::Builtin(RgbSpace::AdobeRgb)).unwrap();
         let count = u32::from_be_bytes(bytes[128..132].try_into().unwrap()) as usize;
-        for tag in bytes[132..132 + count * 12].chunks_exact_mut(12) {
+        for tag in bytes[132..132 + count * 12].as_chunks_mut::<12>().0 {
             if &tag[..4] == b"desc" {
                 tag[..4].copy_from_slice(b"zzzz");
             }

@@ -203,7 +203,7 @@ fn relationship_capture(w: &Rc<Workspace>, input: &mut RemoteInput, directory: &
         let height = texture.height() as usize;
         let mut pixels = vec![0;width * height * 4];
         texture.download(&mut pixels,width * 4);
-        let painted = pixels.chunks_exact(4).filter(|p| p[2] < 120 && p[1] > 120 && p[0] > 120).count();
+        let painted = pixels.as_chunks::<4>().0.iter().filter(|p| p[2] < 120 && p[1] > 120 && p[0] > 120).count();
         let center = ink.0.map(|value| value.round() as usize);
         let mut neutral = 0;
         for y in center[1].saturating_sub(6)..(center[1]+6).min(height) {
@@ -586,7 +586,7 @@ fn native_layer_relationship_review() {
         let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
         assert!(drag.drag().is_some(), "boundary pickup starts native DND");
         input.perform(serde_json::json!([contact("mouse","move",end),contact("mouse","move",[end[0]+1.,end[1]])]));
-        if let Some(owner)=ui_session(&w).layer_drop_preview(id,target,at[1] as f32,layer_ui::LayerDropSurface::Row).and_then(|hint|hint.effect_owner) {
+        if let Some(owner)=ui_session(&w).layer_drop_preview(id,target,at[1],layer_ui::LayerDropSurface::Row).and_then(|hint|hint.effect_owner) {
             assert!(thumb(owner).has_css_class("layer-drop-attach"));
         }
         input.perform(serde_json::json!([contact("mouse","up",end)]));

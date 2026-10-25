@@ -79,7 +79,7 @@ fn deliver(w: &Rc<Workspace>, directory: &std::path::Path, name: &str, format: u
     if format >= 3 {
         assert!(!combo(w, "export-depth").is_visible());
         assert!(!combo(w, "export-format").is_visible());
-        until(|| super::new_photo::export_enabled(&w), "HDR preflight");
+        until(|| super::new_photo::export_enabled(w), "HDR preflight");
     }
     if format == 0 {
         combo(w, "export-depth").set_selected(0);
@@ -549,7 +549,7 @@ fn native_hdr_export_preview_preserves_master_and_tracks_display() {
         let image = picture("color-preview-before");
         let snapshot = gtk::Snapshot::new();
         gtk::WidgetPaintable::new(Some(&image)).snapshot(&snapshot, image.width() as f64, image.height() as f64);
-        let rendered = w.window.renderer().unwrap().render_texture(&snapshot.to_node().unwrap(), None);
+        let rendered = w.window.renderer().unwrap().render_texture(snapshot.to_node().unwrap(), None);
         // GTK scales the checker; the center can interpolate its two tones.
         for (c, base) in [4., 1., 0.25].into_iter().enumerate() {
             assert!((base + 0.395..=base + 0.475).contains(&pixel(&rendered)[c]), "GSK lost HDR values: {:?}", pixel(&rendered));
@@ -699,7 +699,7 @@ fn native_proof_dial_hit_regions() {
         std::fs::create_dir_all(&output).unwrap();
         let snap=gtk::Snapshot::new();
         gtk::WidgetPaintable::new(Some(&dial.root)).snapshot(&snap,dial.root.width() as f64,dial.root.height() as f64);
-        window.renderer().unwrap().render_texture(&snap.to_node().unwrap(),None).save_to_png(output.join(format!("dial-{size}.png"))).unwrap();
+        window.renderer().unwrap().render_texture(snap.to_node().unwrap(),None).save_to_png(output.join(format!("dial-{size}.png"))).unwrap();
         window.destroy();pump(20);
     }
 }
@@ -850,7 +850,7 @@ fn native_float32_new_open_edit_save_and_exr_export() {
     effect(&photo,"exposure","exposure",layer_core::EffectValue::Number(-1.));
     let master=project(&photo);
     let before=pixels(&photo);
-    assert!((before[0][0]-35000.0625).abs()<0.1,"{:?}",before[0]);
+    assert!((before[0][0]-35_000.063).abs()<0.1,"{:?}",before[0]);
     invoke(&photo,CommandId::ExportDocument);
     let range=combo(&photo,"export-output");
     range.set_selected(range.model().unwrap().n_items()-1);range.notify("selected");
@@ -863,7 +863,7 @@ fn native_float32_new_open_edit_save_and_exr_export() {
     assert_eq!(result.interpretation.profile,layer_core::color::ColorProfile::Builtin(RgbSpace::DisplayP3));
     let mut row=vec![0;result.row_bytes()];result.rows().read(0,&mut row).unwrap();
     let pixel=layer_core::color::hdr::decode_samples(SampleDepth::F32,&row[..16]).unwrap();
-    assert!((pixel[0]-35000.0625).abs()<0.1,"{pixel:?}");
+    assert!((pixel[0]-35_000.063).abs()<0.1,"{pixel:?}");
     assert_eq!(project(&photo),master);
     photo.window.destroy();w.window.destroy();pump(100);
     std::fs::remove_dir_all(directory).unwrap();

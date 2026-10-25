@@ -358,7 +358,7 @@ fn native_canvas_bar_distorts_a_pixel_selection() {
     w.dispatch(UiAction::Invoke { command: CommandId::ColorSelect });
     pump(200);
     let pixels = |w: &Workspace| {
-        ui_session(&w).engine().document().working.selection.as_ref()
+        ui_session(w).engine().document().working.selection.as_ref()
             .is_some_and(|s| matches!(s.shape, layer_core::SelectionShape::Pixels(_)))
     };
     let mut native = remote_input();
@@ -615,7 +615,7 @@ pub(super) fn choose_from_bar_menu(w: &Workspace, native: &mut RemoteInput, devi
 }
 
 pub(super) fn document(w: &Workspace) -> layer_core::Document {
-    ui_session(&w).engine().document().clone()
+    ui_session(w).engine().document().clone()
 }
 
 /// Fill a lasso selection on `layer` and wait for its bar.

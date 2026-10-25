@@ -205,9 +205,8 @@ fn motion(w: &Rc<Workspace>, input: &mut RemoteInput, key: &str) -> serde_json::
     let entries=trace.as_array().unwrap();let start=entries[1]["ns"].as_u64().unwrap();let end=entries[entries.len()-2]["ns"].as_u64().unwrap();
     let mut report=super::photo_drop::frames(&stats);let data=stats.lock().unwrap();let mut previous=baseline;let mut moving=Vec::new();
     for frame in data.presented.iter().filter(|frame|frame[3]==1&&frame[1]>=start&&frame[1]<=end) {
-        if let Some(view)=data.camera_views.iter().find(|view|view.0==frame[0]) {
-            if Some(view.2)!=previous {moving.push(*frame);previous=Some(view.2);}
-        }
+        if let Some(view)=data.camera_views.iter().find(|view|view.0==frame[0])
+            && Some(view.2)!=previous {moving.push(*frame);previous=Some(view.2);}
     }
     assert!(moving.len()>100,"sustained native filter changes produce actual moving presentations");
     report["input_trace"]=trace;report["motion_window_ns"]=json!([start,end]);
@@ -529,7 +528,7 @@ fn native_local_adjustments_analysis_history_and_recreation() {
             let row=named::<gtk::Button>(w.window.upcast_ref(),&format!("adjustment-{id}"));scroll_to(row.upcast_ref());
             let picture=descendant::<gtk::Picture>(&row).unwrap();until(||picture.paintable().is_some(),"local adjustment catalog thumbnail");
             let texture=picture.paintable().unwrap().downcast::<gtk::gdk::Texture>().unwrap();let mut bytes=vec![0;texture.width() as usize*texture.height() as usize*4];texture.download(&mut bytes,texture.width() as usize*4);
-            assert!(bytes.chunks_exact(4).any(|p|p[..3].iter().max().unwrap()-p[..3].iter().min().unwrap()>20),"source-aware {id} thumbnail contains gradient colors");
+            assert!(bytes.as_chunks::<4>().0.iter().any(|p|p[..3].iter().max().unwrap()-p[..3].iter().min().unwrap()>20),"source-aware {id} thumbnail contains gradient colors");
             capture(&w,output,&format!("catalog-{id}-{width}-{theme:?}"));
         }
         w.customize(CustomizationAction::SetPanelVisible {panel:Panel::Adjustments,visible:false});assert_source_scene(&w,&source);

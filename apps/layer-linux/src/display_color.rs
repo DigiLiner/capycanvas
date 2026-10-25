@@ -425,6 +425,39 @@ impl ColorPatch {
     }
 }
 
+/// Surface descriptions stay fixed while Wayland handles monitor transforms.
+/// Only the informational native view state changes on a monitor move.
+pub(crate) fn bind_monitor_updates(w: &std::rc::Rc<crate::workspace::Workspace>) {
+    w.window.connect_realize(glib::clone!(
+        #[weak]
+        w,
+        move |window| {
+            let Some(surface) = window.surface() else {
+                return;
+            };
+            let refresh = glib::clone!(
+                #[weak]
+                w,
+                move || {
+                    glib::idle_add_local_once(glib::clone!(
+                        #[weak]
+                        w,
+                        move || w.changed(Ok(layer_ui::UiChange {
+                            regions: layer_ui::regions::SETTINGS,
+                            ..Default::default()
+                        }))
+                    ));
+                }
+            );
+            surface.connect_enter_monitor({
+                let refresh = refresh.clone();
+                move |_, _| refresh()
+            });
+            surface.connect_leave_monitor(move |_, _| refresh());
+        }
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,7 +478,7 @@ mod tests {
             let pair = gtk::Snapshot::new();
             pair.append_node(&node);
             pair.append_texture(&reference, &gtk::graphene::Rect::new(16., 0., 16., 16.));
-            let rendered = renderer.render_texture(&pair.to_node().unwrap(), None);
+            let rendered = renderer.render_texture(pair.to_node().unwrap(), None);
             let mut pixels = vec![0; 32*16*4];
             rendered.download(&mut pixels, 32*4);
             for c in 0..4 {
@@ -462,7 +495,7 @@ mod tests {
                 check(native, view.solid(rgba), Some(view == ViewColor::Srgb || inside_srgb));
             }
             let document = layer_core::color::DocumentColor { space: RgbSpace::DisplayP3,
-                depth: layer_core::color::SampleDepth::F16, ..Default::default() };
+                depth: layer_core::color::SampleDepth::F16 };
             let view = view.with_rendition(document, Default::default());
             for pixel in [[4.,0.2,0.1,1.], [-0.2,0.3,1.7,1.], [0.03,0.07,0.1,1.]] {
                 let native = gtk::Snapshot::new();
@@ -523,37 +556,4 @@ mod tests {
             wgpu::TextureFormat::Rgba8Unorm
         );
     }
-}
-
-/// Surface descriptions stay fixed while Wayland handles monitor transforms.
-/// Only the informational native view state changes on a monitor move.
-pub(crate) fn bind_monitor_updates(w: &std::rc::Rc<crate::workspace::Workspace>) {
-    w.window.connect_realize(glib::clone!(
-        #[weak]
-        w,
-        move |window| {
-            let Some(surface) = window.surface() else {
-                return;
-            };
-            let refresh = glib::clone!(
-                #[weak]
-                w,
-                move || {
-                    glib::idle_add_local_once(glib::clone!(
-                        #[weak]
-                        w,
-                        move || w.changed(Ok(layer_ui::UiChange {
-                            regions: layer_ui::regions::SETTINGS,
-                            ..Default::default()
-                        }))
-                    ));
-                }
-            );
-            surface.connect_enter_monitor({
-                let refresh = refresh.clone();
-                move |_, _| refresh()
-            });
-            surface.connect_leave_monitor(move |_, _| refresh());
-        }
-    ));
 }

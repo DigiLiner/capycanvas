@@ -104,7 +104,7 @@ fn assert_hue_guide_colors(w: &Workspace, texture: &gtk::gdk::Texture) {
         .window
         .renderer()
         .unwrap()
-        .render_texture(&snapshot.to_node().unwrap(), Some(&bounds));
+        .render_texture(snapshot.to_node().unwrap(), Some(&bounds));
     let mut expected = vec![0; side * side * 4];
     let mut actual = vec![0; expected.len()];
     reference.download(&mut expected, side * 4);
@@ -206,7 +206,7 @@ pub(super) fn wheel_texture(w: &Workspace, scale: f32) -> gtk::gdk::Texture {
     parent.snapshot_child(&wheel, &snapshot);
     let b = wheel.compute_bounds(&parent).unwrap();
     let bounds = gtk::graphene::Rect::new(b.x() * scale, b.y() * scale, b.width() * scale, b.height() * scale);
-    w.window.renderer().unwrap().render_texture(&snapshot.to_node().unwrap(), Some(&bounds))
+    w.window.renderer().unwrap().render_texture(snapshot.to_node().unwrap(), Some(&bounds))
 }
 
 fn assert_swatch_pixels(w: &Workspace, output: &std::path::Path, name: &str, front: layer_ui::ColorSlot) {
@@ -281,12 +281,11 @@ fn native_color_panel_input() {
     for theme in [Theme::Dark, Theme::Light] {
         for width in [144., 160., 200., 242., 280., 360.] {
             for float in &mut fixture.layout.floating {
-                if let DockNode::Tabs { panels, .. } = &float.root {
-                    if panels.contains(&Panel::Color) {
+                if let DockNode::Tabs { panels, .. } = &float.root
+                    && panels.contains(&Panel::Color) {
                         float.width = width;
                         float.height = Some(width + 36.);
                     }
-                }
             }
             w.dispatch(UiAction::RestoreWorkspace {
                 workspace: Box::new(fixture.clone()),
@@ -446,12 +445,11 @@ fn native_color_panel_input() {
     )
     .unwrap();
     for float in &mut fixture.layout.floating {
-        if let DockNode::Tabs { panels, .. } = &float.root {
-            if panels.contains(&Panel::Color) {
+        if let DockNode::Tabs { panels, .. } = &float.root
+            && panels.contains(&Panel::Color) {
                 float.width = 100.;
                 float.height = Some(180.);
             }
-        }
     }
     w.dispatch(UiAction::RestoreWorkspace {
         workspace: Box::new(fixture),
@@ -714,12 +712,11 @@ fn native_color_swatch_overlap_input() {
     for theme in [Theme::Dark, Theme::Light] {
         for width in [144., 160., 200., 242., 280., 360.] {
             for float in &mut fixture.layout.floating {
-                if let DockNode::Tabs { panels, .. } = &float.root {
-                    if panels.contains(&Panel::Color) {
+                if let DockNode::Tabs { panels, .. } = &float.root
+                    && panels.contains(&Panel::Color) {
                         float.width = width;
                         float.height = Some(width + 36.);
                     }
-                }
             }
             w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(fixture.clone()) });
             w.dispatch(UiAction::SetTheme { theme: Some(theme) });

@@ -19,7 +19,7 @@ fn brightness(pixel: [u8; 4]) -> u32 {
 /// The canvas's own composite at document point `at`, before the display's
 /// color conversion.
 fn composite(w: &Workspace, [x, y]: [f32; 2]) -> [u8; 4] {
-    let image = ui_session(&w).engine().backend().capture().unwrap();
+    let image = ui_session(w).engine().backend().capture().unwrap();
     let m = state(w).camera.document_to_surface();
     let [x, y] = [(m[0] * x + m[2] * y + m[4]) as usize, (m[1] * x + m[3] * y + m[5]) as usize];
     image.bytes[y * image.stride as usize + x * 4..][..4].try_into().unwrap()
@@ -41,7 +41,7 @@ fn run(w: &Rc<Workspace>, input: &mut RemoteInput, device: &str, command: Comman
 }
 
 fn paint(w: &Rc<Workspace>, input: &mut RemoteInput, device: &str, rgba: [f32; 4], from: [f32; 2], to: [f32; 2]) {
-    let strokes = || ui_session(&w).engine().metrics().committed_strokes;
+    let strokes = || ui_session(w).engine().metrics().committed_strokes;
     let before = strokes();
     w.dispatch(UiAction::SetColor { rgba });
     until(
@@ -55,7 +55,7 @@ fn paint(w: &Rc<Workspace>, input: &mut RemoteInput, device: &str, rgba: [f32; 4
     );
     stroke(input, device, window_point(w, from), window_point(w, to));
     until(|| strokes() > before, "the stroke ends");
-    until(|| !ui_session(&w).engine().has_pending_document_edits(), "the stroke is captured");
+    until(|| !ui_session(w).engine().has_pending_document_edits(), "the stroke is captured");
     pump(200);
 }
 

@@ -68,12 +68,11 @@ fn native_hdr_picker_intensity_shape_and_input() {
             )
             .unwrap();
         for f in &mut fixture.layout.floating {
-            if let DockNode::Tabs { panels, .. } = &f.root {
-                if panels.contains(&Panel::Color) {
+            if let DockNode::Tabs { panels, .. } = &f.root
+                && panels.contains(&Panel::Color) {
                     f.width = 280.;
                     f.height = Some(400.);
                 }
-            }
         }
         w.dispatch(UiAction::RestoreWorkspace {
             workspace: Box::new(fixture.clone()),
@@ -155,7 +154,7 @@ fn native_hdr_picker_intensity_shape_and_input() {
             for widget in [&adjusted_preview, &paint_patch(&w, ColorSlot::Foreground)] {
                 let snapshot = gtk::Snapshot::new();
                 gtk::WidgetPaintable::new(Some(widget)).snapshot(&snapshot, widget.width() as f64, widget.height() as f64);
-                let texture = w.window.renderer().unwrap().render_texture(&snapshot.to_node().unwrap(), None);
+                let texture = w.window.renderer().unwrap().render_texture(snapshot.to_node().unwrap(), None);
                 assert!(peak(&texture) > 1., "GSK retains the HDR paint preview");
                 eprintln!("HDR_COLOR_PREVIEW {} gsk_peak={}", widget.widget_name(), peak(&texture));
             }
@@ -218,7 +217,7 @@ fn native_hdr_picker_intensity_shape_and_input() {
                     .window
                     .renderer()
                     .unwrap()
-                    .render_texture(&s.to_node().unwrap(), None);
+                    .render_texture(s.to_node().unwrap(), None);
                 let mut pixels = vec![0; t.width() as usize * t.height() as usize * 4];
                 t.download(&mut pixels, t.width() as usize * 4);
                 pixels
@@ -270,7 +269,7 @@ fn native_hdr_picker_intensity_shape_and_input() {
                     .window
                     .renderer()
                     .unwrap()
-                    .render_texture(&s.to_node().unwrap(), None);
+                    .render_texture(s.to_node().unwrap(), None);
                 assert!(peak(&t) > 1., "GSK must preserve the HDR ramp");
                 eprintln!(
                     "HDR_PICKER {shape:?} field_peak={} ramp_gsk_peak={}",
@@ -466,12 +465,11 @@ fn native_hdr_picker_intensity_shape_and_input() {
         }
         for theme in [Theme::Dark, Theme::Light] {
             for f in &mut fixture.layout.floating {
-                if let DockNode::Tabs { panels, .. } = &f.root {
-                    if panels.contains(&Panel::Color) {
+                if let DockNode::Tabs { panels, .. } = &f.root
+                    && panels.contains(&Panel::Color) {
                         f.width = 160.;
                         f.height = Some(320.);
                     }
-                }
             }
             w.dispatch(UiAction::RestoreWorkspace {
                 workspace: Box::new(fixture.clone()),

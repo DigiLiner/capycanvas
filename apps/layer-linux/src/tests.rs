@@ -4883,7 +4883,7 @@ fn command(w: &Workspace, id: CommandId) -> gtk::Button {
         popup.popdown();
         if let Some(action) = action {
             let button = gtk::Button::new();
-            button.set_sensitive(ui_session(&w).command(id).enabled);
+            button.set_sensitive(ui_session(w).command(id).enabled);
             button.connect_clicked(move |_| {
                 popup.activate_action(&action, None).unwrap();
             });
@@ -6072,7 +6072,7 @@ fn canvas_paper(w: &Workspace, texture: &gdk::Texture) -> usize {
         .map(|y| {
             let row = &bytes[y * stride + bounds.x() as usize * 4
                 ..y * stride + (bounds.x() + bounds.width()) as usize * 4];
-            row.chunks_exact(4)
+            row.as_chunks::<4>().0.iter()
                 .filter(|p| p[3] > 245 && (0..3).all(|i| (f32::from(p[i]) - bgr[i]).abs() < 24.))
                 .count()
         })
@@ -9420,7 +9420,8 @@ fn native_backdrop_blur_capture() {
         let elements = |scene: &str| {
             let root: gtk::Widget = w.window.clone().upcast();
             let selected_doc = format!("document-tab-{}", w.documents.selected());
-            let probes: [(&str, &dyn Fn(&gtk::Widget) -> bool); 14] = [
+            type Probe<'a> = (&'a str, &'a dyn Fn(&gtk::Widget) -> bool);
+            let probes: [Probe<'_>; 14] = [
                 ("chip", &|x| x.has_css_class("header-menu-labels")),
                 ("status", &|x| x.has_css_class("status-bubble")),
                 ("doc-selected", &|x| x.widget_name() == selected_doc.as_str()),
@@ -9538,10 +9539,10 @@ fn native_backdrop_blur_capture() {
 }
 
 fn refine_busy(w: &Workspace) -> bool {
-    ui_session(&w).wants_continuous_frames()
+    ui_session(w).wants_continuous_frames()
 }
 fn refine_preview_count(w: &Workspace) -> u64 {
-    ui_session(&w).renderer_stats().selection_previews
+    ui_session(w).renderer_stats().selection_previews
 }
 fn finish_canvas_operation(w: &Rc<Workspace>) {
     let open = || matches!(state(w).layer_tools.tool, LayerCanvasTool::Transform | LayerCanvasTool::Crop);
@@ -10735,7 +10736,7 @@ fn native_tab_slide_input() {
         let snapshot = gtk::Snapshot::new();
         slide.snapshot(&snapshot, w.window.frame_clock().unwrap().frame_time(), 1.);
         let texture = w.window.renderer().unwrap().render_texture(
-            &snapshot.to_node().unwrap(),
+            snapshot.to_node().unwrap(),
             Some(&gtk::graphene::Rect::new(slide.bounds.x, slide.bounds.y, slide.bounds.width, slide.bounds.height)),
         );
         let stride = texture.width() as usize * 4;

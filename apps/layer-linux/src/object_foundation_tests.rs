@@ -59,7 +59,7 @@ fn native_object_only_shared_images() {
         }
         let point = [200., expected.artwork.compositions.get(expected.artwork.root).unwrap().size[1] as f32 * 0.5];
         let before = pixels(&w, 100 + index as u64);
-        assert!(before.bytes.chunks_exact(4).any(|pixel| pixel[3] > 0), "{kind} objects supply visible pixels");
+        assert!(before.bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0), "{kind} objects supply visible pixels");
         let shown = photo_edit::shown(&w, point);
         assert_live_artwork_eq(ui_session(&w).engine().document(), &expected);
         let owner = expected.scene().order()[0];
@@ -68,7 +68,7 @@ fn native_object_only_shared_images() {
         }});
         ready(&w, 2);
         let hidden = pixels(&w, 200 + index as u64);
-        assert!(hidden.bytes.chunks_exact(4).all(|pixel| pixel[3] == 0), "{kind} has no paint pixels");
+        assert!(hidden.bytes.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0), "{kind} has no paint pixels");
         assert_ne!(photo_edit::shown(&w, point), shown, "{kind} objects change the displayed canvas");
         for (command, visible) in [(CommandId::Undo, true), (CommandId::Redo, false), (CommandId::Undo, true)] {
             new_photo::invoke(&w, command);

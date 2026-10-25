@@ -394,7 +394,7 @@ fn native_image_object_clipboard_and_paste_into() {
     assert_eq!(doc.scene().occurrence(frame_layer).unwrap().kind(), layer_core::LayerKind::Object);
     let mask = doc.scene().occurrence(frame_layer).unwrap().mask.clone().expect("a mask from the selection");
     assert!(doc.working.selection.is_none(), "the selection became the mask");
-    let inner = vec![doc.scene().object_handle(frame_layer).unwrap()];
+    let inner = [doc.scene().object_handle(frame_layer).unwrap()];
     assert_eq!(inner.len(), 1);
     settle(&w);
     capture(&w, "image-paste-into");

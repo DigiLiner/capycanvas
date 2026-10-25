@@ -177,8 +177,8 @@ fn targeted_curves(page: u32) {
                 until(||artwork_manifest(&document(&w))!=artwork_manifest(&before),"native targeted drag publishes curve");ready(&w);pump(200);
                 assert_source_unchanged(&w,&before);assert_eq!(state(&w).colors,foreground);assert_ne!(shown(&w,[128.,128.]),pixel);
                 let after=document(&w);let key=layer_core::CURVE_KEYS[page as usize];
-                assert!(matches!(active_effect(&after).value(&key),Some(EffectValue::Curve(points)) if points.len()==3));
-                assert_eq!(super::pointwise::value(&w,&key),active_effect(&after).value(&key).unwrap().clone(),"targeted document edits publish current Properties points");
+                assert!(matches!(active_effect(&after).value(key),Some(EffectValue::Curve(points)) if points.len()==3));
+                assert_eq!(super::pointwise::value(&w,key),active_effect(&after).value(key).unwrap().clone(),"targeted document edits publish current Properties points");
                 crate::snapshot(&w).save_to_png(output.join(format!("targeted-{page}-{kind}-{width}-{theme:?}.png"))).unwrap();
                 if kind=="mouse" {assert_persisted(&w,&output.join(format!("targeted-{page}-{width}-{theme:?}.capy")));}
                 input.key(0xff1b);w.dispatch(UiAction::Invoke {command:CommandId::Undo});ready(&w);assert_eq!(artwork_manifest(&document(&w)),artwork_manifest(&before),"one Undo restores targeted drag");
@@ -250,9 +250,8 @@ fn native_targeted_curves_motion_and_latency() {
             let mut report=super::photo_drop::frames(&stats);
             let data=stats.lock().unwrap();let mut revision=baseline;let mut moving=Vec::new();
             for presentation in data.presented.iter().filter(|p|p[3]==1 && p[1]>=start && p[1]<=end) {
-                if let Some(view)=data.camera_views.iter().find(|view|view.0==presentation[0]) {
-                    if Some(view.2)!=revision {moving.push(*presentation);revision=Some(view.2);}
-                }
+                if let Some(view)=data.camera_views.iter().find(|view|view.0==presentation[0])
+                    && Some(view.2)!=revision {moving.push(*presentation);revision=Some(view.2);}
             }
             drop(data);
             let intervals:Vec<f64>=moving.windows(2).map(|pair|pair[1][1].saturating_sub(pair[0][1]) as f64/1e6).collect();

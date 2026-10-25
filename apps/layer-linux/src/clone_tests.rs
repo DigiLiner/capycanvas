@@ -12,11 +12,11 @@ use serde_json::json;
 const ALT: u32 = 0xffe9;
 
 fn session_source(w: &Workspace) -> layer_core::CloneSource {
-    ui_session(&w).engine().clone_source()
+    ui_session(w).engine().clone_source()
 }
 
 fn strokes(w: &Workspace) -> u64 {
-    ui_session(&w).engine().metrics().committed_strokes
+    ui_session(w).engine().metrics().committed_strokes
 }
 
 fn source_point(w: &Workspace) -> [f32; 2] {

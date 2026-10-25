@@ -93,7 +93,7 @@ fn native_quick_mask_input() {
         d.w.dispatch(UiAction::SetTheme { theme:Some(theme) }); pump(250);
         save_snapshot(&d.w, 100, || output.join(format!("quick-mask-{theme:?}.png")));
         let capture=ui_session(&d.w).engine().backend().capture().unwrap();
-        let tinted=capture.bytes.chunks_exact(4).filter(|p|p[0]>p[1].saturating_add(30) && p[0]>p[2].saturating_add(30)).count();
+        let tinted=capture.bytes.as_chunks::<4>().0.iter().filter(|p|p[0]>p[1].saturating_add(30) && p[0]>p[2].saturating_add(30)).count();
         assert!(tinted>100,"{theme:?} mask overlay disappeared: {tinted} pixels");
     }
     d.click_name(&layers); pump(100);
@@ -692,7 +692,7 @@ fn native_tonal_selection_input() {
         assert!(number.tooltip_text().unwrap().contains("stops relative to reference white"));
         let readout=find_css(&number,"number-readout").unwrap().downcast::<gtk::Label>().unwrap();
         assert!(!readout.text().contains("stop"),"units stay in label tooltips");
-        assert_eq!(readout.text().split('.').last().unwrap().len(),1,"one decimal in the endpoint readout");
+        assert_eq!(readout.text().split('.').next_back().unwrap().len(),1,"one decimal in the endpoint readout");
     }
     let custom_height=settings_height(&d);
     assert!(custom_height<=170.,"custom controls use {custom_height}px");
@@ -715,7 +715,7 @@ fn native_tonal_selection_input() {
     if state(&d.w).customization.drawer.is_none() {d.click_name(&opener);}
     save_snapshot(&d.w, 100, || output.join("tonal-quick-mask.png"));
     let image=ui_session(&d.w).engine().backend().capture().unwrap();
-    assert!(image.bytes.chunks_exact(4).filter(|p|p[0]>p[1].saturating_add(30)).count()>100);
+    assert!(image.bytes.as_chunks::<4>().0.iter().filter(|p|p[0]>p[1].saturating_add(30)).count()>100);
     d.click_name(&opener);
     // The red overlay is excluded from both point and rectangle sampling.
     canvas_click(&mut d,[700.,700.]);wait_tonal(&d);

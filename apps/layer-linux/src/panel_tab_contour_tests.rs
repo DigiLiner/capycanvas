@@ -101,7 +101,7 @@ fn native_panel_tab_contours_are_continuous() {
                         let node = crate::squircle::converted(&node, scale.into());
                         let texture = w.window.renderer().unwrap().render_texture(&node, Some(&gtk::graphene::Rect::new(0., 0., strip.width() as f32 * scale, strip.height() as f32 * scale)));
                         let pixels = contour_pixels(&texture);
-                        let gap = pixels.chunks_exact(4).enumerate().find(|(_, pixel)| f32::from(pixel[3]) + 2. < floor);
+                        let gap = pixels.as_chunks::<4>().0.iter().enumerate().find(|(_, pixel)| f32::from(pixel[3]) + 2. < floor);
                         let name = format!("{}-{theme:?}-{level:?}-{style:?}-{panel:?}", if drawer { "drawer" } else { "docked" }).to_lowercase();
                         if gap.is_some() || panel == Panel::Adjustments {
                             texture.save_to_png(output.join(format!("{name}.png"))).unwrap();
@@ -263,9 +263,8 @@ fn native_panel_tab_lower_contours() {
                                     let expected = f64::from(delta[c]) * coverage;
                                     let tolerance = if foot == 1. && !foot_boundary { 1. }
                                         else if hover_boundary || foot_boundary { 5. } else { 2. };
-                                    if (observed - expected).abs() > tolerance {
-                                        if mismatches.len() < 24 { mismatches.push(serde_json::json!({"pixel":[x,y],"channel":c,"observed":observed,"expected":expected,"hover":hover,"active":foot})); }
-                                    }
+                                    if (observed - expected).abs() > tolerance
+                                        && mismatches.len() < 24 { mismatches.push(serde_json::json!({"pixel":[x,y],"channel":c,"observed":observed,"expected":expected,"hover":hover,"active":foot})); }
                                 }
                             } }
                             if !mismatches.is_empty() || ((active == 1 && [0, 2, 3].contains(&hovered)) || (active == 0 && hovered == 2)) {
