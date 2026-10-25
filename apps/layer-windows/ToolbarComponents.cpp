@@ -710,7 +710,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
                 for(uint32_t i=0;i<std::min<uint32_t>(current.Size(),uint32_t(buttons.size()));++i){
 
                     bool chosen=flag(current.GetObjectAt(i),L"selected");
-                    buttons[i].Background(chosen?selected(data):clear());AutomationProperties::SetName(buttons[i],str(current.GetObjectAt(i),L"label"));tooltip(buttons[i],str(current.GetObjectAt(i),L"label"));AutomationProperties::SetItemStatus(buttons[i],chosen?data->caption(L"search",L"selected"):L"");
+                    buttons[i].Background(chosen?selected(data):clear());AutomationProperties::SetName(buttons[i],str(current.GetObjectAt(i),L"label"));tooltip(buttons[i],str(current.GetObjectAt(i),L"disabled_reason",str(current.GetObjectAt(i),L"label")));AutomationProperties::SetItemStatus(buttons[i],chosen?data->caption(L"search",L"selected"):L"");
                 }
             };
             result.orient=[weak,row,buttons,glyphs,labeled,choiceSize,choiceStyle]{

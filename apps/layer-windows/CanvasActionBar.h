@@ -158,8 +158,10 @@ struct CanvasActionBar:std::enable_shared_from_this<CanvasActionBar>{
         if(auto spec=choice(item);spec.Size()){
             auto list=array(spec,L"items");
             if(auto group=element.try_as<StackPanel>()){
-                for(uint32_t i=0;i<list.Size()&&i<group.Children().Size();++i)
-                    group.Children().GetAt(i).as<Primitives::ToggleButton>().IsChecked(flag(list.GetObjectAt(i),L"selected"));
+                for(uint32_t i=0;i<list.Size()&&i<group.Children().Size();++i){
+                    auto entry=list.GetObjectAt(i);auto toggle=group.Children().GetAt(i).as<Primitives::ToggleButton>();
+                    toggle.IsChecked(flag(entry,L"selected"));tooltip(toggle,str(entry,L"disabled_reason",str(entry,L"label")));
+                }
             }else if(auto picker=element.try_as<Button>()){
                 J chosen=list.Size()?list.GetObjectAt(0):J{};
                 for(auto value:list)if(flag(value.GetObject(),L"selected"))chosen=value.GetObject();

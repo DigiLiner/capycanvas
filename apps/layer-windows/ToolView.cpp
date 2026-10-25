@@ -67,9 +67,9 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
         for(int i=0;i<size;i++){
             int row=i/count;
             double itemWidth=media()?width:std::min(tile,width);
-            auto const& pick=groupButtons[i];
-            Canvas::SetLeft(pick,(i%count)*(itemWidth+gap));Canvas::SetTop(pick,row*(height+gap));
-            pick.Width(itemWidth);pick.Height(height);
+            auto shell=groups.Children().GetAt(uint32_t(i)).as<FrameworkElement>();
+            Canvas::SetLeft(shell,(i%count)*(itemWidth+gap));Canvas::SetTop(shell,row*(height+gap));
+            shell.Width(itemWidth);shell.Height(height);
         }
         int rows=(size+count-1)/count;
         groups.Height(rows?rows*height+(rows-1)*gap:0);
@@ -82,9 +82,9 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
         for(uint32_t i=0;i<items.Size();i++){
             auto item=items.GetObjectAt(i);auto action=object(item,L"action");TextBlock title;
             auto pick=button(data,str(item,L"label"),[weak,action]{if(auto self=weak.lock())self->data->dispatch(action);});
-            pick.Tag(O({{L"bubble_choice",action}}));
-            pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-            pick.Padding({17,5,17,5});actionTooltip(data,pick,[action]{return action;});
+            pick.Tag(O({{L"bubble_choice",action}}));auto shell=explainable(pick);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            pick.Padding({17,5,17,5});
+            actionTooltip(data,shell,pick,[action,owner=make_weak(pick)]{auto pick=owner.get();return pick&&AutomationProperties::GetHelpText(pick).empty()?action:J{};});
             AutomationProperties::SetAutomationId(pick,(group?L"tool-group-":L"tool-subtool-")+to_hstring(i));
             if(group&&media())AutomationProperties::SetAutomationId(pick,(panel==L"sculpt_sets"?L"sculpt-set-":L"brush-set-")+str(item,L"icon"));
             if(group&&media()){
@@ -107,7 +107,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
                 auto caption=toolLabel(data,item,true,brush,&title);twoLines(title);
                 Grid::SetRow(caption,1);content.Children().Append(caption);pick.Content(content);
             }
-            buttons.push_back(pick);titles.push_back(title);if(group)groups.Children().Append(pick);else list.Children().Append(pick);
+            buttons.push_back(pick);titles.push_back(title);if(group)groups.Children().Append(shell);else list.Children().Append(shell);
         }
         if(group){arrangedWidth=-1;arrange();}
     }
@@ -119,11 +119,13 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
             auto items=array(view,group?L"groups":L"subtools");auto key=itemSchema(items)+data->theme();
             auto& previous=group?groupKey:subtoolKey;
             if(previous!=key){previous=key;rebuild(items,group);}
-            auto const& buttons=group?groupButtons:subtoolButtons;auto const& titles=group?groupTitles:subtoolTitles;
+            auto const& buttons=group?groupButtons:subtoolButtons;auto const& titles=group?groupTitles:subtoolTitles;auto shells=group?groups.Children():list.Children();
             for(uint32_t i=0;i<items.Size();i++){
                 auto item=items.GetObjectAt(i);auto title=str(item,L"label");titles[i].Text(title);AutomationProperties::SetName(buttons[i],title);
                 bool active=flag(item,L"selected");buttons[i].Background(active?selected(data):clear());
-                bool enabled=flag(item,L"enabled",true);buttons[i].IsEnabled(enabled);buttons[i].Opacity(enabled?1:.36);
+                bool enabled=flag(item,L"enabled",true);auto reason=str(item,L"disabled_reason");
+                buttons[i].IsEnabled(enabled);buttons[i].IsHitTestVisible(enabled);buttons[i].Opacity(enabled?1:.36);buttons[i].Content().as<UIElement>().Opacity(enabled&&!reason.empty()?.36:1);
+                if(AutomationProperties::GetHelpText(buttons[i])!=reason){AutomationProperties::SetHelpText(buttons[i],reason);tooltip(shells.GetAt(i),reason.empty()?title:reason);}
                 if(!group)buttons[i].MinHeight(items.GetObjectAt(i).GetNamedValue(L"preview",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Number?34:tonal?36:44);
                 AutomationProperties::SetItemStatus(buttons[i],active?data->caption(L"search",L"selected"):hstring());
             }
@@ -339,7 +341,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                         J current;for(auto option:array(self->data->state,L"tool_extra"))if(str(object(option.GetObject(),L"Choice"),L"id")==specId)current=object(option.GetObject(),L"Choice");
                         auto items=array(current,L"items");bool chosen=i<items.Size()&&flag(items.GetObjectAt(i),L"selected");
                         pick.Background(chosen?selected(self->data):self->data->brush(L"input"));
-                        if(i<items.Size()){auto title=str(items.GetObjectAt(i),L"label");AutomationProperties::SetName(pick,title);tooltip(pick,title);}
+                        if(i<items.Size()){auto title=str(items.GetObjectAt(i),L"label");AutomationProperties::SetName(pick,title);tooltip(pick,str(items.GetObjectAt(i),L"disabled_reason",title));}
                         if(labeled&&shownTheme!=self->data->theme()){shownTheme=self->data->theme();auto glyph=icon(str(items.GetObjectAt(i),L"icon"),shownTheme,self->data->panelMetric(L"icon_size"));AutomationProperties::SetAutomationId(glyph,L"icon-"+str(items.GetObjectAt(i),L"icon"));pick.Content(glyph);}
                         AutomationProperties::SetItemStatus(pick,chosen?self->data->caption(L"search",L"selected"):hstring());
                     }});

@@ -88,18 +88,17 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                 presses->listen(pick);
                 // A disabled command remains disabled and accessible as such;
                 // its surrounding tile still accepts customization gestures.
-                Border slot;slot.Background(clear());Grid tileContent;tileContent.Children().Append(pick);
+                Border slot;slot.Background(clear());auto tileContent=explainable(pick);
                 auto variants=ToolGroupMarker(data);
                 tileContent.Children().Append(variants);slot.Child(tileContent);attach(slot);
                 tileControls.emplace(uint32_t(id),pick);
-                pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.VerticalAlignment(VerticalAlignment::Stretch);
                 double radius=num(tileGeometry,L"tile_corner_radius",SurfaceRadius);
                 {double r=radius*CornerFit;pick.CornerRadius({r,r,r,r});}
                 AutomationProperties::SetAutomationId(slot,L"tile-hit-"+panelId+L"-"+to_hstring(uint32_t(id)));
                 pick.Resources().Insert(box_value(L"ButtonForegroundDisabled"),data->brush(L"text"));
                 auto tileIcon=icon(str(tile,L"icon",L"brush"),data->theme(),num(tileGeometry,L"tile_icon_size",16));
                 auto tileIconName=std::make_shared<hstring>(str(tile,L"icon",L"brush"));pick.Content(tileIcon);
-                tooltip(pick,str(tile,L"tooltip"));place(slot,rects.GetObjectAt(i));tiles.Children().Append(slot);
+                tooltip(tileContent,str(tile,L"tooltip"));place(slot,rects.GetObjectAt(i));tiles.Children().Append(slot);
                 AutomationProperties::SetAutomationId(pick,L"tile-"+panelId+L"-"+to_hstring(uint32_t(id)));
                 if(kind==L"color"||kind==L"opacity")anchors.insert_or_assign(kind==L"color"?L"brush_color":L"brush_opacity",pick);
                 if(*tileIconName==L"colors")pick.Content(panelIcon(data,*tileIconName,bindings,num(tileGeometry,L"tile_icon_size",16)));
@@ -115,7 +114,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                     bindings.emplace_back([data=data,text,panelId,id]{auto current=findId(array(find(array(data->model,L"panels"),L"id",panelId),L"tiles"),id);text.Text(str(current,L"label"));text.Margin({0,0,flag(current,L"has_variants")?16.:4.,0});});
                     pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);pick.Content(content);
                 }
-                bindings.emplace_back([data=data,pick,variants,panelId,id,picker,tileIcon,tileIconName,radius]{
+                bindings.emplace_back([data=data,pick,tileContent,variants,panelId,id,picker,tileIcon,tileIconName,radius]{
                     auto currentPanel=find(array(data->model,L"panels"),L"id",panelId);
                     auto current=findId(array(currentPanel,L"tiles"),id);
                     if(auto name=str(current,L"icon",L"brush");name!=*tileIconName){
@@ -123,13 +122,11 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                     }
                     variants.Visibility(flag(current,L"has_variants")?Visibility::Visible:Visibility::Collapsed);
                     AutomationProperties::SetName(pick,str(current,L"label"));
-                    bool enabled=flag(current,L"enabled");
-                    pick.IsEnabled(enabled);pick.Opacity(enabled?1.:.36);
+                    bool enabled=flag(current,L"enabled");auto hint=str(current,L"tooltip");
+                    explain(tileContent,pick,enabled,picker?pickerTooltip(hint):hint,str(current,L"disabled_reason"));pick.Opacity(enabled?1.:.36);
                     auto facing=drawerFacing(data,O({{L"kind",S(L"tile")},{L"panel",S(panelId)},{L"tile",N(id)}}));
                     pick.Background(flag(current,L"selected")?selected(data):!facing.empty()?data->glass(L"open_tile"):clear());
                     pick.CornerRadius(facingCorners(radius*CornerFit,facing));
-                    auto hint=str(current,L"tooltip");
-                    tooltip(pick,picker?pickerTooltip(hint):hint);
                 });
             }
             for(uint32_t i=0;i<tileOrder.size()&&i<rects.Size();++i){

@@ -872,7 +872,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         for(auto const& [id,group]:groups)if(group.frame.Visibility()==Visibility::Visible&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
         collapsed->AppendGlass(regions,connections,reference);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
-        canvasBar->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
+        canvasBar->AppendGlass(regions,reference);notice->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
         bubbles->Glass(regions,arcs,colors,reference);
         return regions;
     }

@@ -41,15 +41,15 @@ try{
  (Find 'drawing-canvas').SetFocus()
  [CapyRowPointer]::Key([uint32]$review.Id,[ushort]0x4F)
  Wait-Until {((Model).state.commands|Where-Object id -eq 'move').selected} 'O did not choose Move'
- $hint=((Model).state.commands|Where-Object id -eq 'move').tooltip
+ $command=@((Model).state.commands|Where-Object id -eq 'move')[0];$hint=$command.tooltip
  if($hint -notmatch '\(.+\)$'){throw "Move has no shortcut in its command tooltip: $hint"}
  $move=@{item=$null}
- Wait-Until {$move.item=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Move'))|Where-Object {$_.Current.AutomationId -match '^tool-(subtool|group)-' -and !$_.Current.IsOffscreen})[0];$move.item} 'Tool Set did not list the Move subtool'
+ Wait-Until {$move.item=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$command.label))|Where-Object {$_.Current.AutomationId -match '^tool-(subtool|group)-' -and !$_.Current.IsOffscreen})[0];$move.item} 'Tool Set did not list the Move subtool'
  $r=$move.item.Current.BoundingRectangle
  [CapyRowPointer]::Hover($away.x,$away.y);Start-Sleep -Milliseconds 100
  for($step=0;$step -lt 4;$step++){[CapyRowPointer]::Hover([int]($r.X+$r.Width/2)+$step,[int]($r.Y+$r.Height/2));Start-Sleep -Milliseconds 80}
  $shown=@{text=''}
- $expected='Move'+$hint.Substring($hint.IndexOf(' ('))
+ $expected=$command.label+$hint.Substring($hint.IndexOf(' ('))
  try{Wait-Until {$tip=Tooltip;$shown.text=if($tip){$tip.Current.Name}else{''};$shown.text -eq $expected} 'shortcut' 5}catch{throw "Hovering Move showed '$($shown.text)', expected '$expected'"}
  [CapyRowPointer]::Hover($away.x,$away.y)
  Wait-Until {!(Tooltip)} 'The shortcut tooltip did not dismiss'

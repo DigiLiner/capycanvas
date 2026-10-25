@@ -521,6 +521,9 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
                 layers.Children().Append(native.editor);
                 native.outline.IsHitTestVisible(false);native.outline.CornerRadius({6,6,6,6});layers.Children().Append(native.outline);native.frame.Child(layers);
                 AutomationProperties::SetAutomationId(native.frame,L"header-item-"+to_hstring(id));
+                native.frame.Tapped([view=make_weak(native.view)](auto&& sender,TappedRoutedEventArgs const&){
+                    if(auto pick=view.get().try_as<Control>();pick&&!pick.IsEnabled())revealTooltip(sender.template as<FrameworkElement>());
+                });
                 AutomationProperties::SetAutomationId(native.editor,L"header-select-"+to_hstring(id));
                 canvas.Children().Append(native.frame);Canvas::SetZIndex(native.frame,5);
             }
@@ -530,7 +533,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             else native.frame.Tag(nullptr);
             if(kind==L"capy")setIcon(native.view.as<Image>(),str(object(view,L"capy"),L"icon"),data->theme(),num(size,L"capy_icon"));
             AutomationProperties::SetName(native.editor,label);
-            tooltip(native.frame,kind==L"tool"&&pickerControl(object(item,L"control"))&&!editing?pickerTooltip(label):label);
+            auto reason=editing?hstring():str(spec,L"disabled_reason");
+            tooltip(native.frame,!reason.empty()?reason:kind==L"tool"&&pickerControl(object(item,L"control"))&&!editing?pickerTooltip(label):label);
             native.content.ColumnDefinitions().GetAt(0).Width({editing?20.:0.,GridUnitType::Pixel});
             native.grip.Visibility(editing?Visibility::Visible:Visibility::Collapsed);native.editor.Visibility(editing?Visibility::Visible:Visibility::Collapsed);
             native.view.IsHitTestVisible(!editing);native.editor.IsTabStop(editing);
@@ -554,7 +558,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
                 pick.Background(flag(spec,L"selected")?data->glass(L"header_selection"):open?data->glass(L"panel"):clear());
                 double r=corner();pick.CornerRadius(open?CornerRadius{r,r,0,0}:CornerRadius{r,r,r,r});
                 AutomationProperties::SetItemStatus(pick,open?data->caption(L"header",L"open"):flag(spec,L"selected")?data->caption(L"header",L"on"):data->caption(L"header",L"off"));
-                AutomationProperties::SetName(pick,label);
+                AutomationProperties::SetName(pick,label);AutomationProperties::SetHelpText(pick,reason);
             }
         }
         // The editor overlay owns keyboard activation as well as pointer input.

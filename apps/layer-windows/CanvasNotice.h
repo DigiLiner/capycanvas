@@ -3,7 +3,6 @@
 #include "WorkspaceGeometry.h"
 #include "WorkspaceShadow.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
-#include <winrt/Microsoft.UI.Xaml.Documents.h>
 
 namespace CapyUi {
 struct NoticeAnchor{double x,y,width,minText;};
@@ -22,10 +21,9 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
     Shapes::Path surface;
     Grid row;
     TextBlock text{nullptr};
-    RichTextBlock actions;
-    Microsoft::UI::Xaml::Documents::Paragraph actionLine;
+    StackPanel actions;
     std::vector<Button> choices;
-    double arrangedWidth=-1;
+    double arrangedWidth=-1,gap=2;
     bool reflow=true;
     WorkspaceShadow shadow;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timeout{nullptr};
@@ -35,15 +33,16 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
 
     void init(Canvas const& root){
         host=root;auto weak=weak_from_this();
+        auto style=toolbarUi(data->localization.get(),O({{L"type",S(L"style")},{L"style",S(L"small")}})).GetObject();
+        gap=num(style,L"gap",gap);
         text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);text.VerticalAlignment(VerticalAlignment::Center);
         text.IsHitTestVisible(false);AutomationProperties::SetAutomationId(text,L"canvas-notice-text");
-        actions.FontSize(data->textSize());actions.FontFamily(FontFamily(L"Segoe UI"));inheritLanguage(actions,data);
-        actions.IsTextSelectionEnabled(false);actions.TextWrapping(TextWrapping::Wrap);actions.Blocks().Append(actionLine);
+        actions.Orientation(Orientation::Horizontal);actions.Spacing(gap);actions.HorizontalAlignment(HorizontalAlignment::Right);
         actions.VerticalAlignment(VerticalAlignment::Center);actions.Visibility(Visibility::Collapsed);
         AutomationProperties::SetAutomationId(actions,L"canvas-notice-actions");
         for(auto width:{GridLength{1,GridUnitType::Star},GridLength{1,GridUnitType::Auto}}){ColumnDefinition column;column.Width(width);row.ColumnDefinitions().Append(column);}
-        for(int i=0;i<2;++i){RowDefinition line;line.Height({1,GridUnitType::Auto});row.RowDefinitions().Append(line);}
-        row.ColumnSpacing(12);row.Padding({14,8,14,8});Grid::SetColumn(actions,1);
+        for(auto height:{GridLength{1,GridUnitType::Star},GridLength{1,GridUnitType::Auto}}){RowDefinition line;line.Height(height);row.RowDefinitions().Append(line);}
+        row.MinHeight(array(style,L"size").GetNumberAt(1));Grid::SetColumn(actions,1);
         row.Children().Append(text);row.Children().Append(actions);
         surface.IsHitTestVisible(false);frame.Children().Append(surface);frame.Children().Append(row);
         frame.Background(nullptr);
@@ -67,35 +66,38 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         if(changed)text.Text(message);
         if(auto name=str(notice,L"name");AutomationProperties::GetName(frame)!=name)AutomationProperties::SetName(frame,name);
         auto offers=array(notice,L"actions");
+        auto key=[](J const& offer){return str(offer,L"id")+(flag(offer,L"accent")?L":accent":L"");};
         bool rebuild=offers.Size()!=choices.size();
-        for(uint32_t i=0;!rebuild&&i<offers.Size();++i)rebuild=str(offers.GetObjectAt(i),L"id")!=unbox_value<hstring>(choices[i].Tag());
+        for(uint32_t i=0;!rebuild&&i<offers.Size();++i)rebuild=key(offers.GetObjectAt(i))!=unbox_value<hstring>(choices[i].Tag());
         if(rebuild){
-            actionLine.Inlines().Clear();choices.clear();auto weak=weak_from_this();
+            actions.Children().Clear();choices.clear();auto weak=weak_from_this();
             for(auto value:offers){
-                auto token=str(value.GetObject(),L"id");
+                auto offer=value.GetObject();auto token=str(offer,L"id");
                 auto choice=button(data,L"",[weak,token]{if(auto self=weak.lock())self->accept(token);});
-                TextBlock caption;choice.Content(caption);choice.Tag(box_value(token));
-                choice.Padding({12,5,12,5});choice.MinHeight(34);choice.Margin({0,-6,-8,-6});
+                auto caption=label(data,L"",true);caption.VerticalAlignment(VerticalAlignment::Center);choice.Content(caption);choice.Tag(box_value(key(offer)));
+                choice.Height(data->controlHeight());choice.Padding({10,0,10,0});choice.CornerRadius(data->controlCorner());
                 choice.AllowFocusOnInteraction(false);
+                if(flag(offer,L"accent")){
+                    choice.Background(accent(data));caption.Foreground(data->brush(L"accent_foreground"));
+                    for(auto role:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed",L"ButtonBackgroundDisabled"})choice.Resources().Insert(box_value(role),accent(data));
+                }
                 AutomationProperties::SetAutomationId(choice,L"canvas-notice-action-"+token);
-                Microsoft::UI::Xaml::Documents::InlineUIContainer content;content.Child(choice);
-                actionLine.Inlines().Append(content);choices.push_back(choice);
+                auto shell=explainable(choice);shell.VerticalAlignment(VerticalAlignment::Center);
+                shell.Margin({ControlClearance,ControlClearance,ControlClearance,ControlClearance});
+                actions.Children().Append(shell);choices.push_back(choice);
             }
             actions.Visibility(offers.Size()?Visibility::Visible:Visibility::Collapsed);changed=true;
         }
         for(uint32_t i=0;i<offers.Size();++i){
-            auto offer=offers.GetObjectAt(i);auto choice=choices[i];
-            auto caption=choice.Content().as<TextBlock>();auto name=str(offer,L"label"),reason=str(offer,L"reason");
+            auto offer=offers.GetObjectAt(i);auto choice=choices[i];bool enabled=flag(offer,L"enabled");
+            auto caption=choice.Content().as<TextBlock>();auto name=str(offer,L"label");
             if(caption.Text()!=name){caption.Text(name);AutomationProperties::SetName(choice,name);changed=true;}
-            if(choice.IsEnabled()!=flag(offer,L"enabled"))choice.IsEnabled(flag(offer,L"enabled"));
-            if(AutomationProperties::GetHelpText(choice)!=reason){
-                AutomationProperties::SetHelpText(choice,reason);ToolTipService::SetToolTip(choice,reason.empty()?nullptr:box_value(reason));
-            }
+            explain(actions.Children().GetAt(i).as<Grid>(),choice,enabled,name,str(offer,L"reason"));choice.Opacity(enabled?1:.36);
         }
         reflow|=changed;
         if(shown==id){if(changed)present();return;}
         shown=id;
-        surface.Fill(data->brush(L"panel"));text.Foreground(data->brush(L"text"));
+        surface.Fill(data->glass(L"panel"));
         visible=true;present();
         timeout.Stop();timeout.Start();
         if(auto peer=Automation::Peers::FrameworkElementAutomationPeer::FromElement(frame))
@@ -103,6 +105,9 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
     }
     void Place(J const& layout){placement=object(layout,L"notice");present();}
     void Bar(J const& bounds){bar=bounds;present();}
+    void AppendGlass(A& regions,UIElement const& reference)const{
+        appendGlass(regions,frame,reference,{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius},true);
+    }
     void Hide(){
         timeout.Stop();
         if(visible){visible=false;present();}
@@ -126,23 +131,18 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         }
         auto anchor=noticeAnchor(placement,bar);double limit=anchor.width;
         if(reflow||arrangedWidth!=limit){
-            reflow=false;arrangedWidth=limit;double gap=choices.empty()?0.:12.,minimum=0;
-            for(auto const& choice:choices){choice.Measure({INFINITY,INFINITY});minimum=std::max(minimum,double(choice.DesiredSize().Width));}
-            actions.Measure({INFINITY,INFINITY});text.Measure({INFINITY,INFINITY});
-            double message=text.DesiredSize().Width,offers=choices.empty()?0.:actions.DesiredSize().Width;
-            double room=std::max(0.,limit-28),content=std::min(room,message+offers+gap),available=std::max(0.,content-gap);
-            bool stacked=!choices.empty()&&message+offers+gap>room&&room-offers-gap<anchor.minText;
-            double actionWidth=stacked?0.:std::clamp(offers,std::min(minimum,available),available);
-            if(stacked)content=std::min(room,std::max(message,offers));
-            row.ColumnDefinitions().GetAt(0).Width({stacked?content:available-actionWidth,GridUnitType::Pixel});
-            row.ColumnDefinitions().GetAt(1).Width({stacked?0.:actionWidth,GridUnitType::Pixel});
+            reflow=false;arrangedWidth=limit;bool offered=!choices.empty();double spacing=offered?gap:0.;
+            auto natural=[&](Thickness padding){text.Margin(padding);text.Measure({INFINITY,INFINITY});return double(text.DesiredSize().Width);};
+            actions.Measure({INFINITY,INFINITY});
+            double message=natural({12,6,offered?8.:12.,6}),offers=offered?actions.DesiredSize().Width:0.;
+            bool stacked=offered&&message+offers+gap>limit&&limit-offers-gap<anchor.minText;
+            if(stacked)message=natural({12,10,12,2});
+            row.Width(std::min(limit,std::ceil(stacked?std::max(message,offers):message+spacing+offers)+1));
+            row.ColumnDefinitions().GetAt(1).Width(stacked?GridLength{0,GridUnitType::Pixel}:GridLength{1,GridUnitType::Auto});
             Grid::SetColumn(actions,stacked?0:1);Grid::SetRow(actions,stacked?1:0);
-            row.ColumnSpacing(stacked?0:gap);row.RowSpacing(stacked?gap:0);row.Width(content+28);
+            row.ColumnSpacing(stacked?0:spacing);row.RowSpacing(stacked?gap:0);
         }
-        frame.MaxWidth(limit);frame.Width(std::numeric_limits<double>::quiet_NaN());frame.Height(std::numeric_limits<double>::quiet_NaN());
-        row.Measure({float(limit),INFINITY});
-        auto size=row.DesiredSize();
-        float width=std::min(float(limit),std::ceil(size.Width)+2);
+        float width=float(row.Width());
         row.Measure({width,INFINITY});
         float height=std::ceil(row.DesiredSize().Height);
         frame.Width(width);frame.Height(height);
@@ -150,7 +150,7 @@ struct CanvasNotice:std::enable_shared_from_this<CanvasNotice>{
         Canvas::SetLeft(frame,left);Canvas::SetTop(frame,top);
         std::array<float,4> radii{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius};
         surface.Data(squircleRectangle(width,height,radii));
-        shadow.Shape(squircleRectangle(width,height,radii),width,height,8,2,.27f);shadow.Cut(radii);
+        shadow.Shape(squircleRectangle(width,height,radii),width,height,12,2,.16f);shadow.Cut(radii);
         shadow.Layout({float(left),float(top),width,height},899,true);
         frame.Opacity(1);frame.IsHitTestVisible(true);
     }

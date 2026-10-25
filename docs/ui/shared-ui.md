@@ -377,8 +377,9 @@ disabled, so a dimmed tool says why in a few words. A tool row can also be
 choosable, and hosts draw it dimmed. On a vector layer a brush that cannot draw
 paths says "Doesn’t work on vector layers", and a pen that one of its
 settings stops names that setting; choosing either shows the refusal notice at
-once. GTK shows the reason as the tooltip and dims a choosable row's contents as
-it dims a disabled flat button, keeping its selection highlight.
+once. Every host shows the reason as the tooltip or hover text and dims a
+choosable row's contents as it dims a disabled row, keeping its selection
+highlight; hosts that explain disabled controls on tap or hold do so here too.
 
 Canvas gestures that would change nothing say why through `UiState.notice`,
 published under `regions::HOST`:
@@ -412,9 +413,10 @@ to hold it; a canvas action bar reaching below `bar_floor` lifts it above the ba
 It is at most 960 pixels wide. Its actions stay beside the text while the text
 keeps `min_text_width`, which equals `max_width`, so they share a row only with
 text on one line; otherwise they take their own row under it and the text never
-wraps beside them. On GTK the bubble is drawn like the canvas action bar: the
-same surface, 36 pixels tall in one row, a caption 12 pixels in, and its actions
-as the bar's worded controls, right-aligned under the text when stacked. The
+wraps beside them. Every host draws the bubble like its canvas action bar: the
+same surface, a Small tile tall in one row, a caption 12 pixels in, and its
+actions as the bar's worded controls, right-aligned under the text when stacked.
+Hosts measure the actions before the bubble first shows. The
 first action is the core's suggested way forward (`accent`), drawn as the bar's
 accent button, like a mode bar's exit; the others are flat. Hosts hide it after about 4 s (answering
 `accept: false`) or at the next canvas contact. Notices overlay the canvas and
