@@ -474,7 +474,17 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
 
 @Composable internal fun RendererStatsPanel(host: CanvasHost) {
     var stats by remember { mutableStateOf<JSONObject?>(null) }
-    LaunchedEffect(host) { while(isActive) { host.query(obj("type" to "renderer_stats")) { stats = it as? JSONObject }; delay(200) } }
+    LaunchedEffect(host) {
+        var previous: String? = null
+        while (isActive) {
+            host.query(obj("type" to "renderer_stats")) { result ->
+                val next = result as? JSONObject
+                val content = next?.toString()
+                if (content != previous) { previous = content; stats = next }
+            }
+            delay(200)
+        }
+    }
     val colors = LocalPalette.current
     Column(Modifier.fillMaxWidth().testTag("renderer-stats"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         stats?.let { view ->

@@ -385,6 +385,7 @@ impl App {
         surface: JObject,
     ) -> Result<(), String> {
         self.surface = None;
+        self.host.reset_canvas_frame_rate();
         let window = NonNull::new(unsafe {
             ndk_sys::ANativeWindow_fromSurface(
                 env.get_native_interface().cast(),
@@ -516,6 +517,7 @@ impl App {
     fn retire_gpu(&mut self) -> Result<(), String> {
         self.tone.clear();
         self.surface = None;
+        self.host.reset_canvas_frame_rate();
         let retired = self.host.session.renderer_mut().0.take();
         self.instance = None;
         self.window.gpu = None;
@@ -683,6 +685,9 @@ impl App {
         surface.last_view = Some(view);
         surface.last_paint_start = paint_start;
         surface.submitted_frames += 1;
+        if self.blank_presented && self.host.startup.canvas_ready {
+            self.host.canvas_frame_rate.submitted();
+        }
         {
             let complete = surface.completed_frames.clone();
             let frame = surface.submitted_frames;
@@ -1046,6 +1051,7 @@ pub extern "system" fn Java_art_capycanvas_Native_detach(
         app.host.input(layer_ui::UiInput::Blur).map(|_| ()),
     );
     app.surface = None;
+    app.host.reset_canvas_frame_rate();
     })
 }
 #[unsafe(no_mangle)]

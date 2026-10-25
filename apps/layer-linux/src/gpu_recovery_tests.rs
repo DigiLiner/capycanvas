@@ -109,6 +109,42 @@ fn check_gpu_failure_recovery(app: &adw::Application, color: layer_core::color::
         },
         "renderer statistics",
     );
+    let fps_title = w.localization().text(layer_ui::MessageId::DIAGNOSTICS_FPS).to_string();
+    let displayed_fps = || {
+        let mut child = w.effects.stats.first_child();
+        while let Some(row) = child {
+            if row.first_child().and_downcast::<gtk::Label>().is_some_and(|label| label.text().as_str() == fps_title) {
+                return row.last_child().and_downcast::<gtk::Label>().and_then(|label| label.text().parse::<f32>().ok());
+            }
+            child = row.next_sibling();
+        }
+        None
+    };
+    until(|| displayed_fps().is_some_and(|fps| fps > 0.), "FPS shows canvas presentation feedback");
+    assert!(ui_session(&w).engine().backend().stats.lock().unwrap().presented.iter().any(|frame| frame[3] == 1));
+    until(|| displayed_fps() == Some(0.) && w.frame_timer.borrow().is_none(), "idle FPS falls to zero");
+    let idle_frames = ui_session(&w).engine().backend().stats.lock().unwrap().cpu.len();
+    pump(1100);
+    assert_eq!(displayed_fps(), Some(0.));
+    assert_eq!(ui_session(&w).engine().backend().stats.lock().unwrap().cpu.len(), idle_frames, "Diagnostics does not keep the canvas rendering");
+    assert!(w.frame_timer.borrow().is_none());
+    let navigation_document = ui_session(&w).engine().document().clone();
+    let navigation_checkpoint = ui_session(&w).engine().checkpoint();
+    let presentations = ui_session(&w).engine().backend().stats.lock().unwrap().presented.iter().filter(|frame| frame[3] == 1).count();
+    let camera = state(&w).camera;
+    for step in 0..8 {
+        let current = state(&w).camera;
+        let change = ui_session_mut(&w).gesture(current.translation, [camera.translation[0] + step as f32 * 3., camera.translation[1]], 1., 0.);
+        w.changed(change);
+        pump(40);
+    }
+    until(|| displayed_fps().is_some_and(|fps| fps > 0.), "camera navigation updates displayed FPS");
+    assert_eq!(ui_session(&w).engine().document(), &navigation_document);
+    assert_eq!(ui_session(&w).engine().checkpoint(), navigation_checkpoint);
+    assert!(ui_session(&w).engine().backend().stats.lock().unwrap().presented.iter().filter(|frame| frame[3] == 1).count() > presentations);
+    let current = state(&w).camera;
+    let change = ui_session_mut(&w).gesture(current.translation, camera.translation, 1., 0.);
+    w.changed(change);
     w.dispatch(UiAction::SetBrushSize { value: 70. });
     until(|| ui_session(&w).paint_ready(), "the resized brush is ready to paint");
     let stroke = |fail: bool| {

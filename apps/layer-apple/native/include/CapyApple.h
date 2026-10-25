@@ -210,6 +210,13 @@ int32_t capy_apple_finish_startup_catalog(CapyApple app);
 int32_t capy_apple_resize(CapyApple app, uint32_t width, uint32_t height, float scale);
 int32_t capy_apple_redraw(CapyApple app);
 int32_t capy_apple_detach(CapyApple app);
+typedef struct CapyFrameRateObserver CapyFrameRateObserver;
+/* Owner-only acquisition. The returned Arc remains valid through session retirement.
+   Presentation calls may run on any thread while retained; release exactly once. */
+const CapyFrameRateObserver *capy_apple_frame_rate_observer(CapyApple app);
+void capy_apple_frame_rate_presented(const CapyFrameRateObserver *observer,
+                                    uint64_t presented_ns, uint64_t observed_ns);
+void capy_apple_frame_rate_observer_release(const CapyFrameRateObserver *observer);
 int32_t capy_apple_suspend_renderer(CapyApple app);
 int32_t capy_apple_poll_renderer(CapyApple app); /* 0 available, 1 suspended, -1 error */
 int32_t capy_apple_test_gpu_fault(CapyApple app, uint32_t validation); /* Debug builds only */

@@ -616,3 +616,8 @@ workspace-bubble-swap-sliders = สลับแถบเลื่อน
 workspace-history-put-back = เก็บ { $panels } กลับ
 workspace-show-in-zen = แสดงในโหมดเซน
 workspace-bubble-edit-palettes = แก้ไขจานสี…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = จำนวนเฟรมผืนผ้าใบที่แสดงในวินาทีที่ผ่านมา รวมการเลื่อนและซูมจากแคช ไม่ใช่ค่าความหน่วงของอินพุต
+diagnostics-submitted-fps = FPS ที่ส่ง
+diagnostics-submitted-fps-description = เฟรมผืนผ้าใบที่ส่งในวินาทีที่ผ่านมา ไม่สามารถทราบเวลาที่แสดงบนหน้าจอได้

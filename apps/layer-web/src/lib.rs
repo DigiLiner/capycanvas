@@ -26,7 +26,7 @@ mod gpu_diagnostics;
 
 use layer_core::Point;
 use layer_engine::{PenEvent, PenPhase, SampleFlags, ToolKind};
-use layer_render::CanvasRenderer;
+use layer_render::{CanvasRenderer, FrameRate, FrameRateSource, PresentationRate};
 use layer_render_wgpu::{AttachedRenderer, GpuRasterError, SdrSurfaceColor, StartupProgress, ViewportPresenter, WgpuRasterizer};
 use layer_ui::{UiAction, UiSession, ui_catalog_localized};
 use serde::{Deserialize, Serialize};
@@ -103,6 +103,13 @@ struct WebSurface {
     blank_presented: bool,
     retained_frame: Option<wgpu::Texture>,
     lost: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    submitted_frames: PresentationRate,
+    submission_epoch: web_time::Instant,
+}
+impl WebSurface {
+    fn submission_time_ns(&self) -> u64 {
+        u64::try_from(self.submission_epoch.elapsed().as_nanos()).unwrap_or(u64::MAX).saturating_add(1)
+    }
 }
 
 fn js(value: impl std::fmt::Display) -> JsValue {
@@ -531,6 +538,8 @@ impl WebGpu {
                 blank_presented: false,
                 retained_frame: None,
                 lost,
+                submitted_frames: PresentationRate::default(),
+                submission_epoch: web_time::Instant::now(),
             },
         }.prepare().await?;
         if let Some(error) = validation.pop().await {
@@ -837,7 +846,10 @@ impl WebApp {
         Ok(value)
     }
     pub fn renderer_stats(&self) -> Result<JsValue, JsValue> {
-        serialize(&self.session.renderer_stats())
+        let rate = self.surface.as_ref().and_then(|surface|
+            surface.submitted_frames.fps(surface.submission_time_ns())
+        ).map(|fps| FrameRate { fps, source: FrameRateSource::Submitted });
+        serialize(&self.session.renderer_stats_with_frame_rate(rate))
     }
     pub fn consumed_paint_timestamp_ns(&self) -> u64 {
         self.session.engine().metrics().last_consumed_paint_ns
@@ -1252,6 +1264,7 @@ impl WebApp {
         encoder.copy_texture_to_texture(retained.as_image_copy(), target.texture.as_image_copy(), retained.size());
         gpu.queue().submit([encoder.finish()]);
         gpu.queue().present(target);
+        surface.submitted_frames.observe(surface.submission_time_ns());
         surface.blank_presented = true;
         self.screen_presented_ms = now_ms;
         serialize(&change)

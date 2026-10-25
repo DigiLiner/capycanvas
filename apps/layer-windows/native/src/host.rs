@@ -340,6 +340,7 @@ impl CapyHost {
         self.native.startup = Default::default();
         self.presenter = Some(presenter);
         self.config = Some(config);
+        self.native.reset_canvas_frame_rate();
         // Surface::configure calls SetSwapChain. Only capy_resize may do that,
         // on the UI thread while this worker is parked.
         Ok(())
@@ -418,6 +419,7 @@ impl CapyHost {
             surround,
         ).map_err(err)?;
         gpu.queue().present(target);
+        self.native.canvas_frame_rate.submitted();
         self.pacing.submitted(gpu.queue());
         self.blank_presented = true;
         gpu.device().poll(wgpu::PollType::Poll).map_err(err)?;
@@ -1285,6 +1287,7 @@ pub unsafe extern "C" fn capy_reset_surface(host: u64, panel: *mut c_void) -> i3
         }
         .map_err(err)?;
         host.surface = surface;
+        host.native.reset_canvas_frame_rate();
         host.config = None;
         host.blank_presented = false;
         Ok(0)
@@ -1351,6 +1354,7 @@ pub unsafe extern "C" fn capy_suspend_renderer(host: u64) -> i32 {
         host.target = None;
         host.cancel_contacts()?;
         host.native.suspend_renderer()?;
+        host.native.reset_canvas_frame_rate();
         host.presenter = None;
         drop(host.native.session.renderer_mut().0.take());
         host.config = None;

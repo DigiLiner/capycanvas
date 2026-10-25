@@ -634,3 +634,8 @@ workspace-bubble-swap-sliders = Поменять ползунки местами
 workspace-history-put-back = Убрано на место: { $panels }
 workspace-show-in-zen = Показывать в режиме дзен
 workspace-bubble-edit-palettes = Изменить палитры…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Кадры холста за последнюю секунду, включая панорамирование и масштабирование из кэша. Не задержка ввода.
+diagnostics-submitted-fps = Отправлено FPS
+diagnostics-submitted-fps-description = Кадры холста, отправленные за последнюю секунду. Время их показа на экране недоступно.

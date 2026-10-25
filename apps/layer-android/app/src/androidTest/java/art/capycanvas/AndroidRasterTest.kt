@@ -192,6 +192,44 @@ class AndroidRasterTest {
         }
         assertNull(host.failure)
     }
+    @Test fun submittedFrameRateTracksNavigationIdleAndSurfaceLifetime() {
+        fun stats() = native { JSONObject(Native.query(it, obj("type" to "renderer_stats").toString())) }
+        fun rate() = stats().array("rows").getJSONObject(2)
+        action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "stats", "visible" to true)))
+        compose.onNodeWithTag("renderer-stats").assertIsDisplayed()
+        compose.waitUntil(60_000) { !tick() }
+        SystemClock.sleep(1100)
+        val idleFrames = native { JSONObject(Native.displayStatus(it)).getLong("submitted_frames") }
+        assertEquals("0", rate().getString("value"))
+        assertEquals("Submitted FPS", rate().getString("label"))
+        val revision = native { state(it).getJSONObject("document_file").getLong("revision") }
+        repeat(8) { invoke(if (it % 2 == 0) "zoom_in" else "zoom_out") }
+        compose.waitUntil(10_000) { rate().getString("value").toFloatOrNull()?.let { it > 0 } == true }
+        assertTrue(native { JSONObject(Native.displayStatus(it)).getLong("submitted_frames") } > idleFrames)
+        assertEquals(revision, native { state(it).getJSONObject("document_file").getLong("revision") })
+        compose.onNodeWithText("Submitted FPS").assertIsDisplayed()
+        screenshot("validation/submitted-fps-${native { state(it).getString("theme") }}.png")
+        compose.waitUntil(60_000) { !tick() }
+        SystemClock.sleep(1100)
+        val stopped = native { JSONObject(Native.displayStatus(it)).getLong("submitted_frames") }
+        repeat(4) { assertEquals("0", rate().getString("value")); SystemClock.sleep(220) }
+        assertEquals(stopped, native { JSONObject(Native.displayStatus(it)).getLong("submitted_frames") })
+        native { Native.detach(it) }
+        assertEquals("—", rate().getString("value"))
+        repeat(4) { assertFalse(tick()); assertEquals("—", rate().getString("value")) }
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("FPS").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("FPS").assertIsDisplayed()
+        scenario.recreate()
+        scenario.onActivity { activity = it }
+        host.awaitReady(60_000, compose)
+        compose.waitUntil(60_000) { host.surfaceReady }
+        invoke("zoom_in")
+        compose.waitUntil(10_000) { rate().getString("value").toFloatOrNull()?.let { it > 0 } == true }
+        assertEquals("Submitted FPS", rate().getString("label"))
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Submitted FPS").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Submitted FPS").assertIsDisplayed()
+        assertNull(host.failure)
+    }
     private fun state(handle: Long): JSONObject {
         Native.dispatch(handle,obj("type" to "close_settings").toString())
         return JSONObject(Native.snapshot(handle)!!).getJSONObject("state")

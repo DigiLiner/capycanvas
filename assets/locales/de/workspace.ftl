@@ -631,3 +631,8 @@ workspace-bubble-swap-sliders = Regler tauschen
 workspace-history-put-back = { $panels } zurückgelegt
 workspace-show-in-zen = Im Zen-Modus anzeigen
 workspace-bubble-edit-palettes = Paletten bearbeiten…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Leinwanddarstellungen in der letzten Sekunde, einschließlich zwischengespeichertem Verschieben und Zoomen. Keine Eingabelatenz.
+diagnostics-submitted-fps = Gesendete FPS
+diagnostics-submitted-fps-description = In der letzten Sekunde gesendete Leinwandbilder. Der Zeitpunkt der Bildschirmanzeige ist nicht verfügbar.

@@ -940,10 +940,13 @@ impl CanvasRenderer for RenderWorker {
         }
     }
     fn telemetry(&self) -> layer_render::RendererTelemetry {
-        self.telemetry
+        let mut telemetry = self.telemetry
             .try_lock()
             .map(|t| t.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        telemetry.frame_rate = self.clock.presented_fps(gtk::glib::monotonic_time().max(0) as u64 * 1000)
+            .map(|fps| layer_render::FrameRate { fps, source: layer_render::FrameRateSource::Presented });
+        telemetry
     }
     fn request_thumbnail(
         &mut self,

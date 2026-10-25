@@ -628,3 +628,8 @@ workspace-bubble-swap-sliders = Kaydırıcıları değiştir
 workspace-history-put-back = Yerine kondu: { $panels }
 workspace-show-in-zen = Zen modunda göster
 workspace-bubble-edit-palettes = Paletleri düzenle…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Önbellekten kaydırma ve yakınlaştırma dahil, son saniyede gösterilen tuval kareleri. Girdi gecikmesi değildir.
+diagnostics-submitted-fps = Gönderilen FPS
+diagnostics-submitted-fps-description = Son saniyede gönderilen tuval kareleri. Ekranda gösterim zamanlaması kullanılamıyor.

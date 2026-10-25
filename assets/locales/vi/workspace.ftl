@@ -625,3 +625,8 @@ workspace-bubble-swap-sliders = Đổi chỗ thanh trượt
 workspace-history-put-back = Đã cất lại { $panels }
 workspace-show-in-zen = Hiện trong chế độ Zen
 workspace-bubble-edit-palettes = Sửa bảng màu…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Số khung hình vùng vẽ được hiển thị trong giây vừa qua, gồm cả di chuyển và thu phóng từ bộ nhớ đệm. Không phải độ trễ đầu vào.
+diagnostics-submitted-fps = FPS đã gửi
+diagnostics-submitted-fps-description = Số khung hình vùng vẽ được gửi trong giây vừa qua. Không có thông tin thời điểm hiển thị trên màn hình.

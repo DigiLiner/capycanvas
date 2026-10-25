@@ -1205,3 +1205,8 @@ workspace-bubble-swap-sliders = Tukar penggeser
 workspace-history-put-back = Mengembalikan { $panels }
 workspace-show-in-zen = Tampilkan di Mode Zen
 workspace-bubble-edit-palettes = Edit palet…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Tampilan kanvas dalam satu detik terakhir, termasuk geser dan zoom dari cache. Bukan latensi input.
+diagnostics-submitted-fps = FPS dikirim
+diagnostics-submitted-fps-description = Bingkai kanvas yang dikirim dalam satu detik terakhir. Waktu penayangan di layar tidak tersedia.

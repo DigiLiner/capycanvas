@@ -1121,8 +1121,8 @@ impl EffectPanels {
                 let value = gtk::Label::new(None);
                 value.set_xalign(1.);
                 value.add_css_class("numeric");
-                let row = row(metric.label, &value);
-                row.set_tooltip_text(Some(metric.description));
+                let row = row(&metric.label, &value);
+                row.set_tooltip_text(Some(&metric.description));
                 self.stats
                     .insert_child_after(&row, self.recording_button.prev_sibling().as_ref());
                 self.stats_labels.borrow_mut().push(value);
@@ -1135,10 +1135,15 @@ impl EffectPanels {
             }
         }
         for (label, metric) in self.stats_labels.borrow().iter().zip(&view.rows) {
-            label.set_text(&metric.value);
+            if label.text().as_str() != metric.value { label.set_text(&metric.value); }
+            if let Some(row) = label.parent()
+                && row.tooltip_text().as_deref() != Some(metric.description.as_str())
+            { row.set_tooltip_text(Some(&metric.description)); }
         }
-        *self.stats_samples.borrow_mut() = view.samples;
-        self.stats_plot.queue_draw();
+        if *self.stats_samples.borrow() != view.samples {
+            *self.stats_samples.borrow_mut() = view.samples;
+            self.stats_plot.queue_draw();
+        }
     }
 }
 fn same_property_kind(a: &PropertyKind, b: &PropertyKind) -> bool {

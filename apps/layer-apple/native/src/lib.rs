@@ -3,6 +3,8 @@
 mod handles;
 pub use handles::{capy_apple_string_copy,capy_apple_string_free,capy_apple_string_length};
 mod metal;
+mod frame_rate;
+pub use frame_rate::*;
 mod document_tabs;
 pub use document_tabs::*;
 mod session;
@@ -613,6 +615,7 @@ pub unsafe extern "C" fn capy_apple_attach(
             return Err("Missing Metal layer".into());
         }
         a.host.resize(width, height, scale)?;
+        a.host.reset_canvas_frame_rate();
         a.gpu_operation(|a| unsafe { a.metal.attach(&mut a.host, layer) })
     })
     .map_or(-1, |_| 0)
@@ -673,6 +676,7 @@ pub unsafe extern "C" fn capy_apple_detach(app: u64) -> i32 {
         a.host.input(layer_ui::UiInput::Blur)?;
         a.dismissed_contacts.clear();
         a.metal.detach();
+        a.host.reset_canvas_frame_rate();
         Ok(())
     })
     .map_or(-1, |_| 0)

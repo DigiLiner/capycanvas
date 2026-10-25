@@ -15,6 +15,8 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
     Microsoft::UI::Xaml::Shapes::Line budget;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<TextBlock> values;
+    std::vector<TextBlock> captions;
+    std::vector<Grid> rowLines;
     Button record{nullptr};
     TextBlock recordError;
     uint64_t listener=0;
@@ -68,15 +70,20 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
             }))busy=false;
     }
     void apply(J const& next){
-        model=next;auto rows=array(model,L"rows");
-        if(values.size()!=rows.Size()){
-            root.Children().Clear();values.clear();
+        if(model&&model.Stringify()==next.Stringify())return;
+        auto previous=array(model,L"rows"),rows=array(next,L"rows");
+        bool rebuild=values.size()!=rows.Size();
+        bool chartChanged=rebuild||array(model,L"samples").Stringify()!=array(next,L"samples").Stringify()
+            ||num(model,L"budget_ms")!=num(next,L"budget_ms")||str(model,L"chart_label")!=str(next,L"chart_label");
+        model=next;
+        if(rebuild){
+            root.Children().Clear();values.clear();captions.clear();rowLines.clear();
             for(uint32_t i=0;i<rows.Size();i++){
                 auto row=rows.GetObjectAt(i);Grid line;
                 ColumnDefinition caption;caption.Width({1,GridUnitType::Star});line.ColumnDefinitions().Append(caption);
                 ColumnDefinition reading;reading.Width({1,GridUnitType::Auto});line.ColumnDefinitions().Append(reading);
                 line.ColumnSpacing(data->panelMetric(L"control_spacing"));
-                auto text=label(data,str(row,L"label"));line.Children().Append(text);
+                auto text=label(data,str(row,L"label"));line.Children().Append(text);captions.push_back(text);rowLines.push_back(line);
                 auto value=label(data,L"");Grid::SetColumn(value,1);line.Children().Append(value);values.push_back(value);
                 AutomationProperties::SetAutomationId(value,L"renderer-stat-"+to_hstring(i));
                 tooltip(line,str(row,L"description"));
@@ -89,8 +96,19 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
             }
         }
         {uint32_t index=0;if(!root.Children().IndexOf(record,index)){root.Children().Append(record);root.Children().Append(recordError);}}
-        for(uint32_t i=0;i<rows.Size();i++)values[i].Text(str(rows.GetObjectAt(i),L"value"));
-        draw();
+        for(uint32_t i=0;i<rows.Size();i++){
+            auto row=rows.GetObjectAt(i);auto value=str(row,L"value");
+            if(values[i].Text()!=value)values[i].Text(value);
+            if(!rebuild){
+                auto old=previous.GetObjectAt(i);
+                if(str(old,L"label")!=str(row,L"label"))captions[i].Text(str(row,L"label"));
+                if(str(old,L"description")!=str(row,L"description")){
+                    tooltip(rowLines[i],str(row,L"description"));
+                    AutomationProperties::SetHelpText(values[i],str(row,L"description"));
+                }
+            }
+        }
+        if(chartChanged){AutomationProperties::SetName(chart,str(model,L"chart_label"));draw();}
     }
     void recording(){
         if(!data->strokes)return;auto const& strokes=*data->strokes;auto status=strokes.status;auto text=str(status,L"label");

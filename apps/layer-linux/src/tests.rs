@@ -434,9 +434,8 @@ fn native_default_workspace() {
                 .iter()
                 .find(|view| view.id == g.id)
                 .unwrap()
-                .stack
-                .parent()
-                .unwrap();
+                .root
+                .clone();
             let b = native.compute_bounds(&w.surface).unwrap();
             for (actual, expected) in [
                 (b.x(), g.bounds.x),
@@ -522,7 +521,7 @@ fn native_default_workspace() {
             if panel == Panel::Stats {
                 pump(250);
                 let view = ui_session(&w).renderer_stats();
-                let mut expected: Vec<_> = view.rows.iter().map(|row| row.label).collect();
+                let mut expected: Vec<_> = view.rows.iter().map(|row| row.label.as_str()).collect();
                 expected.insert(view.chart_after_rows, "chart");
                 expected.push("Start stroke recording");
                 let mut actual = Vec::new();

@@ -654,3 +654,8 @@ workspace-bubble-swap-sliders = 交换滑块
 workspace-history-put-back = 放回{ $panels }
 workspace-show-in-zen = 在专注模式中显示
 workspace-bubble-edit-palettes = 编辑调色板…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = 最近一秒显示的画布帧数，包括使用缓存的平移和缩放。并非输入延迟。
+diagnostics-submitted-fps = 提交 FPS
+diagnostics-submitted-fps-description = 最近一秒提交的画布帧数。无法获取实际显示时间。

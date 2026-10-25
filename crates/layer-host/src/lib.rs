@@ -6,6 +6,7 @@ pub mod export;
 pub mod gpu;
 pub mod handles;
 pub mod ffi;
+mod frame_rate;
 mod header;
 mod snapshot;
 mod model_update;
@@ -22,6 +23,7 @@ use layer_render::CanvasRenderer;
 use layer_ui::{ContactPhase, PointerButton, PointerKind, UiAction, UiInput, UiSession};
 pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, admit_adapter, request_device, unsupported_adapter};
 pub use storage::StorageRoots;
+pub use frame_rate::CanvasFrameRate;
 pub use layer_render_wgpu::AttachedRenderer as Renderer;
 pub use snapshot::{SnapshotFields, extend_update};
 use serde::Deserialize;
@@ -57,6 +59,7 @@ pub struct PointerBatch<'a> {
 }
 
 pub struct NativeHost {
+    pub canvas_frame_rate: std::sync::Arc<CanvasFrameRate>,
     pub session: Box<UiSession<Renderer>>,
     /// Number of drawings owned by the window, for shared header geometry.
     pub document_count: usize,
@@ -107,6 +110,9 @@ impl AsMut<NativeHost> for NativeHost {
 }
 
 impl NativeHost {
+    pub fn reset_canvas_frame_rate(&mut self) {
+        self.canvas_frame_rate = std::sync::Arc::new(CanvasFrameRate::default());
+    }
     pub fn poisoned(&self) -> Option<&str> { self.poisoned.as_deref() }
     pub fn poison(&mut self, payload: &(dyn std::any::Any + Send)) -> String {
         self.poisoned.get_or_insert_with(|| panic_diagnostic(payload)).clone()
@@ -201,6 +207,7 @@ impl NativeHost {
     fn from_session(session: Box<UiSession<Renderer>>) -> Self {
         let catalog = Box::new(layer_ui::ui_catalog_localized(session.localization()));
         Self {
+            canvas_frame_rate: std::sync::Arc::new(CanvasFrameRate::default()),
             session,
             ui_color: UiColor::Mapped,
             logical: [1.0, 1.0],
@@ -918,7 +925,7 @@ impl NativeHost {
                 json!(recipe)
             }
             Query::ExportValidation { recipe } => json!(self.export_validation(&recipe).err()),
-            Query::RendererStats => json!(self.session.renderer_stats()),
+            Query::RendererStats => json!(self.session.renderer_stats_with_frame_rate(self.canvas_frame_rate.sample())),
             Query::CommandReason { command } => json!(self.session.command_disabled_reason(command)),
             Query::FilterPreviews {
                 filters,

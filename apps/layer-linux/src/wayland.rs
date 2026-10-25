@@ -27,6 +27,7 @@ use wayland_protocols::wp::presentation_time::client::{wp_presentation, wp_prese
 /// Presentation feedback corrects startup/monitor phase shifts without input-thread locks.
 #[derive(Default)]
 pub struct FrameClock {
+    presentations: layer_render::PresentationRate,
     phase_ns: AtomicU64,
     period_ns: AtomicU64,
     stroke_lead_ns: AtomicU64,
@@ -34,6 +35,9 @@ pub struct FrameClock {
     draw_work_ns: AtomicU64,
 }
 impl FrameClock {
+    pub fn presented_fps(&self, now_ns: u64) -> Option<f32> {
+        self.presentations.fps(now_ns)
+    }
     pub fn stroke_work_fits(&self) -> bool {
         self.draw_work_ns.load(Ordering::Relaxed) <= self.period() / 8
     }
@@ -59,6 +63,7 @@ impl FrameClock {
         period * 3 / 4
     }
     fn observe(&self, time: u64, period: u64) {
+        self.presentations.observe(time);
         let previous = self.phase_ns.load(Ordering::Relaxed);
         let old_period = self.period_ns.load(Ordering::Relaxed);
         if old_period != period {

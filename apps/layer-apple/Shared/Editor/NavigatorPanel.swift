@@ -96,24 +96,39 @@ struct RendererStatsPanel: View {
         VStack(spacing: store.panelMetrics.spacing) {
             ForEach(stats.view["rows"].array.indices, id: \.self) { index in
                 let row = stats.view["rows"][index]
-                HStack(spacing: 0) {
-                    Text(row["label"].string).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(row["value"].string).monospacedDigit().fixedSize()
-                        .accessibilityIdentifier("stats-value-\(index)")
-                }.frame(height: 17).help(row["description"].string)
+                RendererStatsRow(label: row["label"].string, value: row["value"].string,
+                    description: row["description"].string, index: index).equatable()
                 if index + 1 == Int(stats.view["chart_after_rows"].number) {
-                    chart
+                    RendererStatsChart(samples: stats.view["samples"].array.map(\.number),
+                        budget: stats.view["budget_ms"].number, color: palette["text"],
+                        label: stats.view["chart_label"].string).equatable()
                 }
             }
             RecordingButton(recording: store.strokeRecording)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("renderer-stats")
             .onAppear { stats.show(viewer); store.strokeRecording.refresh() }.onDisappear { stats.hide(viewer) }
     }
-    private var chart: some View {
+}
+
+private struct RendererStatsRow: View, Equatable {
+    let label: String, value: String, description: String
+    let index: Int
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(label).lineLimit(1)
+            Spacer(minLength: 6)
+            Text(value).monospacedDigit().fixedSize().accessibilityIdentifier("stats-value-\(index)")
+        }.frame(height: 17).help(description)
+    }
+}
+
+private struct RendererStatsChart: View, Equatable {
+    let samples: [Double]
+    let budget: Double
+    let color: Color
+    let label: String
+    var body: some View {
         Canvas { context, size in
-            let samples = stats.view["samples"].array.map(\.number)
-            let budget = stats.view["budget_ms"].number
             let maximum = max(0.001, max(budget, samples.max() ?? 0) * 1.1)
             // Match the shared chart's centered 200×46 SVG view box.
             let scale = min(size.width / 200, size.height / 46)
@@ -121,14 +136,14 @@ struct RendererStatsPanel: View {
             context.scaleBy(x: scale, y: scale)
             let y = 46 * (1 - budget / maximum)
             var line = Path(); line.move(to: CGPoint(x: 0, y: y)); line.addLine(to: CGPoint(x: 200, y: y))
-            context.stroke(line, with: .color(palette["text"].opacity(0.3)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            context.stroke(line, with: .color(color.opacity(0.3)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             var chart = Path()
             for (index, value) in samples.enumerated() {
                 let point = CGPoint(x: Double(index) * 200 / 119, y: 46 * (1 - value / maximum))
                 if index == 0 { chart.move(to: point) } else { chart.addLine(to: point) }
             }
-            context.stroke(chart, with: .color(palette["text"]), lineWidth: 1.5)
-        }.frame(height: 46).accessibilityElement().accessibilityLabel(stats.view["chart_label"].string)
+            context.stroke(chart, with: .color(color), lineWidth: 1.5)
+        }.frame(height: 46).accessibilityElement().accessibilityLabel(label)
     }
 }
 

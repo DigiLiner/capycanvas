@@ -155,10 +155,12 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
     if(!stats.isConnected||!stats.getClientRects().length||document.hidden)return;
     const view=app.renderer_stats();
     if(!metricLabels.length){for(const [index,metric] of view.rows.entries()){const row=element("div","property-row"),value=element("span","numeric");row.title=metric.description;row.append(element("span","",metric.label),value);stats.insertBefore(row,recordButton);metricLabels.push({row,label:row.firstChild,value});if(index+1===Number(view.chart_after_rows))stats.insertBefore(chart,recordButton);}contentChanged("stats");}
-    view.rows.forEach((r,i)=>{const nodes=metricLabels[i];nodes.row.title=r.description;nodes.label.textContent=r.label;nodes.value.textContent=r.value;});chart.setAttribute("aria-label",view.chart_label);
+    view.rows.forEach((r,i)=>{const nodes=metricLabels[i];if(nodes.row.title!==r.description)nodes.row.title=r.description;if(nodes.label.textContent!==r.label)nodes.label.textContent=r.label;if(nodes.value.textContent!==r.value)nodes.value.textContent=r.value;});
+    if(chart.getAttribute("aria-label")!==view.chart_label)chart.setAttribute("aria-label",view.chart_label);
     const max=Math.max(view.budget_ms,...view.samples)*1.1,y=ms=>46*(1-ms/max);
-    budget.setAttribute("d",`M0 ${y(view.budget_ms)}H200`);
-    line.setAttribute("d",view.samples.map((ms,i)=>`${i?"L":"M"}${i*200/119} ${y(ms)}`).join(" "));
+    const budgetPath=`M0 ${y(view.budget_ms)}H200`,samplePath=view.samples.map((ms,i)=>`${i?"L":"M"}${i*200/119} ${y(ms)}`).join(" ");
+    if(budget.getAttribute("d")!==budgetPath)budget.setAttribute("d",budgetPath);
+    if(line.getAttribute("d")!==samplePath)line.setAttribute("d",samplePath);
   },200);
   function row(label,input){const r=element("label","property-row"),text=element("span","",label);if(typeof label!=="function")text.title=label;r.append(text,input);return r;}
   function numberEditor(numeric,label,request,valueOnly=false){

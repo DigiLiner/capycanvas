@@ -62,6 +62,17 @@ alongside moving-only rates; first-to-last cadence can hide stalls. Browser
 content-surface cadence without camera-to-presentation attribution and renderer
 submissions remain diagnostics, not acceptance evidence.
 
+**Live FPS.** Diagnostics counts canvas frames over the last second, including
+cached pan and zoom. GTK and physical Apple drawables report **FPS** from actual
+presentation feedback. Web, Android, Windows and Apple without drawable feedback
+report **Submitted FPS** from successful main-canvas publications; this cannot
+establish the display rate or account for dropped frames. Neither value measures
+input latency or qualifies moving frames. Idle samples expire without waking the
+canvas. Panels retain their existing 200 ms refresh, skip unchanged values and
+charts, and use bounded atomic storage without per-frame UI work or owner locks.
+Replacing a surface retires its observer so late callbacks cannot affect the new
+canvas. Web's focused check is `node apps/layer-web/test.mjs --headless --fps`.
+
 **The target document.**
 
 - It is the tier's photo as the bottom layer plus one empty paint layer at Fit

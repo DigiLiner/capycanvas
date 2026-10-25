@@ -233,6 +233,7 @@ final class NativeOwner: @unchecked Sendable {
         trace?.finish()
         let handle = handle, retainedLayer = layer
         queue.finish {
+            (retainedLayer as? ObservedMetalLayer)?.frameRate = nil
             capy_apple_detach(nativeValue(handle))
             capy_apple_destroy(nativeValue(handle))
             withExtendedLifetime(retainedLayer) {}
@@ -786,6 +787,7 @@ final class NativeOwner: @unchecked Sendable {
         let lease = MetalLayerLease(layer)
         perform { [self] in
             let previous = self.layer
+            (previous as? ObservedMetalLayer)?.frameRate = nil
             defer { withExtendedLifetime(previous) {}; try? publish() }
             self.layer = lease.value
             surfaceSize = (width, height, scale)
@@ -801,7 +803,9 @@ final class NativeOwner: @unchecked Sendable {
         guard handle != nil else { throw HostFailure(message: launchFailure ?? "Native session is unavailable") }
         guard let layer, let size = surfaceSize else { throw HostFailure(message: "The canvas has no presentation surface") }
         let surface = Unmanaged.passUnretained(layer).toOpaque()
+        (layer as? ObservedMetalLayer)?.frameRate = nil
         try check(capy_apple_attach(nativeValue(handle), surface, size.width, size.height, size.scale))
+        (layer as? ObservedMetalLayer)?.frameRate = CanvasFrameRateObserver(nativeValue(handle))
     }
     private func startGpuHealthChecks() {
         guard gpuHealth == nil else { return }
@@ -887,6 +891,7 @@ final class NativeOwner: @unchecked Sendable {
     }
     func detach() {
         perform { [self] in
+            (layer as? ObservedMetalLayer)?.frameRate = nil
             try check(capy_apple_detach(nativeValue(handle)))
             gpuHealth?.cancel(); gpuHealth = nil
             layer = nil; surfaceSize = nil

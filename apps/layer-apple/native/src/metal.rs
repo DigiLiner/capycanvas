@@ -141,6 +141,7 @@ impl MetalHost {
         let suspension = host.suspend_renderer();
         self.local_tone.clear();
         self.surface = None;
+        host.reset_canvas_frame_rate();
         self.timing = None;
         let retired = host.session.renderer_mut().0.take();
         self.instance = None;
@@ -387,6 +388,7 @@ impl MetalHost {
         ).map_err(error)?;
         costs[2] = clock.elapsed().as_nanos() as u64 - costs[..2].iter().sum::<u64>();
         gpu.queue().present(target);
+        host.canvas_frame_rate.submitted();
         self.blank_presented = true;
         self.screen_presented = Some(Instant::now());
         costs[3] = clock.elapsed().as_nanos() as u64 - costs[..3].iter().sum::<u64>();

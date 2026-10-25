@@ -2388,10 +2388,15 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub fn renderer_stats(&self) -> crate::StatsView {
+        self.renderer_stats_with_frame_rate(None)
+    }
+    pub fn renderer_stats_with_frame_rate(&self, frame_rate: Option<layer_render::FrameRate>) -> crate::StatsView {
+        let mut telemetry = self.engine.backend().telemetry();
+        telemetry.frame_rate = frame_rate.or(telemetry.frame_rate);
         crate::StatsView {
             selection_values: self.selection_masks.refine_values,
             selection_previews: self.selection_masks.refine_previews,
-            ..crate::stats::view(self.engine.backend().telemetry())
+            ..crate::stats::view(telemetry, self.localization())
         }
     }
     /// Live execution availability, including temporary canvas locks. Retained

@@ -654,3 +654,8 @@ workspace-bubble-swap-sliders = スライダーを入れ替え
 workspace-history-put-back = { $panels }を片付け
 workspace-show-in-zen = 集中モードで表示
 workspace-bubble-edit-palettes = パレットを編集…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = 直近1秒間に表示されたキャンバスのフレーム数です。キャッシュを使った移動とズームを含みます。入力の遅延ではありません。
+diagnostics-submitted-fps = 送信 FPS
+diagnostics-submitted-fps-description = 直近1秒間に送信されたキャンバスのフレーム数です。画面に表示された時刻は取得できません。

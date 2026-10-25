@@ -47,6 +47,7 @@ import {checkDragPickup} from "./drag-pickup.test.mjs";
 import {checkZen} from "./zen.test.mjs";
 import {checkIcons} from "./icons.test.mjs";
 import {checkPrediction} from "./prediction.test.mjs";
+import {checkFrameRate} from './fps.test.mjs';
 import {checkPenRendering} from "./pen-rendering.test.mjs";
 import {checkSmoothing} from "./smoothing.test.mjs";
 import {checkTooltips} from "./tooltips.test.mjs";
@@ -236,6 +237,7 @@ try {
   console.log('WebGPU hardware:',JSON.stringify(gpuAdapter));
   const checkErrors = () => assert.deepEqual(errors, []);
   if (!await runJourney([
+    [process.argv.includes('--fps'), () => checkFrameRate({evaluate,settle}), checkErrors],
     [process.argv.includes('--bubble-release'), () => checkBubbleRelease({call,evaluate,settle}), checkErrors],
     [process.argv.includes('--bubble-release-cold'), () => checkBubbleReleaseColdStartup({call,evaluate,settle}), checkErrors],
     [process.argv.includes('--bubble-release-localization'), async () => (await import('./bubble-release-localization-journey.test.mjs')).checkBubbleReleaseLocalization({call,evaluate,settle}), checkErrors],

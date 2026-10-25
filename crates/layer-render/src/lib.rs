@@ -18,7 +18,7 @@ mod cursor_icons;
 pub use cursor_icons::{TOOL_CURSOR_ICONS, TOOL_CURSOR_HOTSPOTS, tool_cursor_marker};
 pub use selection::{SelectionGradient, SelectionOverlay, SelectionPaint, SelectionPaintMode, SelectionPaintResult};
 pub use outline::{TipOutline, mask_outline};
-pub use telemetry::{RendererTelemetry, TimingSamples};
+pub use telemetry::{FrameRate, FrameRateSource, PresentationRate, RendererTelemetry, TimingSamples};
 
 #[derive(Clone, Debug)]
 #[expect(clippy::large_enum_variant, reason = "Snapshot handoffs move captured plans without per-request boxing")]

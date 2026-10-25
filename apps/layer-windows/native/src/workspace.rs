@@ -95,6 +95,25 @@ mod tests {
     }
 
     #[test]
+    fn renderer_stats_distinguish_submissions_and_retire_surface_feedback() {
+        let mut host=NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        host.set_localization(layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
+        let observer=host.canvas_frame_rate.clone();
+        observer.submitted();
+        let packet=metadata(super::query(&mut host,r#"{"type":"renderer_stats"}"#).unwrap());
+        let rows=packet["result"]["rows"].as_array().unwrap();
+        let submitted=rows.iter().find(|row|row["label"]=="Submitted FPS").unwrap();
+        assert_eq!(submitted["value"],"1");
+        assert_eq!(rows.iter().find(|row|row["label"]=="Frames").unwrap()["value"],"0");
+        host.reset_canvas_frame_rate();
+        observer.presented(1,1);
+        let packet=metadata(super::query(&mut host,r#"{"type":"renderer_stats"}"#).unwrap());
+        let rows=packet["result"]["rows"].as_array().unwrap();
+        assert_eq!(rows.iter().find(|row|row["label"]=="FPS").unwrap()["value"],"—");
+        assert!(!rows.iter().any(|row|row["label"]=="Submitted FPS"));
+    }
+
+    #[test]
     fn prompt_validation_and_profile_search_packets_use_current_shared_policy() {
         let mut host=NativeHost::new(layer_ui::Platform::Windows).unwrap();
         let before=host.session.engine().document().clone();

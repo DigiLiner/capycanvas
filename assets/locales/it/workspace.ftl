@@ -628,3 +628,8 @@ workspace-bubble-swap-sliders = Scambia cursori
 workspace-history-put-back = Rimessi a posto { $panels }
 workspace-show-in-zen = Mostra in modalità Zen
 workspace-bubble-edit-palettes = Modifica tavolozze…
+
+diagnostics-fps = FPS
+diagnostics-fps-description = Presentazioni della tela nell’ultimo secondo, inclusi spostamento e zoom dalla cache. Non misura la latenza di input.
+diagnostics-submitted-fps = FPS inviati
+diagnostics-submitted-fps-description = Fotogrammi della tela inviati nell’ultimo secondo. Il momento della visualizzazione sullo schermo non è disponibile.
