@@ -83,6 +83,11 @@ export async function checkWheelNavigation({call,evaluate,settle}) {
 async function checkCanvasNavigation({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/navigation-controls/web';await mkdir(directory,{recursive:true});
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
+  const fixture=await evaluate('layerApp.state().workspace');
+  const toolbar=fixture.layout.panels.find(panel=>panel.id==='toolbar');
+  for(const command of ['hand','zoom'])if(!toolbar.content.tiles.some(tile=>tile.control.kind==='command'&&tile.control.command===command))toolbar.content.tiles.push({id:fixture.layout.next_tile_id++,control:{kind:'command',command}});
+  await send({type:'restore_workspace',workspace:fixture});
+  await send({type:'customize',action:{type:'set_panel_visible',panel:'toolbar',visible:true}});
   const invoke=command=>send({type:'invoke',command});
   const camera=()=>evaluate('(()=>{const c=layerApp.state().camera;return{zoom:c.zoom,rotation:c.rotation,t:Array.from(c.translation),flipped:Array.from(c.flipped)}})()');
   const artwork=()=>evaluate('({paint:layerApp.state().layers.map(l=>[String(l.id),String(l.paint_revision)]),undo:layerApp.state().commands.find(c=>c.id==="undo").enabled})');

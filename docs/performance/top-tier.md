@@ -5,6 +5,64 @@
 Reference: Wacom MovinkPad Pro 14 (DTHA140) with a 1800 × 2880, 120 Hz OLED. The
 canvas is 9504 × 6336. Every row targets **120 fps** unless marked soft.
 
+## Navigation presentation
+
+Measured 2026-10-24 on the reference Wacom MovinkPad Pro 14, comparing
+`2d7c4d5d7` with the presentation-admission and renderer-cache fix. Both APKs
+use optimized Rust release code and the same benchmark host; the final APK is
+`55febd3740001e0ca1f89c1761e1995ade72ea5bb8b8aa96da497680c67b623d`.
+Each row has three independent eight-second moving contacts, warm required
+shaders, actual 120 Hz display mode and thermal status 0. Rates are medians of
+SurfaceFlinger canvas presentations, independently matched to its latency ring.
+The photo is the tier's 9504 × 6336 reference at Fit. The default-paper rows use
+the startup camera, Sketch workspace and Coldpress Naturalwhite at strength 100;
+they supplement the tier-photo measurements. Navigator conditions remain separate.
+
+| Workload and motion | Baseline fps | Fixed fps | Gain | Worst contact gap p99, ms | 120 Hz rate and gap target |
+| --- | --- | --- | --- | --- | --- |
+| Default 2400 × 1800 paper, rotate | 35.79 | 119.25 | +233.2% | 8.337 | Met |
+| Default 2400 × 1800 paper, pinch | 38.79 | 118.99 | +206.8% | 8.544 | Met |
+| 61 MP, Navigator closed, pan | 32.50 | 118.74 | +265.4% | 8.338 | Met |
+| 61 MP, Navigator closed, rotate | 30.28 | 118.87 | +292.5% | 8.501 | Met |
+| 61 MP, Navigator closed, pinch | 38.87 | 105.84 | +172.3% | 16.668 | Not met |
+| 61 MP, Navigator open, pan | 36.78 | 119.00 | +223.6% | 8.336 | Met |
+| 61 MP, Navigator open, rotate | 33.32 | 119.12 | +257.5% | 8.541 | Met |
+| 61 MP, Navigator open, pinch | 35.40 | 111.74 | +215.7% | 16.668 | Not met |
+
+The original presentation shader, paper, filtering and quantization remain
+unchanged. Seven of eight matched resting captures are byte-identical; photo
+pan with Navigator closed differs by one code value in 44,074 pixels, with a
+measured camera drift below 0.003 screen pixels. These captures do not establish
+pixel identity at every moving pose.
+
+Presentation occupies more time on the canvas owner. Default rotate input-queue
+p95 is 8.38–8.61 → 6.65–8.12 ms, default pinch is 5.52–8.10 → 8.31–8.74 ms,
+and closed-Navigator photo pinch is 7.71–8.29 → 9.92–10.11 ms. Throughput
+improves substantially; a general input-latency improvement is not established.
+Photo pinch still misses the 114 presentations/s floor in both Navigator states.
+Per-contact rates, GPU times, camera/paper state, captures, traces and APK/source
+provenance are under `artifacts/nav-fix-qualification-20261024/`.
+
+### Brush and pending-filter controls
+
+The same build comparison uses G-Pen 2048 px on the 61 MP reference photo at
+Fit, Navigator closed, pressure 1 and physical inclination 40°, with nominal
+200 Hz input. Fresh input-attributed GPU completions, rather than presented
+frames, are the brush metric. The three baseline contacts are
+114.82 / 118.74 / 119.49 updates/s; fixed contacts are
+119.21 / 123.78 / 118.52 updates/s. Completion-gap p99 improves from
+17.27 / 20.55 / 16.28 to 15.30 / 15.09 / 16.11 ms. All final gaps meet the
+limit, but two contacts remain below the full 120 updates/s requirement.
+Latest-input age p99 is variable, with no established improvement.
+
+An interruption probe begins a nominal one-second pinch while attached Gaussian
+Blur 85 has verified pending composition. Actual gesture wall time is
+15.72–15.94 s in the baseline and 15.97–16.15 s with the fix; some displayed
+gaps are about 15.9 s. Native frame records locate the long owner call before
+surface acquisition in the shared session-frame call inside frame preparation, rather than in the
+presentation call. Its internal cause remains unqualified. This probe is a
+response failure in both builds and does not establish sustained filter FPS.
+
 ## Operations
 
 Required-only shader startup and first-use tool preparation are unmeasured on
@@ -12,7 +70,7 @@ this reference device. Earlier idle-catalog measurements describe their named
 builds, not the current startup policy. See [startup preparation](responsiveness.md#demand-driven-startup)
 for the Apple diagnostic and its limits.
 
-The M3 cutover is committed at `b3f6f8e51`. The latest G-Pen measurements use
+The M3 cutover is committed at `b3f6f8e51`. The earlier M3 G-Pen comparison uses
 frozen baseline BUILD29 and M3 BUILD32 binaries based on `192601dac`; their
 forward and reverse results are [below](#current-m3-g-pen-comparison).
 Both miss the tier target, and order-dependent CPU and response bounds remain
@@ -53,10 +111,10 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | --- | --- | --- | --- |
 | Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
 | Tool cursor hover, with and without brush size | 120 | Renderer 119.3–119.6 submissions/s; submission interval p99 15.0–15.6 ms. Presentation unqualified. | [Tool cursors](#tool-cursors) |
-| Pan: Hand tool, one or two fingers | 120 | **Not met.** 32.9–36.1 presented fps, p99 41.7 ms, viewport GPU 18.5–18.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/`; [GTK surface diagnostic](#gtk-surface-handoff-diagnostic) does not qualify this tier |
-| Pinch zoom | 120 | **Not met.** 32.7–37.8 presented fps, p99 58.3–66.7 ms, 61 MP photo, Navigator open, thermal 0 | `e7cdd234`, 2026-10-20; [navigation](known-gaps.md); `artifacts/vector-tablets-20261020/` |
+| Pan: Hand tool, one or two fingers | 120 | **Met for two-finger pan.** 118.87–119.50 presented fps, worst p99 8.336 ms, 61 MP photo, Navigator open | [Navigation presentation](#navigation-presentation), 2026-10-24 |
+| Pinch zoom | 120 | **Not met.** 111.73–112.09 presented fps, p99 up to 16.668 ms, 61 MP photo, Navigator open; default paper 118.74–119.00 fps | [Navigation presentation](#navigation-presentation), 2026-10-24 |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 120 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
-| Two-finger rotate | 120 | **Misses:** 33.33–45.48 presented fps, p99 33.33–41.67 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
+| Two-finger rotate | 120 | **Met.** 118.74–119.37 presented fps, worst p99 8.541 ms, 61 MP photo, Navigator open; default paper 119.00–119.37 fps | [Navigation presentation](#navigation-presentation), 2026-10-24 |
 | Rotation snapping: two fingers and Rotate View | 120 | Unmeasured on the reference tablet | [Shared behavior](../ui/shared-ui.md#drawing-and-navigation); [GTK diagnostic](#gtk-rotation-snapping-diagnostic) |
 | Smooth Zoom tool, left/right | 120 | **Misses:** 35.75–42.09 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
 | Smooth Zoom tool, up/down | 120 | **Misses:** 34.56–43.73 presented fps, p99 50.00–58.34 ms, 61 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/top/` |
@@ -2079,7 +2137,7 @@ are kept separate from the 10 s comparison table below.
 
 | Brush (id) | Class | Size | Measured | Status |
 | --- | --- | --- | --- | --- |
-| G-Pen (1) | Simple | 2048 px | 99.49 (99.39–102.36) fresh updates/s; completion-gap p99 25.51–29.35 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
+| G-Pen (1) | Simple | 2048 px | 119.21 (118.52–123.78) fresh input-attributed updates/s; completion-gap p99 15.09–16.11 ms | **Not met**: two rates below 120/s; [current controls](#brush-and-pending-filter-controls) |
 | G-Pen (1), brush controls | Simple | 2048 px | 175.65–179.08 fresh updates/s; fresh gap p99 ≤13.23 ms, contained 60 × 10 path | Meets measured profile; [earlier controls](#dry-media-contact-model) |
 | Rough G-Pen (28) | Simple | 2048 px | 61.8 updates/s (60.6–62.7); gap p99 33.6 ms | **Not met** |
 | Calligraphy Pen (29) | Simple | 2048 px | 189.3 updates/s (188.6–190.5); gap p99 10.6 ms | Met |

@@ -165,7 +165,9 @@ fn region_list_changes_repaint_only_added_and_removed_glass() {
     let frame = |blur: &mut BackdropBlur| {
         let mut encoder = r.device().create_command_encoder(&Default::default());
         let mut repaint = Vec::new();
-        blur.encode(&r, &mut encoder, [512, 256], 0, layer_core::Affine::IDENTITY, false, Some(&[]), |_| {}, None, &mut repaint);
+        let mut uploads = crate::Uploads::new(r.device(), 4096);
+        blur.encode(&r, &mut encoder, &mut uploads, [512, 256], 0, layer_core::Affine::IDENTITY, false, Some(&[]), |_| {}, None, &mut repaint).unwrap();
+        uploads.finish(&encoder);
         r.queue().submit([encoder.finish()]);
         repaint
     };

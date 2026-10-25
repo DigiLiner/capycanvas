@@ -297,11 +297,325 @@ fn presentation_retains_live_output_through_preparation_and_serializes_hal_hando
         assert!(submitted.load(Ordering::Acquire));
         assert_eq!(presented.load(Ordering::Acquire), failure != Some(false));
         assert_eq!(called.load(Ordering::Acquire), failure.is_some());
-        if failure == Some(false) {
-            surface.release().unwrap();
-        }
         assert!(surface.presentation.lock().as_ref().unwrap().acquired_texture.is_none());
         drop(device.device_lost_closure.lock().take());
         drop(output);
     }
+}
+
+#[derive(Default)]
+struct PresentationProbe {
+    hold_submissions: AtomicBool,
+    fail_submission: AtomicBool,
+    fail_present: AtomicBool,
+    before_submit: std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    presents: core::sync::atomic::AtomicUsize,
+    discards: core::sync::atomic::AtomicUsize,
+    device: std::sync::Mutex<Option<alloc::sync::Weak<Device>>>,
+}
+
+struct PresentationQueue {
+    inner: Box<dyn hal::DynQueue>,
+    probe: Arc<PresentationProbe>,
+}
+impl hal::DynResource for PresentationQueue {
+    fn as_any(&self) -> &dyn Any { self.inner.as_any() }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self.inner.as_any_mut() }
+}
+impl hal::DynQueue for PresentationQueue {
+    unsafe fn submit(&self, commands: &[&dyn hal::DynCommandBuffer], textures: &[&dyn hal::DynSurfaceTexture], fence: (&dyn hal::DynFence, u64)) -> Result<(), hal::DeviceError> {
+        if self.probe.fail_submission.swap(false, Ordering::AcqRel) {
+            return Err(hal::DeviceError::Unexpected);
+        }
+        if let Some(action) = self.probe.before_submit.lock().unwrap().take() { action(); }
+        if self.probe.hold_submissions.load(Ordering::Acquire) { return Ok(()); }
+        unsafe { self.inner.submit(commands, textures, fence) }
+    }
+    unsafe fn present(&self, _: &dyn hal::DynSurface, _: Box<dyn hal::DynSurfaceTexture>) -> Result<(), hal::SurfaceError> {
+        let device = self.probe.device.lock().unwrap().as_ref().unwrap().upgrade().unwrap();
+        let admitted = std::thread::spawn(move || device.command_indices.try_write().is_some()).join().unwrap();
+        assert!(!admitted, "background submission entered during HAL present");
+        self.probe.presents.fetch_add(1, Ordering::AcqRel);
+        if self.probe.fail_present.swap(false, Ordering::AcqRel) {
+            Err(hal::SurfaceError::Device(hal::DeviceError::Lost))
+        } else { Ok(()) }
+    }
+    unsafe fn get_timestamp_period(&self) -> f32 { unsafe { self.inner.get_timestamp_period() } }
+    unsafe fn wait_for_idle(&self) -> Result<(), hal::DeviceError> { unsafe { self.inner.wait_for_idle() } }
+}
+
+struct PresentationAdapter {
+    inner: SurfaceAdapter,
+    probe: Arc<PresentationProbe>,
+}
+impl hal::DynResource for PresentationAdapter {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+}
+impl hal::DynAdapter for PresentationAdapter {
+    unsafe fn open(&self, features: wgt::Features, limits: &wgt::Limits, hints: &wgt::MemoryHints) -> Result<hal::DynOpenDevice, hal::DeviceError> {
+        let mut open = unsafe { self.inner.open(features, limits, hints) }?;
+        open.queue = Box::new(PresentationQueue { inner: open.queue, probe: self.probe.clone() });
+        Ok(open)
+    }
+    unsafe fn texture_format_capabilities(&self, format: wgt::TextureFormat) -> hal::TextureFormatCapabilities { unsafe { self.inner.texture_format_capabilities(format) } }
+    unsafe fn surface_capabilities(&self, surface: &dyn hal::DynSurface) -> Option<hal::SurfaceCapabilities> { unsafe { self.inner.surface_capabilities(surface) } }
+    unsafe fn surface_display_hdr_info(&self, surface: &dyn hal::DynSurface) -> Option<wgt::DisplayHdrInfo> { unsafe { self.inner.surface_display_hdr_info(surface) } }
+    unsafe fn get_presentation_timestamp(&self) -> wgt::PresentationTimestamp { unsafe { self.inner.get_presentation_timestamp() } }
+    fn get_ordered_buffer_usages(&self) -> wgt::BufferUses { self.inner.get_ordered_buffer_usages() }
+    fn get_ordered_texture_usages(&self) -> wgt::TextureUses { self.inner.get_ordered_texture_usages() }
+}
+
+struct PresentationSurface(Arc<PresentationProbe>);
+impl hal::DynResource for PresentationSurface {
+    fn as_any(&self) -> &dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+}
+impl hal::DynSurface for PresentationSurface {
+    unsafe fn configure(&self, _: &dyn hal::DynDevice, _: &hal::SurfaceConfiguration) -> Result<(), hal::SurfaceError> { Ok(()) }
+    unsafe fn unconfigure(&self, _: &dyn hal::DynDevice) {}
+    unsafe fn acquire_texture(&self, _: Option<Duration>, _: &dyn hal::DynFence) -> Result<hal::DynAcquiredSurfaceTexture, hal::SurfaceError> {
+        Ok(hal::DynAcquiredSurfaceTexture { texture: Box::new(hal::noop::Resource), suboptimal: false })
+    }
+    unsafe fn discard_texture(&self, _: Box<dyn hal::DynSurfaceTexture>) { self.0.discards.fetch_add(1, Ordering::AcqRel); }
+}
+
+struct PresentationFixture {
+    device: Arc<Device>,
+    queue: Arc<crate::device::queue::Queue>,
+    surface: Arc<Surface>,
+    texture: Arc<crate::resource::Texture>,
+    probe: Arc<PresentationProbe>,
+}
+impl PresentationFixture {
+    fn new() -> Self {
+        let probe = Arc::new(PresentationProbe::default());
+        let mut options = wgt::BackendOptions::default();
+        options.noop.enable = true;
+        let instance = unsafe { <hal::noop::Context as hal::Instance>::init(&hal::InstanceDescriptor {
+            name: "presentation admission test", flags: wgt::InstanceFlags::empty(),
+            memory_budget_thresholds: Default::default(), backend_options: options,
+            telemetry: None, display: None,
+        }) }.unwrap();
+        let exposed = unsafe { <hal::noop::Context as hal::Instance>::enumerate_adapters(&instance, None) }.remove(0);
+        let mut exposed: hal::DynExposedAdapter = exposed.into();
+        exposed.adapter = Box::new(PresentationAdapter { inner: SurfaceAdapter(exposed.adapter, None), probe: probe.clone() });
+        let (device, queue) = Arc::new(Adapter::new(exposed)).create_device_and_queue(&Default::default(), wgt::InstanceFlags::empty()).unwrap();
+        *probe.device.lock().unwrap() = Some(Arc::downgrade(&device));
+        let raw: Box<dyn hal::DynSurface> = Box::new(PresentationSurface(probe.clone()));
+        let surface = Arc::new(Surface {
+            presentation: Mutex::new(rank::SURFACE_PRESENTATION, None),
+            surface_per_backend: [(wgt::Backend::Noop, raw)].into_iter().collect(),
+        });
+        assert!(device.configure_surface(&surface, &configuration()).is_none());
+        let texture = surface.get_current_texture().unwrap().texture.unwrap();
+        queue.prepare_surface_texture_for_present(&texture).unwrap();
+        Self { device, queue, surface, texture, probe }
+    }
+    fn watermark(&self) -> u64 { self.device.command_indices.read().last_non_presentation_submission_index }
+    fn assert_retained(&self) {
+        let presentation = self.surface.presentation.lock();
+        assert!(Arc::ptr_eq(presentation.as_ref().unwrap().acquired_texture.as_ref().unwrap(), &self.texture));
+        let snatch = self.device.snatchable_lock.read();
+        assert!(self.texture.inner.get(&snatch).maybe_valid().is_some());
+    }
+    fn complete(&self) {
+        self.probe.hold_submissions.store(false, Ordering::Release);
+        self.queue.submit_for_present(&[]).unwrap();
+    }
+}
+impl Drop for PresentationFixture {
+    fn drop(&mut self) {
+        self.probe.hold_submissions.store(false, Ordering::Release);
+        let _ = self.queue.submit_for_present(&[]);
+        let _ = self.surface.discard();
+    }
+}
+
+#[test]
+fn pending_artwork_defers_without_consuming_output_then_presents_once() {
+    let f = PresentationFixture::new();
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    let artwork = f.queue.submit(&[]).unwrap();
+    f.queue.submit_for_present(&[]).unwrap();
+    assert_eq!(f.watermark(), artwork);
+    let mut deferred_submission = None;
+    for _ in 0..3 {
+        assert!(f.queue.try_present(&f.surface).unwrap().is_none());
+        let submitted = f.device.last_successful_submission_index.load(Ordering::Acquire);
+        if let Some(previous) = deferred_submission { assert_eq!(submitted, previous, "deferred retries queued more GPU work"); }
+        deferred_submission = Some(submitted);
+        f.assert_retained();
+        assert_eq!(f.probe.presents.load(Ordering::Acquire), 0);
+    }
+    f.complete();
+    assert!(matches!(f.queue.try_present(&f.surface), Ok(Some(wgt::SurfaceStatus::Good))));
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 1);
+    assert!(f.surface.presentation.lock().as_ref().unwrap().acquired_texture.is_none());
+    assert!(matches!(f.queue.try_present(&f.surface), Err(crate::present::SurfaceError::NothingToPresent)));
+}
+
+#[test]
+fn pending_viewports_and_abandoned_submission_indices_do_not_gate_present() {
+    let f = PresentationFixture::new();
+    let baseline = f.watermark();
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    f.queue.submit_for_present(&[]).unwrap();
+    f.queue.on_submitted_work_done(Box::new(|| {}));
+    f.queue.prepare_surface_texture_for_present(&f.texture).unwrap();
+    f.queue.submit_for_present(&[]).unwrap();
+    assert_eq!(f.watermark(), baseline);
+    let finished = unsafe { f.device.raw().get_fence_value(f.device.fence.as_ref()) }.unwrap();
+    assert!(finished < f.device.last_successful_submission_index.load(Ordering::Acquire));
+    assert!(matches!(f.queue.try_present(&f.surface), Ok(Some(wgt::SurfaceStatus::Good))));
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 1);
+    assert!(f.device.command_indices.try_write().is_some());
+}
+
+#[test]
+fn background_submission_after_viewport_is_in_present_dependency() {
+    let f = PresentationFixture::new();
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    f.queue.submit_for_present(&[]).unwrap();
+    let background = f.queue.submit(&[]).unwrap();
+    assert_eq!(f.watermark(), background);
+    assert!(f.queue.try_present(&f.surface).unwrap().is_none());
+    f.assert_retained();
+    f.complete();
+    assert!(f.queue.try_present(&f.surface).unwrap().is_some());
+}
+
+#[test]
+fn viewport_submission_flushing_pending_writes_retains_artwork_dependency() {
+    let f = PresentationFixture::new();
+    let buffer = f.device.create_buffer(&crate::resource::BufferDescriptor {
+        label: None, size: 4, usage: wgt::BufferUsages::COPY_DST, mapped_at_creation: false,
+    }).unwrap();
+    f.queue.write_buffer(buffer, 0, &[1, 2, 3, 4]).unwrap();
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    let mixed = f.queue.submit_for_present(&[]).unwrap();
+    assert_eq!(f.watermark(), mixed);
+    assert!(f.queue.try_present(&f.surface).unwrap().is_none());
+    f.assert_retained();
+    f.complete();
+    assert!(f.queue.try_present(&f.surface).unwrap().is_some());
+}
+
+#[test]
+fn deferred_surface_can_be_discarded_and_reacquired() {
+    let f = PresentationFixture::new();
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    f.queue.submit(&[]).unwrap();
+    assert!(f.queue.try_present(&f.surface).unwrap().is_none());
+    f.surface.discard().unwrap();
+    assert_eq!(f.probe.discards.load(Ordering::Acquire), 1);
+    let replacement = f.surface.get_current_texture().unwrap().texture.unwrap();
+    assert!(!Arc::ptr_eq(&replacement, &f.texture));
+    assert!(f.queue.try_present(&f.surface).unwrap().is_none());
+    assert!(Arc::ptr_eq(f.surface.presentation.lock().as_ref().unwrap().acquired_texture.as_ref().unwrap(), &replacement));
+    f.complete();
+    assert!(f.queue.try_present(&f.surface).unwrap().is_some());
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 1);
+}
+
+#[test]
+fn failed_submission_does_not_advance_artwork_watermark() {
+    let f = PresentationFixture::new();
+    let baseline = f.watermark();
+    let called = Arc::new(AtomicBool::new(false));
+    let callback_called = called.clone();
+    let callback_device = f.device.clone();
+    let callback_surface = f.surface.clone();
+    *f.device.device_lost_closure.lock() = Some(Box::new(move |_, _| {
+        assert!(callback_device.command_indices.try_write().is_some());
+        drop(callback_device.snatchable_lock.write());
+        drop(callback_surface.presentation.lock());
+        callback_called.store(true, Ordering::Release);
+    }));
+    f.probe.fail_submission.store(true, Ordering::Release);
+    assert!(f.queue.submit(&[]).is_err());
+    assert_eq!(f.watermark(), baseline);
+    assert!(called.load(Ordering::Acquire));
+}
+
+#[test]
+fn try_present_device_error_releases_guards_before_reentrant_callback() {
+    let f = PresentationFixture::new();
+    let called = Arc::new(AtomicBool::new(false));
+    let callback_called = called.clone();
+    let callback_device = f.device.clone();
+    let callback_surface = f.surface.clone();
+    *f.device.device_lost_closure.lock() = Some(Box::new(move |_, _| {
+        assert!(callback_device.command_indices.try_write().is_some());
+        drop(callback_device.snatchable_lock.write());
+        drop(callback_surface.presentation.lock());
+        callback_called.store(true, Ordering::Release);
+    }));
+    f.probe.fail_present.store(true, Ordering::Release);
+    assert!(f.queue.try_present(&f.surface).is_err());
+    assert!(called.load(Ordering::Acquire));
+    assert!(f.surface.presentation.lock().as_ref().unwrap().acquired_texture.is_none());
+}
+
+#[test]
+fn output_replaced_during_preparation_is_not_consumed() {
+    let f = PresentationFixture::new();
+    let (replacement, error) = f.device.create_texture(&wgt::TextureDescriptor {
+        label: None, size: wgt::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+        mip_level_count: 1, sample_count: 1, dimension: wgt::TextureDimension::D2,
+        format: wgt::TextureFormat::Rgba8Unorm, usage: wgt::TextureUsages::COPY_DST,
+        view_formats: vec![],
+    });
+    assert!(error.is_none());
+    let concurrent_surface = f.surface.clone();
+    let concurrent_replacement = replacement.clone();
+    *f.probe.before_submit.lock().unwrap() = Some(Box::new(move || {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let concurrent = std::thread::spawn(move || {
+            concurrent_surface.presentation.lock().as_mut().unwrap().acquired_texture = Some(concurrent_replacement);
+            sender.send(()).unwrap();
+        });
+        receiver.recv_timeout(Duration::from_secs(1)).expect("surface remained locked during GPU preparation");
+        concurrent.join().unwrap();
+    }));
+    assert!(matches!(f.queue.try_present(&f.surface), Err(crate::present::SurfaceError::NothingToPresent)));
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 0);
+    assert!(Arc::ptr_eq(f.surface.presentation.lock().as_ref().unwrap().acquired_texture.as_ref().unwrap(), &replacement));
+    f.surface.presentation.lock().as_mut().unwrap().acquired_texture.take();
+}
+
+#[test]
+fn failed_preparation_releases_acquired_output() {
+    let f = PresentationFixture::new();
+    f.device.lose("presentation preparation failure");
+    assert!(f.queue.try_present(&f.surface).is_err());
+    assert!(f.surface.presentation.lock().as_ref().unwrap().acquired_texture.is_none());
+    let snatch = f.device.snatchable_lock.read();
+    assert!(f.texture.inner.get(&snatch).maybe_valid().is_none());
+}
+
+#[cfg(feature = "trace")]
+#[test]
+fn traced_global_surface_entrypoints_preserve_admission_and_lock_order() {
+    let f = PresentationFixture::new();
+    let mut descriptor = wgt::InstanceDescriptor::new_without_display_handle();
+    descriptor.backends = wgt::Backends::empty();
+    let global = crate::global::Global::new("traced surface admission", descriptor, None);
+    let id = global.surfaces.prepare(None).assign(f.surface.clone());
+    f.probe.hold_submissions.store(true, Ordering::Release);
+    f.queue.submit(&[]).unwrap();
+    assert!(global.surface_try_present(id).unwrap().is_none());
+    f.assert_retained();
+    f.complete();
+    assert!(matches!(global.surface_try_present(id), Ok(Some(wgt::SurfaceStatus::Good))));
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 1);
+    assert!(global.surface_get_current_texture(id, None).unwrap().texture.is_some());
+    global.surface_texture_discard(id).unwrap();
+    assert_eq!(f.probe.discards.load(Ordering::Acquire), 1);
+    assert!(global.surface_get_current_texture(id, None).unwrap().texture.is_some());
+    global.surface_texture_release(id).unwrap();
+    assert_eq!(f.probe.discards.load(Ordering::Acquire), 1);
+    assert!(global.surface_get_current_texture(id, None).unwrap().texture.is_some());
+    assert!(matches!(global.surface_present(id), Ok(wgt::SurfaceStatus::Good)));
+    assert_eq!(f.probe.presents.load(Ordering::Acquire), 2);
 }

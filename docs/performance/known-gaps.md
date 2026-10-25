@@ -199,39 +199,46 @@
   round 4 fixed the mid-tier painting regression and the top tier's slower
   5,000-path scrub. Raw summaries, tables, A/B runs and symbolized profiles are
   in `artifacts/vector-tablets-20261020/round2/`, `round3/` and `round4/`.
-- **Navigation misses on every tier; the viewport pass is the cost.** On the
-  round 2 and 3 tree (`e7cdd234`, 2026-10-20), `AndroidViewportBenchmarkTest`
-  pan on each tier photo with the Navigator open
-  ([`android-viewport-presents.py`](measuring.md)) presents 43.6–43.9 on low
-  and 62.6–62.7 on mid (90 Hz), with viewport-pass GPU p50 16.2–16.3 and
-  11.9 ms; pinch presents 33.3–35.2 and 46.4–47.2. Giving paper lighting its
-  own pipeline changed neither tier (16.2 and 11.9 ms at `2567874a7`). On the
-  top tier pan presents 32.9–36.1 at 18.5–18.7 ms (18.9–19.2 ms at
-  `2567874a7`) and pinch 32.7–37.8; rotate, not re-measured, was 29.6–32.3 at
-  `2567874a7`. Everything the GPU does in a frame, including the compositor,
-  must fit in 16.7 / 11.1 / 8.3 ms.
+- **Photo zoom and several reference-tier navigation rows still miss.** The
+  presentation-admission and renderer-cache fix restores top-tier default-paper
+  rotate and pinch to about 119 presented frames/s. On the 61 MP photo, pan and
+  rotate also reach about 119/s; pinch remains 105–106/s with Navigator closed
+  and about 112/s open, below the 114/s floor.
 
-  Alternating runs of presenter variants of `2567874a7` (pan GPU p50 / pan
-  presented frames/s):
+  Factory-density/font measurements on 2026-10-25 give middle-tier default
+  rotate 86.08/s and pinch 77.76/s; rotation clears the 85.5/s rate floor but
+  misses the 22.222 ms gap limit. On its 24 MP photo, closed-Navigator pan,
+  rotate and pinch reach 66.53, 61.10 and 66.69/s; open they reach 77.95,
+  70.39 and 73.63/s. No middle-tier row meets both gates. On low, default
+  rotate and pinch reach 60.02/s. Closed-Navigator photo motion reaches 56.26,
+  54.52 and 48.39/s; open it reaches 60.02, 59.14 and 54.41/s. Open rotation
+  clears the rate floor but one 33.361 ms gap p99 exceeds 33.333 ms. See the
+  [top](top-tier.md#navigation-presentation),
+  [middle](mid-tier.md#navigation-presentation) and
+  [low](low-tier.md#navigation-presentation) tables. Earlier inherited-density
+  comparisons remain separate diagnostics.
 
-  | Variant | Low | Mid | Top |
-  | --- | --- | --- | --- |
-  | Current | 16.3–16.7 ms / 42.0–44.1 | 11.9 ms / 62.1–63.2 | 19.2 ms / 32.3–35.1 |
-  | Surround shaded by the artwork shader again | 17.0–17.1 ms / 41.8–42.5 | 13.3 ms / 57.6–58.3 | 20.4–20.5 ms / 30.8–33.6 |
-  | Half-float levels sampled through `sample_float` again | 17.0–17.1 ms / 41.3–42.5 | 11.8 ms / 62.1–63.8 | |
+  The former one-frame completion gate serialized FIFO navigation. Waiting
+  only for preceding artwork permits overlapping viewport frames; encoded
+  backdrop uniforms, cached layer styles and retained changed-cell masks keep
+  ordinary camera motion from becoming an artwork dependency. The original
+  shader and quality settings are unchanged. On top, the same default-paper
+  shader drops from about 19.5 to 7.0 ms GPU time after the pacing change;
+  earlier 18–19 ms observations do not establish an intrinsic shader floor.
+  Its GPU power/scheduling mechanism remains unestablished.
 
-  Skipping the surround (proposal A) saves 0.7 / 1.4 / 1.2 ms and pinch time
-  alike, and leaves G-Pen painting unchanged (32.0–32.4, 21.6–22.1 and
-  99.1–101.2 updates/s with and without it). Hardware filtering (proposal B)
-  saves 0.5 ms on low and nothing on mid; the top tier filters 32-bit floats
-  already. With the artwork replaced by a flat colour, the top tier's pass
-  takes 15.7–15.8 ms at `24269ed6a`, `b7fb3654a` and `8ee87a1e5` alike, so the
-  non-artwork part did not grow across those commits. On the round 3 tree, with
-  paper lighting in its own pipeline, the flat-artwork pass takes 6.0–6.4 ms
-  and presents 65.0–72.3 frames/s (p99 25 ms) in alternating runs against
-  18.5–18.7 ms with the artwork, so about 12 ms of the top tier's pass goes
-  with sampling the artwork. Pinch adds level refinement on top.
+  **Remaining work:** profile photo pinch's changing display levels and the
+  middle/low viewport passes. Driver presentation occupies more owner wall
+  time: middle-tier default rotation input queue p95 increases from about 2 to
+  10.5 ms, pinch to 15.5 ms; top-tier photo pinch increases from about 8 to
+  9–10 ms. Higher presented rates do not establish lower input latency.
+  Investigate driver backpressure and owner scheduling while preserving
+  overlapping viewport submissions.
 
-  **Fixes.** Profile the artwork sampling in the top tier's viewport pass; with
-  flat artwork the tier still presents only 65–72 frames/s, so the rest of the
-  frame needs its own profile too.
+  Attached Gaussian 85 retains a separate roughly 16 s owner-frame stall on
+  top, as in the baseline. Diagnostics locate it in the shared session-frame
+  call inside frame preparation, outside native presentation; its internal
+  cause remains unqualified. Low filtered paint remains about 0.3 updates/s.
+  Cached navigation does not qualify pending-filter responsiveness. Evidence is
+  under `artifacts/nav-fix-qualification-20261024/`; earlier viewport variants
+  remain under `artifacts/vector-tablets-20261020/`.

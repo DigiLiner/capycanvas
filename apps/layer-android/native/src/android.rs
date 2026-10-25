@@ -156,6 +156,7 @@ pub extern "system" fn Java_art_capycanvas_Native_displayStatus(
                 "retained_target": surface.presenter.retains_target(),
                 "pending_composition": layer_render::CanvasRenderer::has_pending_work(gpu.as_ref()),
                 "pending_edits": a.host.session.engine().has_pending_document_edits(),
+                "pending_presentation": surface.pending_target.is_some(),
                 "overview_count": a.navigators.count(),
                 "glass_regions": a.glass.len(),
                 "backdrop_frames": surface.presenter.backdrop_frames(),
@@ -558,10 +559,12 @@ impl App {
         if self.host.session.engine().backend().0.is_none() { return Ok(false); }
         self.frame_cost.fill(0);
         if let Some(surface) = &mut self.surface {
-            if surface.pending_target.is_some() && surface.completed_frames.load(Ordering::Acquire) < surface.submitted_frames { return Ok(true); }
             if let Some(target) = surface.pending_target.take() {
                 let clock = self.profiling.then(std::time::Instant::now);
-                self.host.session.engine().backend().0.as_ref().unwrap().queue().present(target);
+                if let Err(target) = self.host.session.engine().backend().0.as_ref().unwrap().queue().try_present(target) {
+                    surface.pending_target = Some(target);
+                    return Ok(true);
+                }
                 self.frame_cost[3] = clock.map_or(0, |clock| clock.elapsed().as_nanos() as i64);
             }
         }
@@ -675,8 +678,8 @@ impl App {
             .map_err(error)?;
         self.frame_cost[2] = elapsed() - self.frame_cost[0] - self.frame_cost[1];
         let submitted_ns = surface.completion_observer.as_ref().map_or(0, |_| monotonic_ns());
-        if !surface.ink { surface.pending_target = Some(target); }
-        else { gpu.queue().present(target); }
+        if surface.ink { gpu.queue().present(target); }
+        else { surface.pending_target = gpu.queue().try_present(target).err(); }
         surface.last_view = Some(view);
         surface.last_paint_start = paint_start;
         surface.submitted_frames += 1;

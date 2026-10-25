@@ -30,6 +30,16 @@ stroke.
 Renderer `reduction_samplers_live_with_records_not_page_views` validates the
 actual composed display shaders and rejects per-page sampler ownership.
 
+Presentation changes run the vendored core's surface tests with
+`--cfg wgpu_validate_locks`, including the `trace` feature. They exercise pending
+artwork, overlapping viewport submissions, output ownership and error callbacks.
+Renderer `submission::tests` checks that copies and clears retain their artwork
+dependency, camera motion reuses style uploads and changed-cell masks, and
+discarded style or backdrop uploads are encoded again. Android's
+`frontBufferSurfaceLifecycle` checks buffered navigation across capture, detach,
+rotation and GPU recovery. Run the reference-tier navigation and brush rows
+separately: presented navigation frames do not establish fresh brush throughput.
+
 The renderer's `first_watercolor_frame_batches_page_initialization` bounds the
 passes needed for the first contact across four tiles.
 `first_watercolor_contact_on_empty_layer_batches_source_reduction` bounds cold

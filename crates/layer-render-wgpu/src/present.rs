@@ -905,7 +905,7 @@ impl ViewportPresenter {
                 label: Some("viewport presentation"),
             });
         self.encode(renderer, &mut encoder, target, view, surround_linear)?;
-        renderer.queue.submit([encoder.finish()]);
+        renderer.queue.submit_for_present([encoder.finish()]);
         if let Some(timer) = &mut self.timing {
             timer.submitted(renderer.queue());
         }
@@ -956,7 +956,7 @@ impl ViewportPresenter {
             [0.; 4],
             true,
         )?;
-        renderer.queue.submit([encoder.finish()]);
+        renderer.queue.submit_for_present([encoder.finish()]);
         if let Some(timer) = &mut self.timing {
             timer.submitted(renderer.queue());
         }
@@ -1280,6 +1280,7 @@ impl ViewportPresenter {
             began = backdrop.encode(
                 renderer,
                 encoder,
+                &mut self.uploads,
                 [view.width_px, view.height_px],
                 self.quarter_turns,
                 layer_core::Affine(view.document_to_surface),
@@ -1292,7 +1293,7 @@ impl ViewportPresenter {
                 },
                 timestamp_writes.as_ref().map(|t| wgpu::RenderPassTimestampWrites { end_of_pass_write_index: None, ..t.clone() }),
                 &mut glass,
-            );
+            )?;
             crate::performance_trace::counter(c"Capy viewport glass pixels", glass.iter().map(|r| r.area()).sum());
             if !full {
                 for area in glass {

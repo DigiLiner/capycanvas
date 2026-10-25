@@ -287,101 +287,112 @@ impl Surface {
     }
 
     pub fn present(&self) -> Result<Status, SurfaceError> {
-        profiling::scope!("Surface::present");
+        self.present_inner(false).map(Option::unwrap)
+    }
 
-        let presentation = self.presentation.lock();
-        let present = match presentation.as_ref() {
-            Some(present) => present,
-            None => return Err(SurfaceError::NotConfigured),
+    fn present_inner(&self, defer: bool) -> Result<Option<Status>, SurfaceError> {
+        let (queue, texture) = {
+            let presentation = self.presentation.lock();
+            let present = presentation.as_ref().ok_or(SurfaceError::NotConfigured)?;
+            (present.device.check_is_valid().and_then(|_| present.device.get_queue().ok_or(DeviceError::Lost)),
+                present.acquired_texture.clone())
         };
-
-        present.device.check_is_valid()?;
-        let queue = present
-            .device
-            .get_queue()
-            .ok_or(SurfaceError::Device(DeviceError::Lost))?;
-        drop(presentation);
-
-        queue.present(self)
+        match queue {
+            Ok(queue) => queue.present_inner(self, defer),
+            Err(error) => {
+                if let Some(texture) = texture { self.release_current(&texture); }
+                Err(SurfaceError::from(error))
+            }
+        }
     }
 }
 
 impl Queue {
     pub fn present(&self, surface: &Surface) -> Result<Status, SurfaceError> {
-        profiling::scope!("Queue::present");
+        self.present_inner(surface, false).map(Option::unwrap)
+    }
 
+    pub fn try_present(&self, surface: &Surface) -> Result<Option<Status>, SurfaceError> {
+        self.present_inner(surface, true)
+    }
+
+    fn presentation_ready(&self, indices: &crate::device::resource::CommandIndices) -> Result<bool, hal::DeviceError> {
+        unsafe { self.device.raw().get_fence_value(self.device.fence.as_ref()) }
+            .map(|completed| completed >= indices.last_non_presentation_submission_index)
+    }
+
+    fn present_inner(&self, surface: &Surface, defer: bool) -> Result<Option<Status>, SurfaceError> {
+        profiling::scope!("Queue::present");
+        let device = &self.device;
         let texture = {
             let presentation = surface.presentation.lock();
-            let present = match presentation.as_ref() {
-                Some(present) => present,
-                None => return Err(SurfaceError::NotConfigured),
-            };
-
-            let device = &self.device;
-
-            // Check the surface is configured for this device.
+            let present = presentation.as_ref().ok_or(SurfaceError::NotConfigured)?;
             if !Arc::ptr_eq(&present.device, device) {
                 return Err(SurfaceError::Device(DeviceError::DeviceMismatch(Box::new(
                     crate::device::DeviceMismatch {
-                        res: self.error_ident(),
-                        res_device: device.error_ident(),
-                        target: None,
-                        target_device: present.device.error_ident(),
+                        res: self.error_ident(), res_device: device.error_ident(),
+                        target: None, target_device: present.device.error_ident(),
                     },
                 ))));
             }
-
-            present
-                .acquired_texture
-                .clone()
-                .ok_or(SurfaceError::NothingToPresent)?
+            present.acquired_texture.clone().ok_or(SurfaceError::NothingToPresent)?
         };
-
-        // If the texture was never rendered to, clear it and transition to
-        // PRESENT state before presenting.
-        // Fixes <https://github.com/gfx-rs/wgpu/issues/6748>
-        self.prepare_surface_texture_for_present(&texture)?;
-
-        let device = &self.device;
-        let mut presentation = surface.presentation.lock();
-        let present = presentation.as_mut().ok_or(SurfaceError::NotConfigured)?;
-        if !present.acquired_texture.as_ref().is_some_and(|current| Arc::ptr_eq(current, &texture)) {
-            return Err(SurfaceError::NothingToPresent);
+        if defer {
+            let ready = {
+                let indices = device.command_indices.read();
+                self.presentation_ready(&indices)
+            }.map_err(|error| {
+                surface.release_current(&texture);
+                SurfaceError::from(device.handle_hal_error(error))
+            })?;
+            if !ready { return Ok(None); }
         }
-        drop(present.acquired_texture.take());
-
-        let mut exclusive_snatch_guard = device.snatchable_lock.write();
-        let inner = texture
-            .inner
-            .snatch(&mut exclusive_snatch_guard)
-            .maybe_valid();
-        drop(exclusive_snatch_guard);
-
-        let result = match inner {
-            None => return Err(SurfaceError::TextureDestroyed),
-            Some(resource::TextureInner::Surface { raw }) => {
-                let raw_surface = surface.raw(device.backend()).unwrap();
-                let raw_queue = self.raw();
-                // [`wgpu_hal::Queue::present`] requires the queue to be synchronized with submit calls and
-                // other present calls. Locking command indices prevents submits which must increment the
-                // submission index, and by `write`ing prevents other present calls.
-                let _command_indices = device.command_indices.write();
-                unsafe { raw_queue.present(raw_surface, raw) }
+        self.prepare_surface_texture_for_present(&texture).map_err(|error| {
+            surface.release_current(&texture);
+            error
+        })?;
+        let result = {
+            let mut presentation = surface.presentation.lock();
+            let present = presentation.as_mut().ok_or(SurfaceError::NotConfigured)?;
+            if !Arc::ptr_eq(&present.device, device)
+                || present.acquired_texture.as_ref().is_none_or(|current| !Arc::ptr_eq(current, &texture)) {
+                return Err(SurfaceError::NothingToPresent);
             }
-            _ => unreachable!(),
+            let mut snatch = device.snatchable_lock.write();
+            let indices = device.command_indices.write();
+            let ready = if defer {
+                self.presentation_ready(&indices)
+            } else { Ok(true) };
+            match ready {
+                Err(error) => {
+                    present.acquired_texture.take();
+                    texture.inner.snatch(&mut snatch);
+                    Err(hal::SurfaceError::Device(error))
+                },
+                Ok(false) => return Ok(None),
+                Ok(true) => {
+                    present.acquired_texture.take();
+                    match texture.inner.snatch(&mut snatch).maybe_valid() {
+                        None => return Err(SurfaceError::TextureDestroyed),
+                        Some(resource::TextureInner::Surface { raw }) => {
+                            let raw_surface = surface.raw(device.backend()).unwrap();
+                            unsafe { self.raw().present(raw_surface, raw) }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            }
         };
-        drop(presentation);
-
         match result {
-            Ok(()) => Ok(Status::Good),
+            Ok(()) => Ok(Some(Status::Good)),
             Err(err) => match err {
-                hal::SurfaceError::Timeout => Ok(Status::Timeout),
-                hal::SurfaceError::Occluded => Ok(Status::Occluded),
-                hal::SurfaceError::Lost => Ok(Status::Lost),
+                hal::SurfaceError::Timeout => Ok(Some(Status::Timeout)),
+                hal::SurfaceError::Occluded => Ok(Some(Status::Occluded)),
+                hal::SurfaceError::Lost => Ok(Some(Status::Lost)),
                 hal::SurfaceError::Device(err) => {
                     Err(SurfaceError::from(device.handle_hal_error(err)))
                 }
-                hal::SurfaceError::Outdated => Ok(Status::Outdated),
+                hal::SurfaceError::Outdated => Ok(Some(Status::Outdated)),
                 hal::SurfaceError::Other(msg) => {
                     log::error!("present error: {msg}");
                     Err(SurfaceError::Invalid)
@@ -392,6 +403,24 @@ impl Queue {
 }
 
 impl Surface {
+    #[cfg(feature = "trace")]
+    fn record(&self, action: Action<'_, crate::command::PointerReferences>) {
+        let device = self.presentation.lock().as_ref().map(|present| present.device.clone());
+        if let Some(device) = device {
+            if let Some(ref mut trace) = *device.trace.lock() { trace.add(action); }
+        }
+    }
+
+    fn release_current(&self, texture: &Arc<resource::Texture>) {
+        let mut presentation = self.presentation.lock();
+        if let Some(present) = presentation.as_mut() {
+            if present.acquired_texture.as_ref().is_some_and(|current| Arc::ptr_eq(current, texture)) {
+                present.acquired_texture.take();
+                texture.inner.snatch(&mut present.device.snatchable_lock.write());
+            }
+        }
+    }
+
     pub fn discard(&self) -> Result<(), SurfaceError> {
         profiling::scope!("Surface::discard");
 
@@ -465,14 +494,9 @@ impl Global {
         let output = surface.get_current_texture()?;
 
         #[cfg(feature = "trace")]
-        if let Some(present) = surface.presentation.lock().as_ref() {
-            if let Some(ref mut trace) = *present.device.trace.lock() {
-                if let Some(texture) = present.acquired_texture.as_ref() {
-                    trace.add(Action::GetSurfaceTexture {
-                        id: texture.to_trace(),
-                        parent: surface.to_trace(),
-                    });
-                }
+        if let Some(texture) = output.texture.as_ref() {
+            if let Some(ref mut trace) = *texture.device.trace.lock() {
+                trace.add(Action::GetSurfaceTexture { id: texture.to_trace(), parent: surface.to_trace() });
             }
         }
 
@@ -489,24 +513,24 @@ impl Global {
         let surface = self.surfaces.get(surface_id);
 
         #[cfg(feature = "trace")]
-        if let Some(present) = surface.presentation.lock().as_ref() {
-            if let Some(ref mut trace) = *present.device.trace.lock() {
-                trace.add(Action::Present(surface.to_trace()));
-            }
-        }
+        surface.record(Action::Present(surface.to_trace()));
 
         surface.present()
+    }
+
+    pub fn surface_try_present(&self, surface_id: id::SurfaceId) -> Result<Option<Status>, SurfaceError> {
+        let surface = self.surfaces.get(surface_id);
+        let status = surface.present_inner(true)?;
+        #[cfg(feature = "trace")]
+        if status.is_some() { surface.record(Action::Present(surface.to_trace())); }
+        Ok(status)
     }
 
     pub fn surface_texture_discard(&self, surface_id: id::SurfaceId) -> Result<(), SurfaceError> {
         let surface = self.surfaces.get(surface_id);
 
         #[cfg(feature = "trace")]
-        if let Some(present) = surface.presentation.lock().as_ref() {
-            if let Some(ref mut trace) = *present.device.trace.lock() {
-                trace.add(Action::DiscardSurfaceTexture(surface.to_trace()));
-            }
-        }
+        surface.record(Action::DiscardSurfaceTexture(surface.to_trace()));
 
         surface.discard()
     }
@@ -515,11 +539,7 @@ impl Global {
         let surface = self.surfaces.get(surface_id);
 
         #[cfg(feature = "trace")]
-        if let Some(present) = surface.presentation.lock().as_ref() {
-            if let Some(ref mut trace) = *present.device.trace.lock() {
-                trace.add(Action::ReleaseSurfaceTexture(surface.to_trace()));
-            }
-        }
+        surface.record(Action::ReleaseSurfaceTexture(surface.to_trace()));
 
         surface.release()
     }

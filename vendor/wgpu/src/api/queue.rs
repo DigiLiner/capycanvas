@@ -277,6 +277,16 @@ impl Queue {
         &self,
         command_buffers: I,
     ) -> SubmissionIndex {
+        self.submit_inner(command_buffers, false)
+    }
+
+    /// Submit bounded display rendering without making it an artwork dependency.
+    pub fn submit_for_present<I: IntoIterator<Item = CommandBuffer>>(&self, command_buffers: I) -> SubmissionIndex {
+        self.submit_inner(command_buffers, true)
+    }
+
+    fn submit_inner<I: IntoIterator<Item = CommandBuffer>>(&self, command_buffers: I, presentation: bool) -> SubmissionIndex {
+        let _ = presentation;
         // As submit drains the iterator (even on error), collect deferred actions
         // from each CommandBuffer along the way.
         let mut actions = DeferredCommandBufferActions::default();
@@ -285,7 +295,11 @@ impl Queue {
             actions.append(&mut comb.actions.lock());
             comb.buffer
         });
-        let index = self.inner.submit(&mut command_buffers);
+        let index = match &self.inner {
+            #[cfg(wgpu_core)]
+            dispatch::DispatchQueue::Core(queue) if presentation => queue.submit_commands(&mut command_buffers, true),
+            _ => self.inner.submit(&mut command_buffers),
+        };
 
         // Execute all deferred actions after submit.
         actions.execute(&self.inner);
@@ -377,6 +391,22 @@ impl Queue {
     pub fn present(&self, mut surface_texture: SurfaceTexture) {
         surface_texture.presented = true;
         self.inner.present(&surface_texture.detail);
+    }
+
+    /// Present when preceding artwork work has completed, retaining the image on deferral.
+    /// Native backends check the dependency while excluding concurrent queue submissions.
+    pub fn try_present(&self, mut surface_texture: SurfaceTexture) -> Result<(), SurfaceTexture> {
+        surface_texture.presented = true;
+        let ready = match &self.inner {
+            #[cfg(wgpu_core)]
+            dispatch::DispatchQueue::Core(queue) => queue.try_present(&surface_texture.detail),
+            #[cfg(any(webgpu, custom))]
+            _ => { self.inner.present(&surface_texture.detail); true }
+        };
+        if ready { Ok(()) } else {
+            surface_texture.presented = false;
+            Err(surface_texture)
+        }
     }
 
     /// Compact a BLAS, it must have had [`Blas::prepare_compaction_async`] called on it and had the

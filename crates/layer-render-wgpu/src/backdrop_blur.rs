@@ -1,5 +1,6 @@
 use crate::pixel_rect::PixelRect;
 use layer_core::{Affine, Point};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 #[cfg(test)]
 #[path = "backdrop_blur_tests.rs"]
 mod tests;
@@ -162,7 +163,7 @@ pub(crate) struct BackdropBlur {
     age: u32,
     edges: u32,
     region_buffer: Option<wgpu::Buffer>,
-    uploaded: bool,
+    uploaded: Arc<AtomicBool>,
     frames: [u64; 2],
 }
 
@@ -254,7 +255,7 @@ impl BackdropBlur {
             age: 0,
             edges: 0,
             region_buffer: None,
-            uploaded: false,
+            uploaded: Arc::new(AtomicBool::new(false)),
             frames: [0; 2],
         }
     }
@@ -273,7 +274,7 @@ impl BackdropBlur {
             self.style = style;
             self.levels.clear();
             self.valid.clear();
-            self.uploaded = false;
+            self.uploaded.store(false, Ordering::Release);
         }
     }
 
@@ -355,7 +356,7 @@ impl BackdropBlur {
         self.extent.map(|v| v.div_ceil(1 << shift).max(1))
     }
 
-    fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, extent: [u32; 2]) {
+    fn prepare(&mut self, device: &wgpu::Device, uploads: &mut crate::Uploads, encoder: &mut wgpu::CommandEncoder, extent: [u32; 2]) -> Result<(), crate::GpuRasterError> {
         let levels = self.style.levels;
         if self.extent != extent || self.levels.len() + 1 != levels as usize {
             self.extent = extent;
@@ -387,10 +388,10 @@ impl BackdropBlur {
                 })
                 .collect();
             self.valid.clear();
-            self.uploaded = false;
+            self.uploaded.store(false, Ordering::Release);
         }
-        if self.uploaded {
-            return;
+        if self.uploaded.load(Ordering::Acquire) {
+            return Ok(());
         }
         let mut data = vec![0u8; PASS_STRIDE as usize * (2 * levels as usize - 3)];
         let quarter = self.level_size(2);
@@ -418,7 +419,8 @@ impl BackdropBlur {
         for shift in 2..levels {
             write(levels + shift - 3, self.level_size(shift), self.level_size(shift + 1));
         }
-        queue.write_buffer(&self.uniforms, 0, &data);
+        let write = crate::submission::CacheWrite::shared(self.uploaded.clone());
+        uploads.write(encoder, &self.uniforms, &data)?;
         self.interiors.clear();
         let mut edges = Vec::with_capacity(8 * self.placed.len());
         for region in &self.placed {
@@ -463,9 +465,11 @@ impl BackdropBlur {
                     mapped_at_creation: false,
                 }));
             }
-            queue.write_buffer(self.region_buffer.as_ref().unwrap(), 0, bytes);
+            uploads.write(encoder, self.region_buffer.as_ref().unwrap(), bytes)?;
         }
-        self.uploaded = true;
+        self.uploaded.store(true, Ordering::Release);
+        write.track(encoder);
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -473,6 +477,7 @@ impl BackdropBlur {
         &mut self,
         renderer: &crate::WgpuRasterizer,
         encoder: &mut wgpu::CommandEncoder,
+        uploads: &mut crate::Uploads,
         logical: [u32; 2],
         turns: u32,
         camera: Affine,
@@ -481,13 +486,13 @@ impl BackdropBlur {
         viewport: impl Fn(&mut wgpu::RenderPass),
         timestamps: Option<wgpu::RenderPassTimestampWrites>,
         repaint: &mut Vec<PixelRect>,
-    ) -> bool {
+    ) -> Result<bool, crate::GpuRasterError> {
         let extent = if turns.is_multiple_of(2) { logical } else { [logical[1], logical[0]] };
         let size = logical.map(|v| v as f32);
         let placed: Vec<BackdropRegion> = self.regions.iter().map(|r| r.rotated(turns, size)).collect();
         if placed != self.placed {
             self.placed = placed;
-            self.uploaded = false;
+            self.uploaded.store(false, Ordering::Release);
         }
         if self.placed.is_empty() || extent[0] == 0 || extent[1] == 0 {
             repaint.extend(self.drawn.drain(..).map(|(_, b)| b));
@@ -499,9 +504,9 @@ impl BackdropBlur {
             self.moving = false;
             self.document = None;
             self.extent = [0; 2];
-            return false;
+            return Ok(false);
         }
-        self.prepare(renderer.device(), renderer.queue(), extent);
+        self.prepare(renderer.device(), uploads, encoder, extent)?;
         let drawn = self.placed_bounds();
         if self.drawn != drawn {
             let removed = self.drawn.iter().filter(|d| !drawn.contains(d));
@@ -516,16 +521,16 @@ impl BackdropBlur {
         let reach = self.style.reach();
         let document = camera.then(surface_rotation(turns, size));
         let settled = damage.is_some() && self.document.is_some_and(|d| d != document);
-        if (damage.is_none() && moved && self.reproject(renderer.queue(), document, &bounds)) || (settled && self.hold) {
+        if (damage.is_none() && moved && self.reproject(uploads, encoder, document, &bounds)?) || (settled && self.hold) {
             self.frames[1] += 1;
-            return false;
+            return Ok(false);
         }
         let damage = if settled { None } else { damage };
         self.age = 0;
         self.document = Some(document);
         if self.reprojection != Affine::IDENTITY {
             self.reprojection = Affine::IDENTITY;
-            self.write_reprojection(renderer.queue());
+            self.write_reprojection(uploads, encoder)?;
         }
         let damage = match damage {
             None => {
@@ -575,7 +580,7 @@ impl BackdropBlur {
         crate::performance_trace::counter(c"Capy backdrop work pixels", work.iter().map(|r| r.area()).sum());
         if work.is_empty() {
             self.frames[1] += 1;
-            return false;
+            return Ok(false);
         }
         self.frames[0] += 1;
         self.compute(encoder, &work, viewport, timestamps.clone());
@@ -587,21 +592,24 @@ impl BackdropBlur {
         for b in cached {
             repaint.extend(changed.iter().map(|c| c.intersect(b)).filter(|r| !r.is_empty()));
         }
-        timestamps.is_some()
+        Ok(timestamps.is_some())
     }
 
-    fn write_reprojection(&self, queue: &wgpu::Queue) {
+    fn write_reprojection(&self, uploads: &mut crate::Uploads, encoder: &mut wgpu::CommandEncoder) -> Result<(), crate::GpuRasterError> {
         let bytes: Vec<u8> = self.reprojection.0.into_iter().flat_map(f32::to_ne_bytes).collect();
-        queue.write_buffer(&self.uniforms, REPROJECTION_OFFSET, &bytes);
+        let write = crate::submission::CacheWrite::shared(self.uploaded.clone());
+        uploads.write_at(encoder, &self.uniforms, REPROJECTION_OFFSET, &bytes)?;
+        write.track(encoder);
+        Ok(())
     }
 
-    fn reproject(&mut self, queue: &wgpu::Queue, document: Affine, bounds: &[PixelRect]) -> bool {
+    fn reproject(&mut self, uploads: &mut crate::Uploads, encoder: &mut wgpu::CommandEncoder, document: Affine, bounds: &[PixelRect]) -> Result<bool, crate::GpuRasterError> {
         let Some(relative) = self
             .document
             .filter(|_| self.age + 1 < REFRESH_FRAMES)
             .and_then(|cached| Some(document.inverse()?.then(cached)))
         else {
-            return false;
+            return Ok(false);
         };
         let beyond = MOTION_SLACK as f32;
         let [width, height] = self.extent.map(|v| v as f32);
@@ -617,12 +625,12 @@ impl BackdropBlur {
             })
         });
         if !covered {
-            return false;
+            return Ok(false);
         }
         self.age += 1;
         self.reprojection = relative;
-        self.write_reprojection(queue);
-        true
+        self.write_reprojection(uploads, encoder)?;
+        Ok(true)
     }
 
     fn compute(

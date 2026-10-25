@@ -373,6 +373,16 @@ release the tracker lock first, preserving the declared lock order.
 Window-free noop-backend tests check the handoffs and callback reentry with
 `RUSTFLAGS='--cfg wgpu_validate_locks'` as well as ordinary locks.
 
+`wgpu-presentation-admission.patch` separates successful artwork submissions from
+bounded viewport and timestamp submissions. `Queue::try_present` checks the
+artwork fence without waiting and excludes concurrent submissions through the
+native present call. A deferred image keeps its ownership; repeated retries do
+not enqueue preparation work. Fatal errors release the matching acquired image
+and invoke callbacks after releasing the guards. Pending queue uploads remain
+artwork dependencies even when a viewport submission flushes them. Headless
+surface tests exercise pending fences, overlapping viewports, concurrent output
+replacement, failed submissions and callback reentry with ranked locks.
+
 Remove each patch when an upstream release supplies its equivalent fix, and
 remove these snapshots when no patch remains necessary.
 
@@ -477,8 +487,8 @@ cargo test --manifest-path vendor/wgpu-hal/Cargo.toml --features vulkan --lib \
   --config 'patch.crates-io.wgpu-types.path="vendor/wgpu-types"'
 ```
 
-All Android builds require shared presentation for SDR and HDR pen input.
-Camera navigation uses FIFO until a new paint contact. Unsupported drivers report
-a canvas initialization error; there is no driver-support fallback or build flag.
-Other platform hosts retain their existing presentation modes. [Android presentation](../docs/platforms/README.md#android-presentation)
+Android uses shared presentation for retained SDR and HDR ink when the driver
+supports it; other drivers use FIFO ink with a frame latency of one. Camera
+navigation uses FIFO until a new paint contact. Other platform hosts retain
+their existing presentation modes. [Android presentation](../docs/platforms/README.md#android-presentation)
 describes the host side.

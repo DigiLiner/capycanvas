@@ -1945,6 +1945,45 @@ impl Drop for CoreDevice {
     }
 }
 
+impl CoreQueue {
+    pub(crate) fn submit_commands(
+        &self,
+        command_buffers: &mut dyn Iterator<Item = dispatch::DispatchCommandBuffer>,
+        presentation: bool,
+    ) -> u64 {
+        let temp_command_buffers = command_buffers.collect::<SmallVec<[_; 4]>>();
+        let command_buffer_ids = temp_command_buffers
+            .iter()
+            .map(|cmdbuf| cmdbuf.as_core().id)
+            .collect::<SmallVec<[_; 4]>>();
+
+        let result = if presentation { self.context.0.queue_submit_for_present(self.id, &command_buffer_ids) }
+            else { self.context.0.queue_submit(self.id, &command_buffer_ids) };
+        let index = match result {
+            Ok(index) => index,
+            Err((index, err)) => {
+                self.context
+                    .handle_error_nolabel(&self.error_sink, err, "Queue::submit");
+                index
+            }
+        };
+
+        drop(temp_command_buffers);
+
+        index
+    }
+
+    pub(crate) fn try_present(&self, detail: &dispatch::DispatchSurfaceOutputDetail) -> bool {
+        match self.context.0.surface_try_present(detail.as_core().surface_id) {
+            Ok(status) => status.is_some(),
+            Err(error) => {
+                self.context.handle_error_nolabel(&self.error_sink, error, "Queue::try_present");
+                true
+            }
+        }
+    }
+}
+
 impl dispatch::QueueInterface for CoreQueue {
     fn write_buffer(
         &self,
@@ -2096,28 +2135,8 @@ impl dispatch::QueueInterface for CoreQueue {
         }
     }
 
-    fn submit(
-        &self,
-        command_buffers: &mut dyn Iterator<Item = dispatch::DispatchCommandBuffer>,
-    ) -> u64 {
-        let temp_command_buffers = command_buffers.collect::<SmallVec<[_; 4]>>();
-        let command_buffer_ids = temp_command_buffers
-            .iter()
-            .map(|cmdbuf| cmdbuf.as_core().id)
-            .collect::<SmallVec<[_; 4]>>();
-
-        let index = match self.context.0.queue_submit(self.id, &command_buffer_ids) {
-            Ok(index) => index,
-            Err((index, err)) => {
-                self.context
-                    .handle_error_nolabel(&self.error_sink, err, "Queue::submit");
-                index
-            }
-        };
-
-        drop(temp_command_buffers);
-
-        index
+    fn submit(&self, commands: &mut dyn Iterator<Item = dispatch::DispatchCommandBuffer>) -> u64 {
+        self.submit_commands(commands, false)
     }
 
     fn get_timestamp_period(&self) -> f32 {

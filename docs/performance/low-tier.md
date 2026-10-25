@@ -9,6 +9,58 @@ is 4248 × 2832.
 - Geometry measurements use the 12 MP photo at Fit zoom. Older UI-only rows
   name their own canvas sizes.
 
+## Navigation presentation
+
+Measured 2026-10-24–25 on the reference TCL TAB 11 Gen 2, comparing
+`2d7c4d5d7` with the presentation-admission and renderer-cache fix. Both use
+optimized Rust release code and the same benchmark host; the final APK is
+`55febd3740001e0ca1f89c1761e1995ade72ea5bb8b8aa96da497680c67b623d`.
+Each row has three independent eight-second moving contacts, warm required
+shaders, actual 60 Hz display mode and thermal status 0. Factory density 320,
+font scale 1 and unmodified physical resolution are verified. The inherited
+density override of 272 is restored afterward; its earlier runs remain
+separate diagnostics. Rates are medians of SurfaceFlinger canvas presentations,
+independently matched to the latency ring. The tier photo is 4248 × 2832 at Fit.
+The supplemental default-paper rows use the actual startup 1600 × 1200 canvas,
+startup camera, Sketch workspace and Coldpress Naturalwhite at strength 100.
+
+| Workload and motion | Baseline fps | Fixed fps | Gain | Worst contact gap p99, ms | 60 Hz rate and gap target |
+| --- | --- | --- | --- | --- | --- |
+| Default 1600 × 1200 paper, rotate | 60.02 | 60.02 | +0.0% | 16.841 | Met |
+| Default 1600 × 1200 paper, pinch | 57.40 | 60.02 | +4.6% | 16.835 | Met |
+| 12 MP, Navigator closed, pan | 41.98 | 56.26 | +34.0% | 33.395 | Not met |
+| 12 MP, Navigator closed, rotate | 42.27 | 54.52 | +29.0% | 33.420 | Not met |
+| 12 MP, Navigator closed, pinch | 39.51 | 48.39 | +22.5% | 49.979 | Not met |
+| 12 MP, Navigator open, pan | 45.36 | 60.02 | +32.3% | 16.859 | Met |
+| 12 MP, Navigator open, rotate | 45.17 | 59.14 | +30.9% | 33.361 | Not met |
+| 12 MP, Navigator open, pinch | 46.79 | 54.41 | +16.3% | 33.516 | Not met |
+
+Default-paper rotation already meets the target in the baseline. The fix brings
+default pinch and Navigator-open photo pan to the target. Closed-Navigator
+photo rows remain below the 57 presentations/s floor; their viewport GPU work
+is about 17.6–17.8 ms per pan/rotation frame. Open-Navigator rotation clears the
+rate floor but one contact's 33.361 ms gap p99 exceeds 33.333 ms. The shader and
+quality settings remain unchanged. Full per-contact values, native state,
+traces, captures and provenance are under
+`artifacts/nav-fix-qualification-20261024/low-factory320/`.
+
+### Brush and pending-filter controls
+
+The same factory-scale comparison uses G-Pen 1024 px at pressure 1 and physical
+inclination 40°, with nominal 200 Hz input on the 12 MP photo at Fit, Navigator
+closed. Fresh input-attributed GPU completions are
+42.56 / 42.79 / 39.92 → 41.89 / 42.72 / 42.15 updates/s. Completion-gap p99
+is 35.22–39.87 → 35.28–37.97 ms. Throughput is effectively unchanged, and both
+builds miss the full 60 updates/s brush requirement.
+
+A nominal one-second pinch during verified pending Gaussian Blur 85 work takes
+1.033–1.671 s in the baseline and 1.026–1.031 s with the fix. Final input-queue
+p95 remains 84–155 ms, and fresh filtered paint completes only 0.288–0.304
+updates/s with 5.3–7.0 s completion-gap p99. Both builds miss filtered-paint and
+response targets. These short interruption probes do not qualify sustained
+navigation during filtering. Native witnesses and all raw values remain in
+`artifacts/nav-fix-qualification-20261024/low-factory320/comparison.json`.
+
 ## Operations
 
 Native full required-only startup remains unmeasured; selected dry-brush
@@ -90,12 +142,12 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pan during private session checkpoints | 60 | Unqualified: renderer 60.00–60.12 submissions/s, interval p99 18.70–18.92 ms; screen presentation and thermal status unmeasured | [Session checkpoints](#session-checkpoints) |
 | G-Pen 1024 px during private session checkpoints | 60 | Unqualified: 77.6–79.0 fresh completed updates/s, completion gap p99 23.36–24.07 ms; thermal status unmeasured | [Session checkpoints](#session-checkpoints) |
 | G-Pen 1024 px, repeated short contacts during checkpoints | 60 | Diagnostic only: 11.02–14.27 MiB process writes per 50 contacts; observed head age max 3.52–4.37 s. Paused motion has no qualified frame rate | [Session checkpoints](#session-checkpoints) |
-| Pan: Hand tool, one or two fingers | 60 | **Two-finger path not met.** 44.66–45.37 presented fps, p99 33.34–33.53 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
-| Pinch zoom | 60 | **Not met.** 33.84–35.65 presented fps, p99 116.63–116.73 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
+| Pan: Hand tool, one or two fingers | 60 | **Met for two-finger pan.** 60.02 presented fps in all three contacts, 12 MP photo, Navigator open | [Navigation presentation](#navigation-presentation), 2026-10-25 |
+| Pinch zoom | 60 | **Not met.** 54.41 fps median, 12 MP photo, Navigator open; default paper 60.02 fps | [Navigation presentation](#navigation-presentation), 2026-10-25 |
 | Mouse-wheel pan and Ctrl-wheel zoom, including held navigation buttons | 60 | Unmeasured on the reference tablet | [Wheel input contract](../ui/shared-ui.md); desktop correctness checks do not qualify this tier |
 | Pan: Hand tool, one or two fingers, M3 BUILD20 | 60 | **Unqualified on current M3.** 59.078–59.729 completed updates/s; completion gap p99 18.821–19.033 ms; presentation unmeasured | [BUILD20 selected canvas comparison](#build20-selected-canvas-comparison); older actual presents below |
 | Pinch zoom, earlier retained-Navigator revision | 60 | Photo, Navigator open: screen 59.40 presents/s, p99 ≤16.83 ms; viewport 59.90 fresh completed updates/s | Retained-Navigator navigation below |
-| Two-finger rotate | 60 | **Not met.** 42.10–42.76 presented fps, p99 33.34–33.42 ms, 12 MP photo, Navigator open, thermal 0 | [Touch navigation](#touch-navigation), `dbdaab756`, 2026-10-24 |
+| Two-finger rotate | 60 | **Not met.** 59.14 fps median, 12 MP photo, Navigator open; one gap p99 33.361 ms exceeds 33.333 ms | [Navigation presentation](#navigation-presentation), 2026-10-25 |
 | Rotation snapping: two fingers and Rotate View | 60 | Unmeasured on the reference tablet | [Shared snapping behavior](../ui/shared-ui.md#drawing-and-navigation) |
 | Smooth Zoom tool, left/right | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.33–43.82 presented fps, p99 99.95–99.96 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
 | Smooth Zoom tool, up/down | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.43–43.56 presented fps, p99 99.96–116.21 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
@@ -1803,7 +1855,7 @@ Marker, Paintbrush, Textured Flat, Dry Scumble and Transparent Glaze were measur
 
 | Brush (id) | Class | Size | Measured | Status |
 | --- | --- | --- | --- | --- |
-| G-Pen (1) | Simple | 1024 px | 59.71 (59.45–59.80) fresh updates/s; completion-gap p99 27.17–29.62 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
+| G-Pen (1) | Simple | 1024 px | 42.15 (41.89–42.72) fresh input-attributed updates/s; completion-gap p99 35.28–37.97 ms | **Not met**; [current controls](#brush-and-pending-filter-controls) |
 | G-Pen (1), brush controls | Simple | 1024 px | 82.95–83.91 fresh updates/s; fresh gap p99 ≤20.44 ms, contained 60 × 10 path | Earlier measured Android profile; [earlier controls](#dry-media-contact-model) |
 | G-Pen (1), M3 BUILD32 | Simple | 1024 px | Both orders: 64.295–65.713 fresh updates/s; fresh gap p99 24.960–27.643 ms, Linear | Meets this stroke; common response excess repeats: forward **+1.007 ms**, reverse **+1.192/+1.778 ms**; presentation unmeasured; [BUILD32](#build32-g-pen-comparison) |
 | G-Pen (1), M3 BUILD28 | Simple | 1024 px | BUILD28: 64.926–65.173 fresh updates/s; fresh gap p99 25.959–27.596 ms, Linear | Meets this stroke and matched CPU/response bounds; presentation unmeasured; [BUILD28](#build28-g-pen-comparison) |

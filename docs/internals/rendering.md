@@ -196,6 +196,15 @@ Waiting for optional paper shaders requests no canvas frames and does not block
 layer thumbnail readbacks. Prepared bake steps resume when the compiler wakes
 the host.
 
+Viewport and backdrop uniforms are encoded into the frame that consumes them.
+An unchanged layer-style table reuses its uploaded bytes; buffer replacement or
+discarded commands invalidate that reuse. Camera changes preserve changed-cell
+masks while their cache admission and artwork remain unchanged. The shared
+command encoder treats passes, copies, clears and mutable raw access as resource
+work; its separate diagnostics accessor records only bounded timestamp work.
+Empty or diagnostic submissions can overlap viewport frames without hiding real
+artwork dependencies from native presentation.
+
 When the view is reduced, each screen pixel spans one to two texels of the
 display level and reads only that level, bilinearly. A bilinear sample of the
 finer level stays closer to the pixel's area average than a blend with the

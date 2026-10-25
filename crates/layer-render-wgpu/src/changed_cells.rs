@@ -69,8 +69,7 @@ impl ChangedCells {
         if unchanged && self.admission==Some(admission) && !packet.reset_layers && !packet.composite_all
             && packet.restore_rasters.is_empty() && packet.dabs.is_empty() && packet.dab_batches.is_empty()
             && r.transform_damage.is_empty() && r.document_damage.is_empty() && r.transform_preview.is_none() && r.moving_layer.is_none() && r.moving_pixels.is_none()
-            && r.preview_layer_id.is_none()
-            && r.artwork_frame.as_ref().is_some_and(|frame|frame.view==packet.view) {return;}
+            && r.preview_layer_id.is_none() {return;}
         self.admission=None;
         self.forced.clear();
         let side=(1<<cache.plan.level).min(PAGE_SIZE);

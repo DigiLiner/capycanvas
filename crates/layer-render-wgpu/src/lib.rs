@@ -1039,6 +1039,7 @@ pub struct WgpuRasterizer {
     style_stride: u64,
     style_capacity: usize,
     style_upload: Vec<u8>,
+    style_upload_valid: Arc<std::sync::atomic::AtomicBool>,
     dab_upload: Vec<DabGpu>,
     target_buffer: wgpu::Buffer,
     target_bind_group: wgpu::BindGroup,
@@ -1443,6 +1444,7 @@ impl WgpuRasterizer {
             style_stride,
             style_capacity,
             style_upload: Vec::with_capacity(style_stride as usize * style_capacity),
+            style_upload_valid: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             dab_upload: Vec::new(),
             target_buffer,
             target_bind_group,
@@ -2446,6 +2448,7 @@ impl WgpuRasterizer {
         }
         if styles > self.style_capacity {
             self.style_capacity = styles.next_power_of_two();
+            self.style_upload_valid.store(false, std::sync::atomic::Ordering::Release);
             self.style_buffer =
                 create_style_buffer(&self.device, self.style_stride, self.style_capacity);
             self.style_bind_group =
@@ -2499,7 +2502,8 @@ impl WgpuRasterizer {
             )?;
         }
         let used = self.style_stride as usize * records;
-        self.style_upload.clear();
+        let mut style_changed = self.style_upload.len() != used
+            || !self.style_upload_valid.load(std::sync::atomic::Ordering::Acquire);
         self.style_upload.resize(used, 0);
         for index in 0..packet.dab_batches.len() {
             let batch = &packet.dab_batches[index];
@@ -2518,8 +2522,10 @@ impl WgpuRasterizer {
             record.color_mode[3] = f32::from(ordered_dither(&batch.style));
             record.color_mode[2] = f32::from(batch.style.blend_space == layer_core::BlendSpace::Perceptual);
             let offset = index * self.style_stride as usize;
-            self.style_upload[offset..offset + mem::size_of::<StyleGpu>()]
-                .copy_from_slice(style_bytes(&record));
+            let bytes = style_bytes(&record);
+            let destination = &mut self.style_upload[offset..offset + bytes.len()];
+            style_changed |= destination != bytes;
+            destination.copy_from_slice(bytes);
         }
         self.layer_style_records.clear();
         let occurrences = packet.scene.order().iter().map(|&handle| (handle, packet.scene)).chain(removed_members);
@@ -2530,12 +2536,16 @@ impl WgpuRasterizer {
             let mut record = StyleGpu::layer(packet.document_extent, watercolor);
             record.color_mode = layer_color_parameters(scene.source_target(handle).map_or(Default::default(), |target| scene.color_mode(target)), self.document_color());
             let offset = record_index * self.style_stride as usize;
-            self.style_upload[offset..offset + mem::size_of::<StyleGpu>()]
-                .copy_from_slice(style_bytes(&record));
+            let bytes = style_bytes(&record);
+            let destination = &mut self.style_upload[offset..offset + bytes.len()];
+            style_changed |= destination != bytes;
+            destination.copy_from_slice(bytes);
         }
-        if !self.style_upload.is_empty() {
-            self.uploads
-                .write(encoder, &self.style_buffer, &self.style_upload)?;
+        if style_changed && !self.style_upload.is_empty() {
+            let write = submission::CacheWrite::shared(self.style_upload_valid.clone());
+            self.uploads.write(encoder, &self.style_buffer, &self.style_upload)?;
+            self.style_upload_valid.store(true, std::sync::atomic::Ordering::Release);
+            write.track(encoder);
         }
         Ok(())
     }
@@ -3564,14 +3574,14 @@ impl CanvasRenderer for WgpuRasterizer {
         let work = healing || pending.capture.as_ref().is_some_and(|capture| !capture.complete());
         if work {
             let mut encoder = submission::CommandEncoder::new(&self.device, &wgpu::CommandEncoderDescriptor { label: Some("healing settle") });
-            self.telemetry.begin(&self.device, &self.queue, &mut encoder, self.metrics.submissions);
+            self.telemetry.begin(&self.device, &self.queue, encoder.diagnostics(), self.metrics.submissions);
             let stepped = if healing {
                 let mut sources = self.retouch_sources();
                 let result = sources.step_heal(self, &mut encoder);
                 self.retouch = Some(sources);
                 result?
             } else if let Some(capture) = &mut pending.capture { self.step_native_rasters(capture, &mut encoder)? } else { false };
-            self.telemetry.end(&mut encoder);
+            self.telemetry.end(encoder.diagnostics());
             debug_assert!(stepped);
             self.uploads.finish(&encoder);
             self.metrics.command_passes += encoder.pass_count();
@@ -4162,7 +4172,7 @@ impl WgpuRasterizer {
                 label: Some("layer incremental sparse frame"),
             },
         );
-        self.telemetry.begin(&self.device, &self.queue, &mut encoder, self.metrics.submissions + 1);
+        self.telemetry.begin(&self.device, &self.queue, encoder.diagnostics(), self.metrics.submissions + 1);
         let moving_images_changed = self.prepare_moving_images(packet, &mut encoder)?;
         if moving_images_changed && let Some(scene) = &mut self.scene {
             scene.invalidate_object_previews(packet.document_extent);
@@ -4446,7 +4456,7 @@ impl WgpuRasterizer {
 
         if let Some(started) = started { cpu_phases[0] = started.elapsed().as_secs_f64() * 1000.; }
         trace_phase.next(c"capy.paint");
-        self.telemetry.phase_begin(0, &self.device, &self.queue, &mut encoder);
+        self.telemetry.phase_begin(0, &self.device, &self.queue, encoder.diagnostics());
         // Persistent work is encoded before preview copies so prediction sees
         // this frame's committed ink.
         for (index, batch) in packet
@@ -4533,8 +4543,8 @@ impl WgpuRasterizer {
         if self.settling.is_some() {
             self.clear_preview_stamps();
             self.uploads.finish(&encoder);
-            self.telemetry.phase_end(0, &mut encoder);
-            self.telemetry.end(&mut encoder);
+            self.telemetry.phase_end(0, encoder.diagnostics());
+            self.telemetry.end(encoder.diagnostics());
             self.metrics.command_passes += encoder.pass_count();
             self.last_submission = Some(encoder.submit(&self.queue));
             self.telemetry.submitted(&self.queue);
@@ -4546,7 +4556,7 @@ impl WgpuRasterizer {
 
         if let Some(started) = started { cpu_phases[1] = started.elapsed().as_secs_f64() * 1000.; }
         trace_phase.next(c"capy.capture");
-        self.telemetry.phase_end(0, &mut encoder);
+        self.telemetry.phase_end(0, encoder.diagnostics());
         let replay_window = !packet.commit_rasters && packet.dab_batches.iter().any(|batch| batch.kind == DabBatchKind::Persistent);
         if let Some(liquify) = &mut self.liquify { liquify.publish(packet.scene, packet.dab_batches); }
         let native_commit = match settled_commit {
@@ -4565,7 +4575,7 @@ impl WgpuRasterizer {
             self.transform_damage.sort_unstable_by_key(|&(id,rect)|(id,rect.min_x(),rect.min_y(),rect.max_x(),rect.max_y()));
             self.transform_damage.dedup();
             self.uploads.finish(&encoder);
-            self.telemetry.end(&mut encoder);
+            self.telemetry.end(encoder.diagnostics());
             self.metrics.command_passes += encoder.pass_count();
             self.last_submission = Some(encoder.submit(&self.queue));
             self.telemetry.submitted(&self.queue);
@@ -4586,7 +4596,7 @@ impl WgpuRasterizer {
             return Ok(());
         }
         trace_phase.next(c"capy.prediction");
-        self.telemetry.phase_begin(1, &self.device, &self.queue, &mut encoder);
+        self.telemetry.phase_begin(1, &self.device, &self.queue, encoder.diagnostics());
 
         self.preview_damage = new_preview_damage;
         self.preview_contact_tiles = new_preview_contact_tiles;
@@ -4789,8 +4799,8 @@ impl WgpuRasterizer {
         if preview_is_watercolor { self.canonicalize_preview_watercolor(&mut encoder)?; }
         if let Some(started) = started { cpu_phases[3] = started.elapsed().as_secs_f64() * 1000.; }
         trace_phase.next(c"capy.composition");
-        self.telemetry.phase_end(1, &mut encoder);
-        self.telemetry.phase_begin(2, &self.device, &self.queue, &mut encoder);
+        self.telemetry.phase_end(1, encoder.diagnostics());
+        self.telemetry.phase_begin(2, &self.device, &self.queue, encoder.diagnostics());
         self.preview_layer_id = new_preview_layer;
         self.preview_requires_base = new_preview_requires_base;
 
@@ -4901,7 +4911,7 @@ impl WgpuRasterizer {
                     self.document_damage.clear();
                     self.document_damage.push(PixelRect::full(packet.document_extent));
                     self.uploads.finish(&encoder);
-                    self.telemetry.phase_end(2,&mut encoder);self.telemetry.end(&mut encoder);
+                    self.telemetry.phase_end(2,encoder.diagnostics());self.telemetry.end(encoder.diagnostics());
                     self.metrics.command_passes+=encoder.pass_count();
                     self.last_submission=Some(encoder.submit(&self.queue));
                     self.telemetry.submitted(&self.queue);
@@ -4963,8 +4973,8 @@ impl WgpuRasterizer {
         self.uploads.finish(&encoder);
         if let Some(started) = started { cpu_phases[4] = started.elapsed().as_secs_f64() * 1000.; }
         trace_phase.next(c"capy.publication");
-        self.telemetry.phase_end(2, &mut encoder);
-        self.telemetry.end(&mut encoder);
+        self.telemetry.phase_end(2, encoder.diagnostics());
+        self.telemetry.end(encoder.diagnostics());
         self.metrics.command_passes += encoder.pass_count();
         if let Some(backup)=self.display_backup.take() {
             let bytes=backup.bytes;

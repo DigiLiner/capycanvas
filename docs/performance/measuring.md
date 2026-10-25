@@ -40,6 +40,9 @@ frames:
 - Warm up first: pipelines compiled, and one priming gesture undone.
 - Run on the reference device at thermal status 0, using its default display
   settings and the default panel glass.
+- Check display size and density overrides and font scale before warming up.
+  Inherited overrides still make a run diagnostic. Record the prior values,
+  measure with factory size and density and font scale 1, then restore them.
 
 **Only motion counts.** A frame where nothing moves may take longer. This includes
 the frame after a drag is released and a frame waiting on a click. The exception

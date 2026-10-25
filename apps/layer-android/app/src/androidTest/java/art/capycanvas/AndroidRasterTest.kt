@@ -4518,12 +4518,12 @@ class AndroidRasterTest {
             assertTrue(display.getString("present_mode") in listOf("SharedDemandRefresh", "Fifo"))
             assertEquals(display.getString("present_mode") == "SharedDemandRefresh", display.getBoolean("retained_target"))
         }
-        fun pendingBufferedFrame(transition: (Long) -> Unit) = native { handle ->
+        fun bufferedFrame(transition: (Long) -> Unit) = native { handle ->
             val submitted=JSONObject(Native.displayStatus(handle)).getLong("submitted_frames")
             val zoom=state(handle).getJSONObject("camera").getDouble("zoom")
             Native.dispatch(handle,obj("type" to "set_zoom","zoom" to zoom*1.1).toString())
             val now=System.nanoTime()
-            assertTrue("A submitted buffered frame requests its presentation retry",Native.frame(handle,now,now+16_666_667))
+            Native.frame(handle,now,now+16_666_667)
             val display=JSONObject(Native.displayStatus(handle))
             assertEquals("Fifo",display.getString("present_mode"))
             assertEquals(submitted+1,display.getLong("submitted_frames"))
@@ -4532,7 +4532,7 @@ class AndroidRasterTest {
         ready()
         stroke(0.0)
         val painted=hash(png("front-painted.png"))
-        pendingBufferedFrame { handle ->
+        bufferedFrame { handle ->
             val bytes=Native.surfacePixelsForTest(handle)
             assertTrue("Pending buffered capture contains artwork",(bytes.indices step 97).map {bytes[it]}.toSet().size>8)
         }
@@ -4541,7 +4541,7 @@ class AndroidRasterTest {
         scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         ready()
         assertEquals(painted,hash(png("front-resumed.png")))
-        pendingBufferedFrame { Native.detach(it) }
+        bufferedFrame { Native.detach(it) }
         scenario.recreate()
         scenario.onActivity { activity=it }
         ready()
@@ -4573,7 +4573,7 @@ class AndroidRasterTest {
         val submitted=native {JSONObject(Native.displayStatus(it)).getLong("submitted_frames")}
         SystemClock.sleep(300)
         assertEquals("An idle front buffer stops submitting",submitted,native {JSONObject(Native.displayStatus(it)).getLong("submitted_frames")})
-        pendingBufferedFrame { Native.destroyGpuForTest(it); Native.detach(it) }
+        bufferedFrame { Native.destroyGpuForTest(it); Native.detach(it) }
         compose.runOnUiThread { host.documentChanged() }
         compose.waitUntil(10_000) { host.failure!=null }
         compose.runOnUiThread { host.restartCanvas() }

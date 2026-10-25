@@ -246,7 +246,7 @@ impl GpuFrameTimer {
         if !self.begin_encoded(&mut encoder, frame) {
             return false;
         }
-        queue.submit([encoder.finish()]);
+        queue.submit_for_present([encoder.finish()]);
         true
     }
     pub fn end(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -257,7 +257,7 @@ impl GpuFrameTimer {
             label: Some("frame GPU end"),
         });
         self.end_encoded(&mut encoder);
-        queue.submit([encoder.finish()]);
+        queue.submit_for_present([encoder.finish()]);
         self.submitted(queue);
     }
     /// Resolve only after the marker submission has completed. On Metal,
@@ -275,7 +275,7 @@ impl GpuFrameTimer {
             });
             encoder.resolve_query_set(&slot.query, 0..end_index + 1, &slot.resolve, 0);
             encoder.copy_buffer_to_buffer(&slot.resolve, 0, &slot.read, 0, u64::from(end_index + 1) * 8);
-            queue.submit([encoder.finish()]);
+            queue.submit_for_present([encoder.finish()]);
             let buffer = slot.read.clone();
             let busy = slot.busy.clone();
             let ready = self.ready.clone();
@@ -406,7 +406,7 @@ mod tests {
                 pass.draw(0..3, 0..1);
             }
             if encoded { timer.end_encoded(&mut encoder); }
-            queue.submit([encoder.finish()]);
+            queue.submit_for_present([encoder.finish()]);
             timer.submitted(&queue);
             for _ in 0..2 {
                 device.poll(wgpu::PollType::Wait {
@@ -445,7 +445,7 @@ mod tests {
         // This deliberate CPU stall must not become a reported GPU spike.
         std::thread::sleep(std::time::Duration::from_millis(200));
         timer.end_encoded(&mut encoder);
-        queue.submit([encoder.finish()]);
+        queue.submit_for_present([encoder.finish()]);
         timer.submitted(&queue);
         for _ in 0..2 {
             device
@@ -501,7 +501,7 @@ mod tests {
                     });
                     let mut encoder = device.create_command_encoder(&Default::default());
                     encoder.clear_buffer(&buffer, 0, None);
-                    queue.submit([encoder.finish()]);
+                    queue.submit_for_present([encoder.finish()]);
                     timer.end(&device, &queue);
                     expected.push(frame);
                 }

@@ -981,6 +981,47 @@ fn local_sdr_spatial_guide_matches_cpu_and_preserves_master() {
 }
 
 #[test]
+fn surface_quantization_matches_every_code_with_independent_spatial_noise() {
+    use crate::tests::native_effects::{empty_document,insert_source};
+    let size=[256,64];
+    let color=DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::U16};
+    let codes=|x:u32,y:u32| {
+        let phase=if y<32 {0.} else {(y%3+1) as f64*0.25};
+        [x,255-x,(x+83)%256].map(|v|(f64::from(v)+phase).min(255.))
+    };
+    let image=crate::test_support::depth_source(size,SampleDepth::F32,RgbSpace::Srgb,1024*1024,|x,y| {
+        let rgb=codes(x,y).map(|code|RgbSpace::Srgb.decode(code/255.) as f32);
+        [rgb[0],rgb[1],rgb[2],1.]
+    });
+    let mut document=empty_document(size,color);
+    insert_source(&mut document,"all quantized codes",image);
+    let mut r=WgpuRasterizer::new_native_headless(color).unwrap();
+    let camera=crate::test_support::view(size);
+    r.submit(FramePacket {view:camera,..crate::test_support::packet(document.scene(),size)}).unwrap();
+    let hash=|mut v:u32| {
+        v=(v^(v>>16)).wrapping_mul(0x7feb352d);
+        v=(v^(v>>15)).wrapping_mul(0x846ca68b);
+        v^(v>>16)
+    };
+    for format in [wgpu::TextureFormat::Rgba8UnormSrgb,wgpu::TextureFormat::Bgra8UnormSrgb,wgpu::TextureFormat::Rgba8Unorm,wgpu::TextureFormat::Bgra8Unorm] {
+        let (texture,target)=crate::create_target(r.device(),size,format,"every quantized code");
+        let mut presenter=ViewportPresenter::for_surface(&r,format,SdrSurfaceColor::Srgb).unwrap();
+        presenter.present(&r,&target,camera,[0.;4]).unwrap();
+        for (i,pixel) in crate::layer_tests::page_bytes(&r,&texture).chunks_exact(4).enumerate() {
+            let x=i as u32%size[0];let y=i as u32/size[0];
+            let seed=x.wrapping_mul(0x9e3779b9).wrapping_add(y.wrapping_mul(0x85ebca6b)).wrapping_add(0x3c6ef372);
+            let noise=((hash(seed)&65535) as f32+(hash(seed^0xa511e9b3)&65535) as f32+1.)/65536.-1.;
+            let order=if matches!(format,wgpu::TextureFormat::Bgra8UnormSrgb|wgpu::TextureFormat::Bgra8Unorm) {[2,1,0]}else{[0,1,2]};
+            for (channel,code) in codes(x,y).into_iter().enumerate() {
+                let expected=if code==0. || code==255. {code}else{(code+f64::from(noise)).clamp(0.,255.).round()} as u8;
+                assert_eq!(pixel[order[channel]],expected,"{format:?} pixel ({x},{y}) channel {channel} code {code}");
+            }
+            assert_eq!(pixel[3],255);
+        }
+    }
+}
+
+#[test]
 fn surface_triangular_quantization_is_phase_stable_and_format_aware() {
     use layer_core::color::{ColorProfile,DocumentColor,SampleDepth,RgbSpace,source::{SourceBuilder,SourceInterpretation,SourceChannels}};
     use crate::tests::native_effects::{empty_document,insert_source};

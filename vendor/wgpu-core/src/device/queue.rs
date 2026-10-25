@@ -127,7 +127,7 @@ impl Queue {
         texture: &Arc<Texture>,
     ) -> Result<(), DeviceError> {
         let snatch_guard = self.device.snatchable_lock.read();
-        let submission = self
+        let mut submission = self
             .allocate_submission(snatch_guard)
             .map_err(|(_index, e)| e)?;
         let device = &self.device;
@@ -142,6 +142,7 @@ impl Queue {
         };
 
         let mut pending_writes = self.pending_writes.lock();
+        submission.presentation = !pending_writes.is_recording;
 
         if needs_clear {
             // After encoding the clear operation, we must not return without
@@ -611,6 +612,7 @@ pub(crate) struct PendingSubmission<'a> {
     // deadlocking from the same surface texture being submitted multiple times.
     surface_textures: FastHashMap<*const Texture, Arc<Texture>>,
     pub index: SubmissionIndex,
+    presentation: bool,
 }
 
 pub(crate) struct SubmissionResult<'a> {
@@ -679,11 +681,9 @@ impl Queue {
             buffer_offset,
         );
 
-        drop(snatch_guard);
-
         pending_writes.consume(staging_buffer);
-
         drop(pending_writes);
+        drop(snatch_guard);
 
         result
     }
@@ -732,11 +732,9 @@ impl Queue {
             buffer_offset,
         );
 
-        drop(snatch_guard);
-
         pending_writes.consume(staging_buffer);
-
         drop(pending_writes);
+        drop(snatch_guard);
 
         result
     }
@@ -1350,6 +1348,21 @@ impl Queue {
         &self,
         command_buffers: &[Arc<CommandBuffer>],
     ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
+        self.submit_inner(command_buffers, false)
+    }
+
+    pub fn submit_for_present(
+        &self,
+        command_buffers: &[Arc<CommandBuffer>],
+    ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
+        self.submit_inner(command_buffers, true)
+    }
+
+    fn submit_inner(
+        &self,
+        command_buffers: &[Arc<CommandBuffer>],
+        presentation: bool,
+    ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
         profiling::scope!("Queue::submit");
         api_log!("Queue::submit");
 
@@ -1358,6 +1371,7 @@ impl Queue {
             .allocate_submission(snatch_guard)
             .map_err(|(index, e)| (index, e.into()))?;
         let submit_index = submission.index;
+        submission.presentation = presentation;
 
         let res = 'error: {
             let mut used_surface_textures = track::TextureUsageScope::default();
@@ -1528,6 +1542,7 @@ impl Queue {
             }
 
             let pending_writes = self.pending_writes.lock();
+            submission.presentation &= !pending_writes.is_recording;
 
             let SubmissionResult { snatch_guard } = match submission.submit(pending_writes) {
                 Ok(result) => result,
@@ -1613,6 +1628,7 @@ impl Queue {
             executions: Vec::new(),
             surface_textures: FastHashMap::default(),
             index,
+            presentation: false,
         };
 
         Ok(submission)
@@ -1641,10 +1657,11 @@ impl Queue {
         let PendingSubmission {
             queue: _,
             snatch_guard,
-            command_index_guard,
+            mut command_index_guard,
             mut executions,
             mut surface_textures,
             index: submit_index,
+            presentation,
         } = prepared;
 
         let mut used_surface_textures = track::TextureUsageScope::default();
@@ -1717,12 +1734,16 @@ impl Queue {
                     (self.device.fence.as_ref(), submit_index),
                 )
             };
+            drop(submit_surface_textures);
             if let Err(error) = result {
-                drop(submit_surface_textures);
                 drop(pending_writes);
                 drop(command_index_guard);
                 drop(snatch_guard);
                 return Err(self.device.handle_hal_error(error));
+            }
+
+            if !presentation {
+                command_index_guard.last_non_presentation_submission_index = submit_index;
             }
 
             // Submissions must have strictly increasing indices, so we must hold the
@@ -1975,6 +1996,23 @@ impl Global {
         queue_id: QueueId,
         command_buffer_ids: &[id::CommandBufferId],
     ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
+        self.queue_submit_inner(queue_id, command_buffer_ids, false)
+    }
+
+    pub fn queue_submit_for_present(
+        &self,
+        queue_id: QueueId,
+        command_buffer_ids: &[id::CommandBufferId],
+    ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
+        self.queue_submit_inner(queue_id, command_buffer_ids, true)
+    }
+
+    fn queue_submit_inner(
+        &self,
+        queue_id: QueueId,
+        command_buffer_ids: &[id::CommandBufferId],
+        presentation: bool,
+    ) -> Result<SubmissionIndex, (SubmissionIndex, QueueSubmitError)> {
         let queue = self.hub.queues.get(queue_id);
         let command_buffer_guard = self.hub.command_buffers.read();
         let command_buffers = command_buffer_ids
@@ -1982,7 +2020,8 @@ impl Global {
             .map(|id| command_buffer_guard.get(*id))
             .collect::<Vec<_>>();
         drop(command_buffer_guard);
-        queue.submit(&command_buffers)
+        if presentation { queue.submit_for_present(&command_buffers) }
+        else { queue.submit(&command_buffers) }
     }
 
     pub fn queue_get_timestamp_period(&self, queue_id: QueueId) -> f32 {
