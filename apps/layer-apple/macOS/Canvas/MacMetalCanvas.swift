@@ -20,7 +20,6 @@ final class MacCanvasView: NSView {
     private var tracking: NSTrackingArea?
     private var windowObservers: [NSObjectProtocol] = []
     private var shaderInputMonitor: Any?
-    private lazy var documentDelegate = DocumentWindowDelegate(store: store)
     private var extent = CGSize.zero
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -61,7 +60,6 @@ final class MacCanvasView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let window { store.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) }) }
-        documentDelegate.attach(window)
         for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }
         windowObservers.removeAll()
         if let shaderInputMonitor { NSEvent.removeMonitor(shaderInputMonitor) }
@@ -156,7 +154,6 @@ final class MacCanvasView: NSView {
         setAccessibilityValue(store.bootstrap[store.restartingCanvas ? "restarting_canvas" : store.canvasReady ? "canvas_ready" : "starting_canvas"].string)
     }
     func stop() {
-        documentDelegate.attach(nil)
         frames.deactivate()
         if attached { store.input(["type": "blur"]) }
         for observer in windowObservers { NotificationCenter.default.removeObserver(observer) }

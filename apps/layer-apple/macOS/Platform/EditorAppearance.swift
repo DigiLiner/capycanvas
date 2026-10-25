@@ -10,9 +10,17 @@ struct NativeEditorAppearance: NSViewRepresentable {
     func updateNSView(_ view: EditorAppearanceView, context: Context) {
         view.store = store; view.preferred = preferred; view.update()
     }
+    static func dismantleNSView(_ view: EditorAppearanceView, coordinator: ()) { view.stop() }
 }
 final class EditorAppearanceView: NSView {
-    weak var store: EditorStore?
+    weak var store: EditorStore? {
+        didSet {
+            guard store !== oldValue else { return }
+            documentDelegate?.attach(nil)
+            documentDelegate = store.map { DocumentWindowDelegate(store: $0) }
+        }
+    }
+    private var documentDelegate: DocumentWindowDelegate?
     var preferred = ""
     private var observation: NSKeyValueObservation?
     private var accentObserver: NSObjectProtocol?
@@ -20,7 +28,9 @@ final class EditorAppearanceView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); update() }
     func update() {
-        guard let window else { observation = nil; accentObserver = nil; reported = nil; return }
+        guard let window else { stop(); return }
+        store?.start(on: ProjectFiles.screenInfo(window.screen).map { JSON($0) })
+        documentDelegate?.attach(window)
         let name: NSAppearance.Name? = preferred == "dark" ? .darkAqua : preferred == "light" ? .aqua : nil
         if window.appearance?.name != name { window.appearance = name.flatMap(NSAppearance.init(named:)) }
         if observation == nil {
@@ -33,6 +43,12 @@ final class EditorAppearanceView: NSView {
                 object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.report() } }
         }
         report()
+    }
+    func stop() {
+        documentDelegate?.attach(nil)
+        observation = nil
+        if let accentObserver { NotificationCenter.default.removeObserver(accentObserver) }
+        accentObserver = nil; reported = nil
     }
     private func report() {
         guard window != nil, let store else { return }

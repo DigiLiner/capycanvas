@@ -12,16 +12,21 @@ import AppKit
     init(store: EditorStore) { self.store = store }
     @MainActor func attach(_ window: NSWindow?) {
         if window != nil && self.window === window { return }
-        store?.windowPresentation.changeFullscreen = nil
-        store?.focusWindow = nil
+        let ownsWindow = self.window.map { $0.delegate === self && store?.projectFiles.presentationWindow === $0 } ?? false
+        if window != nil || ownsWindow {
+            store?.windowPresentation.changeFullscreen = nil
+            store?.focusWindow = nil
+        }
         finishFullscreen(error: "The drawing window was detached")
         if let previous = self.window, previous.delegate === self { previous.delegate = downstream }
-        self.window = window; downstream = window?.delegate
+        self.window = window
+        if let previous = window?.delegate as? DocumentWindowDelegate { downstream = previous.downstream }
+        else { downstream = window?.delegate }
         window?.delegate = self
-        store?.projectFiles.presentationWindow = window
-        store?.projectFiles.closeWindow = { [weak window] in window?.performClose(nil) }
         fullscreenTransition = false
         if let window {
+            store?.projectFiles.presentationWindow = window
+            store?.projectFiles.closeWindow = { [weak window] in window?.performClose(nil) }
             store?.focusWindow = { [weak window] in
                 window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
             }
@@ -31,6 +36,9 @@ import AppKit
                 self.fullscreenTarget = target; self.fullscreenCompletion = completion
                 self.applyFullscreen()
             }
+        } else if ownsWindow {
+            store?.projectFiles.presentationWindow = nil
+            store?.projectFiles.closeWindow = nil
         }
     }
 
