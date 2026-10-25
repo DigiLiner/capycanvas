@@ -103,6 +103,13 @@ It records asynchronous pipeline creation and dispatch in the page and workers;
 run both themes on hardware WebGPU. Crop followed by Reveal All also runs in
 `--image-commands` to exercise constant-generator fallbacks outside the canvas.
 
+`scene::scale::tests::source_progress` uses an 80-page image and the real minimum
+64-slot decoded cache. It checks monotonic source prefixes, exact previous
+presentation during preparation, distinct but value-equal image storage, and
+independent final pixels. `correction_gather_` tests retain partial work across
+retries and invalidate it for discarded encoding, changed input identities,
+opacity or scope; repeated identical transform damage must still progress.
+
 GTK's `native_late_shader_failure_after_startup` completes startup, then queues
 a compiler failure and requires the render owner to return its recorded cause
 without another startup request. Run it on the private hardware test display.

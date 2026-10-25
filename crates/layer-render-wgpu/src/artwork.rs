@@ -28,6 +28,14 @@ impl Drop for PendingFrame {
     }
 }
 impl Frame {
+    pub fn paint_sources_changed(&self,scene:SceneView<'_>)->bool {
+        let previous=self.scene.view();
+        scene.targets().any(|target|match (scene.paint_base(target),previous.paint_base(target)) {
+            (Some(a),Some(b))=>a.offset!=b.offset || a.policy!=b.policy || !Arc::ptr_eq(a.image.storage(),b.image.storage()),
+            (None,None)=>false,
+            _=>true,
+        })
+    }
     /// Selection overlays, navigation and layer labels do not alter raw artwork.
     /// Source identity and raster publication catch edits without scanning pixels.
     pub fn same_evaluation(&self, packet: FramePacket<'_>) -> bool {

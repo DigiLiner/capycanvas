@@ -63,6 +63,31 @@ navigation during filtering. Native witnesses and all raw values remain in
 
 ## Operations
 
+### Checked upload comparison
+
+Measured 2026-10-25: `e038e3361` baseline, `c1b215667` checked dab/style upload
+growth, then the baseline again. Optimized release/R8 builds use the reference
+12 MP photo at Fit, factory density 320 and font scale 1, thermal status 0,
+and three warmed five-second gestures per row. Dither paints Photo; the other
+rows paint an empty layer above it. Completed canvas-update medians and p99
+gaps describe GPU-completed moving work, not scanout.
+
+| Row | Baseline / candidate / baseline, updates/s | Gap p99, ms | 60/s target |
+| --- | --- | --- | --- |
+| G-Pen 1024 | 51.33 / 50.54 / 51.25 | 29.28 / 28.99 / 29.36 | Not met |
+| Spray 1024 | 51.46 / 50.52 / 51.26 | 55.72 / 57.29 / 55.91 | Not met |
+| Dither Blender 512 | 32.72 / 31.91 / 32.44 | 76.54 / 76.60 / 75.81 | Not met |
+| Wet Round 512 | 41.25 / 41.52 / 41.46 | 33.15 / 33.16 / 33.26 | Not met |
+| G-Pen 1024, changing preview | 47.87 / 47.46 / 47.75 | 29.75 / 30.22 / 30.71 | Not met |
+
+Additional candidate/baseline controls reverse the initial small G-Pen, Spray
+and Dither throughput costs: 51.44/50.39, 50.97/50.17 and 32.54/32.03 updates/s.
+These short controls establish no repeatable slowdown, without establishing
+complete equivalence. The changing-preview fixture does not inject genuine
+late sensor correction or whole-stroke replay; those rows remain unmeasured.
+Exact APK/source provenance, per-contact results and settings are retained in
+`/mnt/localssd/capycanvas9-stability-android-artifacts/ad5-reference/`.
+
 Native full required-only startup remains unmeasured; selected dry-brush
 preparation is measured under [dry media](#dry-shader-preparation).
 Web diagnostics are recorded under

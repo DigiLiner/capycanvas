@@ -85,6 +85,33 @@ filter performance; raw witnesses remain in
 
 ## Operations
 
+### Checked upload comparison
+
+Measured 2026-10-25: `e038e3361` baseline, `c1b215667` checked dab/style upload
+growth, then the baseline again. Optimized release/R8 builds use the reference
+24 MP photo at Fit, factory density 240 and font scale 1, thermal status 0,
+and three warmed five-second gestures per successful row. The private app's
+Adaptive setting and actual 90 Hz surface period are verified after each setup.
+Dither paints Photo; the other rows paint an empty layer above it.
+
+| Row | Baseline / candidate / baseline, completed updates/s | Gap p99, ms | 90/s and gap target |
+| --- | --- | --- | --- |
+| G-Pen 1536 | 38.07 / 38.29 / 38.29 | 34.46 / 34.61 / 35.00 | Not met |
+| Spray 1024 | 62.29 / 62.40 / 63.25 | 74.19 / 73.85 / 77.06 | Not met |
+| Dither Blender 512 | 62.50 / Missing / 62.83 | 29.10 / Missing / 29.25 | Open |
+| Wet Round 512 | 97.52 / 97.74 / 96.99 | 15.87 / 16.13 / 15.57 | Met for this fixture |
+| G-Pen 1536, changing preview | 37.71 / 37.27 / 37.29 | 36.57 / 34.96 / 35.94 | Not met |
+
+Wet Round's candidate contacts range from 93.34 to 97.85 completed updates/s;
+its fresh-input rate agrees with the completed rate. This does not qualify
+other footprints or replay. The candidate Dither contact consumes input but
+does not advance the document revision; it times out with no renderer error or
+pending work. Both baseline phases author successfully. The failure remains
+unclassified, with no established cause or candidate throughput result. Matched
+camera, brush and input witnesses are retained alongside exact APK/source proof
+in `/mnt/localssd/capycanvas9-stability-android-artifacts/ad5-reference/`.
+Genuine late sensor correction and whole-stroke replay remain unmeasured.
+
 Required-only shader startup and first-use tool preparation are unmeasured on
 this reference device. Earlier idle-catalog measurements describe their named
 builds, not the current startup policy. See [startup preparation](responsiveness.md#demand-driven-startup)

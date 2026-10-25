@@ -215,6 +215,18 @@ A missing recipe queues compilation and defers encoding; capture workers prepare
 the discovered recipes before retrying. Startup enumeration prefetches recipes
 and does not establish readiness for a different effect chain or capture output.
 
+Persistent source levels record each successfully encoded reduction batch before
+attempting the next. A deferred decode resumes after that prefix; transient
+placement and streamed destinations do not acquire persistent source validity.
+Correction input gathering retains its remaining pages for both raster and
+object dependencies and keeps the correction invalid until gathering finishes.
+Discarded submissions invalidate the scene's cached progress.
+The gathering key includes dependency metadata and native roots, transform
+identity and damage, revision and evaluation time. Repeated identical damage
+retains progress. A changed paint-base storage identity retains a presentation
+backup during source preparation. Backups copy the actual presented views,
+including ready Half levels, so deferral preserves the displayed rendition.
+
 Dab and style upload growth checks the device's buffer, storage-binding and
 dynamic-offset limits before replacing either GPU buffer. The preflight includes
 reordered duplicate dabs and validates batch ranges and source indices before

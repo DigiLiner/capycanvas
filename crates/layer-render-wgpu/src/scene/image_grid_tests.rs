@@ -1,6 +1,145 @@
 use super::*;
 
 #[test]
+fn correction_gather_larger_than_decoded_cache_restarts_after_discard_and_source_change() {
+    correction_progress(CorrectionChange::Discard);
+}
+
+#[test]
+fn correction_gather_restarts_when_input_scope_changes_without_a_revision() {
+    correction_progress(CorrectionChange::Scope);
+}
+
+#[test]
+fn correction_gather_restarts_when_input_opacity_changes_without_a_revision() {
+    correction_progress(CorrectionChange::Opacity);
+}
+
+#[test]
+fn correction_gather_finishes_with_repeated_identical_transform_damage() {
+    correction_progress(CorrectionChange::RepeatedDamage);
+}
+
+#[derive(Clone, Copy)]
+enum CorrectionChange { Discard, Scope, Opacity, RepeatedDamage }
+
+fn correction_progress(change: CorrectionChange) {
+    use crate::scene::scale::tests::source_progress::{photo, color, EXTENT};
+    use crate::tests::native_effects::{insert_effect, refresh};
+    use layer_core::{EffectInstance, EffectValue};
+    let mut doc = photo(0);
+    let mut filter = EffectInstance::new(crate::tests::fixture("gaussian_blur").program());
+    filter.set("sigma", EffectValue::Number(0.)).unwrap();
+    let effect = insert_effect(&mut doc, filter);
+    let root = doc.composition().result;
+    doc.artwork.stacks.get_mut(root).unwrap().entries.swap(0, 1);
+    refresh(&mut doc);
+    assert!(doc.scene().order().iter().all(|handle| doc.scene().object_layer(*handle).is_none()));
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    assert_ne!(r.adapter.get_info().device_type, wgpu::DeviceType::Cpu);
+    r.source_tiles.get_mut().admit(0);
+    assert_eq!(r.source_tiles.borrow().admitted_bytes()[0], 64 * u64::from(PAGE_SIZE).pow(2) * 16);
+    let mut scene = Scene::new(&r).unwrap();
+    let full = PixelRect::full(EXTENT);
+    if matches!(change, CorrectionChange::RepeatedDamage) {
+        r.transform_damage.push((doc.active_target().unwrap(), full));
+    }
+    let window = DocRect { min: [0; 2], max: EXTENT.map(i64::from) };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut interrupted = false;
+    for _ in 0..256 {
+        assert!(std::time::Instant::now() < deadline, "correction never produced an incomplete input prefix");
+        let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        r.drain_image_decodes(&mut encoder).unwrap();
+        let frame = layer_render::FramePacket { blend_space: layer_core::BlendSpace::Linear, ..crate::test_support::packet(doc.scene(), EXTENT) };
+        let result = scene.prepare_region(&mut r, frame, (full, window), full, false, &mut encoder);
+        assert!(result.is_ok() || matches!(result, Err(GpuRasterError::DeferredObjectWork)), "{result:?}");
+        let remaining = scene.images.stages.iter().find(|stage| stage.id == effect)
+            .and_then(|stage| stage.input_gather.as_ref()).map(|gather| gather.pages.len());
+        r.uploads.finish(&encoder);
+        if remaining.is_some_and(|pages| pages > 0 && pages < 80) {
+            if matches!(change, CorrectionChange::Discard) {
+                drop(encoder);
+                assert!(!scene.valid.load(std::sync::atomic::Ordering::Acquire));
+            } else {
+                encoder.submit(&r.queue);
+                crate::test_support::complete(&r);
+                assert!(scene.valid.load(std::sync::atomic::Ordering::Acquire));
+            }
+            interrupted = true;
+            break;
+        }
+        encoder.submit(&r.queue);
+        crate::test_support::complete(&r);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(interrupted, "correction must encode an incomplete input prefix");
+    let revision = doc.revision;
+    match change {
+        CorrectionChange::Discard => {
+            let source = layer_core::color::source::rgba8_source(EXTENT, |x, y| color(x, y, 17));
+            let layer_core::SourceTarget::Paint(paint) = doc.active_target().unwrap() else { unreachable!() };
+            doc.artwork.paint.get_mut(paint).unwrap().base = Some(layer_core::PaintBase::new(source.into()));
+            doc.revision += 1;
+        }
+        CorrectionChange::Scope => {
+            let source = layer_core::color::source::rgba8_source(EXTENT, |x, y| color(x, y, 17));
+            let added = crate::tests::native_effects::insert_source(&mut doc, "Replacement input", source);
+            let root = doc.composition().result;
+            let entries = &mut doc.artwork.stacks.get_mut(root).unwrap().entries;
+            entries.retain(|handle| *handle != added);
+            entries.insert(1, added);
+            refresh(&mut doc);
+        }
+        CorrectionChange::Opacity => {
+            let source = doc.scene().order()[1];
+            doc.artwork.occurrences.get_mut(source).unwrap().opacity = 0.5;
+            refresh(&mut doc);
+        }
+        CorrectionChange::RepeatedDamage => (),
+    }
+    if !matches!(change, CorrectionChange::Discard) { assert_eq!(doc.revision, revision); }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut remaining = 80;
+    let mut progressed = false;
+    let mut ready = false;
+    for _ in 0..256 {
+        assert!(std::time::Instant::now() < deadline, "changed correction stalled with {remaining} input pages");
+        let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+        r.drain_image_decodes(&mut encoder).unwrap();
+        let frame = layer_render::FramePacket { blend_space: layer_core::BlendSpace::Linear, ..crate::test_support::packet(doc.scene(), EXTENT) };
+        let result = scene.prepare_region(&mut r, frame, (full, window), full, false, &mut encoder);
+        assert!(result.is_ok() || matches!(result, Err(GpuRasterError::DeferredObjectWork)), "{result:?}");
+        if let Some(gather) = scene.images.stages.iter().find(|stage| stage.id == effect).and_then(|stage| stage.input_gather.as_ref()) {
+            assert_eq!(gather.revision, doc.revision);
+            assert!(gather.pages.len() <= remaining, "a committed input prefix was restarted");
+            remaining = gather.pages.len();
+            progressed |= remaining > 0 && remaining < 80;
+        }
+        r.uploads.finish(&encoder); encoder.submit(&r.queue);
+        crate::test_support::complete(&r);
+        if result.is_ok() { ready = true; break; }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert!(ready && progressed, "changed correction must finish after forward input progress");
+    let stage = scene.images.stages.iter().find(|stage| stage.id == effect).unwrap();
+    assert!(stage.valid && stage.input_gather.is_none());
+    let pixels = crate::test_support::float_pixels(&r, &stage.output.texture);
+    assert_eq!(pixels.len(), EXTENT[0] as usize * EXTENT[1] as usize);
+    let seed = if matches!(change, CorrectionChange::Discard | CorrectionChange::Scope) { 17 } else { 0 };
+    let alpha = if matches!(change, CorrectionChange::Opacity) { 0.5 } else { 1. };
+    let palette: Vec<[f32; 4]> = (0..80).map(|tile| {
+        let rgba = color(tile % 10 * PAGE_SIZE, tile / 10 * PAGE_SIZE, seed);
+        std::array::from_fn(|c| if c == 3 { alpha } else { alpha * doc.composition().color.space.decode(f64::from(rgba[c]) / 255.) as f32 })
+    }).collect();
+    for (index, pixel) in pixels.iter().enumerate() {
+        let x = index as u32 % EXTENT[0]; let y = index as u32 / EXTENT[0];
+        let expected = palette[(x / PAGE_SIZE + 10 * (y / PAGE_SIZE)) as usize];
+        for c in 0..4 { assert!((pixel[c] - expected[c]).abs() < 2e-6, "changed correction pixel {index}: {pixel:?} != {expected:?}"); }
+    }
+}
+
+#[test]
 fn independent_pointwise_tiles_share_a_compute_pass() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let mut scene = Scene::new(&r).unwrap();

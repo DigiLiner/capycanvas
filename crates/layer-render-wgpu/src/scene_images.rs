@@ -27,6 +27,9 @@ struct InputGather {
     blend_space: layer_core::BlendSpace,
     moving: Option<OccurrenceHandle>,
     preview: Option<SourceTarget>,
+    inputs: Vec<(OccurrenceHandle,Metadata,[Option<u64>;2])>,
+    transform: Option<layer_render::TransformPreview>,
+    transform_damage: Vec<(SourceTarget,PixelRect)>,
     pages: std::collections::BTreeSet<[u32; 2]>,
 }
 #[derive(Default)]
@@ -498,18 +501,20 @@ impl Scene {
                         cached.input.view.clone(),
                         wgpu::Color::TRANSPARENT,
                     ));
-                } else if !dependencies.iter().any(|dependency| scene.object_layer(*dependency).is_some()) {
-                    for tile in input_dirty.pages() {
-                        let pixels = self.group(r, packet, layer_core::composite_input_scope(scene, handle), tile)?;
-                        self.capture_tile(r, pixels, &cached.input, tile, input);
-                    }
                 } else {
                     let time = order.iter().any(|h| scene.visible(*h) && scene.effect(*h).is_some_and(|effect| effect.animated())).then_some(packet.time_seconds.to_bits());
-                    if cached.input_gather.as_ref().is_none_or(|gather| gather.revision != scene.revision() || gather.time != time
-                        || gather.blend_space != packet.blend_space || gather.moving != r.moving_layer || gather.preview != r.preview_layer_id)
-                        || !packet.dabs.is_empty() || !packet.dab_batches.is_empty() || !packet.restore_rasters.is_empty() || !r.transform_damage.is_empty() {
+                    let raster_roots=|handle|[scene.source_target(handle),scene.mask(handle).map(|(mask,_)|SourceTarget::Coverage(mask.source))]
+                        .map(|target|target.and_then(|target|scene.raster(target)).map(layer_core::raster::RasterRevision::identity));
+                    if reset || input_scope_changed || cached.input_gather.as_ref().is_none_or(|gather| gather.revision != scene.revision() || gather.time != time
+                        || gather.blend_space != packet.blend_space || gather.moving != r.moving_layer || gather.preview != r.preview_layer_id
+                        || gather.transform!=r.transform_preview || gather.transform_damage!=r.transform_damage
+                        || gather.inputs.len()!=dependencies.len() || gather.inputs.iter().zip(&dependencies).any(|((old,value,roots),next)|old!=next||value!=&metadata[next]||*roots!=raster_roots(*next)))
+                        || !packet.dabs.is_empty() || !packet.dab_batches.is_empty() || !packet.restore_rasters.is_empty() {
                         cached.input_gather = Some(InputGather { revision: scene.revision(), time, blend_space: packet.blend_space,
-                            moving: r.moving_layer, preview: r.preview_layer_id, pages: input_dirty.pages().into_iter().collect() });
+                            moving: r.moving_layer, preview: r.preview_layer_id,
+                            inputs:dependencies.iter().map(|handle|(*handle,metadata[handle].clone(),raster_roots(*handle))).collect(),
+                            transform:r.transform_preview.clone(),transform_damage:r.transform_damage.clone(),
+                            pages: input_dirty.pages().into_iter().collect() });
                     }
                     cached.valid = false;
                     while let Some(tile) = cached.input_gather.as_ref().unwrap().pages.first().copied() {

@@ -22,6 +22,9 @@ fn identity_source_window_clips_signed_bounds_without_interpolation_padding() {
 #[path = "presentation_tests.rs"]
 mod presentation;
 
+#[path = "source_progress_tests.rs"]
+pub(crate) mod source_progress;
+
 #[path = "effect_tests.rs"]
 mod effects;
 #[path = "color_effect_tests.rs"]

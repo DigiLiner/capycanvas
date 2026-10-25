@@ -4249,7 +4249,8 @@ impl WgpuRasterizer {
             let side=if display_request.evaluation==scene::scale::Evaluation::Native {1.} else {f64::from(1u32<<display_request.plan.level)};
             let cold=scene.live_objects_cold(self,packet.scene,bounds,side);
             self.scene=Some(scene);
-            if (cold? || display_request.evaluation.fine_capacity().is_some()) && self.display_backup.is_none() && !self.object_deferred {
+            let source_changed=self.artwork_frame.as_ref().is_some_and(|frame|frame.paint_sources_changed(packet.scene));
+            if (cold? || source_changed || display_request.evaluation.fine_capacity().is_some()) && self.display_backup.is_none() && !self.object_deferred {
                 let mut encoder=submission::CommandEncoder::new(&self.device,&Default::default());
                 self.display_backup=self.scale_display.as_ref().and_then(|cache|cache.backup(self,&mut encoder));
                 if self.display_backup.is_some() {encoder.submit(&self.queue);}

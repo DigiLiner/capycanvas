@@ -1017,7 +1017,8 @@ impl Cache {
         if !self.output_complete() {return 0;}
         let levels=match &self.placed {Some(Presentation::Placed(p))=>[0,1,p.coarse_level-p.value.plan.level],_=>[0;3]};
         let mut unique=Vec::new();
-        [self.view(),self.next_view(),self.coarse_view()].into_iter().zip(levels).map(|(view,level)| {
+        let [current,next]=self.presented_views();
+        [current,next,self.coarse_view()].into_iter().zip(levels).map(|(view,level)| {
             let texture=view.texture();let level=level.min(texture.mip_level_count()-1);
             if unique.iter().any(|(t,m)|*t==texture && *m==level) {return 0;}
             unique.push((texture,level));
@@ -1027,7 +1028,8 @@ impl Cache {
     pub fn backup(&self,r:&WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder)->Option<DisplayBackup> {
         if self.placed.is_none() && self.pixels.root().is_none() {return None;}
         let levels=match &self.placed {Some(Presentation::Placed(p))=>[0,1,p.coarse_level-p.value.plan.level],_=>[0;3]};
-        let sources=[self.view(),self.next_view(),self.coarse_view()];
+        let [current,next]=self.presented_views();
+        let sources=[current,next,self.coarse_view()];
         let mut bytes=0;
         let mut copies: [Option<(&wgpu::Texture,u32,wgpu::TextureView)>;3]=std::array::from_fn(|_|None);
         let views=std::array::from_fn(|index| {

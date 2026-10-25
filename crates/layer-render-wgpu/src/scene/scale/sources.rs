@@ -2,6 +2,8 @@ use super::*;
 use std::collections::{BTreeMap, HashMap};
 use layer_core::raster::{RasterData, RasterPlane};
 
+const REDUCTION_BATCH:usize=32;
+
 fn missing_pages(required: &Damage, bounds: PixelRect, valid: &BTreeSet<[u32; 2]>, covered: PixelRect) -> Vec<[u32; 2]> {
     required.regions.iter().flat_map(|region| page_coordinates(region.intersect(bounds)))
         .filter(|coordinate| !valid.contains(coordinate) && page_rect(*coordinate).intersect(covered).is_empty())
@@ -384,10 +386,13 @@ impl Scene {
         let output = cached.image.view.clone();
         let missing = missing_pages(&required, plan.bounds, &cached.valid, covered);
         let stale = cached.stale.clone();
-        let changed = self.reduce_color_pages(commands, r, packet, encoder, handle, plan, &output, &missing, None, [0; 2], &stale)?;
-        let target = self.scale_sources.entries.get_mut(&id).unwrap().levels.get_mut(&level).unwrap();
-        for page in &missing { target.stale.remove(page); }
-        target.valid.extend(missing);
+        let mut changed=PixelRect::EMPTY;
+        for chunk in missing.chunks(REDUCTION_BATCH) {
+            changed=changed.union(self.reduce_color_pages(commands,r,packet,encoder,handle,plan,&output,chunk,None,[0;2],&stale)?);
+            let target=self.scale_sources.entries.get_mut(&id).unwrap().levels.get_mut(&level).unwrap();
+            for page in chunk {target.stale.remove(page);}
+            target.valid.extend(chunk.iter().copied());
+        }
         Ok(changed)
     }
     /// Reduce `missing` pages of a layer's levels, or of `placement` of it,
@@ -406,7 +411,7 @@ impl Scene {
         let blend_space = if placement.is_some() { packet.blend_space } else { self.scale_sources.entries[&id].blend_space };
         let phased = phased_packet(packet, id, phase);
         let mut changed = PixelRect::EMPTY;
-        for chunk in missing.chunks(32) {
+        for chunk in missing.chunks(REDUCTION_BATCH) {
             for &tile in chunk {
                 if placement.is_none() && phase != [0; 2] && r.watercolor_style(id, packet.dab_batches).is_none()
                     && let Some((region, reads)) = self.reduce_shifted_page(r, packet.scene, id, plan, output, tile, phase, shift, extent, blend_space, stale.get(&tile).copied())? {

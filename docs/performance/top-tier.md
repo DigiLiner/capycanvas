@@ -65,6 +65,22 @@ response failure in both builds and does not establish sustained filter FPS.
 
 ## Operations
 
+### Checked upload setup failure
+
+The 2026-10-25 comparison of `e038e3361` with checked upload growth at
+`c1b215667` does not reach motion on the reference 61 MP photo. The baseline
+waits 600 seconds and a bounded candidate observation waits 90 seconds without
+finishing composition. Canvas, brush and shader readiness are true, four GPU
+frames are submitted/completed, and the photo remains invisible. Heavy source
+cache churn supports a preparation-progress problem; the exact active branch
+was not recorded. No renderer crash or upload-guard regression is established.
+
+These are optimized release/R8 builds on the reference tablet with factory
+display settings. No top-tier brush rate is available for this comparison.
+Exact APK/source proof, state, counters and screenshots are retained under
+`/mnt/localssd/capycanvas9-stability-android-artifacts/ad5-reference/`. Real-device
+composition progress must pass before those motion rows can be measured.
+
 Required-only shader startup and first-use tool preparation are unmeasured on
 this reference device. Earlier idle-catalog measurements describe their named
 builds, not the current startup policy. See [startup preparation](responsiveness.md#demand-driven-startup)
