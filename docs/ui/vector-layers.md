@@ -449,7 +449,9 @@ footer button, the refusal actions, coloring, Erase up to intersection and the
 merge notice ([Android](../development/android.md#device-tests)). On
 Web, `tools/performance/workspace-motion.sh web --vector-tools` walks them with
 pen events in both themes and checks presented pixels, and `--vector-milestone`
-walks the same discovery, coloring, erasing and merge steps as Android, as do
+walks the same discovery, coloring, erasing and merge steps as Android, plus
+Sketch's path tools, a dimmed pen that stays choosable, the reasons on greyed
+tiles of a locked layer and the Fill notice's Back action, as do
 the Apple `EditorLaunchTests/testVectorLayers` and `testVectorLayersDark`
 ([Apple](../development/apple.md)); headless Chrome omits
 WebGPU pixels from screenshots, so run it headed ([Web](../development/web.md)).
@@ -470,7 +472,7 @@ a vector layer from its row and menu, and `native_vector_save_reopen_and_resize`
 (`--native-storage`) drags a path across a window resize, then saves, reopens and
 restarts with the eraser mode kept. On Web, `--vector-edges` and `--vector-files`
 cover the same ground at 1440, 1280 and 640 px, including the footer's actions
-menu. On Android, `vectorEdgeInputCursorsGesturesAndBackground`,
+menu, and check that each notice keeps the canvas bar's shape. On Android, `vectorEdgeInputCursorsGesturesAndBackground`,
 `vectorEdgeKeysTouchPointsNoticesAndGermanLabels` and
 `vectorEdgeRowsFilesAndRecreate` do so in landscape and portrait, place their
 points on the fitted paper, background the app mid-stroke and recreate the

@@ -534,11 +534,6 @@ button.layer-row { justify-content: center; gap: var(--panel-group-spacing); fon
 .zen-hidden #canvas { outline: none; }
 #status { position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: var(--surface-radius); background: var(--popover); box-shadow: 0 2px 8px #0004; z-index: 10; max-width: 80vw; }
 #status:empty { display: none; }
-.canvas-notice { position: absolute; left: 0; top: 0; z-index: 900; display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: max-content; padding: 8px 14px; border-radius: var(--surface-radius); background: var(--popover); color: var(--text); box-shadow: 0 2px 8px #0004; pointer-events: none; user-select: none; -webkit-user-select: none; }
-.canvas-notice[hidden], .canvas-notice [hidden] { display: none; }
-.canvas-notice.stacked { flex-direction: column; align-items: flex-start; }
-.canvas-notice-actions { display: flex; flex-wrap: wrap; }
-.canvas-notice-action { flex: none; margin: -6px -8px -6px 0; padding: 5px 12px; white-space: nowrap; pointer-events: auto; -webkit-tap-highlight-color: transparent; }
 .refine-panel { position: absolute; left: 0; top: 0; z-index: 900; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box; padding: 14px 16px 12px; border-radius: var(--surface-radius); background: var(--popover); color: var(--text); box-shadow: 0 2px 8px #0004; outline: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .refine-title { margin: 0; font-size: inherit; font-weight: 700; }
 .refine-actions { display: flex; justify-content: flex-end; gap: 8px; }
@@ -834,6 +829,7 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 .tool-choice-button { display:flex; align-items:center; gap:8px; text-align:left; width:100%; touch-action:manipulation; }
 .tool-choice-label { display:flex; align-items:center; gap:6px; }
 .tool-choice-button svg, .tool-choice-label svg { flex-shrink:0; }
+.tool-choice-button.unavailable-tool > * { opacity:.36; }
 .tool-setting-action { display:flex; align-items:center; gap:var(--panel-control-spacing); touch-action:manipulation; }
 .tool-setting-action > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tool-groups .tool-choice-button { width:calc(3 * 36px + 2 * 2px); min-width:0; min-height:36px; flex:none; gap:6px; padding:0 6px; line-height:18px; }
@@ -1468,10 +1464,18 @@ button.new-drawing-preset.disabled { opacity:.4; }
 .toolbar-choice-menu:not([popover]), .toolbar-choice-menu:popover-open { display: flex; }
 .toolbar-choice-menu > button { display: flex; align-items: center; gap: 8px; text-align: left; min-height: 32px; }
 .toolbar-choice-menu svg { width: 16px; height: 16px; }
-.canvas-action-bar { --field-clear: calc((var(--bar-tile) - var(--panel-control-height)) / 2); position: absolute; left: 0; top: 0; z-index: 900; display: flex; align-items: center; gap: var(--bar-gap); box-sizing: border-box; width: max-content; color: var(--text); background: var(--glass-panel); border-radius: var(--surface-radius); box-shadow: 0 2px 8px rgb(0 0 0 / 16%); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.canvas-action-bar, .canvas-notice { --field-clear: calc((var(--bar-tile) - var(--panel-control-height)) / 2); position: absolute; left: 0; top: 0; z-index: 900; display: flex; align-items: center; gap: var(--bar-gap); box-sizing: border-box; width: max-content; color: var(--text); background: var(--glass-panel); border-radius: var(--surface-radius); box-shadow: 0 2px 8px rgb(0 0 0 / 16%); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 .canvas-action-bar[hidden], .canvas-action-bar [hidden] { display: none !important; }
 .canvas-action-bar.suppressed { visibility: hidden; }
 .canvas-action-bar-label { flex: none; padding: 0 8px 0 12px; white-space: nowrap; opacity: .8; }
+.canvas-notice { min-height: var(--bar-tile); pointer-events: none; }
+.canvas-notice.stacked { flex-direction: column; align-items: stretch; }
+.canvas-notice-text { padding: 6px 8px 6px 12px; }
+.canvas-notice:not(.stacked, .text-only) .canvas-notice-text { white-space: nowrap; }
+.canvas-notice.text-only .canvas-notice-text { padding-right: 12px; }
+.canvas-notice.stacked .canvas-notice-text { padding: 10px 12px 2px; }
+.canvas-notice-actions { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: var(--bar-gap); }
+.canvas-notice-action { display: flex; flex: none; align-items: center; height: var(--panel-control-height); min-height: 0; margin: var(--field-clear); padding: 0 10px; line-height: normal; white-space: nowrap; pointer-events: auto; }
 .canvas-action-bar-item, .canvas-action-bar-completion { display: flex; flex: none; align-items: center; gap: var(--bar-gap); }
 .canvas-action-bar-divider { position: relative; flex: none; width: var(--divider-size); height: var(--bar-tile); }
 .canvas-action-bar .toolbar-option { flex: none; gap: 0; }
@@ -1492,12 +1496,12 @@ button.new-drawing-preset.disabled { opacity:.4; }
 .tool-position-group { display:flex; align-items:center; gap:var(--panel-compound-spacing); }
 .tool-position-numbers { display:flex; flex:1; min-width:0; flex-direction:column; gap:var(--panel-compound-spacing); }
 .tool-position-numbers .number-control { flex:1; min-width:0; }
-#workspace > .canvas-action-bar .suggested-action { background: var(--accent); color: var(--accent-foreground); }
-:where(:root:not([data-touch])) #workspace > .canvas-action-bar .suggested-action:hover { background: color-mix(in srgb, white 10%, var(--accent)); }
-#workspace > .canvas-action-bar .suggested-action:active { background: color-mix(in srgb, black 10%, var(--accent)); }
+#workspace > :is(.canvas-action-bar, .canvas-notice) .suggested-action { background: var(--accent); color: var(--accent-foreground); }
+:where(:root:not([data-touch])) #workspace > :is(.canvas-action-bar, .canvas-notice) .suggested-action:hover { background: color-mix(in srgb, white 10%, var(--accent)); }
+#workspace > :is(.canvas-action-bar, .canvas-notice) .suggested-action:active { background: color-mix(in srgb, black 10%, var(--accent)); }
 #workspace > .canvas-action-bar button[aria-disabled="true"] { opacity: .36; }
 #workspace > .canvas-action-bar button[aria-disabled="true"]:is(:hover, :active) { background: transparent; }
-#workspace > .canvas-action-bar .suggested-action[aria-disabled="true"]:is(:hover, :active) { background: var(--accent); }
+#workspace > :is(.canvas-action-bar, .canvas-notice) .suggested-action:is([aria-disabled="true"], :disabled):is(:hover, :active) { background: var(--accent); }
 /* Standalone brush tracks keep their value in the transient stamp preview. */
 .toolbar-slider { width: 100%; height: 100%; position: relative; }
 .toolbar-slider .toolbar-slider-cap { position: absolute; min-width: 0; min-height: 0; padding: 0; background: transparent; }

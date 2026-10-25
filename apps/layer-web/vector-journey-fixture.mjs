@@ -82,9 +82,25 @@ export async function vectorHarness({call,evaluate,settle}, {directory='artifact
     for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...at,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
     await settle();
   };
+  const noticeShape=place=>evaluate(`(()=>{const out=[],place=${JSON.stringify(place)},n=document.querySelector('.canvas-notice'),text=n.querySelector('.canvas-notice-text'),box=n.getBoundingClientRect();
+    const tile=layerApp.app.toolbar_ui({type:'style',style:'small'}).size[1],control=layerApp.app.catalog().panel_metrics.control_height,clear=(tile-control)/2;
+    const actions=[...n.querySelectorAll('.canvas-notice-action')].filter(b=>b.checkVisibility()),stacked=n.classList.contains('stacked');
+    const range=document.createRange();range.selectNodeContents(text);const lines=new Set([...range.getClientRects()].map(r=>Math.round(r.top))).size;
+    if(!stacked&&actions.length&&lines>1)out.push(place+': the text wraps to '+lines+' lines beside the actions');
+    if(!stacked&&Math.abs(box.height-tile)>.5)out.push(place+': a one-row notice is '+box.height+' px tall, not the bar tile '+tile);
+    const heights=actions.map(b=>b.getBoundingClientRect().height);
+    if(heights.some(h=>Math.abs(h-control)>.5))out.push(place+': action heights '+heights+' differ from the worded bar control '+control);
+    if(actions.length&&!actions[0].classList.contains('suggested-action'))out.push(place+': the first action is not the suggestion');
+    if(actions.slice(1).some(b=>b.classList.contains('suggested-action')))out.push(place+': a later action is accented');
+    if(stacked&&actions.length){
+      if(actions[0].getBoundingClientRect().top<text.getBoundingClientRect().bottom-1)out.push(place+': stacked actions overlap the text');
+      const end=box.right-actions.at(-1).getBoundingClientRect().right;
+      if(Math.abs(end-clear)>1)out.push(place+': stacked actions end '+end+' px from the right edge');
+    }
+    return out;})()`);
   const brush=label=>evaluate(`layerApp.app.catalog().brush_categories.flatMap(c=>c.brushes).find(b=>b.label===${JSON.stringify(label)}).id`);
   const activeVector='s.layers.find(l=>l.selected)?.content_icon==="layer-path-symbolic"';
   const vectorLayers='s.layers.filter(l=>l.content_icon==="layer-path-symbolic").length';
   const toolIs=name=>`JSON.stringify(s.layer_tools.tool)===${JSON.stringify(JSON.stringify(name))}`;
-  return {pause,send,invoke,tool,state,until,idle,camera,screen,size,line,mouseEvent,draw,stroke,color,eraserEnd,hover,key,chord,shot,darkest,inked,park,expect,refusalCursor,capture,click,brush,activeVector,vectorLayers,toolIs};
+  return {pause,send,invoke,tool,state,until,idle,camera,screen,size,line,mouseEvent,draw,stroke,color,eraserEnd,hover,key,chord,shot,darkest,inked,park,expect,refusalCursor,capture,click,noticeShape,brush,activeVector,vectorLayers,toolIs};
 }

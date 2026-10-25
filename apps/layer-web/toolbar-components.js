@@ -82,7 +82,7 @@ export function choiceField({ app, element, button, icon, openPopup, closePopup 
     if (spec.columns) row.title = spec.label;
     if (b) { b.setAttribute('aria-label', spec.label); b.title = spec.label; }
     if (b) { const item = items[selected] || items[0]; if(shownIcon!==item.icon){shownIcon=item.icon;b.replaceChildren(icon(item.icon),chosen,arrow);} chosen.textContent=item.label; }
-    buttons.forEach((button, i) => { button.title = items[i].label; button.setAttribute('aria-label', items[i].label); if (captions[i]) captions[i].textContent = items[i].label; button.setAttribute('role', 'radio'); button.setAttribute('aria-checked', items[i].selected); button.setAttribute('aria-pressed', items[i].selected); });
+    buttons.forEach((button, i) => { button.title = items[i].disabled_reason ?? items[i].label; button.setAttribute('aria-label', items[i].label); if (captions[i]) captions[i].textContent = items[i].label; button.setAttribute('role', 'radio'); button.setAttribute('aria-checked', items[i].selected); button.setAttribute('aria-pressed', items[i].selected); });
     entries.forEach(({entry,caption},i) => { caption.textContent=items[i].label; entry.setAttribute('aria-checked', i === selected); });
   }
   update({ Choice: spec });

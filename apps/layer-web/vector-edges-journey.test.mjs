@@ -6,7 +6,7 @@ import {readPackage,authoredIdentity} from './package-fixture.test.mjs';
 
 export async function checkVectorEdges({call,evaluate,settle}) {
   const findings=[];
-  const {pause,send,invoke,tool,state,until,idle,camera,screen,size,line,mouseEvent,draw,eraserEnd,hover,key,chord,shot,darkest,inked,park,expect,refusalCursor,capture,click,brush,activeVector,vectorLayers,toolIs}=await vectorHarness({call,evaluate,settle});
+  const {pause,send,invoke,tool,state,until,idle,camera,screen,size,line,mouseEvent,draw,eraserEnd,hover,key,chord,shot,darkest,inked,park,expect,refusalCursor,capture,click,noticeShape,brush,activeVector,vectorLayers,toolIs}=await vectorHarness({call,evaluate,settle});
   const [pencil,gpen,smudge,monoline]=[await brush('Pencil'),await brush('G-Pen'),await brush('Smudge'),await brush('Monoline')];
   const fresh=async()=>{
     for(const id of await state('s.layers.filter(l=>!l.paper).map(l=>Number(l.id))')){await send({type:'layer',action:{op:'select',id,mask:false}});await send({type:'layer',action:{op:'delete_selected'}});}
@@ -151,6 +151,7 @@ export async function checkVectorEdges({call,evaluate,settle}) {
     await draw('mouse',line([x0,rows[1]],[x1,rows[1]],6));
     await until('the vector refusal','(s.notice?.actions??[]).some(a=>a.id==="new_paint_layer")&&!document.querySelector(".canvas-notice").hidden');
     const noticeId=await state('s.notice.id');
+    findings.push(...await noticeShape(`${theme} vector refusal`));
     const bubble=()=>evaluate(`(()=>{const n=document.querySelector('.canvas-notice'),s=getComputedStyle(n);return{background:s.backgroundColor,hidden:n.hidden,label:n.getAttribute('aria-label'),tab:[...n.querySelectorAll('.canvas-notice-action')].map(b=>b.tabIndex)}})()`);
     const shown=await bubble();
     await send({type:'set_theme',theme:theme==='light'?'dark':'light'});
@@ -228,7 +229,7 @@ export async function checkVectorEdges({call,evaluate,settle}) {
       await draw('mouse',line([w2*.3,h2*.5],[w2*.6,h2*.5],6));
       await until('the German refusal','(s.notice?.actions??[]).length===3&&!document.querySelector(".canvas-notice").hidden');
       await park();
-      findings.push(...await fits('.canvas-notice',`${theme} ${place} notice`));
+      findings.push(...await fits('.canvas-notice',`${theme} ${place} notice`),...await noticeShape(`${theme} ${place} notice`));
       await capture(`edges-${theme}-${place}-notice`);
     };
     const workspace=async id=>{

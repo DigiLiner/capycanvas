@@ -250,7 +250,7 @@ export function createHeader({app, state, paintPair, workspace, element, button,
         const kind=r.entry.item.kind, command=state().commands.find(c=>c.id===r.button.dataset.command);
         const glyph=command?.icon||spec.icon;
         if(glyph && (r.button.firstChild?.dataset.asset!==glyph || r.button.firstChild?.hasAttribute('data-paint-pair')!==(glyph==='colors')))r.button.replaceChildren(icon(glyph,true),...(r.variants?[r.variants]:[]));
-        r.button.title=command?.tooltip||spec.label; r.button.setAttribute('aria-label',command?.label||spec.label);
+        r.button.title=spec.disabled_reason||command?.tooltip||spec.label; r.button.setAttribute('aria-label',command?.label||spec.label);
         r.button.disabled=!editing&&(!spec.enabled||(kind==='fullscreen'&&!document.fullscreenEnabled));
         r.button.setAttribute('aria-pressed',String(spec.selected));
         r.button.classList.toggle('brush-color',(spec.resolved_control??r.entry.item.control)?.kind==='color');

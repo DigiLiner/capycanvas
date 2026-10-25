@@ -3,7 +3,7 @@ import {vectorHarness} from './vector-journey-fixture.mjs';
 import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkVectorMilestone({call,evaluate,settle}) {
-  const {send,invoke,tool,state,stroke,line,key:chord,color,capture,click,until,brush,activeVector}=await vectorHarness({call,evaluate,settle},{directory:'artifacts/vector-milestone/web',lineSteps:20,keyDown:'keyDown'});
+  const {send,invoke,tool,state,stroke,line,key:chord,color,capture,click,noticeShape,until,brush,activeVector}=await vectorHarness({call,evaluate,settle},{directory:'artifacts/vector-milestone/web',lineSteps:20,keyDown:'keyDown'});
   const tap=at=>stroke([at,at]);
   const byText=(scope,text)=>`[...document.querySelectorAll(${JSON.stringify(scope)})].find(e=>e.offsetParent&&e.textContent.trim()===${JSON.stringify(text)})`;
   const dark=([r,g,b])=>Math.max(r,g,b)<100;
@@ -54,7 +54,71 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await capture(`milestone-${name}-thumbnail`);
     assert.ok(seen?.green>0,`${name}: the filled layer's thumbnail shows no fill ${JSON.stringify(seen)}`);
   });
-  const [pencil,gpen]=[await brush('Pencil'),await brush('G-Pen')];
+  const [pencil,gpen,rough]=[await brush('Pencil'),await brush('G-Pen'),await brush('Rough G-Pen')];
+  const items='[s.tool_set,...Object.values(s.tool_panels??{}),s.customization?.drawer?.tool_set].filter(Boolean).flatMap(v=>[...v.groups,...v.subtools])';
+  const noticeShown=id=>`(s.notice?.actions??[]).some(a=>a.id===${JSON.stringify(id)})&&!document.querySelector('.canvas-notice').hidden`;
+  const visibleIn=(scope,selector)=>`[...document.querySelectorAll(${JSON.stringify(scope)})].filter(n=>n.checkVisibility()&&n.getBoundingClientRect().width>0).flatMap(n=>[...n.querySelectorAll(${JSON.stringify(selector)})])`;
+  const switchTo=async id=>{
+    await evaluate(`layerApp.app.workspace_input(JSON.stringify({type:'switch',id:${JSON.stringify(id)}}));null`);
+    await until(`the ${id} workspace`,`JSON.parse(layerApp.app.workspace_view()).id===${JSON.stringify(id)}&&!JSON.parse(layerApp.app.workspace_view()).busy`);
+    await invoke('fit_canvas');
+  };
+  const opener=command=>headerTool(`e.item.control?.command===${JSON.stringify(command)}`);
+  const dimmedPen=async theme=>{
+    const row=`[...document.querySelectorAll('.tool-choice-button[data-brush="${rough}"]')].find(n=>n.checkVisibility()&&n.getBoundingClientRect().width>0)`;
+    await until('the dimmed Rough G-Pen row',`!!${row}`);
+    const reason=await state(`${items}.find(i=>i.preview===${rough})?.disabled_reason??null`);
+    assert.ok(reason,'a pen that cannot draw paths carries a reason');
+    assert.deepEqual(await evaluate(`(n=>({disabled:n.disabled,dimmed:n.classList.contains('unavailable-tool'),title:n.title}))(${row})`),{disabled:false,dimmed:true,title:reason},'the dimmed pen stays choosable and says why');
+    const at=await evaluate(`(n=>{n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})(${row})`);
+    for(const dx of [-12,0])await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:at.x+dx,y:at.y,button:'none',buttons:0,pointerType:'mouse'});
+    await until('hovering the dimmed pen shows why',`document.querySelector('#hover-tooltip').matches(':popover-open')&&document.querySelector('#hover-tooltip').textContent===${JSON.stringify(reason)}`,5000);
+    await capture(`milestone-${theme}-dimmed-tooltip`);
+    await click(row);
+    await until('choosing the dimmed pen explains at once',`s.brush.preset===${rough}&&${noticeShown('use_vector_pen')}`);
+    assert.deepEqual(await noticeShape(`${theme} dimmed Rough G-Pen`),[]);
+    await capture(`milestone-${theme}-dimmed-chosen`);
+    await noticeAction('use_vector_pen');
+    await until('Use G-Pen from the dimmed pen',`s.brush.preset===${gpen}`);
+  };
+  const sketchPaths=async theme=>{
+    const original=await evaluate('JSON.parse(layerApp.app.workspace_view()).id');
+    await switchTo('builtin:workspace:painter');
+    await click(await opener('scale_rotate'));
+    await until('Scale/rotate picks paths','s.layer_tools.tool==="move"&&s.commands.find(c=>c.id==="scale_rotate").selected');
+    await tap([650,315]);
+    await until('a tap selects the line','s.commands.find(c=>c.id==="deselect").enabled');
+    await capture(`milestone-${theme}-sketch-scale-rotate`);
+    await invoke('deselect');
+    await invoke('select');
+    await click(await opener('select'));
+    const choices=visibleIn('.content-drawer','.tool-subtools .tool-choice-button');
+    await until('the Select drawer',`${choices}.length>2`);
+    await steady('.content-drawer');
+    const paths=await state(`[${items}.find(i=>i.action?.type==='invoke'&&i.action.command==='move')?.label,s.commands.find(c=>c.id==='edit_points').label]`);
+    assert.deepEqual(await evaluate(`${choices}.slice(0,2).map(n=>n.dataset.toolChoice)`),paths,'the Select drawer starts with Select paths and Edit points');
+    await capture(`milestone-${theme}-sketch-select-drawer`);
+    await click(`${choices}[0]`);
+    await until('Select paths picks the path tool','s.layer_tools.tool==="move"&&s.commands.find(c=>c.id==="scale_rotate").selected');
+    await send({type:'customize',action:{type:'close_expanded'}});
+    await until('the Select drawer closes',`${choices}.length===0`);
+    await click(await opener('sculpt'));
+    await until('Sculpt explains at once',noticeShown('use_vector_pen'));
+    assert.deepEqual(await noticeShape(`${theme} Sculpt`),[]);
+    await capture(`milestone-${theme}-sketch-sculpt`);
+    await noticeAction('use_vector_pen');
+    await until('Use G-Pen after Sculpt',`s.brush.preset===${gpen}&&!s.notice`);
+    const vector=await state('Number(s.layers.find(l=>l.selected).id)');
+    await send({type:'layer',action:{op:'lock',id:vector,value:true}});
+    const greyed=await evaluate(`(()=>{const out=[];let seen=0;
+      for(const r of document.querySelectorAll('.tool-tile:not(.toolbar-component)')){const t=r.tileView,b=r.querySelector(':scope > button');if(!t||!b||t.enabled||!t.disabled_reason)continue;seen++;if(b.title!==t.disabled_reason)out.push('tile '+t.label+' says '+b.title);}
+      for(const i of layerApp.app.header_view().items){const b=document.querySelector('[data-header-item="'+i.id+'"] .header-tool');if(!b||i.enabled||!i.disabled_reason)continue;seen++;if(b.title!==i.disabled_reason)out.push('header '+i.label+' says '+b.title);}
+      return{out,seen};})()`);
+    assert.ok(greyed.seen>0,'a locked layer greys a tile or title-bar item with a reason');
+    assert.deepEqual(greyed.out,[],'greyed tiles and title-bar items say why');
+    await send({type:'layer',action:{op:'lock',id:vector,value:false}});
+    await switchTo(original);
+  };
   await invoke('new_document');
   await evaluate(createDrawing({width:2000,height:1400}));
   await until('the vector drawing is ready','!layerApp.documents.busy()&&!s.document_file.busy&&layerApp.app.brush_ready()',60000);
@@ -72,6 +136,8 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await stroke(line([400,300],[900,330]));
     await expect(`${theme} inked line`,[650,315],dark);
     await capture(`milestone-${theme}-discover`);
+    await dimmedPen(theme);
+    await sketchPaths(theme);
 
     await send({type:'select_brush',id:pencil});
     await tap([650,515]);
@@ -97,6 +163,11 @@ export async function checkVectorMilestone({call,evaluate,settle}) {
     await expect(`${theme} filled inside the outline`,[1250,450],green);
     const unfilled=await state('s.layers.map(l=>Number(l.id))');
     await tap([1600,900]);
+    await until('the fill names its new layer',`${noticeShown('back_to_layer')}&&!(${activeVector})`);
+    assert.deepEqual(await noticeShape(`${theme} fill below`),[]);
+    await capture(`milestone-${theme}-fill-below-notice`);
+    await noticeAction('back_to_layer');
+    await until('back on the vector layer',activeVector);
     await expect(`${theme} filled below the lines`,[1600,960],green);
     await greenThumbnail(await state(`Number(s.layers.find(l=>!${JSON.stringify(unfilled)}.includes(Number(l.id))).id)`),`${theme}-fill-below`);
     await capture(`milestone-${theme}-color`);

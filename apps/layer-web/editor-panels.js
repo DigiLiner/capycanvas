@@ -36,7 +36,7 @@ export function createEditorPanels({ selectionUi, app, rasterWorker:fieldWorker,
     return () => {
       const view = readView?.() || state().tool_panels[panel] || state().tool_set;
       root.classList.toggle('tonal-tool-list', state().tool_extra.some(o=>o.Choice?.id==='tonal-tones'));
-      const next = JSON.stringify([view.groups, view.subtools].map(items => items.map(({label,selected,enabled,...item})=>item)),(_,value)=>typeof value==='bigint'?String(value):value);
+      const next = JSON.stringify([view.groups, view.subtools].map(items => items.map(({label,selected,enabled,disabled_reason,...item})=>item)),(_,value)=>typeof value==='bigint'?String(value):value);
       if (next !== key) {
         key = next; rows = []; root.replaceChildren();
         for (const [kind, items] of [["groups",view.groups], ["subtools",view.subtools]]) {
@@ -63,7 +63,7 @@ export function createEditorPanels({ selectionUi, app, rasterWorker:fieldWorker,
         contentChanged(panel);
       }
       for (const {node,image,kind,index} of rows) {
-        const item=view[kind][index];node.disabled=item.enabled===false;node.dataset.toolChoice=item.label;node.setAttribute("aria-label",item.label);node.title=app.action_tooltip(item.label,item.action);
+        const item=view[kind][index];node.disabled=item.enabled===false;node.classList.toggle('unavailable-tool',item.enabled!==false&&!!item.disabled_reason);node.dataset.toolChoice=item.label;node.setAttribute("aria-label",item.label);node.title=item.disabled_reason??app.action_tooltip(item.label,item.action);
         if(image){const source=asset(`brush-previews/${item.preview}-${state().theme}.webp`);if(image.getAttribute('src')!==source)image.src=source;}
         const pressed=String(item.selected);if(node.getAttribute("aria-pressed")!==pressed)node.setAttribute("aria-pressed",pressed);
       }

@@ -318,7 +318,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
     root.tileView = tile;
     if (root.updateComponent) { root.updateComponent(tile); return; }
     const node = root.querySelector('button'); if (!node) return;
-    node.disabled = !tile.enabled; node.title = tile.tooltip;
+    node.disabled = !tile.enabled; node.title = tile.disabled_reason ?? tile.tooltip;
     node.setAttribute('aria-label', tile.label); node.setAttribute('aria-pressed', tile.selected);
     const label = node.querySelector('.tile-label');if(label)label.textContent=tile.label;
     const glyph = node.querySelector('svg');
