@@ -29,10 +29,8 @@ import org.json.JSONObject
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-private const val BarGap = 4f
-private const val BarPadding = 6f
-private const val BarItemHeight = 32f
-private const val BarLabelPadding = 6f
+private const val LabelStart = 12f
+private const val LabelEnd = 8f
 private val BarItemStyle = obj("sliders" to false, "text" to true)
 
 private val BarElevation = 6.dp
@@ -75,15 +73,23 @@ private class BarFrame {
     val measurer = rememberTextMeasurer()
     val textStyle = LocalTextStyle.current
     fun textWidth(text: String) = measurer.measure(text, textStyle).size.width / density
-    fun width(item: JSONObject) = if (!item.isNull("menu")) menuButtonWidth(item.getString("label"), ::textWidth)
-        else toolOptionSize(item.getJSONObject("option"), false, 0f, BarItemHeight, BarItemHeight, BarItemStyle, ::textWidth,
+    val tiles = remember(host.languageTag) { toolbarUi(host.languageTag, obj("type" to "style", "style" to "small")) }
+    val tile = tiles.array("size").getDouble(1).toFloat()
+    val gap = tiles.number("gap")
+    val control = panelMetrics().height.value
+    fun fieldWidth(item: JSONObject) = when {
+        item.isNull("menu") -> toolOptionSize(item.getJSONObject("option"), false, 0f, tile, tile, BarItemStyle, ::textWidth, control,
             item.getString("label"), language = host.languageTag)[0]
-    val itemWidths = remember(view.opt("items"), textStyle, density) { items.map(::width) }
-    val completionWidths = remember(view.opt("completion"), textStyle, density) { completion.map(::width) }
-    val labelWidth = remember(label, textStyle, density) { label?.let { ceil(textWidth(it)) + 2 * BarLabelPadding } ?: 0f }
-    val measure = obj("context" to context, "label" to labelWidth, "items" to JSONArray(itemWidths),
-        "completion" to JSONArray(completionWidths), "more" to BarItemHeight, "height" to BarItemHeight + 2 * BarPadding,
-        "gap" to BarGap, "padding" to BarPadding).toString()
+        item.optBoolean("icon_only") -> tile
+        else -> menuButtonWidth(item.getString("label"), ::textWidth) + 2 * FieldClear
+    }
+    fun width(field: Float, item: JSONObject) = field + if (item.optBoolean("separated")) DividerSlot.value + gap else 0f
+    val itemFields = remember(view.opt("items"), textStyle, density, tile, control) { items.map(::fieldWidth) }
+    val completionFields = remember(view.opt("completion"), textStyle, density, tile, control) { completion.map(::fieldWidth) }
+    val labelWidth = remember(label, textStyle, density) { label?.let { ceil(textWidth(it)) + LabelStart + LabelEnd } ?: 0f }
+    val measure = obj("context" to context, "label" to labelWidth, "items" to JSONArray(items.indices.map { width(itemFields[it], items[it]) }),
+        "completion" to JSONArray(completion.indices.map { width(completionFields[it], completion[it]) }), "more" to tile, "height" to tile,
+        "gap" to gap, "padding" to 0f).toString()
     var placed by remember { mutableStateOf<JSONObject?>(null) }
     var revealed by remember { mutableStateOf(false) }
     LaunchedEffect(measure, view.opt("anchor")?.toString(), layout) {
@@ -95,7 +101,7 @@ private class BarFrame {
     }
     val glass = remember { Any() }
     val placement = placed ?: return
-    val shape = ControlShape
+    val shape = SurfaceShape
     LaunchedEffect(visible) {
         if (!visible) {
             revealed = false
@@ -104,7 +110,7 @@ private class BarFrame {
         }
         val bounds = (placed ?: placement).getJSONObject("bounds")
         fun px(key: String) = (bounds.number(key) * density).roundToInt().toFloat()
-        val radius = ControlRadius.value * density
+        val radius = SurfaceRadius.value * density
         host.glassBox(glass, floatArrayOf(px("x"), px("y"), px("width"), px("height"), radius, radius, radius, radius))
         host.glassPresented()
         frame.bounds = placed?.getJSONObject("bounds") ?: bounds
@@ -127,15 +133,20 @@ private class BarFrame {
             .semantics { contentDescription = host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("canvas_actions") }) {
             CompositionLocalProvider(LocalPalette provides colors.onGlass) {
                 Surface(Modifier.fillMaxSize(), color = colors.onGlass.panelFill, contentColor = colors.text) {
-                    Row(Modifier.padding(BarPadding.dp).clipToBounds(), horizontalArrangement = Arrangement.spacedBy(BarGap.dp),
+                    Row(Modifier.clipToBounds(), horizontalArrangement = Arrangement.spacedBy(gap.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         label?.let {
-                            Text(it, Modifier.width(labelWidth.dp).padding(horizontal = BarLabelPadding.dp).testTag("canvas-bar-label"),
-                                color = colors.secondary, maxLines = 1, softWrap = false)
+                            Text(it, Modifier.width(labelWidth.dp).padding(start = LabelStart.dp, end = LabelEnd.dp).testTag("canvas-bar-label"),
+                                color = colors.text.copy(alpha = .8f), maxLines = 1, softWrap = false)
                         }
-                        items.take(shown).forEachIndexed { index, item -> BarField(item, itemWidths[index], ::edit, ::choiceMenu, ::choiceCopy) }
-                        CanvasBarMore(host, context, shown)
-                        completion.forEachIndexed { index, item -> BarField(item, completionWidths[index], ::edit, ::choiceMenu, ::choiceCopy) }
+                        var dividers = 0
+                        @Composable fun field(item: JSONObject, width: Float) {
+                            if (item.optBoolean("separated")) ToolbarDivider(Modifier.width(DividerSlot).height(tile.dp).testTag("canvas-bar-divider-${dividers++}"), horizontal = false)
+                            BarField(item, width, tile, ::edit, ::choiceMenu, ::choiceCopy)
+                        }
+                        items.take(shown).forEachIndexed { index, item -> field(item, itemFields[index]) }
+                        CanvasBarMore(host, context, shown, tile)
+                        completion.forEachIndexed { index, item -> field(item, completionFields[index]) }
                     }
                 }
             }
@@ -146,23 +157,26 @@ private class BarFrame {
     }
 }
 
-@Composable private fun BarField(item: JSONObject, width: Float, edit: (JSONObject) -> Unit,
+@Composable private fun BarField(item: JSONObject, width: Float, tile: Float, edit: (JSONObject) -> Unit,
     choiceMenu: (String, (JSONObject?) -> Unit) -> Unit, choiceCopy: suspend (String) -> JSONObject?) {
     val option = item.getJSONObject("option")
-    Box(Modifier.width(width.dp).height(BarItemHeight.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.width(width.dp).height(tile.dp), contentAlignment = Alignment.Center) {
         if (!item.isNull("menu")) item.getString("menu").let { menu ->
-            ToolOptionMenu(menu, item.getString("icon"), item.getString("label"), option.optJSONObject("Action")?.getJSONObject("state"),
-                "canvas-bar", copy = { choiceCopy(menu) }) { choiceMenu(menu, it) }
-        } else ToolOptionField(option, width, false, "medium", false, BarItemStyle, BarItemHeight, 16, edit,
+            val iconOnly = item.optBoolean("icon_only")
+            Box(if (iconOnly) Modifier.fillMaxSize() else Modifier.padding(horizontal = FieldClear.dp).fillMaxWidth().height(panelMetrics().height)) {
+                ToolOptionMenu(menu, item.getString("icon"), item.getString("label"), option.optJSONObject("Action")?.getJSONObject("state"),
+                    "canvas-bar", iconOnly, copy = { choiceCopy(menu) }) { choiceMenu(menu, it) }
+            }
+        } else ToolOptionField(option, width, false, "small", false, BarItemStyle, tile, 16, edit,
             caption = item.getString("label"), prefix = "canvas-bar", accent = item.optBoolean("accent"), choiceMenu = choiceMenu, choiceCopy = choiceCopy)
     }
 }
 
-@Composable private fun CanvasBarMore(host: CanvasHost, context: JSONObject, shown: Int) {
+@Composable private fun CanvasBarMore(host: CanvasHost, context: JSONObject, shown: Int, tile: Float) {
     val button = remember { WindowlessMenuButton() }
     SideEffect { button.copy = { host.menuCopy(obj("type" to "canvas_bar_menu", "context" to context, "shown" to shown)) } }
     HoverTip(host.bootstrap!!.getJSONObject("common").getString("more")) {
-        Box(Modifier.size(BarItemHeight.dp).testTag("canvas-bar-more").clip(ControlShape).focusProperties { canFocus = false }
+        Box(Modifier.size(tile.dp).testTag("canvas-bar-more").clip(TileShape).focusProperties { canFocus = false }
             .opensWindowlessMenu(button, host.bootstrap!!.getJSONObject("common").getString("more")) { load ->
                 host.query(obj("type" to "canvas_bar_menu", "context" to context, "shown" to shown)) { load(it as? JSONObject) }
             }, contentAlignment = Alignment.Center) {

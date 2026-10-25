@@ -19,7 +19,7 @@ import kotlin.math.sqrt
 private const val SquircleSegments = 24
 
 internal val SurfaceRadius = 18.dp
-internal val ControlRadius = 12.dp
+internal val ControlRadius = 13.dp
 internal val SurfaceShape = SquircleShape(SurfaceRadius)
 internal val ControlShape = SquircleShape(ControlRadius)
 internal val TileShape = SquircleShape(50)

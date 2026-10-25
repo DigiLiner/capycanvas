@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,9 +93,13 @@ import kotlin.math.roundToInt
     }
 }
 
-@Composable internal fun ToolbarDivider(modifier: Modifier, horizontal: Boolean, fraction: Float = .7f) {
+internal val DividerSlot = 8.dp
+internal val DividerLength = 18.dp
+
+@Composable internal fun ToolbarDivider(modifier: Modifier, horizontal: Boolean, length: Dp? = DividerLength) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        Box((if (horizontal) Modifier.fillMaxWidth(fraction).height(1.dp) else Modifier.width(1.dp).fillMaxHeight(fraction))
+        Box((if (horizontal) (length?.let { Modifier.width(it) } ?: Modifier.fillMaxWidth()).height(1.dp)
+            else Modifier.width(1.dp).then(length?.let { Modifier.height(it) } ?: Modifier.fillMaxHeight()))
             .background(LocalPalette.current.secondary.copy(alpha = .3f)))
     }
 }

@@ -54,7 +54,7 @@ import kotlinx.coroutines.withContext
             }
         }
         if (view.array("groups").length() > 0 && view.array("subtools").length() > 0)
-            ToolbarDivider(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 4.dp).testTag("tool-set-divider"), horizontal = true, fraction = 1f)
+            ToolbarDivider(Modifier.fillMaxWidth().height(1.dp).padding(horizontal = 4.dp).testTag("tool-set-divider"), horizontal = true, length = null)
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             view.array("subtools").objects().forEach { item ->
                 ToolChoice(host, item, "subtool", Modifier.fillMaxWidth().testTag("subtool-${item.getString("label")}"), compact)

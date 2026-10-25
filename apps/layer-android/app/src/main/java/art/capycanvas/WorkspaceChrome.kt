@@ -115,9 +115,9 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                         val groups = column.array("groups").objects()
                         groups.forEachIndexed { index, group ->
                             if (index > 0) {
-                                val top = group.getJSONObject("bounds").number("y") - 10f
+                                val top = group.getJSONObject("bounds").number("y") - 2f - DividerSlot.value
                                 ToolbarDivider(Modifier.placed(obj("x" to 0f, "y" to (top - content.number("y")),
-                                    "width" to content.number("width"), "height" to 8f), dock.density)
+                                    "width" to content.number("width"), "height" to DividerSlot.value), dock.density)
                                     .testTag("column-divider-$id-$index"), horizontal = true)
                             }
                             group.array("icons").objects().forEach { icon ->

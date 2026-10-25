@@ -2143,7 +2143,9 @@ class AndroidInteractionTest {
                 waitFor("$command selected") { state().array("commands").objects().any { it.getString("id") == command && it.getBoolean("selected") } }
             }
             val segments = bounds("toolbar-segments-selection-mode"); val choice = bounds("toolbar-choice-variant")
-            assertEquals("Segments match the dropdown height", 24 * density, segments.height, 1f)
+            assertEquals("Segments match the dropdown height", panelControl() * density, segments.height, 1f)
+            assertEquals("Segments fill their tiles inside 5 dp clear", 4 * 36 * density, segments.width + 10 * density, 1f)
+            assertEquals("Segments keep 5 dp clear above", 5 * density, segments.top - bounds("tile-${toolbarComponent("tool_options").first}-${toolbarComponent("tool_options").second}").top, 1f)
             assertEquals("Segments center with the dropdown", choice.center.y, segments.center.y, 1f)
             captureToolbar("photo-$theme")
         }
@@ -2590,6 +2592,35 @@ class AndroidInteractionTest {
     }
 
     private fun canvasBar() = state().optJSONObject("canvas_bar")
+    private fun panelControl() = host.catalog.getJSONObject("panel_metrics").getDouble("control_height").toFloat()
+    private fun assertCompactBar(name: String) {
+        settle()
+        val bar = bounds("canvas-action-bar")
+        assertEquals("$name: the bar is one Small tile tall", 36 * density, bar.height, 1.5f)
+        val view = canvasBar()!!
+        val items = view.array("items").objects() + view.array("completion").objects()
+        for (item in items) {
+            val option = item.getJSONObject("option")
+            val tag = when {
+                !item.isNull("menu") -> "canvas-bar-menu-${item.getString("menu")}"
+                option.has("Action") -> "canvas-bar-action-${option.getJSONObject("Action").getJSONObject("state").getString("id")}"
+                option.getJSONObject("Choice").getBoolean("segmented") -> "canvas-bar-segments-${option.getJSONObject("Choice").getString("id")}"
+                else -> "canvas-bar-choice-${option.getJSONObject("Choice").getString("id")}"
+            }
+            if (!shown(tag)) continue
+            val r = bounds(tag)
+            if (item.optBoolean("icon_only")) {
+                assertEquals("$name: $tag is a square tile", 36 * density, r.width, 1.5f)
+                assertEquals("$name: $tag is a full-height tile", 36 * density, r.height, 1.5f)
+            } else {
+                assertEquals("$name: $tag is a panel control", panelControl() * density, r.height, 1.5f)
+                assertEquals("$name: $tag keeps 5 dp clear above", 5 * density, r.top - bar.top, 1.5f)
+            }
+        }
+        if (shown("canvas-bar-divider-0")) assertEquals("$name: a divider takes an 8 dp slot", 8 * density, bounds("canvas-bar-divider-0").width, 1.5f)
+        val more = bounds("canvas-bar-more")
+        assertEquals("$name: More is a square tile", 36 * density, more.width, 1.5f)
+    }
     private fun barKind() = canvasBar()?.getJSONObject("context")?.getString("kind")
     private fun nativeGlassRegions() = kotlinx.coroutines.runBlocking {
         host.withNative { JSONObject(Native.displayStatus(it)).optInt("glass_regions", -1) }
@@ -2931,8 +2962,8 @@ class AndroidInteractionTest {
             }
             for ((id, count) in listOf("zoom-click" to 2, "zoom-drag" to 4)) for (index in 0 until count) {
                 val segment = bounds("tool-segment-$id-$index")
-                assertEquals("Zoom segment width", 24 * density, segment.width, 1f)
-                assertEquals("Zoom segment height", 24 * density, segment.height, 1f)
+                assertEquals("Zoom segment width", panelControl() * density, segment.width, 1f)
+                assertEquals("Zoom segment height", panelControl() * density, segment.height, 1f)
             }
             command("reset_view")
             val work = camera().getJSONArray("work_area")
@@ -2990,7 +3021,7 @@ class AndroidInteractionTest {
             for ((id, count) in listOf("zoom-click" to 2, "zoom-drag" to 4)) for (index in 0 until count) {
                 val segment = bounds("toolbar-segment-$id-$index")
                 assertEquals("Inline icon width", 36 * density, segment.width, 1f)
-                assertEquals("Inline icon height", 36 * density, segment.height, 1f)
+                assertEquals("Inline radios use the panel control height", panelControl() * density, segment.height, 1f)
             }
             for (label in listOf("Click", "Drag")) assertNotNull("Caption survives text=false", textBounds(label))
             val center = state().array("commands").objects().first { it.getString("id") == "center_zoom_clicks" }
@@ -3503,11 +3534,12 @@ class AndroidInteractionTest {
         fun openChoice(id: String) {
             val tag = "canvas-bar-choice-$id"
             val onBar = shown(tag)
-            val label = choice(id)!!.getString("label")
+            val label = host.catalog.array("tool_action_groups").objects().first { it.getString("id") == id }.getString("label")
             tap(bounds(if (onBar) tag else "canvas-bar-more").center)
             waitFor("$id menu opens", 5_000) { popupCount() == 1 }
             if (!onBar) {
                 waitFor("$id in More", 5_000) { menuText(label) != null }
+                settle()
                 tap(menuText(label)!!.center)
             }
         }
@@ -3542,11 +3574,14 @@ class AndroidInteractionTest {
 
                 tool = device
                 val selectionContext = canvasBar()!!.getJSONObject("context").toString()
-                val padding = Offset(bar.left + 3 * density, bar.center.y)
-                tap(padding); settle()
-                assertEquals("$device bar padding tap keeps the selection", selectionContext, canvasBar()?.getJSONObject("context")?.toString())
+                assertCompactBar("$device selection")
+                tap(bounds("canvas-bar-divider-0").center); settle()
+                assertEquals("$device a tap on a bar divider keeps the selection", selectionContext, canvasBar()?.getJSONObject("context")?.toString())
                 assertTrue(shown("canvas-action-bar"))
 
+                waitFor("$device Transform is available once the filled layer is ready", 120_000) {
+                    state().array("commands").objects().first { it.getString("id") == "scale_rotate" }.getBoolean("enabled")
+                }
                 tap(bounds("canvas-bar-action-scale_rotate").center)
                 waitFor("$device transform bar", 5_000) { barKind() == "transform" && shown("canvas-bar-action-apply_transform") }
                 invoke("cancel_transform")
@@ -3567,23 +3602,26 @@ class AndroidInteractionTest {
                 settle()
                 bar = bounds("canvas-action-bar")
                 val anchor = canvasBar()!!.opt("anchor").toString()
-                tap(Offset(bar.left + 3 * density, bar.center.y)); settle()
+                tap(bounds("canvas-bar-divider-0").center); settle()
                 assertEquals("$device bar tap never reaches the transform", anchor, canvasBar()!!.opt("anchor").toString())
-                assertEquals("Free", chosen("transform-mode"))
+                assertEquals("Scale", chosen("transform-mode"))
+                assertCompactBar("$device transform")
                 assertTrue("$device flips are icon-only", canvasBar()!!.array("items").objects().any { it.getString("label").isEmpty() })
-                tap(bounds("canvas-bar-segment-transform-mode-2").center)
+                tap(bounds("canvas-bar-segment-transform-mode-1").center)
                 waitFor("$device Distort", 5_000) { chosen("transform-mode") == "Distort" && shown("canvas-bar-action-transform_perspective") }
                 settle()
                 tap(bounds("canvas-bar-segment-transform-mode-0").center)
-                waitFor("$device back to Free", 5_000) { chosen("transform-mode") == "Free" && !shown("canvas-bar-action-transform_perspective") }
+                waitFor("$device back to Scale", 5_000) { chosen("transform-mode") == "Scale" && !shown("canvas-bar-action-transform_perspective") }
                 settle()
                 openChoice("transform-interpolation")
-                waitFor("$device interpolation menu", 5_000) { popupCount() == 1 && textBounds("Nearest") != null }
+                val nearest = state().array("commands").objects().first { it.getString("id") == "transform_nearest" }.getString("label")
+                waitFor("$device interpolation menu", 5_000) { popupCount() == 1 && menuText(nearest) != null }
                 instrumentation.runOnMainSync { assertTrue("$device the interpolation menu leaves window focus with the canvas", owner.view.hasWindowFocus()) }
-                tap(textBounds("Nearest")!!.center)
-                waitFor("$device Nearest", 5_000) { chosen("transform-interpolation") == "Nearest" && popupCount() == 0 }
                 settle()
-                tap(bounds("canvas-bar-segment-transform-mode-2").center)
+                tap(menuText(nearest)!!.center)
+                waitFor("$device Nearest", 5_000) { enabled("transform_nearest") && state().array("commands").objects().first { it.getString("id") == "transform_nearest" }.getBoolean("selected") && popupCount() == 0 }
+                settle()
+                tap(bounds("canvas-bar-segment-transform-mode-1").center)
                 waitFor("$device Distort for a corner drag", 5_000) { chosen("transform-mode") == "Distort" }
                 settle()
                 val readyStarted = SystemClock.elapsedRealtimeNanos()
@@ -3607,23 +3645,28 @@ class AndroidInteractionTest {
                 settle()
 
                 invoke("reset_transform")
-                waitFor("$device reset before Warp", 5_000) { chosen("transform-mode") == "Free" }
+                waitFor("$device reset before Warp", 5_000) { chosen("transform-mode") == "Scale" }
                 settle()
-                tap(bounds("canvas-bar-segment-transform-mode-3").center)
+                tap(bounds("canvas-bar-segment-transform-mode-2").center)
                 host.awaitMain("$device Warp grid ready", 120_000, {
                     obj("canvas_bar" to canvasBar(), "brush_ready" to snapshot().opt("brush_ready"),
                         "bar_visible" to host.canvasBarVisible, "host_failure" to host.failure?.toString(),
                         "action_error" to host.actionError?.toString()).toString()
-                }) { chosen("transform-mode") == "Warp" && choice("transform-warp-grid") != null
+                }) { chosen("transform-mode") == "Warp" && canvasBar()?.array("items")?.objects()?.any { it.optString("menu") == "warp_grid" } == true
                     && snapshot().optBoolean("brush_ready") && host.canvasBarVisible && shown("canvas-action-bar")
                     && tagged("canvas-bar-action-apply_transform")?.second?.let {
                         it.layoutInfo.isPlaced && it.size.width > 0 && it.boundsInRoot.width >= it.size.width * .9f
                     } == true }
-                val grid = chosen("transform-warp-grid")!!
-                openChoice("transform-warp-grid")
-                waitFor("$device Grid menu lists its presets", 5_000) { popupCount() == 1 && listOf("3 × 3", "4 × 4", "5 × 5").all { textBounds(it) != null } }
-                tap(textBounds(grid)!!.center)
-                waitFor("$device Grid menu closes", 5_000) { popupCount() == 0 && chosen("transform-warp-grid") == grid }
+                assertCompactBar("$device Warp")
+                fun grid() = canvasBar()!!.array("items").objects().first { it.optString("menu") == "warp_grid" }.getString("label")
+                val shownGrid = grid()
+                val presets = listOf("warp_grid_three", "warp_grid_four", "warp_grid_five").map { id -> state().array("commands").objects().first { it.getString("id") == id } }
+                val current = presets.first { it.getBoolean("selected") }.getString("label")
+                tap(bounds("canvas-bar-menu-warp_grid").center)
+                waitFor("$device Grid menu lists its presets", 5_000) { popupCount() == 1 && presets.all { menuText(it.getString("label")) != null } }
+                settle()
+                tap(menuText(current)!!.center)
+                waitFor("$device Grid menu closes", 5_000) { popupCount() == 0 && grid() == shownGrid }
                 settle()
                 val hull = canvasBar()!!.getJSONArray("anchor")
                 val edgeNode = documentPoint(hull.getDouble(0) + (hull.getDouble(2) - hull.getDouble(0)) / 3, hull.getDouble(1))
@@ -3636,7 +3679,7 @@ class AndroidInteractionTest {
                 waitFor("$device bar returns after the Warp drag", 3_000) { shown("canvas-action-bar") }
                 captureCanvasBar("warp-$name")
                 invoke("reset_transform")
-                waitFor("$device reset returns to Free", 5_000) { chosen("transform-mode") == "Free" }
+                waitFor("$device reset returns to Scale", 5_000) { chosen("transform-mode") == "Scale" }
                 settle()
 
                 var hiddenWhileHeld = false
@@ -3673,8 +3716,9 @@ class AndroidInteractionTest {
 
                 if (device == MotionEvent.TOOL_TYPE_STYLUS) {
                     tap(bounds("canvas-bar-more").center)
-                    waitFor("More reopens", 5_000) { popupCount() == 1 && textBounds("Show canvas action bar") != null }
-                    tap(textBounds("Show canvas action bar")!!.center)
+                    waitFor("More reopens", 5_000) { popupCount() == 1 && menuText("Show canvas action bar") != null }
+                    revealInMenu("Show canvas action bar")
+                    tap(menuText("Show canvas action bar")!!.center)
                     waitFor("Hide the bar from More", 5_000) { popupCount() == 0 && !state().getJSONObject("workspace").getJSONObject("layout").getBoolean("canvas_bar") }
                     waitFor("completion-only bar", 5_000) { shown("canvas-bar-action-apply_transform") && !shown("canvas-bar-action-transform_flip_horizontal") }
                     settle()
@@ -3867,14 +3911,12 @@ class AndroidInteractionTest {
             waitFor("$name: the selection", 5_000) { hasSelection() }
             command("fill_selection")
             command("move")
-            waitFor("$name: Move offers Leave Copy on the selection bar", 5_000) {
-                barKind() == "selection" && shown("canvas-bar-action-move_leave_copy")
-            }
+            waitFor("$name: Move keeps the selection bar", 5_000) { barKind() == "selection" && shown("canvas-bar-more") }
             settle()
             tool = device
             if (leaveCopy() != leave) {
-                tap(bounds("canvas-bar-action-move_leave_copy").center)
-                waitFor("$name: Leave Copy toggles on the bar", 5_000) { leaveCopy() == leave }
+                viaMore(listOf(commandState("move_leave_copy").getString("label")))
+                waitFor("$name: Leave Copy toggles in More", 5_000) { leaveCopy() == leave }
             }
             if (device == MotionEvent.TOOL_TYPE_MOUSE && leave) {
                 val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
@@ -4252,13 +4294,13 @@ class AndroidInteractionTest {
                 tool = device
 
                 var selection = blueSelection(keep)
-                if (layout == "docked") assertFalse("$name: Adjust and Clear do not fit beside the docks",
-                    shown("canvas-bar-menu-adjust") || shown("canvas-bar-menu-clear"))
+                if (layout == "docked") assertFalse("$name: Adjust ▾ does not fit beside the docks", shown("canvas-bar-menu-adjust"))
                 else assertTrue("$name: every menu fits on the bar",
-                    listOf("copy_to_layer", "adjust", "clear").all { shown("canvas-bar-menu-$it") })
+                    listOf("copy", "adjust", "mask", "refine").all { shown("canvas-bar-menu-$it") })
+                assertCompactBar(name)
                 val count = layerStates().size
-                chooseFromBarMenu("copy_to_layer", listOf("Copy Selection to New Layer"))
-                waitFor("$name: Copy to Layer adds a layer and consumes the selection", 5_000) {
+                chooseFromBarMenu("copy", listOf("Copy Selection to New Layer"))
+                waitFor("$name: Copy ▾ › Copy Selection to New Layer adds a layer and consumes the selection", 5_000) {
                     layerStates().size == count + 1 && !hasSelection() && editingLayer() != selection.layer
                 }
                 command("undo")
@@ -4274,7 +4316,7 @@ class AndroidInteractionTest {
 
                 selection = blueSelection(keep)
                 val filled = paintRevision(selection.layer)
-                chooseFromBarMenu("clear", listOf("Clear Outside Selection"))
+                viaMore(listOf("Clear Outside Selection"))
                 waitFor("$name: Clear Outside edits the layer and keeps the selection", 5_000) {
                     paintRevision(selection.layer) != filled && hasSelection()
                 }
@@ -4286,14 +4328,15 @@ class AndroidInteractionTest {
                     blue(inside) && blue(outside)
                 }
                 if (layout == "wide") {
-                    fun clear() = canvasBar()?.array("items")?.objects()?.first { it.optString("menu") == "clear" }
-                        ?.getJSONObject("option")?.getJSONObject("Action")?.getJSONObject("state")
+                    fun clear() = canvasBar()?.array("items")?.objects()?.firstNotNullOfOrNull {
+                        it.getJSONObject("option").optJSONObject("Action")?.getJSONObject("state")?.takeIf { state -> state.getString("id") == "clear_selected" }
+                    }
                     layerAction(obj("op" to "lock", "id" to selection.layer, "value" to true))
-                    waitFor("$name: a locked layer disables Clear ▾", 5_000) { clear()?.getBoolean("enabled") == false && shown("canvas-action-bar") }
+                    waitFor("$name: a locked layer disables Clear", 5_000) { clear()?.getBoolean("enabled") == false && shown("canvas-action-bar") }
                     val reason = clear()!!.getString("disabled_reason")
-                    tap(bounds("canvas-bar-menu-clear").center)
-                    waitFor("$name: a tap on the disabled Clear ▾ shows why", 3_000) { findTag("hover-tooltip") != null && textBounds(reason) != null }
-                    assertEquals("$name: the disabled menu stays closed", 0, popupCount())
+                    tap(bounds("canvas-bar-action-clear_selected").center)
+                    waitFor("$name: a tap on the disabled Clear shows why", 3_000) { findTag("hover-tooltip") != null && textBounds(reason) != null }
+                    assertEquals("$name: the disabled tile opens nothing", 0, popupCount())
                     layerAction(obj("op" to "lock", "id" to selection.layer, "value" to false))
                 }
 
@@ -4311,7 +4354,7 @@ class AndroidInteractionTest {
                 println("PASS canvas bar menus $name")
             }
         } finally { popupInput = false }
-        println("PASS canvas bar menus: Copy to Layer, Clear ▾ › Clear Outside and Adjust ▾ › Curves on the bar and through More, with mouse, finger and stylus")
+        println("PASS canvas bar menus: Copy ▾ › Copy Selection to New Layer, More › Clear Outside Selection, a disabled Clear and Adjust ▾ › Curves on the bar and through More, with mouse, finger and stylus")
     }
 
     private fun barLabel(): String? {
@@ -4363,6 +4406,7 @@ class AndroidInteractionTest {
 
                 command("select_all"); command("quick_mask")
                 awaitModeBar(name, "quick_mask", "Quick Mask")
+                assertCompactBar("$name Quick Mask")
                 fun quickMask() = layerStates().firstOrNull { it.getBoolean("quick_mask") }?.let(::paintRevisionText)
                 val coverage = quickMask()
                 tapBar("invert_selection")
@@ -4386,20 +4430,15 @@ class AndroidInteractionTest {
 
                 command("select_all"); command("mask_selection")
                 awaitModeBar(name, "layer_mask", "Editing $paintName mask")
-                assertTrue("$name: an enabled mask offers Disable", barCaption("layer_mask_enabled", "Disable"))
-                if (device == MotionEvent.TOOL_TYPE_STYLUS) {
-                    val plain = bounds("canvas-bar-action-invert_layer_mask"); val toggle = bounds("canvas-bar-action-layer_mask_enabled")
-                    captureCanvasBar("mask-mode") { image, origin ->
-                        fun fill(r: Rect) = image.getPixel((r.left + origin.x + 3 * density).toInt(), (r.center.y + origin.y).toInt())
-                        for (shift in listOf(0, 8, 16)) assertEquals("Disable is drawn as a plain button, not a pressed toggle",
-                            (fill(plain) shr shift and 255).toFloat(), (fill(toggle) shr shift and 255).toFloat(), 12f)
-                    }
-                }
+                fun enable() = tagged("canvas-bar-action-layer_mask_enabled")?.second?.config?.getOrNull(SemanticsProperties.ToggleableState)
+                waitFor("$name: an enabled mask shows the Enable eye on", 5_000) { enable() == androidx.compose.ui.state.ToggleableState.On }
+                assertCompactBar("$name mask")
+                if (device == MotionEvent.TOOL_TYPE_STYLUS) captureCanvasBar("mask-mode")
                 tapBar("layer_mask_enabled")
-                waitFor("$name: Disable turns the mask off and the button offers Enable", 5_000) {
-                    !row(paint).getBoolean("mask_enabled") && barCaption("layer_mask_enabled", "Enable")
+                waitFor("$name: Enable turns the mask off and shows the eye off", 5_000) {
+                    !row(paint).getBoolean("mask_enabled") && enable() == androidx.compose.ui.state.ToggleableState.Off
                 }
-                assertEquals("$name: Disable keeps mask editing", "layer_mask", barKind())
+                assertEquals("$name: Enable keeps mask editing", "layer_mask", barKind())
                 tapBar("edit_layer_content")
                 waitFor("$name: Edit Content leaves mask editing", 5_000) { artwork() && canvasBar() == null && !shown("canvas-action-bar") }
                 layerAction(obj("op" to "delete_mask", "id" to paint))
@@ -4438,7 +4477,43 @@ class AndroidInteractionTest {
             command("edit_layer_content")
             layerAction(obj("op" to "delete_mask", "id" to paint))
         } finally { popupInput = false }
-        println("PASS mode bars: Quick Mask → Invert → Exit, Selection Layer → Invert → Return to Artwork and layer mask → Disable → Edit Content with mouse, finger and stylus; Escape; a notice above the bottom-edge bar")
+        println("PASS mode bars: Quick Mask → Invert → Exit, Selection Layer → Invert → Return to Artwork and layer mask → Enable off → Edit Content with mouse, finger and stylus; Escape; a notice above the bottom-edge bar")
+    }
+
+    @Test fun escapeLeavesBarModesPopupsAndTransformsBeforeColumns() {
+        switchToolbarWorkspace("illustrator")
+        command("fit_canvas")
+        fun columnOpen() = shown("layer-rows")
+        fun escape() { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ESCAPE); settle() }
+        assertTrue("Paint's right column is open", columnOpen())
+        popupInput = true
+        try {
+            command("select_all"); command("quick_mask")
+            waitFor("the Quick Mask bar", 5_000) { barKind() == "quick_mask" && shown("canvas-action-bar") }
+            escape()
+            waitFor("Escape leaves Quick Mask", 5_000) { !state().getJSONObject("layer_tools").getBoolean("quick_mask") && barKind() != "quick_mask" }
+            assertTrue("Leaving Quick Mask keeps the column open", columnOpen())
+            command("rectangle_select")
+            waitFor("the selection bar", 5_000) { barKind() == "selection" && shown("canvas-bar-more") }
+            settle()
+            tool = MotionEvent.TOOL_TYPE_MOUSE
+            tap(bounds("canvas-bar-more").center)
+            waitFor("More opens", 5_000) { popupCount() == 1 }
+            escape()
+            waitFor("Escape closes only More", 5_000) { popupCount() == 0 }
+            assertEquals("Closing More keeps the selection bar", "selection", barKind())
+            assertTrue("Closing More keeps the column open", columnOpen())
+            command("fill_selection")
+            waitFor("Transform is available once the filled layer is ready", 120_000) { commandState("scale_rotate").getBoolean("enabled") }
+            command("scale_rotate")
+            waitFor("the transform bar", 5_000) { barKind() == "transform" }
+            escape()
+            waitFor("Escape cancels the transform", 5_000) { barKind() != "transform" }
+            assertTrue("Cancelling the transform keeps the column open", columnOpen())
+            escape()
+            waitFor("the next Escape closes the column", 5_000) { !columnOpen() }
+        } finally { popupInput = false }
+        println("PASS Escape: Quick Mask, then a popup, then a transform, each without closing the open column; then the column")
     }
 
     @Test fun guideBarDeletesTheSelectedGuideAcrossDevices() {
@@ -4458,6 +4533,7 @@ class AndroidInteractionTest {
                 settle()
                 val bar = bounds("canvas-action-bar")
                 assertNull("$name: the guide bar has no label", barLabel())
+                assertCompactBar("$name guide")
                 assertEquals("$name: the guide bar sits beside the guide", "near_object", canvasBar()!!.getString("placement"))
                 assertTrue("$name: the guide bar sits below the guide's handles: $bar vs $from $to", bar.top > maxOf(from.y, to.y) && bar.top - maxOf(from.y, to.y) < 120 * density)
                 tapBar("delete_ruler")
@@ -4579,7 +4655,13 @@ class AndroidInteractionTest {
             for (portrait in listOf(false, true)) {
                 val name = if (portrait) "portrait" else "landscape"
                 if (portrait) device.portrait(scenario) else device.landscape(scenario)
-                restore(); command("fit_canvas")
+                SystemClock.sleep(500)
+                var window = 0f
+                onMain { window = owner.view.width / density }
+                val narrow = JSONObject(fixture.toString()).apply {
+                    getJSONObject("layout").array("bands").objects().first { it.getInt("id") == 42 }.put("extent", maxOf(240f, window - 690f))
+                }
+                action(obj("type" to "restore_workspace", "workspace" to narrow)); command("fit_canvas")
                 SystemClock.sleep(500)
                 tool = MotionEvent.TOOL_TYPE_STYLUS
                 val selection = blueSelection(keep)
@@ -4591,9 +4673,9 @@ class AndroidInteractionTest {
                     hidden.isNotEmpty() && hidden.size < items.size)
                 assertEquals("$name: the bar shows a leading run of items", items.takeLast(hidden.size), hidden)
                 val bar = bounds("canvas-action-bar")
-                var window = Rect.Zero
-                onMain { window = Rect(0f, 0f, owner.view.width.toFloat(), owner.view.height.toFloat()) }
-                assertTrue("$name: the bar stays in the window: $bar in $window", bar.left >= window.left && bar.right <= window.right)
+                var frame = Rect.Zero
+                onMain { frame = Rect(0f, 0f, owner.view.width.toFloat(), owner.view.height.toFloat()) }
+                assertTrue("$name: the bar stays in the window: $bar in $frame", bar.left >= frame.left && bar.right <= frame.right)
                 captureCanvasBar("selection-overflow-$name")
                 tap(bounds("canvas-bar-more").center)
                 waitFor("$name: More lists every hidden item", 5_000) {
@@ -4606,7 +4688,7 @@ class AndroidInteractionTest {
                 waitFor("$name: Back closes More") { popupCount() == 0 }
 
                 val count = layerStates().size
-                chooseFromBarMenu("copy_to_layer", listOf("Cut Selection to New Layer"))
+                chooseFromBarMenu("copy", listOf("Cut Selection to New Layer"))
                 waitFor("$name: Cut to Layer adds a layer and consumes the selection", 5_000) {
                     layerStates().size == count + 1 && !hasSelection()
                 }
@@ -5179,8 +5261,8 @@ class AndroidInteractionTest {
         fun pick(group: String, label: String) {
             val tag = "canvas-bar-choice-$group"
             if (!shown(tag)) {
-                val choice = canvasBar()!!.array("items").objects().first { it.getJSONObject("option").optJSONObject("Choice")?.getString("id") == group }
-                return viaMore(listOf(choice.getJSONObject("option").getJSONObject("Choice").getString("label"), label))
+                val title = host.catalog.array("tool_action_groups").objects().first { it.getString("id") == group }.getString("label")
+                return viaMore(listOf(title, label))
             }
             tap(bounds(tag).center)
             waitFor("the $group dropdown opens", 5_000) { popupCount() == 1 }
@@ -5238,9 +5320,9 @@ class AndroidInteractionTest {
                 if (index == 0) {
                     instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_O)
                     waitFor("O cycles the overlay", 5_000) { selected("crop_overlay_grid") }
-                    pick("crop-overlay", "Diagonal")
+                    pick("crop-overlay", commandState("crop_overlay_diagonal").getString("label"))
                     waitFor("the Overlay dropdown chooses Diagonal", 5_000) { selected("crop_overlay_diagonal") }
-                    pick("crop-overlay", "Thirds")
+                    pick("crop-overlay", commandState("crop_overlay_thirds").getString("label"))
                     waitFor("the Overlay dropdown chooses Thirds", 5_000) { selected("crop_overlay_thirds") }
                     val inside = documentPoint((width + side) / 2 - 80, height - 80)
                     val outside = documentPoint(width * .02, height * .1)
