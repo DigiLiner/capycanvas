@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 const EXTENT: [u32; 2] = [600, 300];
 
 fn frame(r: &mut WgpuRasterizer, scene: SceneView<'_>, dabs: &[Dab], batches: &[DabBatch], restore: &[(SourceTarget, RasterRevision)]) {
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(r, FramePacket {
         dabs,
         dab_batches: batches,
         restore_rasters: restore,

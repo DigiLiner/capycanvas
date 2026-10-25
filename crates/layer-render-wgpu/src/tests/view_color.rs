@@ -48,7 +48,7 @@ fn paint_mut(document: &mut Document) -> &mut PaintSource {
 fn frame(r: &mut WgpuRasterizer, layer: &mut Document) {
     let root = layer.artwork.root;
     layer.artwork.compositions.get_mut(root).unwrap().color = r.document_color;
-    r.submit(FramePacket { reset_layers: true, ..packet(layer.scene(), [256; 2]) })
+    crate::test_support::submit_ready(r, FramePacket { reset_layers: true, ..packet(layer.scene(), [256; 2]) })
     .unwrap();
 }
 fn linear(space: RgbSpace, codes: [u16; 4], target: RgbSpace) -> [f64; 3] {

@@ -523,7 +523,7 @@ fn raw_rows(source: &layer_core::color::source::SourceImage) -> Vec<u8> {
 fn frame(document: &Document) -> (WgpuRasterizer, Vec<[f32; 4]>) {
     let mut r = crate::test_support::private_sample_renderer(document.composition().color);
     let extent = document.composition().size;
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(&mut r, FramePacket {
         reset_layers: true,
         ..packet(document.scene(), extent)
     })

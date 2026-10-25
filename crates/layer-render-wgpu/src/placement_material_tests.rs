@@ -59,7 +59,7 @@ fn rectangle(x: f32, y: f32, width: f32, height: f32) -> Selection {
 }
 
 fn render(r: &mut WgpuRasterizer, layer: &Document, batches: &[DabBatch], reset: bool) -> Vec<u8> {
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(r, FramePacket {
         dab_batches: batches,
         reset_layers: reset,
         ..packet(layer.scene(), EXTENT)

@@ -56,7 +56,7 @@ fn renderer(document: &Document, limit: u64) -> WgpuRasterizer { renderer_with(d
 fn renderer_with(document: &Document, limit: u64, frame: FramePacket<'_>) -> WgpuRasterizer {
     let mut r = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
     r.native_edit.as_mut().unwrap().color_cache_bytes = limit;
-    r.submit(frame).unwrap();
+    crate::test_support::submit_ready(&mut r, frame).unwrap();
     r
 }
 fn image(r: &WgpuRasterizer) -> Vec<u8> {

@@ -25,7 +25,7 @@ fn op_batch(target: SourceTarget, index: u32, operation: &RasterOperation) -> Da
     }
 }
 fn frame(r: &mut WgpuRasterizer, scene: SceneView<'_>, extent: [u32; 2], dabs: &[Dab], batches: &[DabBatch], reset: bool) {
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(r, FramePacket {
         dabs,
         dab_batches: batches,
         reset_layers: reset,

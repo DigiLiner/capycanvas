@@ -264,7 +264,7 @@ impl Oracle {
 }
 
 fn frame(r: &mut WgpuRasterizer, layer: &Document, reset: bool) {
-    r.submit(FramePacket {
+    crate::test_support::submit_ready(r, FramePacket {
         reset_layers: reset,
         composite_all: reset,
         ..packet(layer.scene(), EXTENT)

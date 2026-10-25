@@ -81,7 +81,7 @@ fn submit(
     batches: &[DabBatch],
     reset: bool,
 ) {
-    r.submit(FramePacket { dabs, dab_batches: batches, reset_layers: reset, ..packet(scene, [128, 128]) })
+    crate::test_support::submit_ready(r, FramePacket { dabs, dab_batches: batches, reset_layers: reset, ..packet(scene, [128, 128]) })
     .unwrap();
 }
 fn pixel(r: &mut WgpuRasterizer, x: usize, y: usize) -> [u8; 4] {

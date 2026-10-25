@@ -44,7 +44,7 @@ fn p21_hue_nondefault_ranges_and_colorize_meet_existing_reduced_graph_quality_or
             let mut frame = packet(doc.scene(), extent);
             frame.view.width_px = 43; frame.view.height_px = 25;
             frame.view.document_to_surface = [scale, 0., 0., scale, -610. * scale, -270. * scale];
-            window.submit(frame).unwrap(); exact.submit(frame).unwrap();
+            crate::test_support::submit_ready(&mut window, frame).unwrap(); crate::test_support::submit_ready(&mut exact, frame).unwrap();
             let cache = window.scale_display.as_ref().unwrap();
             assert_eq!(cache.plan.level, level);
             assert!(cache.plan.bounds.min_x() > 0 || cache.plan.bounds.min_y() > 0);
@@ -140,7 +140,7 @@ fn candidate_errors(name: &str) -> [f32; 2] {
                     let mut frame = packet(doc.scene(), extent);
                     frame.view.width_px = 43; frame.view.height_px = 25;
                     frame.view.document_to_surface = [scale, 0., 0., scale, -610. * scale, -270. * scale];
-                    window.submit(frame).unwrap(); exact.submit(frame).unwrap();
+                    crate::test_support::submit_ready(&mut window, frame).unwrap(); crate::test_support::submit_ready(&mut exact, frame).unwrap();
                     let cache = window.scale_display.as_ref().unwrap();
                     assert_eq!(cache.plan.level, level); assert!(cache.evaluation == Evaluation::Display);
                     let error = quality(&display_pixels(&window), &pixels(&exact, crate::test_support::document_texture(&exact)), cache.plan);

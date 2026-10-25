@@ -147,6 +147,18 @@ pub(crate) fn complete(r: &WgpuRasterizer) {
         .unwrap();
 }
 
+/// Submit `frame` once its dependencies are ready, as the engine does.
+pub(crate) fn submit_ready(r: &mut WgpuRasterizer, frame: FramePacket<'_>) -> Result<(), GpuRasterError> {
+    let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+    let preview = r.transform_preview.clone();
+    loop {
+        r.poll_pending(frame.view)?;
+        if r.can_submit() && r.raster_dependencies_ready(frame, preview.as_ref()) { return r.submit(frame); }
+        assert!(std::time::Instant::now() < deadline, "frame dependencies must become ready");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 pub(crate) fn submit_settled(r: &mut WgpuRasterizer, frame: FramePacket<'_>) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let idle = FramePacket { dabs: &[], dab_batches: &[], restore_rasters: &[],
