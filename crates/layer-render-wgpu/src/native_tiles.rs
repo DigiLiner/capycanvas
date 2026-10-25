@@ -361,14 +361,11 @@ impl NativeTileEncoder {
             .replace("STATUS_TYPE",if readonly {"u32"} else {"atomic<u32>"})
             .replace("STATUS_ACCESS",if readonly {"read"} else {"read_write"})
             .replace("PUBLICATION_GUARD",if readonly {"if status.invalid!=0u {return;}"} else if in_place {"if atomicLoad(&status.invalid)!=0u {return;}"} else {""})
-            .replace("FLOAT32_VALIDATION",if readonly {""} else {"let error=float32_color_error(value); if error!=0u {atomicOr(&status.invalid,error);return;}"})
+            .replace("FLOAT32_VALIDATION",if readonly {""} else {"let error=color_error(value); if error!=0u {atomicOr(&status.invalid,error);return;}"})
             .replace("HALF_VALIDATION",if readonly {""} else {"let error=color_error(value); if error!=0u {atomicOr(&status.invalid,error);return;}"})
             .replace("SDR_VALIDATION",if readonly {""} else {"let error=color_error(value); if error!=0u {atomicOr(&status.invalid,error);store_result(invocation.z,pixel,vec4(0u));return;}"})
             .replace("MODE_PROJECTION", if output_format.is_none() { "
-                var source_error=color_error(value);
-                if settings.maximum==0u {
-                    if settings.scale==32u {source_error=float32_color_error(value);}
-                }
+                let source_error=color_error(value);
                 if source_error!=0u {atomicOr(&status.invalid,source_error);return;}
                 value=layer_color(value,settings.weights.rgb,settings.weights.a,select(sdr_decode_component(0.5,settings.curve),0.5,settings.maximum==0u));
             " } else { "" })

@@ -7,18 +7,11 @@ fn scalar_error(value:f32)->u32 {
     if magnitude>0x3f800000u || ((bits>>31u)!=0u && magnitude!=0u) {return 2u;}
     return 0u;
 }
+// Infinite color saturates when encoded; only NaN and invalid alpha fail.
 fn color_error(value:vec4<f32>)->u32 {
     let bits=bitcast<vec4<u32>>(value);
-    if any((bits&vec4(0x7f800000u))==vec4(0x7f800000u)) {return 1u;}
+    if any((bits.rgb&vec3(0x7fffffffu))>vec3(0x7f800000u)) {return 1u;}
     return scalar_error(value.a);
-}
-
-// Check unassociation too: finite premultiplied values can overflow on division.
-fn float32_color_error(value:vec4<f32>)->u32 {
-    let error=color_error(value);
-    if error!=0u {return error;}
-    if (bitcast<u32>(value.a)&0x7f800000u)!=0u {return color_error(vec4(value.rgb/value.a,value.a));}
-    return 0u;
 }
 // IEEE binary16 ties-to-even, including subnormals. Integer operations avoid
 // implementation-dependent half arithmetic/denormal flushing.

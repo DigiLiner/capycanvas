@@ -12,7 +12,6 @@ use layer_core::color::DocumentColor;
 mod validate;
 
 pub(crate) struct Recipes {
-    depth: layer_core::color::SampleDepth,
     in_place: bool,
     color: Arc<NativeTileEncoder>,
     scalar: Arc<NativeScalarEncoder>,
@@ -20,15 +19,15 @@ pub(crate) struct Recipes {
     validator: Arc<validate::Validator>,
 }
 impl Recipes {
-    fn shared(device: &PipelineDevice, depth: layer_core::color::SampleDepth, in_place: bool) -> Arc<Self> {
+    fn shared(device: &PipelineDevice, in_place: bool) -> Arc<Self> {
         let mut cache = device.native_publication.lock().unwrap();
-        if let Some(recipes) = cache.iter().find(|p| p.depth == depth && p.in_place == in_place) { return recipes.clone(); }
+        if let Some(recipes) = cache.iter().find(|p| p.in_place == in_place) { return recipes.clone(); }
         let device = device.for_recipe();
-        let recipes = Arc::new(Self { depth, in_place,
+        let recipes = Arc::new(Self { in_place,
             color: Arc::new(NativeTileEncoder::prevalidated(&device, in_place)),
             scalar: Arc::new(if in_place { NativeScalarEncoder::validated_in_place(&device) } else { NativeScalarEncoder::with_device(&device) }),
             promoter: (!in_place).then(|| Arc::new(NativePromoter::with_device(&device))),
-            validator: Arc::new(validate::Validator::new(&device, depth)),
+            validator: Arc::new(validate::Validator::new(&device)),
         });
         cache.push(recipes.clone());
         recipes
@@ -76,7 +75,7 @@ impl NativeEdit {
         let display_complete_bytes=admission.map_or_else(||crate::display_memory::complete_budget(&r.device,0),|source|source.display_complete_bytes);
         #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple")))]
         let display_complete_bytes=admission.map_or(0,|source|source.display_complete_bytes);
-        let recipes = Recipes::shared(&r.device, r.document_color().depth, in_place);
+        let recipes = Recipes::shared(&r.device, in_place);
         Self {
             backing: BTreeMap::new(),
             color_cache_bytes: 256 * 1024 * 1024,

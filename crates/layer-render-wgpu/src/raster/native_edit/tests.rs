@@ -158,6 +158,42 @@ fn native_half_float_exposure_bake_saturates_finite_output() {
 }
 
 #[test]
+fn exposure_beyond_the_float_range_bakes_saturated_and_painting_continues() {
+    use crate::tests::native_effects::{empty_document,insert_effect};
+    use layer_core::{Affine,EffectInstance,EffectValue,RasterOperation,RasterOperationKind,SceneScope,Point};
+    for (depth,largest) in [(SampleDepth::F16,65504.),(SampleDepth::F32,f32::MAX)] {
+        let color=DocumentColor {space:RgbSpace::Srgb,depth};
+        let mut document=paint_document([256;2],"Exposure overflow");
+        set_color(&mut document,color);
+        document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend=layer_core::BlendSpace::Linear;
+        let id=target(&document);
+        let (mut input,mut live)=engine(document);
+        let mut members=empty_document([256;2],color);
+        members.artwork.compositions.get_mut(members.artwork.root).unwrap().blend=layer_core::BlendSpace::Linear;
+        let catalog=layer_core::bundled_effect_catalog();
+        let mut exposure=EffectInstance::new(catalog.get("exposure").unwrap().program());
+        exposure.set("exposure",EffectValue::Number(10.)).unwrap();
+        exposure.set("gamma",EffectValue::Number(0.1)).unwrap();
+        insert_effect(&mut members,exposure);
+        let mut bright=EffectInstance::new(catalog.get("solid_color").unwrap().program());
+        bright.set("color",EffectValue::Color(layer_core::color::RgbColor::from_linear(color.space,[8.,8.,8.,1.]).unwrap())).unwrap();
+        insert_effect(&mut members,bright);
+        live.append_raster_operation(id,RasterOperation {placement:Affine::IDENTITY,coverage:reveal_all([256;2],[0,0]),
+            kind:RasterOperationKind::Bake {scene:members.snapshot(),scope:SceneScope::Members(members.scene().order().to_vec().into()),offset:Point::default()}}).unwrap();
+        flush(&mut live);
+        let data=backing(&paint(live.document()).raster);
+        assert!(!data.is_empty(),"{depth:?}");
+        for bytes in data.values() {
+            for pixel in bytes.chunks(if depth==SampleDepth::F16 {8} else {16}) {assert_eq!(layer_core::color::hdr::decode_samples(depth,pixel).unwrap(),[largest,largest,largest,1.],"{depth:?}");}
+        }
+        let baked=live.document().revision;
+        stroke(&mut live,&mut input,1,64.);
+        flush(&mut live);
+        assert!(live.document().revision>baked,"{depth:?}: painting continues after the saturated bake");
+    }
+}
+
+#[test]
 fn partial_bakes_back_tiles_without_publishing_the_layer() {
     let mut document = layer_core::Document::new(PortableId::random(), 1280, 768, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
     let root = document.artwork.root;
@@ -680,7 +716,7 @@ fn prevalidated_late_invalid_color_or_scalar_rejects_siblings_without_canonical_
                 let scalar=page_texture(&r,wgpu::TextureFormat::R32Float);
                 set_pixel(&r,&scalar,&[-0.25]);
                 inputs.push((scalar,RasterTile::pending(color.coverage_descriptor()),LayerColorMode::FullColor));
-            } else {set_pixel(&r,&inputs[16].0,if depth==SampleDepth::F32 {&[f32::MAX,0.,0.,0.125]} else {&[f32::NAN,0.,0.,1.]});}
+            } else {set_pixel(&r,&inputs[16].0,&[f32::NAN,0.,0.,1.]);}
             let first=inputs[0].0.clone();
             let bad=inputs.last().unwrap().0.clone();
             let before=crate::layer_tests::page_bytes(&r,&first);

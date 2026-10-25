@@ -28,13 +28,14 @@ fn fx_levels_neutral(base:u32,offset:u32)->bool {
     return fx_parameter(base,offset).x==0. && fx_parameter(base,offset+1u).x==1.
         && fx_parameter(base,offset+2u).x==1. && fx_parameter(base,offset+3u).x==0. && fx_parameter(base,offset+4u).x==1.;
 }
+const FX_FINITE:f32=3.402823466e38;
 fn fx_levels_stage(x:f32,base:u32,offset:u32)->f32 {
     let low=fx_parameter(base,offset).x;let high=fx_parameter(base,offset+1u).x;
     let gamma=fx_parameter(base,offset+2u).x;let a=fx_parameter(base,offset+3u).x;let b=fx_parameter(base,offset+4u).x;
     var u=(x-low)/(high-low);
     if fx_parameter(base,5u).x>.5 {u=clamp(u,0.,1.);}
-    if gamma!=1. {u=sign(u)*pow(abs(u),1./gamma);}
-    var result=a+(b-a)*u;
+    if gamma!=1. {u=sign(u)*min(pow(abs(u),1./gamma),FX_FINITE);}
+    var result=clamp(a+(b-a)*clamp(u,-FX_FINITE,FX_FINITE),-FX_FINITE,FX_FINITE);
     if fx_parameter(base,6u).x>.5 {result=clamp(result,0.,1.);}
     return result;
 }
@@ -222,15 +223,15 @@ fn capy_exposure(c:vec4<f32>,position:vec2<f32>,base:u32) -> vec4<f32> {
         // EV and offset commute with association. Keep this linear case in
         // premultiplied form so long inverse chains do not accumulate divide/
         // multiply roundoff at small alpha.
-        return vec4<f32>(c.rgb*fx_exposure_gain(fx_parameter(base,0u).x)+fx_parameter(base,1u).x*c.a,c.a);
+        return vec4<f32>(clamp(c.rgb*fx_exposure_gain(fx_parameter(base,0u).x)+fx_parameter(base,1u).x*c.a,vec3(-FX_FINITE),vec3(FX_FINITE)),c.a);
     }
-    let linear=fx_unassociate(c)*fx_exposure_gain(fx_parameter(base,0u).x)+fx_parameter(base,1u).x;
+    let linear=clamp(fx_unassociate(c)*fx_exposure_gain(fx_parameter(base,0u).x)+fx_parameter(base,1u).x,vec3(-FX_FINITE),vec3(FX_FINITE));
     // Signed gamma extends the developed-image correction to finite values
     // outside native SDR range. Gamma 1 is exactly the linear EV/offset control.
     var out:vec3<f32>;
     if FX_EXTENDED {
         out=linear;
-        if fx_parameter(base,2u).x!=1. {out=sign(linear)*pow(abs(linear),vec3<f32>(1./fx_parameter(base,2u).x));}
+        if fx_parameter(base,2u).x!=1. {out=sign(linear)*min(pow(abs(linear),vec3<f32>(1./fx_parameter(base,2u).x)),vec3(FX_FINITE));}
     } else {out=pow(clamp(linear,vec3<f32>(0.),vec3<f32>(1.)),vec3<f32>(1./fx_parameter(base,2u).x));}
     return vec4<f32>(out*c.a,c.a);
 }

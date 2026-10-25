@@ -59,7 +59,9 @@ fn encode_pixel(invocation:vec3<u32>) {
         if settings.scale==32u {
             FLOAT32_VALIDATION
             if (bitcast<u32>(value.a)&0x7f800000u)==0u {store_outputs(invocation.z,pixel,vec4(0u),vec4(0.));return;}
-            let straight=vec4(value.rgb/value.a,value.a);
+            let finite=3.402823466e38;
+            let limit=finite*value.a;
+            let straight=vec4(clamp(clamp(value.rgb,vec3(-limit),vec3(limit))/value.a,vec3(-finite),vec3(finite)),value.a);
             store_outputs(invocation.z,pixel,bitcast<vec4<u32>>(straight),vec4(straight.rgb*straight.a,straight.a));
             return;
         }

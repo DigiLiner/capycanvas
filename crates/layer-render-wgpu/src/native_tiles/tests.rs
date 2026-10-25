@@ -346,13 +346,17 @@ fn reduced_color_writeback_rejects_invalid_pixels_before_projection() {
                 label: Some("invalid reduced color pixels"), size: mode.descriptor(layer_core::color::DocumentColor { depth, ..Default::default() }).byte_len([256; 2]).unwrap() as u64,
                 usage: wgpu::BufferUsages::STORAGE, mapped_at_creation: false,
             });
-            for pixel in [[f32::NAN, 0., 0., 1.], [f32::INFINITY, 0., 0., 1.], [0., 0., 0., -0.1], [0., 0., 0., 1.1]] {
+            for (pixel, valid) in [([f32::NAN, 0., 0., 1.], false), ([f32::INFINITY, 0., 0., 1.], true), ([f32::NEG_INFINITY, 1., 0., 0.5], true),
+                ([0., 0., 0., -0.1], false), ([0., 0., 0., 1.1], false)] {
                 upload(&r, &working, &working_bytes(&vec![pixel; 65536]));
                 let request = NativeTileRequest { working: &working, canonical: &candidate, encoded: (&output).into(), mode, space: RgbSpace::Srgb,
                     transfer: &transfer, depth, alpha: AlphaAssociation::Straight, region: [0, 0, 256, 256] };
                 let batch = encoder.prepare(&r.device, &[request], &status, &mut Default::default()).unwrap();
                 submit(&r, &encoder, &status, &[batch], true);
-                assert!(read_status(&r, &status).is_err(), "{mode:?} {depth:?} {pixel:?}");
+                assert_eq!(read_status(&r, &status).is_ok(), valid, "{mode:?} {depth:?} {pixel:?}");
+                if valid {
+                    assert!(page_bytes(&r, &candidate).as_chunks::<4>().0.iter().all(|v| f32::from_le_bytes(*v).is_finite()), "{mode:?} {depth:?} {pixel:?} saturates");
+                }
             }
         }
     }
@@ -760,7 +764,7 @@ fn hdr_half_publication_preserves_finite_codes_subnormals_and_canonical_cache() 
             }
         }
     }
-    for pixel in [[f32::NAN,0.,0.,1.],[f32::INFINITY,0.,0.,1.],[1.,0.,0.,-0.1],[1.,0.,0.,1.1]] {
+    for pixel in [[f32::NAN,0.,0.,1.],[1.,0.,0.,-0.1],[1.,0.,0.,1.1]] {
         upload(&r,&working,&working_bytes(&vec![pixel;65536]));
         let batch=encoder.prepare(&r.device,&[NativeTileRequest { mode: Default::default(), space: RgbSpace::Srgb, working:&working, encoded: (&output).into(), canonical:&canonical, transfer:&transfer,
             depth:SampleDepth::F16,alpha:AlphaAssociation::Straight,region:[0,0,256,256] }],&status, &mut Default::default()).unwrap();
@@ -779,7 +783,7 @@ fn half_publication_saturates_finite_rgb_and_reconstructs_quantized_alpha() {
     let output=texture(&r,wgpu::TextureFormat::Rgba16Uint);
     let pixels:Vec<_>=(0..65536).map(|i| {
         let alpha=[1.,0.37,1./65536.,1./16777216.,1./67108864.,0.,-0.][i%7];
-        let rgb=[65504.,65505.,65536.,f32::MAX,f32::MIN,-65505.,0.][i/7%7];
+        let rgb=[65504.,65505.,65536.,f32::MAX,f32::MIN,-65505.,0.,f32::INFINITY][i/7%8];
         [rgb,-rgb,0.,alpha]
     }).collect();
     for in_place in [false,true] {
@@ -810,7 +814,7 @@ fn half_publication_saturates_finite_rgb_and_reconstructs_quantized_alpha() {
 }
 
 #[test]
-fn float32_publication_retains_precision_range_and_rejects_unassociation_overflow() {
+fn float32_publication_retains_precision_range_and_saturates_overflow() {
     use layer_core::color::DocumentColor;
     let mut r = WgpuRasterizer::new_native_headless(DocumentColor { space: RgbSpace::Srgb, depth: SampleDepth::F32 }).unwrap();
     let encoder = NativeTileEncoder::with_device(&r.device);
@@ -837,7 +841,19 @@ fn float32_publication_retains_precision_range_and_rejects_unassociation_overflo
             assert_eq!(&actual[i*16..][..16], working_bytes(&[expected]));
         }}
     }
-    for pixel in [[f32::MAX,0.,0.,0.125],[f32::NAN,0.,0.,1.],[0.,0.,0.,1.1]] {
+    for pixel in [[f32::MAX,f32::NEG_INFINITY,f32::INFINITY,0.125],[f32::INFINITY,0.,0.,1.]] {
+        upload(&r, &working, &working_bytes(&vec![pixel;65536]));
+        let batch = encoder.prepare(&r.device, &[NativeTileRequest { mode: Default::default(), space: RgbSpace::Srgb, working: &working, encoded: (&output).into(), canonical: &canonical, transfer: &transfer,
+            depth: SampleDepth::F32, alpha: AlphaAssociation::Straight, region: [0,0,256,256] }], &status, &mut Default::default()).unwrap();
+        submit(&r,&encoder,&status,&[batch],true);
+        read_status(&r,&status).unwrap();
+        let stored = page_bytes(&r, &output);
+        let straight: Vec<_> = stored[..16].as_chunks::<4>().0.iter().map(|v| f32::from_le_bytes(*v)).collect();
+        assert_eq!(straight[0], f32::MAX, "{pixel:?}");
+        assert!(straight.iter().all(|v| v.is_finite()), "{pixel:?} saturates to {straight:?}");
+        assert!(page_bytes(&r, &canonical)[..16].as_chunks::<4>().0.iter().all(|v| f32::from_le_bytes(*v).is_finite()), "{pixel:?} canonical");
+    }
+    for pixel in [[f32::NAN,0.,0.,1.],[0.,0.,0.,1.1]] {
         upload(&r, &working, &working_bytes(&vec![pixel;65536]));
         let batch = encoder.prepare(&r.device, &[NativeTileRequest { mode: Default::default(), space: RgbSpace::Srgb, working: &working, encoded: (&output).into(), canonical: &canonical, transfer: &transfer,
             depth: SampleDepth::F32, alpha: AlphaAssociation::Straight, region: [0,0,256,256] }], &status, &mut Default::default()).unwrap();

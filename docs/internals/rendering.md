@@ -543,12 +543,14 @@ host: up to two RGBA tiles or one gray-alpha tile per dispatch. Tracking,
 pipeline indexing and upload batching share those capacities. Higher browser
 device limits do not select a different gray-alpha shader recipe.
 
-Floating publication rejects non-finite RGB and coverage outside [0, 1].
-At the half-float boundary, finite straight RGB saturates to ±65,504. The
+Publication rejects NaN RGB and coverage outside [0, 1]. Straight RGB beyond
+the stored format's range, including infinity, saturates to its largest
+finite value: ±65,504 for half floats and the Float32 maximum for Float32. The
 encoder bounds associated RGB before division, handles coverage that rounds
 to either signed zero, and reconstructs canonical pixels from the emitted
 half bits and rounded coverage. Preflight applies the same validity policy.
-Float32 publication separately checks that unassociation remains finite.
+Exposure and Levels saturate their power curves to the Float32 range, so an
+extreme adjustment of bright HDR pixels bakes saturated rather than failing.
 
 Gradient interpolation retains the nearer endpoint's weight from its distance
 and derives the other weight as its complement. Coverage stays within the two
@@ -1021,7 +1023,7 @@ their publication variants. Immutable publication recipes share the device;
 scratch grows only to each capture batch, and validation status and results
 belong to each capture. Private outputs
 need no promotion back into their disposable source textures.
-Publication status rejects nonfinite samples and invalid coverage. Bits outside
+Publication status rejects NaN samples and invalid coverage. Bits outside
 those flags are reported as an unknown status word; they do not establish an
 ordinary color-range error, and the candidate remains unpublished.
 Affine captures use source occupancy and the existing conservative filter
