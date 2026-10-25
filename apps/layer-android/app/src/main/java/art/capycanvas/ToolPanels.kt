@@ -1,5 +1,11 @@
 package art.capycanvas
 
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -281,17 +287,30 @@ import kotlinx.coroutines.withContext
     }
 }
 
-/** Native double-press timing; shared Rust owns activation and drawer state. */
-@Composable internal fun pickerClick(host: CanvasHost, control: JSONObject?, anchor: JSONObject, activate: () -> Unit): () -> Unit {
+internal class PickerActivation(val modifier: Modifier, val click: () -> Unit)
+
+@Composable internal fun pickerClick(host: CanvasHost, control: JSONObject?, anchor: JSONObject, activate: () -> Unit): PickerActivation {
     val current by rememberUpdatedState(activate)
     val picker=control?.optString("kind")=="color_picker" || control?.optString("kind")=="command" && control.optString("command")=="eyedropper"
-    val timeout=androidx.compose.ui.platform.LocalViewConfiguration.current.doubleTapTimeoutMillis
-    var last by remember(anchor.toString()) { mutableLongStateOf(0L) }
-    return {
-        val now=android.os.SystemClock.uptimeMillis()
-        if(picker && last!=0L && now-last<=timeout) {
-            last=0L
+    val configuration=androidx.compose.ui.platform.LocalViewConfiguration.current
+    data class Press(val device: androidx.compose.ui.input.pointer.PointerType, val time: Long)
+    var pending by remember(anchor.toString(), picker) { mutableStateOf<Press?>(null) }
+    var previous by remember(anchor.toString(), picker) { mutableStateOf<Press?>(null) }
+    val modifier=if(!picker) Modifier else Modifier.onPreviewKeyEvent { pending=null; previous=null; false }.pointerInput(anchor.toString()) {
+        awaitEachGesture {
+            val down=awaitFirstDown(requireUnconsumed=false,pass=PointerEventPass.Initial)
+            pending=Press(down.type,down.uptimeMillis)
+            try {
+                do { val event=awaitPointerEvent(PointerEventPass.Final) } while(event.changes.any { it.pressed })
+            } finally { pending=null }
+        }
+    }
+    return PickerActivation(modifier) {
+        val press=pending; pending=null
+        val last=previous; previous=null
+        if(picker && press!=null && last!=null && press.device==last.device &&
+            press.time-last.time in 0..configuration.doubleTapTimeoutMillis) {
             host.dispatch(obj("type" to "color_picker","action" to obj("kind" to "settings","anchor" to anchor)))
-        } else { last=now;current() }
+        } else { if(picker)previous=press; current() }
     }
 }

@@ -1,3 +1,4 @@
+import {nativeScreenEvents} from './native-input-fixture.mjs';
 import assert from "node:assert/strict";
 import { mkdir, writeFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -207,7 +208,8 @@ export async function checkWorkspaceResize({call,evaluate,settle,scenarios=["lef
   let step=0,held=null,point;
   const perform=async events=>{
     const path=`${dir}/step-${step}.json`;
-    await writeFile(`${path}.tmp`,JSON.stringify(events));await rename(`${path}.tmp`,path);
+    const nativeEvents=nativeScreenEvents(events,await evaluate('({screenX,screenY,outerWidth,outerHeight,innerWidth,innerHeight})'));
+    await writeFile(`${path}.tmp`,JSON.stringify(nativeEvents));await rename(`${path}.tmp`,path);
     const deadline=Date.now()+20000;
     while(!existsSync(`${dir}/done-${step}`)) {assert.ok(Date.now()<deadline,"native input timeout");await new Promise(r=>setTimeout(r,2));}
     step++;

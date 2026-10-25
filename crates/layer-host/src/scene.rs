@@ -18,7 +18,11 @@ pub struct NavigatorSlot {
     pub bounds: [f32; 4],
     pub clip: [f32; 4],
     pub order: i32,
+    #[serde(default = "opaque")]
+    pub opacity: f32,
 }
+
+fn opaque() -> f32 { 1. }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SlotUnits {
@@ -45,7 +49,8 @@ impl Navigators {
         if slots.len() > MAX_SLOTS
             || slots
                 .iter()
-                .any(|s| !s.bounds.iter().chain(&s.clip).all(|v| v.is_finite()))
+                .any(|s| !s.bounds.iter().chain(&s.clip).all(|v| v.is_finite())
+                    || !s.opacity.is_finite() || !(0. ..=1.).contains(&s.opacity))
         {
             return Err("Invalid Navigator geometry".into());
         }
@@ -89,7 +94,7 @@ impl Navigators {
                     work_area: g.work_area.map(|[a, b]| [(x + a) * scale, (y + b) * scale]),
                     outline_linear: [fg[0], fg[1], fg[2]],
                     scale,
-                    opacity: 1.,
+                    opacity: slot.opacity,
                 })
             })
             .collect()
@@ -102,11 +107,19 @@ impl Navigators {
 #[serde(deny_unknown_fields)]
 pub struct GlassLayout {
     regions: Vec<Vec<f32>>,
-    connections: Vec<DrawerConnection>,
+    connections: Vec<GlassConnection>,
     #[serde(default)]
     arcs: Vec<[f32; 7]>,
     #[serde(default)]
     color_bubbles: Vec<[f32; 7]>,
+}
+
+#[derive(PartialEq, Deserialize)]
+struct GlassConnection {
+    #[serde(flatten)]
+    connection: DrawerConnection,
+    #[serde(default = "opaque")]
+    strength: f32,
 }
 
 #[derive(Default)]
@@ -123,8 +136,9 @@ impl Glass {
         let arcs = layout.arcs.iter().all(|a| a.iter().all(|v| v.is_finite()) && a[2] >= 0. && a[3] >= 0.);
         let color_bubbles = layout.color_bubbles.iter().all(|c| c.iter().all(|v| v.is_finite())
             && c[2..=4].iter().all(|v| *v >= 0.) && (0.0..=std::f32::consts::FRAC_PI_2).contains(&c[5]));
-        let connections = layout.connections.iter().all(|c| {
-            [
+        let connections = layout.connections.iter().all(|entry| {
+            let c = &entry.connection;
+            entry.strength.is_finite() && [
                 c.bounds.x,
                 c.bounds.y,
                 c.bounds.width,
@@ -166,12 +180,11 @@ impl Glass {
                 self.layout
                     .connections
                     .iter()
-                    .flat_map(|c| c.glass())
-                    .map(|(bounds, radii)| BackdropRegion {
+                    .flat_map(|c| c.connection.glass().into_iter().map(move |(bounds, radii)| BackdropRegion {
                         bounds: bounds.map(|v| v * scale),
                         radii: radii.map(|v| v * scale),
                         shape: BackdropRegion::SQUIRCLE,
-                    });
+                    }.with_strength(c.strength)));
             let arcs = self.layout.arcs.iter().map(|a| BackdropRegion::arc(
                 [a[0] * scale, a[1] * scale], a[2] * scale, a[3] * scale, a[4], a[5],
             ).with_strength(a[6]));
@@ -518,12 +531,29 @@ mod tests {
             square_corners: [false; 4],
         };
         let connected = serde_json::json!({"regions": [], "connections": [connection]});
-        assert!(layer.set(glass(connected).unwrap()).unwrap());
+        assert!(layer.set(glass(connected.clone()).unwrap()).unwrap());
         assert_eq!(
             layer.regions(2.).len(),
             3,
             "A connector adds its body and both feet"
         );
+        let geometry = layer.regions(2.).to_vec();
+        assert!(geometry.iter().all(|region| region.shape[1] == 1.));
+        for strength in [0.375f32, 0., 2., -1.] {
+            let mut packet = connected.clone();
+            packet["connections"][0]["strength"] = strength.into();
+            layer.set(glass(packet).unwrap()).unwrap();
+            for (region, original) in layer.regions(2.).iter().zip(&geometry) {
+                assert_eq!(region.bounds, original.bounds);
+                assert_eq!(region.radii, original.radii);
+                assert_eq!(region.shape[1], strength.clamp(0., 1.));
+            }
+        }
+        let cached = layer.regions(2.).to_vec();
+        let mut invalid = glass(connected).unwrap();
+        invalid.connections[0].strength = f32::NAN;
+        assert!(layer.set(invalid).is_err());
+        assert_eq!(layer.regions(2.), cached);
         assert!(
             layer
                 .set(glass(serde_json::json!({"regions": [], "connections": []})).unwrap())
@@ -533,12 +563,33 @@ mod tests {
     }
 
     #[test]
+    fn navigator_opacity_survives_layout_and_rejects_invalid_values() {
+        let host = NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let mut slot: NavigatorSlot = serde_json::from_value(serde_json::json!({
+            "bounds":[0.,0.,200.,100.],"clip":[0.,0.,200.,100.],"order":0,
+        })).unwrap();
+        assert_eq!(slot.opacity, 1.);
+        let mut navigators = Navigators::default();
+        for opacity in [0., 0.25, 1.] {
+            slot.opacity = opacity;
+            navigators.set(vec![slot.clone()]).unwrap();
+            assert_eq!(navigators.placements(&host, 2.)[0].opacity, opacity);
+        }
+        for opacity in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
+            slot.opacity = opacity;
+            assert!(navigators.set(vec![slot.clone()]).is_err());
+            assert_eq!(navigators.placements(&host, 2.)[0].opacity, 1.);
+        }
+    }
+
+    #[test]
     fn navigator_slots_are_bounded_ordered_and_scaled() {
         let host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
         let slot = |x: f32, order: i32| NavigatorSlot {
             bounds: [x, 20., 264., 200.],
             clip: [x, 30., 200., 170.],
             order,
+            opacity: 1.,
         };
         let mut navigators = Navigators::default();
         assert!(navigators.set(vec![slot(30., 9), slot(10., 3)]).unwrap());
@@ -563,6 +614,7 @@ mod tests {
                 bounds: [20., 40., 528., 400.],
                 clip: [20., 60., 400., 340.],
                 order: 3,
+                opacity: 1.,
             }])
             .unwrap();
         let from_physical = physical.placements(&host, 2.);

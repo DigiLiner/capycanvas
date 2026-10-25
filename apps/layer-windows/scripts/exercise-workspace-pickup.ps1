@@ -1,5 +1,9 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[string]$DebuggerPath,[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[string]$DebuggerPath,[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark',[switch]$ZenOnly)
 $ErrorActionPreference='Stop'
+if($ZenOnly -and !$PSBoundParameters.ContainsKey('Theme')){
+    foreach($theme in @('dark','light')){& $PSCommandPath -Executable $Executable -Device $Device -ColumnMode $ColumnMode -Theme $theme -ZenOnly}
+    return
+}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='prefer-visible';$CapyPopups=$true
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
@@ -266,6 +270,24 @@ try {
     $null=[CapyRowPointer]::SetForegroundWindow($drawing.Handle)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     $null=Settled-Layout
+    if($ZenOnly){
+        $script:case='zen-visibility'
+        $before=Settled-Layout
+        $null=Control 'panel-tab-layers' -Arranged
+        foreach($cycle in 1..2){
+            Toggle-Zen;Wait-Until {(Model).chrome_hidden} 'Zen did not hide chrome'
+            Wait-Until {$tab=Find 'panel-tab-layers';!$tab -or $tab.Current.IsOffscreen} 'Hidden Zen panel retained a visible native peer'
+            Intact $before
+            Toggle-Zen;Wait-Until {!(Model).chrome_hidden} 'Zen did not restore chrome'
+            $null=Control 'panel-tab-layers' -Arranged
+            Intact $before
+        }
+        $closeAttempted=$true
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Close
+        if((Get-Item -LiteralPath $stderr).Length){throw 'Native Zen stderr requires review'}
+        @{theme=$Theme;zen_hide_restore_twice='passed';native_collapsed_peer='passed';layout_preserved='passed';scope='Native lifecycle functional checks; 180ms frame pacing and physical input unverified'}|ConvertTo-Json
+        return
+    }
     $script:case='canvas-native-cursor'
     $canvas=(Control 'drawing-canvas').Current.BoundingRectangle
     $model=Model;$area=$model.layout.work_area;$density=$canvas.Width/$model.layout.viewport[0]

@@ -1,3 +1,4 @@
+import {nativeScreenEvents} from './native-input-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -9,7 +10,8 @@ export async function checkNumericControls({call,evaluate,settle}) {
   let nativeStep=0;
   const performNative=async events=>{
     const step=nativeStep++,path=`${inputDir}/step-${step}.json`;
-    await writeFile(`${path}.tmp`,JSON.stringify(events));await rename(`${path}.tmp`,path);
+    const nativeEvents=nativeScreenEvents(events,await evaluate('({screenX,screenY,outerWidth,outerHeight,innerWidth,innerHeight})'));
+    await writeFile(`${path}.tmp`,JSON.stringify(nativeEvents));await rename(`${path}.tmp`,path);
     const deadline=Date.now()+15000;
     while(!existsSync(`${inputDir}/done-${step}`)){assert.ok(Date.now()<deadline,'Compositor numeric input timed out');await new Promise(r=>setTimeout(r,2));}
   };
@@ -49,7 +51,10 @@ export async function checkNumericControls({call,evaluate,settle}) {
       return{...result,reference,fontFamily:css.root,text};
     } finally {await evaluate("document.querySelector('#numeric-ui-font-reference')?.remove()");}
   };
-  if(native)await writeFile(`${inputDir}/ready`,'ready');
+  if(native) {
+    await evaluate(`window.numericNativeEvents=[];for(const type of ['pointerdown','pointerup','pointermove','click','focusin','focusout'])window.addEventListener(type,e=>{const n=e.target,p=document.elementFromPoint(e.clientX??0,e.clientY??0);numericNativeEvents.push({type,pointer:e.pointerType,x:e.clientX,y:e.clientY,target:n.className,hit:p?.className,active:document.activeElement?.className,captured:n.hasPointerCapture?.(e.pointerId??0),trusted:e.isTrusted,time:performance.now()});if(numericNativeEvents.length>80)numericNativeEvents.shift();},true)`);
+    await writeFile(`${inputDir}/ready`,'ready');
+  }
   try {
     if(native)await performNative([{key:0xffe1,down:true},{key:0xffe1,down:false},{wait_ms:100}]);
     await send({type:'restore_workspace',workspace:fixture});
@@ -112,5 +117,11 @@ export async function checkNumericControls({call,evaluate,settle}) {
     }
     await writeFile(`${output}/fonts.json`,JSON.stringify(fonts,null,2));await writeFile(`${output}/geometry.json`,JSON.stringify(geometryReports,null,2));await writeFile(`${output}/motion.json`,JSON.stringify(motion,null,2));
     console.log('PASS: numeric panel geometry, full readouts, integer scrubs, fractional typing, cancellation, mouse/touch/pen, light/dark');console.log(JSON.stringify(motion));
+  } catch(error) {
+    if(native) {
+      await writeFile(`${output}/native-failure.json`,JSON.stringify(await evaluate(`({events:window.numericNativeEvents,scale:devicePixelRatio,viewport:[innerWidth,innerHeight],screen:[screen.width,screen.height],focus:document.activeElement?.outerHTML,readout:document.querySelector('${size} .number-value')?.getBoundingClientRect().toJSON(),entry:document.querySelector('${size} .number-entry')?.outerHTML})`),null,2));
+      await writeFile(`${output}/native-failure.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    }
+    throw error;
   } finally {await send({type:'restore_workspace',workspace:saved});if(native)await writeFile(`${inputDir}/finished`,'finished');}
 }

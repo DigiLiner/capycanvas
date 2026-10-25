@@ -2,6 +2,7 @@
 #include "WorkspaceManagerView.h"
 #include "WorkspaceRowDrag.h"
 #include "UiControls.h"
+#include "WorkspaceQuery.h"
 #include <algorithm>
 #include <map>
 #include <optional>
@@ -9,6 +10,10 @@
 using namespace CapyUi;
 struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     Dispatch send;
+    PreviewTransport query;
+    uint64_t validationSerial=0;
+    hstring validationName,validationError;
+    bool nameValid=false,validationRunning=false,validationQueued=true;
     std::shared_ptr<WorkspaceData> copyData=std::make_shared<WorkspaceData>();
     J catalog;
     std::shared_ptr<CapyLocalization> localization;
@@ -29,7 +34,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     Grid heading;
     TextBlock title,intro,error,progress,promptMessage;
     Button create,retry;
-    TextBox search,name;
+    TextBox search,name,description;
     ComboBox choices;
     ListView list;
     Grid listSurface;
@@ -50,7 +55,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     std::vector<std::wstring> order;
     J snapshot,model;
     hstring promptKey,choicesKey,focusSent,toolbarActionsKey,toolbarPage;
-    std::optional<hstring> nameDraft,searchDraft,selectionDraft;
+    std::optional<hstring> nameDraft,descriptionDraft,searchDraft,selectionDraft;
     bool showing=false,updating=false,programmatic=false,stopping=false,blocked=false,cancelPending=false;
     void dispatch(J const& input) {
         send(to_string(O({{L"operation",S(L"input")},{L"input",input}}).Stringify()));
@@ -84,6 +89,25 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     static void sync(TextBox const& text,hstring value,std::optional<hstring>& draft) {
         if(draft&&*draft==value)draft.reset();
         if(!draft&&text.Text()!=value)text.Text(value);
+    }
+    void validateName(){
+        if(!prompt()||name.Visibility()!=Visibility::Visible)return;
+        auto draft=name.Text();
+        if(draft!=validationName){validationName=draft;nameValid=false;validationError=L"";++validationSerial;validationQueued=true;}
+        if(validationRunning||!validationQueued)return;
+        validationRunning=true;validationQueued=false;auto serial=validationSerial;auto owner=promptKey;
+        if(dialog)dialog.IsPrimaryButtonEnabled(false);
+        bool queued=QueryWorkspace(query,O({{L"type",S(L"workspace_name_validation")},{L"name",S(draft)}}),[weak=weak_from_this(),serial,draft,owner](J reply){
+            if(auto self=weak.lock()){
+                self->validationRunning=false;
+                if(self->showing&&self->validationSerial==serial&&self->promptKey==owner&&self->name.Text()==draft){
+                    auto reason=reply.GetNamedValue(L"result",JsonValue::CreateNullValue());
+                    self->nameValid=reply.GetNamedValue(L"error",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Null&&reason.ValueType()==JsonValueType::Null;
+                    self->validationError=reason.ValueType()==JsonValueType::String?reason.GetString():hstring();self->update();
+                }else if(self->showing)self->validateName();
+            }
+        });
+        if(!queued){validationRunning=false;validationQueued=true;auto timer=Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();timer.IsRepeating(false);timer.Interval(std::chrono::milliseconds(16));timer.Tick([weak=weak_from_this()](auto&& timer,auto&&){timer.Stop();if(auto self=weak.lock();self&&self->showing)self->validateName();});timer.Start();}
     }
     bool prompt()const{return object(model,L"prompt").Size()!=0;}
     bool canReorder()const{
@@ -135,6 +159,8 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         AutomationProperties::SetAutomationId(list,L"workspace-manager-items");
         name.Header(box_value(str(object(object(catalog,L"bootstrap"),L"common"),L"name")));name.MaxLength(100);
         AutomationProperties::SetAutomationId(name,L"workspace-manager-name");
+        description.Header(box_value(copy(L"header",L"description")));description.AcceptsReturn(true);description.TextWrapping(TextWrapping::Wrap);description.MinHeight(72);
+        AutomationProperties::SetAutomationId(description,L"workspace-manager-description");
         choices.HorizontalAlignment(HorizontalAlignment::Stretch);
         AutomationProperties::SetAutomationId(choices,L"workspace-manager-choice");
         retry.Content(box_value(copy(L"header",L"retry")));retry.HorizontalAlignment(HorizontalAlignment::Left);
@@ -146,7 +172,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
                 self->editSwitcher(O({{L"type",S(L"move")},{L"id",S(id)},{L"before",before?S(*before):JsonValue::CreateNullValue()}}));},
             [weak=weak_from_this()]{if(auto self=weak.lock()){++self->selectionSerial;self->restoreSelection();}});
         listing.Children().Append(search);listing.Children().Append(listSurface);
-        promptBody.Children().Append(promptMessage);promptBody.Children().Append(name);promptBody.Children().Append(choices);
+        promptBody.Children().Append(promptMessage);promptBody.Children().Append(name);promptBody.Children().Append(description);promptBody.Children().Append(choices);
         body.Children().Append(toolbarTabs);body.Children().Append(intro);body.Children().Append(listing);body.Children().Append(toolbarActions);body.Children().Append(promptBody);
         body.Children().Append(progress);body.Children().Append(error);body.Children().Append(retry);
         create.Click([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->dispatch(self->page()==L"this_workspace"?form(L"new_toolbar",JsonValue::CreateNullValue()):form(L"new"));});
@@ -155,8 +181,9 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             if(auto self=weak.lock();self&&!self->updating){self->searchDraft=self->search.Text();self->dispatch(O({{L"type",S(L"search")},{L"query",S(self->search.Text())}}));}
         });
         name.TextChanging([weak=weak_from_this()](auto&&,auto&&){
-            if(auto self=weak.lock();self&&!self->updating)self->nameDraft=self->name.Text();
+            if(auto self=weak.lock();self&&!self->updating){self->nameDraft=self->name.Text();self->validateName();}
         });
+        description.TextChanging([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock();self&&!self->updating)self->descriptionDraft=self->description.Text();});
         list.SelectionChanged([weak=weak_from_this()](auto&&,auto&&){
             if(auto self=weak.lock();self&&!self->updating){
                 auto item=self->list.SelectedItem().try_as<ListViewItem>();
@@ -319,7 +346,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         toolbarActions.Visibility(toolbars&&!naming&&toolbarMenu.Items().Size()?Visibility::Visible:Visibility::Collapsed);
         toolbarActions.IsEnabled(!busy&&!flag(model,L"loading"));
         auto key=naming?object(model,L"prompt_action").Stringify():L"";
-        if(key!=promptKey){promptKey=key;nameDraft.reset();choicesKey=L"";}
+        if(key!=promptKey){promptKey=key;nameDraft.reset();descriptionDraft.reset();validationName=L"";++validationSerial;validationQueued=true;nameValid=false;validationError=L"";choicesKey=L"";}
         title.Text(naming?str(details,L"title"):str(model,L"title"));
         auto theme=str(object(snapshot,L"state"),L"theme",L"dark");
         dialog.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
@@ -339,7 +366,10 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             promptMessage.Text(str(details,L"message"));promptMessage.Visibility(promptMessage.Text().empty()?Visibility::Collapsed:Visibility::Visible);
             bool named=details.HasKey(L"name")&&details.GetNamedValue(L"name").ValueType()==Windows::Data::Json::JsonValueType::String;
             name.Visibility(named?Visibility::Visible:Visibility::Collapsed);name.IsEnabled(!busy);
-            sync(name,str(details,L"name"),nameDraft);
+            sync(name,str(details,L"name"),nameDraft);if(named)validateName();
+            bool described=details.GetNamedValue(L"description",JsonValue::CreateNullValue()).ValueType()==JsonValueType::String;
+            description.Visibility(described?Visibility::Visible:Visibility::Collapsed);description.IsEnabled(!busy);
+            sync(description,str(details,L"description"),descriptionDraft);
             auto options=array(details,L"choices");choices.Visibility(options.Size()?Visibility::Visible:Visibility::Collapsed);
             choices.Header(box_value(str(details,L"choice_label")));choices.IsEnabled(!busy);
             auto signature=options.Stringify();
@@ -352,12 +382,12 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
                 }
             }
         }
-        auto message=str(model,L"error");if(message.empty())message=str(model,L"switcher_error");error.Text(message);error.Visibility(message.empty()?Visibility::Collapsed:Visibility::Visible);
+        auto message=validationError;if(message.empty())message=str(model,L"error");if(message.empty())message=str(model,L"switcher_error");error.Text(message);error.Visibility(message.empty()?Visibility::Collapsed:Visibility::Visible);
         error.Foreground(fill(color(theme==L"dark"?L"#ffb4ab":L"#b3261e")));
         progress.Text(busy?recovery(L"saving"):recovery(L"loading"));progress.Visibility(busy||flag(model,L"loading")?Visibility::Visible:Visibility::Collapsed);
         retry.Visibility(flag(model,L"retry")?Visibility::Visible:Visibility::Collapsed);retry.IsEnabled(!busy);
         dialog.PrimaryButtonText(naming?str(details,L"confirm"):str(model,L"primary"));
-        dialog.IsPrimaryButtonEnabled(!busy&&!flag(model,L"loading")&&(naming||flag(model,L"enabled")));
+        dialog.IsPrimaryButtonEnabled(!busy&&!flag(model,L"loading")&&(naming?(name.Visibility()!=Visibility::Visible||nameValid):flag(model,L"enabled")));
         dialog.CloseButtonText(common(L"cancel"));
         dialog.DefaultButton(naming?ContentDialogButton::Primary:ContentDialogButton::None);
         cancelPending=false;
@@ -378,7 +408,7 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
                     if(self->prompt()){
                         auto selected=self->choices.SelectedItem().try_as<ComboBoxItem>();
                         auto option=selected?S(unbox_value<hstring>(selected.Tag())):Windows::Data::Json::JsonValue::CreateNullValue();
-                        self->dispatch(O({{L"type",S(L"submit")},{L"name",S(self->name.Text())},{L"choice",option}}));
+                        self->dispatch(O({{L"type",S(L"submit")},{L"name",S(self->name.Text())},{L"description",self->description.Visibility()==Visibility::Visible?S(self->description.Text()):JsonValue::CreateNullValue()},{L"choice",option}}));
                     }else self->dispatch(O({{L"type",S(L"confirm")}}));
                 }
             });
@@ -416,6 +446,8 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             thisWorkspace.Content(box_value(copy(L"header",L"this_workspace")));savedToolbars.Content(box_value(copy(L"header",L"saved_toolbars")));
             toolbarActions.Content(box_value(copy(L"header",L"toolbar_actions")));retry.Content(box_value(copy(L"header",L"retry")));
             progress.Text(recovery(L"loading"));search.PlaceholderText(copy(L"header",L"search"));
+            description.Header(box_value(copy(L"header",L"description")));description.Language(copyData->language());
+            validationName=L"";++validationSerial;validationQueued=true;
             name.Header(box_value(common(L"name")));name.Language(copyData->language());search.Language(copyData->language());
             if(dialog)dialog.Language(copyData->language());
             for(auto& [id,row]:rows){row.captionTitle=L"";
@@ -446,8 +478,8 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         }else if(open()&&!blocked)show();
     }
 };
-WorkspaceManagerView::WorkspaceManagerView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,XamlRoot root,std::function<void()> changed):impl(std::make_shared<Impl>()){
-    impl->copyData->catalog=catalog;impl->copyData->localization=localization;impl->send=std::move(send);impl->catalog=catalog;impl->localization=std::move(localization);impl->root=root;impl->changed=std::move(changed);impl->init();
+WorkspaceManagerView::WorkspaceManagerView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,XamlRoot root,std::function<void()> changed,PreviewTransport query):impl(std::make_shared<Impl>()){
+    impl->query=std::move(query);impl->copyData->catalog=catalog;impl->copyData->localization=localization;impl->send=std::move(send);impl->catalog=catalog;impl->localization=std::move(localization);impl->root=root;impl->changed=std::move(changed);impl->init();
 }
 WorkspaceManagerView::~WorkspaceManagerView()=default;
 void WorkspaceManagerView::Apply(Json const& snapshot,bool blocked){impl->apply(snapshot,blocked);}

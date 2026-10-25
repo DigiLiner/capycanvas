@@ -8,7 +8,7 @@ import SwiftUI
     func publish(_ next: JSON) {
         guard !next.isNull else { hide(); shown = nil; return }
         let id = next["id"].uint
-        guard id != shown else { return }
+        guard id != shown else { if !notice.isNull { notice = next }; return }
         shown = id; notice = next
         timeout?.cancel()
         let work = DispatchWorkItem { [weak self] in

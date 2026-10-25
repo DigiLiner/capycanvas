@@ -7,10 +7,10 @@ use wasm_bindgen_futures::future_to_promise;
 
 #[wasm_bindgen]
 pub struct WebColorCandidate {
-    workflow: ColorWorkflow,
+    pub(super) workflow: ColorWorkflow,
     renderer: Option<WgpuRasterizer>,
-    lost: std::sync::Arc<std::sync::Mutex<Option<String>>>,
-    control: CaptureControl,
+    pub(super) lost: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    pub(super) control: CaptureControl,
     previews: Vec<SnapshotPreview>,
     clipped: u64,
 }
@@ -143,18 +143,6 @@ impl WebApp {
                 clipped,
             }
             .into())
-        }))
-    }
-    pub fn save_color_copy(
-        &self,
-        candidate: &WebColorCandidate,
-    ) -> Result<js_sys::Promise, JsValue> {
-        let project = layer_core::Editor::new(candidate.workflow.copy_project(candidate.control.is_cancelled()).map_err(js)?.clone()).capture(0,candidate.workflow.context.clone()).map_err(js)?;
-        let control = candidate.control.clone();
-        Ok(future_to_promise(async move {
-            let bytes = artwork_transfer::save(project).await?;
-            output::cancelled(&control)?;
-            Ok(bytes.into())
         }))
     }
     pub fn adopt_color(&mut self, mut candidate: WebColorCandidate) -> Result<JsValue, JsValue> {

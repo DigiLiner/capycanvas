@@ -1,6 +1,47 @@
 //! Compact color controls with real input on the private Mutter display.
 use super::*;
 
+pub(super) fn slot_context(w: &Workspace) -> gtk::PopoverMenu {
+    w.popovers.borrow().iter().filter_map(|popup| popup.upgrade())
+        .find(|popup| popup.has_css_class("panel-context-menu") && popup.is::<gtk::PopoverMenu>())
+        .unwrap().downcast().unwrap()
+}
+
+fn readout_keyboard_input(w: &Rc<Workspace>, input: &mut RemoteInput) {
+    let readout = find_named(w.color_panel.root.upcast_ref(), "color-readout").unwrap();
+    assert!(readout.grab_focus());
+    let targets = widgets(w.window.upcast_ref()).filter(|widget| widget.is_focusable() && widget.is_mapped()).count() + 1;
+    for _ in 0..targets {
+        input.perform(serde_json::json!([{ "key":65056, "down":true }, { "key":65056, "down":false }]));
+        if gtk::prelude::GtkWindowExt::focus(&w.window).as_ref() == Some(&readout) { break; }
+    }
+    let focus = gtk::prelude::GtkWindowExt::focus(&w.window);
+    assert_eq!(focus, Some(readout.clone()), "keyboard focus after {targets} targets: {:?}", focus.as_ref().map(|widget| widget.widget_name()));
+    let before = state(w).colors.readout;
+    input.perform(serde_json::json!([{ "key":32, "down":true }, { "key":32, "down":false }]));
+    until(|| state(w).colors.readout != before, "native keyboard activation changes the readout");
+    assert_eq!(state(w).colors.readout, before.next());
+    let before = state(w).colors.readout;
+    input.perform(serde_json::json!([{ "key":65293, "down":true }, { "key":65293, "down":false }]));
+    until(|| state(w).colors.readout != before, "native keyboard activation changes the readout");
+    assert_eq!(state(w).colors.readout, before.next());
+}
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_color_readout_keyboard_input() {
+    let mut input = RemoteInput::new();
+    let app = native_test_app("art.capycanvas.ColorReadoutKeys");
+    let w = fixture_workspace(&app);
+    w.window.maximize(); w.window.present(); pump(1400); wait_workspaces(&w);
+    input.ready();
+    let swatch = find_named(w.color_panel.root.upcast_ref(), "color-Foreground").unwrap();
+    let point = screen_point(&swatch, &w.window, [0.5, 0.5]);
+    input.perform(serde_json::json!([{ "point":point, "down":true }, { "down":false }]));
+    readout_keyboard_input(&w, &mut input);
+    w.window.destroy(); pump(100);
+}
+
 pub(super) fn settled_wheel(wheel: &crate::tool_panels::ColorWheel) {
     use gtk::subclass::prelude::ObjectSubclassIsExt;
     until(|| {
@@ -423,7 +464,9 @@ fn native_color_panel_input() {
         "Resizing below four tiles preserves the 144px panel minimum"
     );
     let locate = |name: &str, x: f32, y: f32| {
-        let widget = find_named(root.upcast_ref(), name).unwrap();
+        let widget = if name == "color-swap-menu" {
+            find_menu_item(slot_context(&w).upcast_ref(), &w.localization().text(layer_ui::MessageId::COMMANDS_SWAP_FOREGROUND_AND_BACKGROUND)).unwrap()
+        } else { find_named(root.upcast_ref(), name).unwrap() };
         screen_point(&widget, &w.window, [x, y])
     };
     let on_ring = |hue: f32| {
@@ -578,11 +621,7 @@ fn native_color_panel_input() {
         if touch {
             input.perform(serde_json::json!([{ "touch":"down", "point":p }]));
             pump(900);
-            let menu = find_named(root.upcast_ref(), "color-swap-menu")
-                .unwrap()
-                .native()
-                .and_downcast::<gtk::Popover>()
-                .unwrap();
+            let menu = slot_context(&w);
             assert!(
                 menu.is_visible(),
                 "touch hold opens swap menu before release"
@@ -626,19 +665,11 @@ fn native_color_panel_input() {
     let p = locate("color-Foreground", 0.5, 0.5);
     input.perform(serde_json::json!([{ "point":p, "down":true }]));
     pump(900);
-    let swap = find_named(root.upcast_ref(), "color-swap-menu").unwrap();
-    let menu = swap.native().and_downcast::<gtk::Popover>().unwrap();
+    let menu = slot_context(&w);
     assert!(!menu.is_visible());
     input.perform(serde_json::json!([{ "down":false }]));
     // Native keyboard activation uses the same focused, accessible buttons.
-    let readout = find_named(root.upcast_ref(), "color-readout").unwrap();
-    assert!(readout.grab_focus());
-    let before = state(&w).colors.readout;
-    input.perform(serde_json::json!([{ "key":32, "down":true }, { "key":32, "down":false }]));
-    assert_eq!(state(&w).colors.readout, before.next());
-    let before = state(&w).colors.readout;
-    input.perform(serde_json::json!([{ "key":65293, "down":true }, { "key":65293, "down":false }]));
-    assert_eq!(state(&w).colors.readout, before.next());
+    readout_keyboard_input(&w, &mut input);
     capture_reference(&w, output.join("keyboard-focus.png").to_str().unwrap(), 2.);
     // Three-digit RGB readouts are the widest values at the minimum size.
     w.dispatch(UiAction::SetColor { rgba: [1.; 4] });

@@ -1,7 +1,5 @@
 import AppKit
 
-/// Preserve SwiftUI's window delegate while adding the shared unsaved-document
-/// decision. Other window callbacks continue to the original delegate.
 @MainActor final class DocumentWindowDelegate: NSObject, NSWindowDelegate {
     private weak var downstream: NSWindowDelegate?
     private weak var window: NSWindow?

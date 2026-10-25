@@ -151,3 +151,44 @@ test('Shift scrubs finely and changing it mid-drag continues from the current va
   assert.deepEqual(scrubs,[{type:'scrub',origin:22,pixels:80,fine:false}],'a press made with Shift switches to normal speed from the press point');
   assert.equal(number.getValue(),22,'cancelling restores the value from before the drag');assert.deepEqual(phases,['down','cancel']);
 });
+
+test('readout wheel commits text and uses shared stepping while disabled controls retain scrolling',t=>{
+  const h=harness(t),number=createNumberField(h.options);
+  h.failure(null);number.update(4);number.valueButton.dispatch('click');number.entry.value='7';
+  let prevented=0;
+  number.valueButton.dispatch('wheel',{deltaY:-120,preventDefault(){prevented++;}});
+  assert.deepEqual(h.operations.slice(-2).map(r=>r.operation),[{type:'expression',text:'7'},{type:'step',steps:1}]);
+  assert.equal(prevented,1);
+  number.setDisabled(true);number.valueButton.dispatch('wheel',{deltaY:120,preventDefault(){prevented++;}});
+  assert.equal(prevented,1);
+});
+
+test('standalone pen and touch scrubs use normalized position and cancel restores the original value',t=>{
+  const h=harness(t),number=createNumberField({...h.options,panel:false,valueOnly:true,inline:true});
+  contactElements(number);number.update(4);
+  for(const pointerType of ['pen','touch']){
+    number.valueButton.dispatch('pointerdown',{button:0,pointerId:1,pointerType,clientY:100});
+    number.valueButton.dispatch('pointermove',{pointerId:1,clientY:60});
+    assert.deepEqual(h.operations.at(-1).operation,{type:'position',position:.6000000000000001});
+    number.valueButton.dispatch('pointercancel',{pointerId:1});
+    assert.equal(number.getValue(),4);
+  }
+  const before=h.operations.length;
+  number.valueButton.dispatch('pointerdown',{button:0,pointerId:2,pointerType:'mouse',clientY:100});
+  number.valueButton.dispatch('pointermove',{pointerId:2,clientY:60});
+  assert.equal(h.operations.length,before);
+});
+
+test('angle dial wheel uses shared Step without keyboard focus',t=>{
+  const h=harness(t),number=createNumberField({...h.options,control:{...h.options.control,kind:'dial'}});
+  number.querySelector('.number-dial-face').dispatch('wheel',{deltaY:1});
+  assert.deepEqual(h.operations.at(-1).operation,{type:'step',steps:-1});
+});
+
+test('invalid numeric draft consumes readout wheel without stepping',t=>{
+  const h=harness(t),number=createNumberField(h.options);number.valueButton.dispatch('click');
+  number.entry.value='invalid';let consumed=false;
+  number.entry.dispatch('wheel',{deltaY:1,preventDefault(){consumed=true;}});
+  assert.equal(consumed,true);assert.equal(h.operations.at(-1).operation.type,'expression');
+  assert.equal(number.entry.getAttribute('aria-invalid'),'true');
+});

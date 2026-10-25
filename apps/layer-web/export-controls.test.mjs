@@ -3,7 +3,7 @@ import { FakeElement as SharedElement } from "./fake-dom.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { chooseExport, SDR_FORMATS } from "./export-controls.js";
+import { chooseExport, chooseProfileLibrary, localizeProfileLibraries, SDR_FORMATS } from "./export-controls.js";
 import { exportFormats } from "./documents.js";
 
 const ownerDocument={createTextNode:nodeValue=>({nodeType:3,nodeValue:String(nodeValue)})};
@@ -13,6 +13,9 @@ class FakeElement extends SharedElement {
     this.tagName = tag.toUpperCase(); this.className = className; this.ownerDocument=ownerDocument;this.children = []; this.parentNode = null; this.attributes = new Map(); this.listeners = {};
     this.hidden = false; this.disabled = false; this.value = ""; this.style = {};this.textContent=text??"";
   }
+  showModal(){this.open=true;}
+  close(){this.open=false;for(const listener of this.listeners.close??[])listener();}
+  remove(){if(this.parentNode)this.parentNode.children.splice(this.parentNode.children.indexOf(this),1);this.parentNode=null;}
   get firstChild(){return this.children[0];}
   get textContent(){return this.children.map(node=>node.nodeType===3?node.nodeValue:node.textContent).join("");}
   set textContent(value){this.replaceChildren(this.ownerDocument.createTextNode(value));}
@@ -283,4 +286,31 @@ test("retained original-profile option reprojects its descriptor while profile b
   app.language("tr");refreshCopy(app);dialog.form.localize();refreshBindings();
   assert.equal(select.options[1],option);assert.equal(option.textContent,`tr:Original: ${literal}`);assert.equal(select.value,"1");assert.equal(profile.name,literal);assert.equal(profile.profile.Icc,bytes);assert.equal(app.calls.drafts.length,before);assert.equal(app.calls.reads,1);assert.equal(app.calls.rendered,0);
   dialog.form.querySelectorAll("button").find(node=>node.textContent==="Cancel").click();await dialog.result;
+});
+
+test('fit enlargement follows the visible option into the validated export recipe',async()=>{
+  const app=fakeApp(),dialog=await openDialog(app);
+  const size=dialog.labelled(exportCopy.pixel_size);size.value='Fit';size.onchange();
+  const enlarge=dialog.labelled(exportCopy.enlarge);assert.equal(enlarge.closest('label').hidden,false);enlarge.checked=true;
+  dialog.pressed(exportCopy.choose_file).click();
+  const chosen=await dialog.result;assert.equal(chosen.recipe.size.Fit.enlarge,true);
+});
+
+
+test('profile-library search uses shared metadata matching and Escape waits for its active write',async t=>{
+  const before=globalThis.document,body=element('body');globalThis.document={body};t.after(()=>globalThis.document=before);
+  const entries=Array.from({length:8},(_,index)=>({id:String(index),entry_copy_source:{id:String(index)},visible:true}));
+  let release,language='en';const queries=[];
+  const app={profile_copy:()=>({search:'Search profiles',library_title:'Profiles',library_help:'Help',remove:'Remove',show:'Show',hide:'Hide',import:'Import',common:{done:'Done'}}),language_tag:()=>language,
+    profile_entry_copy:entry=>({name:`${language}:profile-${entry.id}`,details:'Details'}),
+    profile_library_matches:(entry,query)=>{queries.push([entry.id,query]);return !query||entry.id===query;},
+    profile_library:async(type)=>{if(type==='list')return entries;if(type==='remove')await new Promise(done=>release=done);},color_feature_error_copy:String};
+  const result=chooseProfileLibrary({app,element,button,manage:true});await new Promise(done=>setImmediate(done));
+  const root=body.children.find(node=>node.tagName==='DIALOG'),search=root.querySelectorAll('input')[0];assert.equal(search.hidden,false);
+  search.value='3';search.dispatchEvent({type:'input'});assert.equal(root.querySelectorAll('h3').length,1);assert.equal(root.querySelectorAll('h3')[0].textContent,'en:profile-3');assert.ok(queries.some(([id,query])=>id==='3'&&query==='3'));
+  language='fr';localizeProfileLibraries();assert.equal(root.querySelectorAll('h3')[0].textContent,'fr:profile-3');assert.equal(search.value,'3');
+  root.querySelectorAll('button').find(node=>node.textContent==='Remove').click();
+  const cancel={type:'cancel',defaultPrevented:false,preventDefault(){this.defaultPrevented=true;}};root.dispatchEvent(cancel);assert.equal(cancel.defaultPrevented,true);assert.equal(root.open,true);
+  release();await new Promise(done=>setImmediate(done));assert.equal(root.querySelectorAll('button').find(node=>node.textContent==='Done').disabled,false);
+  root.querySelectorAll('button').find(node=>node.textContent==='Done').click();assert.equal(await result,null);assert.equal(body.children.some(node=>node.tagName==='DIALOG'),false);
 });

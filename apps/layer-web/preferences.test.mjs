@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkPreferences({ call, evaluate, settle, errors }) {
-  const dir = "artifacts/ui/preferences";
+  const dir = process.env.LAYER_TEST_ARTIFACTS || "artifacts/ui/preferences";
   await mkdir(dir, { recursive: true });
   const action = async (value) => { await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`); await settle(); };
   const preference = (value) => action({ type: "preferences", action: value });
@@ -24,6 +24,9 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   };
   const reload = async (gpu) => {
     const previous = await evaluate("performance.timeOrigin");
+    await call('Input.setIgnoreInputEvents',{ignore:false});
+    for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'F24',code:'F24',windowsVirtualKeyCode:135});
+    await call('Input.setIgnoreInputEvents',{ignore:true});
     await call("Page.reload");
     for (const deadline = Date.now() + 20000; ; await new Promise(resolve => setTimeout(resolve, 50))) {
       assert.ok(Date.now() < deadline, `reload to ${gpu} failed`);
@@ -44,6 +47,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     workspace.zen_mode = false;
     return workspace;
   })()`) });
+  await action({type:'customize',action:{type:'set_control_visible',panel:'sizes',control:'brush_size',visible:true}});
   assert.equal(await evaluate("layerApp.app.catalog().app_name"), "Capy Canvas");
   assert.equal(await evaluate("document.querySelector('#header [data-command=settings] svg').dataset.asset"), "settings");
   const points = await evaluate("layerApp.app.catalog().text_size_pt");
@@ -52,13 +56,13 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     const style = selector => getComputedStyle(document.querySelector(selector));
     const height = selector => Math.max(...[...document.querySelectorAll(selector)].map(n => n.getBoundingClientRect().height));
     return { fonts:['.dock-tab','.size-controls .number-title','.size-button','.number-entry','#view-info','#document-title'].map(s=>parseFloat(style(s).fontSize)),
-      step:parseFloat(style('.panel .number-step svg').width), tool:parseFloat(style('.toolbar-controls .tile-button svg').width),
+      panelSteps:document.querySelectorAll('.panel .number-panel .number-step').length, tool:parseFloat(style('.toolbar-controls .tile-button svg').width),
       tile:height('.tile-button'), preview:height('.brush-preview'),
       slider:height('.size-controls input[type=range]'), layerIconButton:height('.layer-flags button')};
   })()`);
   for (const size of metrics.fonts) assert.ok(Math.abs(size - points * 4 / 3) < .02, `panel text ${size} should be ${points}pt`);
-  assert.equal(metrics.step, 16);
-  assert.equal(metrics.tool, 16); assert.equal(metrics.tile, 36); assert.equal(metrics.preview, 40); assert.equal(metrics.slider, 24); assert.equal(metrics.layerIconButton, 24);
+  assert.equal(metrics.panelSteps, 0, "panel readouts have no step buttons");
+  assert.equal(metrics.tool, 16); assert.equal(metrics.tile, 36); assert.equal(metrics.preview, 40); assert.equal(metrics.slider, 16); assert.equal(metrics.layerIconButton, 24);
   assert.ok(await evaluate("(() => { const button = document.querySelector('#zen-capy'); return Math.abs(button.querySelector('svg').getBoundingClientRect().width - Math.round(button.getBoundingClientRect().height * 440 / 512)) < .02; })()"), 'Capy button uses the enlarged favicon proportions');
   assert.equal(await evaluate("document.querySelector('#zen-capy svg').dataset.asset"), 'zen-looking-up');
   assert.equal(await evaluate("layerApp.state().commands.find(c=>c.id==='zen_mode').shortcut"), 'Tab');
@@ -68,11 +72,11 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   await key('Tab');
   assert.equal(await evaluate("layerApp.state().workspace.zen_mode"), false);
   await capture('typography');
-  assert.equal(await evaluate("getComputedStyle(document.querySelector('#size-number .number-labels')).paddingLeft"), '6px', 'panel labels mirror the value inset');
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('#size-number .number-labels')).paddingLeft"), '0px', 'panel labels align with the row edge');
   assert.ok(await evaluate(`(() => {
-    const track=document.querySelector('#size-number .number-track'), [minus,bar,plus]=[...track.children].map(n=>n.getBoundingClientRect());
-    return minus.height===24 && plus.height===24 && bar.left===minus.right+6 && bar.right+6===plus.left;
-  })()`), 'compact panel track has symmetric 6px gaps before the step buttons');
+    const row=document.querySelector('#size-number').getBoundingClientRect(),track=document.querySelector('#size-number .number-track').getBoundingClientRect(),slider=document.querySelector('#size-number .number-slider').getBoundingClientRect();
+    return Math.abs(row.height-36)<.5 && Math.abs(track.height-16)<.5 && Math.abs(track.left-row.left-36)<.5 && Math.abs(row.right-track.right-76)<.5 && Math.abs(slider.width-track.width)<.5;
+  })()`), 'panel slider keeps the documented16px hit area and36/76px row insets');
   await evaluate("layerApp.dispatch({type:'restore_settings',settings:{...layerApp.state().settings,zen_show_capy:false}})");
   await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:24,clientY:24,pointerType:'mouse',bubbles:true}))");
   await click('#zen-capy');
@@ -154,7 +158,10 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   assert.ok(await evaluate(`(() => {const n=document.querySelector('#size-number .number-entry');const r=parseFloat(getComputedStyle(n).borderRadius);return n.getBoundingClientRect().width<100 && r>4 && r<=12;})()`), 'short values use compact rounded editors');
   await evaluate("document.querySelector('#size-number .number-entry').value='45/2'"); await key('Enter');
   assert.equal(await evaluate('layerApp.state().brush.diameter'), 22.5);
-  await click('#size-number [aria-label="Increase Brush size"]');
+  const readout=await evaluate(`(()=>{const r=document.querySelector('#size-number .number-value').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await call('Input.setIgnoreInputEvents',{ignore:false});
+  await call('Input.dispatchMouseEvent',{type:'mouseWheel',...readout,deltaX:0,deltaY:-120});await settle();
+  await call('Input.setIgnoreInputEvents',{ignore:true});
   assert.equal(await evaluate('layerApp.state().brush.diameter'), 23.5);
   await evaluate("const slider=document.querySelector('#size-number input[type=range]');slider.value=.5;slider.dispatchEvent(new Event('input',{bubbles:true}))");
   assert.equal(await evaluate('layerApp.state().brush.diameter'), 32);
@@ -218,9 +225,10 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     await action({ type: 'open_settings', page: 'appearance' });
     const selector = `#setting-${theme}-base`;
     const custom = `[data-preference=${theme}_base] .swatch[data-swatch="4"]`;
-    assert.equal(await evaluate(`document.querySelector('${selector}').hidden`), true, 'the hex entry waits for Custom');
+    assert.equal(await evaluate(`document.querySelector('${selector}').inert`), true, 'the hex entry waits for Custom');
     assert.ok(await evaluate(`(() => { const row=document.querySelector('[data-preference=${theme}_base]'), circle=document.querySelector('${custom}'); return circle.getBoundingClientRect().height < row.getBoundingClientRect().height; })()`), 'base circles share the title row');
     await click(custom);
+    assert.ok(await evaluate(`(()=>{const n=document.querySelector('${selector}'),reveal=n.parentElement;return !n.inert && getComputedStyle(n).visibility==='visible' && reveal.classList.contains('swatch-entry-reveal') && (matchMedia('(prefers-reduced-motion:reduce)').matches || reveal.getAnimations().length>0);})()`),'Custom reveals an interactive entry through the authored slide');
     assert.equal(await evaluate(`document.activeElement===document.querySelector('${selector}')`), true);
     assert.equal(await evaluate(`document.querySelector('${selector}').value`), theme === 'dark' ? '#333333' : '#b8b8b8');
     await evaluate(`document.querySelector('${selector}').value='invalid'`); await key('Enter');
@@ -233,10 +241,10 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
       const palette=layerApp.state().palette, probe=document.body.appendChild(document.createElement('i'));
       const css=color=>{probe.style.background=color;return getComputedStyle(probe).backgroundColor};
       const glass=name=>css('rgb('+palette.glass[name].slice(0,3).map(v=>v*255).join(' ')+' / '+palette.glass[name][3]+')');
-      const surfaces=[['.panel-preview:has(> .dock-tabs) > .panel-frame',glass('panel')],['.dock-tabs',glass('strip')],
+      const surfaces=[['.panel-preview:has(> .dock-tabs) > .panel-frame',glass('panel')],['.dock-tabs .tab-list > .dock-tab[aria-selected="true"]',glass('strip'),'::before'],
         ['#settings',css(palette.settings)],['.preferences-sidebar',css(palette.sidebar)],['${selector}',css(palette.input)]];
       probe.remove();
-      return surfaces.every(([selector,color])=>getComputedStyle(document.querySelector(selector)).backgroundColor===color);
+      return surfaces.every(([selector,color,pseudo])=>getComputedStyle(document.querySelector(selector),pseudo).backgroundColor===color);
     })()`), 'all surfaces bind the core palette');
     await capture(`custom-base-${theme}`);
     const defaultColor = theme === 'dark' ? '#333333' : '#b8b8b8';
@@ -260,7 +268,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     assert.equal(await evaluate("document.querySelector('#preference-context-menu [data-reset]').disabled"), true);
     await key('Escape');
     assert.equal(await evaluate("document.querySelector('#settings').open"), true, 'Escape only closes the context menu');
-    assert.equal(await evaluate(`document.querySelector('${selector}').hidden`), true, 'a preset hides the entry');
+    assert.equal(await evaluate(`document.querySelector('${selector}').inert`), true, 'a preset hides the entry');
     await click(custom); await evaluate(`document.querySelector('${selector}').value='${color}'`); await key('Enter');
     await evaluate(`document.querySelector('${selector}').value=''`);
     assert.equal(await evaluate(`layerApp.state().settings.${theme}_base`), color.toLowerCase());
@@ -295,7 +303,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     await capture(`accent-custom-${theme}`);
     await click(swatch(0));
     assert.equal(await evaluate('layerApp.state().settings.accent ?? null'), null, 'Blue is the web default');
-    assert.equal(await evaluate("document.querySelector('#setting-accent').hidden"), true);
+    assert.equal(await evaluate("document.querySelector('#setting-accent').inert"), true);
     await action({ type: 'close_settings' });
     assert.ok(await evaluate(`(() => { const c=layerApp.state().palette.glass.switcher_selection, pressed=document.querySelector('#header .workspace-switcher button[aria-pressed="true"]'), probe=document.body.appendChild(document.createElement('i'));
       probe.style.background='rgb('+c.slice(0,3).map(v=>v*255).join(' ')+' / '+c[3]+')'; const expected=getComputedStyle(probe).backgroundColor; probe.remove();
@@ -329,7 +337,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   assert.equal(await evaluate("document.querySelector('#settings-search').hidden"), false);
   await evaluate("const emptySearch=document.querySelector('#settings-search');emptySearch.value='no-such-preference';emptySearch.dispatchEvent(new Event('input'))");
   assert.equal(await evaluate("document.querySelector('.preferences-empty').hidden"), false);
-  await evaluate("const search=document.querySelector('#settings-search');search.value='pressure response';search.dispatchEvent(new Event('input'))");
+  await evaluate("const search=document.querySelector('#settings-search');search.value=layerApp.app.preferences().pages.find(p=>p.id==='input').groups.flatMap(g=>g.rows).find(r=>r.id==='prediction_horizon').title;search.dispatchEvent(new Event('input'))");
   assert.ok(await evaluate("[...document.querySelectorAll('.preferences-search-results small')].every(n=>Math.abs(parseFloat(getComputedStyle(n).fontSize)-parseFloat(getComputedStyle(n.parentElement).fontSize)/1.2)<.02)"), 'search-result descriptions use the same Adwaita subtitle size');
   assert.equal(await evaluate("document.querySelectorAll('.preferences-search-results button').length"), 1);
   await capture("search");
@@ -445,7 +453,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   await type('#shortcuts-search', '');
 
   await click('[data-category="Modifier keys"]');
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('#modifier-keys [data-modifier]')].map(r=>r.dataset.modifier)"), ["Space", "Alt"]);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#modifier-keys [data-modifier]')].map(r=>r.dataset.modifier)"), await prefs("view.shortcut_page.modifiers.filter(m=>m.visible).map(m=>m.label)"));
   await capture("modifier-keys");
   await click('[data-modifier="Alt"]');
   assert.equal(await evaluate("document.querySelector('#settings-title').textContent"), "Alt", "a modifier key slides in instead of a popup");
@@ -482,7 +490,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   assert.ok(await visible('#shortcut-categories'));
 
   await preference({ type: "page", page: "input" });
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('#triggers-pen-buttons [data-trigger]')].map(r=>r.dataset.trigger)"), ["pen.button.primary", "pen.button.secondary"]);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('#triggers-pen-buttons [data-trigger]')].map(r=>r.dataset.trigger)"), await prefs("view.shortcut_page.triggers.filter(t=>t.id.startsWith('pen.button.')).map(t=>t.id)"));
   assert.ok(await visible('#triggers-touch-gestures') && await visible('.preference-row:has(#setting-eraser-tool)'));
   await capture("pen-and-input");
   await click('[data-trigger="pen.button.primary"]');

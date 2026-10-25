@@ -16,7 +16,7 @@ struct WorkspacePanels: View {
                 Color.clear.contentShape(Rectangle()).onTapGesture { store.customize(["type": "close_expanded"]) }
             }
             ForEach(groups, id: \.workspaceGroupID) { group in
-                if !store.snapshot["chrome_hidden"].bool || group["floating"].bool || group["zen_kept"].bool {
+                Group {
                     WorkspacePanelGroup(store: store, workspace: workspace, id: group["id"].uint)
                         .environment(\.workspaceLayer, groups.firstIndex(where: { $0.workspaceGroupID == group.workspaceGroupID }) ?? 0)
                     if workspace.expansion.isNull {
@@ -26,7 +26,7 @@ struct WorkspacePanels: View {
                                 .modifier(WorkspacePlacement(motion: store.workspaceMotion, group: group, bounds: handle["bounds"]))
                         }
                     }
-                }
+                }.modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool && !group["floating"].bool && !group["zen_kept"].bool))
             }
             if workspace.expansion.isNull && !store.snapshot["chrome_hidden"].bool {
                 ForEach(store.snapshot["layout"]["dividers"].array.indices, id: \.self) { index in
@@ -49,7 +49,7 @@ struct WorkspacePanels: View {
             CanvasBarLayer(store: store, presence: store.canvasBar).zIndex(180)
             CanvasFloorLayer(store: store, presence: store.notice, bar: store.canvasBar).zIndex(181)
             WorkspaceDropIndicator(workspace: workspace, palette: EditorPalette(source: store.state["palette"])).zIndex(300)
-            if !store.snapshot["chrome_hidden"].bool { WorkspaceCollapsedColumns(store: store) }
+            WorkspaceCollapsedColumns(store: store).modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool))
             WorkspaceContentDrawers(store: store, drawers: store.contentDrawers)
             WorkspaceTabSlideOverlay(store: store, slide: workspace.tabSlide).zIndex(250)
             ToolbarSliderPreviewOverlay(preview: workspace.sliderPreview, palette: EditorPalette(source: store.state["palette"])).zIndex(350)
@@ -84,6 +84,14 @@ struct WorkspaceResizeHandle: View {
             .onHover { hovering = $0 }.accessibilityElement()
             .accessibilityLabel(store.catalog["document_delivery_copy"]["resize_dock"].string)
             .modifier(WorkspaceDrag(workspace: store.workspace, item: action))
+            .focusable(action["type"].string == "drag_divider")
+            .onKeyPress(keys: [.leftArrow, .upArrow, .rightArrow, .downArrow], phases: [.down, .repeat]) { press in
+                guard action["type"].string == "drag_divider", press.modifiers.isEmpty else { return .ignored }
+                store.dispatch(["type": "nudge_divider", "id": action["id"].raw,
+                    "forward": press.key == .rightArrow || press.key == .downArrow,
+                    "viewport": store.snapshot["layout"]["viewport"].raw])
+                return .handled
+            }
             .simultaneousGesture(TapGesture(count: 2).onEnded {
                 guard !store.workspace.input.contact.consumeClick() else { return }
                 reset?()
@@ -100,7 +108,7 @@ private struct WorkspacePanelGroup: View {
             let expansion = workspace.expansion["group"].uint == id ? workspace.expansion : JSON()
             WorkspacePanelGroupContent(store: store, group: group, expansion: expansion,
                 panels: group["panels"].array.map { store.panel($0.string) })
-                .environment(\.workspaceGesturesEnabled, workspace.expansion.isNull || !expansion.isNull)
+                .environment(\.workspaceGesturesEnabled, (!store.snapshot["chrome_hidden"].bool || group["floating"].bool || group["zen_kept"].bool) && (workspace.expansion.isNull || !expansion.isNull))
                 .modifier(WorkspacePlacement(motion: store.workspaceMotion, group: group,
                     bounds: expansion.isNull ? group["bounds"] : expansion["bounds"], clipsGroup: true))
                 .allowsHitTesting(workspace.expansion.isNull || !expansion.isNull)
@@ -284,7 +292,7 @@ private struct WorkspaceTile: View {
                         anchor: anchor, doubleClick: tile["double_click"].bool, store: store) {
                         store.dispatch(["type": "activate_tile", "panel": panel["id"].raw, "tile": tile["id"].raw])
                     }
-                }
+                }.tracksToolActivation()
             }
         }.accessibilityLabel(tile["label"].string).help(tile["tooltip"].string)
             .accessibilityIdentifier("toolbar-tile-\(panel["id"].string)-\(tile["id"].uint)")
@@ -332,3 +340,32 @@ private struct WorkspacePanelShape: Shape {
 }
 
 private extension JSON { var workspaceGroupID: UInt64 { self["id"].uint } }
+
+struct WorkspaceChromeVisibility: ViewModifier {
+    let hidden: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content.modifier(WorkspaceChromeOpacity(opacity: hidden ? 0 : 1))
+            .allowsHitTesting(!hidden).accessibilityHidden(hidden).disabled(hidden)
+            .environment(\.workspaceGesturesEnabled, !hidden)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hidden)
+    }
+}
+
+private struct WorkspaceChromeOpacity: AnimatableModifier {
+    var opacity: Double
+    var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+    func body(content: Content) -> some View {
+        content.opacity(opacity).environment(\.workspaceChromeOpacity, opacity)
+    }
+}
+private struct WorkspaceChromeOpacityKey: EnvironmentKey { static let defaultValue = 1.0 }
+extension EnvironmentValues {
+    var workspaceChromeOpacity: Double {
+        get { self[WorkspaceChromeOpacityKey.self] }
+        set { self[WorkspaceChromeOpacityKey.self] = newValue }
+    }
+}

@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Owns one shared document request. Heavy conversion and immutable previews
 /// stay on the file worker; only atomic adoption enters the render owner.
@@ -28,6 +27,8 @@ import UniformTypeIdentifiers
     private let expected: (UInt64, UInt64)?
     private let completion: (Bool) -> Void
     private var task: NativeProjectTask?
+    private var pending: (JSON?, Bool)?
+    private var scheduled: DispatchWorkItem?
     private var closing = false
     private var finished = false
     init(store: EditorStore, request: JSON, expected: (UInt64, UInt64)?, completion: @escaping (Bool) -> Void) {
@@ -51,10 +52,6 @@ import UniformTypeIdentifiers
     func refreshCopy() {
         guard let store else { return }
         catalog = store.catalog; bootstrap = store.bootstrap
-    }
-    func convertedName(_ completion: @escaping @MainActor (String) -> Void) {
-        let name = (store?.state["tabs"][0]["title"].string ?? "") as NSString
-        store?.query(["type": "document_delivery_message", "message": ["type": "converted_name", "name": name.deletingPathExtension]]) { completion($0.string) }
     }
     func load() {
         if properties || source {
@@ -96,6 +93,26 @@ import UniformTypeIdentifiers
             }
         }
     }
+    func schedule(_ choice: JSON?, copy: Bool = false) {
+        guard !history, !properties, loaded, !closing, !finished, !publishing else { return }
+        ready = false
+        pending = (choice, copy)
+        scheduled?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.preparePending() }
+        scheduled = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+    private func preparePending() {
+        guard !busy, !closing, !finished, let next = pending else { return }
+        pending = nil; scheduled = nil
+        prepare(next.0, copy: next.1)
+    }
+    func showAppearance() {
+        guard properties, !busy, !finished else { return }
+        let store = self.store
+        finish(false)
+        store?.invoke("soft_proof_setup")
+    }
     func invalidate() {
         guard !busy else { return }
         ready = false; previews = []; clipped = 0; task = nil; error = nil
@@ -116,6 +133,7 @@ import UniformTypeIdentifiers
                         guard let self else { return }
                         self.busy = false
                         if self.closing { self.finish(false); return }
+                        if self.pending != nil { self.task = nil; self.preparePending(); return }
                         if self.source { self.sourceInfo = details }
                         self.clipped = details["clipped_channels"].uint; self.previews = images; self.ready = true
                         if self.history { self.apply() }
@@ -128,54 +146,36 @@ import UniformTypeIdentifiers
         }
     }
     func apply() {
-        guard !busy, ready, !copy, !closing, !finished, let task, let native = store?.native else { return }
+        guard !busy, ready, !closing, !finished, let task, let native = store?.native else { return }
         busy = true; publishing = true
-        native.finishProject(task, opening: true, title: title, url: nil) { [weak self] error in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.publishing = false; self.busy = false
-                if let error { self.failed(error); return }
-                // Color/history swaps the renderer without changing document
-                // identity. Retire pending readbacks from its previous caches.
-                if !self.source { self.store?.layerThumbnails.reset(); self.store?.filterPreviews.reset() }
-                self.finish(true)
-            }
-        }
-    }
-    func saveCopy(to url: URL, access: URL? = nil) {
-        guard !busy, ready, copy, !closing, !finished, let task else { return }
-        let source = URL(string: store?.state["document_file"]["location"]["uri"].string ?? "")
-        let delivery = catalog["document_delivery_copy"]
-        guard url.pathExtension.lowercased() == "capy" else { error = delivery["converted_filename_invalid"].string; return }
-        guard source?.standardizedFileURL.resolvingSymlinksInPath() != url.standardizedFileURL.resolvingSymlinksInPath() else {
-            error = delivery["separate_copy"].string; return
-        }
-        busy = true; error = nil
-        let exists = text["file_exists"].string
-        NativeProjectTask.io.async { [weak self] in
-            let scope = access?.startAccessingSecurityScopedResource() == true
-            defer { if scope { access?.stopAccessingSecurityScopedResource() } }
-            do {
-                // A folder choice grants a destination, not permission to
-                // replace an existing file. AppKit's Save panel asks separately.
-                if access != nil && FileManager.default.fileExists(atPath: url.path) {
-                    throw HostFailure(message: exists)
+        let publish = { [weak self] in
+            guard let self else { return }
+            native.finishProject(task, opening: true, title: self.title, url: nil) { [weak self] error in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.publishing = false; self.busy = false
+                    if let error { self.failed(error); return }
+                    if !self.source { self.store?.layerThumbnails.reset(); self.store?.filterPreviews.reset() }
+                    self.finish(true)
                 }
-                try task.write(to: url)
-                DispatchQueue.main.async { self?.busy = false; self?.finish(true) }
-            } catch { let message = error.localizedDescription
-                DispatchQueue.main.async { self?.failed(message) }
             }
         }
+        if copy {
+            store?.recovery.flush { [weak self] saved in
+                guard let self else { return }
+                if saved { publish() }
+                else { self.publishing = false; self.failed(self.store?.recovery.failure ?? self.bootstrap["action_failed"].string) }
+            }
+        } else { publish() }
     }
     func cancel() {
         guard !finished, !publishing else { return }
-        closing = true; task?.cancel()
+        closing = true; pending = nil; scheduled?.cancel(); scheduled = nil; task?.cancel()
         if !busy { finish(false) }
     }
     private func failed(_ message: String) {
         busy = false; ready = false; task = nil
-        if closing { finish(false) } else { error = message }
+        if closing { finish(false) } else if pending != nil { preparePending() } else { error = message }
     }
     private func finish(_ success: Bool) {
         guard !finished else { return }

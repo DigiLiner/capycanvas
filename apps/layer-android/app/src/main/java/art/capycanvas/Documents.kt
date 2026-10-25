@@ -281,6 +281,11 @@ internal class DocumentController(private val host: CanvasHost, private val appl
     }
     fun exportMime() = exportFileType(exportRecipe?.getString("format")).first
     fun cancel(id: Int) { exportRequest = null; complete(id, false) }
+    fun appearance(id: Int) { host.viewModelScope.launch {
+        finish(id, false)
+        host.withNative { Native.dispatch(it, obj("type" to "invoke", "command" to "soft_proof_setup").toString()) }
+        host.documentChanged()
+    } }
     fun close(id: Int, decision: String) {
         if(decision=="cancel")host.drawingTabs.cancelClose()
         host.viewModelScope.launch {
@@ -536,7 +541,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         val document = request.getJSONObject("kind").getJSONObject("request")
         when (document.getString("type")) {
             "repair_source_profile", "rasterize_source" -> if (!DocumentController.nativeFileJobsForTest) key(id) { SourceEditDialog(host, request) }
-            "properties" -> key(id) { DocumentPropertiesDialog(host) { controller.cancel(id) } }
+            "properties" -> key(id) { DocumentPropertiesDialog(host, { controller.cancel(id) }, { controller.appearance(id) }) }
             "change_color", "color_history" -> if (!DocumentController.nativeFileJobsForTest) key(id) { DocumentColorDialog(host, request) }
             "confirm_close" -> AlertDialog(onDismissRequest = { controller.close(id, "cancel") }, title = { Text(document.getString("title")) },
                 text = { Text(options.getString("unsaved_description")) }, confirmButton = {

@@ -29,7 +29,7 @@ export async function checkImageObjectFixture({call,evaluate,settle,canvasPixels
   const opaque=selector=>evaluate(`(selector=>[...document.querySelectorAll(selector)].every(canvas=>{const pixels=canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data;return pixels.some((value,index)=>index%4===3&&value>0)}))(${JSON.stringify(selector)})`);
   const comparison=async(command,reference)=>{
     console.log(`Object capture comparison: ${command}`);
-    await begin(command);await click('Preview Complete Result');
+    await begin(command);
     const selector=command==='rasterize_source'?'dialog[open] canvas[aria-label="Prepared composition"]':'dialog[open] .color-comparison canvas';
     await wait(`document.querySelectorAll(${JSON.stringify(selector)}).length===${command==='rasterize_source'?1:2}`);
     assert.ok(await opaque(selector),'Comparison captures include object samples');
@@ -103,7 +103,7 @@ export async function checkImageObjectFixture({call,evaluate,settle,canvasPixels
         }
         await begin('change_bit_depth');
         await evaluate(`(()=>{const select=document.querySelector('dialog[open] select[aria-label="Bit depth"]');select.value='F32';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
-        await click('Preview Complete Result');await wait("document.querySelectorAll('dialog[open] .color-comparison canvas').length===2");assert.ok(await opaque('dialog[open] .color-comparison canvas'));await click('Cancel');await idle();
+        await wait("document.querySelectorAll('dialog[open] .color-comparison canvas').length===2");assert.ok(await opaque('dialog[open] .color-comparison canvas'));await click('Cancel');await idle();
         await begin('export_document');await click('Preview Output');
         await wait(`!!document.querySelector('dialog[open] canvas[aria-label="Output preview"]')`);assert.ok(await opaque('dialog[open] canvas[aria-label="Output preview"]'));await click('Cancel');await idle();
         assert.equal(await evaluate('layerApp.state().host_error??null'),null);

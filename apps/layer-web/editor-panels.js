@@ -219,7 +219,7 @@ export function createEditorPanels({ selectionUi, app, rasterWorker:fieldWorker,
     bindCopy(edit,()=>copy.color.edit_menu,"title");bindCopy(edit,()=>copy.color.edit,"ariaLabel");edit.append(icon("pencil"));stage.append(edit);
     const wheel=element("canvas","color-wheel");bindCopy(wheel,()=>copy.color.wheel,"ariaLabel");stage.append(wheel);
     const choices=["background","foreground","transparent"].map(slot=>{
-      const node=button("",()=>color({op:"select",slot}),"color-swatch");node.dataset.colorSlot=slot;node.ondblclick=()=>{if(slot!=='transparent'){color({op:'select',slot});edit.click();}};
+      const node=button("",()=>color({op:"select",slot}),"color-swatch");node.dataset.colorSlot=slot;if(slot!=='transparent')node.dataset.context=JSON.stringify({kind:'color_slot',slot});node.ondblclick=()=>{if(slot!=='transparent'){color({op:'select',slot});edit.click();}};
       const paint=element("span");node.append(paint);stage.append(node);return{slot,node,paint};
     });
     const shapes=[0,1].map(i=>{const node=button("",()=>color({op:"shape",shape:view.other_shapes[i]}),"color-shape");stage.append(node);return node;});

@@ -16,6 +16,15 @@ import org.json.JSONObject
     val job=remember(id) {DocumentColorJob(host,id,source=true)}
     var space by remember {mutableStateOf("Srgb")}
     var custom by remember {mutableStateOf<JSONObject?>(null)}
+    var loaded by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(id) {
+        try {
+            if (!rasterize) space = JSONObject(host.withNative { Native.query(it, obj("type" to "document_color").toString()) }).getString("space")
+            loaded = true
+        } catch (e: Exception) { job.error = e }
+    }
+    val choice = if (rasterize) null else if (space == "custom") custom?.getJSONObject("profile") else obj("Builtin" to space)
+    LaunchedEffect(loaded, rasterize, choice?.toString()) { if (loaded) job.prepare(choice) }
     DisposableEffect(job) {onDispose {job.close()}}
     val copy=host.catalog.getJSONObject("document_color_copy")
     LaunchedEffect(host.languageTag) { job.refreshCopy() }
@@ -25,12 +34,9 @@ import org.json.JSONObject
         confirmButton={TextButton(job::apply,enabled=job.ready&&!job.busy){Text(copy.getString(if(rasterize)"rasterize" else if(job.addsLayer)"add_source" else "apply_profile"))}},
         text={Column(Modifier.fillMaxWidth().heightIn(max=600.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
             Text(copy.getString(if(rasterize)"rasterize_help" else "repair_help"))
-            if(!job.busy) {
-                if(!rasterize) {
-                    ColorChoice(copy.getString("correct_profile"),listOf("Srgb" to "sRGB","DisplayP3" to "Display P3","AdobeRgb" to "Adobe RGB (1998)","ProPhoto" to "ProPhoto RGB")+(custom?.let{listOf("custom" to profileCaption(host,it))}?:emptyList()),space){space=it;job.invalidate()}
-                    ImportProfileButton(host) {custom=it;space="custom";job.invalidate()}
-                }
-                TextButton({job.prepare(if(rasterize)null else if(space=="custom")custom!!.getJSONObject("profile") else obj("Builtin" to space))}){Text(copy.getString("preview"))}
+            if(!rasterize) {
+                    ColorChoice(copy.getString("correct_profile"),listOf("Srgb" to "sRGB","DisplayP3" to "Display P3","AdobeRgb" to "Adobe RGB (1998)","ProPhoto" to "ProPhoto RGB")+(custom?.let{listOf("custom" to profileCaption(host,it))}?:emptyList()),space,enabled=!job.applying){if(!job.applying){space=it;job.invalidate()}}
+                    ImportProfileButton(host,enabled=!job.applying) {if(!job.applying){custom=it;space="custom";job.invalidate()}}
             }
             if(job.busy){CircularProgressIndicator();Text(copy.getString(if(rasterize)"rasterize_comparison" else "preparing_comparison"))}
             if(job.sourceProfile.isNotEmpty()){Text(copy.getString("current_source"));Text(job.sourceProfile)}

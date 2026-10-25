@@ -60,6 +60,7 @@ struct ColorEditor: View {
     @State private var drafts: [String: String] = [:]
     @State private var sheetOpen = false
     @State private var search = ""
+    @State private var searchFocused = false
     @FocusState private var focused: String?
     private var view: JSON { session.view }
     private var copy: JSON { nativeCopy["color"] }
@@ -107,7 +108,7 @@ struct ColorEditor: View {
                     Text(view["hex"].string).monospacedDigit()
                 }
             } else {
-                HStack(spacing: 4) { ForEach(Array(session.recent.prefix(8).enumerated()), id: \.offset) { tile($0.element, kind: "recent") } }
+                HStack(spacing: 4) { ForEach(Array(session.recent.prefix(8).enumerated()), id: \.offset) { tile($0.element, kind: "recent") } }.transition(.opacity)
             }
             Spacer(minLength: 8)
             Button { setSheet(!sheetOpen) } label: {
@@ -121,11 +122,14 @@ struct ColorEditor: View {
         let sheet = session.sheet
         return VStack(spacing: 10) {
             HStack(spacing: 6) {
-                TextField(copy["swatch_search"].string, text: $search).textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                NumericTextField(label: copy["swatch_search"].string, text: $search, focused: $searchFocused,
+                    fontSize: 14, color: palette["text"], identifier: "color-sheet-search",
+                    submit: { _ in !NativeTextContext.composing }, cancel: escapeSearch)
+                    .frame(height: 28).padding(.horizontal, 6)
+                    .background(palette["input"], in: SquircleShape.control)
                     .onChange(of: search) { _, text in session.search(text) }
-                    .accessibilityIdentifier("color-sheet-search")
                 Button { setSheet(false) } label: { SharedIcon(name: "chevron-down").frame(width: 28, height: 28).contentShape(Rectangle()) }
-                    .buttonStyle(EditorControlButtonStyle()).keyboardShortcut(.cancelAction).help(copy["close_swatches"].string)
+                    .buttonStyle(EditorControlButtonStyle()).help(copy["close_swatches"].string)
                     .accessibilityLabel(copy["close_swatches"].string).accessibilityIdentifier("color-sheet-close")
             }
             EditorScrollView {
@@ -150,6 +154,7 @@ struct ColorEditor: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity).background(palette["panel"])
+            .onKeyPress(.escape) { guard !NativeTextContext.composing else { return .ignored }; escapeSearch(); return .handled }
             .accessibilityElement(children: .contain).accessibilityIdentifier("color-sheet")
     }
     private func tile(_ entry: JSON, kind: String) -> some View {
@@ -160,9 +165,14 @@ struct ColorEditor: View {
         }.buttonStyle(.plain).help(entry["detail"].string).accessibilityLabel(entry["detail"].string)
             .accessibilityIdentifier("color-tile-\(kind)")
     }
+    private func escapeSearch() {
+        guard !NativeTextContext.composing else { return }
+        if searchFocused && !search.isEmpty { search = "" } else { setSheet(false) }
+    }
     private func setSheet(_ open: Bool) {
         if open { search = session.search; session.refreshSwatches(sheetOpen: true) }
-        withAnimation(.easeOut(duration: 0.22)) { sheetOpen = open }
+        searchFocused = open
+        withAnimation(.easeOut(duration: 0.25)) { sheetOpen = open }
     }
     private func commitFocused() { if let focused { ColorEditorForm.commit(focused, drafts: $drafts, session: session) } }
     static func copy(_ text: String) {
@@ -422,6 +432,7 @@ private struct ColorValueField: View {
     @ObservedObject var session: ColorEditorSession
     @State private var opened = false
     @State private var scrubbing = false
+    @State private var contactY: CGFloat?
     private var invalid: Bool { session.errorTarget == name }
     private var editing: Bool { opened || invalid || focus.wrappedValue == name }
     var body: some View {
@@ -436,44 +447,61 @@ private struct ColorValueField: View {
                     .onKeyPress(.escape) { draft = nil; session.dismissError(name); opened = false; focus.wrappedValue = nil; return .handled }
                     .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                         guard scrub != nil else { return .ignored }
-                        step(press.key == .upArrow ? 2 : -2); return .handled
+                        step(press.key == .upArrow ? 2 : -2, speed: press.modifiers.contains(.shift) ? "fast" : !press.modifiers.intersection([.option, .control]).isEmpty ? "fine" : "normal"); return .handled
                     }
                     .accessibilityIdentifier("color-entry-\(name)")
             } else {
                 Text(shown["text"].string).monospacedDigit().lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: large ? .leading : .trailing).contentShape(Rectangle())
-                    .onTapGesture { draft = nil; opened = true }
-                    .gesture(DragGesture(minimumDistance: 4)
-                        .onChanged { drag in
-                            guard let scrub else { return }
-                            scrubbing = true
-                            session.act(["op": "scrub", "target": scrub, "pixels": -drag.translation.height, "speed": Self.speed], target: name)
-                        }
-                        .onEnded { _ in
-                            guard scrubbing else { return }
-                            scrubbing = false; session.act(["op": "end_scrub", "cancel": false], target: name)
-                        })
+                    .overlay {
+                        ControlInput(identity: name, contact: { event in
+                            switch event.phase {
+                            case "down": contactY = event.surfacePoint.y
+                            case "move", "up":
+                                guard let y = contactY else { return }
+                                let pixels = Double(y - event.surfacePoint.y)
+                                if let scrub, abs(pixels) >= 4 || scrubbing {
+                                    scrubbing = true
+                                    session.act(["op": "scrub", "target": scrub, "pixels": pixels, "speed": Self.speed(event.modifiers)], target: name)
+                                }
+                                if event.phase == "up" {
+                                    contactY = nil
+                                    if scrubbing { finishScrub(false) } else if event.inside { draft = nil; opened = true }
+                                }
+                            case "cancel": contactY = nil; finishScrub(true)
+                            default: break
+                            }
+                        }, key: { key, pressed, modifiers in
+                            if key == "Escape", scrubbing { finishScrub(true); contactY = nil; return true }
+                            if ["Enter", "Space"].contains(key) { if !pressed { draft = nil; opened = true }; return true }
+                            guard scrub != nil, ["ArrowUp", "ArrowDown"].contains(key) else { return false }
+                            if pressed { step(key == "ArrowUp" ? 2 : -2, speed: Self.speed(modifiers)) }
+                            return true
+                        }).accessibilityHidden(true)
+                    }
                     .accessibilityElement().accessibilityLabel(shown["name"].string).accessibilityValue(shown["text"].string)
                     .accessibilityAddTraits(.isButton).accessibilityIdentifier("color-value-\(name)")
             }
-        }.font(large ? .title2.weight(.medium) : .body).frame(width: width, height: large ? 34 : 28)
+        }.onDisappear { contactY = nil; finishScrub(true) }
+            .font(large ? .title2.weight(.medium) : .body).frame(width: width, height: large ? 34 : 28)
             .padding(.horizontal, 6)
             .background(invalid ? Color.red.opacity(0.12) : Color.primary.opacity(editing ? 0.08 : 0.04), in: SquircleShape.control)
     }
-    private func step(_ pixels: Double) {
+    private func finishScrub(_ cancel: Bool) {
+        guard scrubbing else { return }
+        scrubbing = false
+        session.act(["op": "end_scrub", "cancel": cancel], target: name)
+    }
+    private func step(_ pixels: Double, speed: String) {
         guard let scrub else { return }
         draft = nil
-        session.act(["op": "scrub", "target": scrub, "pixels": pixels, "speed": Self.speed], target: name)
+        session.act(["op": "scrub", "target": scrub, "pixels": pixels, "speed": speed], target: name)
         session.act(["op": "end_scrub", "cancel": false], target: name)
     }
-    private static var speed: String {
-        #if os(macOS)
-        let flags = NSEvent.modifierFlags
-        return flags.contains(.shift) ? "fast" : flags.contains(.option) || flags.contains(.control) ? "fine" : "normal"
-        #else
-        return "normal"
-        #endif
+    private static func speed(_ modifiers: ControlModifiers) -> String {
+        modifiers.shift ? "fast" : modifiers.fine ? "fine" : "normal"
     }
+
 }
 
 private struct ColorEditorWheel: View {

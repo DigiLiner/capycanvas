@@ -10,7 +10,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-@Composable internal fun DocumentPropertiesDialog(host: CanvasHost, onDismiss: () -> Unit) {
+@Composable internal fun DocumentPropertiesDialog(host: CanvasHost, onDismiss: () -> Unit, onAppearance: () -> Unit) {
     var view by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -20,6 +20,7 @@ import org.json.JSONObject
         } } catch (e: Exception) { error = e.message }
     }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(view?.getString("title") ?: host.bootstrap?.getString("preparing_document").orEmpty()) },
+        dismissButton = { view?.let { properties -> TextButton(onAppearance) { Text(properties.getString("proof")) } } },
         confirmButton = { TextButton(onDismiss) { Text(view?.getString("done") ?: host.bootstrap?.getJSONObject("common")?.getString("done").orEmpty()) } }, text = {
             Column(Modifier.fillMaxWidth().heightIn(max = 580.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 view?.getJSONArray("rows")?.let { values -> for (i in 0 until values.length()) {

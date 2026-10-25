@@ -1012,8 +1012,8 @@ fn host_workspace_requests_complete_once() {
     f.action(serde_json::json!({"type":"workspace_manager","command":{"type":"manage_toolbars"}}));
     f.pump();
     assert_eq!(pending(&f), 0);
-    assert!(f.host.session.state().customization.is_open());
-    assert!(f.controller.view.page.is_none());
+    assert!(!f.host.session.state().customization.is_open());
+    assert_eq!(f.controller.view.page, Some(ManagerPage::ThisWorkspace));
 }
 
 #[test]

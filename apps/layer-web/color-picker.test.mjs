@@ -95,6 +95,32 @@ export async function checkColorPicker({call,evaluate,settle}) {
   await wait(`JSON.parse(layerApp.app.workspace_view()).id==='builtin:workspace:illustrator'&&!JSON.parse(layerApp.app.workspace_view()).busy`);await settle();
   await send({type:'move_panel',panel:'color',target:{kind:'float',position:[30,70]}});
   assert.ok(await evaluate(`[...document.querySelectorAll('.color-wheel-control')].some(n=>n.getBoundingClientRect().width>128)`),'visible color panel');
+  for(const theme of ['light','dark']) {
+    await send({type:'set_theme',theme});
+    for(const slot of ['foreground','background']) {
+      const selector=`[data-control=color_wheel] [data-color-slot="${slot}"]`,p=await buttonPoint(selector);
+      const expected=await evaluate(`layerApp.app.context_menu({kind:'color_slot',slot:${JSON.stringify(slot)}}).sections.flat().map(i=>i.label)`);
+      await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'right',buttons:2,clickCount:1});
+      await call('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'right',buttons:0,clickCount:1});await settle();
+      assert.deepEqual(await evaluate(`[...document.querySelectorAll('.panel-context-menu:popover-open .menu-label')].map(n=>n.textContent)`),expected,'secondary press targets the color slot menu');
+      await evaluate(`document.querySelector('.panel-context-menu:popover-open button').click()`);await wait(`!!document.querySelector('dialog.color-dialog[open]')`);
+      await key('Escape','Escape',27);await wait(`!document.querySelector('dialog.color-dialog[open]')`);
+      await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
+      for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'F10',code:'F10',windowsVirtualKeyCode:121,modifiers:8});await settle();
+      assert.deepEqual(await evaluate(`[...document.querySelectorAll('.panel-context-menu:popover-open .menu-label')].map(n=>n.textContent)`),expected,'Shift-F10 keeps slot context');
+      await evaluate(`document.querySelectorAll('.panel-context-menu:popover-open button')[1].click()`);await settle();
+      assert.equal((await state()).colors.slot,slot,'Palettes acts on the menu slot');
+      for(const device of ['pen','touch']) {
+        const at=await buttonPoint(selector);
+        if(device==='touch')await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:45,...at}]});else await mouse('mousePressed',at,'pen',1);
+        await new Promise(resolve=>setTimeout(resolve,600));await settle();
+        assert.deepEqual(await evaluate(`[...document.querySelectorAll('.panel-context-menu:popover-open .menu-label')].map(n=>n.textContent)`),expected,`${device} hold opens slot context`);
+        if(device==='touch')await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});else await mouse('mouseReleased',at,'pen');
+        await key('Escape','Escape',27);
+      }
+    }
+  }
+
   await invoke('eyedropper');await mouse('mouseMoved',point);await wait('layerApp.state().color_picker.preview!=null');
   await evaluate(`window.pickerCounts={fields:0,models:0};for(const [method,key] of [['color_field_pixels','fields'],['state_update','models']]){const old=layerApp.app[method].bind(layerApp.app);layerApp.app[method]=(...args)=>{pickerCounts[key]++;return old(...args)}}`);
   for(let i=0;i<45;i++){await mouse('mouseMoved',{x:point.x-70+i*3,y:point.y});await new Promise(r=>setTimeout(r,8));}

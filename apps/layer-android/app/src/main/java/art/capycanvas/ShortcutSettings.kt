@@ -505,21 +505,11 @@ private fun subtitle(row: JSONObject): String =
     }
     keymap.objectOrNull("import")?.let { preview ->
         AlertDialog({ host.preference(obj("type" to "cancel_keymap_import")) },
-            confirmButton = { TextButton({ host.preference(obj("type" to "confirm_keymap_import")) }, Modifier.testTag("keymap-confirm-import")) { Text(host.bootstrap!!.getJSONObject("common").getString("import")) } },
-            dismissButton = { TextButton({ host.preference(obj("type" to "cancel_keymap_import")) }) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) } },
-            title = { Text("Import " + preview.getString("title") + "?") },
+            confirmButton = { TextButton({ host.preference(obj("type" to "confirm_keymap_import")) }, Modifier.testTag("keymap-confirm-import")) { Text(preview.getString("import_label")) } },
+            dismissButton = { TextButton({ host.preference(obj("type" to "cancel_keymap_import")) }) { Text(preview.getString("cancel_label")) } },
+            title = { Text(preview.getString("heading")) },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState()).testTag("keymap-import-preview")) {
-                    var any = false
-                    for ((title, key) in listOf(host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("added") to "added", host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("changed") to "changed", host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("removed") to "removed", host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("not_available") to "unavailable")) {
-                        val lines = preview.array(key).values()
-                        if (lines.isEmpty()) continue
-                        any = true
-                        Text("$title (${lines.size})", fontWeight = FontWeight.SemiBold)
-                        lines.forEach { Text(it.toString(), fontSize = 13.sp) }
-                    }
-                    if (!any) Text(host.catalog.getJSONObject("native_copy").getJSONObject("shortcuts").getString("no_changes"))
-                }
+                Text(preview.getString("body"), Modifier.verticalScroll(rememberScrollState()).testTag("keymap-import-preview"))
             })
     }
 }

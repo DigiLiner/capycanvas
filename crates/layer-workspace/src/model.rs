@@ -35,14 +35,13 @@ pub fn name_key(name: &str) -> String {
     name.trim().to_lowercase()
 }
 pub fn validate_name(name: &str) -> Result<(), StoreError> {
-    if name.trim() != name
-        || name.is_empty()
-        || name.chars().count() > 100
-        || name.chars().any(char::is_control)
-    {
+    if !layer_ui::workspace_name_valid(name) {
         return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::EnterANameOf1100CharactersWithoutLeadingOrTrailingSpaces));
     }
     Ok(())
+}
+pub fn name_validation(name: &str, localization: &layer_ui::Localizer) -> Option<String> {
+    layer_ui::workspace_name_validation(name, localization)
 }
 pub(crate) use layer_ui::counter;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -611,6 +610,19 @@ pub fn workspace_display_name(id: &str, metadata: &Metadata, localization: &laye
 #[cfg(test)]
 mod localization_tests {
     use super::*;
+
+    #[test]
+    fn prompt_name_validation_reuses_storage_rules_and_current_language() {
+        for language in layer_ui::UiLanguage::ALL {
+            let localization = layer_ui::Localizer::shared(language);
+            for name in ["", "   ", "bad\nname", &"x".repeat(101)] {
+                assert_eq!(name_validation(name, &localization), Some(validate_name(name.trim()).unwrap_err().localized_message(&localization)));
+            }
+            for name in ["Paint", "  Paint  ", "私の絵", &"x".repeat(100)] {
+                assert_eq!(name_validation(name, &localization), None);
+            }
+        }
+    }
 
     #[test]
     fn refusal_transport_retains_numeric_payload_and_separates_raw_diagnostics() {

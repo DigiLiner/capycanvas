@@ -1,5 +1,9 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet("F16","F32")][string]$Depth="F16",[switch]$DrawingTabsOnly,[ValidateSet('dark','light')][string]$Theme='dark')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet("F16","F32")][string]$Depth="F16",[switch]$DrawingTabsOnly,[switch]$ControlsOnly,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+if($ControlsOnly -and !$PSBoundParameters.ContainsKey('Theme')){
+ foreach($theme in @('dark','light')){& $PSCommandPath -Executable $Executable -Depth $Depth -ControlsOnly -Theme $theme}
+ return
+}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $capyControl=${function:Control}
 $CapyWaitSeconds=15;$CapyFind='visible';$CapyPopups=$true
@@ -51,13 +55,14 @@ $run=Join-Path $repo ('artifacts/windows/hdr-ui/'+[Guid]::NewGuid().ToString('N'
 [IO.Directory]::CreateDirectory((Join-Path $run 'profile'))|Out-Null
 $directory=$run;$CapyTraceDirectory=$run
 function New-ArcHelper([string]$Directory){
- $provider=New-Object Microsoft.CSharp.CSharpCodeProvider
- $options=New-Object CodeDom.Compiler.CompilerParameters
- $options.GenerateExecutable=$true;$options.CompilerOptions='/platform:x64';$options.OutputAssembly=Join-Path $Directory 'hdr-geometry.exe'
- try{$compiled=$provider.CompileAssemblyFromSource($options,$hdrNativeSource);if($compiled.Errors.HasErrors){throw ($compiled.Errors|Out-String)}}finally{$provider.Dispose()}
- $bytes=[IO.File]::ReadAllBytes($options.OutputAssembly);$pe=[BitConverter]::ToInt32($bytes,60)
+ $compiler=Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+ $source=Join-Path $Directory 'hdr-geometry.cs';$output=Join-Path $Directory 'hdr-geometry.exe'
+ [IO.File]::WriteAllText($source,$hdrNativeSource)
+ & $compiler /nologo /target:exe /platform:x64 "/out:$output" $source
+ if($LASTEXITCODE -ne 0){throw 'HDR geometry helper compilation failed'}
+ $bytes=[IO.File]::ReadAllBytes($output);$pe=[BitConverter]::ToInt32($bytes,60)
  if([BitConverter]::ToUInt16($bytes,$pe+4) -ne 0x8664){throw 'HDR geometry helper is not x64'}
- $options.OutputAssembly
+ $output
 }
 function Arc-Geometry([string]$Dll,[string]$Json){
  if(!$script:arcHelper){$script:arcHelper=New-ArcHelper $run}
@@ -245,7 +250,11 @@ function ProofPanel {
  $null=Control 'proof-panel-mode'
 }
 function Setup {
- ProofPanel;if(!(Find 'proof-panel-setup')){Invoke 'proof-panel-mode-print'};Invoke 'proof-panel-setup'
+ Command 'document_properties' 'File'
+ Wait-Until {(Model).windows_document.kind -eq 'properties'} 'Document Properties did not open'
+ $appearance=Control 'PrimaryButton' -Within (Control 'document-workflow') -Arranged
+ if($appearance.Current.Name -ne (Model).windows_document.details.proof){throw 'Properties primary action is not Appearance'}
+ $appearance.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {(Model).windows_document.kind -eq 'proof' -and (Find 'proof-profile')} 'Proof Setup did not open'
 }
 function Picker([string]$Name){
@@ -307,14 +316,14 @@ try {
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle;Write-Output "HDR review $($review.Id), $Depth, $run"
  $owned=@{window=$null}
- Wait-Until {$owned.window=Owned-DrawingWindow $review;$owned.window -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Owned drawing did not start' 75
+ Wait-Until {$owned.window=Owned-DrawingWindow $review;$m=Model;$owned.window -and $m.brush_ready -and $m.canvas_ready -and $m.windows_tabs.available -and $m.windows_workspace.ready} 'Owned drawing did not start' 75
  $root=$owned.window.Root;$drawingWindow=$owned.window.Handle
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  if($DrawingTabsOnly){[CapyWindowApi]::ShowWindow($drawingWindow,3)|Out-Null}
  $title=(Control 'drawing-title').Current.Name
  if($title -notmatch ' · \d+ × \d+$' -or (Find 'drawing-tab-1') -or (Find 'drawing-selector')){throw "One drawing did not show the plain title: $title"}
- if(!$DrawingTabsOnly){
+ if(!$DrawingTabsOnly -and !$ControlsOnly){
   Button 'Test pen';Wait-Until {(Model).state.document_file.modified} 'Initial drawing did not become dirty' 60
   Wait-Until {$review.Refresh();$review.MainWindowTitle.StartsWith('• ')} 'Window title lacks the unsaved marker'
  }
@@ -323,10 +332,11 @@ try {
  Button 'Create';Idle
  Wait-Until {(Model).brush_ready -and ($DrawingTabsOnly -or ((Model).color_panel.hdr -and (Model).color_panel.document_depth -eq $Depth -and (Model).windows_display.analysis.ready))} 'Drawing creation did not settle' 60
  if(!$DrawingTabsOnly -and (Model).windows_display.format -ne 'Rgba16Float'){throw 'Expected native floating-point swap chain'}
- if(@((Model).windows_tabs.tabs).Count -ne 2 -or (!$DrawingTabsOnly -and !(Model).windows_tabs.tabs[0].modified)){throw 'New did not retain the first drawing'}
+ if(@((Model).windows_tabs.tabs).Count -ne 2 -or (!$DrawingTabsOnly -and !$ControlsOnly -and !(Model).windows_tabs.tabs[0].modified)){throw 'New did not retain the first drawing'}
  if(!$DrawingTabsOnly){& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1800 -Height 1300}
  Wait-Until {(Find 'drawing-tab-1') -and (Find 'drawing-tab-2') -and (Model).windows_tabs.available} 'Full native drawing strip did not appear'
- if(!$DrawingTabsOnly -and !(Control 'drawing-tab-1').Current.Name.StartsWith('• ')){throw 'Dirty tab lacks the unsaved marker'}
+ if(!$DrawingTabsOnly -and !$ControlsOnly -and !(Control 'drawing-tab-1').Current.Name.StartsWith('• ')){throw 'Dirty tab lacks the unsaved marker'}
+ if(!$ControlsOnly){
  (Control 'drawing-tab-2').SetFocus()
  [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x21)
  Wait-Until {(Model).windows_tabs.selected -eq 1 -and (Model).windows_tabs.available} 'Ctrl+PgUp did not select the previous drawing' 60
@@ -559,6 +569,7 @@ try {
  Wait-Until {(Find 'drawing-close-3')} 'Full strip did not return'
  Invoke 'drawing-close-3'
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq 2 -and (Model).windows_tabs.selected -eq 2 -and (Model).windows_tabs.available} 'Closing the clean selector fixture drawing failed' 60
+ }
  $display=(Model).windows_display
  Button 'Test SDR output';Wait-Until {(Model).windows_display.headroom -eq 1} 'Synthetic SDR fallback did not apply'
  Sdr
@@ -632,7 +643,7 @@ try {
   if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Invalid owned wheel DPI'}
   $points=@();foreach($location in @(@(.56,.46),@(.62,.55))){
    $point=@([int][Math]::Round($box.X+$location[0]*$box.Width),[int][Math]::Round($box.Y+$location[1]*$box.Height))
-   $part=Arc-Geometry $geometryDll (@{type='wheel_hit';size=$box.Width/$scale;point=@(($point[0]-$box.X)/$scale,($point[1]-$box.Y)/$scale);shape=(Model).color_panel.shape}|ConvertTo-Json -Compress)
+   $part=Arc-Geometry $geometryDll (@{type='wheel_hit';size=$box.Width/$scale;point=@((($point[0]-$box.X)/$scale),(($point[1]-$box.Y)/$scale));shape=(Model).color_panel.shape}|ConvertTo-Json -Compress)
    if($part -ne 'field'){throw 'Transparent wheel contact is not inside the shared color field'}
    $points+=,$point
   }
@@ -703,6 +714,25 @@ try {
  if(((Model).state.document_file|ConvertTo-Json -Compress) -ne $proofHistory){throw 'Proof panel modes edited history'}
  # Real native capture with injected mouse/touch/pen; each edit has one history step.
  Invoke 'proof-panel-mode-sdr';Wait-Until {(Model).state.preview_sdr} 'The SDR dial did not appear in SDR mode'
+ $screen=(Model).state.screen
+ if($screen.chip){
+  Invoke 'screen-status';Wait-Until {$null -ne (Find 'screen-details-headline')} 'Screen details did not open'
+  if((Control 'screen-details-headline').Current.Name -ne $screen.details.headline){throw 'Screen details headline differs from shared assessment'}
+  $clipped='not-offered'
+  if($null -ne $screen.details.show_clipped){
+   $before=[bool]$screen.details.show_clipped;$check=Control 'screen-show-clipped'
+   $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+   Wait-Until {[bool](Model).state.screen.details.show_clipped -ne $before} 'Screen clipping checkbox did not update shared state'
+   $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+   Wait-Until {[bool](Model).state.screen.details.show_clipped -eq $before} 'Screen clipping checkbox did not restore shared state'
+   $clipped='passed'
+  }
+  [CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+  @{chip='passed';details='passed';clipped=$clipped;theme=$Theme}|ConvertTo-Json|Set-Content (Join-Path $run 'screen-status.json')
+ }else{
+  if(Find 'screen-status' -Visible){throw 'Screen chip is visible without a shared chip'}
+  @{chip='correctly-hidden';details='not-exercised-no-shared-chip';theme=$Theme}|ConvertTo-Json|Set-Content (Join-Path $run 'screen-status.json')
+ }
  $dialBefore=(Model).windows_proof_form.rendition|ConvertTo-Json -Compress
  foreach($device in @('mouse','touch','pen')){
   Write-Output "Native contact: $device at line $($MyInvocation.ScriptLineNumber)"
@@ -723,7 +753,44 @@ try {
   Command 'redo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialAfter} 'Dial redo failed'
   Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Dial final undo failed'
  }
+ $dial=Control 'proof-dial';$dial.SetFocus()
+ [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x27)
+ Wait-Until {[Math]::Abs((Model).windows_proof_form.rendition.balance-.1) -lt .0001} 'Proof Shift Right did not step balance ten times'
+ Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Shift nudge did not undo once'
+ $dial=Control 'proof-dial';$dial.SetFocus();$box=$dial.Current.BoundingRectangle
+ [CapyRowPointer]::Initialize([uint32]$review.Id)
+ try{
+  [CapyRowPointer]::Hover([int]($box.X+$box.Width*.5),[int]($box.Y+$box.Height*.5))
+  foreach($repeat in 1..3){[CapyRowPointer]::Hold(0x27,$true)}
+  [CapyRowPointer]::Hold(0x27,$false)
+  Wait-Until {(Model).windows_proof_form.rendition.balance -gt 0} 'Proof repeated key did not apply'
+  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Held Proof key repeats were not one Undo'
+  $dial.SetFocus();[CapyRowPointer]::Hold(0x27,$true)
+  Wait-Until {(Model).windows_proof_form.rendition.balance -gt 0} 'Proof held key did not preview before Escape'
+  [CapyRowPointer]::Key([uint32]$review.Id,0x1B);[CapyRowPointer]::Hold(0x27,$false)
+  Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Proof Escape did not roll back held key'
+  $dial.SetFocus();[CapyRowPointer]::Hold(0x27,$true)
+  Wait-Until {(Model).windows_proof_form.rendition.balance -gt 0} 'Proof held key did not preview before focus loss'
+  (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Hold(0x27,$false)
+  Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Proof focus loss did not roll back held key'
+  $x=[int]($box.X+$box.Width/2+25);$y=[int]($box.Y+$box.Height/2-15)
+  [CapyRowPointer]::Down('mouse',$x,$y);[CapyRowPointer]::Up()
+  Wait-Until {[Math]::Abs((Model).windows_proof_form.rendition.balance) -gt .01} 'Proof first press did not move pad'
+  $pressed=(Model).windows_proof_form.rendition|ConvertTo-Json -Compress
+  [CapyRowPointer]::Down('mouse',$x,$y);[CapyRowPointer]::Up()
+  Wait-Until {[Math]::Abs((Model).windows_proof_form.rendition.balance) -lt .0001 -and [Math]::Abs((Model).windows_proof_form.rendition.contrast-1) -lt .0001} 'Proof double press did not reset pad'
+  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $pressed} 'Proof pad reset did not undo once'
+  Command 'undo' 'Edit';Wait-Until {((Model).windows_proof_form.rendition|ConvertTo-Json -Compress) -eq $dialBefore} 'Proof first press did not undo once'
+ }finally{[CapyRowPointer]::Dispose()}
+ @{shift_ten='passed';held_repeat_single_undo='passed';escape_rollback='passed';focus_rollback='passed';double_press_reset='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'proof-dial-keys.json')
  Invoke 'proof-panel-mode-off';Wait-Until {!(Model).state.preview_sdr} 'Proof panel Off failed after the dial'
+ if($ControlsOnly){
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
+  if(!$review.WaitForExit(15000) -or $review.ExitCode -ne 0){throw 'Owned HDR controls review did not close cleanly'}
+  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'HDR controls stderr requires inspection'}
+  @{theme=$Theme;numeric_hdr_color='passed';arc_context_mouse_touch_pen=$arcCases;transparent_wheel_mouse_touch_pen=$wheelCases;proof_numeric_modes_history='passed';proof_dial_contacts_keys_cancel_history='passed';scope='Native controls functional validation; physical HDR and performance unverified'}|ConvertTo-Json -Depth 8|Tee-Object -FilePath (Join-Path $run 'results.json')
+  return
+ }
  $plain=Delivery 'SDR.png' 'PNG'
  $pq=Delivery 'HDR.png' 'HDR PNG · BT.2020 PQ'
  $exr=Delivery 'HDR.exr' 'OpenEXR · 32-bit float'

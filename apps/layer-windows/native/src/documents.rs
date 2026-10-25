@@ -26,6 +26,7 @@ use std::{
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum DocumentAction {
     Tabs { action: tabs::Action },
+    PrintProof { epoch: u64, settings: layer_ui::proof_panel::PrintProofSettings, profile_id: Option<String> },
     Package { id:u32, action:layer_ui::PackageAction, path:Option<String> },
     Palette { action: crate::palette_files::Action },
     PaperImport { id: Option<u32>, path: Option<String> },
@@ -76,6 +77,7 @@ pub(crate) fn recovery_environment(session: &UiSession<Renderer>) -> Result<Open
 }
 struct Opening { environment: OpenEnvironment, imported: layer_ui::ImportedDocument, profiles: Vec<layer_ui::profile_library::ProfileEntry>, profile_view: serde_json::Value, language: layer_ui::UiLanguage }
 enum Source {
+    Converted(Box<layer_core::Document>),
     Clip(Box<layer_ui::PixelClip>),
     Images(Vec<(String, layer_core::color::source::SourceImage)>),
     Create,
@@ -310,6 +312,7 @@ fn prepare(
     let mut opened_destination=None;
     let mut notice=None;
     let imported = match source {
+        Source::Converted(document) => return environment.prepare(*document, || cancel.load(Ordering::Acquire)).map(Completed::Prepared),
         Source::Clip(clip) => return environment.prepare(clip.document(&environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
         Source::Images(sources) => return environment.prepare(layer_ui::clipboard_document(sources, environment.photo_policy, &environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
         Source::Create => {
@@ -393,6 +396,7 @@ pub(crate) struct DocumentService {
     workflow: Option<Box<crate::document_workflows::Task>>,
     workflow_control: Option<(u32, layer_render_wgpu::snapshot::CaptureControl)>,
     workflow_running: bool,
+    workflow_replacement: Option<crate::document_workflows::Action>,
     workflow_quiet: bool,
     workflow_title: Option<String>,
     open_queue: std::collections::VecDeque<String>,
@@ -442,6 +446,7 @@ impl DocumentService {
             workflow: None,
             workflow_control: None,
             workflow_running: false,
+            workflow_replacement: None,
             workflow_quiet: false,
             workflow_title: None,
             open_queue: Default::default(),
@@ -564,6 +569,11 @@ impl DocumentService {
         host: &mut NativeHost,
         action: DocumentAction,
     ) -> Result<(), String> {
+        if let DocumentAction::PrintProof { epoch, settings, profile_id } = action {
+            self.proof.edit(host,epoch,settings,profile_id)?;
+            host.invalidate_snapshot();
+            return Ok(());
+        }
         if let DocumentAction::SaveStrokeRecording { path } = action {
             if self.recording_save.is_some() {
                 return Err("The stroke recording is already being saved".into());
@@ -669,14 +679,22 @@ impl DocumentService {
         }
         if let DocumentAction::Workflow { id, action } = action {
             if self.workflow_control.as_ref().map(|(id, _)| *id) != Some(id) { return Err("Document workflow expired".into()); }
-            if matches!(action, crate::document_workflows::Action::Cancel) && self.workflow_running {
+            if self.workflow_running && matches!(action, crate::document_workflows::Action::Prepare { .. } | crate::document_workflows::Action::Cancel) {
+                self.workflow_replacement = (!matches!(action, crate::document_workflows::Action::Cancel)).then_some(action);
                 self.workflow_control.as_ref().unwrap().1.cancel();
                 return Ok(());
             }
             let mut task = self.workflow.take().ok_or("Wait for document preparation")?;
+            if matches!(action,crate::document_workflows::Action::Prepare { .. }) {
+                let replacement=match task.recapture(host) {Ok(task)=>task,Err(error)=>{self.workflow=Some(task);return Err(error)}};
+                self.worker.retire_workflow(task);task=replacement;
+                self.workflow_control=Some((id,task.control.clone()));
+            }
             let result = match action {
                 crate::document_workflows::Action::Cancel => task.complete(host, false),
+                crate::document_workflows::Action::Appearance => task.complete(host, false).and_then(|()| host.dispatch(layer_ui::UiAction::Invoke { command: layer_ui::CommandId::SoftProofSetup })),
                 crate::document_workflows::Action::ClipPublished { publication } if task.awaits_clipboard() => self.adopt_clip(host, &mut task, publication).or_else(|error| Self::complete(host, id, Err(error))),
+                crate::document_workflows::Action::OpenCopy => task.copy_document(host).and_then(|document| self.open_clipboard(host, id, Source::Converted(Box::new(document)))),
                 crate::document_workflows::Action::Commit if host.session.pasting_new_image() => task.import_sources(host).and_then(|(sources, _)| self.open_clipboard(host, id, Source::Images(sources))).or_else(|error| Self::complete(host, id, Err(error))),
                 crate::document_workflows::Action::Commit => task.commit(host),
                 crate::document_workflows::Action::PasteClip { nonce } if host.session.pasting_new_image() => self.paste_clip(host, id, &nonce).or_else(|error| Self::complete(host, id, Err(error))),
@@ -894,6 +912,16 @@ impl DocumentService {
                 }
                 _ => return Err("Unexpected workflow completion".into()),
             };
+            if let Some(entries)=task.profile_inventory() {self.proof.library(entries);}
+            if let Some(action) = self.workflow_replacement.take() {
+                let replacement=match task.recapture(host) {Ok(task)=>task,Err(error)=>{task.fail(error);self.workflow=Some(task);host.invalidate_snapshot();return Ok(())}};
+                self.worker.retire_workflow(task);task=replacement;
+                self.workflow_control = Some((task.id, task.control.clone()));
+                self.workflow_running = true;
+                self.worker.submit(Job::Workflow { task, action })?;
+                host.invalidate_snapshot();
+                return Ok(());
+            }
             if task.control.is_cancelled() || task.stage == "saved" {
                 task.complete(host, task.stage == "saved")?;
                 if let Some(notice) = task.notice() {

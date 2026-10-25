@@ -524,7 +524,10 @@ function Use-ZenWorkspace([string]$Workspace) {
         (Control $choice.title -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     }
     Wait-Until {(Model).windows_workspace.id -eq $id -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace did not switch'
-    if($Workspace -eq 'photographer'){$null=Control 'histogram-chart' -Arranged}
+    if($Workspace -eq 'photographer'){
+        $null=Control 'histogram-source' -Arranged
+        Wait-Until {$view=(Workspace-Root).Current.ItemStatus|ConvertFrom-Json;$chart=@($view.elements|Where-Object id -eq 'histogram-chart')[0];$chart.actual_bounds.width -gt 0 -and $chart.actual_bounds.height -gt 0} 'Photo workspace did not arrange its native histogram'
+    }
 }
 
 function Check-ZenToolbar([string]$Theme) {

@@ -804,8 +804,6 @@ mod wheel {
         pub bubble_layout: Cell<Option<layer_ui::ColorBubbleLayout>>,
         // Background precedes foreground so their deliberate overlap also picks correctly.
         pub corners: RefCell<Vec<WheelButton>>,
-        pub menu: RefCell<Option<gtk::Popover>>,
-        pub menu_slot: Cell<ColorSlot>,
         pub view: Cell<ViewColor>,
         pub headroom: Cell<f32>,
         pub linear_field: RefCell<Option<super::field::LinearField>>,
@@ -827,9 +825,6 @@ mod wheel {
     impl ObjectImpl for Wheel {
         fn dispose(&self) {
             if let Some(intensity) = self.intensity.take() { intensity.unparent(); }
-            if let Some(menu) = self.menu.take() {
-                menu.unparent();
-            }
             for button in self.corners.borrow_mut().drain(..) {
                 button.unparent();
             }
@@ -909,9 +904,6 @@ mod wheel {
             if let Some(intensity) = self.intensity.borrow().as_ref().filter(|i| i.is_visible()) {
                 intensity.allocate(size.round() as i32, layout.height().ceil() as i32, baseline,
                     Some(gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x, y))));
-            }
-            if let Some(menu) = self.menu.borrow().as_ref() {
-                menu.present();
             }
         }
         fn snapshot(&self, output: &gtk::Snapshot) {
@@ -1165,9 +1157,6 @@ pub struct ColorPanel {
     shape_buttons: [WheelButton; 2],
     readout: WheelButton,
     swap: WheelButton,
-    menu_swap: gtk::Button,
-    menu_edit: gtk::Button,
-    menu_library: gtk::Button,
     intensity: crate::hdr_color_scale::HdrColorScale,
     edit_color: WheelButton,
 }
@@ -1239,31 +1228,6 @@ impl ColorPanel {
         wheel.imp().corners.borrow_mut().push(readout.clone());
         edit_color.set_parent(&wheel);
         wheel.imp().corners.borrow_mut().push(edit_color.clone());
-        let menu = gtk::Popover::new();
-        menu.set_parent(&wheel);
-
-        let menu_swap = gtk::Button::new();
-        menu_swap.add_css_class("flat");
-        menu_swap.set_widget_name("color-swap-menu");
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        row.append(&crate::icons::image("layer-color-swap-symbolic"));
-        row.append(&gtk::Label::new(Some(&copy.swap)));
-        menu_swap.set_child(Some(&row));
-        menu_swap.update_property(&[gtk::accessible::Property::Label(
-            &copy.swap,
-        )]);
-        let menu_edit = gtk::Button::with_label(&copy.edit_menu);
-        menu_edit.add_css_class("flat");
-        menu_edit.set_widget_name("color-edit-menu");
-        let actions = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        actions.append(&menu_edit);
-        let menu_library = gtk::Button::with_label(&copy.palettes);
-        menu_library.add_css_class("flat");
-        menu_library.set_widget_name("color-library-menu");
-        actions.append(&menu_library);
-        actions.append(&menu_swap);
-        menu.set_child(Some(&actions));
-        *wheel.imp().menu.borrow_mut() = Some(menu);
         Self {
             localization: RefCell::new(localization), shape_descriptions: RefCell::new(shape_descriptions),
             root,
@@ -1273,9 +1237,6 @@ impl ColorPanel {
             shape_buttons,
             readout,
             swap,
-            menu_swap,
-            menu_edit,
-            menu_library,
             intensity,
             edit_color,
         }
@@ -1293,7 +1254,6 @@ impl ColorPanel {
             let slot = workspace.gpu.borrow().as_ref().map(|g| g.session.state().display_colors().slot);
             if let Some(slot) = slot { crate::color_editor::show(&workspace, slot); }
         }));
-        workspace.watch_popover(self.wheel.imp().menu.borrow().as_ref().unwrap());
         for (slot, button, _) in &self.swatches {
             let slot = *slot;
             button.connect_clicked(glib::clone!(
@@ -1316,66 +1276,7 @@ impl ColorPanel {
                 }
             }));
             button.add_controller(edit);
-            // This target owns its menu; the enclosing panel's customization
-            // capture controller must leave its secondary clicks and holds alone.
-            button.add_css_class("customizable-target");
-            let popup = glib::clone!(
-                #[weak(rename_to = wheel)]
-                self.wheel,
-                #[weak]
-                button,
-                move || {
-                    wheel.imp().menu_slot.set(slot);
-                    let b = button.compute_bounds(&wheel).unwrap();
-                    let menu = wheel.imp().menu.borrow();
-                    let menu = menu.as_ref().unwrap();
-                    menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
-                        b.x() as i32,
-                        b.y() as i32,
-                        b.width() as i32,
-                        b.height() as i32,
-                    )));
-                    menu.popup();
-                }
-            );
-            let right = gtk::GestureClick::new();
-            right.set_button(3);
-            right.set_propagation_phase(gtk::PropagationPhase::Capture);
-            right.connect_pressed({
-                let popup = popup.clone();
-                move |g, _, _, _| {
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    popup();
-                }
-            });
-            button.add_controller(right);
-            let hold = gtk::GestureLongPress::new();
-            hold.set_touch_only(false);
-            hold.set_propagation_phase(gtk::PropagationPhase::Capture);
-            hold.connect_pressed({
-                let popup = popup.clone();
-                move |g, _, _| {
-                    if !crate::input::touch_or_pen(g) {
-                        return;
-                    }
-                    g.set_state(gtk::EventSequenceState::Claimed);
-                    popup();
-                }
-            });
-            button.add_controller(hold);
-            let key = gtk::EventControllerKey::new();
-            key.connect_key_pressed(move |_, key, _, modifiers| {
-                if key == gtk::gdk::Key::Menu
-                    || (key == gtk::gdk::Key::F10
-                        && modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK))
-                {
-                    popup();
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
-                }
-            });
-            button.add_controller(key);
+            workspace.install_context(button, layer_ui::ContextTarget::ColorSlot { slot });
         }
         for (i, button) in self.shape_buttons.iter().enumerate() {
             button.connect_clicked(glib::clone!(
@@ -1401,10 +1302,7 @@ impl ColorPanel {
         let swap = glib::clone!(
             #[weak]
             workspace,
-            #[weak(rename_to = wheel)]
-            self.wheel,
             move || {
-                wheel.imp().menu.borrow().as_ref().unwrap().popdown();
                 workspace.dispatch(UiAction::Color {
                     action: ColorAction::Swap,
                 });
@@ -1414,25 +1312,6 @@ impl ColorPanel {
             let swap = swap.clone();
             move |_| swap()
         });
-        self.menu_swap.connect_clicked(move |_| swap());
-        self.menu_edit.connect_clicked(glib::clone!(
-            #[weak] workspace,
-            #[weak(rename_to = wheel)] self.wheel,
-            move |_| {
-                let slot = wheel.imp().menu_slot.get();
-                wheel.imp().menu.borrow().as_ref().unwrap().popdown();
-                crate::color_editor::show(&workspace, slot);
-            }
-        ));
-        self.menu_library.connect_clicked(glib::clone!(
-            #[weak] workspace,
-            #[weak(rename_to = wheel)] self.wheel,
-            move |_| {
-                let slot = wheel.imp().menu_slot.get();
-                wheel.imp().menu.borrow().as_ref().unwrap().popdown();
-                crate::color_library::show(&workspace, slot);
-            }
-        ));
         let workspace = Rc::downgrade(workspace);
         self.wheel.connect_pick(move |action| {
             if let Some(workspace) = workspace.upgrade() { workspace.dispatch(UiAction::Color { action }); }
@@ -1446,10 +1325,6 @@ impl ColorPanel {
         self.edit_color.update_property(&[gtk::accessible::Property::Label(&copy.edit)]);
         self.swap.set_tooltip_text(Some(&copy.swap));
         self.swap.update_property(&[gtk::accessible::Property::Label(&copy.swap)]);
-        self.menu_swap.update_property(&[gtk::accessible::Property::Label(&copy.swap)]);
-        if let Some(label) = self.menu_swap.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { label.set_text(&copy.swap); }
-        self.menu_edit.set_label(&copy.edit_menu);
-        self.menu_library.set_label(&copy.palettes);
         for (slot, button, _) in &self.swatches {
             let message = match slot {
                 ColorSlot::Background => layer_ui::MessageId::COMMANDS_BACKGROUND_COLOR,

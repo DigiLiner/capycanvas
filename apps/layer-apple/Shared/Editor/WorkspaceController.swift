@@ -5,6 +5,9 @@ import SwiftUI
 @MainActor final class WorkspaceController: ObservableObject {
     @Published private(set) var view = JSON()
     @Published var formName = ""
+    @Published private(set) var nameError: String?
+    @Published private(set) var validatingName = false
+    private var nameValidation = UUID()
     @Published var formDescription = ""
     @Published var formChoice = ""
     @Published private var dismissedError: String?
@@ -75,6 +78,17 @@ import SwiftUI
     func switchTo(_ id: String) { send(["type": "switch", "id": id]) }
     func dismiss() { if presented { send(["type": "dismiss"]) } }
     func cancelPrompt() { send(["type": "cancel"]) }
+    func validateName(required: Bool) {
+        let generation = UUID(), name = formName
+        nameValidation = generation
+        guard required else { nameError = nil; validatingName = false; return }
+        validatingName = true
+        store?.query(["type": "workspace_name_validation", "name": name]) { [weak self] result in
+            guard let self, nameValidation == generation else { return }
+            nameError = result.isNull ? nil : result.string
+            validatingName = false
+        }
+    }
     func submit() {
         var input: [String: Any] = ["type": "submit", "name": formName]
         if !view["prompt"]["description"].isNull { input["description"] = formDescription }

@@ -38,6 +38,13 @@ class AndroidTitleBarTest {
         instrumentation.runOnMainSync { result = node(tag)?.second?.boundsInRoot }
         return checkNotNull(result) { "Missing $tag" }
     }
+    private fun assertHiddenChrome(tag:String) {
+        instrumentation.runOnMainSync {
+            findTag(tag)?.let { (root,_) ->
+                assertNull("Hidden $tag is absent from accessibility",root.semanticsOwner.rootSemanticsNode.find(hasTag(tag)))
+            }
+        }
+    }
     private fun screenBounds(tag: String): Rect {
         var result: Rect? = null
         instrumentation.runOnMainSync {
@@ -260,7 +267,7 @@ class AndroidTitleBarTest {
                 waitFor("Zen $label") { snapshot().optBoolean("chrome_hidden") && node("zen-button") != null }
                 rectEquals("$label Capy", normal, bounds("zen-button"))
                 rectEquals("$label glyph", normalGlyph, glyph("zen-button"))
-                assertNull("$label retires native header input", node("title-bar"))
+                assertHiddenChrome("title-bar")
                 val zenGlass = bounds("zen-button").translate(-host.surfaceOrigin)
                 instrumentation.runOnMainSync {
                     val boxes = host.glassBoxesForTest.map { Rect(it[0], it[1], it[0] + it[2], it[1] + it[3]) }.filter { it.overlaps(headerArea) }
@@ -293,7 +300,7 @@ class AndroidTitleBarTest {
         val zen = bounds("zen-button")
         val zenGlyph = glyph("zen-button")
         assertEquals((31 * density).roundToInt().toFloat(), zenGlyph.height, .6f)
-        assertNull(node("title-bar"))
+        assertHiddenChrome("title-bar")
         tap("zen-button")
         waitFor("restored Zen exits") { !snapshot().optBoolean("chrome_hidden") && node("zen-button") != null }
         rectEquals("restored Zen Capy", zen, bounds("zen-button"))
@@ -307,7 +314,7 @@ class AndroidTitleBarTest {
             val oldHeader = bounds("header-control-3").center
             val camera = state().getJSONObject("camera").toString()
             action(obj("type" to "invoke", "command" to "zen_mode"))
-            waitFor("Zen retires header controls") { snapshot().optBoolean("chrome_hidden") && node("title-bar") == null }
+            waitFor("Zen retires header controls") { snapshot().optBoolean("chrome_hidden") && node("title-bar")?.first?.semanticsOwner?.rootSemanticsNode?.find(hasTag("title-bar"))==null }
             instrumentation.runOnMainSync { pressed = checkNotNull(node("workspace")).first }
             event(MotionEvent.ACTION_DOWN, oldHeader)
             event(MotionEvent.ACTION_MOVE, oldHeader + Offset(-60 * density, 30 * density))
@@ -827,7 +834,7 @@ class AndroidTitleBarTest {
         val docked = bounds("group-10")
         val natural = measured()
         repeat(2) { round ->
-            action(obj("type" to "select_panel_tab", "group" to 10, "panel" to "color"))
+            instrumentation.runOnMainSync { host.customize(obj("type" to "show_all_controls", "panel" to "color")) }
             waitFor("expanded Color $round") {
                 state().getJSONObject("customization").optString("expanded") == "color" && (node("group-10")?.second?.boundsInRoot?.width ?: 0f) > docked.width + 100f
             }
@@ -1424,11 +1431,7 @@ class AndroidTitleBarTest {
     }
 
     private fun showSwipeLayers() {
-        val defaults=createEnglishHostForTest()
-        val workspace=try { JSONObject(Native.snapshot(defaults)!!).getJSONObject("state").getJSONObject("workspace") }
-            finally { Native.destroy(defaults) }
-        action(obj("type" to "restore_workspace","workspace" to workspace))
-        idle()
+        resetPreset("builtin:workspace:illustrator")
     }
 
     @Test fun layerInputOwnership() {
@@ -1670,11 +1673,9 @@ class AndroidTitleBarTest {
                 idle()
                 if(discrete)shot("$label-$run")
                 if(run>0) {
-                    assertTrue("Moving frames were measured",rows.size>1)
-                    if(properties)assertTrue("Native footer contacts changed pages throughout the gesture",transitions.size>=duration/selectionInterval-2)
-                    if(measureGeometry)assertTrue("Draw geometry matches native frame timestamps",windowFrames.count { it[0] in geometryByVsync }>=windowFrames.size*.95)
                     val result=obj("run" to run,"duration_ms" to duration,"begin_ns" to beginNs,"end_ns" to endNs,
                         "width" to width,"height" to height,"photo" to args.getString("photo"),"motion" to label,"theme" to theme,
+                        "transparency" to state().getJSONObject("settings").getString("transparency"),
                         "swipe_direction" to (if(swipeDirection<0) "left" else "right"),
                         "transitions_ns" to JSONArray(transitions),"selection_interval_ms" to (if(discrete)selectionInterval else JSONObject.NULL),
                         "animation_window_ms" to (if(discrete)200 else JSONObject.NULL),
@@ -1688,6 +1689,9 @@ class AndroidTitleBarTest {
                         "camera" to state().getJSONObject("camera"),
                         "layers" to state().array("layers"),"frames" to JSONArray(rows.map { JSONArray(it.toList()) }))
                     java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"$label-$run.json").writeText(result.toString())
+                    assertTrue("Moving frames were measured",rows.size>1)
+                    if(properties)assertTrue("Native footer contacts changed pages throughout the gesture",transitions.size>=duration/selectionInterval-2)
+                    if(measureGeometry)assertTrue("Draw geometry matches native frame timestamps",windowFrames.count { it[0] in geometryByVsync }>=windowFrames.size*.95)
                     android.util.Log.i("LayerSwipePerf","$label run $run: ${rows.size} moving frames in $duration ms")
                 }
             }
@@ -2108,6 +2112,224 @@ class AndroidTitleBarTest {
             tap(tile)
         }
         assertNull(host.actionError)
+    }
+
+    @Test fun zenBackdropStrengthFadesAndRetiresWithNativeChrome() {
+        resetPreset("builtin:workspace:photographer")
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            tap("column-icon-brushes")
+            waitFor("Expanded collapsed column registers its native connector") { host.glassConnectionsForTest.isNotEmpty() }
+            val menuTag=if(node("application-menu-view")!=null) "application-menu-view" else "header-menu-labels-compact"
+            val target=checkNotNull(node(menuTag));val menuPoint=target.second.boundsInRoot.center
+            val surface=scenario.activity().window.decorView.descendant<CanvasSurfaceView>()!!
+            val area=bounds("title-bar").translate(-host.surfaceOrigin)
+            val capy=node("zen-button")?.second?.boundsInRoot?.translate(-host.surfaceOrigin) ?: Rect.Zero
+            fun targets()=host.glassBoxesForTest.filter { box ->
+                val rect=Rect(box[0],box[1],box[0]+box[2],box[1]+box[3])
+                rect.overlaps(area) && !rect.overlaps(capy)
+            }
+            waitFor("Native header glass starts fully shown") { targets().isNotEmpty() && targets().all { it[8]==1f } }
+            val strengths=java.util.Collections.synchronizedList(mutableListOf<Float>())
+            val connectors=java.util.Collections.synchronizedList(mutableListOf<Double>())
+            lateinit var callback:android.view.Choreographer.FrameCallback
+            instrumentation.runOnMainSync {
+                val clock=android.view.Choreographer.getInstance()
+                callback=android.view.Choreographer.FrameCallback { strengths.addAll(targets().map { it[8] });connectors.addAll(host.glassConnectionsForTest.map { it.getDouble("strength") });clock.postFrameCallback(callback) }
+                clock.postFrameCallback(callback)
+                host.invoke("zen_mode")
+            }
+            try {
+                waitFor("Native hidden chrome retires its backdrop") { snapshot().optBoolean("chrome_hidden") && targets().isEmpty() && host.glassConnectionsForTest.isEmpty() }
+            } finally { instrumentation.runOnMainSync { android.view.Choreographer.getInstance().removeFrameCallback(callback) } }
+            assertTrue("GPU backdrop uses intermediate native fade strength: $strengths",strengths.any { it>0f && it<1f })
+            assertTrue("Native connector strengths stay valid until policy retirement: $connectors",connectors.all { it in 0.0..1.0 })
+            assertHiddenChrome("title-bar")
+            val contacts=mutableListOf<Int>()
+            instrumentation.runOnMainSync { surface.setOnTouchListener { _,event -> contacts.add(event.actionMasked);false } }
+            try {
+                tool=MotionEvent.TOOL_TYPE_FINGER;pressed=target.first
+                event(MotionEvent.ACTION_DOWN,menuPoint);event(MotionEvent.ACTION_UP);idle()
+            } finally { instrumentation.runOnMainSync { surface.setOnTouchListener(null) } }
+            assertTrue("Hidden header press reaches native canvas: $contacts",contacts.contains(MotionEvent.ACTION_DOWN) && contacts.contains(MotionEvent.ACTION_UP))
+            assertNull("A retained hidden menu cannot activate",node("workspace-menu"))
+            shot("zen-native-glass-$theme")
+            key(KeyEvent.KEYCODE_ESCAPE)
+            waitFor("Native header backdrop returns") { !snapshot().optBoolean("chrome_hidden") && targets().isNotEmpty() && targets().all { it[8]==1f } && host.glassConnectionsForTest.isEmpty() }
+            tap("column-icon-brushes")
+            waitFor("Collapsed column can reopen after Zen") { host.glassConnectionsForTest.isNotEmpty() && host.glassConnectionsForTest.all { it.getDouble("strength")==1.0 } }
+            tap("column-icon-brushes")
+            waitFor("Expanded collapsed column closes") { host.glassConnectionsForTest.isEmpty() }
+            assertNull(host.actionError);assertNull(host.failure)
+        }
+    }
+
+    @Test fun localizedNoticeRefreshKeepsItsOriginalDeadline() {
+        val tags=host.bootstrap!!.array("shipped_tags").values().map { it.toString() }
+        fun language(tag:String)=obj("type" to "preferences","action" to obj("type" to "edit","id" to "language","value" to tags.indexOf(tag)+1))
+        require("de" in tags && "en" in tags)
+        val pencil=host.catalog.array("brush_categories").objects().flatMap { it.array("brushes").objects() }.first { it.getString("label")=="Pencil" }.getLong("id")
+        val surface=scenario.activity().window.decorView.descendant<CanvasSurfaceView>()!!
+        for(theme in listOf("light","dark")) {
+            action(language("en"));waitFor("English notice fixture") { host.languageTag=="en" }
+            action(obj("type" to "set_theme","theme" to theme))
+            action(obj("type" to "layer","action" to obj("op" to "new_vector")))
+            action(obj("type" to "select_brush","id" to pencil))
+            waitFor("Notice brush ready") { snapshot().optBoolean("brush_ready") }
+            val start=SystemClock.uptimeMillis()
+            for((phase,x) in listOf(MotionEvent.ACTION_DOWN to .4f,MotionEvent.ACTION_MOVE to .6f,MotionEvent.ACTION_UP to .6f)) {
+                val event=motion(MotionEvent.TOOL_TYPE_MOUSE,phase,Offset(surface.width*x,surface.height*.5f),start,MotionEvent.BUTTON_PRIMARY)
+                try { instrumentation.runOnMainSync { surface.dispatchTouchEvent(event) } } finally { event.recycle() }
+            }
+            waitFor("Vector paint notice") { host.notice?.id!=null }
+            val shown=checkNotNull(host.notice);val shownAt=SystemClock.uptimeMillis()
+            val handler=android.os.Handler(android.os.Looper.getMainLooper())
+            val localize=Runnable { host.dispatch(language("de")) }
+            handler.postDelayed(localize,1700)
+            try {
+                waitFor("Same notice publishes translated copy",6000) { host.notice?.let { it.id==shown.id && it.text!=shown.text }==true }
+                val shared=state().getJSONObject("notice")
+                assertEquals(shared.getString("name"),host.notice!!.name)
+                assertEquals(shared.getString("text"),host.notice!!.text)
+                assertEquals(shared.array("actions").objects().map { it.getString("label") },host.notice!!.actions.map { it.label })
+                waitFor("Notice expires on original deadline",6000) { host.notice==null }
+                assertTrue("Localization must not restart the four-second timeout",SystemClock.uptimeMillis()-shownAt<4800)
+            } finally { handler.removeCallbacks(localize) }
+        }
+    }
+
+    @Test fun pickerDoubleActivationRequiresPointerPressesFromOneSource() {
+        resetPreset("builtin:workspace:painter")
+        val panel=state().getJSONObject("workspace").getJSONObject("layout").array("panels").objects().first { p ->
+            p.getJSONObject("content").optJSONArray("tiles")?.objects()?.any { it.getJSONObject("control").optString("kind")=="color_picker" }==true
+        }
+        val tile=panel.getJSONObject("content").array("tiles").objects().first { it.getJSONObject("control").optString("kind")=="color_picker" }
+        val tag="tile-${panel.getString("id")}-${tile.getInt("id")}"
+        fun drawer()=state().getJSONObject("customization").objectOrNull("drawer")
+        fun activate()=instrumentation.runOnMainSync {
+            fun click(node:SemanticsNode):(() -> Boolean)?=node.config.getOrNull(SemanticsActions.OnClick)?.action ?: node.children.firstNotNullOfOrNull(::click)
+            assertTrue(checkNotNull(click(checkNotNull(node(tag)).second)).invoke())
+        }
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            activate();activate();idle()
+            assertNull("Keyboard/accessibility activation cannot pair",drawer())
+            tool=MotionEvent.TOOL_TYPE_MOUSE;down(tag);event(MotionEvent.ACTION_UP)
+            activate();idle()
+            assertNull("Pointer and keyboard activation cannot pair",drawer())
+            tool=MotionEvent.TOOL_TYPE_FINGER;down(tag);event(MotionEvent.ACTION_UP)
+            tool=MotionEvent.TOOL_TYPE_STYLUS;down(tag);event(MotionEvent.ACTION_UP);idle()
+            assertNull("Different native pointer sources cannot pair",drawer())
+            tool=MotionEvent.TOOL_TYPE_FINGER;down(tag);event(MotionEvent.ACTION_UP)
+            down(tag);event(MotionEvent.ACTION_UP);idle()
+            waitFor("Pointer pair opens anchored picker settings") { drawer()!=null && node("picker-setting-source")!=null }
+            waitFor("Picker settings rows are fully visible") {
+                val drawerNode=node("tool-drawer")?.second
+                val drawerBounds=drawerNode?.boundsInRoot
+                listOf("picker-setting-source","picker-setting-size").all { tag ->
+                    drawerNode?.find(hasTag(tag))?.let {
+                        val row=it.boundsInRoot
+                        drawerBounds!=null && it.size.height>0 && row.height>=it.size.height-1 &&
+                            row.left>=drawerBounds.left-1 && row.top>=drawerBounds.top-1 &&
+                            row.right<=drawerBounds.right+1 && row.bottom<=drawerBounds.bottom+1
+                    }==true
+                }
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val (root,drawerNode)=checkNotNull(node("tool-drawer"))
+                val choice=checkNotNull(drawerNode.find(hasTag("picker-setting-size"))?.find { it.config.getOrNull(SemanticsActions.OnClick)?.action!=null })
+                pressed=root;point=choice.boundsInRoot.center
+            }
+            event(MotionEvent.ACTION_DOWN);event(MotionEvent.ACTION_UP)
+            waitFor("Picker sample-size menu accepts native contact") { host.pickerPopupOpen }
+            key(KeyEvent.KEYCODE_BACK)
+            waitFor("Picker sample-size menu closes") { !host.pickerPopupOpen }
+            instrumentation.waitForIdleSync()
+            shot("picker-pointer-double-$theme")
+            key(KeyEvent.KEYCODE_ESCAPE)
+            waitFor("Picker settings closes") { drawer()==null }
+        }
+    }
+
+    @Test fun layerRenameEscapePreservesImeOwnership() {
+        showSwipeLayers()
+        val id=state().array("layers").objects().first { it.getBoolean("can_rename") }.getLong("id")
+        fun row()=state().array("layers").objects().first { it.getLong("id")==id }
+        val original=row().getString("label")
+        val tag="layer-name-editor-$id"
+        fun begin(composing:Boolean):android.view.inputmethod.InputConnection {
+            action(obj("type" to "layer","action" to obj("op" to "begin_rename","id" to id)))
+            waitFor("Layer name owns native focus") { node(tag)!=null && host.editingText }
+            var connection:android.view.inputmethod.InputConnection?=null
+            instrumentation.runOnMainSync {
+                connection=checkNotNull(node(tag)).first.view.onCreateInputConnection(android.view.inputmethod.EditorInfo())
+                val input=checkNotNull(connection)
+                assertTrue(input.setSelection(0,original.length))
+                assertTrue(if(composing)input.setComposingText("Candidate name",1) else input.commitText("Draft name",1))
+            }
+            return checkNotNull(connection)
+        }
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            begin(false)
+            key(KeyEvent.KEYCODE_ESCAPE)
+            waitFor("Escape cancels layer name") { node(tag)==null }
+            assertEquals(original,row().getString("label"))
+            val connection=begin(true)
+            assertTrue(host.textComposition.active)
+            val candidateDown=SystemClock.uptimeMillis()
+            instrumentation.runOnMainSync {
+                for(phase in listOf(KeyEvent.ACTION_DOWN,KeyEvent.ACTION_UP))
+                    assertTrue(connection.sendKeyEvent(KeyEvent(candidateDown,candidateDown,phase,KeyEvent.KEYCODE_ESCAPE,0,0,-1,0,KeyEvent.FLAG_SOFT_KEYBOARD,android.view.InputDevice.SOURCE_KEYBOARD)))
+            }
+            idle()
+            assertNotNull("IME Escape retains the layer editor: rename=${state().getJSONObject("layer_tools").opt("rename_layer")} layer=${node("layer-row-$id")!=null} activity=${scenario.state} composition=${host.textComposition.active} editing=${host.editingText}",node(tag))
+            assertEquals(original,row().getString("label"))
+            instrumentation.runOnMainSync {
+                val editor=checkNotNull(node(tag)).first.view
+                assertTrue(checkNotNull(editor.onCreateInputConnection(android.view.inputmethod.EditorInfo())).finishComposingText())
+            }
+            waitFor("Layer composition finishes") { !host.textComposition.active }
+            val activity=scenario.activity()
+            val down=SystemClock.uptimeMillis()
+            instrumentation.runOnMainSync {
+                for(phase in listOf(KeyEvent.ACTION_DOWN,KeyEvent.ACTION_UP))
+                    assertTrue("Released app Escape is handled",activity.dispatchKeyEvent(KeyEvent(down,down,phase,KeyEvent.KEYCODE_ESCAPE,0,0,-1,0,0,android.view.InputDevice.SOURCE_KEYBOARD)))
+            }
+            waitFor("Escape cancels after IME releases") { node(tag)==null }
+            assertEquals(original,row().getString("label"))
+        }
+    }
+
+    @Test fun workspaceDividerKeyboardAndPointerDoubleTapIdentity() {
+        for(theme in listOf("light","dark")) {
+            resetPreset("builtin:workspace:illustrator")
+            action(obj("type" to "set_theme","theme" to theme))
+            fun dividers()=snapshot().getJSONObject("layout").array("dividers").objects()
+            val divider=dividers().first { !it.optBoolean("fixed") && it.optBoolean("band") && it.getString("axis")=="horizontal" }
+            val id=divider.getInt("id")
+            fun position()=dividers().first { it.getInt("id")==id }.getJSONObject("bounds").number("x")
+            val start=position()
+            val revision=state().getJSONObject("document_file").getLong("revision")
+            instrumentation.runOnMainSync { assertTrue(checkNotNull(node("divider-$id")).second.config[SemanticsActions.RequestFocus].action!!.invoke()) }
+            waitFor("Native divider focus") { host.dividerFocus==id }
+            key(KeyEvent.KEYCODE_DPAD_RIGHT)
+            waitFor("Shared divider key advances") { kotlin.math.abs(position()-start-12f)<1f }
+            key(KeyEvent.KEYCODE_DPAD_LEFT)
+            waitFor("Shared divider key returns") { kotlin.math.abs(position()-start)<1f }
+            assertEquals("Workspace resize keeps artwork revision",revision,state().getJSONObject("document_file").getLong("revision"))
+            val group=snapshot().getJSONObject("layout").array("groups").objects().first { it.getBoolean("tabs_visible") && node("group-grip-${it.getInt("id")}")!=null }
+            val grip="group-grip-${group.getInt("id")}"
+            val before=layout()
+            tool=MotionEvent.TOOL_TYPE_FINGER;down(grip);event(MotionEvent.ACTION_UP)
+            tool=MotionEvent.TOOL_TYPE_STYLUS;down(grip);event(MotionEvent.ACTION_UP);idle()
+            assertEquals("Different pointer sources cannot form a double tap",before,layout())
+            tool=MotionEvent.TOOL_TYPE_FINGER;down(grip);event(MotionEvent.ACTION_UP)
+            down(grip);event(MotionEvent.ACTION_UP);idle()
+            waitFor("Same pointer source doubles panel handle") { layout()!=before }
+            shot("workspace-divider-double-tap-$theme")
+        }
     }
 
     @Test fun layerSwipeAlphaLock() {

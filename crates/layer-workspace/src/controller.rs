@@ -1382,20 +1382,18 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         });
         Ok(UiChange::default())
     }
-    fn command_input<R: CanvasRenderer>(
+    fn command_input(
         &mut self,
-        session: &mut UiSession<R>,
         command: WorkspaceCommand,
-    ) -> Result<Option<WorkspaceInput>> {
-        let form = |action| Some(WorkspaceInput::Form { action });
-        let simple = matches!(self.manager.platform, Platform::Web | Platform::Android);
+    ) -> Result<WorkspaceInput> {
+        let form = |action| WorkspaceInput::Form { action };
         Ok(match command {
-            WorkspaceCommand::Manage => Some(WorkspaceInput::Open {
+            WorkspaceCommand::Manage => WorkspaceInput::Open {
                 page: ManagerPage::Workspaces,
-            }),
-            WorkspaceCommand::LayoutHistory => Some(WorkspaceInput::Open {
+            },
+            WorkspaceCommand::LayoutHistory => WorkspaceInput::Open {
                 page: ManagerPage::History,
-            }),
+            },
             WorkspaceCommand::New => form(ManagerAction::New),
             WorkspaceCommand::ResetBrushes => form(ManagerAction::ResetBrushes),
             WorkspaceCommand::ResetLayout => {
@@ -1403,29 +1401,16 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     || StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::OpenAWorkspaceFirst),
                 )?))
             }
-            WorkspaceCommand::Switch { id } => Some(WorkspaceInput::Switch { id }),
-            WorkspaceCommand::ShowInSwitcher { id, visible } => Some(WorkspaceInput::EditSwitcher {
+            WorkspaceCommand::Switch { id } => WorkspaceInput::Switch { id },
+            WorkspaceCommand::ShowInSwitcher { id, visible } => WorkspaceInput::EditSwitcher {
                 edit: SwitcherEdit::Show { id, visible },
-            }),
+            },
             WorkspaceCommand::SaveToolbar { panel } => form(ManagerAction::SaveToolbar(panel)),
-            WorkspaceCommand::ManageToolbars if !simple => Some(WorkspaceInput::Open {
+            WorkspaceCommand::ManageToolbars => WorkspaceInput::Open {
                 page: ManagerPage::ThisWorkspace,
-            }),
-            WorkspaceCommand::NewToolbar { group } if !simple => {
+            },
+            WorkspaceCommand::NewToolbar { group } => {
                 form(ManagerAction::NewToolbar(group))
-            }
-            WorkspaceCommand::ManageToolbars | WorkspaceCommand::NewToolbar { .. } => {
-                let action = match command {
-                    WorkspaceCommand::NewToolbar { group } => {
-                        CustomizationAction::NewToolbar { group }
-                    }
-                    _ => CustomizationAction::ManageToolbars,
-                };
-                let customized = session
-                    .dispatch(UiAction::Customize { action })
-                    .map_err(StoreError::invalid)?;
-                merge(&mut self.routed, customized);
-                None
             }
         })
     }
@@ -1453,11 +1438,8 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                 continue;
             }
             match self
-                .command_input(session, command)
-                .and_then(|input| match input {
-                    Some(input) => self.input(session, input, now),
-                    None => Ok(UiChange::default()),
-                }) {
+                .command_input(command)
+                .and_then(|input| self.input(session, input, now)) {
                 Ok(c) => merge(&mut self.routed, c),
                 Err(error) => self.set_error(error),
             }

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SettingsView.h"
 #include "UiControls.h"
+#include "WorkflowMotion.h"
 #include "Checker.h"
 #include "ShortcutPage.h"
 #include "WorkspaceGeometry.h"
@@ -334,6 +335,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
             else{VariableSizedWrapGrid grid;grid.Orientation(Orientation::Horizontal);grid.ItemWidth(side+10);grid.ItemHeight(side+10);grid.HorizontalAlignment(HorizontalAlignment::Center);circles=grid;}
             TextBox entry;entry.Width(96);entry.MaxLength(7);entry.PlaceholderText(str(kind,L"placeholder"));entry.VerticalAlignment(VerticalAlignment::Center);
             AutomationProperties::SetAutomationId(entry,L"setting-text-"+id);AutomationProperties::SetName(entry,titleText);
+            auto entryPages=std::make_shared<WorkflowPages>();Border emptyEntry;entryPages->append(emptyEntry);entryPages->append(entry);
             struct Draft{hstring text,key,saved;bool changed=false,editing=false;std::vector<Button> buttons;};
             auto draft=std::make_shared<Draft>();
             entry.TextChanging([data=data,draft](auto&& sender,auto&&){
@@ -344,7 +346,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
             entry.LostFocus([commit](auto&&,auto&&){commit();});
             entry.KeyDown([commit](auto&&,KeyRoutedEventArgs const& e){if(composingKey(e))return;if(e.Key()==winrt::Windows::System::VirtualKey::Enter){commit();e.Handled(true);}});
             auto refresh=std::make_shared<std::function<void()>>();
-            *refresh=[data=data,id,side,circles,entry,draft,repaint=std::weak_ptr<std::function<void()>>(refresh)]{
+            *refresh=[data=data,id,side,inlineRow,circles,entry,entryPages,draft,repaint=std::weak_ptr<std::function<void()>>(refresh)]{
                 auto current=object(rowFor(data,id),L"kind");auto swatches=array(current,L"swatches");auto chosen=uint32_t(num(current,L"selected"));
                 if(auto saved=str(current,L"value");saved!=draft->saved){draft->saved=saved;draft->editing=false;}
                 uint32_t customIndex=swatches.Size();
@@ -353,7 +355,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
                 hstring key=to_hstring(chosen)+data->theme();
                 for(auto value:swatches){auto swatch=value.GetObject();for(auto field:{L"value",L"color",L"foreground",L"icon",L"custom"})key=key+swatch.GetNamedValue(field,JsonValue::CreateNullValue()).Stringify()+L"|";}
                 bool custom=chosen<swatches.Size()&&chosen==customIndex;
-                entry.Visibility(custom?Visibility::Visible:Visibility::Collapsed);
+                entryPages->show(custom?1:0,true,!inlineRow);
                 if(!draft->changed&&entry.FocusState()==FocusState::Unfocused)entry.Text(str(current,L"custom"));
                 if(key==draft->key){for(uint32_t i=0;i<swatches.Size();++i){auto title=str(swatches.GetObjectAt(i),L"label");tooltip(draft->buttons[i],title);AutomationProperties::SetName(draft->buttons[i],title);AutomationProperties::SetItemStatus(draft->buttons[i],i==chosen?data->caption(L"search",L"selected"):L"");}return;}
                 draft->key=key;circles.Children().Clear();draft->buttons.clear();
@@ -387,7 +389,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
                 }
             };
             bindings.emplace_back([refresh]{(*refresh)();});(*refresh)();
-            StackPanel host;host.Spacing(8);host.Children().Append(circles);host.Children().Append(entry);
+            StackPanel host;host.Spacing(8);host.Children().Append(circles);host.Children().Append(entryPages->root);
             if(inlineRow){text.Spacing(10);text.Children().Append(host);Grid::SetColumnSpan(text,2);}
             else{host.HorizontalAlignment(HorizontalAlignment::Center);text.Spacing(10);text.Children().Append(host);Grid::SetColumnSpan(text,2);}
         }else if(type==L"link"){

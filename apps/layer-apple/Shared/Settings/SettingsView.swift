@@ -236,30 +236,41 @@ private struct PreferenceSwatches: View {
     let commit: (String) -> Void
     @State private var editing = false
     @State private var text = ""
+    @State private var focusRequest = 0
     @FocusState private var focused: Bool
     private var kind: JSON { row["kind"] }
+    private var customSelected: Bool {
+        let choices = kind["swatches"].array, index = Int(kind["selected"].uint)
+        return choices.indices.contains(index) && choices[index]["custom"].bool
+    }
+    private var revealed: Bool { editing || customSelected }
     var body: some View {
+        Group {
         if kind["inline"].bool {
             HStack(spacing: 8) {
                 Text(row["title"].string).layoutPriority(1)
                 Spacer(minLength: 8)
-                if editing { field.frame(width: 96) }
+                if revealed { field.frame(width: 96).transition(.move(edge: .trailing).combined(with: .opacity)) }
                 HStack(spacing: 10) { circles(28) }
             }
         } else {
             VStack(spacing: 12) {
                 Text(row["title"].string).frame(maxWidth: .infinity, alignment: .leading)
                 CenteredFlow(spacing: 10) { circles(32) }
-                if editing { field.frame(width: 120) }
+                if revealed { field.frame(width: 120).transition(.move(edge: .top).combined(with: .opacity)) }
             }
         }
+        }.clipped().animation(.easeOut(duration: 0.25), value: revealed)
+            .onAppear { if !focused { text = kind["custom"].string } }
+            .onChange(of: kind["custom"].string) { _, next in if !focused { text = next } }
+            .onChange(of: kind["value"].string) { _, _ in if !focused { editing = false; text = kind["custom"].string } }
     }
     private func circles(_ side: CGFloat) -> some View {
         ForEach(kind["swatches"].array.indices, id: \.self) { index in
             let swatch = kind["swatches"][index], selected = Int(kind["selected"].uint) == index
             Button {
                 if swatch["custom"].bool {
-                    text = kind["custom"].string; editing = true; focused = true
+                    text = kind["custom"].string; editing = true; focusRequest += 1; focused = true
                 } else {
                     editing = false; commit(swatch["value"].string)
                 }
@@ -288,20 +299,18 @@ private struct PreferenceSwatches: View {
         }
     }
     private var field: some View {
-        TextField(row["title"].string, text: $text, prompt: Text(kind["placeholder"].string))
-            .labelsHidden().focused($focused).monospaced()
-            .onSubmit { submit() }
-            .autocorrectionDisabled()
-            #if os(iOS)
-            .textInputAutocapitalization(.never).keyboardType(.asciiCapable)
-            #endif
+        NumericTextField(label: row["title"].string, text: $text, focused: $focused,
+            fontSize: 14, color: palette["text"], identifier: "preference-" + row["id"].string + "-custom",
+            submit: { _ in submit(); return !NativeTextContext.composing }, cancel: { focused = false })
+            .id(focusRequest).frame(height: 28).padding(.horizontal, 6)
+            .background(palette["input"], in: SquircleShape.control)
             .focusedValue(\.editorTextCommit, { submit() })
-            .onChange(of: text) { _, next in if next.count > 7 { text = String(next.prefix(7)) } }
+            .onChange(of: text) { _, next in if !NativeTextContext.composing && next.count > 7 { text = String(next.prefix(7)) } }
             .onChange(of: focused) { old, next in if old && !next { submit() } }
-            .onChange(of: kind["value"].string) { _, _ in editing = false }
-            .accessibilityIdentifier("preference-" + row["id"].string + "-custom")
     }
+
     private func submit() {
+        guard !NativeTextContext.composing else { return }
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard trimmed != kind["custom"].string else { return }
         commit(trimmed)

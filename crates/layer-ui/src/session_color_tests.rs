@@ -1074,3 +1074,35 @@ fn shared_gradient_keyboard_release_preserves_precise_position_and_one_history_e
         }
     }
 }
+
+#[test]
+fn color_slot_context_keeps_slot_identity_and_opens_shared_palettes() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        let checkpoint = s.engine.checkpoint();
+        for slot in [ColorSlot::Foreground, ColorSlot::Background] {
+            let menu = s.context_menu(ContextTarget::ColorSlot { slot }).unwrap();
+            assert_eq!(menu.sections[0][2].icon.as_deref(), Some("color-swap"));
+            let actions: Vec<_> = menu.sections.into_iter().flatten().map(|entry| entry.action.unwrap()).collect();
+            assert_eq!(actions.len(), 3);
+            assert_eq!(actions[0], UiAction::ColorSlotMenu { slot, library: false });
+            assert_eq!(actions[1], UiAction::ColorSlotMenu { slot, library: true });
+            assert_eq!(actions[2], UiAction::Color { action: ColorAction::Swap });
+            s.dispatch(actions[0].clone()).unwrap();
+            assert!(s.state.requests.iter().any(|request| matches!(request.kind,
+                HostRequestKind::ColorSlot { slot: requested, library: false } if requested == slot)));
+            s.state.requests.clear();
+            let change = s.dispatch(actions[1].clone()).unwrap();
+            assert_ne!(change.regions & regions::BRUSH, 0);
+            assert_eq!(s.state.display_colors().slot, slot);
+            assert!(s.state.workspace.layout.panel_group(Panel::Palettes).is_some());
+            assert_eq!(s.state.workspace.layout.active_panel(Panel::Palettes), Some(Panel::Palettes));
+            assert!(s.state.requests.is_empty());
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+        }
+        for slot in [ColorSlot::Transparent, ColorSlot::Temporary] {
+            assert!(s.context_menu(ContextTarget::ColorSlot { slot }).is_err());
+            assert!(s.dispatch(UiAction::ColorSlotMenu { slot, library: false }).is_err());
+        }
+    }
+}

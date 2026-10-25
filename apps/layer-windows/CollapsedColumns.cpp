@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CollapsedColumns.h"
+#include "ChromeVisibility.h"
 #include "WorkspaceGeometry.h"
 #include <set>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
@@ -9,6 +10,8 @@ namespace {
 struct Column:std::enable_shared_from_this<Column>{
     std::shared_ptr<WorkspaceData> data;
     std::shared_ptr<WorkspaceGestures> gestures;
+    std::function<void()> changed;
+    std::shared_ptr<ChromeVisibility> fade=std::make_shared<ChromeVisibility>();
     Canvas workspace{nullptr},frame,icons;
     Shapes::Path surface;
     Border background,grip;
@@ -149,6 +152,7 @@ struct Column:std::enable_shared_from_this<Column>{
         if(std::abs(scroll.VerticalOffset()-offset)>.25)scroll.ChangeView(nullptr,offset,nullptr,true);
         applying=false;
     }
+    void visible(bool shown){fade->apply(background,shown,[weak=weak_from_this()]{if(auto self=weak.lock()){for(auto const& [id,connection]:self->connections)connection.path.Opacity(self->background.Opacity());if(self->changed)self->changed();}});for(auto const& [id,connection]:connections){connection.path.IsHitTestVisible(false);connection.path.Opacity(background.Opacity());connection.path.Visibility(background.Visibility());}}
     void collectGlass(A& regions,A& links,UIElement const& reference)const{
         if(!appendGlass(regions,background,reference,{corners[0],corners[1],corners[2],corners[3]},true))return;
         for(auto value:array(object(geometry,L"open"),L"connections"))appendConnection(links,value.GetArray().GetObjectAt(1),workspace,reference);
@@ -164,20 +168,21 @@ struct CollapsedColumns::Impl{
     Canvas root{nullptr};
     std::shared_ptr<WorkspaceGestures> gestures;
     std::map<uint32_t,std::shared_ptr<Column>> columns;
+    std::function<void()> changed;
     void reset(){for(auto const& [id,column]:columns)column->remove();columns.clear();}
     void apply(){
         std::set<uint32_t> current;
-        if(!flag(data->model,L"chrome_hidden"))for(auto value:array(object(data->model,L"layout"),L"collapsed")){
+        for(auto value:array(object(data->model,L"layout"),L"collapsed")){
             auto geometry=value.GetObject();uint32_t id=uint32_t(num(geometry,L"id"));current.insert(id);
             auto [it,added]=columns.try_emplace(id);
-            if(added){auto column=std::make_shared<Column>();column->data=data;column->workspace=root;column->gestures=gestures;column->id=id;column->init();it->second=column;}
-            it->second->apply(geometry);
+            if(added){auto column=std::make_shared<Column>();column->data=data;column->workspace=root;column->gestures=gestures;column->changed=changed;column->id=id;column->init();it->second=column;}
+            it->second->apply(geometry);it->second->visible(!flag(data->model,L"chrome_hidden"));
         }
         for(auto it=columns.begin();it!=columns.end();)if(!current.contains(it->first)){it->second->remove();it=columns.erase(it);}else ++it;
     }
 };
-CollapsedColumns::CollapsedColumns(std::shared_ptr<WorkspaceData> data,Canvas root,std::shared_ptr<WorkspaceGestures> gestures):
-    impl(std::make_shared<Impl>()){impl->data=std::move(data);impl->root=root;impl->gestures=std::move(gestures);}
+CollapsedColumns::CollapsedColumns(std::shared_ptr<WorkspaceData> data,Canvas root,std::shared_ptr<WorkspaceGestures> gestures,std::function<void()> changed):
+    impl(std::make_shared<Impl>()){impl->data=std::move(data);impl->root=root;impl->gestures=std::move(gestures);impl->changed=std::move(changed);}
 CollapsedColumns::~CollapsedColumns(){impl->reset();}
 void CollapsedColumns::Apply(){impl->apply();}
 void CollapsedColumns::Reset(){impl->reset();}

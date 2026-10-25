@@ -12,7 +12,7 @@ struct NumericTextField: NSViewRepresentable {
     let identifier: String
     let submit: (_ returnToCanvas: Bool) -> Bool
     let cancel: () -> Void
-    let step: (Int) -> Void
+    var step: ((Int) -> Void)? = nil
     @Environment(\.isEnabled) private var enabled
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSTextField {
@@ -68,8 +68,8 @@ struct NumericTextField: NSViewRepresentable {
             case #selector(NSResponder.insertNewline(_:)): _ = parent.submit(true); return true
             case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.insertBacktab(_:)):
                 return !parent.submit(false)
-            case #selector(NSResponder.moveUp(_:)): parent.step(1); return true
-            case #selector(NSResponder.moveDown(_:)): parent.step(-1); return true
+            case #selector(NSResponder.moveUp(_:)): guard let step = parent.step else { return false }; step(1); return true
+            case #selector(NSResponder.moveDown(_:)): guard let step = parent.step else { return false }; step(-1); return true
             default: return false
             }
         }

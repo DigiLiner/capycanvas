@@ -471,7 +471,7 @@ class AndroidCommandSearchTest {
                     val boxes = host.glassBoxesForTest
                     observed = "top=${node.boundsInRoot.top} expected=$top ime=$ime region=$region boxes=${boxes.map { it.toList() }}"
                     (keyboard || insets.isVisible(WindowInsetsCompat.Type.ime())) && abs(node.boundsInRoot.top - top) <= 1f &&
-                        boxes.any { registered(it) && it.drop(4).all { r -> abs(r - radius) < .5f } }
+                        boxes.any { registered(it) && it.drop(4).take(4).all { r -> abs(r - radius) < .5f } }
                 }
             } catch (e: AssertionError) { throw AssertionError("$name: $observed", e) }
             android.util.Log.i("CommandSearchTest", "$name card=$card $observed")

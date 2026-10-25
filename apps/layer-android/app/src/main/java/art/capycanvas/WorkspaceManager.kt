@@ -30,6 +30,7 @@ import org.json.JSONObject
 import org.json.JSONArray
 
 /** Compose owns focus/scroll/input; Rust owns records, selections and previews. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun WorkspaceManager(host: CanvasHost) {
     val copy = host.catalog.getJSONObject("native_copy").getJSONObject("header")
     val view = host.workspaceManager ?: return
@@ -37,6 +38,7 @@ import org.json.JSONArray
     val form = view.objectOrNull("prompt")
     val error = view.optString("error").takeUnless { it == "null" || it.isEmpty() }
     val busy = view.optBoolean("busy")
+    val toolbarMode = page in listOf("this_workspace", "toolbar_library")
     val rowInteraction = remember { WorkspaceRowInteraction() }
     val focusWindow = view.optJSONObject("focus_window")?.optString("id")
     LaunchedEffect(focusWindow) { if (focusWindow != null) host.reportActionError(copy.getString("owned_elsewhere")) }
@@ -55,17 +57,29 @@ import org.json.JSONArray
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(view.getString("title"), Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                    if (page != "history") FilledTonalIconButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new"))) },
+                    if (page == "workspaces") FilledTonalIconButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new"))) },
                         enabled = !busy, modifier = Modifier.size(32.dp).testTag("new-workspace").semantics { contentDescription = copy.getString("new_workspace") }, shape = RoundedCornerShape(6.dp)) { SharedIcon("plus", null) }
                     IconButton(cancel, Modifier.size(32.dp).semantics { contentDescription = host.bootstrap!!.getJSONObject("common").getString("close") }) { SharedIcon("close", null) }
                 }
                 view.getString("intro").takeIf { it.isNotEmpty() }?.let { Text(it, color = colors.settingsSecondary) }
+                if (toolbarMode) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((target, label) in listOf("this_workspace" to "this_workspace", "toolbar_library" to "saved_toolbars")) TextButton({ host.workspaceInput(obj("type" to "open", "page" to target)) }, enabled = !busy) { Text(copy.getString(label)) }
+                }
+                if (page != "history" && (toolbarMode || view.array("rows").length() > 7 || view.optString("query").isNotEmpty())) CoreTextField(view.optString("query"), { host.workspaceInput(obj("type" to "search", "query" to it)) }, Modifier.fillMaxWidth().testTag("workspace-search"), placeholder = { Text(copy.getString("search")) })
+                if (page == "this_workspace") TextButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new_toolbar", "value" to null))) }, enabled = !busy, modifier = Modifier.testTag("new-toolbar")) { Text(copy.getString("new_toolbar_action")) }
                 WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill = false).height(315.dp).fillMaxWidth())
+                if (toolbarMode) view.objectOrNull("details")?.let { details ->
+                    Text(details.getString("title"), fontWeight = FontWeight.Bold)
+                    Text(details.getString("description"), color = colors.settingsSecondary)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (button in details.array("actions").objects()) TextButton({ host.workspaceInput(obj("type" to "action", "action" to button.getJSONObject("action"))) }, enabled = !busy && button.optBoolean("enabled"), modifier = Modifier.testTag("toolbar-action-${button.getJSONObject("action").getString("type")}")) { Text(button.getString("label")) }
+                    }
+                }
                 view.optString("switcher_error").takeUnless { it == "null" || it.isEmpty() }?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
                 if (error != null && form == null) Text(error, color = MaterialTheme.colorScheme.error)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (!toolbarMode) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(cancel, Modifier.weight(1f).testTag("workspace-cancel")) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) }
                     if (view.optBoolean("retry")) TextButton({ send("retry") }, enabled = !busy) { Text(copy.getString("retry")) }
                     Button({ send("confirm") }, Modifier.weight(1f).testTag("workspace-confirm"), enabled = view.optBoolean("enabled") && !busy) { Text(view.getString("primary")) }
@@ -77,15 +91,21 @@ import org.json.JSONArray
         val action = view.getJSONObject("prompt_action")
         val named = !form.isNull("name")
         var name by remember(action.toString(), form.optString("name")) { mutableStateOf(if (named) form.getString("name") else "") }
+        var description by remember(action.toString()) { mutableStateOf(form.optString("description").takeUnless { form.isNull("description") }.orEmpty()) }
+        val choices = form.array("choices").objects()
+        var choice by remember(action.toString()) { mutableStateOf(form.optString("selected").takeUnless { form.isNull("selected") }) }
+        val nameError = if (!named) null else remember(name, host.languageTag) { JSONObject(Native.workspaceNameError(name, host.languageTag)).let { it.optString("error").takeUnless { _ -> it.isNull("error") } } }
         val title = form.getString("title")
         AlertDialog(onDismissRequest = cancel, modifier = Modifier.testTag("workspace-form"), title = { Text(title) }, text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 form.getString("message").takeIf { it.isNotEmpty() }?.let { Text(it) }
                 if (named) CoreTextField(name, { name = it }, Modifier.fillMaxWidth().testTag("workspace-name"), label = { Text(host.bootstrap!!.getJSONObject("common").getString("name")) })
-                if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
+                if (!form.isNull("description")) CoreTextField(description, { description = it }, Modifier.fillMaxWidth().testTag("workspace-description"), label = { Text(copy.getString("description")) })
+                if (choices.isNotEmpty()) PropertyChoice(form.getString("choice_label"), choices.map { it.getString("label") }, choices.indexOfFirst { it.getString("id") == choice }.coerceAtLeast(0), enabled = !busy) { choice = choices[it].getString("id") }
+                if (nameError != null || error != null) Text(nameError ?: error.orEmpty(), color = MaterialTheme.colorScheme.error)
             }
         }, dismissButton = { TextButton(cancel) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) } }, confirmButton = {
-            TextButton({ host.workspaceInput(obj("type" to "submit", "name" to name)) }, enabled = !busy,
+            TextButton({ host.workspaceInput(obj("type" to "submit", "name" to name, "description" to description.takeUnless { form.isNull("description") }, "choice" to choice)) }, enabled = !busy && nameError == null,
                 modifier = Modifier.testTag("workspace-submit")) { Text(if (view.optBoolean("retry") && action.getString("type") != "save_as_new") copy.getString("retry") else form.getString("confirm"),
                 color = if (form.optBoolean("destructive")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
         })

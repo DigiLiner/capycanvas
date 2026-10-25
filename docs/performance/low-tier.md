@@ -161,7 +161,8 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Windows tool bubble drag through four neighbours | 60 | Unmeasured on reference hardware; Surface Pro / Adreno X1-85 functional checks do not qualify timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | Windows HDR color bubble drag and intensity scrub | 60 | Unmeasured on reference hardware; native input and pixel checks do not qualify presentation timing (PresentMon ETW access denied) | [Windows tool bubbles](../development/windows.md#tool-bubbles) |
 | HDR color bubble drag and intensity scrub | 60 | Unmeasured on reference hardware; other tablets and workstation diagnostics do not qualify this tier; Apple reference and native overlay timing unmeasured; 61 MP Mac canvas diagnostic only | [Web and Android HDR color bubbles](top-tier.md#web-and-android-hdr-color-bubbles); [Apple HDR diagnostic](top-tier.md#apple-hdr-color-bubble-diagnostic), 2026-10-24 |
-| Drawer open and close | 60 | Unmeasured on the reference tablet; GTK Sketch has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
+| Drawer open and close | 60 | **Unqualified.** Android Layers/Properties diagnostic fails draw/FrameMetrics timestamp correspondence; no trustworthy moving presentation rate | [Drawer timestamp diagnostic](#drawer-timestamp-diagnostic); [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
+| Zen fade, expanded configuration and dialog page transitions | 60 | Unmeasured on the reference tablet; controlled-clock and input checks do not qualify presentation timing | [Shared chrome](../ui/shared-ui.md#window-chrome-and-zen-mode); [numeric controls](../ui/numeric-controls.md) |
 | Grouped tool menus, drawer switching and tile drag | 60 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); functional checks do not qualify this tier |
 | Grouped Drawing drawer scrolling | 60 | **Met**, UI FrameMetrics 58.85–60.02 Hz, maximum p99 33.328 ms | [Grouped tool drawer scrolling](#grouped-tool-drawer-scrolling) below |
 | Colour wheel or picker drag | 60 | **Unqualified.** Committed-wheel diagnostic: mouse 48.24–51.16 UI Hz, touch 52.80–54.39; maximum p99 49.98 ms (2048 × 1536) | [Live paint icon diagnostic](#live-paint-icon-diagnostic) below |
@@ -196,6 +197,27 @@ thermal status 0 before and after each theme. The rates exceed the 57 fps floor,
 but the second light run exceeds the 33.3 ms interval limit. These partial-swipe
 measurements do not qualify the full gesture. Raw arrays, thermal readings and
 captures are in `artifacts/layer-swipe-fixed/`.
+
+## Drawer timestamp diagnostic
+
+Measured 2026-10-24 on TCL TAB 11 Gen 2 with the 4248 × 2832 reference photo,
+Fit zoom, default Low glass and thermal status 0 before and after. The benchmark
+APK is `69fa6b0bd33458cd07e415832dcb8cafb2562b7b34ba0a4c5cde1228edb9d490`,
+based on `98f562dd0` plus the interaction adapters. The source and test hashes
+are retained in `artifacts/gtk-interaction-fixes/android-benchmark-diagnostic-artifact-manifest.json`.
+
+After the existing warm-up, one five-second light-theme Layers/Properties run
+records 33 native footer transitions, 261 FrameMetrics and 159 draw-geometry
+samples. Only 105 frame timestamps match draw geometry exactly (40.2%, below
+the harness's unchanged 95% requirement). Intended-vsync matching does not
+recover the missing correspondence. The raw recording is written before the
+assertion so this failure preserves its evidence.
+
+No moving presentation rate is qualified from this run. The remaining repeats
+and dark theme are not measured after the instrumentation failure. Zen fades,
+expanded configuration and dialog page transitions also remain unqualified.
+Raw samples and the diagnostic summary are under
+`artifacts/gtk-interaction-fixes/`; newer source requires a new measurement.
 
 ## Touch navigation
 

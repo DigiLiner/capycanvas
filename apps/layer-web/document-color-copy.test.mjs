@@ -24,7 +24,7 @@ function harness(t,{source=false,missing=null,failure=null}={}) {
   const fields=['assign_title','assign_help','repair_title','repair_help','space','correct_profile','composition_preview','outside_gamut','preparing','preview_help','prepared_composition','original_composition','before','after','preview','add_source','apply_profile'];
   const documentCopy=()=>({...Object.fromEntries(fields.map(field=>[field,`${language}:${field}`])),common:{apply:`${language}:apply`,cancel:`${language}:cancel`}});
   const app={document_color:()=>({space:'Srgb',depth:'U8'}),document_color_copy:documentCopy,export_copy:()=>({}),profile_copy:()=>({import:`${language}:import`,saved_dialog:`${language}:saved`}),
-    capture_control:()=>({cancelled:()=>false,cancel(){},free(){}}),color_feature_error_copy:error=>`${language}:${error.color_feature_error}`,
+    capture_control:()=>{let cancelled=false,freed=false;return{cancelled:()=>cancelled,cancel(){assert.equal(freed,false);cancelled=true;},free(){freed=true;}};},color_feature_error_copy:error=>`${language}:${error.color_feature_error}`,
     source_profile_name_copy:value=>value==null?`${language}:unnamed`:value,color_source_preview:(name,preview,adds)=>`${name} / ${preview} / ${adds}`,
     prepare_color(){prepares++;return new Promise((done,reject)=>{resolver=failure?()=>reject(failure):done;});},prepare_source(){prepares++;return new Promise(done=>{resolver=done;});},prepare_source_comparison:prepared=>prepared};
   const read=value=>{reads++;assert.equal(freed,false,'no binding may read a freed candidate');return value;};
@@ -33,13 +33,13 @@ function harness(t,{source=false,missing=null,failure=null}={}) {
   const bind=(node,reader)=>{bindCopy(node,reader);return node;};
   const button=(text,action,cls)=>{const node=element('button',cls,text);node.click=action;return node;};
   const result=chooseDocumentColor({app,element,button,id:7,request:source?{type:'repair_source_profile'}:{type:'document_color',operation:'assign'},gpuOperation:run=>run(),dialog:(title,build)=>new Promise(done=>{form=element('form');finish=done;build(form,done);})});
-  return {app,doc,form,result,candidate,switch(tag){language=tag;refreshCopy(app);form.localize();refreshBindings();},resolve(){resolver(candidate);},stats:()=>({reads,prepares}),buttons:()=>form.querySelectorAll('button'),finish};
+  return {app,doc,form,result,candidate,switch(tag){language=tag;refreshCopy(app);form.localize();refreshBindings();},resolve(value=candidate){resolver(value);},stats:()=>({reads,prepares}),buttons:()=>form.querySelectorAll('button'),finish};
 }
 import {bindCopy} from './localization.js';
 
 test('prepared document-color copy retains controls, selected options, focus and immutable preview pixels',async t=>{
   const h=harness(t),controls=h.form.querySelectorAll('select,button'),space=controls[0];space.value='ProPhoto';space.focus();
-  h.buttons().find(node=>node.textContent==='en:preview').click();h.switch('tr');assert.equal(h.stats().prepares,1);
+  await settle();h.switch('tr');assert.equal(h.stats().prepares,1);
   assert.equal(h.form.querySelectorAll('p').at(-1).textContent,'tr:preparing');h.resolve();await settle();
   const canvases=h.form.querySelectorAll('canvas'),pixels=canvases.map(node=>node.image),before=h.stats();h.switch('fr');
   assert.deepEqual(h.form.querySelectorAll('select,button'),controls);assert.deepEqual(h.form.querySelectorAll('canvas'),canvases);assert.deepEqual(canvases.map(node=>node.image),pixels);assert.equal(space.value,'ProPhoto');assert.equal(h.doc.activeElement,space);assert.deepEqual(h.stats(),before);
@@ -49,13 +49,30 @@ test('prepared document-color copy retains controls, selected options, focus and
 
 test('source profile presentation preserves raw missing versus literal empty name and never repeats decoding',async t=>{
   for(const missing of [null,'']){
-    const h=harness(t,{source:true,missing});h.buttons().find(node=>node.textContent==='en:preview').click();h.resolve();await settle();const before=h.stats();
+    const h=harness(t,{source:true,missing});await settle();h.resolve();await settle();const before=h.stats();
     h.switch('tr');assert.equal(h.form.querySelectorAll('p').at(-1).textContent,`${missing==null?'tr:unnamed':''} / tr:composition_preview / true`);assert.equal(h.buttons().at(-1).textContent,'tr:add_source');assert.deepEqual(h.stats(),before);
     h.buttons().find(node=>node.textContent.endsWith(':cancel')).click();await h.result;
   }
 });
 
 test('shared candidate failure is projected at publication without preparing again',async t=>{
-  const h=harness(t,{failure:{color_feature_error:'ProfileReadLimit'}});h.buttons().find(node=>node.textContent==='en:preview').click();h.resolve();await settle();assert.equal(h.form.querySelectorAll('p').at(-1).textContent,'en:ProfileReadLimit');
+  const h=harness(t,{failure:{color_feature_error:'ProfileReadLimit'}});await settle();h.resolve();await settle();assert.equal(h.form.querySelectorAll('p').at(-1).textContent,'en:ProfileReadLimit');
   h.switch('ru');assert.equal(h.form.querySelectorAll('p').at(-1).textContent,'ru:ProfileReadLimit');assert.equal(h.stats().prepares,1);h.buttons().find(node=>node.textContent.endsWith(':cancel')).click();await h.result;
+});
+
+test('changed choices cancel and drain the active comparison before preparing the latest draft',async t=>{
+  const h=harness(t);await settle();assert.equal(h.stats().prepares,1);
+  const space=h.form.querySelectorAll('select')[0];space.value='DisplayP3';space.onchange();space.value='ProPhoto';space.onchange();
+  assert.equal(h.stats().prepares,1,'a successor cannot overlap its decoder');
+  let discarded=false;h.resolve({free(){discarded=true;}});await settle();
+  assert.equal(discarded,true);assert.equal(h.stats().prepares,2,'intermediate choices coalesce');
+  h.resolve();await settle();h.buttons().at(-1).click();assert.equal(await h.result,h.candidate);
+});
+
+
+test('Cancel drains a superseded comparison without starting a queued successor or using released controls',async t=>{
+  const h=harness(t);await settle();const space=h.form.querySelectorAll('select')[0];space.value='DisplayP3';space.onchange();
+  h.buttons().find(node=>node.textContent.endsWith(':cancel')).click();let discarded=false;h.resolve({free(){discarded=true;}});
+  assert.equal(await h.result,null);assert.equal(discarded,true);await settle();assert.equal(h.stats().prepares,1);
+  space.onchange();assert.equal(h.stats().prepares,1,'retired native callbacks cannot touch released control');
 });

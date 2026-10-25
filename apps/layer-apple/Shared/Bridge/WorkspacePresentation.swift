@@ -28,6 +28,7 @@ import SwiftUI
         return inputState!
     }
     private var chromeKey = ""
+    var reduceMotion = false
     var headerHeld = false
     private var popovers = [UUID: (owner: UUID, defersLanguage: Bool)]()
     var languageInputBusy: Bool { popovers.values.contains { $0.defersLanguage } }
@@ -67,7 +68,7 @@ import SwiftUI
             let start = ProcessInfo.processInfo.systemUptime
             while !Task.isCancelled {
                 guard let self, let store = self.store else { return }
-                let fraction = min(1, (ProcessInfo.processInfo.systemUptime - start) / duration)
+                let fraction = self.reduceMotion ? 1 : min(1, (ProcessInfo.processInfo.systemUptime - start) / duration)
                 let query: [String: Any] = ["type": "expansion", "panel": panel,
                     "heights": [0, self.configurationHeight], "progress": fraction,
                     "from": from.raw, "closing": closing]
@@ -289,8 +290,10 @@ struct WorkspaceDrag: ViewModifier {
 }
 struct WorkspaceRootDrag: ViewModifier {
     @ObservedObject var workspace: WorkspacePresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
         content.background(NativeReorderInput(model: workspace.input))
+            .onChange(of: reduceMotion, initial: true) { _, value in workspace.reduceMotion = value }
             .onDisappear { workspace.input.cancel() }
     }
 }

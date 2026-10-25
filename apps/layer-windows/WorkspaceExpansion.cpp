@@ -2,6 +2,7 @@
 #include "WorkspaceExpansion.h"
 #include "WorkspaceQuery.h"
 #include <chrono>
+#include <winrt/Windows.UI.ViewManagement.h>
 
 using namespace CapyUi;
 struct WorkspaceExpansion::Impl:std::enable_shared_from_this<Impl>{
@@ -46,7 +47,7 @@ struct WorkspaceExpansion::Impl:std::enable_shared_from_this<Impl>{
         if(disposed||(!dirty&&!animating)){timer.Stop();return;}
         if(busy||!root.IsLoaded()||root.ActualWidth()<=0||root.ActualHeight()<=0)return;
         auto duration=std::max(1.,num(data->catalog,L"panel_expansion_ms",200))/1000.;
-        double progress=animating?std::clamp(std::chrono::duration<double>(Clock::now()-started).count()/duration,0.,1.):1.;
+        double progress=animating&&Windows::UI::ViewManagement::UISettings().AnimationsEnabled()?std::clamp(std::chrono::duration<double>(Clock::now()-started).count()/duration,0.,1.):1.;
         A heights;heights.Append(N(0));heights.Append(N(height));
         auto request=O({{L"type",S(L"expansion")},{L"panel",S(panel)},{L"heights",heights},{L"progress",N(progress)},
             {L"from",from.Size()?V(from):JsonValue::CreateNullValue()},{L"closing",B(closing)}});

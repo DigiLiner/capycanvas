@@ -209,14 +209,24 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                                     onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position - 1))) })
                                 DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_down")) }, enabled = enabled && position >= 0 && position < order.lastIndex, modifier = Modifier.testTag("workspace-down"),
                                     onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position + 2))) })
-                                val offered = listOf("rename" to "Rename…", "delete" to "Delete…").filter { (kind, _) -> row.offers(kind) }
+                                val offered = row.array("actions").objects().filter { it.getJSONObject("action").getString("type") in listOf("rename", "delete") }
                                 if (offered.isNotEmpty()) HorizontalDivider()
-                                for ((kind, label) in offered) {
-                                    DropdownMenuItem(text = { Text(label) },
+                                for (button in offered) {
+                                    val action = button.getJSONObject("action")
+                                    val kind = action.getString("type")
+                                    DropdownMenuItem(text = { Text(button.getString("label")) },
                                         enabled = enabled, modifier = Modifier.testTag("workspace-$kind"), onClick = {
-                                            drag.menu = null; host.workspaceInput(obj("type" to "form", "action" to obj("type" to kind, "value" to id)))
+                                            drag.menu = null; host.workspaceInput(obj("type" to "action", "action" to action))
                                         })
                                 }
+                            }
+                        }
+                    } else {
+                        var menu by remember(id) { mutableStateOf(false) }
+                        Box {
+                            IconButton({ menu = true }, enabled = enabled, modifier = Modifier.testTag("toolbar-options-$id")) { SharedIcon("more", optionsCaption) }
+                            DropdownMenu(menu, { menu = false }) {
+                                for (button in row.array("actions").objects()) DropdownMenuItem(text = { Text(button.getString("label")) }, enabled = enabled && button.optBoolean("enabled"), onClick = { menu = false; host.workspaceInput(obj("type" to "action", "action" to button.getJSONObject("action"))) })
                             }
                         }
                     }

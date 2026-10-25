@@ -25,6 +25,8 @@ private struct NewDrawingDialog: View {
     @State private var name = ""
     @State private var query = ""
     @State private var presetName = ""
+    @FocusState private var focused: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var resolutions = false
     @State private var importing = false
     @State private var paperColor: ColorEditorSession?
@@ -44,7 +46,7 @@ private struct NewDrawingDialog: View {
                     .transition(.move(edge: .bottom))
             }
         }.clipped()
-            .animation(.easeOut(duration: 0.22), value: drawer["kind"].string)
+            .animation(reduceMotion ? nil : .timingCurve(0.215, 0.61, 0.355, 1, duration: 0.25), value: drawer["kind"].string)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onAppear { name = view["name"].string }
             .onChange(of: name) { _, text in if text != view["name"].string { send(["op": "name", "text": text]) } }
@@ -57,8 +59,12 @@ private struct NewDrawingDialog: View {
     private func send(_ action: [String: Any]) {
         store.projectFiles.newDrawing(action) { error = $0 }
     }
+    @State private var previousDrawer = ""
     private func follow(_ kind: String) {
-        if kind == "presets" { query = drawer["query"].string }
+        let previous = previousDrawer
+        previousDrawer = kind
+        if kind == "presets" { query = drawer["query"].string; focused = "search" }
+        else if kind.isEmpty { focused = previous }
         if kind == "paper_color" {
             if paperColor == nil {
                 paperColor = ColorEditorSession(controller: nil, store: store, colors: store.displayColors, value: drawer["color"], opaque: true) { _, _ in }
@@ -107,7 +113,7 @@ private struct NewDrawingDialog: View {
                 blocked: !view["can_create"].bool, cancel: { send(["op": "cancel"]) }, apply: create) {
                 Button { send(["op": "presets"]) } label: {
                     HStack(spacing: 6) { Text(copy["presets"].string); SharedIcon(name: "chevron-down", size: 12).rotationEffect(.degrees(180)) }
-                }.buttonStyle(.bordered).accessibilityIdentifier("new-drawing-presets-button")
+                }.buttonStyle(.bordered).accessibilityIdentifier("new-drawing-presets-button").focused($focused, equals: "presets")
                 Spacer(minLength: 8)
             }
         }
@@ -288,6 +294,7 @@ private struct NewDrawingDialog: View {
                 .background(palette["input"], in: SquircleShape.control).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
             .help(help).accessibilityLabel(help).accessibilityValue([label, detail].compactMap { $0 }.joined(separator: ", "))
+            .focused($focused, equals: identifier == "new-drawing-texture" ? "paper" : "paper_color")
             .accessibilityIdentifier(identifier)
     }
 
@@ -310,7 +317,7 @@ private struct NewDrawingDialog: View {
                 SharedIcon(name: "search").opacity(0.6)
                 TextField(copy["search"].string, text: $query).textFieldStyle(.plain).autocorrectionDisabled()
                     .onChange(of: query) { _, text in if text != drawer["query"].string { send(["op": "search", "query": text]) } }
-                    .accessibilityLabel(copy["search"].string).accessibilityIdentifier("new-drawing-search")
+                    .accessibilityLabel(copy["search"].string).accessibilityIdentifier("new-drawing-search").focused($focused, equals: "search")
             }.padding(.horizontal, 10).frame(height: 34).background(palette["input"], in: SquircleShape.control)
                 .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 10)
             EditorScrollView {
@@ -332,9 +339,19 @@ private struct NewDrawingDialog: View {
             HStack(spacing: 10) {
                 summary
                 Spacer(minLength: 8)
-                if drawer["save"].isNull { browserActions } else { saveRow(drawer["save"]) }
+                ZStack {
+                    if drawer["save"].isNull { browserActions.transition(.opacity) }
+                    else { saveRow(drawer["save"]).transition(.opacity) }
+                }.animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: drawer["save"].isNull)
             }.padding(.horizontal, 20).padding(.vertical, 12)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("new-drawing-browser")
+            .onKeyPress(.escape) {
+                guard !NativeTextContext.composing else { return .ignored }
+                if !drawer["save"].isNull { send(["op": "back"]) }
+                else if !query.isEmpty { query = ""; send(["op": "search", "query": ""]) }
+                else { send(["op": "back"]) }
+                return .handled
+            }
     }
 
     private func pill(_ tab: JSON, index: Int) -> some View {
@@ -396,7 +413,7 @@ private struct NewDrawingDialog: View {
     private var browserActions: some View {
         HStack(spacing: 6) {
             Button(copy["cancel"].string) { send(["op": "close_drawer"]) }.buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction).accessibilityIdentifier("new-drawing-browser-cancel")
+                .accessibilityIdentifier("new-drawing-browser-cancel")
             Button(drawer["save_label"].string) { send(["op": "save_as"]) }.buttonStyle(.bordered)
                 .accessibilityIdentifier("new-drawing-save-as")
             Button(copy["select"].string) { send(["op": "use_preset"]) }.buttonStyle(.borderedProminent).tint(palette.accent)
@@ -411,7 +428,8 @@ private struct NewDrawingDialog: View {
                 .overlay { if !save["can_save"].bool { SquircleShape.control.stroke(Color.red, lineWidth: 1) } }
                 .onChange(of: presetName) { _, text in if text != drawer["save"]["name"].string { send(["op": "preset_name", "text": text]) } }
                 .onSubmit { send(["op": "save_preset"]) }
-                .accessibilityLabel(copy["preset_name"].string).accessibilityIdentifier("new-drawing-save-name")
+                .accessibilityLabel(copy["preset_name"].string).accessibilityIdentifier("new-drawing-save-name").focused($focused, equals: "save")
+                .onAppear { focused = "save" }
             choice(copy["preset_category"].string, save["groups"].array, value: save["group"], identifier: "new-drawing-save-group") {
                 ["op": "preset_group", "group": $0.raw]
             }.fixedSize().help(copy["preset_category"].string)

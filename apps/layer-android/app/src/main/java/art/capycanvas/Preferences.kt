@@ -544,10 +544,11 @@ private fun JSONObject.settingsTitle(): String? = objectOrNull("shortcut_editor"
     val custom = kind.getString("custom")
     val customIndex = swatches.indexOfFirst { it.getBoolean("custom") }
     var editing by remember(id) { mutableStateOf(false) }
+    var chosen by remember(id) { mutableStateOf<Int?>(null) }
     var saved by remember(id) { mutableStateOf(value) }
-    if (saved != value) { saved = value; editing = false }
+    if (saved != value) { saved = value; editing = false; chosen = null }
     var focusRequest by remember(id) { mutableLongStateOf(0L) }
-    val active = if (editing) customIndex else kind.getInt("selected")
+    val active = chosen ?: if (editing) customIndex else kind.getInt("selected")
     fun JSONObject.color(key: String) = if (isNull(key)) null else Color(android.graphics.Color.parseColor(getString(key)))
     val circles = @Composable {
         swatches.forEachIndexed { index, swatch ->
@@ -556,6 +557,7 @@ private fun JSONObject.settingsTitle(): String? = objectOrNull("shortcut_editor"
             Box(Modifier.size(if (inline) 36.dp else 40.dp).clip(CircleShape)
                 .then(if (selected) Modifier.border(2.dp, colors.text, CircleShape) else Modifier)
                 .selectable(selected, enabled = enabled, role = Role.RadioButton) {
+                    chosen = index
                     editing = swatch.getBoolean("custom")
                     if (editing) focusRequest = System.nanoTime()
                     else host.preference(obj("type" to "edit", "id" to id, "value" to swatch.getString("value")))
@@ -571,20 +573,22 @@ private fun JSONObject.settingsTitle(): String? = objectOrNull("shortcut_editor"
         }
     }
     val entry = @Composable {
-        if (active == customIndex) CoreTextField(custom, {}, Modifier.width(120.dp).testTag("setting-text-$id"),
-            height = 44.dp, enabled = enabled, maxLength = 7, focusRequest = focusRequest,
+        CoreTextField(custom, {}, Modifier.width(120.dp).testTag("setting-text-$id"),
+            height = 44.dp, enabled = enabled, maxLength = 7, focusRequest = focusRequest, selectAllOnFocusRequest = true,
             placeholder = { Text(kind.getString("placeholder")) },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii, autoCorrectEnabled = false),
-            onCommit = { if (it.trim() != custom) host.preference(obj("type" to "edit", "id" to id, "value" to it)) })
+            onCommit = { if (active == customIndex && it.trim() != custom) host.preference(obj("type" to "edit", "id" to id, "value" to it)) })
     }
     if (inline) Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically) { entry(); circles() }
+        verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.animation.AnimatedVisibility(active == customIndex, enter = androidx.compose.animation.expandHorizontally(expandFrom = Alignment.End), exit = androidx.compose.animation.shrinkHorizontally(shrinkTowards = Alignment.End)) { entry() }; circles()
+    }
     else Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(6.dp)) { circles() }
-        entry()
+        androidx.compose.animation.AnimatedVisibility(active == customIndex, enter = androidx.compose.animation.expandVertically(), exit = androidx.compose.animation.shrinkVertically()) { entry() }
     }
 }
 

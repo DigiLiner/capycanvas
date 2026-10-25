@@ -1,3 +1,4 @@
+import {nativeScreenEvents} from './native-input-fixture.mjs';
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -119,7 +120,7 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
   };
 }
 
-for (const ending of ["pointerup", "pointercancel", "lostpointercapture", "pointermove"]) {
+for (const ending of ["pointerup", "lostpointercapture", "pointermove"]) {
   test(`pen stroke survives ${ending} and finishes exactly once`, () => {
     const h = harness();
     h.send("pointerdown");
@@ -278,7 +279,7 @@ test("pen navigation also follows tip boundaries with a held barrel button", () 
   assert.deepEqual(h.samples(), []);
 });
 
-for (const ending of ["pointerup", "pointercancel", "lostpointercapture", "pointerrawupdate", "pointermove"]) {
+for (const ending of ["pointerup", "lostpointercapture", "pointerrawupdate", "pointermove"]) {
   test(`raw pen contact is not duplicated and survives ${ending}`, () => {
     const h = harness({ raw: true });
     h.send("pointerdown");
@@ -318,4 +319,23 @@ test("raw hover, foreign pointers, touch and mouse do not enter the pen stream",
   h.send("pointermove");
   h.send("pointerup");
   assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3]);
+});
+
+for (const raw of [false, true]) test(`explicit pen cancellation stays Cancel (raw=${raw})`, () => {
+  const h = harness({raw});
+  h.send('pointerdown'); h.send(raw ? 'pointerrawupdate' : 'pointermove', {clientX: 100});
+  h.send('pointercancel', {clientX: 700, buttons: 0, pressure: 0});
+  h.send('lostpointercapture', {pointerType: '', buttons: 0});
+  assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 4]);
+  assert.equal(h.phases.at(-1).phase, 'cancel');
+  h.send('pointerdown');h.send('pointerup');
+  assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 4, 1, 3]);
+});
+
+test('native browser fixtures map content contacts past browser chrome and preserve key-only records',()=>{
+  const events=[{point:[1555.45,116],down:true},{touch:'move',point:[100,200]},{key:32,down:true},{down:false}];
+  const geometry={screenX:0,screenY:0,outerWidth:1600,outerHeight:1000,innerWidth:1600,innerHeight:913};
+  assert.deepEqual(nativeScreenEvents(events,geometry),[{point:[1555.45,203],down:true},{touch:'move',point:[100,287]},{key:32,down:true},{down:false}]);
+  assert.deepEqual(events[0].point,[1555.45,116],'native transport leaves DOM measurement unchanged');
+  assert.deepEqual(nativeScreenEvents(events,{...geometry,innerHeight:1000}),events,'fullscreen content needs no offset');
 });

@@ -63,6 +63,9 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isAltPressed
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -215,10 +218,12 @@ internal class ColorForm(private val host: CanvasHost, opened: JSONObject, val r
             SwatchSheet(host, form.editor, form.view, { text -> runCatching { form.send(obj("op" to "search", "text" to text)) } }, { color -> form.act(obj("op" to "color", "color" to color)) }) { sheet = false }
         }
     }) {
-        if (sheet) Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ColorPair(form.view, 38.dp, 34.dp, Modifier.testTag("color-mini-pair"))
-            Text(form.view.getString("hex"))
-        } else RecentRow(host, form.view, Modifier.weight(1f)) { color -> form.act(obj("op" to "color", "color" to color)) }
+        androidx.compose.animation.Crossfade(sheet, modifier = Modifier.weight(1f), label = "color-footer") { expanded ->
+            if (expanded) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ColorPair(form.view, 38.dp, 34.dp, Modifier.testTag("color-mini-pair"))
+                Text(form.view.getString("hex"))
+            } else RecentRow(host, form.view, Modifier.fillMaxWidth()) { color -> form.act(obj("op" to "color", "color" to color)) }
+        }
         Box(Modifier.size(34.dp).clip(ControlShape).background(colors.button).clickable { sheet = !sheet }
             .semantics { contentDescription = copy.getString(if (sheet) "close_swatches" else "all_swatches") }.testTag("color-swatches"), contentAlignment = Alignment.Center) {
             SharedIcon("chevron-down", null, Modifier.size(16.dp).rotate(if (sheet) 0f else 180f))
@@ -429,25 +434,27 @@ private fun copyText(context: android.content.Context, text: String) {
     }
     Box(Modifier.width(width).height(if (hex) 40.dp else 28.dp).clip(ControlShape).testTag("color-value-$tag")
         .semantics { contentDescription = "$name $text"; onClick { onBegin(); true } }
-        .focusable()
         .onKeyEvent { event ->
             val direction = when (event.key) { Key.DirectionUp -> 2f; Key.DirectionDown -> -2f; else -> 0f }
             if (event.type != KeyEventType.KeyDown || direction == 0f || onScrub == null) false
-            else { onScrub(direction, if (event.isShiftPressed) "fast" else "normal"); onEndScrub?.invoke(false); true }
-        }
+            else { onScrub(direction, if (event.isShiftPressed) "fast" else if (event.isCtrlPressed || event.isAltPressed) "fine" else "normal"); onEndScrub?.invoke(false); true }
+        }.focusable()
         .pointerInput(onScrub != null) {
             awaitEachGesture {
                 val down = awaitFirstDown()
                 var moved = false
                 var released = false
-                while (true) {
-                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                try { while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    if (change.isConsumed) break
                     val dy = (down.position.y - change.position.y) / density
                     if (!moved && onScrub != null && abs(dy) * density > viewConfiguration.touchSlop) moved = true
-                    if (moved) { change.consume(); onScrub?.invoke(dy, "normal") }
+                    if (moved) { change.consume(); onScrub?.invoke(dy, if (event.keyboardModifiers.isShiftPressed) "fast" else if (event.keyboardModifiers.isCtrlPressed || event.keyboardModifiers.isAltPressed) "fine" else "normal") }
                     if (!change.pressed) { released = true; break }
                 }
-                if (moved) onEndScrub?.invoke(!released) else if (released) onBegin()
+                } finally { if (moved) onEndScrub?.invoke(!released) }
+                if (!moved && released) onBegin()
             }
         }, contentAlignment = if (hex) Alignment.CenterStart else Alignment.CenterEnd) {
         Text(text, Modifier.padding(horizontal = 4.dp), style = style, maxLines = 1)

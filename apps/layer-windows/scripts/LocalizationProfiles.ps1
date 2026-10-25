@@ -46,10 +46,11 @@ function Profile-Surfaces{
  [IO.File]::WriteAllBytes($photo,[Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAABdWlDQ1BJQ0MgUHJvZmlsZQAAeJx1kT1LA0EQhh8TNRIVCy1ELK6IomBQFMRSY5EmSIgKfjWXM5cISTzuEiTaCjYWAQvRxq/Cf6CtYKsgCIogYm3pVyNyziaBBNE59ubh3X2H2VnwRNJGxqkfh0w2Z8fCIW1ufkHzveDHSyOD9OuGY01EoxH+jc876lS+Dapa/5/7M5rXJaCuSXjUsOycsHRDZC1nKd4W7jBS+rLwofCALQ0KXyk9XuZnxckyvyu2Z2KT4FE1tWQNx2vYSNkZ4T7hQCadNyr9qJu0JLKz05K7ZHXjECNMCI04eVZIkyMoOSsz+9s3VPJNsSoeQ/4WBWxxJEmJd0DUvFRNSDZFT8iXpqDm/nuejjkyXK7eEoKGJ9d96wHfDnwXXffryHW/j8H7CBfZqn9V5jT2IXqxqgUOoG0Tzi6rWnwXzreg88HSbb0keWV5TBNeT6F1HtpvwL9YnlVln5N7mNmQJ7qGvX3olfNtSz+jdWhi8y0eYwAAAZ1pVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iPjxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+PHJkZjpEZXNjcmlwdGlvbiB4bWxuczpkYz0iaHR0cDovL3B1cmwub3JnL2RjL2VsZW1lbnRzLzEuMS8iPjxkYzpjcmVhdG9yPjxyZGY6U2VxPjxyZGY6bGk+UHJpdmF0ZSBsb2NhbGl6YXRpb24gZml4dHVyZTwvcmRmOmxpPjwvcmRmOlNlcT48L2RjOmNyZWF0b3I+PGRjOnJpZ2h0cz48cmRmOkFsdD48cmRmOmxpIHhtbDpsYW5nPSJ4LWRlZmF1bHQiPkdlbmVyYXRlZCB0ZXN0IGltYWdlPC9yZGY6bGk+PC9yZGY6QWx0PjwvZGM6cmlnaHRzPjwvcmRmOkRlc2NyaXB0aW9uPjwvcmRmOlJERj48L3g6eG1wbWV0YT59360kAAAAGUlEQVR4nGOUTDnBQApgIkn1qIZRDUNKAwAUYwFl4JulLgAAAABJRU5ErkJggg=='))
  Use-Window $first;Menu-Command 'view' 'soft_proof'
  Wait-Until {(Find 'proof-panel-mode')} 'Retained native Proof panel did not open' 30
- if(!(Find 'proof-panel-setup' -Visible)){Invoke-Id 'proof-panel-mode-print'}
- Wait-Until {$view=Model;$view -and $view.windows_proof_form.mode -eq 'print' -and (Find 'proof-panel-setup' -Visible).Current.IsEnabled} 'Native Print mode did not acknowledge an enabled setup control' 30
- Control 'proof-panel-setup' -Arranged|Out-Null
- Invoke-Id 'proof-panel-setup'
+ Menu-Command 'file' 'document_properties'
+ Wait-Until {(Model).windows_document.kind -eq 'properties'} 'Document Properties did not open' 30
+ $appearance=Control 'PrimaryButton' -Within (Control 'document-workflow') -Arranged
+ if($appearance.Current.Name -ne (Model).windows_document.details.proof){throw 'Properties primary action is not Appearance'}
+ $appearance.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {(Model).windows_document.kind -eq 'proof' -and (Find 'proof-profile')} 'Retained proof setup did not open' 45
  Invoke (Fresh-Model).windows_document.details.feature_copy.profile.add_profile_dialog -Name
  Choose-Path $icc
@@ -71,10 +72,23 @@ function Profile-Surfaces{
  }
  Invoke (Fresh-Model).windows_document.details.feature_copy.profile.manage -Name
  Wait-Until {(Find 'document-profile-library')} 'Native profile library did not open' 30
+ foreach($index in 1..8){
+  $variant=[IO.File]::ReadAllBytes($icc);$variant[35]=[byte]$index
+  $path=Join-Path $run ("profile-search-$index.icc");[IO.File]::WriteAllBytes($path,$variant)
+  Invoke (Fresh-Model).windows_document.details.feature_copy.profile.add_profile_dialog -Name;Choose-Path $path
+  Wait-Until {(Find 'document-profile-library') -and @((Model).windows_document.details.profiles).Count -eq $index+1} 'Private profile search inventory did not grow' 45
+ }
+ Wait-Until {(Find 'profile-library-search') -and !(Control 'profile-library-search').Current.IsOffscreen} 'Larger saved-profile library did not reveal Search' 30
+ (Control 'profile-library-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($entryId.ToUpperInvariant())
+ $library=Control 'document-profile-library';$library.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+ Wait-Until {$items=@($library.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ListItem))|Where-Object {!$_.Current.IsOffscreen});$items.Count -eq 1 -and $items[0].Current.AutomationId -eq ('document-profile-'+$entryId)} 'Saved-profile query did not filter to the matching stable ID' 30
+ (Control ('document-profile-'+$entryId)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+ $library.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
  $libraryIdentity=(Control 'document-profile-library').GetRuntimeId() -join ':'
  Surface-Languages 'retained-profile-library' {
   $details=(Fresh-Model $first $choice.tag).windows_document.details;$entry=@($details.profiles|Where-Object id -eq $entryId)[0]
   Check-Copy 'document-profile-library' $details.feature_copy.profile.library_title $libraryIdentity
+  if((Control 'profile-library-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -ne $entryId.ToUpperInvariant()){throw 'Language refresh lost the retained profile query'}
   if((Control 'profile-library-help').Current.Name -ne (Catalog-Text $choice.tag 'color-features-profile-library-help')){throw 'Profile library help stayed in an earlier language'}
   $expected=$entry.name+' · '+$entry.state;if($entry.issue){$expected+=' · '+$entry.issue}
   if((Selected-Option (Control 'document-profile-library')).Current.Name -ne $expected){throw 'Profile metadata row did not use the current shared projected visibility'}
@@ -83,6 +97,7 @@ function Profile-Surfaces{
  }
  Invoke 'CloseButton';Wait-Until {(Find 'proof-profile')} 'Profile library did not return to the retained proof draft' 30
  Invoke 'CloseButton';Wait-Until {$view=Model;$view -and !$view.windows_document} 'Proof draft did not cancel' 30
+ if($ProfilesOnly){return}
  Menu-Command 'file' 'open_document';Choose-Path $photo
  Wait-Until {$view=Model;$view -and $view.state.layer_tools.editing_layer.label -eq [IO.Path]::GetFileNameWithoutExtension($photo) -and (($view.state.commands|Where-Object id -eq 'repair_source_profile').enabled -or ($view.state.commands|Where-Object id -eq 'apply_transform').enabled)} 'Private source photo did not become editable' 90
  if(((Fresh-Model).state.commands|Where-Object id -eq 'apply_transform').enabled){Search-Command 'apply transform' 'apply_transform'}

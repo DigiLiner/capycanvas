@@ -31,6 +31,13 @@ private struct WorkspaceCollapsedColumnContent: View {
     @ObservedObject var store: EditorStore
     let column: JSON
     let panels: [[JSON]]
+    @StateObject private var scrollPosition: EditorScrollPosition
+    init(store: EditorStore, column: JSON, panels: [[JSON]]) {
+        self.store = store; self.column = column; self.panels = panels
+        let position = EditorScrollPosition()
+        position.offset = store.state["workspace"]["layout"]["column_scroll"].array.first { $0[0].uint == column["id"].uint }?[1].number ?? 0
+        _scrollPosition = StateObject(wrappedValue: position)
+    }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var openSources: [DrawerSource] {
         guard !column["open"].isNull else { return [] }
@@ -45,7 +52,7 @@ private struct WorkspaceCollapsedColumnContent: View {
     var body: some View {
         let base = column["bounds"], clip = column["content"]
         ZStack(alignment: .topLeading) {
-            EditorScrollView(.vertical, offsetChanged: { next in
+            EditorPositionedScrollView(position: scrollPosition, offsetChanged: { next in
                 if abs(next - offset) > 0.5 { store.dispatch(["type": "measure_column_scroll", "column": column["id"].raw, "offset": next]) }
             }) {
                 let bottom = column["groups"].array.map { $0["bounds"].rect.maxY }.max() ?? clip.rect.minY
@@ -76,6 +83,8 @@ private struct WorkspaceCollapsedColumnContent: View {
                         }
                     }
                 }.frame(width: clip.rect.width, height: max(clip.rect.height, bottom - clip.rect.minY + offset), alignment: .topLeading)
+            }.onChange(of: offset) { _, next in
+                if abs(scrollPosition.offset - next) > 0.5 { scrollPosition.scrollTo(y: next) }
             }.environment(\.workspaceClip, clip.rect)
                 .scrollIndicators(.hidden).placed(clip.relative(to: base))
             PanelGrip(vertical: true).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())

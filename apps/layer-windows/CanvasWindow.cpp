@@ -27,6 +27,7 @@ using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
 using namespace Microsoft::UI::Xaml::Input;
 using namespace Microsoft::UI::Xaml::Media;
+using Microsoft::UI::Xaml::Automation::AutomationProperties;
 using namespace Microsoft::UI::Windowing;
 using namespace Windows::Foundation;
 static bool SameRegions(std::vector<Windows::Graphics::RectInt32> const& a,std::vector<Windows::Graphics::RectInt32> const& b){
@@ -206,6 +207,17 @@ void CanvasWindow::Open() {
     status.VerticalAlignment(VerticalAlignment::Bottom);
     status.Margin(Thickness{0,0,0,40});
     root.Children().Append(status);
+    screenChip.HorizontalAlignment(HorizontalAlignment::Center);screenChip.VerticalAlignment(VerticalAlignment::Bottom);screenChip.Margin({0,0,0,76});screenChip.Visibility(Visibility::Collapsed);screenChip.IsTabStop(false);
+    AutomationProperties::SetAutomationId(screenChip,L"screen-status");
+    StackPanel screenDetails;screenDetails.Width(312);screenDetails.Spacing(6);
+    for(auto text:{screenTitle,screenHeadline,screenBody}){text.TextWrapping(TextWrapping::Wrap);screenDetails.Children().Append(text);}
+    screenTitle.Opacity(.7);screenHeadline.FontWeight(Windows::UI::Text::FontWeights::SemiBold());screenDetails.Children().Append(screenClipped);screenPopup.Content(screenDetails);screenChip.Flyout(screenPopup);
+    AutomationProperties::SetAutomationId(screenDetails,L"screen-details");AutomationProperties::SetAutomationId(screenHeadline,L"screen-details-headline");AutomationProperties::SetAutomationId(screenClipped,L"screen-show-clipped");
+    screenPopup.Opened([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->screenPopupOpen=true;self->UpdatePopup();}});
+    screenPopup.Closed([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->screenPopupOpen=false;self->UpdatePopup();}});
+    auto clipped=[weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock();self&&!self->updatingScreen)self->Send(to_string(CapyUi::O({{L"type",CapyUi::S(L"show_clipped_colors")},{L"visible",CapyUi::B(self->screenClipped.IsChecked().Value())}}).Stringify()));};
+    screenClipped.Checked(clipped);screenClipped.Unchecked(clipped);root.Children().Append(screenChip);
+
     window.Content(root);
     panel.Loaded([weak=weak_from_this()](auto&&,auto&&) { if(auto self=weak.lock()) self->Start(); });
     panel.SizeChanged([weak=weak_from_this()](auto&&,auto&&) { if(auto self=weak.lock()) self->Resize(); });
@@ -406,6 +418,8 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     std::unique_ptr<char,decltype(&capy_string_free)> ownedCatalog(catalog,capy_string_free);
     auto catalogView=Windows::Data::Json::JsonObject::Parse(to_hstring(catalog));
     catalogView.Insert(L"bootstrap",bootstrap);
+    screenCopy=CapyUi::object(CapyUi::object(catalogView,L"native_copy"),L"color");
+    screenFontSize=CapyUi::num(catalogView,L"text_size_pt",11)*4/3;
     workspace=std::make_unique<WorkspaceView>([weak=weak_from_this()](std::string json){
         if(auto self=weak.lock())self->Send(std::move(json));
     },catalogView,localization,[weak=weak_from_this()](std::string json){
@@ -478,7 +492,8 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     root.Children().Append(workspaceStorage->Root());
     workspaceManager=std::make_unique<WorkspaceManagerView>(
         [weak=weak_from_this()](std::string json){if(auto self=weak.lock())self->Send(std::move(json),CanvasCommandKind::Workspace);},
-        catalogView,localization,root.XamlRoot(),[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();});
+        catalogView,localization,root.XamlRoot(),[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();},
+        [weak=weak_from_this()](CanvasQueryKind kind,std::string json,PreviewReply reply){if(auto self=weak.lock())return self->RequestPreviews(kind,std::move(json),std::move(reply));return false;});
     if(auto snapshot=capy_snapshot(host,nullptr)){
         std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
         ApplyModel(Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot)));
@@ -1436,7 +1451,7 @@ void CanvasWindow::UpdatePopup() {
     if(dialogOpen.exchange(blocked)!=blocked&&blocked){
         heldKeys.clear();sentModifiers.store(0);Send(R"({"type":"blur"})",CanvasCommandKind::Input);
     }
-    bool open=headerPopupOpen||workspacePopupOpen||blocked;
+    bool open=headerPopupOpen||workspacePopupOpen||screenPopupOpen||blocked;
     auto facts=workspace?workspace->ChromeFacts(headerPopupOpen||blocked):CapyUi::O({{L"held",CapyUi::B(false)},{L"dragging",CapyUi::B(false)}});
     if(menuOpen.exchange(open)==open)return;
     using namespace CapyUi;
@@ -1547,6 +1562,7 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
         if(message.empty())message=str(object(model,L"windows_proof"),L"text");
         status.Text(message);status.Visibility(message.empty()?Visibility::Collapsed:Visibility::Visible);
     }
+    ApplyScreen(model);
     auto nextTheme=theme==L"dark"?ElementTheme::Dark:ElementTheme::Light;
     bool retheme=root.RequestedTheme()!=nextTheme;root.RequestedTheme(nextTheme);
     // Artwork also reaches the caption area; keep the OS buttons readable on it.
@@ -1566,4 +1582,26 @@ void CanvasWindow::ApplyModel(Windows::Data::Json::JsonObject const& model) {
             if(auto self=weak.lock();self&&!self->closing&&self->settings->IsOpen())
                 if(auto control=target.get();control&&control.IsLoaded())control.Focus(FocusState::Programmatic);
         });
+}
+
+void CanvasWindow::ApplyScreen(Windows::Data::Json::JsonObject const& model){
+    using namespace CapyUi;
+    auto state=object(model,L"state"),screen=object(state,L"screen"),chip=object(screen,L"chip"),details=object(screen,L"details");
+    auto catalog=object(object(model,L"localization"),L"catalog");auto updated=object(object(catalog,L"native_copy"),L"color");if(updated.Size())screenCopy=updated;if(catalog.Size())screenFontSize=num(catalog,L"text_size_pt",11)*4/3;
+    auto key=screen.Stringify()+screenCopy.Stringify()+str(state,L"theme")+to_hstring(screenFontSize);if(screenKey==key)return;screenKey=key;
+    auto colorCopy=screenCopy;screenChip.FontSize(screenFontSize);screenClipped.FontSize(screenFontSize);
+    for(auto text:{screenTitle,screenHeadline,screenBody})text.FontSize(screenFontSize);
+    auto foreground=SolidColorBrush(color(str(object(state,L"palette"),L"text",L"#fafafb")));
+    auto warning=SolidColorBrush(color(str(state,L"theme")==L"dark"?L"#e5a50a":L"#9c5700"));
+    screenChip.Visibility(chip.Size()?Visibility::Visible:Visibility::Collapsed);
+    if(!chip.Size()||!details.Size()){if(screenPopupOpen)screenPopup.Hide();return;}
+    StackPanel face;face.Orientation(Orientation::Horizontal);face.Spacing(6);
+    if(flag(chip,L"warning")){auto mark=icon(L"warning",str(state,L"theme"));face.Children().Append(mark);}
+    TextBlock label;label.Text(str(chip,L"label"));face.Children().Append(label);screenChip.Content(face);
+    auto caption=str(colorCopy,L"screen_details");AutomationProperties::SetName(screenChip,caption);ToolTipService::SetToolTip(screenChip,box_value(caption));
+    screenTitle.Text(str(details,L"title"));screenHeadline.Text(str(details,L"headline"));screenHeadline.Foreground(flag(details,L"warning")?warning:foreground);
+    screenBody.Text(str(details,L"body"));screenBody.Visibility(screenBody.Text().empty()?Visibility::Collapsed:Visibility::Visible);
+    auto clipped=details.GetNamedValue(L"show_clipped",JsonValue::CreateNullValue());updatingScreen=true;
+    screenClipped.Visibility(clipped.ValueType()==JsonValueType::Boolean?Visibility::Visible:Visibility::Collapsed);screenClipped.IsChecked(clipped.ValueType()==JsonValueType::Boolean&&clipped.GetBoolean());
+    screenClipped.Content(box_value(str(colorCopy,L"highlight_clipped_colors")));updatingScreen=false;
 }

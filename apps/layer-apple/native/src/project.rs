@@ -33,7 +33,7 @@ pub use proof::*;
 
 enum Payload {
     Package(layer_ui::PackageView),
-    Color(Box<ColorTask>),
+    Color { task: Box<ColorTask>, environment: OpenEnvironment, candidate: Option<Box<UiSession<Renderer>>> },
     Source(Box<SourceTask>),
     Info(layer_color::DocumentInfo),
     Lookup {
@@ -191,7 +191,8 @@ pub unsafe extern "C" fn capy_apple_project_task(
                 gpu: session.engine().backend().0.as_ref().map(|renderer| renderer.snapshot_gpu()),
             }
         } else if opening == 4 {
-            Payload::Color(Box::new(ColorTask::capture(session, None, DISPLAY_SPACE)?))
+            Payload::Color { task: Box::new(ColorTask::capture(session, None, DISPLAY_SPACE)?),
+                environment: OpenEnvironment::capture(session, admission, options)?, candidate: None }
         } else if opening == 5 {
             Payload::Info(layer_color::DocumentInfo::capture(session.engine().document()))
         } else if opening == 6 {
@@ -360,7 +361,6 @@ pub unsafe extern "C" fn capy_project_write(task: *const CapyProjectTask, fd: i3
                 Ok(())
             }
             Payload::Package(view) => view.copy_original(&mut {stream}, task.control.cancellation_flag()),
-            Payload::Color(color) => color.write_copy(stream, task.control.is_cancelled()),
             Payload::Export(export) => export.write(stream, task.control.clone()).map_err(|reason| reason.message(localization)),
             _ => Err("Not a write task".into()),
         }
@@ -632,7 +632,7 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_project_prepare_adopt(app:*mut CapyApple,task:*const CapyProjectTask,now:u64)->i32 {
     let (Some(a),Some(t))=(unsafe{app.as_mut()},unsafe{task.as_ref()}) else{return -1};
-    let opening=matches!(t.state.lock().unwrap_or_else(|e|e.into_inner()).payload,Payload::Open{..});
+    let opening=matches!(t.state.lock().unwrap_or_else(|e|e.into_inner()).payload,Payload::Open{..} | Payload::Color { candidate: Some(_), .. });
     if !opening {return 0;}
     if a.host.session.state().document_file.epoch!=t.epoch || a.host.session.engine().document().revision!=t.revision {return 0;}
     let ready=a.prepare_recovery(now);
@@ -663,8 +663,17 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
         if let Some(error) = &state.error {
             return Err(error.clone());
         }
-        if let Payload::Color(color) = &mut state.payload {
-            return color.adopt(&mut app.host, task.control.is_cancelled(), || task.begin_commit() >= 0);
+        if let Payload::Color { task: color, candidate, .. } = &mut state.payload {
+            if candidate.is_none() {
+                return color.adopt(&mut app.host, task.control.is_cancelled(), || task.begin_commit() >= 0);
+            }
+            color.validate(&app.host, task.control.is_cancelled())?;
+            let open = OpenAdoption { epoch: task.epoch, revision: task.revision, location: None };
+            let retired = app.window.adopt(&mut app.host, candidate, open,
+                || task.begin_commit() >= 0, |session| session)?;
+            app.document_retired();
+            state.payload = Payload::Retired { _renderer: retired };
+            return Ok(());
         }
         if let Payload::Source(source) = &mut state.payload {
             return source.adopt(&mut app.host, task.control.is_cancelled(), || task.begin_commit() >= 0);

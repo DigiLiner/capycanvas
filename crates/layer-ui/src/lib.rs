@@ -150,7 +150,7 @@ pub use stats::{StatRow, StatsView};
 pub use camera::{Camera, MAX_ZOOM, MIN_ZOOM, TouchGesture};
 pub use cursor::{CanvasCursor, CursorMode};
 pub use customization::{ToolbarNameRefusal,
-    ContextMenu, ContextMenuItem, ContextTarget, CustomizationAction, CustomizationState,
+    workspace_name_valid, workspace_name_validation, ContextMenu, ContextMenuItem, ContextTarget, CustomizationAction, CustomizationState,
     PanelConfig, PanelContent, PanelControl, PanelControlView, PanelView, TabPresentation,
     TabStyle, TilePresentation, TileStyle, TileView, ToolChoice, ToolPickerView, ToolbarManagerView, ToolbarTile,
     canonical_tool_choice, tool_choice_localized,
@@ -1487,6 +1487,7 @@ pub struct UiState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum UiAction {
+    ColorSlotMenu { slot: ColorSlot, library: bool },
     CurveEditor { target: CurveEditorTarget, action: CurveEditorAction },
     PressureCalibration { action: PressureCalibrationAction },
     ChooseToolVariant { anchor: DrawerAnchor, variant: ToolVariant },

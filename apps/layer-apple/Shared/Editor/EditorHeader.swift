@@ -135,7 +135,7 @@ import SwiftUI
     }
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if !store.snapshot["chrome_hidden"].bool { controls }
+            controls.modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool))
             let command = view["capy"]
             Button { store.invoke("zen_mode") } label: {
                 PanelIcon(name: command["icon"].string, size: size["capy_icon"].number)
@@ -346,6 +346,7 @@ private struct HeaderItemControl: View {
                             store.dispatch(["type":"activate_header_item", "id":entry["id"].raw])
                         }
                     }.overlay(alignment: .bottomTrailing) { if description["has_variants"].bool && !editing { ToolGroupMarker() } }
+                        .tracksToolActivation()
                         .accessibilityIdentifier("header-tool-" + ([entry["item"]["control"]["command"], entry["item"]["control"]["slot"],
                             entry["item"]["control"]["kind"]].map(\.string).first { !$0.isEmpty } ?? ""))
                 }

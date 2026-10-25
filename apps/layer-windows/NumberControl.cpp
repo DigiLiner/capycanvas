@@ -130,7 +130,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     weak_ref<TextBlock> readout;
     weak_ref<Grid> panelValueBox;
     ContentControl valueSurface{nullptr};
-    if(ranged&&!valueOnly){
+    {
         // Read mode has the same text extent as the shared plain value. Keep
         // native text editing/accessibility while avoiding a hidden caret gutter.
         auto display=label(data,L"");display.UseLayoutRounding(false);display.LineHeight(20);
@@ -144,13 +144,15 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         if(panel){
             valueBox.Width(68);valueBox.Height(valueHeight);
             entry.HorizontalAlignment(HorizontalAlignment::Right);panelValueBox=make_weak(valueBox);
+        }
+        {
             Border hit;hit.Background(clear());hit.ManipulationMode(ManipulationModes::None);hit.Child(display);
             valueSurface=ContentControl();valueSurface.Content(hit);valueSurface.Padding({0});valueSurface.Height(valueHeight);
             valueSurface.ManipulationMode(ManipulationModes::None);
             valueSurface.IsTabStop(true);valueSurface.HorizontalContentAlignment(HorizontalAlignment::Stretch);valueSurface.VerticalContentAlignment(VerticalAlignment::Stretch);
             AutomationProperties::SetAccessibilityView(valueSurface,Automation::Peers::AccessibilityView::Raw);
             valueBox.Children().Append(valueSurface);
-        }else valueBox.Children().Append(display);
+        }
         if(panel){
             Canvas overlay;Grid::SetColumn(overlay,1);Grid::SetRowSpan(overlay,2);overlay.Children().Append(valueBox);
             auto placeValue=[canvas=make_weak(overlay),box=make_weak(valueBox)](auto&&,SizeChangedEventArgs const&){
@@ -168,7 +170,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         entry.Loaded([readout](Windows::Foundation::IInspectable const& sender,auto&&){
             if(auto view=readout.get())view.Opacity(sender.as<TextBox>().IsEnabled()?1.:.36);
         });
-    }else header.Children().Append(entry);
+    }
     AutomationProperties::SetName(entry,str(numericLabels,L"edit"));if(!identifier.empty())AutomationProperties::SetAutomationId(entry,identifier);
     auto palette=object(data->state,L"palette");
     auto panelColor=color(str(palette,L"panel")),textColor=color(str(palette,L"text"));
@@ -312,7 +314,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     };
     if(commits)commits->emplace_back([commit]{commit(false);});
     if(admissions)admissions->emplace_back(commit);
-    if(panel){
+    {
         auto surfaceY=[weak=make_weak(valueSurface)](PointerRoutedEventArgs const& e){return e.GetCurrentPoint(weak.get().XamlRoot().Content().as<UIElement>()).Position().Y;};
         auto restore=[data,local,spec,set,setText,finish,weak=make_weak(valueSurface),dialWeak]{
             bool active=std::exchange(local->scrubbing,false);active=std::exchange(local->turning,false)||active;
@@ -323,21 +325,25 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             if(active){bool transaction=local->gesture;finish(L"cancel");local->value=local->origin;if(!transaction)set(local->value);}
             setText(str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"text"));
         };
-        auto move=[local,spec,set,setText,phase](double y,bool fine){
+        auto move=[local,spec,set,setText,phase,panel](double y,bool fine){
             double pixels=local->originY-y;
-            if(fine!=local->fine){local->fine=fine;local->scrubOrigin=local->value;local->scrubBase=local->scrubPixels;}
+            if(panel&&fine!=local->fine){local->fine=fine;local->scrubOrigin=local->value;local->scrubBase=local->scrubPixels;}
             local->scrubPixels=pixels;
             auto dpi=GetDpiForSystem();double slop=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
             if(!local->scrubbing&&std::abs(pixels)<=slop)return;
             if(!std::exchange(local->scrubbing,true)&&phase){local->gesture=true;phase(L"down",local->origin);}
-            auto next=local->resolve(spec,local->scrubOrigin,O({{L"type",S(L"scrub")},{L"origin",N(local->scrubOrigin)},{L"pixels",N(pixels-local->scrubBase)},{L"fine",B(fine)}}));
+            auto operation=panel?O({{L"type",S(L"scrub")},{L"origin",N(local->scrubOrigin)},{L"pixels",N(pixels-local->scrubBase)},{L"fine",B(fine)}}):O({{L"type",S(L"position")},{L"position",N(local->scrubOrigin+pixels/200.)}});
+            auto next=local->resolve(spec,local->value,operation);
             local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);
         };
-        valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,commit,restore,surfaceY,weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
+        valueSurface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([data,local,commit,restore,surfaceY,panel,spec,editor=make_weak(entry),weak=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
             if(data->claimBubbleContact(e))return;
-            if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr))||!commit(false))return;
+            if(local->pointer||!PointerGesture::PrimaryContact(e.GetCurrentPoint(nullptr)))return;
+            auto entry=editor.get();if(!entry||!entry.IsEnabled())return;
+            if(!panel&&e.GetCurrentPoint(nullptr).PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse){entry.Focus(FocusState::Pointer);e.Handled(true);return;}
+            if(!commit(false))return;
             auto target=weak.get();if(!target||!target.IsEnabled())return;
-            local->pointer=e.Pointer().PointerId();local->origin=local->scrubOrigin=local->value;local->originY=surfaceY(e);
+            local->pointer=e.Pointer().PointerId();local->origin=local->value;local->scrubOrigin=panel?local->value:num(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),L"fill");local->originY=surfaceY(e);
             local->fine=shifted(e);local->scrubBase=local->scrubPixels=0;
             if(!target.CapturePointer(e.Pointer())){local->pointer.reset();return;}
             ++local->contactGeneration;data->pointerCancels.Observe(*local->pointer,local.get(),restore);
@@ -417,11 +423,13 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             auto release=[local,restore](auto&&,PointerRoutedEventArgs const& e){if(local->turning&&local->pointer==e.Pointer().PointerId())restore();};
             dialView.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler(release)),true);
             dialView.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler(release)),true);
-            dialView.KeyDown([local,commit,phase,finish,turn](auto&&,KeyRoutedEventArgs const& e){
+            dialView.KeyDown([local,commit,phase,finish,turn,resetValue](auto&&,KeyRoutedEventArgs const& e){
                 using Windows::System::VirtualKey;auto key=e.Key();
                 if(local->pointer)return;
                 if(key==VirtualKey::Escape&&local->gesture){finish(L"cancel");e.Handled(true);return;}
-                int steps=key==VirtualKey::Right||key==VirtualKey::Up?1:key==VirtualKey::Left||key==VirtualKey::Down?-1:0;
+                if(key==VirtualKey::Home){resetValue();e.Handled(true);return;}
+                int amount=(GetKeyState(VK_SHIFT)&0x8000)?15:1;
+                int steps=key==VirtualKey::PageUp?45:key==VirtualKey::PageDown?-45:key==VirtualKey::Right||key==VirtualKey::Up?amount:key==VirtualKey::Left||key==VirtualKey::Down?-amount:0;
                 if(!steps)return;
                 e.Handled(true);if(!commit(false))return;
                 if(phase&&!local->gesture){local->gesture=true;phase(L"down",local->value);}
@@ -429,11 +437,22 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             });
             dialView.KeyUp([local,finish](auto&&,KeyRoutedEventArgs const& e){
                 using Windows::System::VirtualKey;auto key=e.Key();
-                if(!local->pointer&&(key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Left||key==VirtualKey::Down))finish(L"up");
+                if(!local->pointer&&(key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Left||key==VirtualKey::Down||key==VirtualKey::PageUp||key==VirtualKey::PageDown))finish(L"up");
+            });
+            dialView.PointerWheelChanged([local,commit,turn](auto&&,PointerRoutedEventArgs const& e){
+                if(local->pointer||e.GetCurrentPoint(nullptr).Properties().IsHorizontalMouseWheel()||!commit(false))return;
+                turn(O({{L"type",S(L"step")},{L"steps",N(e.GetCurrentPoint(nullptr).Properties().MouseWheelDelta()/120.)}}));e.Handled(true);
             });
             dialView.LostFocus([local,finish](auto&&,auto&&){if(!local->pointer)finish(L"up");});
         }
     }
+    header.AddHandler(UIElement::PointerWheelChangedEvent(),box_value(PointerEventHandler([local,spec,set,setText,commit,editor=make_weak(entry),surface=make_weak(valueSurface)](auto&&,PointerRoutedEventArgs const& e){
+        auto entry=editor.get();auto readout=surface.get();if(!entry||!entry.IsEnabled()||local->pointer||e.GetCurrentPoint(nullptr).Properties().IsHorizontalMouseWheel())return;
+        bool inside=false;for(auto node=e.OriginalSource().try_as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node))if(node==entry||node==readout){inside=true;break;}
+        if(!inside)return;e.Handled(true);if(!commit(false))return;
+        auto next=local->resolve(spec,local->value,O({{L"type",S(L"step")},{L"steps",N(e.GetCurrentPoint(nullptr).Properties().MouseWheelDelta()/120.)}}));
+        local->value=num(next,L"value");setText(str(next,L"text"));set(local->value);e.Handled(true);
+    })),true);
     entry.GotFocus([data,local,showText,setText](Windows::Foundation::IInspectable const& sender,RoutedEventArgs const&){
         auto entry=sender.as<TextBox>();entry.Background(data->brush(L"input"));
         if(!local->editing)setText(showText(L"edit"));

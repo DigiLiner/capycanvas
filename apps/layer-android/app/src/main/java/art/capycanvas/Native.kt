@@ -4,6 +4,8 @@ import android.view.Surface
 
 /** Only CanvasHost's render Looper can access a native session handle. */
 internal object Native {
+    @JvmStatic external fun workspaceNameError(name: String, language: String): String
+    @JvmStatic external fun profileMatches(entries: String, query: String, language: String): String
     @JvmStatic external fun nativeCaption(request: String, language: String = ""): String
     @JvmStatic external fun drawerFrame(request: String): String
     @JvmStatic external fun shaderInput(handle: Long)
@@ -145,7 +147,11 @@ internal object Native {
     @JvmStatic external fun colorWork(task: Long, choice: String, copy: Boolean = false): String
     @JvmStatic external fun colorPreview(task: Long, after: Boolean): ByteArray
     @JvmStatic external fun colorAdopt(handle: Long, task: Long)
-    @JvmStatic external fun colorWriteCopy(task: Long, fd: Int)
+    @JvmStatic external fun colorCopyTask(handle: Long, source: Long): Long
+    @JvmStatic external fun colorCopyPrepare(copy: Long, source: Long)
+    @JvmStatic external fun colorCopyReady(handle: Long, copy: Long, source: Long): Boolean
+    @JvmStatic external fun colorCopyAdopt(handle: Long, copy: Long, source: Long)
+    @JvmStatic external fun colorCopyFree(copy: Long)
     @JvmStatic external fun colorFree(task: Long)
     @JvmStatic external fun paperTask(handle: Long, request: Int, directory: String): Long
     @JvmStatic external fun paperImports(task: Long): Boolean

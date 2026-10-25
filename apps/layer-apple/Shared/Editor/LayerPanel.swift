@@ -303,7 +303,7 @@ private struct LayerSwipeRow<Content: View>: View {
                 }
             }.clipped()
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-            .animation(swipe.tracking || reduceMotion ? nil : .easeOut(duration: 0.12), value: offset)
+            .animation(swipe.tracking || reduceMotion ? nil : .easeOut(duration: 0.15), value: offset)
     }
 }
 

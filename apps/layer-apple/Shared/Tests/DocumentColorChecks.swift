@@ -42,9 +42,8 @@ extension XCTestCase {
             workspaceActivate(app.buttons[label].firstMatch)
             #endif
         }
-        let preview=app.buttons["document-color-preview"],apply=app.buttons["document-color-apply"]
+        let apply=app.buttons["document-color-apply"]
         func compare() {
-            workspaceActivate(preview)
             expectation(for:NSPredicate(format:"enabled == YES"),evaluatedWith:apply);waitForExpectations(timeout:90)
             XCTAssertTrue(app.staticTexts["Before"].exists && app.staticTexts["After"].exists)
         }
@@ -56,9 +55,9 @@ extension XCTestCase {
         #else
         workspaceActivate(app.buttons["Cancel"].firstMatch)
         #endif
-        XCTAssertTrue(preview.waitForNonExistence(timeout:10));XCTAssertEqual(editorPixels(in:app),before)
+        XCTAssertTrue(apply.waitForNonExistence(timeout:10));XCTAssertEqual(editorPixels(in:app),before)
         command("Assign Profile…");choose("document-color-space","ProPhoto RGB");compare();workspaceActivate(apply)
-        XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         expectation(for:NSPredicate { _,_ in self.editorPixels(in:app) != before },evaluatedWith:app);waitForExpectations(timeout:20)
         let assigned=editorPixels(in:app)
         editorHistory("Undo",in:app)
@@ -66,7 +65,7 @@ extension XCTestCase {
         editorHistory("Redo",in:app)
         expectation(for:NSPredicate { _,_ in self.editorPixels(in:app)==assigned },evaluatedWith:app);waitForExpectations(timeout:90)
         command("Change Bit Depth…");choose("document-color-depth","16-bit SDR");compare();workspaceActivate(apply)
-        XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         command("Document Properties…")
         XCTAssertTrue(app.staticTexts["16-bit integer SDR"].waitForExistence(timeout:15))
         XCTAssertTrue(app.staticTexts["ProPhoto RGB"].exists)
@@ -74,7 +73,7 @@ extension XCTestCase {
         workspaceActivate(app.buttons["Done"].firstMatch)
         command("Convert Color Space…");choose("document-color-space","Display P3");compare()
         attachEditor(in:app,name:"document-convert-comparison")
-        workspaceActivate(apply);XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        workspaceActivate(apply);XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 }

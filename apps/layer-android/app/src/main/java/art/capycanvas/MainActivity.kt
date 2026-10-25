@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
         host.dialogKeyHandler?.let { return it(event) || super.dispatchKeyEvent(event) }
         if (host.headerKeyHandler?.invoke(event) == true) return true
         host.menuKeyHandler?.let { return it(event) || super.dispatchKeyEvent(event) }
+        if (host.dividerFocus != null && event.keyCode in listOf(KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN)) { host.key(event); return true }
         if (host.drawingTabs.key(event)) return true
         if (host.palettes.key(event)) return true
         if (event.action == KeyEvent.ACTION_DOWN && (event.isCtrlPressed || event.isMetaPressed))
@@ -206,7 +207,7 @@ internal fun CanvasHost.key(event: KeyEvent) {
     if (colorControlFocus != null && event.keyCode in listOf(KeyEvent.KEYCODE_SPACE, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER)) return
     val key = keyName(event)
     if (key != null) input(obj("type" to "key", "key" to key, "pressed" to (event.action == KeyEvent.ACTION_DOWN),
-            "repeat" to (event.repeatCount > 0), "editing" to editingText,
+            "repeat" to (event.repeatCount > 0), "editing" to editingText, "divider" to (dividerFocus ?: org.json.JSONObject.NULL),
             "modifiers" to obj("command" to (event.isCtrlPressed || event.isMetaPressed), "shift" to event.isShiftPressed, "alt" to event.isAltPressed)))
 }
 

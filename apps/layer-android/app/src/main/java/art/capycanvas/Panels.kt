@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
                 val source = dock.tileDrawerSource(panel.getString("id"), tile.getInt("id"))
                 val shape = drawerButtonShape(source?.direction)
                 val anchor = obj("kind" to "tile", "panel" to panel.getString("id"), "tile" to tile.getInt("id"))
-                val activate=pickerClick(host,tile.getJSONObject("resolved_control"),anchor) {
+                val activation=pickerClick(host,tile.getJSONObject("resolved_control"),anchor) {
                     host.dispatch(obj("type" to "activate_tile","panel" to panel.getString("id"),"tile" to tile.getInt("id")))
                 }
                 HoverTip(tile.getString("tooltip"), modifier) {
@@ -61,10 +61,10 @@ import kotlin.math.roundToInt
                         tile.optBoolean("selected") -> colors.active
                         else -> Color.Transparent
                     })
-                    .combinedClickable(enabled = tile.getBoolean("enabled"),
+                    .then(activation.modifier).combinedClickable(enabled = tile.getBoolean("enabled"),
                         onDoubleClick = if (tile.optBoolean("double_click")) ({ host.dispatch(obj("type" to "double_click_tool", "control" to tile.getJSONObject("resolved_control"))) }) else null,
                         onLongClick = { dock.holdContext(obj("kind" to "tile", "panel" to panel.getString("id"), "tile" to tile.getInt("id"))) },
-                        onClick = activate),
+                        onClick = activation.click),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                     Box(if (labelLines > 0) Modifier.width(36.dp) else Modifier, contentAlignment = Alignment.Center) {
                         val glyph = Modifier.size(geometry.getInt("tile_icon_size").dp).testTag("tile-icon-${panel.getString("id")}-${tile.getInt("id")}")

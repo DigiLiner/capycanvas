@@ -11,6 +11,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,10 +38,10 @@ private val NoticeMargin = 12.dp
 private val NoticeGap = 8.dp
 
 /** One of the core's ordered notice choices, identified by its stable token. */
-internal class CanvasNoticeAction(val id: String, val label: String, val enabled: Boolean, val reason: String?)
+internal data class CanvasNoticeAction(val id: String, val label: String, val enabled: Boolean, val reason: String?)
 
 /** The core's notice, or a refused command or action, which has no id. */
-internal class CanvasNotice(val id: Long?, val name: String, val text: String, val actions: List<CanvasNoticeAction>)
+internal data class CanvasNotice(val id: Long?, val name: String, val text: String, val actions: List<CanvasNoticeAction>)
 
 /** Projects the shared canvas notice at its shared placement: centred on the
  * placement's anchor, no wider than its maximum width, and above a canvas action
@@ -49,9 +51,10 @@ internal class CanvasNotice(val id: Long?, val name: String, val text: String, v
 @OptIn(ExperimentalLayoutApi::class)
 @Composable internal fun NoticeBubble(host: CanvasHost, dock: DockInteraction, placement: JSONObject) {
     val notice = host.notice ?: return
-    LaunchedEffect(notice) {
+    val current by rememberUpdatedState(notice)
+    LaunchedEffect(notice.id ?: notice) {
         delay(NoticeTimeoutMs)
-        host.answerNotice(notice, accept = false)
+        host.answerNotice(current, accept = false)
     }
     val colors = LocalPalette.current
     Surface(Modifier.zIndex(250f).layout { measurable, constraints ->

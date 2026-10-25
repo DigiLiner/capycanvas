@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -118,16 +119,21 @@ internal class Palette(val dark: Boolean, private val source: org.json.JSONObjec
     key: Any = remember { Any() }, active: Boolean = true): Modifier {
     val host = LocalCanvasHost.current
     val density = LocalDensity.current
+    val opacity=LocalWorkspaceOpacity.current
+    var bounds by remember { mutableStateOf<FloatArray?>(null) }
     DisposableEffect(host, key) { onDispose { host.glassBox(key, null) } }
-    SideEffect { if (!active) host.glassBox(key, null) }
+    LaunchedEffect(host,key,active,opacity) {
+        snapshotFlow { bounds?.toList() to (opacity?.value ?: 1f) }.collect { (box,strength) ->
+            host.glassBox(key,box?.takeIf { active }?.toFloatArray(),strength)
+        }
+    }
     return background(color, shape).onGloballyPositioned { coords ->
-        if (!active) return@onGloballyPositioned
         val origin = coords.positionInRoot() + rootOffset() - host.surfaceOrigin
         val size = coords.size.toSize()
         val radii = (shape as? CornerBasedShape)?.let { s ->
             listOf(s.topStart, s.topEnd, s.bottomEnd, s.bottomStart).map { it.toPx(size, density) }
         } ?: listOf(0f, 0f, 0f, 0f)
-        host.glassBox(key, floatArrayOf(origin.x, origin.y, size.width, size.height) + radii)
+        bounds=floatArrayOf(origin.x, origin.y, size.width, size.height) + radii
     }
 }
 internal val LocalPalette = staticCompositionLocalOf<Palette> { error("Missing core palette") }
@@ -176,7 +182,7 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     height: Dp = 36.dp, enabled: Boolean = true, focusRequest: Long = 0,
     textStyle: TextStyle = LocalTextStyle.current, shape: Shape = RoundedCornerShape(6.dp),
     keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
-    maxLength: Int = Int.MAX_VALUE, background: Color? = null, onCommit: ((String) -> Unit)? = null) {
+    maxLength: Int = Int.MAX_VALUE, selectAllOnFocusRequest: Boolean = false, background: Color? = null, onCommit: ((String) -> Unit)? = null) {
     var text by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     var focused by remember { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
@@ -186,8 +192,8 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     // A core type-to-search request carries text as well as focus. Apply it
     // even if another key arrived before the native field gained focus.
     LaunchedEffect(focusRequest) {
-        if (focusRequest != 0L && value.isNotEmpty()) {
-            text = TextFieldValue(value, TextRange(value.length))
+        if (focusRequest != 0L) {
+            text = TextFieldValue(value, if (selectAllOnFocusRequest) TextRange(0, value.length) else TextRange(value.length))
             host.textComposition.clear(requester)
             requester.requestFocus()
         }

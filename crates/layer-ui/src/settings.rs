@@ -860,6 +860,7 @@ pub struct HostRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostRequestKind {
+    ColorSlot { slot: crate::ColorSlot, library: bool },
     AdjacentDrawing { forward: bool },
     Drawings,
     SdrRendition,

@@ -46,7 +46,11 @@ function ProofPanel {
  Wait-Until {(Find 'proof-panel-mode')} 'Retained Proof panel did not open'
 }
 function Setup {
- ProofPanel;if(!(Find 'proof-panel-setup')){Invoke 'proof-panel-mode-print'};Invoke 'proof-panel-setup'
+ Command 'document_properties' 'File'
+ Wait-Until {(Model).windows_document.kind -eq 'properties'} 'Document Properties did not open'
+ $appearance=Control 'PrimaryButton' -Within (Control 'document-workflow') -Arranged
+ if($appearance.Current.Name -ne (Model).windows_document.details.proof){throw 'Properties primary action is not Appearance'}
+ $appearance.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {(Model).windows_document.kind -eq 'proof' -and (Find 'proof-profile')} 'Proof Setup did not open'
 }
 function Picker([string]$Name){
@@ -90,8 +94,8 @@ try {
  $root=$native.window.Root;$drawingWindow=$native.window.Handle
  $initial=(Model).state.document_file|ConvertTo-Json -Compress
  Command 'soft_proof'
- Wait-Until {$null -ne (Find 'proof-panel-setup')} 'Proof command did not reveal the panel'
- Invoke 'proof-panel-setup'
+ Wait-Until {$null -ne (Find 'proof-panel-mode')} 'Proof command did not reveal the panel'
+ Setup
  Wait-Until {$null -ne (Find 'proof-profile')} 'Print setup did not open'
  Button 'Cancel';Idle
  if((Model).state.soft_proof -or ((Model).state.document_file|ConvertTo-Json -Compress) -ne $initial){throw 'First-use cancellation edited the drawing'}
@@ -110,14 +114,23 @@ try {
  $settings=(Model).windows_document.details.settings
  if($settings.profile.name -ne 'Display P3' -or $settings.simulation -ne 'paper_and_ink' -or $settings.intent -ne 'RelativeColorimetric'){throw 'Profile/library navigation lost the draft'}
  Button 'Cancel';Idle
+ ProofPanel
+ if((Model).windows_proof_form.mode -ne 'print'){Invoke 'proof-panel-mode-print'}
+ Wait-Until {(Find 'proof-panel-profile') -and !(Model).windows_proof_form.preparing} 'Inline print controls did not appear'
+ Select-Choice 'proof-panel-profile' 'sRGB'
+ Wait-Until {(Model).windows_proof.text -eq 'Proof: sRGB' -and !(Model).windows_proof_form.preparing} 'Inline profile choice did not prepare and apply' 60
+ Command 'undo' 'Edit'
+ Wait-Until {(Model).windows_proof.text -eq 'Proof: Display P3' -and !(Model).windows_proof_form.preparing} 'Inline profile Undo did not restore prior recipe' 60
+ foreach($mode in @('off','print','off','print')){Invoke ('proof-panel-mode-'+$mode)}
+ Wait-Until {(Model).windows_proof_form.mode -eq 'print' -and (Find 'proof-panel-profile')} 'Rapid Proof mode reversal did not settle on Print'
  $withProof=(Model).state.document_file|ConvertTo-Json -Compress
  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  $modeBounds=@('off','print'|ForEach-Object {Native-Bounds ('proof-panel-mode-'+$_) $scale})
- $setupBounds=Native-Bounds 'proof-panel-setup' $scale
+ $profileBounds=Native-Bounds 'proof-panel-profile' $scale
  $gamutBounds=Native-Bounds 'proof-panel-gamut' $scale
- foreach($bounds in $modeBounds+@($setupBounds,$gamutBounds)){if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw 'Proof panel controls do not use compact height'}}
- if([Math]::Abs(($modeBounds[1].Left-$modeBounds[0].Right)/$scale-4) -gt 1 -or [Math]::Abs(($gamutBounds.Top-$setupBounds.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($gamutBounds.Left-$setupBounds.Left) -gt 1){throw 'Proof panel controls do not use consistent peer gaps and side alignment'}
- @{theme=$Theme;dpi=96*$scale;modes=$modeBounds;setup=$setupBounds;gamut=$gamutBounds}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'proof-panel-geometry.json')
+ foreach($bounds in $modeBounds+@($gamutBounds)){if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw 'Proof panel controls do not use compact height'}}
+ if([Math]::Abs(($modeBounds[1].Left-$modeBounds[0].Right)/$scale-4) -gt 1 -or [Math]::Abs($gamutBounds.Left-$profileBounds.Left) -gt 1){throw 'Proof panel controls do not use consistent peer gaps and side alignment'}
+ @{theme=$Theme;dpi=96*$scale;modes=$modeBounds;profile=$profileBounds;gamut=$gamutBounds}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'proof-panel-geometry.json')
  Capture ('proof-panel-'+$Theme)
  Invoke 'proof-panel-gamut';Wait-Until {(Model).state.gamut_warning} 'Gamut warning failed'
  Command 'soft_proof';Wait-Until {!(Model).state.soft_proof -and !(Model).state.gamut_warning -and !(Model).windows_proof.text} 'Off did not clear proof status'

@@ -132,7 +132,7 @@ export function createDocumentRecovery({app,call,message,restore,settled=()=>{},
             while(!canOffer())await new Promise(resolve=>setTimeout(resolve,50));
             if(saved.blocked.some(id=>String(id)===String(drawing.id))) {
               const decision=await failed(detail);
-              if(decision==='later')break;
+              if(decision!=='retry'&&decision!=='discard')break;
               if(decision==='discard') {
                 const removed=update(saved,{type:'remove',id:drawing.id});
                 await storage('publish-manifest',{key:origin,manifest:removed,closed:[drawing.key]});saved=removed;break;

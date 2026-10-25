@@ -11,9 +11,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
   const capture = () => evaluate('JSON.parse(layerApp.app.workspace_capture())');
   const idle = () => wait('JSON.parse(layerApp.app.workspace_view()).ready && !JSON.parse(layerApp.app.workspace_view()).busy && !JSON.parse(layerApp.app.workspace_view()).dirty');
   const click = async selector => {
-    // Only scroll the manager's list. Scrolling a centered native dialog while
-    // Android's keyboard is active moves it between measurement and contact.
-    await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing '+${JSON.stringify(selector)});if(e.closest('.workspace-list'))e.scrollIntoView({block:'nearest',behavior:'instant'});})()`);
+    await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing '+${JSON.stringify(selector)});const scroll=e.closest('.workspace-list,.workspace-details');if(scroll){const row=e.getBoundingClientRect(),area=scroll.getBoundingClientRect();if(row.top<area.top)scroll.scrollTop+=row.top-area.top;else if(row.bottom>area.bottom)scroll.scrollTop+=row.bottom-area.bottom;}})()`);
     await settle();
     const point = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     if (touch) {
@@ -50,14 +48,48 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
   await evaluate(`window.workspaceTestEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{workspaceTestEvents.push({type,target:e.target.outerHTML.slice(0,150),x:e.clientX,y:e.clientY,prevented:e.defaultPrevented,active:document.activeElement?.outerHTML.slice(0,80)});if(workspaceTestEvents.length>40)workspaceTestEvents.shift();},{capture:true});`);
   await send({type:"workspace_manager",command:{type:"switch",id:"builtin:workspace:illustrator"}});
   await idle(); await send({type:"set_theme",theme:process.env.CAPY_TEST_THEME || "dark"}); const original = (await view()).id, originalCapture = await capture(), originalLayout = await evaluate('layerApp.state().workspace.layout'); let created;
+  async function advancedToolbars(){
+    const count=await evaluate('layerApp.state().workspace.layout.panels.length'),name=`Web reusable ${Date.now()}`,description='Reusable brush and color controls';
+    await send({type:'invoke',command:'manage_toolbars'});await wait('JSON.parse(layerApp.app.workspace_view()).page==="this_workspace"');
+    const toolbar=(await view()).rows[0];assert.ok(toolbar);
+    await click(`.workspace-choice[data-id=${JSON.stringify(toolbar.id)}]`);
+    await wait('!!document.querySelector(".workspace-details [data-action=save_toolbar]")');
+    await click('.workspace-details [data-action=save_toolbar]');await text('#workspace-item-name',' ');
+    assert.equal(await evaluate('document.querySelector(".workspace-form .suggested-action").disabled'),true);
+    await text('#workspace-item-name',name);await click('.workspace-form .suggested-action');await idle();
+    await click('.workspace-manager-tabs [data-page=toolbar_library]');await wait('JSON.parse(layerApp.app.workspace_view()).page==="toolbar_library"');
+    let item=(await view()).rows.find(row=>row.title===name);assert.ok(item);
+    await text('#workspace-manager-search',name);await wait(`JSON.parse(layerApp.app.workspace_view()).rows.length===1`);
+    await click(`.workspace-choice[data-id=${JSON.stringify(item.id)}]`);await wait('!!document.querySelector(".workspace-details [data-action=rename]")');
+    await click('.workspace-details [data-action=rename]');await text('#workspace-item-description',description);await click('.workspace-form .suggested-action');await idle();
+    await wait(`JSON.parse(layerApp.app.workspace_view()).details?.description===${JSON.stringify(description)}`);
+    await click('.workspace-details [data-action=update_toolbar]');
+    const options=(await view()).prompt.choices;assert.ok(options.length);
+    const choice=options.at(-1).id;
+    await evaluate(`(()=>{const field=document.querySelector('#workspace-item-choice');field.value=${JSON.stringify(choice)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await click('.workspace-form .suggested-action');await idle();
+    await click('.workspace-manager-tabs [data-page=this_workspace]');await click('.workspace-add');
+    await wait('!!document.querySelector("#workspace-item-choice")');
+    assert.ok((await view()).prompt.choices.some(value=>value.id===item.id));
+    await evaluate(`(()=>{const field=document.querySelector('#workspace-item-choice');field.value=${JSON.stringify(item.id)};field.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await text('#workspace-item-name','Applied reusable toolbar');await click('.workspace-form .suggested-action');await idle();
+    assert.equal(await evaluate('layerApp.state().workspace.layout.panels.length'),count+1);
+    if((await view()).page)await click('.workspace-manager .dialog-close');await send({type:'invoke',command:'undo_workspace'});
+    assert.equal(await evaluate('layerApp.state().workspace.layout.panels.length'),count);
+    await send({type:'invoke',command:'manage_toolbars'});await click('.workspace-manager-tabs [data-page=toolbar_library]');
+    await text('#workspace-manager-search',name);await click(`.workspace-choice[data-id=${JSON.stringify(item.id)}]`);await wait('!!document.querySelector(".workspace-details [data-action=delete]")');
+    await click('.workspace-details [data-action=delete]');await click('.workspace-form .suggested-action');await idle();
+    assert.equal((await view()).rows.some(row=>row.id===item.id),false);await click('.workspace-manager .dialog-close');
+  }
   try {
     console.log('Workspace UI: opening manager'); await menu('Manage Workspaces…');
-    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]")'),null);
+    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]").hidden'),true);
     assert.equal(await evaluate('document.querySelector(".workspace-manager footer .suggested-action").disabled'),true);
     await shot('workspaces'); await click('.workspace-add');
     const name=`Web Painting ${Date.now()}`; await text('.workspace-form input',name); await shot('new-workspace');
     await click('.workspace-form .suggested-action'); await idle();
     console.log('Workspace UI: created', await view()); const candidate=(await view()).id; assert.notEqual(candidate,original); created=candidate; assert.equal((await view()).name,name);
+    await advancedToolbars();
     await send({type:'invoke',command:'eraser'});
     await send({type:'set_brush_size',value:91});
     await send({type:'set_color',rgba:[0.2,0.3,0.4,1]});
@@ -85,7 +117,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await menu('Manage Workspaces…'); await click(`.workspace-choice[data-id="${created}"]`); await click('.workspace-manager footer .suggested-action'); await idle();
     assert.deepEqual((await capture()).working,changed.working);
     await menu('Layout History…'); assert.equal((await view()).enabled,false); await shot('history');
-    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]")'),null);
+    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]").hidden'),true);
     const currentVersion=(await capture()).history.current;
     assert.equal(await evaluate('document.querySelector(\'.workspace-choice[data-id="r0"] .workspace-row-title\').textContent'),'Starting layout');
     assert.match(await evaluate(`document.querySelector('.workspace-choice[data-id="${currentVersion}"] .workspace-row-subtitle').textContent`),/^Current layout · /);
@@ -176,7 +208,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await menu('Manage Workspaces…'); assert.ok(!(await view()).rows.some(row=>row.id===deleted),'Deleted workspace stays absent after reload');
     await click('.workspace-manager footer button');
     if(original!==illustrator){await click(`.workspace-switcher button[data-workspace-id="${original}"]`);await idle();}
-    console.log('PASS: real Web menu/dialog input, search-free manager/history, New, Rename, preview/cancel, explicit switch, default pill, tools, history, undo, restart, starting layout, brush reset and active deletion/cancel/reload');
+    console.log('PASS: real Web menu/dialog input, search gating, reusable toolbar save/description/update/choice/apply/undo/delete, manager/history, New, Rename, preview/cancel, explicit switch, default pill, tools, history, undo, restart, starting layout, brush reset and active deletion/cancel/reload');
   } catch (error) { console.error("Workspace acceptance failed", error, await view()); await writeFile(`${directory}/input-events.json`,JSON.stringify(await evaluate('window.workspaceTestEvents || []'),null,2)); await shot("failure"); throw error; } finally {
     await evaluate('layerApp.app.workspace_input(JSON.stringify({type:"cancel"}));null');
     await evaluate('layerApp.app.workspace_input(JSON.stringify({type:"cancel"}));null');

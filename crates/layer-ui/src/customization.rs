@@ -529,6 +529,7 @@ pub enum ContextTarget {
     Ribbon { panel: Panel },
     Bubble { id: u32 },
     BubblePalettes { id: u32 },
+    ColorSlot { slot: crate::ColorSlot },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -766,7 +767,7 @@ impl DockLayout {
     pub(crate) fn context_menu_localized_on(&self, target: ContextTarget, platform: Platform, localization: &Localizer) -> Result<ContextMenu, String> {
         let entry = ContextMenuItem::edit;
         let (title, sections) = match target {
-            ContextTarget::ToolVariants { .. } | ContextTarget::Bubble { .. } | ContextTarget::BubblePalettes { .. } => {
+            ContextTarget::ToolVariants { .. } | ContextTarget::Bubble { .. } | ContextTarget::BubblePalettes { .. } | ContextTarget::ColorSlot { .. } => {
                 return Err("Tool variations require session state".into());
             }
             ContextTarget::Header { id } => {
@@ -3313,4 +3314,15 @@ mod tests {
             }
         }
     }
+}
+
+pub fn workspace_name_valid(name: &str) -> bool {
+    name.trim() == name && !name.is_empty() && name.chars().count() <= 100
+        && !name.chars().any(char::is_control)
+}
+
+pub fn workspace_name_validation(name: &str, localization: &Localizer) -> Option<String> {
+    (!workspace_name_valid(name.trim())).then(|| localization.text(
+        MessageId::WORKSPACE_REFUSAL_ENTER_A_NAME_OF_1_100_CHARACTERS_WITHOUT_LEADING_OR_TRAILING_SPACES,
+    ).to_string())
 }

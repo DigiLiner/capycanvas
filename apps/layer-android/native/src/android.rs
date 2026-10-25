@@ -276,7 +276,7 @@ fn saturated_color_mode() -> bool {
 
 #[derive(serde::Deserialize)]
 struct Glass {
-    boxes: Vec<[f32; 8]>,
+    boxes: Vec<[f32; 9]>,
     connections: Vec<GlassConnection>,
     #[serde(default)]
     bubble_boxes: Vec<[f32; 10]>,
@@ -290,7 +290,10 @@ struct Glass {
 struct GlassConnection {
     connection: layer_ui::DrawerConnection,
     scale: f32,
+    #[serde(default = "glass_strength")]
+    strength: f32,
 }
+fn glass_strength()->f32 {1.0}
 
 impl App {
     pub(crate) fn screen_tick(&mut self) -> bool {
@@ -1360,10 +1363,11 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
     let result = (|| {
         let glass: Glass = serde_json::from_str(&read(&mut env, &value)?).map_err(error)?;
         let squircle = layer_render_wgpu::BackdropRegion::SQUIRCLE;
+        if glass.boxes.iter().any(|b| !(0.0..=1.0).contains(&b[8])) || glass.connections.iter().any(|c| !(0.0..=1.0).contains(&c.strength)) { return Err("Invalid glass strength".into()); }
         let regions: Vec<_> = glass
             .boxes
             .iter()
-            .map(|b| layer_render_wgpu::BackdropRegion::rounded([b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], squircle))
+            .map(|b| layer_render_wgpu::BackdropRegion::rounded([b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], squircle).with_strength(b[8]))
             .chain(glass.bubble_boxes.iter().map(|b| layer_render_wgpu::BackdropRegion::rounded(
                 [b[0], b[1], b[2], b[3]], [b[4], b[5], b[6], b[7]], if b[8] > 0. { squircle } else { layer_render_wgpu::BackdropRegion::CIRCULAR }).with_strength(b[9])))
             .chain(glass.bubble_colors.iter().map(|c| layer_render_wgpu::BackdropRegion::color_bubble([c[0], c[1]], c[2], c[3], c[4], c[5]).with_strength(c[6])))
@@ -1373,7 +1377,7 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
                     bounds: bounds.map(|v| v * c.scale),
                     radii: radii.map(|v| v * c.scale),
                     shape: squircle,
-                })
+                }.with_strength(c.strength))
             }))
             .collect();
         if regions.iter().any(|r| !r.bounds.iter().chain(&r.radii).all(|v| v.is_finite())) {

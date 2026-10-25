@@ -1083,7 +1083,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
                 "frames": host.presenter.as_ref().map_or([0; 2], |p| p.backdrop_frames()),
             }),
             windows_document: host.documents.as_ref().and_then(|service| service.status()),
-            windows_proof_form: serde_json::to_value(layer_ui::proof_workflow::proof_copy(&host.native.session)).unwrap(),
+            windows_proof_form: host.documents.as_ref().map(|service|service.proof.form(&host.native)).unwrap_or_else(||serde_json::json!(layer_ui::proof_workflow::proof_copy(&host.native.session))),
             windows_proof: host
                 .documents
                 .is_some()

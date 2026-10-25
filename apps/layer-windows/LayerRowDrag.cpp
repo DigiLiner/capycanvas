@@ -163,7 +163,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(row->renaming||inside(original,row->rename)||!row->current())return;
             source=row;id=row->id;epoch=row->epoch;pointer=e.Pointer();device=point.PointerDeviceType();
             owner->data->pointerCancels.Observe(pointer.PointerId(),this,[weak=weak_from_this()]{if(auto self=weak.lock())self->cancel(L"capture_handoff");});
-            grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;
+            grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;row->swipe(initialSwipe,false);
             pickup=initialSwipe==0&&movable(row->model());
             for(auto const& [key,other]:owner->rows)if(other!=row)other->swipe(0);
             origin=position=point.Position();initialScroll=list.VerticalOffset();windowHandle=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
@@ -239,7 +239,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
                     if(recognizing){recognizing=false;recognizer.CompleteGesture();}
                 }else{cancel(L"native_scroll");return;}
             }
-            if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X));e.Handled(true);return;}
+            if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X),false);e.Handled(true);return;}
             auto owner=view.lock();auto row=owner?panelRow(owner->data->state,id):J{};
             auto sourceRow=source.lock();
             if(!pickup||!movable(row)||!sourceRow||sourceRow->swipeOffset!=0)return;
@@ -247,7 +247,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             dragging=true;ignoreClick=true;suppressContext=true;hideMenu();
             sourceOpacity=sourceRow->root.Opacity();sourceRow->root.Opacity(.55);
         }
-        if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X));e.Handled(true);}
+        if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X),false);e.Handled(true);}
         if(dragging){target();e.Handled(true);evidence();}
     }
     void up(PointerRoutedEventArgs const& e){

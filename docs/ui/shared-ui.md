@@ -103,6 +103,12 @@ asynchronous storage transport rather than reconstructing layout decisions from
 widgets. Routine workspace operations pause input without disabling or
 restyling the editor.
 
+All hosts present the shared reusable-toolbar library, including its pages,
+choices, descriptions and name prompts. Required-name prompts use shared
+`workspace_name_validation` before enabling submission; the storage operation
+validates the accepted name again. Native asynchronous queries retain their
+prompt identity so an old validation reply cannot enable a newer draft.
+
 `UiSession::layout` supplies the standard workspace rectangles through
 `DockLayout::resolved`. Shared layout operations use that default-chrome helper;
 hosts with measured chrome use `DockLayout::workspace`.
@@ -266,11 +272,16 @@ elsewhere. Pen and mouse never peek. `UiSession::zen_keeps(group)` tells hosts
 which hidden groups to keep. Floating panels remain available, and their drags
 can merge with other floating panels without exposing hidden docks.
 
-Zen immediately disables hidden controls. GTK and Web fade other chrome over
-180 ms; Capy switches without fading. Web respects reduced-motion preferences
-and GTK uses the platform animation setting. Open menus, settings and native
+Zen immediately excludes hidden chrome from pointer hit testing.
+Hosts retain outgoing chrome for its 180 ms fade and honor their platform's
+reduced-motion setting; the standalone Capy button switches immediately.
+Expanded configuration and drawers also skip their native
+frame loops when animation is disabled. Open menus, settings and native
 title-bar grabs keep controls available. The next canvas contact releases an
 interaction pin without also painting.
+Escape closes a visible interaction owner before leaving Zen. An open column
+hidden by Zen keeps its arrangement and cannot consume Escape; peeked columns
+and columns containing a toolbar kept in Zen retain their normal close priority.
 
 Zen’s visibility and interaction pins live in Rust (`Settings.zen_show_capy`
 and `InputReply`’s `chrome_hidden` and `keep_zen_button` flags). Hosts send
@@ -377,6 +388,8 @@ its layer changed or was locked, raises a new notice that says why. The core
 clears the notice at the next canvas contact that raises nothing new, and when
 another document becomes active. Hosts show each id once, in a bubble named by
 `Notice::name` that does not take focus when it appears; Tab reaches its actions.
+Publishing the same id refreshes its localized text and actions without
+restarting its original deadline or showing a notice that already expired.
 `ResolvedLayout::notice` places it centred at the bottom of the canvas area and no
 wider than that area, or at the window's bottom when the canvas area is too small
 to hold it; a canvas action bar reaching below `bar_floor` lifts it above the bar.

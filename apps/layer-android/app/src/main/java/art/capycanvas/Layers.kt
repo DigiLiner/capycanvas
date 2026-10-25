@@ -528,8 +528,15 @@ internal class LayerSwipe {
             if(rename==id && !preview) {
                 var name by remember { mutableStateOf(TextFieldValue(layer.getString("label"),TextRange(0,layer.getString("label").length))) }
                 val focus=remember { FocusRequester() }; var hadFocus by remember { mutableStateOf(false) }; var done by remember { mutableStateOf(false) }
-                fun finish() { if(!done) { done=true; host.layer(if(name.text.isBlank())obj("op" to "cancel_rename") else obj("op" to "rename","id" to id,"name" to name.text)) } }
-                BasicTextField(name,{name=it;host.textComposition.update(focus,name,hadFocus)},Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { if(hadFocus && !it.isFocused)finish(); hadFocus=it.isFocused; host.editingText=it.isFocused;host.textComposition.update(focus,name,hadFocus) },
+                fun finish(cancel: Boolean = false) { if(!done) { done=true; host.layer(if(cancel || name.text.isBlank())obj("op" to "cancel_rename") else obj("op" to "rename","id" to id,"name" to name.text)) } }
+                BasicTextField(name,{name=it;host.textComposition.update(focus,name,hadFocus)},Modifier.fillMaxWidth().testTag("layer-name-editor-$id").focusRequester(focus).onPreviewKeyEvent { event ->
+                    val key = event.nativeKeyEvent
+                    if (key.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                        val owned=name.composition != null || host.textComposition.owns(key)
+                        if (!owned && key.action == android.view.KeyEvent.ACTION_DOWN) finish(true)
+                        true
+                    } else false
+                }.onFocusChanged { if(hadFocus && !it.isFocused)finish(); hadFocus=it.isFocused; host.editingText=it.isFocused;host.textComposition.update(focus,name,hadFocus) },
                     textStyle=LocalTextStyle.current.copy(color=colors.text),singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={if(name.composition==null)finish()}))
                 LaunchedEffect(id) { focus.requestFocus() }
                 DisposableEffect(id) { onDispose { host.editingText=false;host.textComposition.clear(focus) } }

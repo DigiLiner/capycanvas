@@ -15,6 +15,7 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
     Shapes::Ellipse field,marker;std::array<Shapes::Polyline,2> arcs;
     std::array<Shapes::Ellipse,2> handles;std::array<TextBlock,4> texts;std::array<Image,4> icons;
     Button reset;std::array<MenuFlyoutItem,4> resetItems;std::optional<uint32_t> pointer;winrt::Windows::Foundation::Point origin{},last{};
+    std::optional<winrt::Windows::System::VirtualKey> heldKey;uint64_t pressedAt=0;winrt::Windows::Foundation::Point pressedPoint{};uint8_t pressedPart=0;
     hstring epoch,identity,key;uint8_t part=0;static constexpr float side=256;
     J form()const{return object(data->model,L"windows_proof_form");}
     J geometry(std::optional<winrt::Windows::Foundation::Point> point={})const{
@@ -24,7 +25,8 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
         return reply?J::Parse(to_hstring(reply.get())):J{};
     }
     void send(J const& action,hstring const& at){data->dispatch(O({{L"windows_proof_action",action},{L"windows_epoch",S(at)}}));}
-    void control(uint8_t selected,J const& edit){send(O({{L"type",S(L"control")},{L"part",N(selected)},{L"edit",edit}}),to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch"))));}
+    void control(uint8_t selected,J const& edit,hstring const& phase=L""){auto action=O({{L"type",S(L"control")},{L"part",N(selected)},{L"edit",edit}});if(!phase.empty())action.Insert(L"phase",S(phase));send(action,heldKey?epoch:to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch"))));}
+    void finishKey(bool cancel){if(!heldKey)return;control(part,O({{L"type",S(L"step")},{L"axis",N(0)},{L"steps",N(0)}}),cancel?L"cancel":L"up");heldKey.reset();}
     void contact(hstring const& phase){A start,point;start.Append(N(origin.X));start.Append(N(origin.Y));point.Append(N(last.X));point.Append(N(last.Y));
         send(O({{L"type",S(L"dial")},{L"phase",S(phase)},{L"size",N(side)},{L"origin",start},{L"point",point}}),epoch);
     }
@@ -35,7 +37,7 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
         for(auto node=VisualTreeHelper::GetParent(root);node;node=VisualTreeHelper::GetParent(node))if(auto scroll=node.try_as<ScrollViewer>())
             if(auto content=scroll.Content().try_as<UIElement>()){auto mode=content.ManipulationMode();scrollModes.emplace_back(make_weak(content),mode);content.ManipulationMode(mode&~ManipulationModes::System);}
     }
-    void finish(bool cancel){if(!pointer)return;pointer.reset();contact(cancel?L"cancel":L"up");root.ReleasePointerCaptures();releaseScroll();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));}
+    void finish(bool cancel){finishKey(cancel);if(!pointer)return;pointer.reset();contact(cancel?L"cancel":L"up");root.ReleasePointerCaptures();releaseScroll();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));}
     static void circle(Shapes::Ellipse const& e,A const& point,double radius){e.Width(radius*2);e.Height(radius*2);Canvas::SetLeft(e,point.GetNumberAt(0)-radius);Canvas::SetTop(e,point.GetNumberAt(1)-radius);}
     void refresh(){
         auto copy=object(form(),L"copy");auto title=str(copy,L"balance_contrast");
@@ -78,7 +80,11 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
         root.PointerPressed([weak](auto&&,PointerRoutedEventArgs const& e){if(auto self=weak.lock()){
             auto p=e.GetCurrentPoint(self->canvas);if(self->pointer||!PointerGesture::PrimaryContact(p))return;
             auto g=self->geometry(p.Position());auto hit=g.GetNamedValue(L"hit",JsonValue::CreateNullValue());if(hit.ValueType()!=JsonValueType::Number||hit.GetNumber()==3)return;
-            self->root.Focus(FocusState::Pointer);self->claimScroll();if(!self->root.CapturePointer(e.Pointer())){self->releaseScroll();return;}
+            self->finishKey(true);self->root.Focus(FocusState::Pointer);
+            auto at=p.Position();auto selected=uint8_t(hit.GetNumber());bool repeated=self->pressedAt&&p.Timestamp()-self->pressedAt<=uint64_t(GetDoubleClickTime())*1000&&selected==self->pressedPart&&std::hypot(at.X-self->pressedPoint.X,at.Y-self->pressedPoint.Y)<=8;
+            self->pressedAt=repeated?0:p.Timestamp();self->pressedPoint=at;self->pressedPart=selected;
+            if(repeated){self->part=selected;self->control(selected,O({{L"type",S(L"reset")}}));e.Handled(true);return;}
+            self->claimScroll();if(!self->root.CapturePointer(e.Pointer())){self->releaseScroll();return;}
             self->pointer=p.PointerId();self->part=uint8_t(hit.GetNumber());self->origin=self->last=p.Position();self->epoch=to_hstring(uint64_t(num(object(self->data->state,L"document_file"),L"epoch")));
             self->contact(L"down");AutomationProperties::SetItemStatus(self->root,self->data->caption(L"header",L"dragging"));e.Handled(true);
         }});
@@ -90,9 +96,13 @@ struct ProofDial:std::enable_shared_from_this<ProofDial>{
         root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
             using winrt::Windows::System::VirtualKey;auto key=e.Key();if(key==VirtualKey::Escape){self->finish(true);e.Handled(true);return;}
             if(self->pointer)return;
-            if(key==VirtualKey::Home){self->control(self->part,O({{L"type",S(L"reset")}}));e.Handled(true);}
-            else if(key==VirtualKey::Left||key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Down){self->control(self->part,O({{L"type",S(L"step")},{L"axis",N(key==VirtualKey::Up||key==VirtualKey::Down?1:0)},{L"steps",N(key==VirtualKey::Right||key==VirtualKey::Up?1:-1)}}));e.Handled(true);}
+            if(key==VirtualKey::Home){self->finishKey(false);self->control(self->part,O({{L"type",S(L"reset")}}));e.Handled(true);}
+            else if(key==VirtualKey::Left||key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Down){if(self->heldKey&&*self->heldKey!=key)self->finishKey(false);
+                bool first=!self->heldKey;if(first){self->heldKey=key;self->epoch=to_hstring(uint64_t(num(object(self->data->state,L"document_file"),L"epoch")));}
+                int amount=(GetKeyState(VK_SHIFT)&0x8000)?10:1;
+                self->control(self->part,O({{L"type",S(L"step")},{L"axis",N(key==VirtualKey::Up||key==VirtualKey::Down?1:0)},{L"steps",N((key==VirtualKey::Right||key==VirtualKey::Up?1:-1)*amount)}}),first?L"down":L"move");e.Handled(true);}
         }});
+        root.KeyUp([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->heldKey==e.Key()){self->finishKey(false);e.Handled(true);}});
         MenuFlyout menu;TrackPopup(menu,data);
         for(uint8_t i=0;i<4;++i){auto item=resetItems[i];AutomationProperties::SetAutomationId(item,L"proof-dial-reset-"+to_hstring(i));item.Click([weak,i](auto&&,auto&&){if(auto self=weak.lock())self->control(i,O({{L"type",S(L"reset")}}));});menu.Items().Append(item);}root.ContextFlyout(menu);
         refresh();

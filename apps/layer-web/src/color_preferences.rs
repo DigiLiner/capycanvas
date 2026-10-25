@@ -8,6 +8,13 @@ impl WebApp {
         view.localize_names(self.session.engine().document().composition().color, self.session.localization());
         serialize(&view)
     }
+    pub fn workspace_name_validation(&self, name: &str) -> Result<JsValue, JsValue> {
+        serialize(&layer_workspace::name_validation(name, self.session.localization()))
+    }
+    pub fn profile_library_matches(&self, entry: JsValue, query: &str) -> Result<bool, JsValue> {
+        let entry: layer_ui::profile_library::ProfileEntry = serde_wasm_bindgen::from_value(entry).map_err(js)?;
+        Ok(entry.matches(query, self.session.localization()))
+    }
     pub fn profile_entry_copy(&self, entry: JsValue) -> Result<JsValue, JsValue> {
         let entry: layer_ui::profile_library::ProfileEntry = serde_wasm_bindgen::from_value(entry).map_err(js)?;
         serialize(&entry.localized_view(self.session.localization()))

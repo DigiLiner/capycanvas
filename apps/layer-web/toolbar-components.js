@@ -264,7 +264,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     let units = true;
     const change = value => send(context, { type: 'set_tool_setting', id: field.id, value });
     const errorCaption = reason => app.native_caption({type:'numeric_error',reason});
-    const number = createNumberField({ control: field.numeric, label: field.label, labels:next=>app.numeric_labels(next), errorCaption, icon, inline: true,
+    const number = createNumberField({ readoutGestures:false, control: field.numeric, label: field.label, labels:next=>app.numeric_labels(next), errorCaption, icon, inline: true,
       widthSamples: info.samples, onChange: change,
       resolve: request => app.toolbar_ui({ type: 'number', request, compact: true, units }) });
     if(field.preview)number.onEditPhase=phase=>send(context,{type:'tool_setting_contact',id:field.id,phase});

@@ -183,7 +183,8 @@ export function createPreferences({ app, element, button, icon, numberField, pan
       circle.setAttribute("aria-checked", String(index === active));
       if (circle.dataset.icon !== glyph) { circle.dataset.icon = glyph; circle.replaceChildren(...(glyph ? [icon(glyph)] : [])); }
     });
-    input.hidden = active !== custom;
+    input.inert = active !== custom;
+    widget.classList.toggle("custom-open",active === custom);
     if (document.activeElement !== input && input.value !== kind.custom) input.value = kind.custom;
   }
   function paintCircles(widget, kind) {
@@ -230,7 +231,7 @@ export function createPreferences({ app, element, button, icon, numberField, pan
               const circles = element("div", "swatch-circles");
               circles.setAttribute("role", "radiogroup"); circles.setAttribute("aria-label", row.title);
               input = element("input", "preference-entry swatch-entry"); input.type = "text";
-              input.maxLength = 7; input.placeholder = kind.placeholder; input.hidden = true;
+              input.maxLength = 7; input.placeholder = kind.placeholder; input.inert = true;
               input.spellcheck = false; input.autocomplete = "off"; input.setAttribute("autocapitalize", "off");
               const commit = () => {
                 send({ type: "edit", id: row.id, value: input.value });
@@ -252,7 +253,8 @@ export function createPreferences({ app, element, button, icon, numberField, pan
                 circle.setAttribute("aria-label", swatch.label); circle.title = swatch.label;
                 circles.append(circle);
               });
-              widget.append(...(kind.inline ? [input, circles] : [circles, input]));
+              const reveal=element("div","swatch-entry-reveal");reveal.append(input);
+              widget.append(...(kind.inline ? [reveal, circles] : [circles, reveal]));
               break;
             }
             case "choice":

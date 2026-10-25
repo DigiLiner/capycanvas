@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {readPackage,packageOccurrences} from './package-fixture.test.mjs';
 import {scopesFixture} from './scopes-fixture.mjs';
+import {checkCanvasCancellation} from './canvas-cancel-journey.test.mjs';
 import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkGradientSurfaceContracts({evaluate,settle,selectors,preparePreviewFixture}) {
@@ -39,6 +40,7 @@ export async function checkGradientSurfaceContracts({evaluate,settle,selectors,p
 
 export async function checkGradientDefinitions({call,evaluate,settle}) {
   const fixture=await scopesFixture({call,evaluate,settle});
+  await checkCanvasCancellation(fixture,{call,evaluate,settle});
   const directory=process.env.LAYER_TEST_ARTIFACTS??'/tmp/capy-gradients-web';await mkdir(directory,{recursive:true});
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
   const invoke=command=>send({type:'invoke',command});

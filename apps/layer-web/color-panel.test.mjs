@@ -1,3 +1,4 @@
+import {nativeScreenEvents} from './native-input-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
@@ -9,7 +10,8 @@ export async function checkColorPanel({call,evaluate,settle}) {
   let nativeStep=0;
   const performNative=async events=>{
     const step=nativeStep++,path=`${inputDir}/step-${step}.json`;
-    await writeFile(`${path}.tmp`,JSON.stringify(events));await rename(`${path}.tmp`,path);
+    const nativeEvents=nativeScreenEvents(events,await evaluate('({screenX,screenY,outerWidth,outerHeight,innerWidth,innerHeight})'));
+    await writeFile(`${path}.tmp`,JSON.stringify(nativeEvents));await rename(`${path}.tmp`,path);
     const deadline=Date.now()+15000;
     while(!existsSync(`${inputDir}/done-${step}`)){assert.ok(Date.now()<deadline,'Compositor color input timed out');await new Promise(r=>setTimeout(r,2));}
   };

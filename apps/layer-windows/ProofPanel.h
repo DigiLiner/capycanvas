@@ -1,6 +1,8 @@
 #pragma once
 #include "UiControls.h"
 #include "ProofDial.h"
+#include "WorkflowMotion.h"
+#include "ProofForm.h"
 
 namespace CapyUi {
 // Each retained panel/drawer owns native controls; Rust owns mode and edit policy.
@@ -32,7 +34,8 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
     };
     auto modeHdr=std::make_shared<bool>(flag(form(),L"hdr"));arrangeModes(*modeHdr);
     root.Children().Append(mode);
-    StackPanel sdr;sdr.Spacing(data->panelMetric(L"control_spacing"));ContentControl sdrGate;sdrGate.IsTabStop(false);sdrGate.Content(sdr);sdrGate.Visibility(Visibility::Collapsed);root.Children().Append(sdrGate);
+    auto pages=std::make_shared<WorkflowPages>();Border off;pages->append(off);root.Children().Append(pages->root);
+    StackPanel sdr;sdr.Spacing(data->panelMetric(L"control_spacing"));ContentControl sdrGate;sdrGate.IsTabStop(false);sdrGate.Content(sdr);sdrGate.Visibility(Visibility::Collapsed);pages->append(sdrGate);
     sdr.Children().Append(ProofDialControl(data,bindings));
     auto initial=form();
     NumberPresentation presentation;presentation.identity=[form]{return array(form(),L"identity").Stringify();};
@@ -52,15 +55,14 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
             [form,index]{return array(form(),L"pad_values").GetNumberAt(index);},
             [data,send,key=str(axis,L"key")](double value){if(!data->updating)send(O({{L"type",S(L"number")},{L"key",S(key)},{L"value",N(value)}}));},bindings,nullptr,false,L"proof-panel-"+str(axis,L"key"),false,presentation));
     }
-    StackPanel print;print.Spacing(data->panelMetric(L"control_spacing"));print.Visibility(Visibility::Collapsed);root.Children().Append(print);
-    auto heading=label(data,copy(L"print_profile"),true);heading.Opacity(.55);print.Children().Append(heading);
-    auto profile=label(data,L"");profile.TextWrapping(TextWrapping::Wrap);print.Children().Append(profile);
-    auto setup=button(data,str(find(array(data->state,L"commands"),L"id",L"soft_proof_setup"),L"label"),[data]{data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"soft_proof_setup")}}));});
-    AutomationProperties::SetAutomationId(setup,L"proof-panel-setup");setup.MinHeight(data->controlHeight());setup.Padding({6,0,6,0});print.Children().Append(setup);
+    StackPanel print;print.Spacing(data->panelMetric(L"control_spacing"));print.Visibility(Visibility::Collapsed);pages->append(print);
+    StackPanel printControls;ContentControl printGate;printGate.IsTabStop(false);printGate.Content(printControls);print.Children().Append(printGate);
+    auto printKey=std::make_shared<hstring>();
+    auto printForm=std::make_shared<std::shared_ptr<ProofFormView>>();
     CheckBox gamut;gamut.Content(box_value(copy(L"gamut_warning")));gamut.MinWidth(0);gamut.MinHeight(data->controlHeight());gamut.Height(data->controlHeight());gamut.Padding({0});AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
     gamut.Click([data](auto&&,auto&&){if(!data->updating)data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"gamut_warning")}}));});print.Children().Append(gamut);
     auto status=label(data,L"");status.TextWrapping(TextWrapping::Wrap);status.Visibility(Visibility::Collapsed);root.Children().Append(status);
-    bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,sdrGate,print,heading,profile,setup,gamut,status]{
+    bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,pages,sdrGate,print,printControls,printGate,printKey,printForm,gamut,status]{
         auto value=form();auto selected=str(value,L"mode");bool hdr=flag(value,L"hdr");
         bool available=!flag(object(data->state,L"document_file"),L"busy")&&!flag(data->model,L"windows_rendering_suspended");
         if(hdr!=*modeHdr){*modeHdr=hdr;arrangeModes(hdr);}
@@ -72,12 +74,25 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
             choice.Background(pressed?Brush(data->tint(L"text",31)):Brush(clear()));
             AutomationProperties::SetItemStatus(choice,pressed?data->caption(L"search",L"selected"):hstring());
         }
-        sdrGate.IsEnabled(available);sdrGate.Visibility(hdr&&selected==L"sdr"?Visibility::Visible:Visibility::Collapsed);
-        print.Visibility(selected==L"print"?Visibility::Visible:Visibility::Collapsed);heading.Text(copy(L"print_profile"));
-        auto title=value.GetNamedValue(L"document_profile_label",JsonValue::CreateNullValue());profile.Text(title.ValueType()==JsonValueType::String?title.GetString():str(object(data->catalog,L"profile_copy"),L"choose"));
-        auto setupCommand=find(array(data->state,L"commands"),L"id",L"soft_proof_setup");auto setupTitle=str(setupCommand,L"label");setup.Content(box_value(setupTitle));AutomationProperties::SetName(setup,setupTitle);tooltip(setup,str(setupCommand,L"tooltip"));
+        sdrGate.IsEnabled(available);pages->show(selected==L"print"?2:hdr&&selected==L"sdr"?1:0,true);
+        auto settings=object(value,L"print_settings"),document=object(value,L"document_profile");
+        auto key=array(value,L"identity").Stringify()+settings.Stringify()+document.Stringify()+array(value,L"library").Stringify()+data->language();
+        if(array(value,L"profiles").Size()&&key!=*printKey&&!flag(value,L"preparing")){
+            *printKey=key;printControls.Children().Clear();auto details=J::Parse(value.Stringify());
+            auto options=J::Parse(value.Stringify());options.Insert(L"document_profile",document);
+            if(!object(settings,L"profile").Size())settings.Insert(L"profile",document.Size()?document:array(value,L"profiles").GetObjectAt(0));
+            details.Insert(L"form",options);details.Insert(L"settings",settings);details.Insert(L"profiles",array(value,L"library"));
+            auto form=std::make_shared<ProofFormView>(data->localization);form->init(details,J(),document.Size()?hstring(L"document"):hstring());
+            for(auto const& [control,id]:std::initializer_list<std::pair<FrameworkElement,wchar_t const*>>{{form->profile,L"proof-panel-profile"},{form->intent,L"proof-panel-intent"},{form->simulation,L"proof-panel-simulation"},{form->bpc,L"proof-panel-bpc"}})AutomationProperties::SetAutomationId(control,id);
+            *printForm=form;printControls.Children().Append(form->root);
+            auto epoch=num(object(data->state,L"document_file"),L"epoch");
+            auto edit=[data,source=std::weak_ptr<ProofFormView>(form),epoch]{auto form=source.lock();if(data->updating||!form)return;try{
+                auto settings=form->current();data->document(to_string(O({{L"operation",S(L"print_proof")},{L"epoch",N(epoch)},{L"settings",settings},{L"profile_id",form->profileId.empty()?JsonValue::CreateNullValue():S(form->profileId)}}).Stringify()));
+            }catch(hresult_error const&){}};
+            for(auto box:{form->profile,form->intent,form->simulation})box.SelectionChanged([edit](auto&&,auto&&){edit();});form->bpc.Click([edit](auto&&,auto&&){edit();});
+        }
+        printGate.IsEnabled(available);
         gamut.Content(box_value(copy(L"gamut_warning")));AutomationProperties::SetName(gamut,copy(L"gamut_warning"));
-        setup.IsEnabled(flag(find(array(data->state,L"commands"),L"id",L"soft_proof_setup"),L"enabled"));
         gamut.IsChecked(flag(data->state,L"gamut_warning"));gamut.IsEnabled(flag(find(array(data->state,L"commands"),L"id",L"gamut_warning"),L"enabled"));
         auto text=str(object(data->model,L"windows_proof"),L"text");auto analysis=object(object(data->model,L"windows_display"),L"analysis");
         if(text.empty()&&flag(value,L"hdr"))text=!str(analysis,L"error").empty()?copy(L"sdr_unavailable"):flag(analysis,L"ready")?hstring():copy(L"preparing_sdr");

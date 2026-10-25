@@ -197,12 +197,10 @@ struct CurveEditor: View {
     let label: String
     var histogram = false
     @Environment(\.isEnabled) private var enabled
-    @GestureState private var touching = false
     @FocusState private var focused: Bool
     @State private var contact: [String: Any]?
     @State private var held: (key: String, owner: [String: Any])?
     @State private var sequence: (time: Date, points: Int)?
-    @State private var removal: [String: Any]?
     @State private var numberOwner: [String: Any]?
     private var key: String { target["key"].string }
     private var curve: JSON { control["controls"] }
@@ -350,33 +348,36 @@ struct CurveEditor: View {
                 }
             }.background { ZStack { palette["text"].opacity(0.12); if histogram { ScopeGraph(store: store, scopes: store.scopes, kind: "tonal_histogram") } } }
                 .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).updating($touching) { _, active, _ in active = true }.onChanged { event in
-                    let size = geometry.size
-                    guard size.width > 0, size.height > 0 else { return }
-                    if let captured = contact { send(captured, contact: "move", at: event.location, in: size); return }
-                    focused = true
-                    cancel()
-                    let now = Date(), captured = owner
-                    if let last = sequence, now.timeIntervalSince(last.time) < 0.5 { sequence = (now, last.points) }
-                    else { sequence = (now, points.count) }
-                    contact = captured
-                    send(captured, contact: "down", at: event.startLocation, in: size)
-                    if event.location != event.startLocation { send(captured, contact: "move", at: event.location, in: size) }
-                }.onEnded { event in
-                    if let captured = contact { send(captured, contact: "up", at: event.location, in: geometry.size) }
-                    contact = nil
-                    if let removal { send(owner, removal); self.removal = nil }
-                })
-                .simultaneousGesture(SpatialTapGesture(count: 2).onEnded { tap in
-                    let inset = CGFloat(curve["inset"].number)
-                    let request: [String: Any] = ["kind": "remove_at", "point": [tap.location.x - curve["inset"].number, tap.location.y - curve["inset"].number],
-                        "extent": [geometry.size.width - 2 * inset, geometry.size.height - 2 * inset], "point_count": sequence?.points ?? points.count]
-                    if contact == nil { send(owner, request) } else { removal = request }
-                })
+                .overlay {
+                    ControlInput(identity: target.stableKey + String(curve["epoch"].uint), contact: { event in
+                        switch event.phase {
+                        case "down":
+                            focused = true; cancel()
+                            sequence = (Date(), points.count); contact = owner
+                            send(owner, contact: "down", at: event.point, in: geometry.size)
+                        case "move":
+                            if let contact { send(contact, contact: "move", at: event.point, in: geometry.size) }
+                        case "up":
+                            if let contact { send(contact, contact: "up", at: event.point, in: geometry.size) }
+                            contact = nil
+                        case "cancel": cancel()
+                        default: break
+                        }
+                    }, secondary: { point, size in
+                        cancel(); focused = true
+                        let inset = curve["inset"].number
+                        send(owner, ["kind": "remove_at", "point": [point.x - inset, point.y - inset],
+                            "extent": [size.width - 2 * inset, size.height - 2 * inset]])
+                    }, doublePress: { point, size in
+                        cancel(); focused = true
+                        let inset = curve["inset"].number
+                        send(owner, ["kind": "remove_at", "point": [point.x - inset, point.y - inset],
+                            "extent": [size.width - 2 * inset, size.height - 2 * inset], "point_count": sequence?.points ?? points.count])
+                    }).accessibilityHidden(true)
+                }
                 .allowsHitTesting(enabled)
                 .focusable(enabled).focused($focused).focusEffectDisabled()
                 .onKeyPress(phases: [.down, .repeat, .up], action: press)
-                .onChange(of: touching) { _, active in if !active, contact != nil { cancel() } }
                 .accessibilityRepresentation {
                     Button(label) { focused = true }.accessibilityValue(String(points.count))
                         .accessibilityIdentifier("effect-curve")

@@ -1471,7 +1471,7 @@ impl Workspace {
             })
     }
 
-    pub(super) fn install_context(
+    pub(crate) fn install_context(
         self: &Rc<Self>,
         widget: &impl IsA<gtk::Widget>,
         target: ContextTarget,

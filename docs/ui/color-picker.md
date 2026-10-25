@@ -26,6 +26,11 @@ are kept per paint, so neutral colors keep their hue. Hit testing, conversions,
 component values and the selected swatch live in Rust
 ([`color.rs`](../../crates/layer-ui/src/color.rs)).
 
+Foreground and background swatches use the shared slot context menu for Edit
+Color, Palettes and Swap. A secondary press, touch/pen hold or keyboard menu
+activation targets that slot. The enclosing panel's customization menu keeps
+its separate target.
+
 GTK prepares the field and managed hue ring on one worker with one replaceable
 pending request. Panel resizing scales only the retained hue ring and field;
 markers, readout text and buttons follow the current layout on every frame.
@@ -114,7 +119,8 @@ Web, Android, Apple and Windows use the stateless `editor_open`, `editor`,
 - Dragging a number up or down adjusts it from its value at the start of the
   drag (Shift for larger steps, Alt or Ctrl for finer); arrow keys step it.
   A drag stays within the usual scale but never pulls a value already outside
-  it back in.
+  it back in. Native cancellation restores the starting draft and retires the
+  scrub before another contact can begin.
 - Each row and the hex have a copy button. Copies use standard notations:
   `rgb()` and `hsl()` in sRGB drawings, `color()` with the drawing's space
   otherwise, and `oklch()`.

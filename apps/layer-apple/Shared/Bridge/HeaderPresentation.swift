@@ -30,7 +30,7 @@ import SwiftUI
     init(store: EditorStore) { self.store = store }
     var enabled: Bool {
         guard let store else { return false }
-        return store.snapshot["header"]["editing"].bool && store.failure == nil
+        return store.snapshot["header"]["editing"].bool && !store.snapshot["chrome_hidden"].bool && store.failure == nil
             && store.workspaces?.presented != true && !store.workspace.hasPopover(excluding: popup)
             && ["picker", "toolbar_prompt", "toolbar_manager", "preferences"].allSatisfy { store.snapshot[$0].isNull }
     }

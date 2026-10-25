@@ -733,6 +733,7 @@ fn opening(kind: &HostRequestKind) -> bool {
         kind,
         HostRequestKind::Document {
             request: DocumentRequest::New | DocumentRequest::Open | DocumentRequest::Paste { mode: layer_ui::PasteMode::NewImage }
+                | DocumentRequest::ChangeColor { operation: layer_ui::DocumentColorOperation::Convert }
         }
     )
 }
@@ -743,6 +744,17 @@ mod tests {
     use crate::open::OpenEnvironment;
     use layer_ui::{LayerAction, UiAction, UiInput};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn conversion_copy_is_completed_before_parking_the_original_drawing() {
+        assert!(opening(&HostRequestKind::Document { request: DocumentRequest::ChangeColor {
+            operation: layer_ui::DocumentColorOperation::Convert,
+        } }));
+        for operation in [layer_ui::DocumentColorOperation::Assign, layer_ui::DocumentColorOperation::Depth] {
+            assert!(!opening(&HostRequestKind::Document { request: DocumentRequest::ChangeColor { operation } }));
+        }
+        assert!(!opening(&HostRequestKind::SoftProofSetup));
+    }
 
     type Window = DocumentWindow<Box<UiSession<Renderer>>>;
 
@@ -883,6 +895,52 @@ mod tests {
         assert!(host.session.state().document_file.location.is_none());
         assert!(host.session.state().requests.is_empty());
         assert_eq!(window.session(&host, original_id).unwrap().engine().document().owner, original.owner);
+        finish(host, window);
+    }
+
+    #[test]
+    fn converted_copy_opens_as_an_unsaved_drawing_and_preserves_its_source() {
+        let mut host = host();
+        let mut window = Window::default();
+        fill(&mut host);
+        let original = host.session.engine().document().clone();
+        let original_id = window.documents.selected();
+        let original_epoch = host.session.state().document_file.epoch;
+        invoke(&mut host, CommandId::ConvertColorSpace);
+        let mut task = crate::tasks::ColorTask::capture(&host.session, None, layer_core::color::RgbSpace::Srgb).unwrap();
+        task.work(Some(layer_color::DocumentColorChange::Convert {
+            space: layer_core::color::RgbSpace::DisplayP3, options: Default::default(),
+        }), true, Default::default()).unwrap();
+        task.validate(&host, false).unwrap();
+        assert!(task.validate(&host, true).is_err());
+        assert!(task.copy_document(true).is_err());
+        let project = task.copy_document(false).unwrap();
+        assert_eq!(project.composition().color.space, layer_core::color::RgbSpace::DisplayP3);
+        assert_eq!(*host.session.engine().document(), original);
+        let environment = OpenEnvironment::capture(&host.session, window.documents.admission(&host.session.retained_document_tiles()), Default::default()).unwrap();
+        let mut next = Some(environment.prepare(project, || false).unwrap());
+        let adoption = opened(&host);
+        assert!(window.adopt(&mut host, &mut next, adoption, || false, |s| s).is_err());
+        task.validate(&host, false).unwrap();
+        let adoption = opened(&host);
+        drop(window.adopt(&mut host, &mut next, adoption, || true, |s| s).unwrap());
+        settle(&mut host);
+        assert_eq!(window.documents.order().len(), 2);
+        assert_ne!(window.documents.selected(), original_id);
+        assert!(host.session.state().document_file.modified);
+        assert!(host.session.state().document_file.location.is_none());
+        assert!(host.session.state().requests.is_empty());
+        assert!(task.validate(&host, false).is_err());
+        assert_eq!(window.session(&host, original_id).unwrap().engine().document(), &original);
+        let mut activation = switch(&mut window, &mut host, original_id);
+        activation.work().unwrap();
+        resume(&mut window, &mut host, &mut activation);
+        assert_eq!(host.session.engine().document().artwork, original.artwork);
+        assert_eq!(host.session.engine().document().revision, original.revision);
+        assert_eq!(host.session.engine().document().owner, original.owner);
+        assert!(host.session.state().document_file.epoch > original_epoch);
+        assert!(task.validate(&host, false).is_err(), "returning to the source cannot revive a completed color task");
+        drop(task);
         finish(host, window);
     }
 

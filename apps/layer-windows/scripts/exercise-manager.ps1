@@ -1,5 +1,6 @@
-﻿param([Parameter(Mandatory)][string]$Executable)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','both')][string]$Theme='both')
 $ErrorActionPreference='Stop'
+if($Theme -eq 'both'){foreach($choice in @('dark','light')){& $PSCommandPath -Executable $Executable -Theme $choice};return}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
@@ -22,7 +23,7 @@ function Edit([string]$Id,[string]$Value){(Control $Id).GetCurrentPattern([Syste
 function Button([string]$Name){
     Control $Name -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button)
 }
-function Choose([string]$Name){(Button $Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+function Choose([string]$Name){Wait-Until {(Button $Name).Current.IsEnabled} "Manager action remained disabled: $Name";(Button $Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
 function Settled {
     Wait-Until {$v=Manager;$null -ne $v -and !$v.loading -and !$v.busy} 'Manager did not settle'
     if((Manager).error){throw (Manager).error}
@@ -63,6 +64,7 @@ try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
     $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     Launch 'initial'
     $original=(Model).windows_workspace.id
     $originalName=(Model).windows_workspace.name
@@ -137,21 +139,32 @@ try {
     }
     Menu 'Manage Workspaces…'
     Capture 'workspaces'
+    $pinId='workspace-manager-pin-'+$original
+    $pinBefore=[bool](@((Manager).rows|Where-Object id -eq $original)[0].pin.selected)
+    $pinLayout=Layout;$pinWorkspace=(Model).windows_workspace.id
+    foreach($expected in @((-not $pinBefore),$pinBefore)){
+        (Control $pinId -Arranged).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {$row=@((Manager).rows|Where-Object id -eq $original)[0];$row.pin.selected -eq $expected -and !(Manager).switcher_busy -and ((Control $pinId).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq $(if($expected){[System.Windows.Automation.ToggleState]::On}else{[System.Windows.Automation.ToggleState]::Off}))} 'Workspace pin did not acknowledge its shared visibility state'
+    }
+    if((Layout) -ne $pinLayout -or (Model).windows_workspace.id -ne $pinWorkspace){throw 'Pinning changed workspace selection or layout'}
     Invoke ('workspace-manager-options-'+$original)
-    $null=Control 'workspace-manager-show'
+    $null=Control 'workspace-manager-move-up'
     foreach($id in @('workspace-manager-rename','workspace-manager-delete')){
         $action=Find $id
         if($action -and !$action.Current.IsOffscreen){throw 'Included workspace exposes a protected rename/delete action'}
     }
     [CapyRowPointer]::Key([uint32]$review.Id,27)
-    Wait-Until {$null -eq (Find 'workspace-manager-show')} 'Included workspace menu did not close'
+    Wait-Until {$anchor=Find 'workspace-manager-move-up';!$anchor -or $anchor.Current.IsOffscreen} 'Included workspace menu did not close'
     Choose 'Cancel';Closed
     if((HeaderChoice $original).Current.Name -ne $originalName){throw 'Included workspace name changed'}
     Menu 'Manage Workspaces…'
     Invoke 'workspace-manager-create'
     Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'New Workspace prompt did not open'
     if((Manager).prompt.choices.Count -ne 0){throw 'New Workspace must ask only for a name'}
+    Edit 'workspace-manager-name' ''
+    Wait-Until {!(Button 'Create and Switch').Current.IsEnabled} 'Blank workspace name left confirmation enabled'
     Edit 'workspace-manager-name' 'Painting'
+    Wait-Until {(Button 'Create and Switch').Current.IsEnabled} 'Valid workspace name did not enable confirmation'
     Capture 'new-workspace'
     Choose 'Create and Switch';Closed
     if((Model).windows_workspace.name -ne 'Painting' -or (Model).state.brush.diameter -ne $size){throw 'Workspace creation did not preserve tool settings'}
@@ -168,6 +181,30 @@ try {
     Choose 'Switch to Workspace';Closed
     if((Model).windows_workspace.name -ne $originalName -or (Model).state.brush.diameter -ne $otherSize){throw 'Switching workspaces changed the shared brush settings'}
     $size=$otherSize
+    $searchWorkspaces=@()
+    foreach($index in 1..4){
+        Menu 'Manage Workspaces…';Invoke 'workspace-manager-create'
+        Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Search fixture naming form did not open'
+        Edit 'workspace-manager-name' ("Search $index")
+        Wait-Until {(Button 'Create and Switch').Current.IsEnabled} 'Search fixture valid name remained disabled'
+        Choose 'Create and Switch';Closed
+        $searchWorkspaces+=@{id=(Model).windows_workspace.id;name="Search $index"}
+    }
+    (HeaderChoice $original).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    Wait-Until {(Model).windows_workspace.id -eq $original} 'Search fixture did not restore the original workspace'
+    Menu 'Manage Workspaces…'
+    Wait-Until {@((Manager).rows).Count -gt 7 -and !(Control 'workspace-manager-search').Current.IsOffscreen} 'Larger workspace list did not reveal Search'
+    Edit 'workspace-manager-search' 'SEARCH 4'
+    Wait-Until {(Manager).query -eq 'SEARCH 4' -and @((Manager).rows).Count -eq 1 -and (Manager).rows[0].title -eq 'Search 4'} 'Shared workspace search did not match the query'
+    Capture 'workspace-search'
+    Edit 'workspace-manager-search' ''
+    Wait-Until {@((Manager).rows).Count -gt 7} 'Clearing workspace search did not restore the list'
+    foreach($workspace in $searchWorkspaces){
+        Invoke ('workspace-manager-options-'+$workspace.id);Invoke 'workspace-manager-delete'
+        Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Search fixture delete did not open'
+        Choose 'Delete';Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row $workspace.name)} 'Search fixture workspace did not delete'
+    }
+    Choose 'Cancel';Closed
     Menu 'Manage Workspaces…'
     Invoke ('workspace-manager-options-'+$painting);Invoke 'workspace-manager-rename'
     Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Rename prompt did not open'
@@ -185,6 +222,35 @@ try {
     Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Delete prompt did not open'
     Choose 'Delete'
     Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row 'Inking')} 'Delete did not remove the workspace'
+    Choose 'Cancel';Closed
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
+    (Control 'Quick Access Toolbars' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    Invoke 'Manage Toolbars…' -Name
+    Wait-Until {(Manager).page -eq 'this_workspace'} 'Toolbar manager did not open'
+    Settled;$null=Select-Row (Manager).rows[0].id
+    Invoke 'workspace-toolbar-actions';Invoke 'workspace-toolbar-save_toolbar'
+    Wait-Until {$null -ne (Manager).prompt} 'Save toolbar naming form did not open'
+    Edit 'workspace-manager-name' 'Workflow toolbar'
+    Wait-Until {(Button (Manager).prompt.confirm).Current.IsEnabled} 'Saved toolbar name stayed disabled'
+    Choose (Manager).prompt.confirm;Wait-Until {$null -eq (Manager).prompt -and !(Manager).busy} 'Toolbar did not save'
+    Invoke 'workspace-toolbar-library';Wait-Until {(Manager).page -eq 'toolbar_library' -and (Row 'Workflow toolbar')} 'Saved toolbar library did not open'
+    $savedToolbar=(Row 'Workflow toolbar').id;$null=Select-Row $savedToolbar
+    Invoke 'workspace-toolbar-actions';Invoke 'workspace-toolbar-rename'
+    Wait-Until {$null -ne (Manager).prompt.description -and (Find 'workspace-manager-description')} 'Saved toolbar description editor did not open'
+    $description='Pens é 日本語'
+    Edit 'workspace-manager-description' $description
+    Choose (Manager).prompt.confirm
+    Wait-Until {$null -eq (Manager).prompt -and (Row 'Workflow toolbar').subtitle -eq $description} 'Toolbar description did not persist'
+    Invoke 'workspace-toolbar-actions';Invoke 'workspace-toolbar-rename'
+    Wait-Until {(Manager).prompt.description -eq $description -and (Control 'workspace-manager-description').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $description} 'Reopened toolbar description lost its saved text'
+    Edit 'workspace-manager-description' 'Discarded draft';Choose 'Cancel'
+    Wait-Until {$null -eq (Manager).prompt} 'Toolbar rename Cancel did not return to library'
+    Invoke 'workspace-toolbar-actions';Invoke 'workspace-toolbar-rename'
+    Wait-Until {(Manager).prompt.description -eq $description} 'Cancelled description draft overwrote the saved description'
+    Choose 'Cancel';Wait-Until {$null -eq (Manager).prompt} 'Toolbar description did not close'
+    Invoke 'workspace-toolbar-actions';Invoke 'workspace-toolbar-delete'
+    Wait-Until {$null -ne (Manager).prompt} 'Saved toolbar Delete did not open'
+    Choose (Manager).prompt.confirm;Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row 'Workflow toolbar')} 'Saved toolbar did not delete'
     Choose 'Cancel';Closed
     $beforeReset=Layout
     Menu 'Reset All Brushes…';Capture 'reset-brushes'
@@ -206,7 +272,7 @@ try {
     Choose 'Cancel';Closed
     Write-Output 'Manager actions and restart passed; checking the five-second final process exit.'
     Close
-    [pscustomobject]@{included_workspaces='passed';header_switcher='passed';preview_cancel='passed';explicit_apply='passed';enter_previews_only='passed';retained_rows='passed';history_escape_restore='passed';starting_layout_preview='passed';starting_layout_undo_redo='passed';name_only_create='passed';explicit_switch='passed';shared_editing_state='passed';rename_delete='passed';reset_brushes='passed';restart='passed';zero_exit='passed';scope='native UI Automation and guarded OS keys; physical pointer and performance acceptance remain separate'}|ConvertTo-Json
+    [pscustomobject]@{theme=$Theme;included_workspaces='passed';native_pin_toggle='passed';header_switcher='passed';preview_cancel='passed';explicit_apply='passed';enter_previews_only='passed';retained_rows='passed';history_escape_restore='passed';starting_layout_preview='passed';starting_layout_undo_redo='passed';name_only_create='passed';immediate_name_gating='passed';larger_workspace_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';explicit_switch='passed';shared_editing_state='passed';rename_delete='passed';reset_brushes='passed';restart='passed';zero_exit='passed';scope='native UI Automation and guarded OS keys; physical pointer and performance acceptance remain separate'}|ConvertTo-Json
 }catch{
     if($review -and !$review.HasExited){try{Capture 'failure'}catch{}}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw

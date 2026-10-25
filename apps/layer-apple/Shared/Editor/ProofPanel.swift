@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 struct ProofPanel: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var controller: ProofController
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var forward = true
+    @State private var displayedMode = "off"
     private var model: JSON { store.snapshot["proof_panel"] }
     private var copy: JSON { store.catalog["proof_copy"] }
     var body: some View {
@@ -21,11 +24,22 @@ struct ProofPanel: View {
                         .accessibilityAddTraits(model["mode"].string == mode ? .isSelected : [])
                 }
             }.accessibilityElement(children: .contain)
-            if model["mode"].string == "sdr" {
-                ProofDial(store: store, controller: controller)
-            } else if model["mode"].string == "print" {
-                EditorScrollView { PrintProofControls(controller: controller, model: model, store: store) }
-            } else { Spacer(minLength: 0) }
+            ZStack {
+                Group {
+                    if displayedMode == "sdr" {
+                        ProofDial(store: store, controller: controller)
+                    } else if displayedMode == "print" {
+                        EditorScrollView { PrintProofControls(controller: controller, model: model, store: store) }
+                    } else { Spacer(minLength: 0) }
+                }.id(displayedMode)
+                    .transition(.asymmetric(insertion: .move(edge: forward ? .trailing : .leading),
+                        removal: .move(edge: forward ? .leading : .trailing)))
+            }.clipped()
+                .onChange(of: model["mode"].string, initial: true) { _, next in
+                    let modes = ["off", "sdr", "print"]
+                    forward = (modes.firstIndex(of: next) ?? 0) > (modes.firstIndex(of: displayedMode) ?? 0)
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { displayedMode = next }
+                }
         }.padding(store.panelMetrics.inset)
             .modifier(PanelBodyMeasurement(panel: "proof", kind: .fixed))
     }
@@ -222,7 +236,7 @@ private struct PrintProofControls: View {
                 .disabled(model["print"].isNull).accessibilityIdentifier("proof-gamut-warning")
             if controller.busy { ProgressView(copy["preparing"].string) }
             if let error = controller.error { Text(error).foregroundStyle(.red).font(.caption) }
-        }.toggleStyle(PanelCheckStyle()).disabled(controller.busy || importing)
+        }.toggleStyle(PanelCheckStyle()).disabled(controller.committing || importing)
             .task(id:store.interfaceLanguage) { controller.loadForm() }
             .onChange(of: controller.formRevision, initial: true) { _, _ in
                 if !controller.form.isNull && !controller.busy { recipe = controller.form["recipe"] }

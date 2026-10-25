@@ -34,7 +34,7 @@ import QuartzCore
                 return editor
             }
             func prepared(_ editor:DocumentColorController,_ choice:JSON,copy:Bool=false) async throws {
-                editor.prepare(choice,copy:copy)
+                editor.schedule(choice,copy:copy)
                 try await wait("Complete comparison",store:store) { editor.ready || editor.error != nil }
                 try require(editor.ready && editor.previews.count==2,editor.error ?? "Two complete previews required")
             }
@@ -63,18 +63,16 @@ import QuartzCore
             try await invoke("redo");try await idle();try require(store.state["colors"]["rgb_space"].string=="ProPhoto","Color Redo must use prepared renderer")
             let conversion=JSON(["Convert":["space":"Srgb","options":["intent":"RelativeColorimetric","black_point_compensation":false]]])
             editor=try await dialog("convert_color_space");try await prepared(editor,conversion,copy:true)
-            editor.saveCopy(to:master)
-            try require(editor.error != nil && !editor.busy && editor.ready,"Reject overwrite of editable master before writing")
-            let occupied=root.appendingPathComponent("Existing.capy")
-            let sentinel=Data("Keep existing destination".utf8);try sentinel.write(to:occupied)
-            editor.saveCopy(to:occupied,access:root)
-            try await wait("Existing folder destination",store:store) {!editor.busy}
-            try require(editor.error != nil && (try Data(contentsOf:occupied))==sentinel,"Folder selection must not overwrite an existing file")
-            try await prepared(editor,conversion,copy:true)
-            let copy=root.appendingPathComponent("Converted.capy")
-            editor.saveCopy(to:copy,access:root);try await idle()
+            let masterTab = store.drawingTabs.selected
+            let tabsBeforeCopy = store.drawingTabs.rows.count
+            editor.apply(); try await idle()
             try require(try Data(contentsOf:master)==original,"Flattened copy must not modify master bytes")
-            try require(FileManager.default.fileExists(atPath:copy.path) && store.state["colors"]["rgb_space"].string=="ProPhoto","Save Copy leaves editable document active")
+            try require(store.drawingTabs.rows.count == tabsBeforeCopy + 1 && store.drawingTabs.selected != masterTab,
+                "Flattened conversion opens a separate drawing")
+            try require(store.state["colors"]["rgb_space"].string == "Srgb", "Converted drawing uses chosen color space")
+            await withCheckedContinuation { done in store.drawingTabs.select(masterTab) { done.resume(returning: $0) } }
+            try await wait("Original drawing",store:store) {store.drawingTabs.selected == masterTab && !store.drawingTabs.busy}
+            try require(store.state["colors"]["rgb_space"].string == "ProPhoto", "Original remains editable with its color history")
             editor=try await dialog("change_bit_depth")
             // A mismatched operation must remain retryable through a fresh job.
             editor.prepare(assignment)
@@ -91,7 +89,7 @@ import QuartzCore
             editor=try await dialog("convert_color_space")
             editor.prepare(conversion);editor.cancel();try await idle()
             try require(store.state["colors"]["rgb_space"].string=="ProPhoto" && store.state["document_file"]["epoch"].uint==epoch,"Cancel while preparing must leave the same document intact")
-            print("PASS platform \(platform): color previews, Cancel/Apply, exact history route, copy/save protection, retry, properties and worker cancellation")
+            print("PASS platform \(platform): color previews, Cancel/Apply, exact history route, new-copy drawing isolation, retry, properties and worker cancellation")
         }
     }
 }

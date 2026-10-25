@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+@MainActor private final class EscapeReceiver: NSResponder {
+    var count = 0
+    override func cancelOperation(_ sender: Any?) { count += 1 }
+}
+
 @main struct ColorEditorChecks {
     @MainActor static func require(_ value: Bool, _ message: String) throws {
         if !value { throw HostFailure(message: message) }
@@ -17,7 +22,30 @@ import SwiftUI
     @MainActor static func fields(_ view: NSView) -> [NSTextField] {
         (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(fields)
     }
+    @MainActor static func inputs(_ view: NSView) -> [ControlInput.InputView] {
+        (view as? ControlInput.InputView).map { [$0] } ?? view.subviews.flatMap(inputs)
+    }
+    @MainActor static func canceledScrub(_ host: NSView, session: ColorEditorSession, window: NSWindow) throws {
+        guard let input = inputs(host).first(where: { $0.identity == "0-0" }) else { throw HostFailure(message: "Missing native color readout") }
+        let before = session.view["value"].stableKey
+        for (type, point) in [(NSEvent.EventType.leftMouseDown, CGPoint(x: 8, y: 16)), (.leftMouseDragged, CGPoint(x: 8, y: -8))] {
+            guard let event = NSEvent.mouseEvent(with: type, location: input.convert(point, to: nil), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 1, clickCount: 1, pressure: 1) else { throw HostFailure(message: "Missing scrub event") }
+            if type == .leftMouseDown { input.mouseDown(with: event) } else { input.mouseDragged(with: event) }
+        }
+        try require(session.view["value"].stableKey != before, "Native upward readout motion previews a changed color")
+        input.cancelOperation(nil)
+        try require(session.view["value"].stableKey == before, "Native cancellation restores the complete pre-scrub color")
+    }
+    @MainActor static func unownedEscape() throws {
+        let input = ControlInput.InputView(), receiver = EscapeReceiver()
+        input.nextResponder = receiver
+        input.cancelOperation(nil)
+        try require(receiver.count == 1, "An idle native readout forwards Escape to its containing dialog")
+    }
     @MainActor static func run() async throws {
+        try unownedEscape()
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 let prepared = #"{"saved":"","preferred_languages":["en"]}"#.withCString { capy_apple_prepare_launch($0, nil) }
@@ -41,6 +69,7 @@ import SwiftUI
                 defer { window.contentView = nil; window.close() }
                 try await Task.sleep(for: .milliseconds(100))
                 try require(fields(host).isEmpty, "Values show as text until they are tapped")
+                try canceledScrub(host, session: session, window: window)
                 if ["rgb", "invalid"].contains(mode) {
                     try require(session.act(["op": "value", "row": 0, "index": 0, "text": mode == "invalid" ? "invalid" : "32"], target: "0-0") == (mode == "rgb"),
                         "Only a valid value commits")

@@ -10,7 +10,13 @@ pub unsafe extern "C" fn capy_project_edit_work(task: *const CapyProjectTask, ch
     task.perform(|payload| {
         let choice = choice?;
         match payload {
-            Payload::Color(color) => color.work(serde_json::from_str(&choice).map_err(|e| e.to_string())?, copy, task.control.clone()),
+            Payload::Color { task: color, environment, candidate } => {
+                color.work(serde_json::from_str(&choice).map_err(|e| e.to_string())?, copy, task.control.clone())?;
+                if copy {
+                    *candidate = Some(environment.prepare(color.copy_document(task.control.is_cancelled())?, || task.control.is_cancelled())?);
+                }
+                Ok(())
+            },
             Payload::Source(source) if !copy => source.work(serde_json::from_str(&choice).map_err(|e| e.to_string())?, || task.control.is_cancelled()),
             _ => Err("Not an editable color/source task".into()),
         }
@@ -27,7 +33,7 @@ pub unsafe extern "C" fn capy_apple_project_candidate(app: *mut CapyApple, task:
         if let Some(error) = &state.error { return Err(error.clone()); }
         match &mut state.payload {
             Payload::Source(source) => source.prepare(&app.host, task.control.is_cancelled()),
-            Payload::Color(_) => Ok(()),
+            Payload::Color { task: color, .. } => color.validate(&app.host, task.control.is_cancelled()),
             _ => Err("Not an editable color/source task".into()),
         }
     }).map_or(-1, |_| 0)
@@ -42,7 +48,7 @@ pub unsafe extern "C" fn capy_project_compare(task: *const CapyProjectTask) -> i
         match payload {
         Payload::Source(source) => source.compare(task.control.clone()),
         Payload::Export(export) => export.compare(task.control.clone()).map_err(|reason| reason.message(localization)),
-        Payload::Color(_) => Ok(()),
+        Payload::Color { .. } => Ok(()),
         _ => Err("Not an editable color/source task".into()),
         }
     })
@@ -72,7 +78,7 @@ pub unsafe extern "C" fn capy_project_details(task: *const CapyProjectTask) -> *
             Payload::Info(info) => serde_json::to_string(&layer_ui::document_properties(&info.inspect()?, &task.localization)),
             Payload::Source(source) => { source.prepare_metadata()?; serde_json::to_string(&source.details_localized(&task.localization)?) },
             Payload::Export(export) => serde_json::to_string(&export.details_localized(&task.localization)?),
-            Payload::Color(color) => serde_json::to_string(&color.details()),
+            Payload::Color { task: color, .. } => serde_json::to_string(&color.details()),
             _ => return Err("No document details are available".into()),
         }.map_err(|e| e.to_string())?;
         Ok(())
@@ -93,7 +99,7 @@ pub unsafe extern "C" fn capy_project_preview_at(task: *const CapyProjectTask, i
     let Some(task) = (unsafe { task.as_ref() }) else { return -1; };
     if output.is_null() { return -1; }
     let state = task.state.lock().unwrap_or_else(|e| e.into_inner());
-    let previews = match &state.payload { Payload::Color(c) => c.previews(), Payload::Source(s) => s.previews(), Payload::Export(e) => e.previews(), _ => return -1 };
+    let previews = match &state.payload { Payload::Color { task: c, .. } => c.previews(), Payload::Source(s) => s.previews(), Payload::Export(e) => e.previews(), _ => return -1 };
     let Some(preview) = previews.get(index as usize) else { return -1; };
     unsafe { output.write(CapyProjectPreview { width: preview.extent[0], height: preview.extent[1], pixels: preview.pixels.as_ptr(), count: preview.pixels.len() }); }
     0

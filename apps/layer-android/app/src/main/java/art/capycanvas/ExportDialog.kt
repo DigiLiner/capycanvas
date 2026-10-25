@@ -164,7 +164,9 @@ import org.json.JSONObject
                     }
                     if (value.getString("format").startsWith("Jpeg") || value.getString("format").startsWith("AvifHdr")) CoreTextField(quality, { quality = it }, modifier = Modifier.testTag("export-quality"), label = { Text(copy.getString("quality")) })
                     Row { Checkbox(fit, { fit = it }); Text(copy.getString("fit_bounds")) }
-                    if (fit) { CoreTextField(width, { width = it }, modifier = Modifier.testTag("export-width"), label = { Text(copy.getString("maximum_width")) }); CoreTextField(height, { height = it }, modifier = Modifier.testTag("export-height"), label = { Text(copy.getString("maximum_height")) }) }
+                    if (fit) {
+                        Row { Checkbox(enlarge, { enlarge = it }, Modifier.testTag("export-enlarge")); Text(copy.getString("enlarge")) }
+                        CoreTextField(width, { width = it }, modifier = Modifier.testTag("export-width"), label = { Text(copy.getString("maximum_width")) }); CoreTextField(height, { height = it }, modifier = Modifier.testTag("export-height"), label = { Text(copy.getString("maximum_height")) }) }
                     ColorChoice(copy.getString("resolution"), listOf("Master" to copy.getString("keep_resolution"), "Ppi" to copy.getString("ppi"), "Omit" to copy.getString("omit")), resolution) { resolution = it }
                     if (resolution == "Ppi") CoreTextField(ppi, { ppi = it }, modifier = Modifier.testTag("export-ppi"), label = { Text(copy.getString("ppi")) })
                     val metadata = draft?.optJSONObject("metadata")

@@ -742,7 +742,7 @@ private struct ToolbarNumberField: View {
     let edit: ToolOptionEdit
     @State private var open = false
     @State private var scrubStart: Double?
-    @GestureState private var scrubContact = false
+    @State private var scrubY: CGFloat?
     private var id: String { field["id"].string }
     private var control: JSON { field["numeric"] }
     private var value: Double { field["value"].number }
@@ -777,8 +777,29 @@ private struct ToolbarNumberField: View {
                 }.padding(.vertical, style == "small" ? 1 : 3)
                     .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle())
-                .modifier(ToolbarScrub(gesture: scrub(fill: shown["fill"].number)))
-                .onChange(of: scrubContact) { _, active in if !active { finishScrub("cancel") } }
+                .overlay {
+                    ControlInput(identity: id, contact: { event in
+                        switch event.phase {
+                        case "down": scrubY = event.surfacePoint.y
+                        case "move", "up":
+                            guard let y = scrubY else { return }
+                            let delta = Double(y - event.surfacePoint.y)
+                            if event.source != "mouse", abs(delta) >= 8 || scrubStart != nil {
+                                if scrubStart == nil {
+                                    scrubStart = shown["fill"].number
+                                    if field["preview"].bool { edit(["type": "tool_setting_contact", "id": id, "phase": "down"], { _ in }) }
+                                }
+                                resolve(["type": "position", "position": (scrubStart ?? shown["fill"].number) + delta / 200])
+                            }
+                            if event.phase == "up" {
+                                scrubY = nil
+                                if scrubStart == nil { if event.inside { open = true } } else { finishScrub("up") }
+                            }
+                        case "cancel": scrubY = nil; finishScrub("cancel")
+                        default: break
+                        }
+                    }, wheel: { steps in resolve(["type": "step", "steps": steps]) }).accessibilityHidden(true)
+                }
                 .onDisappear { finishScrub("cancel") }
                 .accessibilityLabel(field["label"].string).accessibilityValue(shown["text"].string)
                 .accessibilityIdentifier("toolbar-setting-" + id)
@@ -807,15 +828,6 @@ private struct ToolbarNumberField: View {
             }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-setting-" + id)
         }
     }
-    private func scrub(fill: Double) -> some Gesture {
-        DragGesture(minimumDistance: 8).updating($scrubContact) { _, active, _ in active = true }.onChanged { event in
-            if scrubStart == nil {
-                scrubStart = fill
-                if field["preview"].bool { edit(["type": "tool_setting_contact", "id": id, "phase": "down"], { _ in }) }
-            }
-            resolve(["type": "position", "position": min(1, max(0, (scrubStart ?? fill) - event.translation.height / 200))])
-        }.onEnded { _ in finishScrub("up") }
-    }
     private func finishScrub(_ phase: String) {
         guard scrubStart != nil else { return }
         scrubStart = nil
@@ -832,16 +844,5 @@ private struct ToolbarFaceValue: View {
             Text(text).lineLimit(1).fixedSize()
             Text(bare).lineLimit(1).font(small && bare.count >= 4 ? .system(size: 11 * 4 / 3 * 0.9) : nil).fixedSize()
         }.monospacedDigit()
-    }
-}
-
-private struct ToolbarScrub<G: Gesture>: ViewModifier {
-    let gesture: G
-    func body(content: Content) -> some View {
-        #if os(iOS)
-        content.simultaneousGesture(gesture)
-        #else
-        content
-        #endif
     }
 }

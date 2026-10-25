@@ -37,6 +37,9 @@ import kotlin.math.roundToInt
     val key = remember { Any() }
     val order = LocalWorkspaceZ.current
     val opening = LocalPanelOpening.current
+    val visible = LocalWorkspaceVisible.current
+    val opacity = LocalWorkspaceOpacity.current
+    var placement by remember { mutableStateOf<JSONObject?>(null) }
     val overview = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val document = host.snapshot?.getJSONObject("state")?.array("tabs")?.optJSONObject(0)
     val documentSize = document?.let { it.optInt("width") to it.optInt("height") }
@@ -50,7 +53,12 @@ import kotlin.math.roundToInt
                 .intersect(panel.localBoundingBoxOf(canvas)).takeUnless { it.isEmpty }
         }
     }
-    SideEffect { open() }
+    SideEffect { if(visible) open() else opening?.bounds=null }
+    LaunchedEffect(host,opacity) {
+        snapshotFlow { placement?.toString() to (opacity?.value ?: 1f) }.collect { (value,alpha) ->
+            host.navigatorPlacement(key,if(value==null || alpha<=0f) null else JSONObject(value).put("opacity",alpha))
+        }
+    }
     DisposableEffect(opening) { onDispose { opening?.bounds = null } }
     LaunchedEffect(viewport, documentSize) {
         if (viewport.width > 0 && viewport.height > 0) geometry = host.awaitQuery(obj("type" to "navigator",
@@ -64,13 +72,14 @@ import kotlin.math.roundToInt
             .onSizeChanged { viewport = it }
             .onGloballyPositioned { coords ->
                 overview[0] = coords
+                if(!visible) return@onGloballyPositioned
                 open()
                 val origin = coords.positionInRoot() - host.surfaceOrigin
                 val clip = coords.boundsInRoot().translate(-host.surfaceOrigin)
                 fun rect(r: Rect) = JSONArray(listOf(r.left, r.top, r.width, r.height))
-                host.navigatorPlacement(key, if (clip.isEmpty) null else obj(
+                placement = if (clip.isEmpty) null else obj(
                     "bounds" to JSONArray(listOf(origin.x, origin.y, coords.size.width, coords.size.height)),
-                    "clip" to rect(clip), "order" to order))
+                    "clip" to rect(clip), "order" to order)
             }.pointerInput(host, density) {
                 awaitEachGesture {
                     val down = awaitFirstDown(); down.consume()

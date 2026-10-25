@@ -1,5 +1,6 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ConfigurationOnly)
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light','profiles-dark','profiles-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly,[switch]$ProfilesOnly,[switch]$ConfigurationOnly)
 $ErrorActionPreference='Stop'
+if($Theme.StartsWith('profiles-')){$Theme=$Theme.Substring(9);$ProfilesOnly=$true}
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
 if($Theme.StartsWith('blend-large-')){$Theme=$Theme.Substring(12);$LargeText=$true;$BlendOnly=$true;$LanguageLimit=2}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
@@ -307,11 +308,24 @@ try{
  Menu-Command 'file' 'new_window'
  Wait-Until {@(Windows).Count -eq 2} 'Second window did not register' 45
  $second=@(Windows|Where-Object id -ne $first.id)[0];Ready $second
- if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
+ if(@($NoticeOnly,$HeaderOnly,$BlendOnly,$GroupedToolsOnly,$ConfigurationOnly,$ProfilesOnly|Where-Object {$_}).Count -gt 1){throw 'Choose one focused localization mode'}
  if($ConfigurationOnly){
   [CapyRowPointer]::Initialize([uint32]$review.Id)
   Configuration-CaptionSurface
   [pscustomobject]@{theme=$Theme;languages=@('en','ja','en');retained_configuration_title_hint_and_visibility_captions='passed';configuration_control_identity='passed';layout_brush_artwork_history_and_gpu='unchanged';evidence=$run}|ConvertTo-Json -Depth 6|Tee-Object -FilePath (Join-Path $run 'results.json')
+  $completed=$true;return
+ }
+ if($ProfilesOnly){
+  Use-Window $second;Menu-Command 'edit' 'settings'
+  Wait-Until {(Find 'preference-choice-language')} 'Language preference did not open for profile projection'
+  $seen=@()
+  foreach($tag in @('en','ja')){
+   $index=[array]::IndexOf($shippedTags,$tag)+1;if($index -lt 1){throw "Missing shipped profile test language $tag"}
+   $seen+=Language-Choice $index
+  }
+  Language-Choice $seen[0].index|Out-Null
+  Use-Window $first;Profile-Surfaces
+  [pscustomobject]@{theme=$Theme;languages=$seen;profile_library_search='nine private ICC entries, stable-ID query and live localized metadata passed';evidence=$run}|ConvertTo-Json -Depth 4|Tee-Object -FilePath (Join-Path $run 'results.json')
   $completed=$true;return
  }
  if($GroupedToolsOnly){

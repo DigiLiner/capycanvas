@@ -21,6 +21,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal val LocalWorkspaceOpacity = staticCompositionLocalOf<State<Float>?> { null }
+internal val LocalWorkspaceVisible = staticCompositionLocalOf { true }
 internal val LocalWorkspaceZ = staticCompositionLocalOf { 0 }
 internal val LocalDock = staticCompositionLocalOf<DockInteraction?> { null }
 
@@ -284,6 +286,7 @@ internal class DockInteraction(val host: CanvasHost) {
 @Composable internal fun Modifier.workspaceSource(dock: DockInteraction, action: JSONObject,
     priority: Int = 0, anchor: JSONObject? = null, cursor: Int = AndroidPointerIcon.TYPE_GRAB,
     holdToDrag: Boolean = false): Modifier {
+    if(!LocalWorkspaceVisible.current) return this
     val token = remember { Any() }
     val z = LocalWorkspaceZ.current
     val key = anchor?.let(dock::anchorKey)
@@ -331,7 +334,8 @@ internal class DockInteraction(val host: CanvasHost) {
 
 private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boolean): Modifier = pointerInput(dock, focused) {
     if (!focused) return@pointerInput
-    var chromeTap: Triple<String, Long, Offset>? = null
+    data class Tap(val target: String, val time: Long, val position: Offset, val device: PointerType)
+    var chromeTap: Tap? = null
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         if (dock.bubbleCaptured || down.isConsumed) return@awaitEachGesture
@@ -388,7 +392,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
                     do {
                         val event = if (!retired && !held && !started && (source.holdToDrag || source.context != null)) {
                             withTimeoutOrNull(remaining) { awaitPointerEvent(PointerEventPass.Initial) }
-                        } else awaitPointerEvent(PointerEventPass.Initial)
+                        } else { awaitPointerEvent(PointerEventPass.Initial) }
                         if (event == null) {
                             if (!sourceExists() || dock.popupOpen || !dock.enabled) { retire(); continue }
                             held = true
@@ -420,14 +424,14 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
                             if (retired) change.consume()
                             if (started) dock.finish(false)
                             else if (tapTarget != null && !held && !retired && change.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis) {
-                                val gap = down.uptimeMillis - (previousTap?.second ?: 0)
-                                if (previousTap?.first == tapTarget &&
+                                val gap = down.uptimeMillis - (previousTap?.time ?: 0)
+                                if (previousTap?.target == tapTarget && previousTap.device == down.type &&
                                     gap in viewConfiguration.doubleTapMinTimeMillis..viewConfiguration.doubleTapTimeoutMillis &&
-                                    (down.position - previousTap.third).getDistance() <= viewConfiguration.touchSlop * 2) {
+                                    (down.position - previousTap.position).getDistance() <= viewConfiguration.touchSlop * 2) {
                                     change.consume()
                                     if (band) dock.host.dispatch(obj("type" to "reset_column_width", "id" to divider, "viewport" to dock.viewport))
                                     else group?.let(dock::doubleClickHandle)
-                                } else chromeTap = Triple(tapTarget, change.uptimeMillis, change.position)
+                                } else chromeTap = Tap(tapTarget, change.uptimeMillis, change.position, down.type)
                             }
                             released = true; break
                         }
@@ -451,6 +455,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
 
 /** Only UI-covered contacts are sent here; CanvasHost gates bare canvas contacts. */
 @Composable internal fun Modifier.chromeRegion(dock: DockInteraction, header: Boolean = false, active: Boolean = true): Modifier {
+    if(!LocalWorkspaceVisible.current) return this
     val token = remember { Any() }
     val z = LocalWorkspaceZ.current
     DisposableEffect(dock, token) { onDispose { dock.chromeRegions.remove(token) } }
@@ -461,6 +466,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
     return onGloballyPositioned { if (active) dock.chromeRegions[token] = DockInteraction.ChromeRegion(it.boundsInRoot().translate(-dock.origin), z, header) }
 }
 @Composable internal fun Modifier.contextAnchor(dock: DockInteraction, target: JSONObject): Modifier {
+    if(!LocalWorkspaceVisible.current) return this
     val key = dock.anchorKey(target)
     DisposableEffect(dock, key) { onDispose { dock.anchors.remove(key) } }
     return onGloballyPositioned { dock.anchors[key] = it.boundsInRoot().translate(-dock.origin) }
@@ -469,6 +475,7 @@ internal val LocalDrawerColumn = staticCompositionLocalOf<Int?> { null }
 internal val LocalDrawerClip = staticCompositionLocalOf { Rect.Zero }
 
 @Composable internal fun Modifier.columnDrawerBounds(dock: DockInteraction, column: Int, group: Int?): Modifier {
+    if(!LocalWorkspaceVisible.current) return this
     var bounds by remember { mutableStateOf(Rect.Zero) }
     SideEffect { dock.measureColumnDrawer(column, group, bounds) }
     DisposableEffect(dock, column) { onDispose { dock.measureColumnDrawer(column, null, null) } }
@@ -477,6 +484,7 @@ internal val LocalDrawerClip = staticCompositionLocalOf { Rect.Zero }
 
 @Composable internal fun Modifier.drawerTabHit(dock: DockInteraction, column: Int, group: Int, index: Int,
     panel: String, clip: Rect, active: Boolean): Modifier {
+    if(!LocalWorkspaceVisible.current) return this
     val key = "drawer:$column:$index"
     var bounds by remember { mutableStateOf(Rect.Zero) }
     var natural by remember { mutableStateOf(Rect.Zero) }

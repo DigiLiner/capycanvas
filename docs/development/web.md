@@ -337,9 +337,11 @@ which builds the Wasm module first and serves it on port 4179:
 bash tools/performance/workspace-motion.sh web --title-bar
 ```
 
-`--workspace-motion`, `--workspace-resize` and `--color-panel` then use real
+`--workspace-motion`, `--workspace-resize`, `--numeric-controls` and `--color-panel` use real
 Mutter mouse and touch input; the other journeys use Chrome DevTools input. See
 the [Linux guide](linux.md#tests) for the runner's requirements.
+Native browser fixtures map content coordinates through `native-input-fixture.mjs`
+before compositor injection, including the browser's screen position and chrome.
 
 Journeys by area; the table in `test.mjs` lists them all. `journeys.mjs` runs the
 first matching row and its error check, or leaves the default journey to the host.
@@ -502,6 +504,10 @@ the toolbar popup, including mouse, pen and touch contacts, numeric edits,
 cancellation, undo and selected-stop retention. It checks two-dimensional
 integer preview dithering, unchanged floating previews, and gradient definitions
 through archive reopening and renderer recreation in both themes and widths.
+The same journey checks real pen cancellation for figures, gradients and lasso:
+`pointercancel` restores the unchanged drawing, while ordinary release commits
+one undoable edit. Native cancellation stays distinct from the browser's
+post-release capture-loss event.
 
 `--image-object-fixture` opens the fixed builtin, ICC and Nearest-only shared-image
 packages in `apps/layer-web/fixtures/`. Their sources are generated sample
@@ -525,6 +531,10 @@ shared writer; it needs no external archive fixture.
 
 Setup that some journeys need:
 
+- `--shared-workflows` needs its owned embedded-profile sample at
+  `/pkg/prophoto16.png`: ProPhoto RGBA16, 513 × 257 pixels, with 31 fully
+  transparent black columns and opaque color data elsewhere. Its round-trip
+  assertions preserve alpha and channel layout as well as color/depth.
 - `--tab-styles` checks light/dark docked and drawer tabs for visible hover,
   selection before release, retained tab elements and the regular pointer. Its
   four-tab contour matrix compares both lower corner regions for every active

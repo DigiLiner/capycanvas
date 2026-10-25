@@ -36,7 +36,7 @@ numeric-edit Shared/Editor/NumericEditState.swift
 native-menu-titles macOS/Platform/NativeMenuTitles.swift
 system-status Shared/Bridge/SystemStatus.swift macOS/Platform/BatterySource.swift
 FIXTURES
-for fixture in application-links settings-links owner-autorelease persistence persistence-owner snapshot-projection snapshot-views header-persistence column-stack-persistence workspace-manager workspace-coordinator workspace-tabs workspace-motion workspace-drawers workspace-menu-actions window-presentation panel-measurements reorder-lifecycle-publication editor-appearance color-field-cache native-context-menu squircle-geometry; do
+for fixture in application-links settings-links owner-autorelease persistence persistence-owner snapshot-projection snapshot-views header-persistence column-stack-persistence workspace-manager workspace-coordinator workspace-tabs workspace-notice workspace-motion workspace-drawers workspace-menu-actions window-presentation panel-measurements reorder-lifecycle-publication editor-appearance color-field-cache native-context-menu squircle-geometry; do
   check "$fixture" bash "$CAPY_APP/scripts/test-project-files.sh" "$CAPY_APP/tests/$fixture.swift"
 done
 CAPY_ASSETS_APP="$TMPDIR/HeaderAssets.app"

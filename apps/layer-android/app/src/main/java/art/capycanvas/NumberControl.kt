@@ -1,5 +1,8 @@
 package art.capycanvas
 
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -148,6 +151,9 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         host.textComposition.clear(requester)
         return true
     }
+    val numericOperation by rememberUpdatedState<(JSONObject) -> Boolean>({ apply(it) })
+    val completeText by rememberUpdatedState<() -> Boolean>({ finish() })
+    val currentFill by rememberUpdatedState(shown.number("fill"))
     val currentValue by rememberUpdatedState(shown.getDouble("value"))
     val beginScrub by rememberUpdatedState<(Double) -> Unit>({ origin -> scrubOrigin = origin; beginEdit(); scrubbing = true })
     val moveScrub by rememberUpdatedState<(Double, Double, Boolean) -> Unit>({ origin, pixels, fine -> apply(obj("type" to "scrub", "origin" to origin, "pixels" to pixels, "fine" to fine)) })
@@ -168,11 +174,13 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         if (handler != null) host.numberKeyHandler = handler
         onDispose { if (handler != null && host.numberKeyHandler === handler) host.numberKeyHandler = null }
     }
-    val fineDrag = if (!panel) Modifier else Modifier.pointerInput(control.toString(), enabled) {
+    val fineDrag = Modifier.pointerInput(control.toString(), enabled, panel, toolbar) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
+            if (!panel && down.type == PointerType.Mouse || toolbar) return@awaitEachGesture
             val start = currentValue
+            val startFill = currentFill
             var origin = start
             var fine = currentEvent.keyboardModifiers.isShiftPressed
             var base = 0f
@@ -192,12 +200,12 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                     }
                     last = pixels
                     if (!change.pressed) {
-                        if (moved) { moveScrub(origin, (pixels - base).toDouble(), fine); change.consume() }
+                        if (moved) { if (panel) moveScrub(origin, (pixels - base).toDouble(), fine) else numericOperation(obj("type" to "position", "position" to startFill + pixels / 200f)); change.consume() }
                         released = true; break
                     }
                     if (!moved && kotlin.math.abs(pixels) <= viewConfiguration.touchSlop / density) continue
                     if (!moved) { moved = true; beginScrub(start) }
-                    change.consume(); moveScrub(origin, (pixels - base).toDouble(), fine)
+                    change.consume(); if (panel) moveScrub(origin, (pixels - base).toDouble(), fine) else numericOperation(obj("type" to "position", "position" to startFill + pixels / 200f))
                 }
             } finally { if (moved && !scrubCancelled) settleScrub(start, !released) }
         }
@@ -247,6 +255,15 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
             SharedIcon(name, captions.getString(if (direction < 0) "decrease" else "increase"), Modifier.size(16.dp))
         }
     }
+    val wheelInput = Modifier.pointerInput(enabled, toolbar) {
+                if (enabled && !toolbar) awaitPointerEventScope { while (true) {
+                    val event = awaitPointerEvent()
+                    if (event.type == PointerEventType.Scroll && completeText()) {
+                        val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }
+                        if (delta != 0.0) { numericOperation(obj("type" to "step", "steps" to -delta)); event.changes.forEach { it.consume() } }
+                    }
+                } }
+            }
     val field: @Composable () -> Unit = {
         BasicTextField(text, {
             if (editing && active != 2) {
@@ -291,6 +308,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         if (editing) field()
         else Box(Modifier.then(if (inline && valueOnly && !toolbar) Modifier.fillMaxWidth() else if (inline) Modifier.width(fixedWidth) else Modifier).height(height).clip(shape)
             .onGloballyPositioned { valueBounds = it.boundsInRoot() }.then(fineDrag)
+            .then(wheelInput)
             .then(if (toolbar) Modifier.toolbarNumberScrub(control, shown.number("fill"), enabled,
                 { if (finish()) apply(obj("type" to "position", "position" to it)) },
                 { if (finish()) apply(obj("type" to "step", "steps" to it)) }) else Modifier)
@@ -312,7 +330,27 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 Box(Modifier.align(Alignment.BottomEnd)) { valueControl() }
                 if (dial) AngleDial(shown.getDouble("value") * control.getDouble("scale"), enabled, colors.input, colors.sliderFill,
                     Modifier.align(Alignment.CenterEnd).padding(end = 76.dp).size(metrics.sliderHeight - metrics.spacing * 2).then(contact)
-                        .semantics { contentDescription = label; stateDescription = shown.getString("text") }.testTag("number-dial-$id"),
+                        .semantics { contentDescription = label; stateDescription = shown.getString("text") }
+                        .onPreviewKeyEvent { event ->
+                            if (!enabled || event.type != KeyEventType.KeyDown) false else {
+                                val steps = when (event.key) {
+                                    Key.DirectionLeft, Key.DirectionDown -> if (event.isShiftPressed) -15 else -1
+                                    Key.DirectionRight, Key.DirectionUp -> if (event.isShiftPressed) 15 else 1
+                                    Key.PageUp -> 45
+                                    Key.PageDown -> -45
+                                    else -> 0
+                                }
+                                if (event.key == Key.MoveHome) { reset(); true }
+                                else if (steps != 0 && finish()) { apply(obj("type" to "step", "steps" to steps)); true } else false
+                            }
+                        }.focusable(enabled)
+                        .pointerInput(enabled) { if (enabled) awaitPointerEventScope { while (true) {
+                            val event = awaitPointerEvent()
+                            if (event.type == PointerEventType.Scroll && completeText()) {
+                                val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }
+                                if (delta != 0.0) { numericOperation(obj("type" to "step", "steps" to -delta)); event.changes.forEach { it.consume() } }
+                            }
+                        } } }.testTag("number-dial-$id"),
                     onDoubleTap = reset) { position, radius -> if (finish()) apply(obj("type" to "dial", "x" to position.x.toDouble(), "y" to position.y.toDouble(), "radius" to radius.toDouble())) }
                 else EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) },
                     Modifier.fillMaxWidth().padding(start = 36.dp, end = 76.dp).align(Alignment.BottomStart).then(contact).testTag("number-slider-$label"),

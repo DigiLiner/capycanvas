@@ -3,6 +3,10 @@ package art.capycanvas
 import android.view.KeyEvent as AndroidKeyEvent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.EaseOutCubic
 import androidx.compose.animation.core.tween
@@ -551,14 +555,17 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
     DrawerSheet("new-drawing-browser", head = {
         CoreTextField(drawer.getString("query"), { actions.send("search", "query" to it) }, Modifier.fillMaxWidth().semantics { contentDescription = copy.getString("search") }.testTag("new-drawing-search"),
             placeholder = { Text(copy.getString("search")) }, leadingIcon = { SharedIcon("search", null, Modifier.size(16.dp)) },
-            height = FieldHeight, shape = ControlShape, background = fieldColor())
+            height = FieldHeight, shape = ControlShape, background = fieldColor(), focusRequest = 1)
     }, footer = {
+        var retainedSave by remember { mutableStateOf(save) }
+        if (save != null) retainedSave = save
         val controls = @Composable {
-            if (save == null) {
+            AnimatedContent(save != null, label = "preset-save-footer", transitionSpec = { fadeIn() togetherWith fadeOut() }) { saving -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!saving) {
                 DialogButton(copy.getString("cancel"), "new-drawing-browser-cancel") { actions.send("close_drawer") }
                 DialogButton(drawer.getString("save_label"), "new-drawing-save-as") { focus.clearFocus(); actions.send("save_as") }
                 DialogButton(copy.getString("select"), "new-drawing-select", accent = true, enabled = drawer.getBoolean("can_select")) { actions.send("use_preset") }
-            } else {
+            } else retainedSave?.let { save ->
                 val canSave = save.getBoolean("can_save")
                 CoreTextField(save.getString("name"), { actions.send("preset_name", "text" to it) },
                     Modifier.width(150.dp).then(if (canSave) Modifier else Modifier.border(1.5.dp, MaterialTheme.colorScheme.error, ControlShape))
@@ -570,6 +577,7 @@ private class DrawerMemory { var shown: JSONObject? = null; var open = false; va
                 DialogButton(copy.getString("cancel"), "new-drawing-save-cancel") { actions.send("cancel_save") }
                 DialogButton(save.getString("confirm"), "new-drawing-save-confirm", accent = true, enabled = canSave) { actions.send("save_preset") }
             }
+            } }
         }
         if (wide) {
             PresetSummary(host, drawer, Modifier.weight(1f))

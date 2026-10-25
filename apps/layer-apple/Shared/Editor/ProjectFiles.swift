@@ -91,7 +91,7 @@ import UIKit
         if !file["close_ready"].bool { handledClose = false }
         if file["close_ready"].bool && !handledClose && requestID == nil {
             handledClose = true
-            if closeCompletion != nil { finishClose(true) } else if store?.drawingTabs.confirmingWindow != true { store?.drawingTabs.closeApproved() }
+            if closeCompletion != nil { finishClose(true) } else { store?.drawingTabs.closeApproved() }
         }
         let pending = state["requests"].array.first(where: { $0["kind"]["type"].string == "document" })
         if let document = pending?["kind"]["request"], document["type"].string == "confirm_close",
@@ -224,7 +224,7 @@ import UIKit
     }
     func confirmClose(_ completion: @escaping (Bool) -> Void) {
         guard let store else { completion(false); return }
-        store.drawingTabs.confirmWindowClose(completion)
+        store.query(["type": "document_tabs", "op": "session_close"]) { completion($0.bool) }
     }
     func confirmCurrentClose(_ completion: @escaping (Bool) -> Void) {
         guard !busy, externalOpen == nil, let native = store?.native else { completion(false); return }

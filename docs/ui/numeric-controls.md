@@ -34,9 +34,9 @@ entry without changing the effect application.
   Pressing or dragging points the dial where the pointer is. Within twice the
   dial's radius it snaps to 15° steps; farther out it turns freely, and a press
   at its center keeps the value. Values wrap at 360°. Double-clicking the label
-  or the dial restores the default. Arrow keys step a focused dial on GTK, Web
-  and Windows, GTK also steps it with the scroll wheel, VoiceOver adjusts it on
-  Apple and UI Automation adjusts it on Windows. Paper's Light is a dial.
+  or the dial restores the default. Arrow keys and the scroll wheel step a
+  focused dial; Shift multiplies arrow steps by ten. Native accessibility
+  adjustment uses the same shared numeric operation. Paper's Light is a dial.
 - In Preferences the complete name/description/value header is above the
   slider. Rows expand for descriptions; the numeric content is capped at
   600 logical pixels. Surrounding groups share the same width so labels align.
@@ -83,6 +83,13 @@ entry without changing the effect application.
   bounds. Refused text stays in the editor with its localized error. Pending
   commits must succeed before step buttons or dialog Apply can proceed. Native
   composition holds text and value until the IME finishes.
+
+Number readouts and their text editors accept wheel steps after committing any
+pending text. Refused text consumes the wheel without changing the value.
+Standalone slider readouts use a normalized vertical drag: 200 logical pixels
+cover the slider range. Panel readouts keep the field-step drag described above.
+Hosts forward these operations to Rust, including touch and pen contacts, and
+cancel unfinished gestures on capture loss, focus loss or control retirement.
 
 ## One numeric policy
 

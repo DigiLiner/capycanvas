@@ -218,6 +218,11 @@ UI traces. Presentation and overview pipelines are prepared on the shader worker
 an acquired frame remains owned until presentation is ready. Cursor and brush
 readiness keep their original publication boundaries.
 
+`QueryWorkspace` uses the native workspace packet allowlist in
+`native/src/workspace.rs`. Admit each shared query there and cover its serialized
+result/error packet in the native tests, including name validation and saved-profile
+matching. UI replies retain their requesting prompt or dialog identity.
+
 Empty localization metadata preserves the current context; a pending envelope
 stays queued until a full snapshot carries it. Properties, tool controls, filter
 results and options use semantic identities for their structural keys. Tool settings
@@ -1020,6 +1025,24 @@ compact list; this mode uses ordinary documents and does not test HDR. These
 fixtures check native row activation and outside releases as well as held and
 grip dragging. Small outside releases cross the middle tab's edge within the
 native client area and must preserve the active drawing and tab order.
+Use `exercise-layer-pickup.ps1 -SwipeOnly` for the swipe strip, canceled contacts,
+grip handoff and exact Delete/Undo and reorder history. With no device or theme
+argument it covers mouse, pen and touch in both themes. Use
+`exercise-workspace-pickup.ps1 -ZenOnly` for hidden-control exclusion, retained
+layout and restoration in both themes.
+
+`exercise-documents.ps1 -Journey color-workflows` isolates automatic comparisons,
+Properties Appearance and conversion into a separate unsaved drawing. Repeat
+with `-Journey color-workflows-light`. `exercise-hdr.ps1 -ControlsOnly` isolates
+HDR arc, intensity, proof and screen-status controls in both themes; choose
+`-Depth F16` or `-Depth F32` explicitly. These focused selections reuse the full
+journeys' assertions and disposable profiles. Software-adapter checks establish
+functional behavior; HDR output and presentation timing require hardware.
+The VM selections `manager:default`, `localization:profiles-dark` and
+`localization:profiles-light` cover the workspace manager in both themes and
+profile-library search in English and Japanese without the unrelated document
+import/export matrix.
+
 Secondary-button motion must leave palette colors and row order unchanged; locked rows and
 disabled grips must release ownership and allow fresh native selection.
 Keep the fast Down/Move-inside/Move-outside/Up burst separate from an admitted

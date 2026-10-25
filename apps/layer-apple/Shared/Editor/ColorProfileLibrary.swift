@@ -78,11 +78,19 @@ struct ColorProfileLibrary: View {
     @State private var metadata: [JSON] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var query = ""
+    @State private var matching = Set<String>()
+    @State private var searchGeneration = UUID()
+    @Environment(\.editorPopupStore) private var store
     var body: some View {
-        let entries = entryCopy.rows(metadata, language: language)
+        let entries = entryCopy.rows(metadata, language: language).filter { query.isEmpty || matching.contains($0["id"].string) }
         VStack(alignment: .leading, spacing: 16) {
             Text(copy["library_title"].string).font(.headline)
             Text(copy["library_help"].string)
+            if metadata.count > 7 || !query.isEmpty {
+                TextField(copy["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("profile-library-search")
+            }
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(entries, id: \.id) { entry in
@@ -120,6 +128,8 @@ struct ColorProfileLibrary: View {
             }
         }.padding(24).frame(minWidth: 340, idealWidth: 540, maxWidth: 620, minHeight: 300, idealHeight: 560, maxHeight: 720)
             .interactiveDismissDisabled(busy).task { reload() }
+            .onChange(of: query) { _, _ in search() }
+            .onChange(of: language) { _, _ in search() }
     }
     private func reload(removing id: String? = nil, showing: (String, Bool)? = nil) {
         guard !busy else { return }
@@ -133,11 +143,28 @@ struct ColorProfileLibrary: View {
             DispatchQueue.main.async {
                 busy = false
                 switch result {
-                case .success(let values): metadata = values
+                case .success(let values): metadata = values; search()
                 case .failure(let failure): error = failure.localizedDescription
                 }
             }
         }
+    }
+    private func search() {
+        let generation = UUID()
+        searchGeneration = generation
+        guard !query.isEmpty, let store else { matching = []; return }
+        let entries = metadata
+        var accepted = Set<String>()
+        var remaining = entries.count
+        for entry in entries {
+            store.query(["type": "profile_library_matches", "entry": entry.raw, "query": query]) { result in
+                guard searchGeneration == generation else { return }
+                if result.bool { accepted.insert(entry["id"].string) }
+                remaining -= 1
+                if remaining == 0 { matching = accepted }
+            }
+        }
+        if entries.isEmpty { matching = [] }
     }
     private func remove(_ id: String) { reload(removing: id) }
     private func select(_ id: String) {

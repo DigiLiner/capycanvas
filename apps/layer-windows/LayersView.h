@@ -44,7 +44,9 @@ struct LayerRow : std::enable_shared_from_this<LayerRow> {
     hstring swipeKey;
     TranslateTransform swipeTransform;
     double swipeOffset=0;
-    void swipe(double offset);
+    CompositionTarget::Rendering_revoker swipeFrames;
+    void swipe(double offset,bool animate=true);
+    void positionSwipe(double offset);
     double revealWidth()const;
     bool canSwipe()const;
     Button eye{nullptr},check{nullptr},content{nullptr},load{nullptr},mask{nullptr},link{nullptr},texture{nullptr},name{nullptr},grip{nullptr};

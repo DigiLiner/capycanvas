@@ -15,13 +15,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.json.JSONArray
 
-@Composable internal fun ProfileFileButton(host:CanvasHost,label:String?=null,onProfile: (JSONObject) -> Unit) {
+@Composable internal fun ProfileFileButton(host:CanvasHost,label:String?=null,onBusy: (Boolean) -> Unit = {}, enabled: Boolean = true, onProfile: (JSONObject) -> Unit) {
     val copy = host.catalog.getJSONObject("profile_copy")
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf<Exception?>(null) }
     var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(busy) { onBusy(busy) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             busy = true
@@ -40,7 +42,7 @@ import org.json.JSONObject
         }
     }
     Column {
-        TextButton(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text(if (busy) copy.getString("reading") else label ?: copy.getString("import")) }
+        TextButton(enabled = enabled && !busy, onClick = { picker.launch(arrayOf("*/*")) }) { Text(if (busy) copy.getString("reading") else label ?: copy.getString("import")) }
         ColorFailureText(host, error, true)
     }
 }
@@ -63,11 +65,12 @@ import org.json.JSONObject
         confirmButton = { TextButton({ onChoose(if(selection=="custom")custom!!.getJSONObject("profile") else obj("Builtin" to selection)) }) { Text(copy.getString("use_profile")) } })
 }
 
-@Composable internal fun ImportProfileButton(host:CanvasHost,onProfile:(JSONObject)->Unit) {
+@Composable internal fun ImportProfileButton(host:CanvasHost,enabled:Boolean=true,onProfile:(JSONObject)->Unit) {
     val copy = host.catalog.getJSONObject("profile_copy")
     var library by remember {mutableStateOf(false)}
-    Row {ProfileFileButton(host,onProfile=onProfile);TextButton({library=true}){Text(copy.getString("saved_dialog"))}}
-    if(library)ProfileLibraryDialog(host,{library=false}){profile->onProfile(profile);library=false}
+    val accept by rememberUpdatedState<(JSONObject) -> Unit>({ if (enabled) onProfile(it) })
+    Row {ProfileFileButton(host,enabled=enabled,onProfile={accept(it)});TextButton({library=true},enabled=enabled){Text(copy.getString("saved_dialog"))}}
+    if(library)ProfileLibraryDialog(host,{library=false}){profile->accept(profile);library=false}
 }
 
 @Composable internal fun ProfileLibraryDialog(host:CanvasHost,onDismiss:()->Unit,onProfile:((JSONObject)->Unit)?=null) {
@@ -78,7 +81,12 @@ import org.json.JSONObject
     var rawEntries by remember {mutableStateOf<List<JSONObject>>(emptyList())}
     var error by remember {mutableStateOf<Exception?>(null)}
     var busy by remember {mutableStateOf(true)}
+    var importBusy by remember { mutableStateOf(false) }
     var refresh by remember {mutableIntStateOf(0)}
+    var query by remember { mutableStateOf("") }
+    val matching = remember(rawEntries, query, host.languageTag) {
+        JSONArray(Native.profileMatches(JSONArray(rawEntries.map(::profileMetadata)).toString(), query, host.languageTag)).values().toSet()
+    }
     LaunchedEffect(refresh){busy=true;try{rawEntries=ProfileStore.list(context);error=null}catch(e:Exception){error=e}finally{busy=false}}
     LaunchedEffect(rawEntries, host.languageTag) {
         val language=host.languageTag
@@ -86,21 +94,22 @@ import org.json.JSONObject
         val projected=profileEntriesCopy(host,retained)
         if(language==host.languageTag && retained===rawEntries)entries=projected
     }
-    AlertDialog(onDismissRequest=onDismiss,title={Text(copy.getString("library_title"))},confirmButton={TextButton(onDismiss,Modifier.testTag("profile-library-done")){Text(copy.getJSONObject("common").getString("done"))}},text={
+    AlertDialog(onDismissRequest={ if (!busy && !importBusy) onDismiss() },title={Text(copy.getString("library_title"))},confirmButton={TextButton(onDismiss,Modifier.testTag("profile-library-done"),enabled=!busy&&!importBusy){Text(copy.getJSONObject("common").getString("done"))}},text={
         Column(Modifier.fillMaxWidth().heightIn(max=580.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)){
             Text(copy.getString("library_help"))
+            if (entries.size > 7 || query.isNotEmpty()) CoreTextField(query, { query = it }, Modifier.testTag("profile-library-search"), placeholder = { Text(copy.getString("search")) })
             if(busy)CircularProgressIndicator()
-            for(entry in entries){
+            for(entry in entries.filter { it.getString("id") in matching }){
                 Text(entry.getString("name"),style=MaterialTheme.typography.titleSmall)
                 Text(entry.optString("issue").ifEmpty { entry.getString("details") })
                 Row {
-                    if(onProfile!=null)TextButton(enabled=!busy&&!entry.has("issue"),onClick={busy=true;scope.launch{try{onProfile(ProfileStore.get(context,entry.getString("id")))}catch(e:Exception){error=e}finally{busy=false}}}){Text(copy.getString("use_profile"))}
-                    TextButton(enabled=!busy,onClick={busy=true;scope.launch{try{ProfileStore.remove(context,entry.getString("id"));refresh++}catch(e:Exception){error=e}finally{busy=false}}}){Text(copy.getString("remove"))}
+                    if(onProfile!=null)TextButton(enabled=!busy&&!importBusy&&!entry.has("issue"),onClick={busy=true;scope.launch{try{onProfile(ProfileStore.get(context,entry.getString("id")))}catch(e:Exception){error=e}finally{busy=false}}}){Text(copy.getString("use_profile"))}
+                    TextButton(enabled=!busy&&!importBusy,onClick={busy=true;scope.launch{try{ProfileStore.remove(context,entry.getString("id"));refresh++}catch(e:Exception){error=e}finally{busy=false}}}){Text(copy.getString("remove"))}
                 }
-                TextButton(enabled=!busy,onClick={busy=true;scope.launch{try{ProfileStore.show(context,entry.getString("id"),!entry.optBoolean("visible",true));refresh++}catch(e:Exception){error=e}finally{busy=false}}}){Text(if(entry.optBoolean("visible",true))copy.getString("hide") else copy.getString("show"))}
+                TextButton(enabled=!busy&&!importBusy,onClick={busy=true;scope.launch{try{ProfileStore.show(context,entry.getString("id"),!entry.optBoolean("visible",true));refresh++}catch(e:Exception){error=e}finally{busy=false}}}){Text(if(entry.optBoolean("visible",true))copy.getString("hide") else copy.getString("show"))}
             }
             if(entries.isEmpty()&&!busy)Text(copy.getString("empty"))
-            ProfileFileButton(host) {if(onProfile!=null)onProfile(it)else refresh++}
+            ProfileFileButton(host, onBusy = { importBusy = it }, enabled = !busy) {if(onProfile!=null)onProfile(it)else refresh++}
             ColorFailureText(host, error, true)
         }
     })

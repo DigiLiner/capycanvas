@@ -43,6 +43,7 @@ private struct NavigatorDrawing: View {
     @ObservedObject var store: EditorStore
     @Environment(\.workspaceClip) private var clip
     @Environment(\.workspaceLayer) private var order
+    @Environment(\.workspaceChromeOpacity) private var opacity
     @State private var identity = UUID()
     @State private var started = false
     @GestureState private var contact = false
@@ -66,9 +67,9 @@ private struct NavigatorDrawing: View {
             Canvas { context, size in
                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(palette["bg"]))
             }.contentShape(Rectangle())
-                .preference(key: NavigatorPlacements.self, value: model.isNull || visible.isEmpty ? [:] : [identity:
+                .preference(key: NavigatorPlacements.self, value: model.isNull || visible.isEmpty || opacity <= 0 ? [:] : [identity:
                     NavigatorPlacement(bounds: bounds, clip: visible,
-                        image: model["image"].rect.offsetBy(dx: bounds.minX, dy: bounds.minY), order: order)])
+                        image: model["image"].rect.offsetBy(dx: bounds.minX, dy: bounds.minY), order: order, opacity: opacity)])
                 .gesture(DragGesture(minimumDistance: 0).updating($contact) { _, value, _ in value = true }.onChanged { event in
                     if !started { started = true; send("down", event.startLocation, allocation.size) }
                     if event.translation != .zero { send("move", event.location, allocation.size) }

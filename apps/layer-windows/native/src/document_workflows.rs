@@ -19,6 +19,7 @@ mod proof;
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Action {
     Describe,
+    Appearance,
     ProofOptions {
         settings: layer_ui::proof_panel::PrintProofSettings,
         profile_id: Option<String>,
@@ -62,9 +63,7 @@ pub(crate) enum Action {
     Commit,
     ClipPublished { publication: u64 },
     Cancel,
-    SaveCopy {
-        path: String,
-    },
+    OpenCopy,
     PasteClip {
         nonce: String,
     },
@@ -316,6 +315,11 @@ impl Task {
             payload,
         }))
     }
+    pub fn recapture(&self, host: &mut NativeHost) -> Result<Box<Self>, String> {
+        let mut next=Self::capture(host,self.id)?;
+        next.serial=self.serial;
+        Ok(next)
+    }
     fn feature_copy(localization: &layer_ui::Localizer) -> Value {
         use layer_ui::color_feature_copy::{DocumentColorCopy, ExportCopy, ProfileCopy, ProofCopy};
         json!({"color": DocumentColorCopy::new(localization), "export": ExportCopy::new(localization),
@@ -326,6 +330,7 @@ impl Task {
             let visible = !self.hidden.contains(&entry.id);
             let mut view = entry.localized_view(&self.localization);
             view["visible"] = json!(visible);
+            view["query_entry"] = json!(entry);
             view["state"] = layer_ui::color_feature_copy::profile_visibility(&self.localization, entry.channels, visible).into();
             view
         }).collect::<Vec<_>>())
@@ -613,19 +618,6 @@ impl Task {
                     self.stage = "preview";
                     self.describe()
                 }
-                Action::SaveCopy { path } => {
-                    let Payload::Color(task) = &self.payload else {
-                        return Err("No converted copy is ready".into());
-                    };
-                    crate::document_io::location(&path)?;
-                    crate::document_io::atomic_write(
-                        std::path::Path::new(&path),
-                        self.control.cancellation_flag(),
-                        |file| task.write_copy(file, self.control.is_cancelled()),
-                    )?;
-                    self.stage = "saved";
-                    Ok(())
-                }
                 _ => Err("This action belongs on the document owner".into()),
             }
         })();
@@ -766,6 +758,15 @@ impl Task {
         self.validate_import(host)?;
         let Payload::Import(task) = &mut self.payload else { unreachable!() };
         Ok((task.images.take_sources(self.control.is_cancelled())?, task.context))
+    }
+    pub fn profile_inventory(&self) -> Option<Vec<layer_ui::profile_library::ProfileEntry>> {
+        matches!(self.payload,Payload::Profiles | Payload::Proof(_) | Payload::Export { .. } | Payload::Import(_) | Payload::Source(_)).then(||self.profiles.iter().filter(|entry|!self.hidden.contains(&entry.id)).cloned().collect())
+    }
+    pub fn copy_document(&self, host: &NativeHost) -> Result<layer_core::Document, String> {
+        if self.stage != "preview" || self.error.is_some() { return Err("Preview the result before applying it".into()); }
+        let Payload::Color(task) = &self.payload else { return Err("No converted copy is ready".into()); };
+        task.validate(host, self.control.is_cancelled())?;
+        task.copy_document(self.control.is_cancelled())
     }
     pub fn commit(&mut self, host: &mut NativeHost) -> Result<(), String> {
         self.error_reason=None;
@@ -960,6 +961,19 @@ mod tests {
         assert_eq!(task.details, english);
     }
     #[test]
+    fn recaptured_workflows_keep_monotonic_preview_serials() {
+        let mut host=NativeHost::new(Platform::Windows).unwrap();
+        let mut previous=Task::capture(&mut host,0).unwrap();
+        previous.serial=7;
+        previous.control.cancel();
+        let mut next=previous.recapture(&mut host).unwrap();
+        assert_eq!(next.serial,previous.serial);
+        assert!(!next.control.is_cancelled());
+        next.work(Action::Describe);
+        assert_eq!(next.stage,"options");
+        assert_eq!(next.serial,previous.serial+1);
+    }
+    #[test]
     fn late_profile_inventory_reprojects_semantic_issues_without_reinspection() {
         let mut host = NativeHost::new(Platform::Windows).unwrap();
         let mut task = Task::capture(&mut host, 0).unwrap();
@@ -977,6 +991,7 @@ mod tests {
         let mut expected = entry.localized_view(&japanese);
         expected["visible"] = json!(false);
         expected["state"] = layer_ui::color_feature_copy::profile_visibility(&japanese, None, false).into();
+        expected["query_entry"] = json!(entry);
         assert_eq!(task.details["profiles"][0], expected);
         assert_eq!(task.profiles[0].name, "My literal name");
         assert_eq!(task.profiles[0].issue, entry.issue);

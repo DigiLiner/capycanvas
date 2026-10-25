@@ -1,7 +1,16 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark')
+﻿param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark',[switch]$SwipeOnly,[switch]$PenSwipeOnly)
 $ErrorActionPreference='Stop'
+if($PenSwipeOnly){$SwipeOnly=$true;$Device='pen'}
+if($SwipeOnly -and !$PenSwipeOnly -and !$PSBoundParameters.ContainsKey('Device')){
+    foreach($device in @('touch','pen','mouse')){
+        $options=@{Executable=$Executable;Device=$device;ColumnMode=$ColumnMode;SwipeOnly=$true}
+        if($PSBoundParameters.ContainsKey('Theme')){$options.Theme=$Theme}
+        & $PSCommandPath @options
+    }
+    return
+}
 if(!$PSBoundParameters.ContainsKey('Theme')){
-    foreach($theme in @('dark','light')){& $PSCommandPath -Executable $Executable -Device $Device -ColumnMode $ColumnMode -Theme $theme}
+    foreach($theme in @('dark','light')){& $PSCommandPath -Executable $Executable -Device $Device -ColumnMode $ColumnMode -Theme $theme -SwipeOnly:$SwipeOnly}
     return
 }
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
@@ -319,6 +328,15 @@ try {
         Wait-Until {!@((Model).state.layers|Where-Object id -eq $created).Count} 'Revealed Delete did not remove its row'
         Layer-History 'Undo';Wait-Until {(Rows) -eq $before} 'Revealed Delete requires more than one Undo'
         Record-Swipe 'delete-undone'
+    }
+    if($SwipeOnly){
+        $script:case='settled-grip-reorder';Drag-Row "layer-$created-drag" $created $paint -Grip
+        $script:case='settled-grip-cancel';Drag-Row "layer-$created-drag" $created $paint -Grip -Cancel
+        [CapyRowPointer]::Dispose()
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
+        if((Get-Item -LiteralPath $stderr).Length){throw 'Native swipe stderr requires review'}
+        @{device=$Device;theme=$Theme;swipe_strip_grip_and_rest_gate=$(if($Device -eq 'mouse'){'not_applicable'}else{'passed'});settled_grip_reorder_undo_redo='passed';settled_grip_cancel='passed';scope='Functional native input; animation frame pacing and physical input unverified'}|ConvertTo-Json
+        return
     }
     if($Device -eq 'mouse'){
         foreach($source in @("layer-$created-name","layer-$created-drag")){

@@ -7,6 +7,7 @@ import {createDrawing} from './new-drawing-fixture.mjs';
 // Real DOM, Wasm workers, storage and WebGPU. ICC fixtures are supplied locally,
 // never redistributed. May run through test.mjs or an existing tablet CDP tab.
 export async function checkProof({call,evaluate,settle}, {profileUrl='/pkg/proof-cmyk.icc',originalUrl='/pkg/proof-p3.icc'}={}) {
+  await evaluate(`layerApp.dispatch({type:"set_theme",theme:${JSON.stringify(process.env.CAPY_TEST_THEME||"dark")}})`);await settle();
   const rawEvaluate=evaluate;
   evaluate=expression=>rawEvaluate(expression.startsWith('(await ')?`(async()=>${expression})()`:expression);
   const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const start=performance.now();function poll(){try{if(${condition})resolve(true);else if(performance.now()-start>120000)reject(Error(${JSON.stringify(condition)}+': '+document.body.innerText.slice(-1400)+' '+JSON.stringify({export:layerApp.state().commands.find(c=>c.id==='export_document'),documentsBusy:layerApp.documents.busy(),fileBusy:layerApp.state().document_file.busy,proofMode:layerApp.app.proof_form().mode,proofStatus:layerApp.app.proof_status(),requests:layerApp.state().requests,dialogs:[...document.querySelectorAll('dialog')].map(n=>({open:n.open,modal:n.matches(':modal'),text:n.innerText.slice(0,150)}))},(_,v)=>typeof v==='bigint'?String(v):v)));else setTimeout(poll,25)}catch(e){reject(e)}}poll()})`);

@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
     @Published private(set) var view = JSON()
     @Published private(set) var busy = false
     @Published var presented = false
-    private(set) var confirmingWindow = false
     private weak var store: EditorStore?
     var common: JSON { store?.bootstrap["common"] ?? JSON() }
     var copy: JSON { store?.catalog["native_copy"]["header"] ?? JSON() }
@@ -88,7 +87,7 @@ import UniformTypeIdentifiers
         }
     }
     func closeApproved() {
-        guard let store, !busy, !confirmingWindow else { return }
+        guard let store, !busy else { return }
         if rows.count <= 1 { store.projectFiles.closeWindow?(); return }
         busy = true
         let id = selected, recovery = store.recovery
@@ -103,25 +102,7 @@ import UniformTypeIdentifiers
                 store.wake?()
         } }
     }
-    func confirmWindowClose(_ completion: @escaping (Bool) -> Void) {
-        guard !busy, !confirmingWindow, let store else { completion(false); return }
-        confirmingWindow = true
-        var remaining = [selected] + rows.map { $0["id"].uint }.filter { $0 != selected }
-        func next() {
-            guard !remaining.isEmpty else { confirmingWindow = false; completion(true); return }
-            let id = remaining.removeFirst()
-            select(id) { selected in
-                guard selected else { finish(false); return }
-                store.projectFiles.confirmCurrentClose { allowed in if allowed { next() } else { finish(false) } }
-            }
-        }
-        func finish(_ allowed: Bool) {
-            confirmingWindow = false
-            if !allowed { edit(["op": "reset_close"]) }
-            completion(allowed)
-        }
-        next()
-    }
+
 }
 
 struct DrawingFrame: Equatable {

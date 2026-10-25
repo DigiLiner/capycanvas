@@ -1,3 +1,4 @@
+import {createWorkflowStack} from './workflow-stack.js';
 import {colorForm} from './color-editor.js';
 import {paperThumbnail} from './paper-picker.js';
 import {sizeFields} from './size-dialog.js';
@@ -242,7 +243,8 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
     const saveCancel = button('', () => send({op:'cancel_save'}), 'dialog-button'); saveCancel.id = 'new-drawing-save-cancel';
     const saveConfirm = button('', () => send({op:'save_preset'}), 'suggested-action'); saveConfirm.id = 'new-drawing-save-confirm';
     const saving = element('div', 'new-drawing-actions new-drawing-saving'); saving.append(saveName, saveGroup, saveCancel, saveConfirm);
-    const browserFooter = element('footer', 'dialog-footer'); browserFooter.append(summary, actions, saving);
+    const actionStack=element('div');actionStack.append(actions,saving);const actionPages=createWorkflowStack(actionStack);
+    const browserFooter = element('footer', 'dialog-footer'); browserFooter.append(summary, actionStack);
     const browser = drawer('new-drawing-browser', searchHead, [tabs, presetGrid, empty], browserFooter);
     let presetTiles = [], presetKey = '', tabKey = '', naming = false;
     keyGrid(presetGrid, () => presetTiles, index => send({op:'pick_preset', index}), () => send({op:'use_preset'}));
@@ -371,7 +373,7 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
       text(empty, b.empty ?? ''); empty.hidden = b.empty == null;
       summaryArt.show(b.summary_sheet); text(summaryName, b.summary.name); text(summarySize, b.summary.size); text(summaryDetails, b.summary.details);
       text(browserCancel, c.cancel); text(saveAs, b.save_label); text(select, c.select); select.disabled = !b.can_select;
-      actions.hidden = b.save != null; saving.hidden = b.save == null;
+      actionPages.show(b.save == null?actions:saving);
       const starting = b.save != null && !naming;
       naming = b.save != null;
       if (!b.save) return;
@@ -487,7 +489,7 @@ export function createNewDrawing({app, state, applyChange, element, button, icon
       localize() { colorUi?.form.relocalize(); },
       report(message) { text(report, message); report.hidden = !message; },
       close() {
-        closeColors(); narrow.removeEventListener('change', arrange);
+        actionPages.finish();closeColors(); narrow.removeEventListener('change', arrange);
         ui = null; if (root.open) root.close(); root.remove();
       }};
   }

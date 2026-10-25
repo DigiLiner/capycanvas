@@ -444,6 +444,11 @@ manual save checkpoints and undo/redo after an actual process death.
   `#layerPropertiesDrawerUsesNativeSizingAndActions` checks the combined
   Layers/Properties drawer from the header and a custom toolbar, immediate growth,
   compact Properties, footer alignment and swipe action history in both themes.
+- `AndroidPortParityTest` checks color-scrub modifiers, standalone numeric input,
+  advanced toolbar prompts, automatic conversion-copy admission, profile search,
+  custom preference swatches and direct dial input. `AndroidWorkspacePresentationTest`
+  checks retained Zen drawing, immediate pointer fallthrough and disabled-motion
+  paths with a controlled native frame clock.
 - `AndroidRasterTest`: document, file and GPU lifecycle.
   - `#encloseFillNativeContactsControlsAndHistory` uses Android stylus events
     with Reference source in both themes. It chooses the remembered Enclose

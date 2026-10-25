@@ -32,7 +32,7 @@ struct EditorView<Canvas: View>: View {
             // Controls need both the live values and their shared specifications.
             if !store.state.isNull && !store.catalog.isNull && (store.workspaces == nil || store.state["workspace_ready"].bool) {
                 EditorHeader(store: store)
-                if !store.snapshot["chrome_hidden"].bool && store.state["workspace"]["layout"]["canvas_info"]["visible"].bool {
+                if store.state["workspace"]["layout"]["canvas_info"]["visible"].bool {
                     HStack(alignment: .bottom, spacing: 12) {
                         Spacer()
                         ScreenStatus(store: store, palette: palette)
@@ -40,6 +40,7 @@ struct EditorView<Canvas: View>: View {
                             .glassSurface(SquircleShape.tile, fill: palette.chromeSurface)
                     }.padding(.horizontal, 4).frame(maxHeight: .infinity, alignment: .bottom)
                         .placed(store.snapshot["layout"]["status"])
+                        .modifier(WorkspaceChromeVisibility(hidden: store.snapshot["chrome_hidden"].bool))
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
                 WorkspaceBubbleLayer(store: store, bubbles: store.bubbles)

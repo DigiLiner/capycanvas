@@ -2,6 +2,14 @@ param([Parameter(Mandatory)][string]$Executable,
     [ValidateSet('dark-mouse','dark-touch','dark-pen','light-mouse','light-touch','light-pen')][string]$Variant='dark-mouse',[switch]$RapidOnly,[switch]$HistoryOnly,[switch]$HistoryLightOnly,[switch]$NativeControlsOnly,[switch]$ScrollEpochOnly,[switch]$NumericOnly,[switch]$CurveOnly,[switch]$MenuOnly,[switch]$ObserverOnly,[switch]$VisualOnly,[switch]$BeadTransitionsOnly,[switch]$HdrOnly,[switch]$HdrRetirementOnly,[ValidateSet('F16','F32')][string]$HdrDepth='F16')
 $ErrorActionPreference='Stop'
 if($HdrRetirementOnly){$HdrOnly=$true}
+if($NumericOnly -and !$PSBoundParameters.ContainsKey('Variant')){
+    foreach($variant in @('dark-touch','light-touch')){& $PSCommandPath -Executable $Executable -Variant $variant -NumericOnly}
+    return
+}
+if($HdrOnly -and !$PSBoundParameters.ContainsKey('Variant')){
+    foreach($variant in @('dark-mouse','light-mouse')){& $PSCommandPath -Executable $Executable -Variant $variant -HdrOnly -HdrRetirementOnly:$HdrRetirementOnly -HdrDepth $HdrDepth}
+    return
+}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'BubbleVisualChecks.ps1')
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
@@ -544,6 +552,14 @@ function Native-NumericContacts([long]$Id){
     $slider.SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x25)
     Wait-Until {@((Model).state.layers|Where-Object editing)[0].opacity -lt $origin} 'Stock slider keyboard Arrow Left did not step opacity';Native-OpacityUndo $origin $checkpoint
     $entry=Control 'layer-opacity' -Within (Card $Id) -Arranged;$entry.SetFocus();$value=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern);$value.SetValue('50 + 10')
+    $readout=$entry.Current.BoundingRectangle
+    [CapyRowPointer]::Wheel([int]($readout.X+$readout.Width*.5),[int]($readout.Y+$readout.Height*.5),-120)
+    Wait-Until {@((Model).state.layers|Where-Object editing)[0].opacity -lt .6} 'Readout wheel did not commit draft then decrease opacity'
+    (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,@(0x11),0x5A)
+    Wait-Until {[Math]::Abs(@((Model).state.layers|Where-Object editing)[0].opacity-.6) -lt .001} 'Readout wheel Undo did not isolate committed draft'
+    Native-OpacityUndo $origin $checkpoint
+    $checks.Add('native-readout-wheel-commits-draft-one-step-history')
+    $entry=Control 'layer-opacity' -Within (Card $Id) -Arranged;$entry.SetFocus();$value=$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern);$value.SetValue('50 + 10')
     Wait-Until {$value.Current.Value -eq '50 + 10'} 'Native numeric pending expression was not retained'
     $b=(Control 'layer-opacity-slider' -Within (Card $Id) -Arranged).Current.BoundingRectangle
     Drag @{x=[int]($b.X+$b.Width*.7);y=[int]($b.Y+$b.Height*.5)} @{x=[int]($b.X+$b.Width*.4);y=[int]($b.Y+$b.Height*.5)}
@@ -790,6 +806,7 @@ try{
         @{variant=$Variant;depth=$HdrDepth;checks=@($checks);scope=($scope+'; physical digitizers and HDR display luminance unverified')}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'results.json')
         return
     }
+    if(!$NumericOnly -and !$CurveOnly){
     $dial=Take 'command' 'drawing_brush' (($camera.translation[0]+$document.width*.35*$camera.zoom)/$scale) (($camera.translation[1]+$document.height*.35*$camera.zoom)/$scale)
     Check-Artwork 'tear-out' $revision
     if($MenuOnly){Document-SwitchMenu $dial;@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved|Out-Null;return}
@@ -832,6 +849,7 @@ try{
     Tap (Relative $history (Packet $history).history[1]);Wait-Until {(Screen-Pixels $paper.x $paper.y) -eq $painted} 'Bubble Redo did not restore exact stroke pixels'
     $checks.Add('history-exact-artwork')
     if($HistoryOnly -or $HistoryLightOnly){Native-HistoryActions $history $paper $before $painted;History-CornerPaint $history;@{checks=@($checks)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'results.json');& (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved|Out-Null;return}
+    }
     $layers=Take 'panel' 'layers' ($width*.38) ($height*.56)
     Wait-Until {$null -ne (View $layers).card} 'Layers did not tear out open'
     $card=Card $layers;$count=@((Model).state.layers).Count

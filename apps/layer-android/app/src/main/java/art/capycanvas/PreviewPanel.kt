@@ -59,8 +59,8 @@ internal class PreviewOps(val type: String, val value: String, val apply: String
                 }
             }
             Row(Modifier.align(Alignment.End).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PanelButton("Cancel", "$name-cancel", null) { send(obj("op" to ops.cancel)) }
-                PanelButton("Apply", "$name-apply", colors.accent) { send(obj("op" to ops.apply)) }
+                PanelButton(host.bootstrap!!.getJSONObject("common").getString("cancel"), "$name-cancel", null) { send(obj("op" to ops.cancel)) }
+                PanelButton(host.bootstrap!!.getJSONObject("common").getString("apply"), "$name-apply", colors.accent) { send(obj("op" to ops.apply)) }
             }
         }
     }

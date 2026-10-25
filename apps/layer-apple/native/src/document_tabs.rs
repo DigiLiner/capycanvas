@@ -27,6 +27,12 @@ impl CapyApple {
         self.dismissed_contacts.clear();
     }
     pub(crate) fn tabs_request(&mut self, value: Value) -> Result<Value, String> {
+        if value["op"] == "session_close" {
+            let previous = self.host.session.state().revision;
+            let change = self.host.session.request_session_close()?;
+            self.host.apply_change(previous, change);
+            return Ok(json!(true));
+        }
         if value["op"] != "open" {
             let request = serde_json::from_value(value).map_err(|e| e.to_string())?;
             return self.window.request(&mut self.host, request);

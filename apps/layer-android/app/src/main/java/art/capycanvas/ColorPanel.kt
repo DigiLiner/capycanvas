@@ -3,6 +3,8 @@ package art.capycanvas
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -468,7 +470,28 @@ private data class ColorFieldRequest(val shape:String,val hue:Float,val pixels:I
     val density=LocalDensity.current.density
     val range=presentation?.array("range")?.let { it.getDouble(0).toFloat()..it.getDouble(1).toFloat() } ?: -2f..6f
     val stops=presentation?.number("stops") ?: view.number("intensity")
-    Canvas(modifier.testTag("color-hdr-intensity").semantics {
+    val adjustable = presentation?.optBoolean("enabled", true) != false
+    Canvas(modifier.onKeyEvent { event ->
+        if (!adjustable || event.type != KeyEventType.KeyDown) false else {
+            val delta = when (event.key) {
+                Key.DirectionLeft, Key.DirectionDown -> -.1f
+                Key.DirectionRight, Key.DirectionUp -> .1f
+                Key.PageDown -> -1f
+                Key.PageUp -> 1f
+                else -> 0f
+            }
+            val next = when (event.key) { Key.MoveHome -> range.start; Key.MoveEnd -> range.endInclusive; else -> stops + delta }
+            if (delta != 0f || event.key in listOf(Key.MoveHome, Key.MoveEnd)) { action(obj("op" to "hdr_intensity", "stops" to next.coerceIn(range))); true } else false
+        }
+    }.focusable(adjustable).pointerInput(adjustable, stops, range) {
+        if (adjustable) awaitPointerEventScope { while (true) {
+            val event = awaitPointerEvent()
+            if (event.type == PointerEventType.Scroll) {
+                val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+                if (delta != 0f) { action(obj("op" to "hdr_intensity", "stops" to (stops - delta * .1f).coerceIn(range))); event.changes.forEach { it.consume() } }
+            }
+        } }
+    }.testTag("color-hdr-intensity").semantics {
         contentDescription=presentation?.getString("label") ?: host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("intensity")
         stateDescription=presentation?.getString("text") ?: "$stops EV"
         progressBarRangeInfo=ProgressBarRangeInfo(stops.coerceIn(range),range)

@@ -87,12 +87,18 @@ struct CanvasPreviewPanel: View {
     let palette: EditorPalette
     @Environment(\.capyCommonCopy) private var common
     @State private var commitNumber: ((Bool) -> Bool)?
+    @State private var responded = false
     private func send(_ op: String, _ fields: [String: Any] = [:]) {
         store.dispatch(["type": operations.type, "action": fields.merging(["op": op]) { $1 }])
     }
     private func respond(_ apply: Bool) {
-        if apply { if commitNumber?(false) != false { send(operations.apply) } }
-        else { _ = commitNumber?(true); send(operations.cancel) }
+        guard !responded else { return }
+        if apply {
+            guard commitNumber?(false) != false else { return }
+            responded = true; send(operations.apply)
+        } else {
+            responded = true; _ = commitNumber?(true); send(operations.cancel)
+        }
     }
     var body: some View {
         let identifier = operations.identifier

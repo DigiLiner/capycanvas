@@ -722,6 +722,8 @@ impl NativeHost {
             NativeCaption { caption: layer_ui::NativeCaption },
             DocumentDeliveryMessage { message: layer_ui::DocumentDeliveryMessage },
             ProfileEntriesCopy { entries: Vec<layer_ui::profile_library::ProfileEntry> },
+            ProfileLibraryMatches { entry: layer_ui::profile_library::ProfileEntry, query: String },
+            WorkspaceNameValidation { name: String },
             ProfileNameCopy { name: Option<String> },
             ExportProfileNameCopy { name: String },
             ColorFeatureErrorCopy { reason: layer_ui::ColorFeatureError, profile: Option<bool>, proof: Option<bool> },
@@ -864,6 +866,8 @@ impl NativeHost {
                 if entries.len() > layer_ui::profile_library::PROFILE_LIBRARY_ENTRIES { return Err(layer_ui::ColorFeatureError::ProfileLibraryLimit.message(self.session.localization())); }
                 json!(entries.into_iter().map(|mut entry| { entry.profile = None; entry.localized_view(self.session.localization()) }).collect::<Vec<_>>())
             },
+            Query::WorkspaceNameValidation { name } => json!(layer_ui::workspace_name_validation(&name, self.session.localization())),
+            Query::ProfileLibraryMatches { entry, query } => json!(entry.matches(&query, self.session.localization())),
             Query::ExportProfileNameCopy { name } => json!(layer_ui::ExportProfileCaption::for_name(name).message(self.session.localization())),
             Query::ProfileNameCopy { name } => json!(layer_ui::profile_library::profile_description_name(name, self.session.localization())),
             Query::ColorFeatureErrorCopy { reason, profile, proof } => json!(if proof == Some(true) { reason.proof_message(self.session.localization()) } else { match profile {
@@ -1276,6 +1280,26 @@ mod tests {
             assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
             assert!(host.session.renderer_mut().0.is_none());
         }
+    }
+
+    #[test]
+    fn live_prompt_and_profile_search_queries_use_the_current_localization() {
+        let mut host = NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let entry = layer_ui::profile_library::ProfileEntry { id: "a".repeat(64), bytes: 2048,
+            name: "Tiếng Việt".into(), channels: Some(layer_core::color::ProfileChannels::Gray), profile: None, issue: None };
+        for language in layer_ui::UiLanguage::ALL {
+            let localization = layer_ui::Localizer::shared(language);
+            host.set_localization(localization.clone());
+            for name in ["", "  ", "bad\nname", "Paint", "  Paint  "] {
+                assert_eq!(host.query(json!({"type":"workspace_name_validation","name":name})).unwrap(),
+                    json!(layer_ui::workspace_name_validation(name, &localization)));
+            }
+            for query in [entry.details(&localization), "Tie\u{302}\u{301}ng Vie\u{323}\u{302}t".into(), "not a profile".into()] {
+                assert_eq!(host.query(json!({"type":"profile_library_matches","entry":entry,"query":query})).unwrap(),
+                    entry.matches(&query, &localization));
+            }
+        }
+        assert!(host.session.renderer_mut().0.is_none());
     }
 
     #[test]

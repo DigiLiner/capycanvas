@@ -243,6 +243,18 @@ Bit Depth…. Image › Blending selects how layers combine.
 Show Before/After, Apply and Cancel for consequential changes. Apply is one undo
 step. Routine edits and settings do not trigger repeated confirmation dialogs.
 
+Document and source color forms automatically prepare the latest comparison
+when a choice changes. Each host keeps one running request and the newest pending
+choice, cancels obsolete work, and accepts a result only for its original drawing
+and current form. A flattened conversion copy opens as a new unsaved drawing
+through normal document admission; its source stays open and unchanged. Cancelling
+preparation opens nothing. Properties → Appearance opens proof setup. Print
+proof keeps its profile, simulation, intent and black-point controls inline.
+
+Saved-profile search uses shared `ProfileEntry::matches` through the native
+`profile_library_matches` query or the equivalent Web binding, so catalog names
+and search normalization follow the active language on every host.
+
 Display handling is automatic where supported, including calibrated profiles and
 monitor moves. Show limitations truthfully. Do not offer a monitor profile as a
 working-space fix or ask users to configure technical display settings on every

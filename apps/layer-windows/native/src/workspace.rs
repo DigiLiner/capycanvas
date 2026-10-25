@@ -39,6 +39,8 @@ fn request(json: &str) -> Result<Value, String> {
             | "canvas_bar_choice_menu"
             | "zoom_menu"
             | "action_tooltip"
+            | "workspace_name_validation"
+            | "profile_library_matches"
             | "stroke_recording",
         ) => Ok(value),
         _ => Err("Unsupported workspace query".into()),
@@ -96,6 +98,31 @@ mod tests {
             assert_eq!(count, 0);
             crate::previews::capy_preview_free(owned);
             result
+        }
+    }
+    #[test]
+    fn prompt_validation_and_profile_search_packets_use_current_shared_policy() {
+        let mut host=NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let before=host.session.engine().document().clone();
+        let entry=layer_ui::profile_library::ProfileEntry {
+            id:"a".repeat(64),bytes:2048,name:String::new(),channels:Some(layer_core::color::ProfileChannels::Gray),profile:None,issue:None,
+        };
+        for language in layer_ui::UiLanguage::ALL {
+            let localization=layer_ui::Localizer::shared(language);
+            host.set_localization(localization.clone());
+            for name in ["", "  ", "bad\nname", "Painting"] {
+                let request=json!({"type":"workspace_name_validation","name":name});
+                let actual=metadata(query(&mut host,&request.to_string()).unwrap());
+                assert!(actual["error"].is_null(),"{actual}");
+                assert_eq!(actual["result"],json!(layer_ui::workspace_name_validation(name,&localization)));
+            }
+            for text in [entry.display_name(&localization),entry.details(&localization),"A".repeat(64),"not a profile".into()] {
+                let request=json!({"type":"profile_library_matches","entry":entry,"query":text});
+                let actual=metadata(query(&mut host,&request.to_string()).unwrap());
+                assert!(actual["error"].is_null(),"{actual}");
+                assert_eq!(actual["result"],json!(entry.matches(&text,&localization)));
+            }
+            assert_authored_eq(host.session.engine().document(),&before);
         }
     }
     #[test]

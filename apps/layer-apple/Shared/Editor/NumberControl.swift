@@ -23,10 +23,11 @@ struct NumberControl: View {
     @State private var numericLabels = JSON()
     @State private var showsEntry = false
     @State private var horizontalDrag: Bool?
-    @State private var dialDrag: Bool?
+    @State private var readoutContact: (y: CGFloat, fill: Double, source: String)?
+    @State private var dialOrigin: Double?
+    @State private var dialContact = false
+    @State private var dialKey = false
     @State private var valueScrub: ValueScrub?
-    @State private var valueDragCancelled = false
-    @FocusState private var scrubFocused: Bool
     @GestureState private var contact = false
     @State private var editing = false
     @State private var inlineMeasure = ""
@@ -132,7 +133,7 @@ struct NumberControl: View {
         .onChange(of: value) { _, next in field.receive(next); format(); registerAdmission?(key, admit) }
         .onChange(of: presentedText) { _, _ in format() }
         .onChange(of: control.stableKey) { _, _ in registerAdmission?(key, admit) }
-        .onChange(of: contact) { _, active in if !active { cancelDrag(); valueDragCancelled = false } }
+        .onChange(of: contact) { _, active in if !active { cancelDrag() } }
         .onChange(of: enabled) { _, active in if !active { cancelDrag() } }
         .onDisappear { registerAdmission?(key, nil); cancelDrag() }
         .onChange(of: editing) { _, focused in
@@ -141,15 +142,47 @@ struct NumberControl: View {
             } else if commit() { showsEntry = false; format() }
         }
     }
-    @ViewBuilder private var valueButton: some View {
-        if compactPanel {
-            valueReadout.focusable().focusEffectDisabled().focused($scrubFocused)
-                .highPriorityGesture(valueDrag)
-                .onKeyPress(.escape) {
-                    guard valueScrub != nil else { return .ignored }
-                    cancelDrag(); return .handled
+    private var valueButton: some View {
+        valueReadout.overlay {
+            ControlInput(identity: control.stableKey + key, contact: readoutInput,
+                wheel: { steps in guard enabled, commit() else { return }; _ = resolve(["type": "step", "steps": steps]) },
+                key: { name, pressed, _ in
+                    if name == "Escape", readoutContact != nil { cancelReadout(); return true }
+                    if ["Enter", "Space"].contains(name) { if !pressed { showsEntry = true }; return true }
+                    return false
+                }).accessibilityHidden(true)
+        }
+    }
+    private func readoutInput(_ event: ControlContact) {
+        switch event.phase {
+        case "down":
+            guard enabled, commit() else { return }
+            readoutContact = (event.surfacePoint.y, formatted["fill"].number, event.source)
+        case "move", "up":
+            guard let start = readoutContact else { return }
+            let pixels = Double(start.y - event.surfacePoint.y)
+            let allowed = compactPanel || start.source != "mouse"
+            if allowed, abs(pixels) >= 6 || valueScrub != nil {
+                if valueScrub == nil {
+                    valueScrub = ValueScrub(start: field.value, fine: event.modifiers.shift)
+                    gestureChange?("down", field.value) { field.error = $0 }
                 }
-        } else { valueReadout }
+                if compactPanel {
+                    guard var current = valueScrub else { return }
+                    if let next = resolve(current.operation(pixels: pixels, fine: event.modifiers.shift), phase: event.phase == "up" ? "up" : "move") { current.value = next }
+                    valueScrub = current
+                } else { _ = resolve(["type": "position", "position": start.fill + pixels / 200], phase: event.phase == "up" ? "up" : "move") }
+            }
+            if event.phase == "up" {
+                if valueScrub == nil && event.inside { showsEntry = true }
+                valueScrub = nil; readoutContact = nil; format()
+            }
+        case "cancel": cancelReadout()
+        default: break
+        }
+    }
+    private func cancelReadout() {
+        readoutContact = nil; settleValueDrag(cancel: true)
     }
     private var valueReadout: some View {
         Button { showsEntry = true } label: {
@@ -216,19 +249,19 @@ struct NumberControl: View {
             context.fill(mark, with: .color(panelColor))
             context.fill(mark, with: .color(ink))
         }.frame(width: diameter, height: diameter).contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).updating($contact) { _, active, _ in active = true }.onChanged { event in
-                guard enabled else { cancelDrag(); return }
-                if dialDrag == nil {
-                    dialDrag = commit()
-                    if dialDrag == true { gestureChange?("down", field.value) { field.error = $0 } }
-                }
-                if dialDrag == true { pointDial(event.location, diameter: diameter, phase: "move") }
-            }.onEnded { event in
-                guard enabled else { cancelDrag(); return }
-                if dialDrag == true { pointDial(event.location, diameter: diameter, phase: "up") }
-                dialDrag = nil
-            })
-            .simultaneousGesture(TapGesture(count: 2).onEnded { resetValue() })
+            .overlay {
+                ControlInput(identity: control.stableKey + key, contact: { event in
+                    if event.phase == "cancel" { cancelDial(); return }
+                    if event.phase == "down" {
+                        guard enabled, commit() else { return }
+                        dialOrigin = field.value; dialContact = true; gestureChange?("down", field.value) { field.error = $0 }
+                    }
+                    guard dialContact else { return }
+                    pointDial(event.point, diameter: diameter, phase: event.phase == "up" ? "up" : "move")
+                    if event.phase == "up" { dialContact = false; dialOrigin = nil }
+                }, wheel: { steps in guard commit() else { return }; _ = resolve(["type": "step", "steps": steps]) },
+                key: dialInput, doublePress: { _, _ in resetValue() }).accessibilityHidden(true)
+            }
             .modifier(NumberControlMeasurement(id: key + ":dial"))
             .accessibilityElement().accessibilityLabel(label)
             .accessibilityValue(formatted["text"].string)
@@ -318,33 +351,37 @@ struct NumberControl: View {
         _ = resolve(["type": "step", "steps": direction])
     }
     private func cancelDrag() {
-        if valueScrub != nil { valueDragCancelled = true; settleValueDrag(cancel: true) }
-        if horizontalDrag == true || dialDrag == true { gestureChange?("cancel", field.value) { field.error = $0 } }
-        horizontalDrag = nil; dialDrag = nil
+        readoutContact = nil; cancelDial()
+        if valueScrub != nil { settleValueDrag(cancel: true) }
+        if horizontalDrag == true { gestureChange?("cancel", field.value) { field.error = $0 } }
+        horizontalDrag = nil
     }
-    private var valueDrag: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .global)
-            .updating($contact) { _, active, _ in active = true }
-            .onChanged { event in
-                guard enabled, !valueDragCancelled else { return }
-                if valueScrub == nil {
-                    guard commit() else { valueDragCancelled = true; return }
-                    valueScrub = ValueScrub(start: field.value, fine: ThumbnailSelectionLoad.modifiers().shift); scrubFocused = true
-                    gestureChange?("down", field.value) { field.error = $0 }
-                }
-                scrub(-Double(event.translation.height), phase: "move")
-            }.onEnded { event in
-                if valueScrub != nil, !valueDragCancelled {
-                    scrub(-Double(event.translation.height), phase: "up")
-                    valueScrub = nil; format()
-                }
-                valueDragCancelled = false
-            }
+    private func cancelDial() {
+        if dialContact || dialKey {
+            if let gestureChange { gestureChange("cancel", field.value) { field.error = $0 } }
+            else if let dialOrigin { _ = resolve(["type": "value", "value": dialOrigin]) }
+        }
+        dialContact = false; dialKey = false; dialOrigin = nil
     }
-    private func scrub(_ pixels: Double, phase: String) {
-        guard var current = valueScrub else { return }
-        if let next = resolve(current.operation(pixels: pixels, fine: ThumbnailSelectionLoad.modifiers().shift), phase: phase) { current.value = next }
-        valueScrub = current
+    private func dialInput(_ name: String, _ pressed: Bool, _ modifiers: ControlModifiers) -> Bool {
+        if name == "Escape" { guard dialContact || dialKey else { return false }; cancelDial(); return true }
+        if name == "Home" { if pressed { resetValue() }; return true }
+        let amount: Double
+        switch name {
+        case "ArrowRight", "ArrowUp": amount = modifiers.shift ? 15 : 1
+        case "ArrowLeft", "ArrowDown": amount = modifiers.shift ? -15 : -1
+        case "PageUp": amount = 45
+        case "PageDown": amount = -45
+        default: return false
+        }
+        if pressed {
+            guard enabled, commit() else { return true }
+            if !dialKey { dialOrigin = field.value; dialKey = true; gestureChange?("down", field.value) { field.error = $0 } }
+            _ = resolve(["type": "step", "steps": amount], phase: "move")
+        } else if dialKey {
+            dialKey = false; dialOrigin = nil; gestureChange?("up", field.value) { field.error = $0 }
+        }
+        return true
     }
     private func settleValueDrag(cancel: Bool) {
         guard let start = valueScrub?.start else { return }

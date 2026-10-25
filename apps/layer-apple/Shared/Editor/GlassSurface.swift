@@ -64,14 +64,15 @@ struct GlassRegistration: ViewModifier {
     var rounded = false
     var strength: Double = 1
     @Environment(\.glassRegistry) private var registry
+    @Environment(\.workspaceChromeOpacity) private var opacity
     @State private var id = UUID()
     @State private var geometry = GlassGeometry()
     private var region: [CGFloat] {
         let bounds = geometry.bounds
-        guard active && !bounds.isEmpty else { return [] }
+        guard active && opacity > 0 && strength > 0 && !bounds.isEmpty else { return [] }
         let radii = circular ? Array(repeating: min(bounds.width, bounds.height) / 2, count: 4)
             : shape.radii(in: CGRect(origin: .zero, size: geometry.size)).map { $0 * geometry.scale }
-        return [bounds.minX, bounds.minY, bounds.width, bounds.height] + radii + [circular || rounded ? 0 : 1, strength]
+        return [bounds.minX, bounds.minY, bounds.width, bounds.height] + radii + [circular || rounded ? 0 : 1, strength * opacity]
     }
     func body(content: Content) -> some View {
         content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
@@ -84,15 +85,16 @@ struct GlassArcRegistration: ViewModifier {
     let arc: JSON
     let strength: Double
     @Environment(\.glassRegistry) private var registry
+    @Environment(\.workspaceChromeOpacity) private var opacity
     @State private var id = UUID()
     @State private var geometry = GlassGeometry()
     private var region: [CGFloat] {
         let bounds = geometry.bounds
-        guard !bounds.isEmpty, arc["radius"].number > 0 else { return [] }
+        guard opacity > 0, strength > 0, !bounds.isEmpty, arc["radius"].number > 0 else { return [] }
         let radius = arc["radius"].number, scale = geometry.scale
         let extra = 21 / radius * 180 / .pi, direction = arc["sweep"].number < 0 ? -1.0 : 1.0
         return [bounds.midX, bounds.midY, radius * scale, arc["band"].number * scale,
-            arc["start"].number - direction * extra, arc["sweep"].number + direction * extra, strength]
+            arc["start"].number - direction * extra, arc["sweep"].number + direction * extra, strength * opacity]
     }
     func body(content: Content) -> some View {
         content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
@@ -105,13 +107,14 @@ struct GlassColorBubbleRegistration: ViewModifier {
     let color: JSON
     let strength: Double
     @Environment(\.glassRegistry) private var registry
+    @Environment(\.workspaceChromeOpacity) private var opacity
     @State private var id = UUID()
     @State private var geometry = GlassGeometry()
     private var region: [CGFloat] {
         let bounds = geometry.bounds, source = color["bounds"], shape = color["glass"], scale = geometry.scale
-        guard !bounds.isEmpty, !shape.isNull else { return [] }
+        guard opacity > 0, strength > 0, !bounds.isEmpty, !shape.isNull else { return [] }
         return [bounds.minX - source["x"].number * scale, bounds.minY - source["y"].number * scale,
-            shape[0].number * scale, shape[1].number * scale, shape[2].number * scale, shape[3].number, strength]
+            shape[0].number * scale, shape[1].number * scale, shape[2].number * scale, shape[3].number, strength * opacity]
     }
     func body(content: Content) -> some View {
         content.onGeometryChange(for: GlassGeometry.self) { GlassGeometry($0) } action: { geometry = $0 }
@@ -124,8 +127,10 @@ struct GlassConnection: ViewModifier {
     let key: String
     let connection: JSON
     @Environment(\.glassRegistry) private var registry
+    @Environment(\.workspaceChromeOpacity) private var opacity
+    private var projected: JSON { connection.replacing("strength", with: JSON(opacity)) }
     func body(content: Content) -> some View {
-        content.onChange(of: connection.stableKey, initial: true) { _, _ in registry?.connection(key, connection.isNull ? nil : connection) }
+        content.onChange(of: projected.stableKey, initial: true) { _, _ in registry?.connection(key, connection.isNull || opacity <= 0 ? nil : projected) }
             .onDisappear { registry?.connection(key, nil) }
     }
 }

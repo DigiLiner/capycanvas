@@ -7,6 +7,7 @@ fn sdr_ready(w: &Rc<Workspace>) {
         pump(20);
         if w.gpu.borrow().as_ref().is_some_and(|g| {
             g.session.engine().backend().startup.complete
+                && g.session.state().workspace_ready
                 && !g.session.state().filter_load.pending
                 && !g.session.engine().has_pending_document_edits()
         }) {
@@ -53,6 +54,16 @@ fn native_numeric_colors_and_saved_palettes() {
         .document()
         .revision;
     let click_named = |w: &Rc<Workspace>, name: &str| {
+        if name == "color-edit-menu" {
+            let swatch = find_named(w.window.upcast_ref(), "color-Foreground").unwrap();
+            w.show_context(&swatch, layer_ui::ContextTarget::ColorSlot { slot: layer_ui::ColorSlot::Foreground }, 0., swatch.height() as f64);
+            let menu = super::color_panel::slot_context(w);
+            let label = w.localization().text(layer_ui::MessageId::NATIVE_COLOR_EDIT_MENU);
+            let action = menu_action(&menu.menu_model().unwrap(), &label).unwrap();
+            menu.activate_action(&action, None).unwrap();
+            pump(100);
+            return;
+        }
         let button = find_named(w.window.upcast_ref(), name)
             .unwrap_or_else(|| panic!("{name}"))
             .downcast::<gtk::Button>()
@@ -132,6 +143,8 @@ fn native_numeric_colors_and_saved_palettes() {
             color: RgbColor::WHITE,
         },
     });
+    crate::color_library::show(&w, ColorSlot::Foreground);
+    pump(100);
     click_named(&w, &format!("palette-swatch-{}", palette.swatches[0].id));
     assert_eq!(state(&w).colors.definition(), original);
     // Restore in another document, select the other paint slot, and retain the
@@ -140,6 +153,7 @@ fn native_numeric_colors_and_saved_palettes() {
         .capture_workspace()
         .unwrap();
     let bytes = serde_json::to_vec(&capture).unwrap();
+    let editing = serde_json::to_vec(&ui_session(&w).editing_state()).unwrap();
     let next = Workspace::with_project(&app, Some((new_drawing(128, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));
     next.window.present();
     sdr_ready(&next);
@@ -147,6 +161,8 @@ fn native_numeric_colors_and_saved_palettes() {
         layer_ui::PreparedWorkspace::new(serde_json::from_slice(&bytes).unwrap()).unwrap();
     let change = ui_session_mut(&next)
         .adopt_workspace(prepared);
+    next.changed(change);
+    let change = ui_session_mut(&next).restore_editing(serde_json::from_slice(&editing).unwrap());
     next.changed(change);
     crate::color_library::show(&next, ColorSlot::Background);
     pump(100);

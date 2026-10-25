@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "WorkspaceView.h"
+#include "ChromeVisibility.h"
 #include "StrokeRecording.h"
 #include "CommandSearch.h"
 #include "CanvasActionBar.h"
@@ -79,6 +80,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     hstring lastOverviews;
     struct Group {
         Border frame,border,configurationFrame;
+        std::shared_ptr<ChromeVisibility> fade=std::make_shared<ChromeVisibility>();
         WorkspaceShadow shadow;
         hstring shadowKey;
         Canvas content;
@@ -148,13 +150,17 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         for(auto [panel,kind]:{std::pair{previewPanels[0],PreviewPanel::SelectionRefine},std::pair{previewPanels[1],PreviewPanel::FrequencySeparation}}){
             panel->data=data;panel->kind=kind;panel->moved=[weak=weak_from_this()]{if(auto self=weak.lock())self->placeNotice();};panel->init(root);
         }
-        collapsed=std::make_unique<CollapsedColumns>(data,root,gestures);
+        collapsed=std::make_unique<CollapsedColumns>(data,root,gestures,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();});
         commandSearch->data=data;commandSearch->changed=[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();};commandSearch->init(root);
         drawers=std::make_unique<WorkspaceDrawers>(data,root,gestures,[weak=weak_from_this()]{if(auto self=weak.lock())self->publishOverviews();});
         expansion=std::make_unique<WorkspaceExpansion>(data,root,gestures,[weak=weak_from_this()]{if(auto self=weak.lock())self->present();});
         bubbles=std::make_unique<WorkspaceBubbles>(data,root,[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->glassChanged)self->glassChanged();});
         measureHost.IsHitTestVisible(false);measureHost.Opacity(0);Canvas::SetLeft(measureHost,-100000);root.Children().Append(measureHost);
         root.LayoutUpdated([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
+    }
+    void removeGroup(Group const& group){
+        uint32_t index;if(root.Children().IndexOf(group.frame,index))root.Children().RemoveAt(index);
+        if(root.Children().IndexOf(group.shadow.Root(),index))root.Children().RemoveAt(index);
     }
     void build(Group& group,J const& geometry,J const& panel){
         group.body.reset();group.footer=nullptr;group.backgroundKey=L"";
@@ -399,7 +405,10 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 headers.Append(O({{L"id",S(str(model,L"id"))},{L"icon",S(str(model,L"icon"))},{L"tab",object(model,L"tab")}}));
             }signature.Insert(L"headers",headers);signature.Insert(L"tab_style",S(str(object(snapshot,L"windows_tab_styles"),to_hstring(id).c_str())));
             std::wstring key=signature.Stringify().c_str();
-            if(group.key!=key){group.key=std::move(key);build(group,geometry,panel);}
+            if(group.key!=key||!group.body){
+                try{build(group,geometry,panel);group.key=std::move(key);}
+                catch(...){removeGroup(group);groups.erase(it);throw;}
+            }
             for(auto const& [panelId,shell]:group.tabs){
                 auto tab=shell.Children().GetAt(1).as<Button>();
                 auto model=find(array(snapshot,L"panels"),L"id",hstring(panelId));auto title=str(model,L"title");
@@ -417,12 +426,11 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 resizeHandle(handleKey,object(handle,L"bounds"),O({{L"type",S(L"resize_floating")},
                     {L"group",N(id)},{L"edge",S(str(handle,L"edge"))}}),z+1);handleIds.push_back(handleKey);
             }
-            group.body->Apply(!hidden);
+            group.body->Apply(!hidden||(group.frame.Visibility()==Visibility::Visible&&group.frame.Opacity()>0));
         }
         for(auto it=groups.begin();it!=groups.end();){
             if(std::find(visible.begin(),visible.end(),it->first)==visible.end()){
-                uint32_t index;if(root.Children().IndexOf(it->second.frame,index))root.Children().RemoveAt(index);
-                if(root.Children().IndexOf(it->second.shadow.Root(),index))root.Children().RemoveAt(index);
+                removeGroup(it->second);
                 it=groups.erase(it);
             }else ++it;
         }
@@ -616,14 +624,15 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 auto panel=find(array(data->model,L"panels"),L"id",panelId);if(!panel.Size()||array(panel,L"tiles").Size())continue;
                 std::wstring name(panelId);keep.insert(name);auto& copy=offscreen[name];
                 auto key=std::wstring(panelStructure(panel).Stringify());
-                if(copy.key!=key){
-                    if(copy.body){uint32_t at=0;if(measureHost.Children().IndexOf(copy.body->Root(),at))measureHost.Children().RemoveAt(at);}
+                if(copy.key!=key||!copy.body){
                     auto inert=std::make_shared<WorkspaceData>(*data);
                     inert->send=[](std::string){};inert->document=[](std::string){};inert->input=[](std::string){};
                     inert->query=nullptr;inert->previews.reset();inert->thumbnails.reset();inert->scopes.reset();
                     inert->popupChanged=nullptr;inert->takeBubble=nullptr;inert->bubbleContact=nullptr;inert->pointerCancels.Clear();inert->transients.clear();inert->colorViews.clear();inert->copyViews.clear();
-                    copy.key=key;copy.data=inert;copy.body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
-                    copy.body->Root().Width(width);measureHost.Children().Append(copy.body->Root());copy.body->Apply(true);
+                    auto body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
+                    body->Root().Width(width);body->Apply(true);measureHost.Children().Append(body->Root());
+                    if(copy.body){uint32_t at=0;if(measureHost.Children().IndexOf(copy.body->Root(),at))measureHost.Children().RemoveAt(at);}
+                    copy.data=inert;copy.body=std::move(body);copy.key=key;
                 }else{copy.data->state=data->state;copy.data->model=data->model;copy.body->Apply(true);}
                 if(copy.body->Root().Width()!=width)copy.body->Root().Width(width);
                 double height=copy.body->ContentHeight();
@@ -681,9 +690,10 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             place(group.frame,bounds);placeMotion(id,group);place(group.border,preview);
             group.content.Width(box.Width);group.content.Height(box.Height);
             RectangleGeometry clip;clip.Rect({0,0,box.Width,box.Height});group.content.Clip(clip);
-            group.frame.Visibility(group.hidden?Visibility::Collapsed:Visibility::Visible);
+            group.fade->apply(group.frame,!group.hidden,[weak=weak_from_this(),id,frame=make_weak(group.frame),shadow=make_weak(group.shadow.Root())]{auto self=weak.lock();auto view=frame.get();if(!self||!view)return;if(auto surface=shadow.get())surface.Opacity(view.Opacity());if(view.Opacity()==0)if(auto group=self->groups.find(id);group!=self->groups.end()&&group->second.frame==view&&group->second.body)group->second.body->Apply(false);self->publishOverviews();if(self->glassChanged)self->glassChanged();});
+            if(group.hidden&&group.frame.Opacity()==0&&group.body)group.body->Apply(false);
             Canvas::SetZIndex(group.frame,active?1000:group.order);
-            group.shadow.Layout(box,active?1000:group.order,!group.hidden);
+            group.shadow.Layout(box,active?1000:group.order,group.frame.Visibility()==Visibility::Visible);group.shadow.Root().Opacity(group.frame.Opacity());
             auto geometry=J::Parse(group.geometry.Stringify());geometry.Insert(L"bounds",preview);
             if(active&&expanded.HasKey(L"tiles"))geometry.Insert(L"tiles",object(expanded,L"tiles"));
             double bodyHeight=std::max(0.,double(previewBox.Height)-(flag(geometry,L"tabs_visible")?36.:0.)
@@ -723,14 +733,15 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         backgrounds();publishOverviews();
     }
     void appendGroupOverviews(A& slots,Group const& group){
-        if(group.hidden||!group.frame.IsLoaded())return;
-        auto clip=visibleBounds(group.frame,root);int order=visualOrder(root,group.frame);
+        if(!group.frame.IsLoaded()||group.frame.Visibility()!=Visibility::Visible||group.frame.Opacity()<=0)return;
+        auto start=slots.Size();auto clip=visibleBounds(group.frame,root);int order=visualOrder(root,group.frame);
         if(group.body&&group.body->navigator){
             auto visible=intersect(clip,visibleBounds(group.body->navigator->Root(),root));
             auto slot=group.body->navigator->Placement(root,visible,order);
             if(slot.Size())slots.Append(slot);
         }
         if(group.presented.Size()&&group.configuration)group.configuration->AppendOverviews(slots,root,clip,order);
+        for(uint32_t i=start;i<slots.Size();++i)slots.GetObjectAt(i).Insert(L"opacity",N(group.frame.Opacity()));
     }
     static float groupRadius(J const& geometry){
         auto tiles=object(geometry,L"tiles");
@@ -839,7 +850,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     }
     A glass(UIElement const& reference,A& connections,A& arcs,A& colors)const{
         A regions;
-        for(auto const& [id,group]:groups)if(!group.hidden&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
+        for(auto const& [id,group]:groups)if(group.frame.Visibility()==Visibility::Visible&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
         collapsed->AppendGlass(regions,connections,reference);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
         canvasBar->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);

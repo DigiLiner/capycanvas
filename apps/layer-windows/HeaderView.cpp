@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "HeaderView.h"
+#include "ChromeVisibility.h"
 #include "HeaderInput.h"
 #include "HeaderStatus.h"
 #include "DrawingTabs.h"
@@ -47,10 +48,14 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     std::unique_ptr<HeaderInput> input;
     std::unique_ptr<HeaderStatus> systemStatus;
     struct Item{
+        std::shared_ptr<ChromeVisibility> fade=std::make_shared<ChromeVisibility>();
         Border frame,outline;Grid content;Button editor{nullptr};Image variants{nullptr};FrameworkElement view{nullptr};
         Image grip{nullptr};J entry;hstring key,iconKey;std::shared_ptr<CapyUi::ColorPair> colors;
     };
     std::map<uint32_t,Item> items;std::vector<Border> bars;
+    std::vector<std::shared_ptr<ChromeVisibility>> barFades;
+    std::array<std::shared_ptr<ChromeVisibility>,3> overflowFades{std::make_shared<ChromeVisibility>(),std::make_shared<ChromeVisibility>(),std::make_shared<ChromeVisibility>()};
+    std::shared_ptr<ChromeVisibility> backgroundFade=std::make_shared<ChromeVisibility>(),recoveryFade=std::make_shared<ChromeVisibility>();
     std::vector<FrameworkElement> bankParts;
     StackPanel editorControls,sizeChoices,menuLabels,switches;
     std::vector<Button> menus;
@@ -574,7 +579,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         applying=true;struct Reset{bool& value;~Reset(){value=false;}}reset{applying};
         double width=root.ActualWidth();layoutBank(width);root.Height(totalHeight);
         place(background,O({{L"x",N(0)},{L"y",N(0)},{L"width",N(width)},{L"height",N(height)}}));
-        background.Visibility(hidden?Visibility::Collapsed:Visibility::Visible);
+        backgroundFade->apply(background,!hidden,changed);
         A metrics;auto model=object(view,L"model");
         auto requestedSize=find(array(view,L"sizes"),L"id",str(model,L"size"));double requestedTile=num(requestedSize,L"tile");
         for(auto const& [id,native]:items){
@@ -653,12 +658,13 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         }
         while(bars.size()<barList.Size()){Border bar;bar.IsHitTestVisible(false);bar.Background(headerSurface(data));canvas.Children().Append(bar);Canvas::SetZIndex(bar,4);bars.push_back(bar);}
         for(size_t i=0;i<bars.size();++i){
-            bool shown=i<barList.Size()&&!hidden;bars[i].Visibility(shown?Visibility::Visible:Visibility::Collapsed);
+            if(barFades.size()<=i)barFades.push_back(std::make_shared<ChromeVisibility>());
+            bool shown=i<barList.Size()&&!hidden;barFades[i]->apply(bars[i],shown,changed);
             if(shown){place(bars[i],object(barList.GetObjectAt(uint32_t(i)),L"bounds"));bars[i].CornerRadius({corner(),corner(),corner(),corner()});}
         }
         for(auto& [id,native]:items){
             auto bounds=id==dragged?object(preview,L"held"):object(findId(placed,id),L"bounds");
-            bool visible=bounds.Size()&&!hidden&&(editing||str(object(native.entry,L"item"),L"kind")!=L"capy");native.frame.Visibility(visible?Visibility::Visible:Visibility::Collapsed);
+            bool visible=bounds.Size()&&!hidden&&(editing||str(object(native.entry,L"item"),L"kind")!=L"capy");native.fade->apply(native.frame,visible,changed);
             if(!visible)continue;
             // Only drag neighbors animate. Normal controls and native caption
             // hit regions must adopt a completed layout together.
@@ -693,7 +699,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             zones[i].Visibility(editing&&!hidden&&i<zoneBounds.Size()?Visibility::Visible:Visibility::Collapsed);
             if(i<zoneBounds.Size())place(zones[i],zoneBounds.GetObjectAt(i));zones[i].BorderBrush(data->brush(L"tabbar"));
             bool show=!hidden&&i<more.Size()&&more.GetAt(i).ValueType()==JsonValueType::Object;
-            overflow[i].Visibility(show?Visibility::Visible:Visibility::Collapsed);if(show)place(overflow[i],more.GetObjectAt(i));
+            overflowFades[i]->apply(overflow[i],show,changed);if(show)place(overflow[i],more.GetObjectAt(i));
             overflow[i].Background(overflowJoined[i]?clear():headerSurface(data));overflow[i].CornerRadius({corner(),corner(),corner(),corner()});
         }
         ghost.Visibility(preview.Size()&&!dragged?Visibility::Visible:Visibility::Collapsed);
@@ -704,7 +710,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             ghost.Child(label(data,text));ghost.Padding({6,6,6,6});
         }
         bool navigation=false;for(auto const& [id,native]:items){auto k=str(object(native.entry,L"item"),L"kind");navigation|=k==L"capy"||k==L"menu"||k==L"menu_labels";}
-        recovery.Visibility(!hidden&&!navigation&&!editing?Visibility::Visible:Visibility::Collapsed);
+        recoveryFade->apply(recovery,!hidden&&!navigation&&!editing,changed);
         place(recovery,O({{L"x",N(leftInset+itemGap)},{L"y",N(itemGap)},{L"width",N(tile)},{L"height",N(tile)}}));
         bank.Visibility(editing&&!hidden?Visibility::Visible:Visibility::Collapsed);
         if(editing&&input->Selected()!=focusedItem){
@@ -809,7 +815,7 @@ void HeaderView::SetDrawerSources(A const& sources){
     if(sources.Stringify()==impl->data->drawerSources.Stringify())return;
     impl->data->drawerSources=A::Parse(sources.Stringify());if(impl->built)impl->applyItems();
 }
-void HeaderView::AppendGlass(A& regions,UIElement const& reference)const{if(impl->built)impl->glass(regions,impl->hidden||impl->editing?impl->capySurface.as<DependencyObject>():impl->root.as<DependencyObject>(),reference);}
+void HeaderView::AppendGlass(A& regions,UIElement const& reference)const{if(impl->built)impl->glass(regions,impl->editing?impl->capySurface.as<DependencyObject>():impl->root.as<DependencyObject>(),reference);}
 std::vector<winrt::Windows::Graphics::RectInt32> HeaderView::DragRegions(float scale,uint32_t width)const{return impl->built?impl->drag(scale,width):std::vector<winrt::Windows::Graphics::RectInt32>{};}
 
 std::vector<winrt::Windows::Graphics::RectInt32> HeaderView::InputRegions(float scale,uint32_t width)const{

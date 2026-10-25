@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "LayersView.h"
+#include <chrono>
+#include <winrt/Windows.UI.ViewManagement.h>
 #include "ColorEditor.h"
 #include "ExternalImages.h"
 #include "WorkspaceQuery.h"
@@ -87,7 +89,7 @@ void LayerRow::init(){
     swipeActions.HorizontalAlignment(HorizontalAlignment::Right);swipeActions.VerticalAlignment(VerticalAlignment::Stretch);
     swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);
     swipeFrame.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->swipeFrame.Clip(clip);}});
-    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();self->textureEdge.stop();}});root.MinHeight(LayerRowHeight);root.BorderThickness({0});
+    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0,false);self->contentEdge.stop();self->maskEdge.stop();self->textureEdge.stop();}});root.MinHeight(LayerRowHeight);root.BorderThickness({0});
     root.BorderBrush(accent(data));body.ColumnSpacing(0);body.Padding(LayerRowPadding);
     AutomationProperties::SetAutomationId(root,L"layer-row-"+to_hstring(uint64_t(id)));
     auto rowCaption=[weak]{
@@ -230,7 +232,18 @@ void LayerRow::init(){
 }
 double LayerRow::revealWidth()const{return std::min(std::max(1.,root.ActualWidth()),array(model(),L"swipe_actions").Size()*72.);}
 bool LayerRow::canSwipe()const{for(auto value:array(model(),L"swipe_actions"))if(flag(value.GetObject(),L"enabled"))return true;return false;}
-void LayerRow::swipe(double offset){
+void LayerRow::swipe(double offset,bool animate){
+    swipeFrames.revoke();
+    auto target=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,revealWidth());
+    if(!animate||!root.IsLoaded()||!Windows::UI::ViewManagement::UISettings().AnimationsEnabled()||target==swipeOffset){positionSwipe(target);return;}
+    auto from=swipeOffset;auto start=std::chrono::steady_clock::now();
+    swipeFrames=CompositionTarget::Rendering(auto_revoke,[weak=weak_from_this(),from,target,start](auto&&,auto&&){if(auto self=weak.lock()){
+        auto t=std::clamp(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()/150.,0.,1.);
+        self->positionSwipe(from+(target-from)*(1-std::pow(1-t,3)));
+        if(t>=1)self->swipeFrames.revoke();
+    }});
+}
+void LayerRow::positionSwipe(double offset){
     swipeOffset=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,revealWidth());swipeTransform.X(-swipeOffset);
     auto width=revealWidth();swipeActions.Width(width);
     grip.Opacity(.6*(1-std::clamp(std::abs(swipeOffset)/(swipeOffset>0?std::max(1.,width):72.),0.,1.)));
@@ -262,7 +275,7 @@ void LayerRow::refresh(){
     for(uint32_t i=0;i<actions.Size();++i){
         auto model=actions.GetObjectAt(i);auto key=std::wstring(str(model,L"id"));
         auto& pick=swipeButtons.try_emplace(key,nullptr).first->second;
-        if(!pick){auto weak=weak_from_this();pick=button(data,L"",[weak,key]{if(auto self=weak.lock())for(auto value:array(self->model(),L"swipe_actions")){
+        if(!pick){auto weak=weak_from_this();pick=button(data,L"",[weak,key]{if(auto self=weak.lock();self&&self->clickAllowed())for(auto value:array(self->model(),L"swipe_actions")){
             auto model=value.GetObject();if(str(model,L"id")==key&&flag(model,L"enabled")){self->swipe(0);self->action(object(model,L"action"));break;}
         }});pick.MinWidth(0);pick.Padding({4,0,4,0});pick.CornerRadius({0});pick.VerticalAlignment(VerticalAlignment::Stretch);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
             TextBlock caption;caption.MaxLines(1);caption.TextTrimming(TextTrimming::CharacterEllipsis);caption.TextAlignment(TextAlignment::Center);pick.Content(caption);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
@@ -275,7 +288,7 @@ void LayerRow::refresh(){
         Grid::SetColumn(pick,i);swipeActions.Children().Append(pick);
     }
     }
-    if((swipeOffset>0&&!canSwipe())||(swipeOffset<0&&!object(layer,L"right_swipe").Size())||renaming)swipe(0);else swipe(swipeOffset);
+    if((swipeOffset>0&&!canSwipe())||(swipeOffset<0&&!object(layer,L"right_swipe").Size())||renaming)swipe(0);else positionSwipe(swipeOffset);
     title.Text(str(layer,L"label"));AutomationProperties::SetName(name,str(layer,L"label"));
     auto nextTitle=str(layer,L"label");if(nextTitle!=captionTitle){captionTitle=nextTitle;AutomationProperties::SetName(root,data->caption(O({{L"type",S(L"layer_row")},{L"title",S(nextTitle)}})));}
     auto shown=flag(layer,L"visible")&&!flag(layer,L"visibility_blocked")?L"eye":L"eye-hidden";

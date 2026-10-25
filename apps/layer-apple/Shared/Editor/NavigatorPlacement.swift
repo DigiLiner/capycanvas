@@ -7,9 +7,10 @@ struct NavigatorPlacement: Equatable {
     let clip: CGRect
     let image: CGRect
     let order: Int
+    var opacity: Double = 1
     var json: [String: Any] {
         func rect(_ r: CGRect) -> [CGFloat] { [r.minX, r.minY, r.width, r.height] }
-        return ["bounds": rect(bounds), "clip": rect(clip), "order": order]
+        return ["bounds": rect(bounds), "clip": rect(clip), "order": order, "opacity": opacity]
     }
 }
 struct NavigatorPlacements: PreferenceKey {

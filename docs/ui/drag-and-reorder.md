@@ -133,6 +133,8 @@ it is released on the canvas past the 80-pixel line it takes a bubble too.
   with swipe distance, reaching zero opacity at full reveal and returning to full
   opacity at rest. Keep the handle in the layout and animate opacity with the row's
   existing swipe transform, using native animation or compositor transitions.
+  Release and close settle over 150 ms; disabled animations go directly to the
+  target without leaving a displaced input surface.
   Web matches its opacity and transform transitions; Compose reads the animated
   shift in `graphicsLayer`; SwiftUI uses the offset's animation transaction.
   GTK and WinUI update native opacity beside their existing swipe transform.

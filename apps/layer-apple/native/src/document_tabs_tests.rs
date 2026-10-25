@@ -184,3 +184,16 @@ fn apple_tabs_preserve_history_pixels_and_disk_parking() {
         assert_eq!(unsafe { &*app.0 }.host.session.engine().document().working, second.working);
     }
 }
+
+#[test]
+fn apple_session_close_keeps_unsaved_drawings_without_document_prompts() {
+    for platform in [0, 1] {
+        let app = App::new(platform);
+        app.invoke("add_layer");
+        let before = tabs(&app);
+        assert_eq!(app.request(2, json!({"type":"document_tabs","op":"session_close"})).unwrap(), json!(true));
+        assert!(app.state()["document_file"]["close_ready"].as_bool().unwrap());
+        assert!(app.state()["requests"].as_array().unwrap().iter().all(|r| r["kind"]["request"]["type"] != "confirm_close"));
+        assert_eq!(tabs(&app)["tabs"], before["tabs"]);
+    }
+}

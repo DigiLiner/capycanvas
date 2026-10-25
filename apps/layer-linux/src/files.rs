@@ -177,6 +177,11 @@ impl Workspace {
                                     glib::idle_add_local_once(glib::clone!(#[weak] w, move || w.documents.adjacent(&w, forward)));
                                     Ok(())
                                 }
+                                HostRequestKind::ColorSlot { slot, library } => {
+                                    if library { crate::color_library::show(&w, slot); }
+                                    else { crate::color_editor::show(&w, slot); }
+                                    Ok(())
+                                }
                                 HostRequestKind::Drawings => { w.documents.show_selector(&w); Ok(()) }
                                 HostRequestKind::SdrRendition => crate::hdr::open(&w),
                                 HostRequestKind::SoftProofSetup => proof::run(&w),

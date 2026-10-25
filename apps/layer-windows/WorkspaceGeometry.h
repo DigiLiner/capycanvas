@@ -51,11 +51,12 @@ inline J panelStructure(J const& panel){
 }
 inline bool appendGlass(A& regions,FrameworkElement const& element,UIElement const& reference,std::array<double,4> radii,bool squircle=false){
     if(!element||!element.IsLoaded()||element.ActualWidth()<=0||element.ActualHeight()<=0)return false;
+    double opacity=1.;
     for(auto node=element.as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node))
-        if(auto item=node.try_as<UIElement>();item&&(item.Visibility()!=Visibility::Visible||item.Opacity()<=0))return false;
+        if(auto item=node.try_as<UIElement>()){if(item.Visibility()!=Visibility::Visible||item.Opacity()<=0)return false;opacity*=item.Opacity();}
     auto box=element.TransformToVisual(reference).TransformBounds({0,0,float(element.ActualWidth()),float(element.ActualHeight())});
     A region;for(double v:{double(box.X),double(box.Y),double(box.Width),double(box.Height),radii[0],radii[1],radii[2],radii[3],squircle?1.:0.})region.Append(N(v));
-    regions.Append(region);return true;
+    region.Append(N(opacity));regions.Append(region);return true;
 }
 inline std::array<double,4> cornerRadii(CornerRadius const& r){return {r.TopLeft,r.TopRight,r.BottomRight,r.BottomLeft};}
 inline void appendConnection(A& connections,J const& connection,UIElement const& workspace,UIElement const& reference){

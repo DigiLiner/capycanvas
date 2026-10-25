@@ -30,7 +30,6 @@ extension XCTestCase {
             #endif
         }
         command("Change Bit Depth…"); choose("document-color-depth", "32-bit float HDR")
-        workspaceActivate(app.buttons["document-color-preview"])
         let apply = app.buttons["document-color-apply"]
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: apply); waitForExpectations(timeout: 60)
         workspaceActivate(apply); XCTAssertTrue(apply.waitForNonExistence(timeout: 60))

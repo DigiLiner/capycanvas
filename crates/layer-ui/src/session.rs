@@ -719,9 +719,24 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.refresh_feedback_config();
         self.changed(regions::SETTINGS, false)
     }
+    fn color_slot_menu(&self, slot: ColorSlot) -> Result<ContextMenu, String> {
+        if !matches!(slot, ColorSlot::Foreground | ColorSlot::Background) {
+            return Err(self.localization().text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET).to_string());
+        }
+        let copy = crate::native_copy::ColorCopy::new(self.localization());
+        let mut swap = ContextMenuItem::command(copy.swap.to_string(), UiAction::Color { action: ColorAction::Swap });
+        swap.icon = Some("color-swap".into());
+        Ok(ContextMenu { title: copy.controls.to_string(), sections: vec![vec![
+            ContextMenuItem::command(copy.edit_menu.to_string(), UiAction::ColorSlotMenu { slot, library: false }),
+            ContextMenuItem::command(copy.palettes.to_string(), UiAction::ColorSlotMenu { slot, library: true }),
+            swap,
+        ]] })
+    }
+
     pub fn context_menu(&self, target: ContextTarget) -> Result<ContextMenu, String> {
         let mut menu = match target {
             ContextTarget::ToolVariants { anchor } => self.tool_variants_menu(anchor),
+            ContextTarget::ColorSlot { slot } => self.color_slot_menu(slot),
             ContextTarget::Bubble { id } => self.bubble_menu(id),
             ContextTarget::BubblePalettes { id } => self.bubble_palette_menu(id),
             ContextTarget::ZenMode => self.state.workspace.layout.header.capy_context_menu(self.state.workspace.zen_mode, self.localization()),
@@ -781,14 +796,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                     .map(|p| p[0]),
                 _ => None,
             };
-            // Web and Android retain their existing simple toolbar manager;
-            // they do not expose a separate saved-toolbar library yet.
-            if let Some(panel) = panel.filter(|p| {
-                p.kind() == PanelKind::Tiles
-                    && !matches!(self.state.platform, Platform::Web | Platform::Android)
-            }) {
+            if let Some(panel) = panel.filter(|p| p.kind() == PanelKind::Tiles) {
                 menu.sections.push(vec![ContextMenuItem::command(
-                    "Save to Toolbar Library…",
+                    self.localization().text(MessageId::WORKSPACE_ACTION_SAVE_TO_TOOLBAR_LIBRARY).to_string(),
                     UiAction::WorkspaceManager {
                         command: WorkspaceCommand::SaveToolbar { panel },
                     },
@@ -1532,6 +1542,14 @@ impl<R: CanvasRenderer> UiSession<R> {
                             })
                             .chain(self.state.workspace.layout.column_stacks.iter()
                                 .filter(|s| s.open_column.is_some()).map(|s| s.column))
+                            .filter(|column| !self.interaction.hidden || {
+                                let open = self.state.workspace.layout.column_stack(*column)
+                                    .open_column.unwrap_or(*column);
+                                self.state.workspace.layout.panels.iter()
+                                    .filter_map(|panel| self.state.workspace.layout.panel_group(panel.id))
+                                    .any(|group| self.state.workspace.layout.collapsed_column_for_group(group) == Some(open)
+                                        && self.zen_keeps(group))
+                            })
                             .collect();
                         for column in columns {
                             reply.change = self.dispatch(UiAction::Customize {
@@ -2987,6 +3005,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         );
         let mut save_settings = matches!(&action, UiAction::SetTheme { .. } | UiAction::ZoomTool { .. });
         let (mut changed, wake) = match action {
+            UiAction::ColorSlotMenu { slot, library } => {
+                self.color_slot_menu(slot)?;
+                if library {
+                    let color = self.dispatch(UiAction::Color { action: ColorAction::Select { slot } })?;
+                    let mut change = self.reveal_panel(Panel::Palettes)?;
+                    change.regions |= color.regions;
+                    change.canvas_wake |= color.canvas_wake;
+                    return Ok(change);
+                }
+                self.request(HostRequestKind::ColorSlot { slot, library })?;
+                (0, false)
+            }
             UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } => {
                 self.effect_action(action.effect(layer, &key))?; (DOCUMENT, true)
             }
@@ -7515,21 +7545,20 @@ mod tests {
                 .all(|i| !i.label.ends_with(" toolbar"))
         );
         assert_eq!(toolbars.sections[1][0].label, "New Toolbar…");
-        for platform in [Platform::Gtk, Platform::Web, Platform::Android] {
+        for platform in Platform::ALL {
             s.set_platform(platform);
             let context = s
                 .context_menu(ContextTarget::Panel {
                     panel: Panel::Toolbar,
                 })
                 .unwrap();
-            assert_eq!(
+            assert!(
                 context.sections.iter().flatten().any(|item| matches!(
                     item.action,
                     Some(UiAction::WorkspaceManager {
                         command: WorkspaceCommand::SaveToolbar { .. }
                     })
-                )),
-                platform == Platform::Gtk
+                )), "{platform:?}"
             );
         }
     }
@@ -11639,6 +11668,52 @@ mod tests {
             assert_eq!(s.engine.document(), &document);
             assert!(key(&mut s, "Tab", true, false, false).handled);
             assert!(s.state.workspace.zen_mode);
+        } }
+    }
+
+    #[test]
+    fn escape_in_zen_preserves_hidden_open_columns_and_closes_visible_owners_first() {
+        let viewport = [1440., 1000.];
+        for platform in Platform::ALL { for visibility in 0..3 {
+            let mut s = session(platform);
+            s.state.workspace.layout = WorkspacePreset::Illustrator.layout(platform);
+            s.state.workspace.layout.open_default_columns(platform);
+            let column = s.state.workspace.layout.column_stacks.iter().find_map(|stack| stack.open_column).unwrap();
+            let group = s.state.workspace.layout.panels.iter().filter_map(|panel| s.state.workspace.layout.panel_group(panel.id))
+                .find(|group| s.state.workspace.layout.collapsed_column_for_group(*group) == Some(column)).unwrap();
+            if visibility == 2 {
+                s.state.workspace.layout.add_panel_to_group(Panel::Toolbar, group).unwrap();
+                customize(&mut s, CustomizationAction::SetShowInZen { panel: Panel::Toolbar, shown: true });
+            }
+            s.set_viewport(viewport, [1440, 1000]).unwrap();
+            invoke(&mut s, CommandId::ZenMode);
+            if visibility == 1 {
+                let (start, end) = match s.state.workspace.layout.group_edge(group).unwrap() {
+                    Edge::Left => ([4., 500.], [64., 500.]),
+                    Edge::Right => ([1436., 500.], [1376., 500.]),
+                    Edge::Top => ([720., 4.], [720., 64.]),
+                    Edge::Bottom => ([720., 996.], [720., 936.]),
+                };
+                s.edge_swipe(99, ContactPhase::Down, start);
+                assert!(s.edge_swipe(99, ContactPhase::Move, end));
+                s.edge_swipe(99, ContactPhase::Up, end);
+            }
+            assert_eq!(s.zen_keeps(group), visibility != 0);
+            let layout = s.state.workspace.layout.clone();
+            let camera = s.state.camera.clone();
+            let reply = key(&mut s, "Escape", true, false, false);
+            assert!(reply.handled);
+            if visibility == 0 {
+                assert!(!s.state.workspace.zen_mode, "{platform:?}: hidden columns cannot consume Escape");
+                assert_eq!(s.state.workspace.layout, layout);
+                assert_eq!(s.state.camera, camera);
+            } else {
+                assert!(s.state.workspace.zen_mode, "{platform:?}: a visible owner closes before Zen exits");
+                assert!(s.state.workspace.layout.column_stack(column).open_column.is_none());
+                key(&mut s, "Escape", false, false, false);
+                key(&mut s, "Escape", true, false, false);
+                assert!(!s.state.workspace.zen_mode);
+            }
         } }
     }
 

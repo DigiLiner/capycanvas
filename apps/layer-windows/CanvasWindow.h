@@ -59,6 +59,15 @@ private:
     winrt::Microsoft::UI::Xaml::Controls::SwapChainPanel panel;
     winrt::Microsoft::UI::Xaml::Controls::ContentControl canvasFocus;
     winrt::Microsoft::UI::Xaml::Controls::TextBlock status;
+    winrt::Microsoft::UI::Xaml::Controls::Button screenChip;
+    winrt::Microsoft::UI::Xaml::Controls::Flyout screenPopup;
+    winrt::Microsoft::UI::Xaml::Controls::TextBlock screenTitle,screenHeadline,screenBody;
+    winrt::Microsoft::UI::Xaml::Controls::CheckBox screenClipped;
+    winrt::Windows::Data::Json::JsonObject screenCopy;
+    winrt::hstring screenKey;
+    double screenFontSize=14.;
+    bool screenPopupOpen=false,updatingScreen=false;
+    void ApplyScreen(winrt::Windows::Data::Json::JsonObject const& model);
     winrt::Microsoft::UI::Dispatching::DispatcherQueue dispatcher{nullptr};
     winrt::Windows::UI::ViewManagement::UISettings uiSettings;
     winrt::event_token colorValues{};

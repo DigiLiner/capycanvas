@@ -3,7 +3,7 @@ import { brushSizeGrid } from "./brush-sizes.js";
 import init, { WebApp, WebGpu, configure_raster_worker, configure_gpu_diagnostics, automatic_tab_names } from "./pkg/layer_web.js";
 import { createRasterWorker } from "./raster-worker-client.js";
 import { createPaintPairIcon } from './color-controls.js';
-import { configureColorEditor, refreshColorEditors } from './color-editor.js';
+import { chooseColor, configureColorEditor, refreshColorEditors } from './color-editor.js';
 import { refreshTextureDialogs } from './paper-picker.js';
 import { createDocumentStorage } from "./document-storage.js";
 import { workspaceStore, modulePromise, setWorkspaceWake } from "./workspace-preload.js";
@@ -107,7 +107,7 @@ for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
 );
 for (const type of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture','contextmenu','click','dblclick'])
   window.addEventListener(type,e=>bubbles?.handle(e),{capture:true,passive:false});
-const fullscreenRequests = new Set();
+const fullscreenRequests = new Set(), colorSlotRequests = new Set();
 let gpuStarting = false;
 let gpuReady = false;
 let compilerScheduled = false, compilerFailed = false, compilerEpoch = 0;
@@ -967,6 +967,18 @@ function update(regions) {
               });
               input.click();
             }
+            else if (request.kind.type === "color_slot") {
+              if (!colorSlotRequests.has(request.id)) {
+                colorSlotRequests.add(request.id);
+                const slot=request.kind.slot, epoch=state.document_file.epoch;
+                chooseColor({app,slot,element,button}).then(selected=>{
+                  if(selected && app.state().document_file.epoch===epoch)dispatch({type:'color',action:selected.intensity==null?{op:'set_slot',slot,color:selected.color}:{op:'set_slot_intensity',slot,color:selected.color,stops:selected.intensity}});
+                  dispatch({type:'complete_request',id:request.id,error:null});
+                },error=>dispatch({type:'complete_request',id:request.id,error:String(error)}))
+                  .finally(()=>colorSlotRequests.delete(request.id));
+              }
+              continue;
+            }
             else if (request.kind.type === "workspace") { workspaceManager?.wake(); continue; }
             else if (request.kind.type !== "save_settings") { documents.handle(request); continue; }
             else
@@ -1538,11 +1550,7 @@ function canvasPointer(e, stage) {
   let sample = e;
   const activePen = lastPenEvent?.pointerType === "pen"
     && lastPenEvent.pointerId === e.pointerId;
-  // Losing the browser's input stream is not an instruction to erase ink.
-  // Tablet lift can end with cancellation/capture loss, or a hover move before
-  // pointerup. Finish once, at the last contact sample: termination events may
-  // have reset coordinates/pressure or already be outside the drawing surface.
-  if (activePen && (stage === 4 ||
+  if (activePen && ((stage === 4 && e.type !== "pointercancel") ||
       (e.type !== "pointerup" && stage === 3))) {
     sample = lastPenEvent;
     stage = 3;

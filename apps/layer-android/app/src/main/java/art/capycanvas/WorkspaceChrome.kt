@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -206,10 +205,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             ?: host.awaitQuery(obj("type" to "drawer", "column" to columnId, "heights" to JSONArray(heights.toList()),
                 "progress" to 1f, "from" to null, "closing" to false))?.objectOrNull("placement")
         if(target == null) { if(current == null) closed(); return@LaunchedEffect }
-        val duration = 200_000_000f * (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f)
-        val start = if (animate && duration > 0f) withFrameNanos { it } else 0L
-        do {
-            val progress = if (!animate || duration <= 0f) 1f else ((withFrameNanos { it } - start) / duration).coerceIn(0f, 1f)
+        workspaceFrames(200,animate) { progress ->
             val eased=1f-(1f-progress)*(1f-progress)*(1f-progress)
             val position = if(pageChange) pageFrom+(pageTarget-pageFrom)*eased else pageTarget
             val reply=JSONObject(Native.drawerFrame(obj("from" to from, "to" to target, "progress" to eased,
@@ -220,7 +216,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                 if(dock.drawerSources[id]!=source)dock.drawerSources[id]=source
             } else dock.drawerSources.remove(id)
             if(id=="tool"){dock.drawer=reply;dock.refresh()}
-        } while(progress < 1f)
+        }
         if (current == null) closed()
     }
     DisposableEffect(dock, id) {
@@ -391,7 +387,13 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     val host = LocalCanvasHost.current
     val key = remember { Any() }
     DisposableEffect(host, key) { onDispose { host.glassConnection(key, null, 0f) } }
-    SideEffect { host.glassConnection(key, connection, dock.density) }
+    val current by rememberUpdatedState(connection)
+    val opacity=LocalWorkspaceOpacity.current
+    LaunchedEffect(host,key,opacity,dock.density) {
+        snapshotFlow { current.toString() to (opacity?.value ?: 1f) }.collect { (value,strength) ->
+            host.glassConnection(key,JSONObject(value),dock.density,strength)
+        }
+    }
     Canvas(Modifier.placed(connection.getJSONObject("bounds"), dock.density).then(modifier).zIndex(z).chromeRegion(dock)) {
         val t = connection.array("transform")
         fun point(x: Float, y: Float) = Offset((t.getDouble(0).toFloat() * x + t.getDouble(2).toFloat() * y + t.getDouble(4).toFloat()) * dock.density,

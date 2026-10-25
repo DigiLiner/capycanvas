@@ -213,15 +213,15 @@ class AndroidRasterTest {
     }
     private fun newRequest(handle: Long, width: Int, height: Int, space: String = "Srgb", depth: String = "U8") =
         request(handle, "new_document").also { orderDrawing(handle, width, height, space, depth) }
-    private fun request(handle: Long, command: String): Pair<Int,JSONObject> {
-        try { Native.dispatch(handle,obj("type" to "invoke","command" to command).toString()) }
+    private fun request(handle: Long, command: String, dispatch: Boolean = true): Pair<Int,JSONObject> {
+        try { if(dispatch) Native.dispatch(handle,obj("type" to "invoke","command" to command).toString()) }
         catch(e: Exception) { throw AssertionError("$command: ${state(handle).getJSONObject("document_file")}; ${host.workspaceManager}",e) }
         var state=state(handle)
-        var request=state.array("requests").objects().first { it.getJSONObject("kind").optString("type")=="document" }
+        var request=state.array("requests").objects().firstOrNull { it.getJSONObject("kind").optString("type")=="document" } ?: throw AssertionError("$command request missing: ${state.opt("document_file")}; ${state.opt("requests")}")
         if(request.getJSONObject("kind").getJSONObject("request").getString("type")=="confirm_close") {
             Native.documentClose(handle,request.getInt("id"),"\"discard\"")
             state=state(handle)
-            request=state.array("requests").objects().first { it.getJSONObject("kind").optString("type")=="document" }
+            request=state.array("requests").objects().firstOrNull { it.getJSONObject("kind").optString("type")=="document" } ?: throw AssertionError("$command after discard request missing: $state")
         }
         return request.getInt("id") to state.getJSONObject("document_file")
     }
@@ -315,7 +315,12 @@ class AndroidRasterTest {
         }
     }
     private fun open(file: File, corrupt: Boolean=false, input: (() -> ParcelFileDescriptor)?=null) {
-        val job=native {handle -> val (id,state)=request(handle,"open_document")
+        native {Native.dispatch(it,obj("type" to "invoke","command" to "open_document").toString())}
+        compose.waitUntil(120_000) {
+            tick()
+            native {state(it).array("requests").objects().any {request->request.getJSONObject("kind").optString("type")=="document"}}
+        }
+        val job=native {handle -> val (id,state)=request(handle,"open_document",dispatch=false)
             Native.projectTask(handle,id,"null",state.getLong("epoch"),state.getLong("revision")) to id }
         val incumbent=native {state(it).getJSONObject("document_file")}
         try {
@@ -3876,8 +3881,7 @@ class AndroidRasterTest {
         open(File(files,"source-corrected-layer.capy"));backingEqual(added,manifest(save("source-corrected-reopened.capy")))
         DocumentController.nativeFileJobsForTest=false
         compose.runOnUiThread {host.invoke("rasterize_source")}
-        compose.waitUntil(10_000) {compose.onAllNodesWithText("Preview Complete Result").fetchSemanticsNodes().isNotEmpty()}
-        compose.onNodeWithText("Preview Complete Result").performClick()
+        compose.waitUntil(10_000) {compose.onAllNodesWithTag("color-choice-Result").fetchSemanticsNodes().isNotEmpty()}
         compose.waitUntil(60_000) {compose.onAllNodesWithContentDescription("Prepared composition").fetchSemanticsNodes().isNotEmpty()}
         compose.onNodeWithText("Cancel").performClick()
         compose.waitUntil(10_000) {host.snapshot?.getJSONObject("state")?.getJSONObject("document_file")?.optBoolean("busy")==false}
@@ -4207,18 +4211,32 @@ class AndroidRasterTest {
 
         val copyFile=File(files,"converted-copy.capy")
         val originalState=native {state(it).getJSONObject("document_file")}
+        val originalTab=native {JSONObject(Native.documentTabs(it,obj("op" to "view").toString())).getLong("selected")}
         val flag=Native.captureControl()
         val copyId=native {request(it,"convert_color_space").first}
         val copyTask=native {Native.colorTask(it,copyId,flag)}
         try {
             Native.colorWork(copyTask,obj("Convert" to obj("space" to "Srgb","options" to obj("intent" to "RelativeColorimetric","black_point_compensation" to false))).toString(),true)
             assertTrue(Native.colorPreview(copyTask,true).size>8)
-            Native.colorWriteCopy(copyTask,ParcelFileDescriptor.open(copyFile,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd())
             try {native {Native.colorAdopt(it,copyTask)};fail("Copy adopted over master")}catch(e:Exception){assertTrue(e.message.orEmpty().contains("separate document"))}
-            native {Native.documentComplete(it,copyId,true,"null")}
+            val opening=native {Native.colorCopyTask(it,copyTask)}
+            try {
+                Native.colorCopyPrepare(opening,copyTask)
+                runBlocking {kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    host.drawingTabs.beforeAdopt {host.withNative {Native.colorCopyReady(it,opening,copyTask)}}
+                    try {host.withNative {Native.colorCopyAdopt(it,opening,copyTask)};host.documentChanged()}
+                    finally {host.drawingTabs.afterAdopt()}
+                }}
+            } finally {Native.colorCopyFree(opening)}
         } finally {Native.colorFree(copyTask);Native.captureFree(flag)}
+        assertNotEquals(originalTab,native {JSONObject(Native.documentTabs(it,obj("op" to "view").toString())).getLong("selected")})
+        save("converted-copy.capy")
+        compose.runOnUiThread {host.drawingTabs.select(originalTab)}
+        compose.waitUntil(60_000) {host.drawingTabs.selected==originalTab&&!host.drawingTabs.blocked}
         val afterCopy=native {state(it).getJSONObject("document_file")}
-        for(key in listOf("epoch","revision","modified","location"))assertEquals(originalState.get(key).toString(),afterCopy.get(key).toString())
+        assertEquals(originalTab,native {JSONObject(Native.documentTabs(it,obj("op" to "view").toString())).getLong("selected")})
+        assertTrue(afterCopy.getLong("epoch")>originalState.getLong("epoch"))
+        for(key in listOf("revision","modified","location"))assertEquals(originalState.get(key).toString(),afterCopy.get(key).toString())
         sameBacking(reduced,manifest(save("copy-master-unchanged.capy")))
         val copied=manifest(copyFile.readBytes())
         assertEquals(1,copied.occurrenceRecords().length())
@@ -4228,12 +4246,25 @@ class AndroidRasterTest {
         open(copyFile);sameBacking(copied,manifest(save("copy-reopened.capy")))
 
         open(File(files,"color-depth.capy"));sameBacking(reduced,manifest(save("color-reopened.capy")))
+        val uiOwner=native {state(it).getJSONObject("document_file")}
+        val uiTab=native {JSONObject(Native.documentTabs(it,obj("op" to "view").toString())).getLong("selected")}
+        compose.runOnUiThread {host.documentChanged()}
+        compose.waitUntil(60_000) {
+            val published=host.snapshot?.optJSONObject("state")?.optJSONObject("document_file")
+            published?.optLong("epoch")==uiOwner.getLong("epoch") && published.optLong("revision")==uiOwner.getLong("revision")
+                && !published.optBoolean("busy") && host.drawingTabs.selected==uiTab && !host.drawingTabs.blocked
+        }
         DocumentController.nativeFileJobsForTest=false
         compose.runOnUiThread {host.invoke("convert_color_space")}
-        compose.waitUntil(10_000) {compose.onAllNodesWithText("Preview Complete Result").fetchSemanticsNodes().isNotEmpty()}
+        compose.waitUntil(60_000) {
+            host.snapshot?.optJSONObject("state")?.array("requests")?.objects()?.any {
+                val kind=it.getJSONObject("kind")
+                kind.optString("type")=="document" && kind.getJSONObject("request").optString("type")=="change_color"
+            }==true
+        }
+        compose.waitUntil(10_000) {compose.onAllNodesWithTag("color-choice-Result").fetchSemanticsNodes(atLeastOneRootRequired=false).isNotEmpty()}
         compose.onNodeWithTag("color-choice-Result").performScrollTo().performClick()
         compose.onNodeWithText("Save flattened copy").performClick()
-        compose.onNodeWithText("Preview Complete Result").performScrollTo().performClick()
         compose.waitUntil(60_000) {compose.onAllNodesWithContentDescription("Prepared composition").fetchSemanticsNodes().isNotEmpty()}
         compose.onNodeWithText("Cancel").performClick()
         compose.waitUntil(10_000) {host.snapshot?.getJSONObject("state")?.getJSONObject("document_file")?.optBoolean("busy")==false}

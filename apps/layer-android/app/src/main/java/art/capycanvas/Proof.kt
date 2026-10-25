@@ -2,6 +2,10 @@ package art.capycanvas
 
 import android.app.Application
 import android.graphics.Bitmap
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -226,8 +230,12 @@ internal class ProofController(private val host: CanvasHost) {
                         .testTag("proof-mode-$value"),contentAlignment=Alignment.Center){Text(label,color=colors.text)}
                 }
             }
-            if(mode=="sdr"&&model!=null)Box(Modifier.width(dialSide).align(Alignment.CenterHorizontally)){ProofSdrControls(host,model,controller.texture,controller::action)}
-            if(mode=="print"&&model!=null&&settings!=null) {
+            AnimatedContent(mode, label = "proof-mode", transitionSpec = {
+                val forward = listOf("off", "sdr", "print").indexOf(targetState) > listOf("off", "sdr", "print").indexOf(initialState)
+                slideInHorizontally { if (forward) it else -it } togetherWith slideOutHorizontally { if (forward) -it else it }
+            }) { shownMode -> Column {
+            if(shownMode=="sdr"&&model!=null)Box(Modifier.width(dialSide).align(Alignment.CenterHorizontally)){ProofSdrControls(host,model,controller.texture,controller::action)}
+            if(shownMode=="print"&&model!=null&&settings!=null) {
                 val controls=model.getJSONArray("print_controls").objects()
                 val labelWidth=panelLabelWidth(controls.filter{it.getString("id") in listOf("profile","simulation","intent")}.map{it.getString("label")})
                     .coerceAtMost(contentWidth*.45f)
@@ -243,6 +251,7 @@ internal class ProofController(private val host: CanvasHost) {
                 }
                 if(controller.busy)CircularProgressIndicator(Modifier.size(20.dp).align(Alignment.CenterHorizontally))
             }
+            } }
             if (localError != null) ColorFailureText(host,localError,true) else ColorFailureText(host,controller.error,proof=true)
         }
     }

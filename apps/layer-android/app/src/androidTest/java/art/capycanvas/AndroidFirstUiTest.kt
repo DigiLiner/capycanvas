@@ -33,7 +33,7 @@ class AndroidFirstUiTest {
         try {
             val theme = InstrumentationRegistry.getArguments().getString("theme") ?: "dark"
             instrumentation.targetContext.getSharedPreferences(CanvasHost.preferencesName, 0).edit()
-                .putString("settings", obj("version" to 1, "theme" to theme).toString()).commit()
+                .putString("settings", obj("version" to 1, "theme" to theme,"language" to "en").toString()).commit()
             scenario = ActivityScenario.launch(MainActivity::class.java)
             lateinit var host: CanvasHost
             scenario.onActivity { host = it.host }
@@ -44,6 +44,7 @@ class AndroidFirstUiTest {
             compose.runOnIdle {
                 assertFalse(host.snapshot!!.getBoolean("gpu_ready"))
                 assertTrue(host.snapshot!!.getJSONObject("state").getBoolean("workspace_ready"))
+                assertEquals("builtin:workspace:painter",host.workspaceManager!!.getString("id"))
                 assertEquals("Sketch", host.workspaceManager!!.getString("name"))
                 assertFalse(host.surfaceReady)
                 assertNull(host.failure)
@@ -72,7 +73,9 @@ class AndroidFirstUiTest {
             compose.onNodeWithContentDescription("Main Menu").assertIsDisplayed()
             resume.countDown()
             compose.onNodeWithContentDescription("Main Menu").performClick()
-            compose.onNodeWithText("View", useUnmergedTree = true).assertIsDisplayed().performClick()
+            host.drain();compose.waitForIdle()
+            compose.onNodeWithText("View", useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
+            host.drain();compose.waitForIdle()
             compose.onNodeWithText("Fit canvas").assertIsDisplayed()
             android.util.Log.i("CapyStartupTest", "gray_ui_without_gpu boot_ns=${SystemClock.elapsedRealtimeNanos()}")
             compose.waitUntil(60_000) { host.surfaceReady || host.failure != null }

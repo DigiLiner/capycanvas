@@ -7,7 +7,7 @@ const dialog='#new-drawing-dialog[open]';
 export async function checkNewDrawing({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/new-drawing-dialog/web';
   await mkdir(directory,{recursive:true});
-  const wait=(condition,timeout=30000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){try{if(${condition})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20);}catch(e){reject(e)}}poll();})`);
+  const wait=(condition,timeout=30000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){try{if(${condition})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}+": "+JSON.stringify({tabs:layerApp.app.document_tabs(0),file:layerApp.state().document_file,documentsBusy:layerApp.documents.busy(),brushReady:layerApp.app.brush_ready(),workspace:JSON.parse(layerApp.app.workspace_view()),newDrawing:layerApp.state().new_drawing,requests:layerApp.state().requests,error:layerApp.state().host_error,startup:layerApp.startupTimes},(_,value)=>typeof value==="bigint"?String(value):value)));else setTimeout(poll,20);}catch(e){reject(e)}}poll();})`);
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const view=()=>evaluate('JSON.parse(JSON.stringify(layerApp.state().new_drawing))');
   const drawer=async()=>(await view())?.drawer??null;

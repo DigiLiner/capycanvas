@@ -63,7 +63,7 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
         let row = owner.flatMap { owner in layer.map { Row(owner: owner, layer: $0) } }
         let token = UUID()
         if let row, offset != 0 { returning[row] = token }
-        withAnimation(.easeOut(duration: 0.12), completionCriteria: .removed) {
+        withAnimation(.easeOut(duration: 0.15), completionCriteria: .removed) {
             owner = nil; layer = nil; offset = 0; tracking = false
         } completion: {
             if let row, self.returning[row] == token { self.returning.removeValue(forKey: row) }

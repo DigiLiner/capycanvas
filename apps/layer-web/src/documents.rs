@@ -28,6 +28,7 @@ pub(super) fn host_error_reason(error: &JsValue) -> Option<layer_ui::DocumentHos
 pub struct WebProject {
     session: Option<Box<UiSession<AttachedRenderer>>>,
     request: u32,
+    copy_owner: Option<(u64, layer_render_wgpu::snapshot::CaptureControl)>,
     epoch: u64,
     revision: u64,
     source: layer_ui::ImportSource,
@@ -71,7 +72,7 @@ impl WebApp {
         self.documents.admission(&self.session.retained_document_tiles()).admit(&project).map_err(|reason| js(reason.message(&localization)))?;
         Ok(future_to_promise(async move {
             let candidate = prepare_session(project, adapter, device, queue, &brush, viewport, localization, Some(&cancelled)).await?;
-            Ok(WebProject { session: Some(Box::new(candidate)), request: id, epoch, revision, source: layer_ui::ImportSource::Photo,
+            Ok(WebProject { session: Some(Box::new(candidate)), request: id, copy_owner: None, epoch, revision, source: layer_ui::ImportSource::Photo,
                 placed: None, source_name: String::new(), target: None, package: None, lost }.into())
         }))
     }
@@ -192,6 +193,34 @@ impl WebApp {
             artwork_transfer::save(project).await
         }))
     }
+    pub fn prepare_color_copy(&self, candidate: &color_edit::WebColorCandidate) -> Result<js_sys::Promise, JsValue> {
+        let lost = self.gpu_owner().ok_or_else(|| js("Canvas unavailable"))?;
+        let device_current = std::sync::Arc::ptr_eq(&lost, &candidate.lost) && lost.lock().unwrap().is_none();
+        candidate.workflow.identity.validate(&self.session, candidate.control.is_cancelled(), device_current).map_err(js)?;
+        let project = candidate.workflow.copy_project(candidate.control.is_cancelled()).map_err(js)?.clone();
+        let live = self.session.engine().backend().0.as_ref().ok_or_else(|| js("Wait for the canvas"))?;
+        let (adapter, device, queue) = (live.adapter().clone(), live.device().clone(), live.queue().clone());
+        let request = candidate.workflow.identity.request();
+        let epoch = self.session.state().document_file.epoch;
+        let revision = self.session.engine().document().revision;
+        let copy_owner = Some((self.session.engine().document().owner, candidate.control.clone()));
+        let viewport = self.session.state().camera.viewport;
+        let mut brush = self.session.engine().configured_brush().clone();
+        layer_render::remap_document_colors(self.session.engine().document().composition().color.space,
+            project.composition().color.space, &mut brush);
+        let localization = self.session.localization().clone();
+        let control = candidate.control.clone();
+        self.documents.admission(&self.session.retained_document_tiles()).admit(&project).map_err(|reason| js(reason.message(&localization)))?;
+        Ok(future_to_promise(async move {
+            output::cancelled(&control)?;
+            let cancelled = wasm_bindgen::closure::Closure::<dyn Fn() -> bool>::new(move || control.is_cancelled());
+            let session = prepare_session(project, adapter, device, queue, &brush, viewport, localization,
+                Some(cancelled.as_ref().unchecked_ref())).await?;
+            Ok(WebProject { session: Some(Box::new(session)), request, copy_owner, epoch, revision,
+                source: layer_ui::ImportSource::Photo, placed: None, source_name: String::new(),
+                target: None, package: None, lost }.into())
+        }))
+    }
     pub fn prepare_document(
         &self,
         id: u32,
@@ -304,7 +333,7 @@ impl WebApp {
             check_cancelled()?;
             let (mut imported,fallback)=match imported {
                 artwork_transfer::Opened::Editable {document,fallback}=>(document,fallback),
-                artwork_transfer::Opened::Package {presentation,preview}=>return Ok(WebProject{session:None,request:id,epoch,revision,source:layer_ui::ImportSource::Master,placed:None,source_name,target,lost,package:Some((presentation,preview))}.into()),
+                artwork_transfer::Opened::Package {presentation,preview}=>return Ok(WebProject{session:None,request:id,copy_owner:None,epoch,revision,source:layer_ui::ImportSource::Master,placed:None,source_name,target,lost,package:Some((presentation,preview))}.into()),
             };
             check_cancelled()?;
             if let Some(source) = imported.interpretation_required(photo_policy) {
@@ -330,6 +359,7 @@ impl WebApp {
                 return Ok(WebProject {
                     session: None,
                     request: id,
+                    copy_owner: None,
                     epoch,
                     revision,
                     source: source_kind,
@@ -350,7 +380,7 @@ impl WebApp {
                     if lost.lock().unwrap().is_some(){return Err(error);}
                     if let Some((mut presentation,preview))=fallback {
                         presentation.reason=error.as_string().unwrap_or_else(||format!("{error:?}"));
-                        return Ok(WebProject {session:None,request:id,epoch,revision,source:source_kind,placed:None,source_name,target,lost,package:Some((presentation,preview))}.into());
+                        return Ok(WebProject {session:None,request:id,copy_owner:None,epoch,revision,source:source_kind,placed:None,source_name,target,lost,package:Some((presentation,preview))}.into());
                     }
                     return Err(error);
                 }
@@ -359,6 +389,7 @@ impl WebApp {
             Ok(WebProject {
                 session: Some(Box::new(candidate)),
                 request: id,
+                copy_owner: None,
                 epoch,
                 revision,
                 source: source_kind,
@@ -417,6 +448,9 @@ impl WebApp {
             change.canvas_wake = true;
             change.regions |= 255;
             return serialize(&change);
+        }
+        if project.copy_owner.as_ref().is_some_and(|(owner, control)| *owner != self.session.engine().document().owner || control.is_cancelled()) {
+            return Err(js("The drawing changed while opening; try again"));
         }
         let location = project.source.adoption_location(location);
         if self.session.state().document_file.epoch != project.epoch

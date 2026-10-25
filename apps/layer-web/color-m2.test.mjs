@@ -135,12 +135,12 @@ export async function checkColorEdits({call,evaluate,settle}) {
   async function change(command,label,value,apply=true){
     await invoke(command);await wait(`!!document.querySelector('dialog[open] select[aria-label=${JSON.stringify(label)}]')`);
     await evaluate(`(()=>{const s=document.querySelector('dialog[open] select[aria-label=${JSON.stringify(label)}]');s.value=${JSON.stringify(value)};s.dispatchEvent(new Event('change'));})()`);
-    await click('Preview Complete Result');await wait(`document.querySelectorAll('.color-comparison canvas').length===2`);
+    await wait(`document.querySelectorAll('.color-comparison canvas').length===2`);
     assert.ok(await evaluate(`[...document.querySelectorAll('.color-comparison canvas')].every(c=>c.width<=512&&c.height<=384)`));
     await click(apply?'Apply':'Cancel');await wait('!layerApp.state().document_file.busy && layerApp.app.brush_ready()');assert.equal(await evaluate('layerApp.state().host_error??null'),null);
   }
   await invoke('assign_profile');await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-  await click('Preview Complete Result');await click('Cancel');await wait('!layerApp.state().document_file.busy');assert.deepEqual(backing(await save()),backing(original));
+  await click('Cancel');await wait('!layerApp.state().document_file.busy');assert.deepEqual(backing(await save()),backing(original));
   const paintedHistogram={histogram:await histogramJourney({evaluate,settle}).exact()};
   assert.equal(paintedHistogram.histogram.pixels+paintedHistogram.histogram.transparent,513*257);
   await change('assign_profile','Color space','ProPhoto',false);assert.deepEqual(backing(await save()),backing(original));
@@ -210,7 +210,7 @@ export async function checkSourceEdits({call,evaluate,settle}) {
   async function change(command,profile,apply=true){
     await invoke(command);await wait('!!document.querySelector("dialog[open]")');
     if(profile!==null)await evaluate(`(()=>{const select=document.querySelector('select[aria-label="Correct source profile"]');select.value=${JSON.stringify(profile)};select.dispatchEvent(new Event('change'));})()`);
-    await click('Preview Complete Result');await wait(`!!document.querySelector('canvas[aria-label="Prepared composition"]')`);
+    await wait(`!!document.querySelector('canvas[aria-label="Prepared composition"]')`);
     const adds=await evaluate('!![...document.querySelectorAll("dialog[open] button")].find(b=>b.textContent==="Add Corrected Source")');
     await click(!apply?'Cancel':command==='rasterize_source'?'Rasterize':adds?'Add Corrected Source':'Apply Profile');await idle();
     assert.equal(await evaluate('layerApp.state().host_error??null'),null);return adds;
@@ -232,7 +232,7 @@ export async function checkSourceEdits({call,evaluate,settle}) {
   assert.equal(packageOccurrences(added).length,packageOccurrences(painted).length+1);assert.deepEqual(packageObject(added,old.id),old);assert.deepEqual(packageObject(added,old.data.content.paint),oldPaint);assert.deepEqual(rasterResources(added),rasterResources(painted));
   await evaluate(`window.sdrSourceMaster=sdrFiles.get(layerApp.state().document_file.location.name).slice();window.showOpenFilePicker=async()=>[{name:'source-edited.capy',async getFile(){return new File([sdrSourceMaster],'source-edited.capy')}}];`);
   await invoke('open_document');await idle();assert.deepEqual(backing(await save()),backing(added));
-  await invoke('rasterize_source');await click('Preview Complete Result');await click('Cancel');await idle();assert.deepEqual(backing(await save()),backing(added));
+  await invoke('rasterize_source');await click('Cancel');await idle();assert.deepEqual(backing(await save()),backing(added));
   console.log('Source repair/rasterize full-composition comparisons, exact undo/redo, worker/preview cancellation, baked-paint preservation and save/reopen passed');
 }
 
@@ -288,8 +288,14 @@ export async function checkProfileLibrary({evaluate}) {
     return{exact,corrupt:!!corrupt,rejected,retained,count:entries.filter(e=>e.id===libraryId).length};
   })()`);
   assert.deepEqual(report,{exact:true,corrupt:true,rejected:true,retained:true,count:1});
+  await evaluate(`(async()=>{window.librarySearchIds=[];for(let year=2021;year<2030;year++){const bytes=libraryBytes.slice();new DataView(bytes.buffer).setUint16(24,year);await layerApp.app.profile_library('import',undefined,bytes);librarySearchIds.push([...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(value=>value.toString(16).padStart(2,'0')).join(''));}})()`);
+
   await invoke('export_document');await wait(`!!document.querySelector('select[aria-label="Output profile"]')`);await click('Saved Profiles…');
   await wait(`!![...document.querySelectorAll('.profile-library .profile-entry')].find(e=>e.textContent.includes(libraryId.slice(0,12)))`);
+  assert.equal(await evaluate('document.querySelector("#profile-library-search").hidden'),false);
+  await evaluate(`(()=>{const search=document.querySelector('#profile-library-search');search.value=libraryId.slice(0,12);search.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await wait(`document.querySelectorAll('.profile-library .profile-entry').length===1`);
+
   await evaluate(`[...document.querySelectorAll('.profile-library .profile-entry')].find(e=>e.textContent.includes(libraryId.slice(0,12))).querySelector('button').click()`);
   // close() clears `open` before the queued close event resolves the picker.
   // Wait for that event's removal before inspecting its selected result.
@@ -303,42 +309,44 @@ export async function checkProfileLibrary({evaluate}) {
   await evaluate(`[...[...document.querySelectorAll('.profile-library .profile-entry')].find(e=>e.textContent.includes(libraryId.slice(0,12))).querySelectorAll('button')].find(b=>b.textContent==='Remove').click()`);
   await wait(`![...document.querySelectorAll('.profile-library .profile-entry')].some(e=>e.textContent.includes(libraryId.slice(0,12)))`);
   await evaluate(`[...document.querySelectorAll('.profile-library button')].find(b=>b.textContent==='Done').click();layerApp.dispatch({type:'close_settings'});`);
+  await evaluate(`(async()=>{for(const id of librarySearchIds)if(id!==libraryId)await layerApp.app.profile_library('remove',id)})()`);
   await invoke('save_document_as');await idle();
-  console.log('ICC library exact bytes/dedup, corruption rejection/repair, independent embedded preset ownership, saved-profile export picker and Preferences management passed');
+  console.log('ICC library search, exact bytes/dedup, corruption rejection/repair, independent embedded preset ownership, saved-profile export picker and Preferences management passed');
 }
 
 
 export async function checkFlattenedCopy({evaluate}) {
   const {wait,invoke,click,idle}=helpers(evaluate,{enabled:true});
-  const saved=await evaluate('({file:JSON.parse(JSON.stringify(layerApp.state().document_file,(_,v)=>typeof v==="bigint"?Number(v):v)),color:layerApp.app.document_color(),count:sdrFiles.size})');
+  const saved=await evaluate('({selected:String(layerApp.app.document_tabs(0).selected),file:JSON.parse(JSON.stringify(layerApp.state().document_file,(_,v)=>typeof v==="bigint"?Number(v):v)),color:layerApp.app.document_color(),count:sdrFiles.size,tabs:layerApp.app.document_tabs(0).tabs.length})');
+  const master=await readPackage(evaluate,`sdrFiles.get(${JSON.stringify(saved.file.location.name)})`);
+  const createLabel=await evaluate('layerApp.app.document_color_copy().create_copy');
   const prepare=async()=>{
     await invoke('convert_color_space');await wait(`!!document.querySelector('dialog[open] select[aria-label="Result"]')`);
     await evaluate(`(()=>{for(const [label,value]of [['Result','copy'],['Color space','Srgb']]){const s=document.querySelector('dialog[open] select[aria-label="'+label+'"]');s.value=value;s.dispatchEvent(new Event('change'));}})()`);
-    await click('Preview Complete Result');await wait(`!!document.querySelector('canvas[aria-label="Prepared composition"]')`);
-    assert.ok(await evaluate(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Save Copy…'&&!b.disabled)`));
+    await wait(`!!document.querySelector('canvas[aria-label="Prepared composition"]')`);
+    assert.ok(await evaluate(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===${JSON.stringify(createLabel)}&&!b.disabled)`));
   };
   await prepare();await click('Cancel');await idle();assert.equal(await evaluate('sdrFiles.size'),saved.count);
-  // Cancel the actual destination after a complete candidate; publish no bytes.
-  await evaluate(`window.sdrCopyPicker=showSaveFilePicker;window.showSaveFilePicker=async()=>{throw new DOMException('Cancelled','AbortError')}`);
-  await prepare();await click('Save Copy…');await idle();assert.equal(await evaluate('sdrFiles.size'),saved.count);
-  assert.equal(await evaluate('layerApp.state().host_error??null'),null);
-  await evaluate('window.showSaveFilePicker=sdrCopyPicker');
-  await prepare();await click('Save Copy…');await idle();
-  const copyName=saved.file.location.name.replace(/\.[^.]+$/,'')+' converted.capy';
+  await prepare();await click(createLabel);await idle();
+  await wait(`String(layerApp.app.document_tabs(0).selected)!==${JSON.stringify(saved.selected)}&&layerApp.app.document_color().space==='Srgb'`);
+  assert.equal(await evaluate('sdrFiles.size'),saved.count,'creating a copy does not ask a save destination or publish bytes');
+  assert.equal(await evaluate('layerApp.app.document_tabs(0).tabs.length'),saved.tabs+1);
+  assert.equal(await evaluate('layerApp.state().document_file.location??null'),null);
+  await invoke('save_document_as');await idle();
+  const copyName=await evaluate('layerApp.state().document_file.location.name');
   const copied=await readPackage(evaluate,`sdrFiles.get(${JSON.stringify(copyName)})`);
   assert.deepEqual(compositionColor(copied),{space:'srgb',depth:saved.color.depth.toLowerCase()});
   assert.equal(packageOccurrences(copied).length,1);assert.equal(packageObject(copied,packageOccurrences(copied)[0].data.content.paint).data.base.policy,'working_pixels');
-  const current=await evaluate('JSON.parse(JSON.stringify(layerApp.state().document_file,(_,v)=>typeof v==="bigint"?Number(v):v))');
-  for(const key of ['epoch','revision','modified','location'])assert.deepEqual(current[key],saved.file[key]);
-  await invoke('save_document_as');await idle();
-  const master=await readPackage(evaluate,`sdrFiles.get(${JSON.stringify(saved.file.location.name)})`);
-  assert.deepEqual(compositionColor(master),wireColor(saved.color));
   assert.deepEqual(packageComposition(copied).data.size,packageComposition(master).data.size);
   assert.deepEqual(packageComposition(copied).data.resolution,packageComposition(master).data.resolution);
+  await evaluate(`layerApp.documents.select(BigInt(${JSON.stringify(saved.selected)}))`);await idle();
+  const current=await evaluate('JSON.parse(JSON.stringify(layerApp.state().document_file,(_,v)=>typeof v==="bigint"?Number(v):v))');
+  for(const key of ['revision','modified','location'])assert.deepEqual(current[key],saved.file[key]);
+  assert.deepEqual(await evaluate('layerApp.app.document_color()'),saved.color);
   await evaluate(`window.sdrCopy=sdrFiles.get(${JSON.stringify(copyName)});window.showOpenFilePicker=async()=>[{name:'converted.capy',async getFile(){return new File([sdrCopy],'converted.capy')}}]`);
   await invoke('open_document');await idle();await invoke('save_document_as');await idle();
   const reopened=await readPackage(evaluate,'sdrFiles.get("converted.capy")');assert.deepEqual(sourceIdentity(reopened),sourceIdentity(copied));assert.deepEqual(packageResourceIdentity(reopened),packageResourceIdentity(copied));
-  console.log('Flattened full-composition conversion, preview/copy-picker cancellation, native copy reopen, preserved extent/precision and unchanged master checkpoints passed');
+  console.log('Flattened conversion opens a new drawing, keeps master unchanged, and preserves extent/precision through explicit save/reopen');
 }
 
 

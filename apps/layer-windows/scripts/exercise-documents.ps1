@@ -1,7 +1,8 @@
-﻿param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu,[ValidateSet('full','new-drawing')][string]$Journey='full')
+﻿param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu,[ValidateSet('full','new-drawing','color-workflows','color-workflows-light')][string]$Journey='full')
 if($RecoverGpu -and $FailGpu){throw "Choose successful recovery or exhausted recovery, not both"}
 if($Journey -ne 'full' -and ($RecoverGpu -or $FailGpu)){throw 'GPU recovery requires the full document journey'}
 $ErrorActionPreference='Stop'
+$focusedColor=$Journey.StartsWith('color-workflows')
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs') -ReferencedAssemblies @(
@@ -67,6 +68,7 @@ $env:CAPY_SMOKE_TEST='1'
 $env:CAPY_TEST_DISPLAY='1'
 $env:CAPY_TEST_PRIMARY='1'
 $stderr=Join-Path $run 'stderr.log'
+if($focusedColor){[IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$(if($Journey.EndsWith('-light')){'light'}else{'dark'})}|ConvertTo-Json -Depth 4))}
 $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
 $null=$review.Handle
 [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
@@ -126,7 +128,7 @@ function Choose-Item($Item) {
     elseif($Item.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){$pattern.Select()}
     else{$Item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()}
 }
-function Control([string]$Name,$Type=[System.Windows.Automation.ControlType]::Button) {
+function Named-Control([string]$Name,$Type=[System.Windows.Automation.ControlType]::Button) {
     $script:found=$null;Wait-Until {$script:found=Find-Name $Name $Type;$null -ne $script:found} "Missing control: $Name";$script:found
 }
 function Invoke-Control([string]$Name) {
@@ -398,11 +400,11 @@ function Confirm-Dialog {
         $request.value.Count -eq 1
     } 'Missing shared unsaved request'
     $title=$request.value[0].kind.request.title
-    $script:scope=Control $title ([System.Windows.Automation.ControlType]::Window)
+    $script:scope=Named-Control $title ([System.Windows.Automation.ControlType]::Window)
 }
 function Picker([string]$Name) {
     $script:scope=$root
-    $script:scope=Control $Name ([System.Windows.Automation.ControlType]::Window)
+    $script:scope=Named-Control $Name ([System.Windows.Automation.ControlType]::Window)
     if($scope.Current.ClassName -ne '#32770' -or $scope.Current.ProcessId -ne $review.Id){throw 'Picker does not belong to the isolated review'}
 }
 function Picker-Button([string]$Id) {
@@ -559,13 +561,14 @@ function Draw {
     if(!$ink){throw 'Controlled stroke has no raster ink layer'}
     $paint=$ink.id
     if((Model).state.layer_tools.editing_layer.id -ne $paint){
-        (Find-Id "layer-$paint-content").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Control "layer-$paint-content" -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paint} 'Ink layer did not select'
     }
     if(!(Model).state.layer_tools.controls.alpha_lock){throw 'Controlled stroke target is not editable paint'}
     if(!((Model).state.commands|Where-Object id -eq 'pen').selected){
         $tile=@((Model).panels|Where-Object id -eq 'toolbar')[0].tiles|Where-Object {$_.resolved_control.command -eq 'pen'}|Select-Object -First 1
-        (Find-Id "tile-toolbar-$($tile.id)").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        if(!$tile){throw 'The shared toolbar has no Pen command tile'}
+        (Control "tile-toolbar-$($tile.id)" -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     }
     Wait-Until {(Model).brush_ready -and ((Model).state.commands|Where-Object id -eq 'pen').selected} 'Pen did not become ready' 45
     if((Model).state.layer_tools.mask_editing -or (Model).state.layer_tools.quick_mask -or (Model).state.layer_tools.editing_layer.mask_selected){throw 'Controlled stroke is editing a mask'}
@@ -573,7 +576,7 @@ function Draw {
     $channel=(.02+.02*$script:drawIndex).ToString('R',[Globalization.CultureInfo]::InvariantCulture)
     $colorTile=((Model).panels|Where-Object id -eq 'toolbar').tiles|Where-Object {$_.control.kind -eq 'color'}|Select-Object -First 1
     if(!$colorTile){throw 'Controlled stroke has no color toolbar tile'}
-    (Find-Id "tile-toolbar-$($colorTile.id)").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Control "tile-toolbar-$($colorTile.id)" -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {Find-Id 'tool-drawer'} 'Controlled ink drawer did not open'
     (Control 'color-foreground' -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {(Model).state.colors.slot -eq 'foreground'} 'Foreground paint did not select'
@@ -592,7 +595,7 @@ function Draw {
     (Control 'edit-color-apply').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {$definition=(Model).paint_pair.definition;$definition.linear_rgb -and [Math]::Abs($definition.linear_rgb[1]-[double]$channel) -lt .000001 -and $definition.rgba[3] -eq 1} 'Controlled ink color did not publish'
     Wait-Until {!(Find-Id 'edit-color-apply')} 'Controlled ink editor did not close'
-    (Find-Id "tile-toolbar-$($colorTile.id)").GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Control "tile-toolbar-$($colorTile.id)" -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {!(Find-Id 'tool-drawer')} 'Controlled ink drawer did not close'
     $revision=(Model).state.document_file.revision
     Invoke-Control 'Test pen'
@@ -628,13 +631,23 @@ function Test-LightNewDrawing {
     Bind-ReviewWindow 'No light review window'
     Wait-Until {$model=Model;$model.brush_ready -and $model.state.theme -eq 'light'} 'Light review did not start' 45
     New-Journey 'light'
+    if($Journey -eq 'full'){Color-Workflows}
     Request-Close;Wait-Closed 'Light review close did not finish'
     if((Get-Item -LiteralPath $stderr).Length){throw 'Light native review reported stderr'}
 }
 Bind-ReviewWindow 'No review window'
 Wait-Until {(Model).brush_ready} 'Canvas startup did not finish' 45
 if(!(Model).windows_isolated_settings){throw 'Review must use an isolated profile'}
-New-Journey 'dark' -Full
+if($focusedColor){
+    Open-NewDrawing
+    Pick-Choice 'new-drawing-unit' (Value-Index (Drawing).units 'px')
+    if((Drawing).linked){Press 'new-drawing-link';Wait-Until {!(Drawing).linked} 'Focused drawing did not unlink its dimensions'}
+    Type-Text 'document-width' '128' -Commit;Type-Text 'document-height' '96' -Commit
+    Type-Text 'new-drawing-name' 'Workflow study'
+    Wait-Until {(Drawing).name -eq 'Workflow study' -and (Drawing).values[0] -eq 128 -and (Drawing).values[1] -eq 96} 'Focused drawing setup did not acknowledge its values'
+    $count=@((Model).windows_tabs.tabs).Count;Press 'new-drawing-create'
+    Wait-Until {$model=Model;!$model.state.new_drawing -and @($model.windows_tabs.tabs).Count -eq $count+1 -and !$model.state.document_file.busy} 'Focused drawing did not open' 60
+}else{New-Journey 'dark' -Full}
 if($Journey -eq 'new-drawing'){
     Request-Close;Wait-Closed 'New drawing review close did not finish'
     if((Get-Item -LiteralPath $stderr).Length){throw 'New drawing native review reported stderr'}
@@ -648,6 +661,66 @@ function Combo-Select($Combo,[scriptblock]$Pick){
     $hit=@{item=$null};Wait-Until {$hit.item=@($Combo.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ListItem))|Where-Object $Pick)[0];$hit.item} 'Missing drop-down choice'
     $hit.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+}
+
+
+function Color-Command([string]$Id){
+    $script:scope=$root
+    Wait-Until {((Model).state.commands|Where-Object id -eq $Id).enabled} "Color command stayed disabled: $Id" 45
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Image'
+    $menu=Named-Control 'Color Management' ([System.Windows.Automation.ControlType]::MenuItem)
+    $menu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    Wait-Until {$item=Find-Id $Id;$item -and $item.Current.IsEnabled} "Color command did not open: $Id"
+    (Find-Id $Id).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+function Color-Preview([string]$Space,[switch]$Copy){
+    Wait-Until {$view=(Model).windows_document;$view.kind -eq 'convert' -and $view.stage -eq 'preview' -and !$view.error -and $view.details.result.space -eq $Space -and [bool]$view.details.copy -eq [bool]$Copy} 'Automatic color comparison did not settle on the latest choice' 60
+    $confirm=if($Copy){(Model).windows_document.details.feature_copy.color.create_copy}else{'Apply'}
+    Wait-Until {$dialog=Find-Id 'document-workflow';$dialog -and (Find-Name $confirm).Current.IsEnabled} 'Completed comparison did not enable its commit action'
+}
+function Color-Workflows {
+    $script:scope=$root;$before=Model;$original=$before.windows_tabs.selected;$count=@($before.windows_tabs.tabs).Count
+    $layers=$before.state.layers|ConvertTo-Json -Depth 40 -Compress;$file=$before.state.document_file|Select-Object revision,modified,location,unsaved_name,epoch|ConvertTo-Json -Depth 20 -Compress
+    Color-Command 'convert_color_space'
+    Wait-Until {$view=(Model).windows_document;$view.kind -eq 'convert' -and $view.stage -eq 'preview'} 'Color comparison did not start automatically' 60
+    foreach($space in @('Display P3','sRGB','Display P3')){Combo-Select (Owned 'document-profile-choice') {$_.Current.Name -eq $space}}
+    Color-Preview 'DisplayP3'
+    if(((Model).state.document_file|Select-Object revision,modified,location,unsaved_name,epoch|ConvertTo-Json -Depth 20 -Compress) -ne $file){throw 'Comparison choices edited the original drawing'}
+    Invoke-Control 'Cancel';Wait-Until {!(Model).windows_document -and !@((Model).state.requests).Count} 'Comparison Cancel did not drain the worker'
+    Color-Command 'convert_color_space'
+    Wait-Until {(Find-Id 'document-profile-choice')} 'Color choices did not reopen'
+    Combo-Select (Owned 'document-profile-choice') {$_.Current.Name -eq 'Display P3'}
+    Color-Preview 'DisplayP3'
+    $caption=(Model).windows_document.details.feature_copy.color.create_flattened
+    Choose-Item (Named-Control $caption ([System.Windows.Automation.ControlType]::CheckBox))
+    Color-Preview 'DisplayP3' -Copy
+    Capture ('automatic-color-copy-preview-'+(Model).state.theme) -WithModel
+    Invoke-Control (Model).windows_document.details.feature_copy.color.create_copy
+    Wait-Until {$view=Model;!$view.windows_document -and !$view.state.document_file.busy -and @($view.windows_tabs.tabs).Count -eq $count+1 -and $view.windows_tabs.selected -ne $original} 'Flattened conversion did not open a new drawing' 60
+    if(!@((Model).windows_tabs.tabs|Where-Object id -eq $original).Count){throw 'Flattened copy removed its source drawing'}
+    $modified=(Model).state.document_file.modified
+    File-Command 'close_document'
+    if($modified){Confirm-Dialog;Invoke-Control 'Discard Changes';$script:scope=$root}
+    Wait-Until {$view=Model;!$view.windows_document -and @($view.windows_tabs.tabs).Count -eq $count -and $view.windows_tabs.selected -eq $original} 'Closing the copy did not restore its source drawing' 60
+    if(((Model).state.layers|ConvertTo-Json -Depth 40 -Compress) -ne $layers){throw 'Flattened copy changed source layers'}
+    File-Command 'document_properties'
+    Wait-Until {(Model).windows_document.kind -eq 'properties'} 'Document Properties did not open'
+    $appearance=Control 'PrimaryButton' -Within (Control 'document-workflow') -Arranged
+    if($appearance.Current.Name -ne (Model).windows_document.details.proof){throw 'Properties primary action is not Appearance'}
+    $appearance.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Wait-Until {(Model).windows_document.kind -eq 'proof' -and (Find-Id 'proof-profile')} 'Properties Appearance did not open proof setup'
+    Invoke-Control 'Cancel';Wait-Until {!(Model).windows_document -and !@((Model).state.requests).Count} 'Appearance cancellation did not close'
+}
+if(!$FailGpu){Color-Workflows}
+if($focusedColor){
+    $moveTile=@((Model).panels|Where-Object id -eq 'toolbar')[0].tiles|Where-Object {$_.resolved_control.command -eq 'move'}|Select-Object -First 1
+    if(!$moveTile){throw 'The shared toolbar has no Move command tile'}
+    (Control "tile-toolbar-$($moveTile.id)" -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Wait-Until {((Model).state.commands|Where-Object id -eq 'move').selected} 'Move did not acknowledge before the controlled Pen switch'
+    Draw;Capture ('color-workflows-'+(Model).state.theme) -WithModel
+    Request-Close;Wait-Closed 'Focused workflow drawing did not close'
+    @{journey=$Journey;automatic_comparison_cancel_latest_choice='passed';flattened_copy_new_drawing_and_source_retention='passed';properties_appearance='passed';controlled_move_to_pen_color_and_stroke='passed';evidence=$run}|ConvertTo-Json
+    return
 }
 
 # Exercise the actual native image picker, including a focused numeric draft.
@@ -893,15 +966,15 @@ Fail-Gpu
 if($FailGpu){File-Command 'save_document_as';Picker 'Save As';Picker-Button '2';Idle}
 $script:scope=$root
 & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Edit'
-(Control 'Preferences' ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-$script:scope=Control 'Preferences' ([System.Windows.Automation.ControlType]::Window)
+(Named-Control 'Preferences' ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+$script:scope=Named-Control 'Preferences' ([System.Windows.Automation.ControlType]::Window)
 $custom=@{item=$null};Wait-Until {
     $custom.item=@($scope.FindAll([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Custom'))|Where-Object {$_.Current.AutomationId -like 'setting-dark_base-swatch-*'})[0]
     $null -ne $custom.item
 } 'Missing custom dark base swatch'
 $custom.item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-$entry=Control 'Dark theme base color' ([System.Windows.Automation.ControlType]::Edit)
+$entry=Named-Control 'Dark theme base color' ([System.Windows.Automation.ControlType]::Edit)
 $entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('#223344')
 Request-Close -WithPreferences
 Wait-Closed 'Session close did not finish'
@@ -971,6 +1044,8 @@ if($FailGpu){
     gpu_failure_save=if($FailGpu){'Save/Save As, committed raster preservation and queued contact cancellation, Cancel, Discard, durable reopen and identical exported pixels passed'}else{'not requested'}
     new_drawing_presets_paper_color_size_name_and_cancel='passed'
     new_drawing_captures=if(!$RecoverGpu -and !$FailGpu){'dark and light'}else{'dark'}
+    automatic_color_comparison_cancel_latest_choice_and_copy=if($FailGpu){'not requested without GPU'}else{'passed'}
+    properties_appearance=if($FailGpu){'not requested without GPU'}else{'passed'}
     image_picker_draft_cancel_and_error_recovery='passed'
     image_layer_thumbnail_undo_redo_and_embedded_reopen='passed'
     package_view_copy_export_and_close='passed'
@@ -987,6 +1062,11 @@ if($FailGpu){
     untitled_close_picker_cancel_and_discard='passed'
     scope='isolated native controls and pickers; controlled stroke replay, not physical pen or cadence acceptance'
 }|ConvertTo-Json
+} catch {
+    $failure=$_
+    [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($failure|Format-List * -Force|Out-String)+"`n"+$failure.ScriptStackTrace+"`n"+($failure.InvocationInfo|Format-List * -Force|Out-String))
+    if($review -and !$review.HasExited -and $root){try{Capture 'failure' -WithModel}catch{}}
+    throw
 } finally {
     Exit-CapyEnvironment
 }

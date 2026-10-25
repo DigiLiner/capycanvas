@@ -136,7 +136,8 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
         val hidden = snapshot.optBoolean("chrome_hidden")
         val capyVisible = snapshot.objectOrNull("preferences") == null && (snapshot.optBoolean("keep_zen_button") || (!hidden && !editing && geometry?.isNull("capy_item") == false))
         ZenButton(host, snapshot, input.dock, geometry?.objectOrNull("zen_button")?.takeIf { capyVisible }, size)
-        if (hidden) return@BoxWithConstraints
+        CompositionLocalProvider(LocalWorkspaceVisible provides !hidden) {
+        ZenChrome(!hidden,Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().height(height.dp).testTag("title-bar").chromeRegion(input.dock, header = true)
             .headerSource(input, obj("kind" to "background"), host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("title_bar"), -1).headerChrome())
         // Keep existing item nodes at their prior positions while the native
@@ -237,6 +238,8 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
                 else WorkspaceMenu(host, menu, copy = { host.menuCopy(obj("type" to "application_menu", "menu" to "primary")) }) { overflowMenu = null }
             }
         }
+        }
+        }
     }
     }
 }
@@ -256,7 +259,8 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
     val item = entry.getJSONObject("item")
     val kind = item.getString("kind")
     val anchor = obj("kind" to "header", "id" to id)
-    val activate=pickerClick(host,spec.objectOrNull("resolved_control"),anchor) { activateHeader(host,entry) }
+    val activation=pickerClick(host,spec.objectOrNull("resolved_control"),anchor) { activateHeader(host,entry) }
+    val activate=activation.click
     val colors = LocalPalette.current
     val label = spec.getString("label")
     val focus = remember { FocusRequester() }
@@ -292,7 +296,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
         onDispose { if (ownsPopup) input.dock.popup(false) }
     }
     val open = input.dock.drawerSources["tool"]?.anchor?.let { it.optString("kind") == "header" && it.optInt("id") == id } == true
-    Row(modifier.alpha(if (!editing && !spec.optBoolean("enabled")) .4f else 1f).testTag("header-item-$id").headerSource(input, obj("kind" to "item", "value" to id), label, 1,
+    Row(modifier.then(if(editing) Modifier else activation.modifier).alpha(if (!editing && !spec.optBoolean("enabled")) .4f else 1f).testTag("header-item-$id").headerSource(input, obj("kind" to "item", "value" to id), label, 1,
             context = if (kind == "workspaces") ({ host.workspaceManager?.optJSONObject("switcher_options") }) else null)
         .onPreviewKeyEvent { event ->
             val key = event.nativeKeyEvent

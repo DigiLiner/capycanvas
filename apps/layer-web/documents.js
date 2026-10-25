@@ -3,7 +3,7 @@ import {createDrawingTabs} from './drawing-tabs.js';
 import {createDocumentRecovery} from './document-recovery.js';
 import {chooseDocumentColor} from './document-color.js';
 import {createProof} from './proof.js';
-import {chooseExport,chooseSourceProfile} from './export-controls.js';
+import {chooseExport,chooseSourceProfile,localizeProfileLibraries} from './export-controls.js';
 
 export const exportFormats={
   Exr:["exr","image/x-exr"],
@@ -235,34 +235,22 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
         const info=await app.document_properties();
         if(!app.state().requests.some(request=>request.id===id))return;
         let view=app.document_properties_copy(info);
-        await dialog(()=>view.title,(form,finish)=>{
+        const appearance=await dialog(()=>view.title,(form,finish)=>{
           for(const section of ['rows','sources'])for(const [index]of view[section].entries())form.append(element("h3","",()=>view[section][index][0]),element("p","source-details",()=>view[section][index][1]));
           form.localize=()=>{view=app.document_properties_copy(info);};
-          form.append(button(()=>view.done,()=>finish(true)));
+          form.append(button(()=>view.proof,()=>finish(true)),button(()=>view.done,()=>finish(false)));
         });
         applyChange(app.finish_document(id,true));
+        if(appearance)proof.run(id);
       } else if(["change_color","color_history","repair_source_profile","rasterize_source"].includes(r.type)) {
         candidate=await chooseDocumentColor({app,dialog,element,button,gpuOperation,request:r,id});
         if(candidate?.is_copy?.()) {
-          const master=app.state().document_file.location;
-          const target=await destination({name:deliveryMessage("converted_name",{name:(master?.name??app.document_tabs(0).tabs.find(t=>String(t.id)===String(app.document_tabs(0).selected)).title).replace(/\.[^.]+$/,"")})});
-          if(!target.location.name.toLowerCase().endsWith(".capy"))throw deliveryFailure("converted_filename_invalid");
-          const original=handles.get(master?.uri);
-          if(original&&target.handle&&await original.isSameEntry?.(target.handle))throw deliveryFailure("choose_different");
-          const progress=element("aside","file-progress");progress.setAttribute("role","status");
-          let cancelled=false,phase="preparing_converted_copy";const caption=()=>delivery[phase],label=element("span","",caption);
-          progress.append(label,button(()=>common.cancel,()=>{cancelled=true;phase="cancelling";bindCopy(label,caption);candidate.cancel();}));document.body.append(progress);
-          let output;
-          try {
-            output=await app.save_color_copy(candidate);const bytes=output.blob;
-            if(cancelled)throw new DOMException("Converted copy cancelled","AbortError");
-            phase="writing_converted_copy";bindCopy(label,caption);progress.querySelector("button").disabled=true;
-            let success;
-            if(target.handle){const stream=await target.handle.createWritable();try{await stream.write(bytes);await stream.close();success=true;}catch(error){try{await stream.abort();}catch{}throw error;}}
-            else success=!!await download(bytes,target.location.name,"application/octet-stream");
-            applyChange(app.finish_document(id,success));
-          } catch(error){if(cancelled)throw new DOMException("Converted copy cancelled","AbortError");throw error;}
-          finally{progress.remove();if(output)await rasterWorker({operation:"output-close",metadata:output.token,buffers:[]}).catch(error=>message(String(error)));}
+          const prepared=await gpuOperation(()=>app.prepare_color_copy(candidate));
+          candidate.free();candidate=null;
+          applyChange(app.finish_document(id,true));
+          let pending=prepared;
+          try {await transition(()=>{const next=pending;pending=null;applyChange(app.adopt_document(next,null));});}
+          finally {pending?.free();}
         } else if(candidate){const prepared=candidate;candidate=null;applyChange(["repair_source_profile","rasterize_source"].includes(r.type)?app.adopt_source(prepared):app.adopt_color(prepared));wake();}
         else applyChange(app.finish_document(id,false));
       } else if(r.type==="import_lookup") {
@@ -531,7 +519,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     return tabs.key(event);
   },allowNativePaste,select,close,openFiles,busy:()=>changing||batching||closing||active.size>0,
     interactionBusy:()=>changing||batching||closing||active.size>0&&app.state().requests.some(request=>active.has(request.id)),showSelector:tabs.showSelector,
-    mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();newDrawing.localize();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,loadPapers:()=>runPaper(undefined),refresh(){
+    mountProof:proof.mount,localize(){localizeProfileLibraries();for(const form of openDialogs)form.localize?.();newDrawing.localize();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,loadPapers:()=>runPaper(undefined),refresh(){
     proof.sync();tabs.refresh();newDrawing.refresh();
     const requests=new Set(app.state().requests.map(request=>request.id));
     if(nativePending&&!requests.has(nativePending.id))finishNativePaste();

@@ -240,6 +240,8 @@ Restore Starting Layout…; and Reset All Brushes…. Captions come from
   shows or hides the workspace in the top bar.
   The current workspace starts selected with Switch disabled; a workspace owned
   by another window offers Switch to Window.
+  More than seven entries reveal the shared workspace search control on every
+  host; filtering keeps the selected workspace and preview ownership intact.
 - Selecting a row, double-clicking or pressing Enter in the manager or Layout
   History only previews the arrangement in the editor behind the dialog. The
   confirming button commits; the preview stays presented until the adopted

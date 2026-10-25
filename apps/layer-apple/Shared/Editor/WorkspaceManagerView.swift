@@ -108,7 +108,7 @@ struct WorkspaceManagerView: View {
                 Text(view["intro"].string)
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if toolbarMode { HStack {
+            if toolbarMode || view["rows"].array.count > 7 || !query.isEmpty { HStack {
                 TextField(header["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
                     .onChange(of: query) { _, value in workspaces.search(value) }.accessibilityIdentifier("workspace-manager-search")
                 if workspaces.page == "this_workspace" {
@@ -220,6 +220,7 @@ private struct WorkspaceManagerButtonStyle: ButtonStyle {
 }
 
 private struct WorkspaceManagerForm: View {
+    @Environment(\.capyInterfaceLanguage) private var language
     @Environment(\.capyCommonCopy) private var common
     @Environment(\.capyNativeCopy) private var nativeCopy
     @ObservedObject var workspaces: WorkspaceController
@@ -240,7 +241,7 @@ private struct WorkspaceManagerForm: View {
                     ForEach(spec["choices"].array, id: \.managerID) { choice in Text(choice["label"].string).tag(choice["id"].string) }
                 }.accessibilityIdentifier("workspace-form-choice")
             }
-            if let error = workspaces.error { Text(error).foregroundStyle(.red).accessibilityIdentifier("workspace-form-error") }
+            if let error = workspaces.nameError ?? workspaces.error { Text(error).foregroundStyle(.red).accessibilityIdentifier("workspace-form-error") }
             Spacer(minLength: 16)
             HStack {
                 Spacer()
@@ -248,10 +249,13 @@ private struct WorkspaceManagerForm: View {
                     .accessibilityIdentifier("workspace-form-cancel")
                 Button(spec["confirm"].string, role: spec["destructive"].bool ? .destructive : nil) { workspaces.submit() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(workspaces.busy || !spec["name"].isNull && workspaces.formName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(workspaces.busy || workspaces.validatingName || workspaces.nameError != nil)
                     .accessibilityIdentifier("workspace-form-confirm")
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-form")
+            .onChange(of: workspaces.formName, initial: true) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+            .onChange(of: spec.stableKey) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
+            .onChange(of: language) { _, _ in workspaces.validateName(required: !spec["name"].isNull) }
     }
 }
 

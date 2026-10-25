@@ -14,7 +14,7 @@ use layer_ui::{
     ColorPreparation, ColorWorkflow, DocumentRequest, HostRequestKind, SourceWorkflow, UiSession,
 };
 use serde_json::{Value, json};
-use std::{io::Write, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 /// Straight-alpha RGBA8 bytes encoded in the task's UI space.
 pub struct Preview {
@@ -231,11 +231,12 @@ impl ColorTask {
         })
     }
 
-    pub fn write_copy(&self, mut stream: impl Write, cancelled: bool) -> Result<(), String> {
-        let capture = capture_document_at(self.workflow.copy_project(cancelled)?, self.workflow.context.clone());
-        let cancel = std::sync::atomic::AtomicBool::new(cancelled);
-        let preview = self.gpu.package_preview(&capture, &cancel);
-        layer_core::package::codec::PreparedPackage::prepare(&capture, preview, &cancel)?.write(&mut stream, &cancel)
+    pub fn validate(&self, host: &NativeHost, cancelled: bool) -> Result<(), String> {
+        self.workflow.identity.validate(&host.session, cancelled, device_current(&host.session, &self.device))
+    }
+
+    pub fn copy_document(&self, cancelled: bool) -> Result<layer_core::Document, String> {
+        self.workflow.copy_project(cancelled).cloned()
     }
 
     /// Publishes the prepared renderer, document and history in one owner turn.

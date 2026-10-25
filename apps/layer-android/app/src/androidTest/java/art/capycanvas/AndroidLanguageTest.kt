@@ -748,7 +748,6 @@ class AndroidLanguageTest {
                 println("PROFILE_FIXTURE nameless ICC source adopted and Rasterize Source enabled")
                 host.drain(obj("type" to "invoke", "command" to "rasterize_source"))
                 val copy = host.catalog.getJSONObject("document_color_copy")
-                compose.onNodeWithText(copy.getString("preview")).performScrollTo().performClick()
                 val sourceCaption = expected(entry).getString("name")
                 host.awaitMain("nameless source prepared", 60_000, { state().toString() }, compose) { findNode({ it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(copy.getString("prepared_composition")) == true }) != null && visible(sourceCaption) }
                 val prepared = findNode({ it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(copy.getString("prepared_composition")) == true })!!.first.view
@@ -805,8 +804,7 @@ class AndroidLanguageTest {
                             compose.onNodeWithTag("color-choice-${copy.getString("result")}").performScrollTo().performClick()
                             compose.onNodeWithText(copy.getString("flattened_copy")).performClick()
                         }
-                        compose.onNodeWithText(copy.getString("preview")).performScrollTo().performClick()
-                        host.awaitMain("prepared comparison", 60_000, { state().toString() }, compose) {
+                                host.awaitMain("prepared comparison", 60_000, { state().toString() }, compose) {
                             findNode({ it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(copy.getString("prepared_composition")) == true }) != null
                         }
                         val nativeView = findNode({ it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(copy.getString("prepared_composition")) == true })!!.first.view

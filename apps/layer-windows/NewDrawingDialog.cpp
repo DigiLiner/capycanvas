@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "NewDrawingDialog.h"
+#include "WorkflowMotion.h"
 #include "ColorEditor.h"
 #include "TextureDialog.h"
 #include "PickerDialog.h"
@@ -128,6 +129,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
     TextBox search,saveName;
     ScrollViewer tabScroll;
     StackPanel tabs,summaryText,summaryTop,actions,saveRow;
+    std::shared_ptr<WorkflowPages> footerPages=std::make_shared<WorkflowPages>();
     Grid presetGrid,summary;
     TextBlock empty,summaryName,summarySize,summaryDetails,paperTitle,colorTitle,paletteTitle,paletteCount;
     SheetArt summaryArt;
@@ -479,7 +481,7 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         saveConfirm=primary(L"new-drawing-save-confirm",0,sends(op(L"save_preset")));
         saveRow.Orientation(Orientation::Horizontal);saveRow.Spacing(8);saveRow.Visibility(Visibility::Collapsed);
         for(FrameworkElement node:{FrameworkElement(saveName),FrameworkElement(saveGroup),FrameworkElement(saveCancel),FrameworkElement(saveConfirm)})saveRow.Children().Append(node);
-        Grid buttons;buttons.Children().Append(actions);buttons.Children().Append(saveRow);Grid::SetColumn(buttons,1);presetsDrawer.footer.Children().Append(buttons);
+        footerPages->append(actions);footerPages->append(saveRow);Grid::SetColumn(footerPages->root,1);presetsDrawer.footer.Children().Append(footerPages->root);
     }
     void buildPaper(){
         auto weak=weak_from_this();
@@ -835,15 +837,15 @@ struct NewDrawingDialog::Impl:std::enable_shared_from_this<Impl>{
         pickerLabel(saveAs,str(view,L"save_label"));select.IsEnabled(flag(view,L"can_select"));
         auto saveValue=view.GetNamedValue(L"save",JsonValue::CreateNullValue());
         bool saving=saveValue.ValueType()==JsonValueType::Object;
-        bool starting=saving&&saveRow.Visibility()!=Visibility::Visible;
-        actions.Visibility(saving?Visibility::Collapsed:Visibility::Visible);saveRow.Visibility(saving?Visibility::Visible:Visibility::Collapsed);
-        if(!saving)return;
+        bool starting=saving&&footerPages->selected!=1;
+        if(!saving){footerPages->show(0);return;}
         auto save=saveValue.GetObject();
         items(saveGroup,groupsKey,array(save,L"groups"),labelOf,valued(save.GetNamedValue(L"group")),L"new-drawing-save-group");
         if(saveName.Text()!=str(save,L"name")&&(starting||saveName.FocusState()==FocusState::Unfocused))saveName.Text(str(save,L"name"));
         pickerLabel(saveConfirm,str(save,L"confirm"));
         bool valid=flag(save,L"can_save");saveConfirm.IsEnabled(valid);
         saveName.BorderThickness(valid?Thickness{0}:Thickness{1,1,1,1});saveName.BorderBrush(fill(Problem));
+        footerPages->show(1);
         if(starting){saveName.Focus(FocusState::Programmatic);saveName.SelectAll();}
     }
     void fillPresets(A const& tiles){

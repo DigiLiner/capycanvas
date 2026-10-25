@@ -46,16 +46,15 @@ extension XCTestCase {
         expectation(for:NSPredicate(format:"label CONTAINS %@ OR value CONTAINS %@",drawingName,drawingName),evaluatedWith:title)
         waitForExpectations(timeout:30)
         let initialCount=rows.count,original=editorPixels(in:app)
-        let preview=app.buttons["document-color-preview"],apply=app.buttons["document-color-apply"]
+        let apply=app.buttons["document-color-apply"]
         func compare() {
-            workspaceActivate(preview)
             expectation(for:NSPredicate(format:"enabled == YES"),evaluatedWith:apply);waitForExpectations(timeout:90)
             XCTAssertTrue(app.staticTexts["Before"].exists && app.staticTexts["After"].exists)
         }
         command("Repair Source Profile…")
         workspaceActivate(app.buttons["source-profile-import"])
         XCTAssertTrue(open.waitForExistence(timeout:15));app.typeKey(XCUIKeyboardKey.escape.rawValue,modifierFlags:[])
-        XCTAssertTrue(open.waitForNonExistence(timeout:10));XCTAssertTrue(preview.exists)
+        XCTAssertTrue(open.waitForNonExistence(timeout:10));XCTAssertTrue(apply.exists)
         workspaceActivate(app.buttons["source-profile-import"]);chooseFile(profile)
         let picker=app.popUpButtons["photo-profile-space"]
         expectation(for:NSPredicate(format:"value CONTAINS %@","P3"),evaluatedWith:picker);waitForExpectations(timeout:20)
@@ -67,11 +66,11 @@ extension XCTestCase {
         workspaceActivate(app.buttons["source-profile-import"]);chooseFile(alternate)
         expectation(for:NSPredicate(format:"value CONTAINS %@","sRGB"),evaluatedWith:picker);waitForExpectations(timeout:20)
         XCTAssertFalse(apply.isEnabled);compare()
-        workspaceActivate(app.windows.buttons["Cancel"].firstMatch);XCTAssertTrue(preview.waitForNonExistence(timeout:10))
+        workspaceActivate(app.windows.buttons["Cancel"].firstMatch);XCTAssertTrue(apply.waitForNonExistence(timeout:10))
         XCTAssertEqual(editorPixels(in:app),original)
         command("Repair Source Profile…");workspaceActivate(app.popUpButtons["photo-profile-space"])
         workspaceActivate(app.menuItems["Display P3"].firstMatch);compare();workspaceActivate(apply)
-        XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         expectation(for:NSPredicate { _,_ in self.editorPixels(in:app) != original },evaluatedWith:app);waitForExpectations(timeout:20)
         let repaired=editorPixels(in:app)
         editorHistory("Undo",in:app)
@@ -82,10 +81,10 @@ extension XCTestCase {
         command("Repair Source Profile…");workspaceActivate(app.popUpButtons["photo-profile-space"])
         workspaceActivate(app.menuItems["ProPhoto RGB"].firstMatch);compare()
         XCTAssertEqual(apply.label,"Add Corrected Source");attachEditor(in:app,name:"source-repair-preserves-painted-layer")
-        workspaceActivate(apply);XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        workspaceActivate(apply);XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         expectation(for:NSPredicate(format:"count == %d",initialCount+1),evaluatedWith:rows);waitForExpectations(timeout:15)
         command("Rasterize Source…");compare();attachEditor(in:app,name:"source-rasterize-comparison")
-        XCTAssertEqual(apply.label,"Rasterize");workspaceActivate(apply);XCTAssertTrue(preview.waitForNonExistence(timeout:30))
+        XCTAssertEqual(apply.label,"Rasterize");workspaceActivate(apply);XCTAssertTrue(apply.waitForNonExistence(timeout:30))
         let rasterize=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","toolbar-tile-commands-","Rasterize Source…")).firstMatch
         XCTAssertFalse(rasterize.isEnabled);editorHistory("Undo",in:app)
         expectation(for:NSPredicate(format:"enabled == YES"),evaluatedWith:rasterize);waitForExpectations(timeout:20)

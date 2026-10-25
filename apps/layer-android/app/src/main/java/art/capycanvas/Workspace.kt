@@ -3,6 +3,18 @@ package art.capycanvas
 import android.view.PointerIcon as AndroidPointerIcon
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
@@ -38,6 +50,8 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -68,6 +82,43 @@ internal suspend fun CanvasHost.awaitQuery(query: JSONObject): JSONObject? = sus
 internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offset {
     IntOffset((rect.number("x") * density).roundToInt(), (rect.number("y") * density).roundToInt())
 }.size(rect.number("width").coerceAtLeast(0f).dp, rect.number("height").coerceAtLeast(0f).dp)
+
+internal suspend fun workspaceFrames(durationMs: Long, animate: Boolean = true, place: suspend (Float) -> Unit) {
+    val duration=durationMs*1_000_000f*(kotlinx.coroutines.currentCoroutineContext()[MotionDurationScale]?.scaleFactor ?: 1f)
+    if(!animate || duration<=0f) { place(1f); return }
+    val start=withFrameNanos { it }
+    do {
+        val progress=((withFrameNanos { it }-start)/duration).coerceIn(0f,1f)
+        place(progress)
+    } while(progress<1f)
+}
+
+@Composable internal fun rememberZenOpacity(visible: Boolean): State<Float> =
+    animateFloatAsState(if(visible) 1f else 0f, tween(180, easing=CubicBezierEasing(0f,0f,.58f,1f)), label="zen-opacity")
+
+private val HiddenChromeShape=object:Shape {
+    override fun createOutline(size:Size,layoutDirection:androidx.compose.ui.unit.LayoutDirection,density:androidx.compose.ui.unit.Density)=Outline.Rectangle(Rect.Zero)
+}
+
+@Composable internal fun ZenChrome(visible: Boolean, modifier: Modifier = Modifier, opacity: State<Float>? = null, content: @Composable BoxScope.() -> Unit) {
+    val layer=rememberGraphicsLayer()
+    val alpha=opacity ?: rememberZenOpacity(visible)
+    Box((if(visible) Modifier else Modifier.clearAndSetSemantics {}).then(modifier)) {
+        CompositionLocalProvider(LocalWorkspaceOpacity provides alpha) {
+        Box(Modifier.matchParentSize().graphicsLayer { clip=!visible;shape=HiddenChromeShape }
+            .focusProperties { canFocus=visible }.drawWithContent {
+                if(visible) {
+                    layer.record { this@drawWithContent.drawContent() }
+                    layer.alpha=alpha.value
+                    drawLayer(layer)
+                }
+            },content=content)
+        }
+        Canvas(Modifier.matchParentSize()) {
+            if(!visible && alpha.value>0f) { layer.alpha=alpha.value;drawLayer(layer) }
+        }
+    }
+}
 
 @Composable private fun floatingBounds(bounds: JSONObject, dragging: Boolean, host: CanvasHost, group: Int): JSONObject {
     val target = Rect(bounds.number("x"), bounds.number("y"),
@@ -267,12 +318,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                 "from" to from, "closing" to (expanded == null)))
             dock.refresh()
         }
-        val start = withFrameNanos { it }
-        val duration = host.catalog.optLong("panel_expansion_ms", 200) * 1_000_000f
-        do {
-            val progress = ((withFrameNanos { it } - start) / duration).coerceIn(0f, 1f)
-            place(progress)
-        } while (progress < 1f)
+        workspaceFrames(host.catalog.optLong("panel_expansion_ms",200)) { place(it) }
         if (expanded == null) { dock.expansion = null; shownPanel = null; dock.refresh() }
         else snapshotFlow { host.snapshot?.optJSONObject("layout")?.toString() to dock.configurationHeight }.collect { place(1f) }
     }
@@ -322,19 +368,23 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                     .then(if (shown) Modifier else Modifier.clearAndSetSemantics {})) { children, constraints ->
                 val child = children.single().measure(constraints)
                 layout(constraints.maxWidth, constraints.maxHeight) {
-                    if (shown) child.place(0, 0)
+                    if(snapshot.objectOrNull("preferences")==null) child.place(0, 0)
                 }
             }
             ToolBubbles(bubbles)
             val layout = snapshot.getJSONObject("layout")
-            if (!hidden) CollapsedColumns(host, snapshot, panels, dock)
+            CompositionLocalProvider(LocalWorkspaceVisible provides !hidden) {
+                ZenChrome(!hidden,Modifier.fillMaxSize()) { CollapsedColumns(host, snapshot, panels, dock) }
+            }
             ContentDrawers(host, snapshot, panels, dock)
-            layout.array("groups").objects().filter { !hidden || it.optBoolean("floating") || it.optBoolean("zen_kept") }
+            layout.array("groups").objects()
                 .sortedBy { it.getInt("id") == dock.expansion?.getInt("group") }.forEachIndexed { index, group ->
                 key(group.getInt("id")) {
                   val source = dock.drawerSources["tool"]?.anchor?.optString("panel") == group.getString("active")
                   val z = if (source) 199 else (if (group.optBoolean("floating")) 180 else 100) + index
-                  CompositionLocalProvider(LocalWorkspaceZ provides z) {
+                  val visible = !hidden || group.optBoolean("floating") || group.optBoolean("zen_kept")
+                  val opacity = rememberZenOpacity(visible)
+                  CompositionLocalProvider(LocalWorkspaceZ provides z, LocalWorkspaceVisible provides visible, LocalWorkspaceOpacity provides opacity) {
                     val expansion = dock.expansion?.takeIf { it.getInt("group") == group.getInt("id") }
                     // Full transport baselines need not recreate unchanged
                     // controls after a preferences or chrome publication.
@@ -348,7 +398,8 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                                 ?.number("tile_corner_radius") ?: SurfaceRadius.value)
                     val placement = if (expansion == null) Modifier.workspacePlaced(host, group.getInt("id"), bounds, shown, density) else Modifier.placed(bounds, density)
                     val opening = remember { PanelOpening() }
-                    Box(placement.zIndex(z.toFloat()).testTag("group-${group.getInt("id")}").chromeRegion(dock)
+                    ZenChrome(visible,placement.zIndex(z.toFloat()).testTag("group-${group.getInt("id")}"),opacity) {
+                    Box(Modifier.fillMaxSize().chromeRegion(dock)
                         .then(if (expansion != null) Modifier.shadow(16.dp, shape).clip(shape)
                             else Modifier.panelSurface(6.dp, shape, opening = opening))
                         .then(if (expansion == null) Modifier.glass(shape) else Modifier)) {
@@ -364,6 +415,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                                 panels[group.getString("active")]?.let { ConfigurePanel(host, it) { height -> dock.configurationHeight = height } }
                             }
                         }
+                    }
                     }
                     if (expansion == null) group.array("resize_handles").objects().forEach { handle ->
                         val edge = handle.getString("edge")
@@ -393,6 +445,9 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
             PreviewPanel(host, dock, layout.getJSONObject("status"), tools.objectOrNull("frequency_separation"), "frequency-separation",
                 PreviewOps("frequency_separation", "radius", "apply", "cancel"))
             if (!hidden) layout.array("dividers").objects().filterNot { it.optBoolean("fixed") }.forEach { divider ->
+                val dividerId = divider.getInt("id")
+                var focused by remember(dividerId) { mutableStateOf(false) }
+                DisposableEffect(host, dividerId) { onDispose { if(host.dividerFocus == dividerId) host.dividerFocus = null } }
                 val rect = divider.getJSONObject("bounds")
                 val horizontal = divider.getString("axis") == "horizontal"
                 val hit = JSONObject(rect.toString()).apply {
@@ -402,12 +457,17 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                     put(start, rect.number(start) - extra / 2); put(extent, rect.number(extent) + extra)
                 }
                 CompositionLocalProvider(LocalWorkspaceZ provides 170) {
-                    Box(Modifier.placed(hit, density).zIndex(170f).testTag("divider-${divider.getInt("id")}").workspaceSource(dock,
+                    Box(Modifier.placed(hit, density).zIndex(170f).testTag("divider-${divider.getInt("id")}")
+                        .drawBehind { if(focused) drawRect(colors.accent.copy(alpha=.3f)) }
+                        .semantics { contentDescription=host.catalog.getJSONObject("document_delivery_copy").getString("resize_dock") }
+                        .onFocusChanged { focused=it.isFocused;if (it.isFocused) host.dividerFocus = dividerId else if (host.dividerFocus == dividerId) host.dividerFocus = null }.focusable()
+                        .workspaceSource(dock,
                         obj("type" to "drag_divider", "id" to divider.getInt("id")), priority = 4,
                         cursor = if (horizontal) AndroidPointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW else AndroidPointerIcon.TYPE_VERTICAL_DOUBLE_ARROW))
                 }
             }
-            if (!hidden && state.getJSONObject("workspace").getJSONObject("layout").getJSONObject("canvas_info").optBoolean("visible")) Row(Modifier.placed(layout.getJSONObject("status"), density).padding(horizontal = 4.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
+            if (state.getJSONObject("workspace").getJSONObject("layout").getJSONObject("canvas_info").optBoolean("visible")) ZenChrome(!hidden,Modifier.placed(layout.getJSONObject("status"),density)) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
                 Row(Modifier.weight(1f),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.Bottom) {
                     if(host.proof.status.isNotEmpty()) Surface(Modifier.glass(TileShape),color=colors.headerSurface,shape=TileShape) {
                         Text(host.proof.status,Modifier.testTag("proof-status").clickable {host.invoke("soft_proof_setup")}
@@ -423,6 +483,7 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
                     ZoomReadout(host)
                 }
             }
+        }
         }
         WorkspaceDropHint(dock)
         PaletteDragOverlay(host, dock.origin)
@@ -529,8 +590,10 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     val minimumBody = group.number("min_body_height")
     val bodyScroll = rememberScrollState()
     val groupItem = obj("kind" to "group", "group" to group.getInt("id"))
-    DisposableEffect(group.getInt("id"), group.array("panels").toString()) {
+    val visible = LocalWorkspaceVisible.current
+    DisposableEffect(group.getInt("id"), group.array("panels").toString(), visible) {
         val prefix = "${group.getInt("id")}:"
+        if(!visible) { dock.tabs.keys.removeAll { it.startsWith(prefix) }; dock.tabSlots.keys.removeAll { it.startsWith(prefix) }; dock.tabClips.remove(group.getInt("id")) }
         onDispose { dock.tabs.keys.removeAll { it.startsWith(prefix) }; dock.tabSlots.keys.removeAll { it.startsWith(prefix) }; dock.tabClips.remove(group.getInt("id")) }
     }
     Surface(modifier, color = if (tabsVisible) Color.Transparent else colors.panelFill) {
@@ -542,12 +605,13 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                     var strip by remember { mutableFloatStateOf(0f) }
                     val names = automaticTabNames(host, group.getInt("id"), group.array("panels").values().map { panels[it.toString()] }, strip)
                     val cutout = remember { TabStrip() }
-                    Row(Modifier.weight(1f).onGloballyPositioned { dock.tabClips[group.getInt("id")] = it.boundsInRoot().translate(-dock.origin); strip = it.size.width / dock.density }
+                    Row(Modifier.weight(1f).onGloballyPositioned { if(!visible) return@onGloballyPositioned;dock.tabClips[group.getInt("id")] = it.boundsInRoot().translate(-dock.origin); strip = it.size.width / dock.density }
                         .tabStrip(cutout, colors.strip).horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
                         group.array("panels").values().forEachIndexed { index, id ->
                             val p = panels[id.toString()] ?: return@forEachIndexed
                             val tab = Modifier.testTag("tab-$id").dragSource(dock, obj("kind" to "panel", "panel" to id), cursor = AndroidPointerIcon.TYPE_ARROW)
                                 .onGloballyPositioned { coords ->
+                                    if(!visible) return@onGloballyPositioned
                                     val r = coords.boundsInRoot(); val pos = (r.topLeft - dock.origin) / dock.density
                                     // Contact handling needs the panel ID as well as the drop-target geometry.
                                     dock.tabs["${group.getInt("id")}:$index"] = obj("group" to group.getInt("id"), "index" to index, "panel" to id,

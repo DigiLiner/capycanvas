@@ -68,7 +68,7 @@ import SwiftUI
     }
     private func acceptForm(_ value: JSON) { form = value; formRevision &+= 1 }
     func applyLive(_ recipe: JSON) {
-        guard !committing else { return }
+        if committing { pendingRecipe = recipe; return }
         if setupID != nil { apply(recipe) }
         else { pendingRecipe = recipe; busy = true; store?.invoke("soft_proof_setup") }
     }
@@ -107,7 +107,7 @@ import SwiftUI
     }
     func apply(_ recipe: JSON) {
         if setupID == nil { applyLive(recipe); return }
-        guard !busy, !committing, let id = setupID else { return }
+        guard !committing, let id = setupID else { pendingRecipe = recipe; return }
         cancelWork(); start(id: id, recipe: recipe)
     }
     private func start(id: UInt64, recipe: JSON?) {
@@ -170,6 +170,6 @@ import SwiftUI
     private func finished(_ token: UInt64, error: String?) {
         guard serial == token else { return }
         busy = false; committing = false; task = nil; self.error = error
-        sync()
+        if let recipe = pendingRecipe { pendingRecipe = nil; applyLive(recipe) } else { sync() }
     }
 }

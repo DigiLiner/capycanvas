@@ -1,3 +1,4 @@
+import {liveCopy} from "./localization.js";
 import {createLayerInspector} from "./layer-inspector.js";
 // Shared dock projections. The browser supplies widgets and measured body sizes.
 function squircleCorner([cx,cy],[sx,sy],[ex,ey]) {
@@ -20,7 +21,7 @@ export function tabHover(tab, presentation) {
   tab.style.setProperty('--hover-right-foot',hoverFeet[1]);
 }
 export function createWorkspaceChrome({app,state,workspace,element,button,icon,place,dispatch,customization,editor,panelFrame,draggable,grip,contentPanel,tabLabel,automaticTabs,releaseTabs}) {
-  const columns=new Map(),drawers=new Map(),connections=new Map();
+  const columns=new Map(),drawers=new Map(),connections=new Map(),catalog=liveCopy(app,"catalog");
   let resolved,animating=false;
   const send=action=>dispatch({type:"customize",action});
   const local=(b,origin)=>({...b,x:b.x-origin.x,y:b.y-origin.y});
@@ -177,7 +178,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
           }
           root.append(body);return body;
         });
-        record=Object.assign(record??{},{key,root,shadow,bodies,column,drawer,inspector,from,started:performance.now()-(switching?160:0),placement:from});drawers.set(id,record);
+        record=Object.assign(record??{},{key,root,shadow,bodies,column,drawer,inspector,from,started:performance.now()-(switching?catalog.panel_expansion_ms:0),placement:from});drawers.set(id,record);
       }
       record.drawer=drawer;
       record.tabStyle=drawer.tabs?app.group_tab_style(drawer.tabs.group):null;
@@ -209,7 +210,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
       }
       const page=r.inspector?.measure(now);
       const heights=r.bodies.map(body=>page?.height??contentHeight(body)+(r.drawer.tabs?resolved.tab_bar_height:0));
-      const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-r.started)/160);
+      const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-r.started)/catalog.panel_expansion_ms);
       const result=app.drawer({viewport:[workspace.clientWidth,workspace.clientHeight],column:r.column,heights,progress,from:r.from??null,closing:!!r.closing});
       if(!result || (r.closing&&progress===1)){dispose(r);drawers.delete(id);continue;}
       r.placement=result.placement;r.connection=result.connection;place(r.root,r.placement.bounds);

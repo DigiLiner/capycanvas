@@ -269,10 +269,11 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
     sheetClose.append(icon('chevron-down')); bindCopy(sheetClose, () => copy.close_swatches, 'title'); bindCopy(sheetClose, () => copy.close_swatches, 'ariaLabel');
     const sheetHead = element('div', 'color-sheet-head'); sheetHead.append(search, sheetClose); sheet.append(sheetHead, sheetBody); sheet.hidden = true;
     const recent = element('div', 'color-recent'), mini = element('div', 'color-mini'), miniPair = element('div', 'color-pair');
-    miniPair.append(miniCurrent, miniNew); mini.append(miniPair, miniHex); mini.hidden = true;
+    miniPair.append(miniCurrent, miniNew); mini.append(miniPair, miniHex); mini.inert = true;
+    const footerStack=element('div','color-footer-stack');footerStack.append(recent,mini);
     const more = button('', () => showSheet(sheet.hidden), 'color-swatches'); more.append(icon('chevron-down'));
     const cancel = button(() => common.cancel, () => root.close(), 'color-cancel dialog-button');
-    const footer = element('footer', 'dialog-footer'); footer.append(recent, mini, more, cancel, apply);
+    const footer = element('footer', 'dialog-footer'); footer.append(footerStack, more, cancel, apply);
     const page = element('div', 'color-editor-page'); page.append(form.body, sheet);
     const content = element('div', 'dialog-content'); content.append(page, footer);
     root.append(content); document.body.append(root);
@@ -305,7 +306,7 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
     const searchChanged = () => { form.request({op:'search', text:search.value}); fillSheet(); };
     search.addEventListener('input', searchChanged);
     function showSheet(open) {
-      sheetOpen = open; form.body.inert = open; recent.hidden = open; mini.hidden = !open; more.classList.toggle('open', open);
+      sheetOpen = open; form.body.inert = open; recent.inert = open; mini.inert = !open; footerStack.classList.toggle('show-mini',open); more.classList.toggle('open', open);
       more.title = more.ariaLabel = open ? copy.close_swatches : copy.all_swatches;
       if (open) { search.value = form.editor().picker.editor.search; fillSheet(); sheet.hidden = false; sheetBody.scrollTop = 0; sheet.getBoundingClientRect(); search.focus(); }
       sheet.classList.toggle('open', open);

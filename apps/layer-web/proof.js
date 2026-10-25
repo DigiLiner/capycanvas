@@ -1,3 +1,4 @@
+import {createWorkflowStack} from './workflow-stack.js';
 import { liveCopy, bindCopy } from './localization.js';
 import {importProfile,chooseProfileLibrary} from './export-controls.js';
 
@@ -114,8 +115,8 @@ export function createProof({app,element,button,icon,applyChange,wake,contentCha
       .finally(()=>{candidate.free();sync();});
   }
   document.addEventListener("visibilitychange",()=>{if(document.hidden)cancel();else sync();});
-  let panel=null,panelEpoch=null,refreshPanel=()=>{},cancelContacts=()=>{},pendingTimer,committing=false;
-  function disposePanel(){cancelContacts();clearTimeout(pendingTimer);pendingTimer=null;cancel();panel?.remove();panel=null;setup=null;refreshPanel=()=>{};finishPending=async()=>{};hasPending=()=>false;refreshLibrary=()=>{};}
+  let panel=null,panelEpoch=null,refreshPanel=()=>{},cancelContacts=()=>{},finishPages=()=>{},pendingTimer,committing=false;
+  function disposePanel(){finishPages();finishPages=()=>{};cancelContacts();clearTimeout(pendingTimer);pendingTimer=null;cancel();panel?.remove();panel=null;setup=null;refreshPanel=()=>{};finishPending=async()=>{};hasPending=()=>false;refreshLibrary=()=>{};}
   function run(id,sdr=false){
     if(id!==null)applyChange(app.proof_control({type:"reveal"}));
     if(panel){refreshLibrary();if(sdr)applyChange(app.proof_control({type:'mode',mode:'sdr'}));refreshPanel();return;}
@@ -124,7 +125,8 @@ export function createProof({app,element,button,icon,applyChange,wake,contentCha
     const mode=element('div','proof-modes');bindCopy(mode,()=>copy.mode,"ariaLabel");mode.setAttribute('role','group');
     for(const[value,label]of[['off',()=>copy.mode_off],['sdr','SDR'],['print',()=>copy.mode_print]]){const o=button(label,()=>{mode.value=value;mode.onchange();});o.value=value;mode.append(o);}panel.append(mode);
     const sdrPage=element('div','proof-sdr'),printPage=element('div','proof-print'),issue=element('p','error-message'),status=element('p');status.setAttribute('role','status');
-    panel.append(sdrPage,printPage,issue,status);primary?.append(panel);
+    const modePages=element('div'),offPage=element('div');modePages.append(offPage,sdrPage,printPage);const pages=createWorkflowStack(modePages,'slide');finishPages=pages.finish;
+    panel.append(modePages,issue,status);primary?.append(panel);
     const model=app.proof_form();let recipe=structuredClone(model.recipe),appliedRecipe=JSON.stringify(model.document_profile),appliedGeneration=app.proof_status().generation,profiles=[],selected='';
     const printSettings=model.print_settings;
     let valueBalance=null,valueContrast=null;
@@ -231,9 +233,9 @@ export function createProof({app,element,button,icon,applyChange,wake,contentCha
       const generation=app.proof_status().generation;
       if(generation!==appliedGeneration){appliedGeneration=generation;const current=app.proof_form(),savedRecipe=JSON.stringify(current.document_profile);if(savedRecipe!==appliedRecipe){appliedRecipe=savedRecipe;restorePrint(current);}}
       mode.value=form.mode;for(const b of mode.children){b.setAttribute('aria-pressed',String(b.value===form.mode));b.disabled=committing||(b.value==='sdr'&&!form.hdr);b.hidden=b.value==='sdr'&&!form.hdr;}
-      sdrPage.hidden=form.mode!=='sdr';printPage.hidden=form.mode!=='print';if(shownMode!==form.mode){shownMode=form.mode;contentChanged('proof');}gamut.checked=app.state().gamut_warning;gamut.disabled=committing||!form.recipe_valid;
+      pages.show(form.mode==='sdr'?sdrPage:form.mode==='print'?printPage:offPage);if(shownMode!==form.mode){shownMode=form.mode;contentChanged('proof');}gamut.checked=app.state().gamut_warning;gamut.disabled=committing||!form.recipe_valid;
       for(const{input,spec}of arcControls)input.value=form.rendition[spec.key];
-      if(sdrPage.hidden||!mapped){cancelDial();return;}
+      if(form.mode!=='sdr'||!mapped){cancelDial();return;}
       ensurePattern();
       {const host=panel.parentElement,outer=host.getBoundingClientRect(),top=canvas.getBoundingClientRect().top-outer.top+host.scrollTop;dialSize=Math.max(128,Math.floor(Math.min(sdrPage.clientWidth,host.clientHeight-top-4)));canvas.style.width=canvas.style.height=`${dialSize}px`;const pixels=Math.ceil(dialSize*devicePixelRatio);if(canvas.width!==pixels)canvas.width=canvas.height=pixels;}
       const d=dial(),ctx=canvas.getContext('2d',{willReadFrequently:true}),[cx,cy]=d.center;

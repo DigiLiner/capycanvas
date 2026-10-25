@@ -7,7 +7,7 @@ export async function chooseDocumentColor({app,dialog,element,button,gpuOperatio
   const history=request.type==="color_history",source=["repair_source_profile","rasterize_source"].includes(request.type),rasterize=request.type==="rasterize_source";
   const operation=source?(rasterize?"rasterize":"repair"):request.operation,current=app.document_color();
   const profiles=["Srgb","DisplayP3","AdobeRgb","ProPhoto"].map(Builtin=>({Builtin}));
-  let candidate,control,running,closed=false,accepted=false;
+  let candidate,control,running,closed=false,accepted=false,pending=false;
   try {
     await dialog(()=>history?(request.redo?copy.redo_title:copy.undo_title):{assign:copy.assign_title,convert:copy.convert_title,depth:copy.depth_title,repair:copy.repair_title,rasterize:copy.rasterize_title}[operation],(form,finish)=>{
       const inputs=[];
@@ -26,29 +26,31 @@ export async function chooseDocumentColor({app,dialog,element,button,gpuOperatio
       const intent=operation==="convert"?select(()=>exportCopy.intent,[["RelativeColorimetric",()=>exportCopy.relative],["Perceptual",()=>exportCopy.perceptual],["Saturation",()=>exportCopy.saturation],["AbsoluteColorimetric",()=>exportCopy.absolute]],"RelativeColorimetric"):null;
       let phase="empty",failure=null,presentation=null;
       const status=element("p"),comparison=element("div","color-comparison"),footer=element("footer");
-      const applyLabel=()=>source?(rasterize?copy.rasterize:presentation?.addsLayer?copy.add_source:copy.apply_profile):presentation?.isCopy?copy.save_copy:copy.common.apply;
-      const apply=button(applyLabel,()=>{accepted=true;finish(true);},"suggested-action");apply.disabled=true;
-      const cancel=button(()=>copy.common.cancel,()=>{control?.cancel();finish(null);});
+      const applyLabel=()=>source?(rasterize?copy.rasterize:presentation?.addsLayer?copy.add_source:copy.apply_profile):presentation?.isCopy?copy.create_copy:copy.common.apply;
+      const apply=button(applyLabel,()=>{if(closed||!candidate||running||pending)return;accepted=true;closed=true;finish(true);},"suggested-action");apply.disabled=true;
+      const cancel=button(()=>copy.common.cancel,()=>{if(closed)return;closed=true;pending=false;control?.cancel();finish(null);});
       const statusLabel=()=>{if(failure)return app.color_feature_error_copy(failure,true);if(phase==="preparing")return copy.preparing;if(phase==="empty")return "";if(!presentation)return copy.preview_help;const preview=presentation.clipped?copy.outside_gamut:copy.composition_preview;return source?app.color_source_preview(app.source_profile_name_copy(presentation.sourceProfile),preview,presentation.addsLayer):preview;};
       const present=()=>{bindCopy(status,statusLabel);bindCopy(apply,applyLabel);};
       const fail=error=>{failure=error;present();};
       const invalidate=()=>{candidate?.free();candidate=null;presentation=null;failure=null;phase="draft";apply.disabled=true;comparison.replaceChildren();present();};
-      if(profile){const load=button(()=>profilesCopy.import,async()=>{try{const imported=await importProfile(app,element);if(!imported)return;profiles.push(imported.profile);const option=element("option","",()=>app.profile_name_copy(imported.name));option.value=profiles.length-1;profile.append(option);profile.value=option.value;invalidate();}catch(error){fail(error);}});const saved=button(()=>profilesCopy.saved_dialog,async()=>{try{const imported=await chooseProfileLibrary({app,element,button});if(!imported)return;profiles.push(imported.profile);const option=element("option","",()=>app.profile_name_copy(imported.name));option.value=profiles.length-1;profile.append(option);profile.value=option.value;invalidate();}catch(error){fail(error);}});inputs.push(load,saved);form.append(load,saved);}
-      inputs.forEach(node=>node.onchange=invalidate);
+      if(profile){const load=button(()=>profilesCopy.import,async()=>{try{const imported=await importProfile(app,element);if(closed||!imported)return;profiles.push(imported.profile);const option=element("option","",()=>app.profile_name_copy(imported.name));option.value=profiles.length-1;profile.append(option);profile.value=option.value;schedule();}catch(error){if(!closed)fail(error);}});const saved=button(()=>profilesCopy.saved_dialog,async()=>{try{const imported=await chooseProfileLibrary({app,element,button});if(closed||!imported)return;profiles.push(imported.profile);const option=element("option","",()=>app.profile_name_copy(imported.name));option.value=profiles.length-1;profile.append(option);profile.value=option.value;schedule();}catch(error){if(!closed)fail(error);}});inputs.push(load,saved);form.append(load,saved);}
+      const schedule=()=>{if(closed)return;invalidate();pending=true;control?.cancel();if(!running)queueMicrotask(prepare);};
+      inputs.forEach(node=>node.onchange=schedule);
       const prepare=()=>{
-        if(running)return;invalidate();control?.free();control=app.capture_control();
-        inputs.forEach(node=>node.disabled=true);preview.disabled=true;phase="preparing";present();
+        if(running||closed||!pending)return;pending=false;invalidate();control?.free();control=app.capture_control();
+        phase="preparing";present();
+        const flattened=result?.value==="copy";
         const choice=source?(rasterize?null:profiles[Number(profile.value)]):history?null:operation==="assign"?{Assign:space.value}:operation==="depth"?{Depth:{depth:depth.value,dither:depth.value==="U8"?dither.value:"None"}}:{Convert:{space:space.value,options:{intent:intent.value,black_point_compensation:false}}};
         running=(async()=>{
           try {
             const next=await gpuOperation(async()=>{
-              if(!source)return app.prepare_color(id,choice,control,result?.value==="copy");
+              if(!source)return app.prepare_color(id,choice,control,flattened);
               const prepared=await app.prepare_source(id,choice,control);
               return app.prepare_source_comparison(prepared);
             });
-            if(closed||control.cancelled()){next.free();return;}
+            if(closed||pending||control.cancelled()){next.free();return;}
             candidate=next;presentation={clipped:candidate.clipped_channels()>0,isCopy:!source&&candidate.is_copy(),addsLayer:source&&candidate.adds_layer(),sourceProfile:source?candidate.source_profile():null};phase="complete";
-            if(history){accepted=true;finish(true);return;}
+            if(history){accepted=true;closed=true;finish(true);return;}
             candidate.previews().forEach((image,index)=>{
               const figure=element("figure"),canvas=element("canvas"),caption=element("figcaption","",()=>index?copy.after:copy.before);
               [canvas.width,canvas.height]=image.extent;
@@ -57,17 +59,18 @@ export async function chooseDocumentColor({app,dialog,element,button,gpuOperatio
             });
             present();
             apply.disabled=false;
-          }catch(error){const wasCancelled=control.cancelled();control.cancel();if(!closed&&!wasCancelled)fail(error);}
-          finally{running=null;if(!closed){if(phase==="preparing"){phase="draft";present();}inputs.forEach(node=>node.disabled=false);preview.disabled=false;}}
+          }catch(error){const wasCancelled=control.cancelled();control.cancel();if(!closed&&!pending&&!wasCancelled)fail(error);}
+          finally{running=null;if(!closed){if(phase==="preparing"){phase="draft";present();}if(pending)queueMicrotask(prepare);}}
         })();
       };
-      const preview=button(()=>copy.preview,prepare);
-      footer.append(cancel);if(!history)footer.append(preview,apply);
+      footer.append(cancel);if(!history)footer.append(apply);
       form.localize=present;form.append(comparison,status,footer);form.onsubmit=e=>e.preventDefault();
-      if(history)queueMicrotask(prepare);
+      pending=true;queueMicrotask(prepare);
     });
-    closed=true;if(!accepted)control?.cancel();await running;
-    if(!accepted){candidate?.free();candidate=null;}
-    return candidate;
-  } finally {control?.free();}
+    closed=true;pending=false;if(!accepted)control?.cancel();await running;
+    return accepted?candidate:null;
+  } finally {
+    closed=true;pending=false;if(!accepted)control?.cancel();
+    try {await running;}finally{if(!accepted)candidate?.free();control?.free();}
+  }
 }

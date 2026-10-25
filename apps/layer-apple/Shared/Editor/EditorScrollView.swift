@@ -39,15 +39,16 @@ struct EditorScrollView<Content: View>: View {
 
 struct EditorPositionedScrollView<Content: View>: View {
     @ObservedObject var position: EditorScrollPosition
+    var offsetChanged: ((CGFloat) -> Void)? = nil
     @ViewBuilder var content: () -> Content
     @ViewBuilder var body: some View {
         if #available(iOS 18.0, macOS 15.0, *) {
-            PositionedScrollView(position: position, content: content)
+            PositionedScrollView(position: position, offsetChanged: offsetChanged, content: content)
         } else {
             #if os(iOS)
             ScrollViewReader { proxy in
                 EditorScrollView {
-                    content().background(NativeScrollObservation(position: position))
+                    content().background(NativeScrollObservation(position: position, offsetChanged: offsetChanged))
                 }.onChange(of: position.request, initial: true) { _, request in
                     if let request, case .item(let id) = request.target { proxy.scrollTo(id); position.applied(request) }
                 }
@@ -62,13 +63,14 @@ private struct PositionedScrollView<Content: View>: View {
     @ObservedObject var position: EditorScrollPosition
     @ViewBuilder var content: () -> Content
     @State private var scrollPosition: ScrollPosition
-    init(position: EditorScrollPosition, @ViewBuilder content: @escaping () -> Content) {
-        self.position = position; self.content = content
+    let offsetChanged: ((CGFloat) -> Void)?
+    init(position: EditorScrollPosition, offsetChanged: ((CGFloat) -> Void)?, @ViewBuilder content: @escaping () -> Content) {
+        self.position = position; self.offsetChanged = offsetChanged; self.content = content
         _scrollPosition = State(initialValue: ScrollPosition(y: position.offset))
     }
     var body: some View {
         EditorScrollView { content() }.scrollPosition($scrollPosition)
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, next in position.offset = next }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, next in position.offset = next; offsetChanged?(next) }
             .onChange(of: position.request, initial: true) { _, request in
                 switch request?.target {
                 case .offset(let y): scrollPosition.scrollTo(y: y)

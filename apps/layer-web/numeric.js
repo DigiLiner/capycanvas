@@ -13,7 +13,7 @@ export function gestureNumberField({numberField,numeric,label,request,send,gestu
 }
 // Native text/range controls around Rust's numeric policy. No expression,
 // range-mapping, unit-formatting or rounding rules are duplicated here.
-export function createNumberField({ control, label, labels: captions, resolve, errorCaption, onChange, icon, inline = false, widthSamples, valueOnly = false, panel = true }) {
+export function createNumberField({ control, label, labels: captions, resolve, errorCaption, onChange, icon, inline = false, widthSamples, valueOnly = false, panel = true, readoutGestures = true }) {
   const node = (tag, cls) => { const el = document.createElement(tag); el.className = cls; return el; };
   const initialCaptions = typeof captions === "function" ? captions(label) : captions;
   const root = node("div", `number-control number-${control.kind}`);
@@ -169,16 +169,24 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     }
     if(valueButton.hasPointerCapture(contact.id))valueButton.releasePointerCapture(contact.id);
   }
-  if(panel){
+  const wheel = e => {
+    if(disabled)return;
+    e.preventDefault();e.stopPropagation();
+    if(finish())apply({type:'step',steps:-Math.sign(e.deltaY)});
+  };
+  if(readoutGestures)valueButton.addEventListener('wheel',wheel,{passive:false});
+  entry.addEventListener('wheel',wheel,{passive:false});
+  if(panel || readoutGestures){
     const scrubTo=e=>{
+      if(!panel){apply({type:'position',position:scrub.fill+(scrub.y-e.clientY)/200});return;}
       const pixels=scrub.y-e.clientY;
       if(e.shiftKey!==scrub.fine)Object.assign(scrub,{fine:e.shiftKey,origin:value,base:scrub.last});
       scrub.last=pixels;
       apply({type:'scrub',origin:scrub.origin,pixels:pixels-scrub.base,fine:scrub.fine});
     };
     valueButton.addEventListener('pointerdown',e=>{
-      if(e.button || disabled || scrub || !finish())return;
-      suppressClick=false;scrub={id:e.pointerId,y:e.clientY,start:value,origin:value,fine:e.shiftKey,base:0,last:0,moved:false};
+      if(e.button || disabled || scrub || (!panel && !['pen','touch'].includes(e.pointerType)) || !finish())return;
+      suppressClick=false;scrub={id:e.pointerId,y:e.clientY,start:value,fill:display.fill,origin:value,fine:e.shiftKey,base:0,last:0,moved:false};
       valueButton.setPointerCapture(e.pointerId);
     });
     valueButton.addEventListener('pointermove',e=>{
@@ -200,6 +208,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     };
     title.addEventListener('dblclick',reset);
     if(dial){
+      dial.addEventListener('wheel',wheel,{passive:false});
       let contact=null;
       const point=e=>{const b=dial.getBoundingClientRect();apply({type:'dial',x:e.clientX-b.x-b.width/2,y:e.clientY-b.y-b.height/2,radius:Math.min(b.width,b.height)/2});};
       dial.addEventListener('pointerdown',e=>{

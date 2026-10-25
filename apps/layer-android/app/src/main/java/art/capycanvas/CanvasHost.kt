@@ -197,6 +197,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     private val glassBoxes = linkedMapOf<Any, FloatArray>()
     internal val glassBoxesForTest get() = glassBoxes.values.toList()
     private val glassConnections = linkedMapOf<Any, String>()
+    internal val glassConnectionsForTest get() = glassConnections.values.map(::JSONObject)
     private var bubbleGlassBoxes = emptyList<FloatArray>()
     private var bubbleGlassArcs = emptyList<FloatArray>()
     private var bubbleGlassColors = emptyList<FloatArray>()
@@ -206,13 +207,14 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
         bubbleGlassBoxes = boxes; bubbleGlassArcs = arcs; bubbleGlassColors = colors; queueGlass()
     }
     private var glassQueued = false
-    internal fun glassBox(key: Any, box: FloatArray?) {
-        if (glassBoxes[key]?.contentEquals(box) == true || box == null && key !in glassBoxes) return
-        if (box == null) glassBoxes.remove(key) else glassBoxes[key] = box.copyOf()
+    internal fun glassBox(key: Any, box: FloatArray?, strength: Float = 1f) {
+        val value=box?.takeIf { strength>0f }?.plus(strength)
+        if (glassBoxes[key]?.contentEquals(value) == true || value == null && key !in glassBoxes) return
+        if (value == null) glassBoxes.remove(key) else glassBoxes[key] = value
         queueGlass()
     }
-    internal fun glassConnection(key: Any, connection: JSONObject?, scale: Float) {
-        val entry = connection?.let { obj("connection" to it, "scale" to scale).toString() }
+    internal fun glassConnection(key: Any, connection: JSONObject?, scale: Float, strength: Float = 1f) {
+        val entry = connection?.takeIf { strength>0f }?.let { obj("connection" to it, "scale" to scale,"strength" to strength).toString() }
         if (glassConnections[key] == entry) return
         if (entry == null) glassConnections.remove(key) else glassConnections[key] = entry
         queueGlass()
@@ -254,6 +256,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     val actionError: String? get() = dialogError ?: notice?.takeIf { it.id == null }?.text
     // Native focus, not application state; prevents typing from invoking tools.
     var editingText = false
+    internal var dividerFocus: Int? = null
     internal val textComposition = TextComposition()
     internal var toolbarEditorBounds: androidx.compose.ui.geometry.Rect? = null
     internal var headerKeyHandler: ((android.view.KeyEvent) -> Boolean)? = null
@@ -404,7 +407,7 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
     }
     private fun publishNotice(published: JSONObject?) {
         val id = published?.getLong("id")
-        if (id == publishedNotice) return
+        if (id == publishedNotice && notice?.id != id) return
         publishedNotice = id
         notice = published?.let { notice ->
             val actions = notice.optJSONArray("actions")

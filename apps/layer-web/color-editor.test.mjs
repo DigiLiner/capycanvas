@@ -1,3 +1,4 @@
+import {createDrawing} from './new-drawing-fixture.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 
@@ -26,6 +27,9 @@ export async function checkColorEditor({call,evaluate,settle}) {
   const foreground=()=>evaluate('JSON.stringify(layerApp.state().colors.foreground)');
   await wait('window.layerApp && layerApp.startupTimes.complete!==null');
   await wait('JSON.parse(layerApp.app.workspace_view())?.ready && !JSON.parse(layerApp.app.workspace_view()).busy');
+  await evaluate(`layerApp.dispatch({type:'invoke',command:'new_document'})`);
+  await evaluate(createDrawing({width:512,height:384,paper:'white',relief:0}));
+  await wait('!layerApp.documents.busy()&&layerApp.app.brush_ready()');
   await call('Browser.grantPermissions',{origin:await evaluate('location.origin'),permissions:['clipboardReadWrite','clipboardSanitizedWrite']},null);
   try { for(const theme of ['light','dark']) {
     await evaluate(`layerApp.dispatch({type:'set_theme',theme:'${theme}'})`);
