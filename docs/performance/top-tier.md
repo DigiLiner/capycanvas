@@ -4765,3 +4765,34 @@ performance comparison. No thresholds were adjusted or user processes stopped.
 Raw reports, screenshots, load observations and the complete assertion summary
 are in `artifacts/tilt-editor-startup-fix/`, including `motion/` and
 `verification-summary.json`.
+
+### Matched square calibration plots and centered direction controls
+
+Measured on 2026-10-25 UTC on the `1d952d603` working tree, with the revised
+384-pixel utilities and common font-measured axis gutters. Final release test
+SHA-256 is `5646bf37e0186d4122edd7f74584af688731ad3e45dcf1e165e6ff1b1e734980`.
+The same GPU/driver, private 1600 × 1000/120 Hz display, drawing and six-gesture
+protocol are used. Both themes pass native input, startup, history and layout
+assertions. The final render has matching 262 × 262 plots, title/Close centers,
+16-pixel content margins, 34-pixel actions and a preview stacked above its icon
+bar on the plot centerline. The initial undersized allocation warning is gone.
+The tonal Curves calibration/history smoke also passes; its layout branch is
+unchanged. Screenshot and per-widget geometry review cover both themes.
+
+| Case | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Tilt: Frame | 101.43–105.05 / 25.032 ms | 111.19–117.41 / 25.155 ms |
+| Tilt: Curve | 99.84–105.83 / 25.135 ms | 105.88–116.01 / 33.146 ms |
+| Pressure: Frame | 111.62–115.22 / 16.833 ms | 82.39–102.17 / 33.555 ms |
+| Pressure: Curve | 103.00–105.65 / 25.002 ms | 76.90–88.45 / 33.330 ms |
+
+External GPU renderer tests and Rust/Android builds were active throughout these
+runs. Twenty of 24 gestures miss the 114 presents/s floor and all 24 exceed the
+strict 2000/120 ms p99 gap limit; none qualifies both gates. These are contended
+system diagnostics and do not establish an isolated layout regression or qualify
+the tier target. All native movement, presentation-count and pixel-snapping
+assertions pass, without GTK/GDK sizing warnings. No thresholds were changed,
+measurements repeated for better results, or external processes stopped.
+Reports, load observations, screenshots and geometry are in
+`artifacts/tilt-layout-review/`, with final functional results under `final/` and
+all pacing results under `motion-final/summary.json`.

@@ -44,7 +44,7 @@ fn native_pressure_calibration() {
         assert!(output_bounds.height()>output_bounds.width(),"output caption is sideways");
         let title = find_named(panel,"pen-pressure-title").unwrap();
         assert_eq!(title.pango_context().font_description().unwrap().weight(),gtk::pango::Weight::Bold);
-        let close=find_named(panel,"pen-pressure-close").unwrap(); let header=title.parent().unwrap();
+        let close=find_named(panel,"pen-pressure-close").unwrap(); let header=close.parent().unwrap();
         let close_bounds=close.compute_bounds(&header).unwrap();
         assert!(close_bounds.y()>=4. && close_bounds.y()+close_bounds.height()<=header.height() as f32-4.);
         assert!(close_bounds.x()+close_bounds.width()<=header.width() as f32-6.);
@@ -107,6 +107,7 @@ fn native_pressure_calibration() {
             assert!(state(&w).pressure_calibration.is_some());
         }
         crate::snapshot(&w).save_to_png(output.join(format!("pressure-{theme:?}-{device}.png"))).unwrap();
+        record_layout(&w,panel,"pen-pressure",&output,theme);
         let cancel=find_named(panel,"pen-pressure-cancel").unwrap();
         native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
         assert!(state(&w).pressure_calibration.is_none()); assert_eq!(state(&w).settings.pressure_curve,original);
@@ -324,6 +325,7 @@ fn native_tilt_calibration() {
         let to=window_point(&w,[100.,150.]);native.perform(json!([{"pen":"down","point":canvas,"tilt":[30.,0.]},{"pen":"move","point":to,"tilt":[30.,0.]},{"pen":"up"}]));
         super::editing_tools::committed(&w,&before);assert_ne!(super::editing_tools::pixels(&super::editing_tools::raster(&w)),pixels,"draw while editing tilt");
         crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-{device}.png"))).unwrap();
+        record_layout(&w,panel,"pen-tilt",&output,theme);
         let cancel=find_named(panel,"pen-tilt-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
         assert!(state(&w).tilt_calibration.is_none());assert!(state(&w).settings.tilt_calibrations.is_empty());
     }
@@ -339,7 +341,11 @@ fn native_tilt_calibration() {
     let close=find_named(panel,"pen-tilt-close").unwrap();native.click(screen_point(&close,&w.window,[0.5,0.5]));
     assert_eq!(state(&w).settings.tilt_calibrations.values().next().unwrap().response.points(),chosen);
     w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
-    let graph=find_named(panel,"pen-tilt-graph").unwrap();graph.grab_focus();native.key(0xff1b);assert!(state(&w).tilt_calibration.is_none());
+    let graph=find_named(panel,"pen-tilt-graph").unwrap();let tilt_plot=[graph.width(),graph.height()];graph.grab_focus();native.key(0xff1b);assert!(state(&w).tilt_calibration.is_none());
+    w.dispatch(UiAction::Invoke{command:CommandId::PenPressure});pump(200);
+    let pressure_graph=find_named(panel,"pen-pressure-graph").unwrap();
+    assert_eq!([pressure_graph.width(),pressure_graph.height()],tilt_plot,"pressure and tilt reserve the same font-sized axis gutters");
+    let cancel=find_named(panel,"pen-pressure-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
     if std::env::var("LAYER_TILT_MOTION").is_ok_and(|v|v=="1") {
         w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
         w.dispatch(UiAction::CurveEditor{target:layer_ui::CurveEditorTarget::Tilt,action:layer_ui::CurveEditorAction::Reset});
@@ -354,14 +360,21 @@ fn native_tilt_calibration() {
 
 fn assert_dialog_footer(panel:&gtk::Widget,prefix:&str) {
     let buttons=["reset","cancel","apply"].map(|name|find_named(panel,&format!("{prefix}-{name}")).unwrap());
-    let footer=buttons[0].parent().unwrap();assert!(footer.has_css_class("dialog-footer"));
+    let footer=buttons[0].parent().unwrap();assert!(footer.has_css_class("dialog-actions"));
     assert!(!buttons[0].has_css_class("flat"));
     let reset_bounds=buttons[0].compute_bounds(panel).unwrap();
     let title=find_named(panel,&format!("{prefix}-title")).unwrap().compute_bounds(panel).unwrap();
     let sensitivity=find_named(panel,&format!("{prefix}-firmer")).unwrap().compute_bounds(panel).unwrap();
     let apply=buttons[2].compute_bounds(panel).unwrap();
     assert!((reset_bounds.x()-title.x()).abs()<1.5 && (reset_bounds.x()-sensitivity.x()).abs()<1.5,"title, content and footer share an inset");
-    assert!((panel.width() as f32-apply.x()-apply.width()-20.).abs()<1.5,"balanced footer end inset");
+    assert!((panel.width() as f32-apply.x()-apply.width()-16.).abs()<1.5,"balanced footer end inset");
+    let graph=find_named(panel,&format!("{prefix}-graph")).unwrap().compute_bounds(panel).unwrap();
+    assert!((graph.width()-graph.height()).abs()<=1.,"equal input/output scales use a square plot: {graph:?}");
+    assert!((graph.x()-(panel.width() as f32-graph.x()-graph.width())).abs()<1.5,"axis gutters keep the plot centered");
+    let close=find_named(panel,&format!("{prefix}-close")).unwrap().compute_bounds(panel).unwrap();
+    assert!((panel.width() as f32-close.x()-close.width()-16.).abs()<1.5,"the header shares the same end inset");
+    assert!((title.y()+title.height()*0.5-close.y()-close.height()*0.5).abs()<1.,"title and Close share a vertical center");
+    assert!((sensitivity.height()-reset_bounds.height()).abs()<1.,"editing and footer actions use the same height");
     let bounds=buttons.each_ref().map(|button|button.compute_bounds(&footer).unwrap());
     assert!(bounds.iter().all(|b|b.height()>=34.),"standard dialog button height: {bounds:?}");
     assert!(bounds.iter().all(|b|(b.y()-bounds[0].y()).abs()<1.));
@@ -378,9 +391,23 @@ fn assert_axis_bar(panel:&gtk::Widget,w:&Workspace) {
     }
     let preview=find_named(panel,"pen-tilt-direction").unwrap();
     let preview_bounds=preview.compute_bounds(panel).unwrap();let bar_bounds=bar.compute_bounds(panel).unwrap();
-    assert!((preview_bounds.y()+preview_bounds.height()*0.5-bar_bounds.y()-bar_bounds.height()*0.5).abs()<1.);
-    let row=bar.parent().unwrap().compute_bounds(panel).unwrap();
-    assert!((row.x()+row.width()*0.5-panel.width() as f32*0.5).abs()<1.5,"the preview and icon bar share the panel center");
+    let graph=find_named(panel,"pen-tilt-graph").unwrap().compute_bounds(panel).unwrap();
+    let center=graph.x()+graph.width()*0.5;
+    assert!((preview_bounds.x()+preview_bounds.width()*0.5-center).abs()<1.);
+    assert!((bar_bounds.x()+bar_bounds.width()*0.5-center).abs()<1.,"plot, preview and icon bar share one centerline");
+    assert!((bar_bounds.y()-preview_bounds.y()-preview_bounds.height()-8.).abs()<1.,"consistent preview/control gap");
+    assert!(buttons.iter().all(|button|button.height()>=34));
     let bounds=buttons.each_ref().map(|button|button.compute_bounds(&bar).unwrap());
     assert!(bounds.windows(2).all(|pair|(pair[0].x()+pair[0].width()-pair[1].x()).abs()<1.));
+}
+
+fn record_layout(w:&Workspace,panel:&gtk::Widget,prefix:&str,output:&std::path::Path,theme:Theme) {
+    let mut widgets=serde_json::Map::new();
+    for suffix in ["title","close","graph","input-axis","output-axis","firmer","lighter","reset","cancel","apply","device","direction-title","direction","axes"] {
+        if let Some(widget)=find_named(panel,&format!("{prefix}-{suffix}")) && widget.is_mapped() {
+            let b=widget.compute_bounds(panel).unwrap();widgets.insert(suffix.into(),json!({"x":b.x(),"y":b.y(),"width":b.width(),"height":b.height()}));
+        }
+    }
+    let view=response_view(w,prefix=="pen-tilt");
+    std::fs::write(output.join(format!("{prefix}-{theme:?}-layout.json")),serde_json::to_vec_pretty(&json!({"width":panel.width(),"height":panel.height(),"shared_bounds":view.bounds,"widgets":widgets})).unwrap()).unwrap();
 }

@@ -209,7 +209,16 @@ impl CurveEditor {
         if control.controls.coordinate_readouts { vertical.set_center_widget(Some(&title)); }
         else { vertical.set_center_widget(Some(&RotatedLabel::new(&title))); }
         let y_axis = [minimum.clone(), title.clone(), maximum.clone()];
-        graph.attach(&vertical, 0, 0, 1, 1); graph.attach(&area, 1, 0, 1, 1);
+        graph.attach(&vertical, 0, 0, 1, 1);
+        if matches!(target,layer_ui::CurveEditorTarget::Pressure|layer_ui::CurveEditorTarget::Tilt) {
+            let plot=gtk::AspectFrame::builder().ratio(1.).obey_child(false).hexpand(true).child(&area).build();
+            graph.attach(&plot,1,0,1,1);
+            let gutter=gtk::Box::new(gtk::Orientation::Horizontal,0);gutter.set_can_target(false);
+            let reserve=gtk::Label::builder().label(layer_ui::CurveDomain::Percent.axis_text(1.)).opacity(0.).can_target(false).build();
+            reserve.add_css_class("dim-label");reserve.update_state(&[gtk::accessible::State::Hidden(true)]);gutter.append(&reserve);
+            let gutters=gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);gutters.add_widget(&vertical);gutters.add_widget(&gutter);
+            graph.attach(&gutter,2,0,1,1);
+        } else {graph.attach(&area,1,0,1,1);}
         let horizontal = gtk::CenterBox::new();
         let minimum = gtk::Label::new(Some(&curve.axes[0].minimum));
         let title = gtk::Label::new(None); title.set_widget_name(&format!("{name}-input-axis"));
