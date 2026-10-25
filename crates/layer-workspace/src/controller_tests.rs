@@ -157,6 +157,46 @@ fn workspace_creation_outside_or_dismissed_during_the_manager_stays_closed() {
 }
 
 #[test]
+fn invalid_inline_names_preserve_the_prompt_and_preview_before_follow_up_actions() {
+    for follow_up in ["new", "delete", "confirm", "select", "open", "switch"] {
+        let mut f = Fixture::new();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        f.input(serde_json::json!({"type":"select","id":"builtin:workspace:photographer"}));
+        f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+        let prompt = serde_json::to_value(&f.controller.view.prompt).unwrap();
+        let preview = f.host.session.state().workspace.layout.clone();
+        let selected = f.controller.view.selected.clone();
+        let active = f.controller.manager.active_id();
+        let order = f.controller.manager.workspace_ids();
+        let deliveries = f.backend.deliveries.borrow().len();
+        let rejected = f.controller.input(&mut f.host.session,
+            serde_json::from_value(serde_json::json!({"type":"submit","name":""})).unwrap(),
+            f.backend.now.get());
+        assert!(rejected.is_err());
+        f.pump();
+        assert!(!f.controller.view.busy);
+        f.input(match follow_up {
+            "new" => serde_json::json!({"type":"form","action":{"type":"new"}}),
+            "delete" => serde_json::json!({"type":"action","action":{"type":"delete","value":custom}}),
+            "confirm" => serde_json::json!({"type":"confirm"}),
+            "select" => serde_json::json!({"type":"select","id":DEFAULT_WORKSPACES[1].0}),
+            "open" => serde_json::json!({"type":"open","page":"this_workspace"}),
+            "switch" => serde_json::json!({"type":"switch","id":DEFAULT_WORKSPACES[1].0}),
+            _ => unreachable!(),
+        });
+        assert_eq!(f.controller.view.prompt_action, Some(ManagerAction::Rename(custom)), "{follow_up}");
+        assert_eq!(serde_json::to_value(&f.controller.view.prompt).unwrap(), prompt, "{follow_up}");
+        assert_eq!(f.host.session.state().workspace.layout, preview, "{follow_up}");
+        assert_eq!(f.controller.view.selected, selected, "{follow_up}");
+        assert_eq!(f.controller.manager.active_id(), active, "{follow_up}");
+        assert_eq!(f.controller.manager.workspace_ids(), order, "{follow_up}");
+        assert_eq!(f.backend.deliveries.borrow().len(), deliveries, "{follow_up}");
+        assert!(!f.controller.view.busy, "{follow_up}");
+    }
+}
+
+#[test]
 fn failed_rename_does_not_execute_queued_workspace_inputs() {
     for follow_up in ["new", "delete", "confirm", "select"] {
         let mut f = Fixture::new();

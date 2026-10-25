@@ -90,4 +90,118 @@ extension XCTestCase {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         attachEditor(in: app, name: "workspace-switcher-restarted")
     }
+    @MainActor func checkWorkspaceInlineNameAdmission(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = """
+        [{"type":"set_theme","theme":"\(theme)"},{"type":"workspace_manager","command":{"type":"manage"}}]
+        """
+        app.launch()
+        let manager = app.descendants(matching: .any)["workspace-library-manager"].firstMatch
+        let create = app.buttons["workspace-action-new"]
+        XCTAssertTrue(create.waitForExistence(timeout: 30))
+        workspaceActivate(create)
+        let formName = app.textFields["workspace-form-name"]
+        XCTAssertTrue(formName.waitForExistence(timeout: 10))
+        replaceEditorText(formName, with: "Inline admission original", in: app)
+        let confirm = app.buttons["workspace-form-confirm"]
+        expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: confirm)
+        waitForExpectations(timeout: 10)
+        workspaceActivate(confirm)
+        XCTAssertTrue(formName.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(manager.exists, "Creating a workspace keeps the manager open")
+        let created = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "workspace-select-", "Inline admission original")).firstMatch
+        XCTAssertTrue(created.waitForExistence(timeout: 10)); XCTAssertTrue(created.isSelected)
+        workspaceActivate(app.buttons["workspace-manager-close"])
+        XCTAssertTrue(manager.waitForNonExistence(timeout: 15))
+        let activeBuiltin = app.buttons["workspace-switch-builtin:workspace:painter"]
+        let compactSwitcher = app.descendants(matching: .any)["workspace-switcher"].firstMatch.buttons.firstMatch
+        if activeBuiltin.exists { workspaceActivate(activeBuiltin) }
+        else {
+            XCTAssertTrue(compactSwitcher.waitForExistence(timeout: 10))
+            workspaceActivate(compactSwitcher)
+            let switcherMenu = app.descendants(matching: .any)["workspace-switcher-menu"].firstMatch
+            XCTAssertTrue(switcherMenu.waitForExistence(timeout: 10))
+            workspaceActivate(switcherMenu.buttons["menu-action-Sketch"])
+            XCTAssertTrue(switcherMenu.waitForNonExistence(timeout: 10))
+        }
+        expectation(for: NSPredicate { _, _ in
+            activeBuiltin.exists && activeBuiltin.isSelected || compactSwitcher.exists && compactSwitcher.value as? String == "Sketch"
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        app.terminate(); app.launch()
+        let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@",
+            "workspace-select-", "Inline admission original")).firstMatch
+        guard title.waitForExistence(timeout: 30) else { XCTFail("The created workspace must survive restart"); return }
+        let id = String(title.identifier.dropFirst("workspace-select-".count))
+        XCTAssertNotNil(UUID(uuidString: id))
+        let row = app.descendants(matching: .any)["workspace-select-" + id].firstMatch
+        let originalRowLabel = row.label
+        XCTAssertEqual(originalRowLabel.components(separatedBy: "Inline admission original").count, 2)
+        let pin = app.buttons["workspace-pin-" + id]
+        let rows = app.descendants(matching: .any)["workspace-manager-rows"].firstMatch
+        let name = app.textFields["workspace-name-" + id]
+        let error = app.descendants(matching: .any)["workspace-manager-error"].firstMatch
+        func order() -> [String] {
+            rows.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "workspace-select-"))
+                .allElementsBoundByIndex.map(\.identifier)
+        }
+        workspaceActivate(row)
+        let selected = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            row.isSelected && app.buttons["workspace-manager-apply"].isEnabled && !manager.progressIndicators.firstMatch.exists
+        }, object: row)
+        guard XCTWaiter.wait(for: [selected], timeout: 10) == .completed else {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "workspace-inline-selection-" + theme
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            attachEditor(in: app, name: "workspace-inline-selection-" + theme)
+            XCTFail("The original row click must publish the selected ready preview within ten seconds")
+            return
+        }
+        XCTAssertTrue(row.isSelected)
+        let originalOrder = order(), originalPin = pin.isSelected
+        XCTAssertTrue(rows.exists); XCTAssertTrue(originalOrder.contains("workspace-select-" + id))
+        var latest = "Inline admission original"
+        for (label, identifier) in [("New", "workspace-action-new"), ("Delete", "workspace-action-delete"), ("Apply", "workspace-manager-apply")] {
+            let currentTitle = app.buttons["workspace-select-" + id].firstMatch
+            XCTAssertTrue(currentTitle.waitForExistence(timeout: 10))
+            #if os(macOS)
+            currentTitle.doubleClick()
+            #else
+            currentTitle.doubleTap()
+            #endif
+            guard name.waitForExistence(timeout: 10) else { XCTFail("Rename must mount in the original row"); return }
+            XCTAssertEqual(name.value as? String, latest, "The real row must reopen its exact latest accepted name")
+            replaceEditorText(name, with: "", in: app)
+            XCTAssertEqual(name.value as? String, "")
+            let followUp = app.buttons[identifier]
+            XCTAssertTrue(followUp.exists); XCTAssertTrue(followUp.isEnabled)
+            workspaceActivate(followUp)
+            XCTAssertTrue(error.waitForExistence(timeout: 10), "The async empty-name refusal must be visible before checking the retained rename")
+            XCTAssertTrue(manager.exists); XCTAssertTrue(name.exists)
+            XCTAssertEqual(name.value as? String, "", "\(label) must retain the rejected inline draft")
+            XCTAssertFalse(formName.exists); XCTAssertFalse(confirm.exists, "\(label) must not replace Rename with another prompt")
+            XCTAssertTrue(row.isSelected, "\(label) must preserve the selected preview")
+            XCTAssertEqual(order(), originalOrder); XCTAssertEqual(pin.isSelected, originalPin)
+            latest = "Inline admission after " + label
+            replaceEditorText(name, with: latest, in: app)
+            name.typeText("\n")
+            XCTAssertTrue(name.waitForNonExistence(timeout: 10))
+            expectation(for: NSPredicate(format: "label == %@",
+                originalRowLabel.replacingOccurrences(of: "Inline admission original", with: latest)), evaluatedWith: currentTitle)
+            waitForExpectations(timeout: 10)
+            XCTAssertTrue(error.waitForNonExistence(timeout: 10))
+            XCTAssertTrue(row.isSelected); XCTAssertEqual(order(), originalOrder); XCTAssertEqual(pin.isSelected, originalPin)
+        }
+        let apply = app.buttons["workspace-manager-apply"]
+        XCTAssertTrue(apply.isEnabled)
+        workspaceActivate(apply)
+        XCTAssertTrue(manager.waitForNonExistence(timeout: 15))
+        app.terminate(); app.launch()
+        XCTAssertTrue(row.waitForExistence(timeout: 30)); XCTAssertTrue(row.isSelected)
+        XCTAssertEqual(row.label, originalRowLabel.replacingOccurrences(of: "Inline admission original", with: latest))
+        XCTAssertEqual(order(), originalOrder); XCTAssertEqual(pin.isSelected, originalPin)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+        attachEditor(in: app, name: "workspace-inline-name-admission-" + theme)
+    }
 }

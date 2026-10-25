@@ -354,6 +354,9 @@ mutation or release.
 - **Native control cancellation.** Cancel a control's owned contact once. Idle
   AppKit controls forward `cancelOperation` through the next responder's
   `tryToPerform`; the superclass need not implement that action.
+- **Inline workspace names.** Preserve the native text field's accessibility
+  while renaming. The field owns Space, Return and text composition; row
+  shortcuts apply outside editing.
 
 ## Tool bubbles
 

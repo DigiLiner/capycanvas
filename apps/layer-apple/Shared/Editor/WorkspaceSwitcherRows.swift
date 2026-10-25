@@ -51,9 +51,10 @@ struct WorkspaceSwitcherRows: View {
             if rows.isEmpty { Text(nativeCopy["header"]["no_items"].string).foregroundStyle(.secondary).padding(20) }
             ForEach(rows, id: \.workspaceRowID) { row in
                 let id = row["id"].string
+                let renaming = workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string == id
                 HStack(spacing: 4) {
                     VStack(alignment:.leading,spacing:2) {
-                        if workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id {
+                        if renaming {
                             TextField("",text:$workspaces.formName).textFieldStyle(.plain).focused($editing)
                                 .accessibilityIdentifier("workspace-name-"+id)
                                 .onSubmit {if !NativeTextContext.composing {workspaces.finishName()}}
@@ -69,12 +70,12 @@ struct WorkspaceSwitcherRows: View {
                         }
                         if !row["subtitle"].string.isEmpty {Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1)}
                     }.frame(maxWidth:.infinity,minHeight:rowHeight,alignment:.leading)
-                        .contentShape(Rectangle()).onTapGesture {if !(workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id) && !interaction.contact.consumeClick(){workspaces.select(id)}}.focusable().focused($focus,equals:"row-"+id)
-                        .accessibilityLabel(switchCaptions[id] ?? "").accessibilityIdentifier("workspace-select-"+id)
-                        .accessibilityAddTraits(workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id ? [] : .isButton)
-                        .accessibilityAction {workspaces.select(id)}
-                        .accessibilityAddTraits(workspaces.view["selected"].string==id ? .isSelected : [])
+                        .contentShape(Rectangle()).onTapGesture {if !renaming && !interaction.contact.consumeClick(){workspaces.select(id)}}.focusable().focused($focus,equals:"row-"+id)
+                        .modifier(WorkspaceRowAccessibility(id: id, label: switchCaptions[id] ?? "",
+                            selected: workspaces.view["selected"].string == id, renaming: renaming,
+                            select: { workspaces.select(id) }))
                         .onKeyPress {key in
+                            guard !renaming else { return .ignored }
                             if key.key==KeyEquivalent("\u{F705}") {rename(row);return .handled}
                             if key.key==KeyEquivalent("\u{F70D}") && key.modifiers.contains(.shift){interaction.showMenu(id,reordering:false);return .handled}
                             if key.key == .return || key.key == .space {workspaces.select(id);return .handled}
@@ -177,4 +178,22 @@ struct WorkspaceSwitcherRows: View {
 private extension JSON {
     var workspaceRowID: String { self["id"].string }
     var workspaceActionID: String { self["action"].stableKey }
+}
+
+private struct WorkspaceRowAccessibility: ViewModifier {
+    let id: String
+    let label: String
+    let selected: Bool
+    let renaming: Bool
+    let select: () -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        let row = content.accessibilityElement(children: renaming ? .contain : .ignore)
+            .accessibilityIdentifier("workspace-select-" + id)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+        if renaming { row }
+        else {
+            row.accessibilityLabel(label).accessibilityAddTraits(.isButton)
+                .accessibilityAction { select() }
+        }
+    }
 }

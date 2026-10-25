@@ -101,7 +101,7 @@ extension XCTestCase {
         #if os(macOS)
         workspaceActivate(field)
         field.typeKey("a", modifierFlags: .command)
-        field.typeText(value)
+        field.typeText(value.isEmpty ? XCUIKeyboardKey.delete.rawValue : value)
         #else
         if !field.isHittable { dismissEditorKeyboard(in: app) }
         let focused = app.textFields.matching(NSPredicate(format: "identifier == %@ AND hasKeyboardFocus == true", field.identifier)).firstMatch

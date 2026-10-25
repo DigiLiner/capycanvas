@@ -190,6 +190,14 @@ final class EditorLaunchTests: XCTestCase {
         checkWorkspaceSwitcher(in: editorTestApplication())
     }
 
+    @MainActor func testWorkspaceInlineNameAdmission() {
+        checkWorkspaceInlineNameAdmission(in: editorTestApplication(), theme: "light")
+    }
+
+    @MainActor func testWorkspaceInlineNameAdmissionDark() {
+        checkWorkspaceInlineNameAdmission(in: editorTestApplication(), theme: "dark")
+    }
+
     @MainActor func testWorkspaceLibraryHistory() {
         checkWorkspaceLibraryHistory(in: editorTestApplication())
     }

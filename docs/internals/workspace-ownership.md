@@ -39,6 +39,9 @@ Renewal includes those claims, and retry replays the same operation and fence.
 A metadata-only retry updates the saved metadata without adopting a workspace;
 temporary claims are released after publication. Renaming or deleting an
 unrelated workspace therefore keeps the manager's selected preview in place.
+Inline workspace names require an accepted submission or explicit cancellation
+before navigation. A rejected submission keeps its prompt and selected preview;
+pin edits remain available while a name is being edited or saved.
 
 GTK always attempts the authoritative switch/claim. On a live conflict it focuses
 the owning GTK window where available. A stale SwitchToWindow menu action uses

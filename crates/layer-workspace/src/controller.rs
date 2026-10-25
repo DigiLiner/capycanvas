@@ -841,6 +841,13 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         input: WorkspaceInput,
         now: u64,
     ) -> Result<UiChange> {
+        if self.renaming_workspace() && self.task.is_none()
+            && matches!(input, WorkspaceInput::Open { .. } | WorkspaceInput::Form { .. }
+                | WorkspaceInput::Action { .. } | WorkspaceInput::Switch { .. }
+                | WorkspaceInput::Confirm | WorkspaceInput::Import { .. })
+        {
+            return Ok(UiChange::default());
+        }
         if matches!(input, WorkspaceInput::Submit { .. })
             && self.manager.has_failed_operation()
             && self
