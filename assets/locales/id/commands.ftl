@@ -1262,3 +1262,5 @@ command-erase-to-intersection = Hapus sampai perpotongan
 command-liquify-reset = Atur ulang Liquify
 command-liquify-adjust = Sesuaikan Liquify
 commands-liquify-no-changes = Terapkan Liquify ke lapisan ini terlebih dahulu
+
+command-pen-tilt = Kemiringan pena…

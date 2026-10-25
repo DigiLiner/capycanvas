@@ -681,3 +681,5 @@ command-erase-to-intersection = Cancella fino all’intersezione
 command-liquify-reset = Ripristina Fluidifica
 command-liquify-adjust = Regola Fluidifica
 commands-liquify-no-changes = Applica prima Fluidifica a questo livello
+
+command-pen-tilt = Inclinazione della penna…

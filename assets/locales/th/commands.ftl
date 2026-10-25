@@ -678,3 +678,5 @@ command-erase-to-intersection = ลบถึงจุดตัด
 command-liquify-reset = รีเซ็ตการบิดรูป
 command-liquify-adjust = ปรับการบิดรูป
 commands-liquify-no-changes = ใช้การบิดรูปกับเลเยอร์นี้ก่อน
+
+command-pen-tilt = การเอียงปากกา…

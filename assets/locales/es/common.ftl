@@ -610,3 +610,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Conversión de pantalla
 native-color-display-help = El sistema convierte los colores con perfil para esta pantalla, incluidas las pantallas sRGB. Los colores del dibujo y de la exportación no dependen de la pantalla.
 native-dialog-link-open-failed = No se pudo abrir el enlace
+
+tilt-title = Inclinación del lápiz
+tilt-description = Ajusta la inclinación del lápiz mientras dibujas.
+tilt-less-sensitive = Menos sensible
+tilt-more-sensitive = Más sensible
+tilt-direction = Dirección
+tilt-reverse-horizontal = Invertir horizontal
+tilt-reverse-vertical = Invertir vertical
+tilt-swap-axes = Intercambiar ejes
+tilt-adjusted = Ajustada
+tilt-direction-help = Inclina el lápiz hacia un borde. La flecha azul debe seguirlo.
+tilt-use-pen = Usa el lápiz en el lienzo

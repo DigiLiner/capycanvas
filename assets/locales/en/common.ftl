@@ -607,3 +607,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Display conversion
 native-color-display-help = The system converts tagged colors for this display, including sRGB screens. Document and export colors are independent of the screen.
 native-dialog-link-open-failed = Could not open the link
+
+tilt-title = Pen tilt
+tilt-description = Adjust pen tilt while drawing.
+tilt-less-sensitive = Less sensitive
+tilt-more-sensitive = More sensitive
+tilt-direction = Direction
+tilt-reverse-horizontal = Reverse horizontal
+tilt-reverse-vertical = Reverse vertical
+tilt-swap-axes = Swap axes
+tilt-adjusted = Adjusted
+tilt-direction-help = Lean the pen toward an edge. The blue arrow should follow.
+tilt-use-pen = Use your pen on the canvas

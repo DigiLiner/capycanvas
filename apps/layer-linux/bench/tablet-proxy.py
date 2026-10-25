@@ -143,6 +143,7 @@ try:
                 event(tool, 0, words(kind))
                 event(tool, 1, words(0, tool & 0xFF))
                 event(tool, 3, words(2))  # pressure
+                event(tool, 3, words(1))  # tilt
                 event(tool, 4)
             introduced = True
         file = events / f"pen-{index}.json"
@@ -159,6 +160,8 @@ try:
                 near = tool
             if "point" in contact:
                 event(tool, 10, struct.pack("=ii", *(int(v * 256) for v in contact["point"])))
+            if "tilt" in contact:
+                event(tool, 13, struct.pack("=ii", *(int(v * 256) for v in contact["tilt"])))
             if contact["pen"] == "down":
                 event(tool, 11, words(32768))
                 event(tool, 8, words(serial))

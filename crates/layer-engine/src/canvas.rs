@@ -123,6 +123,7 @@ struct ContactSettings {
     clone_generation: u64,
     paint_color: Option<layer_core::color::RgbColor>,
     pressure: PressureCurve,
+    tilt: crate::TiltCurve,
     instant_feedback: InstantFeedbackConfig,
     ruler_snapping: Option<f32>,
 }
@@ -212,7 +213,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             settings: ContactSettings {
                 brush: BrushSnapshot::default(), tool: StrokeTool::Brush, retouch: None,
                 clone_source: CloneSource::default(), clone_generation: 0, paint_color: None,
-                pressure: PressureCurve::default(), instant_feedback: InstantFeedbackConfig::default(), ruler_snapping: Some(12.),
+                pressure: PressureCurve::default(), tilt: crate::TiltCurve::default(), instant_feedback: InstantFeedbackConfig::default(), ruler_snapping: Some(12.),
             },
             used_colors: Vec::new(),
             recording: Default::default(),
@@ -441,10 +442,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         hover: &mut DabGenerator,
         hover_start_ns: u64,
     ) -> Vec<Dab> {
-        let mut point = crate::input::to_stroke_point(
+        let mut point = crate::input::calibrated_stroke_point(
             event,
             *self.transforms.back().unwrap(),
             self.pressure_for_event(event).clone(),
+            self.tilt_for_event(event),
             hover_start_ns,
         );
         let ruler = self.active_stroke.as_ref().map_or_else(
@@ -1165,6 +1167,16 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     pub fn configured_pressure_curve(&self) -> &PressureCurve { &self.settings.pressure }
+    pub fn configured_tilt_curve(&self) -> &crate::TiltCurve { &self.settings.tilt }
+    pub fn set_tilt_curve(&mut self, tilt: crate::TiltCurve) { self.settings.tilt = tilt; }
+    fn tilt_for_event(&self, event: PenEvent) -> &crate::TiltCurve {
+        if event.flags.contains(SampleFlags::CORRECTION) {
+            self.estimates.get(&(event.device_id,event.sequence)).map(|e| &e.tilt)
+        } else if event.phase != PenPhase::Hover {
+            self.queued_contacts.iter().rev().find(|((device,_),_)| *device == event.device_id).map(|(_,s)| &s.tilt)
+                .or_else(|| self.active_stroke.as_ref().and(self.contact_settings.as_ref()).map(|s| &s.tilt))
+        } else { None }.unwrap_or(&self.settings.tilt)
+    }
     pub(crate) fn instant_feedback(&self) -> InstantFeedbackConfig { self.settings.instant_feedback }
 
     pub fn set_pressure_curve(&mut self, pressure: PressureCurve) {
@@ -1993,7 +2005,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 }
                 self.pending_chunk_dabs.clear();
                 self.finalized_real_points = 0;
-                self.builder.begin(event, transform, self.settings.pressure.clone());
+                self.builder.begin_calibrated(event, transform, self.settings.pressure.clone(), self.settings.tilt.clone());
                 self.record_builder_sample(event);
                 self.track_estimate(event, transform);
                 let active = self.active_stroke.as_ref().expect("set above");
@@ -5285,6 +5297,35 @@ mod tests {
         let mut recorder=engine.recording.lock().unwrap();recorder.stop(crate::recording::StopReason::Manual);
         let records=crate::recording::read(recorder.bytes().unwrap().as_slice()).unwrap();
         for record in records {if let crate::recording::Record::Raw {pressure,..}=record {assert_eq!(pressure,original);}}
+    }
+
+    #[test]
+    fn tilt_calibration_is_captured_for_queued_cursor_predicted_and_corrected_input() {
+        use layer_core::{TiltAxes,TiltCalibration,TiltResponse};
+        let (mut input,mut engine)=engine("tilt calibration",512,512);
+        engine.settings.instant_feedback.enabled=false;
+        let source=TiltCalibration{response:TiltResponse::try_from(vec![[0.,0.],[0.5,1.]]).unwrap(),axes:TiltAxes{reverse_horizontal:true,..Default::default()}};
+        let curve=crate::TiltCurve::new(&source,TiltAxes::default());engine.set_tilt_curve(curve.clone());
+        let mut down=event(1,PenPhase::Down,20.);down.tilt_radians=[0.3,0.];down.flags=SampleFlags::ESTIMATED;
+        engine.capture_queued_contact(down);input.push(down).unwrap();
+        engine.set_tilt_curve(crate::TiltCurve::default());engine.render_frame().unwrap();
+        assert_eq!(engine.builder.real_points()[0].tilt,curve.projected(down.tilt_radians));
+        let mut cursor=DabGenerator::new(layer_core::color::RgbSpace::Srgb);
+        let before=engine.cursor_contacts(down,&mut cursor,0);
+        engine.set_tilt_curve(curve.clone());let after=engine.cursor_contacts(down,&mut cursor,0);
+        assert_eq!(before.iter().map(|d|d.radii).collect::<Vec<_>>(),after.iter().map(|d|d.radii).collect::<Vec<_>>());
+        let mut moved=event(2,PenPhase::Move,24.);moved.tilt_radians=[0.4,0.];
+        engine.set_tilt_curve(crate::TiltCurve::default());input.push(moved).unwrap();engine.render_frame().unwrap();
+        let mut predicted=moved;predicted.sequence=3;predicted.flags=SampleFlags::PREDICTED;predicted.surface_position.x=28.;
+        input.push(predicted).unwrap();engine.render_frame().unwrap();
+        assert!(engine.builder.real_points().iter().all(|p|p.tilt[0]<0.));
+        assert!(engine.builder.predicted_points().iter().all(|p|p.tilt[0]<0.));
+        let mut correction=down;correction.flags=SampleFlags::CORRECTION;correction.tilt_radians=[0.,0.2];
+        input.push(correction).unwrap();engine.render_frame().unwrap();
+        assert_eq!(engine.builder.real_points()[0].tilt,curve.projected(correction.tilt_radians));
+        let mut up=moved;up.phase=PenPhase::Up;up.sequence=4;input.push(up).unwrap();engine.render_frame().unwrap();
+        assert_eq!(engine.completed_stroke.as_ref().unwrap().points[0].tilt,curve.projected(correction.tilt_radians));
+        assert_eq!(engine.configured_tilt_curve(),&crate::TiltCurve::default());
     }
 
     #[test]

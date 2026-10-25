@@ -613,3 +613,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Conversão da tela
 native-color-display-help = O sistema converte as cores com perfil para esta tela, incluindo telas sRGB. As cores do desenho e da exportação não dependem da tela.
 native-dialog-link-open-failed = Não foi possível abrir o link
+
+tilt-title = Inclinação da caneta
+tilt-description = Ajuste a inclinação da caneta enquanto desenha.
+tilt-less-sensitive = Menos sensível
+tilt-more-sensitive = Mais sensível
+tilt-direction = Direção
+tilt-reverse-horizontal = Inverter horizontal
+tilt-reverse-vertical = Inverter vertical
+tilt-swap-axes = Trocar eixos
+tilt-adjusted = Ajustada
+tilt-direction-help = Incline a caneta em direção a uma borda. A seta azul deve acompanhar.
+tilt-use-pen = Use a caneta na tela

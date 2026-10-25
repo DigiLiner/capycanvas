@@ -1,5 +1,5 @@
 use gtk::{glib, prelude::*};
-use layer_ui::{Bounds, ContactPhase, CurveEditorAction, CurveEditorTarget, PressureCalibrationAction, PressureCalibrationView, UiAction};
+use layer_ui::{Bounds, ContactPhase, CurveEditorAction, CurveEditorTarget, PressureCalibrationAction, PressureCalibrationView, TiltCalibrationAction, TiltCalibrationView, UiAction};
 use std::{cell::{Cell, RefCell}, rc::Rc};
 use crate::{curve_editor::CurveEditor, workspace::{PanelColumns, Workspace}};
 
@@ -9,6 +9,16 @@ pub(crate) struct PressurePanel {
     title: gtk::Label,
     close: gtk::Button,
     body: gtk::Box,
+    device: gtk::Label,
+    direction: gtk::Box,
+    direction_title: gtk::Label,
+    arrows: gtk::DrawingArea,
+    legend: gtk::Label,
+    help: gtk::Label,
+    axes: [gtk::CheckButton;3],
+    tilt: Cell<bool>,
+    projecting: Cell<bool>,
+    tilt_view: RefCell<Option<TiltCalibrationView>>,
     firmer: gtk::Button,
     lighter: gtk::Button,
     reset: gtk::Button,
@@ -46,6 +56,14 @@ impl PressurePanel {
         let firmer = gtk::Button::new(); firmer.set_widget_name("pen-pressure-firmer");
         let lighter = gtk::Button::new(); lighter.set_widget_name("pen-pressure-lighter");
         sensitivity.append(&firmer); sensitivity.append(&lighter); body.append(&sensitivity);
+        let device = gtk::Label::builder().xalign(0.).wrap(true).build(); device.add_css_class("dim-label"); body.prepend(&device);
+        let direction = gtk::Box::new(gtk::Orientation::Vertical,6);
+        let direction_title = gtk::Label::builder().xalign(0.).build(); direction_title.add_css_class("heading"); direction.append(&direction_title);
+        let arrows = gtk::DrawingArea::builder().content_height(72).hexpand(true).build(); arrows.set_widget_name("pen-tilt-direction"); direction.append(&arrows);
+        let legend = gtk::Label::new(None); direction.append(&legend);
+        let axes = std::array::from_fn(|_|gtk::CheckButton::new());
+        for button in &axes {direction.append(button);}
+        let help = gtk::Label::builder().wrap(true).xalign(0.).build(); help.add_css_class("dim-label"); direction.append(&help); body.append(&direction);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         footer.set_margin_start(12); footer.set_margin_end(12); footer.set_margin_bottom(12);
         let reset = gtk::Button::new(); reset.set_widget_name("pen-pressure-reset"); reset.add_css_class("flat");
@@ -53,27 +71,53 @@ impl PressurePanel {
         let cancel = gtk::Button::new(); cancel.set_widget_name("pen-pressure-cancel");
         let apply = gtk::Button::new(); apply.set_widget_name("pen-pressure-apply"); apply.add_css_class("suggested-action");
         footer.append(&reset); footer.append(&spacer); footer.append(&cancel); footer.append(&apply); column.append(&footer);
-        Rc::new(Self { root, column, title, close, body, firmer, lighter, reset, cancel, apply,
+        Rc::new(Self { root, column, title, close, body, device, direction, direction_title, arrows, legend, help, axes,
+            tilt:Cell::new(false), projecting:Cell::new(false), tilt_view:RefCell::new(None), firmer, lighter, reset, cancel, apply,
             editor: RefCell::new(None), bounds: Cell::new(None), pending_bounds: Cell::new(None), presented: RefCell::new(None), measured: Cell::new(None), bound: Cell::new(false) })
     }
     pub fn bounds(&self) -> Option<Bounds> { self.bounds.get() }
-    fn bind(&self, w: &Rc<Workspace>) {
+    fn panel_action(&self,action:PressureCalibrationAction)->UiAction {
+        if self.tilt.get() {UiAction::TiltCalibration{action:TiltCalibrationAction::Panel{action}}} else {UiAction::PressureCalibration{action}}
+    }
+    fn target(&self)->CurveEditorTarget {if self.tilt.get(){CurveEditorTarget::Tilt}else{CurveEditorTarget::Pressure}}
+    fn bind(self:&Rc<Self>, w: &Rc<Workspace>) {
         if self.bound.replace(true) { return; }
         for (button, action) in [(&self.close, PressureCalibrationAction::Cancel), (&self.cancel, PressureCalibrationAction::Cancel),
             (&self.apply, PressureCalibrationAction::Apply), (&self.firmer, PressureCalibrationAction::Sensitivity { lighter: false }),
             (&self.lighter, PressureCalibrationAction::Sensitivity { lighter: true })] {
-            button.connect_clicked(glib::clone!(#[weak] w, move |_| { w.dispatch(UiAction::PressureCalibration { action: action.clone() }); }));
+            button.connect_clicked(glib::clone!(#[weak] w, move |_| { w.dispatch(w.pressure_calibration.panel_action(action.clone())); }));
         }
         self.reset.connect_clicked(glib::clone!(#[weak] w, move |_| {
-            w.dispatch(UiAction::CurveEditor { target: CurveEditorTarget::Pressure, action: CurveEditorAction::Reset });
+            w.dispatch(UiAction::CurveEditor { target: w.pressure_calibration.target(), action: CurveEditorAction::Reset });
+        }));
+        for (button,name) in self.axes.iter().zip(["reverse-horizontal","reverse-vertical","swap-axes"]) {
+            button.set_widget_name(&format!("pen-tilt-{name}"));
+            button.connect_toggled(glib::clone!(#[weak(rename_to=panel)] self, #[weak] w, move |_| {
+                if panel.projecting.get(){return;}
+                let axes=layer_core::TiltAxes{reverse_horizontal:panel.axes[0].is_active(),reverse_vertical:panel.axes[1].is_active(),swap:panel.axes[2].is_active()};
+                w.dispatch(UiAction::TiltCalibration{action:TiltCalibrationAction::Axes{axes}});
+            }));
+        }
+        self.arrows.set_draw_func(glib::clone!(#[weak(rename_to=panel)] self, move |area,context,width,height| {
+            let view=panel.tilt_view.borrow();let Some(view)=view.as_ref()else{return};
+            let (cx,cy)=(width as f64/2.,height as f64/2.);let radius=height.min(width) as f64/2.-5.;
+            let color=area.color();context.set_source_rgba(color.red() as f64,color.green() as f64,color.blue() as f64,0.18);
+            context.arc(cx,cy,radius,0.,std::f64::consts::TAU);let _=context.stroke();
+            for (vector,adjusted) in [(view.input_direction,false),(view.adjusted_direction,true)] {
+                let Some([x,y])=vector else{continue};
+                if adjusted {context.set_source_rgb(0.16,0.52,0.95);}else{context.set_source_rgba(color.red() as f64,color.green() as f64,color.blue() as f64,0.55);}
+                let (x,y)=(x as f64*radius,y as f64*radius);context.set_line_width(if adjusted{2.5}else{1.5});
+                context.move_to(cx,cy);context.line_to(cx+x,cy+y);let _=context.stroke();
+                let length=x.hypot(y);if length>3. {let (ux,uy)=(x/length,y/length);context.move_to(cx+x-ux*6.-uy*3.,cy+y-uy*6.+ux*3.);context.line_to(cx+x,cy+y);context.line_to(cx+x-ux*6.+uy*3.,cy+y-uy*6.-ux*3.);let _=context.stroke();}
+            }
         }));
         let drag = gtk::GestureDrag::new(); drag.set_button(1);
         let capture = Rc::new(Cell::new(false));
         drag.connect_drag_begin(glib::clone!(#[weak] w, #[strong] capture, move |gesture, _, _| {
             let Some((x,y)) = gesture.current_event().and_then(|event| event.position()) else { return; };
             capture.set(true); gesture.set_state(gtk::EventSequenceState::Claimed);
-            w.dispatch(UiAction::PressureCalibration { action: PressureCalibrationAction::Drag { phase: ContactPhase::Down,
-                position: [x as f32,y as f32], viewport: [w.surface.width() as f32,w.surface.height() as f32] } });
+            w.dispatch(w.pressure_calibration.panel_action(PressureCalibrationAction::Drag { phase: ContactPhase::Down,
+                position: [x as f32,y as f32], viewport: [w.surface.width() as f32,w.surface.height() as f32] }));
         }));
         for (phase, ending) in [(ContactPhase::Move,false),(ContactPhase::Up,true)] {
             let callback = glib::clone!(#[weak] w, #[strong] capture, move |gesture: &gtk::GestureDrag, _: f64, _: f64| {
@@ -82,21 +126,30 @@ impl PressurePanel {
                 let position = gesture.current_event().and_then(|event|event.position());
                 let phase = if position.is_some() { phase } else { ContactPhase::Cancel };
                 let (x,y) = position.unwrap_or_default();
-                w.dispatch(UiAction::PressureCalibration { action: PressureCalibrationAction::Drag { phase, position: [x as f32,y as f32],
-                    viewport: [w.surface.width() as f32,w.surface.height() as f32] } });
+                w.dispatch(w.pressure_calibration.panel_action(PressureCalibrationAction::Drag { phase, position: [x as f32,y as f32],
+                    viewport: [w.surface.width() as f32,w.surface.height() as f32] }));
                 if ending { w.pressure_calibration.present_motion(&w); }
             });
             if ending { drag.connect_drag_end(callback); } else { drag.connect_drag_update(callback); }
         }
         drag.connect_cancel(glib::clone!(#[weak] w, move |_, _| {
-            if capture.replace(false) { w.dispatch(UiAction::PressureCalibration { action: PressureCalibrationAction::Drag {
-                phase: ContactPhase::Cancel, position: [0.;2], viewport: [w.surface.width() as f32,w.surface.height() as f32] } }); }
+            if capture.replace(false) { w.dispatch(w.pressure_calibration.panel_action(PressureCalibrationAction::Drag {
+                phase: ContactPhase::Cancel, position: [0.;2], viewport: [w.surface.width() as f32,w.surface.height() as f32] })); }
             w.pressure_calibration.present_motion(&w);
         }));
         self.title.add_controller(drag);
     }
-    pub fn refresh(self: &Rc<Self>, w: &Rc<Workspace>, view: Option<&PressureCalibrationView>) {
+    pub fn refresh(self: &Rc<Self>, w: &Rc<Workspace>, pressure: Option<&PressureCalibrationView>, tilt:Option<&TiltCalibrationView>) {
         self.bind(w);
+        let changed_mode=self.tilt.replace(tilt.is_some())!=tilt.is_some();
+        let tilt_changed=self.tilt_view.borrow().as_ref()!=tilt;
+        if changed_mode {
+            let previous=self.editor.borrow_mut().take();
+            if let Some(editor)=previous {self.body.remove(&editor.root);}
+            self.presented.borrow_mut().take();self.measured.set(None);
+        }
+        *self.tilt_view.borrow_mut()=tilt.cloned();
+        let view=tilt.map(|v|&v.panel).or(pressure);
         let Some(view) = view else {
             self.bounds.set(None); self.pending_bounds.set(None); self.presented.borrow_mut().take(); self.root.set_visible(false); self.measured.set(None); return;
         };
@@ -106,10 +159,26 @@ impl PressurePanel {
         {
             let mut presented = self.presented.borrow_mut();
             if let Some(previous) = &mut *presented { previous.bounds = view.bounds; }
-            if presented.as_ref() == Some(view) && self.measured.get().is_some_and(|(_, previous)| previous == viewport) { return; }
+            if !tilt_changed && presented.as_ref() == Some(view) && self.measured.get().is_some_and(|(_, previous)| previous == viewport) { return; }
             *presented = Some(view.clone());
         }
         self.root.set_visible(true);
+        let prefix=if self.tilt.get(){"pen-tilt"}else{"pen-pressure"};
+        for (widget,suffix) in [(self.root.upcast_ref::<gtk::Widget>(),"panel"),(self.title.upcast_ref(),"title"),(self.close.upcast_ref(),"close"),
+            (self.firmer.upcast_ref(),"firmer"),(self.lighter.upcast_ref(),"lighter"),(self.reset.upcast_ref(),"reset"),
+            (self.cancel.upcast_ref(),"cancel"),(self.apply.upcast_ref(),"apply")] {widget.set_widget_name(&format!("{prefix}-{suffix}"));}
+        self.device.set_visible(tilt.is_some()); self.direction.set_visible(tilt.is_some());
+        let ready=tilt.is_none_or(|v|v.ready);self.reset.set_sensitive(ready);self.apply.set_sensitive(ready);
+        self.projecting.set(true);
+        if let Some(tilt)=tilt {
+            self.device.set_label(&tilt.device);self.direction_title.set_label(&tilt.direction);
+            self.legend.set_label(&format!("{} · {}",tilt.input,tilt.adjusted));self.help.set_label(&tilt.help);
+            for (i,(label,active)) in [(&tilt.reverse_horizontal,tilt.axes.reverse_horizontal),(&tilt.reverse_vertical,tilt.axes.reverse_vertical),(&tilt.swap_axes,tilt.axes.swap)].into_iter().enumerate(){
+                self.axes[i].set_label(Some(label));self.axes[i].set_active(active);self.axes[i].set_sensitive(ready);
+            }
+            self.arrows.queue_draw();
+        }
+        self.projecting.set(false);
         self.title.set_label(&view.title); self.column.update_property(&[gtk::accessible::Property::Label(&view.title),gtk::accessible::Property::Modal(false)]);
         self.close.set_tooltip_text(Some(&view.close)); self.close.update_property(&[gtk::accessible::Property::Label(&view.close)]);
         set_button_content(&self.reset, "layer-reset-symbolic", &view.reset);
@@ -118,17 +187,17 @@ impl PressurePanel {
         self.firmer.set_sensitive(view.firmer_enabled); self.lighter.set_sensitive(view.lighter_enabled);
         self.cancel.set_label(&view.cancel); self.apply.set_label(&view.apply);
         if self.editor.borrow().is_none() {
-            let editor = CurveEditor::new(w, CurveEditorTarget::Pressure, "pen-pressure", &view.title, &view.editor);
-            self.body.prepend(&editor.root); *self.editor.borrow_mut() = Some(editor);
+            let editor = CurveEditor::new(w, self.target(), prefix, &view.title, &view.editor);
+            self.body.insert_child_after(&editor.root,Some(&self.device)); *self.editor.borrow_mut() = Some(editor);
         }
+        self.editor.borrow().as_ref().unwrap().root.set_sensitive(ready);
         self.editor.borrow().as_ref().unwrap().update(&view.editor, &w.localization());
         let width = 336f32.max(self.column.measure(gtk::Orientation::Horizontal,-1).0 as f32).min(viewport[0]);
         let extent = [width,360f32.max(self.column.measure(gtk::Orientation::Vertical,width as i32).1 as f32).min(viewport[1])];
         if self.measured.get() != Some((extent, viewport)) {
             self.measured.set(Some((extent, viewport)));
-            glib::idle_add_local_once(glib::clone!(#[weak] w, move || {
-                w.dispatch(UiAction::PressureCalibration { action: PressureCalibrationAction::Measure { extent, viewport } });
-            }));
+            let action=self.panel_action(PressureCalibrationAction::Measure{extent,viewport});
+            glib::idle_add_local_once(glib::clone!(#[weak] w, move || {w.dispatch(action);}));
         }
     }
     pub(super) fn present_motion(&self, w: &Workspace) {

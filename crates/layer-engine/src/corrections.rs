@@ -1,5 +1,5 @@
 use super::*;
-use crate::input::to_stroke_point;
+use crate::input::calibrated_stroke_point;
 
 pub(super) struct EstimatedPoint {
     pub stroke: StrokeId,
@@ -8,6 +8,7 @@ pub(super) struct EstimatedPoint {
     point: layer_core::StrokePoint,
     transform: ViewTransform,
     pub(super) curve: PressureCurve,
+    pub(super) tilt: crate::TiltCurve,
 }
 
 impl<B: CanvasRenderer> CanvasEngine<B> {
@@ -44,6 +45,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 point,
                 transform,
                 curve: self.settings.pressure.clone(),
+                tilt: self.settings.tilt.clone(),
             },
         );
     }
@@ -54,7 +56,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             return Ok(false);
         };
         // All spatial/pressure policy belongs to the original observation.
-        let mut point = to_stroke_point(event, estimate.transform, estimate.curve.clone(), 0);
+        let mut point = calibrated_stroke_point(event, estimate.transform, estimate.curve.clone(), &estimate.tilt, 0);
         point.elapsed_micros = estimate.point.elapsed_micros;
         let mut changed = false;
         if point != estimate.point

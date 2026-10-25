@@ -610,3 +610,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Conversion d’affichage
 native-color-display-help = Le système convertit les couleurs avec profil pour cet écran, y compris les écrans sRGB. Les couleurs du dessin et de l’export ne dépendent pas de l’écran.
 native-dialog-link-open-failed = Impossible d’ouvrir le lien
+
+tilt-title = Inclinaison du stylet
+tilt-description = Ajustez l’inclinaison du stylet en dessinant.
+tilt-less-sensitive = Moins sensible
+tilt-more-sensitive = Plus sensible
+tilt-direction = Direction
+tilt-reverse-horizontal = Inverser horizontalement
+tilt-reverse-vertical = Inverser verticalement
+tilt-swap-axes = Permuter les axes
+tilt-adjusted = Ajustée
+tilt-direction-help = Inclinez le stylet vers un bord. La flèche bleue doit suivre.
+tilt-use-pen = Utilisez le stylet sur la toile

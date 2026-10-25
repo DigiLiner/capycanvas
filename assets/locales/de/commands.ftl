@@ -682,3 +682,5 @@ command-erase-to-intersection = Bis zum Schnittpunkt radieren
 command-liquify-reset = Verflüssigen zurücksetzen
 command-liquify-adjust = Verflüssigen anpassen
 commands-liquify-no-changes = Wende zuerst Verflüssigen auf diese Ebene an
+
+command-pen-tilt = Stiftneigung…

@@ -679,3 +679,5 @@ command-erase-to-intersection = Kesişime kadar sil
 command-liquify-reset = Sıvılaştırmayı sıfırla
 command-liquify-adjust = Sıvılaştırmayı ayarla
 commands-liquify-no-changes = Önce bu katmana sıvılaştırma uygulayın
+
+command-pen-tilt = Kalem eğimi…

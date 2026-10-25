@@ -682,3 +682,5 @@ command-erase-to-intersection = Erase up to intersection
 command-liquify-reset = Reset Liquify
 command-liquify-adjust = Adjust Liquify
 commands-liquify-no-changes = Apply Liquify to this layer first
+
+command-pen-tilt = Pen tilt…

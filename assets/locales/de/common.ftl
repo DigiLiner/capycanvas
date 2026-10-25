@@ -608,3 +608,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Bildschirmumwandlung
 native-color-display-help = Das System wandelt Farben mit Farbprofil für diesen Bildschirm um, auch auf sRGB-Bildschirmen. Zeichnungs- und Exportfarben hängen nicht vom Bildschirm ab.
 native-dialog-link-open-failed = Der Link konnte nicht geöffnet werden
+
+tilt-title = Stiftneigung
+tilt-description = Stiftneigung beim Zeichnen anpassen.
+tilt-less-sensitive = Weniger empfindlich
+tilt-more-sensitive = Empfindlicher
+tilt-direction = Richtung
+tilt-reverse-horizontal = Horizontal umkehren
+tilt-reverse-vertical = Vertikal umkehren
+tilt-swap-axes = Achsen tauschen
+tilt-adjusted = Angepasst
+tilt-direction-help = Neige den Stift zu einem Rand. Der blaue Pfeil sollte folgen.
+tilt-use-pen = Stift auf der Leinwand verwenden

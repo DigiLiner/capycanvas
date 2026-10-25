@@ -683,3 +683,5 @@ command-erase-to-intersection = Apagar até a interseção
 command-liquify-reset = Redefinir Liquefazer
 command-liquify-adjust = Ajustar Liquefazer
 commands-liquify-no-changes = Aplique Liquefazer a esta camada primeiro
+
+command-pen-tilt = Inclinação da caneta…

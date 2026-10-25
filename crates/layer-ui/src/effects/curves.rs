@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag="kind",rename_all="snake_case")]
-pub enum CurveDomain { Encoded, Percent, LogHdr { stops:f32 } }
+pub enum CurveDomain { Encoded, Percent, Degrees, LogHdr { stops:f32 } }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all="snake_case")]
 pub enum CurveAxis { Input, Output }
@@ -34,19 +34,20 @@ pub struct CurveControls {
 impl CurveDomain {
     pub fn decode(self,x:f64)->f64 {
         match self {
-            Self::Encoded | Self::Percent=>x,
+            Self::Encoded | Self::Percent | Self::Degrees=>x,
             Self::LogHdr{stops}=>layer_core::log_curve_decode(x,f64::from(stops))
         }
     }
     pub fn encode(self,value:f64)->f64 {
         match self {
-            Self::Encoded | Self::Percent=>value,
+            Self::Encoded | Self::Percent | Self::Degrees=>value,
             Self::LogHdr{stops}=>layer_core::log_curve_encode(value,f64::from(stops))
         }
     }
     pub fn numeric(self)->NumericControl {
         match self {
             Self::Percent=>{let mut n=NumericControl::percent();n.kind=NumericKind::Number;n},
+            Self::Degrees=>{let mut n=NumericControl::number(0.,1.,1./90.,1);n.kind=NumericKind::Number;n.scale=90.;n},
             Self::Encoded=>{let mut n=NumericControl::number(0.,1.,1./255.,3);n.kind=NumericKind::Number;n.scale=255.;n.resolution=1./255000.;n},
             Self::LogHdr{stops}=>{let mut n=NumericControl::number(0.,f64::from(stops).exp2(),0.01,3);n.kind=NumericKind::Number;n.resolution=2f64.powi(-149);n}
         }
@@ -55,6 +56,7 @@ impl CurveDomain {
         let value=self.decode(f64::from(x));
         match self {
             Self::Percent=>format!("{:.0}%",value*100.),
+            Self::Degrees=>format!("{:.0}°",value*90.),
             Self::Encoded=>format!("{:.0}",value*255.),
             Self::LogHdr{..}=>if value!=0. && (value.abs()<1e-4 || value.abs()>=1e6) {format!("{value:.3e}")}else{format!("{value:.3}").trim_end_matches('0').trim_end_matches('.').to_string()},
         }
@@ -63,6 +65,7 @@ impl CurveDomain {
         let value=self.decode(f64::from(x));
         match self {
             Self::Percent=>format!("{:.1}%",value*100.),
+            Self::Degrees=>format!("{:.1}°",value*90.),
             Self::Encoded=>format!("{:.3}",value*255.),
             Self::LogHdr{..}=>if value!=0. && (value.abs()<1e-4 || value.abs()>=1e6) {format!("{value:e}")}else{value.to_string()},
         }

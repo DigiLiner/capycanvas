@@ -128,13 +128,24 @@ fn native_pressure_calibration() {
         w.dispatch(UiAction::Invoke{command:CommandId::PenPressure});pump(300);
         w.dispatch(UiAction::CurveEditor {target:layer_ui::CurveEditorTarget::Pressure,action:layer_ui::CurveEditorAction::Reset});pump(300);
         native.settle_ms=0;native.timeout=Duration::from_secs(30);
-        measure_motion(&w,&mut native,&output);
+        measure_motion(&w,&mut native,&output,false);
     }
     native.finish();w.window.close();
 }
 
 fn graph_point(w: &Workspace, graph: &gtk::Widget, point: [f32;2]) -> [f32;2] {
-    let inset=state(w).pressure_calibration.unwrap().editor.controls.inset;
+    graph_point_for(w,graph,point,false)
+}
+
+fn response_view(w:&Workspace,tilt:bool)->layer_ui::PressureCalibrationView {
+    with_response(w,tilt,Clone::clone)
+}
+fn with_response<T>(w:&Workspace,tilt:bool,f:impl FnOnce(&layer_ui::PressureCalibrationView)->T)->T {
+    let gpu=w.gpu.borrow();let state=gpu.as_ref().unwrap().session.state();
+    f(if tilt {&state.tilt_calibration.as_ref().unwrap().panel}else{state.pressure_calibration.as_ref().unwrap()})
+}
+fn graph_point_for(w:&Workspace,graph:&gtk::Widget,point:[f32;2],tilt:bool)->[f32;2] {
+    let inset=response_view(w,tilt).editor.controls.inset;
     let at=[(inset+point[0]*(graph.width() as f32-2.*inset))/graph.width() as f32,
         (inset+point[1]*(graph.height() as f32-2.*inset))/graph.height() as f32];
     screen_point(graph,&w.window,at)
@@ -156,11 +167,11 @@ fn opaque_surfaces_own_their_translucent_controls() {
     }
 }
 
-fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path::Path) {
-    let mut reports=Vec::new();
+fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path::Path, tilt:bool) {
+    let mut reports=Vec::new();let prefix=if tilt {"pen-tilt"}else{"pen-pressure"};
     let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
-    let title=find_named(panel,"pen-pressure-title").unwrap();
-    let bounds=state(w).pressure_calibration.unwrap().bounds;
+    let title=find_named(panel,&format!("{prefix}-title")).unwrap();
+    let bounds=response_view(w,tilt).bounds;
     let viewport=[w.surface.width() as f32,w.surface.height() as f32];
     let origin=[(viewport[0]-bounds.width)*0.5,(viewport[1]-bounds.height+200.)*0.5];
     assert!(origin[0]>=200. && origin[0]+bounds.width+200.<=viewport[0]);
@@ -173,10 +184,10 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
     for scenario in ["panel","curve"] {
         for gesture in 0..3 {
             let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
-            let target=find_named(panel,if scenario=="panel" {"pen-pressure-title"} else {"pen-pressure-graph"}).unwrap();
-            let view=state(w).pressure_calibration.unwrap();
+            let target=find_named(panel,&format!("{prefix}-{}",if scenario=="panel" {"title"}else{"graph"})).unwrap();
+            let view=response_view(w,tilt);
             let point=if scenario=="panel" {screen_point(&target,&w.window,[0.5,0.5])}
-                else {let p=view.editor.points[1];graph_point(w,&target,[p[0],1.-p[1]])};
+                else {let p=view.editor.points[1];graph_point_for(w,&target,[p[0],1.-p[1]],tilt)};
             input.perform(json!([{"point":point},{"wait_ms":100}]));
             let hit=w.window.pick(f64::from(point[0]),f64::from(point[1]),gtk::PickFlags::DEFAULT);
             assert!(hit.as_ref().is_some_and(|v|v==&target || v.is_ancestor(&target)),"{scenario} motion target hit {:?} at {point:?}",hit.map(|v|v.widget_name()));
@@ -185,8 +196,7 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
                     let b=w.pressure_calibration.root.compute_bounds(&w.surface).unwrap();
                     return [b.x(),b.y()];
                 }
-                let gpu=w.gpu.borrow();let v=gpu.as_ref().unwrap().session.state().pressure_calibration.as_ref().unwrap();
-                v.editor.points[1]
+                with_response(w,tilt,|v|v.editor.points[1])
             };
             let observed=Rc::new(RefCell::new(Vec::new()));let observations=observed.clone();let owner=w.clone();let mut previous=current(w);
             let initial_native=previous;
@@ -195,7 +205,7 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
                 let value=current(&owner);
                 if value!=previous {observations.borrow_mut().push((glib::monotonic_time(),value));previous=value;}
                 if scenario=="panel" {
-                    let gpu=owner.gpu.borrow();let value=gpu.as_ref().unwrap().session.state().pressure_calibration.as_ref().unwrap().bounds;
+                    let value=with_response(&owner,tilt,|v|v.bounds);
                     if value!=previous_shared {shared_observations.borrow_mut().push((glib::monotonic_time(),value));previous_shared=value;}
                 }
                 glib::ControlFlow::Continue
@@ -211,12 +221,12 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
             events.push(json!({"down":false}));input.perform(json!(events));pump(300);observer.remove();clock.disconnect(after);
             let observed=observed.borrow();
             if observed.len()<=100 {
-                std::fs::write(output.join("pressure-motion-failure.json"),serde_json::to_vec_pretty(&json!({
+                std::fs::write(output.join(if tilt {"tilt-motion-failure.json"}else{"pressure-motion-failure.json"}),serde_json::to_vec_pretty(&json!({
                     "scenario":scenario,"gesture":gesture,"moving_updates":observed.len(),
                     "initial_native_position":initial_native,"initial_shared_bounds":view.bounds,
                     "moving_positions":observed.iter().map(|(timestamp,position)|json!({"timestamp_us":timestamp,"position":position})).collect::<Vec<_>>(),
                     "shared_positions":shared.borrow().iter().map(|(timestamp,bounds)|json!({"timestamp_us":timestamp,"bounds":bounds})).collect::<Vec<_>>(),
-                    "shared_bounds":state(w).pressure_calibration.unwrap().bounds,
+                    "shared_bounds":response_view(w,tilt).bounds,
                 })).unwrap()).unwrap();
             }
             assert!(observed.len()>100,"measure actual moving state: {scenario} gesture {gesture}, {} updates, first {:?}, last {:?}",observed.len(),observed.first(),observed.last());
@@ -239,5 +249,73 @@ fn measure_motion(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path
                 "moving_positions":observed.iter().map(|(timestamp,position)|json!({"timestamp_us":timestamp,"position":position})).collect::<Vec<_>>()}));
         }
     }
-    std::fs::write(output.join("pressure-motion.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    std::fs::write(output.join(if tilt {"tilt-motion.json"}else{"pressure-motion.json"}),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+}
+
+#[test]
+#[ignore="private Mutter display and tablet proxy; workspace-motion.sh gtk --native-test=native_tilt_calibration --tablet"]
+fn native_tilt_calibration() {
+    let app=native_test_app("art.capycanvas.TiltCalibration");
+    let w=Workspace::with_project(&app,Some((new_drawing_at(256,256,SampleDepth::F32),None)));
+    w.window.set_default_size(1100,800);w.window.maximize();w.window.present();ready(&w);
+    let theme=if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|v|v=="dark"){Theme::Dark}else{Theme::Light};
+    w.dispatch(UiAction::SetTheme{theme:Some(theme)});
+    let mut native=RemoteInput::new();native.ready();
+    let output=std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap());std::fs::create_dir_all(&output).unwrap();
+    let canvas=window_point(&w,[60.,140.]);
+    native.perform(json!([{"pen":"move","point":canvas,"tilt":[30.,0.]}]));
+    for device in ["mouse","touch","pen"] {
+        w.dispatch(UiAction::OpenSettings{page:SettingsPage::Input});pump(200);
+        let adjust=find_named(w.preferences.dialog.upcast_ref(),"setting-pen-tilt-action").unwrap();super::histogram::scroll_to(&adjust);pump(100);
+        let at=screen_point(&adjust,&w.window,[0.5,0.5]);native.perform(json!([contact(device,"down",at),contact(device,"up",at)]));
+        until(||!w.preferences.dialog.is_mapped(),"tilt closes preferences");pump(200);
+        let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();assert!(panel.is_mapped());
+        assert!(state(&w).tilt_calibration.as_ref().unwrap().ready,"native tablet identity binds the editor");
+        let graph=find_named(panel,"pen-tilt-graph").unwrap();
+        let less=find_named(panel,"pen-tilt-firmer").unwrap();let at=screen_point(&less,&w.window,[0.5,0.5]);
+        native.perform(json!([contact(device,"down",at),contact(device,"up",at)]));
+        assert_eq!(response_view(&w,true).editor.points,[[0.,0.],[1.,0.975]],"{device} lowers sensitivity from neutral");
+        let reverse=find_named(panel,"pen-tilt-reverse-horizontal").unwrap();let at=screen_point(&reverse,&w.window,[0.5,0.5]);
+        native.perform(json!([contact(device,"down",at),contact(device,"up",at)]));
+        assert!(state(&w).tilt_calibration.unwrap().axes.reverse_horizontal);
+        let at=graph_point_for(&w,&graph,[0.5,0.5],true);let to=graph_point_for(&w,&graph,[0.55,0.4],true);
+        native.perform(json!([contact(device,"down",at),contact(device,"move",to),contact(device,"up",to)]));
+        assert_eq!(response_view(&w,true).editor.points.len(),3,"{device} edits a shared curve control");
+        let title=find_named(panel,"pen-tilt-title").unwrap();let at=screen_point(&title,&w.window,[0.5,0.5]);
+        let before=response_view(&w,true).bounds;let to=[at[0]-100.,at[1]+20.];
+        native.perform(json!([contact(device,"down",at),contact(device,"move",to),contact(device,"up",to)]));
+        assert!(response_view(&w,true).bounds.x<before.x-70.,"{device} moves the tilt utility");
+        native.perform(json!([{"pen":"move","point":canvas,"tilt":[30.,0.]}]));
+        let tilt=state(&w).tilt_calibration.unwrap();assert!((tilt.input_direction.unwrap()[0]-1./3.).abs()<1e-5);
+        assert!(tilt.adjusted_direction.unwrap()[0]<0.);
+        let before=super::editing_tools::raster(&w);let pixels=super::editing_tools::pixels(&before);
+        let to=window_point(&w,[100.,150.]);native.perform(json!([{"pen":"down","point":canvas,"tilt":[30.,0.]},{"pen":"move","point":to,"tilt":[30.,0.]},{"pen":"up"}]));
+        super::editing_tools::committed(&w,&before);assert_ne!(super::editing_tools::pixels(&super::editing_tools::raster(&w)),pixels,"draw while editing tilt");
+        crate::snapshot(&w).save_to_png(output.join(format!("tilt-{theme:?}-{device}.png"))).unwrap();
+        let cancel=find_named(panel,"pen-tilt-cancel").unwrap();native.click(screen_point(&cancel,&w.window,[0.5,0.5]));
+        assert!(state(&w).tilt_calibration.is_none());assert!(state(&w).settings.tilt_calibrations.is_empty());
+    }
+    w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
+    let panel=w.pressure_calibration.root.upcast_ref::<gtk::Widget>();
+    let more=find_named(panel,"pen-tilt-lighter").unwrap();native.click(screen_point(&more,&w.window,[0.5,0.5]));
+    let chosen=response_view(&w,true).editor.points;
+    let apply=find_named(panel,"pen-tilt-apply").unwrap();native.click(screen_point(&apply,&w.window,[0.5,0.5]));
+    assert_eq!(state(&w).settings.tilt_calibrations.values().next().unwrap().response.points(),chosen);
+    w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
+    let reset=find_named(panel,"pen-tilt-reset").unwrap();native.click(screen_point(&reset,&w.window,[0.5,0.5]));
+    assert_eq!(response_view(&w,true).editor.points,[[0.,0.],[1.,1.]]);
+    let close=find_named(panel,"pen-tilt-close").unwrap();native.click(screen_point(&close,&w.window,[0.5,0.5]));
+    assert_eq!(state(&w).settings.tilt_calibrations.values().next().unwrap().response.points(),chosen);
+    w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
+    let graph=find_named(panel,"pen-tilt-graph").unwrap();graph.grab_focus();native.key(0xff1b);assert!(state(&w).tilt_calibration.is_none());
+    if std::env::var("LAYER_TILT_MOTION").is_ok_and(|v|v=="1") {
+        w.dispatch(UiAction::Invoke{command:CommandId::PenTilt});pump(200);
+        w.dispatch(UiAction::CurveEditor{target:layer_ui::CurveEditorTarget::Tilt,action:layer_ui::CurveEditorAction::Reset});
+        let epoch=response_view(&w,true).editor.controls.epoch;
+        for phase in [layer_ui::ContactPhase::Down,layer_ui::ContactPhase::Up]{
+            w.dispatch(UiAction::CurveEditor{target:layer_ui::CurveEditorTarget::Tilt,action:layer_ui::CurveEditorAction::Contact{epoch,phase,point:[50.,50.],extent:[100.,100.]}});
+        }
+        pump(200);native.settle_ms=0;native.timeout=Duration::from_secs(30);measure_motion(&w,&mut native,&output,true);
+    }
+    native.finish();w.window.close();
 }

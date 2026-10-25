@@ -3,15 +3,28 @@
 use adw::prelude::*;
 use gtk::gdk;
 use layer_engine::SampleFlags;
-use std::{cell::RefCell, collections::HashMap, path::Path};
+use std::{cell::{Cell,RefCell}, collections::HashMap, path::Path, rc::Rc};
 
 #[derive(Default)]
-pub(super) struct TabletDevices(RefCell<HashMap<gdk::Device, SampleFlags>>);
+pub(super) struct TabletDevices {
+    flags:RefCell<HashMap<gdk::Device,SampleFlags>>,
+    pens:RefCell<HashMap<(gdk::Device,gdk::DeviceTool),Rc<layer_ui::PenDeviceInfo>>>,
+    next_id:Cell<u64>,
+}
 
 impl TabletDevices {
+    pub fn pen(&self,device:&gdk::Device,tool:&gdk::DeviceTool)->Rc<layer_ui::PenDeviceInfo> {
+        self.pens.borrow_mut().entry((device.clone(),tool.clone())).or_insert_with(|| {
+            let physical=device.seat().devices(gdk::SeatCapabilities::TABLET_STYLUS).into_iter()
+                .find(|candidate|candidate.device_tool().as_ref()==Some(tool)).unwrap_or_else(||device.clone());
+            let id=self.next_id.get().max(2);self.next_id.set(id+1);
+            let identity=serde_json::json!([physical.vendor_id().as_deref(),physical.product_id().as_deref(),physical.name().as_str(),tool.serial(),tool.hardware_id()]);
+            Rc::new(layer_ui::PenDeviceInfo{id,key:format!("gtk:{identity}"),label:physical.name().to_string(),native_to_surface:layer_core::TiltAxes::default()})
+        }).clone()
+    }
     pub fn flags(&self, device: &gdk::Device, tool: Option<&gdk::DeviceTool>) -> SampleFlags {
         *self
-            .0
+            .flags
             .borrow_mut()
             .entry(device.clone())
             .or_insert_with(|| {

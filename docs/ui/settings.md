@@ -74,7 +74,8 @@ need the existing backdrop. The preference affects only groups made afterwards.
 **[Pen pressure](pen-pressure.md)** appears in Input's Pen response group, above
 Stroke prediction. **Adjust…** closes Preferences and opens a floating
 calibration utility so painters can test the curve on the canvas. Apply saves
-the preview; Cancel and Close discard it.
+the preview; Cancel and Close discard it. GTK places **[Pen tilt](pen-tilt.md)**
+next, with a per-pen response curve and direction correction in the same utility.
 
 ## Keyboard shortcuts
 

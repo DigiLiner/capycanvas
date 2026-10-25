@@ -2725,9 +2725,9 @@ impl Workspace {
         }
     }
     fn refresh(self: &Rc<Self>, regions: u32) {
-        if regions == regions::PRESSURE_CALIBRATION {
-            let view = self.gpu.borrow().as_ref().and_then(|g|g.session.state().pressure_calibration.clone());
-            self.pressure_calibration.refresh(self, view.as_ref()); return;
+        if regions != 0 && regions & !(regions::PRESSURE_CALIBRATION | regions::TILT_CALIBRATION) == 0 {
+            let views = self.gpu.borrow().as_ref().map(|g|(g.session.state().pressure_calibration.clone(),g.session.state().tilt_calibration.clone()));
+            if let Some((pressure,tilt))=views {self.pressure_calibration.refresh(self, pressure.as_ref(),tilt.as_deref());} return;
         }
         if regions == regions::COMMAND_SEARCH {
             let view = self.gpu.borrow().as_ref().and_then(|g| g.session.state().command_search.clone());
@@ -2786,8 +2786,8 @@ impl Workspace {
         if regions & (regions::BUBBLES | regions::LAYOUT | regions::BRUSH | regions::CUSTOMIZATION | regions::DOCUMENT | regions::COMMANDS | regions::SETTINGS) != 0 {
             self.bubbles.refresh(self, &state);
         }
-        if regions & (regions::PRESSURE_CALIBRATION | regions::SETTINGS | regions::LAYOUT | regions::CAMERA) != 0 {
-            self.pressure_calibration.refresh(self, state.pressure_calibration.as_ref());
+        if regions & (regions::PRESSURE_CALIBRATION | regions::TILT_CALIBRATION | regions::SETTINGS | regions::LAYOUT | regions::CAMERA) != 0 {
+            self.pressure_calibration.refresh(self, state.pressure_calibration.as_ref(),state.tilt_calibration.as_deref());
         }
         if regions & (regions::DOCUMENT | regions::COMMANDS | regions::LAYOUT) != 0 {
             self.proof_panel.refresh(self, &state);

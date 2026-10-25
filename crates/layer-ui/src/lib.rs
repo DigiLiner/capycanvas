@@ -77,6 +77,7 @@ pub use session::{ThumbnailRequests, occurrence_token, occurrence_handle, object
 mod curve_editor;
 pub use curve_editor::{CurveEditorView, CurveEditorTarget, CurveEditorAction};
 pub use session::pressure_calibration::{PressureCalibrationAction, PressureCalibrationView};
+pub use session::tilt_calibration::{PenDeviceInfo, TiltCalibrationAction, TiltCalibrationView};
 mod color;
 mod tool_settings;
 mod toolbar_components;
@@ -446,6 +447,7 @@ macro_rules! command_ids {
 command_ids! {
     SearchCommands,
     PenPressure,
+    PenTilt,
     DrawingBrush,
     Sculpt,
     SdrRendition,
@@ -713,6 +715,7 @@ impl CommandId {
         match self {
             Self::Fullscreen => matches!(platform, Platform::Gtk | Platform::Web | Platform::Mac | Platform::Windows),
             Self::NewWindow => platform.native_windows(),
+            Self::PenTilt => platform == Platform::Gtk,
             _ => true,
         }
     }
@@ -760,7 +763,7 @@ impl CommandId {
     pub fn icon(self) -> Option<&'static str> {
         Some(match self {
             Self::SearchCommands => "search",
-            Self::PenPressure => "pen",
+            Self::PenPressure | Self::PenTilt => "pen",
             Self::DrawingBrush => "drawing-tools",
             Self::Sculpt => "sculpt",
             Self::SdrRendition | Self::PreviewSdr | Self::SoftProofSetup | Self::SoftProof | Self::GamutWarning => "image",
@@ -1038,6 +1041,7 @@ impl CommandId {
         match self {
             Self::SearchCommands => MessageId::COMMAND_SEARCH_COMMANDS,
             Self::PenPressure => MessageId::COMMAND_PEN_PRESSURE,
+            Self::PenTilt => MessageId::COMMAND_PEN_TILT,
             Self::DrawingBrush => MessageId::COMMAND_DRAWING_BRUSH,
             Self::Sculpt => MessageId::COMMAND_SCULPT,
             Self::SdrRendition => MessageId::COMMAND_SDR_RENDITION,
@@ -1422,6 +1426,7 @@ pub struct DocumentTab {
 #[derive(Clone, Debug, Serialize)]
 pub struct UiState {
     pub pressure_calibration: Option<PressureCalibrationView>,
+    pub tilt_calibration: Option<Box<TiltCalibrationView>>,
     #[serde(skip)]
     pub tool_slots: ToolSlotMemory,
     pub histogram: HistogramView,
@@ -1490,6 +1495,7 @@ pub enum UiAction {
     ColorSlotMenu { slot: ColorSlot, library: bool },
     CurveEditor { target: CurveEditorTarget, action: CurveEditorAction },
     PressureCalibration { action: PressureCalibrationAction },
+    TiltCalibration { action: TiltCalibrationAction },
     ChooseToolVariant { anchor: DrawerAnchor, variant: ToolVariant },
     Histogram { action: HistogramAction },
     CommandSearch { action: CommandSearchAction },
@@ -1833,7 +1839,8 @@ pub mod regions {
     pub const HISTOGRAM: u32 = 2048;
     pub const PRESSURE_CALIBRATION: u32 = 4096;
     pub const BUBBLES: u32 = 8192;
-    pub const ALL: u32 = 16383;
+    pub const TILT_CALIBRATION: u32 = 16384;
+    pub const ALL: u32 = 32767;
 }
 
 #[cfg(test)]

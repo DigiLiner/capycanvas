@@ -377,3 +377,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = การแปลงสำหรับหน้าจอ
 native-color-display-help = ระบบจะแปลงสีที่มีโปรไฟล์สำหรับหน้าจอนี้ รวมถึงหน้าจอ sRGB สีของภาพวาดและการส่งออกไม่ขึ้นกับหน้าจอ
 native-dialog-link-open-failed = เปิดลิงก์ไม่ได้
+
+tilt-title = การเอียงปากกา
+tilt-description = ปรับการเอียงปากกาขณะวาด
+tilt-less-sensitive = ลดความไว
+tilt-more-sensitive = เพิ่มความไว
+tilt-direction = ทิศทาง
+tilt-reverse-horizontal = กลับแนวนอน
+tilt-reverse-vertical = กลับแนวตั้ง
+tilt-swap-axes = สลับแกน
+tilt-adjusted = หลังปรับ
+tilt-direction-help = เอียงปากกาไปทางขอบ ลูกศรสีน้ำเงินควรชี้ตาม
+tilt-use-pen = ใช้ปากกาบนผืนผ้าใบ

@@ -1,0 +1,82 @@
+# Pen tilt
+
+[Workspace and UI](README.md) · [Pen pressure](pen-pressure.md)
+
+GTK exposes **Preferences → Input → Pen response → Pen tilt → Adjust…** directly
+after Pen pressure. It closes Preferences and opens the same modeless, draggable
+utility used for pressure. Only one pen response editor opens at a time; switching
+editors discards the previous draft. Other hosts do not expose this editor yet.
+
+Use the pen on the canvas to choose the input device. The caption identifies the
+pen being adjusted. An open editor keeps its target when another pen is used;
+close and reopen it to adjust the last pen used. Drawing stays available.
+
+The graph maps physical lean from upright, with Input and Output axes from 0° to
+90°. The neutral response is a straight line. The origin stays at zero; interior
+controls use the pressure editor's add, drag, delete, drag-out removal and keyboard
+behavior. The final control moves along the top or right graph boundary. Moving
+it rescales the other controls while preserving the normalized curve shape.
+**More sensitive** moves it left along the top edge, reaching 90° output earlier.
+**Less sensitive** reverses that movement, then moves down the right edge to
+reduce output even from the neutral response. Each step changes an endpoint
+coordinate by 2.5 percentage points; its minimum is 2.25°.
+
+The direction preview shows input in gray and adjusted tilt in blue. Lean the
+barrel toward an edge and make the blue arrow follow it. **Reverse horizontal**,
+**Reverse vertical** and **Swap axes** represent all eight signed axis mappings.
+Swapping happens before the reflections. Direction correction preserves the lean
+magnitude; the response curve changes magnitude without changing direction.
+
+**Reset** previews the neutral response and direction. **Apply** saves this pen's
+profile and closes. **Cancel**, Close and Escape discard the draft. Escape first
+cancels an active point or frame drag. Test strokes stay in ordinary artwork
+history. Calibration itself does not edit artwork or workspace history.
+
+## Shared implementation and coordinate frames
+
+`layer_core::TiltResponse` stores authored controls and reuses `PressureResponse`
+for the normalized spline and constraints. `TiltAxes` owns signed permutations,
+composition, inverse and frame conversion. `TiltCalibration` stores the response
+and direction. Settings keep profiles by stable input-source key.
+
+The shared response editor supplies curve actions, sensitivity, window placement
+and view projection for both pressure and tilt. GTK reuses one panel and the same
+`CurveEditor`. Hosts register `PenDeviceInfo` and forward native samples; they do
+not evaluate response curves or own calibration transactions.
+
+`PenDeviceInfo.native_to_surface` describes the stable input frame in current
+surface axes. Shared code stores a correction C in the input frame and presents
+R C R⁻¹ in surface axes. A horizontal reflection therefore becomes a vertical
+reflection after a quarter turn, retaining its physical meaning. All eight
+mappings and four quarter-turn frames have headless regression coverage. Canvas
+rotation, zoom and mirroring happen after calibration and do not change it.
+
+GTK keys combine tablet vendor/product/name and pen serial/hardware identifiers.
+Pens without serials share a profile when those identifiers are indistinguishable.
+GTK currently uses its delivered logical-tablet axes as the calibration frame.
+GDK does not expose the physical tablet-to-monitor rotation mapping through its
+public device API. Automatic reprojection after a physical monitor or compositor
+tablet-mapping change is therefore not established on GTK; screen dimensions must
+not be used to guess it. Native hosts with a known frame supply that frame to the
+same shared model.
+
+`layer_engine::TiltCurve` decodes projected sensor angles to physical radial tilt,
+applies the response and direction, then lets the camera map direction into the
+document. Each stroke captures its calibration at Down, including input held
+before painting becomes ready. Queued samples, native predictions, estimated
+corrections and contact cursors retain that calibration. Hover and later contacts
+preview new settings immediately. Compiled curves are runtime data only; direction
+changes reuse their response tables, and curve edits leave other profiles’ tables
+intact.
+
+## Validation
+
+Run the core tilt tests, engine tests and UI tilt, pressure calibration, held
+contact and localization tests. Run `native_tilt_calibration` through
+`tools/performance/workspace-motion.sh gtk --native-test=native_tilt_calibration --tablet`
+in both themes. It covers Preferences, mouse/touch/pen controls, native tilt
+metadata, live arrows, graph and window dragging, canvas painting, Apply, Reset,
+Cancel, Close and Escape. Run the pressure and tonal Curves journeys after changes
+to their shared widgets. Set `LAYER_TILT_MOTION=1` and `LAYER_NATIVE_EVENT_MS=8`
+for three five-second frame and curve drags with native presentation timestamps.
+These desktop diagnostics do not qualify reference-tablet painting performance.

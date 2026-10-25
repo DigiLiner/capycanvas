@@ -678,3 +678,5 @@ command-erase-to-intersection = 擦除到交叉点
 command-liquify-reset = 重置液化
 command-liquify-adjust = 调整液化
 commands-liquify-no-changes = 请先对此图层应用液化
+
+command-pen-tilt = 笔倾斜…

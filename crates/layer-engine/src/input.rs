@@ -114,6 +114,40 @@ impl From<PressureCurve> for layer_core::PressureResponse {
     fn from(curve: PressureCurve) -> Self { curve.0.source.clone() }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TiltCurve {
+    response: PressureCurve,
+    extent: [f32; 2],
+    axes: layer_core::TiltAxes,
+    identity: bool,
+}
+impl Default for TiltCurve {
+    fn default() -> Self { Self::new(&layer_core::TiltCalibration::default(), layer_core::TiltAxes::default()) }
+}
+impl TiltCurve {
+    pub fn new(source: &layer_core::TiltCalibration, frame: layer_core::TiltAxes) -> Self {
+        Self {response:source.response.normalized().clone().into(),extent:source.response.extent(),axes:Default::default(),identity:false}
+            .with_axes(source.axes,frame)
+    }
+    pub fn response_matches(&self,response:&layer_core::TiltResponse)->bool {
+        self.extent==response.extent() && &self.response.0.source==response.normalized()
+    }
+    pub fn with_axes(&self,axes:layer_core::TiltAxes,frame:layer_core::TiltAxes)->Self {
+        let axes=axes.in_frame(frame);
+        let identity=axes==layer_core::TiltAxes::default() && self.extent==[1.,1.] && self.response.0.source.points()==[[0.,0.],[1.,1.]];
+        Self {response:self.response.clone(),extent:self.extent,axes,identity}
+    }
+    pub fn map(&self, radial: [f32; 2]) -> [f32; 2] {
+        if self.identity { return radial; }
+        let angle=radial[0].hypot(radial[1]);
+        if angle == 0. { return [0.;2]; }
+        let adjusted=self.response(angle/std::f32::consts::FRAC_PI_2)*std::f32::consts::FRAC_PI_2;
+        self.axes.apply(radial.map(|v|v*adjusted/angle))
+    }
+    pub fn response(&self, input: f32) -> f32 { self.response.map(input/self.extent[0])*self.extent[1] }
+    pub fn projected(&self, angles: [f32; 2]) -> [f32; 2] { self.map(radial_tilt(angles)) }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ViewTransform {
     pub revision: u64,
@@ -142,6 +176,16 @@ pub fn to_stroke_point(
     curve: PressureCurve,
     stroke_start_ns: u64,
 ) -> StrokePoint {
+    point_from_tilt(event, transform, curve, stroke_start_ns, radial_tilt(event.tilt_radians))
+}
+
+pub(crate) fn calibrated_stroke_point(event: PenEvent, transform: ViewTransform, curve: PressureCurve,
+    tilt: &TiltCurve, stroke_start_ns: u64) -> StrokePoint {
+    point_from_tilt(event, transform, curve, stroke_start_ns, tilt.projected(event.tilt_radians))
+}
+
+fn point_from_tilt(event: PenEvent, transform: ViewTransform, curve: PressureCurve,
+    stroke_start_ns: u64, tilt: [f32; 2]) -> StrokePoint {
     // Stylus orientation lives in the document just like position. Preserve
     // tilt magnitude through zoom; rotate/reflect its direction with the view.
     let [a, b, c, d, _, _] = transform.surface_to_document;
@@ -157,7 +201,7 @@ pub fn to_stroke_point(
     StrokePoint {
         position: transform.map(event.surface_position),
         pressure: curve.map(event.pressure),
-        tilt: map_direction(radial_tilt(event.tilt_radians)),
+        tilt: map_direction(tilt),
         twist: twist_axis[1]
             .atan2(twist_axis[0])
             .rem_euclid(std::f32::consts::TAU),
@@ -230,6 +274,7 @@ pub struct StrokeBuilder {
     predicted: Vec<StrokePoint>,
     start_ns: Option<u64>,
     last_real_source: usize,
+    tilt: TiltCurve,
 }
 
 impl StrokeBuilder {
@@ -239,13 +284,19 @@ impl StrokeBuilder {
             predicted: Vec::with_capacity(32),
             start_ns: None,
             last_real_source: 0,
+            tilt: TiltCurve::default(),
         }
     }
 
     pub fn begin(&mut self, event: PenEvent, transform: ViewTransform, curve: PressureCurve) {
+        self.begin_calibrated(event, transform, curve, TiltCurve::default());
+    }
+
+    pub(crate) fn begin_calibrated(&mut self, event: PenEvent, transform: ViewTransform, curve: PressureCurve, tilt: TiltCurve) {
         self.real.clear();
         self.predicted.clear();
         self.start_ns = Some(event.timestamp_ns);
+        self.tilt = tilt;
         self.push(event, transform, curve);
     }
 
@@ -253,7 +304,7 @@ impl StrokeBuilder {
         let Some(start_ns) = self.start_ns else {
             return;
         };
-        let point = to_stroke_point(event, transform, curve, start_ns);
+        let point = calibrated_stroke_point(event, transform, curve, &self.tilt, start_ns);
         if event.flags.contains(SampleFlags::PREDICTED) {
             if self.predicted.len() == 32 {
                 self.predicted.remove(0);
@@ -374,6 +425,35 @@ mod tests {
             }
         }
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn tilt_direction_changes_share_the_compiled_response() {
+        let mut source=layer_core::TiltCalibration::default();source.response.sensitivity(true);
+        let original=TiltCurve::new(&source,Default::default());
+        for turn in 0..4 {
+            let axes=layer_core::TiltAxes{reverse_horizontal:true,..Default::default()};
+            let mapped=original.with_axes(axes,layer_core::TiltAxes::quarter_turns(turn));
+            assert!(Arc::ptr_eq(&original.response.0,&mapped.response.0));
+            assert!(mapped.response_matches(&source.response));
+            assert_eq!(mapped.map([0.3,0.]),axes.in_frame(layer_core::TiltAxes::quarter_turns(turn)).apply(original.map([0.3,0.])));
+        }
+        source.response.sensitivity(false);assert!(!original.response_matches(&source.response));
+    }
+
+    #[test]
+    fn tilt_response_precedes_camera_rotation_reflection_and_zoom() {
+        use layer_core::{TiltAxes,TiltCalibration,TiltResponse};
+        let calibration=TiltCalibration{response:TiltResponse::try_from(vec![[0.,0.],[0.5,1.]]).unwrap(),axes:TiltAxes{swap:true,reverse_horizontal:true,reverse_vertical:false}};
+        let curve=TiltCurve::new(&calibration,TiltAxes::default());
+        let mut pen=event(1,false);pen.tilt_radians=[30f32.to_radians(),0.];
+        let angle=60f32.to_radians();
+        for (matrix,expected) in [([1.,0.,0.,1.,0.,0.],[0.,angle]),([0.,2.,-2.,0.,0.,0.],[-angle,0.]),([-3.,0.,0.,3.,0.,0.],[0.,angle])] {
+            let point=calibrated_stroke_point(pen,ViewTransform{revision:0,surface_to_document:matrix},PressureCurve::default(),&curve,0);
+            assert!((point.tilt[0]-expected[0]).abs()<1e-5 && (point.tilt[1]-expected[1]).abs()<1e-5,"{:?} vs {expected:?}",point.tilt);
+        }
+        assert_eq!(curve.projected([0.;2]),[0.;2]);
+        assert!((curve.projected([60f32.to_radians(),0.])[1]-std::f32::consts::FRAC_PI_2).abs()<1e-6);
     }
 
     #[test]

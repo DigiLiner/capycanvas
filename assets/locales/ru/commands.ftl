@@ -685,3 +685,5 @@ command-erase-to-intersection = Стирать до пересечения
 command-liquify-reset = Сбросить пластику
 command-liquify-adjust = Настроить пластику
 commands-liquify-no-changes = Сначала примените пластику к этому слою
+
+command-pen-tilt = Наклон пера…

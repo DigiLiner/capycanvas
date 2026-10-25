@@ -601,3 +601,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Chuyển đổi màn hình
 native-color-display-help = Hệ thống chuyển đổi các màu có hồ sơ màu cho màn hình này, kể cả màn hình sRGB. Màu của bản vẽ và màu xuất không phụ thuộc vào màn hình.
 native-dialog-link-open-failed = Không thể mở liên kết
+
+tilt-title = Độ nghiêng bút
+tilt-description = Điều chỉnh độ nghiêng bút khi vẽ.
+tilt-less-sensitive = Giảm độ nhạy
+tilt-more-sensitive = Tăng độ nhạy
+tilt-direction = Hướng
+tilt-reverse-horizontal = Đảo ngang
+tilt-reverse-vertical = Đảo dọc
+tilt-swap-axes = Đổi trục
+tilt-adjusted = Đã điều chỉnh
+tilt-direction-help = Nghiêng bút về một cạnh. Mũi tên xanh phải cùng hướng.
+tilt-use-pen = Dùng bút trên vùng vẽ

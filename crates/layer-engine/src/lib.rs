@@ -22,6 +22,6 @@ pub use brush::DabGenerator;
 pub use canvas::{CanvasEngine, EngineError, EngineMetrics, ScenePreview, StrokeRefusal};
 pub use feedback::{FeedbackConfigError, InstantFeedbackConfig};
 pub use input::{
-    InputConsumer, InputProducer, PenEvent, PenPhase, PressureCurve, SampleFlags, ToolKind,
+    InputConsumer, InputProducer, PenEvent, PenPhase, PressureCurve, TiltCurve, SampleFlags, ToolKind,
     ViewTransform, input_queue,
 };

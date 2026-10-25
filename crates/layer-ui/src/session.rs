@@ -13,6 +13,10 @@ pub fn occurrence_handle(token: u64) -> Result<OccurrenceHandle, String> {
     let index = token.checked_sub(1).and_then(|index| u32::try_from(index).ok()).ok_or("Invalid layer identity")?;
     Ok(OccurrenceHandle::from_index(index))
 }
+#[path = "response_calibration.rs"]
+pub(crate) mod response_calibration;
+#[path = "tilt_calibration.rs"]
+pub(crate) mod tilt_calibration;
 #[path = "pressure_calibration.rs"]
 pub(crate) mod pressure_calibration;
 #[path = "art_layers.rs"]
@@ -238,6 +242,8 @@ struct CustomizationCopy {
 /// worker's message boundary. It never creates threads or calls UI callbacks.
 pub struct UiSession<R: CanvasRenderer> {
     pressure_calibration: pressure_calibration::Calibration,
+    tilt_calibration: Box<tilt_calibration::Calibration>,
+    tilt_meter_changed: bool,
     pressure_meter_changed: bool,
     screen_headroom: std::cell::RefCell<Option<(UiLanguage, u32, std::sync::Arc<str>)>>,
     histogram_captions: [Option<histogram::HistogramCaptionKey>; 3],
@@ -405,7 +411,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn preferences_revision(&self) -> u64 { self.preferences_revision }
 
     pub fn localization_input_busy(&self) -> bool {
-        self.pressure_calibration.input_busy() || !self.canvas_idle() || self.input_pending || self.touch.is_active()
+        self.pressure_calibration.input_busy() || self.tilt_calibration.editor.input_busy() || !self.canvas_idle() || self.input_pending || self.touch.is_active()
             || self.interaction.pointer.is_some() || self.interaction.facts.held
             || self.interaction.facts.dragging || self.interaction.axes.active()
             || self.operation.dragging() || self.operation.nudging() || self.navigator_drag.is_some()
@@ -424,6 +430,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.refresh_size_localization();
         self.refresh_new_drawing();
         self.refresh_pressure_calibration();
+        self.refresh_tilt_calibration();
         self.state.preferences.set_localization(&self.state.settings, self.state.platform, &self.state.localization);
         self.state.customization.set_localization(&self.state.localization);
         self.state.filter_load.set_localization(&self.state.localization);
@@ -472,6 +479,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         engine.set_pressure_curve(Settings::default().pressure_curve.into());
         let mut session = Self {
             pressure_calibration: Default::default(),
+            tilt_calibration: Default::default(),
+            tilt_meter_changed: false,
             pressure_meter_changed: false,
             screen_headroom: Default::default(),
             histogram_captions: Default::default(),
@@ -560,6 +569,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             files: document_files::DocumentFiles::default(),
             state: UiState {
                 pressure_calibration: None,
+                tilt_calibration: None,
                 tool_slots: ToolSlotMemory::default(),
                 localization: localization.clone(),
                 soft_proof: false,
@@ -977,6 +987,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }) {
             return;
         }
+        if let Some(event)=event { self.prepare_tilt_input(event); }
         if let Some(event) =
             event.filter(|e| e.phase == PenPhase::Hover && self.engine.recording.is_active())
         {
@@ -1490,6 +1501,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.change = self.changed(regions::SETTINGS, false);
                         reply.handled = true;
                         return Ok(reply);
+                    }
+                    if key == "escape" && !editing && self.canvas_idle() && !self.interaction.facts.popup_open && self.state.tilt_calibration.is_some() {
+                        let epoch=self.state.tilt_calibration.as_ref().unwrap().panel.editor.controls.epoch;
+                        self.tilt_curve_action(CurveEditorAction::Key{epoch,key_event:"Escape".into(),pressed:true,repeat:false,modifiers});
+                        reply.change=self.changed(regions::TILT_CALIBRATION,false);reply.handled=true;return Ok(reply);
                     }
                     if key == "escape" && !editing && self.canvas_idle() && !self.interaction.facts.popup_open && self.state.pressure_calibration.is_some() {
                         let epoch=self.state.pressure_calibration.as_ref().unwrap().editor.controls.epoch;
@@ -3020,11 +3036,17 @@ impl<R: CanvasRenderer> UiSession<R> {
             UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } => {
                 self.effect_action(action.effect(layer, &key))?; (DOCUMENT, true)
             }
+            UiAction::CurveEditor { target: CurveEditorTarget::Tilt, action } => {
+                self.tilt_curve_action(action); (TILT_CALIBRATION,false)
+            }
             UiAction::CurveEditor { target: CurveEditorTarget::Pressure, action } => {
                 self.pressure_curve_action(action); (PRESSURE_CALIBRATION, false)
             }
             UiAction::PressureCalibration { action } => {
                 save_settings = self.pressure_action(action); (PRESSURE_CALIBRATION | if save_settings { SETTINGS } else { 0 }, false)
+            }
+            UiAction::TiltCalibration { action } => {
+                save_settings=self.tilt_action(action); (TILT_CALIBRATION | if save_settings { SETTINGS } else { 0 }, false)
             }
             UiAction::Histogram { action } => { self.histogram_action(action)?; (HISTOGRAM, true) }
             UiAction::CommandSearch { .. } => unreachable!("handled above"),
@@ -4220,6 +4242,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Raw records retain platform timestamp/history/prediction metadata. A
     /// full queue returns the untouched record; hosts must retry after a frame.
     pub fn pen(&mut self, event: PenEvent) {
+        self.prepare_tilt_input(event);
         if !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION) {
             self.bubble_stroke(event.phase, [event.surface_position.x, event.surface_position.y]);
         }
@@ -4710,6 +4733,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.update_shader_idle();
         let mut changed = self.poll_filter_installation() | self.poll_deferred_edits() | self.apply_loaded_paper() | self.take_bubble_changes();
         if std::mem::take(&mut self.pressure_meter_changed) { changed |= regions::PRESSURE_CALIBRATION; }
+        if std::mem::take(&mut self.tilt_meter_changed) { changed |= regions::TILT_CALIBRATION; }
         let revision = self.engine.document().revision;
         let working_generation = self.engine.document().working.generation;
         changed |= self.poll_selection_paint()?;
@@ -5469,12 +5493,14 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.navigate_command(command)?;
                 Ok((CAMERA, true))
             }
+            CommandId::PenTilt => { self.open_tilt_calibration(); Ok((SETTINGS|PRESSURE_CALIBRATION|TILT_CALIBRATION,false)) }
             CommandId::PenPressure => {
+                if self.tilt_calibration.editor.source().is_some() {self.tilt_action(TiltCalibrationAction::Panel{action:PressureCalibrationAction::Cancel});}
                 self.state.settings_open = false;
                 self.state.preferences = PreferencesState::default();
                 self.pressure_calibration.open(&self.state.settings.pressure_curve);
                 self.refresh_pressure_calibration();
-                Ok((SETTINGS | PRESSURE_CALIBRATION, false))
+                Ok((SETTINGS | PRESSURE_CALIBRATION | TILT_CALIBRATION, false))
             }
             CommandId::Settings | CommandId::KeyboardShortcuts | CommandId::About => {
                 let canceled = self
@@ -5652,6 +5678,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.touch.reset_rotation();
         }
         self.state.settings = settings;
+        self.sync_tilt_curves();
+        self.refresh_tilt_calibration();
         if mask_mode_changed { self.refresh_document(); }
         self.refresh_shortcuts(bindings_changed);
         self.refresh_tools();
@@ -18448,3 +18476,7 @@ mod tests {
         include!("layout_drop_tests.rs");
     }
 }
+
+#[cfg(test)]
+#[path="tilt_calibration_tests.rs"]
+mod tilt_calibration_tests;

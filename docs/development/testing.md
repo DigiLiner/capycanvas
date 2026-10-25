@@ -728,3 +728,13 @@ are your task, and remove an entry when you fix it.
   `testSettingsTextSelectionShortcut`: XCTest keys don't reach UIKit key commands.
 - Tablet Chrome `--workspace-manager` cannot find its new-workspace name input
   on MovinkPad 11.
+
+## Pen response calibration
+
+Changes to the shared response editor run pressure and tilt calibration tests,
+held-contact admission tests, engine tests and localization catalog checks. Run
+GTK’s `native_pressure_calibration` and `native_tilt_calibration` on the private
+display with `--tablet`, in both themes. Also run the tonal Curves journey when
+changing `CurveEditor`. The [tilt guide](../ui/pen-tilt.md) describes device profiles,
+frame conversion and sustained motion diagnostics. Physical display rotation
+requires a host with a verified native-to-surface tilt mapping.

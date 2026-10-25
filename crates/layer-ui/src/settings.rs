@@ -82,6 +82,7 @@ pub struct Settings {
     /// Shared by Quick Mask and every saved selection, across documents.
     pub selection_painting: layer_core::SelectionPaintBehavior,
     pub pressure_curve: layer_core::PressureResponse,
+    pub tilt_calibrations: BTreeMap<String,layer_core::TiltCalibration>,
     pub cursor: CursorMode,
     pub hide_cursor_while_drawing: bool,
     pub pan_speed: f32,
@@ -150,6 +151,7 @@ impl Default for Settings {
             zen_show_capy: true,
             selection_painting: Default::default(),
             pressure_curve: layer_core::PressureResponse::default(),
+            tilt_calibrations: BTreeMap::new(),
             cursor: CursorMode::default(),
             hide_cursor_while_drawing: true,
             pan_speed: 1.0,
@@ -389,6 +391,7 @@ pub enum PreferenceId {
     RotateWithTwoFingers,
     PassThroughGroups,
     PenPressure,
+    PenTilt,
     Feedback,
     PlatformPrediction,
     PredictionHorizon,
@@ -422,6 +425,7 @@ impl PreferenceId {
             Self::RotateWithTwoFingers => "rotate-with-two-fingers",
             Self::PassThroughGroups => "pass-through-groups",
             Self::PenPressure => "pen-pressure",
+            Self::PenTilt => "pen-tilt",
             Self::Feedback => "feedback",
             Self::PlatformPrediction => "platform-prediction",
             Self::PredictionHorizon => "prediction-horizon",
@@ -1037,6 +1041,10 @@ impl Settings {
                 label: localizer.text(MessageId::COMMON_ADJUST).to_string(),
                 action: Box::new(UiAction::Invoke { command: CommandId::PenPressure }),
             }),
+            row(PenTilt, &localizer.text(MessageId::TILT_TITLE), "", PreferenceKind::Action {
+                label:localizer.text(MessageId::COMMON_ADJUST).to_string(),
+                action:Box::new(UiAction::Invoke{command:CommandId::PenTilt}),
+            }),
             row(
                 Feedback,
                 &localizer.text(MessageId::SETTINGS_ENABLE_STROKE_PREDICTION),
@@ -1067,6 +1075,7 @@ impl Settings {
                 self,
             ),
         ];
+        if platform!=Platform::Gtk {input.retain(|row|row.id!=PreferenceId::PenTilt);}
         for r in &mut input {
             if matches!(r.id, PredictionHorizon | PlatformPrediction) {
                 r.enabled = self.feedback;
@@ -1491,7 +1500,7 @@ impl Settings {
                 }
             }
             EraserErase => self.eraser_end.erase = matches!(value, PreferenceValue::Bool(true)),
-            PenPressure | Version | License | Renderer | Website | SourceCode | Dedication => {
+            PenPressure | PenTilt | Version | License | Renderer | Website | SourceCode | Dedication => {
                 return Err(localizer.text(MessageId::SETTINGS_THIS_INFORMATION_IS_READ_ONLY).to_string());
             }
         }

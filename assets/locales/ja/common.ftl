@@ -425,3 +425,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = 画面の色変換
 native-color-display-help = システムは、sRGB画面を含め、プロファイル付きの色をこの画面に合わせて変換します。描画と書き出しの色は画面に左右されません。
 native-dialog-link-open-failed = リンクを開けませんでした
+
+tilt-title = ペンの傾き
+tilt-description = 描きながらペンの傾きを調整します。
+tilt-less-sensitive = 感度を下げる
+tilt-more-sensitive = 感度を上げる
+tilt-direction = 方向
+tilt-reverse-horizontal = 左右を反転
+tilt-reverse-vertical = 上下を反転
+tilt-swap-axes = 軸を入れ替え
+tilt-adjusted = 調整後
+tilt-direction-help = ペンを画面の端に向けて傾けてください。青い矢印が同じ方向を指すようにします。
+tilt-use-pen = キャンバスでペンを使ってください

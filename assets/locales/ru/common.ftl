@@ -601,3 +601,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Преобразование для экрана
 native-color-display-help = Система преобразует цвета с профилем для этого экрана, включая экраны sRGB. Цвета рисунка и экспорта не зависят от экрана.
 native-dialog-link-open-failed = Не удалось открыть ссылку
+
+tilt-title = Наклон пера
+tilt-description = Настройте наклон пера во время рисования.
+tilt-less-sensitive = Меньше чувствительность
+tilt-more-sensitive = Больше чувствительность
+tilt-direction = Направление
+tilt-reverse-horizontal = Отразить по горизонтали
+tilt-reverse-vertical = Отразить по вертикали
+tilt-swap-axes = Поменять оси
+tilt-adjusted = После настройки
+tilt-direction-help = Наклоните перо к краю. Синяя стрелка должна следовать за ним.
+tilt-use-pen = Используйте перо на холсте

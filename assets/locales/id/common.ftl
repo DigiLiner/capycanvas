@@ -685,3 +685,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Konversi layar
 native-color-display-help = Sistem mengonversi warna berprofil untuk layar ini, termasuk layar sRGB. Warna gambar dan ekspor tidak bergantung pada layar.
 native-dialog-link-open-failed = Tautan tidak dapat dibuka
+
+tilt-title = Kemiringan pena
+tilt-description = Sesuaikan kemiringan pena sambil menggambar.
+tilt-less-sensitive = Kurang peka
+tilt-more-sensitive = Lebih peka
+tilt-direction = Arah
+tilt-reverse-horizontal = Balik horizontal
+tilt-reverse-vertical = Balik vertikal
+tilt-swap-axes = Tukar sumbu
+tilt-adjusted = Disesuaikan
+tilt-direction-help = Miringkan pena ke arah tepi. Panah biru harus mengikutinya.
+tilt-use-pen = Gunakan pena di kanvas

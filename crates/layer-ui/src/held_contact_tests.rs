@@ -249,3 +249,26 @@ fn a_paste_lands_before_the_undo_queued_behind_its_request() {
     s.suspend_renderer().unwrap();
     assert!(s.paste_clip(&clip, PasteMode::Paste).is_err(), "a completion cannot leave raster work without a renderer");
 }
+
+#[test]
+fn held_contacts_keep_their_pressure_and_tilt_calibration_at_admission() {
+    use layer_core::{TiltAxes,TiltCalibration,TiltResponse};
+    use layer_engine::recording::{Record,Event,StopReason};
+    let mut s=held_session();
+    let pressure=layer_core::PressureResponse::try_from(vec![[0.,0.],[0.5,0.1],[1.,1.]]).unwrap();
+    let tilt=layer_engine::TiltCurve::new(&TiltCalibration{response:TiltResponse::default(),axes:TiltAxes{reverse_horizontal:true,..Default::default()}},TiltAxes::default());
+    s.state.settings.tilt_calibrations.insert("held".into(),TiltCalibration{response:TiltResponse::default(),axes:TiltAxes{reverse_horizontal:true,..Default::default()}});
+    s.register_pen_device(&PenDeviceInfo{id:1,key:"held".into(),label:"Held pen".into(),native_to_surface:TiltAxes::default()});
+    s.engine.set_pressure_curve(pressure.clone().into());s.engine.set_tilt_curve(tilt.clone());
+    s.stroke_recording().start("held-calibration").unwrap();
+    for (sequence,phase) in [(1,PenPhase::Down),(2,PenPhase::Move),(3,PenPhase::Up)] {
+        s.pen(PenEvent{tilt_radians:[0.4,0.],..event(&s,sequence,phase,0.5)});
+    }
+    s.engine.set_pressure_curve(layer_engine::PressureCurve::default());s.engine.set_tilt_curve(layer_engine::TiltCurve::default());
+    s.renderer_mut().painting_unready=false;settle(&mut s);
+    let records={let mut recorder=s.stroke_recording();recorder.stop(StopReason::Manual);layer_engine::recording::read(recorder.bytes().unwrap().as_slice()).unwrap()};
+    let samples:Vec<_>=records.iter().filter_map(|record|if let Record::Predictor(Event::Sample(point))=record{Some(layer_core::StrokePoint::from(*point))}else{None}).collect();
+    assert!(!samples.is_empty());
+    assert!(samples.iter().all(|point|(point.pressure-pressure.map(0.5)).abs()<1e-5 && point.tilt[0]<0.));
+    assert_eq!(s.engine.configured_tilt_curve(),&layer_engine::TiltCurve::default());
+}

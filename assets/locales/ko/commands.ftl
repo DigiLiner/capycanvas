@@ -678,3 +678,5 @@ command-erase-to-intersection = 교차점까지 지우기
 command-liquify-reset = 왜곡 초기화
 command-liquify-adjust = 왜곡 조정
 commands-liquify-no-changes = 먼저 이 레이어에 왜곡을 적용하세요
+
+command-pen-tilt = 펜 기울기…

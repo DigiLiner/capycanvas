@@ -25,6 +25,9 @@ reflection act on that vector without changing its length. Painting, hover,
 prediction and estimate corrections share this conversion. Authored `StrokePoint`
 tilt retains that vector, so replay does not convert it again. At exactly flat
 dual-axis projections, the otherwise ambiguous direction is the signed diagonal.
+The [pen tilt editor](../ui/pen-tilt.md) applies per-device response and axis
+correction after physical tilt conversion and before the canvas transform.
+Each contact captures that calibration with its pressure response.
 
 Input also identifies the camera transform used when it was collected. Queued
 samples must not move to a different document position merely because the camera

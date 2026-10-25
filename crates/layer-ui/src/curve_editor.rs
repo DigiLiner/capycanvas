@@ -12,7 +12,7 @@ pub struct CurveEditorView {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum CurveEditorTarget { Effect { layer: u64, key: String }, Pressure }
+pub enum CurveEditorTarget { Effect { layer: u64, key: String }, Pressure, Tilt }
 
 pub(crate) fn dragged_outside(point: [f32; 2], extent: [f32; 2]) -> bool {
     point.iter().zip(extent).any(|(position, length)| *position < -24. || *position > length + 24.)

@@ -601,3 +601,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = Ekran dönüşümü
 native-color-display-help = Sistem, sRGB ekranlar dahil profilli renkleri bu ekran için dönüştürür. Çizim ve dışa aktarma renkleri ekrandan bağımsızdır.
 native-dialog-link-open-failed = Bağlantı açılamadı
+
+tilt-title = Kalem eğimi
+tilt-description = Çizerken kalem eğimini ayarlayın.
+tilt-less-sensitive = Daha az duyarlı
+tilt-more-sensitive = Daha duyarlı
+tilt-direction = Yön
+tilt-reverse-horizontal = Yatayı ters çevir
+tilt-reverse-vertical = Dikeyi ters çevir
+tilt-swap-axes = Eksenleri değiştir
+tilt-adjusted = Ayarlanmış
+tilt-direction-help = Kalemi bir kenara doğru eğin. Mavi ok aynı yönü izlemeli.
+tilt-use-pen = Kaleminizi tuvalde kullanın

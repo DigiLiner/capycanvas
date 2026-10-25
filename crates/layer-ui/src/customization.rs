@@ -1140,6 +1140,7 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
             label.to_string(),
             match command {
                 CommandId::PenPressure => localization.text(MessageId::PRESSURE_DESCRIPTION).to_string(),
+                CommandId::PenTilt => localization.text(MessageId::TILT_DESCRIPTION).to_string(),
                 CommandId::Zoom | CommandId::CenterZoomClicks | CommandId::RotateView | CommandId::FitWidth | CommandId::FillView
                 | CommandId::ZoomSelection | CommandId::ResetRotation | CommandId::ResetView | CommandId::PreviousView
                 | CommandId::SaveView | CommandId::RestoreView | CommandId::NextDrawing | CommandId::PreviousDrawing

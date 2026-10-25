@@ -24,6 +24,10 @@ samples, corrections, pressure observations, resets, policy and physical-surface
 transform at each query, and actual frame/requested timestamps. It makes replay
 independent of brush settings, input batching and display cadence on the replay
 machine. Raw records retain the input view transform and authored pressure controls.
+Version 4 does not serialize user tilt calibration. Raw tilt remains the native
+projected angles; processed predictor samples include the applied tilt calibration.
+Use the processed stream for predictor replay. Reconstructing processed tilt from
+raw samples alone requires the calibration settings used during capture.
 Estimated corrections retain their original observation's pressure response,
 including corrections delivered before the engine processes that observation.
 Contact end markers distinguish cancellation from a recording interrupted mid-stroke.

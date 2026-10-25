@@ -45,6 +45,8 @@ pub mod levels;
 pub mod curves;
 mod pressure;
 pub use pressure::PressureResponse;
+mod tilt;
+pub use tilt::{TiltAxes, TiltCalibration, TiltResponse};
 mod rotation_snap;
 pub use rotation_snap::RotationSnap;
 #[cfg(test)]

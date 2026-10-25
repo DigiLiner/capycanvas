@@ -680,3 +680,5 @@ command-erase-to-intersection = Xóa đến giao điểm
 command-liquify-reset = Đặt lại hóa lỏng
 command-liquify-adjust = Điều chỉnh hóa lỏng
 commands-liquify-no-changes = Áp dụng hóa lỏng cho lớp này trước
+
+command-pen-tilt = Độ nghiêng bút…

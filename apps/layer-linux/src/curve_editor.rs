@@ -238,7 +238,7 @@ impl CurveEditor {
         });
         let footer = crate::histogram::Footer::new("curve");footer.root.append(&reset);root.append(&footer.root);
         let editor = Self { root, area, reset, view, presented: Cell::new(false), readouts, axes, histogram, histogram_colors, footer };
-        if matches!(target, layer_ui::CurveEditorTarget::Pressure) { editor.footer.root.set_visible(false); }
+        if matches!(target, layer_ui::CurveEditorTarget::Pressure | layer_ui::CurveEditorTarget::Tilt) { editor.footer.root.set_visible(false); }
         editor.update(control, &w.localization());editor
     }
     pub(crate) fn refresh_histogram(&self,w:&Rc<Workspace>,state:&UiState) {

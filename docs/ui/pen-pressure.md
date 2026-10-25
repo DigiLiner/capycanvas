@@ -3,8 +3,7 @@
 [Workspace and UI](README.md)
 
 In **Preferences → Input → Pen response**, **Pen pressure → Adjust…** closes
-Preferences and opens a modeless, draggable utility above the canvas. The row
-appears immediately above Stroke prediction.
+Preferences and opens a modeless, draggable utility above the canvas. On GTK, Pen tilt follows this row; other hosts place Stroke prediction next.
 The command is also available in command search and toolbar customization. Its
 bold title and inset Close button distinguish it from dockable workspace panels.
 It has no tabs, docking targets, workspace persistence or workspace undo entry.
@@ -78,7 +77,8 @@ error by that span. Settings and recordings store controls, never compiled table
 
 `CurveEditorView` separates evaluated paths, editable handles and a live marker.
 Its `CurveControls` provides control guides, inset and optional coordinate readouts. Pressure omits the readouts;
-tonal Curves keeps its numeric editing fields. `CurveEditorTarget` routes editor
+tonal Curves keeps its numeric editing fields. [Pen tilt](pen-tilt.md) shares the calibration editor and GTK panel with pressure.
+`CurveEditorTarget` routes editor
 actions to the owner. Tonal Curves retains its existing interpolating function;
 pressure supplies its spline constraints. Native widgets do not evaluate either
 algorithm or own document history and calibration transactions.

@@ -425,3 +425,15 @@ native-color-display-previews-sdr = Display P3 · SDR
 native-color-display-conversion = 屏幕转换
 native-color-display-help = 系统会为此屏幕转换带配置文件的颜色，包括 sRGB 屏幕。绘画和导出的颜色与屏幕无关。
 native-dialog-link-open-failed = 无法打开链接
+
+tilt-title = 笔倾斜
+tilt-description = 绘画时调整笔的倾斜响应。
+tilt-less-sensitive = 降低灵敏度
+tilt-more-sensitive = 提高灵敏度
+tilt-direction = 方向
+tilt-reverse-horizontal = 水平反转
+tilt-reverse-vertical = 垂直反转
+tilt-swap-axes = 交换坐标轴
+tilt-adjusted = 调整后
+tilt-direction-help = 将笔向屏幕边缘倾斜。蓝色箭头应指向同一方向。
+tilt-use-pen = 在画布上使用笔

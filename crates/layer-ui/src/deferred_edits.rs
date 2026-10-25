@@ -10,7 +10,7 @@ const HELD_SAMPLES: usize = 4096;
 
 enum EditInput {
     Action(UiAction),
-    Pen { event: PenEvent, camera: Camera },
+    Pen { event: PenEvent, camera: Camera, pressure:layer_engine::PressureCurve, tilt:layer_engine::TiltCurve },
 }
 pub(super) struct DeferredEdit {
     drawing: (u64, u64),
@@ -72,7 +72,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .rposition(|edit| matches!(&edit.input, EditInput::Pen { event: queued, .. } if queued.device_id == event.device_id))
                 .map_or(0, |last| last + 1)
         });
-        self.queue_edit(EditInput::Pen { event, camera: self.state.camera.clone() }, (held && starts_contact(&event)).then(Instant::now));
+        self.queue_edit(EditInput::Pen { event, camera: self.state.camera.clone(), pressure:self.engine.configured_pressure_curve().clone(), tilt:self.engine.configured_tilt_curve().clone() }, (held && starts_contact(&event)).then(Instant::now));
         if let Some(position) = contact_end.filter(|position| *position + 1 < self.deferred_edits.len()) {
             let edit = self.deferred_edits.pop_back().unwrap();
             self.deferred_edits.insert(position, edit);
@@ -228,14 +228,18 @@ impl<R: CanvasRenderer> UiSession<R> {
                         Err(error) => { self.notify(error); changed |= regions::COMMANDS; }
                     }
                 },
-                EditInput::Pen { event, camera } => {
+                EditInput::Pen { event, camera, pressure, tilt } => {
+                    let current_pressure=self.engine.configured_pressure_curve().clone();
+                    let current_tilt=self.engine.configured_tilt_curve().clone();
+                    self.engine.set_pressure_curve(pressure.clone());self.engine.set_tilt_curve(tilt.clone());
                     let current = std::mem::replace(&mut self.state.camera, camera);
                     self.sync_camera();
                     let result = self.pen_ready(event);
+                    self.engine.set_pressure_curve(current_pressure);self.engine.set_tilt_curve(current_tilt);
                     let camera = std::mem::replace(&mut self.state.camera, current);
                     self.sync_camera();
                     if let Err(event) = result {
-                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera }, held_since: None, ..edit });
+                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera, pressure, tilt }, held_since: None, ..edit });
                         break;
                     }
                 }

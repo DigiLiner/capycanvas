@@ -4684,3 +4684,55 @@ and dark. The broader editor journey fails in both themes at its pure-white
 paper expectation, reading `[245,242,233,255]` from the default Naturalwhite
 paper. The same failure reproduces on the baseline; no runtime errors occur.
 Its later save/open/export checks are not reached.
+
+## GTK pen tilt utility
+
+Measured on 2026-10-25 UTC with the pen tilt editor on the `04d8dc0c3` working
+tree. The final release test executable has SHA-256
+`25e44c1c0063806988b41a136629c750b2b79a4f184c433e302bd68041abe4b4`.
+The private Mutter display is 1600 × 1000 at 120 Hz, scale 1, on NVIDIA RTX PRO
+6000 Blackwell Max-Q/Vulkan, driver 615.71.09. The fixture is a 256 × 256 F32
+drawing at Fit with default transparency. These are desktop diagnostics, not
+reference-tablet or 61 MP painting qualification.
+
+Both themes first exercise Preferences, mouse/touch/pen controls, live native
+tilt, graph and frame dragging, drawing, Apply, Reset, Cancel, Close and Escape.
+Each motion case then runs three five-second frame drags and three curve drags,
+with input every 8 ms. Frame motion follows a 200 × 100 logical-pixel ellipse;
+the authored interior control follows a 4 × 20 logical-pixel ellipse. Only native
+presentations during observed motion count. The unchanged gates are at least
+114 presents/s and interval p99 at most 2000/120 ms.
+
+| Case | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Captured pre-task pressure: Frame | 100.04–118.22 / 25.087 ms | — |
+| Captured pre-task pressure: Curve | 100.07–101.86 / 25.039 ms | — |
+| Shared pressure: Frame | 111.23–118.61 / 24.915 ms | 116.01–118.21 / 16.821 ms |
+| Shared pressure: Curve | 116.61–118.81 / 16.763 ms | 117.61–118.81 / 16.659 ms |
+| Tilt before table reuse: Frame | 118.21–118.81 / 16.669 ms | 114.82–119.80 / 16.782 ms |
+| Tilt before table reuse: Curve | 117.80–119.01 / 16.683 ms | 108.84–119.21 / 25.129 ms |
+| Final tilt: Frame | 108.24–119.40 / 24.983 ms | 99.53–116.21 / 25.022 ms |
+| Final tilt: Curve | 100.43–117.62 / 25.033 ms | 97.07–100.51 / 25.085 ms |
+
+Final tilt misses at least one gate in 10 of 12 gestures. The earlier tilt build
+misses in 6 of 12. The captured pre-task pressure build also misses in 5 of 6
+Light gestures; its exact source commit is not established. These runs retain
+competing desktop GPU activity, and the final runs also overlap other sessions’
+compilation. They do not establish an isolated regression or improvement, and
+none qualifies the performance target. No thresholds were relaxed and no user
+processes were stopped. Pressure's widget path is unchanged by tilt table reuse;
+its current measurements precede that cache change.
+
+The final shared implementation reuses compiled tables for direction/frame
+changes and skips recompiling unchanged device profiles. A headless regression
+checks response-table sharing and unchanged mapping across all four frames.
+Functional tilt and pressure journeys pass in both themes. The related tonal
+Curves keyboard journey fails its modifier-release/Undo assertion in both current
+and captured pre-task executables; this editor change does not resolve that
+existing issue.
+
+JSON and screenshots are under `artifacts/tilt-editor-design/`, including
+`before-cache`, `after-cache`, `pre-task-captured`, and `motion-after-summary.json`.
+Reproduce the tilt case with `native_tilt_calibration --tablet`,
+`LAYER_TILT_MOTION=1`, and `LAYER_NATIVE_EVENT_MS=8`. The
+[tilt guide](../ui/pen-tilt.md) describes profile and coordinate-frame limits.

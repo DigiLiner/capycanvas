@@ -97,7 +97,7 @@ fn preferences_launch_closes_settings_on_every_platform() {
         let view=s.preferences().unwrap();
         let groups=&view.pages.iter().find(|p|p.id==SettingsPage::Input).unwrap().groups;
         let rows=&groups.iter().find(|g|g.rows.iter().any(|r|r.id==PreferenceId::Feedback)).unwrap().rows;
-        assert_eq!(rows[0].id,PreferenceId::PenPressure);assert_eq!(rows[1].id,PreferenceId::Feedback);
+        assert_eq!(rows[0].id,PreferenceId::PenPressure);assert_eq!(rows[1].id,if platform==Platform::Gtk {PreferenceId::PenTilt}else{PreferenceId::Feedback});
         assert!(rows[0].reset.is_none());
         let PreferenceKind::Action {action,..}=&rows[0].kind else {panic!("pressure opens a separate editor")};
         let action=action.clone();s.dispatch(*action).unwrap();

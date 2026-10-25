@@ -678,3 +678,5 @@ command-erase-to-intersection = 交点まで消去
 command-liquify-reset = ゆがみをリセット
 command-liquify-adjust = ゆがみを調整
 commands-liquify-no-changes = 先にこのレイヤーにゆがみを適用してください
+
+command-pen-tilt = ペンの傾き…

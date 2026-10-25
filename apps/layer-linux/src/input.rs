@@ -800,10 +800,15 @@ impl Input {
         let timestamp_ns = self.timestamp(gesture.current_event_time());
         let tablet_flags = gesture.current_event().and_then(|event| event.device())
             .map_or(SampleFlags::NONE, |device| self.tablets.flags(&device, tool.as_ref()));
+        let pen=gesture.current_event().and_then(|event|event.device()).zip(tool.as_ref())
+            .map(|(device,tool)|self.tablets.pen(&device,tool));
+        if let Some(pen)=&pen {
+            if let Some(gpu)=workspace.gpu.borrow_mut().as_mut(){gpu.session.register_pen_device(pen);}
+        }
         let dpi = workspace.area.scale_factor() as f32;
         let axis = |a| gesture.axis(a).unwrap_or(0.0) as f32;
         let event = PenEvent {
-            device_id: tool.as_ref().map_or(1, |t| t.serial().max(2)),
+            device_id: pen.as_ref().map_or(1,|pen|pen.id),
             sequence: 0,
             timestamp_ns,
             view_revision,
