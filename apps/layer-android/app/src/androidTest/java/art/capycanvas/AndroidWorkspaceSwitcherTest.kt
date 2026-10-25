@@ -1,11 +1,15 @@
 package art.capycanvas
 
+import android.content.res.Configuration
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.LayoutInfo
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -13,6 +17,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.toSize
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ActivityScenario
 import org.json.JSONArray
 import org.json.JSONObject
@@ -108,6 +116,132 @@ class AndroidWorkspaceSwitcherTest {
     @After fun cleanup() {
         if (pressed != null) event(MotionEvent.ACTION_CANCEL)
         if (::scenario.isInitialized) scenario.close()
+    }
+
+    @Test fun inlineNameGeometryAndFooterSpacingAcrossThemes() {
+        var original: Configuration? = null
+        scenario.onActivity { original = Configuration(it.resources.configuration) }
+        val checks = mutableListOf<() -> Unit>()
+        fun frame(tag: String): Rect {
+            var result: Rect? = null
+            instrumentation.runOnMainSync {
+                val coordinates = node(tag)!!.second.layoutInfo.coordinates
+                result = Rect(coordinates.positionInRoot(), coordinates.size.toSize())
+            }
+            return result!!
+        }
+        fun geometry(id: String): List<Rect> {
+            val origin = frame("workspace-row-$id").topLeft
+            return listOf("workspace-name-slot-$id", "workspace-row-$id", "workspace-pin-$id", "workspace-grip-$id").map { frame(it).translate(-origin) }
+        }
+        fun footer(id: String) {
+            val rows = bounds("workspace-rows")
+            val button = bounds("new-workspace")
+            assertEquals("Footer leaves six dp above its targets", 6 * density, button.top - rows.bottom, 1f)
+            for (target in listOf(button, bounds("workspace-remove"))) {
+                assertEquals(34 * density, target.width, 1f)
+                assertEquals(34 * density, target.height, 1f)
+            }
+            for (tag in listOf("workspace-cancel", "workspace-confirm")) {
+                val action = bounds(tag)
+                assertEquals("Manager action remains fully visible", 34 * density, action.height, 1f)
+                assertTrue("Manager action stays inside the panel", action.bottom <= bounds("workspace-manager").bottom + 1)
+            }
+            val row = frame("workspace-row-$id")
+            assertTrue("Selected workspace row stays fully inside the list: $row / $rows", row.top >= rows.top - 1 && row.bottom <= rows.bottom + 1)
+            instrumentation.runOnMainSync {
+                val manager = node("workspace-manager")!!
+                val root = manager.first.view
+                val insets = checkNotNull(ViewCompat.getRootWindowInsets(root))
+                val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                assertFalse("Workspace manager preserves immersive app chrome", insets.isVisible(WindowInsetsCompat.Type.statusBars()))
+                assertTrue("Manager and footer stay above the software keyboard", manager.second.boundsInRoot.bottom <= root.height - ime + 1)
+            }
+        }
+        fun textOrigins(id: String): List<Offset> {
+            val result = mutableListOf<Offset>()
+            instrumentation.runOnMainSync {
+                val title = node("workspace-name-$id")!!.second.find { it.config.getOrNull(SemanticsActions.GetTextLayoutResult) != null }!!
+                val layouts = mutableListOf<TextLayoutResult>()
+                assertTrue(title.config[SemanticsActions.GetTextLayoutResult].action!!.invoke(layouts))
+                val text = layouts.single()
+                fun layouts(info: LayoutInfo): List<LayoutInfo> = listOf(info) + (info.javaClass.getMethod("getChildrenInfo").invoke(info) as List<*>).flatMap { layouts(it as LayoutInfo) }
+                val content = layouts(title.layoutInfo).last { it.coordinates.size == text.size }
+                result += content.coordinates.boundsInRoot().topLeft + text.getBoundingBox(0).topLeft
+                val subtitle = view().array("rows").objects().first { it.getString("id") == id }.getString("subtitle")
+                result += label(node("workspace-row-$id")!!.second, subtitle)!!.layoutInfo.coordinates.boundsInRoot().topLeft
+            }
+            return result.map { it - frame("workspace-row-$id").topLeft }
+        }
+        fun unchanged(before: List<Rect>, origins: List<Offset>, after: List<Rect>, afterOrigins: List<Offset>) {
+            before.zip(after).forEachIndexed { index, (first, second) ->
+                val message = "Rename preserves control $index; before=$before after=$after; text=$origins → $afterOrigins"
+                assertEquals(message, first.left, second.left, 1f)
+                assertEquals(message, first.top, second.top, 1f)
+                assertEquals(message, first.right, second.right, 1f)
+                assertEquals(message, first.bottom, second.bottom, 1f)
+            }
+            origins.zip(afterOrigins).forEach { (first, second) ->
+                assertEquals("Rename preserves text origin", first.x, second.x, 1f)
+                assertEquals("Rename preserves text origin", first.y, second.y, 1f)
+            }
+        }
+        try {
+            for (scale in listOf(1f, 1.3f)) {
+                scenario.onActivity { activity ->
+                    val configuration = Configuration(original!!).apply { fontScale = scale }
+                    @Suppress("DEPRECATION")
+                    activity.resources.updateConfiguration(configuration, activity.resources.displayMetrics)
+                    activity.window.decorView.dispatchConfigurationChanged(configuration)
+                    activity.onConfigurationChanged(configuration)
+                }
+                for (theme in listOf("light", "dark")) {
+                    waitFor("document accepts theme") { !host.documentInputBlocked }
+                    host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+                    waitFor("geometry theme") { host.snapshot!!.getJSONObject("state").getString("theme") == theme }
+                    val custom = newWorkspace("Geometry $theme $scale")
+                    open(); tap("workspace-row-$custom")
+                    val before = geometry(custom); val origins = textOrigins(custom)
+                    shot("name-normal-$theme-$scale")
+                    val metrics = host.catalog.getJSONObject("panel_metrics")
+                    assertTrue("Name slot reserves the shared compact height", before[0].height + 1 >= metrics.getDouble("control_height") * density)
+                    footer(custom)
+                    focus("workspace-row-$custom"); key(KeyEvent.KEYCODE_F2); idle()
+                    waitFor("geometry inline editor") { node("workspace-name-$custom")?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } != null }
+                    key(KeyEvent.KEYCODE_MOVE_HOME)
+                    shot("rename-geometry-$theme-$scale")
+                    val editing = geometry(custom); val editingOrigins = textOrigins(custom)
+                    footer(custom)
+                    key(KeyEvent.KEYCODE_ESCAPE); idle(); shot("name-canceled-$theme-$scale")
+                    val canceled = geometry(custom); val canceledOrigins = textOrigins(custom)
+                    footer(custom)
+                    checks += { unchanged(before, origins, editing, editingOrigins); unchanged(before, origins, canceled, canceledOrigins) }
+                    focus("workspace-row-$custom"); key(KeyEvent.KEYCODE_F2); idle()
+                    renameInline(custom, "Renamed $theme $scale")
+                    assertEquals("Renamed $theme $scale", view().getString("name"))
+                    if (scale == 1f) {
+                        val panel = bounds("workspace-manager")
+                        instrumentation.runOnMainSync { pressed = node("workspace-manager")!!.first }
+                        event(MotionEvent.ACTION_DOWN, Offset(panel.left + 2 * density, panel.center.y)); event(MotionEvent.ACTION_UP); idle()
+                        assertNotNull("Empty panel padding keeps the manager open", node("workspace-manager"))
+                        instrumentation.runOnMainSync { pressed = node("workspace-manager")!!.first }
+                        event(MotionEvent.ACTION_DOWN, Offset(2 * density, panel.center.y)); event(MotionEvent.ACTION_UP); idle()
+                        assertNull("Backdrop dismisses the manager", node("workspace-manager"))
+                        open()
+                    }
+                    key(KeyEvent.KEYCODE_ESCAPE); idle()
+                    assertNull(node("workspace-manager"))
+                }
+            }
+            checks.forEach { it() }
+        } finally {
+            scenario.onActivity { activity ->
+                @Suppress("DEPRECATION")
+                activity.resources.updateConfiguration(original!!, activity.resources.displayMetrics)
+                activity.window.decorView.dispatchConfigurationChanged(original!!)
+                activity.onConfigurationChanged(original!!)
+            }
+        }
     }
 
     @Test fun bottomListActionsCreateDeleteAndKeepManagerAcrossThemes() {

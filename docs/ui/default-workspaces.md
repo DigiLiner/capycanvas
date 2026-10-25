@@ -254,11 +254,13 @@ Restore Starting Layout…; and Reset All Brushes…. Captions come from
   by another window offers Switch to Window.
   Escape closes the normal list view;
   an open menu or inline name editor handles Escape first.
-  On GTK, inline names use the app's compact input fill, padding and squircle
-  corners. The name slot reserves the editor's height before editing, keeping
+  Inline names use the app's compact input fill, padding and control corners.
+  The name slot reserves the editor's height before editing, keeping
   the text and subtitle in place at normal and enlarged text sizes.
   A 6px gap separates the list from the + and trash hover targets, matching the
   tool tile-to-divider spacing.
+  Android keeps the edited row and both action rows above the onscreen keyboard;
+  the list scrolls within the remaining space.
 - Selecting a row or pressing Enter in the manager or Layout History previews
   the arrangement in the editor behind the dialog. Double-clicking also previews,
   except on custom workspace names, where it starts renaming. The

@@ -3,8 +3,10 @@ package art.capycanvas
 import android.view.WindowManager
 import android.view.KeyEvent
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -46,10 +48,14 @@ import org.json.JSONArray
     val colors = LocalPalette.current
     fun send(type: String) = host.workspaceInput(obj("type" to type))
     val cancel = { send("cancel") }
-    if (page != null) Dialog(onDismissRequest = {
+    val dismiss = {
         if (rowInteraction.active != null || rowInteraction.menu != null) rowInteraction.cancel() else send("dismiss")
-    }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    }
+    if (page != null) Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false,decorFitsSystemWindows=false)) {
         PreviewBackdrop()
+        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.matchParentSize().pointerInput(dismiss) {detectTapGestures {dismiss()}})
+        Box(Modifier.fillMaxSize().imePadding().padding(vertical=16.dp),contentAlignment=Alignment.Center) {
         Surface(shape = SquircleShape(16.dp), color = colors.settingsBackground, contentColor=colors.text,
             modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(.94f).testTag("workspace-manager").onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ESCAPE && event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
@@ -66,8 +72,8 @@ import org.json.JSONArray
                 }
                 if (toolbarMode) CoreTextField(view.optString("query"), { host.workspaceInput(obj("type" to "search", "query" to it)) }, Modifier.fillMaxWidth().testTag("workspace-search"), placeholder = { Text(copy.getString("search")) })
                 if (page == "this_workspace") TextButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new_toolbar", "value" to null))) }, enabled = !busy, modifier = Modifier.testTag("new-toolbar")) { Text(copy.getString("new_toolbar_action")) }
-                Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                    WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill=false).height(if(page=="workspaces")(minOf(7,view.array("rows").length())*56).dp else 315.dp).fillMaxWidth())
+                Column(Modifier.weight(1f,fill=false),verticalArrangement=Arrangement.spacedBy(if(page=="workspaces")6.dp else 4.dp)) {
+                    WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill=false).height(if(page=="workspaces")workspaceRowHeight()*minOf(7,view.array("rows").length()) else 315.dp).fillMaxWidth())
                     if(page=="workspaces")Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                         IconButton({host.workspaceInput(obj("type" to "form","action" to obj("type" to "new")))},enabled=!busy||renaming,modifier=Modifier.size(34.dp).testTag("new-workspace").semantics { contentDescription=copy.getString("new_workspace") }) {SharedIcon("plus",null,Modifier.size(16.dp),tint=colors.text.copy(alpha=if(busy&&!renaming) .36f else 1f))}
                         val delete=view.array("rows").objects().find {it.getString("id")==view.optString("selected")}?.array("options")?.objects()?.find {it.getJSONObject("action").getString("type")=="delete"}
@@ -91,6 +97,8 @@ import org.json.JSONArray
                     Button({ send("confirm") }, Modifier.height(34.dp).testTag("workspace-confirm"), shape=ControlShape,contentPadding=PaddingValues(horizontal=16.dp,vertical=0.dp),enabled = view.optBoolean("enabled") && (!busy || renaming)) { Text(view.getString("primary")) }
                 }
             }
+        }
+        }
         }
     }
     if (form != null && !(page=="workspaces"&&view.objectOrNull("prompt_action")?.optString("type")=="rename")) {
@@ -165,8 +173,13 @@ internal fun workspaceSwitcherMenu(view: JSONObject?): JSONObject = view?.optJSO
 
 @Composable private fun PreviewBackdrop() {
     val view = LocalView.current
-    SideEffect { (view.parent as? DialogWindowProvider)?.window?.apply {
-        addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-        setDimAmount(.18f)
-    } }
+    val window=(view.parent as? DialogWindowProvider)?.window
+    DisposableEffect(window) {
+        window?.apply {
+            enterCanvasFullscreen()
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(.18f)
+        }
+        onDispose { }
+    }
 }

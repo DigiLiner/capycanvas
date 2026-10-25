@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkspaceSwitcherRows: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
     @Environment(\.capyNativeCopy) private var nativeCopy
+    @Environment(\.editorPalette) private var palette
     private let rowHeight: CGFloat = 56
     @ObservedObject var workspaces: WorkspaceController
     @StateObject private var interaction = WorkspaceRowInteraction()
@@ -12,6 +13,7 @@ struct WorkspaceSwitcherRows: View {
     @FocusState private var focus: String?
     @FocusState private var editing: Bool
     private var rows: [JSON] { workspaces.view["rows"].array }
+    private var metrics: PanelControlMetrics { PanelControlMetrics(view: workspaces.store?.catalog["panel_metrics"] ?? JSON()) }
     private var available: Bool {
         workspaces.ready && !workspaces.readOnly && !workspaces.busy
             && !workspaces.switcherBusy && workspaces.view["prompt"].isNull
@@ -28,7 +30,7 @@ struct WorkspaceSwitcherRows: View {
         optionTitles = titles; reorderCaptions = reorder; switchCaptions = switches
     }
     var body: some View {
-        scroll.clipShape(SquircleShape(12 / SquircleShape.fit))
+        scroll.clipShape(SquircleShape.control)
             .accessibilityIdentifier("workspace-manager-rows")
             .onAppear { refreshCaptions() }
             .onChange(of: interfaceLanguage) { _, _ in optionTitles = [:]; refreshCaptions() }
@@ -54,21 +56,26 @@ struct WorkspaceSwitcherRows: View {
                 let renaming = workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string == id
                 HStack(spacing: 4) {
                     VStack(alignment:.leading,spacing:2) {
+                        ZStack(alignment:.leading) {
+                            Text(row["title"].string).lineLimit(1).padding(.horizontal,metrics.padding)
+                                .frame(maxWidth:.infinity,minHeight:metrics.height,alignment:.leading)
+                                .opacity(renaming ? 0 : 1).accessibilityHidden(renaming).allowsHitTesting(!renaming)
+                                .contentShape(Rectangle()).gesture(TapGesture(count:2).onEnded {_ in rename(row)},
+                                    including:row["options"].array.contains(where:{$0["action"]["type"].string=="rename" && $0["enabled"].bool}) ? .all : .none)
+                                .accessibilityIdentifier("workspace-name-"+id)
                         if renaming {
                             TextField("",text:$workspaces.formName).textFieldStyle(.plain).focused($editing)
+                                .padding(.horizontal,metrics.padding).frame(minHeight:metrics.height)
+                                .background(palette["input"],in:SquircleShape.control)
                                 .accessibilityIdentifier("workspace-name-"+id)
                                 .onSubmit {if !NativeTextContext.composing {workspaces.finishName()}}
                                 .onAppear {editing=true;workspaces.validateName(required:true)}
                                 .onChange(of:workspaces.formName) {_,_ in workspaces.validateName(required:true)}
                                 .onChange(of:editing) {_,focused in if !focused {workspaces.finishName()}}
                                 .onKeyPress(.escape) {guard !NativeTextContext.composing else{return .ignored};workspaces.cancelPrompt();return .handled}
-                        } else {
-                            Text(row["title"].string).lineLimit(1).frame(maxWidth:.infinity,alignment:.leading)
-                                .contentShape(Rectangle()).gesture(TapGesture(count:2).onEnded {_ in rename(row)},
-                                    including:row["options"].array.contains(where:{$0["action"]["type"].string=="rename" && $0["enabled"].bool}) ? .all : .none)
-                                .accessibilityIdentifier("workspace-name-"+id)
                         }
-                        if !row["subtitle"].string.isEmpty {Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1)}
+                        }.frame(minHeight:metrics.height).accessibilityIdentifier("workspace-name-slot-"+id)
+                        if !row["subtitle"].string.isEmpty {Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1).padding(.horizontal,metrics.padding)}
                     }.frame(maxWidth:.infinity,minHeight:rowHeight,alignment:.leading)
                         .contentShape(Rectangle()).onTapGesture {if !renaming && !interaction.contact.consumeClick(){workspaces.select(id)}}.focusable().focused($focus,equals:"row-"+id)
                         .modifier(WorkspaceRowAccessibility(id: id, label: switchCaptions[id] ?? "",
@@ -102,7 +109,7 @@ struct WorkspaceSwitcherRows: View {
                         .accessibilityIdentifier("workspace-grip-" + id).disabled(!available)
                         .focusable().focused($focus, equals: "grip-" + id)
                         .modifier(WorkspaceRowMeasurement(id: id, part: \.grip))
-                }.padding(.horizontal,12)
+                }.padding(.leading,12-metrics.padding).padding(.trailing,12)
                     .background(workspaces.view["selected"].string == id ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035))
                     .overlay(alignment:.top) {if id != rows.first?["id"].string {Divider()}}
                     .offset(x:interaction.swipe==id ? -interaction.swipeOffset : 0)

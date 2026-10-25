@@ -107,7 +107,7 @@ struct WorkspaceManagerView: View {
                 }
             } }
             if workspaces.page == "workspaces" {
-                VStack(alignment: .leading,spacing:4) {
+                VStack(alignment: .leading,spacing:6) {
                     WorkspaceSwitcherRows(workspaces: workspaces).frame(height:CGFloat(min(7,view["rows"].array.count))*56)
                     HStack(spacing:4) {
                         Button {workspaces.form(["type":"new"])} label: {SharedIcon(name:"plus").frame(width:34,height:34)}

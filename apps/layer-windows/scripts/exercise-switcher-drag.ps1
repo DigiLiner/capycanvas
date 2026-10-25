@@ -151,12 +151,74 @@ function Pin-Buttons {
     }
 }
 
+function Workspace-TextGeometry([string]$Id,[switch]$Editing){
+    $item=Control ('workspace-manager-row-'+$Id) -Arranged
+    $spec=@((Manager).rows|Where-Object id -eq $Id)[0]
+    $name=if($Editing){Control ('workspace-manager-rename-'+$Id) -Arranged}else{Control $spec.title -Name -Within $item -Type ([System.Windows.Automation.ControlType]::Text) -Arranged}
+    $rect=$name.Current.BoundingRectangle;$row=$item.Current.BoundingRectangle
+    $glyph=$null;$textPattern=$null
+    if($name.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$textPattern)){
+        $rectangles=$textPattern.DocumentRange.GetBoundingRectangles()
+        if($rectangles.Count -ge 4){$glyph=@($rectangles[0..3])}
+    }
+    $subtitle=$null
+    if($spec.subtitle){$detail=(Control $spec.subtitle -Name -Within $item -Type ([System.Windows.Automation.ControlType]::Text) -Arranged).Current.BoundingRectangle;$subtitle=@($detail.X,$detail.Y,$detail.Width,$detail.Height)}
+    @{row=@($row.X,$row.Y,$row.Width,$row.Height);name=@($rect.X,$rect.Y,$rect.Width,$rect.Height);glyph=$glyph;subtitle=$subtitle;editing=[bool]$Editing;title=$spec.title}
+}
+function Assert-WorkspaceTextGeometry($Before,$After){
+    foreach($part in @('row','subtitle')){
+        if($null -eq $Before[$part] -and $null -eq $After[$part]){continue}
+        if($null -eq $Before[$part] -or $null -eq $After[$part]){throw "Workspace $part disappeared while renaming"}
+        foreach($axis in 0..3){if([Math]::Abs($Before[$part][$axis]-$After[$part][$axis]) -gt 1.5){throw "Workspace $part moved while renaming"}}
+    }
+    if($Before.glyph -and $After.glyph){foreach($axis in 0..1){if([Math]::Abs($Before.glyph[$axis]-$After.glyph[$axis]) -gt 1.5*$scale){throw 'Workspace name glyph origin moved while renaming'}}}
+}
+function Workspace-GlyphPixels([string]$Path,$Region,[bool]$Bright,[bool]$Selected=$false){
+    $origin=[CapyWindowCapture+Point]::new()
+    if(![CapyWindowCapture]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Owned client origin unavailable for glyph measurement'}
+    $image=[Drawing.Bitmap]::new($Path)
+    try{
+        $left=[Math]::Max(0,[int][Math]::Ceiling($Region[0]-$origin.x));$top=[Math]::Max(0,[int][Math]::Floor($Region[1]-$origin.y))
+        $right=[Math]::Min($image.Width,[int][Math]::Floor($Region[0]+$Region[2]-$origin.x));$bottom=[Math]::Min($image.Height,[int][Math]::Ceiling($Region[1]+$Region[3]-$origin.y))
+        if($Selected){
+            $spans=@(for($y=$top;$y -lt $bottom;$y++){
+                $xs=@(for($x=$left;$x -lt $right;$x++){$pixel=$image.GetPixel($x,$y);if($pixel.B -gt $pixel.R+35 -and $pixel.B -gt $pixel.G+15){$x}})
+                if($xs.Count -ge 3){@{left=$xs[0];right=$xs[-1];y=$y}}
+            })
+            $edge=$spans|Group-Object right|Sort-Object Count -Descending|Select-Object -First 1
+            if(!$edge -or $edge.Count -lt 8){throw 'Selected name background unavailable for rendered glyph measurement'}
+            $selection=$edge.Group
+            $left=($selection.left|Measure-Object -Minimum).Minimum;$right=[int]$edge.Name+1
+            $selectedRows=[Collections.Generic.HashSet[int]]::new()
+            foreach($span in $selection){$null=$selectedRows.Add($span.y)}
+
+        }
+        $minX=$right;$minY=$bottom;$maxX=$left;$maxY=$top;$count=0
+        for($y=$top;$y -lt $bottom;$y++){for($x=$left;$x -lt $right;$x++){
+            $pixel=$image.GetPixel($x,$y)
+            $ink=if($Bright){[Math]::Min($pixel.R,[Math]::Min($pixel.G,$pixel.B)) -gt 190}else{[Math]::Max($pixel.R,[Math]::Max($pixel.G,$pixel.B)) -lt 80}
+            if($ink -and (!$Selected -or $selectedRows.Contains($y))){$minX=[Math]::Min($minX,$x);$minY=[Math]::Min($minY,$y);$maxX=[Math]::Max($maxX,$x);$maxY=[Math]::Max($maxY,$y);$count++}
+        }}
+        if($count -lt 20){throw 'Composed glyph sample did not contain readable name text'}
+        @{bounds=@(($minX+$origin.x),($minY+$origin.y),($maxX+$origin.x),($maxY+$origin.y));pixels=$count;bright=$Bright}
+    }finally{$image.Dispose()}
+}
+function Assert-WorkspaceRenderedName($Before,$Editing,[string]$BeforeImage,[string]$EditingImage){
+    $left=[Math]::Max($Before.name[0],$Editing.name[0]);$top=[Math]::Min($Before.name[1],$Editing.name[1])
+    $width=.65*[Math]::Min($Before.name[2],$Editing.name[2]);$bottom=[Math]::Max($Before.name[1]+$Before.name[3],$Editing.name[1]+$Editing.name[3])
+    $region=@($left,$top,$width,($bottom-$top))
+    $display=Workspace-GlyphPixels $BeforeImage $region ($Theme -eq 'dark')
+    $editor=Workspace-GlyphPixels $EditingImage $region $true $true
+    @{region=$region;display=$display;editor=$editor}|ConvertTo-Json -Depth 8|Set-Content ($EditingImage -replace '\.png$','-glyphs.json')
+    foreach($axis in @(0,1,3)){if([Math]::Abs($display.bounds[$axis]-$editor.bounds[$axis]) -gt 1.5){throw 'Rendered name glyph origin/baseline moved while renaming'}}
+}
 function New-WorkspaceButton {
     $control=Control 'workspace-manager-create' -Arranged
     $bounds=$control.Current.BoundingRectangle;$items=(Control 'workspace-manager-items' -Arranged).Current.BoundingRectangle
     $remove=(Control 'workspace-manager-remove' -Arranged).Current.BoundingRectangle
     if($control.Current.Name -notlike 'New Workspace*'){throw 'New workspace icon has no accessible label'}
     if($bounds.Top -lt $items.Bottom-1 -or $bounds.Left -gt $items.Left+24*$scale -or $remove.Left -lt $bounds.Right-1 -or [Math]::Abs($remove.Top-$bounds.Top) -gt 1){throw 'Plus and trash are not below the left side of the list'}
+    if([Math]::Abs(($bounds.Top-$items.Bottom)/$scale-6) -gt 1){throw 'Workspace action hover targets do not have6 DIP of space above them'}
     if(Find 'workspace-manager-search' -Visible){throw 'Workspace manager still exposes Search'}
     $cancel=(Control 'Cancel' -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Arranged).Current.BoundingRectangle
     $apply=(Control (Manager).primary -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Arranged).Current.BoundingRectangle
@@ -254,11 +316,18 @@ function Custom-Options {
     Wait-Until {(Storage).id -eq $active -and !(Storage).busy} 'Original workspace did not return'
     Open-Manager;Preview-Select
     $saved=@((Storage).order);$revision=(Storage).switcher_revision
+    $nameGeometry=Workspace-TextGeometry $custom
+    Capture 'workspace-rename-display' -Composed
     Row-Context $custom
     Preview-Intact;Order-Intact $saved $revision
     Invoke 'workspace-manager-rename'
     Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'Custom context Rename did not open inline'
     $editor=Control ('workspace-manager-rename-'+$custom) -Arranged;$editor.SetFocus()
+    $editingGeometry=Workspace-TextGeometry $custom -Editing
+    @{before=$nameGeometry;editing=$editingGeometry}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'rename-geometry.json')
+    Assert-WorkspaceTextGeometry $nameGeometry $editingGeometry
+    Capture 'workspace-rename-input' -Composed
+    Assert-WorkspaceRenderedName $nameGeometry $editingGeometry (Join-Path $run 'workspace-rename-display.png') (Join-Path $run 'workspace-rename-input.png')
     $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Discarded inline name')
     [CapyRowPointer]::Key([uint32]$review.Id,27)
     Wait-Until {$null -eq (Manager).prompt} 'Escape did not cancel inline Rename'

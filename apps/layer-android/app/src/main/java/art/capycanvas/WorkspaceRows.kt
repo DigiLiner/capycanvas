@@ -18,6 +18,8 @@ import kotlin.math.abs
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -155,15 +157,28 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
     }
 }
 
+@Composable internal fun workspaceRowHeight(): androidx.compose.ui.unit.Dp {
+    val style=LocalTextStyle.current
+    val measurer=androidx.compose.ui.text.rememberTextMeasurer()
+    val metrics=panelMetrics()
+    return with(LocalDensity.current) {
+        maxOf(56.dp.roundToPx(),maxOf(metrics.height.roundToPx(),measurer.measure(" ",style).size.height)+
+            measurer.measure(" ",style.copy(fontSize=style.fontSize*.88f)).size.height+2.dp.roundToPx()+2*4.dp.roundToPx()).toDp()
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun WorkspaceRows(host: CanvasHost, view: JSONObject, drag: WorkspaceRowInteraction, modifier: Modifier) {
     val colors = LocalPalette.current
     val rows = view.array("rows").objects()
     val workspaces = view.optString("page") == "workspaces"
+    val metrics=panelMetrics()
+    val rowHeight=if(workspaces)workspaceRowHeight() else 56.dp
     val renaming=workspaces&&view.objectOrNull("prompt_action")?.optString("type")=="rename"
     val enabled = !view.optBoolean("busy") && !view.optBoolean("switcher_busy") && view.isNull("prompt")
     val order = view.array("order").values().map { it.toString() }
     val scroll = rememberScrollState()
+    var viewportHeight by remember {mutableIntStateOf(0)}
     val focused = LocalWindowInfo.current.isWindowFocused
     val density = LocalDensity.current.density
     fun edit(value: JSONObject) { host.workspaceInput(obj("type" to "edit_switcher", "edit" to value)) }
@@ -189,12 +204,15 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
             drag.target()
         }
     }
-    Box(modifier.clip(SquircleShape((12/.54f).dp)).background(colors.settingsCard)
-        .testTag("workspace-rows").onGloballyPositioned { drag.area = Rect(it.positionInRoot(), it.size.toSize()) }
+    Box(modifier.clip(ControlShape).background(colors.settingsCard)
+        .testTag("workspace-rows").onGloballyPositioned { drag.area = Rect(it.positionInRoot(), it.size.toSize());viewportHeight=it.size.height }
         .workspaceRowInput(drag, focused) { id, before -> edit(obj("type" to "move", "id" to id, "before" to before)) }) {
         Column(Modifier.fillMaxSize().panelScroll(scroll)) {
             rows.forEachIndexed { index, row -> key(row.getString("id")) {
                 val id = row.getString("id")
+                val editing=workspaces&&view.objectOrNull("prompt_action")?.let {it.optString("type")=="rename"&&it.optString("value")==id}==true
+                val bringIntoView=remember {BringIntoViewRequester()}
+                LaunchedEffect(editing,viewportHeight,rowHeight) {if(editing)bringIntoView.bringIntoView()}
                 val title = row.getString("title")
                 val switchCaption=remember(title, workspaces, host.languageTag) { if (workspaces) JSONObject(Native.nativeCaption(obj("type" to "switch_workspace", "title" to title).toString(), host.languageTag)).getString("text") else title }
                 val optionsCaption=remember(title, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "options_for", "title" to title).toString(), host.languageTag)).getString("text") }
@@ -203,9 +221,9 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                 DisposableEffect(id) { onDispose { drag.rows.remove(id); drag.grips.remove(id); drag.options.remove(id); drag.pins.remove(id) } }
                 Box(Modifier.fillMaxWidth()) {
                     val delete=row.array("options").objects().find {it.getJSONObject("action").getString("type")=="delete"}
-                    if(drag.swipeRow==id&&delete!=null)TextButton({host.workspaceInput(obj("type" to "action","action" to delete.getJSONObject("action")));drag.swipeRow=null;drag.swipeOffset=0f},Modifier.align(Alignment.CenterEnd).width(72.dp).height(56.dp).background(MaterialTheme.colorScheme.error).rowBounds(drag.options,id).testTag("workspace-swipe-delete-$id"),enabled=delete.optBoolean("enabled")) {Text(delete.getString("label"),color=MaterialTheme.colorScheme.onError)}
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).offset {IntOffset(if(drag.swipeRow==id)-drag.swipeOffset.roundToInt() else 0,0)}.rowBounds(drag.rows, id)
-                    .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard).padding(horizontal=12.dp),
+                    if(drag.swipeRow==id&&delete!=null)TextButton({host.workspaceInput(obj("type" to "action","action" to delete.getJSONObject("action")));drag.swipeRow=null;drag.swipeOffset=0f},Modifier.align(Alignment.CenterEnd).width(72.dp).height(rowHeight).background(MaterialTheme.colorScheme.error).rowBounds(drag.options,id).testTag("workspace-swipe-delete-$id"),enabled=delete.optBoolean("enabled")) {Text(delete.getString("label"),color=MaterialTheme.colorScheme.onError)}
+                    Row(Modifier.fillMaxWidth().heightIn(min = rowHeight).bringIntoViewRequester(bringIntoView).offset {IntOffset(if(drag.swipeRow==id)-drag.swipeOffset.roundToInt() else 0,0)}.rowBounds(drag.rows, id)
+                    .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard).padding(start=if(workspaces)12.dp-metrics.padding else 12.dp,end=12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f).onPreviewKeyEvent { event ->
                         val key = event.nativeKeyEvent
@@ -217,16 +235,18 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                         } else false
                     }.selectable(selected, enabled = enabled || renaming, role = Role.RadioButton) {
                         host.workspaceInput(obj("type" to "select", "id" to id))
-                    }.padding(vertical = 8.dp, horizontal = 0.dp).testTag("workspace-row-$id").semantics { contentDescription = switchCaption },
-                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    }.padding(vertical = if(workspaces)4.dp else 8.dp).testTag("workspace-row-$id").semantics { contentDescription = switchCaption },
+                        verticalArrangement = Arrangement.spacedBy(if(workspaces)2.dp else 3.dp)) {
                         val renameAction=if(workspaces)row.array("options").objects().find {it.optBoolean("enabled")&&it.getJSONObject("action").getString("type")=="rename"} else null
                         val rename=view.objectOrNull("prompt_action")
+                        Box(Modifier.fillMaxWidth().heightIn(min=if(workspaces)metrics.height else 0.dp).testTag("workspace-name-slot-$id"),contentAlignment=Alignment.CenterStart) {
                         if(workspaces&&rename?.optString("type")=="rename"&&rename.optString("value")==id)WorkspaceNameEditor(host,view,id)
-                        else Text(row.getString("title"),Modifier.testTag("workspace-name-$id").combinedClickable(enabled=enabled || renaming,
+                        else Text(row.getString("title"),Modifier.fillMaxWidth().padding(horizontal=if(workspaces)metrics.padding else 0.dp).testTag("workspace-name-$id").combinedClickable(enabled=enabled || renaming,
                             onClick={host.workspaceInput(obj("type" to "select","id" to id))},
                             onDoubleClick=renameAction?.let {action->{host.workspaceInput(obj("type" to "action","action" to action.getJSONObject("action")))}}),maxLines=1,overflow=TextOverflow.Ellipsis)
+                        }
                         row.getString("subtitle").takeIf { it.isNotEmpty() }?.let {
-                            Text(it, color = colors.settingsSecondary, fontSize = LocalTextStyle.current.fontSize * .88f)
+                            Text(it, Modifier.padding(horizontal=if(workspaces)metrics.padding else 0.dp), color = colors.settingsSecondary, fontSize = LocalTextStyle.current.fontSize * .88f,maxLines=if(workspaces)1 else Int.MAX_VALUE,overflow=TextOverflow.Ellipsis)
                         }
                     }
                     if (workspaces) {
@@ -297,6 +317,7 @@ private fun JSONObject.offers(type: String) =
     array("actions").objects().any { it.optBoolean("enabled") && it.getJSONObject("action").getString("type") == type }
 
 @Composable private fun WorkspaceNameEditor(host: CanvasHost,view:JSONObject,id:String) {
+    val metrics=panelMetrics();val colors=LocalPalette.current
     val initial=view.getJSONObject("prompt").getString("name")
     var name by remember(id) {mutableStateOf(TextFieldValue(initial,TextRange(0,initial.length)))}
     val focus=remember {FocusRequester()};var hadFocus by remember {mutableStateOf(false)};var submitted by remember {mutableStateOf(false)}
@@ -313,7 +334,8 @@ private fun JSONObject.offers(type: String) =
         val key=event.nativeKeyEvent
         if(key.keyCode==KeyEvent.KEYCODE_ESCAPE){if(name.composition==null&&!host.textComposition.owns(key)&&key.action==KeyEvent.ACTION_DOWN)finish(true);true}else false
     }.onFocusChanged {if(hadFocus&&!it.isFocused)finish();hadFocus=it.isFocused;host.editingText=it.isFocused;host.textComposition.update(focus,name,hadFocus)},
-        textStyle=LocalTextStyle.current.copy(color=LocalPalette.current.text),singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={if(name.composition==null)finish()}))
+        textStyle=LocalTextStyle.current.copy(color=colors.text),singleLine=true,cursorBrush=androidx.compose.ui.graphics.SolidColor(colors.accent),keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={if(name.composition==null)finish()}),
+        decorationBox={field->Box(Modifier.fillMaxWidth().heightIn(min=metrics.height).clip(ControlShape).background(colors.input).padding(horizontal=metrics.padding),contentAlignment=Alignment.CenterStart){field()}})
     LaunchedEffect(id){focus.requestFocus()}
     DisposableEffect(id){onDispose {if(host.workspaceNameCommit===commit)host.workspaceNameCommit=null;host.editingText=false;host.textComposition.clear(focus)}}
 }

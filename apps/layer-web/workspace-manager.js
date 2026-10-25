@@ -121,7 +121,8 @@ export function createWorkspaceManager({ app, store, applyChange, element, butto
           select.addEventListener("keydown",event=>{if(event.key==="F2"&&!event.target.closest("input")){event.preventDefault();rename();}});
         }
         select.dataset.id = row.id; select.setAttribute("role", "option");
-        const title=element("span","workspace-row-title");bindCopy(title,()=>view?.rows.find(item=>item.id===row.id)?.title??row.title);select.append(title);
+        const title=element("span","workspace-row-title");bindCopy(title,()=>view?.rows.find(item=>item.id===row.id)?.title??row.title);
+        if(view.page==="workspaces"){const name=element("span","workspace-name-slot");name.append(title);select.append(name);}else select.append(title);
         if(row.subtitle){const subtitle=element("span","workspace-row-subtitle");bindCopy(subtitle,()=>view?.rows.find(item=>item.id===row.id)?.subtitle??"");select.append(subtitle);}
         container.append(select);
         if (view.page === "workspaces") switcher.decorate(container, select, row, view);
