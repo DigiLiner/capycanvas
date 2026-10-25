@@ -1,6 +1,6 @@
 //! File workers own transfer jobs, never the live editor. Only adoption and
 //! checkpoint acknowledgement return to the render Looper.
-use crate::android::{app, error, fail, or_throw, read};
+use crate::android::{error, fail, or_throw, read};
 use jni::{
     JNIEnv,
     objects::{JClass, JString},
@@ -31,14 +31,14 @@ impl Environment {
 }
 enum Payload {
     Lookup { resource:Option<std::sync::Arc<layer_core::Lut3d>>, name:String },
-    Save { project: Option<ArtworkCapture>, gpu: Option<layer_render_wgpu::snapshot::SnapshotGpu> },
+    Save { project: Option<ArtworkCapture>, gpu: Option<Box<layer_render_wgpu::snapshot::SnapshotGpu>> },
     Package {view: layer_ui::PackageView, localization: std::sync::Arc<layer_ui::Localizer>},
     Export {
         export: Box<ExportTask>,
         control: layer_render_wgpu::snapshot::CaptureControl,
     },
     Open {
-        environment: Option<Environment>,
+        environment: Option<Box<Environment>>,
         candidate: Option<Box<UiSession<Renderer>>>,
         warning: Option<String>,
     },
@@ -77,9 +77,9 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
     epoch: jlong,
     revision: jlong,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let admission = a.window.documents.admission(&a.host.session.retained_document_tiles());
         let options = a.host.renderer_options();
         let session = &mut a.host.session;
@@ -94,7 +94,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
                 let location: DocumentLocation =
                     serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
                 Payload::Save { project: Some(session.capture_project_save(id as u32, location)?),
-                    gpu: session.engine().backend().0.as_ref().map(|renderer| renderer.snapshot_gpu()) }
+                    gpu: session.engine().backend().0.as_ref().map(|renderer| Box::new(renderer.snapshot_gpu())) }
             }
             DocumentRequest::Open
             | DocumentRequest::New
@@ -107,7 +107,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
                     return Err(layer_ui::DocumentTransportRefusal::OpenSnapshotChanged.message(session.localization()).to_string());
                 }
                 Payload::Open {
-                    environment: Some(Environment::new(
+                    environment: Some(Box::new(Environment::new(
                         OpenEnvironment::capture(session, admission, options)?,
                         session.engine().document().composition().color.space,
                         serde_json::from_str::<Option<DocumentLocation>>(&read(
@@ -116,18 +116,18 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
                         .map_err(error)?
                         .map(|location| location.name)
                         .unwrap_or_else(|| "Photo".into()),
-                    )),
+                    ))),
                     candidate: None,
                     warning: None,
                 }
             }
             _ => return Err("This request does not transfer a project".into()),
         };
-        Ok(Box::into_raw(Box::new(Task {
+        crate::inspection::owned(Task {
             place,
             ..Task::new(a.window.documents.selected(), session.state().document_file.epoch,
                 session.engine().document().revision, id as u32, a.gpu_generation, payload)
-        })) as jlong)
+        })
     })();
     or_throw(&mut env, result, 0)
     })
@@ -140,7 +140,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectOpenControl(
     mut env: JNIEnv, _: JClass, handle: jlong, control: jlong,
 ) {
     crate::jni_entry!(env, {
-    unsafe { crate::inspection::borrow::<Task>(handle) }.open_control = crate::inspection::control(control);
+    crate::inspection::borrow::<Task>(handle)?.open_control = crate::inspection::control(control)?;
     })
 }
 fn check_open(t: &Task) -> Result<(), String> {
@@ -233,7 +233,7 @@ fn prepare(t: &mut Task, input: Option<File>, papers: Option<&std::path::Path>) 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_projectPackagePrompt(mut env: JNIEnv,_:JClass,handle:jlong)->jni::sys::jstring {
     crate::jni_entry!(env, {
-    let summary = match &unsafe {crate::inspection::borrow_ref::<Task>(handle)}.payload {
+    let summary = match &crate::inspection::borrow_ref::<Task>(handle)?.payload {
         Payload::Package {view,localization} => serde_json::to_string(&view.summary(localization)).map_err(error),
         _ => Ok("null".into()),
     };
@@ -243,7 +243,8 @@ pub extern "system" fn Java_art_capycanvas_Native_projectPackagePrompt(mut env: 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_projectPackagePreview(mut env: JNIEnv,_:JClass,handle:jlong)->jni::sys::jintArray {
     crate::jni_entry!(env, {
-    let bytes = match &unsafe {crate::inspection::borrow_ref::<Task>(handle)}.payload {
+    let task=crate::inspection::borrow_ref::<Task>(handle)?;
+    let bytes = match &task.payload {
         Payload::Package {view,..} => view.preview().map(|p| p.pixels().as_ref()).unwrap_or(&[]),
         _ => &[],
     };
@@ -257,7 +258,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectPackageWrite(mut env: J
     let result = crate::inspection::on_worker("capy-original-copy","Drawing copy worker failed",move || {
         if fd < 0 {return Err("Missing drawing copy output".into());}
         let mut output = BufWriter::new(unsafe {File::from_raw_fd(fd)});
-        let task = unsafe {crate::inspection::borrow_ref::<Task>(handle)};
+        let mut task_owner = crate::inspection::borrow_ref::<Task>(handle)?;let task=&mut *task_owner;
         let Payload::Package {view,..} = &task.payload else{return Err("No preserved drawing to copy".into());};
         if preview != 0 { view.export_preview(&mut output, task.open_control.cancellation_flag())?; }
         else { view.copy_original(&mut output,task.open_control.cancellation_flag())?; }
@@ -275,7 +276,8 @@ pub extern "system" fn Java_art_capycanvas_Native_projectProfilePrompt(
     handle: jlong,
 ) -> jni::sys::jstring {
     crate::jni_entry!(env, {
-    let source = match &unsafe { crate::inspection::borrow::<Task>(handle) }.payload {
+    let task=crate::inspection::borrow::<Task>(handle)?;
+    let source = match &task.payload {
         Payload::Open {
             environment: Some(e),
             ..
@@ -298,7 +300,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectAssumeProfile(
         let Payload::Open {
             environment: Some(e),
             ..
-        } = &mut unsafe { crate::inspection::borrow::<Task>(handle) }.payload
+        } = &mut crate::inspection::borrow::<Task>(handle)?.payload
         else {
             return Err("Image interpretation is no longer pending".into());
         };
@@ -320,7 +322,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectWork(
     crate::jni_entry!(env, {
     let input = (fd >= 0).then(|| unsafe { File::from_raw_fd(fd) });
     let papers = read(&mut env, &papers).ok().filter(|folder| !folder.is_empty()).map(std::path::PathBuf::from);
-    let t = unsafe { crate::inspection::borrow::<Task>(handle) };
+    let mut t_owner = crate::inspection::borrow::<Task>(handle)?;let t=&mut *t_owner;
     let result = crate::inspection::on_worker("capy-project", "Project worker failed", move || match &mut t.payload {
         Payload::Lookup {resource,name} => {
             let mut bytes=Vec::new();
@@ -360,10 +362,10 @@ pub extern "system" fn Java_art_capycanvas_Native_projectAdopt(
     transfer: jlong,
     location: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
-        let t = unsafe { crate::inspection::borrow::<Task>(transfer) };
+        let a = &mut *capy_app;
+        let mut t_owner = crate::inspection::borrow::<Task>(transfer)?;let t=&mut *t_owner;
         check_open(t)?;
         let location: Option<DocumentLocation> =
             serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
@@ -420,7 +422,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectAdopt(
 pub extern "system" fn Java_art_capycanvas_Native_projectFree(mut env: JNIEnv, _: JClass, handle: jlong) {
     crate::jni_entry!(env, {
     if handle != 0 {
-        drop(unsafe { Box::from_raw(handle as *mut Task) });
+        crate::inspection::release::<Task>(handle)?;
     }
     })
 }
@@ -433,11 +435,11 @@ pub extern "system" fn Java_art_capycanvas_Native_documentComplete(
     success: jboolean,
     message: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let message: Option<String> =
             serde_json::from_str(&read(&mut env, &message)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let previous = a.host.session.state().revision;
         let change = a
             .host
@@ -457,10 +459,10 @@ pub extern "system" fn Java_art_capycanvas_Native_documentClose(
     id: jint,
     decision: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let decision = serde_json::from_str(&read(&mut env, &decision)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let previous = a.host.session.state().revision;
         let change = a.host.session.respond_document_close(id as u32, decision)?;
         a.host.apply_change(previous, change);
@@ -478,9 +480,9 @@ pub extern "system" fn Java_art_capycanvas_Native_projectExportTask(
     now: jlong,
     cancel: jlong,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         a.host.session.require_document_idle()?;
         if !matches!(a.host.session.document_request(id as u32), Ok(DocumentRequest::Export { .. })) {
             return Err("Export is no longer active".into());
@@ -497,13 +499,13 @@ pub extern "system" fn Java_art_capycanvas_Native_projectExportTask(
             "",
             layer_core::color::RgbSpace::Srgb,
         )?;
-        Ok(Box::into_raw(Box::new(Task::new(
+        crate::inspection::owned(Task::new(
             a.window.documents.selected(), epoch, revision, id as u32, a.gpu_generation,
             Payload::Export {
                 export: Box::new(export),
-                control: crate::inspection::control(cancel),
+                control: crate::inspection::control(cancel)?,
             },
-        ))) as jlong)
+        ))
     })();
     or_throw(&mut env, result, 0)
     })
@@ -522,7 +524,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectExportOptions(
         let localization = &*crate::launch::active_localization()?;
         let selected: layer_ui::ExportRecipe =
             serde_json::from_str(&read(&mut env, &value)?).map_err(error)?;
-        let Payload::Export { export, .. } = &mut unsafe { crate::inspection::borrow::<Task>(handle) }.payload else {
+        let Payload::Export { export, .. } = &mut crate::inspection::borrow::<Task>(handle)?.payload else {
             return Err("Export task is no longer configurable".into());
         };
         export.configure(selected).map_err(|reason| reason.message(localization))
@@ -535,9 +537,9 @@ pub extern "system" fn Java_art_capycanvas_Native_projectExportOptions(
 /// Its stable owner and activation generation remain checked during adoption.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_projectParkReady(mut env: JNIEnv,_:JClass,handle:jlong,transfer:jlong)->jboolean {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result=(|| {
-        let a=unsafe{app(handle)};let t=unsafe{crate::inspection::borrow::<Task>(transfer)};
+        let a=&mut *capy_app;let t=crate::inspection::borrow::<Task>(transfer)?;
         if t.owner!=a.window.documents.selected() || t.epoch!=a.host.session.state().document_file.epoch || t.revision!=a.host.session.engine().document().revision || t.gpu_generation!=a.gpu_generation {
             return Err("The drawing changed while opening; try again".into());
         }
@@ -545,7 +547,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectParkReady(mut env: JNIE
             a.host.session.complete_document_request(t.request,Ok(true))?;
         }
         a.window.park_ready(&a.host)
-    })();or_throw(&mut env, result.map(|ready| u8::from(ready)), 0)
+    })();or_throw(&mut env, result.map(u8::from), 0)
     })
 }
 

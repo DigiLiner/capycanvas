@@ -41,6 +41,15 @@ a real Japanese, Chinese or Korean input method.
 JNI result handling lives in `native/src/android.rs`: `or_throw` reports
 `IllegalStateException` and keeps the return sentinel; `argb_array` packs RGBA
 pixels for Kotlin.
+JNI `Long` handles are typed generational tokens in `layer_host::handles`.
+Lookup validates the token before accessing an App or task. Apps remain in the
+creating render thread's local table; another thread cannot borrow or destroy
+them. Worker operations hold an owned task lease for the complete call, including
+scoped file work. Free invalidates the token while an active lease retains its
+value. Terminal consumers take once. Cancellation controls and paper jobs retain
+separate shared owners, so cancellation does not wait for mutable file work.
+Malformed, stale, wrong-kind and busy handles report normal JNI errors; panic
+containment and App poisoning use the shared native host boundary.
 Known numeric and color refusals retain their shared typed reason across JNI;
 unexpected diagnostics stay literal. Color, profile, proof and export controls
 relabel retained scalar copy without revalidating dirty input, reading profile
@@ -147,6 +156,10 @@ taking the payload; release cancels a remaining payload or frees an already
 committed job. The controller releases the job in its non-cancellable cleanup,
 including after JNI errors. Release still frees the allocation for a poisoned
 host without dispatching another document action.
+`AndroidNativeHandlesTest` exercises wrong-kind and stale task tokens, slot reuse,
+single-use metadata jobs and App thread ownership without creating a GPU surface.
+The shared registry tests cover concurrent release, consumption and cancellation
+with deterministic barriers and run under Miri independently of JNI.
 
 `AppStorage` passes the platform folders to shared Rust, and
 `layer_host::StorageRoots` names each store within them:

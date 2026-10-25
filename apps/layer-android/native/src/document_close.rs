@@ -4,7 +4,7 @@ use layer_ui::UiSession;
 pub(crate) struct CloseJob(pub Option<PreparedClose>);
 impl CloseJob {
     pub fn commit(&mut self, window: &mut DocumentWindow<Box<UiSession<Renderer>>>, host: &mut NativeHost) -> Result<Activation, String> {
-        window.validate_close(host, self.0.as_ref().expect("Unconsumed close job"))?;
+        window.validate_close(host, self.0.as_ref().ok_or("Drawing close task was already consumed")?)?;
         window.commit_close(host, self.0.take().unwrap(), |_| {}).map(|(activation, _)| activation)
     }
 }
@@ -38,6 +38,7 @@ mod tests {
         let address = &*job as *const CloseJob;
         let activation = job.commit(&mut window, &mut host).unwrap();
         assert!(job.0.is_none());
+        assert!(job.commit(&mut window,&mut host).err().unwrap().contains("already consumed"));
         assert_eq!(&*job as *const CloseJob, address);
         drop(job);
         drop(activation);

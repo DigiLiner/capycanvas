@@ -1,6 +1,6 @@
 use jni::{JNIEnv, objects::{JClass, JObject}, sys::{jlong, jobjectArray}};
 use layer_ui::HistogramView;
-use crate::android::{app, error, or_throw};
+use crate::android::{error, or_throw};
 
 #[derive(Default)]
 pub(crate) struct Cache {
@@ -10,9 +10,9 @@ pub(crate) struct Cache {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_takeScopes(mut env: JNIEnv, _: JClass, handle: jlong) -> jobjectArray {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let state = a.host.session.state();
         let colors = state.palette.histogram_colors().map(|color| color.0);
         let changed = a.scopes.colors != Some(colors);

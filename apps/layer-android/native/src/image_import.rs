@@ -1,6 +1,6 @@
 //! Provider descriptors are decoded on the file worker. Nothing enters the live
 //! document until the complete, interpreted batch passes identity checks.
-use crate::android::{app, error, fail, or_throw, read, string};
+use crate::android::{error, fail, or_throw, read, string};
 use jni::{
     JNIEnv,
     objects::{JClass, JString},
@@ -62,9 +62,9 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportContext(
     screen: JString,
     destination: JString,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let screen = serde_json::from_str(&read(&mut env, &screen)?).map_err(error)?;
         let destination = serde_json::from_str(&read(&mut env, &destination)?).map_err(error)?;
         serde_json::to_string(&Context {
@@ -89,9 +89,9 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
     cancel: jlong,
     nonce: JString,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         active(a, id as u32)?;
         let context: Context = serde_json::from_str(&read(&mut env, &context)?).map_err(error)?;
         a.host
@@ -109,17 +109,17 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
                 candidate: None, retired: None,
             })
         } else { None };
-        Ok(Box::into_raw(Box::new(Batch {
+        crate::inspection::owned(Batch {
             id: id as u32,
             context,
             clipboard: matches!(a.host.session.document_request(id as u32), Ok(DocumentRequest::Paste { .. })),
-            control: crate::inspection::control(cancel),
+            control: crate::inspection::control(cancel)?,
             images: layer_ui::ImageImportBatch::new(a.host.session.state().settings.photo_open,
                 a.host.session.engine().document().composition().color.space, Default::default()),
             clip, color: a.host.session.engine().document().composition().color,
             mode: match a.host.session.document_request(id as u32)? { DocumentRequest::Paste { mode } => Some(*mode), _ => None },
             open,
-        })) as jlong)
+        })
     })();
     or_throw(&mut env, result, 0)
     })
@@ -127,7 +127,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportPrepare(mut env: JNIEnv, _: JClass, handle: jlong) {
     crate::jni_entry!(env, {
-    let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
+    let mut b_owner = crate::inspection::borrow::<Batch>(handle)?;let b=&mut *b_owner;
     let result = (|| {
         if b.open.is_none() && b.mode != Some(layer_ui::PasteMode::Into) && let Some(clip) = &mut b.clip {
             clip.convert_layers(b.color, layer_color::photo::PhotoMemoryBudget::current().encode_bytes, || b.control.is_cancelled())?;
@@ -146,10 +146,10 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportPrepare(mut env: JN
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportParkReady(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong) -> jboolean {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
-        let b = unsafe { crate::inspection::borrow::<Batch>(task) };
+        let a = &mut *capy_app;
+        let mut b_owner = crate::inspection::borrow::<Batch>(task)?;let b=&mut *b_owner;
         if b.control.is_cancelled() || b.open.as_ref().and_then(|open| open.candidate.as_ref()).is_none() { return Err("Paste cancelled or not prepared".into()); }
         if a.host.session.state().document_file.epoch != b.context.placement.epoch || a.host.session.engine().document().revision != b.context.placement.revision || a.gpu_generation != b.context.generation {
             return Err("The drawing changed while pasting; try again".into());
@@ -170,13 +170,13 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportRead(
 ) {
     crate::jni_entry!(env, {
     if fd < 0 {
-        unsafe { crate::inspection::borrow::<Batch>(handle) }.images.invalidate();
+        crate::inspection::borrow::<Batch>(handle)?.images.invalidate();
         fail(&mut env, Err("Missing image descriptor".into()));
-        return;
+        return Ok(());
     }
     // Take descriptor ownership even if this batch has already failed.
     let file = unsafe { File::from_raw_fd(fd) };
-    let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
+    let mut b_owner = crate::inspection::borrow::<Batch>(handle)?;let b=&mut *b_owner;
     let result = (|| {
         let name = read(&mut env, &name)?;
         let name = name
@@ -200,7 +200,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportProfilePrompt(
     handle: jlong,
 ) -> jstring {
     crate::jni_entry!(env, {
-    let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
+    let mut b_owner = crate::inspection::borrow::<Batch>(handle)?;let b=&mut *b_owner;
     string(
         &mut env,
         serde_json::to_string(&b.images.pending_source().map(|s| &s.interpretation)).map_err(error),
@@ -215,7 +215,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAssumeProfile(
     profile: JString,
 ) {
     crate::jni_entry!(env, {
-    let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
+    let mut b_owner = crate::inspection::borrow::<Batch>(handle)?;let b=&mut *b_owner;
     let result = (|| {
         let profile = serde_json::from_str(&read(&mut env, &profile)?).map_err(error)?;
         b.images.interpret(profile, b.control.is_cancelled())
@@ -233,10 +233,10 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAdopt(
     handle: jlong,
     task: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
-        let b = unsafe { crate::inspection::borrow::<Batch>(task) };
+        let a = &mut *capy_app;
+        let mut b_owner = crate::inspection::borrow::<Batch>(task)?;let b=&mut *b_owner;
         active(a, b.id)?;
         if let Some(open) = &mut b.open {
             if b.control.is_cancelled() || a.gpu_generation != b.context.generation || a.gpu_watch.failure().is_some() { return Err("Paste cancelled or canvas changed".into()); }
@@ -285,7 +285,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportFree(
 ) {
     crate::jni_entry!(env, {
     if handle != 0 {
-        drop(unsafe { Box::from_raw(handle as *mut Batch) });
+        crate::inspection::release::<Batch>(handle)?;
     }
     })
 }

@@ -112,8 +112,8 @@ pub extern "system" fn Java_art_capycanvas_Native_surfacePixelsForTest(
     _: JClass,
     handle: jlong,
 ) -> jbyteArray {
-    crate::jni_entry!(env, handle, {
-    match pixels(unsafe { app(handle) })
+    crate::jni_entry!(env, handle, capy_app, {
+    match pixels(&mut *capy_app)
         .and_then(|bytes| env.byte_array_from_slice(&bytes).map_err(error))
     {
         Ok(array) => array.into_raw(),

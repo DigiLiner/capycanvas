@@ -1,4 +1,4 @@
-use crate::android::{app, error, fail, or_throw, read};
+use crate::android::{error, fail, or_throw, read};
 use jni::{JNIEnv, objects::{JClass, JString}, sys::{jboolean, jlong}};
 use layer_host::{Renderer, open::OpenEnvironment};
 use layer_ui::{UiSession, session_recovery::{SessionCapture, SessionManifest, SessionRestore}};
@@ -7,25 +7,25 @@ use std::time::{Duration, Instant};
 use std::{fs::File, os::fd::FromRawFd};
 
 enum Work {
-    Capture(Option<SessionCapture>),
-    Restore { environment: OpenEnvironment, candidates: Vec<(u64, Box<UiSession<Renderer>>)>, stamp: layer_ui::SessionStamp, pending: Option<(SessionRestore,bool)> },
+    Capture(Option<Box<SessionCapture>>),
+    Restore { environment: Box<OpenEnvironment>, candidates: Vec<(u64, Box<UiSession<Renderer>>)>, stamp: Box<layer_ui::SessionStamp>, pending: Option<Box<(SessionRestore,bool)>> },
     Retired { _renderers: Vec<Box<layer_render_wgpu::WgpuRasterizer>> },
 }
 struct Task { generation: u64, work: Work }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionSettle(mut env: JNIEnv, _: JClass, handle: jlong, now: jlong) {
-    crate::jni_entry!(env, handle, {
-    let result = unsafe {app(handle)}.host.prepare_canvas_frame(now.max(0) as u64,now.max(0) as u64,true);
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = capy_app.host.prepare_canvas_frame(now.max(0) as u64,now.max(0) as u64,true);
     fail(&mut env,result)
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStamp(mut env: JNIEnv, _: JClass, handle: jlong, id: jlong) -> jni::sys::jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         serde_json::to_string(&a.window.session(&a.host, id as u64)?.session_stamp()).map_err(error)
     })();
     crate::android::string(&mut env, result)
@@ -34,15 +34,15 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionStamp(mut env: JNIEnv, 
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCapture(mut env: JNIEnv, _: JClass, handle: jlong, id: jlong) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let session = a.window.session(&a.host, id as u64)?;
         if session.recovery_document().busy { return Ok(0); }
-        Ok(Box::into_raw(Box::new(Task {
+        crate::inspection::owned(Task {
             generation: a.gpu_generation,
-            work: Work::Capture(Some(session.capture_session()?)),
-        })) as jlong)
+            work: Work::Capture(Some(Box::new(session.capture_session()?))),
+        })
     })();
     or_throw(&mut env, result, 0)
     })
@@ -52,7 +52,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCapture(mut env: JNIEnv
 pub extern "system" fn Java_art_capycanvas_Native_sessionStoreOpen(mut env: JNIEnv, _: JClass, directory: JString) -> jlong {
     crate::jni_entry!(env, {
     let result = read(&mut env, &directory).and_then(|path| layer_core::package::session_store::SessionStore::open(Path::new(&path)))
-        .map(|store| Box::into_raw(Box::new(store)) as jlong);
+        .and_then(crate::inspection::owned);
     or_throw(&mut env, result, 0)
     })
 }
@@ -60,29 +60,29 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionStoreOpen(mut env: JNIE
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStoreFree(mut env: JNIEnv, _: JClass, store: jlong) {
     crate::jni_entry!(env, {
-    if store != 0 { drop(unsafe { Box::from_raw(store as *mut layer_core::package::session_store::SessionStore) }); }
+    if store != 0 { crate::inspection::release::<layer_core::package::session_store::SessionStore>(store)?; }
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStoreRetire(mut env: JNIEnv, _: JClass, store: jlong) {
     crate::jni_entry!(env, {
-    fail(&mut env, unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) }.retire())
+    fail(&mut env, crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store)?.retire())
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStorePrepareRetirement(mut env: JNIEnv, _: JClass, store: jlong) {
     crate::jni_entry!(env, {
-    fail(&mut env, unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) }.prepare_retirement())
+    fail(&mut env, crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store)?.prepare_retirement())
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCommit(mut env: JNIEnv, _: JClass, task: jlong, store: jlong) {
     crate::jni_entry!(env, {
-    let task = unsafe { crate::inspection::borrow::<Task>(task) };
-    let store = unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) };
+    let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
+    let mut store_owner = crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store)?;let store=&mut *store_owner;
     let result = crate::inspection::on_worker("capy-session-save", "Session worker failed", move || {
         let Work::Capture(capture) = &mut task.work else { return Err("Not a session capture".into()); };
         let cancel = AtomicBool::new(false);
@@ -96,9 +96,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCommit(mut env: JNIEnv,
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionFailure(mut env: JNIEnv, _: JClass, handle: jlong, detail: JString, recovery: jboolean) -> jni::sys::jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = read(&mut env,&detail).map(|detail| {
-        let localization = unsafe {app(handle)}.host.session.localization();
+        let localization = capy_app.host.session.localization();
         if recovery != 0 {layer_ui::document_recovery_unavailable(localization,&detail)}
         else {layer_ui::document_storage_retained(localization,&detail)}
     });
@@ -108,22 +108,22 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionFailure(mut env: JNIEnv
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRequireEmptyRetry(mut env: JNIEnv, _: JClass, handle: jlong) {
-    crate::jni_entry!(env, handle, {
-    let result = (|| {
-        let a = unsafe {app(handle)};
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = {
+        let a = &mut *capy_app;
         if a.window.documents.order().len() == 1 && a.host.session.can_replace_startup_session(&a.host.session.session_stamp()) {Ok(())}
         else {Err(layer_ui::DocumentSessionError::DrawingsStillOpen.message(a.host.session.localization()))}
-    })();
+    };
     fail(&mut env,result)
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionReserveIdentities(mut env: JNIEnv, _: JClass, handle: jlong, identities: JString) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let identities: Vec<u64> = serde_json::from_str(&read(&mut env,&identities)?).map_err(error)?;
-        unsafe {app(handle)}.window.documents.reserve_identities(&identities)
+        capy_app.window.documents.reserve_identities(&identities)
     })();
     fail(&mut env,result)
     })
@@ -131,19 +131,19 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionReserveIdentities(mut e
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRestoreTask(mut env: JNIEnv, _: JClass, handle: jlong, stamp: JString) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let stamp: Option<layer_ui::SessionStamp> = serde_json::from_str(&read(&mut env, &stamp)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let session = &a.host.session;
         session.require_document_idle()?;
         let environment = OpenEnvironment::capture(session,
             a.window.documents.admission(&session.retained_document_tiles()),
             a.host.renderer_options())?;
-        Ok(Box::into_raw(Box::new(Task {
+        crate::inspection::owned(Task {
             generation: a.gpu_generation,
-            work: Work::Restore { environment, candidates: Vec::new(), stamp: stamp.unwrap_or_else(||session.session_stamp()), pending: None },
-        })) as jlong)
+            work: Work::Restore { environment:Box::new(environment), candidates: Vec::new(), stamp: Box::new(stamp.unwrap_or_else(||session.session_stamp())), pending: None },
+        })
     })();
     or_throw(&mut env, result, 0)
     })
@@ -152,15 +152,15 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionRestoreTask(mut env: JN
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRead(mut env: JNIEnv, _: JClass, task: jlong, store: jlong, recovered: jboolean) -> jni::sys::jstring {
     crate::jni_entry!(env, {
-    let task = unsafe { crate::inspection::borrow::<Task>(task) };
-    let store = unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) };
+    let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
+    let mut store_owner = crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store)?;let store=&mut *store_owner;
     let result = crate::inspection::on_worker("capy-session-read", "Session worker failed", move || {
         let Work::Restore { environment, pending, .. } = &mut task.work else { return Err("Not a session restore".into()); };
         if pending.is_some() {return Err("Session restore already read".into());}
         let opened = store.load(environment.limits(), &AtomicBool::new(false))?.ok_or("The drawing has no complete session copy")?;
         let restored = SessionRestore::from_core(opened)?;
         let location = serde_json::to_string(&restored.state.location.as_ref().filter(|_|restored.state.destination.is_some())).map_err(error)?;
-        *pending = Some((restored,recovered != 0 || store.recovered_previous()));
+        *pending = Some(Box::new((restored,recovered != 0 || store.recovered_previous())));
         Ok(location)
     });
     crate::android::string(&mut env,result)
@@ -172,8 +172,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionObserve(mut env: JNIEnv
     crate::jni_entry!(env, {
     let file = unsafe {File::from_raw_fd(fd)};
     let result = (|| {
-        let task = unsafe {crate::inspection::borrow::<Task>(task)};
-        let Work::Restore {pending:Some((restored,_)),..} = &task.work else {return Err("Session restore is not read".into());};
+        let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
+        let Work::Restore {pending,..} = &task.work else {return Err("Session restore is not read".into());};
+        let (restored,_)=pending.as_deref().ok_or("Session restore is not read")?;
         let observed = restored.state.destination.as_ref().and_then(|expected|expected.observe(file));
         serde_json::to_string(&observed).map_err(error)
     })();
@@ -186,10 +187,10 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionPrepare(mut env: JNIEnv
     crate::jni_entry!(env, {
     let result = (|| {
         let observed: Option<layer_ui::DestinationFingerprint> = serde_json::from_str(&read(&mut env,&observed)?).map_err(error)?;
-        let task = unsafe { crate::inspection::borrow::<Task>(task) };
+        let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
         crate::inspection::on_worker("capy-session-open", "Session worker failed", move || {
             let Work::Restore { environment, candidates, pending, .. } = &mut task.work else { return Err("Not a session restore".into()); };
-            let (restored,recovered) = pending.take().ok_or("Session restore is not read")?;
+            let (restored,recovered) = *pending.take().ok_or("Session restore is not read")?;
             let mut prepared = environment.prepare(restored.document().clone(), || false)?;
             prepared.restore_session(restored, recovered, observed)?;
             let deadline = Instant::now() + layer_host::open::PREPARE_DEADLINE;
@@ -210,18 +211,18 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionPrepare(mut env: JNIEnv
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionAdopt(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong, active: jlong, reserved: JString) -> jni::sys::jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let reserved: Vec<u64> = serde_json::from_str(&read(&mut env,&reserved)?).map_err(error)?;
-        let a = unsafe { app(handle) };
-        let task = unsafe { crate::inspection::borrow::<Task>(task) };
+        let a = &mut *capy_app;
+        let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
         if task.generation != a.gpu_generation { return Err("The canvas changed while restoring".into()); }
         let Work::Restore { candidates, stamp, .. } = &mut task.work else { return Err("Session restore is not prepared".into()); };
         let mut ids = std::collections::BTreeMap::new();
         let replace = a.window.documents.order().len() == 1 && a.host.session.can_replace_startup_session(stamp);
         let retired = if replace {
             for(id,_)in candidates.iter() { ids.insert(*id,*id); }
-            a.window.restore_sessions(&mut a.host, candidates, active as u64, stamp.clone(), |s| s)?
+            a.window.restore_sessions(&mut a.host, candidates, active as u64, stamp.as_ref().clone(), |s| s)?
         } else {
             let (mapping, retired) = a.window.append_restored_sessions(&mut a.host, candidates, |s| s)?;
             ids.extend(mapping);
@@ -238,10 +239,10 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionAdopt(mut env: JNIEnv, 
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionHydrate(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong, id: jlong) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
-        let task = unsafe { crate::inspection::borrow::<Task>(task) };
+        let a = &mut *capy_app;
+        let mut task_owner = crate::inspection::borrow::<Task>(task)?;let task=&mut *task_owner;
         if task.generation != a.gpu_generation { return Err("The canvas changed while restoring".into()); }
         let Work::Restore {candidates,..} = &mut task.work else {return Err("Session restore is not prepared".into());};
         if candidates.len()!=1 {return Err("Expected one restored drawing".into());}
@@ -258,7 +259,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionHydrate(mut env: JNIEnv
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionFree(mut env: JNIEnv, _: JClass, task: jlong) {
     crate::jni_entry!(env, {
-    if task != 0 { drop(unsafe { Box::from_raw(task as *mut Task) }); }
+    if task != 0 { crate::inspection::release::<Task>(task)?; }
     })
 }
 
@@ -322,9 +323,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionManifestUpdate(mut env:
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionClose(mut env: JNIEnv, _: JClass, handle: jlong) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let previous = a.host.session.state().revision;
         let change = a.host.session.request_session_close()?;
         a.host.apply_change(previous, change);
@@ -345,8 +346,8 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionFingerprint(mut env: JN
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionDestination(mut env: JNIEnv, _: JClass, handle: jlong) -> jni::sys::jstring {
-    crate::jni_entry!(env, handle, {
-    let result = serde_json::to_string(&unsafe { app(handle) }.host.session.save_destination_expectation()).map_err(error);
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = serde_json::to_string(&capy_app.host.session.save_destination_expectation()).map_err(error);
     crate::android::string(&mut env, result)
     })
 }
@@ -365,11 +366,11 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionDestinationMatches(mut 
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRecordDestination(mut env: JNIEnv, _: JClass, handle: jlong, location: JString, fingerprint: JString) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let location = serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
         let fingerprint = serde_json::from_str(&read(&mut env, &fingerprint)?).map_err(error)?;
-        unsafe { app(handle) }.host.session.record_destination_fingerprint(&location, fingerprint)
+        capy_app.host.session.record_destination_fingerprint(&location, fingerprint)
     })();
     fail(&mut env, result)
     })
@@ -377,11 +378,11 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionRecordDestination(mut e
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCompleteSave(mut env: JNIEnv, _: JClass, handle: jlong, request: jni::sys::jint, location: JString, fingerprint: JString) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let location = serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
         let fingerprint = serde_json::from_str(&read(&mut env, &fingerprint)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let previous = a.host.session.state().revision;
         let change = a.host.session.complete_document_request(request as u32, Ok(true))?;
         a.host.session.record_destination_fingerprint(&location, fingerprint)?;

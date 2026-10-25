@@ -4,6 +4,7 @@ pub mod bubbles;
 pub mod clipboard;
 pub mod export;
 pub mod gpu;
+pub mod handles;
 mod header;
 mod snapshot;
 mod model_update;

@@ -59,3 +59,7 @@ impl App {
         })
     }
 }
+
+impl AsMut<layer_host::NativeHost> for App {
+    fn as_mut(&mut self)->&mut layer_host::NativeHost {&mut self.host}
+}

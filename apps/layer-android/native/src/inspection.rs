@@ -1,6 +1,6 @@
 //! Immutable inspection jobs and separately owned cancellation handles. JNI
 //! never borrows a running worker's mutable Task to cancel it.
-use crate::android::{app, error, or_throw, string};
+use crate::android::{error, or_throw, string};
 use jni::{
     JNIEnv,
     objects::JClass,
@@ -12,38 +12,36 @@ pub(crate) struct Task<T> {
     pub task: T,
     pub control: CaptureControl,
 }
-pub(crate) unsafe fn borrow<'a, T>(handle: jlong) -> &'a mut T {
-    unsafe { &mut *(handle as *mut T) }
+pub(crate) fn owned<T:Send+'static>(value:T)->Result<jlong,String> {layer_host::handles::insert(value).map(|handle|handle.raw() as jlong).map_err(error)}
+pub(crate) fn borrow<T:Send+'static>(handle:jlong)->Result<layer_host::handles::Borrowed<T>,String> {
+    layer_host::handles::lease(layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?).map_err(error)?.borrow().map_err(error)
 }
-pub(crate) unsafe fn borrow_ref<'a, T>(handle: jlong) -> &'a T {
-    unsafe { &*(handle as *const T) }
-}
-pub(crate) unsafe fn release<T>(handle: jlong) {
-    if handle != 0 { drop(unsafe { Box::from_raw(handle as *mut T) }); }
-}
-pub(crate) fn capture_task<T>(env: &mut JNIEnv, handle: jlong, id: jni::sys::jint, cancel: jlong,
+pub(crate) fn borrow_ref<T:Send+'static>(handle:jlong)->Result<layer_host::handles::Borrowed<T>,String> {borrow(handle)}
+pub(crate) fn take<T:Send+'static>(handle:jlong)->Result<T,String> {layer_host::handles::take(layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?).map_err(error)}
+pub(crate) fn release<T:'static>(handle:jlong)->Result<(),String> {if handle==0{return Ok(());}layer_host::handles::release::<T>(layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?).map_err(error)}
+pub(crate) fn shared_owned<T:Send+Sync+'static>(value:T)->Result<jlong,String> {layer_host::handles::insert_shared(std::sync::Arc::new(value)).map(|handle|handle.raw() as jlong).map_err(error)}
+pub(crate) fn shared<T:Send+Sync+'static>(handle:jlong)->Result<std::sync::Arc<T>,String> {layer_host::handles::shared(layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?).map_err(error)}
+pub(crate) fn capture_task<T:Send+'static>(env: &mut JNIEnv, handle: jlong, id: jni::sys::jint, cancel: jlong,
     capture: impl FnOnce(&layer_ui::UiSession<layer_host::Renderer>, Option<u32>, layer_core::color::RgbSpace) -> Result<T, String>) -> jlong {
-    let result = capture(&unsafe { app(handle) }.host.session, Some(id as u32), layer_core::color::RgbSpace::Srgb)
-        .map(|task| Box::into_raw(Box::new(Task { task, control: control(cancel) })) as jlong);
-    or_throw(env, result, 0)
+    let result=crate::android::with_app(handle,|app| {
+        let task=capture(&app.host.session,Some(id as u32),layer_core::color::RgbSpace::Srgb)?;
+        owned(Task {task,control:control(cancel)?})
+    });
+    or_throw(env,result,0)
 }
 pub(crate) fn on_worker<T: Send, E: From<String> + Send>(name: &str, failed: &str, work: impl FnOnce() -> Result<T, E> + Send) -> Result<T, E> {
     std::thread::scope(|scope| std::thread::Builder::new().name(name.into()).stack_size(8 * 1024 * 1024)
         .spawn_scoped(scope, work).map_err(|value| E::from(error(value)))?.join().map_err(|_| E::from(failed.to_owned()))?)
 }
 
-pub(crate) fn control(handle: jlong) -> CaptureControl {
-    if handle == 0 {
-        CaptureControl::default()
-    } else {
-        unsafe { &*(handle as *const CaptureControl) }.clone()
-    }
+pub(crate) fn control(handle:jlong)->Result<CaptureControl,String> {
+    if handle==0 {Ok(CaptureControl::default())}else{shared::<CaptureControl>(handle).map(|control|(*control).clone())}
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_captureControl(mut env: JNIEnv, _: JClass) -> jlong {
     crate::jni_entry!(env, {
-    Box::into_raw(Box::new(CaptureControl::default())) as jlong
+    crate::inspection::shared_owned(CaptureControl::default())?
     })
 }
 #[unsafe(no_mangle)]
@@ -53,14 +51,14 @@ pub extern "system" fn Java_art_capycanvas_Native_captureCancel(
     handle: jlong,
 ) {
     crate::jni_entry!(env, {
-    control(handle).cancel();
+    control(handle)?.cancel();
     })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_captureFree(mut env: JNIEnv, _: JClass, handle: jlong) {
     crate::jni_entry!(env, {
     if handle != 0 {
-        drop(unsafe { Box::from_raw(handle as *mut CaptureControl) });
+        crate::inspection::release::<CaptureControl>(handle)?;
     }
     })
 }
@@ -80,7 +78,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionSample(
     x: jni::sys::jfloat, y: jni::sys::jfloat, width: jni::sys::jint,
 ) -> jstring {
     crate::jni_entry!(env, {
-    let job = unsafe { Box::from_raw(handle as *mut Inspection) };
+    let job = crate::inspection::take::<Inspection>(handle)?;
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
         on_worker("capy-artwork-sample", "Artwork sample worker failed", move || {
@@ -102,7 +100,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionStatistics(
     preview: jni::sys::jboolean, selection: jni::sys::jboolean, waveform: jni::sys::jboolean,
 ) -> jstring {
     crate::jni_entry!(env, {
-    let job = unsafe { Box::from_raw(handle as *mut Inspection) };
+    let job = crate::inspection::take::<Inspection>(handle)?;
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
         on_worker("capy-artwork-statistics", "Artwork statistics worker failed", move || {
@@ -120,7 +118,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionLevelsStatistics(
     mut env: JNIEnv, _: JClass, handle: jlong, source: jni::objects::JString,
 ) -> jstring {
     crate::jni_entry!(env, {
-    let job = unsafe { Box::from_raw(handle as *mut Inspection) };
+    let job = crate::inspection::take::<Inspection>(handle)?;
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
         on_worker("capy-levels-statistics", "Levels statistics worker failed", move || {
@@ -139,9 +137,9 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionTask(
     handle: jlong,
     cancel: jlong,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let session = &a.host.session;
         session.require_document_snapshot_idle()?;
         let capture = session.capture_artwork()?;
@@ -154,14 +152,14 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionTask(
             .as_ref()
             .ok_or("Canvas unavailable")?
             .snapshot_gpu();
-        Ok(Box::into_raw(Box::new(Inspection {
+        crate::inspection::owned(Inspection {
             capture,
             snapshot,
             selection,
             gpu,
             epoch: session.state().document_file.epoch,
-            control: control(cancel),
-        })) as jlong)
+            control: control(cancel)?,
+        })
     })();
     or_throw(&mut env, result, 0)
     })
@@ -173,11 +171,11 @@ pub extern "system" fn Java_art_capycanvas_Native_documentInfoTask(
     _: JClass,
     handle: jlong,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
-    Box::into_raw(Box::new(layer_color::DocumentInfo::capture(
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
+    crate::inspection::owned(layer_color::DocumentInfo::capture(
         a.host.session.engine().document(),
-    ))) as jlong
+    ))?
     })
 }
 /// Consumes the small metadata job on IO, including profile parsing.
@@ -188,7 +186,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentInfo(
     handle: jlong,
 ) -> jstring {
     crate::jni_entry!(env, {
-    let info = unsafe { Box::from_raw(handle as *mut layer_color::DocumentInfo) };
+    let info = crate::inspection::take::<layer_color::DocumentInfo>(handle)?;
     string(
         &mut env,
         ( || { let inspected = info.inspect()?;
@@ -207,7 +205,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionOutput(
     recipe: jni::objects::JString,
 ) -> jni::sys::jobjectArray {
     crate::jni_entry!(env, {
-    let job = unsafe { Box::from_raw(handle as *mut Inspection) };
+    let job = crate::inspection::take::<Inspection>(handle)?;
     let result = (|| -> Result<_, crate::color_preferences::ColorCallError> {
         let recipe: layer_ui::ExportRecipe =
             serde_json::from_str(&crate::android::read(&mut env, &recipe)?).map_err(error)?;

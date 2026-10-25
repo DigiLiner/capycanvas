@@ -1,7 +1,7 @@
 //! Android scheduling around the shared drawing collection. Parked editors have
 //! no renderer. One bounded worker drains retirement before activation.
 use crate::{
-    android::{app, error, fail, or_throw, read, string},
+    android::{error, fail, or_throw, read, string},
     app::App,
 };
 use jni::{
@@ -32,11 +32,11 @@ pub extern "system" fn Java_art_capycanvas_Native_documentTabs(
     handle: jlong,
     request: JString,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let request: TabRequest =
             serde_json::from_str(&read(&mut env, &request)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         Ok(a.window.request(&mut a.host, request)?.to_string())
     })();
     string(&mut env, result)
@@ -51,9 +51,9 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
     id: jlong,
     close: jni::sys::jboolean,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let options = a
             .host
             .renderer_options();
@@ -65,7 +65,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
         };
         a.document_retired();
         a.blank_presented = false;
-        Ok(Box::into_raw(Box::new(activation)) as jlong)
+        crate::inspection::owned(activation)
     })();
     or_throw(&mut env, result, 0)
     })
@@ -73,24 +73,22 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentPrepareClose(mut env: JNIEnv, _: JClass, handle: jlong) -> jlong {
-    crate::jni_entry!(env, handle, {
-    let result = (|| {
-        let a = unsafe {app(handle)};
-        let options = a.host.renderer_options();
-        a.window.prepare_close(&mut a.host, options).map(|job|Box::into_raw(Box::new(crate::document_close::CloseJob(Some(job)))) as jlong)
-    })();
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
+    let options = a.host.renderer_options();
+    let result=a.window.prepare_close(&mut a.host,options).and_then(|job|crate::inspection::owned(crate::document_close::CloseJob(Some(job))));
     or_throw(&mut env,result,0)
     })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) -> jlong {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe {app(handle)};
-    let prepared = unsafe { &mut *(job as *mut crate::document_close::CloseJob) };
-    let result = prepared.commit(&mut a.window, &mut a.host).map(|activation| {
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
+    let mut prepared_owner = crate::inspection::borrow::<crate::document_close::CloseJob>(job)?;let prepared=&mut *prepared_owner;
+    let result = prepared.commit(&mut a.window, &mut a.host).and_then(|activation| {
         a.document_retired();a.blank_presented=false;
-        Box::into_raw(Box::new(activation)) as jlong
+        crate::inspection::owned(activation)
     });
     or_throw(&mut env,result,0)
     })
@@ -99,10 +97,11 @@ pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(mut env: J
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentReleasePreparedClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) {
     crate::jni_entry!(env, {
-    let prepared = *unsafe {Box::from_raw(job as *mut crate::document_close::CloseJob)};
-    if let Some(prepared) = prepared.0 {
-        let a = unsafe {app(handle)};
-        if a.host.poisoned().is_none() { fail(&mut env,a.window.cancel_close(&mut a.host,prepared)); }
+    let prepared=crate::inspection::take::<crate::document_close::CloseJob>(job)?;
+    if let Some(prepared)=prepared.0 {
+        crate::android::with_app_owner(handle,|app| {
+            if app.host.poisoned().is_none(){app.window.cancel_close(&mut app.host,prepared)}else{Ok(())}
+        })?;
     }
     })
 }
@@ -113,7 +112,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResumeWork(
     handle: jlong,
 ) {
     crate::jni_entry!(env, {
-    let job = unsafe { &mut *(handle as *mut Activation) };
+    let mut job_owner = crate::inspection::borrow::<Activation>(handle)?;let job=&mut *job_owner;
     fail(&mut env, job.work());
     })
 }
@@ -124,10 +123,10 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResume(
     handle: jlong,
     task: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
-        let job = unsafe { &mut *(task as *mut Activation) };
+        let a = &mut *capy_app;
+        let mut job_owner = crate::inspection::borrow::<Activation>(task)?;let job=&mut *job_owner;
         if let Some(gpu) = a.window.resume(&a.host, job)? {
             a.host.replace_renderer(Renderer(Some(gpu)))?;
             a.project_adopted();
@@ -147,9 +146,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResumeFree(
     handle: jlong,
 ) {
     crate::jni_entry!(env, {
-    if handle != 0 {
-        drop(unsafe { Box::from_raw(handle as *mut Activation) })
-    }
+    crate::inspection::release::<Activation>(handle)?;
     })
 }
 #[unsafe(no_mangle)]
@@ -158,12 +155,12 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSpillTask(
     _: JClass,
     handle: jlong,
 ) -> jlong {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     a.window
         .documents
         .spill_candidate()
-        .map(|tiles| Box::into_raw(Box::new(tiles)) as jlong)
+        .map(crate::inspection::owned).transpose()?
         .unwrap_or(0)
     })
 }
@@ -174,7 +171,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSpillWork(
     handle: jlong,
 ) {
     crate::jni_entry!(env, {
-    let tiles = unsafe { Box::from_raw(handle as *mut layer_core::raster_storage::RetainedTiles) };
+    let tiles = crate::inspection::take::<layer_core::raster_storage::RetainedTiles>(handle)?;
     fail(
         &mut env,
         layer_core::temp_files::directory()

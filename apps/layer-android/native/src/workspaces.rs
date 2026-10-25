@@ -11,8 +11,7 @@ fn now() -> u64 {
 impl App {
     pub fn workspace(&mut self, request: Value) -> Result<Value, String> {
         let time = now();
-        if request["type"] == "start" {
-            if self.workspaces.is_none() {
+        if request["type"] == "start" && self.workspaces.is_none() {
                 let path = request["directory"]
                     .as_str()
                     .ok_or("Workspace storage directory is missing")?;
@@ -25,7 +24,6 @@ impl App {
                     time,
                     self.host.session.localization().clone(),
                 ));
-            }
         }
         let Some(c) = &mut self.workspaces else {
             return Ok(Value::Null);

@@ -69,7 +69,7 @@ impl Surface {
             _ => 0,
         };
         self.logical_extent = extent;
-        let [width, height] = if self.quarter_turns % 2 == 0 { extent } else { [extent[1], extent[0]] };
+        let [width, height] = if self.quarter_turns.is_multiple_of(2) { extent } else { [extent[1], extent[0]] };
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(gpu.device(), &self.config);
@@ -122,8 +122,8 @@ fn monotonic_ns() -> u64 {
 pub extern "system" fn Java_art_capycanvas_Native_completionTimings(
     mut env: JNIEnv, _: JClass, handle: jlong, enabled: jboolean,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let mut rows = Vec::new();
     if let Some(surface) = &mut a.surface {
         if let Some(observer) = surface.completion_observer.take() {
@@ -143,8 +143,8 @@ pub extern "system" fn Java_art_capycanvas_Native_completionTimings(
 pub extern "system" fn Java_art_capycanvas_Native_displayStatus(
     mut env: JNIEnv, _: JClass, handle: jlong,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let value = match (&a.surface, &a.host.session.engine().backend().0) {
         (Some(surface), Some(gpu)) => {
             let caps = surface.surface.get_capabilities(gpu.adapter());
@@ -189,8 +189,8 @@ pub extern "system" fn Java_art_capycanvas_Native_displayStatus(
 pub extern "system" fn Java_art_capycanvas_Native_renderingPending(
     mut env: JNIEnv, _: JClass, handle: jlong,
 ) -> jboolean {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let engine = a.host.session.engine();
     (engine.has_pending_document_edits()
         || layer_render::CanvasRenderer::has_pending_work(engine.backend())
@@ -203,8 +203,8 @@ pub extern "system" fn Java_art_capycanvas_Native_renderingPending(
 pub extern "system" fn Java_art_capycanvas_Native_rendererMemory(
     mut env: JNIEnv, _: JClass, handle: jlong,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let report = a.host.session.engine().backend().0.as_ref()
         .and_then(|gpu| gpu.device().generate_allocator_report().map(|report| (report, gpu.metrics())))
         .map(|(report, metrics)| {
@@ -235,8 +235,8 @@ pub extern "system" fn Java_art_capycanvas_Native_rendererMemory(
 pub extern "system" fn Java_art_capycanvas_Native_displayInfo(
     mut env: JNIEnv, _: JClass, handle: jlong, available: jboolean,
 ) {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let available = available != 0;
     if a.display_hdr_available != available {
         a.display_hdr_available = available;
@@ -251,10 +251,10 @@ pub extern "system" fn Java_art_capycanvas_Native_displayInfo(
 pub extern "system" fn Java_art_capycanvas_Native_screenInfo(
     mut env: JNIEnv, _: JClass, handle: jlong, name: JString, wide: jboolean, panel_wide: jboolean, hdr: jboolean, peak: jfloat,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     use layer_color::screen::{Chromaticities, ScreenReport};
     use layer_core::color::RgbSpace;
-    let a = unsafe { app(handle) };
+    let a = &mut *capy_app;
     let name = read(&mut env, &name).ok().filter(|n| !n.is_empty());
     let wide = wide != 0;
     let gamut = Chromaticities::of(if wide { RgbSpace::DisplayP3 } else { RgbSpace::Srgb });
@@ -719,14 +719,13 @@ impl App {
     }
 }
 
-// The Kotlin host owns this handle and never exposes it to UI callers. Calls
-// are serialized on its render Looper, including lifecycle and final disposal.
-pub(crate) unsafe fn app<'a>(handle: jlong) -> &'a mut App {
-    let a = unsafe { &mut *(handle as *mut App) };
-    // CPU file/menu calls remain available, but no later JNI request can use a
-    // device whose failure callback has already arrived.
-    a.observe_gpu_failure(false);
-    a
+thread_local! {static APPS:layer_host::handles::LocalHandles=Default::default();}
+pub(crate) fn with_app_owner<T>(handle:jlong,work:impl FnOnce(&mut App)->Result<T,String>)->Result<T,String> {
+    let handle=layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?;
+    APPS.with(|apps|apps.with(handle,work)).map_err(error)?
+}
+pub(crate) fn with_app<T>(handle:jlong,work:impl FnOnce(&mut App)->Result<T,String>)->Result<T,String> {
+    with_app_owner(handle,|app|layer_host::contain(app,|app| {app.observe_gpu_failure(false);work(app)}))
 }
 pub(crate) trait Fallback {
     fn fallback() -> Self;
@@ -766,7 +765,7 @@ pub(crate) fn string(env: &mut JNIEnv, result: Result<String, String>) -> jstrin
     or_throw(env, result, std::ptr::null_mut())
 }
 pub(crate) fn argb_array<'local>(env: &mut JNIEnv<'local>, rgba: &[u8]) -> Result<JIntArray<'local>, String> {
-    let pixels: Vec<i32> = rgba.chunks_exact(4)
+    let pixels: Vec<i32> = rgba.as_chunks::<4>().0.iter()
         .map(|p| i32::from_be_bytes([p[3], p[0], p[1], p[2]])).collect();
     let array = env.new_int_array(pixels.len() as i32).map_err(error)?;
     env.set_int_array_region(&array, 0, &pixels).map_err(error)?;
@@ -783,8 +782,8 @@ pub extern "system" fn Java_art_capycanvas_Native_frameCost(
     handle: jlong,
     array: jni::objects::JLongArray,
 ) {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     let result = env
         .set_long_array_region(&array, 0, &app.frame_cost)
         .map_err(error);
@@ -812,7 +811,7 @@ pub extern "system" fn Java_art_capycanvas_Native_create(
     match result {
         Ok(mut app) => {
             app.profiling = profiling != 0;
-            Box::into_raw(Box::new(app)) as jlong
+            APPS.with(|apps|apps.insert(app)).map_err(error)?.raw() as jlong
         }
         Err(e) => {
             fail(&mut env, Err(e));
@@ -874,10 +873,10 @@ pub extern "system" fn Java_art_capycanvas_Native_storage(
 pub extern "system" fn Java_art_capycanvas_Native_languageRequest(
     mut env: JNIEnv, _: JClass, handle: jlong, locales: JObjectArray,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let locales = locale_tags(&mut env, &locales)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let preference = a.host.session.state().settings.language;
         if preference != a.language_preference {
             crate::launch::preference(preference);
@@ -907,7 +906,7 @@ pub extern "system" fn Java_art_capycanvas_Native_prepareLanguage(
     crate::jni_entry!(env, {
     let result = read(&mut env, &language).and_then(|tag| {
         let language = serde_json::from_value(serde_json::Value::String(tag)).map_err(error)?;
-        Ok(Box::into_raw(Box::new(layer_ui::Localizer::shared(language))) as jlong)
+        crate::inspection::owned(layer_ui::Localizer::shared(language))
     });
     or_throw(&mut env, result, 0)
     })
@@ -917,11 +916,11 @@ pub extern "system" fn Java_art_capycanvas_Native_prepareLanguage(
 pub extern "system" fn Java_art_capycanvas_Native_publishLanguage(
     mut env: JNIEnv, _: JClass, handle: jlong, generation: jlong, context: jlong, busy: jboolean,
 ) {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     if context != 0 {
-        let context = unsafe { Box::from_raw(context as *mut std::sync::Arc<layer_ui::Localizer>) };
-        a.language.prepared(layer_ui::LanguageRequest { generation: generation as u64, language: context.language() }, *context);
+        let context = crate::inspection::take::<std::sync::Arc<layer_ui::Localizer>>(context)?;
+        a.language.prepared(layer_ui::LanguageRequest { generation: generation as u64, language: context.language() }, context);
     }
     let busy = busy != 0 || a.host.session.localization_input_busy();
     if let Some(context) = crate::launch::publish(a.language_preference, || a.language.publish(busy)) {
@@ -935,7 +934,7 @@ pub extern "system" fn Java_art_capycanvas_Native_publishLanguage(
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_freeLanguage(mut env: JNIEnv, _: JClass, context: jlong) {
     crate::jni_entry!(env, {
-    if context != 0 { drop(unsafe { Box::from_raw(context as *mut std::sync::Arc<layer_ui::Localizer>) }); }
+    if context != 0 { crate::inspection::release::<std::sync::Arc<layer_ui::Localizer>>(context)?; }
     })
 }
 
@@ -943,7 +942,8 @@ pub extern "system" fn Java_art_capycanvas_Native_freeLanguage(mut env: JNIEnv, 
 pub extern "system" fn Java_art_capycanvas_Native_destroy(mut env: JNIEnv, _: JClass, handle: jlong) {
     crate::jni_entry!(env, {
     if handle != 0 {
-        unsafe { drop(Box::from_raw(handle as *mut App)) };
+        let handle=layer_host::handles::Handle::from_raw(handle as u64).map_err(error)?;
+        drop(APPS.with(|apps|apps.take::<App>(handle)).map_err(error)?);
     }
     })
 }
@@ -954,8 +954,8 @@ pub extern "system" fn Java_art_capycanvas_Native_attach(
     handle: jlong,
     surface: JObject,
 ) {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     let result = app.attach(&env, surface);
     if let Err(e) = &result {
         app.host.error = Some(e.clone());
@@ -969,16 +969,16 @@ pub extern "system" fn Java_art_capycanvas_Native_finishStartupCatalog(
     _: JClass,
     handle: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
-    if let Some(gpu) = &mut unsafe { app(handle) }.host.session.renderer_mut().0 {
+    crate::jni_entry!(env, handle, capy_app, {
+    if let Some(gpu) = &mut capy_app.host.session.renderer_mut().0 {
         gpu.finish_startup_catalog();
     }
     })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_shaderInput(mut env: JNIEnv, _: JClass, handle: jlong) {
-    crate::jni_entry!(env, handle, {
-    if let Some(gpu) = &unsafe { app(handle) }.host.session.engine().backend().0 {
+    crate::jni_entry!(env, handle, capy_app, {
+    if let Some(gpu) = &capy_app.host.session.engine().backend().0 {
         gpu.shader_input();
     }
     })
@@ -990,8 +990,8 @@ pub extern "system" fn Java_art_capycanvas_Native_destroyGpuForTest(
     _: JClass,
     handle: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let result = (|| {
         if !a.profiling {
             return Err("GPU fault injection requires a debug test session".into());
@@ -1016,8 +1016,8 @@ pub extern "system" fn Java_art_capycanvas_Native_resetGpu(
     _: JClass,
     handle: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let result = (|| {
         a.host.suspend_renderer()?;
         a.retire_gpu()?;
@@ -1033,8 +1033,8 @@ pub extern "system" fn Java_art_capycanvas_Native_detach(
     _: JClass,
     handle: jlong,
 ) {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     fail(
         &mut env,
         app.host.input(layer_ui::UiInput::Blur).map(|_| ()),
@@ -1051,10 +1051,10 @@ pub extern "system" fn Java_art_capycanvas_Native_resize(
     height: jint,
     density: jfloat,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     fail(
         &mut env,
-        unsafe { app(handle) }
+        capy_app
             .host
             .resize(width.max(0) as u32, height.max(0) as u32, density),
     );
@@ -1072,8 +1072,8 @@ pub extern "system" fn Java_art_capycanvas_Native_scroll(
     zoom: jboolean,
     horizontal: jboolean,
 ) {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     let dpi = app.host.session.state().camera.viewport[0] as f32 / app.host.logical[0];
     let result = app.host.scroll([x, y], [dx, dy], dpi, zoom != 0, horizontal != 0);
     fail(&mut env, result);
@@ -1086,10 +1086,10 @@ pub extern "system" fn Java_art_capycanvas_Native_dispatch(
     handle: jlong,
     action: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = read(&mut env, &action)
         .and_then(|s| serde_json::from_str(&s).map_err(error))
-        .and_then(|action| unsafe { app(handle) }.host.dispatch(action));
+        .and_then(|action| capy_app.host.dispatch(action));
     fail(&mut env, result);
     })
 }
@@ -1100,11 +1100,11 @@ pub extern "system" fn Java_art_capycanvas_Native_input(
     handle: jlong,
     input: JString,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = read(&mut env, &input)
         .and_then(|s| serde_json::from_str(&s).map_err(error))
         .and_then(|input| {
-            let a = unsafe { app(handle) };
+            let a = &mut *capy_app;
             a.host.input(input)
         })
         .and_then(|reply| serde_json::to_string(&reply).map_err(error));
@@ -1118,8 +1118,8 @@ pub extern "system" fn Java_art_capycanvas_Native_predictionAvailability(
     handle: jlong,
     available: jboolean,
 ) {
-    crate::jni_entry!(env, handle, {
-    unsafe { app(handle) }
+    crate::jni_entry!(env, handle, capy_app, {
+    capy_app
         .host
         .session
         .set_platform_prediction_available(available != 0);
@@ -1133,8 +1133,8 @@ pub extern "system" fn Java_art_capycanvas_Native_touchPolicy(
     tap_ms: jint,
     slop: jfloat,
 ) {
-    crate::jni_entry!(env, handle, {
-    let result = unsafe { app(handle) }.host.session.set_touch_policy(layer_ui::TouchPolicy {
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = capy_app.host.session.set_touch_policy(layer_ui::TouchPolicy {
         tap_ms: tap_ms.max(0) as u32,
         slop,
     });
@@ -1154,7 +1154,7 @@ pub extern "system" fn Java_art_capycanvas_Native_pointer(
     predicted: jboolean,
     device_flags: jint,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         if count <= 0
             || count > 9 * 8192
@@ -1162,7 +1162,7 @@ pub extern "system" fn Java_art_capycanvas_Native_pointer(
         {
             return Err("Invalid Android pointer batch length".into());
         }
-        let app = unsafe { app(handle) };
+        let app = &mut *capy_app;
         let mut data = std::mem::take(&mut app.pointer_records);
         data.resize(count as usize, 0.0);
         let result = env
@@ -1192,8 +1192,8 @@ pub extern "system" fn Java_art_capycanvas_Native_canvasBarHold(
     _: JClass,
     handle: jlong,
 ) -> jint {
-    crate::jni_entry!(env, handle, {
-    unsafe { app(handle) }.host.session.canvas_bar_hold() as jint
+    crate::jni_entry!(env, handle, capy_app, {
+    capy_app.host.session.canvas_bar_hold() as jint
     })
 }
 #[unsafe(no_mangle)]
@@ -1204,8 +1204,8 @@ pub extern "system" fn Java_art_capycanvas_Native_frame(
     now: jlong,
     presentation: jlong,
 ) -> jboolean {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     let clock = app.profiling.then(std::time::Instant::now);
     app.observe_gpu_failure(true);
     let poll = clock.map_or(0, |clock| clock.elapsed().as_nanos() as i64);
@@ -1239,16 +1239,14 @@ pub extern "system" fn Java_art_capycanvas_Native_surfaceReady(
     _: JClass,
     handle: jlong,
 ) -> jboolean {
-    crate::jni_entry!(env, handle, {
-    let app = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let app = &mut *capy_app;
     let Some(surface) = app.surface.as_ref() else {
-        return 0;
+        return Ok(0);
     };
-    if let Some(gpu) = app.host.session.renderer_mut().0.as_ref() {
-        if let Err(e) = gpu.device().poll(wgpu::PollType::Poll) {
-            fail(&mut env, Err(error(e)));
-            return 0;
-        }
+    if let Some(gpu) = app.host.session.renderer_mut().0.as_ref()
+        && let Err(e) = gpu.device().poll(wgpu::PollType::Poll) {
+        fail(&mut env, Err(error(e)));return Ok(0);
     }
     (surface.completed_frames.load(Ordering::Acquire) > 0) as jboolean
     })
@@ -1259,8 +1257,8 @@ pub extern "system" fn Java_art_capycanvas_Native_snapshot(
     _: JClass,
     handle: jlong,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
-    match unsafe { app(handle) }.host.take_layout_update_bytes() {
+    crate::jni_entry!(env, handle, capy_app, {
+    match capy_app.host.take_layout_update_bytes() {
         Ok(Some(bytes)) => string(&mut env, String::from_utf8(bytes).map_err(error)),
         Ok(None) => std::ptr::null_mut(),
         Err(e) => string(&mut env, Err(error(e))),
@@ -1273,9 +1271,9 @@ pub extern "system" fn Java_art_capycanvas_Native_modelUpdate(
     _: JClass,
     handle: jlong,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let Some(bytes) = a.host.take_model_update_bytes().map_err(error)? else { return Ok(None); };
         if a.published_language == a.host.localization_generation() {
             return String::from_utf8(bytes).map(Some).map_err(error);
@@ -1302,11 +1300,11 @@ pub extern "system" fn Java_art_capycanvas_Native_query(
     handle: jlong,
     query: JString,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = read(&mut env, &query)
         .and_then(|s| serde_json::from_str(&s).map_err(error))
         .and_then(|query| {
-            let a = unsafe { app(handle) };
+            let a = &mut *capy_app;
             a.observe_gpu_failure(true);
             a.host.query(query)
         })
@@ -1322,10 +1320,10 @@ pub extern "system" fn Java_art_capycanvas_Native_workspace(
     handle: jlong,
     request: JString,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = read(&mut env, &request)
         .and_then(|s| serde_json::from_str(&s).map_err(error))
-        .and_then(|request| unsafe { app(handle) }.workspace(request))
+        .and_then(|request| capy_app.workspace(request))
         .map(|v| v.to_string());
     string(&mut env, result)
     })
@@ -1340,10 +1338,10 @@ pub extern "system" fn Java_art_capycanvas_Native_navigatorPlacements(
     handle: jlong,
     value: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let slots = serde_json::from_str(&read(&mut env, &value)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         a.host.dirty |= a.navigators.set(slots)?;
         Ok(())
     })();
@@ -1358,7 +1356,7 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
     handle: jlong,
     value: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let glass: Glass = serde_json::from_str(&read(&mut env, &value)?).map_err(error)?;
         let squircle = layer_render_wgpu::BackdropRegion::SQUIRCLE;
@@ -1381,7 +1379,7 @@ pub extern "system" fn Java_art_capycanvas_Native_glassRegions(
         if regions.iter().any(|r| !r.bounds.iter().chain(&r.radii).all(|v| v.is_finite())) {
             return Err("Invalid glass geometry".into());
         }
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         a.glass = regions;
         a.host.dirty = true;
         Ok(())
@@ -1397,9 +1395,9 @@ pub extern "system" fn Java_art_capycanvas_Native_takeFilterPreviews(
     _: JClass,
     handle: jlong,
 ) -> jni::sys::jobjectArray {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         a.observe_gpu_failure(true);
         let Some(atlas) = a.host.take_filter_preview_image() else {
             return Ok(std::ptr::null_mut());
@@ -1680,8 +1678,8 @@ pub extern "system" fn Java_art_capycanvas_Native_strokeRecordingData(
     _: JClass,
     handle: jlong,
 ) -> jni::sys::jbyteArray {
-    crate::jni_entry!(env, handle, {
-    let result = unsafe { app(handle) }
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = capy_app
         .host
         .session
         .stroke_recording()
@@ -1703,8 +1701,8 @@ pub extern "system" fn Java_art_capycanvas_Native_paperPreview(
     handle: jlong,
     id: JString,
 ) -> jni::sys::jbyteArray {
-    crate::jni_entry!(env, handle, {
-    let result = read(&mut env, &id).and_then(|id| match unsafe { app(handle) }.host.session.paper_preview(&id) {
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = read(&mut env, &id).and_then(|id| match capy_app.host.session.paper_preview(&id) {
         Some(preview) => env.byte_array_from_slice(&preview).map(|a| a.into_raw()).map_err(error),
         None => Ok(std::ptr::null_mut()),
     });

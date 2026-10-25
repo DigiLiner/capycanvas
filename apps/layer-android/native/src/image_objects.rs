@@ -1,4 +1,4 @@
-use crate::android::{app, error, fail, or_throw, read, string};
+use crate::android::{error, fail, or_throw, read, string};
 use jni::{JNIEnv, objects::{JClass, JString}, sys::{jboolean, jlong, jstring}};
 use layer_core::authored::{Affine64, PortableId};
 
@@ -6,8 +6,8 @@ use layer_core::authored::{Affine64, PortableId};
 pub extern "system" fn Java_art_capycanvas_Native_imageObjects(
     mut env: JNIEnv, _: JClass, handle: jlong,
 ) -> jstring {
-    crate::jni_entry!(env, handle, {
-    let a = unsafe { app(handle) };
+    crate::jni_entry!(env, handle, capy_app, {
+    let a = &mut *capy_app;
     let document = a.host.session.engine().document();
     let mut sources = Vec::new();
     let rows: Vec<_> = document.artwork.objects.iter().map(|(object, id, value)| {
@@ -27,8 +27,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageObjects(
     })
 }
 
-fn motion_change(handle: jlong, update: impl FnOnce(&mut layer_host::NativeHost) -> Result<layer_ui::UiChange, String>) -> Result<jlong, String> {
-    let a = unsafe { app(handle) };
+fn motion_change(a: &mut crate::app::App, update: impl FnOnce(&mut layer_host::NativeHost) -> Result<layer_ui::UiChange, String>) -> Result<jlong, String> {
     let previous = a.host.session.state().revision;
     let change = update(&mut a.host)?;
     a.host.apply_change(previous, change);
@@ -39,13 +38,13 @@ fn motion_change(handle: jlong, update: impl FnOnce(&mut layer_host::NativeHost)
 pub extern "system" fn Java_art_capycanvas_Native_beginObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, objects: JString,
 ) {
-    crate::jni_entry!(env, handle, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let ids: Vec<PortableId> = serde_json::from_str(&read(&mut env, &objects)?).map_err(error)?;
-        let a = unsafe { app(handle) };
+        let a = &mut *capy_app;
         let store = &a.host.session.engine().document().artwork.objects;
         let objects = ids.iter().map(|id| store.resolve(*id).ok_or("Unknown image object")).collect::<Result<Vec<_>, _>>()?;
-        motion_change(handle, |host| host.session.begin_object_motion(&objects)).map(|_| ())
+        motion_change(capy_app, |host| host.session.begin_object_motion(&objects)).map(|_| ())
     })();
     fail(&mut env, result)
     })
@@ -55,10 +54,10 @@ pub extern "system" fn Java_art_capycanvas_Native_beginObjectMotion(
 pub extern "system" fn Java_art_capycanvas_Native_previewObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, delta: JString,
 ) -> jlong {
-    crate::jni_entry!(env, {
+    crate::jni_entry!(env, handle, capy_app, {
     let result = (|| {
         let delta: Affine64 = serde_json::from_str(&read(&mut env, &delta)?).map_err(error)?;
-        motion_change(handle, |host| host.session.preview_object_motion(delta))
+        motion_change(capy_app, |host| host.session.preview_object_motion(delta))
     })();
     or_throw(&mut env, result, -1)
     })
@@ -68,8 +67,8 @@ pub extern "system" fn Java_art_capycanvas_Native_previewObjectMotion(
 pub extern "system" fn Java_art_capycanvas_Native_finishObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, commit: jboolean,
 ) -> jlong {
-    crate::jni_entry!(env, {
-    let result = motion_change(handle, |host| if commit != 0 { host.session.commit_object_motion() } else { host.session.cancel_object_motion() });
+    crate::jni_entry!(env, handle, capy_app, {
+    let result = motion_change(capy_app, |host| if commit != 0 { host.session.commit_object_motion() } else { host.session.cancel_object_motion() });
     or_throw(&mut env, result, -1)
     })
 }

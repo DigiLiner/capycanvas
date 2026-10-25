@@ -2429,7 +2429,7 @@ class AndroidRasterTest {
             val groupName = native { state(it).array("layers").objects().single { it.getLong("id") == group }.getString("label") }
             val authoredGroup = nested.occurrenceRecords().objects().single {it.getJSONObject("data").optString("name") == groupName}
             val children = nested.packageData(authoredGroup.getJSONObject("data").getJSONObject("content").getJSONObject("stack").getString("ref")).getJSONArray("entries")
-            assertTrue("The dropped image layer is inside the group", children.objects().any {nested.packageData(it.getString("ref")).getJSONObject("content").has("objects")})
+            assertTrue("The dropped image layer is inside the group", children.objects().any {nested.packageData(it.getString("ref")).getJSONObject("content").has("object")})
             println("Android global URI drag: canvas captured point, group center insertion, Apply and one-step Undo passed")
 
             val clipboard = activity.getSystemService(android.content.ClipboardManager::class.java)
@@ -3961,7 +3961,7 @@ class AndroidRasterTest {
             val masked = rows().single { it.getBoolean("editing") }
             assertTrue("Paste Into masks a new image layer", masked.getBoolean("has_mask") && masked.getBoolean("object"))
             val framed = manifest(save("$theme-paste-into.capy"))
-            fun maskOf(m: JSONObject) = m.occurrenceRecords().objects().single { it.getJSONObject("data").getJSONObject("content").has("objects") && it.getJSONObject("data").has("mask") }.getJSONObject("data").getJSONObject("mask")
+            fun maskOf(m: JSONObject) = m.occurrenceRecords().objects().single { it.getJSONObject("data").getJSONObject("content").has("object") && it.getJSONObject("data").has("mask") }.getJSONObject("data").getJSONObject("mask")
             val frame = maskOf(framed)
             val inside = objects().single { it.getString("id") !in placed.keys }.getString("id")
             native {
@@ -4018,6 +4018,12 @@ class AndroidRasterTest {
             invoke("redo"); assertEquals("Recovered Redo restores the edit", edited, poses())
             assertSamePixels("$theme: recovered pixels", editedPixels, png("$theme-recovered.png"))
             fun previewsArrive(label: String) {
+                compose.runOnUiThread {host.customize(obj("type" to "set_panel_visible","panel" to "layers","visible" to true))}
+                refresh()
+                val group=host.snapshot!!.getJSONObject("layout").array("groups").objects()
+                    .first {"layers" in it.array("panels").values()}.getInt("id")
+                compose.runOnUiThread {host.dispatch(obj("type" to "select_panel_tab","group" to group,"panel" to "layers"))}
+                refresh()
                 val previews = rows().filter { it.getBoolean("object") }.map { row ->
                     row.getLong("id") to "layer-thumbnail-${row.getLong("id")}-false"
                 }
@@ -4331,6 +4337,13 @@ class AndroidRasterTest {
     }
 
     @Test fun histogramCapturesCommittedDocumentAndCancelsIndependently() {
+        val drawing=native { handle ->
+            val (id,file)=newRequest(handle,2048,1536)
+            Native.projectTask(handle,id,"null",file.getLong("epoch"),file.getLong("revision"))
+        }
+        try {Native.projectWork(drawing,-1,"");native {Native.projectAdopt(it,drawing,"null")}}
+        finally {Native.projectFree(drawing)}
+        refresh()
         val epoch = native { state(it).getJSONObject("document_file").getLong("epoch") }
         for (cancelled in listOf(true, false)) {
             val control = Native.captureControl()
@@ -4381,7 +4394,9 @@ class AndroidRasterTest {
                 if(cancelled)fail("Cancelled output preview succeeded")
                 val image=result[2] as ByteArray;val header=ByteBuffer.wrap(image).order(ByteOrder.LITTLE_ENDIAN)
                 assertEquals(128,header.int);assertEquals(96,header.int)
-                assertTrue(image.drop(8).all{(it.toInt() and 255)==255})
+                val samples=image.drop(8).map {it.toInt() and 255}
+                val channels=(0..3).map {channel -> samples.filterIndexed {index,_ -> index%4==channel}.groupingBy {it}.eachCount()}
+                assertTrue("Opaque white preview channels RGBA: $channels",samples.all {it==255})
             }catch(e:Exception){if(!cancelled)throw e;assertTrue(e.message.orEmpty().contains("cancel",ignoreCase=true))}
             finally{Native.captureFree(flag)}
         }
