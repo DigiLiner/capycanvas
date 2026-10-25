@@ -3,7 +3,6 @@ import SwiftUI
 struct WorkspaceRowFrame: Equatable {
     var row: CGRect = .zero
     var grip: CGRect = .zero
-    var options: CGRect = .zero
     var pin: CGRect = .zero
 }
 struct WorkspaceRowFrames: PreferenceKey {
@@ -12,7 +11,6 @@ struct WorkspaceRowFrames: PreferenceKey {
         value.merge(nextValue()) { old, next in
             WorkspaceRowFrame(row: next.row == .zero ? old.row : next.row,
                 grip: next.grip == .zero ? old.grip : next.grip,
-                options: next.options == .zero ? old.options : next.options,
                 pin: next.pin == .zero ? old.pin : next.pin)
         }
     }
@@ -39,6 +37,26 @@ struct WorkspaceRowMeasurement: ViewModifier {
     @Published private(set) var reordering = true
     @Published private(set) var drag: Drag?
     @Published private(set) var hint: Hint?
+    @Published var swipe: String?
+    @Published var swipeOffset: CGFloat = 0
+    private var swipeOrigin = CGPoint.zero
+    private var swipeStart: CGFloat = 0
+    private var swipeTracking = false
+    var swiping: Bool { swipeTracking }
+    func beginSwipe(at point: CGPoint) -> Bool {
+        guard enabled,contact.device != .mouse,contact.target?.surface == .row,!contact.held,
+            let id=contact.target?.id,items.contains(where:{$0["id"].string==id && $0["options"].array.contains(where:{$0["action"]["type"].string=="delete" && $0["enabled"].bool})}) else{return false}
+        let delta=CGPoint(x:point.x-contact.origin.x,y:point.y-contact.origin.y)
+        let start=swipe==id ? swipeOffset : 0
+        guard abs(delta.x)>abs(delta.y),delta.x<0 || start>0 else{return false}
+        swipeOrigin=contact.origin;swipeStart=start;swipe=id;swipeTracking=true
+        contact.suppressActivation();closeMenu();moveSwipe(to:point);return true
+    }
+    func moveSwipe(to point:CGPoint) {if swipeTracking {swipeOffset=min(72,max(0,swipeStart-(point.x-swipeOrigin.x)))}}
+    func finishSwipe(cancelled:Bool) {
+        guard swipeTracking else{return};swipeTracking=false
+        if cancelled || swipeOffset<36 {swipe=nil;swipeOffset=0}else{swipeOffset=72}
+    }
     var frames: [String: WorkspaceRowFrame] = [:]
     var viewport = CGRect.zero
     var enabled = true
@@ -46,6 +64,7 @@ struct WorkspaceRowMeasurement: ViewModifier {
     var commit: (String, String?) -> Void = { _, _ in }
     func update(items: [JSON], enabled: Bool) {
         self.items = items; self.enabled = enabled
+        if !enabled || swipe.map({id in !items.contains(where:{$0["id"].string==id})}) == true {finishSwipe(cancelled:true);swipe=nil;swipeOffset=0}
         if contact.target != nil { _ = contact.validate() }
         if let menu, !enabled || !items.contains(where: { $0["id"].string == menu }) { closeMenu() }
     }
@@ -55,6 +74,7 @@ struct WorkspaceRowMeasurement: ViewModifier {
     }
     func closeMenu() { if menu != nil { menu = nil } }
     func cancel() {
+        finishSwipe(cancelled:true);swipe=nil;swipeOffset=0
         contact.cancel()
         if drag != nil { drag = nil }; if hint != nil { hint = nil }; closeMenu()
     }
@@ -64,11 +84,12 @@ struct WorkspaceRowMeasurement: ViewModifier {
     func source(at point: CGPoint) -> ReorderTarget? {
         guard enabled, viewport.contains(point) else { closeMenu(); return nil }
         closeMenu()
+        if let revealed=swipe,frames[revealed]?.row.contains(point) != true {swipe=nil;swipeOffset=0}
         guard let (id, frame) = frames.first(where: { $0.value.row.contains(point) }),
-            items.contains(where: { $0["id"].string == id }), !frame.options.contains(point), !frame.pin.contains(point) else { return nil }
+            items.contains(where: { $0["id"].string == id }), !frame.pin.contains(point) else { return nil }
         return ReorderTarget(id: id, surface: frame.grip.contains(point) ? .handle : .row,
             valid: { [weak self] _ in self?.enabled == true && self?.items.contains(where: { $0["id"].string == id }) == true },
-            openContext: { [weak self] in self?.showMenu(id) },
+            openContext: { [weak self] in self?.showMenu(id,reordering:frame.grip.contains(point)) },
             closeContext: { [weak self] in self?.closeMenu() },
             begin: { [weak self] origin in self?.drag = Drag(id: id, origin: origin, bounds: frame.row, point: origin) },
             move: { [weak self] point in self?.move(point) },
@@ -84,7 +105,7 @@ struct WorkspaceRowMeasurement: ViewModifier {
     func context(at point: CGPoint) {
         guard !contact.dragging, viewport.contains(point),
             let id = frames.first(where: { $0.value.row.contains(point) })?.key else { return }
-        showMenu(id)
+        showMenu(id,reordering:false)
     }
     func move(_ point: CGPoint) {
         guard var drag else { return }

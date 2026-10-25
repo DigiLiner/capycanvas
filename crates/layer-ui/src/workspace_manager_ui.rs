@@ -91,6 +91,28 @@ impl ManagedWorkspace {
 mod tests {
     use super::*;
     #[test]
+    fn workspace_visibility_menu_items_stay_open_while_navigation_closes() {
+        let localization = Localizer::shared(UiLanguage::English);
+        let workspace = ManagedWorkspace {
+            id: "current".into(), name: "Current".into(), baseline: DockLayout::default(),
+            choices: vec![WorkspaceChoice { id: "other".into(), name: "Other".into() }],
+        };
+        let menu = workspace.menu(true, true, &localization);
+        for item in menu.sections.iter().flatten() {
+            assert_eq!(serde_json::to_value(item).unwrap()["keep_open"], false, "{:?}", item.action);
+        }
+        for visible in [false, true] {
+            let command = WorkspaceCommand::ShowInSwitcher { id: "other".into(), visible };
+            let mut item = ContextMenuItem::command("Other", UiAction::WorkspaceManager { command: command.clone() });
+            item.selected = Some(!visible);
+            let serialized = serde_json::to_value(&item).unwrap();
+            assert_eq!(serialized["keep_open"], true);
+            assert_eq!(serialized["selected"], !visible);
+            assert_eq!(serialized["action"], serde_json::to_value(UiAction::WorkspaceManager { command }).unwrap());
+        }
+    }
+
+    #[test]
     fn workspace_menu_localizes_actions_and_preserves_literal_choice_names() {
         let en = Localizer::shared(UiLanguage::English);
         let ja = Localizer::shared(UiLanguage::Japanese);

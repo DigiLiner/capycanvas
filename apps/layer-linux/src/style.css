@@ -78,10 +78,18 @@ window, label, text { font-size: var(--ui-text-size); }
 .choice-well button:checked { background: var(--header-selection); color: var(--window-fg-color); }
 .choice-well button:checked:hover { background: var(--header-selection-hover); }
 .workspace-switcher .workspace-options > button { min-width: 20px; min-height: 26px; padding: 0; color: alpha(var(--window-fg-color), .7); }
-.workspace-manager-row > box.header:dir(ltr) { margin-left: 6px; }
-.workspace-manager-row > box.header:dir(rtl) { margin-right: 6px; }
-.workspace-manager-row .prefixes { margin-left: 0; margin-right: 0; }
+.workspace-manager { --window-bg-color: var(--dialog-bg-color); --headerbar-bg-color: var(--dialog-bg-color); --headerbar-backdrop-color: var(--dialog-bg-color); }
 .workspace-manager-row menubutton.workspace-reorder-handle > button { padding: 0; min-width: 16px; background: transparent; box-shadow: none; }
+.workspace-manager-row { padding: 0; }
+.workspace-manager-list { border-radius: var(--control-radius); }
+.workspace-manager-items { border-radius: 0; box-shadow: none; }
+.workspace-manager-items > row { border: 0; border-radius: 0; }
+.workspace-manager-items > row + row { box-shadow: inset 0 1px var(--card-shade-color); }
+.workspace-row-content { min-height: 56px; padding: 0 12px; }
+.workspace-manager-row label.subtitle { font-size: smaller; }
+.workspace-list-actions { padding: 0; }
+.workspace-list-actions button { min-width: 34px; min-height: 34px; padding: 0; border-radius: var(--control-radius); }
+.dialog-footer.workspace-manager-footer { padding-top: 0; }
 .workspace-manager-row menubutton.workspace-reorder-handle > button image { opacity: .55; }
 .workspace-manager-row button.workspace-pin { background: transparent; border: 0; box-shadow: none; color: var(--window-fg-color); }
 .workspace-manager-row button.workspace-pin:checked { color: var(--accent-color); }
@@ -107,6 +115,8 @@ window, label, text { font-size: var(--ui-text-size); }
 .bubble-readout { font-size: var(--ui-text-size); font-feature-settings: "tnum"; border-radius: 9999px; padding: 2px 7px; }
 .context-check { min-height: 30px; padding: 0 8px; border-radius: var(--control-radius); }
 .context-check:hover { background-color: alpha(var(--window-fg-color), .07); }
+.workspace-visibility-menu modelbutton label:dir(ltr) { margin-left: 18px; }
+.workspace-visibility-menu modelbutton label:dir(rtl) { margin-right: 18px; }
 .bubble-tag { border-radius: 9px; padding: 3px 9px; font-size: var(--ui-text-size); }
 .bubble-count { border-radius: 9999px; min-height: 22px; padding: 0; font-size: var(--ui-text-size); font-weight: 600; }
 .bubble-thumbnail { border-radius: calc(13px * var(--corner-fit)); background-color: white; box-shadow: 0 0 0 1px alpha(gray, .28); }
@@ -169,9 +179,9 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-icon image { -gtk-icon-size: 16px; }
 .layer-list { background: transparent; }
 .layer-list > row { padding: 0; margin: 0; border-radius: 0; }
-.dock-panel .layer-swipe-actions button { min-width: 0; border-radius: 0; padding: 0 4px; background: mix(@window_bg_color, @window_fg_color, 0.16); }
-.dock-panel button.layer-swipe-duplicate { background: mix(@window_bg_color, @window_fg_color, 0.24); }
-.dock-panel button.layer-swipe-delete { background: #c01c28; color: white; }
+.layer-swipe-actions button { min-width: 0; border-radius: 0; padding: 0 4px; background: mix(@window_bg_color, @window_fg_color, 0.16); }
+.layer-swipe-actions button.layer-swipe-duplicate { background: mix(@window_bg_color, @window_fg_color, 0.24); }
+.layer-swipe-actions button.layer-swipe-delete { background: #c01c28; color: white; }
 .layer-row { min-height: 36px; padding: 2px 6px; border-radius: 0; }
 .layer-row.selected { background: var(--selection-bg); }
 .layers-panel button.layer-column { min-width: 24px; }

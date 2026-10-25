@@ -168,8 +168,9 @@ it is released on the canvas past the 80-pixel line it takes a bubble too.
 - Workspace-manager grips open Move Up / Move Down on an ordinary click, tap,
   Enter or Space. Movement still starts a drag immediately after native slop;
   a completed or cancelled drag suppresses that menu activation. Row context
-  menus use the same reorder commands. Custom workspace dots contain only
-  Rename and Delete, supplied by shared Rust.
+  menus use the same reorder commands. Shared Rust supplies Rename and Delete
+  for custom workspaces in the row context menu, with inline name editing and
+  a swipe Delete action. Pins and grips sit at the right edge.
 - Once dragging starts, retain the original contact and grab offset across
   reparenting, scrolling, and view updates. Preserve validated drop indicators,
   cancellation rollback, and one undo/redo transaction per completed reorder.

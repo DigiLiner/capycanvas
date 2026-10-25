@@ -57,7 +57,7 @@ import {checkLayoutDrops} from "./layout-drops.test.mjs";
 import {checkColumnDrops} from "./column-drops.test.mjs";
 import {checkWorkspaceFocus,checkWorkspaceSwitcher,checkWorkspaceOptions,checkWorkspaceMenuRefresh} from "./workspace-switcher.test.mjs";
 import {checkWorkspaceManagerVisual} from "./workspace-manager-visual.test.mjs";
-import {checkWorkspaceGrips} from "./workspace-grips.test.mjs";
+import {checkWorkspaceGrips,checkWorkspaceHeldName} from "./workspace-grips.test.mjs";
 import {checkWorkspaceManager} from "./workspace-manager.test.mjs";
 import {checkTitleBarState} from "./title-bar-state.test.mjs";
 import {checkTitleBar} from "./title-bar.test.mjs";
@@ -346,6 +346,7 @@ try {
     [process.argv.includes("--workspace-switcher"), () => checkWorkspaceSwitcher({call,evaluate,settle,reload}), checkErrors],
     [process.argv.includes("--workspace-manager-visual"), () => checkWorkspaceManagerVisual({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--workspace-grips"), () => checkWorkspaceGrips({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--workspace-held-name"), () => checkWorkspaceHeldName({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--workspace-manager"), () => checkWorkspaceManager({call,evaluate,settle,reload}), checkErrors],
     [process.argv.includes("--workspace-store"), () => checkWorkspaceStore({evaluate}), checkErrors],
     [process.argv.includes("--stale-storage"), () => checkStaleStorageStartup({evaluate,reload}), checkErrors],

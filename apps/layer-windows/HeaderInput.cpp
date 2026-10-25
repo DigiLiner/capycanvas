@@ -33,7 +33,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     uint32_t selected=0;
     uint64_t generation=0;
     bool editing=false,dragging=false,starting=false,started=false,busy=false,ending=false,cancelled=false;
-    bool dirty=false,held=false,recognizing=false,releasing=false,workspaceMenu=false,normalContact=false,released=false;
+    bool dirty=false,held=false,recognizing=false,releasing=false,workspaceMenu=false,keepMenu=false,normalContact=false,released=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     ~Impl(){if(timer)timer.Stop();if(menu)menu.Hide();}
     bool focused()const{return owner&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==owner&&!IsIconic(owner);}
@@ -173,11 +173,12 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!menu||!workspaceMenu)return;
         auto presentation=object(object(data->model,L"windows_workspace"),L"switcher_options");
         NativeMenuItems(menu.Items(),array(presentation,L"sections"),data,[weak=weak_from_this()](J action){
-            if(auto self=weak.lock()){self->cancel();self->data->dispatch(action);}
-        });
+            if(auto self=weak.lock()){if(!self->keepMenu)self->cancel();self->data->dispatch(action);}
+        },[weak=weak_from_this()](bool keep){if(auto self=weak.lock())self->keepMenu=keep;});
     }
     OwnedPopup::Ticket beginMenu(FrameworkElement const& invoking,bool workspaceOptions=false){
         hideMenu();menu=MenuFlyout();workspaceMenu=workspaceOptions;auto ticket=menuOwner.Begin(data,invoking,menu);
+        menu.Closing([weak=weak_from_this()](auto&&,auto const& args){if(auto self=weak.lock();self&&std::exchange(self->keepMenu,false))args.Cancel(true);});
         auto weak=weak_from_this();auto control=invoking.try_as<Control>();
         if(!control)control=FocusManager::GetFocusedElement(root.XamlRoot()).try_as<Control>();
         auto focus=make_weak(control);
@@ -192,8 +193,8 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!ticket.Current())return;
         if(!array(presentation,L"sections").Size()){ticket.Cancel();return;}
         NativeMenuItems(menu.Items(),array(presentation,L"sections"),data,[weak=weak_from_this()](J action){
-            if(auto self=weak.lock()){self->cancel();self->data->dispatch(action);}
-        });
+            if(auto self=weak.lock()){if(!self->keepMenu)self->cancel();self->data->dispatch(action);}
+        },[weak=weak_from_this()](bool keep){if(auto self=weak.lock())self->keepMenu=keep;});
         Primitives::FlyoutShowOptions options;options.Position(at);
         options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);
         ticket.Show(root,options);
@@ -331,7 +332,8 @@ void HeaderInput::Context(uint32_t id,FrameworkElement const& invoking){
 }
 void HeaderInput::Configure(J const& model,bool editing,J const& request){
     auto identity=model.Stringify()+request.Stringify();
-    if((impl->identity!=identity||impl->editing!=editing)&&str(impl->source,L"kind")!=L"capy")impl->cancel(L"configuration_changed");
+    if((impl->identity!=identity||impl->editing!=editing)&&str(impl->source,L"kind")!=L"capy"
+        &&(impl->editing!=editing||!impl->workspaceMenu||impl->active()))impl->cancel(L"configuration_changed");
     impl->model=model;impl->configuration=request;impl->identity=identity;impl->editing=editing;
     impl->refreshWorkspaceMenu();
     bool found=false;for(auto zone:array(model,L"zones"))for(auto entry:zone.GetArray())found|=num(entry.GetObject(),L"id")==impl->selected;

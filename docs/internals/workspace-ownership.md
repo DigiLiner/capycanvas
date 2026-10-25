@@ -34,6 +34,12 @@ kernel locks even when SQL cleanup fails. A process kill closes the handles in
 the kernel; a subsequent transaction reclaims the row. Pending deliveries and
 receipts are preserved, and a new fence rejects stale saves/releases.
 
+Failed metadata writes retain their original claims until retry or teardown.
+Renewal includes those claims, and retry replays the same operation and fence.
+A metadata-only retry updates the saved metadata without adopting a workspace;
+temporary claims are released after publication. Renaming or deleting an
+unrelated workspace therefore keeps the manager's selected preview in place.
+
 GTK always attempts the authoritative switch/claim. On a live conflict it focuses
 the owning GTK window where available. A stale SwitchToWindow menu action uses
 the same path; if the external owner disappeared during the attempt, it retries

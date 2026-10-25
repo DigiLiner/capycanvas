@@ -38,6 +38,7 @@ import org.json.JSONArray
     val form = view.objectOrNull("prompt")
     val error = view.optString("error").takeUnless { it == "null" || it.isEmpty() }
     val busy = view.optBoolean("busy")
+    val renaming=page=="workspaces"&&view.objectOrNull("prompt_action")?.optString("type")=="rename"
     val toolbarMode = page in listOf("this_workspace", "toolbar_library")
     val rowInteraction = remember { WorkspaceRowInteraction() }
     val focusWindow = view.optJSONObject("focus_window")?.optString("id")
@@ -46,13 +47,13 @@ import org.json.JSONArray
     fun send(type: String) = host.workspaceInput(obj("type" to type))
     val cancel = { send("cancel") }
     if (page != null) Dialog(onDismissRequest = {
-        if (rowInteraction.active != null || rowInteraction.menu != null) rowInteraction.cancel() else cancel()
+        if (rowInteraction.active != null || rowInteraction.menu != null) rowInteraction.cancel() else send("dismiss")
     }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         PreviewBackdrop()
-        Surface(shape = RoundedCornerShape(16.dp), color = colors.settingsBackground,
+        Surface(shape = SquircleShape(16.dp), color = colors.settingsBackground, contentColor=colors.text,
             modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth(.94f).testTag("workspace-manager").onPreviewKeyEvent { event ->
                 if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_ESCAPE && event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                    (rowInteraction.active != null || rowInteraction.menu != null || rowInteraction.contact)) { rowInteraction.cancel(); true } else false
+                    !host.editingText) { if(rowInteraction.active != null || rowInteraction.menu != null || rowInteraction.contact)rowInteraction.cancel() else send("dismiss"); true } else false
             }) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -63,15 +64,16 @@ import org.json.JSONArray
                 if (toolbarMode) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((target, label) in listOf("this_workspace" to "this_workspace", "toolbar_library" to "saved_toolbars")) TextButton({ host.workspaceInput(obj("type" to "open", "page" to target)) }, enabled = !busy) { Text(copy.getString(label)) }
                 }
-                if (page != "history" && (toolbarMode || view.array("rows").length() > 7 || view.optString("query").isNotEmpty())) CoreTextField(view.optString("query"), { host.workspaceInput(obj("type" to "search", "query" to it)) }, Modifier.fillMaxWidth().testTag("workspace-search"), placeholder = { Text(copy.getString("search")) })
+                if (toolbarMode) CoreTextField(view.optString("query"), { host.workspaceInput(obj("type" to "search", "query" to it)) }, Modifier.fillMaxWidth().testTag("workspace-search"), placeholder = { Text(copy.getString("search")) })
                 if (page == "this_workspace") TextButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new_toolbar", "value" to null))) }, enabled = !busy, modifier = Modifier.testTag("new-toolbar")) { Text(copy.getString("new_toolbar_action")) }
-                if (page == "workspaces") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    FilledTonalButton({ host.workspaceInput(obj("type" to "form", "action" to obj("type" to "new"))) },
-                        enabled = !busy, modifier = Modifier.testTag("new-workspace"), shape = RoundedCornerShape(6.dp)) {
-                        Text(copy.getString("new_workspace"))
+                Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                    WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill=false).height(if(page=="workspaces")(minOf(7,view.array("rows").length())*56).dp else 315.dp).fillMaxWidth())
+                    if(page=="workspaces")Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                        IconButton({host.workspaceInput(obj("type" to "form","action" to obj("type" to "new")))},enabled=!busy||renaming,modifier=Modifier.size(34.dp).testTag("new-workspace").semantics { contentDescription=copy.getString("new_workspace") }) {SharedIcon("plus",null,Modifier.size(16.dp),tint=colors.text.copy(alpha=if(busy&&!renaming) .36f else 1f))}
+                        val delete=view.array("rows").objects().find {it.getString("id")==view.optString("selected")}?.array("options")?.objects()?.find {it.getJSONObject("action").getString("type")=="delete"}
+                        IconButton({delete?.let {host.workspaceInput(obj("type" to "action","action" to it.getJSONObject("action"))) }},enabled=(!busy||renaming)&&delete?.optBoolean("enabled")==true,modifier=Modifier.size(34.dp).testTag("workspace-remove").semantics {contentDescription=host.bootstrap!!.getJSONObject("common").getString("delete")}) {SharedIcon("delete",null,Modifier.size(16.dp),tint=colors.text.copy(alpha=if((!busy||renaming)&&delete?.optBoolean("enabled")==true) 1f else .36f))}
                     }
                 }
-                WorkspaceRows(host, view, rowInteraction, Modifier.weight(1f, fill = false).height(315.dp).fillMaxWidth())
                 if (toolbarMode) view.objectOrNull("details")?.let { details ->
                     Text(details.getString("title"), fontWeight = FontWeight.Bold)
                     Text(details.getString("description"), color = colors.settingsSecondary)
@@ -83,15 +85,15 @@ import org.json.JSONArray
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
                 if (error != null && form == null) Text(error, color = MaterialTheme.colorScheme.error)
-                if (!toolbarMode) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(cancel, Modifier.weight(1f).testTag("workspace-cancel")) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) }
+                if (!toolbarMode) Row(Modifier.fillMaxWidth(),horizontalArrangement = Arrangement.spacedBy(8.dp,Alignment.End)) {
+                    FilledTonalButton(cancel, Modifier.height(34.dp).testTag("workspace-cancel"),shape=ControlShape,colors=ButtonDefaults.filledTonalButtonColors(containerColor=colors.text.copy(alpha=.1f),contentColor=colors.text),contentPadding=PaddingValues(horizontal=16.dp,vertical=0.dp)) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) }
                     if (view.optBoolean("retry")) TextButton({ send("retry") }, enabled = !busy) { Text(copy.getString("retry")) }
-                    Button({ send("confirm") }, Modifier.weight(1f).testTag("workspace-confirm"), enabled = view.optBoolean("enabled") && !busy) { Text(view.getString("primary")) }
+                    Button({ send("confirm") }, Modifier.height(34.dp).testTag("workspace-confirm"), shape=ControlShape,contentPadding=PaddingValues(horizontal=16.dp,vertical=0.dp),enabled = view.optBoolean("enabled") && (!busy || renaming)) { Text(view.getString("primary")) }
                 }
             }
         }
     }
-    if (form != null) {
+    if (form != null && !(page=="workspaces"&&view.objectOrNull("prompt_action")?.optString("type")=="rename")) {
         val action = view.getJSONObject("prompt_action")
         val named = !form.isNull("name")
         var name by remember(action.toString(), form.optString("name")) { mutableStateOf(if (named) form.getString("name") else "") }

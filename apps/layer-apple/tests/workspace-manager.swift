@@ -24,7 +24,7 @@ import SwiftUI
             precondition(workspaces.view["selected"].string == original)
             try await capture(workspaces, platform: platform, phase: "browser")
             precondition(!workspaces.view["rows"].array.contains { row in
-                row["actions"].array.contains { ["rename", "delete"].contains($0["action"]["type"].string) && $0["enabled"].bool }
+                row["options"].array.contains { ["rename", "delete"].contains($0["action"]["type"].string) && $0["enabled"].bool }
             }, "Included workspaces keep their names and cannot be deleted")
             try await workspaces.perform(["type": "form", "action": ["type": "new"]])
             precondition(workspaces.view["prompt"]["choices"].array.isEmpty && !workspaces.view["prompt"]["message"].string.isEmpty)
@@ -33,7 +33,20 @@ import SwiftUI
             precondition(workspaces.view["id"].string == original && workspaces.view["prompt"].isNull)
             try await workspaces.create("Inking")
             let inking = workspaces.view["id"].string
-            precondition(inking != original && !workspaces.presented)
+            precondition(inking != original && workspaces.page == "workspaces" && workspaces.view["selected"].string == inking,
+                "New keeps the manager open with the created workspace selected")
+            try await workspaces.perform(["type": "form", "action": ["type": "rename", "value": inking]])
+            workspaces.formName = ""; workspaces.validateName(required: true)
+            try await wait("inline required-name validation") { workspaces.nameError != nil && !workspaces.validatingName }
+            workspaces.formName = "Latest valid draft"; workspaces.validateName(required: true)
+            precondition(workspaces.finishName(), "Focus loss submits the latest draft while its validation reply is pending")
+            try await workspaces.settle()
+            precondition(workspaces.view["prompt"].isNull && workspaces.view["rows"].array.contains { $0["id"].string == inking && $0["title"].string == "Latest valid draft" })
+            try await workspaces.perform(["type": "form", "action": ["type": "rename", "value": inking]])
+            workspaces.formName = "Inking"; precondition(workspaces.finishName())
+            try await workspaces.settle()
+            workspaces.dismiss(); try await workspaces.settle()
+            precondition(!workspaces.presented)
             try await editor.apply(["type": "set_brush_size", "value": 31])
             try await editor.apply(["type": "customize", "action": ["type": "set_panel_visible", "panel": "sizes", "visible": false]])
             let source = try await workspaces.capture()
@@ -100,12 +113,16 @@ import SwiftUI
                 "The header switch action must focus a claimed workspace without taking it over")
             try await toolbarActions(editor)
             try await workspaces.perform(["type": "switch", "id": sketching])
+            try await workspaces.perform(["type": "open", "page": "workspaces"])
             try await workspaces.perform(["type": "form", "action": ["type": "delete", "value": sketching]])
             let deletion = workspaces.view["prompt"]
             precondition(deletion["choices"].array.isEmpty && deletion["message"].string.contains("permanent"))
             let orderBeforeDelete = workspaces.view["order"].array.map(\.string)
             workspaces.submit(); try await workspaces.settle()
             precondition(workspaces.view["id"].string == "builtin:workspace:illustrator")
+            precondition(workspaces.page == "workspaces" && workspaces.view["selected"].string == workspaces.view["id"].string,
+                "Deleting the active workspace keeps the manager open with its replacement selected")
+            workspaces.dismiss(); try await workspaces.settle()
             precondition(workspaces.view["order"].array.map(\.string) == orderBeforeDelete.filter { $0 != sketching },
                 "Deleting the active workspace must not create an extra replacement")
             try await invalidPackage(workspaces, root: root)

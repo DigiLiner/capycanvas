@@ -130,7 +130,6 @@ workspace-action-retry-storage = Retry Storage
 workspace-manage-toolbars = Manage Toolbars
 workspace-toolbars-intro = Arrange the toolbars in this workspace.
 workspace-library-intro = Save toolbars to reuse in any workspace.
-workspace-intro = Workspaces save your layout for different tasks.
 workspace-history-hidden = Hid { $panels }
 workspace-history-shown = Showed { $panels }
 workspace-history-restored-earlier = Restored earlier layout

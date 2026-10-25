@@ -19,7 +19,8 @@ public:
         winrt::Microsoft::UI::Xaml::Controls::Button grip,
         winrt::Microsoft::UI::Xaml::Controls::Button more,
         winrt::Microsoft::UI::Xaml::UIElement pin,
-        winrt::Microsoft::UI::Xaml::Controls::MenuFlyout menu,Id id);
+        winrt::Microsoft::UI::Xaml::Controls::MenuFlyout menu,Id id,
+        winrt::Microsoft::UI::Xaml::Controls::MenuFlyout context = nullptr);
     void Refresh(std::vector<Id> const& order);
     bool FenceSelection()const;
     bool SuppressClick()const;

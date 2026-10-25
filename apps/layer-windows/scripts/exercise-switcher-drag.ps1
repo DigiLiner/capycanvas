@@ -27,8 +27,10 @@ function Closed {
 function Open-Manager {
     Closed
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
-    (Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-    Invoke 'Manage Workspaces…' -Name
+    $submenu=Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Arranged
+    $bounds=$submenu.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))
+    $submenu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    (Control 'Manage Workspaces…' -Name -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {$null -ne (Find 'workspace-manager')} 'Manager did not open'
     Settled
 }
@@ -152,46 +154,165 @@ function Pin-Buttons {
 function New-WorkspaceButton {
     $control=Control 'workspace-manager-create' -Arranged
     $bounds=$control.Current.BoundingRectangle;$items=(Control 'workspace-manager-items' -Arranged).Current.BoundingRectangle
-    if($control.Current.Name -notlike 'New Workspace*' -or $bounds.Width -lt 64*$scale){throw 'New Workspace action is not a labeled button'}
-    if($bounds.Bottom -gt $items.Top+1 -or $bounds.X+$bounds.Width/2 -le $items.X+$items.Width/2 -or $bounds.Right -gt $items.Right+1){throw 'New Workspace button is not above the right side of the list'}
+    $remove=(Control 'workspace-manager-remove' -Arranged).Current.BoundingRectangle
+    if($control.Current.Name -notlike 'New Workspace*'){throw 'New workspace icon has no accessible label'}
+    if($bounds.Top -lt $items.Bottom-1 -or $bounds.Left -gt $items.Left+24*$scale -or $remove.Left -lt $bounds.Right-1 -or [Math]::Abs($remove.Top-$bounds.Top) -gt 1){throw 'Plus and trash are not below the left side of the list'}
+    if(Find 'workspace-manager-search' -Visible){throw 'Workspace manager still exposes Search'}
+    $cancel=(Control 'Cancel' -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Arranged).Current.BoundingRectangle
+    $apply=(Control (Manager).primary -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Arranged).Current.BoundingRectangle
+    if($cancel.Right -gt $apply.Left -or $cancel.Width -ge $apply.Width*.9 -or [Math]::Abs($apply.Right-$items.Right) -gt 4*$scale -or [Math]::Abs($cancel.Height-34*$scale) -gt 2 -or [Math]::Abs($apply.Height-34*$scale) -gt 2){throw 'Manager footer is not natural-width Cancel then Switch aligned right at34 DIP'}
+    foreach($row in (Manager).rows){
+        if(Find ('workspace-manager-options-'+$row.id) -Visible){throw 'Workspace row still has a dots button'}
+        $grip=(Control ('workspace-manager-grip-'+$row.id) -Arranged).Current.BoundingRectangle
+        $pin=(Control ('workspace-manager-pin-'+$row.id) -Arranged).Current.BoundingRectangle
+        if($grip.Left -lt $pin.Right-1){throw 'Reorder grip is not right of the pin'}
+    }
     $control
 }
-
+function Row-Context([string]$Id){
+    $at=Point $Id
+    if($Device -eq 'mouse'){[CapyRowPointer]::RightClick($at.x,$at.y)}else{
+        if($Device -eq 'pen'){[CapyRowPointer]::PenHover($at.x,$at.y);Start-Sleep -Milliseconds 50}
+        [CapyRowPointer]::Down($Device,$at.x,$at.y)
+        Wait-Until {(Gesture).phase -eq 'held'} 'Custom row hold was not recognized' 4
+        [CapyRowPointer]::Up($Device -eq 'pen')
+    }
+    Wait-Until {$null -ne (Find 'workspace-manager-rename') -and $null -ne (Find 'workspace-manager-delete')} 'Custom row context did not expose Rename and Delete'
+    foreach($id in @('workspace-manager-rename','workspace-manager-delete')){$item=Control $id -Arranged;Wait-Until {$item.Current.IsEnabled} 'Custom context action remained disabled'}
+}
+function Swipe-DeleteAction([string]$Id){
+    $action=Find ('workspace-manager-swipe-delete-'+$Id) -Visible
+    $row=Control ('workspace-manager-row-'+$Id) -Arranged
+    $spec=@((Manager).rows|Where-Object id -eq $Id)[0].options|Where-Object {$_.action.type -eq 'delete'}|Select-Object -First 1
+    if(!$action){$action=Find $spec.label -Name -Within $row -Visible}
+    if($action){$null=Native-TapAt $action 0;return}
+    $bounds=$row.Current.BoundingRectangle
+    $x=[int]($bounds.Right-20*$scale);$y=[int]($bounds.Y+$bounds.Height/2)
+    @{case='native-swipe-revealed-strip';row=$Id;label=$spec.label;bounds=$bounds.ToString();point=@($x,$y);gesture=Gesture}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'swipe-action-target.json')
+    [CapyRowPointer]::Down('touch',$x,$y);Start-Sleep -Milliseconds 50;[CapyRowPointer]::Up()
+}
+function Held-Button($Control,[string]$Case){
+    $bounds=$Control.Current.BoundingRectangle
+    if(!$Control.Current.IsEnabled){throw "$Case is disabled before contact"}
+    $trace=@{case=$Case;device=$Device;bounds=$bounds.ToString();enabled_before=$Control.Current.IsEnabled;passed=$false}
+    try{
+        [CapyRowPointer]::Down($Device,[int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))
+        Start-Sleep -Milliseconds 200
+        $trace.enabled_before_up=$Control.Current.IsEnabled;$trace.workspace_before_up=Storage
+        [CapyRowPointer]::Up($Device -eq 'pen')
+        if(!$trace.enabled_before_up){throw "$Case disabled while native contact was held"}
+        $trace.passed=$true
+    }finally{
+        [CapyRowPointer]::Cancel()
+        $taps.Add($trace);$taps|ConvertTo-Json -Depth 25|Set-Content (Join-Path $run 'native-taps.json')
+    }
+}
+function Held-Rename([string]$Id){
+    Row-Context $Id;Invoke 'workspace-manager-rename'
+    Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'Held pin rename did not open'
+    $entry=Control ('workspace-manager-rename-'+$Id) -Arranged;$entry.SetFocus()
+    $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Held pin workspace')
+    $pin=Control ('workspace-manager-pin-'+$active) -Arranged
+    $before=@((Manager).rows|Where-Object id -eq $active)[0].pin.selected;$revision=(Storage).switcher_revision
+    Held-Button $pin 'rename-held-pin'
+    Wait-Until {$null -eq (Manager).prompt -and (Storage).switcher_revision -gt $revision -and @((Manager).rows|Where-Object id -eq $Id)[0].title -eq 'Held pin workspace'} 'Held pin lost its click or inline name'
+    if(@((Manager).rows|Where-Object id -eq $active)[0].pin.selected -eq $before){throw 'Held pin did not toggle'}
+    Preview-Intact
+    $revision=(Storage).switcher_revision
+    $pin.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    Wait-Until {(Storage).switcher_revision -gt $revision -and !(Storage).switcher_busy} 'Held pin restoration did not settle'
+    Row-Context $Id;Invoke 'workspace-manager-rename'
+    Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'Held Apply rename did not open'
+    $entry=Control ('workspace-manager-rename-'+$Id) -Arranged;$entry.SetFocus()
+    $entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Held Apply workspace')
+    $apply=Control (Manager).primary -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button) -Arranged
+    Held-Button $apply 'rename-held-apply'
+    Closed
+    Wait-Until {(Storage).id -eq $preview -and !(Storage).busy} 'Held Apply did not commit the selected preview'
+    Open-Manager
+    if(@((Manager).rows|Where-Object id -eq $Id)[0].title -ne 'Held Apply workspace'){throw 'Held Apply lost inline name'}
+    (Control ('workspace-manager-row-'+$active)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Wait-Until {(Manager).selected -eq $active -and !(Manager).loading} 'Original active row did not preview after held Apply'
+    Settled;Choose (Manager).primary;Closed
+    Wait-Until {(Storage).id -eq $active -and !(Storage).busy} 'Held Apply fixture did not restore original active workspace'
+    Open-Manager;Preview-Select
+    Write-Output "$Device held pin and Apply across inline rename passed"
+}
 function Custom-Options {
     (New-WorkspaceButton).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Custom options fixture did not open naming'
+    Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Custom fixture did not open naming'
     (Control 'workspace-manager-name').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Grip options custom workspace')
     Wait-Until {(Control 'Create and Switch' -Name -Within (Control 'workspace-manager') -Type ([System.Windows.Automation.ControlType]::Button)).Current.IsEnabled} 'Custom workspace name did not enable confirmation'
-    Choose 'Create and Switch';Closed
-    Wait-Until {(Storage).ready -and !(Storage).busy -and !(Storage).switcher_busy} 'Custom options workspace did not settle'
+    Choose 'Create and Switch';Settled
+    Wait-Until {$null -eq (Manager).prompt -and (Manager).page -eq 'workspaces'} 'New workspace closed the manager'
     $custom=(Storage).id
-    Open-Manager
+    Write-Output "$Device New retains manager passed"
+    if((Manager).selected -ne $custom){throw 'New workspace was not selected in retained manager'}
     (Control ('workspace-manager-row-'+$active)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     Wait-Until {(Manager).selected -eq $active -and !(Manager).loading} 'Original workspace selection did not settle'
     Settled;Choose (Manager).primary;Closed
     Wait-Until {(Storage).id -eq $active -and !(Storage).busy} 'Original workspace did not return'
     Open-Manager;Preview-Select
     $saved=@((Storage).order);$revision=(Storage).switcher_revision
-    $trace=Native-TapAt (Control ('workspace-manager-options-'+$custom) -Arranged) 1;$trace.case='custom-row-options'
-    Wait-Until {$null -ne (Find 'workspace-manager-rename') -and $null -ne (Find 'workspace-manager-delete')} 'Custom row options did not retain Rename and Delete'
-    if((Find 'workspace-manager-move-up') -or (Find 'workspace-manager-move-down')){throw 'Custom row options contain reorder actions'}
+    Row-Context $custom
     Preview-Intact;Order-Intact $saved $revision
-    $trace.passed=$true;$taps.Add($trace);$taps|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run 'native-taps.json')
     Invoke 'workspace-manager-rename'
-    Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Custom row Rename did not open'
-    Choose 'Cancel';Settled
-    Wait-Until {$null -eq (Manager).prompt} 'Cancel did not return from Rename'
-    Invoke ('workspace-manager-options-'+$custom);Invoke 'workspace-manager-delete'
-    Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Custom row Delete did not open'
-    Choose 'Cancel';Settled
-    Wait-Until {$null -eq (Manager).prompt} 'Cancel did not return from Delete'
+    Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'Custom context Rename did not open inline'
+    $editor=Control ('workspace-manager-rename-'+$custom) -Arranged;$editor.SetFocus()
+    $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Discarded inline name')
+    [CapyRowPointer]::Key([uint32]$review.Id,27)
+    Wait-Until {$null -eq (Manager).prompt} 'Escape did not cancel inline Rename'
+    if(@((Manager).rows|Where-Object id -eq $custom)[0].title -ne 'Grip options custom workspace'){throw 'Escape persisted inline name'}
     Preview-Intact;Order-Intact $saved $revision
-    Capture ($Device+'-custom-options') -Composed
-    Invoke ('workspace-manager-options-'+$custom);Invoke 'workspace-manager-delete'
+    Write-Output "$Device context Rename Escape passed"
+    $previousPreview=$preview
+    $bounds=(Control ('workspace-manager-row-'+$custom) -Arranged).Current.BoundingRectangle
+    [CapyRowPointer]::DoubleClick([int]($bounds.X+$bounds.Width*.3),[int]($bounds.Y+$bounds.Height/2))|Out-Null
+    Wait-Until {(Manager).prompt_action.type -eq 'rename' -and !(Manager).loading} 'Double-click name did not open inline Rename'
+    if((Manager).selected -ne $custom){throw 'Double-click first click did not preview its row'}
+    $script:preview=$custom;$script:previewLayout=Layout
+    $editor=Control ('workspace-manager-rename-'+$custom) -Arranged;$editor.SetFocus()
+    $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Renamed workspace')
+    [CapyRowPointer]::Key([uint32]$review.Id,13)
+    Wait-Until {$null -eq (Manager).prompt -and @((Manager).rows|Where-Object id -eq $custom)[0].title -eq 'Renamed workspace'} 'Inline Enter did not commit'
+    Preview-Intact;Order-Intact $saved $revision
+    Write-Output "$Device double-click Rename Enter passed"
+    $script:preview=$previousPreview;Preview-Select
+    Row-Context $custom;Invoke 'workspace-manager-rename'
+    Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'Focus-loss rename did not open'
+    $editor=Control ('workspace-manager-rename-'+$custom) -Arranged;$editor.SetFocus()
+    $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Focus committed workspace')
+    [CapyRowPointer]::Key([uint32]$review.Id,9)
+    Wait-Until {$null -eq (Manager).prompt -and @((Manager).rows|Where-Object id -eq $custom)[0].title -eq 'Focus committed workspace'} 'Inline focus loss did not commit'
+    Preview-Intact;Order-Intact $saved $revision
+    Write-Output "$Device inline Rename Tab commit passed"
+    Held-Rename $custom
+    $revision=(Storage).switcher_revision
+    Row-Context $custom;Invoke 'workspace-manager-delete'
+    Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Context Delete did not open'
+    Choose 'Cancel';Settled
+    Wait-Until {$null -eq (Manager).prompt} 'Delete Cancel did not return to manager'
+    Preview-Intact;Order-Intact $saved $revision
+    if($Device -eq 'touch'){
+        $at=Point $custom
+        [CapyRowPointer]::Down('touch',$at.x,$at.y);Start-Sleep -Milliseconds 50
+        foreach($distance in @(20,40,80,120)){[CapyRowPointer]::Move([int]($at.x-$distance*$scale),$at.y);Start-Sleep -Milliseconds 20}
+        [CapyRowPointer]::Up()
+        Preview-Intact;Order-Intact $saved $revision
+        Capture 'touch-swipe-delete' -Composed
+        Swipe-DeleteAction $custom
+    }else{
+        $previousPreview=$preview;$script:preview=$custom;Preview-Select
+        $remove=Control 'workspace-manager-remove' -Arranged
+        Wait-Until {$remove.Current.IsEnabled} 'Selected custom workspace did not enable footer Delete'
+        $remove.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    }
     Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Custom cleanup did not open Delete'
     Choose 'Delete';Settled
-    Wait-Until {@((Manager).rows|Where-Object id -eq $custom).Count -eq 0} 'Custom fixture workspace was not removed'
+    Wait-Until {@((Manager).rows|Where-Object id -eq $custom).Count -eq 0 -and (Manager).page -eq 'workspaces'} 'Delete closed manager or retained removed workspace'
+    if($Device -ne 'touch'){$script:preview=$previousPreview;Preview-Select}
     Preview-Intact
+    Capture ($Device+'-custom-context-inline-delete') -Composed
 }
 
 function Middle-RowDrag([switch]$Grip){
@@ -423,7 +544,7 @@ try {
     Choose 'Cancel';Closed
     Open-Manager;Preview-Select
     foreach($row in (Manager).rows){if(Find ('workspace-manager-options-'+$row.id) -Visible){throw 'Reopened included workspace still has a row options button'}}
-    Choose 'Cancel';Closed
+    (Control ('workspace-manager-row-'+$preview)).SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,27);Closed
     if((Storage).id -ne $active){throw 'Cancel changed the active workspace'}
 
     if($Overflow){
@@ -431,7 +552,9 @@ try {
             Open-Manager;Invoke 'workspace-manager-create'
             Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Creation prompt missing'
             (Control 'workspace-manager-name').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("Row overflow workspace $i")
-            Choose 'Create and Switch';Closed
+            Choose 'Create and Switch';Settled
+            Wait-Until {$null -eq (Manager).prompt -and (Manager).page -eq 'workspaces'} 'Creation closed manager'
+            Choose 'Cancel';Closed
             Wait-Until {$s=Storage;$s.ready -and !$s.busy -and !$s.switcher_busy} 'Created workspace did not settle'
         }
         $active=(Storage).id
@@ -464,19 +587,6 @@ try {
         Write-Output "$Device scroll overflow and retained drag passed"
         $scroller.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll,0)
         Wait-Until {$scroller.Current.VerticalScrollPercent -le 1} 'Rows did not return to the beginning'
-        $script:gestureCase='source-invalidation'
-        $saved=@((Storage).order);$revision=(Storage).switcher_revision;$source=$saved[0]
-        $at=Point $saved[2]
-        Press $source -Grip;Start-Sleep -Milliseconds 45;Move-To $at
-        Wait-Until {(Gesture).phase -eq 'dragging'} 'Source invalidation review did not begin dragging'
-        $search=Control 'workspace-manager-search'
-        $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('No matching row for input review')
-        Wait-Until {(Gesture).phase -eq 'idle' -and @((Manager).rows).Count -eq 0} 'Filtering away the source did not cancel the drag'
-        [CapyRowPointer]::Cancel()
-        Order-Intact $saved $revision
-        $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
-        Settled;Preview-Select
-        Write-Output "$Device source invalidation passed"
         $script:gestureCase='minimize'
         $saved=@((Storage).order);$revision=(Storage).switcher_revision
         $at=Point $saved[2]
@@ -501,7 +611,7 @@ try {
     }
     Close
     @{device=$Device;theme=$Theme;short_click='passed';pickup_and_menu='passed';grip_and_body_drop='passed';preview_preserved='passed';
-        single_reorder_commit='passed';grip_short_tap_and_keyboard_menu='passed';builtin_dots_absent='passed';custom_rename_delete_options='passed';cancel_and_reopen='passed';cancellation='passed';no_op_and_outside_drops='passed';accessible_grip_and_keyboard='passed';secondary_and_keyboard_menus='passed';secondary_mouse_drags=@{cases=$secondaryContacts.Count;passed=@($secondaryContacts|Where-Object passed).Count};overflow_source_invalidation_and_blur=[bool]$Overflow;zero_exit='passed';
+        single_reorder_commit='passed';grip_short_tap_and_keyboard_menu='passed';builtin_dots_absent='passed';custom_context_inline_rename_delete='passed';cancel_and_reopen='passed';cancellation='passed';no_op_and_outside_drops='passed';accessible_grip_and_keyboard='passed';secondary_and_keyboard_menus='passed';secondary_mouse_drags=@{cases=$secondaryContacts.Count;passed=@($secondaryContacts|Where-Object passed).Count};overflow_scroll_and_blur=[bool]$Overflow;zero_exit='passed';
         scope='OS-injected native input; physical digitizers and performance require separate acceptance'}|
         ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
     Get-Content (Join-Path $run 'results.json')

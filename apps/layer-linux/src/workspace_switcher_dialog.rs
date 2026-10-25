@@ -2,21 +2,23 @@
 use super::*;
 use layer_workspace::SwitcherEdit;
 
-fn picked(row: &adw::ActionRow, x: f64, y: f64) -> (bool, bool) {
+fn picked(row: &gtk::ListBoxRow, x: f64, y: f64) -> (bool, bool, bool) {
     let mut widget = row.pick(x, y, gtk::PickFlags::DEFAULT);
     let mut handle = false;
     let mut button = false;
+    let mut name = false;
     while let Some(w) = widget {
-        if w.is::<gtk::Button>() || w.is::<gtk::MenuButton>() || w.is::<gtk::CheckButton>() {
+        if w.is::<gtk::Button>() || w.is::<gtk::MenuButton>() || w.is::<gtk::CheckButton>() || w.is::<gtk::Editable>() {
             button = true;
         }
         handle |= w.has_css_class("workspace-reorder-handle");
+        name |= w.has_css_class("workspace-name");
         if w == *row.upcast_ref::<gtk::Widget>() {
             break;
         }
         widget = w.parent();
     }
-    (button && !handle, handle)
+    (button && !handle, handle, name)
 }
 
 impl ManagerUi {
@@ -29,10 +31,9 @@ impl ManagerUi {
     pub(super) fn add_switcher_actions(
         &self,
         w: &Rc<Workspace>,
-        menu: &gtk::MenuButton,
+        popup: &gtk::Popover,
         id: &str,
     ) {
-        let popup = menu.popover().unwrap();
         let content = popup.child().and_downcast::<gtk::Box>().unwrap();
         for (label, up) in [
             (layer_ui::MessageId::NATIVE_HEADER_MOVE_UP, true),
@@ -41,8 +42,9 @@ impl ManagerUi {
             let button = gtk::Button::with_label(&w.localization().text(label));
             button.add_css_class("flat");
             let id = id.to_string();
-            popup.connect_show(glib::clone!(#[weak] w, #[weak] button, #[strong] id, move |_| {
+            button.connect_map(glib::clone!(#[weak] w, #[strong] id, move |button| {
                 let order = w.workspaces.view().order;
+                button.set_label(&w.localization().text(label));
                 button.set_sensitive(!w.workspaces.ui.switcher_pending.get() && order.iter().position(|row| row == &id)
                     .is_some_and(|index| if up { index > 0 } else { index + 1 < order.len() }));
             }));
@@ -66,23 +68,24 @@ impl ManagerUi {
     pub(super) fn bind_reorder_row(
         &self,
         w: &Rc<Workspace>,
-        row: &adw::ActionRow,
+        row: &gtk::ListBoxRow,
         id: &str,
         menu: &gtk::MenuButton,
+        context: &gtk::Popover,
     ) {
         let popup = menu.popover().unwrap();
         popup.connect_closed(|p| p.set_pointing_to(None));
+        context.connect_closed(|p| p.set_pointing_to(None));
+        let popovers = [popup.clone(), context.clone()];
         // While a hold owns the contact, leave the popup ungrabbed so the
         // grouped DragSource can take over. On release, restore normal dismissal.
         let release = gtk::EventControllerLegacy::new();
         release.set_propagation_phase(gtk::PropagationPhase::Capture);
         release.connect_event(glib::clone!(
-            #[weak]
-            popup,
-            #[upgrade_or]
-            glib::Propagation::Proceed,
+            #[strong]
+            popovers,
             move |_, event| {
-                if matches!(
+                for popup in &popovers { if matches!(
                     event.event_type(),
                     gdk::EventType::TouchEnd
                         | gdk::EventType::TouchCancel
@@ -97,7 +100,7 @@ impl ManagerUi {
                         popup.set_pointing_to(position.0.then_some(&position.1));
                         popup.popup();
                     }
-                }
+                } }
                 glib::Propagation::Proceed
             }
         ));
@@ -109,16 +112,31 @@ impl ManagerUi {
             #[weak]
             row,
             #[weak]
-            menu,
+            context,
             move |gesture, _, x, y| {
+                if picked(&row, x, y).0 { return; }
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                row_menu(&row, &menu, x, y, true);
+                row_menu(&row, &context, x, y, true);
             }
         ));
         row.add_controller(secondary);
+        let keys = gtk::EventControllerKey::new();
+        let key_id = id.to_string();
+        keys.connect_key_pressed(glib::clone!(#[weak] w, #[weak] row, #[weak] context, #[upgrade_or] glib::Propagation::Proceed, move |_, key, _, modifiers| {
+            if gtk::prelude::GtkWindowExt::focus(&w.window).is_some_and(|widget| widget.is::<gtk::Editable>()) { return glib::Propagation::Proceed; }
+            if key == gdk::Key::Menu || (key == gdk::Key::F10 && modifiers.contains(gdk::ModifierType::SHIFT_MASK)) {
+                row_menu(&row, &context, row.width() as f64 / 2., row.height() as f64 / 2., true);
+                glib::Propagation::Stop
+            } else if key == gdk::Key::F2 && let Some(action) = w.workspaces.ui.workspace_name_action(&w, &key_id) {
+                w.workspaces.send(&w, WorkspaceInput::Action { action });
+                glib::Propagation::Stop
+            } else { glib::Propagation::Proceed }
+        }));
+        row.add_controller(keys);
         let held = Rc::new(Cell::new(false));
         let moved = Rc::new(Cell::new(false));
         let valid = Rc::new(Cell::new(false));
+        let press_origin = Rc::new(Cell::new((0., 0.)));
         let source = gtk::DragSource::new();
         source.set_actions(gdk::DragAction::MOVE);
         source.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -132,18 +150,22 @@ impl ManagerUi {
             held,
             #[weak]
             popup,
+            #[weak]
+            context,
             #[strong]
             id,
             #[upgrade_or]
             None,
             move |source, x, y| {
-                if w.workspaces.ui.switcher_pending.get() || picked(&row, x, y).0 {
+                if w.workspaces.ui.switcher_pending.get() || picked(&row, x, y).0
+                    || w.workspaces.ui.workspace_rows.borrow().get(&id).is_some_and(|row| !row.swipe.is_at_rest()) {
                     return None;
                 }
                 if crate::input::touch_or_pen(source) && !held.get() {
                     return None;
                 }
                 popup.popdown();
+                context.popdown();
                 popup.set_autohide(true);
                 let color = w.gpu.borrow().as_ref()?.session.state().palette.panel;
                 let preview = crate::layers::drag_preview(row.upcast_ref(), color);
@@ -189,6 +211,8 @@ impl ManagerUi {
         click.set_propagation_phase(gtk::PropagationPhase::Capture);
         click.connect_pressed(glib::clone!(
             #[weak]
+            w,
+            #[weak]
             row,
             #[strong]
             held,
@@ -196,9 +220,29 @@ impl ManagerUi {
             moved,
             #[strong]
             valid,
-            move |g, _, x, y| {
+            #[strong]
+            id,
+            #[strong]
+            press_origin,
+            move |g, count, x, y| {
                 moved.set(false);
-                let (button, handle) = picked(&row, x, y);
+                press_origin.set((x, y));
+                let (button, handle, name) = picked(&row, x, y);
+                let ui = w.workspaces.ui.workspace_rows.borrow().get(&id).cloned();
+                if let Some(ui) = ui.filter(|ui| !ui.swipe.is_at_rest()) {
+                    valid.set(false);
+                    if !row.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|picked| ui.swipe.is_action(&picked)) {
+                        ui.swipe.reveal(false);
+                        g.set_state(gtk::EventSequenceState::Claimed);
+                    }
+                    return;
+                }
+                if count == 2 && name && !button && let Some(action) = w.workspaces.ui.workspace_name_action(&w, &id) {
+                    valid.set(false);
+                    g.set_state(gtk::EventSequenceState::Claimed);
+                    w.workspaces.send(&w, WorkspaceInput::Action { action });
+                    return;
+                }
                 valid.set(!button);
                 held.set(handle && !button);
                 if button {
@@ -224,7 +268,7 @@ impl ManagerUi {
             #[strong]
             valid,
             move |_, _, x, y| {
-                if valid.get()
+                if valid.replace(false)
                     && !moved.get()
                     && x >= 0.
                     && y >= 0.
@@ -232,17 +276,34 @@ impl ManagerUi {
                     && y < row.height() as f64
                 {
                     if picked(&row, x, y).1 {
-                        row_menu(&row, &menu, x, y, true);
+                        menu.grab_focus();
+                        row_menu(&row, &menu.popover().unwrap(), x, y, true);
                     } else {
+                        if !w.workspaces.ui.finish_active_workspace_name(&w) { return; }
+                        row.grab_focus();
                         w.workspaces.ui.list.select_row(Some(&row));
                     }
                 }
             }
         ));
-        click.connect_stopped(glib::clone!(
+        click.connect_update(glib::clone!(
+            #[weak]
+            row,
+            #[strong]
+            press_origin,
             #[strong]
             valid,
-            move |_| valid.set(false)
+            move |gesture, sequence| {
+                if valid.get() && let Some((x, y)) = gesture.point(sequence) {
+                    let (start_x, start_y) = press_origin.get();
+                    if row.drag_check_threshold(start_x as i32, start_y as i32, x as i32, y as i32) { valid.set(false); }
+                }
+            }
+        ));
+        click.connect_cancel(glib::clone!(
+            #[strong]
+            valid,
+            move |_, _| valid.set(false)
         ));
         row.add_controller(click.clone());
         click.group_with(&source);
@@ -254,7 +315,7 @@ impl ManagerUi {
             #[weak]
             row,
             #[weak]
-            menu,
+            context,
             #[strong]
             held,
             #[strong]
@@ -264,7 +325,7 @@ impl ManagerUi {
                     held.set(true);
                     valid.set(false);
                     g.set_state(gtk::EventSequenceState::Claimed);
-                    row_menu(&row, &menu, x, y, false);
+                    row_menu(&row, &context, x, y, false);
                 }
             }
         ));
@@ -362,11 +423,11 @@ impl ManagerUi {
     }
 }
 
-fn row_menu(row: &adw::ActionRow, menu: &gtk::MenuButton, x: f64, y: f64, autohide: bool) {
-    let popup = menu.popover().unwrap();
-    if let Some(p) = row.compute_point(menu, &gtk::graphene::Point::new(x as f32, y as f32)) {
+fn row_menu(row: &gtk::ListBoxRow, popup: &gtk::Popover, x: f64, y: f64, autohide: bool) {
+    if let Some(p) = popup.parent().and_then(|parent| row.compute_point(&parent, &gtk::graphene::Point::new(x as f32, y as f32))) {
         popup.set_pointing_to(Some(&gdk::Rectangle::new(p.x() as i32, p.y() as i32, 1, 1)));
     }
     popup.set_autohide(autohide);
     popup.popup();
+    popup.present();
 }

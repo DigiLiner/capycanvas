@@ -16,8 +16,7 @@ fn menu_changes(previous: &layer_ui::ContextMenu, next: &layer_ui::ContextMenu) 
             if previous.len() != next.len() { return (true, true); }
             for (previous, next) in previous.iter().zip(next) {
                 let children = sections(&previous.sections, &next.sections);
-                changed.1 |= children.1 || previous.label != next.label || previous.bindings != next.bindings
-                    || (previous.action.is_none() && previous.enabled != next.enabled);
+                changed.1 |= children.1 || previous.label != next.label || previous.bindings != next.bindings;
                 changed.0 |= children.0 || previous.enabled != next.enabled || previous.selected != next.selected || previous.action != next.action;
             }
         }
@@ -26,6 +25,27 @@ fn menu_changes(previous: &layer_ui::ContextMenu, next: &layer_ui::ContextMenu) 
     let changed = sections(&previous.sections, &next.sections);
     let title = previous.title != next.title;
     (changed.0 || title, changed.1 || title)
+}
+
+fn sync_menu(previous: &gtk::gio::Menu, next: &gtk::gio::MenuModel) {
+    let attributes = ["label", "action", "target", "icon", "custom", "accel"];
+    let links = [gtk::gio::MENU_LINK_SECTION, gtk::gio::MENU_LINK_SUBMENU];
+    let same_items = previous.n_items() == next.n_items() && (0..next.n_items()).all(|index| {
+        attributes.iter().all(|name| previous.item_attribute_value(index, name, None) == next.item_attribute_value(index, name, None))
+            && links.iter().all(|name| previous.item_link(index, name).is_some() == next.item_link(index, name).is_some())
+    });
+    if !same_items {
+        previous.remove_all();
+        for index in 0..next.n_items() { previous.append_item(&gtk::gio::MenuItem::from_model(next, index)); }
+        return;
+    }
+    for index in 0..next.n_items() {
+        for name in links {
+            if let (Some(previous), Some(next)) = (previous.item_link(index, name).and_downcast::<gtk::gio::Menu>(), next.item_link(index, name)) {
+                sync_menu(&previous, &next);
+            }
+        }
+    }
 }
 
 fn menu_label(widget: &gtk::Widget) -> Option<glib::GString> {
@@ -88,6 +108,7 @@ impl NativeWorkspaces {
     fn options_popup(&self, w: &Rc<Workspace>) -> gtk::PopoverMenu {
         let popup = gtk::PopoverMenu::from_model(gtk::gio::MenuModel::NONE);
         popup.set_widget_name("workspace-switcher-options-popup");
+        popup.add_css_class("workspace-visibility-menu");
         self.populate_switcher_menu(w, &popup, false, true);
         self.track_popup(&popup, false);
         w.watch_popover(popup.upcast_ref());
@@ -96,6 +117,10 @@ impl NativeWorkspaces {
 
     fn populate_switcher_menu(&self, w: &Rc<Workspace>, popup: &gtk::PopoverMenu, compact: bool, layout: bool) {
         let view = self.view();
+        let states: std::collections::HashMap<_, _> = view.switcher_options.sections.iter().flatten().filter_map(|item| {
+            let Some(UiAction::WorkspaceManager { command: layer_ui::WorkspaceCommand::ShowInSwitcher { id, .. } }) = &item.action else { return None; };
+            Some((id.clone(), (item.selected.unwrap_or(false), item.enabled)))
+        }).collect();
         let menu = if compact { view.switcher_menu } else { view.switcher_options };
         let page = popup.visible_submenu();
         let focused = gtk::prelude::GtkWindowExt::focus(&w.window).filter(|widget| widget.is_ancestor(popup));
@@ -103,12 +128,37 @@ impl NativeWorkspaces {
         if layout { menu_rows(popup.upcast_ref(), &mut rows); }
         let focus_row = focused.as_ref().and_then(|focused| rows.iter().position(|(row, _)| row == focused))
             .map(|index| (index, rows[index].1.clone()));
-        let model = w.workspace_menu_model(popup, menu);
         if !layout {
+            w.workspace_switcher_menu_model(popup, menu);
+            crate::text_language::visit(popup.upcast_ref(), &mut |widget| {
+                if let Some(check) = widget.downcast_ref::<gtk::CheckButton>()
+                    && let Some((selected, enabled)) = check.widget_name().strip_prefix("workspace-visibility-").and_then(|id| states.get(id))
+                {
+                    check.set_active(*selected);
+                    check.update_state(&[gtk::accessible::State::Disabled(!enabled)]);
+                    check.set_opacity(if *enabled { 1. } else { 0.5 });
+                }
+            });
             if let Some(focused) = focused.filter(|widget| widget.is_sensitive()) { focused.grab_focus(); }
             return;
         }
-        popup.set_menu_model(Some(&model));
+        let (model, checks) = w.workspace_switcher_menu_model(popup, menu);
+        if let Some(previous) = popup.menu_model().and_downcast::<gtk::gio::Menu>() { sync_menu(&previous, model.upcast_ref()); }
+        else { popup.set_menu_model(Some(&model)); }
+        let mut menus = Vec::new();
+        crate::text_language::visit(popup.upcast_ref(), &mut |widget| {
+            if let Some(menu) = widget.downcast_ref::<gtk::PopoverMenu>() { menus.push(menu.clone()); }
+        });
+        let mut existing = std::collections::HashSet::new();
+        crate::text_language::visit(popup.upcast_ref(), &mut |widget| { if widget.is::<gtk::CheckButton>() { existing.insert(widget.widget_name()); } });
+        for (id, check) in checks {
+            if !existing.contains(&check.widget_name()) { for menu in &menus { if menu.add_child(&check, &id) { break; } } }
+        }
+        crate::text_language::visit(popup.upcast_ref(), &mut |widget| {
+            if let Some(check) = widget.downcast_ref::<gtk::CheckButton>()
+                && let Some((selected, enabled)) = check.widget_name().strip_prefix("workspace-visibility-").and_then(|id| states.get(id))
+            { check.set_active(*selected); check.update_state(&[gtk::accessible::State::Disabled(!enabled)]); check.set_opacity(if *enabled { 1. } else { 0.5 }); }
+        });
         if compact { popup.set_visible_submenu(page.as_deref()); }
         if let Some((index, label)) = focus_row {
             rows.clear();
@@ -215,6 +265,7 @@ impl NativeWorkspaces {
     pub(super) fn bind_switcher(&self, w: &Rc<Workspace>) {
         *self.switch_owner.borrow_mut() = Rc::downgrade(w);
         self.switch_context.set_widget_name("workspace-switcher-options-context");
+        self.switch_context.add_css_class("workspace-visibility-menu");
         self.switch_context.set_has_arrow(false);
         self.switch_context.connect_closed(glib::clone!(#[weak] w, move |_| {
             if let Some(source) = w.workspaces.switch_context_focus.take().and_then(|source| source.upgrade())

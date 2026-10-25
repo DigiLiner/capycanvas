@@ -130,7 +130,6 @@ workspace-action-retry-storage = 저장 다시 시도
 workspace-manage-toolbars = 도구 모음 관리
 workspace-toolbars-intro = 이 작업 영역의 도구 모음을 배치합니다.
 workspace-library-intro = 어느 작업 영역에서든 다시 사용할 수 있도록 도구 모음을 저장합니다.
-workspace-intro = 작업 영역은 다양한 작업에 맞는 레이아웃을 저장합니다.
 workspace-history-hidden = 숨기기: { $panels }
 workspace-history-shown = 표시: { $panels }
 workspace-history-restored-earlier = 이전 레이아웃 복원

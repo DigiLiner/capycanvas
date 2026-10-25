@@ -103,6 +103,8 @@ class AndroidWorkspaceManagerTest {
         val painting = view().getString("id")
         assertNotEquals(original, painting)
         assertEquals("Tablet Painting", view().getString("name"))
+        compose.onNodeWithTag("workspace-manager").assertIsDisplayed()
+        tap("workspace-cancel"); idle()
         action(obj("type" to "invoke", "command" to "eraser"))
         action(obj("type" to "set_brush_size", "value" to 91))
         action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(0.2, 0.3, 0.4, 1.0))))
@@ -141,9 +143,11 @@ class AndroidWorkspaceManagerTest {
         assertEquals(painting, view().getString("id"))
         assertEquals(sharedEditing, editing())
         assertEquals(normalized(beforeRestart), normalized(capture()))
-        menu("Manage Workspaces…"); tap("workspace-options-$painting"); tap("workspace-rename")
-        compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("workspace-name")), useUnmergedTree = true).performTextReplacement("Tablet Inking")
-        tap("workspace-submit"); idle(); tap("workspace-cancel")
+        menu("Manage Workspaces…")
+        compose.onNodeWithTag("workspace-name-$painting", useUnmergedTree = true).performTouchInput { doubleClick() }
+        compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("workspace-name-$painting")), useUnmergedTree = true).performTextReplacement("Tablet Inking")
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_ENTER)
+        idle(); tap("workspace-cancel")
         assertEquals("Tablet Inking", view().getString("name"))
         for (id in listOf("builtin:workspace:painter", "builtin:workspace:illustrator", "builtin:workspace:photographer")) {
             shot("before-header-switch")

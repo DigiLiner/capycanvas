@@ -130,7 +130,6 @@ workspace-action-retry-storage = Reintentar almacenamiento
 workspace-manage-toolbars = Gestionar barras de herramientas
 workspace-toolbars-intro = Organiza las barras de herramientas de este espacio de trabajo.
 workspace-library-intro = Guarda barras para reutilizarlas en cualquier espacio de trabajo.
-workspace-intro = Los espacios de trabajo guardan la distribución para distintas tareas.
 workspace-history-hidden = Se ocultó { $panels }
 workspace-history-shown = Se mostró { $panels }
 workspace-history-restored-earlier = Se restauró una distribución anterior

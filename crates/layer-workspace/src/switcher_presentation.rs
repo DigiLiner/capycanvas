@@ -65,7 +65,9 @@ impl WorkspaceView {
         let editing = available && !self.switcher_busy;
         update(&mut self.switcher_options.sections, available, editing);
         update(&mut self.switcher_menu.sections, available, editing);
-        let manager_editing = self.ready && !self.busy && !self.closing && self.prompt.is_none();
+        let renaming = self.page == Some(ManagerPage::Workspaces)
+            && matches!(self.prompt_action, Some(ManagerAction::Rename(_)));
+        let manager_editing = self.ready && !self.closing && (renaming || (!self.busy && self.prompt.is_none()));
         for pin in self.rows.iter_mut().filter_map(|row| row.pin.as_mut()) {
             pin.enabled = manager_editing;
         }

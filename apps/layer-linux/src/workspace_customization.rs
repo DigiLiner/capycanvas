@@ -1729,7 +1729,7 @@ impl Workspace {
 
     fn fill_menu(self: &Rc<Self>, popover: &gtk::PopoverMenu, menu: layer_ui::ContextMenu, keep_toggles: bool) {
         let checks = RefCell::new(Vec::new());
-        let root = self.menu_model(popover, menu, keep_toggles.then_some(&checks));
+        let root = self.menu_model(popover, menu, keep_toggles.then_some(&checks), None);
         popover.set_menu_model(Some(&root));
         for (id, check) in checks.borrow().iter() {
             popover.add_child(check, id);
@@ -1766,7 +1766,17 @@ impl Workspace {
         popover: &gtk::PopoverMenu,
         menu: layer_ui::ContextMenu,
     ) -> gtk::gio::Menu {
-        self.menu_model(popover, menu, None)
+        self.menu_model(popover, menu, None, None)
+    }
+
+    pub(crate) fn workspace_switcher_menu_model(
+        self: &Rc<Self>,
+        popover: &gtk::PopoverMenu,
+        menu: layer_ui::ContextMenu,
+    ) -> (gtk::gio::Menu, Vec<(String, gtk::CheckButton)>) {
+        let checks = RefCell::new(Vec::new());
+        let model = self.menu_model(popover, menu, None, Some(&checks));
+        (model, checks.into_inner())
     }
 
     fn refresh_context_checks(self: &Rc<Self>) {
@@ -1800,8 +1810,9 @@ impl Workspace {
         popover: &gtk::PopoverMenu,
         menu: layer_ui::ContextMenu,
         checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
+        visibility_checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
     ) -> gtk::gio::Menu {
-        popover.set_flags(gtk::PopoverMenuFlags::NESTED);
+        popover.set_flags(if visibility_checks.is_some() { gtk::PopoverMenuFlags::empty() } else { gtk::PopoverMenuFlags::NESTED });
         fn model(
             w: &Rc<Workspace>,
             popup: &gtk::PopoverMenu,
@@ -1809,6 +1820,7 @@ impl Workspace {
             prefix: &str,
             actions: &gtk::gio::SimpleActionGroup,
             checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
+            visibility_checks: Option<&RefCell<Vec<(String, gtk::CheckButton)>>>,
         ) -> gtk::gio::Menu {
             let root = gtk::gio::Menu::new();
             for (s, items) in sections.into_iter().enumerate() {
@@ -1823,8 +1835,8 @@ impl Workspace {
                     if let Some(icon) = item.icon {
                         entry.set_icon(&gtk::gio::ThemedIcon::new(&format!("layer-{icon}-symbolic")));
                     }
-                    if item.action.is_none() && item.enabled {
-                        let submenu = model(w, popup, item.sections, &id, actions, checks);
+                    if item.action.is_none() && (item.enabled || (visibility_checks.is_some() && !item.sections.is_empty())) {
+                        let submenu = model(w, popup, item.sections, &id, actions, checks, visibility_checks);
                         entry.set_submenu(Some(&submenu));
                         section.append_item(&entry);
                         continue;
@@ -1839,6 +1851,30 @@ impl Workspace {
                                 w.dispatch(dispatch.clone());
                                 w.refresh_context_checks();
                             }
+                        }));
+                        let custom = gtk::gio::MenuItem::new(None, None);
+                        custom.set_attribute_value("custom", Some(&id.to_variant()));
+                        section.append_item(&custom);
+                        checks.borrow_mut().push((id, check));
+                        continue;
+                    }
+                    if let (Some(checks), Some(selected), Some(UiAction::WorkspaceManager { command: layer_ui::WorkspaceCommand::ShowInSwitcher { id: workspace, .. } })) = (visibility_checks, item.selected, item.action.as_ref()) {
+                        let check = gtk::CheckButton::with_label(&item.label);
+                        check.add_css_class("context-check");
+                        check.set_widget_name(&format!("workspace-visibility-{workspace}"));
+                        check.set_hexpand(true);
+                        check.set_active(selected);
+                        check.update_state(&[gtk::accessible::State::Disabled(!item.enabled)]);
+                        check.set_opacity(if item.enabled { 1. } else { 0.5 });
+                        let workspace = workspace.clone();
+                        check.connect_toggled(glib::clone!(#[weak] w, move |check| {
+                            let visible = check.is_active();
+                            let published = w.workspaces.view().switcher_options.sections.into_iter().flatten()
+                                .find(|item| matches!(&item.action, Some(UiAction::WorkspaceManager { command: layer_ui::WorkspaceCommand::ShowInSwitcher { id, .. } }) if id == &workspace))
+                                .map(|item| (item.selected.unwrap_or(false), item.enabled));
+                            if published.is_some_and(|(selected, enabled)| enabled && selected != visible) {
+                                w.dispatch(UiAction::WorkspaceManager { command: layer_ui::WorkspaceCommand::ShowInSwitcher { id: workspace.clone(), visible } });
+                            } else if let Some((selected, _)) = published { check.set_active(selected); }
                         }));
                         let custom = gtk::gio::MenuItem::new(None, None);
                         custom.set_attribute_value("custom", Some(&id.to_variant()));
@@ -1891,6 +1927,7 @@ impl Workspace {
             "item",
             &actions,
             checks,
+            visibility_checks,
         );
         popover.insert_action_group("context", Some(&actions));
         root

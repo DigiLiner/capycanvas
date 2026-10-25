@@ -130,7 +130,6 @@ workspace-action-retry-storage = 重試儲存
 workspace-manage-toolbars = 管理工具列
 workspace-toolbars-intro = 排列此工作區中的工具列。
 workspace-library-intro = 儲存工具列以便在任何工作區中重複使用。
-workspace-intro = 工作區為不同工作儲存版面配置。
 workspace-history-hidden = 隱藏{ $panels }
 workspace-history-shown = 顯示{ $panels }
 workspace-history-restored-earlier = 恢復更早的版面配置

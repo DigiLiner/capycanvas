@@ -131,7 +131,6 @@ workspace-action-retry-storage = Tentar armazenar novamente
 workspace-manage-toolbars = Gerenciar barras de ferramentas
 workspace-toolbars-intro = Organize as barras de ferramentas nesta área de trabalho.
 workspace-library-intro = Salve barras de ferramentas para reutilizar em qualquer área de trabalho.
-workspace-intro = Áreas de trabalho salvam seu layout para diferentes tarefas.
 workspace-history-hidden = Oculto: { $panels }
 workspace-history-shown = Mostrado: { $panels }
 workspace-history-restored-earlier = Layout anterior restaurado

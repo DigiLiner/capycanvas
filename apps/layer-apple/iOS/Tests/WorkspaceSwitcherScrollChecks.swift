@@ -13,9 +13,9 @@ extension EditorLaunchTests {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"workspace_manager","command":{"type":"manage"}}]"#
         app.launch()
         let list = app.scrollViews["workspace-manager-rows"]
-        let painter = app.buttons["workspace-select-builtin:workspace:painter"]
-        let illustrator = app.buttons["workspace-select-builtin:workspace:illustrator"]
-        let photographer = app.buttons["workspace-select-builtin:workspace:photographer"]
+        let painter = app.descendants(matching: .any)["workspace-select-builtin:workspace:painter"].firstMatch
+        let illustrator = app.descendants(matching: .any)["workspace-select-builtin:workspace:illustrator"].firstMatch
+        let photographer = app.descendants(matching: .any)["workspace-select-builtin:workspace:photographer"].firstMatch
         let menu = app.buttons["Show in top bar"]
         XCTAssertTrue(list.waitForExistence(timeout: 30))
         XCTAssertTrue(painter.waitForExistence(timeout: 10))
@@ -56,7 +56,7 @@ extension EditorLaunchTests {
         returnToTop(illustrator)
         XCTAssertTrue(illustrator.isSelected)
         XCTAssertLessThan(illustrator.frame.minY, photographer.frame.minY)
-        let firstCustom = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+        let firstCustom = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
             "workspace-select-", "Drawing Task 00")).firstMatch
         XCTAssertTrue(firstCustom.exists)
         XCTAssertTrue(!painter.isHittable || painter.frame.minY > firstCustom.frame.minY,

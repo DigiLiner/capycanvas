@@ -184,8 +184,10 @@ class CanvasHost @JvmOverloads constructor(application: Application, screen: JSO
             main.post { workspaceManager = view }
         }
     }
-    internal fun workspaceInput(request: JSONObject) = post {
-        updateWorkspaceManager(request); refreshChrome(); publish(true); wake()
+    internal var workspaceNameCommit: (() -> Boolean)? = null
+    internal fun workspaceInput(request: JSONObject) {
+        if(request.optString("type") !in listOf("submit","cancel","dismiss","edit_switcher","refresh_switcher","resume","suspend") && workspaceNameCommit?.invoke()==false)return
+        post {updateWorkspaceManager(request); refreshChrome(); publish(true); wake()}
     }
     private var closingWorkspaceWindow = false
     // Main-thread window attachment survives the gap during configuration

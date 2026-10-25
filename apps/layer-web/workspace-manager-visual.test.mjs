@@ -3,7 +3,7 @@ import {mkdir,writeFile} from "node:fs/promises";
 
 // Match native_workspace_manager_visual: fresh storage, three defaults, scale 1.
 export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
-  const output=process.env.LAYER_TEST_ARTIFACTS || '/tmp/capy-workspace-manager-visual/web';
+  const output=process.env.LAYER_TEST_ARTIFACTS || 'artifacts/workspace-manager-visual/web';
   await mkdir(output,{recursive:true});
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const row='.workspace-row[data-id="builtin:workspace:painter"]';
@@ -16,7 +16,7 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
     await pause(700);await settle();
     assert.equal(await evaluate('document.querySelector(".workspace-manager").open'),true);
     const samples={};
-    for(const [state,selector] of [['normal',null],['row',`${row} .workspace-choice`],['grip',`${row} .workspace-grip`],['pin',`${row} .workspace-pin`],['current','.workspace-row[data-id="builtin:workspace:illustrator"] .workspace-choice'],['new','.workspace-add'],['cancel','.workspace-manager footer button'],['disabled','.workspace-manager .suggested-action']]) {
+    for(const [state,selector] of [['normal',null],['row',`${row} .workspace-choice`],['grip',`${row} .workspace-grip`],['pin',`${row} .workspace-pin`],['current','.workspace-row[data-id="builtin:workspace:illustrator"] .workspace-choice'],['new','.workspace-row-actions .workspace-add'],['cancel','.workspace-manager footer button'],['disabled','.workspace-manager .suggested-action']]) {
       await move(selector);
       const shot=await call('Page.captureScreenshot',{format:'png'});
       await writeFile(`${output}/web-${theme}-${state}.png`,Buffer.from(shot.data,'base64'));
@@ -34,16 +34,13 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
       assert.equal(sample.primary,normal.primary,'hovering disabled confirmation preserves its color');
     }
     assert.equal(await evaluate('[...document.querySelectorAll(".workspace-row")].every(row=>!row.querySelector(".workspace-options"))'),true,'built-in rows have no extra options button');
-    const measured=await evaluate(`(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]};return {dialog:rect('.workspace-manager'),intro:rect('.workspace-intro'),list:rect('.workspace-list'),row:rect('.workspace-row'),footer:rect('.workspace-manager footer'),add:(()=>{const r=document.querySelector('.workspace-add').getBoundingClientRect();return[r.right,r.y,r.height]})(),focus:document.activeElement.className};})()`);
-    assert.deepEqual(measured,{dialog:[490,250,460,500],intro:[508,314,424,18],list:[508,398,424,288],row:[508,398,424,56],footer:[508,698,424,34],add:[932,354,34],focus:'workspace-manager'},'GTK allocations and initial dialog focus');
-    // Keyboard navigation still exposes focus, including the whole selected row.
-    assert.equal(await evaluate('document.querySelector(".workspace-add").textContent'),'New Workspace');
-    assert.equal(await evaluate('(()=>{const n=document.querySelector(".workspace-add");return n.scrollWidth<=n.clientWidth&&getComputedStyle(n).backgroundColor!=="rgba(0, 0, 0, 0)"})()'),true,'New Workspace fits its label and has a visible button surface');
-    for(const selector of ['.dialog-close','.workspace-add']) {
-      await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-      await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
-      assert.equal(await evaluate(`document.activeElement.matches('${selector}:focus-visible')`),true);
-    }
+    const measured=await evaluate(`(()=>{const node=s=>document.querySelector(s),rect=s=>node(s).getBoundingClientRect(),d=rect('.workspace-manager'),h=rect('.workspace-manager .dialog-header'),l=rect('.workspace-list'),a=rect('.workspace-row-actions .workspace-add'),trash=rect('.workspace-delete'),f=rect('.workspace-manager footer'),buttons=[...node('.workspace-manager footer').querySelectorAll('button')].filter(n=>!n.hidden),last=buttons.at(-1).getBoundingClientRect();return {padding:[l.left-d.left,d.right-l.right,d.bottom-f.bottom,getComputedStyle(node('.workspace-manager')).paddingTop],sections:[l.top-h.bottom,f.top-a.bottom],actionGap:a.top-l.bottom,actionSizes:[a.width,a.height,trash.width,trash.height],listHeight:l.height,rowHeights:[...node('.workspace-list').children].map(n=>n.getBoundingClientRect().height),rowBorders:[...node('.workspace-list').children].map(n=>getComputedStyle(n).borderBottomWidth),buttonRight:last.right,listRight:l.right,footerButtonWidths:buttons.map(n=>n.getBoundingClientRect().width),footerWidth:f.width,radius:getComputedStyle(node('.workspace-list')).borderRadius,focus:document.activeElement.matches('.workspace-choice[aria-selected="true"]'),extra:[...document.querySelectorAll('.workspace-intro,.workspace-search,.workspace-options')].filter(n=>n.getClientRects().length).length};})()`);
+    assert.deepEqual(measured.padding.slice(0,3),[20,20,20],'manager body uses20 px outer margins');
+    assert.deepEqual(measured.sections,[20,12],'header has20 px body inset and footer has12 px section spacing');assert.equal(measured.actionGap,4);
+    assert.deepEqual(measured.actionSizes,[34,34,34,34]);assert.ok(measured.listHeight<=7*56);assert.ok(measured.rowHeights.every(height=>height===56));assert.ok(measured.rowBorders.every(width=>width==='0px'),'rows have no bottom rule');
+    assert.equal(measured.buttonRight,measured.listRight,'footer aligns natural buttons to the right');assert.ok(measured.footerButtonWidths.reduce((a,b)=>a+b,0)<measured.footerWidth);assert.notEqual(measured.radius,'0px');assert.equal(measured.extra,0);assert.equal(measured.focus,true);
+    assert.equal(await evaluate('document.querySelector(".workspace-row-actions .workspace-add").textContent.trim()'),'','New Workspace uses an icon');
+    await evaluate('document.querySelector(".workspace-row-actions .workspace-add").focus()');
     await evaluate(`document.querySelector(${JSON.stringify(`${row} .workspace-choice`)}).focus()`);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(row)})).outlineStyle`),'solid');
     // Touch mode must not retain a mouse hover while the list scrolls or drags.

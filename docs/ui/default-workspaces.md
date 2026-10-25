@@ -227,6 +227,9 @@ retain their ordinary docked Properties panels.
 | Layout History | Earlier arrangements of the current workspace; excludes tool settings and document edits |
 | Starting layout | The arrangement the workspace began with |
 
+Web is the visual reference for the manager's layout and controls across clients.
+Native dialog shells, menus and input retain platform conventions.
+
 The Window menu starts with Customize Title Bar…, then Undo Layout Change and
 Redo Layout Change, then the **Workspaces** and **Quick Access Toolbars**
 submenus, then the panel rows. Workspaces lists the current workspace and up to
@@ -234,19 +237,26 @@ five others, then New Workspace… and Manage Workspaces…; Layout History… a
 Restore Starting Layout…; and Reset All Brushes…. Captions come from
 [`workspace_manager_ui.rs`](../../crates/layer-ui/src/workspace_manager_ui.rs).
 
-- **Manage Workspaces** is a compact selectable list with a labeled **New
-  Workspace** button above the list on the right and Cancel / Switch to
-  Workspace below. Each row's
+- **Manage Workspaces** is a compact selectable list with Cancel / Switch to
+  Workspace below. **+** and trash sit below the list, like Layers, with
+  tooltips and accessible names. These use 34px dialog targets aligned with the
+  list; Cancel and Switch use the app's right-aligned dialog footer. The dialog
+  fits up to seven measured rows and scrolls longer lists without a search bar. Its list
+  and controls use the shared squircle rendering, with one outer list clip.
+  Double-click a custom workspace's name or press
+  F2 to rename it inline; Enter commits and Escape cancels. Touch and pen can
+  swipe left to reveal Delete. There is no introductory description. Each row's
   grip opens Move Up / Move Down when clicked, tapped or activated with the
   keyboard, and drags immediately after movement slop. Custom rows also have a
-  **⋮** menu for Rename and Delete; built-in rows have no dots. A separate pin
+  context menu for Rename and Delete. A separate pin
   shows or hides the workspace in the top bar.
   The current workspace starts selected with Switch disabled; a workspace owned
   by another window offers Switch to Window.
-  More than seven entries reveal the shared workspace search control on every
-  host; filtering keeps the selected workspace and preview ownership intact.
-- Selecting a row, double-clicking or pressing Enter in the manager or Layout
-  History only previews the arrangement in the editor behind the dialog. The
+  Escape closes the normal list view;
+  an open menu or inline name editor handles Escape first.
+- Selecting a row or pressing Enter in the manager or Layout History previews
+  the arrangement in the editor behind the dialog. Double-clicking also previews,
+  except on custom workspace names, where it starts renaming. The
   confirming button commits; the preview stays presented until the adopted
   workspace replaces it, and a failed load restores the original. Cancel,
   Escape, back navigation and native dismissal restore the original
@@ -256,6 +266,9 @@ Restore Starting Layout…; and Reset All Brushes…. Captions come from
   date. The current version starts selected with Restore disabled.
 - **New Workspace** asks only for a name, copies the current
   arrangement into an independent workspace, and pins it to the top bar.
+  Creating or deleting a workspace from Manage Workspaces keeps the manager open.
+  Creation and active-workspace deletion select the resulting current workspace;
+  dismissing the manager during publication does not reopen it when the work finishes.
 - Failed saves offer Retry and Save as New Workspace, and a failed close keeps
   the option to leave the window open.
 
@@ -317,6 +330,9 @@ under Show in top bar and ends with Manage Workspaces….
 The checklist keeps confirmed checkmarks while preferences are being saved or
 refreshed and updates when the operation completes. A failed save keeps the
 previous visibility and shows a notice when the full editor is closed.
+The menu stays open while checking or unchecking workspaces, including in
+the compact menu's submenu. Escape, an outside press or a navigation command
+closes it normally.
 
 Right-clicking a workspace choice, the dots, or unused switcher space opens the
 same visibility menu. Touch/pen hold and the keyboard context-menu action do
@@ -325,7 +341,7 @@ context-menu action, and their options open outside Customize Title Bar. Releasi
 not switch workspaces. Ordinary clicks keep their switching behavior.
 
 Manage Workspaces keeps a single ordered list. Every row has a narrow, dimmed
-left grip and a pin with no button background or border. The pin is filled when
+grip and a pin with no button background or border. The pin is filled when
 the workspace is shown in the top bar and outlined otherwise; its tooltip offers
 **Hide from top bar** or **Show in top bar**. Clicking, tapping or activating the
 focused pin changes only its saved visibility, without selecting a preview or
@@ -343,9 +359,19 @@ Moving a row never changes its pin. Clicking or tapping the grip opens only
 Move Up / Move Down. Enter or Space on the focused grip opens the same menu;
 Escape closes it and restores focus. Dragging the grip does not open a menu
 or select a preview. Row context menus offer the same reorder commands.
-Custom rows keep a separate **⋮** for Rename and Delete. Shared Rust supplies
-these options; built-in rows and rows owned by another window have none. The
-empty options column keeps pins aligned without an extra focus stop.
+Shared Rust supplies Rename and Delete only for available custom workspaces.
+These appear in the row's hold, right-click and keyboard context menu,
+without dots. Its trash button acts on the selected row and stays disabled when
+Delete is unavailable; a touch/pen swipe left reveals the same Delete action.
+The pin and grip sit together at
+the right edge without an empty options column. Inline renaming preserves the
+selected preview, including pending loads, cancellation and successful saves.
+Rows update in place so saving a name preserves a pressed pin and its ancestors
+through release. An accepted Switch or row-selection action waits for the name
+to save; visibility edits remain independent of the rename. Swipe Delete uses the Layers action styling, stays clipped to
+the list and closes on an outside press without consuming that press.
+New, Delete, Switch and row selection finish an inline edit first. Invalid names
+keep the draft open; a failed save keeps its error and cancels queued actions.
 Clicking still previews; menus, scrolling and dragging keep the selected row and
 its preview. Pinning and ordering save immediately as app preferences shared by
 all workspaces and windows; Cancel does not undo them.
@@ -382,8 +408,12 @@ and shows a notice; see
 ```sh
 bash tools/performance/workspace-motion.sh gtk --workspace-switcher
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_grip_menus --native-storage
+bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_rename_pin_capture --native-storage
+bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_swipe_dismissal --native-storage
+bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_inline_actions --native-storage
+bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_rename_apply_capture --native-storage
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_options
-bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_pending_menu
+GTK_A11Y=test bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_pending_menu
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_compact_switcher_input
 bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_immediate_audit
 bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_viewport_input
@@ -394,6 +424,7 @@ bash tools/performance/workspace-motion.sh gtk --native-test=native_brush_drawer
 bash tools/performance/workspace-motion.sh gtk --native-test=native_unreadable_workspace_storage_input --native-storage
 node apps/layer-web/test.mjs --workspace-switcher
 node apps/layer-web/test.mjs --workspace-grips
+node apps/layer-web/test.mjs --workspace-held-name
 node apps/layer-web/test.mjs --workspace-options
 node apps/layer-web/test.mjs --workspace-options-refresh
 node apps/layer-web/device.test.mjs --workspace-options

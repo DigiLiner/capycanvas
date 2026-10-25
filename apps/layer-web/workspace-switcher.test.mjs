@@ -135,16 +135,17 @@ export async function checkWorkspaceOptions({call, evaluate, settle}) {
       }
       device="mouse";
       const toggle=async id=>{
-        await click(dots);await check();const index=(await view()).switcher_options.sections[0].findIndex(row=>row.action.command.id===id);
-        await click(`${menu} button:nth-of-type(${index+1})`);assert.equal(await opened(),false,"visibility activation closes menu");
+        assert.ok((await view()).switcher_options.sections[0].every(item=>item.keep_open),"visibility choices publish persistent menu policy");
+        if(!await opened())await click(dots);await check();const index=(await view()).switcher_options.sections[0].findIndex(row=>row.action.command.id===id);
+        await click(`${menu} button:nth-of-type(${index+1})`);assert.equal(await opened(),true,"visibility activation retains the menu");await check();
       };
       for (const row of (await view()).switcher_options.sections[0].filter(row=>row.selected))await toggle(row.action.command.id);
       assert.deepEqual((await view()).switcher,[]);assert.equal((await view()).id,active);
       assert.deepEqual((await view()).switcher_display.map(row=>row.id),[active]);
-      await click(dots);await check();assert.ok((await view()).switcher_options.sections[0].every(row=>!row.selected));await key("Escape");
+      if(!await opened())await click(dots);await check();assert.ok((await view()).switcher_options.sections[0].every(row=>!row.selected));await key("Escape");
       for (const row of original.switcher)await toggle(row.id);
       assert.equal(await evaluate("layerApp.app.workspace_capture()"),before,"pin changes preserve workspace and history");
-      await click(dots);await click(`${menu} button:last-of-type`);assert.equal((await view()).page,"workspaces");
+      if(!await opened())await click(dots);await click(`${menu} button:last-of-type`);assert.equal((await view()).page,"workspaces");
       assert.equal(await evaluate("document.querySelector('.workspace-options')"),null,"built-in rows have no extra options button");
       assert.ok(await evaluate("Array.from(document.querySelectorAll('.workspace-grip svg'),n=>n.getBoundingClientRect()).every(r=>r.width===16&&r.height===16)"),"editor grips retain the shared icon canvas");
       await shot(`${theme}-manage-workspaces`);
@@ -268,7 +269,7 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
   const drag = async (id, target, after, sourceDevice, handle=false, hold=false) => {
     device=sourceDevice;
     const start=await point(`${row(id)} ${handle?'.workspace-grip':'.workspace-choice'}`), end=await point(row(target), after?.85:.15);
-    await pointer("down",start); if(hold) {await pause(600);assert.equal(await menuOpen(),device!=="mouse",`${device}: only touch/pen holds open menus before drag`);}
+    await pointer("down",start); if(hold) {await pause(600);assert.equal(await menuOpen(),device!=="mouse",`${device}: touch/pen hold opens row actions before drag`);}
     for(const t of [.3,.7,1]) await pointer("move",{x:start.x+(end.x-start.x)*t,y:start.y+(end.y-start.y)*t});
     if(hold)assert.equal(await menuOpen(),false,`${device} same-contact drag closes menu`);
     await pointer("up"); await idle();
@@ -285,7 +286,7 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
     for(const id of [p,i,f])assert.ok((await rect(`${row(id)} .workspace-grip`)).width<=16,"narrow grip on every row");
     await shot("workspaces");
     device="mouse"; await pointer("down",await point(`${row(p)} .workspace-choice`),"right"); await pointer("up",undefined,"right");
-    assert.equal(await menuOpen(),true,"right-click opens menu"); await shot("row-menu"); await key("Escape");
+    assert.equal(await menuOpen(),true,"included workspace context contains ordering actions");assert.deepEqual(await evaluate('[...document.querySelectorAll(".workspace-row-menu button")].map(n=>n.dataset.action)'),["up","down"]); await shot("row-menu");await key("Escape");
     for(const kind of ["mouse","touch","pen"]) {
       device=kind;
       await evaluate(`window.retainedPin=document.querySelector(${JSON.stringify(`${row(p)} .workspace-pin`)})`);
@@ -310,8 +311,8 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
       }
       device=kind;
       await pointer("down",await point(`${row(p)} .workspace-choice`)); await pause(600);
-      assert.equal(await menuOpen(),kind!=="mouse",`${kind}: only touch/pen holds open menus`); await pointer("up"); await idle();
-      assert.equal(await menuOpen(),kind!=="mouse",`${kind}: menu lifetime after release`);
+      assert.equal(await menuOpen(),kind!=="mouse",`${kind}: touch/pen hold opens ordering actions`); await pointer("up"); await idle();
+      assert.equal(await menuOpen(),kind!=="mouse",`${kind}: hold menu survives release`);
       if(kind==="mouse") {
         assert.equal((await view()).selected,p,"mouse hold release keeps ordinary row selection");
         await click(`${row(f)} .workspace-choice`);
@@ -357,6 +358,8 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
       assert.deepEqual(await shown(),await pins());
     }
     await send({type:"switch",id:initial.id}); await send({type:"open",page:"workspaces"}); await click(`${row(f)} .workspace-choice`);
+    assert.equal(await evaluate('document.querySelector(".workspace-list").getBoundingClientRect().height'),392,"large lists expose at most seven 56 px rows");
+    assert.equal(await evaluate('[...document.querySelectorAll(".workspace-search")].every(n=>n.hidden||!n.getClientRects().length)'),true,"workspace search stays hidden for large lists");
     assert.deepEqual(await pins(),[i,f,...custom],"new pins survive switching away");
     for(const id of custom.slice(1))await togglePin(id);
     assert.deepEqual(await pins(),[i,f,custom[0]]);

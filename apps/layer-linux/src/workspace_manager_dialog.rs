@@ -4,6 +4,8 @@ use layer_workspace::{ManagerAction, ManagerButton, ManagerPage, ManagerPrompt, 
 
 #[path = "workspace_switcher_dialog.rs"]
 mod switcher_controls;
+#[path = "workspace_manager_row.rs"]
+mod workspace_rows;
 
 pub(crate) struct ManagerUi {
     pub dialog: adw::Dialog,
@@ -13,21 +15,24 @@ pub(crate) struct ManagerUi {
     tabs: gtk::Box,
     search: gtk::SearchEntry,
     list: gtk::ListBox,
+    list_scroll: gtk::ScrolledWindow,
     details: gtk::Box,
     pub note: gtk::Label,
     rows: RefCell<Vec<String>>,
     rows_key: RefCell<String>,
-    pin_buttons: RefCell<std::collections::BTreeMap<String, gtk::ToggleButton>>,
+    rows_page: Cell<Option<ManagerPage>>,
+    workspace_rows: RefCell<std::collections::BTreeMap<String, Rc<workspace_rows::WorkspaceRowUi>>>,
     details_key: RefCell<String>,
     rebuilding: Cell<bool>,
     actions: gtk::Box,
     intro: gtk::Label,
     split: gtk::Paned,
-    sidebar: gtk::Box,
     details_view: gtk::ScrolledWindow,
     apply: gtk::Button,
     footer: gtk::Box,
     create: gtk::Button,
+    remove: gtk::Button,
+    list_actions: gtk::Box,
     switcher_pending: Cell<bool>,
     order: RefCell<Vec<String>>,
     dragged: RefCell<Option<String>>,
@@ -45,16 +50,16 @@ impl ManagerUi {
             .content_height(540)
             .build();
         dialog.set_widget_name("workspace-manager");
+        dialog.add_css_class("workspace-manager");
         let view = adw::ToolbarView::new();
         let header = adw::HeaderBar::new();
-        let create = gtk::Button::with_label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE));
+        let create = crate::icons::button("layer-plus-symbolic");
         create.set_widget_name("workspace-manager-new");
         create.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE)));
         create.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE))]);
-        create.set_halign(gtk::Align::End);
         view.add_top_bar(&header);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        margins(&body, 18);
+        body.add_css_class("dialog-page");
         let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         body.append(&tabs);
         let intro = gtk::Label::new(None);
@@ -71,26 +76,42 @@ impl ManagerUi {
         split.set_position(280);
         split.set_vexpand(true);
         split.set_wide_handle(true);
-        let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
         sidebar.set_size_request(220, -1);
         let search = gtk::SearchEntry::new();
         search.set_placeholder_text(Some(&localization.text(layer_ui::MessageId::COLOR_FEATURES_PROFILE_SEARCH)));
         search.set_widget_name("workspace-manager-search");
+        search.set_margin_bottom(12);
         sidebar.append(&search);
         let actions = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        actions.set_margin_bottom(12);
         sidebar.append(&actions);
-        sidebar.append(&create);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::Single);
         list.add_css_class("boxed-list");
+        list.add_css_class("workspace-manager-items");
         list.set_widget_name("workspace-manager-items");
-        sidebar.append(&crate::input::pen_scroller(
+        let scroll = crate::input::pen_scroller(
             gtk::ScrolledWindow::builder()
                 .vexpand(true)
                 .hscrollbar_policy(gtk::PolicyType::Never)
                 .child(&list)
                 .build(),
-        ));
+        );
+        scroll.add_css_class("workspace-manager-list");
+        scroll.set_overflow(gtk::Overflow::Hidden);
+        sidebar.append(&scroll);
+        let list_actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        list_actions.add_css_class("workspace-list-actions");
+        create.add_css_class("flat");
+        list_actions.append(&create);
+        let remove = crate::icons::button("layer-delete-symbolic");
+        remove.add_css_class("flat");
+        remove.set_widget_name("workspace-manager-delete");
+        remove.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::COMMON_DELETE)));
+        remove.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::COMMON_DELETE))]);
+        list_actions.append(&remove);
+        sidebar.append(&list_actions);
         let details = gtk::Box::new(gtk::Orientation::Vertical, 12);
         details.set_widget_name("workspace-manager-details");
         details.set_margin_start(18);
@@ -109,7 +130,9 @@ impl ManagerUi {
         apply.add_css_class("suggested-action");
         apply.set_sensitive(false);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        footer.set_homogeneous(true);
+        footer.add_css_class("dialog-footer");
+        footer.add_css_class("workspace-manager-footer");
+        footer.set_halign(gtk::Align::End);
         let cancel = gtk::Button::with_label(&localization.text(layer_ui::MessageId::COMMON_CANCEL));
         cancel.connect_clicked(glib::clone!(
             #[weak]
@@ -120,8 +143,13 @@ impl ManagerUi {
         ));
         footer.append(&cancel);
         footer.append(&apply);
-        body.append(&footer);
-        view.set_content(Some(&body));
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("dialog-content");
+        let page = crate::squircle::Squircles::new(&body);
+        page.set_vexpand(true);
+        content.append(&page);
+        content.append(&crate::squircle::Squircles::new(&footer));
+        view.set_content(Some(&content));
         dialog.set_child(Some(&view));
         Self {
             dialog,
@@ -131,21 +159,24 @@ impl ManagerUi {
             tabs,
             search,
             list,
+            list_scroll: scroll,
             details,
             note,
             rows: RefCell::new(Vec::new()),
             rows_key: RefCell::new(String::new()),
-            pin_buttons: RefCell::default(),
+            rows_page: Cell::new(None),
+            workspace_rows: RefCell::default(),
             details_key: RefCell::new(String::new()),
             rebuilding: Cell::new(false),
             actions,
             intro,
             split,
-            sidebar,
             details_view,
             apply,
             footer,
             create,
+            remove,
+            list_actions,
             switcher_pending: Cell::new(false),
             order: RefCell::new(Vec::new()),
             dragged: RefCell::new(None),
@@ -156,6 +187,28 @@ impl ManagerUi {
         }
     }
     pub fn bind(&self, w: &Rc<Workspace>) {
+        w.workspaces.bind_input_gate(w, &self.dialog);
+        let outside = gtk::GestureClick::new();
+        outside.set_button(0);
+        outside.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dialog = self.dialog.clone();
+        outside.connect_pressed(glib::clone!(#[weak] w, #[weak] dialog, move |_, _, x, y| {
+            let rows: Vec<_> = w.workspaces.ui.workspace_rows.borrow().values().cloned().collect();
+            for row in rows {
+                if row.swipe.is_open() && !dialog.compute_point(&row.row, &gtk::graphene::Point::new(x as f32, y as f32))
+                    .is_some_and(|point| point.x() >= 0. && point.y() >= 0. && point.x() < row.row.width() as f32 && point.y() < row.row.height() as f32)
+                { row.swipe.reveal(false); }
+            }
+        }));
+        self.dialog.add_controller(outside);
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(#[weak] w, #[upgrade_or] glib::Propagation::Proceed, move |_, key, _, _| {
+            if key == gdk::Key::Escape && w.workspaces.view().page == Some(ManagerPage::Workspaces) {
+                w.workspaces.send(&w, WorkspaceInput::Dismiss);
+                glib::Propagation::Stop
+            } else { glib::Propagation::Proceed }
+        }));
+        self.dialog.add_controller(keys);
         self.bind_reorder_drop(w);
         crate::input::guard_editable_activation(&self.search);
         self.dialog.connect_closed(glib::clone!(
@@ -172,12 +225,18 @@ impl ManagerUi {
         self.apply.connect_clicked(glib::clone!(
             #[weak]
             w,
-            move |_| w.workspaces.send(&w, WorkspaceInput::Confirm)
+            move |_| {
+                if w.workspaces.ui.finish_active_workspace_name(&w) {
+                    w.workspaces.send(&w, WorkspaceInput::Confirm);
+                }
+            }
         ));
         self.create.connect_clicked(glib::clone!(
             #[weak]
             w,
             move |_| {
+                w.workspaces.ui.close_workspace_swipes();
+                if !w.workspaces.ui.finish_active_workspace_name(&w) { return; }
                 w.workspaces.send(
                     &w,
                     WorkspaceInput::Form {
@@ -186,6 +245,14 @@ impl ManagerUi {
                 )
             }
         ));
+        self.remove.connect_clicked(glib::clone!(#[weak] w, move |_| {
+            w.workspaces.ui.close_workspace_swipes();
+            if !w.workspaces.ui.finish_active_workspace_name(&w) { return; }
+            let view = w.workspaces.view();
+            if let Some(action) = view.rows.iter().find(|row| Some(&row.id) == view.selected.as_ref())
+                .and_then(|row| row.options.iter().find(|button| matches!(button.action, ManagerAction::Delete(_)) && button.enabled))
+            { w.workspaces.send(&w, WorkspaceInput::Action { action: action.action.clone() }); }
+        }));
         self.search.connect_search_changed(glib::clone!(
             #[weak]
             w,
@@ -217,6 +284,8 @@ impl ManagerUi {
                 }
                 let id = row.and_then(|row| row.widget_name().strip_prefix("workspace-row-").map(str::to_owned))
                     .filter(|id| ui.rows.borrow().contains(id));
+                if w.workspaces.view().selected == id { return; }
+                if !ui.finish_active_workspace_name(&w) { return; }
                 w.workspaces.send(&w, WorkspaceInput::Select { id });
             }
         ));
@@ -256,9 +325,10 @@ impl ManagerUi {
     pub fn render(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
         let localization = w.localization();
         self.search.set_placeholder_text(Some(&localization.text(layer_ui::MessageId::COLOR_FEATURES_PROFILE_SEARCH)));
-        self.create.set_label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE));
         self.create.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE)));
         self.create.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::WORKSPACE_NEW_WORKSPACE))]);
+        self.remove.set_tooltip_text(Some(&localization.text(layer_ui::MessageId::COMMON_DELETE)));
+        self.remove.update_property(&[gtk::accessible::Property::Label(&localization.text(layer_ui::MessageId::COMMON_DELETE))]);
         if let Some(cancel) = self.footer.first_child().and_downcast::<gtk::Button>() { cancel.set_label(&localization.text(layer_ui::MessageId::COMMON_CANCEL)); }
         self.switcher_pending.set(view.switcher_busy);
         *self.order.borrow_mut() = view.order.clone();
@@ -275,7 +345,7 @@ impl ManagerUi {
         };
         let compact = matches!(page, ManagerPage::Workspaces | ManagerPage::History);
         if self.page.replace(Some(page)) != Some(page) {
-            self.configure(w, page);
+            self.configure(w, page, &view.query);
         }
         self.dialog.set_title(&view.title);
         self.intro.set_text(&view.intro);
@@ -284,25 +354,32 @@ impl ManagerUi {
         self.note.set_text(note.map_or("", String::as_str));
         self.note.set_visible(note.is_some());
         self.rebuilding.set(true);
-        self.search.set_visible(
-            page != ManagerPage::History
-                && (!compact || view.rows.len() > 7 || !view.query.is_empty()),
-        );
+        self.search.set_visible(!matches!(page, ManagerPage::History | ManagerPage::Workspaces));
         self.rebuilding.set(false);
         self.rows(w, view, page);
+        if page == ManagerPage::Workspaces && view.query.is_empty() && !view.rows.is_empty() {
+            let rows_height: i32 = (0..view.rows.len().min(7)).filter_map(|index| self.list.row_at_index(index as i32))
+                .map(|row| row.measure(gtk::Orientation::Vertical, -1).1).sum();
+            let controls_height = self.dialog.child().unwrap().measure(gtk::Orientation::Vertical, -1).1
+                - self.list_scroll.measure(gtk::Orientation::Vertical, -1).1;
+            self.dialog.set_content_height(controls_height + rows_height);
+        }
         if !compact {
             self.render_details(w, view);
         }
         self.apply.set_label(&view.primary);
-        self.apply.set_sensitive(view.enabled && !view.busy);
-        self.sidebar.set_sensitive(!view.busy);
-        self.create.set_sensitive(!view.busy);
+        self.apply.set_sensitive(view.enabled);
+        self.remove.set_sensitive(view.rows.iter().find(|row| Some(&row.id) == view.selected.as_ref())
+            .is_some_and(|row| row.options.iter().any(|button| button.enabled && matches!(button.action, ManagerAction::Delete(_)))));
         if !self.presented.replace(true) {
             self.dialog.present(Some(&w.window));
         }
         self.render_prompt(w, view);
+        if page == ManagerPage::Workspaces && w.window.visible_dialog().as_ref() == Some(&self.dialog)
+            && gtk::prelude::RootExt::focus(&w.window).is_none_or(|focus| !focus.is_ancestor(&self.dialog))
+        { self.focus_workspace_selection(); }
     }
-    fn configure(&self, w: &Rc<Workspace>, page: ManagerPage) {
+    fn configure(&self, w: &Rc<Workspace>, page: ManagerPage, query: &str) {
         let toolbar = matches!(
             page,
             ManagerPage::ThisWorkspace | ManagerPage::ToolbarLibrary
@@ -313,6 +390,7 @@ impl ManagerUi {
         self.list.set_placeholder(Some(&empty));
         self.footer.set_visible(compact);
         self.create.set_visible(page == ManagerPage::Workspaces);
+        self.list_actions.set_visible(page == ManagerPage::Workspaces);
         self.dialog
             .set_content_width(if compact { 460 } else { 780 });
         self.dialog
@@ -351,10 +429,11 @@ impl ManagerUi {
             ));
             self.actions.append(&button);
         }
+        self.actions.set_visible(self.actions.first_child().is_some());
         self.details_key.borrow_mut().clear();
         clear(&self.details);
         self.rebuilding.set(true);
-        self.search.set_text("");
+        self.search.set_text(query);
         self.rebuilding.set(false);
     }
     fn rows(&self, w: &Rc<Workspace>, view: &WorkspaceView, page: ManagerPage) {
@@ -362,28 +441,52 @@ impl ManagerUi {
         content.sort_by(|a, b| a.id.cmp(&b.id));
         let key = serde_json::to_string(&(page, content.iter().map(|row| (&row.id, &row.title, &row.subtitle, row.current, &row.actions)).collect::<Vec<_>>())).unwrap_or_default();
         self.rebuilding.set(true);
-        if *self.rows_key.borrow() != key && self.dragged.borrow().is_none() {
+        let changed_page = self.rows_page.replace(Some(page)) != Some(page);
+        if page == ManagerPage::Workspaces {
+            if changed_page {
+                let old_rows = std::mem::take(&mut *self.workspace_rows.borrow_mut());
+                drop(old_rows);
+                self.list.remove_all();
+                self.rows.borrow_mut().clear();
+            }
+            if self.dragged.borrow().is_none() {
+                let ids: Vec<_> = view.rows.iter().map(|row| row.id.clone()).collect();
+                let changed_order = *self.rows.borrow() != ids;
+                *self.rows.borrow_mut() = ids.clone();
+                let removed: Vec<_> = self.workspace_rows.borrow().keys().filter(|id| !ids.contains(id)).cloned().collect();
+                for id in removed {
+                    let row = self.workspace_rows.borrow_mut().remove(&id);
+                    if let Some(row) = row { self.list.remove(&row.row); }
+                }
+                for item in &view.rows {
+                    let missing = !self.workspace_rows.borrow().contains_key(&item.id);
+                    if missing {
+                        self.list.append(&self.workspace_row(w, item));
+                    }
+                }
+                if changed_order { self.list.invalidate_sort(); }
+            }
+            for item in &view.rows {
+                let row = self.workspace_rows.borrow().get(&item.id).cloned();
+                if let Some(row) = row { row.update(w, item); }
+            }
+        } else if (changed_page || *self.rows_key.borrow() != key) && self.dragged.borrow().is_none() {
             *self.rows_key.borrow_mut() = key;
             let scroll = self
                 .list
                 .ancestor(gtk::ScrolledWindow::static_type())
                 .and_downcast::<gtk::ScrolledWindow>();
             let position = scroll.as_ref().map(|s| s.vadjustment().value());
-            self.pin_buttons.borrow_mut().clear();
+            let old_rows = std::mem::take(&mut *self.workspace_rows.borrow_mut());
+            drop(old_rows);
             self.list.remove_all();
             self.rows.borrow_mut().clear();
             for item in &view.rows {
-                let row = adw::ActionRow::builder()
-                    .title(&item.title)
-                    .subtitle(&item.subtitle)
-                    .build();
+                let row = adw::ActionRow::builder().title(&item.title).subtitle(&item.subtitle).build();
                 row.set_use_markup(false);
                 row.set_title_lines(2);
                 row.set_widget_name(&format!("workspace-row-{}", item.id));
                 row.set_activatable(true);
-                if page == ManagerPage::Workspaces {
-                    self.workspace_row(w, &row, item);
-                }
                 self.rows.borrow_mut().push(item.id.clone());
                 self.list.append(&row);
             }
@@ -394,77 +497,25 @@ impl ManagerUi {
             *self.rows.borrow_mut() = view.rows.iter().map(|row| row.id.clone()).collect();
             self.list.invalidate_sort();
         }
-        for item in &view.rows {
-            if let Some(pin) = &item.pin
-                && let Some(button) = self.pin_buttons.borrow().get(&item.id)
-            {
-                button.set_active(pin.selected);
-                button.update_state(&[gtk::accessible::State::Disabled(!pin.enabled)]);
-                button.set_opacity(if pin.enabled { 1. } else { 0.5 });
-                button.set_tooltip_text(Some(&pin.label));
-                button.update_property(&[gtk::accessible::Property::Label(&pin.label)]);
-                crate::icons::set_button(button, &format!("layer-{}-symbolic", pin.icon));
-            }
-        }
         let index = view
             .selected
             .as_ref()
             .and_then(|id| self.rows.borrow().iter().position(|row| row == id));
         let row = index.and_then(|index| self.list.row_at_index(index as i32));
-        if self.list.selected_row() != row {
+        let selected_changed = self.list.selected_row() != row;
+        if selected_changed {
             self.list.select_row(row.as_ref());
+        }
+        if page == ManagerPage::Workspaces && (selected_changed
+            || self.dialog.focus().is_none_or(|focus| !focus.is_mapped()))
+        {
+            self.focus_workspace_selection();
         }
         self.rebuilding.set(false);
     }
-    fn workspace_row(
-        &self,
-        w: &Rc<Workspace>,
-        row: &adw::ActionRow,
-        item: &layer_workspace::WorkspaceRow,
-    ) {
-        row.add_css_class("workspace-manager-row");
-        let reorder_label = layer_ui::NativeCaption::Reorder { title: item.title.clone() }.message(&w.localization());
-        let handle = actions_menu(w, &reorder_label, Vec::new());
-        handle.set_child(Some(&crate::icons::image("layer-grip-symbolic")));
-        handle.update_property(&[gtk::accessible::Property::Label(&reorder_label)]);
-        self.add_switcher_actions(w, &handle, &item.id);
-        handle.set_widget_name(&format!("workspace-reorder-handle-{}", item.id));
-        handle.add_css_class("workspace-reorder-handle");
-        handle.set_size_request(16, 44);
-        handle.set_cursor_from_name(Some("grab"));
-        row.add_prefix(&handle);
-        if item.current {
-            row.add_suffix(&crate::icons::image("layer-check-symbolic"));
-        }
-        let pin = gtk::ToggleButton::new();
-        pin.set_widget_name(&format!("workspace-pin-{}", item.id));
-        pin.add_css_class("flat");
-        pin.add_css_class("workspace-pin");
-        pin.set_size_request(34, 34);
-        pin.set_valign(gtk::Align::Center);
-        let id = item.id.clone();
-        pin.connect_clicked(glib::clone!(#[weak] w, move |button| {
-            if let Some(pin) = w.workspaces.view().rows.iter().find(|row| row.id == id).and_then(|row| row.pin.clone())
-            {
-                button.set_active(pin.selected);
-                if pin.enabled {
-                    w.workspaces.send(&w, WorkspaceInput::EditSwitcher { edit: pin.edit });
-                }
-            }
-        }));
-        self.pin_buttons.borrow_mut().insert(item.id.clone(), pin.clone());
-        row.add_suffix(&pin);
-        let trailing = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        trailing.set_size_request(34, -1);
-        if !item.options.is_empty() {
-            let caption = layer_ui::NativeCaption::OptionsFor { title: item.title.clone() }.message(&w.localization());
-            let more = actions_menu(w, &caption, item.options.clone());
-            more.set_widget_name(&format!("workspace-options-{}", item.id));
-            more.set_valign(gtk::Align::Center);
-            trailing.append(&more);
-        }
-        row.add_suffix(&trailing);
-        self.bind_reorder_row(w, row, &item.id, &handle);
+    fn focus_workspace_selection(&self) {
+        let row = self.list.selected_row();
+        self.dialog.set_focus(Some(row.as_ref().map_or(self.create.upcast_ref::<gtk::Widget>(), |row| row.upcast_ref())));
     }
     fn render_details(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
         let key = serde_json::to_string(&(&view.details, view.busy, view.rows.is_empty()))
@@ -507,6 +558,7 @@ impl ManagerUi {
         }
     }
     fn render_prompt(&self, w: &Rc<Workspace>, view: &WorkspaceView) {
+        if self.render_inline_rename(view) { return; }
         let Some(prompt) = view.prompt.clone() else {
             *self.prompt_key.borrow_mut() = None;
             *self.draft.borrow_mut() = None;
@@ -723,15 +775,16 @@ fn margins(widget: &impl IsA<gtk::Widget>, value: i32) {
     widget.set_margin_start(value);
     widget.set_margin_end(value);
 }
-fn actions_menu(w: &Rc<Workspace>, label: &str, actions: Vec<ManagerButton>) -> gtk::MenuButton {
-    let menu = gtk::MenuButton::builder()
-        .child(&crate::icons::image("layer-more-symbolic"))
-        .tooltip_text(label)
-        .build();
-    menu.add_css_class("flat");
+fn actions_popover(w: &Rc<Workspace>, actions: Vec<ManagerButton>) -> gtk::Popover {
     let popup = gtk::Popover::new();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 4);
     margins(&content, 6);
+    popup.set_child(Some(&content));
+    append_actions(w, &popup, actions);
+    popup
+}
+fn append_actions(w: &Rc<Workspace>, popup: &gtk::Popover, actions: Vec<ManagerButton>) {
+    let content = popup.child().and_downcast::<gtk::Box>().unwrap();
     for item in actions {
         let button = gtk::Button::with_label(&item.label);
         button.add_css_class("flat");
@@ -746,6 +799,7 @@ fn actions_menu(w: &Rc<Workspace>, label: &str, actions: Vec<ManagerButton>) -> 
             popup,
             move |_| {
                 popup.popdown();
+                if !w.workspaces.ui.finish_active_workspace_name(&w) { return; }
                 w.workspaces.send(
                     &w,
                     WorkspaceInput::Action {
@@ -756,8 +810,11 @@ fn actions_menu(w: &Rc<Workspace>, label: &str, actions: Vec<ManagerButton>) -> 
         ));
         content.append(&button);
     }
-    popup.set_child(Some(&content));
-    menu.set_popover(Some(&popup));
+}
+fn actions_menu(w: &Rc<Workspace>, label: &str, actions: Vec<ManagerButton>) -> gtk::MenuButton {
+    let menu = gtk::MenuButton::builder().child(&crate::icons::image("layer-more-symbolic")).tooltip_text(label).build();
+    menu.add_css_class("flat");
+    menu.set_popover(Some(&actions_popover(w, actions)));
     menu
 }
 fn clear(container: &gtk::Box) {

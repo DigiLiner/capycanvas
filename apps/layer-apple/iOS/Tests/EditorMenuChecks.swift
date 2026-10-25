@@ -190,9 +190,9 @@ final class EditorMenuChecks: XCTestCase {
         let app = editorCaptureApplication()
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"workspace_manager","command":{"type":"manage"}}]"#
         app.launch()
-        let painter = app.buttons["workspace-select-builtin:workspace:painter"]
-        let illustrator = app.buttons["workspace-select-builtin:workspace:illustrator"]
-        let photographer = app.buttons["workspace-select-builtin:workspace:photographer"]
+        let painter = app.descendants(matching: .any)["workspace-select-builtin:workspace:painter"].firstMatch
+        let illustrator = app.descendants(matching: .any)["workspace-select-builtin:workspace:illustrator"].firstMatch
+        let photographer = app.descendants(matching: .any)["workspace-select-builtin:workspace:photographer"].firstMatch
         XCTAssertTrue(photographer.waitForExistence(timeout: 30))
         XCTAssertTrue(illustrator.isSelected)
         photographer.press(forDuration: 0.8)

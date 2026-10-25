@@ -42,7 +42,7 @@ extension XCTestCase {
         XCTAssertTrue(photo.waitForExistence(timeout: 30), "Visibility persists across restarts")
         workspaceActivate(options)
         workspaceActivate(app.buttons["menu-action-Manage Workspaces…"])
-        XCTAssertTrue(app.buttons["workspace-select-builtin:workspace:photographer"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["workspace-select-builtin:workspace:photographer"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 }

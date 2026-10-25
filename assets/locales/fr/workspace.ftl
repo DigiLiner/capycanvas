@@ -130,7 +130,6 @@ workspace-action-retry-storage = Réessayer le stockage
 workspace-manage-toolbars = Gérer les barres d’outils
 workspace-toolbars-intro = Organiser les barres d’outils de cet espace de travail.
 workspace-library-intro = Enregistrer les barres d’outils pour les réutiliser dans tout espace de travail.
-workspace-intro = Les espaces de travail enregistrent votre disposition pour différentes tâches.
 workspace-history-hidden = { $panels } masqués
 workspace-history-shown = { $panels } affichés
 workspace-history-restored-earlier = Disposition précédente restaurée

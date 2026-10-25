@@ -3,36 +3,32 @@ import SwiftUI
 struct WorkspaceSwitcherRows: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
     @Environment(\.capyNativeCopy) private var nativeCopy
-    // Match the web manager's 55-point content plus divider and Android's
-    // 56dp row minimum. Keep the actual controls tall, not just their spacing.
     private let rowHeight: CGFloat = 56
     @ObservedObject var workspaces: WorkspaceController
     @StateObject private var interaction = WorkspaceRowInteraction()
-    @State private var optionCaptions: [String: String] = [:]
     @State private var reorderCaptions: [String: String] = [:]
     @State private var switchCaptions: [String: String] = [:]
     @State private var optionTitles: [String: String] = [:]
     @FocusState private var focus: String?
+    @FocusState private var editing: Bool
     private var rows: [JSON] { workspaces.view["rows"].array }
     private var available: Bool {
         workspaces.ready && !workspaces.readOnly && !workspaces.busy
             && !workspaces.switcherBusy && workspaces.view["prompt"].isNull
     }
     private func refreshCaptions() {
-        var captions: [String: String] = [:], titles: [String: String] = [:]
+        var titles: [String: String] = [:]
         var reorder: [String: String] = [:], switches: [String: String] = [:]
         for row in rows {
             let id = row["id"].string, title = row["title"].string
             titles[id] = title
             reorder[id] = optionTitles[id] == title ? reorderCaptions[id] : NativeTextContext.caption(["type": "reorder", "title": title], language: interfaceLanguage)
             switches[id] = optionTitles[id] == title ? switchCaptions[id] : NativeTextContext.caption(["type": "switch_workspace", "title": title], language: interfaceLanguage)
-            captions[id] = optionTitles[id] == title ? optionCaptions[id]
-                : NativeTextContext.caption(["type": "options_for", "title": title], language: interfaceLanguage)
         }
-        optionTitles = titles; optionCaptions = captions; reorderCaptions = reorder; switchCaptions = switches
+        optionTitles = titles; reorderCaptions = reorder; switchCaptions = switches
     }
     var body: some View {
-        scroll
+        scroll.clipShape(SquircleShape(12 / SquircleShape.fit))
             .accessibilityIdentifier("workspace-manager-rows")
             .onAppear { refreshCaptions() }
             .onChange(of: interfaceLanguage) { _, _ in optionTitles = [:]; refreshCaptions() }
@@ -51,31 +47,37 @@ struct WorkspaceSwitcherRows: View {
         if !interaction.contact.held && !interaction.contact.dragging { interaction.cancel() }
     }
     private var content: some View {
-        LazyVStack(spacing: 2) {
+        LazyVStack(spacing: 0) {
             if rows.isEmpty { Text(nativeCopy["header"]["no_items"].string).foregroundStyle(.secondary).padding(20) }
             ForEach(rows, id: \.workspaceRowID) { row in
                 let id = row["id"].string
-                HStack(spacing: 6) {
-                    Button {
-                        if !interaction.contact.consumeClick() { interaction.showMenu(id) }
-                    } label: { SharedIcon(name: "grip").frame(width: 16, height: rowHeight).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                        .help(nativeCopy["header"]["drag_to_reorder"].string).accessibilityLabel(reorderCaptions[id] ?? "")
-                        .accessibilityIdentifier("workspace-grip-" + id).disabled(!available)
-                        .focusable().focused($focus, equals: "grip-" + id)
-                        .modifier(WorkspaceRowMeasurement(id: id, part: \.grip))
-                    Button {
-                        if !interaction.contact.consumeClick() { workspaces.select(id) }
-                    } label: {
-                        Text(row["title"].string).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8).frame(minHeight: rowHeight).contentShape(Rectangle())
-                    }.buttonStyle(.plain).help(row["title"].string).accessibilityLabel(switchCaptions[id] ?? "")
-                        .accessibilityIdentifier("workspace-select-" + id).focusable().focused($focus, equals: "row-" + id)
-                        .accessibilityAddTraits(workspaces.view["selected"].string == id ? .isSelected : [])
-                        .onKeyPress { key in
-                            if key.key == KeyEquivalent("\u{F70D}") && key.modifiers.contains(.shift) {
-                                interaction.showMenu(id); return .handled
-                            }
+                HStack(spacing: 4) {
+                    VStack(alignment:.leading,spacing:2) {
+                        if workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id {
+                            TextField("",text:$workspaces.formName).textFieldStyle(.plain).focused($editing)
+                                .accessibilityIdentifier("workspace-name-"+id)
+                                .onSubmit {if !NativeTextContext.composing {workspaces.finishName()}}
+                                .onAppear {editing=true;workspaces.validateName(required:true)}
+                                .onChange(of:workspaces.formName) {_,_ in workspaces.validateName(required:true)}
+                                .onChange(of:editing) {_,focused in if !focused {workspaces.finishName()}}
+                                .onKeyPress(.escape) {guard !NativeTextContext.composing else{return .ignored};workspaces.cancelPrompt();return .handled}
+                        } else {
+                            Text(row["title"].string).lineLimit(1).frame(maxWidth:.infinity,alignment:.leading)
+                                .contentShape(Rectangle()).gesture(TapGesture(count:2).onEnded {_ in rename(row)},
+                                    including:row["options"].array.contains(where:{$0["action"]["type"].string=="rename" && $0["enabled"].bool}) ? .all : .none)
+                                .accessibilityIdentifier("workspace-name-"+id)
+                        }
+                        if !row["subtitle"].string.isEmpty {Text(row["subtitle"].string).font(.caption).foregroundStyle(.secondary).lineLimit(1)}
+                    }.frame(maxWidth:.infinity,minHeight:rowHeight,alignment:.leading)
+                        .contentShape(Rectangle()).onTapGesture {if !(workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id) && !interaction.contact.consumeClick(){workspaces.select(id)}}.focusable().focused($focus,equals:"row-"+id)
+                        .accessibilityLabel(switchCaptions[id] ?? "").accessibilityIdentifier("workspace-select-"+id)
+                        .accessibilityAddTraits(workspaces.inlineRename && workspaces.view["prompt_action"]["value"].string==id ? [] : .isButton)
+                        .accessibilityAction {workspaces.select(id)}
+                        .accessibilityAddTraits(workspaces.view["selected"].string==id ? .isSelected : [])
+                        .onKeyPress {key in
+                            if key.key==KeyEquivalent("\u{F705}") {rename(row);return .handled}
+                            if key.key==KeyEquivalent("\u{F70D}") && key.modifiers.contains(.shift){interaction.showMenu(id,reordering:false);return .handled}
+                            if key.key == .return || key.key == .space {workspaces.select(id);return .handled}
                             return .ignored
                         }
                     if row["current"].bool {
@@ -91,18 +93,25 @@ struct WorkspaceSwitcherRows: View {
                         .accessibilityAddTraits(pin["selected"].bool ? .isSelected : [])
                         .accessibilityIdentifier("workspace-pin-" + id).focusable().focused($focus, equals: "pin-" + id)
                         .modifier(WorkspaceRowMeasurement(id: id, part: \.pin))
-                    if !row["options"].array.isEmpty {
-                        Button {
-                            if interaction.menu == id { interaction.closeMenu() } else { interaction.showMenu(id, reordering: false) }
-                        } label: { Text("⋮").frame(width: 34, height: rowHeight).contentShape(Rectangle()) }
-                            .buttonStyle(.plain).accessibilityLabel(optionCaptions[id] ?? "").disabled(!available)
-                            .accessibilityIdentifier("workspace-options-" + id).focusable().focused($focus, equals: "options-" + id)
-                            .modifier(WorkspaceRowMeasurement(id: id, part: \.options))
-                    } else {
-                        Color.clear.frame(width: 34, height: rowHeight).accessibilityHidden(true)
+                    Button {
+                        if !interaction.contact.consumeClick() { interaction.showMenu(id) }
+                    } label: { SharedIcon(name: "grip").frame(width: 16, height: 34).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                        .help(nativeCopy["header"]["drag_to_reorder"].string).accessibilityLabel(reorderCaptions[id] ?? "")
+                        .accessibilityIdentifier("workspace-grip-" + id).disabled(!available)
+                        .focusable().focused($focus, equals: "grip-" + id)
+                        .modifier(WorkspaceRowMeasurement(id: id, part: \.grip))
+                }.padding(.horizontal,12)
+                    .background(workspaces.view["selected"].string == id ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035))
+                    .overlay(alignment:.top) {if id != rows.first?["id"].string {Divider()}}
+                    .offset(x:interaction.swipe==id ? -interaction.swipeOffset : 0)
+                    .background(alignment:.trailing) {
+                        if interaction.swipe==id,let action=row["options"].array.first(where:{$0["action"]["type"].string=="delete"}) {
+                            Button(action["label"].string,role:.destructive){interaction.swipe=nil;interaction.swipeOffset=0;workspaces.activate(action["action"])}
+                                .buttonStyle(.plain).foregroundStyle(.white).frame(width:72,height:rowHeight).background(Color(red:0.78,green:0.16,blue:0.16)).accessibilityIdentifier("workspace-swipe-delete-"+id)
+                        }
                     }
-                }.padding(.horizontal, 6)
-                    .background(workspaces.view["selected"].string == id ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+                    .clipped()
                     .opacity(interaction.drag?.id == id ? 0.35 : 1)
                     .modifier(WorkspaceRowMeasurement(id: id))
                     .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-item-" + id)
@@ -121,8 +130,11 @@ struct WorkspaceSwitcherRows: View {
             .onKeyPress(.escape) {
                 guard interaction.menu != nil || interaction.contact.target != nil else { return .ignored }
                 let id = interaction.menu ?? interaction.contact.target?.id
-                interaction.cancel(); if let id { focus = (interaction.reordering ? "grip-" : "options-") + id }; return .handled
+                interaction.cancel(); if let id { focus = (interaction.reordering ? "grip-" : "row-") + id }; return .handled
             }
+    }
+    private func rename(_ row:JSON) {
+        if let action=row["options"].array.first(where:{$0["action"]["type"].string=="rename" && $0["enabled"].bool}) {workspaces.activate(action["action"])}
     }
     private func update() {
         interaction.update(items: rows, enabled: available)
@@ -155,9 +167,9 @@ struct WorkspaceSwitcherRows: View {
              "action": edit(["type": "move", "id": id, "before": index.flatMap { $0 + 2 < order.count ? order[$0 + 2] : nil } as Any? ?? NSNull()])],
         ]
         let actions = row["options"].array.map { item -> [String: Any] in
-            ["label": item["label"].raw, "enabled": available, "action": item["action"].raw]
+            ["label": item["label"].raw, "enabled": available && item["enabled"].bool, "action": item["action"].raw]
         }
-        return EditorActionMenu(model: AppleContextMenu(JSON(["sections": interaction.reordering ? [preferences] : [actions]])) { workspaces.activate($0) },
+        return EditorActionMenu(model: AppleContextMenu(JSON(["sections": interaction.reordering ? [preferences] : [actions,preferences]])) { workspaces.activate($0) },
             width: 260, identifier: "workspace-row-menu") { interaction.closeMenu() }
     }
 }

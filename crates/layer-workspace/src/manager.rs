@@ -292,6 +292,21 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         let state = self.state.borrow();
         state.failed_operation.is_some() || !state.older_failed_operations.is_empty()
     }
+    fn failed_claims(&self) -> std::collections::BTreeSet<(String, u64)> {
+        let state = self.state.borrow();
+        state.failed_operation.iter().chain(&state.older_failed_operations)
+            .flat_map(|batch| &batch.writes).filter(|write| !write.create && write.fence != 0)
+            .map(|write| (write.id.clone(), write.fence)).collect()
+    }
+    fn apply_metadata_receipt(&self, id: &str, metadata: Metadata, receipt: &CommitReceipt) {
+        let Some((_, generations)) = receipt.items.iter().find(|(item, _)| item == id) else { return; };
+        let mut state = self.state.borrow_mut();
+        if let Some(saved) = state.saved.as_mut().filter(|saved| saved.entity.id == id) {
+            saved.entity.metadata = metadata.clone();
+            saved.generations = *generations;
+        }
+        if let Some(latest) = state.latest.as_mut().filter(|latest| latest.id == id) { latest.metadata = metadata; }
+    }
     pub async fn retry_failed_operation(&self) -> Result<Option<StoredEntity>> {
         let batch = {
             let state = self.state.borrow();
@@ -309,8 +324,20 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
             .iter()
             .find(|(key, _)| key == &format!("window:{}", self.owner.id))
             .and_then(|(_, id)| id.clone())
-            .or_else(|| self.active_id());
-        self.publish(batch).await?;
+            .or_else(|| self.active_id().filter(|id| batch.writes.iter().any(|write|
+                &write.id == id && (write.content_json.is_some() || write.working_json.is_some()))));
+        let claims: Vec<_> = batch.writes.iter().filter(|write| !write.create && write.fence != 0)
+            .map(|write| (write.id.clone(), write.fence)).collect();
+        let metadata: Vec<_> = batch.writes.iter().filter_map(|write| write.metadata.clone().map(|metadata| (write.id.clone(), metadata))).collect();
+        let receipt = self.publish(batch).await?;
+        for (id, metadata) in metadata { self.apply_metadata_receipt(&id, metadata, &receipt); }
+        for (id, fence) in claims {
+            if self.active_id().as_ref() != Some(&id) && incoming.as_ref() != Some(&id)
+                && !self.failed_claims().contains(&(id.clone(), fence))
+            {
+                let _ = self.execute(StoreRequest::Release { id, owner: self.owner.clone(), fence: fence.to_string() }).await;
+            }
+        }
         self.refresh().await?;
         self.refresh_switcher().await?;
         match incoming {
@@ -344,6 +371,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
         }
     }
     pub async fn release(&self, entity: &StoredEntity) {
+        if entity.claim.as_ref().is_some_and(|claim| self.failed_claims().contains(&(entity.entity.id.clone(), claim.fence))) { return; }
         let _ = self.release_checked(entity).await;
     }
     async fn release_checked(&self, entity: &StoredEntity) -> Result<()> {
@@ -655,6 +683,11 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                 }
             }
         }
+        for (id, fence) in self.failed_claims() {
+            if self.active_id().as_ref() != Some(&id) {
+                let _ = self.execute(StoreRequest::Renew { id, owner: self.owner.clone(), fence: fence.to_string() }).await;
+            }
+        }
         Ok(())
     }
     pub fn lease_valid(&self, now: u64) -> bool {
@@ -747,16 +780,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                     vec![update(&stored, Some(metadata.clone()), None, None)?],
                 )?)
                 .await?;
-            if self.active_id().as_deref() == Some(id) {
-                let mut s = self.state.borrow_mut();
-                if let Some(saved) = &mut s.saved {
-                    saved.entity.metadata = metadata.clone();
-                    saved.generations = receipt.items[0].1;
-                }
-                if let Some(latest) = &mut s.latest {
-                    latest.metadata = metadata;
-                }
-            }
+            self.apply_metadata_receipt(id, metadata, &receipt);
             Ok(())
         }
         .await;
@@ -783,6 +807,9 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
             {
                 current.claim = None;
             }
+        }
+        for (id, fence) in self.failed_claims() {
+            let _ = self.execute(StoreRequest::Release { id, owner: self.owner.clone(), fence: fence.to_string() }).await;
         }
         Ok(())
     }

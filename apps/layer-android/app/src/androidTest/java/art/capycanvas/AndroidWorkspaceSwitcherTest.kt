@@ -76,6 +76,16 @@ class AndroidWorkspaceSwitcherTest {
         send(obj("type" to "form", "action" to obj("type" to "new"))); send(obj("type" to "submit", "name" to name))
         return view().getString("id")
     }
+    private fun renameInline(id: String, name: String) {
+        waitFor("inline workspace name") { node("workspace-name-$id")?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } != null }
+        instrumentation.runOnMainSync {
+            val field = node("workspace-name-$id")!!.second.find { it.config.getOrNull(SemanticsActions.SetText) != null }!!
+            assertTrue(field.config[SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString(name)))
+        }
+        key(KeyEvent.KEYCODE_ENTER); idle()
+        waitFor("renamed workspace row") { view().array("rows").objects().first { it.getString("id") == id }.getString("title") == name }
+        assertNotNull(node("workspace-manager"))
+    }
     private fun shot(name: String) = screenshot("validation/workspace-switcher/$name.png")
     private fun scrollTop() {
         instrumentation.runOnMainSync {
@@ -100,7 +110,7 @@ class AndroidWorkspaceSwitcherTest {
         if (::scenario.isInitialized) scenario.close()
     }
 
-    @Test fun labeledNewWorkspaceButtonCreatesAndRestoresAcrossThemes() {
+    @Test fun bottomListActionsCreateDeleteAndKeepManagerAcrossThemes() {
         for (theme in listOf("light", "dark")) {
             waitFor("restored document accepts input") { !host.documentInputBlocked }
             host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
@@ -110,14 +120,24 @@ class AndroidWorkspaceSwitcherTest {
             open()
             val button = bounds("new-workspace")
             val rows = bounds("workspace-rows")
-            assertTrue("New Workspace appears above the list", button.bottom <= rows.top)
-            assertEquals("New Workspace aligns with the list's right edge", rows.right, button.right, density)
+            val rowBounds = view().array("rows").objects().map { bounds("workspace-row-${it.getString("id")}") }
+            rowBounds.zipWithNext().forEach { (first, second) -> assertEquals("Workspace rows keep their native pitch", 56 * density, second.top - first.top, 1f) }
+            assertTrue("Last workspace row stays inside the list", rowBounds.last().bottom <= rows.bottom + 1)
+            assertTrue("New Workspace appears below the list", button.top >= rows.bottom)
+            assertEquals("New Workspace aligns with the list's left edge", rows.left, button.left, density)
+            assertTrue("Delete appears below the list", bounds("workspace-remove").top >= rows.bottom)
+            assertNull(node("workspace-search"))
             instrumentation.runOnMainSync {
                 val caption = host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("new_workspace")
-                assertEquals(listOf(caption), texts(node("new-workspace")!!.second))
+                assertTrue(caption in (node("new-workspace")!!.second.config.getOrNull(SemanticsProperties.ContentDescription) ?: emptyList()))
+                assertFalse(texts(node("workspace-manager")!!.second).contains(view().getString("intro")))
                 fun count(current: SemanticsNode): Int = (if (hasTag("new-workspace")(current)) 1 else 0) + current.children.sumOf(::count)
                 assertEquals(1, semanticsRoots().sumOf { count(it.semanticsOwner.unmergedRootSemanticsNode) })
             }
+            val current = view().getString("id")
+            val pinned = current in ids("switcher")
+            tap("workspace-pin-$current"); assertEquals(!pinned, current in ids("switcher"))
+            tap("workspace-pin-$current"); assertEquals(pinned, current in ids("switcher"))
             shot("new-workspace-$theme")
             tap("new-workspace")
             waitFor("new workspace name form") { node("workspace-name") != null && view().getJSONObject("prompt_action").getString("type") == "new" }
@@ -131,9 +151,20 @@ class AndroidWorkspaceSwitcherTest {
             assertFalse(created in before)
             assertEquals(before.toSet() + created, order().toSet())
             assertTrue(created in ids("switcher"))
+            assertNotNull("Creating keeps the manager open", node("workspace-manager"))
+            assertEquals("workspaces", view().getString("page"))
+            key(KeyEvent.KEYCODE_ESCAPE); idle()
+            assertNull(node("workspace-manager"))
             scenario.close(); SystemClock.sleep(300); launch()
             assertEquals(created, view().getString("id")); assertEquals(name, view().getString("name"))
             assertTrue(created in ids("switcher"))
+            open(); tap("workspace-row-$created"); tap("workspace-remove")
+            waitFor("delete confirmation") { !view().isNull("prompt") }
+            tap("workspace-submit")
+            waitFor("workspace removed") { created !in order() && view().isNull("prompt") }
+            assertNotNull("Deleting keeps the manager open", node("workspace-manager"))
+            assertEquals("workspaces", view().getString("page"))
+            key(KeyEvent.KEYCODE_ESCAPE); idle(); assertNull(node("workspace-manager"))
         }
     }
 
@@ -172,7 +203,8 @@ class AndroidWorkspaceSwitcherTest {
         assertEquals(preview, layout()); assertEquals(before, capture())
         assertEquals(defaults.last(), view().getString("selected"))
         assertNotNull(node("workspace-pin-$current"))
-        assertEquals(ToggleableState.Off, node("workspace-pin-$current")!!.second.config[SemanticsProperties.ToggleableState])
+        assertFalse(view().array("rows").objects().first { it.getString("id") == current }.getJSONObject("pin").getBoolean("selected"))
+        assertTrue(view().array("rows").objects().first { it.getString("id") == current }.getJSONObject("pin").getString("label") in node("workspace-pin-$current")!!.second.config[SemanticsProperties.ContentDescription])
         val previous = order().indexOf(current)
         tap("workspace-grip-$current")
         shot("options")
@@ -287,8 +319,8 @@ class AndroidWorkspaceSwitcherTest {
                 instrumentation.runOnMainSync { assertNotNull("Escape returns control focus", node("workspace-switcher-options")?.second?.find { it.config.getOrNull(SemanticsProperties.Focused) == true }) }
             }
             val keyboardRow = menuRows().first { it.getJSONObject("action").getJSONObject("command").getString("id") == inactive }.getString("label")
+            tap("workspace-switcher-options")
             for (pinned in listOf(false, true)) {
-                tap("workspace-switcher-options")
                 waitFor("checkbox keyboard focus window") { node("workspace-menu")?.first?.view?.hasWindowFocus() == true }
                 key(KeyEvent.KEYCODE_TAB, KeyEvent.META_SHIFT_ON)
                 instrumentation.runOnMainSync {
@@ -298,24 +330,21 @@ class AndroidWorkspaceSwitcherTest {
                 }
                 key(KeyEvent.KEYCODE_ENTER); idle()
                 waitFor("keyboard checkbox saves $pinned") { (inactive in ids("switcher")) == pinned }
+                assertNotNull("Visibility checkboxes keep their menu open", node("workspace-menu"))
                 assertEquals(current, view().getString("id")); assertEquals(savedLayout, layout()); assertEquals(savedOrder, order())
             }
             for (id in ids("switcher").toList()) {
-                tap("workspace-switcher-options")
                 tapMenu(menuRows().first { it.getJSONObject("action").getJSONObject("command").getString("id") == id }.getString("label"))
                 waitFor("$id pin cleared") { id !in ids("switcher") }
                 assertEquals(current, view().getString("id")); assertEquals(savedOrder, order()); assertEquals(savedLayout, layout())
             }
             assertEquals(emptyList<String>(), ids("switcher")); assertEquals(listOf(current), ids("switcher_display"))
-            tap("workspace-switcher-options"); assertOptions(current, savedLayout, savedOrder)
+            assertOptions(current, savedLayout, savedOrder)
             assertFalse(menuRows().first { it.getJSONObject("action").getJSONObject("command").getString("id") == current }.optBoolean("selected"))
-            closeOptions()
             for (id in savedOrder) {
-                tap("workspace-switcher-options")
                 tapMenu(menuRows().first { it.getJSONObject("action").getJSONObject("command").getString("id") == id }.getString("label"))
             }
             assertEquals(savedOrder, ids("switcher")); assertEquals(durable, capture())
-            tap("workspace-switcher-options")
             tapMenu(view().getJSONObject("switcher_options").array("sections").getJSONArray(1).getJSONObject(0).getString("label"))
             waitFor("Manage opens full editor after dismissing options") { node("workspace-manager") != null && node("workspace-menu") == null }
             tap("workspace-cancel")
@@ -349,26 +378,18 @@ class AndroidWorkspaceSwitcherTest {
                 tap("header-control-900")
                 tapMenu(view().getJSONObject("switcher_menu").array("sections").getJSONArray(1).getJSONObject(0).getString("label"))
             }
-            var popup: android.view.View? = null
-            val database = android.database.sqlite.SQLiteDatabase.openDatabase(java.io.File(AppStorage.of(instrumentation.targetContext).workspaces, "workspaces.sqlite3").path,
-                null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE)
-            try {
-                database.execSQL("BEGIN IMMEDIATE")
-                instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "edit_switcher", "edit" to obj("type" to "show", "id" to inactive, "visible" to false))) }
-                waitFor("visibility write waits for database") { view().optBoolean("switcher_busy") }
-                if (!compact) { down("workspace-switcher-options"); event(MotionEvent.ACTION_UP) }
-                waitFor("retained checkbox waits for write") { menuCheckbox(title)?.config?.getOrNull(SemanticsProperties.Disabled) != null }
-                instrumentation.runOnMainSync { popup = node("workspace-menu")!!.first.view }
-            } finally { database.execSQL("COMMIT"); database.close() }
-            waitFor("retained options popup") { node("workspace-menu")?.first?.view?.hasWindowFocus() == true }
-            waitFor("retained checkbox becomes available with confirmed check") {
-                !view().optBoolean("switcher_busy") && menuCheckbox(title)?.let {
-                    it.config.getOrNull(SemanticsProperties.Disabled) == null && it.config.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState.Off
-                } == true
+            if (!compact) tap("workspace-switcher-options")
+            waitFor("retained options native focus") { node("workspace-menu")?.first?.view?.hasWindowFocus() == true }
+            val popup = node("workspace-menu")!!.first.view
+            for (pinned in listOf(false, true)) {
+                tapMenu(title)
+                waitFor("retained checkbox reflects $pinned") {
+                    (inactive in ids("switcher")) == pinned && menuCheckbox(title)?.config?.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState(pinned)
+                }
+                instrumentation.runOnMainSync { assertSame("Pin changes retain the native popup", popup, node("workspace-menu")!!.first.view) }
+                assertTrue("Retained menu keeps shared popup ownership", sharedPopupOpen())
             }
-            instrumentation.runOnMainSync { assertSame("Refresh retains the native popup", popup, node("workspace-menu")!!.first.view) }
-            assertTrue("Options register shared popup ownership", sharedPopupOpen())
-            tapMenu(title); waitFor("refreshed action restores the pin") { inactive in ids("switcher") }
+            closeOptions()
             assertFalse("Dismissal releases shared popup ownership", sharedPopupOpen())
             assertEquals(current, view().getString("id")); assertEquals(savedLayout, layout()); assertEquals(savedOrder, order())
         }
@@ -498,7 +519,7 @@ class AndroidWorkspaceSwitcherTest {
         instrumentation.runOnMainSync { assertNull("Mouse holds never open menus", node("workspace-row-menu")) }
     }
 
-    @Test fun gripMenusKeepPreviewAndSeparateCustomOptionsAcrossThemesAndInputs() {
+    @Test fun gripMenusAndContextMetadataKeepPreviewAcrossThemesAndInputs() {
         val custom = newWorkspace("Grip options")
         val durable = capture()
         val originalOrder = order()
@@ -536,7 +557,12 @@ class AndroidWorkspaceSwitcherTest {
                     assertNull("Built-in rows have no options button", node("workspace-options-$id"))
                     assertEquals(0, view().array("rows").objects().first { it.getString("id") == id }.array("options").length())
                 }
-                assertNotNull(node("workspace-options-$custom"))
+                assertNull("Custom rows have no options button", node("workspace-options-$custom"))
+                for (id in originalOrder) {
+                    val pin = node("workspace-pin-$id")!!.second.boundsInRoot; val grip = node("workspace-grip-$id")!!.second.boundsInRoot
+                    assertTrue("Grip follows the pin on the right", grip.left >= pin.right - density)
+                    assertTrue("Grip stays beside its pin", grip.left - pin.right <= 8 * density)
+                }
             }
             for (pointer in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
                 tool = pointer
@@ -561,17 +587,20 @@ class AndroidWorkspaceSwitcherTest {
             assertEquals(originalOrder.toMutableList().apply { remove(source); add(0, source) }, order())
             unchanged(); reset()
             tap("workspace-grip-$source"); moveMenu(); shot("grip-menu-$theme"); closeMenu()
-            tap("workspace-options-$custom")
+            tool = MotionEvent.TOOL_TYPE_MOUSE; button = MotionEvent.BUTTON_SECONDARY
+            down("workspace-row-$custom"); event(MotionEvent.ACTION_UP); button = MotionEvent.BUTTON_PRIMARY
             waitFor("custom options native focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
             instrumentation.runOnMainSync {
                 val options = view().array("rows").objects().first { it.getString("id") == custom }.array("options").objects()
                 assertEquals(listOf("rename", "delete"), options.map { it.getJSONObject("action").getString("type") })
                 assertTrue(options.all { it.getBoolean("enabled") })
-                assertEquals(options.map { it.getString("label") }, texts(node("workspace-row-menu")!!.second))
+                val copy = host.catalog.getJSONObject("native_copy").getJSONObject("header")
+                assertEquals(options.map { it.getString("label") } + listOf(copy.getString("move_up"), copy.getString("move_down")), texts(node("workspace-row-menu")!!.second))
                 assertNotNull(node("workspace-rename")); assertNotNull(node("workspace-delete"))
-                assertNull(node("workspace-up")); assertNull(node("workspace-down"))
+                assertNotNull(node("workspace-up")); assertNotNull(node("workspace-down"))
             }
-            unchanged(); shot("custom-options-$theme"); closeMenu()
+            unchanged(); shot("custom-context-$theme"); closeMenu()
+            tool = MotionEvent.TOOL_TYPE_FINGER
             tap("workspace-cancel"); assertEquals(durable, capture())
         }
     }
@@ -625,6 +654,7 @@ class AndroidWorkspaceSwitcherTest {
         tap("workspace-cancel")
         repeat(12) { newWorkspace("Scroll ${it.toString().padStart(2, '0')}") }
         open()
+        assertNull("Long workspace lists have no search field", node("workspace-search"))
         for (pointer in listOf(MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
             tool = pointer; scrollTop()
             val before = order(); val rows = bounds("workspace-rows")
@@ -644,6 +674,163 @@ class AndroidWorkspaceSwitcherTest {
             event(MotionEvent.ACTION_MOVE, Offset(rows.center.x, rows.bottom - 8 * density)); SystemClock.sleep(1000)
             event(MotionEvent.ACTION_UP); idle()
             assertTrue("Drag autoscrolls toward later rows", order().indexOf(first) > 4)
+        }
+    }
+
+    @Test fun inlineRenameContextSwipeDeleteAndEscapeAcrossThemes() {
+        for (theme in listOf("light", "dark")) {
+            waitFor("document accepts theme") { !host.documentInputBlocked }
+            host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+            waitFor("requested manager theme") { host.snapshot!!.getJSONObject("state").getString("theme") == theme }
+            val custom = newWorkspace("Native name $theme")
+            val savedOrder = order(); val savedPins = ids("switcher")
+            open(); tap("workspace-row-$custom")
+            val savedLayout = layout(); val durable = capture()
+            for (pointer in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+                tool = pointer
+                button = if (pointer == MotionEvent.TOOL_TYPE_MOUSE) MotionEvent.BUTTON_SECONDARY else MotionEvent.BUTTON_PRIMARY
+                down("workspace-row-$custom")
+                if (pointer != MotionEvent.TOOL_TYPE_MOUSE) waitFor("native held metadata menu") { node("workspace-row-menu") != null }
+                event(MotionEvent.ACTION_UP); button = MotionEvent.BUTTON_PRIMARY
+                waitFor("metadata menu receives native input") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
+                assertNotNull(node("workspace-rename")); assertNotNull(node("workspace-delete"))
+                assertEquals(custom, view().getString("selected")); assertEquals(savedOrder, order())
+                assertEquals(savedLayout, layout()); assertEquals(durable, capture())
+                key(KeyEvent.KEYCODE_ESCAPE); idle()
+                assertNotNull(node("workspace-manager"))
+            }
+            tool = MotionEvent.TOOL_TYPE_MOUSE
+            down("workspace-name-$custom"); event(MotionEvent.ACTION_UP)
+            down("workspace-name-$custom"); event(MotionEvent.ACTION_UP); idle()
+            renameInline(custom, "Double click $theme")
+            focus("workspace-row-$custom"); key(KeyEvent.KEYCODE_F2); idle()
+            renameInline(custom, "Keyboard name $theme")
+            button = MotionEvent.BUTTON_SECONDARY
+            down("workspace-row-$custom"); event(MotionEvent.ACTION_UP); button = MotionEvent.BUTTON_PRIMARY
+            waitFor("rename context focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
+            tap("workspace-rename"); renameInline(custom, "Context name $theme")
+            assertEquals(savedOrder, order()); assertEquals(savedPins, ids("switcher"))
+            assertEquals(savedLayout, layout()); assertEquals(durable, capture())
+            focus("workspace-row-$custom"); key(KeyEvent.KEYCODE_F2); idle()
+            key(KeyEvent.KEYCODE_ESCAPE); idle()
+            assertNotNull("Escape cancels inline edit before closing manager", node("workspace-manager"))
+            assertEquals("Context name $theme", view().array("rows").objects().first { it.getString("id") == custom }.getString("title"))
+            tool = MotionEvent.TOOL_TYPE_FINGER
+            down("workspace-row-$custom")
+            val start = point
+            for (step in 1..5) event(MotionEvent.ACTION_MOVE, start - Offset(24 * density * step, 0f))
+            event(MotionEvent.ACTION_UP); idle()
+            waitFor("swipe reveals Delete") { node("workspace-swipe-delete-$custom") != null }
+            assertEquals(savedOrder, order()); assertNull(node("workspace-row-menu"))
+            shot("inline-swipe-$theme")
+            tap("workspace-swipe-delete-$custom")
+            waitFor("swipe delete confirmation") { !view().isNull("prompt") }
+            tap("workspace-submit")
+            waitFor("swiped workspace removed") { custom !in order() && view().isNull("prompt") }
+            assertNotNull("Swipe delete keeps manager open", node("workspace-manager"))
+            key(KeyEvent.KEYCODE_ESCAPE); idle(); assertNull(node("workspace-manager"))
+        }
+    }
+
+    @Test fun heldInlineRenameKeepsApplyRowAndPinsActiveAcrossThemes() {
+        for (theme in listOf("light", "dark")) {
+            waitFor("document accepts theme") { !host.documentInputBlocked }
+            host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+            waitFor("requested held rename theme") { host.snapshot!!.getJSONObject("state").getString("theme") == theme }
+            val custom = newWorkspace("Held $theme")
+            for ((action, pointer) in listOf("apply" to MotionEvent.TOOL_TYPE_MOUSE, "select" to MotionEvent.TOOL_TYPE_FINGER, "pin" to MotionEvent.TOOL_TYPE_STYLUS)) {
+                tool = pointer
+                val name = "Renamed $action $theme"
+                val target = defaults.last { it != view().getString("id") }
+                val rowTarget = defaults.first { it != target }
+                open(); tap("workspace-row-$target")
+                waitFor("$theme/$action preview is ready for Apply") { view().optBoolean("enabled") }
+                focus("workspace-row-$custom"); key(KeyEvent.KEYCODE_F2); idle()
+                waitFor("held inline editor") { node("workspace-name-$custom")?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } != null }
+                instrumentation.runOnMainSync {
+                    val editor = node("workspace-name-$custom")!!.second.find { it.config.getOrNull(SemanticsActions.SetText) != null }!!
+                    assertTrue(editor.config[SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString(name)))
+                }
+                val pinned = custom in ids("switcher")
+                val path = java.io.File(AppStorage.of(instrumentation.targetContext).workspaces, "workspaces.sqlite3-shm")
+                val writer = ProcessBuilder("/apex/com.android.art/bin/dalvikvm64", "-cp",
+                    instrumentation.context.applicationInfo.sourceDir + ":" + instrumentation.targetContext.applicationInfo.sourceDir,
+                    "art.capycanvas.WorkspaceWriteLockProcess", path.absolutePath).redirectErrorStream(true).start()
+                try {
+                    assertEquals("LOCKED", writer.inputStream.bufferedReader().readLine())
+                    key(KeyEvent.KEYCODE_ENTER)
+                    waitFor("rename publication held") { view().optBoolean("busy") && view().objectOrNull("prompt_action")?.optString("type") == "rename" }
+                    instrumentation.runOnMainSync {
+                        for (tag in listOf("workspace-confirm", "workspace-row-$rowTarget", "workspace-pin-$custom"))
+                            assertNull("$theme/$action $tag remains enabled during rename publication; shared=${view().optBoolean("enabled")}", node(tag)!!.second.config.getOrNull(SemanticsProperties.Disabled))
+                    }
+                    down(when (action) { "apply" -> "workspace-confirm"; "select" -> "workspace-row-$rowTarget"; else -> "workspace-pin-$custom" })
+                    SystemClock.sleep(160)
+                    event(MotionEvent.ACTION_UP)
+                    shot("held-rename-$action-$theme")
+                } finally {
+                    writer.waitFor()
+                    assertEquals(0, writer.exitValue())
+                }
+                idle()
+                when (action) {
+                    "apply" -> {
+                        waitFor("queued Apply switches after rename") { view().getString("id") == target && view().isNull("page") }
+                        open()
+                    }
+                    "select" -> assertEquals(rowTarget, view().getString("selected"))
+                    "pin" -> assertEquals(!pinned, custom in ids("switcher"))
+                }
+                assertEquals(name, view().array("rows").objects().first { it.getString("id") == custom }.getString("title"))
+                waitFor("$theme/$action inline editor retired") { view().isNull("prompt") && node("workspace-name-$custom")?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } == null }
+                key(KeyEvent.KEYCODE_ESCAPE); idle(); assertNull("$theme/$action closes manager after commit; textOwner=${host.editingText}", node("workspace-manager"))
+            }
+        }
+    }
+
+    @Test fun nameGesturesSelectBuiltinsAndRenameCustomAcrossThemes() {
+        val custom = newWorkspace("Name gestures")
+        val builtin = defaults.first()
+        fun doubleClickName(id: String) {
+            down("workspace-name-$id"); event(MotionEvent.ACTION_UP)
+            down("workspace-name-$id"); event(MotionEvent.ACTION_UP); idle()
+        }
+        for (theme in listOf("light", "dark")) {
+            waitFor("document accepts gesture theme") { !host.documentInputBlocked }
+            host.drain(obj("type" to "set_theme", "theme" to theme)); idle()
+            waitFor("requested name gesture theme") { host.snapshot!!.getJSONObject("state").getString("theme") == theme }
+            open(); tap("workspace-row-${defaults.last()}")
+            waitFor("another row selected before builtin double click") { view().getString("selected") == defaults.last() }
+            tool = MotionEvent.TOOL_TYPE_MOUSE
+            doubleClickName(builtin)
+            waitFor("built-in double click selects without Rename", 5000) { view().getString("selected") == builtin }
+            assertTrue(view().isNull("prompt")); assertNull(node("workspace-row-menu"))
+            tap("workspace-row-${defaults.last()}")
+            waitFor("another row selected before mouse hold") { view().getString("selected") == defaults.last() }
+            down("workspace-name-$builtin")
+            SystemClock.sleep(ViewConfiguration.getLongPressTimeout().toLong() + 160)
+            assertNull("Stationary mouse hold never opens metadata", node("workspace-row-menu"))
+            event(MotionEvent.ACTION_UP); idle()
+            waitFor("mouse hold release selects builtin") { view().getString("selected") == builtin }
+            for (pointer in listOf(MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+                tool = pointer
+                down("workspace-name-$custom")
+                waitFor("touch or pen name hold opens metadata") { node("workspace-row-menu") != null }
+                event(MotionEvent.ACTION_UP)
+                waitFor("held metadata owns native focus") { node("workspace-row-menu")?.first?.view?.hasWindowFocus() == true }
+                assertNotNull(node("workspace-rename")); assertNotNull(node("workspace-delete"))
+                assertEquals(builtin, view().getString("selected"))
+                key(KeyEvent.KEYCODE_ESCAPE); idle()
+            }
+            tool = MotionEvent.TOOL_TYPE_MOUSE
+            doubleClickName(custom)
+            val name = "Name gesture $theme"
+            renameInline(custom, name)
+            waitFor("custom name editor retired") { view().isNull("prompt") && node("workspace-name-$custom")?.second?.find { it.config.getOrNull(SemanticsActions.SetText) != null } == null }
+            assertEquals(builtin, view().getString("selected"))
+            assertEquals(custom, view().getString("id"))
+            shot("name-gestures-$theme")
+            key(KeyEvent.KEYCODE_ESCAPE); idle(); assertNull(node("workspace-manager"))
         }
     }
 
@@ -688,5 +875,16 @@ class AndroidWorkspaceSwitcherTest {
         }
         tap("workspace-switch-$target")
         assertEquals(target, view().getString("id"))
+    }
+}
+
+internal object WorkspaceWriteLockProcess {
+    @JvmStatic fun main(args: Array<String>) {
+        java.io.RandomAccessFile(args[0], "rw").use { file ->
+            file.channel.lock(120L, 1L, false).use {
+                System.out.println("LOCKED"); System.out.flush()
+                Thread.sleep(3000)
+            }
+        }
     }
 }

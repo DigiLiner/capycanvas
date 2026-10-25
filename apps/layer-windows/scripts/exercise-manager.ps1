@@ -170,7 +170,9 @@ try {
     Edit 'workspace-manager-name' 'Painting'
     Wait-Until {(Button 'Create and Switch').Current.IsEnabled} 'Valid workspace name did not enable confirmation'
     Capture 'new-workspace'
-    Choose 'Create and Switch';Closed
+    Choose 'Create and Switch';Settled
+    Wait-Until {$null -eq (Manager).prompt -and (Manager).page -eq 'workspaces'} 'Creation closed the manager'
+    Choose 'Cancel';Closed
     if((Model).windows_workspace.name -ne 'Painting' -or (Model).state.brush.diameter -ne $size){throw 'Workspace creation did not preserve tool settings'}
     foreach($id in @($painter,$original,'builtin:workspace:photographer')){
         if((HeaderChoice $id).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off){throw 'Custom workspace must leave all header choices off'}
@@ -188,39 +190,40 @@ try {
     if((Model).windows_workspace.name -ne $originalName -or (Model).state.brush.diameter -ne $otherSize){throw 'Switching workspaces changed the shared brush settings'}
     $size=$otherSize
     }
-    $searchWorkspaces=@()
+    $listWorkspaces=@()
     foreach($index in 1..4){
         Menu 'Manage Workspaces…';Invoke 'workspace-manager-create'
-        Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Search fixture naming form did not open'
-        Edit 'workspace-manager-name' ("Search $index")
-        Wait-Until {(Button 'Create and Switch').Current.IsEnabled} 'Search fixture valid name remained disabled'
-        Choose 'Create and Switch';Closed
-        $searchWorkspaces+=@{id=(Model).windows_workspace.id;name="Search $index"}
+        Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Long-list fixture naming form did not open'
+        Edit 'workspace-manager-name' ("Workspace $index")
+        Wait-Until {(Button 'Create and Switch').Current.IsEnabled} 'Long-list fixture valid name remained disabled'
+        Choose 'Create and Switch';Settled
+        Wait-Until {$null -eq (Manager).prompt -and (Manager).page -eq 'workspaces'} 'Creation closed the manager'
+        Choose 'Cancel';Closed
+        $listWorkspaces+=@{id=(Model).windows_workspace.id;name="Workspace $index"}
     }
     (HeaderChoice $original).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
-    Wait-Until {(Model).windows_workspace.id -eq $original} 'Search fixture did not restore the original workspace'
+    Wait-Until {(Model).windows_workspace.id -eq $original} 'Long-list fixture did not restore the original workspace'
     Menu 'Manage Workspaces…'
-    Wait-Until {@((Manager).rows).Count -gt 7 -and !(Control 'workspace-manager-search').Current.IsOffscreen} 'Larger workspace list did not reveal Search'
-    Edit 'workspace-manager-search' 'SEARCH 4'
-    Wait-Until {(Manager).query -eq 'SEARCH 4' -and @((Manager).rows).Count -eq 1 -and (Manager).rows[0].title -eq 'Search 4'} 'Shared workspace search did not match the query'
-    Capture 'workspace-search'
-    Edit 'workspace-manager-search' ''
-    Wait-Until {@((Manager).rows).Count -gt 7} 'Clearing workspace search did not restore the list'
-    foreach($workspace in $searchWorkspaces){
-        Invoke ('workspace-manager-options-'+$workspace.id);Invoke 'workspace-manager-delete'
-        Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Search fixture delete did not open'
-        Choose 'Delete';Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row $workspace.name)} 'Search fixture workspace did not delete'
+    Wait-Until {@((Manager).rows).Count -gt 7} 'Larger workspace list did not retain every row'
+    if(Find 'workspace-manager-search' -Visible){throw 'Workspace manager still exposes Search'}
+    foreach($workspace in $listWorkspaces){
+        $null=Select-Row $workspace.id
+        Invoke 'workspace-manager-remove'
+        Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Footer delete did not open'
+        Choose 'Delete';Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row $workspace.name) -and (Manager).page -eq 'workspaces'} 'Delete did not retain the manager and remove its row'
     }
     Choose 'Cancel';Closed
     if(!$WorkflowOnly){
     Menu 'Manage Workspaces…'
-    Invoke ('workspace-manager-options-'+$painting)
-    if((Find 'workspace-manager-move-up') -or (Find 'workspace-manager-move-down')){throw 'Custom row options contain reorder actions'}
-    Invoke 'workspace-manager-rename'
-    Wait-Until {(Manager).prompt.title -eq 'Rename'} 'Rename prompt did not open'
-    Edit 'workspace-manager-name' 'Inking'
-    Choose 'Rename'
-    Wait-Until {$null -eq (Manager).prompt -and $null -ne (Row 'Inking')} 'Rename did not update retained list'
+    $null=Select-Row $painting
+    if(Find ('workspace-manager-options-'+$painting) -Visible){throw 'Custom workspace still has a row dots button'}
+    (Control ('workspace-manager-row-'+$painting) -Arranged).SetFocus()
+    [CapyRowPointer]::Key([uint32]$review.Id,0x71)
+    Wait-Until {(Manager).prompt_action.type -eq 'rename'} 'F2 did not enter inline rename'
+    (Control ('workspace-manager-rename-'+$painting) -Arranged).SetFocus()
+    Edit ('workspace-manager-rename-'+$painting) 'Inking'
+    [CapyRowPointer]::Key([uint32]$review.Id,13)
+    Wait-Until {$null -eq (Manager).prompt -and $null -ne (Row 'Inking')} 'Inline Enter did not update retained list'
     Wait-Until {(HeaderChoice $painting).Current.Name -eq 'Inking'} 'Header did not follow the renamed custom workspace'
     Wait-Until {
         $menu=(& (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Window' -Inspect).Current.BoundingRectangle
@@ -228,7 +231,7 @@ try {
         $menu.Right -le $firstChoice.Left
     } 'Renamed workspace header overlaps the application menus'
     Capture 'renamed-header'
-    Invoke ('workspace-manager-options-'+$painting);Invoke 'workspace-manager-delete'
+    Invoke 'workspace-manager-remove'
     Wait-Until {(Manager).prompt.title -eq 'Delete'} 'Delete prompt did not open'
     Choose 'Delete'
     Wait-Until {$null -eq (Manager).prompt -and $null -eq (Row 'Inking')} 'Delete did not remove the workspace'
@@ -265,7 +268,7 @@ try {
     Choose 'Cancel';Closed
     if($WorkflowOnly){
         Close
-        [pscustomobject]@{theme=$Theme;workflow_only=$true;immediate_name_gating='passed';larger_workspace_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';zero_exit='passed';evidence=$run}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
+        [pscustomobject]@{theme=$Theme;workflow_only=$true;immediate_name_gating='passed';larger_workspace_list_without_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';zero_exit='passed';evidence=$run}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
         return
     }
     $beforeReset=Layout
@@ -288,7 +291,7 @@ try {
     Choose 'Cancel';Closed
     Write-Output 'Manager actions and restart passed; checking the five-second final process exit.'
     Close
-    [pscustomobject]@{theme=$Theme;included_workspaces='passed';native_pin_toggle='passed';header_switcher='passed';preview_cancel='passed';explicit_apply='passed';enter_previews_only='passed';retained_rows='passed';history_escape_restore='passed';starting_layout_preview='passed';starting_layout_undo_redo='passed';name_only_create='passed';immediate_name_gating='passed';larger_workspace_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';explicit_switch='passed';shared_editing_state='passed';rename_delete='passed';reset_brushes='passed';restart='passed';zero_exit='passed';scope='native UI Automation and guarded OS keys; physical pointer and performance acceptance remain separate'}|ConvertTo-Json
+    [pscustomobject]@{theme=$Theme;included_workspaces='passed';native_pin_toggle='passed';header_switcher='passed';preview_cancel='passed';explicit_apply='passed';enter_previews_only='passed';retained_rows='passed';history_escape_restore='passed';starting_layout_preview='passed';starting_layout_undo_redo='passed';name_only_create='passed';immediate_name_gating='passed';larger_workspace_list_without_search='passed';saved_toolbar_description_edit_cancel_and_reopen='passed';explicit_switch='passed';shared_editing_state='passed';rename_delete='passed';reset_brushes='passed';restart='passed';zero_exit='passed';scope='native UI Automation and guarded OS keys; physical pointer and performance acceptance remain separate'}|ConvertTo-Json
 }catch{
     if($review -and !$review.HasExited){try{Capture 'failure'}catch{}}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw

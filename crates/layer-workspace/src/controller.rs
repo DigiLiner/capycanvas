@@ -583,6 +583,19 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         self.view.prompt_action = None;
         self.prompt_source = None;
     }
+    fn renaming_workspace(&self) -> bool {
+        matches!(self.view.prompt_action, Some(ManagerAction::Rename(_)))
+            && self.workspace_metadata_prompt()
+    }
+    fn workspace_metadata_prompt(&self) -> bool {
+        matches!(self.view.prompt_action, Some(ManagerAction::Rename(_) | ManagerAction::Delete(_)))
+            && self.prompt_source.as_ref().is_some_and(|source| source.kind == ItemKind::Workspace)
+    }
+    fn metadata_submit_preserves_preview(&self) -> bool {
+        self.renaming_workspace() || (self.workspace_metadata_prompt()
+            && matches!(&self.view.prompt_action, Some(ManagerAction::Delete(id))
+                if self.view.selected.as_ref() != Some(id) && self.manager.active_id().as_ref() != Some(id)))
+    }
     fn dismiss<R: CanvasRenderer>(&mut self, session: &mut UiSession<R>) -> UiChange {
         let change = self.stop_preview(session);
         self.close_prompt();
@@ -647,7 +660,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             ),
             _ => (
                 self.localization.text(layer_ui::MessageId::WORKSPACE_WORKSPACES).to_string(),
-                self.localization.text(layer_ui::MessageId::WORKSPACE_INTRO).to_string(),
+                String::new(),
             ),
         };
         self.view.title = title;
@@ -892,11 +905,12 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                 if matches!(input, WorkspaceInput::Dismiss) || self.view.prompt.is_none() {
                     change = self.dismiss(session);
                 } else {
-                    change = self.stop_preview(session);
+                    let keep_preview = self.workspace_metadata_prompt();
+                    if !keep_preview { change = self.stop_preview(session); }
                     self.close_prompt();
                     if self.view.page.is_none() && self.task.is_none() {
                         self.end_transition(session);
-                    } else if self.view.page.is_some() && self.task.is_none() {
+                    } else if !keep_preview && self.view.page.is_some() && self.task.is_none() {
                         merge(
                             &mut change,
                             self.select(session, self.view.selected.clone(), now)?,
@@ -940,7 +954,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                 self.close_after_task = true;
             }
             WorkspaceInput::Select { id } => {
-                if self.view.page.is_some() && self.view.prompt.is_none() {
+                if self.renaming_workspace() && self.task.is_some() {
+                    self.queued = Some(WorkspaceInput::Select { id });
+                } else if self.view.page.is_some() && self.view.prompt.is_none() {
                     change = self.select(session, id, now)?;
                 }
             }
@@ -961,6 +977,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                             | WorkspaceInput::Form { .. }
                             | WorkspaceInput::Action { .. }
                             | WorkspaceInput::Switch { .. }
+                            | WorkspaceInput::Confirm
                             | WorkspaceInput::Import { .. }
                             | WorkspaceInput::Retry
                     ) {
@@ -1082,7 +1099,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             _ => self.manager.form_prompt(&action, source.as_ref())?,
         };
         self.start_transition(session)?;
-        let mut change = self.stop_preview(session);
+        let mut change = if matches!(action, ManagerAction::Rename(_) | ManagerAction::Delete(_))
+            && source.as_ref().is_some_and(|source| source.kind == ItemKind::Workspace)
+        { UiChange::default() } else { self.stop_preview(session) };
         if let (ManagerAction::Reset(_), Some(entity)) = (&action, &current) {
             session
                 .begin_workspace_layout_preview()
@@ -1122,6 +1141,8 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         }
         let mut change = if matches!(action, ManagerAction::Reset(_)) {
             self.hold_preview();
+            UiChange::default()
+        } else if self.metadata_submit_preserves_preview() {
             UiChange::default()
         } else {
             self.stop_preview(session)
@@ -1592,8 +1613,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                         merge(&mut change, session.cancel_workspace_layout_preview());
                     }
                     if !keep_prompt {
+                        let keep_preview = self.renaming_workspace() || (self.workspace_metadata_prompt() && self.preview_open);
                         self.close_prompt();
-                        if self.view.page.is_some() && !self.suspended {
+                        if !keep_preview && self.view.page.is_some() && !self.suspended {
                             match self.select(session, self.view.selected.clone(), now) {
                                 Ok(c) => merge(&mut change, c),
                                 Err(e) => self.set_error(e),
@@ -1607,6 +1629,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     self.pending_binding = self.manager.binding();
                 }
                 Err(e) => {
+                    if self.renaming_workspace() { self.queued = None; }
                     if !self.preview_open {
                         merge(&mut change, session.cancel_workspace_layout_preview());
                     }
@@ -1712,6 +1735,8 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             }) {
                 Ok(c) => {
                     merge(&mut change, c);
+                    let keep_manager = self.view.page == Some(ManagerPage::Workspaces)
+                        && matches!(self.view.prompt_action, Some(ManagerAction::New | ManagerAction::Delete(_)));
                     self.startup = None;
                     self.startup_error = None;
                     let id = incoming.entity.id.clone();
@@ -1739,15 +1764,16 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     self.view.ready = true;
                     self.clear_error();
                     self.view.owner_lost = false;
-                    self.view.page = None;
+                    self.view.page = keep_manager.then_some(ManagerPage::Workspaces);
                     self.view.details = None;
                     self.details_source = None;
-                    self.view.selected = None;
+                    self.view.selected = keep_manager.then_some(id);
                     self.view.query.clear();
                     self.close_prompt();
                     self.generation = session.workspace_layout_generation();
                     session.set_workspace_read_only(self.suspended);
                     self.end_transition(session);
+                    if keep_manager && let Err(error) = self.start_transition(session) { self.set_error(error); }
                     self.pending_binding = self.manager.binding();
                 }
                 Err(e) => {

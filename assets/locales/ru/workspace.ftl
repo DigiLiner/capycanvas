@@ -132,7 +132,6 @@ workspace-action-retry-storage = Повторить работу с хранил
 workspace-manage-toolbars = Управление панелями инструментов
 workspace-toolbars-intro = Расположите панели инструментов в этом рабочем пространстве.
 workspace-library-intro = Сохраните панели инструментов для использования в любом рабочем пространстве.
-workspace-intro = Рабочие пространства сохраняют расположение для разных задач.
 workspace-history-hidden = Скрыто: { $panels }
 workspace-history-shown = Показано: { $panels }
 workspace-history-restored-earlier = Восстановлено прежнее расположение

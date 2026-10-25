@@ -127,7 +127,6 @@ workspace-action-retry-storage = ลองเก็บข้อมูลอี�
 workspace-manage-toolbars = จัดการแถบเครื่องมือ
 workspace-toolbars-intro = จัดแถบเครื่องมือในพื้นที่ทำงานนี้
 workspace-library-intro = บันทึกแถบเครื่องมือเพื่อใช้ซ้ำในพื้นที่ทำงานใดก็ได้
-workspace-intro = พื้นที่ทำงานบันทึกผังสำหรับงานต่างกัน
 workspace-history-hidden = ซ่อน { $panels }
 workspace-history-shown = แสดง { $panels }
 workspace-history-restored-earlier = คืนค่าผังก่อนหน้า

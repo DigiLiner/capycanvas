@@ -25,8 +25,10 @@ function Closed {
 function Open-Manager {
     Closed
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
-    (Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-    Invoke 'Manage Workspaces…' -Name
+    $submenu=Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Arranged
+    $bounds=$submenu.Current.BoundingRectangle;[CapyRowPointer]::Hover([int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))
+    $submenu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    (Control 'Manage Workspaces…' -Name -Arranged).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {$null -ne (Find 'workspace-manager')} 'Manager did not open'
     Settled
 }
@@ -44,12 +46,14 @@ function Options([switch]$Compact) {
     $first=Control ('workspace-switcher-show-'+(Storage).order[0])
     $menu=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($first)
     $items=@($menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem)))
-    if($items.Count -ne (@((Storage).order).Count+$(if($Compact){0}else{1}))){throw 'Visibility checklist has unexpected native rows'}
-    if($items[0].Current.AutomationId -ne ('workspace-switcher-show-'+(Storage).order[0])){throw 'Visibility checklist does not begin with its first workspace'}
+    if($items.Count -ne (@((Storage).order).Count+1)){throw 'Visibility checklist has unexpected native rows'}
+    $firstIndex=if($Compact){1}else{0}
+    if($Compact -and $items[0].Current.AutomationId -ne 'native-menu-back'){throw 'Compact visibility page has no native Back action'}
+    if($items[$firstIndex].Current.AutomationId -ne ('workspace-switcher-show-'+(Storage).order[0])){throw 'Visibility checklist does not begin with its first workspace'}
     $rows=@($menu.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|Where-Object {$_.Current.AutomationId -like 'workspace-switcher-show-*'})
     $nativeOrder=@($rows|ForEach-Object {$_.Current.AutomationId.Substring('workspace-switcher-show-'.Length)})
     if(($nativeOrder -join '|') -ne ((Storage).order -join '|')){throw 'Visibility menu does not contain every workspace in saved order'}
-    $null=Control 'Manage Workspaces…' -Name
+    if(!$Compact){$null=Control 'Manage Workspaces…' -Name}
     if(Find 'Customize Title Bar' -Name){throw 'Switcher input opened the titlebar context menu'}
 }
 function Dismiss([string]$Focus=''){
@@ -107,14 +111,12 @@ function Check-Options {
         foreach($repeat in 1..2){
             Invoke 'workspace-switcher-options';Options
             $revision=(Storage).switcher_revision
-            Invoke ('workspace-switcher-show-'+$id)
-            Wait-Until {!(Find ('workspace-switcher-show-'+$id))} 'Checkbox activation did not dismiss options'
-            Invoke 'workspace-switcher-options'
             $retained=Control ('workspace-switcher-show-'+$id)
             $runtime=$retained.GetRuntimeId() -join ':'
+            Invoke ('workspace-switcher-show-'+$id)
             Wait-Until {(Storage).switcher_revision -gt $revision -and !(Storage).switcher_busy -and $retained.Current.IsEnabled} 'Open options did not follow preference acknowledgement'
             Options
-            if(((Control ('workspace-switcher-show-'+$id)).GetRuntimeId() -join ':') -ne $runtime){throw 'Preference acknowledgement replaced the open menu item'}
+            if(((Control ('workspace-switcher-show-'+$id)).GetRuntimeId() -join ':') -ne $runtime){throw 'Visibility edit replaced or closed its retained menu item'}
             Dismiss 'workspace-switcher-options'
             if((Storage).id -ne $active -or (Layout) -ne $layout -or ((Storage).order -join '|') -ne $order){throw 'Visibility edit changed the active workspace, layout or order'}
         }
@@ -131,13 +133,22 @@ function Check-Compact {
     $null=Control 'header-workspace-menu' -Arranged
     $at=At 'header-workspace-menu';[CapyRowPointer]::RightClick($at.x,$at.y);Options;Dismiss 'header-workspace-menu'
     Invoke 'header-workspace-menu'
-    $submenu=Control 'Show in top bar' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)
-    $submenu.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    Invoke 'Show in top bar' -Name
     Options -Compact;Capture 'compact-visibility' -Composed
-    $revision=(Storage).switcher_revision
-    Invoke ('workspace-switcher-show-'+$active)
-    Wait-Until {(Storage).switcher_revision -gt $revision -and !(Storage).switcher_busy} 'Compact visibility toggle was not acknowledged'
-    if((Storage).id -ne $active -or (Layout) -ne $layout){throw 'Compact pinning switched or changed the workspace'}
+    $retained=Control ('workspace-switcher-show-'+$active);$identity=$retained.GetRuntimeId() -join ':'
+    foreach($repeat in 1..2){
+        $revision=(Storage).switcher_revision
+        Invoke ('workspace-switcher-show-'+$active)
+        Wait-Until {(Storage).switcher_revision -gt $revision -and !(Storage).switcher_busy} 'Compact visibility toggle was not acknowledged'
+        Options -Compact
+        if(((Control ('workspace-switcher-show-'+$active)).GetRuntimeId() -join ':') -ne $identity){throw 'Compact visibility edit closed or replaced its checkbox'}
+        if((Storage).id -ne $active -or (Layout) -ne $layout){throw 'Compact pinning switched or changed the workspace'}
+    }
+    Capture 'compact-visibility-retained' -Composed
+    Invoke 'native-menu-back'
+    Wait-Until {$null -ne (Find 'Manage Workspaces…' -Name) -and !(Find ('workspace-switcher-show-'+$active))} 'Native Back did not retain the parent menu'
+    Invoke 'Show in top bar' -Name;Options -Compact
+    Dismiss 'header-workspace-menu'
     Invoke 'header-workspace-menu';Invoke 'Manage Workspaces…' -Name
     Wait-Until {$null -ne (Find 'workspace-manager')} 'Compact footer did not open the manager'
     Settled;Choose 'Cancel';Closed
@@ -221,7 +232,7 @@ try {
         if((Manager).selected -ne $preview -or (Layout) -ne $previewLayout){throw 'Rapid pin input changed the preview'}
     }
     foreach($selected in @($false,$true)){
-        (Control $pinId).SetFocus();$revision=(Storage).switcher_revision
+        Focus-Keyboard (Control $pinId);$revision=(Storage).switcher_revision
         [CapyRowPointer]::Key([uint32]$review.Id,0x20)
         Wait-Until {(Storage).switcher_revision -gt $revision} 'Keyboard pin input was not acknowledged'
         Settled
@@ -281,7 +292,9 @@ try {
         Invoke 'workspace-manager-create'
         Wait-Until {(Manager).prompt.title -eq 'New Workspace'} 'Creation prompt missing'
         (Control 'workspace-manager-name').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("Switcher overflow workspace $i")
-        Choose 'Create and Switch';Closed
+        Choose 'Create and Switch';Settled
+        Wait-Until {$null -eq (Manager).prompt -and (Manager).page -eq 'workspaces'} 'Creation closed the manager'
+        Choose 'Cancel';Closed
         Wait-Until {$s=Storage;$s.switcher.id -contains $s.id -and $s.switcher_display.id -contains $s.id} 'Created workspace was not pinned'
     }
     $inline=@{item=$null};Wait-Until {$inline.item=Find 'workspace-switcher';$null -ne $inline.item} 'Expanded workspace switcher did not appear'

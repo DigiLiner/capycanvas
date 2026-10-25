@@ -70,6 +70,329 @@ impl WorkspaceStore for Store {
     }
 }
 #[test]
+fn workspace_pins_remain_available_during_inline_rename_publication() {
+    let mut f = Fixture::new();
+    let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+    f.input(serde_json::json!({"type":"switch","id":DEFAULT_WORKSPACES[0].0}));
+    f.save();
+    let active = f.controller.manager.active_id();
+    let order = f.controller.manager.workspace_ids();
+    let photo = "builtin:workspace:photographer";
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    f.input(serde_json::json!({"type":"select","id":photo}));
+    let preview = f.host.session.state().workspace.layout.clone();
+    f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+    let (release, gate) = async_channel::bounded(1);
+    *f.backend.commit_gate.borrow_mut() = Some(gate);
+    f.input(serde_json::json!({"type":"submit","name":"Renamed While Unpinning"}));
+    assert!(f.controller.view.busy);
+    let pin = f.controller.view.rows.iter().find(|row| row.id == photo).unwrap().pin.clone().unwrap();
+    assert!(pin.selected && pin.enabled, "inline Rename publication preserves accepted pin input");
+    f.input(serde_json::json!({"type":"edit_switcher","edit":pin.edit}));
+    assert!(!f.controller.view.rows.iter().find(|row| row.id == photo).unwrap().pin.as_ref().unwrap().selected);
+    assert_eq!(f.host.session.state().workspace.layout, preview);
+    release.try_send(()).unwrap();
+    f.pump();
+    assert!(!f.controller.manager.switcher_ids().iter().any(|id| id == photo));
+    assert_eq!(f.controller.manager.items().into_iter().find(|item| item.id == custom).unwrap().metadata.name, "Renamed While Unpinning");
+    assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+    assert_eq!(f.host.session.state().workspace.layout, preview);
+    assert_eq!(f.controller.manager.active_id(), active);
+    assert_eq!(f.controller.manager.workspace_ids(), order);
+    assert!(f.controller.view.error.is_none());
+}
+
+#[test]
+fn workspace_creation_keeps_the_manager_open() {
+    let mut f = Fixture::new();
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    f.input(serde_json::json!({"type":"form","action":{"type":"new"}}));
+    f.input(serde_json::json!({"type":"submit","name":"Managed Workspace"}));
+    let created = f.controller.manager.active_id().unwrap();
+    assert_eq!(f.controller.manager.active_name().as_deref(), Some("Managed Workspace"));
+    assert_eq!(f.controller.view.page, Some(ManagerPage::Workspaces));
+    assert_eq!(f.controller.view.selected.as_ref(), Some(&created));
+    assert!(f.controller.view.rows.iter().any(|row| row.id == created && row.current));
+    assert!(f.controller.view.error.is_none());
+}
+
+#[test]
+fn active_workspace_deletion_keeps_the_manager_open() {
+    let mut f = Fixture::new();
+    let created = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+    f.input(serde_json::json!({"type":"switch","id":created}));
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    f.input(serde_json::json!({"type":"form","action":{"type":"delete","value":created}}));
+    f.input(serde_json::json!({"type":"submit","name":""}));
+    let fallback = f.controller.manager.active_id().unwrap();
+    assert_ne!(fallback, created);
+    assert_eq!(f.controller.view.page, Some(ManagerPage::Workspaces));
+    assert_eq!(f.controller.view.selected.as_ref(), Some(&fallback));
+    assert!(f.controller.view.rows.iter().any(|row| row.id == fallback && row.current));
+    assert!(f.controller.manager.items().iter().all(|item| item.id != created));
+    assert!(f.controller.view.error.is_none());
+}
+
+#[test]
+fn workspace_creation_outside_or_dismissed_during_the_manager_stays_closed() {
+    for dismiss_pending in [false, true] {
+        let mut f = Fixture::new();
+        if dismiss_pending { f.input(serde_json::json!({"type":"open","page":"workspaces"})); }
+        f.input(serde_json::json!({"type":"form","action":{"type":"new"}}));
+        let (release, gate) = async_channel::bounded(1);
+        if dismiss_pending { *f.backend.commit_gate.borrow_mut() = Some(gate); }
+        f.input(serde_json::json!({"type":"submit","name":"Created Outside Manager"}));
+        if dismiss_pending {
+            assert!(f.controller.view.busy);
+            f.input(serde_json::json!({"type":"dismiss"}));
+            assert!(f.controller.view.page.is_none());
+            release.try_send(()).unwrap();
+            f.pump();
+        }
+        assert_eq!(f.controller.manager.active_name().as_deref(), Some("Created Outside Manager"));
+        assert!(f.controller.view.page.is_none());
+        assert!(f.controller.view.prompt.is_none());
+        assert!(f.controller.view.error.is_none());
+    }
+}
+
+#[test]
+fn failed_rename_does_not_execute_queued_workspace_inputs() {
+    for follow_up in ["new", "delete", "confirm", "select"] {
+        let mut f = Fixture::new();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        f.input(serde_json::json!({"type":"switch","id":DEFAULT_WORKSPACES[0].0}));
+        f.save();
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        f.input(serde_json::json!({"type":"select","id":"builtin:workspace:photographer"}));
+        let presented = f.host.session.state().workspace.layout.clone();
+        f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+        let prompt = serde_json::to_value(&f.controller.view.prompt).unwrap();
+        let (release, gate) = async_channel::bounded(1);
+        *f.backend.commit_gate.borrow_mut() = Some(gate);
+        f.input(serde_json::json!({"type":"submit","name":"Unsaved Rename"}));
+        assert!(f.controller.view.busy);
+        f.input(match follow_up {
+            "new" => serde_json::json!({"type":"form","action":{"type":"new"}}),
+            "delete" => serde_json::json!({"type":"action","action":{"type":"delete","value":custom}}),
+            "confirm" => serde_json::json!({"type":"confirm"}),
+            "select" => serde_json::json!({"type":"select","id":DEFAULT_WORKSPACES[1].0}),
+            _ => unreachable!(),
+        });
+        f.backend.fail.set(true);
+        release.try_send(()).unwrap();
+        f.pump();
+        assert_eq!(f.controller.view.prompt_action, Some(ManagerAction::Rename(custom)));
+        assert_eq!(serde_json::to_value(&f.controller.view.prompt).unwrap(), prompt);
+        assert!(f.controller.view.error.is_some());
+        assert!(f.controller.manager.has_failed_operation());
+        assert_eq!(f.host.session.state().workspace.layout, presented);
+        assert_eq!(f.controller.view.selected.as_deref(), Some("builtin:workspace:photographer"));
+    }
+}
+
+#[test]
+fn failed_workspace_renames_retry_the_same_operation_without_replacing_the_preview() {
+    for rename_active in [false, true] {
+        let mut f = Fixture::new();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        let active = if rename_active { custom.as_str() } else { DEFAULT_WORKSPACES[0].0 };
+        f.input(serde_json::json!({"type":"switch","id":active}));
+        f.save();
+        let order = f.controller.manager.workspace_ids();
+        let pins = f.controller.manager.switcher_ids();
+        let photo = "builtin:workspace:photographer";
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        f.input(serde_json::json!({"type":"select","id":photo}));
+        let presented = f.host.session.state().workspace.layout.clone();
+        f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+        f.backend.fail.set(true);
+        f.input(serde_json::json!({"type":"submit","name":"Retried Rename"}));
+        assert!(f.controller.view.error.is_some());
+        assert!(f.controller.manager.has_failed_operation());
+        let operation = f.backend.deliveries.borrow().last().unwrap().clone();
+        let deliveries = f.backend.deliveries.borrow().len();
+        assert_eq!(f.host.session.state().workspace.layout, presented);
+        if !rename_active {
+            let claim = pollster::block_on(f.controller.manager.load(&custom)).unwrap().claim.unwrap();
+            f.backend.now.set(f.backend.now.get() + OWNER_RENEW_MS);
+            f.pump();
+            let renewed = pollster::block_on(f.controller.manager.load(&custom)).unwrap().claim.unwrap();
+            assert_eq!(renewed.fence, claim.fence);
+            assert!(renewed.expires_at_ms > claim.expires_at_ms, "failed metadata publication retains and renews its original fence");
+            assert_eq!(f.host.session.state().workspace.layout, presented);
+        }
+        f.backend.fail.set(false);
+        f.controller.input(&mut f.host.session, WorkspaceInput::Retry, f.backend.now.get()).unwrap();
+        assert_eq!(f.host.session.state().workspace.layout, presented);
+        for _ in 0..20 {
+            f.controller.tick(&mut f.host.session, f.backend.now.get());
+            assert_eq!(f.host.session.state().workspace.layout, presented, "rename retry preserves the Photo preview (active={rename_active})");
+        }
+        assert!(f.controller.view.error.is_none(), "{:?}", f.controller.manager.error());
+        assert!(!f.controller.manager.has_failed_operation());
+        assert_eq!(&f.backend.deliveries.borrow()[deliveries..], &[operation]);
+        assert_eq!(f.controller.manager.active_id().as_deref(), Some(active));
+        if rename_active { assert_eq!(f.controller.manager.active_name().as_deref(), Some("Retried Rename")); }
+        assert_eq!(f.controller.manager.items().into_iter().find(|item| item.id == custom).unwrap().metadata.name, "Retried Rename");
+        assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+        assert_eq!(f.controller.view.page, Some(ManagerPage::Workspaces));
+        assert_eq!(f.controller.manager.workspace_ids(), order);
+        assert_eq!(f.controller.manager.switcher_ids(), pins);
+        if rename_active {
+            let mut working = f.host.session.workspace_working_state();
+            working.zen_mode = !working.zen_mode;
+            f.controller.manager.observe_working(working.clone());
+            pollster::block_on(f.controller.manager.flush()).unwrap();
+            let saved = pollster::block_on(f.controller.manager.load(&custom)).unwrap();
+            assert_eq!(saved.entity.capture().unwrap().working, working);
+            assert_eq!(saved.entity.metadata.name, "Retried Rename");
+            assert!(!f.controller.manager.dirty());
+        }
+    }
+}
+
+#[test]
+fn deleting_an_unselected_workspace_preserves_the_presented_preview_through_completion() {
+    for fail_first in [false, true] {
+        let mut f = Fixture::new();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        f.input(serde_json::json!({"type":"switch","id":DEFAULT_WORKSPACES[0].0}));
+        f.input(serde_json::json!({"type":"edit_switcher","edit":{"type":"show","id":custom,"visible":true}}));
+        let active = f.controller.manager.active_id();
+        let mut order = f.controller.manager.workspace_ids();
+        let mut pins = f.controller.manager.switcher_ids();
+        order.retain(|id| id != &custom);
+        pins.retain(|id| id != &custom);
+        let photo = "builtin:workspace:photographer";
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        f.input(serde_json::json!({"type":"select","id":photo}));
+        let presented = f.host.session.state().workspace.layout.clone();
+        f.input(serde_json::json!({"type":"form","action":{"type":"delete","value":custom}}));
+        let (release, gate) = async_channel::bounded(1);
+        *f.backend.commit_gate.borrow_mut() = Some(gate);
+        f.backend.fail.set(fail_first);
+        f.controller.input(&mut f.host.session, WorkspaceInput::Submit {
+            name: String::new(), description: None, choice: None,
+        }, f.backend.now.get()).unwrap();
+        assert_eq!(f.host.session.state().workspace.layout, presented, "accepting unrelated Delete preserves the presented preview synchronously");
+        for _ in 0..20 {
+            f.controller.tick(&mut f.host.session, f.backend.now.get());
+            assert_eq!(f.host.session.state().workspace.layout, presented, "pending unrelated Delete preserves the presented preview");
+        }
+        assert!(f.controller.view.busy);
+        release.try_send(()).unwrap();
+        for _ in 0..20 {
+            f.controller.tick(&mut f.host.session, f.backend.now.get());
+            assert_eq!(f.host.session.state().workspace.layout, presented, "completing unrelated Delete preserves the presented preview");
+        }
+        assert!(!f.controller.view.busy);
+        if fail_first {
+            assert!(f.controller.view.error.is_some());
+            assert!(f.controller.manager.has_failed_operation(), "{:?}", f.controller.manager.error());
+            assert!(f.controller.manager.items().iter().any(|item| item.id == custom));
+            f.backend.fail.set(false);
+            f.controller.input(&mut f.host.session, WorkspaceInput::Retry, f.backend.now.get()).unwrap();
+            assert_eq!(f.host.session.state().workspace.layout, presented, "retrying unrelated Delete preserves the presented preview synchronously");
+            for _ in 0..20 {
+                f.controller.tick(&mut f.host.session, f.backend.now.get());
+                assert_eq!(f.host.session.state().workspace.layout, presented, "retrying unrelated Delete preserves the presented preview through completion");
+            }
+            assert!(!f.controller.view.busy);
+            assert!(f.controller.view.error.is_none(), "retry view={:?}; manager={:?}; deliveries={:?}",
+                f.controller.view.error, f.controller.manager.error(), f.backend.deliveries.borrow());
+        }
+        assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+        assert_eq!(f.controller.manager.active_id(), active);
+        assert_eq!(f.controller.manager.workspace_ids(), order);
+        assert_eq!(f.controller.manager.switcher_ids(), pins);
+        assert!(f.controller.manager.items().iter().all(|item| item.id != custom));
+        assert!(f.controller.view.error.is_none());
+    }
+}
+
+#[test]
+fn workspace_selection_and_confirmation_wait_for_an_accepted_rename() {
+    for confirm in [false, true] {
+        let mut f = Fixture::new();
+        let active = f.controller.manager.active_id();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        let photo = "builtin:workspace:photographer";
+        let expected = pollster::block_on(f.controller.manager.load(photo)).unwrap().entity.capture().unwrap().history.layout().clone();
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        if confirm { f.input(serde_json::json!({"type":"select","id":photo})); }
+        let selected = f.controller.view.selected.clone();
+        f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+        let (release, gate) = async_channel::bounded(1);
+        *f.backend.load_gate.borrow_mut() = Some(gate);
+        f.input(serde_json::json!({"type":"submit","name":"Renamed Before Switch"}));
+        assert!(f.controller.view.busy);
+        f.input(if confirm { serde_json::json!({"type":"confirm"}) }
+            else { serde_json::json!({"type":"select","id":photo}) });
+        assert!(f.controller.view.busy);
+        assert_eq!(f.controller.view.selected, selected);
+        release.try_send(()).unwrap();
+        f.pump();
+        assert_eq!(f.controller.manager.items().into_iter().find(|item| item.id == custom).unwrap().metadata.name, "Renamed Before Switch");
+        assert_eq!(f.host.session.state().workspace.layout, expected);
+        if confirm {
+            assert_eq!(f.controller.manager.active_id().as_deref(), Some(photo));
+            assert!(f.controller.view.page.is_none());
+        } else {
+            assert_eq!(f.controller.manager.active_id(), active);
+            assert_eq!(f.controller.view.page, Some(ManagerPage::Workspaces));
+            assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+        }
+        assert!(f.controller.view.error.is_none());
+    }
+}
+
+#[test]
+fn workspace_metadata_prompts_preserve_settled_and_pending_selected_previews() {
+    for pending in [false, true] {
+        let mut f = Fixture::new();
+        let active = f.controller.manager.active_id();
+        let custom = f.controller.manager.items().into_iter().find(|item| !item.metadata.builtin).unwrap().id;
+        let photo = "builtin:workspace:photographer";
+        let expected = pollster::block_on(f.controller.manager.load(photo)).unwrap().entity.capture().unwrap().history.layout().clone();
+        let order = f.controller.manager.workspace_ids();
+        let pins = f.controller.manager.switcher_ids();
+        f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+        let (release, gate) = async_channel::bounded(1);
+        if pending { *f.backend.load_gate.borrow_mut() = Some(gate); }
+        f.input(serde_json::json!({"type":"select","id":photo}));
+        let presented = f.host.session.state().workspace.layout.clone();
+        assert_eq!(f.controller.view.loading, pending);
+        if !pending { assert_eq!(presented, expected); }
+        for action in ["rename", "delete"] {
+            f.input(serde_json::json!({"type":"form","action":{"type":action,"value":custom}}));
+            assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+            assert_eq!(f.host.session.state().workspace.layout, presented, "opening {action} preserves the presented preview (pending={pending})");
+            assert_eq!(f.controller.view.loading, pending, "opening {action} preserves the pending preview");
+            f.input(serde_json::json!({"type":"cancel"}));
+            assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+            assert_eq!(f.host.session.state().workspace.layout, presented, "cancelling {action} preserves the presented preview");
+            assert_eq!(f.controller.view.loading, pending, "cancelling {action} preserves the pending preview");
+            assert_eq!(f.controller.manager.active_id(), active);
+            assert_eq!(f.controller.manager.workspace_ids(), order);
+            assert_eq!(f.controller.manager.switcher_ids(), pins);
+        }
+        if pending { release.try_send(()).unwrap(); f.pump(); }
+        assert!(!f.controller.view.loading);
+        assert_eq!(f.host.session.state().workspace.layout, expected);
+        f.input(serde_json::json!({"type":"form","action":{"type":"rename","value":custom}}));
+        f.input(serde_json::json!({"type":"submit","name":"Renamed Workspace"}));
+        assert!(f.controller.view.prompt.is_none());
+        assert_eq!(f.controller.view.selected.as_deref(), Some(photo));
+        assert_eq!(f.host.session.state().workspace.layout, expected);
+        assert_eq!(f.controller.manager.active_id(), active);
+        assert_eq!(f.controller.manager.workspace_ids(), order);
+        assert_eq!(f.controller.manager.switcher_ids(), pins);
+        assert_eq!(f.controller.manager.items().into_iter().find(|item| item.id == custom).unwrap().metadata.name, "Renamed Workspace");
+    }
+}
+
+#[test]
 fn manager_workspace_options_contain_only_available_localized_metadata_actions() {
     let mut f = Fixture::new();
     f.input(serde_json::json!({"type":"open","page":"workspaces"}));
@@ -78,6 +401,7 @@ fn manager_workspace_options_contain_only_available_localized_metadata_actions()
         let localization = Localizer::shared(language);
         f.controller.set_localization(localization.clone());
         f.pump();
+        assert!(f.controller.view.intro.is_empty());
         for row in &f.controller.view.rows {
             let item = f.controller.manager.items().into_iter().find(|item| item.id == row.id).unwrap();
             let pin = row.pin.as_ref().unwrap();

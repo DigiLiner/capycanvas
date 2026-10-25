@@ -58,9 +58,9 @@ struct WorkspaceManagerView: View {
         return view["switcher_error"].isNull ? nil : view["switcher_error"].string
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
-                Text(view["prompt"]["title"].isNull ? view["title"].string : view["prompt"]["title"].string)
+                Text(view["prompt"].isNull || workspaces.inlineRename ? view["title"].string : view["prompt"]["title"].string)
                     .font(.title2).fontWeight(.semibold)
                 Spacer()
                 if view["prompt"].isNull && toolbarMode {
@@ -68,16 +68,16 @@ struct WorkspaceManagerView: View {
                         .disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
             }
-            if !view["prompt"].isNull { WorkspaceManagerForm(workspaces: workspaces, spec: view["prompt"]) }
+            if !view["prompt"].isNull && !workspaces.inlineRename { WorkspaceManagerForm(workspaces: workspaces, spec: view["prompt"]) }
             else {
                 if let error = message {
                     Text(error).foregroundStyle(.red).textSelection(.enabled).accessibilityIdentifier("workspace-manager-error")
                 }
                 if workspaces.page == "history" { history } else { browser }
             }
-        }.padding(20).frame(minWidth: 340, idealWidth: workspaces.page == "history" ? 480 : 620, maxWidth: 800,
-            minHeight: 360, idealHeight: 600, maxHeight: 900)
-            .interactiveDismissDisabled(workspaces.busy)
+        }.padding(20).frame(minWidth: 340, idealWidth: workspaces.page == "workspaces" ? 460 : workspaces.page == "history" ? 480 : 620, maxWidth: workspaces.page == "workspaces" ? 620 : 800,
+            minHeight: workspaces.page == "workspaces" ? 0 : 360, idealHeight: workspaces.page == "workspaces" ? CGFloat(min(7,view["rows"].array.count))*56+176 : 600, maxHeight: 900)
+            .onKeyPress(.escape) { guard !NativeTextContext.composing else{return .ignored};if workspaces.inlineRename { workspaces.cancelPrompt() } else { workspaces.dismiss() }; return .handled }
             .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
             .onChange(of: workspaces.page) { _, _ in query = "" }
             .onChange(of: [language] + view["rows"].array.map { $0["title"].string }, initial: true) { _, _ in refreshCaptions() }
@@ -89,7 +89,7 @@ struct WorkspaceManagerView: View {
         }, uniquingKeysWith: { first, _ in first })
     }
     private var browser: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             if toolbarMode {
                 HStack {
                     ForEach([("this_workspace", header["this_workspace"].string), ("toolbar_library", header["saved_toolbars"].string)], id: \.0) { page in
@@ -97,11 +97,8 @@ struct WorkspaceManagerView: View {
                             .tint(workspaces.page == page.0 ? .accentColor : .secondary)
                     }
                 }
-            } else if !view["intro"].string.isEmpty {
-                Text(view["intro"].string)
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            if toolbarMode || view["rows"].array.count > 7 || !query.isEmpty { HStack {
+            if toolbarMode { HStack {
                 TextField(header["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
                     .onChange(of: query) { _, value in workspaces.search(value) }.accessibilityIdentifier("workspace-manager-search")
                 if workspaces.page == "this_workspace" {
@@ -110,14 +107,16 @@ struct WorkspaceManagerView: View {
                 }
             } }
             if workspaces.page == "workspaces" {
-                HStack {
-                    Spacer()
-                    Button(header["new_workspace"].string) { workspaces.form(["type": "new"]) }
-                        .buttonStyle(WorkspaceManagerButtonStyle()).fixedSize(horizontal: true, vertical: false)
-                        .disabled(workspaces.busy)
-                        .accessibilityIdentifier("workspace-action-new")
+                VStack(alignment: .leading,spacing:4) {
+                    WorkspaceSwitcherRows(workspaces: workspaces).frame(height:CGFloat(min(7,view["rows"].array.count))*56)
+                    HStack(spacing:4) {
+                        Button {workspaces.form(["type":"new"])} label: {SharedIcon(name:"plus").frame(width:34,height:34)}
+                            .buttonStyle(.plain).disabled(workspaces.busy && !workspaces.inlineRename).accessibilityLabel(header["new_workspace"].string).accessibilityIdentifier("workspace-action-new")
+                        let action=view["rows"].array.first {$0["id"].string==view["selected"].string}?["options"].array.first {$0["action"]["type"].string=="delete"}
+                        Button {if let action {workspaces.activate(action["action"])}} label: {SharedIcon(name:"delete").frame(width:34,height:34)}
+                            .buttonStyle(.plain).disabled(workspaces.busy && !workspaces.inlineRename || action?["enabled"].bool != true).accessibilityLabel(common["delete"].string).accessibilityIdentifier("workspace-action-delete")
+                    }
                 }
-                WorkspaceSwitcherRows(workspaces: workspaces)
             } else { EditorScrollView {
                 LazyVStack(spacing: 8) {
                     if view["rows"].array.isEmpty { Text(nativeCopy["header"]["no_items"].string).foregroundStyle(.secondary).padding(20) }
@@ -132,17 +131,18 @@ struct WorkspaceManagerView: View {
             } }
             if !toolbarMode {
                 HStack(spacing: 8) {
+                    Spacer()
                     Button(common["cancel"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                         .accessibilityIdentifier("workspace-manager-close")
                         .buttonStyle(WorkspaceManagerButtonStyle())
                     Button(view["primary"].string) { workspaces.send(["type": "confirm"]) }
                         .buttonStyle(WorkspaceManagerButtonStyle(primary: true))
-                        .disabled(!view["enabled"].bool || workspaces.busy)
+                        .disabled(!view["enabled"].bool || workspaces.busy && !workspaces.inlineRename)
                         .accessibilityIdentifier("workspace-manager-apply")
                 }
             }
             if workspaces.busy || view["loading"].bool { ProgressView().controlSize(.small) }
-        }.disabled(workspaces.busy)
+        }
     }
     private func selectableRow(_ row: JSON) -> some View {
         Button { workspaces.select(row["id"].string) } label: { rowLabel(row).contentShape(Rectangle()) }
@@ -196,7 +196,6 @@ struct WorkspaceManagerView: View {
     }
 }
 
-/// Solid, equally sized footer actions matching the shared workspace manager.
 private struct WorkspaceManagerButtonStyle: ButtonStyle {
     var primary = false
     @Environment(\.isEnabled) private var enabled
@@ -209,13 +208,13 @@ private struct WorkspaceManagerButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         let prominent = primary && enabled
         configuration.label.fontWeight(.semibold).lineLimit(2).multilineTextAlignment(.center)
-            .padding(.horizontal, 16).frame(maxWidth: .infinity, minHeight: 40)
+            .padding(.horizontal, 16).frame(minHeight: 34)
             .foregroundStyle(prominent ? palette.accentForeground : foreground)
             .background(prominent ? palette.accent : foreground.opacity(0.10))
             .overlay { if configuration.isPressed { Color.black.opacity(0.12) } }
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(foreground.opacity(prominent ? 0 : 0.10)) }
-            .opacity(enabled ? 1 : 0.55).contentShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(SquircleShape.control)
+            .overlay { SquircleShape.control.strokeBorder(foreground.opacity(prominent ? 0 : 0.10)) }
+            .opacity(enabled ? 1 : 0.55).contentShape(SquircleShape.control)
     }
 }
 

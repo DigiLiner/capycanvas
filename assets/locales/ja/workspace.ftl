@@ -130,7 +130,6 @@ workspace-action-retry-storage = 保存処理を再試行
 workspace-manage-toolbars = ツールバーを管理
 workspace-toolbars-intro = このワークスペースのツールバーを配置します。
 workspace-library-intro = どのワークスペースでも再利用できるように、ツールバーを保存します。
-workspace-intro = ワークスペースには、用途ごとに配置を保存できます。
 workspace-history-hidden = { $panels }を非表示
 workspace-history-shown = { $panels }を表示
 workspace-history-restored-earlier = 以前のレイアウトに復元

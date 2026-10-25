@@ -2,12 +2,27 @@ package art.capycanvas
 
 import android.view.KeyEvent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import kotlin.math.abs
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,6 +39,7 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -40,6 +56,9 @@ internal class WorkspaceRowInteraction {
     val grips = mutableMapOf<String, Rect>()
     val options = mutableMapOf<String, Rect>()
     val pins = mutableMapOf<String, Rect>()
+    var swipeRow by mutableStateOf<String?>(null)
+    var swipeOffset by mutableFloatStateOf(0f)
+    var deletable = emptySet<String>()
     var area = Rect.Zero
     var order = emptyList<String>()
     var enabled = false
@@ -79,11 +98,13 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
         val secondary = currentEvent.buttons.isSecondaryPressed
         val generation = drag.generation
         var held = false
+        var swiping = false
         var retired = false
         var released = false
         var remaining = viewConfiguration.longPressTimeoutMillis
         var eventTime = down.uptimeMillis
-        drag.contact = true; drag.reorderMenu = true; drag.menu = if (secondary) id else null
+        drag.contact = true; drag.reorderMenu = drag.grips[id]?.contains(start)==true; drag.menu = if (secondary) id else null
+        if(drag.swipeRow!=id){drag.swipeRow=null;drag.swipeOffset=0f}
         if (secondary) down.consume()
         try {
             while (true) {
@@ -102,7 +123,14 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                 if (!change.pressed && change.isConsumed) break // Native CANCEL.
                 if (!drag.enabled || id !in drag.order || generation != drag.generation) retired = true
                 val moved = (change.position - down.position).getDistance() > viewConfiguration.touchSlop
-                if (!direct && !held && moved) retired = true // Leave scrolling with the list.
+                val delta=change.position-down.position
+                if(!direct&&!held&&!retired&&id in drag.deletable&&delta.x < -viewConfiguration.touchSlop&&abs(delta.x)>abs(delta.y)*1.5f)swiping=true
+                if(swiping){
+                    drag.swipeRow=id;drag.swipeOffset=(-delta.x).coerceIn(0f,72.dp.toPx());change.consume()
+                    if(!change.pressed){released=true;if(drag.swipeOffset<36.dp.toPx()){drag.swipeRow=null;drag.swipeOffset=0f}else drag.swipeOffset=72.dp.toPx();break}
+                    continue
+                }
+                if (!direct && !held && moved) retired = true
                 if (!retired && !secondary && moved && change.pressed && (direct || held)) {
                     drag.active = id; drag.menu = null
                 }
@@ -127,17 +155,21 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun WorkspaceRows(host: CanvasHost, view: JSONObject, drag: WorkspaceRowInteraction, modifier: Modifier) {
     val colors = LocalPalette.current
     val rows = view.array("rows").objects()
     val workspaces = view.optString("page") == "workspaces"
+    val renaming=workspaces&&view.objectOrNull("prompt_action")?.optString("type")=="rename"
     val enabled = !view.optBoolean("busy") && !view.optBoolean("switcher_busy") && view.isNull("prompt")
     val order = view.array("order").values().map { it.toString() }
     val scroll = rememberScrollState()
     val focused = LocalWindowInfo.current.isWindowFocused
     val density = LocalDensity.current.density
     fun edit(value: JSONObject) { host.workspaceInput(obj("type" to "edit_switcher", "edit" to value)) }
-    SideEffect { drag.order = rows.map { it.getString("id") }; drag.enabled = enabled && workspaces }
+    SideEffect { drag.order = rows.map { it.getString("id") }; drag.enabled = enabled && workspaces
+        drag.deletable=rows.filter {row->row.array("options").objects().any {it.optBoolean("enabled")&&it.getJSONObject("action").getString("type")=="delete"}}.map {it.getString("id")}.toSet()
+    }
     LaunchedEffect(view.optString("page"), view.optString("prompt"), rows.map { it.getString("id") }) {
         if (!workspaces || !view.isNull("prompt") || (drag.active != null && drag.active !in drag.order)) drag.cancel()
         if (drag.menu != null && drag.menu !in drag.order) drag.menu = null
@@ -157,7 +189,7 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
             drag.target()
         }
     }
-    Box(modifier.clip(RoundedCornerShape(10.dp)).background(colors.settingsCard)
+    Box(modifier.clip(SquircleShape((12/.54f).dp)).background(colors.settingsCard)
         .testTag("workspace-rows").onGloballyPositioned { drag.area = Rect(it.positionInRoot(), it.size.toSize()) }
         .workspaceRowInput(drag, focused) { id, before -> edit(obj("type" to "move", "id" to id, "before" to before)) }) {
         Column(Modifier.fillMaxSize().panelScroll(scroll)) {
@@ -169,11 +201,43 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                 val reorderCaption=remember(title, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "reorder", "title" to title).toString(), host.languageTag)).getString("text") }
                 val selected = view.optString("selected") == id
                 DisposableEffect(id) { onDispose { drag.rows.remove(id); drag.grips.remove(id); drag.options.remove(id); drag.pins.remove(id) } }
-                if (index > 0) HorizontalDivider(color = colors.divider)
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rowBounds(drag.rows, id)
-                    .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard),
+                Box(Modifier.fillMaxWidth()) {
+                    val delete=row.array("options").objects().find {it.getJSONObject("action").getString("type")=="delete"}
+                    if(drag.swipeRow==id&&delete!=null)TextButton({host.workspaceInput(obj("type" to "action","action" to delete.getJSONObject("action")));drag.swipeRow=null;drag.swipeOffset=0f},Modifier.align(Alignment.CenterEnd).width(72.dp).height(56.dp).background(MaterialTheme.colorScheme.error).rowBounds(drag.options,id).testTag("workspace-swipe-delete-$id"),enabled=delete.optBoolean("enabled")) {Text(delete.getString("label"),color=MaterialTheme.colorScheme.onError)}
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).offset {IntOffset(if(drag.swipeRow==id)-drag.swipeOffset.roundToInt() else 0,0)}.rowBounds(drag.rows, id)
+                    .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard).padding(horizontal=12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    if (workspaces) Box(Modifier.width(24.dp).height(56.dp), contentAlignment = Alignment.Center) {
+                    Column(Modifier.weight(1f).onPreviewKeyEvent { event ->
+                        val key = event.nativeKeyEvent
+                        if(workspaces&&enabled&&key.action==KeyEvent.ACTION_DOWN&&key.keyCode==KeyEvent.KEYCODE_F2){
+                            row.array("options").objects().find {it.optBoolean("enabled")&&it.getJSONObject("action").getString("type")=="rename"}?.let {host.workspaceInput(obj("type" to "action","action" to it.getJSONObject("action")))};true
+                        }else if (workspaces && enabled && key.action == KeyEvent.ACTION_DOWN &&
+                            (key.keyCode == KeyEvent.KEYCODE_MENU || (key.keyCode == KeyEvent.KEYCODE_F10 && key.isShiftPressed))) {
+                            drag.reorderMenu = false; drag.menu = id; true
+                        } else false
+                    }.selectable(selected, enabled = enabled || renaming, role = Role.RadioButton) {
+                        host.workspaceInput(obj("type" to "select", "id" to id))
+                    }.padding(vertical = 8.dp, horizontal = 0.dp).testTag("workspace-row-$id").semantics { contentDescription = switchCaption },
+                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        val renameAction=if(workspaces)row.array("options").objects().find {it.optBoolean("enabled")&&it.getJSONObject("action").getString("type")=="rename"} else null
+                        val rename=view.objectOrNull("prompt_action")
+                        if(workspaces&&rename?.optString("type")=="rename"&&rename.optString("value")==id)WorkspaceNameEditor(host,view,id)
+                        else Text(row.getString("title"),Modifier.testTag("workspace-name-$id").combinedClickable(enabled=enabled || renaming,
+                            onClick={host.workspaceInput(obj("type" to "select","id" to id))},
+                            onDoubleClick=renameAction?.let {action->{host.workspaceInput(obj("type" to "action","action" to action.getJSONObject("action")))}}),maxLines=1,overflow=TextOverflow.Ellipsis)
+                        row.getString("subtitle").takeIf { it.isNotEmpty() }?.let {
+                            Text(it, color = colors.settingsSecondary, fontSize = LocalTextStyle.current.fontSize * .88f)
+                        }
+                    }
+                    if (workspaces) {
+                        if (view.optString("id") == id) SharedIcon("check", host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("current_workspace"), Modifier.padding(start = 6.dp).size(16.dp))
+                        val pin = row.getJSONObject("pin")
+                        Box(Modifier.size(34.dp).alpha(if(pin.getBoolean("enabled"))1f else .5f).toggleable(value=pin.getBoolean("selected"),enabled=pin.getBoolean("enabled"),role=Role.Checkbox,
+                            interactionSource=remember {MutableInteractionSource()},indication=null,onValueChange={edit(pin.getJSONObject("edit"))}).rowBounds(drag.pins,id)
+                            .testTag("workspace-pin-$id").semantics {contentDescription=pin.getString("label");this.selected=pin.getBoolean("selected")},contentAlignment=Alignment.Center) {
+                            SharedIcon(pin.getString("icon"), null, Modifier.size(16.dp),tint=if(pin.getBoolean("selected"))colors.accent else colors.text)
+                        }
+                        if (workspaces) Box(Modifier.width(16.dp).height(34.dp), contentAlignment = Alignment.Center) {
                         IconButton({ drag.reorderMenu = true; drag.menu = id }, enabled = enabled,
                             modifier = Modifier.fillMaxSize().rowBounds(drag.grips, id).testTag("workspace-grip-$id")
                                 .semantics { contentDescription = reorderCaption }) {
@@ -189,35 +253,10 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                                     onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position + 2))) })
                         }
                     }
-                    Column(Modifier.weight(1f).onPreviewKeyEvent { event ->
-                        val key = event.nativeKeyEvent
-                        if (workspaces && enabled && key.action == KeyEvent.ACTION_DOWN &&
-                            (key.keyCode == KeyEvent.KEYCODE_MENU || (key.keyCode == KeyEvent.KEYCODE_F10 && key.isShiftPressed))) {
-                            drag.reorderMenu = true; drag.menu = id; true
-                        } else false
-                    }.selectable(selected, enabled = enabled, role = Role.RadioButton) {
-                        host.workspaceInput(obj("type" to "select", "id" to id))
-                    }.padding(vertical = 12.dp, horizontal = if (workspaces) 4.dp else 12.dp).testTag("workspace-row-$id").semantics { contentDescription = switchCaption },
-                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(row.getString("title"))
-                        row.getString("subtitle").takeIf { it.isNotEmpty() }?.let {
-                            Text(it, color = colors.settingsSecondary, fontSize = LocalTextStyle.current.fontSize * .88f)
-                        }
-                    }
-                    if (workspaces) {
-                        if (view.optString("id") == id) SharedIcon("check", host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("current_workspace"), Modifier.padding(start = 6.dp).size(16.dp))
-                        val pin = row.getJSONObject("pin")
-                        IconToggleButton(checked = pin.getBoolean("selected"), onCheckedChange = { edit(pin.getJSONObject("edit")) },
-                            enabled = pin.getBoolean("enabled"), modifier = Modifier.size(36.dp).rowBounds(drag.pins, id)
-                                .testTag("workspace-pin-$id").semantics { contentDescription = pin.getString("label") }) {
-                            SharedIcon(pin.getString("icon"), null, Modifier.size(16.dp))
-                        }
                         val offered = row.array("options").objects()
                         if (offered.isEmpty()) SideEffect { drag.options.remove(id) }
-                        Box(Modifier.size(36.dp)) {
-                            if (offered.isNotEmpty()) {
-                                IconButton({ drag.reorderMenu = false; drag.menu = id }, enabled = enabled,
-                                    modifier = Modifier.fillMaxSize().rowBounds(drag.options, id).testTag("workspace-options-$id").semantics { contentDescription = optionsCaption }) { SharedIcon("more", null) }
+                        Box {
+                            if (offered.isNotEmpty() || order.isNotEmpty()) {
                                 DropdownMenu(drag.menu == id && !drag.reorderMenu, { drag.menu = null }, properties = PopupProperties(focusable = !drag.contact),
                                     modifier = Modifier.testTag("workspace-row-menu")) {
                                     for (button in offered) {
@@ -228,6 +267,10 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                                                 drag.menu = null; host.workspaceInput(obj("type" to "action", "action" to action))
                                             })
                                     }
+                                    if(offered.isNotEmpty())HorizontalDivider()
+                                    val position=order.indexOf(id)
+                                    DropdownMenuItem(text={Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_up"))},enabled=enabled&&position>0,modifier=Modifier.testTag("workspace-up"),onClick={drag.menu=null;edit(obj("type" to "move","id" to id,"before" to order.getOrNull(position-1)))})
+                                    DropdownMenuItem(text={Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_down"))},enabled=enabled&&position>=0&&position<order.lastIndex,modifier=Modifier.testTag("workspace-down"),onClick={drag.menu=null;edit(obj("type" to "move","id" to id,"before" to order.getOrNull(position+2)))})
                                 }
                             }
                         }
@@ -241,6 +284,8 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                         }
                     }
                 }
+                if(index>0)HorizontalDivider(Modifier.align(Alignment.TopCenter),color=colors.divider)
+                }
             } }
         }
         drag.hint?.let { y -> Box(Modifier.offset { IntOffset(0, (y - density).roundToInt()) }
@@ -250,3 +295,25 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
 
 private fun JSONObject.offers(type: String) =
     array("actions").objects().any { it.optBoolean("enabled") && it.getJSONObject("action").getString("type") == type }
+
+@Composable private fun WorkspaceNameEditor(host: CanvasHost,view:JSONObject,id:String) {
+    val initial=view.getJSONObject("prompt").getString("name")
+    var name by remember(id) {mutableStateOf(TextFieldValue(initial,TextRange(0,initial.length)))}
+    val focus=remember {FocusRequester()};var hadFocus by remember {mutableStateOf(false)};var submitted by remember {mutableStateOf(false)}
+    fun finish(cancel:Boolean=false):Boolean {
+        if(submitted)return true
+        if(!cancel&&!JSONObject(Native.workspaceNameError(name.text,host.languageTag)).isNull("error"))return false
+        submitted=true
+        host.workspaceInput(if(cancel)obj("type" to "cancel") else obj("type" to "submit","name" to name.text,"description" to null,"choice" to null));return true
+    }
+    val commit=remember(id) {{finish()}}
+    SideEffect {host.workspaceNameCommit=commit}
+    LaunchedEffect(view.optBoolean("busy"),view.optString("error")) {if(!view.optBoolean("busy"))submitted=false}
+    BasicTextField(name,{name=it;host.textComposition.update(focus,name,hadFocus)},Modifier.fillMaxWidth().testTag("workspace-name-$id").focusRequester(focus).onPreviewKeyEvent {event->
+        val key=event.nativeKeyEvent
+        if(key.keyCode==KeyEvent.KEYCODE_ESCAPE){if(name.composition==null&&!host.textComposition.owns(key)&&key.action==KeyEvent.ACTION_DOWN)finish(true);true}else false
+    }.onFocusChanged {if(hadFocus&&!it.isFocused)finish();hadFocus=it.isFocused;host.editingText=it.isFocused;host.textComposition.update(focus,name,hadFocus)},
+        textStyle=LocalTextStyle.current.copy(color=LocalPalette.current.text),singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Done),keyboardActions=KeyboardActions(onDone={if(name.composition==null)finish()}))
+    LaunchedEffect(id){focus.requestFocus()}
+    DisposableEffect(id){onDispose {if(host.workspaceNameCommit===commit)host.workspaceNameCommit=null;host.editingText=false;host.textComposition.clear(focus)}}
+}

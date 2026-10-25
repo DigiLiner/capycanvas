@@ -30,6 +30,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
     struct Row{
         weak_ref<ListViewItem> item;
         weak_ref<Button> grip,more;
+        weak_ref<MenuFlyout> context;
         weak_ref<UIElement> pin;
         weak_ref<MenuFlyout> menu;
         hstring id;
@@ -117,8 +118,8 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(!captured)cancel();
         return captured;
     }
-    void menuAt(Row const& row,Point at,bool holding){
-        if(auto menu=row.menu.get())if(auto item=row.item.get()){
+    void menuAt(Row const& row,Point at,bool holding,bool reordering=false){
+        if(auto menu=reordering||!row.context.get()?row.menu.get():row.context.get())if(auto item=row.item.get()){
             Primitives::FlyoutShowOptions options;options.Position(at);
             options.ShowMode(holding?Primitives::FlyoutShowMode::Transient:Primitives::FlyoutShowMode::Standard);
             menu.ShowAt(item,options);
@@ -131,7 +132,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         held=true;ignoreClick=true;suppressContext=true;
         auto item=source->item.get();item.Focus(FocusState::Pointer);
         auto at=surface.TransformToVisual(item).TransformPoint(position);
-        menuAt(*source,at,true);evidence();
+        menuAt(*source,at,true,grip);evidence();
     }
     void down(PointerRoutedEventArgs const& e){
         if(pointer){if(pointer.PointerId()!=e.Pointer().PointerId())cancel();return;}
@@ -143,7 +144,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(!PointerGesture::PrimaryContact(point))return;
             source=row;pointer=e.Pointer();device=point.PointerDeviceType();
             position=point.Position();grip=inside(original,row.grip.get());
-            child=inside(original,row.more.get())||inside(original,row.pin.get());
+            child=inside(original,row.more.get())||inside(original,row.pin.get())||bool(original.try_as<TextBox>());
             ignoreClick=grip||child;
             owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
             auto node=original;
@@ -230,7 +231,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         // A held release keeps its menu; dragging/cancellation closes it.
         clear(dragging);
         if(handled)e.Handled(true);
-        if(open)menuAt(menuRow,menuPoint,false);
+        if(open)menuAt(menuRow,menuPoint,false,true);
         if(commit)move(id,destination);
     }
     void tick(){
@@ -249,10 +250,12 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             target();evidence();
         }
     }
-    void attach(ListViewItem const& item,Button const& gripButton,Button const& more,UIElement const& pin,MenuFlyout const& menu,hstring id){
-        Row row{make_weak(item),make_weak(gripButton),make_weak(more),make_weak(pin),make_weak(menu),id};rows.push_back(row);
+    void attach(ListViewItem const& item,Button const& gripButton,Button const& more,UIElement const& pin,MenuFlyout const& menu,hstring id,MenuFlyout const& context){
+        Row row{make_weak(item),make_weak(gripButton),make_weak(more),make_weak(context),make_weak(pin),make_weak(menu),id};rows.push_back(row);
         menu.Opening([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock())self->visibleMenu=sender.template as<MenuFlyout>();});
         menu.Closed([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock();self&&self->visibleMenu==sender)self->visibleMenu=nullptr;});
+        if(context)context.Opening([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock())self->visibleMenu=sender.template as<MenuFlyout>();});
+        if(context)context.Closed([weak=weak_from_this()](auto&& sender,auto&&){if(auto self=weak.lock();self&&self->visibleMenu==sender)self->visibleMenu=nullptr;});
         PointerGesture::OwnHolding(item);
         item.RightTapped([weak=weak_from_this(),row](auto&&,RightTappedRoutedEventArgs const& e){
             if(auto self=weak.lock();self&&self->available()){
@@ -271,7 +274,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         });
         // The accessible grip opens the same keyboard Move Up/Down commands.
         gripButton.Click([weak=weak_from_this(),row](auto&&,auto&&){
-            if(auto self=weak.lock();self&&!self->ignoreClick&&self->available())self->menuAt(row,{24,24},false);
+            if(auto self=weak.lock();self&&!self->ignoreClick&&self->available())self->menuAt(row,{24,24},false,true);
         });
         item.Unloaded([weak=weak_from_this(),id](auto&&,auto&&){
             if(auto self=weak.lock();self&&self->source&&self->source->id==id){
@@ -330,7 +333,7 @@ WorkspaceRowDrag::WorkspaceRowDrag(ListView list,Grid surface,std::function<bool
     impl->list=list;impl->surface=surface;impl->available=std::move(available);impl->move=std::move(move);impl->ended=std::move(ended);impl->init();
 }
 WorkspaceRowDrag::~WorkspaceRowDrag(){impl->cancel();impl->timer.Stop();}
-void WorkspaceRowDrag::Attach(ListViewItem row,Button grip,Button more,UIElement pin,MenuFlyout menu,Id id){impl->attach(row,grip,more,pin,menu,id);}
+void WorkspaceRowDrag::Attach(ListViewItem row,Button grip,Button more,UIElement pin,MenuFlyout menu,Id id,MenuFlyout context){impl->attach(row,grip,more,pin,menu,id,context);}
 void WorkspaceRowDrag::Refresh(std::vector<Id> const& order){
     impl->order=order;
     std::erase_if(impl->rows,[](auto const& row){return !row.item.get();});

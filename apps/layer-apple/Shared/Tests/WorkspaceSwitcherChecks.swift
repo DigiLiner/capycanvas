@@ -4,11 +4,10 @@ extension XCTestCase {
     @MainActor func checkWorkspaceSwitcher(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"workspace_manager","command":{"type":"manage"}}]"#
         app.launch()
-        let painter = app.buttons["workspace-select-builtin:workspace:painter"]
-        let illustrator = app.buttons["workspace-select-builtin:workspace:illustrator"]
-        let photographer = app.buttons["workspace-select-builtin:workspace:photographer"]
+        let painter = app.descendants(matching: .any)["workspace-select-builtin:workspace:painter"].firstMatch
+        let illustrator = app.descendants(matching: .any)["workspace-select-builtin:workspace:illustrator"].firstMatch
+        let photographer = app.descendants(matching: .any)["workspace-select-builtin:workspace:photographer"].firstMatch
         let grip = app.buttons["workspace-grip-builtin:workspace:painter"]
-        let options = app.buttons["workspace-options-builtin:workspace:painter"]
         let menu = app.descendants(matching: .any)["workspace-row-menu"].firstMatch
         let pin = app.buttons["workspace-pin-builtin:workspace:painter"]
         func activateMenu(_ control: XCUIElement) {
@@ -26,6 +25,15 @@ extension XCTestCase {
             point.clickOrTap()
         }
         XCTAssertTrue(painter.waitForExistence(timeout: 30))
+        let create = app.buttons["workspace-action-new"], remove = app.buttons["workspace-action-delete"]
+        let rows = app.descendants(matching: .any)["workspace-manager-rows"].firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 10)); XCTAssertTrue(remove.exists)
+        XCTAssertFalse(remove.isEnabled, "Included workspaces cannot be deleted")
+        XCTAssertGreaterThanOrEqual(create.frame.minY, rows.frame.maxY - 1)
+        XCTAssertGreaterThanOrEqual(remove.frame.minX, create.frame.maxX - 1)
+        XCTAssertGreaterThanOrEqual(grip.frame.minX, pin.frame.maxX - 1)
+        XCTAssertFalse(app.textFields["workspace-manager-search"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "workspace-options-")).firstMatch.exists)
         workspaceActivate(illustrator)
         XCTAssertTrue(illustrator.isSelected)
         XCTAssertTrue(pin.waitForExistence(timeout: 10)); XCTAssertTrue(pin.isSelected)
@@ -40,7 +48,7 @@ extension XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         XCTAssertFalse(pin.isSelected)
         activateMenu(app.buttons["menu-action-Move Down"])
-        workspaceActivate(options); activateMenu(app.buttons["menu-action-Move Up"])
+        workspaceActivate(grip); activateMenu(app.buttons["menu-action-Move Up"])
         workspaceActivate(pin)
         #else
         workspaceActivate(pin)
@@ -69,7 +77,7 @@ extension XCTestCase {
         waitForExpectations(timeout: 10)
         XCTAssertTrue(illustrator.isSelected)
 
-        workspaceActivate(options); activateMenu(app.buttons["menu-action-Move Down"])
+        workspaceActivate(grip); activateMenu(app.buttons["menu-action-Move Down"])
         expectation(for: NSPredicate { _, _ in painter.frame.minY > illustrator.frame.minY && painter.frame.minY < photographer.frame.minY }, evaluatedWith: painter)
         waitForExpectations(timeout: 10)
         workspaceActivate(pin)

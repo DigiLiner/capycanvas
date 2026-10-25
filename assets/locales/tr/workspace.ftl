@@ -130,7 +130,6 @@ workspace-action-retry-storage = Depolamayı yeniden dene
 workspace-manage-toolbars = Araç çubuklarını yönet
 workspace-toolbars-intro = Bu çalışma alanındaki araç çubuklarını düzenleyin.
 workspace-library-intro = Araç çubuklarını herhangi bir çalışma alanında yeniden kullanmak için kaydedin.
-workspace-intro = Çalışma alanları farklı görevler için düzeninizi kaydeder.
 workspace-history-hidden = Gizlendi: { $panels }
 workspace-history-shown = Gösterildi: { $panels }
 workspace-history-restored-earlier = Önceki düzen geri yüklendi

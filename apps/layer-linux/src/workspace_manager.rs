@@ -112,7 +112,7 @@ impl NativeWorkspaces {
             paused: Cell::new(false),
         }
     }
-    pub fn bind(&self, w: &Rc<Workspace>) {
+    fn bind_input_gate(&self, w: &Rc<Workspace>, widget: &impl IsA<gtk::Widget>) {
         // Pausing input through GTK sensitivity restyles every descendant and
         // clears native focus/gesture state. Intercept new input instead, while
         // still letting releases and cancellation finish existing sequences.
@@ -125,6 +125,9 @@ impl NativeWorkspaces {
             #[upgrade_or]
             glib::Propagation::Stop,
             move |_, event| {
+                if event.event_type() == gdk::EventType::KeyPress
+                    && event.downcast_ref::<gdk::KeyEvent>().is_some_and(|key| key.keyval() == gdk::Key::Escape)
+                { return glib::Propagation::Proceed; }
                 if matches!(
                     event.event_type(),
                     gdk::EventType::ButtonPress
@@ -144,7 +147,10 @@ impl NativeWorkspaces {
                 }
             }
         ));
-        w.surface.add_controller(gate);
+        widget.add_controller(gate);
+    }
+    pub fn bind(&self, w: &Rc<Workspace>) {
+        self.bind_input_gate(w, &w.surface);
         self.ui.bind(w);
         self.bind_switcher(w);
         self.recovery.connect_clicked(glib::clone!(

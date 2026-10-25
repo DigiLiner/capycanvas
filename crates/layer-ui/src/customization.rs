@@ -678,7 +678,7 @@ impl Serialize for ContextMenuItem {
         fields.serialize_field("bindings", &self.bindings)?;
         fields.serialize_field("sections", &self.sections)?;
         fields.serialize_field("is_heading", &self.is_heading())?;
-        fields.serialize_field("keep_open", &matches!(self.action, Some(UiAction::Bubble { action: BubbleAction::Option { .. } | BubbleAction::ToggleSliders { .. } | BubbleAction::ToggleRingSetting { .. } })))?;
+        fields.serialize_field("keep_open", &matches!(self.action, Some(UiAction::Bubble { action: BubbleAction::Option { .. } | BubbleAction::ToggleSliders { .. } | BubbleAction::ToggleRingSetting { .. } } | UiAction::WorkspaceManager { command: crate::WorkspaceCommand::ShowInSwitcher { .. } })))?;
         fields.end()
     }
 }

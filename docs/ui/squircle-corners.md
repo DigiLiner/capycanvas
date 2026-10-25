@@ -79,6 +79,12 @@ collapsed columns, status notices, the brush-size preview and the controls
 inside them. Native hosts keep platform styling for settings, dialogs, menus,
 tooltips and other popovers.
 
+GTK's custom workspace-manager list and footer use the shared control contours,
+as do the custom drawing and picker sheets. The workspace list's viewport owns
+its rounded clip; the inner list and rows have square backgrounds, so selected
+rows and swipe actions do not stack corner masks. Scrolling keeps the viewport's
+contour. The native dialog shell and menus retain platform styling.
+
 Web squircles those as well. Menus and popovers use `SURFACE_RADIUS` with
 12px items, concentric at their own 6px inset. Other dialogs, cards, list highlights and tooltips
 keep their former visual rounding: `--squircle-scale` divides the former

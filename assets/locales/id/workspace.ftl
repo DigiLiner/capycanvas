@@ -256,7 +256,6 @@ workspace-toolbars-intro = Atur bilah alat dalam ruang kerja ini.
 
 workspace-library-intro = Simpan bilah alat untuk digunakan kembali di ruang kerja mana pun.
 
-workspace-intro = Ruang kerja menyimpan tata letak untuk berbagai tugas.
 
 workspace-history-hidden = Menyembunyikan { $panels }
 

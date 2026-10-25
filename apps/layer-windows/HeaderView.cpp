@@ -73,6 +73,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     std::vector<Border> zones;
     bool built=false,editing=false,hidden=false,fullscreenActive=false,applying=false,resolvingLink=false,queryBusy=false;
     using MenuItems=winrt::Windows::Foundation::Collections::IVector<MenuFlyoutItemBase>;
+    bool keepMenu=false;
+    std::vector<std::pair<uint32_t,uint32_t>> menuPath;
     MenuFlyout activeMenu{nullptr};std::function<void(MenuItems)> menuPopulate;hstring menuSource,hoveredMenu;
     bool scheduled=false,trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     float leftInset=0,rightInset=0;
@@ -251,8 +253,9 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     }
     MenuFlyout menu(std::function<void(MenuItems)> populate){
         MenuFlyout result;TrackPopup(result,data);
+        result.Closing([weak=weak_from_this()](auto&&,auto const& args){if(auto self=weak.lock();self&&std::exchange(self->keepMenu,false))args.Cancel(true);});
         result.Opening([weak=weak_from_this(),populate](winrt::Windows::Foundation::IInspectable const& sender,auto&&){if(auto self=weak.lock()){
-            self->activeMenu=sender.as<MenuFlyout>();self->menuPopulate=populate;self->menuSource=L"";
+            self->keepMenu=false;self->menuPath.clear();self->activeMenu=sender.as<MenuFlyout>();self->menuPopulate=populate;self->menuSource=L"";
             self->activeMenu.Items().Clear();self->refreshMenu();
             auto target=self->activeMenu.Target();if(!target||!target.XamlRoot())return;
             auto xaml=target.XamlRoot();
@@ -267,11 +270,53 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             style.Setters().Append(limit);self->activeMenu.MenuFlyoutPresenterStyle(style);
         }});
         result.Closed([weak=weak_from_this()](winrt::Windows::Foundation::IInspectable const& sender,auto&&){if(auto self=weak.lock();self&&self->activeMenu==sender.as<MenuFlyout>()){
-            self->activeMenu=nullptr;self->menuPopulate={};self->menuSource=L"";
+            self->keepMenu=false;self->menuPath.clear();self->activeMenu=nullptr;self->menuPopulate={};self->menuSource=L"";
         }});return result;
     }
-    void fillMenu(winrt::Windows::Foundation::Collections::IVector<MenuFlyoutItemBase> const& target,J const& model){
-        NativeMenuItems(target,array(model,L"sections"),data,[data=data](J action){data->dispatch(action);});
+    static bool persistentMenu(A const& sections){
+        for(auto section:sections)for(auto value:section.GetArray()){
+            auto item=value.GetObject();if(flag(item,L"keep_open")||persistentMenu(array(item,L"sections")))return true;
+        }
+        return false;
+    }
+    void menuPage(J action){
+        auto shown=make_weak(activeMenu);keepMenu=true;
+        root.DispatcherQueue().TryEnqueue([weak=weak_from_this(),shown,action]{if(auto self=weak.lock();self&&self->activeMenu&&self->activeMenu==shown.get()){
+            if(str(action,L"type")==L"native_menu_back"){if(!self->menuPath.empty())self->menuPath.pop_back();}
+            else self->menuPath.emplace_back(uint32_t(num(action,L"section")),uint32_t(num(action,L"item")));
+            self->menuSource=L"";self->refreshMenu();
+            for(auto value:self->activeMenu.Items())if(auto item=value.try_as<Control>();item&&item.IsEnabled()&&item.IsTabStop()){item.Focus(FocusState::Keyboard);break;}
+        }});
+    }
+    void fillMenu(MenuItems const& target,J const& model){
+        auto sections=array(model,L"sections");hstring title;
+        size_t depth=0;
+        for(auto [section,index]:menuPath){
+            if(section>=sections.Size()||index>=sections.GetArrayAt(section).Size())break;
+            auto item=sections.GetArrayAt(section).GetObjectAt(index);auto children=array(item,L"sections");if(!children.Size())break;
+            sections=children;title=str(item,L"label");++depth;
+        }
+        menuPath.resize(depth);A visible;
+        if(depth){
+            A back;back.Append(O({{L"label",S(title)},{L"icon",S(L"back")},{L"enabled",B(true)},{L"keep_open",B(true)},
+                {L"action",O({{L"type",S(L"native_menu_back")},{L"command",S(L"native-menu-back")}})}}));visible.Append(back);
+        }
+        for(uint32_t section=0;section<sections.Size();++section){
+            A items;auto source=sections.GetArrayAt(section);
+            for(uint32_t index=0;index<source.Size();++index){
+                auto item=J::Parse(source.GetObjectAt(index).Stringify());
+                if(persistentMenu(array(item,L"sections"))){
+                    item.Remove(L"sections");item.Insert(L"enabled",B(true));item.Insert(L"keep_open",B(true));
+                    item.Insert(L"action",O({{L"type",S(L"native_menu_page")},{L"command",S(L"native-menu-page-"+to_hstring(section)+L"-"+to_hstring(index))},
+                        {L"section",N(section)},{L"item",N(index)}}));
+                }
+                items.Append(item);
+            }
+            visible.Append(items);
+        }
+        NativeMenuItems(target,visible,data,[weak=weak_from_this()](J action){if(auto self=weak.lock()){
+            auto type=str(action,L"type");if(type==L"native_menu_page"||type==L"native_menu_back")self->menuPage(action);else self->data->dispatch(action);
+        }},[weak=weak_from_this()](bool keep){if(auto self=weak.lock())self->keepMenu=keep;});
     }
     Button command(hstring const& id){
         auto item=button(data,id,[data=data,id]{data->dispatch(invoke(id));});style(item,data,false);item.Padding({0});return item;

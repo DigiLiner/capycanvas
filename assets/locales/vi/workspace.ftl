@@ -129,7 +129,6 @@ workspace-action-retry-storage = Thử lưu trữ lại
 workspace-manage-toolbars = Quản lý thanh công cụ
 workspace-toolbars-intro = Sắp xếp các thanh công cụ trong không gian làm việc này.
 workspace-library-intro = Lưu thanh công cụ để dùng lại trong mọi không gian làm việc.
-workspace-intro = Không gian làm việc lưu bố cục cho các tác vụ khác nhau.
 workspace-history-hidden = Đã ẩn { $panels }
 workspace-history-shown = Đã hiện { $panels }
 workspace-history-restored-earlier = Đã khôi phục bố cục trước đó

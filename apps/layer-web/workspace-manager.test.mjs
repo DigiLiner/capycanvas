@@ -43,7 +43,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
   };
   const send = async action => { await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`); await new Promise(r=>setTimeout(r,500)); await idle(); };
   const normalized = value => JSON.parse(JSON.stringify(value,(key,v)=>key==='timestamp_ms'? 'date':v));
-  const directory=process.env.LAYER_TEST_ARTIFACTS || '/tmp/capy-workspace-evidence/web'; await mkdir(directory,{recursive:true});
+  const directory=process.env.LAYER_TEST_ARTIFACTS || 'artifacts/workspace-evidence/web'; await mkdir(directory,{recursive:true});
   const shot=async name=>{const s=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${name}.png`,Buffer.from(s.data,'base64'));};
   await evaluate(`window.workspaceTestEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{workspaceTestEvents.push({type,target:e.target.outerHTML.slice(0,150),x:e.clientX,y:e.clientY,prevented:e.defaultPrevented,active:document.activeElement?.outerHTML.slice(0,80)});if(workspaceTestEvents.length>40)workspaceTestEvents.shift();},{capture:true});`);
   await send({type:"workspace_manager",command:{type:"switch",id:"builtin:workspace:illustrator"}});
@@ -83,12 +83,12 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
   }
   try {
     console.log('Workspace UI: opening manager'); await menu('Manage Workspaces…');
-    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]").hidden'),true);
+    assert.equal(await evaluate('[...document.querySelectorAll(".workspace-manager input[type=search]")].every(n=>n.hidden||!n.getClientRects().length)'),true);
     assert.equal(await evaluate('document.querySelector(".workspace-manager footer .suggested-action").disabled'),true);
-    await shot('workspaces'); await click('.workspace-add');
+    await shot('workspaces'); await click('.workspace-row-actions .workspace-add');
     const name=`Web Painting ${Date.now()}`; await text('.workspace-form input',name); await shot('new-workspace');
     await click('.workspace-form .suggested-action'); await idle();
-    console.log('Workspace UI: created', await view()); const candidate=(await view()).id; assert.notEqual(candidate,original); created=candidate; assert.equal((await view()).name,name);
+    console.log('Workspace UI: created', await view()); const candidate=(await view()).id; assert.notEqual(candidate,original); created=candidate; assert.equal((await view()).name,name);assert.equal((await view()).page,'workspaces');assert.equal((await view()).selected,candidate);await click('.workspace-manager footer button');
     await advancedToolbars();
     await send({type:'invoke',command:'eraser'});
     await send({type:'set_brush_size',value:91});
@@ -117,7 +117,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await menu('Manage Workspaces…'); await click(`.workspace-choice[data-id="${created}"]`); await click('.workspace-manager footer .suggested-action'); await idle();
     assert.deepEqual((await capture()).working,changed.working);
     await menu('Layout History…'); assert.equal((await view()).enabled,false); await shot('history');
-    assert.equal(await evaluate('document.querySelector(".workspace-manager input[type=search]").hidden'),true);
+    assert.equal(await evaluate('[...document.querySelectorAll(".workspace-manager input[type=search]")].every(n=>n.hidden||!n.getClientRects().length)'),true);
     const currentVersion=(await capture()).history.current;
     assert.equal(await evaluate('document.querySelector(\'.workspace-choice[data-id="r0"] .workspace-row-title\').textContent'),'Starting layout');
     assert.match(await evaluate(`document.querySelector('.workspace-choice[data-id="${currentVersion}"] .workspace-row-subtitle').textContent`),/^Current layout · /);
@@ -130,9 +130,9 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     assert.deepEqual(await editing(),sharedEditing,"Restart retains shared editing");
     assert.deepEqual(normalized(await capture()),normalized(beforeRestart),'Restart retains undo/redo and working settings');
     await menu('Manage Workspaces…');
-    await click(`.workspace-row[data-id="${created}"] .workspace-options`);
-    await click(`.workspace-row-menu [data-action="rename"]`);
-    await text('.workspace-form input','Web Inking Acceptance'); await click('.workspace-form .suggested-action'); await idle();
+    const renamePoint=await evaluate(`(()=>{const r=document.querySelector('.workspace-row[data-id="${created}"] .workspace-row-title').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    for(const count of [1,2])for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...renamePoint,button:'left',buttons:type==='mousePressed'?1:0,clickCount:count});await settle();
+    await text('.workspace-name-entry','Web Inking Acceptance');for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,...(type==='keyDown'?{text:'\r',unmodifiedText:'\r'}:{})});await idle();
     assert.equal((await view()).name,'Web Inking Acceptance'); await click('.workspace-manager footer button');
     // Header switches address stable identities and preserve their arrangements.
     for (const id of ['builtin:workspace:painter','builtin:workspace:illustrator','builtin:workspace:photographer']) {
@@ -188,8 +188,7 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await menu('Manage Workspaces…');
     const rowsBeforeDelete=(await view()).rows.map(row=>row.id);
     const deleteForm=async()=>{
-      await click(`.workspace-row[data-id="${deleted}"] .workspace-options`);
-      await click('.workspace-row-menu [data-action="delete"]');
+      await click('.workspace-delete');
       assert.equal(await evaluate('document.querySelector(".workspace-form[open] > p").textContent'),'Delete “Web Inking Acceptance”? This is permanent. This window will switch to an available default workspace.');
       assert.equal(await evaluate('document.querySelectorAll(".workspace-form[open] select").length'),0);
     };
@@ -199,9 +198,8 @@ export async function checkWorkspaceManager({call, evaluate, settle, reload, tou
     await deleteForm(); await shot('delete-workspace');
     await click('.workspace-form .destructive-action'); await idle();
     assert.equal((await view()).id,illustrator,'Active deletion switches to the included Illustrator workspace');
-    created=null;
+    created=null;assert.equal((await view()).page,'workspaces');assert.equal((await view()).selected,illustrator);
     assert.equal(await evaluate(`document.querySelectorAll('.workspace-switcher [data-workspace-id="${deleted}"]').length`),0);
-    await menu('Manage Workspaces…');
     assert.deepEqual((await view()).rows.map(row=>row.id).sort(),rowsBeforeDelete.filter(id=>id!==deleted).sort(),'Deletion removes the row without creating a replacement workspace');
     await click('.workspace-manager footer button');
     await reload(); await wait('window.layerApp?.startupTimes.complete != null', 55000); await idle();

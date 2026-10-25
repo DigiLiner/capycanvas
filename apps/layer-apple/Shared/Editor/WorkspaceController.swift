@@ -13,6 +13,8 @@ import SwiftUI
     @Published private var dismissedError: String?
     private(set) weak var store: EditorStore?
     private var promptKey = ""
+    private var submittedName = false
+    var inlineRename: Bool { page == "workspaces" && view["prompt_action"]["type"].string == "rename" }
     private var focusKey = ""
     private var sent = 0
     private var closeWaiters: [(Int, @MainActor (Bool) -> Void)] = []
@@ -57,6 +59,9 @@ import SwiftUI
     }
     func tick() { send(["type": "tick"]) }
     @discardableResult func send(_ input: [String: Any]) -> Int {
+        if inlineRename && !["tick","submit","cancel","dismiss","edit_switcher","refresh_switcher","resume","suspend"].contains(input["type"] as? String ?? "") {
+            guard finishName() else { return sent }
+        }
         if input["type"] as? String == "retry" { dismissedError = nil }
         sent += 1
         let number = sent
@@ -81,6 +86,7 @@ import SwiftUI
     func validateName(required: Bool) {
         let generation = UUID(), name = formName
         nameValidation = generation
+        nameError = nil
         guard required else { nameError = nil; validatingName = false; return }
         validatingName = true
         store?.query(["type": "workspace_name_validation", "name": name]) { [weak self] result in
@@ -88,6 +94,10 @@ import SwiftUI
             nameError = result.isNull ? nil : result.string
             validatingName = false
         }
+    }
+    @discardableResult func finishName() -> Bool {
+        guard inlineRename && !submittedName else { return true }
+        submittedName = true; submit(); return true
     }
     func submit() {
         var input: [String: Any] = ["type": "submit", "name": formName]
@@ -137,8 +147,10 @@ import SwiftUI
         let wasReady = view["ready"].bool, revision = view["switcher_revision"].uint
         if view["error"].string != next["error"].string { dismissedError = nil }
         view = next
-        let key = next["prompt"].isNull ? "" : next["prompt_action"].stableKey + next["prompt"].stableKey
+        let key = next["prompt"].isNull ? "" : next["prompt_action"].stableKey + next["page"].string
+        if !next["busy"].bool && !next["error"].isNull { submittedName = false }
         if key != promptKey {
+            submittedName = false;
             promptKey = key
             formName = next["prompt"]["name"].string
             formDescription = next["prompt"]["description"].string

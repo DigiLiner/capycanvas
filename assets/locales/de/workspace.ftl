@@ -130,7 +130,6 @@ workspace-action-retry-storage = Speicherung erneut versuchen
 workspace-manage-toolbars = Werkzeugleisten verwalten
 workspace-toolbars-intro = Werkzeugleisten in diesem Arbeitsbereich anordnen.
 workspace-library-intro = Werkzeugleisten speichern, um sie in jedem Arbeitsbereich wiederzuverwenden.
-workspace-intro = Arbeitsbereiche speichern das Layout für verschiedene Aufgaben.
 workspace-history-hidden = { $panels } ausgeblendet
 workspace-history-shown = { $panels } eingeblendet
 workspace-history-restored-earlier = Früheres Layout wiederhergestellt
