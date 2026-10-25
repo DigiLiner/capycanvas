@@ -8,7 +8,8 @@ retain that choice; changing only a direct dependency cannot disable features
 enabled elsewhere in the graph.
 
 `layer-color` reads and writes photos and converts colours in Rust, for every
-client. It uses `libjpeg-turbo-rs`, `moxcms`, patched `rav1d` for AVIF decoding,
+client. It uses `libjpeg-turbo-rs` without its `simd` feature, so decoding runs
+the scalar path instead of unchecked vector loads, `moxcms`, patched `rav1d` for AVIF decoding,
 `rav1e` and `oxideav-av1` for AVIF encoding, and `rust_h265` for HEIC import.
 The Linux, WebAssembly and Android production graphs contain no C codec, C build
 tool, dynamic loader or Zstd dependency; independent native codecs appear only as

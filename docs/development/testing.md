@@ -536,6 +536,23 @@ adapter when `LAYER_TEST_SOFTWARE_GPU=1` is set. Those runs check numbers only;
 they are never performance evidence, and production hosts always require a
 hardware GPU.
 
+## Fuzzing untrusted input
+
+`fuzz/` holds `cargo fuzz` targets for the shared readers of outside files:
+`import` (photos and `.capy` through the shared import policy), `workspace`
+(workspace and toolbar packages), `icc`, `lut` and `palette`. It is its own
+Cargo workspace with the same vendored patches. Run a target with a nightly
+toolchain and AddressSanitizer, keeping corpora and artifacts outside the repository:
+
+```sh
+cd fuzz && cargo +nightly fuzz run -O import /mnt/localssd/fuzz/import -- \
+  -fork=8 -ignore_crashes=1 -ignore_ooms=1 -ignore_timeouts=1 -max_total_time=1800
+```
+
+Treat an AddressSanitizer report as a memory-safety defect. A panic, timeout or
+memory exhaustion is a refused input, not a vulnerability. Run the targets after
+changing a decoder, a vendored codec patch or a reader of outside files.
+
 ## Localization
 
 Run `cargo test --locked -p layer-ui localization_catalog_tests` for catalog

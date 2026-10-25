@@ -1,0 +1,57 @@
+[package]
+name = "capy-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+layer-core = { path = "../crates/layer-core" }
+layer-color = { path = "../crates/layer-color" }
+layer-ui = { path = "../crates/layer-ui" }
+layer-workspace = { path = "../crates/layer-workspace" }
+
+[patch.crates-io]
+wgpu-core = { path = "../vendor/wgpu-core" }
+wgpu = { path = "../vendor/wgpu" }
+wgpu-hal = { path = "../vendor/wgpu-hal" }
+wgpu-types = { path = "../vendor/wgpu-types" }
+image-webp = { path = "../vendor/image-webp" }
+rav1d = { path = "../vendor/rav1d" }
+rust_h265 = { path = "../vendor/rust_h265" }
+moxcms = { path = "../vendor/moxcms" }
+
+[workspace]
+
+[[bin]]
+name = "import"
+path = "fuzz_targets/import.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "workspace"
+path = "fuzz_targets/workspace.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "icc"
+path = "fuzz_targets/icc.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lut"
+path = "fuzz_targets/lut.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "palette"
+path = "fuzz_targets/palette.rs"
+test = false
+doc = false

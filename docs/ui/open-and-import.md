@@ -30,7 +30,9 @@ projects and images is rejected. `ImportIntent::for_drop` decides for GTK and
 Apple: one `.capy` file opens as a drawing on the canvas, image-only batches are
 placed, and several drawings, a mixed batch or a drawing dropped on a layer row
 are refused with a shared message. Hosts supply local files; providers without a
-local path are rejected.
+local path are rejected. Android opens shared, viewed, dropped and pasted items
+only from `content://` provider URIs; it ignores `file://` URIs, which another
+app could point at Capy's private storage.
 
 Shared Rust owns destination validation, placement and history; hosts own
 external data acquisition and pointer capture. External drags arrive already

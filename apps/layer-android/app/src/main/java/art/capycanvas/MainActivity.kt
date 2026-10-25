@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
             android.content.Intent.ACTION_SEND->listOfNotNull(androidx.core.content.IntentCompat.getParcelableExtra(intent,android.content.Intent.EXTRA_STREAM,android.net.Uri::class.java))
             android.content.Intent.ACTION_SEND_MULTIPLE->androidx.core.content.IntentCompat.getParcelableArrayListExtra(intent,android.content.Intent.EXTRA_STREAM,android.net.Uri::class.java).orEmpty()
             else->emptyList()
-        }
+        }.filter(android.net.Uri::fromContentProvider)
         if(uris.isNotEmpty())host.documents.openUris(uris,intent.flags)
     }
     private fun wideColorWindow()=resources.configuration.isScreenWideColorGamut&&

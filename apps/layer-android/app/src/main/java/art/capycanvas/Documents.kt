@@ -171,7 +171,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
     fun drop(activity:Activity,event:android.view.DragEvent):Boolean {
         if(!acceptsDrop(event))return false
         val permission=activity.requestDragAndDropPermissions(event)
-        val uris=event.clipData?.let{clip->(0 until clip.itemCount).mapNotNull{clip.getItemAt(it).uri}}.orEmpty()
+        val uris=event.clipData?.let{clip->(0 until clip.itemCount).mapNotNull{clip.getItemAt(it).uri?.takeIf(Uri::fromContentProvider)}}.orEmpty()
         return openUris(uris,release={permission?.release()})
     }
     private var approval = 0L to 0L

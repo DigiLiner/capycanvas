@@ -21,7 +21,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-internal fun ClipData.imageUris(failure:String): List<Uri> = (0 until itemCount).mapNotNull { getItemAt(it).uri }
+internal fun Uri.fromContentProvider() = scheme == android.content.ContentResolver.SCHEME_CONTENT
+internal fun ClipData.imageUris(failure:String): List<Uri> = (0 until itemCount).mapNotNull { getItemAt(it).uri?.takeIf(Uri::fromContentProvider) }
     .ifEmpty { throw ImageImportMessage(failure) }
 private class ImageImportMessage(message:String): IllegalStateException(message)
 internal data class IncomingImages(val uris: List<Uri>, val context: String, val release: () -> Unit, val finished: ((Boolean) -> Unit)? = null)

@@ -8,7 +8,7 @@ description = "Portable ICC transforms and profiled SDR image interchange"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 layer-core = { path = "../layer-core" }
-libjpeg-turbo-rs = "=0.8.0"
+libjpeg-turbo-rs = { version = "=0.8.0", default-features = false, features = ["std"] }
 rav1d = { version = "=1.1.0", default-features = false, features = ["bitdepth_8", "bitdepth_16"] }
 rav1e = { version = "=0.8.1", default-features = false }
 oxideav-av1 = "=0.1.16"
