@@ -1,5 +1,5 @@
 //! Native file transport for the shared runtime JSON/WGSL loader.
-use crate::workspace_async::{AsyncTask, BlockingTask};
+use crate::workspace_async::{SendAsyncTask, BlockingTask};
 use layer_core::{EffectInstallMode, EffectPackage};
 use layer_host::NativeHost;
 use serde::{Deserialize, Serialize};
@@ -120,7 +120,7 @@ impl Default for Status {
     }
 }
 pub(crate) struct FilterService {
-    task: AsyncTask<Result<Package, String>>,
+    task: SendAsyncTask<Result<Package, String>>,
     acquired: Option<Package>,
     validating: Option<u64>,
     status: Status,
@@ -130,7 +130,7 @@ pub(crate) struct FilterService {
 impl FilterService {
     pub(crate) fn new(wake: impl Fn() + Send + 'static) -> Self {
         Self {
-            task: AsyncTask::new(wake),
+            task: SendAsyncTask::new(wake),
             acquired: None,
             validating: None,
             status: Status::default(),

@@ -75,7 +75,7 @@ pub struct CapyHost {
     launch_settings: Option<crate::settings::PreparedSettings>,
     filters: Option<crate::filter_packages::FilterService>,
     documents: Option<crate::documents::DocumentService>,
-    workspaces: Option<crate::workspace_service::WorkspaceService<layer_workspace::StoreWorker>>,
+    workspaces: Option<crate::workspace_owner::WorkspaceOwner>,
     blocked_contacts: std::collections::BTreeSet<u64>,
     live_contacts: std::collections::BTreeMap<u64, CapyPointer>,
     scopes: crate::scopes::Scopes,
@@ -185,13 +185,9 @@ impl CapyHost {
         )
     }
 
-    fn accepts_workspace_input(&self) -> bool {
-        self.services
-            .as_ref()
-            .is_none_or(|s| !s.close_status().requested)
-            && self.workspaces
-                .as_ref()
-                .is_none_or(|s| s.accepts_input(crate::workspace_service::now_ms()))
+    fn accepts_workspace_input(&self)->Result<bool,String> {
+        if self.services.as_ref().is_some_and(|service|service.close_status().requested){return Ok(false);}
+        self.workspaces.as_ref().map(|owner|owner.with(|service|Ok(service.accepts_input(crate::workspace_service::now_ms())))).transpose().map(|accepted|accepted.unwrap_or(true))
     }
     fn sync_document(&mut self) {
         let epoch = self.native.session.state().document_file.epoch;
@@ -242,7 +238,7 @@ impl CapyHost {
         if let Some(service) = self.filters.as_mut() {
             service.poll(&mut self.native);
         }
-        if let Some(service) = self.workspaces.as_mut() {
+        if let Some(owner) = self.workspaces.as_ref() {owner.with(|service| {
             if self.documents.as_ref().is_some_and(|d| d.window_close_ready(&self.native))
                 && self.services.as_ref().is_none_or(|s| s.close_status().ready)
                 && self.documents.as_ref().and_then(|d| d.recovery.as_ref()).is_none_or(|s| s.close_ready())
@@ -251,8 +247,8 @@ impl CapyHost {
             {
                 let _ = service.input(&mut self.native, layer_workspace::WorkspaceInput::Close);
             }
-            service.poll(&mut self.native, crate::workspace_service::now_ms());
-        }
+            service.poll(&mut self.native, crate::workspace_service::now_ms());Ok(())
+        })?;}
         Ok(())
     }
 
@@ -572,7 +568,7 @@ pub unsafe extern "C" fn capy_start_services(
                         wake(context as *mut c_void);
                     }
                 });
-            host.workspaces = Some(service);
+            host.workspaces = Some(crate::workspace_owner::WorkspaceOwner::new(service)?);
             host.poll_services()?;
         }
         Ok(0)
@@ -610,11 +606,11 @@ pub unsafe extern "C" fn capy_finish_services(host: *mut CapyHost) -> i32 {
     }))
     .map_err(|_| "Filter transport shutdown failed".to_string());
     let workspaces = catch_unwind(AssertUnwindSafe(|| {
-        if let Some(mut service) = host.workspaces.take() {
-            service.stop();
-        }
+        if let Some(service) = host.workspaces.as_mut() { service.stop()?; }
+        host.workspaces = None;
+        Ok(())
     }))
-    .map_err(|_| "Workspace shutdown failed".to_string());
+    .map_err(|_| "Workspace shutdown failed".to_string()).and_then(|result|result);
     // Cleanup must join the storage callback even when another host operation
     // poisoned the renderer. Do not dispatch more actions into a poisoned host.
     let documents = catch_unwind(AssertUnwindSafe(|| {
@@ -714,7 +710,7 @@ pub unsafe extern "C" fn capy_pointer(
             let batch = unsafe { std::slice::from_raw_parts(records, count) };
             validate_batch(batch).map_err(err)?;
             host.poll_services()?;
-            let blocked = !host.accepts_workspace_input();
+            let blocked = !host.accepts_workspace_input()?;
             let mut delivered = None;
             for sample in batch {
                 let terminal = matches!(sample.phase, 3 | 4);
@@ -771,14 +767,9 @@ pub unsafe extern "C" fn capy_workspace_action(host: *mut CapyHost, json: *const
             host.poll_services()?;
             return Ok(0);
         }
-        let service = host
-            .workspaces
-            .as_mut()
-            .ok_or("Workspace service is unavailable")?;
-        let result = service.action(&mut host.native, action);
-        if let Err(error) = result {
-            service.report_error(&mut host.native, error);
-        }
+        host.workspaces.as_ref().ok_or("Workspace service is unavailable")?.with(|service| {
+            if let Err(error)=service.action(&mut host.native,action){service.report_error(&mut host.native,error);}Ok(())
+        })?;
         host.poll_services()?;
         Ok(0)
     })
@@ -820,7 +811,7 @@ pub unsafe extern "C" fn capy_action(host: *mut CapyHost, json: *const c_char) -
         let action: crate::actions::Action =
             unsafe { read_json(json) }?;
         host.poll_services()?;
-        if !host.accepts_workspace_input() && !action.allowed_while_workspace_blocked() {
+        if !host.accepts_workspace_input()? && !action.allowed_while_workspace_blocked() {
             return Ok(0); // A queued widget from before a workspace transition.
         }
         if let Err(error) = action.dispatch(&mut host.native) {
@@ -867,7 +858,7 @@ pub unsafe extern "C" fn capy_input(host: *mut CapyHost, json: *const c_char) ->
     guard(unsafe { host.as_mut() }, |host| {
         let input = unsafe { read_json(json) }?;
         host.poll_services()?;
-        if !host.accepts_workspace_input()
+        if !host.accepts_workspace_input()?
             && !matches!(
                 &input,
                 layer_ui::UiInput::Blur | layer_ui::UiInput::Chrome { .. }
@@ -903,7 +894,7 @@ pub unsafe extern "C" fn capy_scroll(
 ) -> i32 {
     guard(unsafe { host.as_mut() }, |host| {
         host.poll_services()?;
-        if !host.accepts_workspace_input() {
+        if !host.accepts_workspace_input()? {
             return Ok(0);
         }
         host.native
@@ -1097,10 +1088,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
                 .documents
                 .is_some()
                 .then(|| host.native.proof.observe(&host.native.session)),
-            windows_workspace: host
-                .workspaces
-                .as_ref()
-                .and_then(|s| serde_json::to_value(s.status(&host.native)).ok()),
+            windows_workspace: host.workspaces.as_ref().map(|owner|owner.with(|service|serde_json::to_value(service.status(&host.native)).map_err(err))).transpose()?,
             windows_settings_close: host.services.as_ref().map(|s| s.close_status().clone()),
             windows_scopes: host.scopes.revision(host.native.session.state()),
             windows_filter_source: [occurrence.to_string(), catalog.to_string()],
@@ -1719,3 +1707,5 @@ mod numeric_localization_tests {
         assert!(unsafe { capy_number(std::ptr::null(), format.as_ptr()) }.is_null());
     }
 }
+
+const _:fn()=|| {fn send<T:Send>(){}send::<CapyHost>();send::<CapyLaunch>();};

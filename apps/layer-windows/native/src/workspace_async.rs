@@ -36,58 +36,35 @@ impl Wake for Signal {
     }
 }
 
-pub(crate) struct AsyncTask<T> {
-    future: Option<Pin<Box<dyn Future<Output = T>>>>,
-    signal: Arc<Signal>,
-    closed: bool,
+pub(crate) type AsyncTask<T>=FutureTask<Pin<Box<dyn Future<Output=T>>>>;
+pub(crate) type SendAsyncTask<T>=FutureTask<Pin<Box<dyn Future<Output=T>+Send>>>;
+pub(crate) struct FutureTask<F> {future:Option<F>,signal:Arc<Signal>,closed:bool}
+impl<F> FutureTask<F> {
+    pub(crate) fn new(wake:impl Fn()+Send+'static)->Self {Self {future:None,closed:false,signal:Signal::new(wake)}}
+    pub(crate) fn busy(&self)->bool {self.future.is_some()}
+    fn start_boxed(&mut self,future:F)->Result<(),()> {
+        if self.closed||self.busy(){return Err(());}
+        self.future=Some(future);self.signal.ready.store(true,Ordering::Release);Ok(())
+    }
+    pub(crate) fn close(&mut self) {self.signal.deactivate();self.closed=true;self.future=None;}
+}
+impl<F:Future+Unpin> FutureTask<F> {
+    pub(crate) fn poll(&mut self)->Option<F::Output> {
+        let future=self.future.as_mut()?;
+        if !self.signal.ready.swap(false,Ordering::AcqRel){return None;}
+        let waker=Waker::from(self.signal.clone());
+        match Pin::new(future).poll(&mut Context::from_waker(&waker)) {
+            Poll::Pending=>None,Poll::Ready(value)=>{self.future=None;Some(value)},
+        }
+    }
 }
 impl<T> AsyncTask<T> {
-    pub(crate) fn new(wake: impl Fn() + Send + 'static) -> Self {
-        Self {
-            future: None,
-            closed: false,
-            signal: Signal::new(wake),
-        }
-    }
-    pub(crate) fn busy(&self) -> bool {
-        self.future.is_some()
-    }
-    /// Rejecting a second operation must never replace an accepted save.
-    pub(crate) fn start<F: Future<Output = T> + 'static>(&mut self, future: F) -> Result<(), F> {
-        if self.closed || self.busy() {
-            return Err(future);
-        }
-        self.future = Some(Box::pin(future));
-        self.signal.ready.store(true, Ordering::Release);
-        Ok(())
-    }
-    pub(crate) fn poll(&mut self) -> Option<T> {
-        let future = self.future.as_mut()?;
-        if !self.signal.ready.swap(false, Ordering::AcqRel) {
-            return None;
-        }
-        let waker = Waker::from(self.signal.clone());
-        match future.as_mut().poll(&mut Context::from_waker(&waker)) {
-            Poll::Pending => None,
-            Poll::Ready(value) => {
-                self.future = None;
-                Some(value)
-            }
-        }
-    }
-    /// Call outside the native window's notification mutex, before destroying
-    /// its callback context. Normal close first waits for durable completion.
-    pub(crate) fn close(&mut self) {
-        self.signal.deactivate();
-        self.closed = true;
-        self.future = None;
-    }
+    pub(crate) fn start<F:Future<Output=T>+'static>(&mut self,future:F)->Result<(),()> {self.start_boxed(Box::pin(future))}
 }
-impl<T> Drop for AsyncTask<T> {
-    fn drop(&mut self) {
-        self.close();
-    }
+impl<T> SendAsyncTask<T> {
+    pub(crate) fn start<F:Future<Output=T>+Send+'static>(&mut self,future:F)->Result<(),()> {self.start_boxed(Box::pin(future))}
 }
+impl<F> Drop for FutureTask<F> {fn drop(&mut self){self.close();}}
 
 // Cold file transport is rare and bounded. Its owned I/O job never
 // borrows the live session and is joined before a window callback can expire.
@@ -155,6 +132,15 @@ mod tests {
         rc::Rc,
         sync::{atomic::AtomicUsize, mpsc},
     };
+
+    #[test]
+    fn owned_file_future_can_move_before_poll_without_replacing_accepted_work() {
+        let mut task=SendAsyncTask::new(||{});
+        assert!(task.start(async {42}).is_ok());
+        assert!(task.start(async {99}).is_err());
+        let mut task=std::thread::spawn(move|| {assert_eq!(task.poll(),Some(42));task}).join().unwrap();
+        task.close();assert!(task.start(async {99}).is_err());
+    }
 
     #[test]
     fn a_pending_local_future_is_retained_and_only_polled_when_woken() {

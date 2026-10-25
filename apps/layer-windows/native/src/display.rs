@@ -76,7 +76,7 @@ impl Display {
 #[derive(Default)]
 pub(crate) struct DisplayProbe {
     factory: Option<IDXGIFactory1>,
-    monitor: Option<HMONITOR>,
+    monitor: Option<usize>,
     display: Display,
 }
 impl DisplayProbe {
@@ -86,6 +86,7 @@ impl DisplayProbe {
         }))
     }
     fn poll_monitor(&mut self, monitor: Option<HMONITOR>) -> &Display {
+        let monitor=monitor.map(|monitor|monitor.0 as usize);
         let current = self
             .factory
             .as_ref()
@@ -119,7 +120,7 @@ impl DisplayProbe {
             while let Ok(output) = unsafe { adapter.EnumOutputs(o) } {
                 o += 1;
                 let desc = unsafe { output.GetDesc() }.map_err(|e| e.to_string())?;
-                if desc.Monitor != monitor {
+                if desc.Monitor.0 as usize != monitor {
                     continue;
                 }
                 let output: IDXGIOutput6 = output.cast().map_err(|e| e.to_string())?;

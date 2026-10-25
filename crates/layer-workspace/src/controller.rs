@@ -278,6 +278,9 @@ pub struct WorkspaceController<S: WorkspaceStore + 'static> {
     startup_error: Option<StoreError>,
     notice: Option<WorkspaceNotice>,
 }
+impl<S: WorkspaceStore + 'static> Drop for WorkspaceController<S> {
+    fn drop(&mut self) { self.stop(); }
+}
 impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
     pub fn new_localized(store: S, platform: Platform, now: u64, localization: Arc<layer_ui::Localizer>) -> Self {
         Self::new_owned_localized(store, platform, Owner::fresh(), now, localization)
@@ -1915,3 +1918,27 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
 #[cfg(test)]
 #[path = "controller_localization_tests.rs"]
 mod localization_tests;
+
+#[cfg(test)]
+mod lifetime_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    struct UnusedStore;
+    impl WorkspaceStore for UnusedStore {
+        async fn execute(&self,_:StoreRequest)->Result<StoreResponse> { panic!("Unused store"); }
+    }
+
+    #[test]
+    fn dropping_controller_disarms_retained_storage_wakers() {
+        let mut controller=WorkspaceController::new_localized(UnusedStore,Platform::Windows,0,
+            layer_ui::Localizer::shared(layer_ui::UiLanguage::English));
+        let calls=Arc::new(AtomicUsize::new(0));let observed=calls.clone();
+        controller.set_wake(Arc::new(move|| {observed.fetch_add(1,Ordering::SeqCst);}));
+        let retained=Waker::from(Arc::new(Signal {ready:AtomicBool::new(false),wake:controller.wake.clone()}));
+        retained.wake_by_ref();assert_eq!(calls.load(Ordering::SeqCst),1);
+        drop(controller);
+        std::thread::spawn(move||retained.wake()).join().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst),1);
+    }
+}

@@ -139,6 +139,11 @@ on a worker after detaching the surface; explicitly closing a drawing still
 uses Save/Discard/Cancel and removes its durable membership before cleanup.
 Abnormal restores mark drawings as recovered until their next save.
 
+Workspace manager futures remain on their creating render thread. The movable
+canvas host holds a typed handle to that thread's workspace service; access from
+another thread is rejected, and service shutdown removes it on its owner before
+background host cleanup. File transport futures carry only owned, Send state.
+
 Session workers reuse immutable resources and coalesce changes over two seconds.
 Unchanged drawings produce no periodic writes. Atomic publication preserves the
 previous complete drawing checkpoint when storage fails, and live windows hold
