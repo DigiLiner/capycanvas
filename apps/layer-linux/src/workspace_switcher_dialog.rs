@@ -19,7 +19,7 @@ fn picked(row: &adw::ActionRow, x: f64, y: f64) -> (bool, bool) {
 }
 
 impl ManagerUi {
-    fn edit_switcher(&self, w: &Rc<Workspace>, edit: SwitcherEdit) {
+    pub(super) fn edit_switcher(&self, w: &Rc<Workspace>, edit: SwitcherEdit) {
         if !self.switcher_pending.get() {
             w.workspaces.send(w, WorkspaceInput::EditSwitcher { edit });
         }
@@ -30,34 +30,11 @@ impl ManagerUi {
         w: &Rc<Workspace>,
         menu: &gtk::MenuButton,
         id: &str,
-        pinned: &[String],
     ) {
         let popup = menu.popover().unwrap();
         let content = popup.child().and_downcast::<gtk::Box>().unwrap();
         let controls = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let check = gtk::CheckButton::with_label("Show in top bar");
-        check.set_widget_name(&format!("workspace-pin-{id}"));
-        check.set_active(pinned.iter().any(|i| i == id));
         let id = id.to_string();
-        check.connect_toggled(glib::clone!(
-            #[weak]
-            w,
-            #[weak]
-            popup,
-            #[strong]
-            id,
-            move |check| {
-                popup.popdown();
-                w.workspaces.ui.edit_switcher(
-                    &w,
-                    SwitcherEdit::Show {
-                        id: id.clone(),
-                        visible: check.is_active(),
-                    },
-                );
-            }
-        ));
-        controls.append(&check);
         let order = self.order.borrow().clone();
         if let Some(index) = order.iter().position(|i| i == &id) {
             for (label, enabled, before) in [

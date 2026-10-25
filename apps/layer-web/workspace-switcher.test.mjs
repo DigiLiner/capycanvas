@@ -264,6 +264,7 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
   const durable = () => evaluate("JSON.parse(layerApp.app.workspace_capture())");
   const layout = () => evaluate("layerApp.state().workspace.layout");
   const shown = () => evaluate("[...document.querySelectorAll('.workspace-switcher button[data-workspace-id]')].map(node=>node.dataset.workspaceId)");
+  const togglePin = id => click(`${row(id)} .workspace-pin`);
   const options = async (id, action) => { await click(`${row(id)} .workspace-options`); await click(`.workspace-row-menu [data-action="${action}"]`); };
   const drag = async (id, target, after, sourceDevice, handle=false, hold=false) => {
     device=sourceDevice;
@@ -287,6 +288,17 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
     device="mouse"; await pointer("down",await point(`${row(p)} .workspace-choice`),"right"); await pointer("up",undefined,"right");
     assert.equal(await menuOpen(),true,"right-click opens menu"); await shot("row-menu"); await key("Escape");
     for(const kind of ["mouse","touch","pen"]) {
+      device=kind;
+      await evaluate(`window.retainedPin=document.querySelector(${JSON.stringify(`${row(p)} .workspace-pin`)})`);
+      for(const selected of [false,true]) {
+        const target=await point(`${row(p)} .workspace-pin`);
+        await pointer("down",target); await pointer("up",target); await idle();
+        assert.equal((await pins()).includes(p),selected,`${kind}: pin toggles directly`);
+        assert.equal((await view()).selected,f,`${kind}: pin does not select a preview`);
+        assert.deepEqual(await layout(),preview);
+        assert.equal(await menuOpen(),false,`${kind}: pin does not open a row menu`);
+        assert.equal(await evaluate(`retainedPin===document.querySelector(${JSON.stringify(`${row(p)} .workspace-pin`)})`),true,'pin updates retain its native button');
+      }
       device=kind;
       await pointer("down",await point(`${row(p)} .workspace-choice`)); await pause(600);
       assert.equal(await menuOpen(),kind!=="mouse",`${kind}: only touch/pen holds open menus`); await pointer("up"); await idle();
@@ -321,7 +333,7 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
       assert.equal(await menuOpen(),false); assert.deepEqual(await pins(),[p,i,f]);
       assert.equal(await evaluate("document.querySelector('.workspace-manager').open"),true);
     }
-    await options(p,"pin"); assert.deepEqual(await pins(),[i,f]);
+    await togglePin(p); assert.deepEqual(await pins(),[i,f]);
     assert.ok(await evaluate(`!!document.querySelector(${JSON.stringify(`${row(p)} .workspace-grip`)})`));
     await drag(p,f,true,"touch",true); assert.deepEqual((await order()).slice(0,3),[i,f,p]); assert.deepEqual(await pins(),[i,f]);
     await click(`${row(p)} .workspace-options`); await evaluate("document.querySelector('.workspace-row-menu [data-action=up]').focus()"); assert.equal(await menuOpen(),true); assert.equal(await evaluate("document.activeElement.dataset.action"),"up"); await key("Enter");
@@ -337,14 +349,14 @@ export async function checkWorkspaceSwitcher({call, evaluate, settle, reload}) {
     }
     await send({type:"switch",id:initial.id}); await send({type:"open",page:"workspaces"}); await click(`${row(f)} .workspace-choice`);
     assert.deepEqual(await pins(),[i,f,...custom],"new pins survive switching away");
-    for(const id of custom.slice(1))await options(id,"pin");
+    for(const id of custom.slice(1))await togglePin(id);
     assert.deepEqual(await pins(),[i,f,custom[0]]);
-    for(const id of [i,f,custom[0]])await options(id,"pin");
+    for(const id of [i,f,custom[0]])await togglePin(id);
     assert.equal(await evaluate("document.querySelector('.workspace-switcher').hidden"),false);
     assert.deepEqual(await shown(),[initial.id],"current workspace stays visible, not the dialog preview");
     await evaluate("document.querySelector('.workspace-list').scrollTop=0"); await settle();
     await drag(custom[0],i,false,"mouse",true); assert.equal((await order())[0],custom[0]); assert.deepEqual(await pins(),[]);
-    await options(custom[0],"pin"); await options(p,"pin");
+    await togglePin(custom[0]); await togglePin(p);
     assert.deepEqual(await shown(),[initial.id,...await pins()]);
     // Native touch and pen body motion scrolls rather than publishing a reorder.
     const savedOrder=await order();

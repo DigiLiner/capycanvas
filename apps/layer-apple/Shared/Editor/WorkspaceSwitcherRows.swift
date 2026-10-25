@@ -14,7 +14,6 @@ struct WorkspaceSwitcherRows: View {
     @State private var optionTitles: [String: String] = [:]
     @FocusState private var focus: String?
     private var rows: [JSON] { workspaces.view["rows"].array }
-    private var pinned: Set<String> { Set(workspaces.view["switcher"].array.map { $0["id"].string }) }
     private var available: Bool {
         workspaces.ready && !workspaces.readOnly && !workspaces.busy
             && !workspaces.switcherBusy && workspaces.view["prompt"].isNull
@@ -76,12 +75,19 @@ struct WorkspaceSwitcherRows: View {
                             }
                             return .ignored
                         }
-                    if pinned.contains(id) {
-                        SharedIcon(name: "pin").accessibilityHidden(false).accessibilityLabel(nativeCopy["header"]["show_top"].string)
-                    }
                     if row["current"].bool {
                         SharedIcon(name: "check").accessibilityHidden(false).accessibilityLabel(nativeCopy["header"]["current_workspace"].string)
                     }
+                    let pin = row["pin"]
+                    Button {
+                        workspaces.send(["type": "edit_switcher", "edit": pin["edit"].raw])
+                    } label: {
+                        SharedIcon(name: pin["icon"].string).frame(width: 34, height: rowHeight).contentShape(Rectangle())
+                    }.buttonStyle(.plain).foregroundStyle(pin["selected"].bool ? Color.accentColor : Color.secondary)
+                        .disabled(!pin["enabled"].bool).help(pin["label"].string).accessibilityLabel(pin["label"].string)
+                        .accessibilityAddTraits(pin["selected"].bool ? .isSelected : [])
+                        .accessibilityIdentifier("workspace-pin-" + id).focusable().focused($focus, equals: "pin-" + id)
+                        .modifier(WorkspaceRowMeasurement(id: id, part: \.pin))
                     Button {
                         if interaction.menu == id { interaction.closeMenu() } else { interaction.showMenu(id) }
                     } label: { Text("⋮").frame(width: 34, height: rowHeight).contentShape(Rectangle()) }
@@ -136,8 +142,6 @@ struct WorkspaceSwitcherRows: View {
         let index = order.firstIndex(of: id)
         let edit = { (value: [String: Any]) -> [String: Any] in ["type": "edit_switcher", "edit": value] }
         let preferences: [[String: Any]] = [
-            ["label": nativeCopy["header"]["show_top"].string, "enabled": available, "selected": pinned.contains(id),
-             "action": edit(["type": "show", "id": id, "visible": !pinned.contains(id)])],
             ["label": nativeCopy["header"]["move_up"].string, "enabled": available && (index ?? 0) > 0,
              "action": edit(["type": "move", "id": id, "before": index.flatMap { $0 > 0 ? order[$0 - 1] : nil } as Any? ?? NSNull()])],
             ["label": nativeCopy["header"]["move_down"].string, "enabled": available && index.map { $0 + 1 < order.count } == true,

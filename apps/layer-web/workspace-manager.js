@@ -66,7 +66,7 @@ export function createWorkspaceManager({ app, store, applyChange, element, butto
     bindCopy(primary,()=>view?.primary??""); primary.disabled = view.busy || view.switcher_busy || !view.enabled;
     retry.hidden = !view.retry; retry.disabled = view.busy;
     bindCopy(error,()=>view?.switcher_error||view?.error||"");error.hidden = !error.textContent;
-    const newRowsKey = JSON.stringify([view.page, view.rows.map(({id,current,subtitle,actions})=>({id,current,subtitle:!!subtitle,actions:actions.map(({action,enabled,primary})=>({action,enabled,primary}))})), view.switcher.map(row => row.id), view.id]);
+    const newRowsKey = JSON.stringify([view.page, view.rows.map(({id,current,subtitle,actions})=>({id,current,subtitle:!!subtitle,actions:actions.map(({action,enabled,primary})=>({action,enabled,primary}))})), view.id]);
     if (newRowsKey !== rowsKey && !switcher.dragging()) {
       const focusedId = document.activeElement.closest?.(".workspace-row")?.dataset.id;
       switcher.closeMenu();

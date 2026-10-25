@@ -149,11 +149,14 @@ function Preference([string]$Id,[string]$Action){
     $row=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,('workspace-manager-row-'+$Id)))
     if($row -and $row.Current.IsOffscreen){$row.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView()}
-    $null=Control ('workspace-manager-options-'+$Id) -Arranged
-    Invoke ('workspace-manager-options-'+$Id)
-    $item=Control ('workspace-manager-'+$Action)
-    if($Action -eq 'show'){$item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()}
-    else{$item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+    if($Action -eq 'show'){
+        $item=Control ('workspace-manager-pin-'+$Id) -Arranged
+        $item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    }else{
+        $null=Control ('workspace-manager-options-'+$Id) -Arranged
+        Invoke ('workspace-manager-options-'+$Id)
+        (Control ('workspace-manager-'+$Action)).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    }
     Wait-Until {(Storage).switcher_revision -gt $revision -or (Storage).switcher_error} 'Preference was not acknowledged'
     Settled
 }
@@ -191,6 +194,25 @@ try {
     Wait-Until {(Manager).selected -eq $preview -and !(Manager).loading} 'Preview did not settle'
     $previewLayout=Layout
     $retained=(Control ('workspace-manager-row-'+$preview)).GetRuntimeId() -join ':'
+    $pinId='workspace-manager-pin-'+$active
+    $pinRuntime=(Control $pinId).GetRuntimeId() -join ':'
+    foreach($selected in @($false,$true)){
+        $at=At $pinId;$revision=(Storage).switcher_revision
+        [CapyRowPointer]::Down($Device,$at.x,$at.y);[CapyRowPointer]::Up()
+        Wait-Until {(Storage).switcher_revision -gt $revision} 'Direct pin input was not acknowledged'
+        Settled
+        if((@((Storage).switcher.id) -contains $active) -ne $selected){throw 'Direct pin input did not toggle visibility'}
+        if((Manager).selected -ne $preview -or (Layout) -ne $previewLayout){throw 'Direct pin input changed the preview'}
+        if(((Control $pinId).GetRuntimeId() -join ':') -ne $pinRuntime){throw 'Direct pin input replaced its native button'}
+    }
+    foreach($selected in @($false,$true)){
+        (Control $pinId).SetFocus();$revision=(Storage).switcher_revision
+        [CapyRowPointer]::Key([uint32]$review.Id,0x20)
+        Wait-Until {(Storage).switcher_revision -gt $revision} 'Keyboard pin input was not acknowledged'
+        Settled
+        if((@((Storage).switcher.id) -contains $active) -ne $selected){throw 'Keyboard pin input did not toggle visibility'}
+        if((Manager).selected -ne $preview -or (Layout) -ne $previewLayout){throw 'Keyboard pin input changed the preview'}
+    }
     Preference $active 'show'
     if((Storage).switcher.id -contains $active -or (Storage).switcher_display[0].id -ne $active){throw 'Hidden current workspace fallback is incorrect'}
     if(((Storage).order -join '|') -ne ($order -join '|')){throw 'Visibility changed dialog order'}

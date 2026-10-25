@@ -4,6 +4,7 @@ struct WorkspaceRowFrame: Equatable {
     var row: CGRect = .zero
     var grip: CGRect = .zero
     var options: CGRect = .zero
+    var pin: CGRect = .zero
 }
 struct WorkspaceRowFrames: PreferenceKey {
     static var defaultValue: [String: WorkspaceRowFrame] { [:] }
@@ -11,7 +12,8 @@ struct WorkspaceRowFrames: PreferenceKey {
         value.merge(nextValue()) { old, next in
             WorkspaceRowFrame(row: next.row == .zero ? old.row : next.row,
                 grip: next.grip == .zero ? old.grip : next.grip,
-                options: next.options == .zero ? old.options : next.options)
+                options: next.options == .zero ? old.options : next.options,
+                pin: next.pin == .zero ? old.pin : next.pin)
         }
     }
 }
@@ -62,7 +64,7 @@ struct WorkspaceRowMeasurement: ViewModifier {
         guard enabled, viewport.contains(point) else { closeMenu(); return nil }
         closeMenu()
         guard let (id, frame) = frames.first(where: { $0.value.row.contains(point) }),
-            items.contains(where: { $0["id"].string == id }), !frame.options.contains(point) else { return nil }
+            items.contains(where: { $0["id"].string == id }), !frame.options.contains(point), !frame.pin.contains(point) else { return nil }
         return ReorderTarget(id: id, surface: frame.grip.contains(point) ? .handle : .row,
             valid: { [weak self] _ in self?.enabled == true && self?.items.contains(where: { $0["id"].string == id }) == true },
             openContext: { [weak self] in self?.showMenu(id) },

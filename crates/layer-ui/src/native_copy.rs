@@ -134,7 +134,6 @@ copy_struct! { HeaderCopy {
     current_workspace: WORKSPACE_CURRENT_WORKSPACE,
     drag_to_reorder: WORKSPACE_HEADER_DRAG_ITEM,
     show_top: NATIVE_HEADER_SHOW_TOP,
-    shown_top: NATIVE_HEADER_SHOWN_TOP,
     move_up: NATIVE_HEADER_MOVE_UP,
     move_down: NATIVE_HEADER_MOVE_DOWN,
     no_items: NATIVE_HEADER_NO_ITEMS,

@@ -541,7 +541,6 @@ native-dialog-fullscreen-failed = O Windows não conseguiu alterar a tela cheia.
 native-dialog-link-unavailable = O link do aplicativo não está disponível.
 native-dialog-drop-drawings = Solte arquivos de desenho para abri-los
 
-native-header-shown-top = Mostrado na barra superior
 native-drawing-storage-help = { $detail }
     Abra o menu do desenho e escolha Tentar armazenar desenho novamente.
 native-dialog-preferences-failed = O Windows não conseguiu abrir as Preferências.

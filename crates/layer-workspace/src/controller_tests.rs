@@ -70,6 +70,50 @@ impl WorkspaceStore for Store {
     }
 }
 #[test]
+fn manager_pins_preserve_preview_and_confirmed_state_until_the_save_finishes() {
+    let mut f = Fixture::new();
+    let active = f.controller.view.switcher[0].id.clone();
+    f.input(serde_json::json!({"type":"switch","id":active}));
+    f.input(serde_json::json!({"type":"open","page":"workspaces"}));
+    let preview_id = f.controller.view.rows.iter().find(|row| row.id != active).unwrap().id.clone();
+    f.input(serde_json::json!({"type":"select","id":preview_id}));
+    let layout = f.host.session.state().workspace.layout.clone();
+    let original = f.controller.manager.current_record().unwrap();
+    let order = f.controller.view.order.clone();
+    let pin = |f: &Fixture| f.controller.view.rows.iter().find(|row| row.id == active).unwrap().pin.clone().unwrap();
+    let before = pin(&f);
+    assert!(before.selected && before.enabled);
+    let (release, gate) = async_channel::bounded(1);
+    *f.backend.switcher_gate.borrow_mut() = Some(gate);
+    f.input(serde_json::json!({"type":"edit_switcher","edit":before.edit}));
+    assert!(pin(&f).selected);
+    assert!(!pin(&f).enabled);
+    release.try_send(()).unwrap();
+    f.pump();
+    let after = pin(&f);
+    assert!(!after.selected && after.enabled);
+    assert_ne!(after.icon, before.icon);
+    assert_ne!(after.label, before.label);
+    assert_eq!(f.controller.view.switcher_display[0].id, active);
+    assert_eq!(f.controller.view.selected.as_ref(), Some(&preview_id));
+    assert_eq!(f.controller.view.order, order);
+    assert_eq!(f.host.session.state().workspace.layout, layout);
+    assert_eq!(f.controller.manager.current_record().unwrap(), original);
+    f.backend.fail_preferences.set(true);
+    f.input(serde_json::json!({"type":"edit_switcher","edit":after.edit}));
+    assert!(f.controller.view.switcher_error.is_some());
+    assert!(!pin(&f).selected && pin(&f).enabled);
+    f.backend.fail_preferences.set(false);
+    f.input(serde_json::json!({"type":"edit_switcher","edit":pin(&f).edit}));
+    assert!(pin(&f).selected);
+    f.input(serde_json::json!({"type":"cancel"}));
+    assert!(f.controller.manager.switcher_ids().contains(&active));
+    assert_eq!(f.controller.manager.current_record().unwrap(), original);
+    f.input(serde_json::json!({"type":"open","page":"history"}));
+    assert!(f.controller.view.rows.iter().all(|row| row.pin.is_none()));
+}
+
+#[test]
 fn switcher_menu_toggles_saved_visibility_without_opening_or_editing_a_workspace() {
     let mut f = Fixture::new();
     let id = f.controller.view.switcher[0].id.clone();

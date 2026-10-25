@@ -28,6 +28,7 @@ workspace-header-fullscreen = เต็มจอ
 workspace-header-workspaces = ตัวสลับพื้นที่ทำงาน
 workspace-switcher-options = ตัวเลือกพื้นที่ทำงาน
 workspace-show-in-top-bar = แสดงในแถบบน
+workspace-hide-from-top-bar = ซ่อนจากแถบบน
 workspace-header-document-title = ชื่อเอกสาร
 workspace-header-clock = นาฬิกา
 workspace-header-battery = แบตเตอรี่

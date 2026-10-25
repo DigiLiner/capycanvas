@@ -59,6 +59,7 @@ workspace-header-workspaces = Pemilih Ruang Kerja
 workspace-switcher-options = Opsi Ruang Kerja
 
 workspace-show-in-top-bar = Tampilkan di bilah atas
+workspace-hide-from-top-bar = Sembunyikan dari bilah atas
 
 workspace-header-document-title = Judul Dokumen
 

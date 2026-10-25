@@ -529,7 +529,6 @@ native-dialog-fullscreen-failed = Windows không thể đổi chế độ toàn 
 native-dialog-link-unavailable = Liên kết ứng dụng không khả dụng.
 native-dialog-drop-drawings = Thả tệp bản vẽ để mở
 
-native-header-shown-top = Đang hiện trên thanh trên cùng
 native-drawing-storage-help = { $detail }
     Mở trình đơn bản vẽ và chọn Thử lưu trữ bản vẽ lại.
 native-dialog-preferences-failed = Windows không thể mở Tùy chọn.

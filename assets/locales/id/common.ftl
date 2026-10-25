@@ -609,7 +609,6 @@ native-dialog-link-unavailable = Tautan aplikasi tidak tersedia.
 
 native-dialog-drop-drawings = Jatuhkan berkas gambar untuk membukanya
 
-native-header-shown-top = Ditampilkan di bilah atas
 
 native-drawing-storage-help = { $detail }
     Buka menu gambar dan pilih Coba lagi penyimpanan gambar.

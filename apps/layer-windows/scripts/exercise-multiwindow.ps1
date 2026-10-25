@@ -112,8 +112,7 @@ try {
     $owned=(Model $first).windows_workspace.id
     Wait-Until {!(Model).windows_workspace.switcher_busy} 'Switcher refresh did not settle'
     $firstRevision=(Model $first).windows_workspace.switcher_revision
-    Invoke ('workspace-manager-options-'+$owned)
-    (Control 'workspace-manager-show').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    (Control ('workspace-manager-pin-'+$owned)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {
         (Model $first).windows_workspace.switcher.id -notcontains $owned -and
         (Model $second).windows_workspace.switcher.id -notcontains $owned -and

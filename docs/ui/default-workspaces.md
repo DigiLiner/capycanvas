@@ -236,7 +236,8 @@ Restore Starting Layout…; and Reset All Brushes…. Captions come from
 
 - **Manage Workspaces** is a compact selectable list with a square **+** (New
   Workspace) at the top right and Cancel / Switch to Workspace below. Each row's
-  **⋮** menu has Rename, Delete, **Show in top bar** and Move Up / Move Down.
+  **⋮** menu has Rename, Delete and Move Up / Move Down. A separate pin button
+  shows or hides the workspace in the top bar.
   The current workspace starts selected with Switch disabled; a workspace owned
   by another window offers Switch to Window.
 - Selecting a row, double-clicking or pressing Enter in the manager or Layout
@@ -319,9 +320,12 @@ context-menu action, and their options open outside Customize Title Bar. Releasi
 not switch workspaces. Ordinary clicks keep their switching behavior.
 
 Manage Workspaces keeps a single ordered list. Every row has a narrow, dimmed
-left grip; workspaces shown in the top bar also have a pin icon with the tooltip
-**Shown in top bar**, and the current workspace keeps its checkmark. The top bar
-follows the list order and skips unpinned rows. If the current workspace is
+left grip and a pin button. The pin is filled when the workspace is shown in
+the top bar and outlined otherwise; its tooltip offers **Hide from top bar** or
+**Show in top bar**. Clicking, tapping or activating the focused pin changes only
+its saved visibility, without selecting a preview or starting a row drag. The
+button keeps its place and focus in both states. The current workspace keeps its
+checkmark. The top bar follows the list order and skips unpinned rows. If the current workspace is
 unpinned, it is shown first until the user switches away, without changing the
 saved pins or order; dialog previews do not change this entry.
 

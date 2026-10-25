@@ -38,11 +38,11 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
     struct Row {
         ListViewItem item;
         TextBlock title,subtitle;
-        Image pinned,current;
+        Image pinIcon,current;
+        Primitives::ToggleButton pin;
         Button more,grip;
         MenuFlyout menu;
-        hstring theme,captionTitle;
-        ToggleMenuFlyoutItem show;
+        hstring theme,captionTitle,pinGlyph;
         MenuFlyoutItem up,down,rename,remove;
         MenuFlyoutSeparator separator;
     };
@@ -210,25 +210,23 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         AutomationProperties::SetAutomationId(row.remove,L"workspace-manager-delete");
         row.rename.Click([weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock();self&&self->showing)self->dispatch(form(L"rename",S(id)));});
         row.remove.Click([weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock();self&&self->showing)self->dispatch(form(L"delete",S(id)));});
-        row.show.Text(copy(L"header",L"show_top"));row.up.Text(copy(L"header",L"move_up"));row.down.Text(copy(L"header",L"move_down"));
-        AutomationProperties::SetAutomationId(row.show,L"workspace-manager-show");
+        row.up.Text(copy(L"header",L"move_up"));row.down.Text(copy(L"header",L"move_down"));
         AutomationProperties::SetAutomationId(row.up,L"workspace-manager-move-up");
         AutomationProperties::SetAutomationId(row.down,L"workspace-manager-move-down");
-        // Observe checked state for pointer, keyboard and accessibility actions;
-        // model-driven updates are guarded below.
-        row.show.RegisterPropertyChangedCallback(ToggleMenuFlyoutItem::IsCheckedProperty(),
-            [weak=weak_from_this(),id](DependencyObject const& sender,auto&&){if(auto self=weak.lock()){
-                if(!self->updating)self->editSwitcher(O({{L"type",S(L"show")},{L"id",S(id)},{L"visible",B(sender.as<ToggleMenuFlyoutItem>().IsChecked())}}));}});
+        row.pin.RegisterPropertyChangedCallback(Primitives::ToggleButton::IsCheckedProperty(),[weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock();self&&!self->updating){
+            for(auto value:array(self->model,L"rows")){
+                auto data=value.GetObject();if(str(data,L"id")!=id)continue;
+                auto pin=object(data,L"pin");if(flag(pin,L"enabled"))self->editSwitcher(object(pin,L"edit"));break;
+            }
+        }});
         row.up.Click([weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock())self->moveWorkspace(id,false);});
         row.down.Click([weak=weak_from_this(),id](auto&&,auto&&){if(auto self=weak.lock())self->moveWorkspace(id,true);});
-        options.Items().Append(row.show);options.Items().Append(row.up);options.Items().Append(row.down);options.Items().Append(row.separator);
+        options.Items().Append(row.up);options.Items().Append(row.down);options.Items().Append(row.separator);
         options.Items().Append(row.rename);options.Items().Append(row.remove);row.more.Flyout(options);
-        row.pinned=icon(L"pin",str(object(snapshot,L"state"),L"theme",L"dark"),14);row.pinned.Opacity(.7);
-        row.pinned.Margin({0,0,8,0});row.pinned.VerticalAlignment(VerticalAlignment::Center);
-        Grid::SetColumn(row.pinned,3);content.Children().Append(row.pinned);
-        AutomationProperties::SetAutomationId(row.pinned,L"workspace-manager-pinned-"+id);
-        AutomationProperties::SetName(row.pinned,copy(L"header",L"shown_top"));
-        row.pinned.IsHitTestVisible(true);tooltip(row.pinned,copy(L"header",L"shown_top"));
+        row.pin.Content(row.pinIcon);row.pin.Width(34);row.pin.Height(34);row.pin.Padding({0,0,0,0});
+        row.pin.Background(clear());row.pin.BorderThickness({0,0,0,0});
+        row.pin.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(row.pin,3);content.Children().Append(row.pin);
+        AutomationProperties::SetAutomationId(row.pin,L"workspace-manager-pin-"+id);
         row.current.Width(14);row.current.Height(14);row.current.Margin({0,0,8,0});
         row.current.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(row.current,2);content.Children().Append(row.current);
         AutomationProperties::SetAutomationId(row.current,L"workspace-manager-current-"+id);
@@ -239,11 +237,11 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
         AutomationProperties::SetAutomationId(row.grip,L"workspace-manager-grip-"+id);
         AutomationProperties::SetHelpText(row.grip,copy(L"header",L"drag_to_reorder"));
         content.Children().Append(row.more);content.Children().Append(row.grip);row.item.Content(content);
-        rowDrag->Attach(row.item,row.grip,row.more,row.menu,id);return row;
+        rowDrag->Attach(row.item,row.grip,row.more,row.pin,row.menu,id);return row;
     }
     void applyRows() {
         auto values=array(model,L"rows");std::vector<std::wstring> next;
-        auto pins=array(model,L"switcher"),saved=array(model,L"order");
+        auto saved=array(model,L"order");
         bool configurable=page()==L"workspaces",saving=flag(model,L"switcher_busy");
         for(auto value:values){
             auto data=value.GetObject();auto id=str(data,L"id");std::wstring key(id);next.push_back(key);
@@ -251,17 +249,21 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             if(found==rows.end())found=rows.emplace(key,makeRow(id)).first;
             auto& row=found->second;auto label=str(data,L"title"),detail=str(data,L"subtitle");
             row.title.Text(label);row.subtitle.Text(detail);row.subtitle.Visibility(detail.empty()?Visibility::Collapsed:Visibility::Visible);
-            bool pinned=false;for(auto pin:pins)if(str(pin.GetObject(),L"id")==id)pinned=true;
+            auto pin=object(data,L"pin");
             uint32_t position=saved.Size();for(uint32_t i=0;i<saved.Size();++i)if(saved.GetStringAt(i)==id)position=i;
-            row.pinned.Visibility(configurable&&pinned?Visibility::Visible:Visibility::Collapsed);
+            row.pin.Visibility(configurable?Visibility::Visible:Visibility::Collapsed);
+            row.pin.IsChecked(flag(pin,L"selected"));row.pin.IsEnabled(flag(pin,L"enabled"));
+            AutomationProperties::SetName(row.pin,str(pin,L"label"));tooltip(row.pin,str(pin,L"label"));
+
             row.current.Visibility(configurable&&flag(data,L"current")?Visibility::Visible:Visibility::Collapsed);
-            auto theme=str(object(snapshot,L"state"),L"theme",L"dark");
-            if(theme!=row.theme){row.theme=theme;row.pinned.Source(icon(L"pin",theme,14).Source());row.current.Source(icon(L"check",theme,14).Source());row.grip.Content(panelGrip(theme));}
+            auto theme=str(object(snapshot,L"state"),L"theme",L"dark"),glyph=str(pin,L"icon",L"pin");
+            if(theme!=row.theme||glyph!=row.pinGlyph){row.pinGlyph=glyph;row.pinIcon.Source(icon(glyph,theme,16).Source());}
+            if(theme!=row.theme){row.theme=theme;row.current.Source(icon(L"check",theme,14).Source());row.grip.Content(panelGrip(theme));}
             row.grip.Visibility(configurable?Visibility::Visible:Visibility::Collapsed);row.grip.IsEnabled(canReorder());
             if(row.captionTitle!=label){row.captionTitle=label;AutomationProperties::SetName(row.grip,caption(O({{L"type",S(L"reorder")},{L"title",S(label)}})));AutomationProperties::SetName(row.more,caption(O({{L"type",S(L"options_for")},{L"title",S(label)}})));}
-            row.show.IsChecked(pinned);row.show.IsEnabled(!saving);row.up.IsEnabled(!saving&&position>0&&position<saved.Size());
+            row.up.IsEnabled(!saving&&position>0&&position<saved.Size());
             row.down.IsEnabled(!saving&&position+1<saved.Size());
-            for(auto item:{row.show.as<UIElement>(),row.up.as<UIElement>(),row.down.as<UIElement>()})
+            for(auto item:{row.up.as<UIElement>(),row.down.as<UIElement>()})
                 item.Visibility(configurable?Visibility::Visible:Visibility::Collapsed);
             bool rename=configurable&&offers(data,L"rename"),remove=configurable&&offers(data,L"delete");
             row.rename.Visibility(rename?Visibility::Visible:Visibility::Collapsed);
@@ -413,9 +415,8 @@ struct WorkspaceManagerView::Impl:std::enable_shared_from_this<Impl> {
             name.Header(box_value(common(L"name")));name.Language(copyData->language());search.Language(copyData->language());
             if(dialog)dialog.Language(copyData->language());
             for(auto& [id,row]:rows){row.captionTitle=L"";
-                row.rename.Text(recovery(L"rename"));row.remove.Text(common(L"delete"));row.show.Text(copy(L"header",L"show_top"));
+                row.rename.Text(recovery(L"rename"));row.remove.Text(common(L"delete"));
                 row.up.Text(copy(L"header",L"move_up"));row.down.Text(copy(L"header",L"move_down"));
-                AutomationProperties::SetName(row.pinned,copy(L"header",L"shown_top"));tooltip(row.pinned,copy(L"header",L"shown_top"));
                 AutomationProperties::SetName(row.current,copy(L"header",L"current_workspace"));tooltip(row.current,copy(L"header",L"current_workspace"));
                 AutomationProperties::SetHelpText(row.grip,copy(L"header",L"drag_to_reorder"));
             }

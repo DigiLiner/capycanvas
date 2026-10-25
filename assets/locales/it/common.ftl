@@ -312,7 +312,6 @@ native-dialog-window-failed = Windows non è riuscito a creare una finestra.
 native-dialog-fullscreen-failed = Windows non è riuscito a cambiare la modalità a schermo intero.
 native-dialog-link-unavailable = Il collegamento dell'applicazione non è disponibile.
 native-dialog-drop-drawings = Trascina qui i file di disegno per aprirli
-native-header-shown-top = Mostrato nella barra superiore
 native-drawing-storage-help = { $detail }
     Apri il menu del disegno e scegli Riprova archiviazione disegno.
 native-dialog-preferences-failed = Windows non è riuscito ad aprire le Preferenze.

@@ -529,7 +529,6 @@ native-dialog-fullscreen-failed = Windows не удалось изменить �
 native-dialog-link-unavailable = Ссылка приложения недоступна.
 native-dialog-drop-drawings = Перетащите файлы рисунков для открытия
 
-native-header-shown-top = Показано в верхней панели
 native-drawing-storage-help = { $detail }
     Откройте меню рисунка и выберите повторное сохранение в хранилище.
 native-dialog-preferences-failed = Windows не удалось открыть настройки.

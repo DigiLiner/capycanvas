@@ -10,7 +10,7 @@ extension XCTestCase {
         let grip = app.buttons["workspace-grip-builtin:workspace:painter"]
         let options = app.buttons["workspace-options-builtin:workspace:painter"]
         let menu = app.descendants(matching: .any)["workspace-row-menu"].firstMatch
-        let pin = app.buttons["menu-action-Show in top bar"]
+        let pin = app.buttons["workspace-pin-builtin:workspace:painter"]
         func activateMenu(_ control: XCUIElement) {
             XCTAssertTrue(control.waitForExistence(timeout: 10))
             if control.isHittable { workspaceActivate(control); return }
@@ -28,9 +28,9 @@ extension XCTestCase {
         XCTAssertTrue(painter.waitForExistence(timeout: 30))
         workspaceActivate(illustrator)
         XCTAssertTrue(illustrator.isSelected)
-        workspaceActivate(options)
         XCTAssertTrue(pin.waitForExistence(timeout: 10)); XCTAssertTrue(pin.isSelected)
-        activateMenu(pin)
+        workspaceActivate(pin)
+        XCTAssertTrue(illustrator.isSelected)
         XCTAssertTrue(menu.waitForNonExistence(timeout: 10))
 
         // Native touch hold retains its menu after release. A fresh held contact
@@ -39,9 +39,11 @@ extension XCTestCase {
         painter.press(forDuration: 0.8)
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         XCTAssertFalse(pin.isSelected)
-        activateMenu(pin) // Restore visibility, closing the menu.
+        activateMenu(app.buttons["menu-action-Move Down"])
+        workspaceActivate(options); activateMenu(app.buttons["menu-action-Move Up"])
+        workspaceActivate(pin)
         #else
-        workspaceActivate(options); activateMenu(pin)
+        workspaceActivate(pin)
         #endif
         XCTAssertTrue(menu.waitForNonExistence(timeout: 10))
         func drag(_ source: XCUIElement, to target: XCUICoordinate, held: Bool) {
@@ -70,13 +72,12 @@ extension XCTestCase {
         workspaceActivate(options); activateMenu(app.buttons["menu-action-Move Down"])
         expectation(for: NSPredicate { _, _ in painter.frame.minY > illustrator.frame.minY && painter.frame.minY < photographer.frame.minY }, evaluatedWith: painter)
         waitForExpectations(timeout: 10)
-        workspaceActivate(options); activateMenu(pin)
+        workspaceActivate(pin)
         XCTAssertTrue(menu.waitForNonExistence(timeout: 10))
         app.terminate(); app.launch()
         XCTAssertTrue(painter.waitForExistence(timeout: 30))
         XCTAssertGreaterThan(painter.frame.minY, illustrator.frame.minY)
         XCTAssertLessThan(painter.frame.minY, photographer.frame.minY)
-        workspaceActivate(options)
         XCTAssertTrue(pin.waitForExistence(timeout: 10)); XCTAssertFalse(pin.isSelected)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         attachEditor(in: app, name: "workspace-switcher-restarted")

@@ -35,7 +35,7 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
     assert.equal(samples.row.options,normal.options);
     assert.notEqual(samples.options.options,normal.options,'options has its own button hover');
     const measured=await evaluate(`(()=>{const rect=s=>{const r=document.querySelector(s).getBoundingClientRect();return [r.x,r.y,r.width,r.height]};return {dialog:rect('.workspace-manager'),intro:rect('.workspace-intro'),list:rect('.workspace-list'),row:rect('.workspace-row'),footer:rect('.workspace-manager footer'),add:rect('.workspace-add'),focus:document.activeElement.className};})()`);
-    assert.deepEqual(measured,{dialog:[490,250,460,500],intro:[508,314,424,36],list:[508,372,424,314],row:[508,372,424,56],footer:[508,698,424,34],add:[870,256,34,34],focus:'workspace-manager'},'GTK allocations and initial dialog focus');
+    assert.deepEqual(measured,{dialog:[490,250,460,500],intro:[508,314,424,18],list:[508,354,424,332],row:[508,354,424,56],footer:[508,698,424,34],add:[870,256,34,34],focus:'workspace-manager'},'GTK allocations and initial dialog focus');
     // Keyboard navigation still exposes focus, including the whole selected row.
     await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
     await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
@@ -46,13 +46,20 @@ export async function checkWorkspaceManagerVisual({call,evaluate,settle}) {
     await move(`${row} .workspace-grip`);await evaluate('document.documentElement.dataset.touch=""');await settle();
     assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(row)})).backgroundColor`),normal.row);
     await evaluate('delete document.documentElement.dataset.touch');
-    // The pin and whitespace belong to the same previewable row surface.
+    const before=await evaluate("JSON.parse(layerApp.app.workspace_view()).selected");
+    await evaluate(`window.retainedManagerPin=document.querySelector(${JSON.stringify(`${row} .workspace-pin`)})`);
     await move(`${row} .workspace-pin`);
     const point=await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(`${row} .workspace-pin`)}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
     await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
     await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});
     await pause(500);await settle();
-    assert.deepEqual(await evaluate('(()=>{const v=JSON.parse(layerApp.app.workspace_view());return [v.id,v.selected,v.enabled]})()'),['builtin:workspace:illustrator','builtin:workspace:painter',true],'clicking a status icon selects a preview without switching');
+    assert.deepEqual(await evaluate('(()=>{const v=JSON.parse(layerApp.app.workspace_view());return [v.id,v.selected,v.enabled]})()'),['builtin:workspace:illustrator',before,false],'clicking the pin preserves preview selection');
+    assert.equal(await evaluate('retainedManagerPin.isConnected&&retainedManagerPin.getAttribute("aria-pressed")==="false"'),true);
+    await evaluate('retainedManagerPin.focus()');
+    for(const type of ['keyDown','keyUp']) await call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,...(type==='keyDown'?{text:'\r',unmodifiedText:'\r'}:{})});
+    await pause(500);await settle();
+    assert.equal(await evaluate('document.activeElement===retainedManagerPin&&retainedManagerPin.getAttribute("aria-pressed")==="true"'),true,'keyboard pin retains focus');
+    await evaluate(`document.querySelector(${JSON.stringify(`${row} .workspace-choice`)}).click()`);await pause(500);await settle();
     await move('.workspace-manager .suggested-action');
     const background=await evaluate(`getComputedStyle(document.querySelector('.workspace-manager .suggested-action')).backgroundColor`);
     const color=background.match(/[\d.]+/g).map(Number);

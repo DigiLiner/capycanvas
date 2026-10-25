@@ -31,6 +31,7 @@ workspace-header-fullscreen = Pantalla completa
 workspace-header-workspaces = Selector de espacio de trabajo
 workspace-switcher-options = Opciones del espacio de trabajo
 workspace-show-in-top-bar = Mostrar en la barra superior
+workspace-hide-from-top-bar = Ocultar de la barra superior
 workspace-header-document-title = Título del documento
 workspace-header-clock = Reloj
 workspace-header-battery = Batería

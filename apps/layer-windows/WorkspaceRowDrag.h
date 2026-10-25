@@ -18,6 +18,7 @@ public:
     void Attach(winrt::Microsoft::UI::Xaml::Controls::ListViewItem row,
         winrt::Microsoft::UI::Xaml::Controls::Button grip,
         winrt::Microsoft::UI::Xaml::Controls::Button more,
+        winrt::Microsoft::UI::Xaml::UIElement pin,
         winrt::Microsoft::UI::Xaml::Controls::MenuFlyout menu,Id id);
     void Refresh(std::vector<Id> const& order);
     bool FenceSelection()const;

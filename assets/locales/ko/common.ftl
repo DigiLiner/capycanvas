@@ -353,7 +353,6 @@ native-dialog-fullscreen-failed = Windows에서 전체 화면을 변경하지 �
 native-dialog-link-unavailable = 앱 링크를 사용할 수 없습니다.
 native-dialog-drop-drawings = 그림 파일을 끌어다 놓아 열기
 
-native-header-shown-top = 상단 표시줄에 표시됨
 native-drawing-storage-help = { $detail }
     그림 메뉴를 열고 “그림 저장 다시 시도”를 선택하세요.
 native-dialog-preferences-failed = Windows에서 환경 설정을 열지 못했습니다.

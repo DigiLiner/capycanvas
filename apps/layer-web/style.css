@@ -39,28 +39,27 @@ body .workspace-manager::backdrop { background:rgb(0 0 0 / 12%); }
 .workspace-manager .workspace-choice { background:transparent; }
 .workspace-row-subtitle { font-size:inherit; opacity:.55; }
 .workspace-row-title, .workspace-row-subtitle { max-width:100%; overflow-wrap:anywhere; }
-.workspace-options { display:grid; place-items:center; align-self:center; flex:none; width:34px; height:34px; padding:0; margin-left:6px; transform:translateY(-.5px); font-weight:400; }
-.workspace-options svg { width:16px; height:16px; }
+.workspace-options, .workspace-pin { display:grid; place-items:center; align-self:center; flex:none; width:34px; height:34px; padding:0; margin-left:6px; transform:translateY(-.5px); font-weight:400; }
+.workspace-options svg, .workspace-pin svg { width:16px; height:16px; }
 .workspace-grip { flex:none; display:flex; align-items:center; justify-content:center; width:16px; padding:0; margin-left:8px; opacity:.55; cursor:grab; touch-action:none; }
 .workspace-grip svg { width:16px; height:16px; }
 .workspace-grip + .workspace-choice { padding-left:6px; }
 .workspace-row-mark { display:flex; align-items:center; flex:none; margin-left:6px; transform:translateY(-.5px); }
 .workspace-row-mark svg { width:16px; height:16px; }
-.workspace-pin { opacity:.55; }
-/* Row bodies, grips, and status icons share one hover surface. */
+.workspace-pin[aria-pressed="true"] { color:var(--accent); }
+.workspace-pin[aria-disabled="true"] { opacity:.5; }
+/* Row bodies and grips share one hover surface. */
 :where(:root:not([data-touch])) .workspace-row:has(.workspace-choice:not(:disabled)):hover { background:color-mix(in srgb,var(--workspace-shade) 3%,transparent); }
 :where(:root:not([data-touch])) .workspace-row[data-selected="true"]:has(.workspace-choice:not(:disabled)):hover { background:color-mix(in srgb,var(--text) 8%,var(--selection)); }
-:where(:root:not([data-touch])) .workspace-manager :is(.workspace-add,.workspace-options):hover:not(:disabled) { background:color-mix(in srgb,var(--workspace-shade) 7%,transparent); }
+:where(:root:not([data-touch])) .workspace-manager :is(.workspace-add,.workspace-options,.workspace-pin):hover:not(:disabled):not([aria-disabled="true"]) { background:color-mix(in srgb,var(--workspace-shade) 7%,transparent); }
 :where(:root:not([data-touch])) .workspace-manager .dialog-close:hover::before { background:color-mix(in srgb,var(--workspace-shade) 15%,transparent); }
-.workspace-manager :is(.workspace-add,.workspace-options):active:not(:disabled) { background:color-mix(in srgb,var(--workspace-shade) 16%,transparent); }
+.workspace-manager :is(.workspace-add,.workspace-options,.workspace-pin):active:not(:disabled):not([aria-disabled="true"]) { background:color-mix(in srgb,var(--workspace-shade) 16%,transparent); }
 .workspace-manager .dialog-close:active::before { background:color-mix(in srgb,var(--workspace-shade) 20%,transparent); }
 .workspace-row:has(.workspace-choice:active:not(:disabled)) { background:color-mix(in srgb,var(--workspace-shade) 8%,transparent); }
 .workspace-row[data-selected="true"]:has(.workspace-choice:active:not(:disabled)) { background:color-mix(in srgb,var(--text) 16%,var(--selection)); }
 .workspace-row-menu { position:fixed; inset:auto; margin:0; display:none; flex-direction:column; min-width:180px; padding:6px; border:0; color:var(--text); background:var(--popover); box-shadow:0 4px 16px #0005; border-radius:var(--surface-radius); }
 .workspace-row-menu:popover-open { display:flex; }
 .workspace-row-menu button { display:flex; align-items:center; gap:8px; text-align:left; font-weight:400; padding:4px 8px; }
-.workspace-menu-check { display:inline-flex; width:16px; flex:none; }
-.workspace-menu-check svg { width:16px; height:16px; }
 :where(:root:not([data-touch])) .workspace-row-menu button:hover:not(:disabled), .workspace-row-menu button:active:not(:disabled) { background:color-mix(in srgb,var(--text) 8%,transparent); }
 .workspace-row-menu hr { width:100%; border:0; height:1px; background:color-mix(in srgb,var(--text) 15%,transparent); margin:5px 0; }
 .workspace-row-dragging { opacity:.45; }

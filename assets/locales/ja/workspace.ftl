@@ -31,6 +31,7 @@ workspace-header-fullscreen = 全画面表示
 workspace-header-workspaces = ワークスペース切り替え
 workspace-switcher-options = ワークスペースのオプション
 workspace-show-in-top-bar = 上部バーに表示
+workspace-hide-from-top-bar = 上部バーに表示しない
 workspace-header-document-title = ドキュメント名
 workspace-header-clock = 時計
 workspace-header-battery = バッテリー

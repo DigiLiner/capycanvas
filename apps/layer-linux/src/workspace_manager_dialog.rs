@@ -17,6 +17,7 @@ pub(crate) struct ManagerUi {
     pub note: gtk::Label,
     rows: RefCell<Vec<String>>,
     rows_key: RefCell<String>,
+    pin_buttons: RefCell<std::collections::BTreeMap<String, gtk::ToggleButton>>,
     row_captions: RefCell<std::collections::BTreeMap<String, (String, String)>>,
     details_key: RefCell<String>,
     rebuilding: Cell<bool>,
@@ -134,6 +135,7 @@ impl ManagerUi {
             note,
             rows: RefCell::new(Vec::new()),
             rows_key: RefCell::new(String::new()),
+            pin_buttons: RefCell::default(),
             row_captions: RefCell::new(std::collections::BTreeMap::new()),
             details_key: RefCell::new(String::new()),
             rebuilding: Cell::new(false),
@@ -350,8 +352,7 @@ impl ManagerUi {
         self.rebuilding.set(false);
     }
     fn rows(&self, w: &Rc<Workspace>, view: &WorkspaceView, page: ManagerPage) {
-        let pinned: Vec<String> = view.switcher.iter().map(|row| row.id.clone()).collect();
-        let key = serde_json::to_string(&(page, &view.rows, &pinned)).unwrap_or_default();
+        let key = serde_json::to_string(&(page, view.rows.iter().map(|row| (&row.id, &row.title, &row.subtitle, row.current, &row.actions)).collect::<Vec<_>>())).unwrap_or_default();
         self.rebuilding.set(true);
         if *self.rows_key.borrow() != key && self.dragged.borrow().is_none() {
             *self.rows_key.borrow_mut() = key;
@@ -361,6 +362,7 @@ impl ManagerUi {
                 .ancestor(gtk::ScrolledWindow::static_type())
                 .and_downcast::<gtk::ScrolledWindow>();
             let position = scroll.as_ref().map(|s| s.vadjustment().value());
+            self.pin_buttons.borrow_mut().clear();
             self.list.remove_all();
             self.rows.borrow_mut().clear();
             for item in &view.rows {
@@ -373,13 +375,25 @@ impl ManagerUi {
                 row.set_widget_name(&format!("workspace-row-{}", item.id));
                 row.set_activatable(true);
                 if page == ManagerPage::Workspaces {
-                    self.workspace_row(w, &row, item, &pinned);
+                    self.workspace_row(w, &row, item);
                 }
                 self.rows.borrow_mut().push(item.id.clone());
                 self.list.append(&row);
             }
             if let (Some(scroll), Some(position)) = (scroll, position) {
                 scroll.vadjustment().set_value(position);
+            }
+        }
+        for item in &view.rows {
+            if let Some(pin) = &item.pin
+                && let Some(button) = self.pin_buttons.borrow().get(&item.id)
+            {
+                button.set_active(pin.selected);
+                button.update_state(&[gtk::accessible::State::Disabled(!pin.enabled)]);
+                button.set_opacity(if pin.enabled { 1. } else { 0.5 });
+                button.set_tooltip_text(Some(&pin.label));
+                button.update_property(&[gtk::accessible::Property::Label(&pin.label)]);
+                crate::icons::set_button(button, &format!("layer-{}-symbolic", pin.icon));
             }
         }
         let index = view
@@ -397,7 +411,6 @@ impl ManagerUi {
         w: &Rc<Workspace>,
         row: &adw::ActionRow,
         item: &layer_workspace::WorkspaceRow,
-        pinned: &[String],
     ) {
         row.add_css_class("workspace-manager-row");
         let handle = crate::icons::image("layer-grip-symbolic");
@@ -412,13 +425,23 @@ impl ManagerUi {
         if item.current {
             row.add_suffix(&crate::icons::image("layer-check-symbolic"));
         }
-        if pinned.contains(&item.id) {
-            let pin = crate::icons::image("layer-pin-symbolic");
-            pin.add_css_class("dim-label");
-            pin.set_tooltip_text(Some(&w.localization().text(layer_ui::MessageId::NATIVE_HEADER_SHOWN_TOP)));
-            pin.update_property(&[gtk::accessible::Property::Label(&w.localization().text(layer_ui::MessageId::NATIVE_HEADER_SHOWN_TOP))]);
-            row.add_suffix(&pin);
-        }
+        let pin = gtk::ToggleButton::new();
+        pin.set_widget_name(&format!("workspace-pin-{}", item.id));
+        pin.add_css_class("flat");
+        pin.set_size_request(34, 34);
+        pin.set_valign(gtk::Align::Center);
+        let id = item.id.clone();
+        pin.connect_clicked(glib::clone!(#[weak] w, move |button| {
+            if let Some(pin) = w.workspaces.view().rows.iter().find(|row| row.id == id).and_then(|row| row.pin.clone())
+            {
+                button.set_active(pin.selected);
+                if pin.enabled {
+                    w.workspaces.ui.edit_switcher(&w, pin.edit);
+                }
+            }
+        }));
+        self.pin_buttons.borrow_mut().insert(item.id.clone(), pin.clone());
+        row.add_suffix(&pin);
         let actions = item
             .actions
             .iter()
@@ -438,7 +461,7 @@ impl ManagerUi {
             *caption = (item.title.clone(), layer_ui::NativeCaption::OptionsFor { title: item.title.clone() }.message(&w.localization()));
         }
         let more = actions_menu(w, &caption.1, actions);
-        self.add_switcher_actions(w, &more, &item.id, pinned);
+        self.add_switcher_actions(w, &more, &item.id);
         more.set_valign(gtk::Align::Center);
         row.add_suffix(&more);
         self.bind_reorder_row(w, row, &item.id, &more);

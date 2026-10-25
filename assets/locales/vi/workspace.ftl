@@ -30,6 +30,7 @@ workspace-header-fullscreen = Toàn màn hình
 workspace-header-workspaces = Bộ chuyển không gian làm việc
 workspace-switcher-options = Tùy chọn không gian làm việc
 workspace-show-in-top-bar = Hiện trên thanh trên cùng
+workspace-hide-from-top-bar = Ẩn khỏi thanh trên cùng
 workspace-header-document-title = Tiêu đề tài liệu
 workspace-header-clock = Đồng hồ
 workspace-header-battery = Pin

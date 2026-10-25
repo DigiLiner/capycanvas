@@ -529,7 +529,6 @@ native-dialog-fullscreen-failed = Windows tam ekranı değiştiremedi.
 native-dialog-link-unavailable = Uygulama bağlantısı kullanılamıyor.
 native-dialog-drop-drawings = Çizim dosyalarını açmak için bırakın
 
-native-header-shown-top = Üst çubukta gösteriliyor
 native-drawing-storage-help = { $detail }
     Çizim menüsünü açıp Çizim depolamasını yeniden dene seçeneğini kullanın.
 native-dialog-preferences-failed = Windows Tercihler'i açamadı.

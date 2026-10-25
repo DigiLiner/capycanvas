@@ -185,7 +185,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
                 r.grip=button(data,data->copyCaption(L"header",L"reorder_drawing"),[]{});r.grip.Content(panelGrip(data->theme()));r.grip.Padding({0});r.grip.MinWidth(0);AutomationProperties::SetAutomationId(r.grip,L"drawing-grip-"+key);
                 r.remove=button(data,data->copyCaption(L"header",L"close_drawing"),[weak,id]{if(auto self=weak.lock())self->close(id);});r.remove.Content(box_value(L"×"));r.remove.Padding({0});r.remove.MinWidth(0);Grid::SetColumn(r.remove,2);AutomationProperties::SetAutomationId(r.remove,L"drawing-row-close-"+key);r.menu=menu(id);
                 StackPanel labels;r.text=CapyUi::label(data,label);r.location=CapyUi::label(data,L"");r.location.FontSize(11);r.location.TextTrimming(TextTrimming::CharacterEllipsis);labels.Children().Append(r.text);labels.Children().Append(r.location);Grid::SetColumn(labels,1);row.Children().Append(r.grip);row.Children().Append(labels);row.Children().Append(r.remove);r.item.Content(row);
-                rowDrag->Attach(r.item,r.grip,r.remove,r.menu,key);rows.emplace(id,r);
+                rowDrag->Attach(r.item,r.grip,r.remove,nullptr,r.menu,key);rows.emplace(id,r);
             }
             auto& t=tabs.at(id);t.text.Text(label);t.text.Foreground(data->brush(L"text"));paintTab(t,id==uint64_t(num(m,L"selected")));t.select.IsEnabled(available());t.close.IsEnabled(available());tooltip(t.select,str(spec,L"location",label));AutomationProperties::SetName(t.select,label);
             auto& r=rows.at(id);r.text.Text(label);r.location.Text(str(spec,L"location"));r.item.IsEnabled(available());r.remove.IsEnabled(available());

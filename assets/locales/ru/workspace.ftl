@@ -33,6 +33,7 @@ workspace-header-fullscreen = Полный экран
 workspace-header-workspaces = Выбор рабочего пространства
 workspace-switcher-options = Параметры рабочего пространства
 workspace-show-in-top-bar = Показать в верхней панели
+workspace-hide-from-top-bar = Скрыть с верхней панели
 workspace-header-document-title = Название документа
 workspace-header-clock = Часы
 workspace-header-battery = Батарея

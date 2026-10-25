@@ -246,6 +246,28 @@ fn native_workspace_manager_visual() {
             )
             .unwrap();
         }
+        let id = DEFAULT_WORKSPACES[0].0;
+        let pin = find_named(&painter, &format!("workspace-pin-{id}")).unwrap().downcast::<gtk::ToggleButton>().unwrap();
+        let original = w.workspaces.view();
+        let before = layer_ui::durable_layout(&state(&w).workspace.layout);
+        for selected in [false, true] {
+            click(&w, &mut input, pin.upcast_ref());
+            wait_switcher(&w);
+            assert_eq!(pin.is_active(), selected);
+            assert_eq!(w.workspaces.view().selected, original.selected);
+            assert_eq!(layer_ui::durable_layout(&state(&w).workspace.layout), before);
+            assert_eq!(find_named(&row(&w, id), &format!("workspace-pin-{id}")).unwrap(), pin.clone().upcast::<gtk::Widget>());
+        }
+        assert!(pin.grab_focus());
+        until(|| pin.is_focus(), "workspace pin focus");
+        for selected in [false, true] {
+            input.perform(serde_json::json!([{"key":0x20,"down":true},{"key":0x20,"down":false}]));
+            until(|| pin.is_active() == selected, "keyboard workspace pin activation");
+            wait_switcher(&w);
+            assert_eq!(pin.is_active(), selected);
+            assert!(pin.is_focus());
+            assert_eq!(w.workspaces.view().selected, original.selected);
+        }
         w.workspaces.ui.close(&w);
         pump(250);
     }
@@ -994,10 +1016,8 @@ fn native_workspace_switcher_input() {
             .upcast_ref(),
     );
     assert_eq!(manager.switcher_ids(), [i.clone(), p.clone(), f.clone()]);
-    let menu = menu_button(&row(&w, &p)).unwrap();
-    click(&w, &mut input, menu.upcast_ref());
     let pin = find_named(
-        menu.popover().unwrap().upcast_ref(),
+        &row(&w, &p),
         &format!("workspace-pin-{p}"),
     )
     .unwrap();
@@ -1077,10 +1097,8 @@ fn native_workspace_switcher_input() {
     click(&w, &mut input, &row(&w, &f));
     let toggle_pin = |id: &str, input: &mut RemoteInput| {
         wait_switcher(&w);
-        let menu = menu_button(&row(&w, id)).unwrap();
-        click(&w, input, menu.upcast_ref());
         let pin = find_named(
-            menu.popover().unwrap().upcast_ref(),
+            &row(&w, id),
             &format!("workspace-pin-{id}"),
         )
         .unwrap();

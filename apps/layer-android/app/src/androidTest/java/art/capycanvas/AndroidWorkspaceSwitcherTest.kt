@@ -109,9 +109,23 @@ class AndroidWorkspaceSwitcherTest {
         open(); tap("workspace-row-${defaults.last()}")
         shot("manager")
         val preview = layout()
-        options(current, "pin")
+        for (pointer in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
+            tool = pointer
+            for (selected in listOf(false, true)) {
+                tap("workspace-pin-$current")
+                assertEquals(selected, current in ids("switcher"))
+                assertEquals(defaults.last(), view().getString("selected"))
+                assertEquals(preview, layout()); assertEquals(before, capture())
+                assertNull(node("workspace-row-menu"))
+            }
+        }
+        tool = MotionEvent.TOOL_TYPE_FINGER
+        tap("workspace-pin-$current")
         assertFalse(current in ids("switcher")); assertEquals(current, ids("switcher_display").first())
         assertEquals(preview, layout()); assertEquals(before, capture())
+        assertEquals(defaults.last(), view().getString("selected"))
+        assertNotNull(node("workspace-pin-$current"))
+        assertEquals(ToggleableState.Off, node("workspace-pin-$current")!!.second.config[SemanticsProperties.ToggleableState])
         val previous = order().indexOf(current)
         tap("workspace-options-$current")
         shot("options")
@@ -121,14 +135,14 @@ class AndroidWorkspaceSwitcherTest {
         key(KeyEvent.KEYCODE_ENTER); idle()
         assertEquals(previous - 1, order().indexOf(current))
         assertFalse(current in ids("switcher")); assertEquals(preview, layout()); assertEquals(before, capture())
-        for (id in ids("switcher").toList()) options(id, "pin")
+        for (id in ids("switcher").toList()) tap("workspace-pin-$id")
         assertTrue(ids("switcher").isEmpty()); assertEquals(listOf(current), ids("switcher_display"))
         tap("workspace-cancel"); assertEquals(before, capture())
         shot("unpinned-current")
         tap("workspace-switch-$current"); assertEquals(current, view().getString("id"))
         open(); tap("workspace-row-${defaults.first()}"); tap("workspace-confirm")
         assertEquals(listOf(defaults.first()), ids("switcher_display"))
-        open(); options(custom, "pin"); tap("workspace-cancel")
+        open(); tap("workspace-pin-$custom"); tap("workspace-cancel")
         assertTrue(custom in ids("switcher_display"))
         tap("workspace-switch-$custom"); assertEquals(before, capture())
         val savedOrder = order(); val savedPins = ids("switcher")

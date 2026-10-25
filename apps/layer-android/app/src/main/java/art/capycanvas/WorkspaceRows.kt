@@ -27,8 +27,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.toggleableState
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -41,6 +39,7 @@ internal class WorkspaceRowInteraction {
     val rows = linkedMapOf<String, Rect>()
     val grips = mutableMapOf<String, Rect>()
     val options = mutableMapOf<String, Rect>()
+    val pins = mutableMapOf<String, Rect>()
     var area = Rect.Zero
     var order = emptyList<String>()
     var enabled = false
@@ -74,7 +73,7 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
         val start = down.position + drag.area.topLeft
         val id = drag.order.firstOrNull { drag.rows[it]?.contains(start) == true }
-        if (!drag.enabled || id == null || drag.options[id]?.contains(start) == true) return@awaitEachGesture
+        if (!drag.enabled || id == null || drag.options[id]?.contains(start) == true || drag.pins[id]?.contains(start) == true) return@awaitEachGesture
         val direct = down.type == PointerType.Mouse || drag.grips[id]?.contains(start) == true
         val secondary = currentEvent.buttons.isSecondaryPressed
         val generation = drag.generation
@@ -132,7 +131,6 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
     val rows = view.array("rows").objects()
     val workspaces = view.optString("page") == "workspaces"
     val enabled = !view.optBoolean("busy") && !view.optBoolean("switcher_busy") && view.isNull("prompt")
-    val pinned = view.array("switcher").objects().map { it.getString("id") }
     val order = view.array("order").values().map { it.toString() }
     val scroll = rememberScrollState()
     val focused = LocalWindowInfo.current.isWindowFocused
@@ -168,7 +166,7 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                 val switchCaption=remember(title, workspaces, host.languageTag) { if (workspaces) JSONObject(Native.nativeCaption(obj("type" to "switch_workspace", "title" to title).toString(), host.languageTag)).getString("text") else title }
                 val optionsCaption=remember(title, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "options_for", "title" to title).toString(), host.languageTag)).getString("text") }
                 val selected = view.optString("selected") == id
-                DisposableEffect(id) { onDispose { drag.rows.remove(id); drag.grips.remove(id); drag.options.remove(id) } }
+                DisposableEffect(id) { onDispose { drag.rows.remove(id); drag.grips.remove(id); drag.options.remove(id); drag.pins.remove(id) } }
                 if (index > 0) HorizontalDivider(color = colors.divider)
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rowBounds(drag.rows, id)
                     .alpha(if (drag.active == id) .45f else 1f).background(if (selected) colors.active else colors.settingsCard),
@@ -193,19 +191,19 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
                         }
                     }
                     if (workspaces) {
-                        if (id in pinned) SharedIcon("pin", host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("show_top"), Modifier.size(16.dp).testTag("workspace-pin-$id"))
                         if (view.optString("id") == id) SharedIcon("check", host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("current_workspace"), Modifier.padding(start = 6.dp).size(16.dp))
+                        val pin = row.getJSONObject("pin")
+                        IconToggleButton(checked = pin.getBoolean("selected"), onCheckedChange = { edit(pin.getJSONObject("edit")) },
+                            enabled = pin.getBoolean("enabled"), modifier = Modifier.size(36.dp).rowBounds(drag.pins, id)
+                                .testTag("workspace-pin-$id").semantics { contentDescription = pin.getString("label") }) {
+                            SharedIcon(pin.getString("icon"), null, Modifier.size(16.dp))
+                        }
                         Box(Modifier.rowBounds(drag.options, id)) {
                             IconButton({ drag.menu = id }, enabled = enabled,
                                 modifier = Modifier.size(36.dp).testTag("workspace-options-$id").semantics { contentDescription = optionsCaption }) { SharedIcon("more", null) }
                             DropdownMenu(drag.menu == id, { drag.menu = null }, properties = PopupProperties(focusable = !drag.contact),
                                 modifier = Modifier.testTag("workspace-row-menu")) {
                                 fun closeEdit(value: JSONObject) { drag.menu = null; edit(value) }
-                                DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("show_top")) }, trailingIcon = { if (id in pinned) SharedIcon("check", null) },
-                                    enabled = enabled, modifier = Modifier.testTag("workspace-pin").semantics {
-                                        toggleableState = if (id in pinned) ToggleableState.On else ToggleableState.Off
-                                    },
-                                    onClick = { closeEdit(obj("type" to "show", "id" to id, "visible" to (id !in pinned))) })
                                 val position = order.indexOf(id)
                                 DropdownMenuItem(text = { Text(host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("move_up")) }, enabled = enabled && position > 0, modifier = Modifier.testTag("workspace-up"),
                                     onClick = { closeEdit(obj("type" to "move", "id" to id, "before" to order.getOrNull(position - 1))) })

@@ -91,12 +91,21 @@ impl ManagerButton {
     }
 }
 #[derive(Clone, Debug, Serialize)]
+pub struct WorkspacePin {
+    pub label: String,
+    pub icon: String,
+    pub selected: bool,
+    pub enabled: bool,
+    pub edit: SwitcherEdit,
+}
+#[derive(Clone, Debug, Serialize)]
 pub struct WorkspaceRow {
     pub id: String,
     pub title: String,
     pub subtitle: String,
     pub current: bool,
     pub actions: Vec<ManagerButton>,
+    pub pin: Option<WorkspacePin>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct ManagerDetails {
@@ -155,6 +164,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                     },
                     current: false,
                     actions: Vec::new(),
+                    pin: None,
                 })
                 .collect();
         }
@@ -210,6 +220,7 @@ impl<S: WorkspaceStore> WorkspaceManager<S> {
                     subtitle,
                     current: false,
                     actions: Vec::new(),
+                    pin: None,
                 }
             })
             .collect()

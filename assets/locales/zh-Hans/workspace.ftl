@@ -31,6 +31,7 @@ workspace-header-fullscreen = 全屏
 workspace-header-workspaces = 工作区切换器
 workspace-switcher-options = 工作区选项
 workspace-show-in-top-bar = 在顶部栏显示
+workspace-hide-from-top-bar = 在顶部栏隐藏
 workspace-header-document-title = 文档标题
 workspace-header-clock = 时钟
 workspace-header-battery = 电池

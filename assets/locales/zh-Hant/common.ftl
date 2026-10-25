@@ -353,7 +353,6 @@ native-dialog-fullscreen-failed = Windows 無法切換全螢幕。
 native-dialog-link-unavailable = 無法使用應用程式連結。
 native-dialog-drop-drawings = 拖放繪畫檔案以開啟
 
-native-header-shown-top = 顯示於頂端列
 native-drawing-storage-help = { $detail }
     請開啟繪畫選單並選擇「重試繪畫儲存」。
 native-dialog-preferences-failed = Windows 無法開啟偏好設定。

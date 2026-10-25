@@ -538,7 +538,6 @@ native-dialog-fullscreen-failed = Windows n’a pas pu changer le mode plein éc
 native-dialog-link-unavailable = Le lien de l’application est indisponible.
 native-dialog-drop-drawings = Déposer des fichiers de dessin pour les ouvrir
 
-native-header-shown-top = Affiché dans la barre supérieure
 native-drawing-storage-help = { $detail }
     Ouvrir le menu du dessin et choisir Réessayer le stockage du dessin.
 native-dialog-preferences-failed = Windows n’a pas pu ouvrir les préférences.

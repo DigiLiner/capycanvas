@@ -1,4 +1,4 @@
-use crate::{WorkspaceRow, WorkspaceView};
+use crate::{ManagerPage, SwitcherEdit, WorkspacePin, WorkspaceRow, WorkspaceView};
 use layer_ui::{ContextMenu, ContextMenuItem, Localizer, MessageId, UiAction, WorkspaceCommand};
 
 fn command(label: String, command: WorkspaceCommand, selected: Option<bool>) -> ContextMenuItem {
@@ -8,6 +8,21 @@ fn command(label: String, command: WorkspaceCommand, selected: Option<bool>) -> 
 }
 
 impl WorkspaceView {
+    pub(crate) fn present_manager_pins(&mut self, localization: &Localizer) {
+        if self.page != Some(ManagerPage::Workspaces) { return; }
+        for row in &mut self.rows {
+            let selected = self.switcher.iter().any(|pinned| pinned.id == row.id);
+            row.pin = Some(WorkspacePin {
+                label: localization.text(if selected { MessageId::WORKSPACE_HIDE_FROM_TOP_BAR } else { MessageId::WORKSPACE_SHOW_IN_TOP_BAR }).to_string(),
+                icon: if selected { "pin" } else { "pin-outline" }.into(),
+                selected,
+                enabled: false,
+                edit: SwitcherEdit::Show { id: row.id.clone(), visible: !selected },
+            });
+        }
+        self.update_switcher_menu_availability();
+    }
+
     pub(crate) fn present_switcher_menus(&mut self, localization: &Localizer, rows: Vec<WorkspaceRow>) {
         self.switcher_options_label = localization.text(MessageId::WORKSPACE_SWITCHER_OPTIONS).to_string();
         let visibility_label = localization.text(MessageId::WORKSPACE_SHOW_IN_TOP_BAR).to_string();
@@ -49,5 +64,9 @@ impl WorkspaceView {
         let editing = available && !self.switcher_busy;
         update(&mut self.switcher_options.sections, available, editing);
         update(&mut self.switcher_menu.sections, available, editing);
+        let manager_editing = self.ready && !self.busy && !self.closing && !self.switcher_busy && self.prompt.is_none();
+        for pin in self.rows.iter_mut().filter_map(|row| row.pin.as_mut()) {
+            pin.enabled = manager_editing;
+        }
     }
 }

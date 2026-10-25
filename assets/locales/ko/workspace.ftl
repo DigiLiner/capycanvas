@@ -31,6 +31,7 @@ workspace-header-fullscreen = 전체 화면
 workspace-header-workspaces = 작업 영역 전환기
 workspace-switcher-options = 작업 영역 옵션
 workspace-show-in-top-bar = 상단 막대에 표시
+workspace-hide-from-top-bar = 상단 막대에서 숨기기
 workspace-header-document-title = 문서 제목
 workspace-header-clock = 시계
 workspace-header-battery = 배터리

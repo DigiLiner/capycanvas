@@ -31,6 +31,7 @@ workspace-header-fullscreen = Tam ekran
 workspace-header-workspaces = Çalışma alanı değiştirici
 workspace-switcher-options = Çalışma alanı seçenekleri
 workspace-show-in-top-bar = Üst çubukta göster
+workspace-hide-from-top-bar = Üst çubukta gizle
 workspace-header-document-title = Belge başlığı
 workspace-header-clock = Saat
 workspace-header-battery = Pil

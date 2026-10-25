@@ -26,16 +26,13 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     if (!item || view.page !== "workspaces" || unavailable()) return;
     closeMenu(); menuOwner = row; menu.replaceChildren(); menu.dataset.id = item.id;
     bindCopy(menu,()=>app.native_caption({type:"options_for",title:getView()?.rows.find(row=>row.id===menuOwner?.dataset.id)?.title??""}),"ariaLabel");
-    const action = (label, kind, run, enabled = true, checked) => {
+    const action = (label, kind, run, enabled = true) => {
       const node = button("", () => { closeMenu(true); run(); });
       node.dataset.action = kind; node.disabled = !enabled;
-      node.setAttribute("role", checked == null ? "menuitem" : "menuitemcheckbox");
-      const mark = element("span", "workspace-menu-check");
-      if (checked != null) { node.setAttribute("aria-checked", String(checked)); if (checked) mark.append(icon("check")); }
-      const caption=element("span");bindCopy(caption,label);node.append(mark,caption);menu.append(node);
+      node.setAttribute("role", "menuitem");
+      const caption=element("span");bindCopy(caption,label);node.append(caption);menu.append(node);
     };
-    const pinned = view.switcher.some(entry => entry.id === item.id), index = view.order.indexOf(item.id);
-    action(()=>copy.show_top, "pin", () => edit({type:"show", id:item.id, visible:!pinned}), true, pinned);
+    const index = view.order.indexOf(item.id);
     action(()=>copy.move_up, "up", () => edit({type:"move", id:item.id, before:view.order[index-1]}), index > 0);
     action(()=>copy.move_down, "down", () => edit({type:"move", id:item.id, before:view.order[index+2] ?? null}), index < view.order.length-1);
     const offered = type => item.actions.some(button => button.enabled && button.action.type === type);
@@ -57,13 +54,17 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     const handle = button("", e => e.preventDefault(), "workspace-grip"); handle.append(icon("grip")); handle.tabIndex = -1;
     bindCopy(handle,()=>copy.drag_to_reorder,"title");bindCopy(handle,()=>copy.drag_to_reorder,"ariaLabel");
     row.prepend(handle);
-    for (const [visible, glyph, label] of [
-      [view.id === item.id, "check", ()=>copy.current_workspace],
-      [view.switcher.some(entry => entry.id === item.id), "pin", ()=>copy.shown_top],
-    ]) if (visible) {
-      const mark = element("span", `workspace-row-mark workspace-${glyph}`); mark.append(icon(glyph));
-      bindCopy(mark,label,"title");bindCopy(mark,label,"ariaLabel"); mark.setAttribute("role", "img"); row.append(mark);
+    if (view.id === item.id) {
+      const mark = element("span", "workspace-row-mark workspace-check"); mark.append(icon("check"));
+      bindCopy(mark,()=>copy.current_workspace,"title");bindCopy(mark,()=>copy.current_workspace,"ariaLabel"); mark.setAttribute("role", "img"); row.append(mark);
     }
+    const pin = button("", () => {
+      const value = getView()?.rows.find(row => row.id === item.id)?.pin;
+      if (value?.enabled) edit(value.edit);
+    }, "workspace-pin");
+    bindCopy(pin,()=>getView()?.rows.find(row=>row.id===item.id)?.pin?.label??"","title");
+    bindCopy(pin,()=>getView()?.rows.find(row=>row.id===item.id)?.pin?.label??"","ariaLabel");
+    row.append(pin); updatePin(row, item.pin);
     const more = button("", () => {
       if (menuOpen() && menuOwner === row) { closeMenu(true); return; }
       const r = more.getBoundingClientRect(); showMenu(row, {x:r.left, y:r.bottom}, true);
@@ -72,13 +73,22 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     bindCopy(more,()=>app.native_caption({type:"options_for",title:getView()?.rows.find(row=>row.id===item.id)?.title??item.title}),"ariaLabel"); more.setAttribute("aria-haspopup", "menu"); more.setAttribute("aria-expanded", "false");
     row.append(more);
     row.addEventListener("click", e => {
-      if (!e.target.closest(".workspace-choice,.workspace-options") && !unavailable()) choice.click();
+      if (!e.target.closest(".workspace-choice,.workspace-options,.workspace-pin") && !unavailable()) choice.click();
     });
     choice.addEventListener("keydown", e => {
       if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
         e.preventDefault(); const r = row.getBoundingClientRect(); showMenu(row, {x:r.left+28, y:r.bottom}, true);
       }
     });
+  }
+  function updatePin(row, value) {
+    const pin = row.querySelector(".workspace-pin");
+    if (!pin || !value) return;
+    pin.setAttribute("aria-disabled", String(!value.enabled));
+    pin.setAttribute("aria-pressed", String(value.selected));
+    if (pin.dataset.icon !== value.icon) {
+      pin.dataset.icon = value.icon; pin.replaceChildren(icon(value.icon));
+    }
   }
   function clearHint() { for (const row of list.children) row.classList.remove("workspace-drop-before", "workspace-drop-after"); }
   function targetAt(point) {
@@ -118,7 +128,7 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
   list.addEventListener("pointerdown", e => {
     if (contact) finish();
     suppressClick = false;
-    if (unavailable() || getView().page !== "workspaces" || e.button || !e.isPrimary || e.target.closest(".workspace-options")) return;
+    if (unavailable() || getView().page !== "workspaces" || e.button || !e.isPrimary || e.target.closest(".workspace-options,.workspace-pin")) return;
     const row = e.target.closest(".workspace-row"); if (!row) return;
     const handle = !!e.target.closest(".workspace-grip");
     contact = {id:e.pointerId, row, point:{x:e.clientX,y:e.clientY}, x:e.clientX, y:e.clientY,
@@ -188,6 +198,7 @@ export function createWorkspaceSwitcher({app,dialog, list, element, button, icon
     if (view.id !== previousFirst && view.switcher_display[0]?.id === view.id) choices.scrollLeft = 0;
     if (!view.page || view.prompt || (contact && !view.order.includes(contact.row.dataset.id))) { finish(); closeMenu(); }
     for (const more of list.querySelectorAll(".workspace-options")) more.disabled = unavailable();
+    for (const row of list.children) updatePin(row, view.rows.find(item => item.id === row.dataset.id)?.pin);
   }
   return {root, render, decorate, closeMenu, dragging:() => !!contact, cancel:() => { finish(); closeMenu(); }};
 }
