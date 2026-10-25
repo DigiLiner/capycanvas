@@ -1,5 +1,6 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','numeric','numeric-light')][string]$Journey='full')
 $ErrorActionPreference='Stop'
+if($Journey -eq 'numeric-light'){$Theme='light'}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyPopups=$true
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
@@ -34,10 +35,18 @@ function Drag($from,$to){
 function Release{[CapyRowPointer]::Up();Start-Sleep -Milliseconds 250}
 function Focus-Review{$null=[CapyRowPointer]::SetForegroundWindow($drawingWindow);Start-Sleep -Milliseconds 120}
 function Switch-Workspace([string]$Name,[string]$Id){
-    $switch=Find ('workspace-switch-'+$Id)
-    if(!$switch -or $switch.Current.IsOffscreen){Invoke 'header-workspace-menu';$switch=Control $Name -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
+    $found=@{switch=$null;menu=$null}
+    Wait-Until {$found.switch=Find ('workspace-switch-'+$Id) -Visible;$found.menu=Find 'header-workspace-menu' -Visible;$found.switch -or $found.menu} "No workspace switcher for $Name"
+    $switch=$found.switch
+    if(!$switch){Invoke 'header-workspace-menu';$switch=Control $Name -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)}
     $switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {(Model).windows_workspace.id -eq $Id -and !(Model).windows_workspace.busy} "$Name did not open" 20
+}
+function Finish-Review([string]$Scope){
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
+    if($review.ExitCode -ne 0){throw "Native review exit code $($review.ExitCode)"}
+    if((Get-Item $stderr).Length){throw 'Review stderr is not empty'}
+    @{status='passed';theme=$Theme;journey=$Journey;captures=$run;scope=$Scope}|ConvertTo-Json
 }
 try {
     Enter-CapyEnvironment
@@ -113,13 +122,30 @@ try {
     if(!$options -or !$options.component){throw 'Photo lacks Tool Options'}
     $commands=@((Model).panels|Where-Object id -eq 'commands')[0]
     if(@($commands.tiles)[-1].control.kind -ne 'tool_options'){throw 'Tool Options is not the last Photo command'}
-    Invoke (Tool-Tile 'pen')
+    Invoke 'toolbar-choice-tool'
+    Invoke 'Pen' -Name
+    Wait-Until {(Control 'toolbar-choice-tool').Current.ItemStatus -eq 'Pen' -and !(Find 'Pen' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Visible)} 'Tool Options did not acknowledge the Pen choice'
     Wait-Until {$null -ne (Find 'toolbar-setting-size')} 'Brush Tool Options did not show a size field'
     $entry=Control 'toolbar-setting-size'
     $entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('37')
     [CapyRowPointer]::Key(0x0D)
     Wait-Until {[Math]::Abs((Brush).diameter-37) -lt 0.001} 'Tool Options size entry did not apply'
+    foreach($shown in @($false,$true)){
+        (Control "toolbar-more-$($options.id)").SetFocus()
+        [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+        Invoke 'Show Sliders' -Name
+        Wait-Until {(Tile 'tool_options').control.style.sliders -eq $shown -and !(Find 'Show Sliders' -Name -Visible)} 'Tool Options slider visibility did not update'
+        Wait-Until {($null -ne (Find 'toolbar-setting-size-slider' -Visible)) -eq $shown} 'The native numeric track did not follow Show Sliders'
+    }
+    $before=(Brush).diameter;$track=Box 'toolbar-setting-size-slider'
+    Press 'mouse' (Along $track .8);Release
+    Wait-Until {[Math]::Abs((Brush).diameter-$before) -gt .001} 'Restored inline numeric track did not accept native pointer input'
+    $entry=Control 'toolbar-setting-size';$entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('37')
+    [CapyRowPointer]::Key(0x0D)
+    Wait-Until {[Math]::Abs((Brush).diameter-37) -lt .001} 'Tool Options size did not restore after the track check'
+    Write-Output 'PASS: Tool Options Show Sliders hides and restores the numeric track and native input'
     Capture 'photo-brush-options' -WithModel
+    if($Journey -ne 'full'){Finish-Review 'Native numeric track construction, Show Sliders visibility, inline pointer input and pen/touch standalone tracks';return}
     $beforeFaceLayout=(Model).state.workspace.layout|ConvertTo-Json -Depth 40 -Compress
     $grip=Box 'ribbon-grip-commands';$hostBox=$root.Current.BoundingRectangle;$scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Invalid owned toolbar DPI'}
@@ -231,10 +257,7 @@ try {
     [CapyRowPointer]::Hover([int]($target.X+$target.Width/2),[int]($target.Y+$target.Height/2))
     [CapyRowPointer]::Key(0x1B)
     Wait-Until {!((Model).state.customization.drawer)} 'Zoom overflow drawer did not close'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -StateDirectory $run -Action Close -DiscardUnsaved
-    if($review.ExitCode -ne 0){throw "Native review exit code $($review.ExitCode)"}
-    if((Get-Item $stderr).Length){throw 'Review stderr is not empty'}
-    @{status='passed';captures=$run;scope='Guarded OS-delivered synthetic mouse, touch and pen input. Physical digitizers are not tested.'}|ConvertTo-Json
+    Finish-Review 'Guarded OS-delivered synthetic mouse, touch and pen input. Physical digitizers are not tested.'
 } catch {
     $_|Out-String|Set-Content (Join-Path $run 'failure.txt');$_.ScriptStackTrace|Add-Content (Join-Path $run 'failure.txt')
     if($review){$review.Refresh();if(!$review.HasExited){try{Capture 'failure' -WithModel}catch{$_|Out-String|Set-Content (Join-Path $run 'capture-error.txt')}}};throw

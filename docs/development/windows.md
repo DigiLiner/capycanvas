@@ -637,6 +637,14 @@ to check the selection bar's native glass registration and menu actions.
 | Windows desktop | The `exercise-*.ps1` fixtures for the changed area. On Linux: `tools/windows-vm/windows-vm.py fixtures <name>`. |
 | Hardware D3D12 | `cargo test --locked -p layer-windows --lib d3d12_ -- --ignored --test-threads=1`, which adds the HDR and color round-trip tests; [GPU reconstruction](#gpu-reconstruction); renderer tests with `LAYER_GPU_INDEX`; performance. |
 
+`exercise-header.ps1 -Journey zen` checks retained Capy button and glyph bounds
+across workspaces and sizes in both themes. It also checks the docked toolbar's
+Show in Zen mode toggle, retained native controls, edge touch swipe peek and
+outside-touch dismissal.
+Use `-Journey zen-workspace` for only the toolbar and edge touch checks in both
+themes, including switches through Sketch, Photo and Paint with arranged native
+Histogram controls in Photo.
+
 D3D12-specific fixtures construct an instance with `Backends::DX12`; a generic
 `PRIMARY` headless instance can select Vulkan. The software-adapter gate permits
 CPU adapters but does not force every ordinary test onto WARP.
@@ -981,6 +989,12 @@ They release at a new slot after acknowledging an earlier preview, then require
 the final order and one-step Undo.
 Run `exercise-toolbar-components.ps1` in both themes for compact numeric faces:
 release pen and touch scrubs, then activate with mouse, keyboard and accessibility.
+The journey also hides and restores inline tracks with Show Sliders and verifies
+native pointer input after restoring them.
+Use `-Journey numeric` and `-Journey numeric-light` for these track checks in both
+themes without the gradient, Zoom and compact-face journeys.
+Tool Options retain the complete numeric track and input host when changing slider
+visibility, so compact controls keep their native pointer surface together.
 The full `exercise-hdr.ps1` journey also switches paint slots during an acknowledged
 arc contact and checks that its remaining input cannot edit the new slot.
 Run `exercise-tab-drag.ps1` in both themes after changing

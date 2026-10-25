@@ -528,7 +528,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto title=str(option,L"label");
         auto bindings=std::make_shared<Bindings>();
         auto numberView=number(data,title,settingSpec,[state]{return state->value;},set,*bindings,nullptr,false,L"toolbar-setting-"+id,true,presentation);
-        auto header=numberView.Children().GetAt(0).as<Grid>();auto inlineTrack=header.Children().GetAt(0).as<Slider>();
+        auto header=numberView.Children().GetAt(0).as<Grid>();auto inlineTrack=header.Children().GetAt(0).as<FrameworkElement>();
         Grid row;row.ColumnSpacing(4);
         ColumnDefinition lead;lead.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(lead);
         ColumnDefinition rest;rest.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(rest);

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('paint','sketch','photo')][string]$Workspace='paint',[switch]$Catalog,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','options','options-light','options-pen','options-touch','menus','menus-light','zen')][string]$Journey='full')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('paint','sketch','photo')][string]$Workspace='paint',[switch]$Catalog,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','options','options-light','options-pen','options-touch','menus','menus-light','zen','zen-workspace')][string]$Journey='full')
 $ErrorActionPreference='Stop'
 if($Journey -eq 'options-light'){$Theme='light'}
 if($Journey -eq 'menus-light'){$Theme='light'}
@@ -505,6 +505,64 @@ function Check-Narrow {
  Check-Geometry
 }
 
+function Set-ZenTheme([string]$Theme) {
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'edit';Invoke 'settings'
+    $dialog=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
+    (Control 'Color theme' -Name -Type ([System.Windows.Automation.ControlType]::ComboBox)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    (Control $Theme -Name -Type ([System.Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Wait-Until {(Model).state.theme -eq $Theme.ToLower()} 'Theme did not apply'
+    Invoke 'CloseButton' -Within $dialog
+    Wait-Until {!(Find 'Preferences' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'Preferences did not release canvas'
+}
+
+function Use-ZenWorkspace([string]$Workspace) {
+    $id='builtin:workspace:'+$Workspace
+    if((Model).windows_workspace.id -ne $id){
+        & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
+        (Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        $choice=@((Model).windows_workspace.switcher_display|Where-Object id -eq $id)[0]
+        (Control $choice.title -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+    }
+    Wait-Until {(Model).windows_workspace.id -eq $id -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace did not switch'
+    if($Workspace -eq 'photographer'){$null=Control 'histogram-chart' -Arranged}
+}
+
+function Check-ZenToolbar([string]$Theme) {
+    function ToolbarGroup { @((Model).layout.groups|Where-Object active -eq 'toolbar')[0] }
+    function Toggle-ZenToolbar {
+        $grip=Control 'ribbon-grip-toolbar' -Arranged
+        $grip.SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+        Invoke 'Show in Zen mode' -Name
+        Wait-Until {!(Find 'Show in Zen mode' -Name -Visible)} 'Show in Zen mode menu did not close'
+    }
+    $group=ToolbarGroup
+    if(!$group -or $group.floating -or $group.zen_kept){throw 'Zen toolbar fixture needs an ordinary hidden docked toolbar'}
+    $grip=Control 'ribbon-grip-toolbar' -Arranged
+    $identity=[string]::Join(',', $grip.GetRuntimeId())
+    Toggle-ZenToolbar
+    Wait-Until {(ToolbarGroup).zen_kept} 'Show in Zen mode did not update shared toolbar geometry'
+    (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09)
+    Wait-Until {(Model).chrome_hidden -and (Model).state.workspace.zen_mode -and (Find 'ribbon-grip-toolbar' -Visible)} 'Show in Zen mode hid the native toolbar'
+    if([string]::Join(',', (Control 'ribbon-grip-toolbar').GetRuntimeId()) -ne $identity){throw 'Show in Zen mode replaced the retained native toolbar'}
+    Capture ('zen-toolbar-kept-'+$Theme) -WithModel
+    Toggle-ZenToolbar
+    Wait-Until {(Model).chrome_hidden -and !(ToolbarGroup).zen_kept -and !(Find 'ribbon-grip-toolbar' -Visible)} 'Unchecking Show in Zen mode kept the native toolbar visible'
+    $y=$group.bounds.y+$group.bounds.height/2
+    $start=Screen @{x=4;y=$y};$end=Screen @{x=84;y=$y}
+    [CapyRowPointer]::Down('touch',$start.x,$start.y)
+    try{for($step=1;$step -le 8;$step++){[CapyRowPointer]::Move([int]($start.x+($end.x-$start.x)*$step/8),$start.y);Start-Sleep -Milliseconds 20}}finally{[CapyRowPointer]::Up()}
+    Wait-Until {(Model).chrome_hidden -and (ToolbarGroup).zen_kept -and (Find 'ribbon-grip-toolbar' -Visible)} 'Native edge touch swipe did not reveal the toolbar in Zen'
+    Capture ('zen-toolbar-touch-peek-'+$Theme) -WithModel
+    $canvas=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle
+    $x=[int]($canvas.Left+$canvas.Width*.6);$y=[int]($canvas.Top+$canvas.Height*.6)
+    [CapyRowPointer]::Down('touch',$x,$y);[CapyRowPointer]::Up()
+    Wait-Until {(Model).chrome_hidden -and !(ToolbarGroup).zen_kept -and !(Find 'ribbon-grip-toolbar' -Visible)} 'Outside touch did not hide the peeked toolbar'
+    (Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09)
+    Wait-Until {!(Model).state.workspace.zen_mode -and (Find 'ribbon-grip-toolbar' -Visible)} 'Zen toolbar journey did not restore ordinary chrome'
+    if((Model).state.document_file.modified){throw 'Zen toolbar and edge swipe edited the drawing'}
+    Write-Output "PASS $Theme Show in Zen mode toggle, retained toolbar, native edge touch peek and outside dismissal"
+}
+
 function Check-ZenMatrix {
     function CapyImage($Button) {
         $image=$Button.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
@@ -553,22 +611,10 @@ function Check-ZenMatrix {
         Write-Output "PASS $Label native button/glyph bounds and restored layout"
     }
     foreach($theme in @('Dark','Light')) {
-        & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'edit';Invoke 'settings'
-        $dialog=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
-        (Control 'Color theme' -Name -Type ([System.Windows.Automation.ControlType]::ComboBox)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-        (Control $theme -Name -Type ([System.Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-        Wait-Until {(Model).state.theme -eq $theme.ToLower()} 'Theme did not apply'
-        Invoke 'CloseButton' -Within $dialog
-        Wait-Until {!(Find 'Preferences' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'Preferences did not release canvas'
+        Set-ZenTheme $theme
         foreach($workspace in @('illustrator','painter','photographer')) {
-            $id='builtin:workspace:'+ $workspace
-            if((Model).windows_workspace.id -ne $id){
-                & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
-                (Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
-                $choice=@((Model).windows_workspace.switcher_display|Where-Object id -eq $id)[0]
-                (Control $choice.title -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
-            }
-            Wait-Until {(Model).windows_workspace.id -eq $id -and !(Model).windows_workspace.busy} 'Workspace did not switch'
+            Use-ZenWorkspace $workspace
+            if($workspace -eq 'illustrator'){Check-ZenToolbar $theme}
             foreach($size in @('small','medium','large')) {
                 Edit-Header
                 Invoke ('header-size-'+$size)
@@ -613,11 +659,12 @@ try {
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
     [IO.File]::WriteAllText((Settings-File),(@{theme=$Theme}|ConvertTo-Json))
     Start-Review 'initial';Capture 'normal'
-    if($Journey -eq 'zen'){
-        Check-ZenMatrix
+    if($Journey -in @('zen','zen-workspace')){
+        if($Journey -eq 'zen'){Check-ZenMatrix}
+        else{foreach($theme in @('Dark','Light')){Set-ZenTheme $theme;foreach($workspaceKind in @('painter','photographer','illustrator')){Use-ZenWorkspace $workspaceKind};Check-ZenToolbar $theme}}
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
-        @{zen_native_button_and_glyph_bounds='passed';cases=22}|ConvertTo-Json
+        @{journey=$Journey;zen_native_button_and_glyph_bounds=if($Journey -eq 'zen'){'passed'}else{'outside scoped journey'};cases=if($Journey -eq 'zen'){22}else{0};zen_toolbar_visibility_and_retention='passed';zen_edge_touch_peek_and_outside_dismissal='passed';toolbar_themes=@('dark','light')}|ConvertTo-Json
         return
     }
     if($Journey -in @('menus','menus-light')){
