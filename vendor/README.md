@@ -494,3 +494,25 @@ supports it; other drivers use FIFO ink with a frame latency of one. Camera
 navigation uses FIFO until a new paint contact. Other platform hosts retain
 their existing presentation modes. [Android presentation](../docs/platforms/README.md#android-presentation)
 describes the host side.
+
+## ICC Lab table encoding
+
+`moxcms` 0.9.1 is the BSD-3-Clause OR Apache-2.0 crate from revision
+`1e5305c77a0523acbd96721385ebe6dadfab6bc9`, registry archive SHA-256
+`396077b717181ce3f9a6b66739b269b82d756be5ec0f76be0bc40a7c51775830`.
+Its library sources, original manifests, licenses and registry provenance are
+retained. The unrelated `moxcms` 0.7.11 image dependency stays on crates.io.
+
+`moxcms-lab-table-encoding.patch` selects PCS Lab normalization from the actual
+intent table and direction. `mft2` uses legacy 16-bit Lab encoding in both v2 and
+v4 profiles; `mft1` and modern multi-stage tables do not. Sampled transforms and
+Katana stages share this rule. Missing colorimetric or saturation tables fall
+back to the perceptual table in the same selector used to execute the transform.
+Synthetic tests cover both directions, profile versions, mixed table types and
+intent fallback. Independent LittleCMS fixtures retain their original bounds.
+No external ICC profile is copied into the repository. Remove this vendor when
+a qualified upstream release includes the correction.
+
+```sh
+cargo test --locked --manifest-path vendor/moxcms/Cargo.toml --no-default-features --features extended_range,options,any_to_any --lib conversions::lut_transforms::tests
+```

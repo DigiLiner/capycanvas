@@ -125,6 +125,11 @@ Linear RGB is shaped before compiling device LUTs to avoid coarse sampling of
 dark colors. Absolute intent applies media-white scaling at matrix endpoints;
 absolute conversions between two non-matrix profiles with different media
 whites fail explicitly.
+PCS Lab normalization follows the selected table's encoding: `mft2` uses legacy
+16-bit Lab in both v2 and v4 profiles, while `mft1` uses full-range 8-bit Lab.
+Missing intent tables fall back to the perceptual table. The
+[backend correction](../../vendor/README.md#icc-lab-table-encoding) applies this
+rule to sampled and direct transforms.
 
 Black point compensation is unavailable in the new adapter. Export and document
 conversion offer no toggle, and explicit requests return an error rather than

@@ -639,3 +639,12 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
+
+
+### Portable ICC transforms — BSD-3-Clause OR Apache-2.0
+
+`moxcms` 0.9.1 by Radzivon Bartoshyk is vendored with the Lab table-encoding
+correction documented in [vendor/README.md](vendor/README.md#icc-lab-table-encoding).
+Its original [BSD-3-Clause license](vendor/moxcms/LICENSE.md) and
+[Apache-2.0 license](vendor/moxcms/LICENSE-APACHE.md) are retained. Recipients may
+choose either license. No external ICC profile is redistributed with this fix.

@@ -1,0 +1,334 @@
+--- a/src/conversions/katana/pcs_stages.rs
++++ b/src/conversions/katana/pcs_stages.rs
+@@ -28,0 +29 @@
++use crate::conversions::bpc::TransformDirection;
+@@ -30,0 +32 @@
++use crate::conversions::lut_transforms::uses_legacy_lab;
+@@ -32 +34 @@
+-use crate::{CmsError, ColorProfile, DataColorSpace, Matrix3f, ProfileVersion};
++use crate::{CmsError, ColorProfile, Matrix3f, RenderingIntent};
+@@ -70,2 +72,5 @@
+-pub(crate) fn katana_pcs_lab_v4_to_v2(profile: &ColorProfile) -> Box<KatanaDefaultIntermediate> {
+-    if profile.pcs == DataColorSpace::Lab && profile.version_internal <= ProfileVersion::V4_0 {
++pub(crate) fn katana_pcs_lab_v4_to_v2(
++    profile: &ColorProfile,
++    intent: RenderingIntent,
++) -> Box<KatanaDefaultIntermediate> {
++    if uses_legacy_lab(profile, intent, TransformDirection::PcsToDevice) {
+@@ -86,2 +91,5 @@
+-pub(crate) fn katana_pcs_lab_v2_to_v4(profile: &ColorProfile) -> Box<KatanaDefaultIntermediate> {
+-    if profile.pcs == DataColorSpace::Lab && profile.version_internal <= ProfileVersion::V4_0 {
++pub(crate) fn katana_pcs_lab_v2_to_v4(
++    profile: &ColorProfile,
++    intent: RenderingIntent,
++) -> Box<KatanaDefaultIntermediate> {
++    if uses_legacy_lab(profile, intent, TransformDirection::DeviceToPcs) {
+--- a/src/conversions/lut_transforms.rs
++++ b/src/conversions/lut_transforms.rs
+@@ -40 +40 @@
+-    ProfileVersion, TransformExecutor, TransformOptions,
++    RenderingIntent, TransformExecutor, TransformOptions,
+@@ -119,3 +119,15 @@
+-fn pcs_lab_v4_to_v2(profile: &ColorProfile, lut: &mut [f32]) {
+-    if profile.pcs == DataColorSpace::Lab
+-        && profile.version_internal < ProfileVersion::V4_0
++pub(super) fn uses_legacy_lab(
++    profile: &ColorProfile,
++    intent: RenderingIntent,
++    direction: TransformDirection,
++) -> bool {
++    let lut = match direction {
++        TransformDirection::DeviceToPcs => profile.get_device_to_pcs(intent),
++        TransformDirection::PcsToDevice => profile.get_pcs_to_device(intent),
++    };
++    profile.pcs == DataColorSpace::Lab
++        && matches!(lut, Some(LutWarehouse::Lut(lut)) if lut.lut_type == crate::LutType::Lut16)
++}
++
++fn pcs_lab_v4_to_v2(profile: &ColorProfile, lut: &mut [f32], intent: RenderingIntent) {
++    if uses_legacy_lab(profile, intent, TransformDirection::PcsToDevice)
+@@ -142,3 +154,2 @@
+-fn pcs_lab_v2_to_v4(profile: &ColorProfile, lut: &mut [f32]) {
+-    if profile.pcs == DataColorSpace::Lab
+-        && profile.version_internal < ProfileVersion::V4_0
++fn pcs_lab_v2_to_v4(profile: &ColorProfile, lut: &mut [f32], intent: RenderingIntent) {
++    if uses_legacy_lab(profile, intent, TransformDirection::DeviceToPcs)
+@@ -423 +434 @@
+-            stages.push(katana_pcs_lab_v2_to_v4(source));
++            stages.push(katana_pcs_lab_v2_to_v4(source, options.rendering_intent));
+@@ -430 +441 @@
+-            stages.push(katana_pcs_lab_v4_to_v2(dest));
++            stages.push(katana_pcs_lab_v4_to_v2(dest, options.rendering_intent));
+@@ -480 +491 @@
+-        pcs_lab_v2_to_v4(source, &mut lut);
++        pcs_lab_v2_to_v4(source, &mut lut, options.rendering_intent);
+@@ -494 +505 @@
+-        pcs_lab_v4_to_v2(dest, &mut lut);
++        pcs_lab_v4_to_v2(dest, &mut lut, options.rendering_intent);
+@@ -584 +595 @@
+-        pcs_lab_v2_to_v4(source, &mut lut);
++        pcs_lab_v2_to_v4(source, &mut lut, options.rendering_intent);
+@@ -598 +609 @@
+-        pcs_lab_v4_to_v2(dest, &mut lut);
++        pcs_lab_v4_to_v2(dest, &mut lut, options.rendering_intent);
+@@ -677 +688 @@
+-            stages.push(katana_pcs_lab_v2_to_v4(source));
++            stages.push(katana_pcs_lab_v2_to_v4(source, options.rendering_intent));
+@@ -684 +695 @@
+-            stages.push(katana_pcs_lab_v4_to_v2(dest));
++            stages.push(katana_pcs_lab_v4_to_v2(dest, options.rendering_intent));
+@@ -746 +757 @@
+-        pcs_lab_v2_to_v4(source, &mut lut);
++        pcs_lab_v2_to_v4(source, &mut lut, options.rendering_intent);
+@@ -760 +771 @@
+-        pcs_lab_v4_to_v2(dest, &mut lut);
++        pcs_lab_v4_to_v2(dest, &mut lut, options.rendering_intent);
+@@ -841,0 +853,4 @@
++
++#[cfg(test)]
++#[path = "pcs_lab_tests.rs"]
++mod tests;
+--- a/src/conversions/md_luts_factory.rs
++++ b/src/conversions/md_luts_factory.rs
+@@ -97 +97 @@
+-    stages.push(katana_pcs_lab_v2_to_v4(source));
++    stages.push(katana_pcs_lab_v2_to_v4(source, options.rendering_intent));
+@@ -104 +104 @@
+-    stages.push(katana_pcs_lab_v4_to_v2(dest));
++    stages.push(katana_pcs_lab_v4_to_v2(dest, options.rendering_intent));
+--- /dev/null
++++ b/src/conversions/pcs_lab_tests.rs
+@@ -0,0 +1,217 @@
++use super::*;
++use crate::{
++    LutDataType, LutMultidimensionalType, LutStore, LutType, Matrix3d, ProfileVersion,
++    ToneReprCurve, Vector3d,
++};
++
++fn table(kind: LutType) -> LutWarehouse {
++    let store = |values: &[u16]| match kind {
++        LutType::Lut8 => LutStore::Store8(values.iter().map(|v| (v / 257) as u8).collect()),
++        LutType::Lut16 => LutStore::Store16(values.to_vec()),
++        _ => unreachable!(),
++    };
++    let entries = if kind == LutType::Lut8 { 256 } else { 2 };
++    let identity: Vec<_> = (0..entries)
++        .map(|i| (u32::from(i) * 65535 / u32::from(entries - 1)) as u16)
++        .collect();
++    LutWarehouse::Lut(LutDataType {
++        num_input_channels: 3,
++        num_output_channels: 3,
++        num_clut_grid_points: 2,
++        matrix: Matrix3d::IDENTITY,
++        num_input_table_entries: entries,
++        num_output_table_entries: entries,
++        input_table: store(&identity.repeat(3)),
++        clut_table: store(
++            &(0..8)
++                .flat_map(|i| [i / 4, i / 2 % 2, i % 2].map(|v| v * 65535))
++                .collect::<Vec<_>>(),
++        ),
++        output_table: store(&identity.repeat(3)),
++        lut_type: kind,
++    })
++}
++
++fn profile(version: ProfileVersion, lut: LutWarehouse) -> ColorProfile {
++    let mut profile = ColorProfile::new_srgb();
++    profile.pcs = DataColorSpace::Lab;
++    profile.version_internal = version;
++    profile.lut_a_to_b_perceptual = Some(lut.clone());
++    profile.lut_b_to_a_perceptual = Some(lut);
++    profile
++}
++
++fn check(
++    profile: &ColorProfile,
++    intent: RenderingIntent,
++    direction: TransformDirection,
++    expected: [f32; 3],
++) {
++    let input = [0.25, 0.5, 0.75];
++    let mut sampled = input;
++    match direction {
++        TransformDirection::DeviceToPcs => pcs_lab_v2_to_v4(profile, &mut sampled, intent),
++        TransformDirection::PcsToDevice => pcs_lab_v4_to_v2(profile, &mut sampled, intent),
++    }
++    for (actual, expected) in sampled.into_iter().zip(expected) {
++        assert!(
++            (actual - expected).abs() < 1e-7,
++            "{intent:?} {direction:?}: {actual} vs {expected}"
++        );
++    }
++    #[cfg(feature = "any_to_any")]
++    {
++        let stage = match direction {
++            TransformDirection::DeviceToPcs => katana_pcs_lab_v2_to_v4(profile, intent),
++            TransformDirection::PcsToDevice => katana_pcs_lab_v4_to_v2(profile, intent),
++        };
++        let mut input = input.to_vec();
++        let output = stage.stage(&mut input).unwrap();
++        for (actual, expected) in output.into_iter().zip(expected) {
++            assert!((actual - expected).abs() < 1e-7);
++        }
++    }
++}
++
++fn expected(legacy: bool, direction: TransformDirection) -> [f32; 3] {
++    let scale = if !legacy {
++        1.
++    } else {
++        match direction {
++            TransformDirection::DeviceToPcs => 65535. / 65280.,
++            TransformDirection::PcsToDevice => 65280. / 65535.,
++        }
++    };
++    [0.25 * scale, 0.5 * scale, 0.75 * scale]
++}
++
++#[test]
++fn lab_pcs_samples_follow_table_encoding_in_v2_and_v4() {
++    for version in [
++        ProfileVersion::V2_1,
++        ProfileVersion::V2_4,
++        ProfileVersion::V4_0,
++        ProfileVersion::V4_4,
++    ] {
++        for kind in [LutType::Lut8, LutType::Lut16] {
++            let profile = profile(version, table(kind));
++            for intent in [
++                RenderingIntent::Perceptual,
++                RenderingIntent::RelativeColorimetric,
++                RenderingIntent::AbsoluteColorimetric,
++                RenderingIntent::Saturation,
++            ] {
++                for direction in [
++                    TransformDirection::DeviceToPcs,
++                    TransformDirection::PcsToDevice,
++                ] {
++                    check(
++                        &profile,
++                        intent,
++                        direction,
++                        expected(kind == LutType::Lut16, direction),
++                    );
++                }
++            }
++        }
++    }
++}
++
++#[test]
++fn lab_pcs_uses_selected_direction_intent_and_perceptual_fallback() {
++    let mut profile = profile(ProfileVersion::V2_1, table(LutType::Lut8));
++    profile.lut_b_to_a_perceptual = Some(table(LutType::Lut16));
++    profile.lut_a_to_b_colorimetric = Some(table(LutType::Lut16));
++    profile.lut_b_to_a_colorimetric = Some(table(LutType::Lut8));
++    for direction in [
++        TransformDirection::DeviceToPcs,
++        TransformDirection::PcsToDevice,
++    ] {
++        for intent in [
++            RenderingIntent::RelativeColorimetric,
++            RenderingIntent::AbsoluteColorimetric,
++        ] {
++            check(
++                &profile,
++                intent,
++                direction,
++                expected(direction == TransformDirection::DeviceToPcs, direction),
++            );
++        }
++        check(
++            &profile,
++            RenderingIntent::Saturation,
++            direction,
++            expected(direction == TransformDirection::PcsToDevice, direction),
++        );
++    }
++}
++
++#[test]
++fn modern_luts_and_xyz_pcs_do_not_receive_legacy_lab_scaling() {
++    let curves = vec![ToneReprCurve::Parametric(vec![1.]); 3];
++    let lut = LutWarehouse::Multidimensional(LutMultidimensionalType {
++        num_input_channels: 3,
++        num_output_channels: 3,
++        grid_points: [0; 16],
++        clut: None,
++        a_curves: vec![],
++        b_curves: curves,
++        m_curves: vec![],
++        matrix: Matrix3d::IDENTITY,
++        bias: Vector3d { v: [0.; 3] },
++    });
++    let modern = profile(ProfileVersion::V2_1, lut);
++    let mut xyz = profile(ProfileVersion::V2_1, table(LutType::Lut16));
++    xyz.pcs = DataColorSpace::Xyz;
++    for profile in [modern, xyz] {
++        for direction in [
++            TransformDirection::DeviceToPcs,
++            TransformDirection::PcsToDevice,
++        ] {
++            check(
++                &profile,
++                RenderingIntent::Perceptual,
++                direction,
++                [0.25, 0.5, 0.75],
++            );
++        }
++    }
++}
++
++#[test]
++fn identity_lab_transforms_preserve_physical_units_across_table_encodings() {
++    let input = [0.25f64, 0.5, 0.75];
++    for version in [ProfileVersion::V2_1, ProfileVersion::V4_4] {
++        for (source_kind, destination_kind, scale) in [
++            (LutType::Lut8, LutType::Lut16, 65280. / 65535.),
++            (LutType::Lut16, LutType::Lut8, 65535. / 65280.),
++        ] {
++            let mut source = profile(version, table(source_kind));
++            let mut destination = profile(version, table(destination_kind));
++            source.color_space = DataColorSpace::Lab;
++            destination.color_space = DataColorSpace::Lab;
++            let transform = source
++                .create_transform_f64(
++                    crate::Layout::Rgb,
++                    &destination,
++                    crate::Layout::Rgb,
++                    TransformOptions {
++                        rendering_intent: RenderingIntent::RelativeColorimetric,
++                        prefer_fixed_point: false,
++                        ..Default::default()
++                    },
++                )
++                .unwrap();
++            let mut output = [0.; 3];
++            transform.transform(&input, &mut output).unwrap();
++            for (actual, input) in output.into_iter().zip(input) {
++                assert!(
++                    (actual - input * scale).abs() < 2e-5,
++                    "{version:?} {source_kind:?}->{destination_kind:?}: {actual} vs {}",
++                    input * scale
++                );
++            }
++        }
++    }
++}
+--- a/src/transform.rs
++++ b/src/transform.rs
+@@ -1201 +1201 @@
+-        match intent {
++        (match intent {
+@@ -1206 +1206,2 @@
+-        }
++        })
++        .or(self.lut_a_to_b_perceptual.as_ref())
+@@ -1211 +1212 @@
+-        match intent {
++        (match intent {
+@@ -1216 +1217,2 @@
+-        }
++        })
++        .or(self.lut_b_to_a_perceptual.as_ref())
